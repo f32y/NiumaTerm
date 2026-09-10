@@ -59,7 +59,7 @@ impl ComposerAttachments {
     fn render_attachment(
         &self,
         index: usize,
-        attachment: &Attachment,
+        attachment: Attachment<'_>,
         cx: &mut Context<AgentPane>,
     ) -> AnyElement {
         let image = attachment.image();

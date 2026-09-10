@@ -225,7 +225,7 @@ fn local_branch_waits_for_ready_preserves_controls_and_keeps_later_drafts(cx: &m
         pane.update(cx, |pane, cx| {
             install(pane);
             pane.apply_replay(replay("current"), cx);
-            pane.controls.settings.model = Some("selected-model".into());
+            pane.controls.state.settings.model = Some("selected-model".into());
             prepare_local(pane, RewindAction::Conversation, cx);
             assert_eq!(rows(pane, cx), ["current"]);
             assert_eq!(pane.history_ui.mode, RecentSessionsMode::Loading);
@@ -236,7 +236,7 @@ fn local_branch_waits_for_ready_preserves_controls_and_keeps_later_drafts(cx: &m
             pane.fill_branch_prompt(window, cx);
             assert_eq!(rows(pane, cx), ["kept prefix"]);
             assert_eq!(
-                pane.controls.settings.model.as_deref(),
+                pane.controls.state.settings.model.as_deref(),
                 Some("selected-model")
             );
             assert_eq!(pane.input.read(cx).text().to_string(), "later draft");
@@ -351,7 +351,7 @@ fn history_resume_cannot_take_over_an_open_branch_picker(cx: &mut TestAppContext
     cx.update(|_, cx| {
         pane.update(cx, |pane, cx| {
             install(pane);
-            pane.history_ui.sessions = vec![SessionSummary {
+            pane.history_ui.data.sessions = vec![SessionSummary {
                 id: "other".into(),
                 title: "Other".into(),
                 branch: None,

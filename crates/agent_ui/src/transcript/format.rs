@@ -6,7 +6,6 @@ use gpui_component::IconName;
 use nmt_agent::chat::{Compaction, CompactionTrigger, Item as SessionItem};
 use nmt_i18n::i18n;
 
-use crate::capabilities::AgentCapabilities as _;
 use crate::composer::visible_prompt;
 use crate::profile::AgentKind;
 use crate::transcript::code::clean_output;
@@ -363,7 +362,7 @@ pub(crate) fn compaction_label(detail: &Compaction) -> &'static str {
 }
 
 pub(crate) fn compaction_row_is_expandable(kind: AgentKind) -> bool {
-    kind.caps().expandable_compaction_rows
+    matches!(kind, AgentKind::Claude | AgentKind::DeepSeek)
 }
 
 pub(crate) fn compaction_trigger_label(trigger: CompactionTrigger) -> &'static str {

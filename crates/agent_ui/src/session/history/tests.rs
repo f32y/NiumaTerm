@@ -21,7 +21,7 @@ fn late_count_cannot_replace_new_scope_loading_or_completed_rows() {
     let mut history = SessionHistoryUi::default();
     let old = history.begin_filesystem_history(Some("project".into()), 1);
 
-    history.scope = SessionScope::AllDirectories;
+    history.data.scope = SessionScope::AllDirectories;
 
     let new = history.begin_filesystem_history(Some("project".into()), 1);
 
@@ -33,14 +33,14 @@ fn late_count_cannot_replace_new_scope_loading_or_completed_rows() {
         history.publish_filesystem_count(&old, Some("project"), 1, 0),
         CountPublication::Stale
     ));
-    assert_eq!(history.pending, Some(3));
+    assert_eq!(history.data.pending, Some(3));
     assert!(history.publish_filesystem_rows(&new, Some("project"), 1, rows("new")));
     assert!(matches!(
         history.publish_filesystem_count(&old, Some("project"), 1, 7),
         CountPublication::Stale
     ));
-    assert_eq!(history.pending, None);
-    assert_eq!(history.sessions, rows("new"));
+    assert_eq!(history.data.pending, None);
+    assert_eq!(history.data.sessions, rows("new"));
 }
 
 #[test]
@@ -53,11 +53,11 @@ fn late_rows_cannot_replace_new_rows_after_scope_returns_to_original() {
         CountPublication::LoadRows
     ));
 
-    history.scope = SessionScope::AllDirectories;
+    history.data.scope = SessionScope::AllDirectories;
 
     let middle = history.begin_filesystem_history(Some("project".into()), 1);
 
-    history.scope = SessionScope::CurrentDirectory;
+    history.data.scope = SessionScope::CurrentDirectory;
 
     let new = history.begin_filesystem_history(Some("project".into()), 1);
 
@@ -66,24 +66,24 @@ fn late_rows_cannot_replace_new_rows_after_scope_returns_to_original() {
         CountPublication::LoadRows
     ));
     assert!(!history.publish_filesystem_rows(&old, Some("project"), 1, rows("old")));
-    assert_eq!(history.pending, Some(1));
+    assert_eq!(history.data.pending, Some(1));
     assert!(history.publish_filesystem_rows(&new, Some("project"), 1, rows("new")));
     assert!(!history.publish_filesystem_rows(&old, Some("project"), 1, rows("old")));
     assert!(matches!(
         history.publish_filesystem_count(&middle, Some("project"), 1, 9),
         CountPublication::Stale
     ));
-    assert_eq!(history.sessions, rows("new"));
-    assert_eq!(history.pending, None);
+    assert_eq!(history.data.sessions, rows("new"));
+    assert_eq!(history.data.pending, None);
 }
 
 #[test]
 fn empty_count_finishes_loading_and_removes_previous_rows() {
     let mut history = SessionHistoryUi {
-        sessions: rows("previous"),
         selected: 8,
         ..Default::default()
     };
+    history.data.sessions = rows("previous");
 
     let request = history.begin_filesystem_history(None, 1);
 
@@ -91,9 +91,9 @@ fn empty_count_finishes_loading_and_removes_previous_rows() {
         history.publish_filesystem_count(&request, None, 1, 0),
         CountPublication::Empty
     ));
-    assert!(history.sessions.is_empty());
+    assert!(history.data.sessions.is_empty());
     assert_eq!(history.selected, 0);
-    assert_eq!(history.pending, None);
+    assert_eq!(history.data.pending, None);
     assert!(!history.publish_filesystem_rows(&request, None, 1, rows("late")));
 }
 
@@ -109,7 +109,7 @@ fn replacement_invalidation_rejects_both_passes_and_clears_placeholders() {
 
     history.invalidate_filesystem_history();
 
-    assert_eq!(history.pending, None);
+    assert_eq!(history.data.pending, None);
     assert!(matches!(
         history.publish_filesystem_count(&old, None, 1, 9),
         CountPublication::Stale
@@ -123,7 +123,7 @@ fn replacement_invalidation_rejects_both_passes_and_clears_placeholders() {
         CountPublication::LoadRows
     ));
     assert!(history.publish_filesystem_rows(&new, None, 2, rows("replacement")));
-    assert_eq!(history.sessions, rows("replacement"));
+    assert_eq!(history.data.sessions, rows("replacement"));
 }
 
 #[test]
@@ -136,14 +136,14 @@ fn changed_session_directory_or_scope_rejects_publication() {
         let mut history = SessionHistoryUi::default();
         let request = history.begin_filesystem_history(Some("project".into()), 1);
 
-        history.scope = scope;
+        history.data.scope = scope;
 
         assert!(matches!(
             history.publish_filesystem_count(&request, cwd, epoch, 5),
             CountPublication::Stale
         ));
         assert!(!history.publish_filesystem_rows(&request, cwd, epoch, rows("wrong")));
-        assert!(history.sessions.is_empty());
-        assert_eq!(history.pending, None);
+        assert!(history.data.sessions.is_empty());
+        assert_eq!(history.data.pending, None);
     }
 }

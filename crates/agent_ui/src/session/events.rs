@@ -1,5 +1,3 @@
-use std::mem::take;
-
 use gpui::Context;
 use nmt_agent::AgentEventKind;
 use nmt_agent::background_task::BackgroundTaskSnapshot;
@@ -9,6 +7,8 @@ use nmt_agent::chat::{
 };
 use nmt_agent::session::branch::BranchReplay;
 use nmt_agent::session::restore::{ReadyAction, ReplayAction};
+#[cfg(test)]
+pub(super) use nmt_agent::session::settings::resolve_ready_settings;
 use nmt_i18n::i18n;
 use tracing::info;
 
@@ -19,46 +19,6 @@ use crate::thread_controls::{launch_effort, launch_model, stored_thread_settings
 use crate::transcript::hidden;
 use crate::{AgentPane, AgentPaneEvent, RecentSessionsMode};
 
-/// Fold the thread's reported settings together with what the pane
-/// remembered. `startup_model` and `startup_effort` come from the launch
-/// profile and are applied last, so a profile that pins one of them wins over
-/// both the remembered pick and whatever the agent reported.
-pub(super) fn resolve_ready_settings(
-    mut next: ThreadSettings,
-    local: Option<&ThreadSettings>,
-    use_all_local: bool,
-    use_local_reviewer: bool,
-    startup_model: Option<&str>,
-    startup_effort: Option<&str>,
-) -> ThreadSettings {
-    if use_all_local && let Some(local) = local {
-        next = ThreadSettings {
-            model: local.model.clone().or(next.model),
-            approval: local.approval.clone().or(next.approval),
-            approvals_reviewer: local.approvals_reviewer.clone().or(next.approvals_reviewer),
-            sandbox: local.sandbox.clone().or(next.sandbox),
-            effort: local.effort.clone().or(next.effort),
-            tier: local.tier.clone().or(next.tier),
-        };
-    }
-
-    if use_local_reviewer
-        && let Some(reviewer) = local.and_then(|local| local.approvals_reviewer.clone())
-    {
-        next.approvals_reviewer = Some(reviewer);
-    }
-
-    if let Some(model) = startup_model {
-        next.model = Some(model.to_string());
-    }
-
-    if let Some(effort) = startup_effort {
-        next.effort = Some(effort.to_string());
-    }
-
-    next
-}
-
 impl AgentPane {
     /// Apply one typed session event to the transcript and status line.
     pub(crate) fn apply_event(&mut self, event: SessionEvent, cx: &mut Context<Self>) {
@@ -67,20 +27,20 @@ impl AgentPane {
             // left to the chrome that does. Arriving here is what settles the
             // conversation's name: until then every message asks again.
             SessionEvent::TitleUpdated(title) => {
-                self.conversation_named = true;
+                self.naming.named = true;
                 cx.emit(AgentPaneEvent::TitleSuggested(title));
             }
             SessionEvent::Ready(settings) => self.on_ready(settings, cx),
             SessionEvent::Models(models) => {
-                self.controls.models = models;
+                self.controls.state.models = models;
                 cx.notify();
             }
             SessionEvent::ApprovalPresets { presets, current } => {
                 // The harness owns this control: it reports the presets its
                 // deployment serves and which one is in force, so a remembered
                 // pick has no say and the row shows what actually applies.
-                self.controls.approval_presets = presets;
-                self.controls.settings.approval = current;
+                self.controls.state.approval_presets = presets;
+                self.controls.state.settings.approval = current;
                 cx.notify();
             }
             SessionEvent::AgentPresets { presets, current } => {
@@ -88,8 +48,8 @@ impl AgentPane {
                 // the conversation is created, and a resumed one carries
                 // whichever preset built it rather than whichever this tab last
                 // showed.
-                self.controls.agent_presets = presets;
-                self.controls.agent_preset = current;
+                self.controls.state.agent_presets = presets;
+                self.controls.state.agent_preset = current;
                 cx.notify();
             }
             SessionEvent::Commands(commands) => {
@@ -245,7 +205,7 @@ impl AgentPane {
                 // the session is on. The reason goes to the feedback strip
                 // above the composer: it answers for the control the user just
                 // used, and the transcript is what the conversation said.
-                self.controls.settings.effort = effort;
+                self.controls.state.settings.effort = effort;
                 self.controls
                     .remember_defaults(self.kind, &self.profile, cx);
                 self.palette
@@ -341,52 +301,29 @@ impl AgentPane {
         // confirms the permission mode); a payload without effort
         // keeps the user's pick — Claude never reports effort, so
         // None there means "unknown", never "reset".
-        let effort = settings
-            .effort
-            .clone()
-            .or(self.controls.settings.effort.clone());
-
-        let mut next = ThreadSettings { effort, ..settings };
-
-        // Fresh conversations, and resumes into a harness that does not
-        // replay its own controls, seed all remembered picks. Where
-        // another Ready arrives during first-turn initialization, that
-        // later confirmation preserves the controls in use instead of
-        // restoring the ones the CLI reports.
-        let seed_thread_defaults = take(&mut self.controls.seed_thread_defaults);
-        let seed_approval_reviewer = take(&mut self.controls.seed_approval_reviewer);
-        let stored = (seed_thread_defaults || seed_approval_reviewer)
+        let stored = (self.controls.state.seed_thread_defaults
+            || self.controls.state.seed_approval_reviewer)
             .then(|| stored_thread_settings(self.kind, &self.profile, cx))
             .flatten();
-        let preserve_current = self.kind.caps().repeats_ready_during_init && !seed_thread_defaults;
-
-        let local = if preserve_current {
-            Some(&self.controls.settings)
-        } else {
-            stored
-        };
-
-        let startup_model = seed_thread_defaults
+        let model = self
+            .controls
+            .state
+            .seed_thread_defaults
             .then(|| launch_model(self.kind, &self.profile))
             .flatten();
-        let startup_effort = seed_thread_defaults
+        let effort = self
+            .controls
+            .state
+            .seed_thread_defaults
             .then(|| launch_effort(&self.profile))
             .flatten();
-
-        next = resolve_ready_settings(
-            next,
-            local,
-            seed_thread_defaults || preserve_current,
-            seed_approval_reviewer,
-            startup_model.as_deref(),
-            startup_effort.as_deref(),
+        self.controls.state.ready(
+            self.kind,
+            settings,
+            stored,
+            model.as_deref(),
+            effort.as_deref(),
         );
-
-        if let Some(restored) = self.controls.restore_on_ready.take() {
-            next = resolve_ready_settings(next, Some(&restored), true, false, None, None);
-        }
-
-        self.controls.settings = next;
 
         // Seeding only fills in the pickers. Where the harness adopts a
         // model through its own request, a remembered or profile pick
@@ -400,7 +337,7 @@ impl AgentPane {
         info!(
             "agent thread ready: profile=\"{}\", model={:?}, profile_model={:?}",
             self.profile.name,
-            self.controls.settings.model,
+            self.controls.state.settings.model,
             launch_model(self.kind, &self.profile)
         );
         self.runtime.ready();
@@ -421,6 +358,10 @@ impl AgentPane {
         outcome: SlashCommandOutcome,
         cx: &mut Context<Self>,
     ) {
+        let advance = self
+            .palette
+            .commands
+            .settle(&outcome, self.runtime.status());
         match outcome {
             SlashCommandOutcome::Accepted => {
                 self.palette.set_feedback(
@@ -437,20 +378,13 @@ impl AgentPane {
                     }),
                     cx,
                 );
-
-                if self.palette.awaiting_command_turn && self.runtime.status() != Status::Running {
-                    self.palette.awaiting_command_turn = false;
-                    self.run_next_queued_command(cx);
-                }
             }
             SlashCommandOutcome::Rejected { message } => {
-                self.palette.awaiting_command_turn = false;
                 self.palette
                     .set_feedback(CommandFeedbackKind::Error, message, cx);
-                self.run_next_queued_command(cx);
             }
             SlashCommandOutcome::NotReady => {
-                self.palette.awaiting_command_turn = false;
+                self.palette.commands.awaiting_turn = false;
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,
                     i18n("agent-session-provider-not-ready").replace("{name}", self.kind.display()),
@@ -458,6 +392,9 @@ impl AgentPane {
                 );
                 self.run_next_queued_command(cx);
             }
+        }
+        if advance {
+            self.run_next_queued_command(cx);
         }
     }
 
@@ -467,7 +404,7 @@ impl AgentPane {
     /// with neither done, and without them the whole turn would be filed
     /// under the previous one and leave the pane looking idle while it runs.
     fn on_turn_started(&mut self, cx: &mut Context<Self>) {
-        let command_turn = take(&mut self.palette.awaiting_command_turn);
+        let command_turn = self.palette.commands.turn_started();
         let new_turn = if command_turn {
             self.delivery.begin_turn();
             true
@@ -514,7 +451,7 @@ impl AgentPane {
                 i18n("agent-session-turn-completed").replace("{name}", self.kind.display())
             });
 
-        self.palette.awaiting_command_turn = false;
+        self.palette.commands.turn_completed();
         self.delivery.completed();
 
         // Compaction lives inside a turn; a flag surviving the turn
@@ -569,7 +506,7 @@ impl AgentPane {
             self.report_branch_failure(failure, cx);
         }
 
-        let cancelled_queue = fatal && !self.palette.command_queue.is_empty();
+        let cancelled_queue = fatal && !self.palette.commands.queue.is_empty();
 
         if fatal {
             self.prompts.core.disconnect();
@@ -578,11 +515,11 @@ impl AgentPane {
             cx.emit(AgentPaneEvent::Interrupted);
             self.runtime.exited(&message);
             self.delivery.exited();
-            self.palette.awaiting_command_turn = false;
-            self.palette.command_queue.clear();
+            self.palette.commands.turn_completed();
+            self.palette.commands.queue.clear();
             self.publish_queued_user_messages(cx);
-        } else if self.palette.awaiting_command_turn {
-            self.palette.awaiting_command_turn = false;
+        } else if self.palette.commands.awaiting_turn {
+            self.palette.commands.turn_completed();
         }
 
         self.push_item(SessionItem::Error { text: message }, cx);
@@ -602,23 +539,7 @@ impl AgentPane {
     /// currently on screen, so it replaces those rows rather than being
     /// appended to them.
     fn on_history(&mut self, sessions: Vec<SessionSummary>, cx: &mut Context<Self>) {
-        if take(&mut self.history_ui.showing_search) {
-            self.history_ui.sessions.clear();
-        }
-
-        // Pages accumulate: the first page lands in an empty list,
-        // later cursor pages extend it. A /new backend may publish
-        // the first page again, so ids are deduplicated in place.
-        for session in sessions {
-            if !self
-                .history_ui
-                .sessions
-                .iter()
-                .any(|existing| existing.id == session.id)
-            {
-                self.history_ui.sessions.push(session);
-            }
-        }
+        self.history_ui.data.append_page(sessions);
 
         cx.notify();
     }

@@ -35,7 +35,7 @@ impl AgentPane {
 
         let enabled = self.prompts.core.can_submit(&self.runtime, prompt.key())
             && !self.branch_flow_holds_composer()
-            && !self.palette.awaiting_command_turn;
+            && !self.palette.commands.awaiting_turn;
         let presentation = &self.prompts.presentations[active];
 
         let status = match prompt.status() {

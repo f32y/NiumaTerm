@@ -7,6 +7,9 @@
 //! installs and exposes the pane plus the recovery types the update
 //! coordinator drives across a backend replacement.
 
+use nmt_agent::session::commands::CommandQueue;
+use nmt_agent::session::history::SessionHistory;
+use nmt_agent::session::naming::ConversationNaming;
 pub mod input_history;
 
 mod capabilities;
@@ -25,15 +28,14 @@ pub mod transcript;
 mod view;
 mod workflows;
 
-use std::collections::VecDeque;
 use std::rc::Rc;
 
 use gpui::{Entity, FocusHandle, Pixels, Point, ScrollHandle, SharedString};
 use gpui_component::VirtualListScrollHandle;
 use gpui_component::input::TextareaState;
 use nmt_agent::chat::{
-    ContextComposition, ContextWindowUsage, SessionScope, SessionStats, SessionSummary,
-    SkillCatalog, SkillReference, SlashCommandInfo,
+    ContextComposition, ContextWindowUsage, SessionStats, SkillCatalog, SkillReference,
+    SlashCommandInfo,
 };
 use nmt_agent::session::delivery::MessageDelivery;
 use nmt_agent::session::lifecycle::SessionRuntime;
@@ -43,12 +45,11 @@ use nmt_config::profile::AgentProfile;
 use nmt_i18n::i18n;
 
 use crate::composer::attachments::ComposerAttachments;
-use crate::composer::{BranchFlow, CommandFeedback, PendingSlashCommand};
+use crate::composer::{BranchFlow, CommandFeedback};
 use crate::fade::Fade;
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
 use crate::pane_state::{ChildAgents, TurnPresentation};
 pub use crate::profile::{AgentKind, AgentKindExt, AgentThreadDefaults, agent_launch};
-use crate::session::history::FilesystemHistoryRequest;
 use crate::session::prompts::PendingPrompts;
 pub use crate::session::{
     RecoveryIdentity, RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
@@ -178,22 +179,10 @@ mod tests;
 
 /// Recent-session list shown above the composer.
 struct SessionHistoryUi {
-    next_request_id: u64,
-    filesystem_request: Option<FilesystemHistoryRequest>,
-    /// Resumable sessions for this cwd, newest first; shown above the
-    /// composer while the transcript is empty.
-    sessions: Vec<SessionSummary>,
-    /// Set between the cheap count pass and the title-parsing pass: the list
-    /// reserves its final height with this many placeholder rows, so the
-    /// composer doesn't jump when real rows land.
-    pending: Option<usize>,
+    data: SessionHistory,
     /// Blank conversations show the list automatically; `/resume` can reopen
     /// the same list after a conversation has started.
     mode: RecentSessionsMode,
-    /// The rows answer a search rather than list what is recent. History pages
-    /// accumulate, so without this the next page would be appended to the
-    /// matches and the strip would mix two different questions' answers.
-    showing_search: bool,
     /// The one highlighted row, whether the pointer or the arrow keys put it
     /// there. A list has a single current row: what a click opens and what
     /// Enter opens are the same row, and only one thing on screen says so.
@@ -207,10 +196,6 @@ struct SessionHistoryUi {
     /// pointer that has not moved cannot take the highlight back. Keyboard
     /// navigation scrolls the list, which does exactly that.
     pointer: Option<Point<Pixels>>,
-    /// Which directories the rows come from. A conversation belongs to the
-    /// directory it ran in, so widening the list means rows this tab cannot
-    /// resume in place; those open where they worked instead.
-    scope: SessionScope,
     scroll: VirtualListScrollHandle,
     transcript_blur: Fade,
 }
@@ -218,16 +203,11 @@ struct SessionHistoryUi {
 impl Default for SessionHistoryUi {
     fn default() -> Self {
         Self {
-            next_request_id: 0,
-            filesystem_request: None,
-            sessions: Vec::new(),
-            pending: None,
+            data: SessionHistory::default(),
             mode: RecentSessionsMode::Automatic,
-            showing_search: false,
             selected: 0,
             pointer_inside: false,
             pointer: None,
-            scope: SessionScope::default(),
             scroll: VirtualListScrollHandle::new(),
             transcript_blur: Fade::default(),
         }
@@ -274,10 +254,7 @@ struct SlashPalette {
     /// Order of the latest feedback shown. A delayed dismissal compares
     /// against it so it can only retire the message it was started for.
     feedback_seq: u64,
-    command_queue: VecDeque<PendingSlashCommand>,
-    /// An accepted backend command starts the progress clock only after the
-    /// protocol reports a real turn, not when the request is written.
-    awaiting_command_turn: bool,
+    commands: CommandQueue,
 }
 
 pub struct AgentPane {
@@ -306,10 +283,7 @@ pub struct AgentPane {
     /// that opens a conversation names it: a later one is a follow-up on the
     /// same subject, and renaming on every send would make the tab strip
     /// churn under a working agent.
-    conversation_named: bool,
-    /// A user rename committed before the provider published its conversation
-    /// identity. Ready applies it once the backend can address the thread.
-    pending_conversation_rename: Option<String>,
+    naming: ConversationNaming,
     /// The conversation as the user reads it. Presentation lives in its own
     /// view so a child agent's conversation renders through the same code.
     transcript: Entity<TranscriptView>,

@@ -4,8 +4,12 @@ use nmt_agent::AgentEvent;
 use nmt_agent::session::ImageAttachment;
 use nmt_agent::session::delivery::{MessageDelivery, RecoverablePrompt, Submission};
 use nmt_agent::session::lifecycle::{SessionRuntime, StartOutcome};
+use nmt_agent::session::naming::ConversationNaming;
+#[cfg(test)]
+use nmt_agent::session::naming::conversation_title_request as build_title_request;
 pub(crate) use nmt_agent::session::restore::directories_match;
 use nmt_agent::session::restore::{ConversationRestore, SettingsSeed};
+use nmt_agent::session::settings::ConversationSettings;
 
 use crate::capabilities::AgentCapabilities as _;
 use crate::pane_state::{ChildAgents, TurnPresentation};
@@ -35,9 +39,8 @@ use std::{env, fs};
 use gpui::{App, Context, Image, Window};
 use gpui_component::input::{InputEvent, TextareaState};
 use nmt_agent::chat::{Event as SessionEvent, Item as SessionItem, SkillReference, ThreadSettings};
-use nmt_agent::claude_code::sessions as claude_sessions;
-use nmt_agent::codex::app_server;
 pub(super) use nmt_agent::session::Backend;
+#[cfg(test)]
 use nmt_agent::session::ConversationTitleRequest;
 pub use nmt_agent::session::RecoveryIdentity;
 pub use nmt_agent::session::lifecycle::{RecoverySnapshot, RestorationReadiness};
@@ -116,17 +119,9 @@ fn tab_title_from_prompt(text: &str) -> Option<String> {
     (!line.starts_with('/')).then(|| line.chars().take(TAB_TITLE_CHARS).collect())
 }
 
+#[cfg(test)]
 fn conversation_title_request(kind: AgentKind, text: &str) -> Option<ConversationTitleRequest> {
-    let provisional_title = match kind {
-        AgentKind::Codex => app_server::provisional_title_from_prompt(text),
-        AgentKind::Claude => claude_sessions::provisional_title_from_prompt(text),
-        AgentKind::DeepSeek => tab_title_from_prompt(text),
-    }?;
-
-    Some(ConversationTitleRequest {
-        description: text.to_string(),
-        provisional_title,
-    })
+    build_title_request(kind, text, tab_title_from_prompt)
 }
 
 impl AgentPane {
@@ -226,8 +221,7 @@ impl AgentPane {
             input_history_scope,
             input_history_navigation: InputHistoryNavigation::default(),
             attachments: ComposerAttachments::default(),
-            conversation_named: false,
-            pending_conversation_rename: None,
+            naming: ConversationNaming::default(),
             transcript,
             input,
             runtime: SessionRuntime::default(),
@@ -235,14 +229,10 @@ impl AgentPane {
             history_ui: SessionHistoryUi::default(),
             prompts: PendingPrompts::default(),
             controls: ThreadControls {
-                settings: ThreadSettings::default(),
-                seed_thread_defaults: true,
-                seed_approval_reviewer: false,
-                restore_on_ready: None,
-                models: Vec::new(),
-                approval_presets: Vec::new(),
-                agent_presets: Vec::new(),
-                agent_preset: None,
+                state: ConversationSettings {
+                    seed_thread_defaults: true,
+                    ..Default::default()
+                },
                 effort_drag: None,
             },
             delivery: MessageDelivery::new(kind),
@@ -492,14 +482,14 @@ impl AgentPane {
         // handshake, so the picker need not flash the backend default while a
         // custom endpoint is starting.
         if !preserve_thread_settings && let Some(model) = launch_model(self.kind, &self.profile) {
-            self.controls.settings.model = Some(model);
+            self.controls.state.settings.model = Some(model);
         }
 
         // A pinned effort reaches the backend through the launch, so the
         // picker shows it from the first frame rather than the level the
         // agent would otherwise have used.
         if !preserve_thread_settings && let Some(effort) = launch_effort(&self.profile) {
-            self.controls.settings.effort = Some(effort);
+            self.controls.state.settings.effort = Some(effort);
         }
 
         let kind = self.kind;
@@ -524,8 +514,8 @@ impl AgentPane {
             SettingsSeed::Defaults
         };
         self.seed_restored_settings(seed);
-        self.controls.restore_on_ready =
-            preserve_thread_settings.then(|| self.controls.settings.clone());
+        self.controls.state.restore_on_ready =
+            preserve_thread_settings.then(|| self.controls.state.settings.clone());
 
         // Replacing a conversation must clear any running or unread state
         // associated with the previous backend before the new epoch can emit.
@@ -546,7 +536,7 @@ impl AgentPane {
         // A resumed conversation already has an opening prompt, even when an
         // older transcript has no stored title. Only a fresh conversation may
         // claim its next accepted prompt as the subject.
-        self.conversation_named = recovery.is_some();
+        self.naming.named = recovery.is_some();
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
 
@@ -565,7 +555,7 @@ impl AgentPane {
         // tab with neither leaves the flag off and starts on the CLI's
         // configured model.
         if caps.model_baked_into_launch {
-            launch.model = self.controls.settings.model.clone().or_else(|| {
+            launch.model = self.controls.state.settings.model.clone().or_else(|| {
                 stored_thread_settings(self.kind, &self.profile, cx)
                     .and_then(|stored| stored.model.clone())
             });
@@ -725,10 +715,7 @@ impl AgentPane {
                 }
                 this.runtime
                     .exited(&i18n("agent-session-exited-before-restored").replace("{name}", name));
-                this.palette.awaiting_command_turn = false;
-
-                if !this.palette.command_queue.is_empty() {
-                    this.palette.command_queue.clear();
+                if this.palette.commands.clear() {
                     this.palette.set_feedback(
                         CommandFeedbackKind::Error,
                         i18n("agent-session-queued-cancelled-exited").replace("{name}", name),
@@ -793,8 +780,7 @@ impl AgentPane {
             }
             StartOutcome::Failed(text) => {
                 cx.emit(AgentPaneEvent::Interrupted);
-                self.palette.awaiting_command_turn = false;
-                self.palette.command_queue.clear();
+                self.palette.commands.clear();
                 self.delivery.start_failed();
 
                 let turn = self.delivery.turn();
@@ -879,7 +865,7 @@ impl AgentPane {
             return false;
         }
 
-        if self.palette.awaiting_command_turn {
+        if self.palette.commands.awaiting_turn {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-command-starting").to_string(),
@@ -895,13 +881,11 @@ impl AgentPane {
             .as_ref()
             .map_or(text.as_str(), |(prompt, _)| prompt.as_str());
 
-        let title_request = if self.conversation_named {
-            None
-        } else {
-            conversation_title_request(self.kind, title_text)
-        };
+        let title_request = self
+            .naming
+            .request(self.kind, title_text, tab_title_from_prompt);
 
-        let settings = self.controls.settings.clone();
+        let settings = self.controls.state.settings.clone();
         let scratch = scratch_dir(self.agent_route.as_str());
 
         let outcome = self.runtime.send(|session| {
@@ -953,7 +937,7 @@ impl AgentPane {
         if matches!(self.kind, AgentKind::Codex | AgentKind::Claude)
             && let Some(title) = title_request
         {
-            self.conversation_named = true;
+            self.naming.named = true;
             cx.emit(AgentPaneEvent::TitleSuggested(title.provisional_title));
         }
 
@@ -1039,31 +1023,12 @@ impl AgentPane {
     /// Pass a tab rename through to the conversation, so the name reaches the
     /// harness's own session record rather than living only in this tab.
     pub fn rename_session(&mut self, title: &str) {
-        self.conversation_named = true;
-        self.pending_conversation_rename = Some(title.to_string());
+        self.naming.rename(title);
         self.sync_pending_rename();
     }
 
     pub(super) fn sync_pending_rename(&mut self) {
-        use nmt_agent::session::RenameOutcome;
-
-        let can_address_conversation = self
-            .runtime
-            .backend()
-            .and_then(Backend::recovery_identity)
-            .is_some();
-
-        if can_address_conversation
-            && let Some(session) = self.runtime.backend_mut()
-            && let Some(title) = self.pending_conversation_rename.as_deref()
-        {
-            match session.rename_session(title) {
-                RenameOutcome::Accepted | RenameOutcome::Unsupported => {
-                    self.pending_conversation_rename = None;
-                }
-                RenameOutcome::Rejected => {}
-            }
-        }
+        self.naming.sync(self.runtime.backend_mut());
     }
 
     pub(super) fn reset_conversation(&mut self, cx: &mut Context<Self>) {
@@ -1075,8 +1040,8 @@ impl AgentPane {
         // A fresh conversation always follows the live tail again, even if
         // the previous transcript was scrolled up when it was discarded.
         self.clear_conversation_presentation(cx);
-        self.controls.settings = ThreadSettings::default();
-        self.controls.models.clear();
+        self.controls.state.settings = ThreadSettings::default();
+        self.controls.state.models.clear();
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
         self.prompts.dismiss_approval();

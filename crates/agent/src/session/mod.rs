@@ -5,13 +5,21 @@ use crate::update::ProviderKind;
 mod attachments;
 mod backend;
 pub mod branch;
+pub mod capabilities;
+pub mod children;
+pub mod commands;
 pub mod delivery;
+pub mod history;
 pub mod input;
 pub mod lifecycle;
+pub mod naming;
 pub mod restore;
+pub mod settings;
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
 pub mod test_support;
+pub mod update_readiness;
+pub mod workflows;
 
 pub use crate::session::backend::{
     Backend, ConversationTitleRequest, RecoveryIdentity, RenameOutcome,
@@ -91,3 +99,6 @@ impl AgentKind {
         }
     }
 }
+
+#[cfg(test)]
+mod ui_split_tests;

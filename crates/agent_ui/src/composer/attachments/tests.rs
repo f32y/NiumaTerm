@@ -4,7 +4,6 @@ use gpui::{Image, ImageFormat};
 
 use crate::composer::attachments::{
     AttachError, MAX_ATTACHMENTS, MAX_IMAGE_EDGE, PendingAttachments, placeholder_text,
-    scaled_dimensions,
 };
 
 /// A real encoded PNG, because attaching decodes what it is given.
@@ -151,16 +150,6 @@ fn a_message_carries_no_more_than_the_cap() {
 
     assert!(matches!(pending.attach(&png(4, 4)), Err(AttachError::Full)));
     assert_eq!(pending.iter().count(), MAX_ATTACHMENTS);
-}
-
-#[test]
-fn an_oversized_image_is_shrunk_onto_the_cap_keeping_its_shape() {
-    assert_eq!(scaled_dimensions(3840, 2160), Some((MAX_IMAGE_EDGE, 1152)));
-    assert_eq!(scaled_dimensions(1000, 4000), Some((512, MAX_IMAGE_EDGE)));
-
-    // Already within the cap on both edges.
-    assert_eq!(scaled_dimensions(800, 600), None);
-    assert_eq!(scaled_dimensions(MAX_IMAGE_EDGE, 10), None);
 }
 
 #[test]

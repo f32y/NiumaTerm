@@ -1,11 +1,16 @@
+pub mod annotations;
 pub mod background_task;
+pub mod catalog;
 pub mod chat;
 pub mod claude_code;
 pub mod codex;
 pub mod deepseek;
 pub mod git;
+pub mod images;
+pub mod input_history;
 pub mod launcher;
 pub mod message_memory;
+pub mod profile;
 pub mod session;
 pub mod update;
 pub mod usage;

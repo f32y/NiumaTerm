@@ -179,8 +179,8 @@ impl AgentPane {
                 self.branch.draft = Some(self.input.read(cx).text().to_string());
                 self.history_ui.mode = RecentSessionsMode::Loading;
                 self.restore.cancel();
-                self.controls.seed_thread_defaults = false;
-                self.controls.seed_approval_reviewer = false;
+                self.controls.state.seed_thread_defaults = false;
+                self.controls.state.seed_approval_reviewer = false;
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
                     translated("agent-session-forking"),

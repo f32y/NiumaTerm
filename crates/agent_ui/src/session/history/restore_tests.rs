@@ -118,9 +118,9 @@ fn failed_resume_keeps_the_transcript_and_current_controls(cx: &mut TestAppConte
         pane.update(cx, |pane, cx| {
             install_backend(pane);
             pane.apply_replay(replay("current"), cx);
-            pane.controls.settings.model = Some("current-model".into());
-            let settings = pane.controls.settings.clone();
-            pane.history_ui.sessions = vec![summary()];
+            pane.controls.state.settings.model = Some("current-model".into());
+            let settings = pane.controls.state.settings.clone();
+            pane.history_ui.data.sessions = vec![summary()];
             pane.history_ui.mode = RecentSessionsMode::Open;
 
             pane.resume_session(0, cx);
@@ -137,7 +137,7 @@ fn failed_resume_keeps_the_transcript_and_current_controls(cx: &mut TestAppConte
             assert_eq!(pane.history_ui.mode, RecentSessionsMode::Open);
             assert_eq!(pane.runtime.status(), Status::Idle);
             assert_eq!(user_rows(pane, cx), ["current"]);
-            assert_eq!(pane.controls.settings, settings);
+            assert_eq!(pane.controls.state.settings, settings);
         })
     });
 }
@@ -202,12 +202,12 @@ fn resumed_codex_controls_keep_provider_values_instead_of_local_defaults(cx: &mu
     cx.update(|_, cx| {
         pane.update(cx, |pane, cx| {
             install_backend(pane);
-            pane.history_ui.sessions = vec![summary()];
+            pane.history_ui.data.sessions = vec![summary()];
             pane.history_ui.mode = RecentSessionsMode::Open;
-            pane.controls.settings.model = Some("old-model".into());
+            pane.controls.state.settings.model = Some("old-model".into());
             pane.resume_session(0, cx);
-            assert!(!pane.controls.seed_thread_defaults);
-            assert!(pane.controls.seed_approval_reviewer);
+            assert!(!pane.controls.state.seed_thread_defaults);
+            assert!(pane.controls.state.seed_approval_reviewer);
 
             let settings = ThreadSettings {
                 model: Some("resumed-model".into()),
@@ -216,14 +216,14 @@ fn resumed_codex_controls_keep_provider_values_instead_of_local_defaults(cx: &mu
             pane.apply_event(Event::Ready(settings), cx);
             pane.apply_event(Event::Replay(replay("restored")), cx);
             assert_eq!(
-                pane.controls.settings.model.as_deref(),
+                pane.controls.state.settings.model.as_deref(),
                 Some("resumed-model")
             );
             assert_eq!(user_rows(pane, cx), ["restored"]);
 
             pane.seed_restored_settings(SettingsSeed::None);
-            assert!(!pane.controls.seed_thread_defaults);
-            assert!(!pane.controls.seed_approval_reviewer);
+            assert!(!pane.controls.state.seed_thread_defaults);
+            assert!(!pane.controls.state.seed_approval_reviewer);
         })
     });
 }
@@ -239,8 +239,8 @@ fn old_backend_events_during_disk_read_leave_visible_rows_and_settings_untouched
         pane.update(cx, |pane, cx| {
             install_backend(pane);
             pane.apply_replay(replay("current"), cx);
-            pane.controls.settings.model = Some("current-model".into());
-            let settings = pane.controls.settings.clone();
+            pane.controls.state.settings.model = Some("current-model".into());
+            let settings = pane.controls.state.settings.clone();
             let cwd = pane.cwd();
             let ResumeStart::ReadReplay(request) = pane.restore.begin(
                 &mut pane.runtime,
@@ -264,7 +264,7 @@ fn old_backend_events_during_disk_read_leave_visible_rows_and_settings_untouched
             assert_eq!(pane.runtime.status(), Status::Starting);
             assert_eq!(pane.history_ui.mode, RecentSessionsMode::Loading);
             assert_eq!(user_rows(pane, cx), ["current"]);
-            assert_eq!(pane.controls.settings, settings);
+            assert_eq!(pane.controls.state.settings, settings);
             assert!(matches!(
                 pane.restore.loaded(
                     &mut pane.runtime,

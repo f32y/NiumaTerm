@@ -386,11 +386,11 @@ mod conversation_title_tests {
                 pane.rename_session("first");
                 pane.rename_session("latest");
 
-                assert_eq!(pane.pending_conversation_rename.as_deref(), Some("latest"));
+                assert_eq!(pane.naming.pending.as_deref(), Some("latest"));
 
                 pane.sync_pending_rename();
 
-                assert_eq!(pane.pending_conversation_rename.as_deref(), Some("latest"));
+                assert_eq!(pane.naming.pending.as_deref(), Some("latest"));
 
                 let Some(Backend::Test(backend)) = pane.runtime.backend_mut() else {
                     panic!("expected test backend");
@@ -399,7 +399,7 @@ mod conversation_title_tests {
                 backend.rename_outcome = RenameOutcome::Accepted;
                 pane.sync_pending_rename();
 
-                assert!(pane.pending_conversation_rename.is_none());
+                assert!(pane.naming.pending.is_none());
 
                 let Some(Backend::Test(backend)) = pane.runtime.backend_mut() else {
                     panic!("expected test backend");
@@ -408,7 +408,7 @@ mod conversation_title_tests {
                 backend.rename_outcome = RenameOutcome::Unsupported;
                 pane.rename_session("local only");
 
-                assert!(pane.pending_conversation_rename.is_none());
+                assert!(pane.naming.pending.is_none());
             });
         });
     }
@@ -522,7 +522,7 @@ mod conversation_title_tests {
                 assert!(
                     pane.send_text("  Inspect title generation\n and its fallback  ".into(), cx)
                 );
-                assert!(pane.conversation_named);
+                assert!(pane.naming.named);
             });
         });
         cx.run_until_parked();
@@ -562,7 +562,7 @@ mod conversation_title_tests {
                 pane.runtime.ready();
 
                 assert!(pane.send_text("one two three four five six seven eight".into(), cx));
-                assert!(pane.conversation_named);
+                assert!(pane.naming.named);
                 assert!(pane.send_text("a later prompt cannot rename this".into(), cx));
             });
         });
@@ -587,7 +587,7 @@ mod conversation_title_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                assert!(pane.conversation_named);
+                assert!(pane.naming.named);
 
                 pane.kind = crate::AgentKind::Claude;
 
@@ -744,7 +744,7 @@ mod queued_prompt_placement_tests {
                 ));
 
                 pane.runtime.ready();
-                pane.palette.awaiting_command_turn = true;
+                pane.palette.commands.awaiting_turn = true;
 
                 let previous_turn = pane.delivery.turn();
 
@@ -752,7 +752,7 @@ mod queued_prompt_placement_tests {
 
                 pane.apply_event(SessionEvent::TurnStarted, cx);
 
-                assert!(!pane.palette.awaiting_command_turn);
+                assert!(!pane.palette.commands.awaiting_turn);
                 assert_eq!(pane.delivery.turn(), previous_turn + 1);
                 assert_eq!(pane.runtime.status(), Status::Running);
                 assert!(pane.transcript.read(cx).is_working());

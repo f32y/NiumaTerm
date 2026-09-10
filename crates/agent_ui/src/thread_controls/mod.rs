@@ -1,3 +1,4 @@
+use nmt_agent::session::settings::ConversationSettings;
 mod defaults;
 pub(crate) mod effort;
 pub(crate) use crate::thread_controls::defaults::{
@@ -10,7 +11,6 @@ use gpui::{AnyElement, App, Context, Div, IntoElement, Pixels, SharedString, Sta
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::{ActiveTheme as _, Icon, IconName, IconNamed, Sizable as _, h_flex};
-use nmt_agent::chat::{AgentPreset, ApprovalPreset, ModelInfo, ThreadSettings};
 use nmt_i18n::i18n;
 
 use crate::AgentPane;
@@ -22,37 +22,7 @@ use crate::thread_controls::effort::EffortGaugeIcon;
 /// The thread controls under the composer: current values, catalogs to pick
 /// from, and the seeding flags that decide what the next `Ready` overlays.
 pub(crate) struct ThreadControls {
-    /// Current thread settings, seeded from the session's `Ready` event and
-    /// changed via the dropdowns under the input; sent as overrides on every
-    /// turn start (idempotent when unchanged).
-    pub(crate) settings: ThreadSettings,
-    /// Whether the next `Ready` should overlay all remembered settings. True
-    /// for fresh conversations and resumed Claude conversations; later Claude
-    /// confirmations keep the values currently selected under the input.
-    pub(crate) seed_thread_defaults: bool,
-    /// Whether the next resumed Codex thread should take the locally
-    /// remembered approval reviewer while preserving its other stored
-    /// settings.
-    pub(crate) seed_approval_reviewer: bool,
-    /// A rewind starts a new backend identity but keeps the user's current
-    /// thread controls. The first Ready payload describes process defaults,
-    /// so these values are overlaid once instead of being replaced by them.
-    pub(crate) restore_on_ready: Option<ThreadSettings>,
-    /// Model catalog; service tiers are per model, so the tier dropdown lists
-    /// the selected model's tiers.
-    pub(crate) models: Vec<ModelInfo>,
-    /// Execution-permission presets, for a harness whose preset table belongs
-    /// to its deployment. Empty for one whose presets this UI can name
-    /// itself.
-    pub(crate) approval_presets: Vec<ApprovalPreset>,
-    /// Agent compositions this deployment offers, and the one this
-    /// conversation was built from. Empty where the deployment composes none,
-    /// which is a picker with nothing to choose between rather than an
-    /// unsupported one.
-    pub(crate) agent_presets: Vec<AgentPreset>,
-    pub(crate) agent_preset: Option<String>,
-    /// Stop the effort slider's thumb is being dragged to while the button is
-    /// down. The level itself is applied on release.
+    pub(crate) state: ConversationSettings,
     pub(crate) effort_drag: Option<usize>,
 }
 
@@ -126,7 +96,8 @@ impl ThreadControls {
     pub(super) fn model_options(&self, cx: &App) -> Vec<(String, String)> {
         let style = cx.global::<AgentSettings>().model_list_style;
 
-        self.models
+        self.state
+            .models
             .iter()
             .map(|m| (m.model.clone(), style.label(&m.display, &m.model)))
             .collect()

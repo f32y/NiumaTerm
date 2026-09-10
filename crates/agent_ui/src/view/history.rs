@@ -137,13 +137,14 @@ impl AgentPane {
     ) -> impl IntoElement + use<> {
         let rows = self
             .history_ui
+            .data
             .pending
-            .unwrap_or(self.history_ui.sessions.len());
+            .unwrap_or(self.history_ui.data.sessions.len());
 
         let body_height =
             px((Self::HISTORY_ROW_HEIGHT * rows as f32).min(Self::HISTORY_MAX_HEIGHT));
 
-        let body: AnyElement = if self.history_ui.pending.is_some() {
+        let body: AnyElement = if self.history_ui.data.pending.is_some() {
             // Both loading and loaded bodies use the same explicit viewport
             // height. The virtual list's inferred first-frame measurement
             // must not move the composer when it replaces these placeholders.
@@ -205,7 +206,7 @@ impl AgentPane {
                             // The final page in view is the cue to fetch
                             // the next one (no-op without a cursor, and
                             // only Codex pages from the backend).
-                            if visible_range.end >= this.history_ui.sessions.len()
+                            if visible_range.end >= this.history_ui.data.sessions.len()
                                 && let Some(session) = this.runtime.backend_mut()
                             {
                                 session.request_more_history();
@@ -285,7 +286,9 @@ impl AgentPane {
                             .child(
                                 Checkbox::new("history-scope")
                                     .label(i18n("agent-history-show-all-sessions"))
-                                    .checked(self.history_ui.scope == SessionScope::AllDirectories)
+                                    .checked(
+                                        self.history_ui.data.scope == SessionScope::AllDirectories,
+                                    )
                                     .tooltip(i18n("agent-history-show-all-sessions-tooltip"))
                                     .on_click(
                                         cx.listener(|this, _, _, cx| this.toggle_history_scope(cx)),
@@ -309,7 +312,7 @@ impl AgentPane {
     /// One history row: title, branch, and relative time, in the settings
     /// row's ghost-control idiom (small, muted, hover lifts the foreground).
     fn render_history_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
-        let Some(session) = self.history_ui.sessions.get(index) else {
+        let Some(session) = self.history_ui.data.sessions.get(index) else {
             return div().into_any_element();
         };
 

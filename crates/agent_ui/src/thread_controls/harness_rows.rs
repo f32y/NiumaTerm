@@ -44,9 +44,10 @@ impl ThreadControls {
         // advertises none (Haiku) gets no control rather than one whose every
         // value it would reject.
         let supports_effort = self
+            .state
             .models
             .iter()
-            .find(|m| Some(&m.model) == self.settings.model.as_ref())
+            .find(|m| Some(&m.model) == self.state.settings.model.as_ref())
             .is_some_and(|m| !m.efforts.is_empty());
 
         let model = setting_picker(
@@ -54,10 +55,10 @@ impl ThreadControls {
             "agent-model",
             i18n("agent-setting-model"),
             IconName::Cpu,
-            self.settings.model.clone(),
+            self.state.settings.model.clone(),
             model_options,
             |this, value, cx| {
-                this.controls.settings.model = Some(value);
+                this.controls.state.settings.model = Some(value);
                 this.controls
                     .remember_defaults(this.kind, &this.profile, cx);
             },
@@ -66,11 +67,11 @@ impl ThreadControls {
 
         let folded = vec![FoldedSetting {
             name: i18n("agent-setting-permissions"),
-            icon: permission_icon(self.settings.approval.as_deref()),
-            current: self.settings.approval.clone(),
+            icon: permission_icon(self.state.settings.approval.as_deref()),
+            current: self.state.settings.approval.clone(),
             options: permission_options,
             set: |this, value, cx| {
-                this.controls.settings.approval = Some(value);
+                this.controls.state.settings.approval = Some(value);
                 this.controls
                     .remember_defaults(this.kind, &this.profile, cx);
             },
@@ -89,13 +90,14 @@ impl ThreadControls {
                 // The protocol never reports the session's current effort;
                 // until the user picks one, the honest label is the CLI's
                 // own per-model default rather than an empty dash.
-                self.settings
+                self.state
+                    .settings
                     .effort
                     .clone()
                     .or_else(|| Some("default".to_string())),
                 effort_levels(kind),
                 |this, value, cx| {
-                    this.controls.settings.effort = Some(value);
+                    this.controls.state.settings.effort = Some(value);
                     this.controls
                         .remember_defaults(this.kind, &this.profile, cx);
                 },
@@ -130,9 +132,10 @@ impl ThreadControls {
         // advertises no levels simply has no effort control; the levels it
         // then offers are the shared ladder.
         let supports_effort = self
+            .state
             .models
             .iter()
-            .find(|m| Some(&m.model) == self.settings.model.as_ref())
+            .find(|m| Some(&m.model) == self.state.settings.model.as_ref())
             .is_some_and(|m| !m.efforts.is_empty());
 
         let model = setting_picker(
@@ -140,10 +143,10 @@ impl ThreadControls {
             "agent-model",
             i18n("agent-setting-model"),
             IconName::Cpu,
-            self.settings.model.clone(),
+            self.state.settings.model.clone(),
             model_options,
             |this, value, cx| {
-                this.controls.settings.model = Some(value);
+                this.controls.state.settings.model = Some(value);
                 this.controls
                     .remember_defaults(this.kind, &this.profile, cx);
                 this.apply_model_selection(cx);
@@ -155,12 +158,13 @@ impl ThreadControls {
 
         // A deployment that composes no presets has one composition for every
         // conversation, so the control would offer a choice that does not exist.
-        if !self.agent_presets.is_empty() {
+        if !self.state.agent_presets.is_empty() {
             folded.push(FoldedSetting {
                 name: i18n("agent-setting-agent-preset"),
                 icon: IconName::Bot,
-                current: self.agent_preset.clone(),
+                current: self.state.agent_preset.clone(),
                 options: self
+                    .state
                     .agent_presets
                     .iter()
                     .map(|preset| (preset.value.clone(), preset.label.clone()))
@@ -169,12 +173,13 @@ impl ThreadControls {
             });
         }
 
-        if !self.approval_presets.is_empty() {
+        if !self.state.approval_presets.is_empty() {
             folded.push(FoldedSetting {
                 name: i18n("agent-setting-permissions"),
-                icon: permission_icon(self.settings.approval.as_deref()),
-                current: self.settings.approval.clone(),
+                icon: permission_icon(self.state.settings.approval.as_deref()),
+                current: self.state.settings.approval.clone(),
                 options: self
+                    .state
                     .approval_presets
                     .iter()
                     .map(|preset| (preset.value.clone(), preset.label.clone()))
@@ -198,10 +203,10 @@ impl ThreadControls {
         if supports_effort {
             let effort = effort_panel(
                 cx,
-                self.settings.effort.clone(),
+                self.state.settings.effort.clone(),
                 effort_levels(kind),
                 |this, value, cx| {
-                    this.controls.settings.effort = Some(value);
+                    this.controls.state.settings.effort = Some(value);
                     this.controls
                         .remember_defaults(this.kind, &this.profile, cx);
                     this.apply_model_selection(cx);
@@ -236,9 +241,10 @@ impl ThreadControls {
             vec![(String::new(), setting_value_label("normal"))];
 
         tier_options.extend(
-            self.models
+            self.state
+                .models
                 .iter()
-                .find(|m| Some(&m.model) == self.settings.model.as_ref())
+                .find(|m| Some(&m.model) == self.state.settings.model.as_ref())
                 .map(|m| m.tiers.clone())
                 .unwrap_or_default(),
         );
@@ -263,23 +269,24 @@ impl ThreadControls {
             "agent-model",
             i18n("agent-setting-model"),
             IconName::Cpu,
-            self.settings.model.clone(),
+            self.state.settings.model.clone(),
             model_options,
             |this, value, cx| {
                 // A tier the new model doesn't offer falls back to that
                 // model's default tier instead of erroring the next turn.
-                if let Some(info) = this.controls.models.iter().find(|m| m.model == value)
+                if let Some(info) = this.controls.state.models.iter().find(|m| m.model == value)
                     && !this
                         .controls
+                        .state
                         .settings
                         .tier
                         .as_ref()
                         .is_some_and(|tier| info.tiers.iter().any(|(id, _)| id == tier))
                 {
-                    this.controls.settings.tier = info.default_tier.clone();
+                    this.controls.state.settings.tier = info.default_tier.clone();
                 }
 
-                this.controls.settings.model = Some(value);
+                this.controls.state.settings.model = Some(value);
                 this.controls
                     .remember_defaults(this.kind, &this.profile, cx);
             },
@@ -289,11 +296,11 @@ impl ThreadControls {
         let folded = vec![
             FoldedSetting {
                 name: i18n("agent-setting-approval"),
-                icon: permission_icon(self.settings.approval.as_deref()),
-                current: self.settings.approval.clone(),
+                icon: permission_icon(self.state.settings.approval.as_deref()),
+                current: self.state.settings.approval.clone(),
                 options: approval_options,
                 set: |this, value, cx| {
-                    this.controls.settings.approval = Some(value);
+                    this.controls.state.settings.approval = Some(value);
                     this.controls
                         .remember_defaults(this.kind, &this.profile, cx);
                 },
@@ -301,10 +308,10 @@ impl ThreadControls {
             FoldedSetting {
                 name: i18n("agent-setting-approval-reviewer"),
                 icon: IconName::User,
-                current: self.settings.approvals_reviewer.clone(),
+                current: self.state.settings.approvals_reviewer.clone(),
                 options: reviewer_options,
                 set: |this, value, cx| {
-                    this.controls.settings.approvals_reviewer = Some(value);
+                    this.controls.state.settings.approvals_reviewer = Some(value);
                     this.controls
                         .remember_defaults(this.kind, &this.profile, cx);
                 },
@@ -312,10 +319,10 @@ impl ThreadControls {
             FoldedSetting {
                 name: i18n("agent-setting-sandbox"),
                 icon: IconName::Shield,
-                current: self.settings.sandbox.clone(),
+                current: self.state.settings.sandbox.clone(),
                 options: sandbox_options,
                 set: |this, value, cx| {
-                    this.controls.settings.sandbox = Some(value);
+                    this.controls.state.settings.sandbox = Some(value);
                     this.controls
                         .remember_defaults(this.kind, &this.profile, cx);
                 },
@@ -323,10 +330,10 @@ impl ThreadControls {
             FoldedSetting {
                 name: i18n("agent-setting-tier"),
                 icon: IconName::Zap,
-                current: Some(self.settings.tier.clone().unwrap_or_default()),
+                current: Some(self.state.settings.tier.clone().unwrap_or_default()),
                 options: tier_options,
                 set: |this, value, cx| {
-                    this.controls.settings.tier = (!value.is_empty()).then_some(value);
+                    this.controls.state.settings.tier = (!value.is_empty()).then_some(value);
                     this.controls
                         .remember_defaults(this.kind, &this.profile, cx);
                 },
@@ -335,10 +342,10 @@ impl ThreadControls {
 
         let effort = effort_panel(
             cx,
-            self.settings.effort.clone(),
+            self.state.settings.effort.clone(),
             effort_levels(kind),
             |this, value, cx| {
-                this.controls.settings.effort = Some(value);
+                this.controls.state.settings.effort = Some(value);
                 this.controls
                     .remember_defaults(this.kind, &this.profile, cx);
             },

@@ -32,29 +32,13 @@ use gpui::{Context, SharedString, Window};
 use gpui_component::button::Button;
 use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogClose, DialogFooter};
 use gpui_component::{WindowExt, v_flex};
+pub(super) use nmt_agent::session::commands::PendingSlashCommand;
 use nmt_i18n::i18n;
 
 use crate::commands::{parse_slash_command, reconcile_skill_binding, validate_skill_binding};
 use crate::session::Status;
 use crate::transcript::last_response_label;
 use crate::{AgentPane, RecentSessionsMode, SlashPalette};
-
-#[derive(Clone)]
-pub(super) struct PendingSlashCommand {
-    name: String,
-    arguments: String,
-}
-
-impl PendingSlashCommand {
-    /// One command a control runs directly, without the composer's parsing
-    /// stage: the caller already knows the name and the value it is passing.
-    pub(super) fn new(name: &str, arguments: String) -> Self {
-        Self {
-            name: name.to_string(),
-            arguments,
-        }
-    }
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum CommandFeedbackKind {
@@ -131,8 +115,7 @@ impl SlashPalette {
         self.provider_commands.clear();
         self.provider_commands_ready = commands_ready;
         self.catalog = None;
-        self.command_queue.clear();
-        self.awaiting_command_turn = false;
+        self.commands.clear();
         self.selected = 0;
         self.dismissed = false;
     }
@@ -189,7 +172,7 @@ impl SlashPalette {
     pub(crate) fn visible_feedback(&self) -> Option<&CommandFeedback> {
         self.feedback
             .as_ref()
-            .filter(|feedback| feedback_is_current(feedback.kind, self.command_queue.is_empty()))
+            .filter(|feedback| feedback_is_current(feedback.kind, self.commands.queue.is_empty()))
     }
 }
 
@@ -333,7 +316,7 @@ impl AgentPane {
 
     pub(super) fn is_command_busy(&self) -> bool {
         self.runtime.status() == Status::Running
-            || self.palette.awaiting_command_turn
+            || self.palette.commands.awaiting_turn
             || self.history_ui.mode == RecentSessionsMode::Loading
             || self.branch_flow_holds_composer()
     }

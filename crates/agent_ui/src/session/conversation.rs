@@ -104,7 +104,8 @@ impl AgentPane {
         results: Vec<SessionSummary>,
         cx: &mut Context<Self>,
     ) {
-        if results.is_empty() {
+        let count = results.len();
+        if !self.history_ui.data.search_results(results) {
             self.palette.set_feedback(
                 CommandFeedbackKind::Notice,
                 i18n("agent-session-search-no-matches").to_string(),
@@ -114,12 +115,6 @@ impl AgentPane {
             return;
         }
 
-        let count = results.len();
-
-        self.history_ui.invalidate_filesystem_history();
-        self.history_ui.sessions = results;
-        self.history_ui.showing_search = true;
-        self.history_ui.pending = None;
         self.history_ui.selected = 0;
         self.history_ui.mode = RecentSessionsMode::Open;
         self.palette.set_feedback(

@@ -6,13 +6,9 @@
 //! tell from the type which fields move as a unit and which merely live on
 //! the same pane.
 
-use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use gpui::Context;
-use nmt_agent::background_task::{
-    BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscript,
-};
 
 use crate::AgentPane;
 use crate::session::turn::response_age_tick;
@@ -93,18 +89,4 @@ impl TurnPresentation {
     }
 }
 
-/// Child-agent activity the provider adapter reports for this conversation.
-pub(crate) struct ChildAgents {
-    /// Latest child-agent snapshot published by the provider adapter. The
-    /// adapter owns child lifecycle; the pane keeps only this replacement
-    /// copy so the right-side view never maintains a second mutable registry.
-    pub(crate) background_tasks: Option<BackgroundTaskSnapshot>,
-    /// Each child's own conversation, accumulated here rather than in the
-    /// adapter so live activity is retained once and the retention bound
-    /// applies to what is actually shown.
-    pub(crate) transcripts: HashMap<BackgroundTaskKey, BackgroundTaskTranscript>,
-    /// Claude session id whose child agents were already restored from
-    /// history. Ready fires again during first-turn initialization, so the
-    /// read happens once per conversation rather than once per confirmation.
-    pub(crate) restored_session: Option<String>,
-}
+pub(crate) use nmt_agent::session::children::ChildAgents;

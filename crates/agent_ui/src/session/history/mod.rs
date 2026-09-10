@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use gpui::Context;
 use nmt_agent::chat::{SessionScope, SessionSummary};
-use nmt_agent::claude_code::sessions;
 use nmt_agent::session::restore::{ReplayLoaded, ResumeStart, SettingsSeed};
 use nmt_i18n::i18n;
 
@@ -22,26 +21,11 @@ mod restore_tests;
 #[cfg(test)]
 mod tests;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct FilesystemHistoryRequest {
-    id: u64,
-    scope: SessionScope,
-    cwd: Option<String>,
-    epoch: u64,
-}
-
-enum CountPublication {
-    Stale,
-    Empty,
-    LoadRows,
-}
-
+pub(crate) use nmt_agent::session::history::FilesystemHistoryRequest;
+use nmt_agent::session::history::{CountPublication, count_scoped_sessions, list_scoped_sessions};
 impl SessionHistoryUi {
-    // Disk reads may finish after their view has been replaced. Retiring the
-    // request also removes its placeholders without waiting for that work.
     pub(super) fn invalidate_filesystem_history(&mut self) {
-        self.filesystem_request = None;
-        self.pending = None;
+        self.data.invalidate_filesystem_history();
     }
 
     fn begin_filesystem_history(
@@ -49,34 +33,7 @@ impl SessionHistoryUi {
         cwd: Option<String>,
         epoch: u64,
     ) -> FilesystemHistoryRequest {
-        self.invalidate_filesystem_history();
-        self.next_request_id = self
-            .next_request_id
-            .checked_add(1)
-            .expect("history request id exhausted");
-
-        let request = FilesystemHistoryRequest {
-            id: self.next_request_id,
-            scope: self.scope,
-            cwd,
-            epoch,
-        };
-
-        self.filesystem_request = Some(request.clone());
-
-        request
-    }
-
-    fn owns_filesystem_request(
-        &self,
-        request: &FilesystemHistoryRequest,
-        cwd: Option<&str>,
-        epoch: u64,
-    ) -> bool {
-        self.filesystem_request.as_ref() == Some(request)
-            && self.scope == request.scope
-            && request.cwd.as_deref() == cwd
-            && request.epoch == epoch
+        self.data.begin_filesystem_history(cwd, epoch)
     }
 
     fn publish_filesystem_count(
@@ -86,20 +43,13 @@ impl SessionHistoryUi {
         epoch: u64,
         count: usize,
     ) -> CountPublication {
-        if !self.owns_filesystem_request(request, cwd, epoch) {
-            return CountPublication::Stale;
-        }
-
-        if count == 0 {
-            self.sessions.clear();
+        let result = self
+            .data
+            .publish_filesystem_count(request, cwd, epoch, count);
+        if matches!(result, CountPublication::Empty) {
             self.selected = 0;
-            self.invalidate_filesystem_history();
-
-            CountPublication::Empty
-        } else {
-            self.pending = Some(count);
-            CountPublication::LoadRows
         }
+        result
     }
 
     fn publish_filesystem_rows(
@@ -107,34 +57,15 @@ impl SessionHistoryUi {
         request: &FilesystemHistoryRequest,
         cwd: Option<&str>,
         epoch: u64,
-        sessions: Vec<SessionSummary>,
+        rows: Vec<SessionSummary>,
     ) -> bool {
-        if !self.owns_filesystem_request(request, cwd, epoch) {
+        if !self.data.publish_filesystem_rows(request, cwd, epoch, rows) {
             return false;
         }
-
-        self.sessions = sessions;
-        self.selected = self.selected.min(self.sessions.len().saturating_sub(1));
-        self.invalidate_filesystem_history();
-
+        self.selected = self
+            .selected
+            .min(self.data.sessions.len().saturating_sub(1));
         true
-    }
-}
-
-/// The filesystem history a scope covers. Only a backend that reads its own
-/// transcripts takes this route; one that lists over the protocol asks its
-/// server for the scope instead.
-fn count_scoped_sessions(scope: SessionScope, cwd: Option<&str>) -> usize {
-    match scope {
-        SessionScope::CurrentDirectory => sessions::count_sessions(cwd),
-        SessionScope::AllDirectories => sessions::count_all_sessions(),
-    }
-}
-
-fn list_scoped_sessions(scope: SessionScope, cwd: Option<&str>) -> Vec<SessionSummary> {
-    match scope {
-        SessionScope::CurrentDirectory => sessions::list_sessions(cwd),
-        SessionScope::AllDirectories => sessions::list_all_sessions(),
     }
 }
 
@@ -146,16 +77,16 @@ impl AgentPane {
     /// rescanned.
     pub(crate) fn toggle_history_scope(&mut self, cx: &mut Context<Self>) {
         self.history_ui.invalidate_filesystem_history();
-        self.history_ui.scope = match self.history_ui.scope {
+        self.history_ui.data.scope = match self.history_ui.data.scope {
             SessionScope::CurrentDirectory => SessionScope::AllDirectories,
             SessionScope::AllDirectories => SessionScope::CurrentDirectory,
         };
-        self.history_ui.sessions.clear();
-        self.history_ui.showing_search = false;
+        self.history_ui.data.sessions.clear();
+        self.history_ui.data.showing_search = false;
         self.history_ui.selected = 0;
 
         if let Some(session) = self.runtime.backend_mut() {
-            session.request_history(self.history_ui.scope);
+            session.request_history(self.history_ui.data.scope);
         }
 
         self.load_filesystem_history(cx);
@@ -174,7 +105,7 @@ impl AgentPane {
         }
 
         let cwd = self.cwd();
-        let scope = self.history_ui.scope;
+        let scope = self.history_ui.data.scope;
         let request = self
             .history_ui
             .begin_filesystem_history(cwd.clone(), self.runtime.epoch());
@@ -251,13 +182,13 @@ impl AgentPane {
             SettingsSeed::Reviewer => (false, true),
             SettingsSeed::None => (false, false),
         };
-        self.controls.seed_thread_defaults = defaults;
-        self.controls.seed_approval_reviewer = reviewer;
+        self.controls.state.seed_thread_defaults = defaults;
+        self.controls.state.seed_approval_reviewer = reviewer;
     }
 
     /// Keep the displayed conversation until the replacement supplies its replay.
     pub(crate) fn resume_session(&mut self, index: usize, cx: &mut Context<Self>) {
-        let Some(summary) = self.history_ui.sessions.get(index) else {
+        let Some(summary) = self.history_ui.data.sessions.get(index) else {
             return;
         };
 

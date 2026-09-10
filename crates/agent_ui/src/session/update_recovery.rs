@@ -2,11 +2,12 @@ use std::time::Duration;
 
 use gpui::{App, Context, Task};
 use nmt_agent::launcher::AgentCli;
+use nmt_agent::session::update_readiness::{ConversationWork, Readiness, prepare_stop};
 use nmt_agent::update::InstallationKey;
 use nmt_i18n::i18n;
 
 use crate::profile::agent_launch;
-use crate::session::{Backend, RecoverySnapshot, RestorationReadiness, Status, UpdateSuspension};
+use crate::session::{RecoverySnapshot, RestorationReadiness};
 use crate::{AgentPane, AgentPaneEvent};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,54 +32,45 @@ impl AgentPane {
     /// Assess both quiescence and recoverability before any related backend
     /// is stopped. A blank tab needs no provider identity because restarting
     /// it as another blank conversation loses no conversation state.
+    fn update_work(&self, cx: &App) -> ConversationWork {
+        ConversationWork {
+            approval_open: self.prompts.approval_open(),
+            branch_pending: self.branch.holds_composer(),
+            compacting: self.transcript.read(cx).is_compacting(),
+            empty: self.transcript.read(cx).is_empty(),
+        }
+    }
+
     pub fn recovery_readiness(&self, cx: &App) -> RecoveryReadiness {
-        if self
-            .runtime
-            .update_suspension()
-            .is_some_and(|state| !matches!(state, UpdateSuspension::Waiting))
-        {
-            return RecoveryReadiness::Busy(
-                i18n("agent-update-profile-already-updating").replace("{name}", &self.profile.name),
-            );
-        }
-
-        if matches!(self.runtime.status(), Status::Starting | Status::Running)
-            || self.prompts.approval_open()
-            || self.palette.awaiting_command_turn
-            || !self.palette.command_queue.is_empty()
-            || !self.delivery.pending().is_empty()
-            || self.branch.holds_composer()
-            || self.transcript.read(cx).is_compacting()
-            || self
-                .runtime
-                .backend()
-                .is_some_and(Backend::has_active_operation)
-        {
-            return RecoveryReadiness::Busy(
-                i18n("agent-update-profile-active-work").replace("{name}", &self.profile.name),
-            );
-        }
-
-        self.recovery_identity_snapshot(cx)
+        self.present_readiness(self.update_work(cx).readiness(
+            &self.runtime,
+            &self.palette.commands,
+            &self.delivery,
+        ))
     }
 
     pub fn recovery_identity_snapshot(&self, cx: &App) -> RecoveryReadiness {
-        let identity = if self.transcript.read(cx).is_empty() {
-            None
-        } else if let Some(identity) = self.runtime.backend().and_then(Backend::recovery_identity) {
-            Some(identity)
-        } else {
-            return RecoveryReadiness::MissingIdentity(
+        self.present_readiness(self.update_work(cx).identity(self.runtime.backend()))
+    }
+
+    fn present_readiness(&self, readiness: Readiness) -> RecoveryReadiness {
+        match readiness {
+            Readiness::Ready(identity) => RecoveryReadiness::Ready(RecoverySnapshot {
+                identity,
+                profile_name: self.profile.name.clone(),
+            }),
+            Readiness::Updating => RecoveryReadiness::Busy(
+                i18n("agent-update-profile-already-updating").replace("{name}", &self.profile.name),
+            ),
+            Readiness::ActiveWork => RecoveryReadiness::Busy(
+                i18n("agent-update-profile-active-work").replace("{name}", &self.profile.name),
+            ),
+            Readiness::MissingIdentity => RecoveryReadiness::MissingIdentity(
                 i18n("agent-update-profile-missing-identity")
                     .replace("{name}", &self.profile.name)
                     .replace("{provider}", self.kind.display()),
-            );
-        };
-
-        RecoveryReadiness::Ready(RecoverySnapshot {
-            identity,
-            profile_name: self.profile.name.clone(),
-        })
+            ),
+        }
     }
 
     pub fn prepare_update_wait(&mut self, cx: &mut Context<Self>) {
@@ -99,9 +91,7 @@ impl AgentPane {
             self.interrupt(cx);
         }
 
-        self.palette.command_queue.clear();
-        self.palette.awaiting_command_turn = false;
-        self.delivery.stopping_for_update();
+        prepare_stop(&mut self.palette.commands, &mut self.delivery);
         self.publish_queued_user_messages(cx);
 
         self.cancel_branch_picker(cx);

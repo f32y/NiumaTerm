@@ -18,108 +18,37 @@ use nmt_agent::chat::Item as SessionItem;
 use nmt_agent::claude_code::workflows::{
     self, RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
 };
-use nmt_agent::workflow::{WorkflowAgentState, WorkflowRun, WorkflowSnapshot};
+pub use nmt_agent::session::workflows::OpenWorkflowAgent;
+use nmt_agent::session::workflows::WorkflowData;
+use nmt_agent::workflow::{WorkflowRun, WorkflowSnapshot};
 
 use crate::capabilities::AgentCapabilities as _;
 use crate::session::Backend;
 use crate::{AgentPane, AgentPaneEvent};
-
-/// The agent conversation the user has open, and what has been read of it.
-#[derive(Default)]
-pub struct OpenWorkflowAgent {
-    pub task_id: String,
-    pub agent_id: String,
-    pub items: Vec<SessionItem>,
-    /// Size the transcript had when `items` was parsed, so an unchanged file
-    /// is never re-parsed.
-    len: Option<u64>,
-    /// The provider has not persisted this agent's transcript; the row stays
-    /// listed and the conversation reports itself unavailable.
-    pub unavailable: bool,
-    /// Bumped whenever `items` changes, so the transcript view rebuilds only
-    /// on a real change.
-    revision: u64,
-}
-
-impl OpenWorkflowAgent {
-    pub fn revision(&self) -> u64 {
-        self.revision
-    }
-}
-
-/// Workflow state the pane owns and the view renders.
 #[derive(Default)]
 pub(crate) struct WorkflowUi {
-    pub(crate) snapshot: Option<WorkflowSnapshot>,
-    pub(crate) open: Option<OpenWorkflowAgent>,
-    /// Whether the right-side area currently shows this view. Polling a file
-    /// for a view nobody is looking at is pure cost, so it gates the refresh.
+    pub(crate) data: WorkflowData,
     visible: bool,
-    /// Session whose completed runs were already read back from disk, so a
-    /// resumed conversation restores once rather than on every reopen.
-    restored_session: Option<String>,
     refresh: Option<Task<()>>,
 }
 
 impl WorkflowUi {
-    /// Runs of the scoped session, empty until one is reported.
     pub(crate) fn runs(&self) -> &[WorkflowRun] {
-        self.snapshot
-            .as_ref()
-            .map(|snapshot| snapshot.runs.as_slice())
-            .unwrap_or_default()
+        self.data.runs()
+    }
+
+    pub(crate) fn running_agents(&self) -> usize {
+        self.data.running_agents()
+    }
+
+    pub(crate) fn open_conversation(&self) -> Option<&OpenWorkflowAgent> {
+        self.data.open_conversation()
     }
 
     fn clear(&mut self) {
-        self.snapshot = None;
-        self.open = None;
-        self.restored_session = None;
+        self.data.clear();
         self.refresh = None;
     }
-
-    /// Agents of this tab the provider currently reports as running.
-    pub(crate) fn running_agents(&self) -> usize {
-        self.runs()
-            .iter()
-            .flat_map(|run| run.agents.iter())
-            .filter(|agent| agent.state == WorkflowAgentState::Running)
-            .count()
-    }
-
-    /// What the chrome derives from this tab: whether a control is warranted
-    /// at all, and the number it shows.
-    fn activity(&self) -> (bool, usize) {
-        (!self.runs().is_empty(), self.running_agents())
-    }
-
-    /// Take a replacement snapshot, reporting whether what the chrome shows
-    /// changed. The chrome reveals its control and shows a running count, so
-    /// it is told on a change rather than on every refreshed snapshot.
-    fn set_snapshot(&mut self, snapshot: WorkflowSnapshot) -> bool {
-        let before = self.activity();
-
-        self.snapshot = Some(snapshot);
-
-        self.activity() != before
-    }
-
-    /// The agent conversation the user has open, if any.
-    pub(crate) fn open_conversation(&self) -> Option<&OpenWorkflowAgent> {
-        self.open.as_ref()
-    }
-
-    fn open_agent(&mut self, task_id: &str, agent_id: &str) {
-        self.open = Some(OpenWorkflowAgent {
-            task_id: task_id.to_owned(),
-            agent_id: agent_id.to_owned(),
-            ..OpenWorkflowAgent::default()
-        });
-    }
-
-    fn close_agent(&mut self) {
-        self.open = None;
-    }
-
     /// Show or hide the view, reporting whether that is a change.
     fn set_visible(&mut self, visible: bool) -> bool {
         let changed = self.visible != visible;
@@ -129,138 +58,12 @@ impl WorkflowUi {
         changed
     }
 
-    /// Fold one agent conversation in, reporting whether it is still the one
-    /// on screen. The user may have moved on while the read was in flight.
-    fn apply_transcript(&mut self, task_id: &str, agent_id: &str, items: Vec<SessionItem>) -> bool {
-        let Some(open) = self.open.as_mut() else {
-            return false;
-        };
-
-        if open.task_id != task_id || open.agent_id != agent_id {
-            return false;
-        }
-
-        open.items = items;
-        open.unavailable = false;
-        open.revision += 1;
-
-        true
-    }
-
-    fn agent_ids(&self, task_id: &str) -> Vec<String> {
-        self.runs()
-            .iter()
-            .find(|run| run.task_id == task_id)
-            .map(|run| {
-                run.agents
-                    .iter()
-                    .filter_map(|agent| agent.agent_id.clone())
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    /// An open conversation with nothing read yet reports itself unavailable
-    /// once its run has settled, because no further content is coming.
-    /// Reports whether that answer changed.
-    fn mark_open_availability(&mut self) -> bool {
-        let settled = self
-            .open
-            .as_ref()
-            .map(|open| open.task_id.clone())
-            .and_then(|task_id| {
-                self.runs()
-                    .iter()
-                    .find(|run| run.task_id == task_id)
-                    .map(|run| run.state.is_terminal())
-            })
-            .unwrap_or(false);
-
-        let Some(open) = self.open.as_mut() else {
-            return false;
-        };
-
-        let unavailable = settled && open.items.is_empty();
-
-        if open.unavailable == unavailable {
-            return false;
-        }
-
-        open.unavailable = unavailable;
-
-        true
-    }
-
-    /// Whether the poll has anything to find. A run that reports itself as it
-    /// goes leaves nothing for a poll to read: every tick would re-read what
-    /// the events already delivered.
     fn should_refresh(&self, reads_from_disk: bool) -> bool {
-        reads_from_disk
-            && self.visible
-            && self
-                .snapshot
-                .as_ref()
-                .is_some_and(WorkflowSnapshot::has_active_run)
-    }
-
-    /// Attach the open conversation to the request for the run it belongs to,
-    /// so a tick still touches at most one transcript.
-    fn scope_requests(&self, requests: Vec<WorkflowRefreshRequest>) -> Vec<WorkflowRefreshRequest> {
-        let open = self.open.as_ref();
-
-        requests
-            .into_iter()
-            .map(|mut request| {
-                if let Some(open) = open.filter(|open| open.task_id == request.task_id) {
-                    request.open_agent = Some(open.agent_id.clone());
-                    request.open_agent_len = open.len;
-                }
-
-                request
-            })
-            .collect()
-    }
-
-    /// Record how much of the open transcript a tick read, so an unchanged
-    /// file is never re-parsed.
-    fn note_open_len(&mut self, result: &WorkflowRefreshResult) {
-        let Some(transcript) = result.transcript.as_ref() else {
-            return;
-        };
-        let Some(open) = self.open.as_mut() else {
-            return;
-        };
-
-        if open.task_id == result.task_id && open.agent_id == transcript.agent_id {
-            open.len = Some(transcript.len);
-        }
-    }
-
-    /// Claim the one restore this session gets, so a resumed conversation
-    /// reads its stored runs once rather than on every reopen.
-    fn claim_restore(&mut self, session_id: &str) -> bool {
-        if self.restored_session.as_deref() == Some(session_id) {
-            return false;
-        }
-
-        self.restored_session = Some(session_id.to_owned());
-
-        true
-    }
-
-    /// Give the claim back after a failed read, so the next open retries.
-    fn forget_restore(&mut self) {
-        self.restored_session = None;
+        reads_from_disk && self.visible && self.data.has_active_run()
     }
 }
 
-/// What one refresh tick should read, captured before its IO starts.
-struct RefreshPlan {
-    cwd: Option<String>,
-    session_id: String,
-    epoch: u64,
-    requests: Vec<WorkflowRefreshRequest>,
-}
+use nmt_agent::session::workflows::RefreshPlan;
 
 impl AgentPane {
     /// Drop every run when the pane moves to another conversation.
@@ -274,7 +77,7 @@ impl AgentPane {
         snapshot: WorkflowSnapshot,
         cx: &mut Context<Self>,
     ) {
-        if self.workflows.set_snapshot(snapshot) {
+        if self.workflows.data.set_snapshot(snapshot) {
             cx.emit(AgentPaneEvent::WorkflowActivity);
         }
 
@@ -291,7 +94,11 @@ impl AgentPane {
         items: Vec<SessionItem>,
         cx: &mut Context<Self>,
     ) {
-        if self.workflows.apply_transcript(task_id, agent_id, items) {
+        if self
+            .workflows
+            .data
+            .apply_transcript(task_id, agent_id, items)
+        {
             cx.notify();
         }
     }
@@ -342,13 +149,13 @@ impl AgentPane {
     /// Open one agent's conversation, reading it immediately rather than
     /// waiting for the next tick.
     pub fn open_workflow_agent(&mut self, task_id: &str, agent_id: &str, cx: &mut Context<Self>) {
-        self.workflows.open_agent(task_id, agent_id);
+        self.workflows.data.open_agent(task_id, agent_id);
         self.read_open_workflow_agent(cx);
         cx.notify();
     }
 
     pub fn close_workflow_agent(&mut self, cx: &mut Context<Self>) {
-        self.workflows.close_agent();
+        self.workflows.data.close_agent();
         cx.notify();
     }
 
@@ -376,7 +183,7 @@ impl AgentPane {
             return;
         };
 
-        if !self.workflows.claim_restore(&session_id) {
+        if !self.workflows.data.claim_restore(&session_id) {
             return;
         }
 
@@ -411,7 +218,7 @@ impl AgentPane {
         // A failed read leaves whatever the live stream reported; the view is
         // still usable and the next open retries.
         let Ok(restored) = restored else {
-            self.workflows.forget_restore();
+            self.workflows.data.forget_restore();
             return;
         };
 
@@ -481,19 +288,7 @@ impl AgentPane {
             return None;
         }
 
-        let session = self.runtime.backend()?;
-        let session_id = session.session_id()?.to_owned();
-
-        let requests = self
-            .workflows
-            .scope_requests(session.workflow_refresh_requests());
-
-        (!requests.is_empty()).then_some(RefreshPlan {
-            cwd: self.cwd(),
-            session_id,
-            epoch: self.runtime.epoch(),
-            requests,
-        })
+        self.workflows.data.refresh_plan(&self.runtime, self.cwd())
     }
 
     /// Fold a tick's reads in. Returns whether the loop should keep running.
@@ -509,7 +304,7 @@ impl AgentPane {
         }
 
         for result in results {
-            self.workflows.note_open_len(&result);
+            self.workflows.data.note_open_len(&result);
 
             let Some(session) = self.runtime.backend_mut() else {
                 return false;
@@ -520,7 +315,7 @@ impl AgentPane {
             }
         }
 
-        if self.workflows.mark_open_availability() {
+        if self.workflows.data.mark_open_availability() {
             cx.notify();
         }
 
@@ -557,7 +352,7 @@ impl AgentPane {
 
         let request = WorkflowRefreshRequest {
             task_id: open.task_id.clone(),
-            agent_ids: self.workflows.agent_ids(&open.task_id),
+            agent_ids: self.workflows.data.agent_ids(&open.task_id),
             open_agent: Some(open.agent_id.clone()),
             open_agent_len: None,
         };

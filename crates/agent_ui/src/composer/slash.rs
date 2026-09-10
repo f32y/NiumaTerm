@@ -8,12 +8,13 @@
 use std::rc::Rc;
 
 use gpui::{Context, SharedString, Window};
+use nmt_agent::catalog::adapter_commands;
 use nmt_agent::chat::{
     SkillInfo, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy,
 };
 use nmt_agent::claude_code::stream_json;
 use nmt_agent::codex::app_server;
-use nmt_agent::deepseek;
+use nmt_agent::session::commands::CommandAdmission;
 use nmt_i18n::i18n;
 
 use crate::capabilities::AgentCapabilities as _;
@@ -134,7 +135,7 @@ impl AgentPane {
 
             match resolve_choice(&parsed.arguments, &choices) {
                 Ok(value) if command.name == "model" => {
-                    self.controls.settings.model = Some(value.clone());
+                    self.controls.state.settings.model = Some(value.clone());
                     self.controls
                         .remember_defaults(self.kind, &self.profile, cx);
                     self.palette.set_feedback(
@@ -154,7 +155,7 @@ impl AgentPane {
                     return true;
                 }
                 Ok(value) if command.name == "permissions" => {
-                    self.controls.settings.approval = Some(value.clone());
+                    self.controls.state.settings.approval = Some(value.clone());
                     self.controls
                         .remember_defaults(self.kind, &self.profile, cx);
                     self.palette.set_feedback(
@@ -228,14 +229,8 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) -> bool {
         if self.is_command_busy() {
-            return match policy {
-                SlashCommandRunPolicy::QueueUntilIdle => {
-                    let name = command.name.clone();
-
-                    self.palette.command_queue.push_back(command);
-
-                    let count = self.palette.command_queue.len();
-
+            return match self.palette.commands.while_busy(command, policy) {
+                CommandAdmission::Queued { name, count } => {
                     self.palette.set_feedback(
                         CommandFeedbackKind::Queued,
                         i18n(if count == 1 {
@@ -250,16 +245,16 @@ impl AgentPane {
 
                     true
                 }
-                SlashCommandRunPolicy::IdleOnly => {
+                CommandAdmission::Busy { name } => {
                     self.palette.set_feedback(
                         CommandFeedbackKind::Error,
-                        i18n("agent-composer-command-idle-only").replace("{name}", &command.name),
+                        i18n("agent-composer-command-idle-only").replace("{name}", &name),
                         cx,
                     );
 
                     false
                 }
-                SlashCommandRunPolicy::Immediate => self.execute_backend_command(command, cx),
+                CommandAdmission::Execute(command) => self.execute_backend_command(command, cx),
             };
         }
 
@@ -271,15 +266,14 @@ impl AgentPane {
         command: PendingSlashCommand,
         cx: &mut Context<Self>,
     ) -> bool {
-        let outcome = match self.runtime.backend_mut() {
-            Some(session) => session.execute_slash_command(&command.name, &command.arguments),
-            None => SlashCommandOutcome::NotReady,
-        };
+        let outcome = self
+            .palette
+            .commands
+            .execute(self.runtime.backend_mut(), &command);
 
         match outcome {
             SlashCommandOutcome::Accepted => {
                 self.history_ui.mode = RecentSessionsMode::Hidden;
-                self.palette.awaiting_command_turn = true;
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
                     i18n("agent-composer-command-starting").replace("{name}", &command.name),
@@ -321,12 +315,12 @@ impl AgentPane {
             return;
         }
 
-        let Some(command) = self.palette.command_queue.pop_front() else {
+        let Some(command) = self.palette.commands.queue.pop_front() else {
             return;
         };
 
         if !self.execute_backend_command(command, cx) {
-            self.palette.command_queue.clear();
+            self.palette.commands.queue.clear();
         }
     }
 
@@ -350,23 +344,23 @@ impl AgentPane {
         for (name, value) in [
             (
                 i18n("agent-setting-model"),
-                self.controls.settings.model.as_deref(),
+                self.controls.state.settings.model.as_deref(),
             ),
             (
                 i18n("agent-setting-permissions"),
-                self.controls.settings.approval.as_deref(),
+                self.controls.state.settings.approval.as_deref(),
             ),
             (
                 i18n("agent-setting-sandbox"),
-                self.controls.settings.sandbox.as_deref(),
+                self.controls.state.settings.sandbox.as_deref(),
             ),
             (
                 i18n("agent-setting-effort"),
-                self.controls.settings.effort.as_deref(),
+                self.controls.state.settings.effort.as_deref(),
             ),
             (
                 i18n("agent-setting-tier"),
-                self.controls.settings.tier.as_deref(),
+                self.controls.state.settings.tier.as_deref(),
             ),
         ] {
             if let Some(value) = value {
@@ -378,11 +372,11 @@ impl AgentPane {
             }
         }
 
-        if !self.palette.command_queue.is_empty() {
+        if !self.palette.commands.queue.is_empty() {
             fields.push(
                 i18n("agent-composer-status-field")
                     .replace("{name}", i18n("agent-composer-status-queued"))
-                    .replace("{value}", &self.palette.command_queue.len().to_string()),
+                    .replace("{value}", &self.palette.commands.queue.len().to_string()),
             );
         }
 
@@ -422,11 +416,7 @@ impl AgentPane {
             .runtime
             .backend()
             .map(Backend::adapter_commands)
-            .unwrap_or_else(|| match self.kind {
-                AgentKind::Codex => app_server::Session::adapter_commands(),
-                AgentKind::Claude => stream_json::Session::adapter_commands(),
-                AgentKind::DeepSeek => deepseek::Session::adapter_commands(),
-            });
+            .unwrap_or_else(|| adapter_commands(self.kind));
 
         let commands: Rc<[SlashCommandInfo]> = merge_catalog(
             local_commands(),
@@ -447,6 +437,7 @@ impl AgentPane {
         match command {
             "model" => self
                 .controls
+                .state
                 .models
                 .iter()
                 .map(|model| (model.model.clone(), model.display.clone()))

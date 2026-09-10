@@ -160,8 +160,9 @@ impl Render for AgentPane {
         // result reserves placeholder rows until the full entries arrive.
         let history_rows = self
             .history_ui
+            .data
             .pending
-            .unwrap_or(self.history_ui.sessions.len());
+            .unwrap_or(self.history_ui.data.sessions.len());
 
         let transcript_empty = self.transcript.read(cx).is_empty();
         let composer_empty = self.input.read(cx).text().len() == 0;

@@ -223,7 +223,7 @@ impl AgentPane {
         action: QuestionAction,
         cx: &mut Context<Self>,
     ) {
-        if self.branch_flow_holds_composer() || self.palette.awaiting_command_turn {
+        if self.branch_flow_holds_composer() || self.palette.commands.awaiting_turn {
             return;
         }
         let waiting = self.prompts.core.waiting();
@@ -231,7 +231,7 @@ impl AgentPane {
             &mut self.runtime,
             key,
             action,
-            &self.controls.settings,
+            &self.controls.state.settings,
             Instant::now(),
         ) {
             Submission::Ignored => return,

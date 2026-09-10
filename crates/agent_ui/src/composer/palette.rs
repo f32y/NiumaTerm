@@ -93,8 +93,9 @@ impl AgentPane {
 
         let rows = self
             .history_ui
+            .data
             .pending
-            .unwrap_or(self.history_ui.sessions.len());
+            .unwrap_or(self.history_ui.data.sessions.len());
 
         if rows == 0 {
             self.history_ui.mode = RecentSessionsMode::Hidden;
@@ -439,8 +440,9 @@ impl AgentPane {
 
         let rows = self
             .history_ui
+            .data
             .pending
-            .unwrap_or(self.history_ui.sessions.len());
+            .unwrap_or(self.history_ui.data.sessions.len());
 
         if !self.history_ui.mode.is_visible(
             self.transcript.read(cx).is_empty(),
@@ -457,7 +459,7 @@ impl AgentPane {
                 if let Some(direction) = control.direction()
                     && let Some(selected) = move_palette_selection(
                         self.history_ui.selected,
-                        self.history_ui.sessions.len(),
+                        self.history_ui.data.sessions.len(),
                         direction,
                     )
                 {

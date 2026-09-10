@@ -10,23 +10,10 @@ use nmt_agent::background_task::{
     BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscript,
 };
 use nmt_agent::claude_code::sessions;
+use nmt_agent::session::children::ChildAgents;
+pub(super) use nmt_agent::session::children::scoped_background_tasks;
 
 use crate::AgentPane;
-use crate::profile::AgentKind;
-
-/// Show a task snapshot only against the parent session it was produced for.
-/// Provider adapters publish snapshots asynchronously, so a snapshot can still
-/// be held when the pane has already moved to another session or has no
-/// session id yet; in both cases the view must render nothing rather than
-/// another conversation's children.
-pub(super) fn scoped_background_tasks<'a>(
-    parent: Option<&BackgroundTaskKey>,
-    snapshot: Option<&'a BackgroundTaskSnapshot>,
-) -> Option<&'a BackgroundTaskSnapshot> {
-    let parent = parent?;
-    let snapshot = snapshot?;
-    (&snapshot.parent_session == parent).then_some(snapshot)
-}
 
 impl AgentPane {
     /// Rebuild Claude child agents from the session's persisted history. The
@@ -42,11 +29,9 @@ impl AgentPane {
             return;
         };
 
-        if self.children.restored_session.as_deref() == Some(session_id.as_str()) {
+        if !self.children.claim_restore(&session_id) {
             return;
         }
-
-        self.children.restored_session = Some(session_id.clone());
 
         let Some(session) = self.runtime.backend_mut() else {
             return;
@@ -93,13 +78,7 @@ impl AgentPane {
     pub fn background_task_parent(&self) -> Option<BackgroundTaskKey> {
         let identity = self.runtime.backend()?.recovery_identity()?;
 
-        Some(match identity.kind {
-            AgentKind::Codex => BackgroundTaskKey::codex(identity.id),
-            AgentKind::Claude => BackgroundTaskKey::claude_code(identity.id),
-            // Child agents are not mapped for DeepSeek yet, so there is no
-            // parent to name and the Background Tasks button stays disabled.
-            AgentKind::DeepSeek => return None,
-        })
+        ChildAgents::parent(identity)
     }
 
     /// Ask the provider for one child's conversation. A provider that already

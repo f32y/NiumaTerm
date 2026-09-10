@@ -1,43 +1,45 @@
 //! Pure slash-command parsing and catalog logic for the agent composer.
 
-use std::collections::HashSet;
-
+use nmt_agent::catalog::{
+    ChoiceError, SkillError, prepare_skill_selection as prepare_core_skill_selection,
+    resolve_choice as resolve_core_choice, validate_skill_binding as validate_core_skill_binding,
+};
+pub(super) use nmt_agent::catalog::{
+    merge_catalog, parse_skill_prefix, parse_slash_command, reconcile_skill_binding,
+};
 use nmt_agent::chat::{
     SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo,
     SlashCommandRunPolicy, SlashCommandSource,
 };
 use nmt_i18n::i18n;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct ParsedSlashCommand {
-    pub name: String,
-    pub arguments: String,
-    pub has_argument_separator: bool,
-}
-
-/// Parse only an input whose first byte is `/`. A slash later in ordinary
-/// prose is deliberately invisible to command routing.
-pub(super) fn parse_slash_command(input: &str) -> Option<ParsedSlashCommand> {
-    let tail = input.strip_prefix('/')?;
-    let token_end = tail.find(char::is_whitespace).unwrap_or(tail.len());
-    let remainder = &tail[token_end..];
-
-    Some(ParsedSlashCommand {
-        name: tail[..token_end].to_ascii_lowercase(),
-        arguments: remainder
-            .trim_start_matches(char::is_whitespace)
-            .to_string(),
-        has_argument_separator: !remainder.is_empty(),
+pub(super) fn validate_skill_binding(
+    input: &str,
+    binding: Option<&SkillReference>,
+    catalog: Option<&SkillCatalog>,
+) -> Result<Option<SkillReference>, String> {
+    validate_core_skill_binding(input, binding, catalog).map_err(|error| match error {
+        SkillError::Loading => i18n("agent-command-skill-loading").to_owned(),
+        SkillError::Unavailable(name) => {
+            i18n("agent-command-skill-unavailable").replace("{name}", &name)
+        }
+        SkillError::Disabled(name) => i18n("agent-command-skill-disabled").replace("{name}", &name),
     })
 }
-
-/// Parse only an input whose first token is `$name`. Once the user types past
-/// that token the composer holds a skill invocation with arguments, so the
-/// picker stops claiming the input.
-pub(super) fn parse_skill_prefix(input: &str) -> Option<String> {
-    let tail = input.strip_prefix('$')?;
-
-    (!tail.contains(char::is_whitespace)).then(|| tail.to_ascii_lowercase())
+pub(super) fn prepare_skill_selection(
+    skill: &SkillInfo,
+) -> Result<(String, SkillReference), String> {
+    prepare_core_skill_selection(skill)
+        .map_err(|_| i18n("agent-command-skill-disabled-by-codex").replace("{name}", &skill.name))
+}
+pub(super) fn resolve_choice(input: &str, choices: &[(String, String)]) -> Result<String, String> {
+    resolve_core_choice(input, choices).map_err(|error| {
+        i18n(match error {
+            ChoiceError::Unknown => "agent-command-value-unknown",
+            ChoiceError::Ambiguous => "agent-command-value-ambiguous",
+        })
+        .replace("{value}", input)
+    })
 }
 
 pub(super) fn local_commands() -> Vec<SlashCommandInfo> {
@@ -138,41 +140,6 @@ fn command(
 /// Normalize a provider/adapter name. Whitespace would make the advertised
 /// command impossible to address as one slash token, so such names are
 /// discarded rather than shown as entries that can never execute.
-pub(super) fn normalize_command(mut command: SlashCommandInfo) -> Option<SlashCommandInfo> {
-    let name = command.name.trim().trim_start_matches('/');
-
-    if name.is_empty() || name.chars().any(char::is_whitespace) {
-        return None;
-    }
-
-    command.name = name.to_ascii_lowercase();
-
-    Some(command)
-}
-
-/// Merge in precedence order. Keeping the first normalized name makes local
-/// commands authoritative over adapter commands, and adapter commands over
-/// provider discovery, without relying on hash iteration order.
-pub(super) fn merge_catalog(
-    local: Vec<SlashCommandInfo>,
-    adapter: Vec<SlashCommandInfo>,
-    provider: Vec<SlashCommandInfo>,
-) -> Vec<SlashCommandInfo> {
-    let mut seen = HashSet::new();
-
-    local
-        .into_iter()
-        .chain(adapter)
-        .chain(provider)
-        .filter_map(normalize_command)
-        .filter(|command| seen.insert(command.name.clone()))
-        .collect()
-}
-
-/// One ranked palette hit, borrowed from the catalog it was ranked out of.
-/// Ranking runs again on every keystroke and again on every frame the palette
-/// paints, so the rows carry references and only the entry the user acts on is
-/// ever copied.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PaletteCatalogEntry<'a> {
     Command(&'a SlashCommandInfo),
@@ -277,102 +244,6 @@ pub(super) fn filter_skill_catalog(catalog: &[SkillInfo], query: &str) -> Vec<Sk
     }
 
     buckets.into_iter().flatten().collect()
-}
-
-fn input_has_bound_skill_token(input: &str, binding: &SkillReference) -> bool {
-    input
-        .split_whitespace()
-        .next()
-        .is_some_and(|token| token == format!("${}", binding.name))
-}
-
-/// Editing task text after `$name` is safe; changing the first token turns
-/// the composer back into ordinary unbound text.
-pub(super) fn reconcile_skill_binding(input: &str, binding: &mut Option<SkillReference>) {
-    if binding
-        .as_ref()
-        .is_some_and(|binding| !input_has_bound_skill_token(input, binding))
-    {
-        *binding = None;
-    }
-}
-
-/// Re-check the live replacement snapshot immediately before submission so
-/// a file watcher cannot leave the UI holding a removed or disabled path.
-pub(super) fn validate_skill_binding(
-    input: &str,
-    binding: Option<&SkillReference>,
-    catalog: Option<&SkillCatalog>,
-) -> Result<Option<SkillReference>, String> {
-    let Some(binding) = binding else {
-        return Ok(None);
-    };
-
-    if !input_has_bound_skill_token(input, binding) {
-        return Ok(None);
-    }
-
-    let Some(catalog) = catalog else {
-        return Err(i18n("agent-command-skill-loading").to_string());
-    };
-
-    let Some(skill) = catalog
-        .skills
-        .iter()
-        .find(|skill| skill.name == binding.name && skill.path == binding.path)
-    else {
-        return Err(i18n("agent-command-skill-unavailable").replace("{name}", &binding.name));
-    };
-
-    if !skill.enabled {
-        return Err(i18n("agent-command-skill-disabled").replace("{name}", &binding.name));
-    }
-
-    Ok(Some(binding.clone()))
-}
-
-pub(super) fn prepare_skill_selection(
-    skill: &SkillInfo,
-) -> Result<(String, SkillReference), String> {
-    if !skill.enabled {
-        return Err(i18n("agent-command-skill-disabled-by-codex").replace("{name}", &skill.name));
-    }
-
-    Ok((
-        format!("${} ", skill.name),
-        SkillReference {
-            name: skill.name.clone(),
-            path: skill.path.clone(),
-        },
-    ))
-}
-
-/// Resolve a typed choice by exact value/display label, then by a unique
-/// prefix. Ambiguous or unknown input is rejected instead of silently
-/// selecting a different setting.
-pub(super) fn resolve_choice(input: &str, choices: &[(String, String)]) -> Result<String, String> {
-    let query = input.trim().to_ascii_lowercase();
-    let exact = choices.iter().find(|(value, label)| {
-        value.eq_ignore_ascii_case(&query) || label.eq_ignore_ascii_case(&query)
-    });
-
-    if let Some((value, _)) = exact {
-        return Ok(value.clone());
-    }
-
-    let candidates: Vec<&(String, String)> = choices
-        .iter()
-        .filter(|(value, label)| {
-            value.to_ascii_lowercase().starts_with(&query)
-                || label.to_ascii_lowercase().starts_with(&query)
-        })
-        .collect();
-
-    match candidates.as_slice() {
-        [(value, _)] => Ok(value.clone()),
-        [] => Err(i18n("agent-command-value-unknown").replace("{value}", input)),
-        _ => Err(i18n("agent-command-value-ambiguous").replace("{value}", input)),
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
