@@ -93,7 +93,8 @@ impl Session {
 
     pub(super) fn begin_title_generation(&mut self, prompt: &str, provisional_title: &str) {
         self.cancel_title_generation();
-        let (Some(host), Some(root_thread_id)) = (self.host.as_ref(), self.thread_id.clone())
+        let (Some(host), Some(root_thread_id)) =
+            (self.host.as_ref(), self.conversation.thread_id.clone())
         else {
             self.queue_thread_name(provisional_title);
             return;
@@ -126,7 +127,7 @@ impl Session {
         let matches_active = self
             .title_generation
             .as_ref()
-            .is_some_and(|active| active.accepts(&result, self.thread_id.as_deref()));
+            .is_some_and(|active| active.accepts(&result, self.conversation.thread_id.as_deref()));
         if !matches_active {
             return Vec::new();
         }
@@ -138,7 +139,7 @@ impl Session {
     }
 
     fn queue_thread_name(&mut self, name: &str) {
-        let Some(thread_id) = self.thread_id.clone() else {
+        let Some(thread_id) = self.conversation.thread_id.clone() else {
             return;
         };
 

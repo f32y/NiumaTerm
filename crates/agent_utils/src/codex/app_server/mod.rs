@@ -2,8 +2,8 @@
 //! and translation of the backend protocol into typed events for a chat UI.
 //!
 //! The app-server protocol is Codex's supported integration surface for
-//! third-party UIs (it powers the VS Code extension). One `Session` owns one
-//! `codex app-server` process and one conversation thread on it.
+//! third-party UIs (it powers the VS Code extension). Each `Session` owns one
+//! conversation thread and shares its app-server host with other sessions.
 
 use std::collections::HashMap;
 use std::mem::take;
@@ -30,6 +30,7 @@ use crate::{CodexProviderConfig, LaunchConfig};
 
 mod background_tasks;
 mod compaction;
+mod conversation;
 mod host;
 mod options;
 mod protocol;
@@ -38,9 +39,10 @@ mod skills;
 mod title_generation;
 
 use crate::codex::app_server::background_tasks::{CodexTasks, ThreadScope, notification_thread_id};
-use crate::codex::app_server::compaction::{
-    CompactionState, compaction_completed, compaction_started, is_legacy_compaction_notification,
-};
+use crate::codex::app_server::compaction::is_legacy_compaction_notification;
+use crate::codex::app_server::conversation::ConversationState;
+#[cfg(test)]
+use crate::codex::app_server::conversation::TurnOutputUsage;
 use crate::codex::app_server::host::{CodexHost, HOST_EXIT_METHOD, RegistrationId};
 pub use crate::codex::app_server::options::{
     APPROVAL_OPTIONS, APPROVAL_REVIEWER_OPTIONS, SANDBOX_OPTIONS,
@@ -48,11 +50,10 @@ pub use crate::codex::app_server::options::{
 #[cfg(test)]
 use crate::codex::app_server::protocol::thread_start_params;
 use crate::codex::app_server::protocol::{
-    codex_command_request, codex_command_response, codex_user_input, delta_event,
-    file_change_paths, initial_thread_request, parse_context_window_usage, parse_fork_checkpoints,
-    parse_item, parse_models, parse_replay, parse_thread_settings, parse_thread_summaries,
-    resumed_thread_events, skills_list_request, stringify_command, thread_list_params,
-    thread_resume_params, turn_start_params,
+    codex_command_request, codex_command_response, codex_user_input, file_change_paths,
+    initial_thread_request, parse_fork_checkpoints, parse_models, parse_replay,
+    parse_thread_settings, parse_thread_summaries, resumed_thread_events, skills_list_request,
+    stringify_command, thread_list_params, thread_resume_params, turn_start_params,
 };
 use crate::codex::app_server::questions::QuestionState;
 #[cfg(test)]
@@ -110,37 +111,6 @@ impl From<&LaunchConfig> for ThreadProfile {
     }
 }
 
-#[derive(Default)]
-struct TurnOutputUsage {
-    latest_total: Option<u64>,
-    baseline: Option<u64>,
-}
-
-impl TurnOutputUsage {
-    fn begin_turn(&mut self) {
-        self.baseline = self.latest_total;
-    }
-
-    fn finish_turn(&mut self) {
-        self.baseline = None;
-    }
-
-    fn observe(&mut self, total: u64, last: u64, active: bool) -> Option<u64> {
-        self.latest_total = Some(total);
-        if !active {
-            return None;
-        }
-
-        let inferred_baseline = total.saturating_sub(last);
-        let baseline = self.baseline.get_or_insert(inferred_baseline);
-        if total < *baseline {
-            *baseline = inferred_baseline;
-        }
-
-        Some(total.saturating_sub(*baseline))
-    }
-}
-
 struct PendingThreadName {
     thread_id: String,
 }
@@ -149,17 +119,13 @@ type SessionDelivery = Arc<dyn Fn(Value) + Send + Sync>;
 
 pub struct Session {
     host: Option<Arc<CodexHost>>,
+    conversation: ConversationState,
     registration_id: RegistrationId,
     deliver: SessionDelivery,
     detached: bool,
     next_rpc_id: u64,
     next_title_generation_id: u64,
     title_generation: Option<TitleGenerationHandle>,
-    thread_id: Option<String>,
-    current_turn: Option<String>,
-    /// JSON-RPC id of the server→client approval request awaiting an answer.
-    pending_approval: Option<u64>,
-    questions: QuestionState,
     /// Cursor for the next history page; `None` once the final page arrived.
     history_cursor: Option<String>,
     /// Command RPC responses are independent of turn ids. Tracking their
@@ -170,8 +136,6 @@ pub struct Session {
     pending_thread_names: HashMap<u64, PendingThreadName>,
     history_scope: SessionScope,
     skill_refresh: SkillRefreshState,
-    compaction: CompactionState,
-    turn_output_usage: TurnOutputUsage,
     /// Profile-level model/provider overrides reused for thread start, history
     /// filtering, and resume. Provider credentials remain only in process env.
     thread_profile: ThreadProfile,
@@ -287,23 +251,18 @@ impl Session {
 
         let mut session = Self {
             host: Some(host),
+            conversation: ConversationState::default(),
             registration_id,
             deliver,
             detached: false,
             next_rpc_id: FIRST_TURN_RPC_ID,
             next_title_generation_id: 0,
             title_generation: None,
-            thread_id: None,
-            current_turn: None,
-            pending_approval: None,
-            questions: QuestionState::default(),
             history_cursor: None,
             pending_commands: HashMap::new(),
             pending_thread_names: HashMap::new(),
             history_scope: SessionScope::default(),
             skill_refresh: SkillRefreshState::default(),
-            compaction: CompactionState::default(),
-            turn_output_usage: TurnOutputUsage::default(),
             thread_profile,
             workspace: workspace.clone(),
             initial_resume,
@@ -322,15 +281,15 @@ impl Session {
     }
 
     pub fn thread_id(&self) -> Option<&str> {
-        self.thread_id.as_deref()
+        self.conversation.thread_id.as_deref()
     }
 
     pub fn has_active_operation(&self) -> bool {
-        self.current_turn.is_some()
-            || self.pending_approval.is_some()
-            || self.questions.has_active_request()
+        self.conversation.current_turn.is_some()
+            || self.conversation.pending_approval.is_some()
+            || self.conversation.questions.has_active_request()
             || !self.pending_commands.is_empty()
-            || self.compaction.active.is_some()
+            || self.conversation.compaction.active.is_some()
     }
 
     /// Detach this thread from the shared host. The final owner performs the
@@ -348,9 +307,10 @@ impl Session {
             return Ok(());
         }
         self.cancel_title_generation();
-        if let (Some(thread_id), Some(turn_id)) =
-            (self.thread_id.clone(), self.current_turn.clone())
-        {
+        if let (Some(thread_id), Some(turn_id)) = (
+            self.conversation.thread_id.clone(),
+            self.conversation.current_turn.clone(),
+        ) {
             let rpc_id = self.alloc_rpc_id();
             self.send(json!({
                 "jsonrpc": "2.0",
@@ -359,7 +319,7 @@ impl Session {
                 "params": {"threadId": thread_id, "turnId": turn_id},
             }));
         }
-        if let Some(thread_id) = self.thread_id.clone() {
+        if let Some(thread_id) = self.conversation.thread_id.clone() {
             let rpc_id = self.alloc_rpc_id();
             self.send(json!({
                 "jsonrpc": "2.0",
@@ -427,14 +387,14 @@ impl Session {
         skill: Option<&SkillReference>,
         images: &[PathBuf],
     ) -> SendOutcome {
-        let Some(thread_id) = self.thread_id.clone() else {
+        let Some(thread_id) = self.conversation.thread_id.clone() else {
             return SendOutcome::NotReady;
         };
 
         let rpc_id = self.alloc_rpc_id();
         let input = codex_user_input(text, skill, images);
 
-        if let Some(turn_id) = self.current_turn.clone() {
+        if let Some(turn_id) = self.conversation.current_turn.clone() {
             self.send(json!({
                 "jsonrpc": "2.0",
                 "id": rpc_id,
@@ -482,10 +442,10 @@ impl Session {
     /// requests. `/skills` is handled entirely by the UI picker and never
     /// reaches this method.
     pub fn execute_slash_command(&mut self, name: &str, arguments: &str) -> SlashCommandOutcome {
-        let Some(thread_id) = self.thread_id.clone() else {
+        let Some(thread_id) = self.conversation.thread_id.clone() else {
             return SlashCommandOutcome::NotReady;
         };
-        if self.current_turn.is_some() {
+        if self.conversation.current_turn.is_some() {
             return SlashCommandOutcome::Rejected {
                 message: "Codex is already running a turn.".to_string(),
             };
@@ -504,7 +464,7 @@ impl Session {
         };
 
         if name == "compact" {
-            self.compaction.request_manual();
+            self.conversation.compaction.request_manual();
         }
         self.pending_commands.insert(rpc_id, name.to_string());
         self.send(request);
@@ -514,8 +474,10 @@ impl Session {
 
     /// Interrupt the running turn (the Esc/Ctrl-C equivalent).
     pub fn interrupt(&mut self) {
-        let (Some(thread_id), Some(turn_id)) = (self.thread_id.clone(), self.current_turn.clone())
-        else {
+        let (Some(thread_id), Some(turn_id)) = (
+            self.conversation.thread_id.clone(),
+            self.conversation.current_turn.clone(),
+        ) else {
             return;
         };
 
@@ -536,7 +498,7 @@ impl Session {
     /// session keeps the thread it started with, so the tab stays usable.
     pub fn resume_thread(&mut self, thread_id: &str) {
         self.cancel_title_generation();
-        self.compaction.reset_thread();
+        self.conversation.compaction.reset_thread();
         let params = thread_resume_params(thread_id, &self.thread_profile);
         self.send(json!({
             "jsonrpc": "2.0",
@@ -553,7 +515,7 @@ impl Session {
     /// run. Reading it per request rather than accumulating it as turns go by
     /// also keeps the offer honest after a compaction rewrites the thread.
     pub fn request_fork_checkpoints(&mut self) -> bool {
-        let Some(thread_id) = self.thread_id.clone() else {
+        let Some(thread_id) = self.conversation.thread_id.clone() else {
             return false;
         };
 
@@ -576,12 +538,12 @@ impl Session {
         let ForkAnchor::CodexThrough(last_turn_id) = anchor else {
             return Err("that branch point belongs to another agent".to_string());
         };
-        let Some(thread_id) = self.thread_id.clone() else {
+        let Some(thread_id) = self.conversation.thread_id.clone() else {
             return Err("this conversation has no thread to branch".to_string());
         };
         self.cancel_title_generation();
 
-        self.compaction.reset_thread();
+        self.conversation.compaction.reset_thread();
         let mut params = thread_resume_params(&thread_id, &self.thread_profile);
         params["lastTurnId"] = json!(last_turn_id);
         self.send(json!({
@@ -667,7 +629,7 @@ impl Session {
     }
 
     fn start_descendant_discovery(&mut self) {
-        let Some(thread_id) = self.thread_id.clone() else {
+        let Some(thread_id) = self.conversation.thread_id.clone() else {
             return;
         };
         self.background.set_root(&thread_id);
@@ -696,7 +658,7 @@ impl Session {
     /// Answer the pending approval request (`"accept"` / `"decline"`); a no-op
     /// when none is pending.
     pub fn respond_approval(&mut self, decision: &str) {
-        let Some(rpc_id) = self.pending_approval.take() else {
+        let Some(rpc_id) = self.conversation.pending_approval.take() else {
             return;
         };
 
@@ -756,7 +718,7 @@ impl Session {
                     )
                 };
 
-                self.pending_approval = Some(rpc_id);
+                self.conversation.pending_approval = Some(rpc_id);
 
                 vec![Event::ApprovalRequested { description }]
             }
@@ -780,7 +742,7 @@ impl Session {
             return events;
         }
         if let Some(pending) = self.pending_thread_names.remove(&rpc_id) {
-            if self.thread_id.as_deref() != Some(pending.thread_id.as_str()) {
+            if self.conversation.thread_id.as_deref() != Some(pending.thread_id.as_str()) {
                 return Vec::new();
             }
             return Vec::new();
@@ -861,7 +823,7 @@ impl Session {
         if let Some(error) = message["error"]["message"].as_str() {
             if let Some(command) = pending_command.as_deref() {
                 if command == "compact" {
-                    self.compaction.reject_manual_request();
+                    self.conversation.compaction.reject_manual_request();
                 }
                 return vec![Event::SlashCommandResult {
                     name: command.to_string(),
@@ -906,7 +868,7 @@ impl Session {
             THREAD_START_RPC_ID => {
                 let result = &message["result"];
 
-                self.thread_id = result["thread"]["id"].as_str().map(str::to_owned);
+                self.conversation.thread_id = result["thread"]["id"].as_str().map(str::to_owned);
 
                 self.send(json!({
                     "jsonrpc": "2.0",
@@ -940,7 +902,7 @@ impl Session {
                 // already in.
                 vec![Event::History(parse_thread_summaries(
                     result,
-                    self.thread_id.as_deref(),
+                    self.conversation.thread_id.as_deref(),
                 ))]
             }
             THREAD_READ_RPC_ID => vec![Event::ForkCheckpoints(Ok(parse_fork_checkpoints(
@@ -952,9 +914,9 @@ impl Session {
             THREAD_RESUME_RPC_ID | THREAD_FORK_RPC_ID => {
                 let result = &message["result"];
 
-                self.questions = QuestionState::default();
-                self.current_turn = None;
-                self.thread_id = result["thread"]["id"].as_str().map(str::to_owned);
+                self.conversation.questions = QuestionState::default();
+                self.conversation.current_turn = None;
+                self.conversation.thread_id = result["thread"]["id"].as_str().map(str::to_owned);
                 self.initial_resume = None;
                 // A resumed parent can already have finished descendants, and
                 // a reconnect resumes into a new process with none of the live
@@ -969,11 +931,11 @@ impl Session {
     fn process_notification(&mut self, method: &str, params: &Value) -> Vec<Event> {
         if method == HOST_EXIT_METHOD {
             self.cancel_title_generation();
-            self.current_turn = None;
-            self.pending_approval = None;
-            self.questions = QuestionState::default();
+            self.conversation.current_turn = None;
+            self.conversation.pending_approval = None;
+            self.conversation.questions = QuestionState::default();
             self.pending_commands.clear();
-            self.compaction.reset_thread();
+            self.conversation.compaction.reset_thread();
             return vec![Event::HostExited {
                 message: params["message"]
                     .as_str()
@@ -1022,145 +984,18 @@ impl Session {
             }
         }
 
-        match method {
-            "skills/changed" => {
-                self.request_skills(true);
-                Vec::new()
-            }
-            "turn/started" => {
-                self.current_turn = params["turn"]["id"].as_str().map(str::to_owned);
-                self.turn_output_usage.begin_turn();
-
-                vec![Event::TurnStarted]
-            }
-            "turn/completed" => {
-                let mut events = self
-                    .questions
-                    .end_turn(params["turn"]["id"].as_str().unwrap_or_default());
-                self.current_turn = None;
-                self.turn_output_usage.finish_turn();
-
-                let error = (params["turn"]["status"].as_str() == Some("failed"))
-                    .then(|| params["turn"]["error"]["message"].as_str())
-                    .flatten()
-                    .map(str::to_owned);
-                self.compaction.clear_incomplete();
-
-                events.push(Event::TurnCompleted { error });
-                events
-            }
-            "thread/tokenUsage/updated" => {
-                let Some(usage) = parse_context_window_usage(&params["tokenUsage"]) else {
-                    return Vec::new();
-                };
-
-                self.compaction.update_usage(usage);
-                let active = params["turnId"]
-                    .as_str()
-                    .is_some_and(|turn_id| self.current_turn.as_deref() == Some(turn_id));
-                let turn_output_tokens = usage
-                    .cumulative
-                    .and_then(|usage| usage.breakdown.output_tokens)
-                    .zip(usage.current.output_tokens)
-                    .and_then(|(total, last)| self.turn_output_usage.observe(total, last, active));
-
-                let mut events = vec![Event::ContextWindowUpdated(usage)];
-                if let Some(output_tokens) = turn_output_tokens {
-                    events.push(Event::TurnOutputTokensUpdated(output_tokens));
-                }
-                events
-            }
-            "item/started" => {
-                let item = &params["item"];
-                if item["type"].as_str() == Some("contextCompaction") {
-                    return compaction_started(&mut self.compaction, item);
-                }
-
-                // Collaboration items are the parent's own tool calls, so they
-                // keep their transcript row; they additionally identify the
-                // child thread the panel tracks.
-                let changed = self.background.observe_parent_item(item);
-                let mut events: Vec<Event> = parse_item(item)
-                    .map(Event::ItemStarted)
-                    .into_iter()
-                    .collect();
-                events.extend(self.background_events(changed));
-                events
-            }
-            "item/completed" => {
-                let item = &params["item"];
-                if item["type"].as_str() == Some("contextCompaction") {
-                    return compaction_completed(&mut self.compaction, item);
-                }
-
-                let changed = self.background.observe_parent_item(item);
-                let mut events: Vec<Event> = parse_item(item)
-                    .map(Event::ItemCompleted)
-                    .into_iter()
-                    .collect();
-                events.extend(self.questions.observe_message(item));
-                events.extend(self.background_events(changed));
-                events
-            }
-            "item/agentMessage/delta" => delta_event(params, |item_id, delta| {
-                Event::AgentMessageDelta { item_id, delta }
-            }),
-            "item/reasoning/summaryTextDelta" => delta_event(params, |item_id, delta| {
-                Event::ReasoningSummaryDelta { item_id, delta }
-            }),
-            // Raw reasoning tokens stream under their own method and append to
-            // the same text as the summary deltas, because a model that emits
-            // raw tokens is the one that emits no summary. A model that sent
-            // both would interleave them for the rest of the item, since a
-            // stream cannot retract text it already appended and a completed
-            // item only fills reasoning text that streamed empty.
-            "item/reasoning/textDelta" => delta_event(params, |item_id, delta| {
-                Event::ReasoningSummaryDelta { item_id, delta }
-            }),
-            "item/commandExecution/outputDelta" => delta_event(params, |item_id, delta| {
-                Event::CommandOutputDelta { item_id, delta }
-            }),
-            "serverRequest/resolved" => {
-                if params["threadId"].as_str() != self.thread_id.as_deref() {
-                    return Vec::new();
-                }
-                if let Some(event) = params["requestId"]
-                    .as_u64()
-                    .and_then(|id| self.questions.resolve_request(id))
-                {
-                    return vec![event];
-                }
-                // Fires when a pending approval is answered or cleared by
-                // turn lifecycle — tear down the approval UI either way.
-                if self.pending_approval.is_some()
-                    && self.pending_approval == params["requestId"].as_u64()
-                {
-                    self.pending_approval = None;
-
-                    return vec![Event::ApprovalResolved];
-                }
-
-                Vec::new()
-            }
-            "error" => {
-                let message = params["error"]["message"]
-                    .as_str()
-                    .or_else(|| params["message"].as_str())
-                    .unwrap_or("unknown Codex error")
-                    .to_string();
-
-                vec![Event::Error {
-                    message,
-                    fatal: false,
-                }]
-            }
-            // The status carries a protocol token rather than a sentence, and
-            // the working row it would reach shows text to the user. Child-agent
-            // rows read the same notification through their own reducer, which
-            // maps it to a lifecycle state instead of showing the word.
-            "thread/status/changed" => Vec::new(),
-            _ => Vec::new(),
+        if method == "skills/changed" {
+            self.request_skills(true);
+            return Vec::new();
         }
+        // Child discovery observes only parent items after thread routing.
+        // Its panel updates follow the parent's transcript events.
+        let children_changed = matches!(method, "item/started" | "item/completed")
+            && params["item"]["type"].as_str() != Some("contextCompaction")
+            && self.background.observe_parent_item(&params["item"]);
+        let mut events = self.conversation.process_notification(method, params);
+        events.extend(self.background_events(children_changed));
+        events
     }
 }
 

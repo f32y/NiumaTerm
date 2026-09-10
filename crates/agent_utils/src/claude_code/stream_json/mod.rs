@@ -11,7 +11,7 @@
 //! `--allow-dangerously-skip-permissions` present — that flag only unlocks
 //! switching into `bypassPermissions` mode).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 #[cfg(all(test, windows))]
 use std::fs;
 use std::process::Command;
@@ -26,11 +26,9 @@ use crate::background_task::{BackgroundTaskKey, BackgroundTaskTranscriptUpdate};
 #[cfg(test)]
 use crate::chat::ContextUsageScope;
 use crate::chat::{
-    ContextComposition, ContextWindowUsage, Event, Item, MessageImage, SendOutcome,
-    SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy,
-    SlashCommandSource, ThreadSettings, TokenUsageBreakdown,
+    Event, MessageImage, SendOutcome, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
+    SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
-use crate::claude_code::compaction::{compaction_metadata, parse_compaction};
 use crate::claude_code::sessions::{RestoredTask, load_child_transcript};
 use crate::claude_code::shell_output::shell_items;
 use crate::claude_code::stream_json::control::{
@@ -43,17 +41,17 @@ use crate::claude_code::stream_json::launch::{
     configured_permission_mode, enable_file_checkpointing, file_rewind_request,
     initial_ready_model, launch_model,
 };
-#[cfg(test)]
-use crate::claude_code::stream_json::parse::parse_slash_commands;
 use crate::claude_code::stream_json::parse::{
-    approval_description, claude_context_window, claude_result_error, compaction_progress,
-    context_window_usage, initialize_command_catalog, legacy_command_catalog, parse_claude_usage,
-    parse_models, slash_command_text, ui_owns_slash_command, update_claude_output,
+    approval_description, claude_result_error, compaction_progress, initialize_command_catalog,
+    legacy_command_catalog, parse_models, slash_command_text, ui_owns_slash_command,
+};
+#[cfg(test)]
+use crate::claude_code::stream_json::parse::{
+    context_window_usage, parse_slash_commands, update_claude_output,
 };
 use crate::claude_code::tasks::ClaudeTasks;
-use crate::claude_code::tool_items::{complete_tool_item, tool_item};
 #[cfg(test)]
-use crate::claude_code::tool_items::{edit_diff, input_detail};
+use crate::claude_code::tool_items::{edit_diff, input_detail, tool_item};
 use crate::claude_code::workflows::{
     ClaudeWorkflows, RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
 };
@@ -64,6 +62,13 @@ use crate::workspace::AgentWorkspace;
 mod control;
 mod launch;
 mod parse;
+mod transcript;
+
+#[cfg(test)]
+use crate::claude_code::stream_json::parse::parse_claude_usage;
+use crate::claude_code::stream_json::transcript::TranscriptState;
+#[cfg(test)]
+use crate::claude_code::stream_json::transcript::{TurnOutputUsage, window_from_composition};
 
 /// Effort level standing for Claude Code's ultracode mode. The CLI does not
 /// take it as a level: it is xhigh effort plus standing dynamic-workflow
@@ -94,38 +99,9 @@ fn session_title_description(description: &str) -> String {
         .collect()
 }
 
-#[derive(Default)]
-struct TurnOutputUsage {
-    completed_responses: u64,
-    current_response: Option<u64>,
-}
-
-impl TurnOutputUsage {
-    fn reset(&mut self) {
-        *self = Self::default();
-    }
-
-    fn start_response(&mut self, output_tokens: u64) -> u64 {
-        self.completed_responses = self
-            .completed_responses
-            .saturating_add(self.current_response.take().unwrap_or(0));
-        self.current_response = Some(output_tokens);
-        self.total()
-    }
-
-    fn update_response(&mut self, output_tokens: u64) -> u64 {
-        self.current_response = Some(output_tokens);
-        self.total()
-    }
-
-    fn total(&self) -> u64 {
-        self.completed_responses
-            .saturating_add(self.current_response.unwrap_or(0))
-    }
-}
-
 pub struct Session {
     process: JsonLineProcess,
+    transcript: TranscriptState,
     next_request_id: u64,
     ready: bool,
     /// The CLI's session id from the `init` message; the handle a future tab
@@ -145,18 +121,6 @@ pub struct Session {
     applied_model: Option<String>,
     applied_permission: Option<String>,
     applied_effort: Option<String>,
-    /// Streamed content blocks of the in-flight assistant message, keyed by
-    /// their stream index, so text/thinking deltas route to transcript items.
-    open_blocks: HashMap<u64, String>,
-    /// Streamed text/thinking items not yet finalized by an `assistant`
-    /// snapshot. Snapshots arrive per completed block in stream order, so
-    /// FIFO matching by kind pairs each snapshot with its streamed item.
-    open_texts: VecDeque<String>,
-    open_thinkings: VecDeque<String>,
-    /// Started tool items by `tool_use_id`; the matching `tool_result` block
-    /// completes them with output and status.
-    pending_tools: HashMap<String, Item>,
-    item_seq: u64,
     active_slash_command: Option<String>,
     /// Control requests with user-visible completion semantics. Fire-and-forget
     /// settings requests are deliberately absent; only operations that the UI
@@ -165,13 +129,6 @@ pub struct Session {
     /// A structured initialize catalog carries richer metadata than the
     /// string-only first-turn fallback and must remain authoritative.
     structured_commands_published: bool,
-    /// The most recent assistant message's input/output accounting represents
-    /// the live context, unlike result-level totals which may sum retries and
-    /// tool-loop iterations.
-    context_usage: Option<TokenUsageBreakdown>,
-    last_turn_usage: Option<TokenUsageBreakdown>,
-    context_window: Option<u64>,
-    turn_output_usage: TurnOutputUsage,
     /// A compaction is running. Tracked because the CLI re-announces it every
     /// 30 seconds while a long compaction proceeds, and the UI only needs the
     /// state transitions.
@@ -322,6 +279,7 @@ impl Session {
 
         let mut session = Self {
             process,
+            transcript: TranscriptState::default(),
             next_request_id: 1,
             ready: false,
             // A resumed process may not emit `system/init` until its next
@@ -337,18 +295,9 @@ impl Session {
             applied_permission: None,
             // The launch flag below already put the process on this level.
             applied_effort: launch.effort.clone(),
-            open_blocks: HashMap::new(),
-            open_texts: VecDeque::new(),
-            open_thinkings: VecDeque::new(),
-            pending_tools: HashMap::new(),
-            item_seq: 0,
             active_slash_command: None,
             pending_control_operations: HashMap::new(),
             structured_commands_published: false,
-            context_usage: None,
-            last_turn_usage: None,
-            context_window: None,
-            turn_output_usage: TurnOutputUsage::default(),
             compacting: false,
             tasks: ClaudeTasks::default(),
             workflows: ClaudeWorkflows::default(),
@@ -404,7 +353,7 @@ impl Session {
         if !self.turn_active && carries_model_output(&message) {
             self.turn_active = true;
             self.turn_reported = false;
-            self.turn_output_usage.reset();
+            self.transcript.begin_turn();
         }
 
         // First sign of life after a send: the turn is actually running.
@@ -415,9 +364,9 @@ impl Session {
 
         match message["type"].as_str() {
             Some("system") => events.extend(self.process_system(&message)),
-            Some("stream_event") => events.extend(self.process_stream_event(&message)),
-            Some("assistant") => events.extend(self.process_assistant(&message)),
-            Some("user") => events.extend(self.process_tool_results(&message)),
+            Some("stream_event") => events.extend(self.transcript.process_stream_event(&message)),
+            Some("assistant") => events.extend(self.transcript.process_assistant(&message)),
+            Some("user") => events.extend(self.transcript.process_tool_results(&message)),
             Some("result") => events.extend(self.process_result(&message)),
             Some("control_request") => events.extend(self.process_control_request(&message)),
             Some("control_response") => events.extend(self.process_control_response(&message)),
@@ -535,7 +484,7 @@ impl Session {
         } else {
             self.turn_active = true;
             self.turn_reported = false;
-            self.turn_output_usage.reset();
+            self.transcript.begin_turn();
 
             SendOutcome::StartedTurn
         }
@@ -573,7 +522,7 @@ impl Session {
         }
         self.turn_active = true;
         self.turn_reported = false;
-        self.turn_output_usage.reset();
+        self.transcript.begin_turn();
         self.active_slash_command = Some(name.to_string());
 
         SlashCommandOutcome::Accepted
@@ -917,12 +866,6 @@ impl Session {
             .unwrap_or_default()
     }
 
-    fn alloc_item_id(&mut self, prefix: &str) -> String {
-        self.item_seq += 1;
-
-        format!("{prefix}-{}", self.item_seq)
-    }
-
     fn send_control(&mut self, request: Value) -> String {
         let request_id = format!("nmt-{}", self.next_request_id);
 
@@ -946,7 +889,10 @@ impl Session {
         match message["subtype"].as_str() {
             Some("init") => self.process_init(message),
             Some("status") => compaction_progress(&mut self.compacting, message),
-            Some("compact_boundary") => self.process_compact_boundary(message),
+            Some("compact_boundary") => {
+                self.compacting = false;
+                self.transcript.process_compact_boundary(message)
+            }
             // Every other subtype (hook_*, thinking_tokens, informational, …)
             // is telemetry the UI ignores.
             _ => Vec::new(),
@@ -1005,249 +951,6 @@ impl Session {
         events
     }
 
-    /// The post-compaction boundary. Live it carries only the token accounting:
-    /// the replacement summary is written to the transcript file and marked
-    /// visible there only, so a resumed thread shows it and this one does not.
-    fn process_compact_boundary(&mut self, message: &Value) -> Vec<Event> {
-        let detail = parse_compaction(compaction_metadata(message));
-        let id = match message["uuid"].as_str() {
-            Some(uuid) => format!("compaction-{uuid}"),
-            None => self.alloc_item_id("compaction"),
-        };
-        let post_tokens = detail.post_tokens;
-
-        self.compacting = false;
-
-        let mut events = vec![
-            Event::CompactionFinished { error: None },
-            Event::ItemCompleted(Item::Compaction { id, detail }),
-        ];
-
-        // Compaction replaces the prompt, so the live context is this size from
-        // here on. Without the correction the gauge keeps showing the
-        // pre-compaction total until the next assistant message reports usage,
-        // which is exactly when the boundary row claims space was reclaimed.
-        if let Some(post_tokens) = post_tokens {
-            self.context_usage = Some(TokenUsageBreakdown::total_only(post_tokens));
-
-            if let Some(usage) = self.context_window_usage() {
-                events.push(Event::ContextWindowUpdated(usage));
-            }
-        }
-
-        events
-    }
-
-    fn process_stream_event(&mut self, message: &Value) -> Vec<Event> {
-        // Subagent (Task tool) internals stream with a parent id; the parent
-        // tool row already represents them in the transcript.
-        if !message["parent_tool_use_id"].is_null() {
-            return Vec::new();
-        }
-
-        let event = &message["event"];
-        let index = event["index"].as_u64();
-
-        match event["type"].as_str() {
-            Some("message_start") => {
-                self.open_blocks.clear();
-                self.open_texts.clear();
-                self.open_thinkings.clear();
-
-                self.context_usage = parse_claude_usage(&event["message"]["usage"]);
-                let turn_output_tokens = self.turn_output_usage.start_response(
-                    self.context_usage
-                        .and_then(|usage| usage.output_tokens)
-                        .unwrap_or(0),
-                );
-
-                let mut events = self
-                    .context_window_usage()
-                    .map(Event::ContextWindowUpdated)
-                    .into_iter()
-                    .collect::<Vec<_>>();
-                events.push(Event::TurnOutputTokensUpdated(turn_output_tokens));
-
-                events
-            }
-            Some("message_delta") => {
-                let turn_output_tokens =
-                    event["usage"]["output_tokens"]
-                        .as_u64()
-                        .map(|output_tokens| {
-                            update_claude_output(&mut self.context_usage, output_tokens);
-                            self.turn_output_usage.update_response(output_tokens)
-                        });
-
-                let mut events = self
-                    .context_window_usage()
-                    .map(Event::ContextWindowUpdated)
-                    .into_iter()
-                    .collect::<Vec<_>>();
-                if let Some(output_tokens) = turn_output_tokens {
-                    events.push(Event::TurnOutputTokensUpdated(output_tokens));
-                }
-
-                events
-            }
-            Some("content_block_start") => {
-                let Some(index) = index else {
-                    return Vec::new();
-                };
-
-                match event["content_block"]["type"].as_str() {
-                    Some("text") => {
-                        let id = self.alloc_item_id("text");
-
-                        self.open_blocks.insert(index, id.clone());
-                        self.open_texts.push_back(id.clone());
-
-                        vec![Event::ItemStarted(Item::AgentMessage {
-                            id,
-                            text: None,
-                            questions: None,
-                        })]
-                    }
-                    Some("thinking") => {
-                        let id = self.alloc_item_id("thinking");
-
-                        self.open_blocks.insert(index, id.clone());
-                        self.open_thinkings.push_back(id.clone());
-
-                        vec![Event::ItemStarted(Item::Reasoning { id, summary: None })]
-                    }
-                    // Tool-use blocks stream their input as JSON fragments;
-                    // the item is emitted from the `assistant` snapshot where
-                    // the input is complete.
-                    _ => Vec::new(),
-                }
-            }
-            Some("content_block_delta") => {
-                let Some(item_id) = index.and_then(|i| self.open_blocks.get(&i)).cloned() else {
-                    return Vec::new();
-                };
-                let delta = &event["delta"];
-
-                match delta["type"].as_str() {
-                    Some("text_delta") => delta["text"]
-                        .as_str()
-                        .map(|text| Event::AgentMessageDelta {
-                            item_id,
-                            delta: text.to_string(),
-                        })
-                        .into_iter()
-                        .collect(),
-                    Some("thinking_delta") => delta["thinking"]
-                        .as_str()
-                        .map(|text| Event::ReasoningSummaryDelta {
-                            item_id,
-                            delta: text.to_string(),
-                        })
-                        .into_iter()
-                        .collect(),
-                    _ => Vec::new(),
-                }
-            }
-            _ => Vec::new(),
-        }
-    }
-
-    /// An `assistant` snapshot finalizes each content block it carries: text
-    /// and thinking blocks overwrite their streamed item with the
-    /// authoritative full text (or create it when partial messages were
-    /// missed), tool-use blocks become started tool items.
-    fn process_assistant(&mut self, message: &Value) -> Vec<Event> {
-        if !message["parent_tool_use_id"].is_null() {
-            return Vec::new();
-        }
-
-        let Some(blocks) = message["message"]["content"].as_array() else {
-            return Vec::new();
-        };
-        let mut events = Vec::new();
-
-        if let Some(usage) = parse_claude_usage(&message["message"]["usage"]) {
-            self.context_usage = Some(usage);
-            if let Some(snapshot) = self.context_window_usage() {
-                events.push(Event::ContextWindowUpdated(snapshot));
-            }
-            if let Some(output_tokens) = usage.output_tokens {
-                events.push(Event::TurnOutputTokensUpdated(
-                    self.turn_output_usage.update_response(output_tokens),
-                ));
-            }
-        }
-
-        for block in blocks {
-            match block["type"].as_str() {
-                Some("text") => {
-                    let id = self
-                        .open_texts
-                        .pop_front()
-                        .unwrap_or_else(|| self.alloc_item_id("text"));
-
-                    events.push(Event::ItemCompleted(Item::AgentMessage {
-                        id,
-                        text: block["text"].as_str().map(str::to_owned),
-                        questions: None,
-                    }));
-                }
-                Some("thinking") => {
-                    let id = self
-                        .open_thinkings
-                        .pop_front()
-                        .unwrap_or_else(|| self.alloc_item_id("thinking"));
-
-                    events.push(Event::ItemCompleted(Item::Reasoning {
-                        id,
-                        summary: block["thinking"].as_str().map(str::to_owned),
-                    }));
-                }
-                Some("tool_use") | Some("server_tool_use") | Some("mcp_tool_use") => {
-                    let Some(id) = block["id"].as_str() else {
-                        continue;
-                    };
-                    let item = tool_item(
-                        id,
-                        block["name"].as_str().unwrap_or("tool"),
-                        &block["input"],
-                    );
-
-                    self.pending_tools.insert(id.to_string(), item.clone());
-                    events.push(Event::ItemStarted(item));
-                }
-                _ => {}
-            }
-        }
-
-        events
-    }
-
-    /// `user` messages in the stream carry tool results; each one completes
-    /// its started tool item with output and success/failure status.
-    fn process_tool_results(&mut self, message: &Value) -> Vec<Event> {
-        let Some(blocks) = message["message"]["content"].as_array() else {
-            return Vec::new();
-        };
-        let mut events = Vec::new();
-
-        for block in blocks {
-            if block["type"].as_str() != Some("tool_result") {
-                continue;
-            }
-            let Some(id) = block["tool_use_id"].as_str() else {
-                continue;
-            };
-            let Some(started) = self.pending_tools.remove(id) else {
-                continue;
-            };
-
-            events.push(Event::ItemCompleted(complete_tool_item(started, block)));
-        }
-
-        events
-    }
-
     fn process_result(&mut self, message: &Value) -> Vec<Event> {
         self.turn_active = false;
         self.turn_reported = false;
@@ -1286,17 +989,7 @@ impl Session {
             });
         }
 
-        if let Some(max_tokens) = claude_context_window(&message["modelUsage"]) {
-            self.context_window = Some(max_tokens);
-        }
-        self.last_turn_usage = parse_claude_usage(&message["usage"]);
-
-        if let Some(usage) = self.context_window_usage() {
-            events.push(Event::ContextWindowUpdated(usage));
-        }
-        if let Some(output_tokens) = self.last_turn_usage.and_then(|usage| usage.output_tokens) {
-            events.push(Event::TurnOutputTokensUpdated(output_tokens));
-        }
+        events.extend(self.transcript.finish_turn(message));
 
         events.push(Event::TurnCompleted { error });
 
@@ -1389,18 +1082,10 @@ impl Session {
                 self.applied_effort = effort.clone();
             }
 
-            // Before any assistant message reports usage there is nothing else
-            // describing how full the window is, so the breakdown's own totals
-            // stand in. Live accounting is richer, so it is never replaced.
             if let Event::ContextCompositionUpdated(composition) = &event
-                && let Some(filled) = window_from_composition(self.context_usage, composition)
+                && let Some(usage) = self.transcript.apply_composition(composition)
             {
-                self.context_usage = Some(filled);
-                self.context_window = self.context_window.or(composition.max_tokens);
-
-                if let Some(usage) = self.context_window_usage() {
-                    return vec![Event::ContextWindowUpdated(usage), event];
-                }
+                return vec![Event::ContextWindowUpdated(usage), event];
             }
             return vec![event];
         }
@@ -1462,14 +1147,6 @@ impl Session {
 
         Vec::new()
     }
-
-    fn context_window_usage(&self) -> Option<ContextWindowUsage> {
-        context_window_usage(
-            self.context_usage,
-            self.last_turn_usage,
-            self.context_window,
-        )
-    }
 }
 
 /// Whether a line is model output, which the CLI only emits inside a turn.
@@ -1477,17 +1154,6 @@ impl Session {
 /// startup and on resume, where no turn has opened yet.
 fn carries_model_output(message: &Value) -> bool {
     matches!(message["type"].as_str(), Some("assistant" | "stream_event"))
-}
-
-/// Whether a context breakdown should stand in for the window's own
-/// accounting. Live accounting names each category, so it is always the better
-/// answer; the breakdown only fills the gap before any has arrived.
-fn window_from_composition(
-    live: Option<TokenUsageBreakdown>,
-    composition: &ContextComposition,
-) -> Option<TokenUsageBreakdown> {
-    (live.is_none() && composition.used_tokens > 0)
-        .then(|| TokenUsageBreakdown::total_only(composition.used_tokens))
 }
 
 #[cfg(test)]

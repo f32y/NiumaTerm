@@ -1,6 +1,11 @@
 use std::path::PathBuf;
 
-use crate::codex::app_server::protocol::{command_purpose, turn_start_params};
+use crate::codex::app_server::compaction::{
+    CompactionState, compaction_completed, compaction_started,
+};
+use crate::codex::app_server::protocol::{
+    command_purpose, parse_context_window_usage, parse_item, turn_start_params,
+};
 use crate::codex::app_server::*;
 use crate::workspace::AgentWorkspace;
 
@@ -12,6 +17,141 @@ fn replayed_items(turns: &Value) -> Vec<Item> {
         .flat_map(|turn| turn.items)
         .map(|entry| entry.item)
         .collect()
+}
+
+#[test]
+fn routed_child_completion_does_not_finish_the_parent_turn() {
+    let mut session = Session {
+        host: None,
+        conversation: ConversationState::default(),
+        registration_id: 0,
+        deliver: Arc::new(|_| {}),
+        detached: false,
+        next_rpc_id: FIRST_TURN_RPC_ID,
+        next_title_generation_id: 0,
+        title_generation: None,
+        history_cursor: None,
+        pending_commands: HashMap::new(),
+        pending_thread_names: HashMap::new(),
+        history_scope: SessionScope::default(),
+        skill_refresh: SkillRefreshState::default(),
+        thread_profile: ThreadProfile::default(),
+        workspace: AgentWorkspace::default(),
+        initial_resume: None,
+        suppress_resume_replay: false,
+        background: CodexTasks::default(),
+    };
+    session.conversation.thread_id = Some("parent".into());
+    session.background.set_root("parent");
+    session.process_notification(
+        "turn/started",
+        &json!({"threadId":"parent","turn":{"id":"parent-turn"}}),
+    );
+    let spawn_events = session.process_notification("item/completed", &json!({"threadId":"parent","item":{
+        "type":"collabAgentToolCall","id":"spawn","tool":"spawnAgent","status":"completed",
+        "senderThreadId":"parent","receiverThreadIds":["child"],"agentsStates":{"child":{"status":"running"}}
+    }}));
+    assert!(matches!(
+        spawn_events.first(),
+        Some(Event::ItemCompleted(_))
+    ));
+    assert!(matches!(
+        spawn_events.last(),
+        Some(Event::BackgroundTasks(_))
+    ));
+    let child_events = session.process_notification(
+        "turn/completed",
+        &json!({"threadId":"child","turn":{"id":"child-turn","status":"completed"}}),
+    );
+    assert!(
+        !child_events
+            .iter()
+            .any(|event| matches!(event, Event::TurnCompleted { .. }))
+    );
+    assert_eq!(
+        session.conversation.current_turn.as_deref(),
+        Some("parent-turn")
+    );
+    assert!(
+        session
+            .process_notification(
+                "turn/completed",
+                &json!({"threadId":"unrelated","turn":{"id":"other","status":"completed"}})
+            )
+            .is_empty()
+    );
+    assert_eq!(
+        session.conversation.current_turn.as_deref(),
+        Some("parent-turn")
+    );
+}
+
+#[test]
+fn conversation_approval_resolution_requires_its_thread_and_request() {
+    let mut state = ConversationState::default();
+    state.thread_id = Some("parent".into());
+    state.pending_approval = Some(8);
+    assert!(
+        state
+            .process_notification(
+                "serverRequest/resolved",
+                &json!({"threadId":"other","requestId":8})
+            )
+            .is_empty()
+    );
+    assert!(
+        state
+            .process_notification(
+                "serverRequest/resolved",
+                &json!({"threadId":"parent","requestId":9})
+            )
+            .is_empty()
+    );
+    assert_eq!(state.pending_approval, Some(8));
+    assert!(matches!(
+        state
+            .process_notification(
+                "serverRequest/resolved",
+                &json!({"threadId":"parent","requestId":8})
+            )
+            .as_slice(),
+        [Event::ApprovalResolved]
+    ));
+    assert!(state.pending_approval.is_none());
+}
+
+#[test]
+fn conversation_turns_and_output_baselines_are_independent() {
+    let mut first = ConversationState::default();
+    let mut second = ConversationState::default();
+    for state in [&mut first, &mut second] {
+        assert!(matches!(
+            state
+                .process_notification("turn/started", &json!({"turn":{"id":"turn"}}))
+                .as_slice(),
+            [Event::TurnStarted]
+        ));
+    }
+    let usage = |total, last| json!({"turnId":"turn","tokenUsage":{"total":{"outputTokens":total,"totalTokens":total},"last":{"outputTokens":last,"totalTokens":last}}});
+    first.process_notification("thread/tokenUsage/updated", &usage(80, 10));
+    let second_events = second.process_notification("thread/tokenUsage/updated", &usage(5, 5));
+    assert!(
+        second_events
+            .iter()
+            .any(|event| matches!(event, Event::TurnOutputTokensUpdated(5)))
+    );
+    let first_events = first.process_notification("thread/tokenUsage/updated", &usage(90, 10));
+    assert!(
+        first_events
+            .iter()
+            .any(|event| matches!(event, Event::TurnOutputTokensUpdated(20)))
+    );
+    first.process_notification(
+        "turn/completed",
+        &json!({"turn":{"id":"turn","status":"completed"}}),
+    );
+    assert!(first.current_turn.is_none());
+    assert_eq!(second.current_turn.as_deref(), Some("turn"));
 }
 
 #[test]

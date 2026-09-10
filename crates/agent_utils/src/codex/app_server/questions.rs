@@ -178,15 +178,22 @@ impl Session {
     pub fn restore_question_requests(&mut self, requests: Vec<QuestionRequest>) {
         for request in requests {
             if request.mode != QuestionMode::Async
-                || self.questions.pending.contains_key(&request.id)
+                || self
+                    .conversation
+                    .questions
+                    .pending
+                    .contains_key(&request.id)
             {
                 continue;
             }
             let Some(item_id) = request.id.strip_prefix("message:") else {
                 continue;
             };
-            self.questions.seen_messages.insert(item_id.to_string());
-            self.questions.pending.insert(
+            self.conversation
+                .questions
+                .seen_messages
+                .insert(item_id.to_string());
+            self.conversation.questions.pending.insert(
                 request.id.clone(),
                 PendingQuestion {
                     request,
@@ -201,7 +208,7 @@ impl Session {
             .map_err(|error| format!("Invalid user-input request: {error}"))
             .and_then(|request| {
                 let mut ids = HashSet::new();
-                if self.thread_id.as_deref() != Some(request.thread_id.as_str())
+                if self.conversation.thread_id.as_deref() != Some(request.thread_id.as_str())
                     || request.turn_id.is_empty()
                     || request.item_id.is_empty()
                     || request.questions.is_empty()
@@ -224,7 +231,7 @@ impl Session {
             }
         };
         let id = format!("request:{rpc_id}");
-        if self.questions.pending.contains_key(&id) {
+        if self.conversation.questions.pending.contains_key(&id) {
             return Vec::new();
         }
         let question_ids = request
@@ -269,7 +276,7 @@ impl Session {
                 })
                 .collect(),
         };
-        self.questions.pending.insert(
+        self.conversation.questions.pending.insert(
             id,
             PendingQuestion {
                 request: batch.clone(),
@@ -292,11 +299,13 @@ impl Session {
         settings: &ThreadSettings,
     ) -> Result<(), String> {
         let pending = self
+            .conversation
             .questions
             .pending
             .get(id)
             .ok_or("This question is no longer pending")?;
         if self
+            .conversation
             .questions
             .submissions
             .values()
@@ -355,7 +364,7 @@ impl Session {
                 if let Some(PendingQuestion {
                     source: QuestionSource::Request { submitted, .. },
                     ..
-                }) = self.questions.pending.get_mut(id)
+                }) = self.conversation.questions.pending.get_mut(id)
                 {
                     *submitted = Some(resolution);
                 }
@@ -363,7 +372,7 @@ impl Session {
             }
             QuestionSource::Message => {
                 let Some(answers) = answers else {
-                    self.questions.pending.remove(id);
+                    self.conversation.questions.pending.remove(id);
                     return Ok(());
                 };
                 let mut text = String::from("Answers to your questions:\n");
@@ -381,7 +390,7 @@ impl Session {
                     question_id: id.to_string(),
                     text,
                     settings: settings.clone(),
-                    steered: self.current_turn.is_some(),
+                    steered: self.conversation.current_turn.is_some(),
                 };
                 self.send_question_message(submission)
             }
@@ -390,6 +399,7 @@ impl Session {
 
     fn send_question_message(&mut self, submission: AnswerSubmission) -> Result<(), String> {
         let thread_id = self
+            .conversation
             .thread_id
             .as_deref()
             .ok_or("Codex is not connected")?
@@ -397,6 +407,7 @@ impl Session {
         let input = codex_user_input(&submission.text, None, &[]);
         let (method, mut params) = if submission.steered {
             let turn_id = self
+                .conversation
                 .current_turn
                 .as_deref()
                 .ok_or("The active turn ended; submit again")?;
@@ -414,7 +425,10 @@ impl Session {
         params["clientUserMessageId"] =
             json!(format!("nmt-question-{}-{rpc_id}", self.registration_id));
         self.try_send(json!({"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params}))?;
-        self.questions.submissions.insert(rpc_id, submission);
+        self.conversation
+            .questions
+            .submissions
+            .insert(rpc_id, submission);
         Ok(())
     }
 
@@ -423,7 +437,7 @@ impl Session {
         rpc_id: u64,
         message: &Value,
     ) -> Option<Vec<Event>> {
-        let submission = self.questions.submissions.remove(&rpc_id)?;
+        let submission = self.conversation.questions.submissions.remove(&rpc_id)?;
         let id = submission.question_id.clone();
         if let Some(error) = message["error"].as_object() {
             let error = error
@@ -434,7 +448,7 @@ impl Session {
             // Only an explicit rejection proves the first attempt was not accepted.
             // Transport loss has an unknown outcome and must never trigger another send.
             if submission.steered
-                && self.current_turn.is_none()
+                && self.conversation.current_turn.is_none()
                 && error == "no active turn to steer"
             {
                 let retry = AnswerSubmission {
@@ -448,7 +462,7 @@ impl Session {
             }
             return Some(vec![Event::InputSubmissionFailed { id, message: error }]);
         }
-        self.questions.pending.remove(&id);
+        self.conversation.questions.pending.remove(&id);
         Some(vec![Event::InputResolved {
             id,
             resolution: QuestionResolution::Submitted {

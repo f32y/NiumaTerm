@@ -2,8 +2,51 @@ use std::collections::HashMap;
 #[cfg(windows)]
 use std::thread;
 
+use crate::chat::{ContextComposition, Item, TokenUsageBreakdown};
 use crate::claude_code::stream_json::*;
 use crate::workspace::AgentWorkspace;
+
+#[test]
+fn transcript_snapshots_complete_their_streamed_items() {
+    let mut transcript = TranscriptState::default();
+    transcript.begin_turn();
+    transcript.process_stream_event(
+        &json!({"event":{"type":"message_start","message":{"usage":{"output_tokens":0}}}}),
+    );
+    let started = transcript.process_stream_event(
+        &json!({"event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}),
+    );
+    let [Event::ItemStarted(Item::AgentMessage { id, .. })] = started.as_slice() else {
+        panic!("text block should start a transcript item");
+    };
+    let deltas = transcript.process_stream_event(&json!({"event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}}));
+    assert!(
+        matches!(deltas.as_slice(), [Event::AgentMessageDelta { item_id, delta }] if item_id == id && delta == "hello")
+    );
+    let completed = transcript
+        .process_assistant(&json!({"message":{"content":[{"type":"text","text":"hello world"}]}}));
+    assert!(
+        matches!(completed.as_slice(), [Event::ItemCompleted(Item::AgentMessage { id: completed_id, text: Some(text), .. })] if completed_id == id && text == "hello world")
+    );
+}
+
+#[test]
+fn transcript_state_isolates_children_and_tool_results() {
+    let mut parent = TranscriptState::default();
+    let mut other = TranscriptState::default();
+    let tool = json!({"message":{"content":[{"type":"tool_use","id":"tool-1","name":"Bash","input":{"command":"pwd"}}]}});
+    let mut child = tool.clone();
+    child["parent_tool_use_id"] = json!("child");
+    assert!(parent.process_assistant(&child).is_empty());
+    assert_eq!(parent.process_assistant(&tool).len(), 1);
+    let result = json!({"message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"done"}]}});
+    assert!(other.process_tool_results(&result).is_empty());
+    assert!(matches!(
+        parent.process_tool_results(&result).as_slice(),
+        [Event::ItemCompleted(_)]
+    ));
+    assert!(parent.process_tool_results(&result).is_empty());
+}
 
 #[test]
 fn turn_output_usage_accumulates_model_responses() {
