@@ -4,6 +4,7 @@ use nmt_agent_utils::AgentEvent;
 
 use crate::UnansweredPrompt;
 use crate::pane_state::{ChildAgents, SessionRuntime, TurnState};
+use crate::session::output::{EventBatch, MAX_MESSAGES_PER_BATCH, MAX_UPDATE_TIME};
 use crate::session::prompts::PendingPrompts;
 use crate::thread_controls::{ThreadControls, launch_effort, launch_model, stored_thread_settings};
 use crate::view::session_state::SessionStateBadge;
@@ -12,6 +13,7 @@ mod background_tasks;
 mod conversation;
 mod events;
 mod history;
+mod output;
 pub(crate) mod prompts;
 #[cfg(test)]
 mod tests;
@@ -21,7 +23,7 @@ mod update_recovery;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{env, fs};
 
 use futures::channel::mpsc;
@@ -560,7 +562,8 @@ impl AgentPane {
         self.palette.skill_binding = None;
         let epoch = self.runtime.epoch;
 
-        let (tx, mut rx) = mpsc::unbounded::<Value>();
+        let (tx, rx) = mpsc::unbounded::<Value>();
+        let mut batches = rx.ready_chunks(MAX_MESSAGES_PER_BATCH);
         let deliver = move |message| {
             let _ = tx.unbounded_send(message);
         };
@@ -639,28 +642,40 @@ impl AgentPane {
                 return;
             }
 
-            while let Some(message) = rx.next().await {
-                let updated = this.update(cx, |this, cx| {
-                    // A newer session owns the pane now; this pump's
-                    // messages belong to the replaced process.
-                    if !is_current_session_epoch(this.runtime.epoch, epoch) {
-                        return false;
+            while let Some(messages) = batches.next().await {
+                let mut messages = messages.into_iter();
+                while messages.len() > 0 {
+                    let updated = this.update(cx, |this, cx| {
+                        let started = Instant::now();
+                        let mut events = EventBatch::default();
+                        for message in messages.by_ref() {
+                            // A transition during this batch can replace the backend.
+                            // Remaining messages still belong to the earlier session.
+                            if !is_current_session_epoch(this.runtime.epoch, epoch) {
+                                return false;
+                            }
+                            let next_events = match this.runtime.backend.as_mut() {
+                                Some(session) => session.process(message),
+                                None => Vec::new(),
+                            };
+                            for event in next_events {
+                                events.push(event, |event| this.apply_event(event, cx));
+                            }
+                            if started.elapsed() >= MAX_UPDATE_TIME {
+                                break;
+                            }
+                        }
+                        events.flush(|event| this.apply_event(event, cx));
+                        true
+                    });
+                    if !updated.unwrap_or(false) {
+                        return;
                     }
-
-                    let events = match this.runtime.backend.as_mut() {
-                        Some(session) => session.process(message),
-                        None => Vec::new(),
-                    };
-
-                    for event in events {
-                        this.apply_event(event, cx);
-                    }
-
-                    true
-                });
-
-                if !updated.unwrap_or(false) {
-                    return;
+                    // An already-ready stream need not yield at its next await.
+                    // Give input and frame work a chance between bounded slices.
+                    cx.background_executor()
+                        .timer(Duration::from_millis(1))
+                        .await;
                 }
             }
 
