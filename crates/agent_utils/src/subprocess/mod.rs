@@ -4,7 +4,7 @@
 
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -13,7 +13,9 @@ use parking_lot::Mutex;
 use serde_json::Value;
 use tracing::warn;
 
-const INPUT_QUEUE_CAPACITY: usize = 64;
+mod input;
+use crate::subprocess::input::InputQueue;
+pub(crate) use crate::subprocess::input::{InputClass, InputError};
 
 /// A spawned agent CLI with piped stdio, kill-on-close containment, and
 /// newline-delimited JSON output. Stdout lines that parse as JSON are handed
@@ -25,7 +27,7 @@ pub(crate) struct JsonLineProcess {
     /// Held until the root exits or forced shutdown terminates any remaining
     /// descendants.
     job: Arc<Mutex<Option<KillOnCloseJob>>>,
-    stdin: Option<mpsc::SyncSender<Value>>,
+    stdin: Option<InputQueue>,
     /// Provider display name ("Codex", "Claude") for lifecycle error messages.
     provider: &'static str,
 }
@@ -87,12 +89,15 @@ impl JsonLineProcess {
 
         let job = Arc::new(Mutex::new(Some(job)));
         let writer_job = Arc::clone(&job);
-        let (input_tx, input_rx) = mpsc::sync_channel::<Value>(INPUT_QUEUE_CAPACITY);
+        let (input_tx, input_rx) = InputQueue::new();
         thread::Builder::new()
             .name(format!("{provider}-stdin"))
             .spawn(move || {
-                for message in input_rx {
-                    if let Err(error) = writeln!(stdin, "{message}").and_then(|_| stdin.flush()) {
+                for input in input_rx {
+                    let result = input.messages.iter().try_for_each(|message| {
+                        writeln!(stdin, "{message}").and_then(|_| stdin.flush())
+                    });
+                    if let Err(error) = result {
                         warn!(provider, %error, "agent input writer stopped");
                         // A child can close stdin without closing stdout. Terminating
                         // its tree makes the existing EOF notification reliable.
@@ -128,28 +133,50 @@ impl JsonLineProcess {
         })
     }
 
-    /// Queue one protocol line. Transport failures terminate the process tree
-    /// so reader-side EOF remains the exit-detection path.
-    pub(crate) fn write_line(&mut self, message: &Value) {
-        let _ = self.try_write_line(message);
+    /// Queue a required control line using reserved capacity. Failure ends the
+    /// process tree so a missing reply cannot leave the session waiting forever.
+    pub(crate) fn write_line(&mut self, message: Value) -> Result<(), InputError> {
+        let result = self.try_write_line(message, InputClass::Control);
+        if let Err(error) = &result {
+            warn!(%error, "required agent control input was rejected");
+            // Callers use this path for required replies and lifecycle controls.
+            // Exhausting even the control reserve cannot silently lose them.
+            self.stdin.take();
+            self.job.lock().take();
+        }
+        result
     }
 
-    pub(crate) fn try_write_line(&mut self, message: &Value) -> Result<(), String> {
-        let stdin = self.stdin.as_ref().ok_or("The agent input is closed")?;
-        match stdin.try_send(message.clone()) {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                let reason = match error {
-                    mpsc::TrySendError::Full(_) => "The agent input queue is full",
-                    mpsc::TrySendError::Disconnected(_) => "The agent input writer stopped",
-                };
-                // Losing one ordered request leaves correlated replies and session
-                // settings inconsistent. Fail the transport instead of skipping it.
-                self.stdin.take();
-                self.job.lock().take();
-                Err(reason.to_string())
-            }
+    /// Success means admission, not completed I/O. Capacity rejection leaves
+    /// the transport open so the caller can retain its input and retry.
+    pub(crate) fn try_write_line(
+        &mut self,
+        message: Value,
+        class: InputClass,
+    ) -> Result<(), InputError> {
+        self.try_write_batch(vec![message], class)
+    }
+
+    /// Reserve all settings and prompt lines together before publishing any of
+    /// them; the caller changes its local settings only after admission.
+    pub(crate) fn try_write_batch(
+        &mut self,
+        messages: Vec<Value>,
+        class: InputClass,
+    ) -> Result<(), InputError> {
+        if !self.has_stdin() {
+            return Err(InputError::Closed);
         }
+        let result = self
+            .stdin
+            .as_ref()
+            .ok_or(InputError::Closed)?
+            .submit(messages, class);
+        if result == Err(InputError::Closed) {
+            self.stdin.take();
+            self.job.lock().take();
+        }
+        result
     }
 
     /// False once shutdown has closed the protocol input.

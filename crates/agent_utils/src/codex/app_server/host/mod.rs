@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use crate::LaunchConfig;
 use crate::codex::app_server::host::router::Router;
 use crate::launcher::AgentCli;
-use crate::subprocess::JsonLineProcess;
+use crate::subprocess::{InputClass, JsonLineProcess};
 
 const HOST_INIT_RPC_ID: u64 = 1;
 const FIRST_HOST_RPC_ID: u64 = 2;
@@ -166,16 +166,22 @@ impl CodexHost {
             router,
             process: Mutex::new(process),
         };
-        host.process.lock().write_line(&initialize_request());
+        host.process
+            .lock()
+            .write_line(initialize_request())
+            .map_err(|error| error.to_string())?;
         let initialized = startup_rx
             .recv_timeout(START_TIMEOUT)
             .map_err(|_| "Codex app-server did not initialize in time".to_string())?;
         initialized.map_err(|error| redact(&error, &credential_values))?;
-        host.process.lock().write_line(&json!({
-            "jsonrpc": "2.0",
-            "method": "initialized",
-            "params": {},
-        }));
+        host.process
+            .lock()
+            .write_line(json!({
+                "jsonrpc": "2.0",
+                "method": "initialized",
+                "params": {},
+            }))
+            .map_err(|error| error.to_string())?;
         Ok(host)
     }
 
@@ -216,7 +222,25 @@ impl CodexHost {
 
     pub(super) fn send(&self, owner: RegistrationId, mut message: Value) -> Result<(), String> {
         self.router.prepare_outgoing(owner, &mut message)?;
-        self.process.lock().try_write_line(&message)
+        let request_id = message["method"]
+            .is_string()
+            .then(|| message["id"].as_u64())
+            .flatten();
+        let result = match message["method"].as_str() {
+            None | Some("turn/interrupt" | "thread/unsubscribe") => {
+                self.process.lock().write_line(message)
+            }
+            _ => self
+                .process
+                .lock()
+                .try_write_line(message, InputClass::Normal),
+        };
+        if result.is_err()
+            && let Some(id) = request_id
+        {
+            self.router.reject_outgoing(id);
+        }
+        result.map_err(|error| error.to_string())
     }
 
     pub(super) fn claim_descendants(

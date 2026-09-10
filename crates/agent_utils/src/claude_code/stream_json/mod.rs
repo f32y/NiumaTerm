@@ -56,7 +56,7 @@ use crate::claude_code::workflows::{
     ClaudeWorkflows, RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
 };
 use crate::launcher::AgentCli;
-use crate::subprocess::JsonLineProcess;
+use crate::subprocess::{InputClass, JsonLineProcess};
 use crate::workspace::AgentWorkspace;
 
 mod control;
@@ -424,18 +424,24 @@ impl Session {
             return SendOutcome::NotReady;
         }
 
+        let mut messages = Vec::new();
         if settings.model.is_some() && settings.model != self.applied_model {
             let model = settings.model.clone().unwrap_or_default();
 
-            self.send_control(json!({"subtype": "set_model", "model": model}));
-            self.applied_model = settings.model.clone();
+            messages.push(
+                self.control_request(json!({"subtype": "set_model", "model": model}))
+                    .1,
+            );
         }
         if settings.approval.is_some() && settings.approval != self.applied_permission {
             let mode = settings.approval.clone().unwrap_or_default();
 
-            self.send_control(json!({"subtype": "set_permission_mode", "mode": mode}));
-            self.applied_permission = settings.approval.clone();
+            messages.push(
+                self.control_request(json!({"subtype": "set_permission_mode", "mode": mode}))
+                    .1,
+            );
         }
+        let mut pending_effort = None;
         if settings.effort.is_some() && settings.effort != self.applied_effort {
             let effort = settings.effort.clone().unwrap_or_default();
             let ultracode = effort == ULTRACODE_EFFORT;
@@ -444,16 +450,13 @@ impl Session {
             // Correlated, unlike the model and permission requests: this one
             // can be refused for reasons the user has to be told about, and
             // the answer carries which.
-            let request_id = self.send_control(json!({
+            let (request_id, request) = self.control_request(json!({
                 "subtype": "apply_flag_settings",
                 "settings": {"effortLevel": level, "ultracode": ultracode},
             }));
 
-            self.pending_control_operations.insert(
-                request_id,
-                PendingControlOperation::EffortChange(self.applied_effort.clone()),
-            );
-            self.applied_effort = settings.effort.clone();
+            messages.push(request);
+            pending_effort = Some(request_id);
         }
 
         let mut content = vec![json!({"type": "text", "text": text})];
@@ -468,15 +471,27 @@ impl Session {
             })
         }));
 
-        if self
-            .process
-            .try_write_line(&json!({
-                "type": "user",
-                "message": {"role": "user", "content": content},
-            }))
-            .is_err()
-        {
-            return SendOutcome::NotReady;
+        messages.push(json!({
+            "type": "user",
+            "message": {"role": "user", "content": content},
+        }));
+        if let Err(error) = self.process.try_write_batch(messages, InputClass::Normal) {
+            return SendOutcome::Rejected {
+                message: error.to_string(),
+            };
+        }
+        if settings.model.is_some() {
+            self.applied_model = settings.model.clone();
+        }
+        if settings.approval.is_some() {
+            self.applied_permission = settings.approval.clone();
+        }
+        if let Some(request_id) = pending_effort {
+            self.pending_control_operations.insert(
+                request_id,
+                PendingControlOperation::EffortChange(self.applied_effort.clone()),
+            );
+            self.applied_effort = settings.effort.clone();
         }
 
         if self.turn_active {
@@ -510,15 +525,16 @@ impl Session {
 
         let text = slash_command_text(name, arguments);
 
-        if self
-            .process
-            .try_write_line(&json!({
+        if let Err(error) = self.process.try_write_line(
+            json!({
                 "type": "user",
                 "message": {"role": "user", "content": [{"type": "text", "text": text}]},
-            }))
-            .is_err()
-        {
-            return SlashCommandOutcome::NotReady;
+            }),
+            InputClass::Normal,
+        ) {
+            return SlashCommandOutcome::Rejected {
+                message: error.to_string(),
+            };
         }
         self.turn_active = true;
         self.turn_reported = false;
@@ -867,22 +883,28 @@ impl Session {
     }
 
     fn send_control(&mut self, request: Value) -> String {
+        let (request_id, message) = self.control_request(request);
+        self.send(message);
+        request_id
+    }
+
+    fn control_request(&mut self, request: Value) -> (String, Value) {
         let request_id = format!("nmt-{}", self.next_request_id);
 
         self.next_request_id += 1;
-        self.send(json!({
+        let message = json!({
             "type": "control_request",
             "request_id": request_id,
             "request": request,
-        }));
+        });
 
-        request_id
+        (request_id, message)
     }
 
     /// Write one line; write failures stay unsurfaced because the reader-side
     /// EOF is the single exit-detection path.
     fn send(&mut self, message: Value) {
-        self.process.write_line(&message);
+        let _ = self.process.write_line(message);
     }
 
     fn process_system(&mut self, message: &Value) -> Vec<Event> {

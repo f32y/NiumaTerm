@@ -41,6 +41,27 @@ fn start_response(global_id: u64, thread_id: &str) -> Value {
 }
 
 #[test]
+fn rejected_requests_release_routes_without_affecting_other_sessions() {
+    let router = router();
+    let (first, first_rx) = register(&router);
+    let (second, second_rx) = register(&router);
+    let mut rejected = start_request(2);
+    let mut accepted = start_request(2);
+    router.prepare_outgoing(first, &mut rejected).unwrap();
+    router.prepare_outgoing(second, &mut accepted).unwrap();
+    let id = rejected["id"].as_u64().unwrap();
+    router.reject_outgoing(id);
+    router.handle_message(start_response(id, "rejected"));
+    assert!(first_rx.try_recv().is_err());
+    router.handle_message(start_response(accepted["id"].as_u64().unwrap(), "accepted"));
+    assert_eq!(
+        second_rx.try_recv().unwrap()["result"]["thread"]["id"],
+        "accepted"
+    );
+    assert!(router.alive.load(Ordering::Acquire));
+}
+
+#[test]
 fn host_initialize_enables_experimental_api() {
     assert_eq!(
         initialize_request(),

@@ -467,12 +467,13 @@ impl Session {
             };
         };
 
+        if let Err(message) = self.try_send(request) {
+            return SlashCommandOutcome::Rejected { message };
+        }
         if name == "compact" {
             self.conversation.compaction.request_manual();
         }
         self.pending_commands.insert(rpc_id, name.to_string());
-        self.send(request);
-
         SlashCommandOutcome::Accepted
     }
 
@@ -701,8 +702,18 @@ impl Session {
     }
 
     fn send(&mut self, message: Value) {
+        let request_id = message["method"]
+            .is_string()
+            .then(|| message["id"].as_u64())
+            .flatten();
         if let Err(error) = self.try_send(message) {
             tracing::warn!("could not write Codex app-server request: {error}");
+            // Background requests already have local pending state. Deliver the
+            // rejection through the usual response path so it can settle that
+            // state even though the shared host remains available.
+            if let Some(id) = request_id {
+                (self.deliver)(json!({"id": id, "error": {"message": error}}));
+            }
         }
     }
 

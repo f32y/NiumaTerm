@@ -177,6 +177,93 @@ fn rewind_is_an_idle_ui_command_not_a_provider_slash_turn() {
 
 #[cfg(windows)]
 #[test]
+fn oversized_input_keeps_settings_unchanged_and_a_retry_is_atomic() {
+    use std::env;
+    use std::path::Path;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use uuid::Uuid;
+
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/capture-stream.ps1");
+    let log = env::temp_dir().join(format!("niumaterm-admission-{}.jsonl", Uuid::new_v4()));
+    let launch = LaunchConfig {
+        executable: "powershell.exe".into(),
+        executable_args: vec![
+            "-NoLogo".into(),
+            "-NoProfile".into(),
+            "-NonInteractive".into(),
+            "-File".into(),
+            fixture.to_string_lossy().into_owned(),
+        ],
+        env: vec![(
+            "NMT_FAKE_STREAM_LOG".into(),
+            log.to_string_lossy().into_owned(),
+        )],
+        ..LaunchConfig::default()
+    };
+    let (tx, rx) = mpsc::channel();
+    let mut session = Session::spawn(
+        &launch,
+        &AgentWorkspace::default(),
+        None,
+        move |message| {
+            let _ = tx.send(message);
+        },
+        |_| {},
+    )
+    .unwrap();
+    session.process(rx.recv_timeout(Duration::from_secs(5)).unwrap());
+    let previous_model = session.applied_model.clone();
+    let previous_permission = session.applied_permission.clone();
+    let previous_effort = session.applied_effort.clone();
+    let pending = session.pending_control_operations.len();
+    let settings = ThreadSettings {
+        model: Some("test-model".into()),
+        approval: Some("plan".into()),
+        effort: Some("high".into()),
+        ..ThreadSettings::default()
+    };
+    assert!(matches!(
+        session.send_user_message(&"x".repeat(32 * 1024 * 1024), &settings, &[]),
+        SendOutcome::Rejected { .. }
+    ));
+    assert_eq!(session.applied_model, previous_model);
+    assert_eq!(session.applied_permission, previous_permission);
+    assert_eq!(session.applied_effort, previous_effort);
+    assert_eq!(session.pending_control_operations.len(), pending);
+    assert!(!session.turn_active);
+    assert!(session.process.has_stdin());
+    assert_eq!(
+        session.send_user_message("retry prompt", &settings, &[]),
+        SendOutcome::StartedTurn
+    );
+    session.shutdown(Duration::from_secs(5), false).unwrap();
+    let lines: Vec<Value> = fs::read_to_string(&log)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let changed: Vec<_> = lines
+        .iter()
+        .filter(|message| {
+            matches!(
+                message["request"]["subtype"].as_str(),
+                Some("set_model" | "set_permission_mode" | "apply_flag_settings")
+            ) || message["type"] == "user"
+        })
+        .collect();
+    assert_eq!(changed.len(), 4);
+    assert_eq!(changed[0]["request"]["subtype"], "set_model");
+    assert_eq!(changed[1]["request"]["subtype"], "set_permission_mode");
+    assert_eq!(changed[2]["request"]["subtype"], "apply_flag_settings");
+    assert_eq!(changed[3]["message"]["content"][0]["text"], "retry prompt");
+    fs::remove_file(log).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
 fn fake_stream_json_process_never_receives_rewind_as_a_user_turn() {
     use std::env;
     use std::path::Path;

@@ -273,6 +273,10 @@ impl Router {
         }
     }
 
+    pub(super) fn reject_outgoing(&self, id: u64) {
+        self.state.lock().pending_requests.remove(&id);
+    }
+
     pub(super) fn handle_message(&self, message: Value) {
         let deliveries = if let Some(method) = message["method"].as_str().map(str::to_string) {
             if message["id"].is_number() {

@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::mpsc::channel;
 
 use crate::codex::app_server::compaction::{
     CompactionState, compaction_completed, compaction_started,
@@ -40,6 +41,27 @@ fn disconnected_session() -> Session {
         suppress_resume_replay: false,
         background: CodexTasks::default(),
     }
+}
+
+#[test]
+fn rejected_background_requests_settle_their_pending_state() {
+    let mut session = disconnected_session();
+    let (tx, rx) = channel();
+    session.deliver = Arc::new(move |message| {
+        let _ = tx.send(message);
+    });
+    session.request_skills(false);
+    assert!(session.skill_refresh.in_flight.is_some());
+    let events = session.process(rx.try_recv().unwrap());
+    assert!(matches!(events.as_slice(), [Event::Skills(catalog)] if !catalog.errors.is_empty()));
+    assert!(session.skill_refresh.in_flight.is_none());
+    session.conversation.thread_id = Some("parent".into());
+    assert!(matches!(
+        session.execute_slash_command("compact", ""),
+        SlashCommandOutcome::Rejected { .. }
+    ));
+    assert!(session.pending_commands.is_empty());
+    assert!(!session.has_active_operation());
 }
 
 #[test]
