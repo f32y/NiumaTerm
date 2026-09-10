@@ -14,7 +14,7 @@
 #[cfg(all(test, windows))]
 use std::fs;
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -59,6 +59,7 @@ use crate::claude_code::workflows::{
     ClaudeWorkflows, RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
 };
 use crate::launcher::AgentCli;
+use crate::request_policy::RequestClass;
 use crate::subprocess::{InputClass, JsonLineProcess};
 use crate::workspace::AgentWorkspace;
 
@@ -293,7 +294,7 @@ impl Session {
             workflows: ClaudeWorkflows::default(),
         };
 
-        session.send(json!({
+        session.try_send(json!({
             "type": "control_request",
             "request_id": INIT_REQUEST_ID,
             "request": {
@@ -304,7 +305,12 @@ impl Session {
                 // tool-use id so the nested transcript can be rendered.
                 "forwardSubagentText": true,
             },
-        }));
+        }))?;
+        session.control.record_admitted(
+            INIT_REQUEST_ID.to_string(),
+            RequestClass::Query,
+            Instant::now(),
+        );
 
         Ok(session)
     }
@@ -453,12 +459,20 @@ impl Session {
             .iter()
             .filter_map(|message| message["request_id"].as_str().map(str::to_owned))
             .collect();
+        if let Err(message) = self
+            .control
+            .check_capacity(RequestClass::Mutation, control_ids.len())
+        {
+            return SendOutcome::Rejected { message };
+        }
         if let Err(error) = self.process.try_write_batch(messages, InputClass::Normal) {
             return SendOutcome::Rejected {
                 message: error.to_string(),
             };
         }
         for id in control_ids {
+            self.control
+                .record_admitted(id.clone(), RequestClass::Mutation, Instant::now());
             self.control.track(id, PendingControlOperation::Other);
         }
         if settings.model.is_some() {
@@ -704,6 +718,42 @@ impl Session {
         events
     }
 
+    /// Expire unanswered protocol requests without retrying side effects.
+    pub fn poll_timeouts(&mut self, now: Instant) -> Vec<Event> {
+        let mut events = Vec::new();
+        for (id, class) in self.control.expired(now) {
+            let message = class.timeout_message("Claude");
+            if id == INIT_REQUEST_ID {
+                events.extend(self.control.close(&message));
+                events.push(Event::Error {
+                    message,
+                    fatal: true,
+                });
+                break;
+            }
+            if let Some(effort_events) = self.control.expire_effort(&id) {
+                events.extend(effort_events);
+                events.push(Event::Error {
+                    message,
+                    fatal: false,
+                });
+                continue;
+            }
+            let result = self.process_control_response(
+                &json!({"response": {"request_id": id, "subtype": "error", "error": message}}),
+            );
+            if result.is_empty() {
+                events.push(Event::Error {
+                    message,
+                    fatal: false,
+                });
+            } else {
+                events.extend(result);
+            }
+        }
+        events
+    }
+
     pub fn process_exit(&mut self) -> Vec<Event> {
         self.ready = false;
         self.turn_active = false;
@@ -900,8 +950,23 @@ impl Session {
     }
 
     fn send_control(&mut self, request: Value) -> Result<String, String> {
+        let class = match request["subtype"].as_str() {
+            Some("get_context_usage") => RequestClass::Query,
+            Some("interrupt" | "stop_task") => RequestClass::Control,
+            _ => RequestClass::Mutation,
+        };
+        self.control.check_capacity(class, 1)?;
         let (request_id, message) = self.control.request(request);
-        self.try_send(message)?;
+        let input_class = if class == RequestClass::Control {
+            InputClass::Control
+        } else {
+            InputClass::Normal
+        };
+        self.process
+            .try_write_line(message, input_class)
+            .map_err(|error| error.to_string())?;
+        self.control
+            .record_admitted(request_id.clone(), class, Instant::now());
         self.control
             .track(request_id.clone(), PendingControlOperation::Other);
         Ok(request_id)
@@ -937,6 +1002,7 @@ impl Session {
     }
 
     fn process_init(&mut self, message: &Value) -> Vec<Event> {
+        self.control.complete(INIT_REQUEST_ID);
         // The session id makes this conversation resumable by a future tab
         // (`--resume`); captured on every `init` since a resumed session
         // keeps the id of the transcript it reloaded.
@@ -1098,6 +1164,9 @@ impl Session {
 
     fn process_control_response(&mut self, message: &Value) -> Vec<Event> {
         let response = &message["response"];
+        if let Some(id) = response["request_id"].as_str() {
+            self.control.complete(id);
+        }
 
         if response["request_id"].as_str() != Some(INIT_REQUEST_ID) {
             let Some(event) = self.control.resolve(response) else {

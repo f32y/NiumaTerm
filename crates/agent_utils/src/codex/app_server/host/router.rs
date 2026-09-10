@@ -9,6 +9,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
+use std::time::Instant;
 
 use parking_lot::Mutex;
 use serde_json::{Value, json};
@@ -17,6 +18,18 @@ use crate::codex::app_server::host::{
     Delivery, FIRST_HOST_RPC_ID, HOST_EXIT_METHOD, HOST_INIT_RPC_ID, MAX_EARLY_MESSAGES_PER_THREAD,
     MAX_EARLY_THREADS, RegistrationId, message_thread_id,
 };
+use crate::request_policy::RequestClass;
+
+const MAX_HOST_REQUESTS: usize = 1024;
+const RESERVED_HOST_CONTROLS: usize = 64;
+
+fn request_class(message: &Value) -> RequestClass {
+    match message["method"].as_str() {
+        Some("model/list" | "skills/list" | "thread/list" | "thread/read") => RequestClass::Query,
+        Some("turn/interrupt" | "thread/unsubscribe") => RequestClass::Control,
+        _ => RequestClass::Mutation,
+    }
+}
 
 #[derive(Clone, Copy)]
 enum RequestPurpose {
@@ -56,6 +69,20 @@ impl RequestPurpose {
 struct PendingRoute {
     owner: RegistrationId,
     purpose: RequestPurpose,
+    class: RequestClass,
+    deadline: Instant,
+}
+
+impl PendingRoute {
+    fn timeout_response(&self) -> Value {
+        json!({
+            "id": self.purpose.local_id(),
+            "error": {
+                "message": self.class.timeout_message("Codex"),
+                "data": {"requestTimedOut": true},
+            },
+        })
+    }
 }
 
 struct ServerRequestRoute {
@@ -248,6 +275,25 @@ impl Router {
             if !state.sessions.contains_key(&owner) {
                 return Err("Codex session is detached".to_string());
             }
+            let class = request_class(message);
+            let host_limit = if class == RequestClass::Control {
+                MAX_HOST_REQUESTS
+            } else {
+                MAX_HOST_REQUESTS - RESERVED_HOST_CONTROLS
+            };
+            if state.pending_requests.len() >= host_limit
+                || state
+                    .pending_requests
+                    .values()
+                    .filter(|route| route.owner == owner)
+                    .count()
+                    >= class.limit()
+            {
+                return Err(
+                    "too many unanswered Codex requests; wait for pending requests to finish"
+                        .into(),
+                );
+            }
             let global_id = state
                 .allocate_request_id()
                 .ok_or_else(|| "Codex app-server request IDs are exhausted".to_string())?;
@@ -256,6 +302,8 @@ impl Router {
                 PendingRoute {
                     owner,
                     purpose: RequestPurpose::from_message(message, id),
+                    class,
+                    deadline: Instant::now() + class.timeout(),
                 },
             );
             message["id"] = json!(global_id);
@@ -275,6 +323,35 @@ impl Router {
 
     pub(super) fn reject_outgoing(&self, id: u64) {
         self.state.lock().pending_requests.remove(&id);
+    }
+
+    pub(super) fn retain_requests(&self, owner: RegistrationId, ids: &[u64]) {
+        self.state
+            .lock()
+            .pending_requests
+            .retain(|_, route| route.owner != owner || ids.contains(&route.purpose.local_id()));
+    }
+
+    pub(super) fn expire_requests(&self, now: Instant) {
+        let deliveries = {
+            let mut state = self.state.lock();
+            let expired: Vec<_> = state
+                .pending_requests
+                .extract_if(|_, route| route.deadline <= now)
+                .map(|(_, route)| route)
+                .collect();
+            expired
+                .into_iter()
+                .filter_map(|route| {
+                    let delivery = state.delivery(route.owner)?;
+                    Some((delivery, route.timeout_response()))
+                })
+                .collect::<Vec<_>>()
+        };
+        // Delivery can re-enter routing, so no callback runs while state is locked.
+        for (delivery, message) in deliveries {
+            delivery(message);
+        }
     }
 
     pub(super) fn handle_message(&self, message: Value) {
@@ -311,6 +388,9 @@ impl Router {
             return Vec::new();
         };
         message["id"] = json!(route.purpose.local_id());
+        if route.deadline <= Instant::now() {
+            message = route.timeout_response();
+        }
         let Some(delivery) = state.delivery(route.owner) else {
             return Vec::new();
         };

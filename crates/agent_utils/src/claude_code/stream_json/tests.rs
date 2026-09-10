@@ -1,10 +1,42 @@
 use std::collections::HashMap;
 #[cfg(windows)]
 use std::thread;
+use std::time::Instant;
 
 use crate::chat::{ContextComposition, Item, TokenUsageBreakdown};
 use crate::claude_code::stream_json::*;
+use crate::request_policy::RequestClass;
 use crate::workspace::AgentWorkspace;
+
+#[test]
+fn pending_control_capacity_preserves_urgent_slots_and_releases_expired_queries() {
+    let now = Instant::now();
+    let mut state = ControlState::default();
+    for index in 0..120 {
+        state.check_capacity(RequestClass::Query, 1).unwrap();
+        state.record_admitted(index.to_string(), RequestClass::Query, now);
+        state.track(index.to_string(), PendingControlOperation::Other);
+    }
+    assert!(state.check_capacity(RequestClass::Mutation, 1).is_err());
+    assert!(state.check_capacity(RequestClass::Mutation, 0).is_ok());
+    for index in 120..128 {
+        state.check_capacity(RequestClass::Control, 1).unwrap();
+        state.record_admitted(index.to_string(), RequestClass::Control, now);
+        state.track(index.to_string(), PendingControlOperation::Other);
+    }
+    assert!(state.check_capacity(RequestClass::Control, 1).is_err());
+    assert!(state.expired(now + Duration::from_secs(14)).is_empty());
+    let expired = state.expired(now + Duration::from_secs(15));
+    assert_eq!(expired.len(), 8);
+    for (id, class) in expired {
+        assert_eq!(class, RequestClass::Control);
+        state.resolve(&json!({"request_id": id, "subtype": "error", "error": class.timeout_message("Claude")}));
+    }
+    assert!(state.check_capacity(RequestClass::Query, 1).is_err());
+    assert_eq!(state.expired(now + Duration::from_secs(30)).len(), 120);
+    assert!(state.expired(now + Duration::from_secs(30)).is_empty());
+    state.check_capacity(RequestClass::Mutation, 3).unwrap();
+}
 
 #[test]
 fn control_cancellation_matches_prompt_ids_and_close_settles_once() {
@@ -128,6 +160,39 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
     assert_eq!(session.control.effort(), Some("max"));
     session.rename_session("User title");
     assert!(session.process(json!({"type": "control_response", "response": {"request_id": id, "subtype": "success", "response": {"title": "Late title"}}})).is_empty());
+    session.control.complete(INIT_REQUEST_ID);
+    session.control.track(
+        "restore-timeout".into(),
+        PendingControlOperation::FileRewind,
+    );
+    session.control.record_admitted(
+        "restore-timeout".into(),
+        RequestClass::Mutation,
+        Instant::now(),
+    );
+    session
+        .control
+        .record_effort("effort-timeout".into(), "high".into());
+    session.control.record_admitted(
+        "effort-timeout".into(),
+        RequestClass::Mutation,
+        Instant::now(),
+    );
+    let timeout_events = session.poll_timeouts(Instant::now() + Duration::from_secs(301));
+    assert!(timeout_events.iter().any(|event| matches!(event, Event::FileRewindCompleted { error: Some(message) } if message.contains("result is unknown"))));
+    assert!(timeout_events.iter().any(|event| matches!(event, Event::Error { message, fatal: false } if message.contains("result is unknown"))));
+    assert!(
+        !timeout_events
+            .iter()
+            .any(|event| matches!(event, Event::EffortRejected { .. }))
+    );
+    assert_eq!(session.control.effort(), Some("high"));
+    assert!(
+        session
+            .poll_timeouts(Instant::now() + Duration::from_secs(601))
+            .is_empty()
+    );
+    assert!(session.process(json!({"type": "control_response", "response": {"request_id": "restore-timeout", "subtype": "success"}})).is_empty());
     session.compacting = true;
     session
         .process
@@ -353,7 +418,7 @@ fn rewind_is_an_idle_ui_command_not_a_provider_slash_turn() {
 
 #[cfg(windows)]
 #[test]
-fn oversized_input_keeps_settings_unchanged_and_a_retry_is_atomic() {
+fn rejected_input_keeps_settings_unchanged_and_a_retry_is_atomic() {
     use std::env;
     use std::path::Path;
     use std::sync::mpsc;
@@ -411,6 +476,27 @@ fn oversized_input_keeps_settings_unchanged_and_a_retry_is_atomic() {
     assert_eq!(session.control.pending_count(), pending);
     assert!(!session.turn_active);
     assert!(session.process.has_stdin());
+    let now = Instant::now();
+    for index in 0..120 - pending {
+        let id = format!("capacity-{index}");
+        session
+            .control
+            .record_admitted(id.clone(), RequestClass::Query, now);
+        session.control.track(id, PendingControlOperation::Other);
+    }
+    assert!(matches!(
+        session.send_user_message("capacity rejected prompt", &settings, &[]),
+        SendOutcome::Rejected { message } if message.contains("too many unanswered")
+    ));
+    assert_eq!(session.applied_model, previous_model);
+    assert_eq!(session.applied_permission, previous_permission);
+    assert_eq!(session.control.effort(), previous_effort.as_deref());
+    assert_eq!(session.control.pending_count(), 120);
+    assert!(!session.turn_active);
+    assert!(session.interrupt());
+    let expired = session.poll_timeouts(now + Duration::from_secs(31));
+    assert_eq!(expired.len(), 121);
+    assert_eq!(session.control.pending_count(), 0);
     assert_eq!(
         session.send_user_message("retry prompt", &settings, &[]),
         SendOutcome::StartedTurn

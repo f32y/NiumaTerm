@@ -5,7 +5,13 @@ use crate::chat::Event;
 struct Change {
     id: String,
     value: String,
-    result: Option<Result<(), String>>,
+    result: Option<ChangeResult>,
+}
+
+enum ChangeResult {
+    Applied,
+    Rejected(String),
+    Unknown,
 }
 
 /// Responses may arrive in a different order from writes. Confirm changes in
@@ -13,6 +19,7 @@ struct Change {
 #[derive(Default)]
 pub(super) struct EffortState {
     confirmed: Option<String>,
+    unconfirmed: Option<String>,
     pending: VecDeque<Change>,
 }
 
@@ -20,6 +27,7 @@ impl EffortState {
     pub(super) fn new(confirmed: Option<String>) -> Self {
         Self {
             confirmed,
+            unconfirmed: None,
             pending: VecDeque::new(),
         }
     }
@@ -28,6 +36,7 @@ impl EffortState {
         self.pending
             .back()
             .map(|change| change.value.as_str())
+            .or(self.unconfirmed.as_deref())
             .or(self.confirmed.as_deref())
     }
 
@@ -52,14 +61,25 @@ impl EffortState {
         if change.result.is_some() {
             return None;
         }
-        change.result = Some(error.map_or(Ok(()), Err));
+        change.result = Some(error.map_or(ChangeResult::Applied, ChangeResult::Rejected));
+        self.settle()
+    }
+
+    pub(super) fn expire(&mut self, id: &str) -> Option<Event> {
+        let change = self.pending.iter_mut().find(|change| change.id == id)?;
+        if change.result.is_some() {
+            return None;
+        }
+        // A missing acknowledgment is not a refusal. Retain the requested
+        // level as uncertain so sending another prompt does not resend it.
+        change.result = Some(ChangeResult::Unknown);
         self.settle()
     }
 
     pub(super) fn close(&mut self, message: &str) -> Option<Event> {
         for change in &mut self.pending {
             if change.result.is_none() {
-                change.result = Some(Err(message.to_string()));
+                change.result = Some(ChangeResult::Rejected(message.to_string()));
             }
         }
         self.settle()
@@ -76,8 +96,12 @@ impl EffortState {
                 break;
             };
             match change.result {
-                Some(Ok(())) => self.confirmed = Some(change.value),
-                Some(Err(error)) => errors.push(error),
+                Some(ChangeResult::Applied) => {
+                    self.confirmed = Some(change.value);
+                    self.unconfirmed = None;
+                }
+                Some(ChangeResult::Rejected(error)) => errors.push(error),
+                Some(ChangeResult::Unknown) => self.unconfirmed = Some(change.value),
                 None => unreachable!("only completed changes are removed"),
             }
         }

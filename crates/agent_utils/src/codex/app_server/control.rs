@@ -49,6 +49,9 @@ impl Default for ControlState {
 }
 
 impl ControlState {
+    pub(super) fn request_ids(&self) -> Vec<u64> {
+        self.pending.keys().copied().collect()
+    }
     pub(super) fn alloc_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;

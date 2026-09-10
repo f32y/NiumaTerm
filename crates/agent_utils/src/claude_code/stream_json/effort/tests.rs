@@ -118,3 +118,24 @@ fn a_rejected_first_change_restores_an_unspecified_launch_level() {
     );
     assert_eq!(state.desired(), None);
 }
+
+#[test]
+fn timeout_keeps_the_selection_uncertain_without_replaying_it() {
+    let mut state = EffortState::new(Some("low".into()));
+    state.record("first".into(), "high".into());
+    assert!(state.expire("first").is_none());
+    assert_eq!(state.desired(), Some("high"));
+    assert!(!state.has_pending());
+    assert!(state.resolve("first", None).is_none());
+    state.record("second".into(), "max".into());
+    assert_eq!(
+        state.resolve("second", Some("unavailable".into())),
+        Some(Event::EffortRejected {
+            message: "unavailable".into(),
+            effort: Some("high".into()),
+        })
+    );
+    state.record("third".into(), "medium".into());
+    assert!(state.resolve("third", None).is_none());
+    assert_eq!(state.desired(), Some("medium"));
+}

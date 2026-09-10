@@ -11,6 +11,7 @@ pub mod workflow;
 pub mod workspace;
 
 mod hook_store;
+mod request_policy;
 mod subprocess;
 
 mod event;
@@ -19,9 +20,7 @@ mod json;
 mod monitor;
 mod process;
 
-pub use codex::ProviderConfig as CodexProviderConfig;
-pub use workspace::{AgentWorkspace, MultiRootAccess};
-
+pub use crate::codex::ProviderConfig as CodexProviderConfig;
 #[cfg(test)]
 use crate::event::MAX_TITLE_CHARS;
 pub use crate::event::{
@@ -39,6 +38,7 @@ pub use crate::process::{
     AGENT_HOOK_EXE_ENV, AGENT_HOOK_PROTOCOL_VERSION, AGENT_HOOK_TOKEN_ENV, AGENT_HOOK_VERSION_ENV,
     AGENT_ROUTE_ENV, AGENT_TESTING_ENV, AgentProcess, agent_process,
 };
+pub use crate::workspace::{AgentWorkspace, MultiRootAccess};
 
 /// How to launch an agent CLI. Protocol-specific settings are carried here so
 /// adapters can map them onto their native environment or RPC surfaces.

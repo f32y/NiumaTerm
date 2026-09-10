@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, channel, sync_channel};
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -9,6 +10,7 @@ use crate::codex::ProviderConfig;
 use crate::codex::app_server::host::{
     HOST_INIT_RPC_ID, HostBootstrap, HostKey, Router, initialize_request, redact,
 };
+use crate::request_policy::RequestClass;
 
 fn router() -> Router {
     let (startup_tx, _startup_rx) = sync_channel(1);
@@ -21,6 +23,124 @@ fn register(router: &Router) -> (u64, Receiver<Value>) {
         let _ = tx.send(message);
     }));
     (owner, rx)
+}
+
+#[test]
+fn unanswered_requests_reserve_controls_and_expire_by_class() {
+    let router = router();
+    let (owner, rx) = register(&router);
+    let (other, other_rx) = register(&router);
+    for id in 0..120 {
+        router
+            .prepare_outgoing(owner, &mut json!({"id": id, "method": "thread/list"}))
+            .unwrap();
+    }
+    assert!(
+        router
+            .prepare_outgoing(owner, &mut json!({"id": 120, "method": "thread/read"}))
+            .is_err()
+    );
+    for id in 120..128 {
+        router
+            .prepare_outgoing(owner, &mut json!({"id": id, "method": "turn/interrupt"}))
+            .unwrap();
+    }
+    assert!(
+        router
+            .prepare_outgoing(owner, &mut json!({"id": 128, "method": "turn/interrupt"}))
+            .is_err()
+    );
+    let mut mutation = json!({"id": 1, "method": "thread/fork"});
+    router.prepare_outgoing(other, &mut mutation).unwrap();
+    let now = Instant::now();
+    router.expire_requests(now + Duration::from_secs(16));
+    let controls: Vec<_> = rx.try_iter().collect();
+    assert_eq!(controls.len(), 8);
+    assert!(controls.iter().all(|response| {
+        response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("result is unknown")
+    }));
+    assert!(other_rx.try_recv().is_err());
+    router.expire_requests(now + Duration::from_secs(31));
+    let queries: Vec<_> = rx.try_iter().collect();
+    assert_eq!(queries.len(), 120);
+    assert!(queries.iter().all(|response| {
+        response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("retry the query")
+    }));
+    router
+        .prepare_outgoing(owner, &mut json!({"id": 129, "method": "thread/read"}))
+        .unwrap();
+    router.expire_requests(now + RequestClass::Mutation.timeout() + Duration::from_secs(1));
+    assert!(
+        other_rx.try_recv().unwrap()["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("result is unknown")
+    );
+    router.handle_message(json!({"id": mutation["id"], "result": {"thread": {"id": "late"}}}));
+    assert!(other_rx.try_recv().is_err());
+    router.expire_requests(now + Duration::from_secs(600));
+    assert!(other_rx.try_recv().is_err());
+}
+
+#[test]
+fn retired_requests_cannot_reassign_roots_or_affect_other_owners() {
+    let router = router();
+    let (owner, rx) = register(&router);
+    let (other, other_rx) = register(&router);
+    let mut old = start_request(10);
+    let mut current = start_request(11);
+    let mut independent = start_request(10);
+    router.prepare_outgoing(owner, &mut old).unwrap();
+    router.prepare_outgoing(owner, &mut current).unwrap();
+    router.prepare_outgoing(other, &mut independent).unwrap();
+    router.retain_requests(owner, &[11]);
+    router.handle_message(json!({"id": old["id"], "result": {"thread": {"id": "stale"}}}));
+    assert!(rx.try_recv().is_err());
+    router.handle_message(json!({"id": current["id"], "result": {"thread": {"id": "chosen"}}}));
+    assert_eq!(rx.try_recv().unwrap()["id"], 11);
+    router.handle_message(
+        json!({"id": independent["id"], "result": {"thread": {"id": "independent"}}}),
+    );
+    assert_eq!(other_rx.try_recv().unwrap()["id"], 10);
+}
+
+#[test]
+fn shared_host_bounds_pending_requests_across_many_owners() {
+    let router = router();
+    let mut owners = Vec::new();
+    for _ in 0..8 {
+        let (owner, _) = register(&router);
+        owners.push(owner);
+        for id in 0..120 {
+            router
+                .prepare_outgoing(owner, &mut json!({"id": id, "method": "thread/list"}))
+                .unwrap();
+        }
+    }
+    let (ninth, _) = register(&router);
+    assert!(
+        router
+            .prepare_outgoing(ninth, &mut json!({"id": 1, "method": "thread/list"}))
+            .is_err()
+    );
+    for owner in owners {
+        for id in 120..128 {
+            router
+                .prepare_outgoing(owner, &mut json!({"id": id, "method": "turn/interrupt"}))
+                .unwrap();
+        }
+    }
+    assert!(
+        router
+            .prepare_outgoing(ninth, &mut json!({"id": 2, "method": "turn/interrupt"}))
+            .is_err()
+    );
 }
 
 fn start_request(local_id: u64) -> Value {

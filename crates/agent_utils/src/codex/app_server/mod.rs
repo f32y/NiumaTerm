@@ -8,9 +8,9 @@
 use std::mem::take;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 #[cfg(test)]
 use std::time::UNIX_EPOCH;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -716,11 +716,25 @@ impl Session {
         Ok(())
     }
 
+    /// Check deadlines even when the server produces no output.
+    pub fn poll_timeouts(&mut self, now: Instant) {
+        if let Some(host) = &self.host {
+            host.expire_requests(now);
+        }
+    }
+
+    fn retain_request_routes(&self) {
+        if let Some(host) = &self.host {
+            host.retain_requests(self.registration_id, &self.control.request_ids());
+        }
+    }
+
     fn try_send_query(&mut self, kind: QueryKind, mut message: Value) -> Result<(), String> {
         let id = self.alloc_rpc_id();
         message["id"] = json!(id);
         self.try_send(message)?;
         self.control.track_query(id, kind);
+        self.retain_request_routes();
         Ok(())
     }
 
@@ -729,6 +743,7 @@ impl Session {
         message["id"] = json!(id);
         self.send(message);
         self.control.track_query(id, kind);
+        self.retain_request_routes();
     }
 
     fn send(&mut self, message: Value) {
@@ -791,6 +806,11 @@ impl Session {
             Some(ControlOperation::Command(command)) => (Some(command), None),
             Some(ControlOperation::Query(kind)) => (None, Some(kind)),
             Some(ControlOperation::Other | ControlOperation::ThreadRequest) => (None, None),
+            Some(ControlOperation::ThreadName)
+                if message["error"]["data"]["requestTimedOut"].as_bool() == Some(true) =>
+            {
+                (None, None)
+            }
             Some(ControlOperation::ThreadName) | None => return Vec::new(),
         };
         if let Some(events) = self.process_question_response(rpc_id, message) {
@@ -962,6 +982,7 @@ impl Session {
                 let result = &message["result"];
 
                 self.control.reset_thread();
+                self.retain_request_routes();
                 self.conversation.pending_approval = None;
                 self.conversation.compaction.reset_thread();
                 self.conversation.questions = QuestionState::default();

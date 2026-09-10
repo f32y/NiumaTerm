@@ -381,6 +381,48 @@ mod conversation_title_tests {
     }
 
     #[gpui::test]
+    fn request_watchdog_runs_without_messages_and_stops_after_replacement(cx: &mut TestAppContext) {
+        use std::time::Duration;
+
+        let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.runtime.epoch += 1;
+                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
+                    [],
+                    SlashCommandOutcome::NotReady,
+                    Vec::new(),
+                )));
+                pane.runtime.status = Status::Idle;
+                pane.start_request_watchdog(pane.runtime.epoch, cx);
+            });
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_secs(1));
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, _| {
+                let Some(Backend::Test(backend)) = &pane.runtime.backend else {
+                    panic!("test backend remains installed");
+                };
+                assert_eq!(backend.timeout_polls, 1);
+                pane.runtime.epoch += 1;
+            });
+        });
+        cx.executor().advance_clock(Duration::from_secs(2));
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, _| {
+                let Some(Backend::Test(backend)) = &pane.runtime.backend else {
+                    panic!("test backend remains installed");
+                };
+                assert_eq!(backend.timeout_polls, 1);
+            });
+        });
+    }
+
+    #[gpui::test]
     fn rejected_control_replies_keep_interaction_cards(cx: &mut TestAppContext) {
         use nmt_agent_utils::chat::{Event, Question, QuestionInput};
 

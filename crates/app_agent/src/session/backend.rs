@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use nmt_agent_utils::background_task::{BackgroundTaskKey, BackgroundTaskProvider};
 use nmt_agent_utils::chat::{
@@ -63,6 +63,7 @@ pub(super) struct ConversationTitleRequest {
 
 #[cfg(test)]
 pub(crate) struct TestBackend {
+    pub(crate) timeout_polls: usize,
     send_outcomes: VecDeque<SendOutcome>,
     slash_outcome: SlashCommandOutcome,
     commands: Vec<SlashCommandInfo>,
@@ -82,6 +83,7 @@ impl TestBackend {
     ) -> Self {
         Self {
             send_outcomes: send_outcomes.into_iter().collect(),
+            timeout_polls: 0,
             slash_outcome,
             commands,
             released: None,
@@ -110,6 +112,21 @@ impl Drop for TestBackend {
 }
 
 impl Backend {
+    pub(crate) fn poll_timeouts(&mut self, now: Instant) -> Vec<SessionEvent> {
+        match self {
+            Backend::Claude(session) => session.poll_timeouts(now),
+            Backend::Codex(session) => {
+                session.poll_timeouts(now);
+                Vec::new()
+            }
+            Backend::DeepSeek(_) => Vec::new(),
+            #[cfg(test)]
+            Backend::Test(session) => {
+                session.timeout_polls += 1;
+                Vec::new()
+            }
+        }
+    }
     /// Start the harness process for `kind` and wrap it in the matching
     /// variant. Resume differs by harness — Codex asks the running app-server
     /// to reopen a thread, Claude Code takes a session id as a launch flag —

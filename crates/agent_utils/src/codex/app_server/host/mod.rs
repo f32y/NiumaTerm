@@ -4,7 +4,7 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, LazyLock, Weak, mpsc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use parking_lot::{Condvar, Mutex};
 use serde_json::{Value, json};
@@ -76,6 +76,13 @@ pub(super) struct CodexHost {
 }
 
 impl CodexHost {
+    pub(super) fn expire_requests(&self, now: Instant) {
+        self.router.expire_requests(now);
+    }
+
+    pub(super) fn retain_requests(&self, owner: RegistrationId, ids: &[u64]) {
+        self.router.retain_requests(owner, ids);
+    }
     pub(super) fn acquire(
         launch: &LaunchConfig,
         catalog: &[LaunchConfig],

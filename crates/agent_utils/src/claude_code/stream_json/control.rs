@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::mem::take;
+use std::time::Instant;
 
 use serde_json::{Value, json};
 use tracing::debug;
 
 use crate::chat::{ContextComposition, ContextSegment, Event, Question, QuestionOption};
 use crate::claude_code::stream_json::effort::EffortState;
+use crate::request_policy::RequestClass;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PendingControlOperation {
@@ -18,6 +20,7 @@ pub(super) enum PendingControlOperation {
 pub(super) struct ControlState {
     next_request_id: u64,
     operations: HashMap<String, PendingControlOperation>,
+    deadlines: HashMap<String, (Instant, RequestClass)>,
     closed: bool,
     effort: EffortState,
     pub(super) pending_approval: Option<PendingApproval>,
@@ -29,6 +32,7 @@ impl Default for ControlState {
         Self {
             next_request_id: 1,
             operations: HashMap::new(),
+            deadlines: HashMap::new(),
             closed: false,
             effort: EffortState::default(),
             pending_approval: None,
@@ -38,6 +42,39 @@ impl Default for ControlState {
 }
 
 impl ControlState {
+    pub(super) fn check_capacity(&self, class: RequestClass, count: usize) -> Result<(), String> {
+        if self.closed {
+            return Err("Claude is not connected".into());
+        }
+        if count > 0 && self.deadlines.len().saturating_add(count) > class.limit() {
+            return Err(
+                "too many unanswered Claude requests; wait for pending requests to finish".into(),
+            );
+        }
+        Ok(())
+    }
+
+    pub(super) fn record_admitted(&mut self, id: String, class: RequestClass, now: Instant) {
+        self.deadlines.insert(id, (now + class.timeout(), class));
+    }
+
+    pub(super) fn complete(&mut self, id: &str) {
+        self.deadlines.remove(id);
+    }
+
+    pub(super) fn expired(&mut self, now: Instant) -> Vec<(String, RequestClass)> {
+        self.deadlines
+            .extract_if(|_, (deadline, _)| *deadline <= now)
+            .map(|(id, (_, class))| (id, class))
+            .collect()
+    }
+
+    pub(super) fn expire_effort(&mut self, id: &str) -> Option<Vec<Event>> {
+        self.effort
+            .contains(id)
+            .then(|| self.effort.expire(id).into_iter().collect())
+    }
+
     pub(super) fn with_effort(value: Option<String>) -> Self {
         Self {
             effort: EffortState::new(value),
@@ -86,6 +123,9 @@ impl ControlState {
     }
 
     pub(super) fn resolve(&mut self, response: &Value) -> Option<Event> {
+        if let Some(id) = response["request_id"].as_str() {
+            self.complete(id);
+        }
         if let Some(id) = response["request_id"].as_str()
             && self.effort.contains(id)
         {
@@ -95,8 +135,14 @@ impl ControlState {
     }
 
     pub(super) fn cancel_generated_title(&mut self) {
-        self.operations
-            .retain(|_, operation| !matches!(operation, PendingControlOperation::SessionTitle));
+        self.operations.retain(|id, operation| {
+            if matches!(operation, PendingControlOperation::SessionTitle) {
+                self.deadlines.remove(id);
+                false
+            } else {
+                true
+            }
+        });
     }
 
     pub(super) fn cancel_prompt(&mut self, id: &str) -> Vec<Event> {
@@ -133,6 +179,7 @@ impl ControlState {
 
     pub(super) fn close(&mut self, message: &str) -> Vec<Event> {
         self.closed = true;
+        self.deadlines.clear();
         let mut events = self.finish_turn();
         events.extend(self.effort.close(message));
         events.extend(fail_pending_control_operations(
