@@ -11,6 +11,8 @@ use nmt_agent_utils::AgentWorkspace;
 use nmt_agent_utils::chat::{SendOutcome, SessionSummary, SlashCommandOutcome};
 use nmt_agent_utils::codex::app_server;
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
+use nmt_platform::process::hidden_command;
+use serde_json::{Value, json};
 
 use crate::composer::PaletteControl;
 use crate::input_history::store::{HistoryStore, load_from_path, save_to_path};
@@ -175,6 +177,103 @@ fn history_directory_keys_follow_native_spelling() {
             scope("local", AgentKind::Codex, &directory.path().join("a/b")),
         );
     }
+}
+
+#[test]
+fn legacy_migration_and_stale_saves_preserve_distinct_records() {
+    let directory = TestDirectory::new();
+    let path = directory.path().join("history.json");
+    let scope = scope("local", AgentKind::Codex, directory.path());
+    let legacy = json!({"version":1,"scopes":[{
+        "target":scope.target,"backend":scope.backend,"cwd":scope.cwd,
+        "entries":["first","second","first"]
+    }]});
+    fs::write(&path, legacy.to_string()).unwrap();
+    let mut first = load_from_path(&path).unwrap();
+    let mut second = load_from_path(&path).unwrap();
+    first.record(&scope, "from first".into());
+    second.record(&scope, "from second".into());
+    save_to_path(&path, &first.snapshot()).unwrap();
+    save_to_path(&path, &second.snapshot()).unwrap();
+    save_to_path(&path, &first.snapshot()).unwrap();
+    let entries = load_from_path(&path).unwrap().entries(&scope);
+    assert_eq!(&entries[..3], ["first", "second", "first"]);
+    assert_eq!(entries.len(), 5);
+    assert!(entries.contains(&"from first".to_string()));
+    assert!(entries.contains(&"from second".to_string()));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(&path).unwrap()).unwrap()["version"],
+        2
+    );
+}
+
+#[test]
+fn stale_saves_do_not_revive_expired_entries_or_overwrite_invalid_files() {
+    let directory = TestDirectory::new();
+    let path = directory.path().join("history.json");
+    let scope = scope("local", AgentKind::Codex, directory.path());
+    let mut store = HistoryStore::default();
+    store.record(&scope, "expired".into());
+    let stale = store.snapshot();
+    for index in 0..100 {
+        store.record(&scope, format!("new-{index}"));
+    }
+    save_to_path(&path, &store.snapshot()).unwrap();
+    save_to_path(&path, &stale).unwrap();
+    let entries = load_from_path(&path).unwrap().entries(&scope);
+    assert_eq!(entries, store.entries(&scope));
+    fs::write(&path, b"invalid history").unwrap();
+    assert!(save_to_path(&path, &store.snapshot()).is_err());
+    assert_eq!(fs::read(&path).unwrap(), b"invalid history");
+}
+
+#[test]
+fn history_process_writer() {
+    let Some(path) = env::var_os("NMT_HISTORY_TEST_PATH") else {
+        return;
+    };
+    let path = PathBuf::from(path);
+    let writer = env::var("NMT_HISTORY_TEST_WRITER").unwrap();
+    let scope = scope("local", AgentKind::Codex, path.parent().unwrap());
+    let mut history = HistoryStore::default();
+    for index in 0..15 {
+        history.record(&scope, format!("writer-{writer}-{index}"));
+        save_to_path(&path, &history.snapshot()).unwrap();
+    }
+}
+
+#[test]
+fn concurrent_processes_merge_history_without_losing_entries() {
+    let directory = TestDirectory::new();
+    let path = directory.path().join("history.json");
+    let executable = env::current_exe().unwrap();
+    let mut children = Vec::new();
+    for writer in 0..3 {
+        children.push(
+            hidden_command(&executable)
+                .args(["--exact", "input_history::tests::history_process_writer"])
+                .env("NMT_HISTORY_TEST_PATH", &path)
+                .env("NMT_HISTORY_TEST_WRITER", writer.to_string())
+                .spawn()
+                .unwrap(),
+        );
+    }
+    for mut child in children {
+        assert!(child.wait().unwrap().success());
+    }
+    let scope = scope("local", AgentKind::Codex, directory.path());
+    let entries = load_from_path(&path).unwrap().entries(&scope);
+    assert_eq!(entries.len(), 45);
+    for writer in 0..3 {
+        for index in 0..15 {
+            assert!(entries.contains(&format!("writer-{writer}-{index}")));
+        }
+    }
+    assert_eq!(
+        fs::read_dir(directory.path()).unwrap().count(),
+        2,
+        "only the history and persistent lock should remain"
+    );
 }
 
 #[test]

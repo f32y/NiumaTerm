@@ -4270,11 +4270,13 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
+ "tempfile",
  "tracing",
  "tree-sitter-bash",
  "tree-sitter-diff",
  "tree-sitter-powershell",
  "tree-sitter-rust",
+ "uuid",
  "vte",
 ]
 
