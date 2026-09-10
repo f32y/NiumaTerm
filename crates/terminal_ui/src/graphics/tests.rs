@@ -60,6 +60,46 @@ fn frozen_image_cache_prunes_with_block_lifecycle() {
 }
 
 #[test]
+fn uploaded_images_release_after_store_and_pane_owners_are_gone() {
+    let mut store = GenerationStore::default();
+    let generation = store
+        .install(1, data(1, 1, 1, ColorType::Rgba, vec![0; 4]))
+        .unwrap();
+    generation.mark_uploaded();
+
+    let queue = store.release_queue();
+    let mut receiver = queue.lock().attach().unwrap();
+    assert!(queue.lock().attach().is_none());
+    store.remove(1);
+    assert!(store.is_empty());
+    assert!(receiver.try_recv().is_err());
+
+    // A displayed frame can outlive the pane and the live image mapping.
+    drop(store);
+    drop(queue);
+    drop(generation);
+    assert!(receiver.try_recv().is_ok());
+    assert!(receiver.try_recv().is_err());
+}
+
+#[test]
+fn frozen_eviction_releases_without_any_live_images_or_repaint() {
+    let store = GenerationStore::default();
+    let queue = store.release_queue();
+    let mut receiver = queue.lock().attach().unwrap();
+    let generation =
+        graphic_to_generation(data(2, 1, 1, ColorType::Rgba, vec![0; 4]), &queue).unwrap();
+    generation.mark_uploaded();
+    let cache: FrozenImageCache = Default::default();
+    cache.lock().insert((10, 2), generation);
+
+    prune_frozen_images(&cache, &[BlockEvent::HistoryCleared]);
+    assert!(store.is_empty());
+    assert!(receiver.try_recv().is_ok());
+    assert!(receiver.try_recv().is_err());
+}
+
+#[test]
 fn expanded_bounds_full_source_is_identity() {
     // Full [0,0,1,1] source → paint the whole image at the destination as-is.
     approx4(
@@ -180,7 +220,7 @@ fn unpainted_generation_releases_nothing() {
     }
 
     assert!(
-        queue.lock().is_empty(),
+        queue.lock().pending.is_empty(),
         "unpainted drop must not enqueue release"
     );
 }

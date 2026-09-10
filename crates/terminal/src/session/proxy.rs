@@ -2,32 +2,39 @@ use std::mem;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use nmt_terminal::block_store::SegmentMeta;
-use nmt_terminal::clipboard::Clipboard;
-use nmt_terminal::event::{EventListener, TerminalEvent, WindowId};
 use tracing::debug;
 
-use crate::graphics;
-use crate::session::{HostEvent, InFlightBlock, SessionSharedState};
-use crate::wake::{Wake, WakeSender};
+use crate::block_store::SegmentMeta;
+use crate::event::{EventListener, TerminalEvent, WindowId};
+use crate::session::{
+    HostEvent, InFlightBlock, SessionChange, SessionObserver, SessionSharedState,
+};
 
 #[derive(Clone)]
-pub struct TerminalEventProxy {
+pub(super) struct TerminalEventProxy {
     shared: Arc<SessionSharedState>,
     /// Source surface id, stamped onto every wake so the shell can route by tab.
     id: u64,
     /// Render-wakeup sender; `None` for sessions/tests without a live shell.
-    wake: Option<WakeSender>,
+    observer: Option<Arc<dyn SessionObserver>>,
 }
 
 impl TerminalEventProxy {
-    pub(super) fn new(shared: Arc<SessionSharedState>, id: u64, wake: Option<WakeSender>) -> Self {
-        Self { shared, id, wake }
+    pub(super) fn new(
+        shared: Arc<SessionSharedState>,
+        id: u64,
+        observer: Option<Arc<dyn SessionObserver>>,
+    ) -> Self {
+        Self {
+            shared,
+            id,
+            observer,
+        }
     }
 
-    fn signal(&self, kind: Wake) {
-        if let Some(tx) = &self.wake {
-            tx.send(kind);
+    fn signal(&self, kind: SessionChange) {
+        if let Some(observer) = &self.observer {
+            observer.changed(kind);
         }
     }
 
@@ -41,7 +48,9 @@ impl TerminalEventProxy {
             return;
         }
 
-        graphics::prune_frozen_images(&self.shared.frozen_images, &batch);
+        if let Some(observer) = &self.observer {
+            observer.blocks(&batch);
+        }
         self.shared.block_store.lock().apply(batch);
     }
 }
@@ -61,7 +70,7 @@ impl EventListener for TerminalEventProxy {
             TerminalEvent::TerminalDamaged(_) | TerminalEvent::Render
         ) {
             self.flush_staged_blocks();
-            self.signal(Wake::Content(self.id));
+            self.signal(SessionChange::Content);
 
             return;
         }
@@ -74,24 +83,11 @@ impl EventListener for TerminalEventProxy {
                 return;
             }
 
-            let mut store = self.shared.generation_store.lock();
-
-            for (image_id, data) in queues.pending_images {
-                store.install(image_id, data);
+            if let Some(observer) = &self.observer {
+                observer.graphics(queues);
             }
 
-            for gid in queues.remove_queue {
-                store.remove(gid.0 as u32);
-            }
-
-            // Publish the live count lock-free so the render path can skip the store.
-            self.shared
-                .live_image_count
-                .store(store.len(), Ordering::Relaxed);
-
-            drop(store);
-
-            self.signal(Wake::Content(self.id));
+            self.signal(SessionChange::Content);
 
             return;
         }
@@ -102,13 +98,15 @@ impl EventListener for TerminalEventProxy {
             TerminalEvent::Bell => HostEvent::Bell,
             TerminalEvent::ProgressReport(report) => HostEvent::Progress(report),
             TerminalEvent::ClipboardStore(ty, text) => {
-                let mut clipboard = Clipboard::default();
-
-                clipboard.set(ty, text);
+                if let Some(observer) = &self.observer {
+                    observer.clipboard(ty, text);
+                }
 
                 return;
             }
             TerminalEvent::CloseTerminal(_) => {
+                self.shared.exited.store(true, Ordering::Release);
+                self.shared.selection.clear();
                 // The shell died: no ;D is coming for a running command, and any
                 // half-staged block batch for the interrupted read is discarded.
                 *self.shared.in_flight.lock() = None;
@@ -123,7 +121,10 @@ impl EventListener for TerminalEventProxy {
                 HostEvent::Notification { title, body }
             }
             TerminalEvent::InteractiveState(on) => HostEvent::InteractiveState(on),
-            TerminalEvent::AltScreen(on) => HostEvent::AltScreen(on),
+            TerminalEvent::AltScreen(on) => {
+                self.shared.alt_screen.store(on, Ordering::Release);
+                HostEvent::AltScreen(on)
+            }
             TerminalEvent::PromptBoundaryTrusted(on) => {
                 if !on {
                     // Trust lost mid-command (nested shell, malformed stream): the
@@ -171,6 +172,7 @@ impl EventListener for TerminalEventProxy {
                 HostEvent::CommandStarted
             }
             TerminalEvent::CommandFinished(cmd) => {
+                self.shared.selection.clear();
                 *self.shared.in_flight.lock() = None;
 
                 self.shared
@@ -197,6 +199,6 @@ impl EventListener for TerminalEventProxy {
         self.shared.events.lock().push_back(host);
 
         // A user-visible event changes chrome (tab title, status, attention).
-        self.signal(Wake::Chrome(self.id));
+        self.signal(SessionChange::HostEvents);
     }
 }

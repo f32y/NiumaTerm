@@ -1,3 +1,7 @@
+use nmt_terminal::clipboard::{Clipboard, ClipboardType};
+
+use crate::surface::TerminalSurface;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TerminalKeyAction {
     Write(Vec<u8>),
@@ -19,35 +23,21 @@ pub(crate) enum TerminalKeyResult {
 }
 
 impl TerminalSurface {
-    pub fn write_text(&self, text: &str) -> bool {
-        self.write_bytes(text.as_bytes())
-    }
-
-    pub(super) fn write_bytes(&self, bytes: &[u8]) -> bool {
-        if bytes.is_empty() || self.read_only.load(Ordering::Relaxed) {
-            return false;
-        }
-
-        self.session.write_input(bytes);
-
-        true
-    }
-
     pub(crate) fn apply_key_action(&self, action: TerminalKeyAction) -> TerminalKeyResult {
         match action {
             TerminalKeyAction::Write(bytes) => {
-                if self.write_bytes(&bytes) {
+                if self.session.write_input(&bytes) {
                     TerminalKeyResult::Handled
                 } else {
                     TerminalKeyResult::Ignored
                 }
             }
             TerminalKeyAction::CopyOrWrite(bytes) => {
-                if self.selection.copy(&self.session, self.viewport_top()) {
+                if self.copy_selection() {
                     return TerminalKeyResult::Copied;
                 }
 
-                if self.write_bytes(&bytes) {
+                if self.session.write_input(&bytes) {
                     TerminalKeyResult::Handled
                 } else {
                     TerminalKeyResult::Ignored
@@ -69,36 +59,19 @@ impl TerminalSurface {
 
         let text = clipboard.get(ClipboardType::Clipboard);
 
-        self.paste_text(&text)
+        self.session.paste_text(&text)
     }
 
-    pub(crate) fn paste_text(&self, text: &str) -> bool {
-        let Some(bytes) = paste_payload(text, self.modes().contains(Mode::BRACKETED_PASTE)) else {
+    fn copy_selection(&self) -> bool {
+        let Some(text) = self.session.selected_text().filter(|text| !text.is_empty()) else {
             return false;
         };
 
-        self.write_bytes(&bytes)
+        let mut clipboard = Clipboard::default();
+
+        clipboard.set(ClipboardType::Clipboard, text);
+        self.session.clear_selection();
+
+        true
     }
 }
-
-pub(super) fn paste_payload(text: &str, bracketed: bool) -> Option<Vec<u8>> {
-    if text.is_empty() {
-        return None;
-    }
-
-    let mut body = text.replace("\r\n", "\r").replace('\n', "\r");
-
-    if bracketed {
-        body = body.replace("\x1b[201~", "");
-    }
-
-    Some(bracket_paste(body.as_bytes(), bracketed))
-}
-
-use std::sync::atomic::Ordering;
-
-use nmt_input::bracket_paste;
-use nmt_terminal::clipboard::{Clipboard, ClipboardType};
-use nmt_terminal::terminal::Mode;
-
-use crate::surface::TerminalSurface;

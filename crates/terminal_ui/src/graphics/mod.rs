@@ -9,15 +9,20 @@
 //! still paint it.
 
 use std::collections::{self, HashMap};
+#[cfg(test)]
 use std::mem;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use gpui::RenderImage;
 use image_rs::{Frame, RgbaImage};
 use nmt_terminal::event::BlockEvent;
 use nmt_terminal::graphics::{ColorType, GraphicData};
 use parking_lot::Mutex;
+
+mod session;
+pub(crate) use crate::graphics::session::SessionImages;
 
 // Generations are built and dropped on the PTY thread, so both the GPUI image
 // and the wrapper must cross threads. The compile-time assertion enforces the invariant.
@@ -30,9 +35,40 @@ const _: fn() = || {
 
 /// UI-thread atlas-release queue for one window/pane. An [`ImageGeneration`] that
 /// reached the GPUI atlas pushes its `Arc<RenderImage>` here exactly once when its
-/// final reference drops; the UI drains it through `Window::drop_image` on content
-/// wakes. Cheap to clone (an `Arc`).
-pub type ReleaseQueue = Arc<Mutex<Vec<Arc<RenderImage>>>>;
+/// final reference drops; an independent UI task drains it through
+/// `Window::drop_image`, without waiting for content rendering.
+pub type ReleaseQueue = Arc<Mutex<ImageReleases>>;
+
+/// Before the first paint releases stay local. Once attached, a window task
+/// receives them even if the pane is hidden or has already been destroyed.
+#[derive(Debug, Default)]
+pub struct ImageReleases {
+    pending: Vec<Arc<RenderImage>>,
+    sender: Option<UnboundedSender<Arc<RenderImage>>>,
+}
+
+impl ImageReleases {
+    fn push(&mut self, image: Arc<RenderImage>) {
+        if let Some(sender) = &self.sender {
+            let _ = sender.unbounded_send(image);
+        } else {
+            self.pending.push(image);
+        }
+    }
+
+    pub(crate) fn attach(&mut self) -> Option<UnboundedReceiver<Arc<RenderImage>>> {
+        if self.sender.is_some() {
+            return None;
+        }
+
+        let (sender, receiver) = unbounded();
+        for image in self.pending.drain(..) {
+            let _ = sender.unbounded_send(image);
+        }
+        self.sender = Some(sender);
+        Some(receiver)
+    }
+}
 
 /// One decoded Kitty image generation: an immutable CPU-only [`RenderImage`], its
 /// byte size (for the frozen-history budget), an atomic "reached the atlas" flag,
@@ -257,8 +293,9 @@ impl GenerationStore {
 
     /// Take the accumulated atlas releases so the UI can drain them through
     /// `Window::drop_image`. Includes releases from frozen blocks sharing this queue.
+    #[cfg(test)]
     pub fn drain_released(&self) -> Vec<Arc<RenderImage>> {
-        mem::take(&mut *self.release.lock())
+        mem::take(&mut self.release.lock().pending)
     }
 
     pub fn len(&self) -> usize {

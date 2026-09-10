@@ -7,7 +7,7 @@ impl TerminalPane {
     /// their presentation, so display changes never hide frozen output.
     /// Alt-screen stays a plain terminal grid.
     pub(crate) fn block_list_mode(&self, _cx: &App) -> bool {
-        self.surface.engine_blocks() && !self.surface.alt_screen()
+        self.surface.session.engine_blocks() && !self.surface.session.alt_screen()
     }
 
     pub(super) fn block_chrome_enabled(&self, cx: &App) -> bool {
@@ -47,7 +47,7 @@ impl TerminalPane {
     /// inside the live item when scrolling into a running command.
     /// 0 in classic single-grid mode (no block list is shown there anyway).
     fn live_history_rows(&self, frame: &TerminalFrame) -> u64 {
-        if !self.surface.engine_blocks() {
+        if !self.surface.session.engine_blocks() {
             return 0;
         }
 
@@ -168,7 +168,7 @@ impl TerminalPane {
         position: Point<Pixels>,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.surface.mouse_reporting_active() {
+        if self.surface.session.mouse_reporting_active() {
             return false;
         }
 
@@ -205,7 +205,7 @@ impl TerminalPane {
         let cols = self.content_cols();
         let pad_rows = block_pad_rows(cx);
         let (resolved, max_scroll) = self.block_list.scrollbar;
-        let store = self.surface.block_store();
+        let store = self.surface.session.block_store();
 
         // One lock hold for both reads: target resolution and offset
         // conversion see the same block-list state.
@@ -241,7 +241,7 @@ impl TerminalPane {
     /// when one is known.
     fn selected_frozen_command(&self) -> Option<String> {
         let item = self.frozen.selected()?;
-        let store = self.surface.block_store();
+        let store = self.surface.session.block_store();
         let store = store.lock();
 
         if item < store.items().len() {
@@ -257,7 +257,7 @@ impl TerminalPane {
 
     fn selected_frozen_output(&self) -> Option<String> {
         let item = self.frozen.selected()?;
-        let store = self.surface.block_store();
+        let store = self.surface.session.block_store();
         let store = store.lock();
 
         if item < store.items().len() {
@@ -292,14 +292,15 @@ impl TerminalPane {
         // The PTY path acquires engine before store, so release the store
         // guard before asking the surface to inspect the engine-owned block.
         let handle = {
-            let store = self.surface.block_store();
+            let store = self.surface.session.block_store();
             let store = store.lock();
             store.items().get(point.item)?.handle()?
         };
 
-        let ((start_line, start_col), (end_line, end_col)) =
-            self.surface
-                .frozen_selection_range(handle, point.line, point.col, selection_type)?;
+        let ((start_line, start_col), (end_line, end_col)) = self
+            .surface
+            .session
+            .frozen_selection_range(handle, point.line, point.col, selection_type)?;
 
         Some((
             FrozenPoint {
@@ -324,7 +325,7 @@ impl TerminalPane {
         b: block_list::FrozenPoint,
     ) -> String {
         let pieces = {
-            let store = self.surface.block_store();
+            let store = self.surface.session.block_store();
             let store = store.lock();
 
             block_list::frozen_selection_pieces(&store, a, b)
@@ -347,6 +348,7 @@ impl TerminalPane {
         end: Option<(usize, u32)>,
     ) -> Option<String> {
         self.surface
+            .session
             .acquire_block(handle)?
             .block
             .format_range_clamped(start, end, true, true)
@@ -390,8 +392,8 @@ impl TerminalPane {
             return;
         };
 
-        self.surface.write_text(&command);
-        self.surface.write_text("\r");
+        self.surface.session.write_text(&command);
+        self.surface.session.write_text("\r");
 
         self.invalidate(cx);
     }
@@ -421,7 +423,7 @@ impl TerminalPane {
         if block_list_mode {
             let cols = self.content_cols();
             let pad_rows = block_pad_rows(cx);
-            let store = self.surface.block_store();
+            let store = self.surface.session.block_store();
             let live_rows = frame_content_rows(frame);
             let history_rows = self.live_history_rows(frame);
 

@@ -1,13 +1,11 @@
-use nmt_terminal::clipboard::{Clipboard, ClipboardType};
-use nmt_terminal::ghostty::{BlockHandle, BlockRef, Palette};
-use nmt_terminal::render_buffer::RenderBuffer;
-use nmt_terminal::selection::{Selection, SelectionRange, SelectionType, WORD_DELIMITERS};
-use nmt_terminal::terminal::pos::{Column, Line, Pos, Side};
 use parking_lot::Mutex;
 
+use crate::ghostty::{BlockHandle, BlockRef, Palette};
+use crate::render_buffer::RenderBuffer;
+use crate::selection::{Selection, SelectionRange, SelectionType, WORD_DELIMITERS};
 use crate::session::TerminalSession;
-use crate::surface::TerminalSurface;
-use crate::surface::mouse::{SurfaceCellSide, SurfaceMouseEventKind, SurfaceScreenCell};
+use crate::session::mouse::{SurfaceCellSide, SurfaceMouseEventKind, SurfaceScreenCell};
+use crate::terminal::pos::{Column, Line, Pos, Side};
 
 #[cfg(test)]
 mod tests;
@@ -17,7 +15,7 @@ mod tests;
 /// viewport scrolls; every query therefore takes the caller's current
 /// `viewport_top` instead of caching one that would go stale on the next scroll.
 #[derive(Default)]
-pub(crate) struct SurfaceSelection {
+pub(super) struct SurfaceSelection {
     selection: Mutex<Option<Selection>>,
 }
 
@@ -154,58 +152,50 @@ impl SurfaceSelection {
             )
             .ok()
     }
-
-    pub(super) fn copy(&self, session: &TerminalSession, viewport_top: i32) -> bool {
-        let Some(text) = self.text(session, viewport_top) else {
-            return false;
-        };
-
-        if text.is_empty() {
-            return false;
-        }
-
-        let mut clipboard = Clipboard::default();
-
-        clipboard.set(ClipboardType::Clipboard, text);
-
-        self.clear();
-
-        true
-    }
 }
 
-impl TerminalSurface {
-    pub(crate) fn apply_screen_selection(
+impl TerminalSession {
+    pub fn selected_text(&self) -> Option<String> {
+        self.shared.selection.text(self, self.viewport_top())
+    }
+
+    pub fn selection_range(&self) -> Option<SelectionRange> {
+        self.shared.selection.range_at(self, self.viewport_top())
+    }
+
+    pub fn apply_screen_selection(
         &self,
         cell: SurfaceScreenCell,
         side: SurfaceCellSide,
         kind: SurfaceMouseEventKind,
         selection_type: SelectionType,
     ) -> bool {
-        self.selection
+        self.shared
+            .selection
             .apply_screen(cell, side, kind, selection_type)
     }
 
-    pub(crate) fn selection_screen_range(&self) -> Option<SelectionRange> {
-        self.selection
-            .screen_range(&self.session, self.viewport_top())
+    pub fn selection_screen_range(&self) -> Option<SelectionRange> {
+        self.shared
+            .selection
+            .screen_range(self, self.viewport_top())
     }
 
-    pub(crate) fn clear_selection(&self) {
-        self.selection.clear();
+    pub fn clear_selection(&self) {
+        self.shared.selection.clear();
     }
 
     /// Expand a click inside a frozen block into a selection range. A frozen
     /// block lives in the engine rather than in the render buffer, so this
     /// reads the block directly and never consults the live selection.
-    pub(crate) fn frozen_selection_range(
+    pub fn frozen_selection_range(
         &self,
         handle: BlockHandle,
         line: usize,
         col: u32,
         selection_type: SelectionType,
     ) -> Option<((usize, u32), (usize, u32))> {
-        let engine = self.session.engine.lock();
+        let engine = self.engine.lock();
         let palette = engine.color_palette();
         let block = engine.block_acquire(handle)?;
 
@@ -278,7 +268,7 @@ pub(super) fn block_selection_range(
 
         block
             .read_row_visit(row, palette, |x, text, wide, _| {
-                use nmt_terminal::ghostty::CellWide;
+                use crate::ghostty::CellWide;
 
                 if matches!(wide, CellWide::SpacerHead | CellWide::SpacerTail) {
                     return;

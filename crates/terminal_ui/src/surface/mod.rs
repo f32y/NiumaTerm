@@ -1,115 +1,62 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::{collections, time};
 
-use nmt_config::CursorShape;
-use nmt_config::colors::Colors;
 use nmt_config::local_state::TabState;
-use nmt_input::keyboard::ModifiersState;
+use nmt_config::{CursorShape, active_colors};
+#[cfg(windows)]
+use nmt_remote_net::{RemoteSession, net_pty::NetPty};
 use nmt_terminal::clipboard::{Clipboard, ClipboardType};
-use nmt_terminal::render_buffer::RenderBuffer;
-use nmt_terminal::terminal::pos::{Line, Pos};
-use parking_lot::Mutex;
-use tracing::{trace, warn};
+#[cfg(windows)]
+use nmt_terminal::pty_pipe::SessionOptions;
+use nmt_terminal::session::{TerminalSession, TerminalSessionConfig};
+use tracing::trace;
 
 use crate::frame::TerminalFrame;
+use crate::graphics::SessionImages;
 use crate::metrics;
-use crate::session::{HostEvent, TerminalSession, TerminalSessionConfig};
 use crate::wake::{Wake, WakeSender, WakeSignal};
 
 mod input;
-mod mouse;
+#[cfg(all(test, windows))]
+mod profile_tests;
 mod reads;
-mod scroll;
-mod selection;
-
-use crate::session;
 #[cfg(test)]
-use crate::surface::input::paste_payload;
-pub(crate) use crate::surface::input::{TerminalKeyAction, TerminalKeyResult};
-pub(crate) use crate::surface::mouse::{
+mod tests;
+
+pub(crate) use nmt_terminal::session::{
     SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
 };
-#[cfg(test)]
-use crate::surface::mouse::{mouse_button_code, mouse_motion_code, mouse_report_mods};
-use crate::surface::selection::SurfaceSelection;
-#[cfg(test)]
-use crate::surface::selection::{block_selection_range, selection_screen_range};
+
+pub(crate) use crate::surface::input::{TerminalKeyAction, TerminalKeyResult};
 
 pub struct TerminalSurface {
-    session: TerminalSession,
+    pub(crate) session: TerminalSession,
+    pub(crate) images: Arc<SessionImages>,
     launch_state: TabState,
-    last_cwd: Mutex<Option<String>>,
-    selection: SurfaceSelection,
-    read_only: AtomicBool,
-    /// A full-screen program owns the grid (alt-screen). A subset of
-    /// [`Self::interactive`] — excludes the unmarked-prompt fallback — used to
-    /// suppress command-block chrome only when the whole grid is repainted by a
-    /// TUI, keeping blocks visible during plain interactive prompts.
-    alt_screen: AtomicBool,
-    /// Current grid size, tracked so [`Self::resize_for_content`] can skip
-    /// no-op resizes when the laid-out area maps to the same cell grid.
     grid_size: (u16, u16),
 }
 
 impl TerminalSurface {
-    pub(crate) fn title(&self) -> String {
-        self.session.engine.lock().title()
-    }
-
-    pub(crate) fn set_theme_colors(&self, colors: &Colors) {
-        self.session.engine.lock().set_theme_colors(colors);
-    }
-
-    pub(crate) fn set_cursor_shape(&self, shape: CursorShape) -> bool {
-        let next = {
-            let mut engine = self.session.engine.lock();
-
-            if let Err(error) = engine.set_default_cursor_shape(shape) {
-                warn!("failed to update cursor shape: {error}");
-                return false;
-            }
-
-            engine.snapshot()
-        };
-
-        let next = match next {
-            Ok(next) => next,
-            Err(error) => {
-                warn!("failed to refresh terminal after cursor shape change: {error}");
-                return false;
-            }
-        };
-
-        *self.session.render_buffer.lock() = next;
-
-        true
-    }
-
     pub fn new(
         config: TerminalSessionConfig,
         id: u64,
         wake: Option<WakeSender>,
     ) -> Result<Self, String> {
         let grid_size = (config.cols, config.rows);
-        let launch_state = config.restorable_tab_state();
+        let launch_state = restorable_tab_state(&config);
         let config = config.with_shell_integration();
-        let session = TerminalSession::new(&config, id, wake)
+        let images = Arc::new(SessionImages::new(id, wake));
+        let session = TerminalSession::new(&config, id, active_colors(), Some(images.clone()))
             .map_err(|error| format!("{:?}: {}", error.code, error))?;
 
         Ok(Self {
             session,
+            images,
             launch_state,
-            last_cwd: Mutex::new(None),
-            selection: SurfaceSelection::default(),
-            read_only: AtomicBool::new(false),
-            alt_screen: AtomicBool::new(false),
             grid_size,
         })
     }
 
-    /// Build a surface for the GPUI shell: a fixed initial grid and PTY wakeups
-    /// posted through the GPUI `wake` signal. Finished commands stay in engine
-    /// blocks so the UI can change their presentation without losing output.
     pub(crate) fn for_gpui(
         wake: WakeSignal,
         surface_id: u64,
@@ -131,57 +78,42 @@ impl TerminalSurface {
         Self::new(config, surface_id, Some(wake_sender))
     }
 
-    /// Build a GPUI surface backed by a remote session. The attach snapshot
-    /// sizes the initial grid; live output/input/resize flow over the network.
     #[cfg(windows)]
     pub(crate) fn for_gpui_remote(
         wake: WakeSignal,
         surface_id: u64,
-        remote: nmt_remote_net::RemoteSession,
+        remote: RemoteSession,
     ) -> Result<Self, String> {
         let wake_sender = WakeSender::from_fn(move |kind: Wake| {
             wake.signal(kind);
         });
 
         let grid_size = (remote.snapshot().cols, remote.snapshot().rows);
-        let session = TerminalSession::new_remote(remote, surface_id, Some(wake_sender))
-            .map_err(|error| format!("{:?}: {}", error.code, error))?;
+        let images = Arc::new(SessionImages::new(surface_id, Some(wake_sender)));
+        let session = TerminalSession::from_pty(
+            NetPty::new(remote),
+            None,
+            SessionOptions {
+                cols: grid_size.0.max(1),
+                rows: grid_size.1.max(1),
+                route_id: surface_id as usize,
+                colors: active_colors(),
+                cursor_shape: CursorShape::Block,
+                scrollback_lines: 10_000,
+                engine_blocks: false,
+                terminal_responses: true,
+                output_sink: None,
+            },
+            Some(images.clone()),
+        )
+        .map_err(|error| format!("{:?}: {}", error.code, error))?;
 
         Ok(Self {
             session,
+            images,
             launch_state: TabState::default(),
-            last_cwd: Mutex::new(None),
-            selection: SurfaceSelection::default(),
-            read_only: AtomicBool::new(false),
-            alt_screen: AtomicBool::new(false),
             grid_size,
         })
-    }
-
-    /// Number of processes beyond the shell itself in the shell's Job
-    /// Object (requires the job-management setting; 0 otherwise).
-    pub(crate) fn child_process_count(&self) -> usize {
-        self.session.child_process_count()
-    }
-
-    pub fn poll_events(&self) -> Vec<HostEvent> {
-        self.session.poll_events()
-    }
-
-    pub(crate) fn in_flight_block(&self) -> Option<session::InFlightBlock> {
-        self.session.in_flight_block()
-    }
-
-    pub(crate) fn open_prompt_region(&self) -> bool {
-        self.session.open_prompt_region()
-    }
-
-    pub(crate) fn mouse_reporting_active(&self) -> bool {
-        self.mouse_mode().is_some()
-    }
-
-    pub(crate) fn mouse_reporting_active_for(&self, modifiers: ModifiersState) -> bool {
-        self.app_mouse_mode(modifiers).is_some()
     }
 
     pub(crate) fn copy_text_to_clipboard(&self, text: String) {
@@ -194,21 +126,10 @@ impl TerminalSurface {
         clipboard.set(ClipboardType::Clipboard, text);
     }
 
-    pub(crate) fn set_last_cwd(&self, cwd: String) {
-        *self.last_cwd.lock() = Some(normalize_osc7_pwd(&cwd));
-    }
-
     pub(crate) fn tab_state(&self) -> TabState {
-        tab_state_with_cwd(&self.launch_state, self.last_cwd.lock().clone())
+        tab_state_with_cwd(&self.launch_state, self.session.current_directory())
     }
 
-    pub fn resize(&self, cols: u16, rows: u16, width: u16, height: u16) {
-        self.session.resize(cols, rows, width, height);
-    }
-
-    /// Resize from a content rect (padding already excluded), e.g. the terminal
-    /// leaf's laid-out bounds when chrome occupies part of the window. Skips the
-    /// resize when the area maps to the same cell grid.
     pub(crate) fn resize_for_content(
         &mut self,
         width_px: f32,
@@ -221,35 +142,36 @@ impl TerminalSurface {
             return false;
         }
 
-        self.grid_size = (cols, rows);
-
-        self.resize(
+        let accepted = self.session.resize(
             cols,
             rows,
             metrics::pixel_u16(width_px),
             metrics::pixel_u16(height_px),
         );
 
-        true
+        if accepted {
+            self.grid_size = (cols, rows);
+        }
+        accepted
     }
 
     pub(crate) fn frame(&self, previous: Option<&TerminalFrame>) -> TerminalFrame {
         let total_start = time::Instant::now();
-        let selection = self.selection.range_at(&self.session, self.viewport_top());
+        let selection = self.session.selection_range();
 
         // Resolve live image generations before taking the render-buffer lock so the
         // generation-store and render locks are never nested. A graphics-free
         // session skips the store entirely via the lock-free live-image check, so it
         // pays nothing here.
-        let generations = if self.session.has_live_images() {
-            self.session.generation_store().lock().live_generations()
+        let generations = if self.images.has_live_images() {
+            self.images.generations.lock().live_generations()
         } else {
             collections::HashMap::new()
         };
 
         let sel_us = total_start.elapsed().as_micros();
 
-        let frame = self.with_render_buffer(|buf| {
+        let frame = self.session.with_render_buffer(|buf| {
             // Time spent here is *after* the render_buffer lock is acquired, so
             // (total - sel - extract) is the lock-wait + selection lock cost.
             let extract_start = time::Instant::now();
@@ -277,39 +199,6 @@ impl TerminalSurface {
 
         frame
     }
-
-    pub fn with_render_buffer<R>(&self, read: impl FnOnce(&RenderBuffer) -> R) -> R {
-        let buf = self.session.render_buffer.lock();
-
-        read(&buf)
-    }
-
-    /// SCREEN row of the top visible row (0 when the viewport is empty).
-    pub(super) fn viewport_top(&self) -> i32 {
-        self.session
-            .engine
-            .lock()
-            .viewport_top_screen()
-            .unwrap_or(0) as i32
-    }
-
-    pub fn alt_screen(&self) -> bool {
-        self.alt_screen.load(Ordering::Relaxed)
-    }
-
-    pub fn set_alt_screen(&self, on: bool) -> bool {
-        self.alt_screen.swap(on, Ordering::Relaxed) != on
-    }
-
-    pub fn mark_read_only(&self) {
-        self.read_only.store(true, Ordering::Relaxed);
-    }
-
-    /// Re-base a viewport-relative cell onto SCREEN coordinates, so the anchor
-    /// stays on the same content when the viewport scrolls.
-    pub(super) fn screen_pos(&self, pos: Pos) -> Pos {
-        Pos::new(Line(pos.row.0 + self.viewport_top()), pos.col)
-    }
 }
 
 fn tab_state_with_cwd(launch: &TabState, last_cwd: Option<String>) -> TabState {
@@ -322,30 +211,15 @@ fn tab_state_with_cwd(launch: &TabState, last_cwd: Option<String>) -> TabState {
     state
 }
 
-/// OSC 7 reports the cwd as a `file://host/path` URI (or a plain path from
-/// some shells); consumers (git status, session restore) need a filesystem
-/// path. `file:///C:/x` → `C:/x`, `file://host/home/u` → `/home/u`.
-fn normalize_osc7_pwd(pwd: &str) -> String {
-    let Some(rest) = pwd.strip_prefix("file://") else {
-        return pwd.to_string();
-    };
-
-    let Some(slash) = rest.find('/') else {
-        return pwd.to_string();
-    };
-
-    let path = &rest[slash..];
-
-    // "/C:/x" → "C:/x": Windows drive paths carry no leading slash.
-    if path.as_bytes().get(2) == Some(&b':') {
-        path[1..].to_string()
-    } else {
-        path.to_string()
+pub(crate) fn restorable_tab_state(config: &TerminalSessionConfig) -> TabState {
+    TabState {
+        name: None,
+        user_named: false,
+        shell: config.shell.clone(),
+        args: config.args.clone(),
+        cwd: config.working_dir.clone(),
+        agent: None,
+        agent_profile: None,
+        panes: None,
     }
 }
-
-/// Place one sparse row cell into the column-aligned char buffer: gaps
-/// (skipped blank cells) become spaces, and only the cell's first codepoint
-/// is kept so char index stays == grid column.
-#[cfg(test)]
-mod tests;

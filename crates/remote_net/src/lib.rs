@@ -16,6 +16,8 @@ mod devices;
 mod host;
 #[cfg(windows)]
 mod keys;
+#[cfg(windows)]
+pub mod net_pty;
 pub mod protocol;
 
 pub use channel::*;

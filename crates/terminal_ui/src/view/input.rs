@@ -54,7 +54,7 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if should_scroll_to_latest(&event.keystroke, self.surface.alt_screen())
+        if should_scroll_to_latest(&event.keystroke, self.surface.session.alt_screen())
             && self.scroll_to_latest(cx)
         {
             return;
@@ -155,7 +155,11 @@ impl TerminalPane {
     ) {
         window.focus(&self.focus, cx);
 
-        if self.surface.paste_text(&dropped_paths_text(paths.paths())) {
+        if self
+            .surface
+            .session
+            .paste_text(&dropped_paths_text(paths.paths()))
+        {
             self.invalidate(cx);
         }
     }
@@ -177,7 +181,7 @@ impl EntityInputHandler for TerminalPane {
             return;
         }
 
-        if self.surface.write_text(text) {
+        if self.surface.session.write_text(text) {
             self.react_to_pty_input(cx);
             self.invalidate(cx);
         }

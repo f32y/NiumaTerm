@@ -17,8 +17,9 @@
 use std::time::{Duration, Instant};
 use std::{path, thread};
 
-use nmt_terminal::ghostty::BlockHandle;
+use nmt_config::active_colors;
 
+use crate::ghostty::BlockHandle;
 use crate::session::{HostEvent, TerminalSession, TerminalSessionConfig};
 
 fn integration_config() -> TerminalSessionConfig {
@@ -176,7 +177,7 @@ fn run_command(session: &TerminalSession, all: &mut Vec<HostEvent>, cmd: &str) -
 
 /// Spawn an integrated session and wait for boundary trust.
 fn trusted_session() -> Option<(TerminalSession, Vec<HostEvent>)> {
-    let session = match TerminalSession::new(&integration_config(), 1, None) {
+    let session = match TerminalSession::new(&integration_config(), 1, active_colors(), None) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("skipping: could not spawn powershell.exe: {e:?}");
@@ -320,7 +321,7 @@ fn engine_blocks_bridge_freezes_command_output() {
 
     config.engine_blocks = true;
 
-    let session = match TerminalSession::new(&config, 1, None) {
+    let session = match TerminalSession::new(&config, 1, active_colors(), None) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("skipping: could not spawn powershell.exe: {e:?}");

@@ -4,41 +4,48 @@
 use std::collections::VecDeque;
 use std::error::Error as StdError;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time;
 
-use nmt_config::{CursorShape, active_colors};
+use nmt_config::colors::Colors;
 use nmt_platform::process::ProcessTree;
 use nmt_platform::{
     EventedPty, PtyOptions, WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env,
 };
-use nmt_terminal::block_store::BlockStore;
-use nmt_terminal::event::{BlockEvent, Msg, MsgSender, ProgressReport};
-use nmt_terminal::ghostty::GhosttyTerminal;
-use nmt_terminal::pty_pipe::{SessionOptions, start_session};
-use nmt_terminal::render_buffer::RenderBuffer;
 use parking_lot::{FairMutex, Mutex};
 use tracing::error;
 
-use crate::error::{EngineError, EngineErrorCode};
-use crate::graphics::GenerationStore;
-use crate::wake::WakeSender;
+use crate::block_store::BlockStore;
+use crate::event::{BlockEvent, Msg, MsgSender, ProgressReport};
+use crate::ghostty::GhosttyTerminal;
+use crate::pty_pipe::{SessionOptions, start_session};
+use crate::render_buffer::RenderBuffer;
+pub use crate::session::error::{EngineError, EngineErrorCode};
+pub use crate::session::mouse::{
+    SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
+};
+pub use crate::session::observer::{SessionChange, SessionObserver};
+use crate::session::selection::SurfaceSelection;
 
 mod config;
+mod error;
+mod input;
+mod mouse;
+mod observer;
 mod proxy;
+mod reads;
+mod scroll;
+mod selection;
 
-use crate::graphics;
 pub use crate::session::config::TerminalSessionConfig;
 use crate::session::config::default_shell;
-pub use crate::session::proxy::TerminalEventProxy;
+use crate::session::proxy::TerminalEventProxy;
 
-pub(crate) type SessionGraphics = Arc<Mutex<GenerationStore>>;
-
-pub(crate) type SessionEngine = Arc<FairMutex<GhosttyTerminal>>;
-pub(crate) type SessionBuffer = Arc<FairMutex<RenderBuffer>>;
+type SessionEngine = Arc<FairMutex<GhosttyTerminal>>;
+type SessionBuffer = Arc<FairMutex<RenderBuffer>>;
 
 /// A host event surfaced from the PTY thread to the shell. The shell
-/// drains these on its render tick via [`Session::poll_events`].
+/// drains these on its render tick via [`TerminalSession::poll_events`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostEvent {
     /// Terminal title changed (OSC 0/2).
@@ -83,10 +90,10 @@ pub struct InFlightBlock {
 /// `PtyPipe`. The PTY thread parses ConPTY output into the engine + render buffer;
 /// the render host reads the buffer under its own lock.
 pub struct TerminalSession {
-    pub(crate) engine: SessionEngine,
-    pub(crate) render_buffer: SessionBuffer,
-    pub(crate) vt_modes: Arc<AtomicU32>,
-    pub(crate) messenger: MsgSender,
+    engine: SessionEngine,
+    render_buffer: SessionBuffer,
+    vt_modes: Arc<AtomicU32>,
+    messenger: MsgSender,
     shared: Arc<SessionSharedState>,
     process_tree: Option<ProcessTree>,
     /// Engine-blocks mode is active: frozen history lives in
@@ -103,70 +110,27 @@ struct SessionSharedState {
     events: Mutex<VecDeque<HostEvent>>,
     /// Frozen block-split history; read side of the block-event pipeline.
     block_store: Arc<Mutex<BlockStore>>,
-    /// Live Kitty image generations keyed by image ID. Written on the PTY
-    /// thread from `UpdateGraphics`; read by the pane/frame path for paint.
-    generation_store: SessionGraphics,
-    /// Lock-free mirror of the live generation count. The render path reads this to
-    /// skip the generation-store lock/clone entirely when no images exist — so a
-    /// graphics-free session pays nothing per frame.
-    live_image_count: AtomicUsize,
     /// The in-flight command, if one is executing.
     in_flight: Mutex<Option<InFlightBlock>>,
     open_prompt: Mutex<bool>,
-    /// Lazily-read frozen Kitty generations keyed `(block_id, image_id)`;
-    /// lives beside the (gpui-free) block store because the values are gpui
-    /// images. Pruned by the proxy on the same batches that feed the store.
-    frozen_images: graphics::FrozenImageCache,
+    read_only: AtomicBool,
+    exited: AtomicBool,
+    alt_screen: AtomicBool,
+    selection: SurfaceSelection,
     /// Block events wait for the read-cycle damage notification so image
     /// generations are installed before frozen rows become visible.
     staged_blocks: Mutex<Vec<BlockEvent>>,
 }
 
 impl TerminalSession {
-    /// Create a terminal session backed by a remote session instead of a local
-    /// ConPTY. The attach snapshot primes the screen; live output, input, and
-    /// resize flow over the network through `NetPty`. Every other layer (engine,
-    /// proxy, render buffer, wake) is identical to a local session.
-    #[cfg(windows)]
-    pub fn new_remote(
-        remote: nmt_remote_net::RemoteSession,
-        id: u64,
-        wake: Option<WakeSender>,
-    ) -> Result<TerminalSession, EngineError> {
-        use crate::net_pty::NetPty;
-
-        let snapshot = remote.snapshot();
-        let cols = snapshot.cols.max(1);
-        let rows = snapshot.rows.max(1);
-
-        let pty = NetPty::new(remote);
-
-        Self::from_pty(
-            pty,
-            None,
-            SessionOptions {
-                cols,
-                rows,
-                route_id: id as usize,
-                colors: active_colors(),
-                cursor_shape: CursorShape::Block,
-                scrollback_lines: 10_000,
-                engine_blocks: false,
-                terminal_responses: true,
-                output_sink: None,
-            },
-            id,
-            wake,
-        )
-    }
-
     /// Create a terminal session and start its shell through the platform PTY.
-    /// `id` routes engine events to this surface; `wake` coalesces render work
-    /// on PTY damage and host events. `None` runs headless.
+    /// `id` identifies engine events. The optional observer receives synchronous
+    /// presentation updates without owning the session.
     pub fn new(
         config: &TerminalSessionConfig,
         id: u64,
-        wake: Option<WakeSender>,
+        colors: Colors,
+        observer: Option<Arc<dyn SessionObserver>>,
     ) -> Result<TerminalSession, EngineError> {
         let shell = config.shell.clone().unwrap_or_else(default_shell);
         let cols = config.cols.max(1);
@@ -206,27 +170,25 @@ impl TerminalSession {
                 cols,
                 rows,
                 route_id: id as usize,
-                colors: active_colors(),
+                colors,
                 cursor_shape: config.cursor_shape,
                 scrollback_lines: config.scrollback_lines,
                 engine_blocks: config.engine_blocks,
                 terminal_responses: true,
                 output_sink: None,
             },
-            id,
-            wake,
+            observer,
         )
     }
 
-    fn from_pty<T: EventedPty + Send + 'static>(
+    pub fn from_pty<T: EventedPty + Send + 'static>(
         pty: T,
         process_tree: Option<ProcessTree>,
         options: SessionOptions,
-        id: u64,
-        wake: Option<WakeSender>,
+        observer: Option<Arc<dyn SessionObserver>>,
     ) -> Result<Self, EngineError> {
         let shared = Arc::new(SessionSharedState::default());
-        let proxy = TerminalEventProxy::new(Arc::clone(&shared), id, wake);
+        let proxy = TerminalEventProxy::new(Arc::clone(&shared), options.route_id as u64, observer);
         let engine_blocks = options.engine_blocks;
         let handles = start_session(pty, proxy, options).map_err(engine_init_error)?;
 
@@ -242,29 +204,13 @@ impl TerminalSession {
     }
 
     /// Whether frozen history lives in finished engine blocks.
-    pub(crate) fn engine_blocks(&self) -> bool {
+    pub fn engine_blocks(&self) -> bool {
         self.engine_blocks
     }
 
     /// Shared frozen block-split history (renderer read side).
-    pub(crate) fn block_store(&self) -> Arc<Mutex<BlockStore>> {
+    pub fn block_store(&self) -> Arc<Mutex<BlockStore>> {
         Arc::clone(&self.shared.block_store)
-    }
-
-    /// Shared frozen Kitty generation cache (renderer read/insert side).
-    pub(crate) fn frozen_images(&self) -> graphics::FrozenImageCache {
-        Arc::clone(&self.shared.frozen_images)
-    }
-
-    /// Shared live Kitty image generations for pane and frame painting.
-    pub(crate) fn generation_store(&self) -> SessionGraphics {
-        Arc::clone(&self.shared.generation_store)
-    }
-
-    /// Whether any live Kitty image generation exists (lock-free). The render path
-    /// uses this to avoid touching the generation store when graphics are unused.
-    pub(crate) fn has_live_images(&self) -> bool {
-        self.shared.live_image_count.load(Ordering::Relaxed) != 0
     }
 
     /// Number of processes beyond the shell itself in the shell's Job
@@ -276,21 +222,51 @@ impl TerminalSession {
     }
 
     /// Write input bytes (already terminal-encoded) to the session's PTY.
-    pub fn write_input(&self, data: &[u8]) {
-        if data.is_empty() {
-            return;
+    /// True means the local queue accepted the bytes, not that a remote peer
+    /// received them or the shell processed them.
+    pub fn write_input(&self, data: &[u8]) -> bool {
+        if data.is_empty()
+            || self.shared.read_only.load(Ordering::Acquire)
+            || self.shared.exited.load(Ordering::Acquire)
+        {
+            return false;
         }
-
-        let _ = self.messenger.send(Msg::Input(data.to_vec().into()));
+        self.messenger
+            .send(Msg::Input(data.to_vec().into()))
+            .is_ok()
     }
 
-    pub fn resize(&self, cols: u16, rows: u16, width: u16, height: u16) {
-        let _ = self.messenger.send(Msg::Resize(WinsizeBuilder {
-            cols,
-            rows,
-            width,
-            height,
-        }));
+    pub fn resize(&self, cols: u16, rows: u16, width: u16, height: u16) -> bool {
+        if self.shared.exited.load(Ordering::Acquire) {
+            return false;
+        }
+        self.messenger
+            .send(Msg::Resize(WinsizeBuilder {
+                cols,
+                rows,
+                width,
+                height,
+            }))
+            .is_ok()
+    }
+
+    pub fn exited(&self) -> bool {
+        self.shared.exited.load(Ordering::Acquire)
+    }
+
+    pub fn alt_screen(&self) -> bool {
+        self.shared.alt_screen.load(Ordering::Acquire)
+    }
+
+    pub fn mark_read_only(&self) {
+        self.shared.read_only.store(true, Ordering::Release);
+    }
+
+    pub fn current_directory(&self) -> Option<String> {
+        self.engine
+            .lock()
+            .current_directory()
+            .map(|path| path.to_string_lossy().into_owned())
     }
 
     /// Drain all pending host events. Queued events (title/bell/exit/
@@ -338,4 +314,10 @@ fn engine_init_error(error: Box<dyn StdError>) -> EngineError {
 }
 
 #[cfg(test)]
+mod interaction_tests;
+#[cfg(test)]
+mod state_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod vtebench_tests;

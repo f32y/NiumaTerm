@@ -1,37 +1,47 @@
+use std::sync::atomic::Ordering;
+
+use nmt_input::encode_mouse_report;
+use nmt_input::keyboard::ModifiersState;
+
+use crate::selection::SelectionType;
+use crate::session::TerminalSession;
+use crate::terminal::Mode;
+use crate::terminal::pos::{Column, Line, Pos};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct SurfaceCell {
-    pub(crate) col: u16,
-    pub(crate) row: u16,
+pub struct SurfaceCell {
+    pub col: u16,
+    pub row: u16,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct SurfaceScreenCell {
-    pub(crate) col: u16,
-    pub(crate) row: u32,
+pub struct SurfaceScreenCell {
+    pub col: u16,
+    pub row: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SurfaceCellSide {
+pub enum SurfaceCellSide {
     Left,
     Right,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SurfaceMouseButton {
+pub enum SurfaceMouseButton {
     Left,
     Middle,
     Right,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SurfaceMouseEventKind {
+pub enum SurfaceMouseEventKind {
     Down,
     Up,
     Move,
 }
 
-impl TerminalSurface {
-    pub(crate) fn apply_mouse(
+impl TerminalSession {
+    pub fn apply_mouse(
         &self,
         cell: SurfaceCell,
         side: SurfaceCellSide,
@@ -72,12 +82,13 @@ impl TerminalSurface {
 
         let pos = Pos::new(Line(cell.row as i32), Column(cell.col as usize));
 
-        self.selection
+        self.shared
+            .selection
             .apply_at(self.screen_pos(pos), side, kind, selection_type)
     }
 
     pub(super) fn modes(&self) -> Mode {
-        let bits = self.session.vt_modes.load(Ordering::Relaxed);
+        let bits = self.vt_modes.load(Ordering::Relaxed);
 
         Mode::from_bits_truncate(bits)
     }
@@ -116,7 +127,7 @@ impl TerminalSurface {
             return false;
         };
 
-        self.write_bytes(&msg)
+        self.write_input(&msg)
     }
 }
 
@@ -160,13 +171,3 @@ pub(super) fn mouse_report_mods(modifiers: ModifiersState) -> u8 {
 
     mods
 }
-
-use std::sync::atomic::Ordering;
-
-use nmt_input::encode_mouse_report;
-use nmt_input::keyboard::ModifiersState;
-use nmt_terminal::selection::SelectionType;
-use nmt_terminal::terminal::Mode;
-use nmt_terminal::terminal::pos::{Column, Line, Pos};
-
-use crate::surface::TerminalSurface;

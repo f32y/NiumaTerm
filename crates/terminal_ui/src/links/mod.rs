@@ -203,7 +203,7 @@ impl TerminalPane {
         // `bottom_anchor_offsets`), so one value shifts every underline.
         let slack = self.current_row_offsets(cx).first().copied().unwrap_or(0.0);
 
-        let viewport_top = self.surface.viewport_top_screen_row();
+        let viewport_top = self.surface.session.viewport_top_screen_row();
 
         let (source, col) = match self.block_list_point_at(position, cx) {
             Some(BlockListPoint::Frozen(pt)) => {
@@ -211,7 +211,7 @@ impl TerminalPane {
                 // reads below (the PTY thread nests engine → store, so the
                 // reverse nesting would deadlock).
                 let handle = {
-                    let store = self.surface.block_store();
+                    let store = self.surface.session.block_store();
                     let store = store.lock();
                     store.items().get(pt.item)?.handle()?
                 };

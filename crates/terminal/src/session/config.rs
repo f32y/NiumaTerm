@@ -1,5 +1,4 @@
 use nmt_config::CursorShape;
-use nmt_config::local_state::TabState;
 use nmt_platform::PromptIntegration;
 
 pub(crate) fn default_shell() -> String {
@@ -38,23 +37,10 @@ pub struct TerminalSessionConfig {
 }
 
 impl TerminalSessionConfig {
-    pub(crate) fn restorable_tab_state(&self) -> TabState {
-        TabState {
-            name: None,
-            user_named: false,
-            shell: self.shell.clone(),
-            args: self.args.clone(),
-            cwd: self.working_dir.clone(),
-            agent: None,
-            agent_profile: None,
-            panes: None,
-        }
-    }
-
     /// Augment a session config so the shell evaluates the bundled OSC 133
     /// integration at startup. Whether that rides on startup arguments or on
     /// the child environment is the platform's answer, not this layer's.
-    pub(crate) fn with_shell_integration(mut self: TerminalSessionConfig) -> TerminalSessionConfig {
+    pub fn with_shell_integration(mut self: TerminalSessionConfig) -> TerminalSessionConfig {
         let Some(integration) = self.prompt_integration() else {
             return self;
         };

@@ -32,7 +32,11 @@ fn line_text(i: usize) -> String {
 
 #[test]
 #[ignore = "manual full-frame pipeline profile"]
-fn profile_full_frame_pipeline() {
+fn profile_full_frame_pipeline() -> Result<(), &'static str> {
+    if cfg!(debug_assertions) {
+        return Err("run this profile with cargo test --release -p nmt_terminal_ui");
+    }
+
     // 1. parse (write_vt)
     let mut engine = GhosttyTerminal::new(COLS, ROWS, 1_000_000).unwrap();
     let mut vt = String::new();
@@ -83,15 +87,37 @@ fn profile_full_frame_pipeline() {
     let mut previous = TerminalFrame::from_render_buffer_with_selection(&render_buf, None, &gens);
     let mut incremental_total = Duration::ZERO;
 
-    for i in 0..FRAMES {
+    const WARMUP_FRAMES: usize = 256;
+
+    for i in 0..FRAMES + WARMUP_FRAMES {
         engine.write_vt(if i % 2 == 0 { b"\rA" } else { b"\rB" });
         engine.snapshot_into(&mut render_buf).unwrap();
 
         let e = Instant::now();
-        let frame =
-            TerminalFrame::from_render_buffer_reusing(&render_buf, None, &gens, Some(&previous));
+        let frame = hint::black_box(TerminalFrame::from_render_buffer_reusing(
+            hint::black_box(&render_buf),
+            None,
+            hint::black_box(&gens),
+            Some(hint::black_box(&previous)),
+        ));
 
-        incremental_total += e.elapsed();
+        let elapsed = e.elapsed();
+
+        if i >= WARMUP_FRAMES {
+            incremental_total += elapsed;
+        }
+
+        // A timing comparison is meaningful only when both runs rebuild the
+        // same row and retain all other line allocations.
+        assert!(!previous.lines()[0].ptr_eq(&frame.lines()[0]));
+        assert!(
+            previous.lines()[1..]
+                .iter()
+                .zip(&frame.lines()[1..])
+                .all(|(old, new)| old.ptr_eq(new)),
+            "one-row profile must reuse every unchanged line"
+        );
+
         sink += frame.lines().len();
         previous = frame;
     }
@@ -158,7 +184,7 @@ fn profile_full_frame_pipeline() {
 
     let _ = writeln!(
         report,
-        "     one-row  {per_frame_incremental:?}/frame  (incremental)"
+        "     one-row  {per_frame_incremental:?}/frame  (incremental, 23/24 lines reused)"
     );
 
     let _ = writeln!(
@@ -185,4 +211,6 @@ fn profile_full_frame_pipeline() {
     );
 
     assert!(sink > 0);
+
+    Ok(())
 }

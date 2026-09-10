@@ -104,6 +104,7 @@ pub struct TerminalPane {
     pub(super) scrollbar: ScrollbarActivity,
     wake: wake::WakeSignal,
     dirty: DirtyState,
+    image_releases_attached: bool,
     /// The in-flight command mirrored from the session on drain.
     in_flight: Option<InFlightBlock>,
     /// Whether a trusted prompt input region is open.
@@ -210,9 +211,11 @@ impl TerminalPane {
                 .list
                 .set_alignment(block_list_alignment(fixed_bottom));
 
-            this.surface.set_theme_colors(&active_colors());
+            this.surface.session.set_theme_colors(&active_colors());
 
-            if cursor_shape != this.cursor_shape && this.surface.set_cursor_shape(cursor_shape) {
+            if cursor_shape != this.cursor_shape
+                && this.surface.session.set_cursor_shape(cursor_shape)
+            {
                 this.cursor_shape = cursor_shape;
             }
 
@@ -256,6 +259,7 @@ impl TerminalPane {
             scrollbar: ScrollbarActivity::default(),
             wake,
             dirty: DirtyState::default(),
+            image_releases_attached: false,
             in_flight: None,
             open_prompt: false,
             block_list: BlockListState::new(block_list_alignment(fixed_bottom_requested)),
@@ -352,7 +356,7 @@ impl TerminalPane {
     }
 
     pub fn terminal_title(&self) -> String {
-        self.surface.title()
+        self.surface.session.title()
     }
 
     /// The pane's last laid-out content size (`None` before the first paint).
@@ -365,7 +369,7 @@ impl TerminalPane {
     /// Number of child processes in the shell's Job Object (requires the
     /// job-management setting; 0 otherwise).
     pub fn child_process_count(&self) -> usize {
-        self.surface.child_process_count()
+        self.surface.session.child_process_count()
     }
 
     /// Whether a command is currently executing in this pane. Mirrors the
@@ -390,6 +394,29 @@ impl TerminalPane {}
 
 impl Render for TerminalPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.image_releases_attached {
+            let queue = self.surface.images.generations.lock().release_queue();
+            if let Some(mut releases) = queue.lock().attach() {
+                let handle = window.window_handle();
+                // The task owns no pane or generation references. It drains through
+                // the original window until the final generation releases its sender.
+                cx.spawn(async move |_, cx| {
+                    while let Some(image) = releases.next().await {
+                        if handle
+                            .update(cx, |_, window, _| {
+                                let _ = window.drop_image(image);
+                            })
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                })
+                .detach();
+            }
+            self.image_releases_attached = true;
+        }
+
         self.dirty.begin_frame();
 
         self.wake.mark_delivered(self.id);
@@ -404,16 +431,6 @@ impl Render for TerminalPane {
         }
 
         let frame = self.frame_cache.current().unwrap_or_default();
-
-        // Release the atlas tiles of Kitty images whose final reference dropped
-        // (replaced, removed, evicted, or last frozen owner gone). Gated
-        // on the lock-free live-image check so a graphics-free session never touches
-        // the store here.
-        if self.surface.has_live_images() {
-            for image in self.surface.drain_released_images() {
-                let _ = window.drop_image(image);
-            }
-        }
 
         let settings = cx.global::<TerminalSettings>();
         let fixed_bottom = settings.fixed_bottom();

@@ -2,16 +2,11 @@ use std::mem;
 
 use nmt_input::keyboard::ModifiersState;
 
-use crate::surface::TerminalSurface;
-use crate::surface::mouse::SurfaceCell;
+use crate::session::TerminalSession;
+use crate::session::mouse::SurfaceCell;
 
-impl TerminalSurface {
-    pub(crate) fn apply_scroll(
-        &self,
-        cell: SurfaceCell,
-        lines: i32,
-        modifiers: ModifiersState,
-    ) -> bool {
+impl TerminalSession {
+    pub fn apply_scroll(&self, cell: SurfaceCell, lines: i32, modifiers: ModifiersState) -> bool {
         if lines == 0 {
             return false;
         }
@@ -25,19 +20,19 @@ impl TerminalSurface {
         self.scroll_lines(-(lines as isize))
     }
 
-    pub(crate) fn scroll_lines(&self, delta: isize) -> bool {
+    pub fn scroll_lines(&self, delta: isize) -> bool {
         if delta == 0 {
             return false;
         }
 
-        let before = self.session.render_buffer.lock().scrollbar();
+        let before = self.render_buffer.lock().scrollbar();
 
         if before.total <= before.len {
             return false;
         }
 
         let snap = {
-            let mut engine = self.session.engine.lock();
+            let mut engine = self.engine.lock();
             engine.scroll_viewport_delta(delta);
             engine.snapshot()
         };
@@ -48,7 +43,7 @@ impl TerminalSurface {
 
         let changed = next.scrollbar() != before;
 
-        let mut buf = self.session.render_buffer.lock();
+        let mut buf = self.render_buffer.lock();
 
         next.set_cursor_visible(buf.cursor_visible());
 

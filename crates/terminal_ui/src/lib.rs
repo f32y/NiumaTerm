@@ -8,23 +8,20 @@
 
 pub(crate) mod block_list;
 pub(crate) mod dirty;
-mod error;
 pub mod frame;
 pub(crate) mod graphics;
 pub(crate) mod input;
 pub(crate) mod layout;
 pub(crate) mod links;
 pub mod metrics;
-#[cfg(windows)]
-pub(crate) mod net_pty;
 pub(crate) mod paint_text;
 pub(crate) mod scrollbar;
-pub mod session;
+pub use nmt_terminal::session;
+#[cfg(test)]
+mod remote_tests;
 pub mod settings;
 pub(crate) mod surface;
 pub(crate) mod terminal_view;
 pub(crate) mod theme;
 pub mod view;
-#[cfg(test)]
-mod vtebench_repro;
 pub(crate) mod wake;

@@ -156,7 +156,7 @@ impl Element for BlockListItem {
                             pad_rows,
                         );
 
-                        let acquired = pane.read(cx).surface.acquire_block(info.handle);
+                        let acquired = pane.read(cx).surface.session.acquire_block(info.handle);
 
                         let mut view = block_list::frozen_block_view(
                             acquired.as_ref().map(|acq| (&acq.block, &acq.palette)),
@@ -252,7 +252,7 @@ impl Element for BlockListItem {
                     let lines = pane
                         .surface
                         .live_history_lines(visible.start as u64..visible.end as u64);
-                    let selection = pane.surface.selection_screen_range();
+                    let selection = pane.surface.session.selection_screen_range();
 
                     block_list::live_history_view(
                         lines,

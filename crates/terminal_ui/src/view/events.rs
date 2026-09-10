@@ -41,21 +41,16 @@ pub(super) fn terminal_surface_for_tab(
 }
 
 impl TerminalPane {
-    /// Drain queued host events, applying the pane-side effects (read-only on
-    /// exit, interactive state, boundary trust) and returning the events so the
+    /// Drain queued host events, refreshing presentation state and returning them so the
     /// shell pump can update chrome (tab title, exited, window title). Runs for
     /// every pane — active or background — driven by the shell's observer.
     pub fn drain_host_events(&mut self) -> Vec<HostEvent> {
-        let events = self.surface.poll_events();
+        let events = self.surface.session.poll_events();
 
         for event in &events {
             match event {
-                HostEvent::Exit => self.surface.mark_read_only(),
                 HostEvent::InteractiveState(on) => {
                     info!(interactive = *on, "terminal interactive state changed");
-                }
-                HostEvent::AltScreen(on) => {
-                    self.surface.set_alt_screen(*on);
                 }
                 HostEvent::PromptBoundaryTrusted(on) => {
                     info!(
@@ -63,8 +58,10 @@ impl TerminalPane {
                         "terminal prompt boundary trust changed"
                     );
                 }
-                HostEvent::Cwd(cwd) => self.surface.set_last_cwd(cwd.clone()),
-                HostEvent::Title(_)
+                HostEvent::Exit
+                | HostEvent::AltScreen(_)
+                | HostEvent::Cwd(_)
+                | HostEvent::Title(_)
                 | HostEvent::Bell
                 | HostEvent::Progress(_)
                 | HostEvent::Notification { .. } => {}
@@ -72,8 +69,6 @@ impl TerminalPane {
                     // Finishing transfers the active SCREEN rows into an
                     // immutable block, so live selection anchors no longer
                     // address the content they were created for.
-                    self.surface.clear_selection();
-
                     self.frame_cache.invalidate();
 
                     self.refresh_blocks();
@@ -100,7 +95,7 @@ impl TerminalPane {
 
     /// Mirror the session's live split state onto the pane.
     fn refresh_blocks(&mut self) {
-        self.in_flight = self.surface.in_flight_block();
-        self.open_prompt = self.surface.open_prompt_region();
+        self.in_flight = self.surface.session.in_flight_block();
+        self.open_prompt = self.surface.session.open_prompt_region();
     }
 }

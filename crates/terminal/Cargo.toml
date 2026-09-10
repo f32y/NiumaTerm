@@ -20,6 +20,7 @@ wayland = [
 [dependencies]
 libghostty-vt-sys.workspace = true
 nmt_config.workspace = true
+nmt_input.workspace = true
 nmt_platform = { workspace = true, features = ["clipboard"] }
 
 base64.workspace = true

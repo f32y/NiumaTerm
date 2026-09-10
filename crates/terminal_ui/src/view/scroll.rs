@@ -151,7 +151,7 @@ impl TerminalPane {
             if let (Some(frame), Some(cell)) = (self.frame_cache.current(), self.cell_metrics) {
                 let cols = self.content_cols();
                 let pad_rows = block_pad_rows(cx);
-                let store = self.surface.block_store();
+                let store = self.surface.session.block_store();
                 let store = store.lock();
                 let offset =
                     self.list_offset_for_px(&store, &frame, cols, cell.height_px, pad_rows, new);
@@ -185,7 +185,7 @@ impl TerminalPane {
 
         let delta = target as isize - sb.offset as isize;
 
-        if delta != 0 && self.surface.scroll_lines(delta) {
+        if delta != 0 && self.surface.session.scroll_lines(delta) {
             self.scrollbar.mark_activity(cx);
 
             self.invalidate(cx);

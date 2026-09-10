@@ -27,7 +27,6 @@ parking_lot.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-base64.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 tokio.workspace = true
 

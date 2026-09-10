@@ -10,23 +10,25 @@ mod images;
 mod line;
 
 #[cfg(test)]
-use cache::GenerationMap;
-pub(crate) use cache::TerminalFrameCache;
+use crate::frame::cache::GenerationMap;
+pub(crate) use crate::frame::cache::TerminalFrameCache;
 #[cfg(test)]
-use colors::BackgroundColors;
-pub use colors::theme_default_background;
-pub(crate) use colors::{theme_default_foreground, theme_selection_background};
-use extract::TerminalLineState;
+use crate::frame::colors::BackgroundColors;
+pub use crate::frame::colors::theme_default_background;
+pub(crate) use crate::frame::colors::{theme_default_foreground, theme_selection_background};
+use crate::frame::extract::TerminalLineState;
 #[cfg(test)]
-pub(crate) use extract::extract_row;
+pub(crate) use crate::frame::extract::extract_row;
 #[cfg(test)]
-use extract::{cursor_for_row, extract_row_with_colors, frame_cursor};
-pub(crate) use images::{FrameImage, ZLayer};
+use crate::frame::extract::{cursor_for_row, extract_row_with_colors, frame_cursor};
+pub(crate) use crate::frame::images::{FrameImage, ZLayer};
 #[cfg(test)]
-pub(crate) use images::{FrameImageKind, extract_frame_images};
+pub(crate) use crate::frame::images::{FrameImageKind, extract_frame_images};
 #[cfg(test)]
-pub(crate) use line::line_from_parts;
-pub(crate) use line::{LineBuilder, StyleRun, TerminalCell, TerminalColor, TerminalLine};
+pub(crate) use crate::frame::line::line_from_parts;
+pub(crate) use crate::frame::line::{
+    LineBuilder, StyleRun, TerminalCell, TerminalColor, TerminalLine,
+};
 
 #[derive(Clone, Default)]
 pub(crate) struct TerminalFrame {
@@ -75,7 +77,7 @@ mod tests;
 /// against the real render-thread cost.
 ///
 /// ```text
-/// cargo test --release -p app full_frame_profile -- --ignored --nocapture
+/// cargo test --release -p nmt_terminal_ui full_frame_profile -- --ignored --nocapture
 /// ```
 ///
 /// Stages, in pipeline order:

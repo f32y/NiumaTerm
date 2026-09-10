@@ -182,6 +182,7 @@ impl TerminalPane {
         // selection (and drops the engine one); any other press clears it.
         let reports_mouse = self
             .surface
+            .session
             .mouse_reporting_active_for(terminal_input::modifiers_state(event.modifiers));
 
         let selection_type = selection_type_for_click_count(event.click_count);
@@ -197,7 +198,7 @@ impl TerminalPane {
             {
                 // The engine highlight is baked into the cached frame, so
                 // clearing the selection needs a frame rebuild too.
-                self.surface.clear_selection();
+                self.surface.session.clear_selection();
 
                 if selection_type == SelectionType::Simple {
                     self.frozen_drag.begin(pt);
@@ -341,7 +342,7 @@ impl TerminalPane {
 
         // Block-split: scrolling is list state; the engine viewport stays
         // pinned. TUI mouse reporting still goes to the program.
-        if self.block_list_mode(cx) && !self.surface.mouse_reporting_active() {
+        if self.block_list_mode(cx) && !self.surface.session.mouse_reporting_active() {
             return;
         }
 
@@ -354,7 +355,7 @@ impl TerminalPane {
             &offsets,
         );
 
-        if self.surface.apply_scroll(
+        if self.surface.session.apply_scroll(
             cell,
             lines,
             terminal_input::modifiers_state(event.modifiers),
@@ -381,7 +382,7 @@ impl TerminalPane {
         let modifiers = terminal_input::modifiers_state(modifiers);
 
         if self.block_list_mode(cx)
-            && !self.surface.mouse_reporting_active_for(modifiers)
+            && !self.surface.session.mouse_reporting_active_for(modifiers)
             && button == Some(MouseButton::Left)
             && let Some(point) = self.block_list_point_at(position, cx)
         {
@@ -401,6 +402,7 @@ impl TerminalPane {
 
             if self
                 .surface
+                .session
                 .apply_screen_selection(cell, side, kind, selection_type)
             {
                 self.invalidate(cx);
@@ -421,7 +423,7 @@ impl TerminalPane {
 
         let (cell, side) = terminal_cell_at_position(position, origin, cell_metrics, &offsets);
 
-        let handled = self.surface.apply_mouse(
+        let handled = self.surface.session.apply_mouse(
             cell,
             side,
             button.and_then(surface_mouse_button),

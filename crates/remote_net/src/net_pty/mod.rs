@@ -22,9 +22,10 @@ use nmt_platform::{
     ChildEvent, EventedPty, Interest, Poll, ProcessReadWrite, SoftReady, Token, Waker,
     WinsizeBuilder,
 };
-use nmt_remote_net::{RemoteInput, RemoteSession, SessionByteEvent};
 use parking_lot::Mutex;
 use tracing::warn;
+
+use crate::{RemoteInput, RemoteSession, SessionByteEvent};
 
 /// Cap on unread network bytes. A local ConPTY throttles its child when the
 /// reader falls behind; the network stream has no such brake, so a remote
