@@ -18,6 +18,4 @@ toml.workspace = true
 toml_edit.workspace = true
 tracing.workspace = true
 nmt_platform.workspace = true
-
-[dev-dependencies]
 tempfile.workspace = true

@@ -5,14 +5,15 @@
 //! rewritten wholesale on save.
 
 use std::collections::BTreeMap;
+#[cfg(test)]
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
-use std::{fs, io};
 
 use serde::{Deserialize, Serialize};
-use toml::de::Error as TomlError;
 use toml::{from_str as parse_toml, to_string as serialize_toml};
 
-use crate::config_dir_path;
+use crate::{config_dir_path, persistence};
 
 fn is_false(value: &bool) -> bool {
     !*value
@@ -199,15 +200,22 @@ fn load_from(path: &Path) -> LocalState {
     try_load_from(path).unwrap_or_default()
 }
 
-/// A missing file loads as default; invalid TOML is reported to startup.
-pub fn try_load() -> Result<LocalState, TomlError> {
+/// A missing file loads as default; read and decoding failures reach startup.
+pub fn try_load() -> io::Result<LocalState> {
     try_load_from(&local_state_file_path())
 }
 
-fn try_load_from(path: &Path) -> Result<LocalState, TomlError> {
-    fs::read_to_string(path)
-        .ok()
-        .map_or(Ok(LocalState::default()), |content| parse_toml(&content))
+fn try_load_from(path: &Path) -> io::Result<LocalState> {
+    decode(persistence::read(path)?.as_deref())
+}
+
+fn decode(content: Option<&str>) -> io::Result<LocalState> {
+    content.map_or_else(
+        || Ok(LocalState::default()),
+        |content| {
+            parse_toml(content).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+        },
+    )
 }
 
 /// Atomic write (temp file + rename).
@@ -215,8 +223,8 @@ pub fn save(state: &LocalState) -> io::Result<()> {
     save_to(&local_state_file_path(), state)
 }
 
-/// Replace the agent defaults without replacing window state that may have
-/// been written by a different application instance.
+/// Update only the supplied profiles, preserving windows and other profiles
+/// that may have been written by another application instance.
 pub fn save_agent_defaults(agent_defaults: &BTreeMap<String, AgentDefaults>) -> io::Result<()> {
     save_agent_defaults_to(&local_state_file_path(), agent_defaults)
 }
@@ -225,26 +233,32 @@ fn save_agent_defaults_to(
     path: &Path,
     agent_defaults: &BTreeMap<String, AgentDefaults>,
 ) -> io::Result<()> {
-    let mut state = match fs::read_to_string(path) {
-        Ok(content) => parse_toml(&content)
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => LocalState::default(),
-        Err(err) => return Err(err),
-    };
-    state.agent_defaults.clone_from(agent_defaults);
-    save_to(path, &state)
+    update_state(path, |state| {
+        state.agent_defaults.extend(agent_defaults.clone());
+    })
+}
+
+/// Save window state without replacing newer profile choices on disk.
+pub fn save_windows(windows: &[WindowLocalState]) -> io::Result<()> {
+    save_windows_to(&local_state_file_path(), windows)
+}
+
+fn save_windows_to(path: &Path, windows: &[WindowLocalState]) -> io::Result<()> {
+    update_state(path, |state| state.windows = windows.to_vec())
+}
+
+fn update_state(path: &Path, edit: impl FnOnce(&mut LocalState)) -> io::Result<()> {
+    persistence::update(path, |content| {
+        let mut state = decode(content)?;
+        edit(&mut state);
+        serialize_toml(&state).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+    })
 }
 
 fn save_to(path: &Path, state: &LocalState) -> io::Result<()> {
-    let content = serialize_toml(state)
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)?;
-    }
-    let tmp = path.with_extension("toml.tmp");
-    fs::write(&tmp, content)?;
-    fs::rename(&tmp, path)?;
-    Ok(())
+    persistence::update(path, |_| {
+        serialize_toml(state).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+    })
 }
 
 #[cfg(test)]

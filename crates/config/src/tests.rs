@@ -186,6 +186,10 @@ fn save_settings_to_creates_updates_and_rejects_invalid() {
     assert_eq!(config.profiles.default, "PowerShell");
     assert!(!path.with_extension("toml.tmp").exists());
 
+    fs::write(&path, [0xff, 0xfe]).unwrap();
+    assert_eq!(save().unwrap_err().kind(), io::ErrorKind::InvalidData);
+    assert_eq!(fs::read(&path).unwrap(), [0xff, 0xfe]);
+
     fs::write(&path, "not [ valid").unwrap();
     assert!(save().is_err());
     assert_eq!(fs::read_to_string(&path).unwrap(), "not [ valid");

@@ -75,12 +75,13 @@ impl ThreadControls {
         profile: &AgentProfile,
         cx: &mut Context<AgentPane>,
     ) {
+        let key = defaults_key(kind, profile);
         let stored = {
             let defaults = cx.default_global::<AgentThreadDefaults>();
-            defaults
-                .0
-                .insert(defaults_key(kind, profile), self.settings.clone());
-            defaults.to_local_state()
+            defaults.0.insert(key.clone(), self.settings.clone());
+            let mut stored = defaults.to_local_state();
+            stored.retain(|name, _| name == &key);
+            stored
         };
 
         if let Err(err) = local_state::save_agent_defaults(&stored) {

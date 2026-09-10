@@ -416,12 +416,9 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
         // Restore disabled with saved sessions: rewrite the file without
         // them now, so a crash before quit can't resurrect them.
         if !restore_session && remembered_state.windows.iter().any(|w| w.session.is_some()) {
-            let clean = LocalState {
-                windows: initials.iter().map(|w| w.to_local_state(false)).collect(),
-                agent_defaults: remembered_state.agent_defaults.clone(),
-            };
+            let windows: Vec<_> = initials.iter().map(|w| w.to_local_state(false)).collect();
 
-            if let Err(err) = local_state::save(&clean) {
+            if let Err(err) = local_state::save_windows(&windows) {
                 warn!("failed to clear sessions from local_state.toml: {err}");
             }
         }
@@ -462,18 +459,15 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
 
             let save_session = cx.global::<AppSettings>().restore_last_session_when_opening;
 
-            let state = LocalState {
-                windows: cx
-                    .global::<WindowRegistry>()
-                    .0
-                    .iter()
-                    .map(|(_, w)| w.to_local_state(save_session))
-                    .collect(),
-                agent_defaults: cx.global::<AgentThreadDefaults>().to_local_state(),
-            };
+            let windows: Vec<_> = cx
+                .global::<WindowRegistry>()
+                .0
+                .iter()
+                .map(|(_, w)| w.to_local_state(save_session))
+                .collect();
 
-            if !state.windows.is_empty()
-                && let Err(err) = local_state::save(&state)
+            if !windows.is_empty()
+                && let Err(err) = local_state::save_windows(&windows)
             {
                 warn!("failed to save local_state.toml: {err}");
             }

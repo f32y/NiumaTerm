@@ -5,6 +5,7 @@ pub mod colors;
 mod credentials;
 pub mod defaults;
 pub mod local_state;
+mod persistence;
 pub mod profile;
 pub mod remote_session;
 pub mod render_types;
@@ -376,33 +377,28 @@ pub fn save_settings(patch: &SettingsPatch<'_>) -> io::Result<()> {
 }
 
 fn save_settings_to(path: &Path, patch: &SettingsPatch<'_>) -> io::Result<()> {
-    let mut doc = match fs::read_to_string(path) {
-        Ok(content) => content.parse::<DocumentMut>().map_err(|err| {
+    persistence::update(path, |content| {
+        let mut doc = match content {
+            Some(content) => content.parse::<DocumentMut>().map_err(|err| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("config.toml is not valid TOML, not saving settings: {err}"),
+                )
+            })?,
+            None => DocumentMut::new(),
+        };
+
+        // Credential encryption runs while patching, before any file is touched;
+        // a failure here must leave the existing configuration file as it is.
+        patch_settings_document(&mut doc, patch).map_err(|err| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("config.toml is not valid TOML, not saving settings: {err}"),
+                format!("not saving settings: {err}"),
             )
-        })?,
-        // Missing (or unreadable) file: start from an empty document.
-        Err(_) => DocumentMut::new(),
-    };
+        })?;
 
-    // Credential encryption runs while patching, before any file is touched;
-    // a failure here must leave the existing configuration file as it is.
-    patch_settings_document(&mut doc, patch).map_err(|err| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("not saving settings: {err}"),
-        )
-    })?;
-
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)?;
-    }
-    let tmp = path.with_extension("toml.tmp");
-    fs::write(&tmp, doc.to_string())?;
-    fs::rename(&tmp, path)?;
-    Ok(())
+        Ok(doc.to_string())
+    })
 }
 
 fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> Result<(), String> {

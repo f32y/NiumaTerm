@@ -1,5 +1,7 @@
 use std::env;
 
+use tempfile::tempdir;
+
 use crate::local_state::*;
 
 #[test]
@@ -161,6 +163,56 @@ fn save_agent_defaults_updates_only_agent_defaults() {
     assert_eq!(saved.agent_defaults, defaults);
 
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn windows_and_profile_updates_preserve_other_writers() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("local_state.toml");
+    let first = BTreeMap::from([(
+        "first".to_string(),
+        AgentDefaults {
+            model: Some("model-a".to_string()),
+            ..AgentDefaults::default()
+        },
+    )]);
+    let second = BTreeMap::from([(
+        "second".to_string(),
+        AgentDefaults {
+            model: Some("model-b".to_string()),
+            ..AgentDefaults::default()
+        },
+    )]);
+    save_agent_defaults_to(&path, &first).unwrap();
+    let windows = vec![WindowLocalState {
+        sidebar_width: Some(320.0),
+        ..WindowLocalState::default()
+    }];
+    save_windows_to(&path, &windows).unwrap();
+    save_agent_defaults_to(&path, &second).unwrap();
+    let state = try_load_from(&path).unwrap();
+    assert_eq!(state.windows, windows);
+    assert_eq!(state.agent_defaults["first"], first["first"]);
+    assert_eq!(state.agent_defaults["second"], second["second"]);
+
+    save_windows_to(&path, &[]).unwrap();
+    let cleared = try_load_from(&path).unwrap();
+    assert!(cleared.windows.is_empty());
+    assert_eq!(cleared.agent_defaults, state.agent_defaults);
+}
+
+#[test]
+fn local_state_read_errors_are_reported_and_preserved() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("local_state.toml");
+    fs::write(&path, [0xff]).unwrap();
+    assert_eq!(
+        try_load_from(&path).unwrap_err().kind(),
+        io::ErrorKind::InvalidData
+    );
+    assert!(save_windows_to(&path, &[]).is_err());
+    assert!(save_agent_defaults_to(&path, &BTreeMap::new()).is_err());
+    assert_eq!(fs::read(&path).unwrap(), [0xff]);
 }
 
 #[test]
