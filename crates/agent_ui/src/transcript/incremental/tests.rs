@@ -3,19 +3,13 @@ use std::time::{Duration, Instant};
 
 use gpui::{AppContext as _, TestAppContext};
 use nmt_agent::chat::{Item, ReplayItem, ReplayTurn};
+use nmt_agent::transcript::TextField;
 use nmt_config::agent::CollapseRows;
 
 use crate::profile::AgentKind;
 use crate::settings::AgentSettings;
 use crate::transcript::TranscriptView;
 use crate::transcript::reveal::RevealKey;
-
-fn select_summary(item: &mut Item) -> Option<&mut Option<String>> {
-    match item {
-        Item::Reasoning { summary, .. } => Some(summary),
-        _ => None,
-    }
-}
 
 fn history(turns: u64) -> TranscriptView {
     let mut view = TranscriptView::new(AgentKind::Codex, None);
@@ -68,7 +62,7 @@ fn streaming_rebuilds_only_the_changed_turn() {
     assert_rows_match_rebuild(&mut view, mode);
 
     for _ in 0..20 {
-        assert!(view.append_delta("live", "more", select_summary));
+        assert!(view.append_delta("live", "more", TextField::ReasoningSummary));
         assert_rows_match_rebuild(&mut view, mode);
         assert_eq!(view.row_cache.rebuilt_entries, 1);
     }
@@ -99,7 +93,7 @@ fn streaming_rebuilds_only_the_changed_turn() {
     view.clear();
 
     assert!(!view.contains_item("live"));
-    assert!(!view.append_delta("live", "stale", select_summary));
+    assert!(!view.append_delta("live", "stale", TextField::ReasoningSummary));
 
     assert_rows_match_rebuild(&mut view, mode);
     view.push_stamped(
@@ -110,7 +104,7 @@ fn streaming_rebuilds_only_the_changed_turn() {
         },
     );
 
-    assert!(view.append_delta("live", "new conversation", select_summary));
+    assert!(view.append_delta("live", "new conversation", TextField::ReasoningSummary));
 
     assert_rows_match_rebuild(&mut view, mode);
 }
@@ -128,10 +122,7 @@ fn indexed_updates_preserve_duplicate_id_order_and_item_kinds() {
         },
     );
 
-    assert!(view.append_delta("live", "answer", |item| match item {
-        Item::AgentMessage { text, .. } => Some(text),
-        _ => None,
-    }));
+    assert!(view.append_delta("live", "answer", TextField::Reply));
 
     view.merge_completed(&Item::AgentMessage {
         id: "live".into(),
@@ -140,10 +131,10 @@ fn indexed_updates_preserve_duplicate_id_order_and_item_kinds() {
     });
 
     assert!(
-        matches!(&view.items[0].item, Item::Reasoning { summary: Some(text), .. } if text == "working")
+        matches!(&view.content.entries()[0].item, Item::Reasoning { summary: Some(text), .. } if text == "working")
     );
     assert!(
-        matches!(&view.items[1].item, Item::AgentMessage { text: Some(text), .. } if text == "complete")
+        matches!(&view.content.entries()[1].item, Item::AgentMessage { text: Some(text), .. } if text == "complete")
     );
 
     assert_rows_match_rebuild(&mut view, CollapseRows::Off);
@@ -219,7 +210,7 @@ fn cached_rows_follow_disclosures_turns_and_mirrored_revisions(cx: &mut TestAppC
 
             assert_rows_match_rebuild(view, mode);
 
-            assert!(view.append_delta("replayed", " and extended", select_summary));
+            assert!(view.append_delta("replayed", " and extended", TextField::ReasoningSummary));
 
             assert_rows_match_rebuild(view, mode);
 
@@ -261,12 +252,7 @@ fn typed_edges_invalidate_cached_rows_until_the_reply_is_complete() {
 
     assert_rows_match_rebuild(&mut view, mode);
 
-    assert!(
-        view.append_delta("answer", "世界".repeat(100).as_str(), |item| match item {
-            Item::AgentMessage { text, .. } => Some(text),
-            _ => None,
-        })
-    );
+    assert!(view.append_delta("answer", "世界".repeat(100).as_str(), TextField::Reply));
 
     assert_rows_match_rebuild(&mut view, mode);
 
@@ -291,7 +277,7 @@ fn long_transcript_timing() {
     let started = Instant::now();
 
     for _ in 0..200 {
-        assert!(view.append_delta("live", "x", select_summary));
+        assert!(view.append_delta("live", "x", TextField::ReasoningSummary));
 
         let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
 
@@ -307,7 +293,7 @@ fn long_transcript_timing() {
     let started = Instant::now();
 
     for _ in 0..200 {
-        assert!(view.append_delta("live", "x", select_summary));
+        assert!(view.append_delta("live", "x", TextField::ReasoningSummary));
         view.refresh_rows(CollapseRows::WorkAndToolCalls);
         black_box(&view.rows);
     }

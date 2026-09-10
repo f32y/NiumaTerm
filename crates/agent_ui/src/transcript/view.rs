@@ -11,6 +11,7 @@ use gpui_component::button::Button;
 use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme as _, ElementExt as _, IconName, Sizable as _};
 use nmt_agent::chat::{Item as SessionItem, ReplayTurn};
+use nmt_agent::transcript::{TextField, TranscriptContent};
 use nmt_config::agent::CollapseRows;
 use nmt_i18n::i18n;
 use nmt_profiling::transcript::{Operation, Probe};
@@ -20,14 +21,14 @@ use crate::composer::PALETTE_MAX_HEIGHT;
 use crate::fade::Fade;
 use crate::profile::AgentKind;
 use crate::settings::{AgentSettings, UI_RADIUS};
-use crate::transcript::incremental::{ItemIndex, RowCache};
+use crate::transcript::incremental::RowCache;
 use crate::transcript::render::TRANSCRIPT_LINE_HEIGHT;
 use crate::transcript::render::image_preview::ZOOM_DURATION;
 use crate::transcript::reveal::Disclosures;
-use crate::transcript::rows::{TranscriptRow, folds_turns};
+use crate::transcript::rows::{EntryPresentation, TranscriptRow, folds_turns};
 use crate::transcript::turns::{LiveTurn, TurnLedger};
 use crate::transcript::typewriter::{Typewriter, shown_prefix};
-use crate::transcript::{CodeTranscriptCache, Entry, ReadingPosition, is_work_row};
+use crate::transcript::{CodeTranscriptCache, Entry, ReadingPosition};
 
 /// One agent conversation as the user reads it: the entry list, the row
 /// structure derived from it, and every piece of view state that structure
@@ -40,8 +41,7 @@ use crate::transcript::{CodeTranscriptCache, Entry, ReadingPosition, is_work_row
 /// own conversation and a child agent's conversation render through here, which
 /// is what keeps their presentation from drifting apart.
 pub struct TranscriptView {
-    pub(crate) items: Vec<Entry>,
-    pub(super) item_index: ItemIndex,
+    pub(crate) content: TranscriptContent<EntryPresentation>,
     pub(super) row_cache: RowCache,
     /// Virtualized transcript: only visible rows build elements each frame.
     /// `rows` mirrors the list's item count; render() rebuilds the changed
@@ -121,8 +121,7 @@ impl TranscriptView {
         let collapse_mode = CollapseRows::default();
 
         Self {
-            items: Vec::new(),
-            item_index: ItemIndex::default(),
+            content: TranscriptContent::default(),
             row_cache: RowCache::default(),
             transcript_list: {
                 // Bottom alignment + tail follow give chat-log behavior: pinned
@@ -170,7 +169,7 @@ impl TranscriptView {
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.items.is_empty()
+        self.content.entries().is_empty()
     }
 
     /// Mirror a conversation this view does not own. `revision` identifies the
@@ -187,20 +186,16 @@ impl TranscriptView {
 
         self.source_revision = Some(revision);
         self.code_transcripts.invalidate_all();
-        self.items = items
-            .iter()
-            .map(|item| Entry {
-                at: String::new(),
-                turn: 0,
-                item: item.clone(),
-                images: Vec::new(),
-            })
-            .collect();
-        self.item_index.clear();
-
-        for (index, entry) in self.items.iter().enumerate() {
-            self.item_index.insert(entry, index);
-        }
+        self.content.replace(
+            items
+                .iter()
+                .map(|item| Entry {
+                    turn: 0,
+                    item: item.clone(),
+                    metadata: EntryPresentation::default(),
+                })
+                .collect(),
+        );
 
         self.row_cache.invalidate(0);
 
@@ -215,8 +210,7 @@ impl TranscriptView {
     /// Used when the owning view switches to a different conversation, so one
     /// conversation's expansion and scroll position cannot leak into another's.
     pub(crate) fn clear(&mut self) {
-        self.items.clear();
-        self.item_index.clear();
+        self.content.clear();
         self.row_cache.invalidate(0);
         self.source_revision = None;
         self.stashed_position = None;
@@ -244,14 +238,16 @@ impl TranscriptView {
 
         for entry in replay.items {
             self.append_entry(Entry {
-                at: entry
-                    .at
-                    .and_then(|at| DateTime::from_timestamp(at, 0))
-                    .map(|at| at.with_timezone(&Local).format("%H:%M").to_string())
-                    .unwrap_or_default(),
                 turn,
                 item: entry.item,
-                images: Vec::new(),
+                metadata: EntryPresentation {
+                    at: entry
+                        .at
+                        .and_then(|at| DateTime::from_timestamp(at, 0))
+                        .map(|at| at.with_timezone(&Local).format("%H:%M").to_string())
+                        .unwrap_or_default(),
+                    images: Vec::new(),
+                },
             });
         }
 
@@ -268,79 +264,66 @@ impl TranscriptView {
     /// outside the normal push path.
     pub(crate) fn push_stamped(&mut self, turn: u64, item: SessionItem) {
         self.append_entry(Entry {
-            at: Local::now().format("%H:%M").to_string(),
             turn,
             item,
-            images: Vec::new(),
+            metadata: EntryPresentation {
+                at: Local::now().format("%H:%M").to_string(),
+                images: Vec::new(),
+            },
         });
     }
 
     pub(crate) fn contains_item(&self, id: &str) -> bool {
-        !self.item_index.positions(id).is_empty()
+        self.content.contains_item(id)
     }
 
     /// Fold an authoritative completed payload into the entry that streamed it.
     pub(crate) fn merge_completed(&mut self, item: &SessionItem) {
         let _profile = Probe::start(Operation::MergeCompleted);
 
-        let Some(id) = item.id() else {
-            return;
-        };
-
-        for &index in self.item_index.positions(id) {
-            if self.items[index].item.merge_completed(item) {
-                self.code_transcripts.invalidate(index);
-                self.row_cache.invalidate(index);
-                break;
-            }
+        if let Some(index) = self.content.merge_completed(item) {
+            self.code_transcripts.invalidate(index);
+            self.row_cache.invalidate(index);
         }
     }
 
     /// Extend a streamed item's text. Returns whether the result is non-empty,
     /// which is what tells the caller the row became visible.
-    pub(crate) fn append_delta(
-        &mut self,
-        item_id: &str,
-        delta: &str,
-        select: fn(&mut SessionItem) -> Option<&mut Option<String>>,
-    ) -> bool {
+    pub(crate) fn append_delta(&mut self, item_id: &str, delta: &str, field: TextField) -> bool {
         let _profile = Probe::start(Operation::AppendDelta);
 
-        for &index in self.item_index.positions(item_id) {
-            let entry = &mut self.items[index];
-            let is_reply = matches!(entry.item, SessionItem::AgentMessage { .. });
+        let Some(update) = self.content.append_delta(item_id, delta, field) else {
+            return false;
+        };
+        let index = update.index;
 
-            if let Some(text) = select(&mut entry.item) {
-                let text = text.get_or_insert_default();
+        // Only a newly selected reply needs its old prefix counted. Existing
+        // typed edges keep advancing in the view without rescanning each delta.
+        if matches!(field, TextField::Reply)
+            && !self
+                .typewriter
+                .as_ref()
+                .is_some_and(|typing| typing.index() == index)
+        {
+            if let Some(previous) = &self.typewriter {
+                self.row_cache.invalidate(previous.index());
+            }
 
-                // A reply starts typing from what it already showed when the
-                // stream reached it, so text that was on screen stays put and
-                // only the new arrival is let through the edge.
-                let typing = self
-                    .typewriter
-                    .as_ref()
-                    .is_some_and(|typewriter| typewriter.index() == index);
-
-                if is_reply && !typing {
-                    if let Some(previous) = &self.typewriter {
-                        self.row_cache.invalidate(previous.index());
-                    }
-
-                    self.typewriter = Some(Typewriter::start(
-                        index,
-                        text.chars().count(),
-                        Instant::now(),
-                    ));
-                }
-
-                text.push_str(delta);
-                self.code_transcripts.invalidate(index);
-                self.row_cache.invalidate(index);
-                return !text.trim().is_empty();
+            if let SessionItem::AgentMessage {
+                text: Some(text), ..
+            } = &self.content.entries()[index].item
+            {
+                self.typewriter = Some(Typewriter::start(
+                    index,
+                    text[..update.previous_bytes].chars().count(),
+                    Instant::now(),
+                ));
             }
         }
 
-        false
+        self.code_transcripts.invalidate(index);
+        self.row_cache.invalidate(index);
+        update.non_blank
     }
 
     /// The part of reply `index` the reader sees this frame: the whole of it
@@ -378,7 +361,7 @@ impl TranscriptView {
         let _profile = Probe::start(Operation::Typewriter);
         let index = typewriter.index();
         let previous = typewriter.shown();
-        let moving = typewriter.advance(reply_chars(&self.items, index), now);
+        let moving = typewriter.advance(reply_chars(self.content.entries(), index), now);
 
         if typewriter.shown() != previous {
             self.row_cache.invalidate(index);
@@ -393,42 +376,28 @@ impl TranscriptView {
 
     /// Latest non-empty assistant reply of `turn`, for notification bodies.
     pub(crate) fn latest_agent_message(&self, turn: u64) -> Option<&str> {
-        self.items.iter().rev().find_map(|entry| match &entry.item {
-            SessionItem::AgentMessage {
-                text: Some(text), ..
-            } if entry.turn == turn && !text.trim().is_empty() => Some(text.as_str()),
-            _ => None,
-        })
+        self.content.latest_agent_message(turn)
     }
 
     /// Whether this turn already shows the provider error reported at
     /// completion. Codex can announce the error immediately and repeat it in
     /// the terminal turn state, while the transcript should show one row.
     pub(crate) fn turn_has_error(&self, turn: u64, text: &str) -> bool {
-        self.items.iter().any(|entry| {
-            entry.turn == turn
-                && matches!(&entry.item, SessionItem::Error { text: shown } if shown == text)
-        })
+        self.content.turn_has_error(turn, text)
     }
 
     /// How many actions `turn` has taken: the tool calls, file changes and
     /// thinking passes it logged. Conversation text is the turn talking rather
     /// than working, so it does not count.
     pub(crate) fn turn_steps(&self, turn: u64) -> usize {
-        self.items
-            .iter()
-            .filter(|entry| entry.turn == turn && is_work_row(&entry.item))
-            .count()
+        self.content.turn_steps(turn)
     }
 
     /// Completed and total entries of the task list the agent is working from.
     /// Only the newest list counts: a task list is republished in full whenever
     /// it changes, so the earlier ones describe states the agent has left.
     pub(crate) fn task_tally(&self) -> Option<(u32, u32)> {
-        self.items
-            .iter()
-            .rev()
-            .find_map(|entry| entry.item.task_tally())
+        self.content.task_tally()
     }
 
     pub(crate) fn is_working(&self) -> bool {
@@ -441,7 +410,7 @@ impl TranscriptView {
 
     pub(crate) fn set_compacting(&mut self, compacting: bool, cx: &mut Context<Self>) {
         self.live_turn.set_compacting(compacting);
-        self.row_cache.invalidate(self.items.len());
+        self.row_cache.invalidate(self.content.entries().len());
         cx.notify();
     }
 
@@ -456,7 +425,7 @@ impl TranscriptView {
 
     pub(crate) fn start_working(&mut self, cx: &mut Context<Self>) {
         self.live_turn.start();
-        self.row_cache.invalidate(self.items.len());
+        self.row_cache.invalidate(self.content.entries().len());
         cx.notify();
     }
 

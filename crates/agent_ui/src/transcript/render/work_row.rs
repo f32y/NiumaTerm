@@ -39,7 +39,7 @@ impl TranscriptView {
     ) -> AnyElement {
         let cwd = self.cwd.clone();
 
-        let (icon, heading, reason, status, detail) = match &self.items[index].item {
+        let (icon, heading, reason, status, detail) = match &self.content.entries()[index].item {
             SessionItem::CommandExecution {
                 purpose,
                 aggregated_output,
@@ -205,10 +205,12 @@ impl TranscriptView {
                         .child(reason)
                 }))
                 .children(detail.filter(|_| expanded).map(|detail| {
-                    let body = if is_code_item(&self.items[index].item) {
-                        let view = self
-                            .code_transcripts
-                            .ensure(index, &self.items[index].item, cx);
+                    let body = if is_code_item(&self.content.entries()[index].item) {
+                        let view = self.code_transcripts.ensure(
+                            index,
+                            &self.content.entries()[index].item,
+                            cx,
+                        );
 
                         div()
                             .w_full()

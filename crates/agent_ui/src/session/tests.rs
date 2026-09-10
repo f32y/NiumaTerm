@@ -709,7 +709,8 @@ mod queued_prompt_placement_tests {
     fn user_rows(pane: &AgentPane, cx: &gpui::App) -> Vec<(u64, String)> {
         pane.transcript
             .read(cx)
-            .items
+            .content
+            .entries()
             .iter()
             .filter_map(|entry| match &entry.item {
                 SessionItem::UserMessage { text } => {
@@ -977,7 +978,8 @@ mod turn_error_tests {
                 let errors = pane
                     .transcript
                     .read(cx)
-                    .items
+                    .content
+                    .entries()
                     .iter()
                     .filter_map(|entry| match &entry.item {
                         SessionItem::Error { text } => Some(text.as_str()),

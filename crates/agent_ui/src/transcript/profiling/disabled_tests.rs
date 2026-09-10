@@ -2,6 +2,7 @@ use std::mem::size_of;
 
 use gpui::{TestAppContext, frame_stats};
 use nmt_agent::chat::Item;
+use nmt_agent::transcript::TextField;
 use nmt_config::agent::CollapseRows;
 use nmt_profiling::transcript::{Operation, Probe, flush};
 
@@ -16,21 +17,17 @@ fn disabled_hooks_leave_transcript_updates_available(_cx: &mut TestAppContext) {
 
     let mut view = TranscriptView::new(AgentKind::Codex, None);
     view.append_entry(Entry {
-        at: String::new(),
         turn: 1,
-        images: Vec::new(),
+        metadata: Default::default(),
         item: Item::Reasoning {
             id: "reasoning".into(),
             summary: Some("before".into()),
         },
     });
-    assert!(view.append_delta("reasoning", "-after", |item| match item {
-        Item::Reasoning { summary, .. } => Some(summary),
-        _ => None,
-    }));
+    assert!(view.append_delta("reasoning", "-after", TextField::ReasoningSummary));
     view.refresh_rows(CollapseRows::WorkAndToolCalls);
     assert!(matches!(
-        &view.items[0].item,
+        &view.content.entries()[0].item,
         Item::Reasoning { summary: Some(text), .. } if text == "before-after"
     ));
     flush();

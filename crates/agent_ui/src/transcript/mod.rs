@@ -17,6 +17,8 @@ mod view;
 mod virtual_code;
 mod working_indicator;
 
+pub(super) use nmt_agent::transcript::is_work_item as is_work_row;
+
 pub(super) use crate::transcript::code::CodeTranscriptCache;
 #[cfg(test)]
 use crate::transcript::disclosure_row::{
@@ -26,7 +28,7 @@ pub(super) use crate::transcript::format::{
     LAST_RESPONSE_LIMIT, command_execution_heading, command_failure_reason, compact_token_count,
     compaction_accounting, compaction_label, compaction_row_is_expandable,
     compaction_trigger_label, detect_output_language, entry_copy_text, file_extension_lang, hidden,
-    is_work_row, last_response_label, permission_icon, relative_time, should_show_jump_to_latest,
+    last_response_label, permission_icon, relative_time, should_show_jump_to_latest,
     strip_read_gutter, truncated_user_prompt, working_label,
 };
 #[cfg(test)]

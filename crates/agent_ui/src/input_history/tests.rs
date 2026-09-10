@@ -12,6 +12,7 @@ use nmt_agent::chat::{SendOutcome, SessionSummary, SlashCommandOutcome};
 use nmt_agent::codex::app_server;
 use nmt_agent::input_history::AgentInputHistory as InputHistoryService;
 use nmt_agent::session::lifecycle::StartOutcome;
+use nmt_agent::transcript::TextField;
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
 use crate::composer::PaletteControl;
@@ -652,15 +653,7 @@ fn interruption_restores_only_unanswered_input_and_preserves_new_drafts(cx: &mut
                     cx,
                 );
                 if visible {
-                    pane.append_delta(
-                        "answer",
-                        "visible response",
-                        |item| match item {
-                            Item::AgentMessage { text, .. } => Some(text),
-                            _ => None,
-                        },
-                        cx,
-                    );
+                    pane.append_delta("answer", "visible response", TextField::Reply, cx);
                 }
 
                 pane.input

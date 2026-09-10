@@ -34,3 +34,4 @@ reqwest = { workspace = true, features = [
     "system-proxy",
 ] }
 tungstenite.workspace = true
+smallvec.workspace = true

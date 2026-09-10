@@ -66,7 +66,8 @@ fn replay(text: &str) -> Vec<ReplayTurn> {
 fn user_rows(pane: &AgentPane, cx: &App) -> Vec<String> {
     pane.transcript
         .read(cx)
-        .items
+        .content
+        .entries()
         .iter()
         .filter_map(|entry| match &entry.item {
             Item::UserMessage { text } => text.clone(),

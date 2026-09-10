@@ -5,19 +5,20 @@ use std::sync::Arc;
 use chrono::Local;
 use gpui::{Context, FollowMode, Image, ListOffset, px};
 use nmt_agent::chat::Item as SessionItem;
+use nmt_agent::transcript::TranscriptEntry;
 use nmt_config::agent::CollapseRows;
 
 use crate::composer::PromptTarget;
 use crate::transcript::view::TranscriptView;
 use crate::transcript::{compaction_accounting, hidden, is_work_row, should_show_jump_to_latest};
 
-/// A transcript entry plus the local wall-clock time it first appeared
-/// (shown on hover) and the turn it belongs to (drives turn folding).
-/// Streamed items keep their start time.
-pub(crate) struct Entry {
+pub(crate) type Entry = TranscriptEntry<EntryPresentation>;
+
+/// Display data that stays with its entry while provider content is updated.
+/// The content model stores this value without interpreting or copying it.
+#[derive(Default)]
+pub(crate) struct EntryPresentation {
     pub(crate) at: String,
-    pub(crate) turn: u64,
-    pub(crate) item: SessionItem,
     /// Images a user message carried. Held here rather than on the protocol
     /// item because they are this side's own record: a harness reports what a
     /// message said, not the pixels the person attached to it.
@@ -298,10 +299,12 @@ impl TranscriptView {
         }
 
         self.append_entry(Entry {
-            at: Local::now().format("%H:%M").to_string(),
             turn,
             item,
-            images,
+            metadata: EntryPresentation {
+                at: Local::now().format("%H:%M").to_string(),
+                images,
+            },
         });
         cx.notify();
     }
@@ -311,7 +314,7 @@ impl TranscriptView {
     /// Running turns render chronologically.
     pub(crate) fn entry_spec(&self, index: usize) -> RowSpec {
         let fingerprint = entry_fingerprint(
-            &self.items[index].item,
+            &self.content.entries()[index].item,
             self.disclosures.row_expanded(index),
             self.disclosures.annotation_expanded(index),
         );
@@ -332,7 +335,7 @@ impl TranscriptView {
         RowSpec::Work {
             index,
             fingerprint: entry_fingerprint(
-                &self.items[index].item,
+                &self.content.entries()[index].item,
                 self.disclosures.row_expanded(index),
                 false,
             ),
@@ -346,12 +349,13 @@ impl TranscriptView {
     pub(crate) fn build_row_specs(&self, collapse: CollapseRows) -> Vec<RowSpec> {
         let mut rows = Vec::new();
         let mut start = 0;
+        let items = self.content.entries();
 
-        while start < self.items.len() {
-            let turn = self.items[start].turn;
+        while start < items.len() {
+            let turn = items[start].turn;
             let mut end = start + 1;
 
-            while end < self.items.len() && self.items[end].turn == turn {
+            while end < items.len() && items[end].turn == turn {
                 end += 1;
             }
 
@@ -418,8 +422,9 @@ impl TranscriptView {
         // into a turn already in flight was written after part of the reply
         // existed, so hoisting it here would show it above output it never
         // saw; it keeps its place in the stream instead.
+        let items = self.content.entries();
         let opening_user =
-            (start..end).find(|&i| matches!(&self.items[i].item, SessionItem::UserMessage { .. }));
+            (start..end).find(|&i| matches!(&items[i].item, SessionItem::UserMessage { .. }));
 
         if let Some(i) = opening_user {
             rows.push(self.entry_spec(i));
@@ -428,7 +433,7 @@ impl TranscriptView {
         // What the fold owns: everything the expanded turn shows that the
         // folded one does not. Counting it here keeps the disclosure's label
         // honest and lets a turn with nothing to hide skip the control.
-        let shown = |i: usize| !hidden(&self.items[i].item) && Some(i) != opening_user;
+        let shown = |i: usize| !hidden(&items[i].item) && Some(i) != opening_user;
         let row_count = (start..end)
             .filter(|&i| shown(i) && !self.survives_fold(i))
             .count();
@@ -476,9 +481,10 @@ impl TranscriptView {
         rows: &mut Vec<RowSpec>,
     ) {
         let mut i = start;
+        let items = self.content.entries();
 
         while i < end {
-            let item = &self.items[i].item;
+            let item = &items[i].item;
 
             if skip(i) || hidden(item) {
                 i += 1;
@@ -496,11 +502,8 @@ impl TranscriptView {
             let mut visible: Vec<usize> = Vec::new();
             let mut j = i;
 
-            while j < end
-                && !skip(j)
-                && (hidden(&self.items[j].item) || is_work_row(&self.items[j].item))
-            {
-                if !hidden(&self.items[j].item) {
+            while j < end && !skip(j) && (hidden(&items[j].item) || is_work_row(&items[j].item)) {
+                if !hidden(&items[j].item) {
                     visible.push(j);
                 }
 
@@ -540,7 +543,8 @@ impl TranscriptView {
     /// turn closes; everything between the prompt and that answer is what the
     /// fold hides.
     pub(crate) fn survives_fold(&self, index: usize) -> bool {
-        let entry = &self.items[index];
+        let items = self.content.entries();
+        let entry = &items[index];
 
         match &entry.item {
             SessionItem::Error { .. }
@@ -551,7 +555,7 @@ impl TranscriptView {
             } => true,
             SessionItem::AgentMessage { .. } => {
                 !hidden(&entry.item)
-                    && self.items[index + 1..]
+                    && items[index + 1..]
                         .iter()
                         .take_while(|later| later.turn == entry.turn)
                         .all(|later| {
@@ -576,7 +580,7 @@ impl TranscriptView {
     pub(super) fn sync_transcript_tail(&mut self, start: usize, specs: &[RowSpec]) {
         let mut new = mem::take(&mut self.row_cache.scratch_rows);
 
-        spaced_rows(&self.items, specs, &mut new);
+        spaced_rows(self.content.entries(), specs, &mut new);
 
         if self.rows[start..] == new {
             new.clear();
@@ -634,11 +638,13 @@ impl TranscriptView {
     /// menu. `None` where the row is not a prompt that opened a turn, which is
     /// a row no cut can be anchored on.
     pub(crate) fn prompt_target(&self, index: usize) -> Option<PromptTarget> {
-        let SessionItem::UserMessage { text: Some(prompt) } = &self.items.get(index)?.item else {
+        let SessionItem::UserMessage { text: Some(prompt) } =
+            &self.content.entries().get(index)?.item
+        else {
             return None;
         };
 
-        let openings = turn_opening_prompts(&self.items);
+        let openings = turn_opening_prompts(self.content.entries());
         let position = openings.iter().position(|opening| *opening == index)?;
 
         Some(PromptTarget {
@@ -652,9 +658,10 @@ impl TranscriptView {
     /// text confirming the count landed on the same message. `None` where the
     /// two disagree, which is a row the transcript should not be moved to.
     pub(crate) fn prompt_row(&self, target: &PromptTarget) -> Option<usize> {
-        let openings = turn_opening_prompts(&self.items);
+        let openings = turn_opening_prompts(self.content.entries());
         let index = *openings.get(openings.len().checked_sub(target.depth + 1)?)?;
-        let SessionItem::UserMessage { text: Some(prompt) } = &self.items[index].item else {
+        let SessionItem::UserMessage { text: Some(prompt) } = &self.content.entries()[index].item
+        else {
             return None;
         };
 

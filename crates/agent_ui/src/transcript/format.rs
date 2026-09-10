@@ -137,18 +137,6 @@ pub(super) fn elapsed_label(total_seconds: u64) -> String {
     parts.join(" ")
 }
 
-/// Work-log rows: the single-line tool/thinking entries that participate in
-/// "+N tool calls" run-collapsing. Conversation text never does.
-pub(crate) fn is_work_row(item: &SessionItem) -> bool {
-    matches!(
-        item,
-        SessionItem::CommandExecution { .. }
-            | SessionItem::FileChange { .. }
-            | SessionItem::Other { .. }
-            | SessionItem::Reasoning { .. }
-    )
-}
-
 /// Entries with nothing to show (yet): an agent bubble before its first delta,
 /// or a reasoning item that never streamed a summary. They render no row and
 /// are transparent to work-run grouping, so an invisible entry can't split a

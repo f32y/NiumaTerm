@@ -670,9 +670,9 @@ impl TranscriptView {
     fn row_turn(&self, ix: usize) -> Option<u64> {
         match self.rows.get(ix)?.spec {
             RowSpec::Entry { index, .. } | RowSpec::Work { index, .. } => {
-                Some(self.items[index].turn)
+                Some(self.content.entries()[index].turn)
             }
-            RowSpec::RunToggle { run_start, .. } => Some(self.items[run_start].turn),
+            RowSpec::RunToggle { run_start, .. } => Some(self.content.entries()[run_start].turn),
             RowSpec::TurnFold { turn, .. } | RowSpec::Interrupted { turn, .. } => Some(turn),
             RowSpec::TurnSummary { .. } | RowSpec::Working { .. } => None,
         }

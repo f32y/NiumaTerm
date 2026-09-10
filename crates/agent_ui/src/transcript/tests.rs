@@ -1631,16 +1631,10 @@ mod row_rhythm_tests {
 mod typed_reply_tests {
     use gpui::{AppContext as _, TestAppContext};
     use nmt_agent::chat::Item as SessionItem;
+    use nmt_agent::transcript::TextField;
 
     use crate::profile::AgentKind;
     use crate::transcript::TranscriptView;
-
-    fn select_reply(item: &mut SessionItem) -> Option<&mut Option<String>> {
-        match item {
-            SessionItem::AgentMessage { text, .. } => Some(text),
-            _ => None,
-        }
-    }
 
     /// Text a reply already showed when the stream reached it stays on screen;
     /// only the arrival waits behind the typed edge.
@@ -1654,16 +1648,22 @@ mod typed_reply_tests {
                     1,
                     SessionItem::AgentMessage {
                         id: "a".into(),
-                        text: Some("Hello".into()),
+                        text: Some("Hello 世界".into()),
                         questions: None,
                     },
                     Vec::new(),
                     cx,
                 );
-                transcript.append_delta("a", " world", select_reply);
+                transcript.append_delta("a", " world", TextField::Reply);
 
-                assert_eq!(transcript.shown_reply(0, "Hello world"), "Hello");
-                assert_eq!(transcript.typed_edge(0), Some(5));
+                assert_eq!(transcript.shown_reply(0, "Hello 世界 world"), "Hello 世界");
+                assert_eq!(transcript.typed_edge(0), Some(8));
+
+                transcript.append_delta("a", " again", TextField::Reply);
+
+                assert_eq!(transcript.typed_edge(0), Some(8));
+                assert!(!transcript.append_delta("a", "ignored", TextField::ReasoningSummary));
+                assert_eq!(transcript.typed_edge(0), Some(8));
 
                 transcript.clear();
 
@@ -1689,10 +1689,7 @@ mod typed_reply_tests {
                     Vec::new(),
                     cx,
                 );
-                transcript.append_delta("r", "thinking", |item| match item {
-                    SessionItem::Reasoning { summary, .. } => Some(summary),
-                    _ => None,
-                });
+                transcript.append_delta("r", "thinking", TextField::ReasoningSummary);
 
                 assert_eq!(transcript.typed_edge(0), None);
             });

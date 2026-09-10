@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use gpui::{AppContext as _, TestAppContext, frame_stats};
 use nmt_agent::chat::Item;
+use nmt_agent::transcript::TextField;
 use nmt_config::agent::CollapseRows;
 use nmt_profiling::allocation::{AllocationCounts, AllocationScope, ProfilingAllocator};
 use nmt_profiling::transcript::{OPERATIONS, Operation, Probe, Totals, flush, take_samples};
@@ -56,20 +57,6 @@ fn take_totals() -> [Totals; 9] {
     take_samples()
 }
 
-fn select_summary(item: &mut Item) -> Option<&mut Option<String>> {
-    match item {
-        Item::Reasoning { summary, .. } => Some(summary),
-        _ => None,
-    }
-}
-
-fn select_reply(item: &mut Item) -> Option<&mut Option<String>> {
-    match item {
-        Item::AgentMessage { text, .. } => Some(text),
-        _ => None,
-    }
-}
-
 fn history(turns: u64, live: Item) -> TranscriptView {
     let mut view = TranscriptView::new(AgentKind::Codex, None);
 
@@ -85,10 +72,9 @@ fn history(turns: u64, live: Item) -> TranscriptView {
             },
         ] {
             view.append_entry(Entry {
-                at: String::new(),
                 turn,
                 item,
-                images: Vec::new(),
+                metadata: Default::default(),
             });
         }
 
@@ -96,10 +82,9 @@ fn history(turns: u64, live: Item) -> TranscriptView {
     }
 
     view.append_entry(Entry {
-        at: String::new(),
         turn: turns,
         item: live,
-        images: Vec::new(),
+        metadata: Default::default(),
     });
     view.refresh_rows(CollapseRows::WorkAndToolCalls);
     view
@@ -126,8 +111,8 @@ fn profiles_real_updates_and_mirror_revisions_without_changing_results(cx: &mut 
         let _enabled = Enabled::new();
 
         entity.update(cx, |view, cx| {
-            assert!(view.append_delta("live", " more", select_summary));
-            assert!(!view.append_delta("missing", "ignored", select_summary));
+            assert!(view.append_delta("live", " more", TextField::ReasoningSummary));
+            assert!(!view.append_delta("missing", "ignored", TextField::ReasoningSummary));
             view.refresh_rows(CollapseRows::WorkAndToolCalls);
             view.refresh_rows(CollapseRows::WorkAndToolCalls);
 
@@ -142,7 +127,7 @@ fn profiles_real_updates_and_mirror_revisions_without_changing_results(cx: &mut 
 
             let growth = "x".repeat(2048);
 
-            assert!(view.append_delta("live", &growth, select_summary));
+            assert!(view.append_delta("live", &growth, TextField::ReasoningSummary));
             let grown = take_totals()[Operation::AppendDelta as usize];
 
             assert_eq!(grown.allocations.reallocations, 1);
@@ -190,7 +175,7 @@ fn profiles_real_updates_and_mirror_revisions_without_changing_results(cx: &mut 
                 .finish();
 
             with_default(subscriber, || {
-                view.append_delta("mirrored", " additional", select_reply);
+                view.append_delta("mirrored", " additional", TextField::Reply);
                 flush();
                 flush();
             });
@@ -296,7 +281,7 @@ fn long_transcript_profile(cx: &mut TestAppContext) {
             200,
             |_| history(turns, reasoning(4096)),
             |view, _, _| {
-                black_box(view.append_delta("live", "x", select_summary));
+                black_box(view.append_delta("live", "x", TextField::ReasoningSummary));
             },
         );
 
@@ -306,7 +291,7 @@ fn long_transcript_profile(cx: &mut TestAppContext) {
             200,
             |_| history(turns, reasoning(4096)),
             |view, _, _| {
-                black_box(view.append_delta("live", "x", select_summary));
+                black_box(view.append_delta("live", "x", TextField::ReasoningSummary));
                 view.refresh_rows(CollapseRows::WorkAndToolCalls);
                 black_box(&view.rows);
             },
@@ -321,7 +306,7 @@ fn long_transcript_profile(cx: &mut TestAppContext) {
         200,
         |_| history(5_000, reasoning(7)),
         |view, _, _| {
-            black_box(view.append_delta("live", &chunk, select_summary));
+            black_box(view.append_delta("live", &chunk, TextField::ReasoningSummary));
         },
     );
 
@@ -343,7 +328,7 @@ fn long_transcript_profile(cx: &mut TestAppContext) {
             )
         },
         |(view, started), index, _| {
-            black_box(view.append_delta("live", " more \u{4e2d}\u{6587}", select_reply));
+            black_box(view.append_delta("live", " more \u{4e2d}\u{6587}", TextField::Reply));
             view.advance_typing(*started + Duration::from_millis((index as u64 + 1) * 16));
             view.refresh_rows(CollapseRows::WorkAndToolCalls);
             black_box(&view.rows);

@@ -251,7 +251,7 @@ impl TranscriptView {
             return px(0.);
         };
         let below = self.rows.get(ix + 1).map(|row| &row.spec);
-        let merged = row_gap(&self.items, &above.spec, below);
+        let merged = row_gap(self.content.entries(), &above.spec, below);
 
         px(gap_px(merged) - gap_px(above.gap))
     }
@@ -366,7 +366,7 @@ impl TranscriptView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let entry = &self.items[index];
+        let entry = &self.content.entries()[index];
 
         match &entry.item {
             SessionItem::UserMessage { text: Some(text) } => self.render_user_row(index, text, cx),

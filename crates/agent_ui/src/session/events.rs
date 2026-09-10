@@ -9,6 +9,7 @@ use nmt_agent::session::branch::BranchReplay;
 use nmt_agent::session::restore::{ReadyAction, ReplayAction};
 #[cfg(test)]
 pub(super) use nmt_agent::session::settings::resolve_ready_settings;
+use nmt_agent::transcript::TextField;
 use nmt_i18n::i18n;
 use tracing::info;
 
@@ -101,39 +102,13 @@ impl AgentPane {
             SessionEvent::ItemStarted(item) => self.start_item(item, cx),
             SessionEvent::ItemCompleted(item) => self.complete_item(item, cx),
             SessionEvent::AgentMessageDelta { item_id, delta } => {
-                self.append_delta(
-                    &item_id,
-                    &delta,
-                    |item| match item {
-                        SessionItem::AgentMessage { text, .. } => Some(text),
-                        _ => None,
-                    },
-                    cx,
-                );
+                self.append_delta(&item_id, &delta, TextField::Reply, cx);
             }
             SessionEvent::ReasoningSummaryDelta { item_id, delta } => {
-                self.append_delta(
-                    &item_id,
-                    &delta,
-                    |item| match item {
-                        SessionItem::Reasoning { summary, .. } => Some(summary),
-                        _ => None,
-                    },
-                    cx,
-                );
+                self.append_delta(&item_id, &delta, TextField::ReasoningSummary, cx);
             }
             SessionEvent::CommandOutputDelta { item_id, delta } => {
-                self.append_delta(
-                    &item_id,
-                    &delta,
-                    |item| match item {
-                        SessionItem::CommandExecution {
-                            aggregated_output, ..
-                        } => Some(aggregated_output),
-                        _ => None,
-                    },
-                    cx,
-                );
+                self.append_delta(&item_id, &delta, TextField::CommandOutput, cx);
             }
             SessionEvent::ApprovalRequested { description } => {
                 self.note_visible_output();
@@ -687,17 +662,17 @@ impl AgentPane {
         cx.notify();
     }
 
-    /// Append streamed text to the item `select` picks out. A delta that
+    /// Append streamed text to the requested field. A delta that
     /// actually landed is visible agent output, which resets the idle clock.
     pub(crate) fn append_delta(
         &mut self,
         item_id: &str,
         delta: &str,
-        select: fn(&mut SessionItem) -> Option<&mut Option<String>>,
+        field: TextField,
         cx: &mut Context<Self>,
     ) {
         let visible = self.transcript.update(cx, |transcript, _| {
-            transcript.append_delta(item_id, delta, select)
+            transcript.append_delta(item_id, delta, field)
         });
 
         if visible {

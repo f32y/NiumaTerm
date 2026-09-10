@@ -39,7 +39,7 @@ impl TranscriptView {
             .text_color(cx.theme().muted_foreground)
             .invisible()
             .group_hover("entry", |this| this.visible())
-            .child(self.items[index].at.clone())
+            .child(self.content.entries()[index].metadata.at.clone())
     }
 
     pub(crate) fn copy_menu(
@@ -52,7 +52,8 @@ impl TranscriptView {
             // list layout independent of the hidden message size.
             let copy_text = pane
                 .read_with(cx, |pane, _| {
-                    pane.items
+                    pane.content
+                        .entries()
                         .get(index)
                         .map(|entry| entry_copy_text(&entry.item))
                 })
@@ -353,7 +354,7 @@ impl TranscriptView {
     /// should see what was sent, not the placeholder that stood in for it while
     /// the message was being written.
     fn render_entry_images(&self, index: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let images = &self.items.get(index)?.images;
+        let images = &self.content.entries().get(index)?.metadata.images;
 
         if images.is_empty() {
             return None;
