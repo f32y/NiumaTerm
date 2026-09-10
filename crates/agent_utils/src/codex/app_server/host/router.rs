@@ -16,8 +16,8 @@ use serde_json::{Value, json};
 
 use crate::codex::app_server::host::early::EarlyMessages;
 use crate::codex::app_server::host::{
-    Delivery, EARLY_LOSS_METHOD, FIRST_HOST_RPC_ID, HOST_EXIT_METHOD, HOST_INIT_RPC_ID,
-    RegistrationId, message_thread_id,
+    Delivery, FIRST_HOST_RPC_ID, HOST_EXIT_METHOD, HOST_INIT_RPC_ID, RegistrationId,
+    message_thread_id,
 };
 use crate::deadline_timer::DeadlineTimer;
 use crate::message_memory::OUTPUT_FAILURE_METHOD;
@@ -182,37 +182,32 @@ impl RouterState {
             return Ok(Vec::new());
         };
         let early = self.early_messages.take(&thread_id);
-        let closed = early.messages.iter().any(|message| {
+        let closed = early.iter().any(|message| {
             matches!(
                 message["method"].as_str(),
                 Some("thread/closed" | "thread/deleted")
             )
         });
-        let mut deliveries = Vec::new();
-        if early.incomplete {
-            deliveries.push((Arc::clone(&delivery), json!({
-                "method": EARLY_LOSS_METHOD,
-                "params": {"threadId": thread_id, "message":
-                    "Codex early activity may be incomplete because the message buffer reached its limit. Reload this conversation before relying on its state."},
-            })));
-        }
-        deliveries.extend(early.messages.into_iter().map(|message| {
-            if let (Some(id), Some(_)) = (message["id"].as_u64(), message["method"].as_str()) {
-                self.server_requests.insert(
-                    id,
-                    ServerRequestRoute {
-                        owner,
-                        thread_id: thread_id.clone(),
-                    },
-                );
-            }
-            if message["method"].as_str() == Some("serverRequest/resolved")
-                && let Some(id) = message["params"]["requestId"].as_u64()
-            {
-                self.server_requests.remove(&id);
-            }
-            (Arc::clone(&delivery), message)
-        }));
+        let deliveries = early
+            .into_iter()
+            .map(|message| {
+                if let (Some(id), Some(_)) = (message["id"].as_u64(), message["method"].as_str()) {
+                    self.server_requests.insert(
+                        id,
+                        ServerRequestRoute {
+                            owner,
+                            thread_id: thread_id.clone(),
+                        },
+                    );
+                }
+                if message["method"].as_str() == Some("serverRequest/resolved")
+                    && let Some(id) = message["params"]["requestId"].as_u64()
+                {
+                    self.server_requests.remove(&id);
+                }
+                (Arc::clone(&delivery), message)
+            })
+            .collect();
         if closed {
             self.remove_thread(&thread_id);
         }

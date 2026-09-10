@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use crate::LaunchConfig;
 use crate::codex::ProviderConfig;
 use crate::codex::app_server::host::{
-    EARLY_LOSS_METHOD, HOST_INIT_RPC_ID, HostBootstrap, HostKey, Router, initialize_request, redact,
+    HOST_INIT_RPC_ID, HostBootstrap, HostKey, Router, initialize_request, redact,
 };
 use crate::message_memory::OUTPUT_FAILURE_METHOD;
 use crate::request_policy::RequestClass;
@@ -369,6 +369,26 @@ fn root_notifications_are_isolated_and_process_notifications_are_shared() {
 }
 
 #[test]
+fn early_approval_remains_answerable_after_a_large_notification_backlog() {
+    let router = router();
+    let (owner, rx) = register(&router);
+    router.handle_message(json!({
+        "id": 900,
+        "method": "item/commandExecution/requestApproval",
+        "params": {"threadId": "child", "turnId": "turn"},
+    }));
+    for id in 0..80 {
+        router.handle_message(json!({"method": "item/agentMessage/delta",
+            "params": {"threadId": "child", "delta": id.to_string()}}));
+    }
+    router.claim_descendants(owner, ["child".into()]);
+    assert_eq!(rx.recv().unwrap()["id"], 900);
+    assert_eq!(rx.try_iter().count(), 80);
+    let mut answer = json!({"id": 900, "result": {"decision": "decline"}});
+    router.prepare_outgoing(owner, &mut answer).unwrap();
+}
+
+#[test]
 fn auxiliary_title_thread_activity_never_reaches_the_primary_registration() {
     let router = router();
     let (primary, primary_rx) = register(&router);
@@ -434,7 +454,7 @@ fn early_descendant_activity_waits_for_a_proven_owner() {
 }
 
 #[test]
-fn truncated_child_replay_warns_only_its_owner_before_replaying_messages() {
+fn delayed_child_replay_delivers_every_message_only_to_its_owner() {
     let router = router();
     let (owner, rx) = register(&router);
     let (_, other_rx) = register(&router);
@@ -444,26 +464,17 @@ fn truncated_child_replay_warns_only_its_owner_before_replaying_messages() {
     }
     assert!(rx.try_recv().is_err());
     router.claim_descendants(owner, ["child".into()]);
-    let warning = rx.recv().unwrap();
-    assert_eq!(warning["method"], EARLY_LOSS_METHOD);
-    assert_eq!(warning["params"]["threadId"], "child");
-    assert!(
-        warning["params"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("incomplete")
-    );
     let messages: Vec<_> = rx.try_iter().collect();
-    assert_eq!(messages.len(), 32);
-    assert_eq!(messages[0]["params"]["delta"], "8");
-    assert_eq!(messages[31]["params"]["delta"], "39");
+    assert_eq!(messages.len(), 40);
+    assert_eq!(messages[0]["params"]["delta"], "0");
+    assert_eq!(messages[39]["params"]["delta"], "39");
     router.claim_descendants(owner, ["child".into()]);
     assert!(rx.try_recv().is_err());
     assert!(other_rx.try_recv().is_err());
 }
 
 #[test]
-fn evicted_root_replay_warns_after_the_open_response() {
+fn oldest_root_activity_survives_many_unclaimed_threads() {
     let router = router();
     let (owner, rx) = register(&router);
     let mut request = start_request(2);
@@ -474,9 +485,9 @@ fn evicted_root_replay_warns_after_the_open_response() {
     }
     router.handle_message(start_response(request["id"].as_u64().unwrap(), "0"));
     assert_eq!(rx.recv().unwrap()["result"]["thread"]["id"], "0");
-    let warning = rx.recv().unwrap();
-    assert_eq!(warning["method"], EARLY_LOSS_METHOD);
-    assert_eq!(warning["params"]["threadId"], "0");
+    let activity = rx.recv().unwrap();
+    assert_eq!(activity["method"], "turn/started");
+    assert_eq!(activity["params"]["threadId"], "0");
     assert!(rx.try_recv().is_err());
 }
 

@@ -44,9 +44,7 @@ use crate::codex::app_server::control::{ControlOperation, ControlState, QueryKin
 use crate::codex::app_server::conversation::ConversationState;
 #[cfg(test)]
 use crate::codex::app_server::conversation::TurnOutputUsage;
-use crate::codex::app_server::host::{
-    CodexHost, EARLY_LOSS_METHOD, HOST_EXIT_METHOD, RegistrationId,
-};
+use crate::codex::app_server::host::{CodexHost, HOST_EXIT_METHOD, RegistrationId};
 pub use crate::codex::app_server::options::{
     APPROVAL_OPTIONS, APPROVAL_REVIEWER_OPTIONS, SANDBOX_OPTIONS,
 };
@@ -995,30 +993,6 @@ impl Session {
     }
 
     fn process_notification(&mut self, method: &str, params: &Value) -> Vec<Event> {
-        if method == EARLY_LOSS_METHOD {
-            let Some(thread_id) = notification_thread_id(params) else {
-                return Vec::new();
-            };
-            let message = format!(
-                "Codex thread {thread_id}: {}",
-                params["message"]
-                    .as_str()
-                    .unwrap_or("Early activity may be incomplete. Reload this conversation.")
-            );
-            let mut events = vec![Event::Error {
-                message: message.clone(),
-                fatal: false,
-            }];
-            if self.conversation.thread_id.as_deref() != Some(thread_id) {
-                events.push(Event::BackgroundTaskTranscript {
-                    key: BackgroundTaskKey::codex(thread_id),
-                    update: BackgroundTaskTranscriptUpdate::state(
-                        BackgroundTaskTranscriptState::Unavailable { message },
-                    ),
-                });
-            }
-            return events;
-        }
         if method == HOST_EXIT_METHOD {
             self.cancel_title_generation();
             self.conversation.current_turn = None;

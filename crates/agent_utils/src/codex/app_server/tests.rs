@@ -42,31 +42,6 @@ fn disconnected_session() -> Session {
 }
 
 #[test]
-fn incomplete_early_activity_is_visible_without_settling_the_parent() {
-    let mut session = disconnected_session();
-    session.conversation.thread_id = Some("parent".into());
-    session.conversation.current_turn = Some("active".into());
-    session.conversation.pending_approval = Some(42);
-    let parent = session.process(json!({"method": EARLY_LOSS_METHOD,
-        "params": {"threadId": "parent", "message": "Early activity may be incomplete."}}));
-    assert!(
-        matches!(parent.as_slice(), [Event::Error { message, fatal: false }] if message.contains("parent") && message.contains("incomplete"))
-    );
-    let child = session.process(json!({"method": EARLY_LOSS_METHOD,
-        "params": {"threadId": "child", "message": "Early activity may be incomplete."}}));
-    assert!(
-        matches!(&child[0], Event::Error { message, fatal: false } if message.contains("child"))
-    );
-    assert!(
-        matches!(&child[1], Event::BackgroundTaskTranscript { key, update }
-        if key == &BackgroundTaskKey::codex("child")
-        && matches!(update.state, Some(BackgroundTaskTranscriptState::Unavailable { .. })))
-    );
-    assert_eq!(session.conversation.current_turn.as_deref(), Some("active"));
-    assert_eq!(session.conversation.pending_approval, Some(42));
-}
-
-#[test]
 fn disconnected_controls_reject_without_consuming_approval_or_switching_state() {
     let mut session = disconnected_session();
     session.conversation.thread_id = Some("parent".into());

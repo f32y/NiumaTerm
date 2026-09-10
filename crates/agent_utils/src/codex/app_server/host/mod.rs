@@ -20,7 +20,6 @@ const HOST_INIT_RPC_ID: u64 = 1;
 const FIRST_HOST_RPC_ID: u64 = 2;
 const START_TIMEOUT: Duration = Duration::from_secs(30);
 pub(super) const HOST_EXIT_METHOD: &str = "nmt/codexHostExited";
-pub(super) const EARLY_LOSS_METHOD: &str = "nmt/codexEarlyMessagesLost";
 
 pub(super) type RegistrationId = u64;
 
