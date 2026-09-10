@@ -3,23 +3,7 @@
 
 use std::{iter, mem, path};
 
-/// A path as comparable components: separators unified by `Path`, trailing
-/// separators and `.` segments dropped by component iteration, and each
-/// component lowercased because Windows filesystems are case-insensitive.
-/// Literal comparison only — no symlink resolution, no filesystem access, so a
-/// directory that is currently unreachable keeps its identity.
-pub fn path_identity(path: &path::Path) -> Vec<String> {
-    path.components()
-        .map(|c| {
-            let component = c.as_os_str().to_string_lossy();
-            if cfg!(windows) {
-                component.to_lowercase()
-            } else {
-                component.into_owned()
-            }
-        })
-        .collect()
-}
+pub use nmt_platform::filesystem::path_identity;
 
 /// Identity of a stored root string, or `None` when the string is a
 /// placeholder that does not name a concrete filesystem location.

@@ -50,11 +50,8 @@ impl NetPty {
     /// Build a PTY from an attached remote session, spawning the drain thread
     /// that feeds the snapshot then live output into the read buffer.
     pub fn new(session: RemoteSession) -> Self {
-        let snapshot = session.snapshot().vt.clone();
-        let input = session.input();
-        let output = session.into_output();
-
-        let buffer = Arc::new(Mutex::new(VecDeque::<u8>::from(snapshot)));
+        let (snapshot, input, output) = session.into_parts();
+        let buffer = Arc::new(Mutex::new(VecDeque::<u8>::from(snapshot.vt)));
         let read_ready = SoftReady::new();
         let child_ready = SoftReady::new();
         let exited = Arc::new(AtomicBool::new(false));

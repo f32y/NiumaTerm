@@ -9,6 +9,7 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 use std::{env, fmt, io, thread};
 
+use nmt_platform::environment::override_value;
 use nmt_platform::process::{
     KillOnCloseJob, decode_child_output, hidden_cmd_command, launch_env_var,
 };
@@ -81,11 +82,8 @@ impl AgentCli {
     /// The value `target` has for this launcher: its own configuration first,
     /// then whatever a child started by [`AgentCli::command`] would inherit.
     pub fn effective_env_os(&self, target: &str) -> Option<OsString> {
-        self.environment
-            .iter()
-            .rev()
-            .find(|(name, _)| name.eq_ignore_ascii_case(target))
-            .map(|(_, value)| OsString::from(value))
+        override_value(&self.environment, target)
+            .map(OsString::from)
             .or_else(|| launch_env_var(target))
     }
 

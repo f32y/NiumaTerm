@@ -933,7 +933,7 @@ impl Session {
     fn process_system(&mut self, message: &Value) -> Vec<Event> {
         match message["subtype"].as_str() {
             Some("init") => self.process_init(message),
-            Some("status") => self.process_status(message),
+            Some("status") => compaction_progress(&mut self.compacting, message),
             Some("compact_boundary") => self.process_compact_boundary(message),
             // Every other subtype (hook_*, thinking_tokens, informational, …)
             // is telemetry the UI ignores.
@@ -991,10 +991,6 @@ impl Session {
         self.request_context_composition();
 
         events
-    }
-
-    fn process_status(&mut self, message: &Value) -> Vec<Event> {
-        compaction_progress(&mut self.compacting, message)
     }
 
     /// The post-compaction boundary. Live it carries only the token accounting:

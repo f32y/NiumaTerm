@@ -164,13 +164,7 @@ fn codex_credential_env(provider_id: &str) -> String {
 }
 
 pub(super) fn launch_env_value(launch: &LaunchConfig, target: &str) -> Option<String> {
-    launch
-        .env
-        .iter()
-        .rev()
-        .find(|(name, _)| name.trim().eq_ignore_ascii_case(target))
-        .map(|(_, value)| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    launch_env_value_from_entries(&launch.env, target)
 }
 
 /// Turn a profile into a protocol-neutral launch spec. Generated environment
@@ -246,9 +240,8 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
         }
     }
 
-    let api_key_env = codex_credential_env.filter(|name| {
-        launch_env_value_from_entries(&env, name).is_some_and(|value| !value.trim().is_empty())
-    });
+    let api_key_env =
+        codex_credential_env.filter(|name| launch_env_value_from_entries(&env, name).is_some());
     let codex_provider = codex_provider_id.map(|id| CodexProviderConfig {
         id,
         name: if profile.name.trim().is_empty() {

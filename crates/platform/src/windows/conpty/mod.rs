@@ -20,11 +20,11 @@ use windows_sys::Win32::System::Threading::{
 use windows_sys::core::{HRESULT, PWSTR};
 use windows_sys::{s, w};
 
-use crate::Winsize;
 use crate::windows::child::ChildExitWatcher;
 use crate::windows::pipes::{EventedAnonRead, EventedAnonWrite};
 use crate::windows::process::{KillOnCloseJob, ProcessTree};
 use crate::windows::{Pty, cmdline, win32_string};
+use crate::{PtyOptions, Winsize};
 
 /// Load the pseudoconsole API from conpty.dll if possible, otherwise use the
 /// standard Windows API.
@@ -175,15 +175,15 @@ impl Drop for Conpty {
 // The ConPTY handle can be sent between threads.
 unsafe impl Send for Conpty {}
 
-pub fn new(
-    shell: &str,
-    working_directory: &Option<String>,
-    columns: u16,
-    rows: u16,
-    environment_overrides: &[(String, String)],
-    starting_title: Option<&str>,
-    manage_process_tree: bool,
-) -> Result<Pty> {
+pub fn new(shell: &str, options: PtyOptions<'_>, manage_process_tree: bool) -> Result<Pty> {
+    let PtyOptions {
+        working_directory,
+        columns,
+        rows,
+        environment_overrides,
+        starting_title,
+        ..
+    } = options;
     let api = ConptyApi::new();
     let mut pty_handle: HPCON = 0;
 
@@ -301,7 +301,7 @@ pub fn new(
     }
 
     let cmdline = win32_string(&cmdline(shell));
-    let cwd = working_directory.as_ref().map(win32_string);
+    let cwd = working_directory.map(win32_string);
 
     let mut environment = build_environment_block(environment_overrides);
 

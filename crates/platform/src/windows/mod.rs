@@ -50,7 +50,8 @@ use crate::windows::conpty::Conpty as Backend;
 use crate::windows::pipes::{EventedAnonRead as ReadPipe, EventedAnonWrite as WritePipe};
 use crate::windows::process::ProcessTree;
 use crate::{
-    ChildEvent, EventedPty, Interest, Poll, ProcessReadWrite, Token, Waker, Winsize, WinsizeBuilder,
+    ChildEvent, EventedPty, Interest, Poll, ProcessReadWrite, PtyOptions, Token, Waker, Winsize,
+    WinsizeBuilder,
 };
 
 pub struct Pty {
@@ -65,8 +66,6 @@ pub struct Pty {
     child_watcher: ChildExitWatcher,
 }
 
-// Creates conpty instead of pty
-// Windows Pseudo Console (ConPTY)
 pub fn create_pty(
     shell: &str,
     args: Vec<String>,
@@ -74,76 +73,26 @@ pub fn create_pty(
     columns: u16,
     rows: u16,
 ) -> Result<Pty, io::Error> {
-    create_pty_with_env(
+    create_pty_with_env(PtyOptions {
         shell,
-        args,
-        working_directory,
+        args: &args,
+        working_directory: working_directory.as_deref(),
         columns,
         rows,
-        &[],
-        None,
-        None,
-    )
+        environment_overrides: &[],
+        starting_title: None,
+        bootstrap: None,
+    })
 }
 
-/// Create a ConPTY shell with explicit child-only environment overrides.
-// The parameter list is the shared PTY creation surface: the Unix backend
-// declares the same one and callers hand it straight through, so its length is
-// decided by that shared signature rather than by anything this function does
-// with the values.
-#[allow(clippy::too_many_arguments)]
-pub fn create_pty_with_env(
-    shell: &str,
-    args: Vec<String>,
-    working_directory: &Option<String>,
-    columns: u16,
-    rows: u16,
-    environment_overrides: &[(String, String)],
-    starting_title: Option<&str>,
-    // PowerShell takes its integration as a startup argument, so nothing has
-    // to be typed at the shell here.
-    _bootstrap: Option<&str>,
-) -> Result<Pty, io::Error> {
-    create_pty_with_management(
-        shell,
-        args,
-        working_directory,
-        columns,
-        rows,
-        environment_overrides,
-        starting_title,
-        false,
-    )
+/// Create a ConPTY shell with child-only environment overrides.
+pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, io::Error> {
+    create_pty_with_management(options, false)
 }
 
-/// Create a ConPTY whose entire child process tree is terminated when the PTY
-/// is dropped. Background probes need deterministic cleanup regardless of the
-/// user setting that controls process-tree management for ordinary terminals.
-// The parameter list is the shared PTY creation surface: the Unix backend
-// declares the same one and callers hand it straight through, so its length is
-// decided by that shared signature rather than by anything this function does
-// with the values.
-#[allow(clippy::too_many_arguments)]
-pub fn create_managed_pty_with_env(
-    shell: &str,
-    args: Vec<String>,
-    working_directory: &Option<String>,
-    columns: u16,
-    rows: u16,
-    environment_overrides: &[(String, String)],
-    starting_title: Option<&str>,
-    _bootstrap: Option<&str>,
-) -> Result<Pty, io::Error> {
-    let pty = create_pty_with_management(
-        shell,
-        args,
-        working_directory,
-        columns,
-        rows,
-        environment_overrides,
-        starting_title,
-        true,
-    )?;
+/// Create a ConPTY whose child process tree is terminated when it is dropped.
+pub fn create_managed_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, io::Error> {
+    let pty = create_pty_with_management(options, true)?;
     if pty.process_tree().is_none() {
         return Err(io::Error::other(
             "managed ConPTY could not create its process-tree job",
@@ -152,27 +101,12 @@ pub fn create_managed_pty_with_env(
     Ok(pty)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn create_pty_with_management(
-    shell: &str,
-    args: Vec<String>,
-    working_directory: &Option<String>,
-    columns: u16,
-    rows: u16,
-    environment_overrides: &[(String, String)],
-    starting_title: Option<&str>,
+    options: PtyOptions<'_>,
     manage_process_tree: bool,
 ) -> Result<Pty, io::Error> {
-    let exec = command_line(shell, &args);
-    conpty::new(
-        &exec,
-        working_directory,
-        columns,
-        rows,
-        environment_overrides,
-        starting_title,
-        manage_process_tree,
-    )
+    let exec = command_line(options.shell, options.args);
+    conpty::new(&exec, options, manage_process_tree)
 }
 
 impl Pty {

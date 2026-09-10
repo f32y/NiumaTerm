@@ -11,7 +11,7 @@ pub(super) mod rewind;
 
 use crate::AgentPane;
 use crate::composer::branch::fork::{ForkFlow, ForkState};
-use crate::composer::branch::rewind::{RewindFlow, RewindState, rewind_blocks_submission};
+use crate::composer::branch::rewind::{RewindFlow, RewindState};
 
 /// The two ways of cutting the conversation, held together because at most one
 /// of them runs at a time and every question the composer asks about either is
@@ -29,7 +29,7 @@ impl BranchFlow {
     /// is open would reach a session about to be swapped out, and while a
     /// picker is showing, the keys that would send it are the picker's.
     pub(crate) fn holds_composer(&self) -> bool {
-        rewind_blocks_submission(self.rewind.state.as_ref()) || self.fork.state.is_some()
+        self.rewind.state.is_some() || self.fork.state.is_some()
     }
 
     /// Whether such a flow is past its picker and working. Until then the

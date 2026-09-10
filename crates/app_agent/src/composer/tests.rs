@@ -3,10 +3,12 @@ use nmt_agent_utils::claude_code::{sessions, stream_json};
 use nmt_agent_utils::codex::app_server;
 
 use crate::composer::attachments::spaced_placeholder;
+use crate::composer::branch::BranchFlow;
+use crate::composer::branch::fork::ForkState;
 use crate::composer::{
     CommandFeedbackKind, FileRestoreNext, RewindState, feedback_is_current, feedback_is_transient,
     file_restore_next, parse_annotated_prompt, prompt_with_response_annotations,
-    restored_input_after_interruption, rewind_blocks_submission,
+    restored_input_after_interruption,
 };
 
 fn checkpoint() -> sessions::ClaudeCheckpoint {
@@ -36,7 +38,6 @@ fn picker_cancellation_and_processing_phases_are_distinct() {
         assert!(state.is_picker());
         assert!(state.has_operation(7));
         assert!(!state.has_operation(6), "stale operations must be ignored");
-        assert!(rewind_blocks_submission(Some(state)));
     }
 
     for state in [
@@ -44,9 +45,7 @@ fn picker_cancellation_and_processing_phases_are_distinct() {
         RewindState::ForkingConversation { operation_id: 7 },
     ] {
         assert!(!state.is_picker());
-        assert!(rewind_blocks_submission(Some(&state)));
     }
-    assert!(!rewind_blocks_submission(None));
 }
 
 #[test]
@@ -196,4 +195,38 @@ fn an_image_placeholder_is_separated_from_the_prompt_it_is_written_into() {
     assert_eq!(spaced_placeholder(None, "[Image #1]"), "[Image #1] ");
     assert_eq!(spaced_placeholder(Some(' '), "[Image #2]"), "[Image #2] ");
     assert_eq!(spaced_placeholder(Some('\n'), "[Image #2]"), "[Image #2] ");
+}
+
+#[test]
+fn branch_flows_hold_the_composer_until_cleared() {
+    let mut flow = BranchFlow::default();
+    assert!(!flow.holds_composer());
+
+    flow.rewind.state = Some(RewindState::Loading { operation_id: 1 });
+    assert!(flow.holds_composer());
+    assert!(flow.picker_is_open());
+    assert!(!flow.is_working());
+
+    flow.rewind.state = Some(RewindState::RestoringFiles { operation_id: 1 });
+    assert!(flow.holds_composer());
+    assert!(!flow.picker_is_open());
+    assert!(flow.is_working());
+
+    flow.clear();
+    assert!(!flow.holds_composer());
+
+    flow.fork.state = Some(ForkState::Selecting(Vec::new()));
+    assert!(flow.holds_composer());
+    assert!(flow.picker_is_open());
+    assert!(!flow.is_working());
+
+    flow.fork.state = Some(ForkState::Branching);
+    assert!(flow.holds_composer());
+    assert!(!flow.picker_is_open());
+    assert!(flow.is_working());
+
+    flow.clear();
+    assert!(!flow.holds_composer());
+    assert!(!flow.picker_is_open());
+    assert!(!flow.is_working());
 }

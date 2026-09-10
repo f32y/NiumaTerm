@@ -8,7 +8,7 @@ use std::{error, fmt, io, thread};
 use nmt_config::{CursorShape, active_colors};
 use nmt_platform::windows::powershell::DEFAULT_SHELL;
 use nmt_platform::windows::process::ProcessTree;
-use nmt_platform::{WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env};
+use nmt_platform::{PtyOptions, WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env};
 use nmt_terminal::event::{EventListener, Msg, MsgSender, TerminalEvent, WindowId};
 use nmt_terminal::ghostty::GhosttyTerminal;
 use nmt_terminal::pty_pipe::{SessionOptions as PipeOptions, start_session};
@@ -299,28 +299,20 @@ impl RemoteSessionHub {
         let id = SessionId(self.next_session_id.fetch_add(1, Ordering::Relaxed) + 1);
         let stream = Arc::new(Mutex::new(StreamState::default()));
 
+        let pty_options = PtyOptions {
+            shell: &options.shell,
+            args: &options.args,
+            working_directory: options.working_directory.as_deref(),
+            columns: options.cols,
+            rows: options.rows,
+            environment_overrides: &options.environment_overrides,
+            starting_title: options.starting_title.as_deref(),
+            bootstrap: None,
+        };
         let pty = if options.manage_process_tree {
-            create_managed_pty_with_env(
-                &options.shell,
-                options.args.clone(),
-                &options.working_directory,
-                options.cols,
-                options.rows,
-                &options.environment_overrides,
-                options.starting_title.as_deref(),
-                None,
-            )
+            create_managed_pty_with_env(pty_options)
         } else {
-            create_pty_with_env(
-                &options.shell,
-                options.args.clone(),
-                &options.working_directory,
-                options.cols,
-                options.rows,
-                &options.environment_overrides,
-                options.starting_title.as_deref(),
-                None,
-            )
+            create_pty_with_env(pty_options)
         }
         .map_err(HubError::Spawn)?;
 

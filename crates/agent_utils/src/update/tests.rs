@@ -6,6 +6,18 @@ use nmt_platform::process::exit_status_from_code;
 use crate::update::*;
 
 #[test]
+fn installation_keys_follow_platform_path_case_rules() {
+    let upper = AgentCli::new("nmt-missing-installation/CLI", []);
+    let lower = AgentCli::new("nmt-missing-installation/cli", []);
+    let upper = InstallationKey::derive(ProviderKind::Codex, &upper);
+    let lower = InstallationKey::derive(ProviderKind::Codex, &lower);
+    #[cfg(windows)]
+    assert_eq!(upper.key, lower.key);
+    #[cfg(unix)]
+    assert_ne!(upper.key, lower.key);
+}
+
+#[test]
 fn installation_keys_dedupe_shared_launchers_and_split_update_contexts() {
     let first = AgentCli::new("codex", [("CODEX_HOME".to_string(), "C:\\A".to_string())]);
     let same = AgentCli::new("codex", [("CODEX_HOME".to_string(), "C:\\A".to_string())]);

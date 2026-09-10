@@ -12,7 +12,7 @@ use std::{env, fmt, thread};
 use nmt_platform::process::launch_env_var;
 #[cfg(not(windows))]
 use nmt_platform::shell::default_shell;
-use nmt_platform::{ChildEvent, EventedPty as _, ProcessReadWrite as _};
+use nmt_platform::{ChildEvent, EventedPty as _, ProcessReadWrite as _, PtyOptions};
 use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use serde::Deserialize;
@@ -356,16 +356,16 @@ fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchErro
     let (shell, shell_arguments) = interactive_launch();
     // A real terminal is required because current Claude versions render
     // subscription limits only through the interactive `/usage` panel.
-    let mut pty = nmt_platform::create_managed_pty_with_env(
-        &shell,
-        shell_arguments,
-        &working_directory,
-        120,
-        40,
-        &environment_overrides,
-        Some("Claude Usage"),
-        None,
-    )
+    let mut pty = nmt_platform::create_managed_pty_with_env(PtyOptions {
+        shell: &shell,
+        args: &shell_arguments,
+        working_directory: working_directory.as_deref(),
+        columns: 120,
+        rows: 40,
+        environment_overrides: &environment_overrides,
+        starting_title: Some("Claude Usage"),
+        bootstrap: None,
+    })
     .map_err(|err| format!("could not start interactive Claude usage session: {err}"))?;
 
     let started_at = Instant::now();

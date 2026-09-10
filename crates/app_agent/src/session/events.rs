@@ -11,7 +11,6 @@ use nmt_i18n::i18n;
 use tracing::{info, warn};
 
 use crate::capabilities::QueuedPromptDelivery;
-use crate::commands::claim_command_turn_start;
 use crate::composer::CommandFeedbackKind;
 use crate::questions::{QuestionPrompt, QuestionStatus};
 use crate::session::conversation::claimed_prompts;
@@ -464,7 +463,7 @@ impl AgentPane {
     /// with neither done, and without them the whole turn would be filed
     /// under the previous one and leave the pane looking idle while it runs.
     fn on_turn_started(&mut self, cx: &mut Context<Self>) {
-        let command_turn = claim_command_turn_start(&mut self.palette.awaiting_command_turn);
+        let command_turn = take(&mut self.palette.awaiting_command_turn);
         let harness_opened = !command_turn && !self.transcript.read(cx).is_working();
 
         if command_turn || harness_opened {

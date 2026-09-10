@@ -15,6 +15,9 @@ use crate::protocol::{
 };
 use crate::{FrameChannel, NET_TIMEOUT, NetError, client_connect_ik, with_timeout};
 
+#[cfg(test)]
+mod tests;
+
 /// One remote session's byte stream as the terminal engine wants to consume
 /// it: opaque output bytes plus a terminal exit. Mirrors the hub's
 /// `SessionEvent` but flattened to what a PTY reader yields.
@@ -39,21 +42,6 @@ impl RemoteSession {
         &self.output
     }
 
-    pub fn send_input(&self, data: Vec<u8>) {
-        let _ = self.commands.send(Frame::Input {
-            session_id: self.session_id,
-            data,
-        });
-    }
-
-    pub fn send_resize(&self, cols: u16, rows: u16) {
-        let _ = self.commands.send(Frame::Resize {
-            session_id: self.session_id,
-            cols,
-            rows,
-        });
-    }
-
     pub fn snapshot(&self) -> &ProtocolSessionSnapshot {
         &self.snapshot
     }
@@ -68,10 +56,19 @@ impl RemoteSession {
         }
     }
 
-    /// Consume the session into its output receiver (the byte stream a PTY
-    /// reader drains). Pair with a prior `input()` for the write side.
-    pub fn into_output(self) -> std_mpsc::Receiver<SessionByteEvent> {
-        self.output
+    /// Transfer the snapshot and both stream directions without copying VT bytes.
+    pub fn into_parts(
+        self,
+    ) -> (
+        ProtocolSessionSnapshot,
+        RemoteInput,
+        std_mpsc::Receiver<SessionByteEvent>,
+    ) {
+        let input = RemoteInput {
+            session_id: self.session_id,
+            commands: self.commands,
+        };
+        (self.snapshot, input, self.output)
     }
 }
 

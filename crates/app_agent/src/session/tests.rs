@@ -557,6 +557,40 @@ mod queued_prompt_placement_tests {
     }
 
     #[gpui::test]
+    fn a_pending_command_starts_working_on_its_turn_event_once(cx: &mut TestAppContext) {
+        // Codex initialization stays on the test executor; Claude would start
+        // a real stdout reader before the test backend replaces it.
+        let (pane, window) = open_pane(cx, AgentProfileKind::Codex);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
+                    [],
+                    SlashCommandOutcome::NotReady,
+                    Vec::new(),
+                )));
+                pane.runtime.status = Status::Idle;
+                pane.palette.awaiting_command_turn = true;
+                let previous_turn = pane.turn.seq;
+                assert!(!pane.transcript.read(cx).is_working());
+
+                pane.apply_event(SessionEvent::TurnStarted, cx);
+                assert!(!pane.palette.awaiting_command_turn);
+                assert_eq!(pane.turn.seq, previous_turn + 1);
+                assert_eq!(pane.runtime.status, Status::Running);
+                assert!(pane.transcript.read(cx).is_working());
+
+                pane.apply_event(SessionEvent::TurnStarted, cx);
+                assert_eq!(
+                    pane.turn.seq,
+                    previous_turn + 1,
+                    "a repeated event must not open another turn"
+                );
+            });
+        });
+    }
+
+    #[gpui::test]
     fn a_queued_prompt_heads_the_turn_opened_for_it(cx: &mut TestAppContext) {
         let (pane, window) = open_pane(cx, AgentProfileKind::ClaudeCode);
         let mut cx = VisualTestContext::from_window(window.into(), cx);

@@ -11,7 +11,7 @@ use std::io::Read;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use nmt_platform::{ProcessReadWrite, create_pty_with_env};
+use nmt_platform::{ProcessReadWrite, PtyOptions, create_pty_with_env};
 
 /// Minimal base64 (standard alphabet, padded) so the test needs no crates.
 fn b64(input: &[u8]) -> String {
@@ -57,8 +57,17 @@ fn drive_conpty(script: &str) -> Vec<u8> {
 fn drive_conpty_with_title(script: &str, title: Option<&str>) -> Vec<u8> {
     let encoded = b64(&utf16le(script));
     let cmdline = format!("powershell -NoProfile -NonInteractive -EncodedCommand {encoded}");
-    let mut pty = create_pty_with_env(&cmdline, Vec::new(), &None, 80, 24, &[], title, None)
-        .expect("failed to create ConPTY");
+    let mut pty = create_pty_with_env(PtyOptions {
+        shell: &cmdline,
+        args: &[],
+        working_directory: None,
+        columns: 80,
+        rows: 24,
+        environment_overrides: &[],
+        starting_title: title,
+        bootstrap: None,
+    })
+    .expect("failed to create ConPTY");
 
     let mut collected: Vec<u8> = Vec::new();
     let mut buf = [0u8; 4096];

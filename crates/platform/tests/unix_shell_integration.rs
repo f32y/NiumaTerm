@@ -14,7 +14,7 @@ use std::process::{Command, Stdio, id};
 use std::time::{Duration, Instant};
 use std::{env, fs, thread};
 
-use nmt_platform::{Pty, create_pty_with_env, prompt_integration, terminfo_exists};
+use nmt_platform::{Pty, PtyOptions, create_pty_with_env, prompt_integration, terminfo_exists};
 
 const DEADLINE: Duration = Duration::from_secs(20);
 
@@ -148,16 +148,16 @@ fn start_with_startup_files(
         environment.push((String::from("ZDOTDIR"), home_value));
     }
 
-    match create_pty_with_env(
-        &program,
-        integration.args,
-        &None,
-        80,
-        24,
-        &environment,
-        None,
-        integration.bootstrap.as_deref(),
-    ) {
+    match create_pty_with_env(PtyOptions {
+        shell: &program,
+        args: &integration.args,
+        working_directory: None,
+        columns: 80,
+        rows: 24,
+        environment_overrides: &environment,
+        starting_title: None,
+        bootstrap: integration.bootstrap.as_deref(),
+    }) {
         Ok(pty) => Some(Session {
             pty,
             home,

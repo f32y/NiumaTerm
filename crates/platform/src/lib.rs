@@ -32,6 +32,19 @@ use crate::windows as platform;
 #[cfg(windows)]
 pub use crate::windows::*;
 
+/// Borrowed launch settings shared by local sessions and background PTYs.
+#[derive(Clone, Copy)]
+pub struct PtyOptions<'a> {
+    pub shell: &'a str,
+    pub args: &'a [String],
+    pub working_directory: Option<&'a str>,
+    pub columns: u16,
+    pub rows: u16,
+    pub environment_overrides: &'a [(String, String)],
+    pub starting_title: Option<&'a str>,
+    pub bootstrap: Option<&'a str>,
+}
+
 pub const APP_ID: &str = "NiumaTerm";
 pub const USES_CONPTY: bool = cfg!(windows);
 

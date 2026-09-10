@@ -98,10 +98,6 @@ pub(crate) fn file_restore_next(
     }
 }
 
-pub(crate) fn rewind_blocks_submission(state: Option<&RewindState>) -> bool {
-    state.is_some()
-}
-
 pub(crate) fn rewind_prompt_label(prompt: &str) -> String {
     let line = prompt
         .lines()

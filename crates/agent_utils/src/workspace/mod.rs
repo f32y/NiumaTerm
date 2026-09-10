@@ -1,7 +1,9 @@
 //! The directories one Agent conversation may use, in a shape every harness
 //! adapter can read without knowing anything about NiumaTerm's Workspace model.
 
-use std::path::{Component, Path};
+use std::path::Path;
+
+use nmt_platform::filesystem::lexical_path_spelling;
 
 /// The directories an Agent conversation started with. Cloned into a backend
 /// at start and never mutated afterwards: editing the parent workspace must
@@ -74,30 +76,10 @@ impl AgentWorkspace {
     pub fn history_signature(&self) -> String {
         self.additional
             .iter()
-            .map(|path| normalize(path))
+            .map(|path| lexical_path_spelling(Path::new(path.trim())))
             .collect::<Vec<_>>()
             .join("\n")
     }
-}
-
-/// A path reduced to a comparable spelling: separators unified, `.` segments
-/// and trailing separators dropped, and case folded because Windows
-/// filesystems are case-insensitive.
-fn normalize(path: &str) -> String {
-    let mut normalized = String::new();
-    for component in Path::new(path.trim()).components() {
-        if component == Component::CurDir {
-            continue;
-        }
-        if !normalized.is_empty() {
-            normalized.push('/');
-        }
-        normalized.push_str(&component.as_os_str().to_string_lossy());
-    }
-    if cfg!(windows) {
-        normalized.make_ascii_lowercase();
-    }
-    normalized
 }
 
 /// Whether a harness can use every directory an [`AgentWorkspace`] carries.

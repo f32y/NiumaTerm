@@ -9,7 +9,9 @@ use std::time;
 
 use nmt_config::{CursorShape, active_colors};
 use nmt_platform::process::ProcessTree;
-use nmt_platform::{EventedPty, WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env};
+use nmt_platform::{
+    EventedPty, PtyOptions, WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env,
+};
 use nmt_terminal::block_store::BlockStore;
 use nmt_terminal::event::{BlockEvent, Msg, MsgSender, ProgressReport};
 use nmt_terminal::ghostty::GhosttyTerminal;
@@ -170,28 +172,20 @@ impl TerminalSession {
         let cols = config.cols.max(1);
         let rows = config.rows.max(1);
 
+        let pty_options = PtyOptions {
+            shell: &shell,
+            args: &config.args,
+            working_directory: config.working_dir.as_deref(),
+            columns: cols,
+            rows,
+            environment_overrides: &config.environment_overrides,
+            starting_title: config.starting_title.as_deref(),
+            bootstrap: config.bootstrap.as_deref(),
+        };
         let pty = if config.manage_process_tree {
-            create_managed_pty_with_env(
-                &shell,
-                config.args.clone(),
-                &config.working_dir,
-                cols,
-                rows,
-                &config.environment_overrides,
-                config.starting_title.as_deref(),
-                config.bootstrap.as_deref(),
-            )
+            create_managed_pty_with_env(pty_options)
         } else {
-            create_pty_with_env(
-                &shell,
-                config.args.clone(),
-                &config.working_dir,
-                cols,
-                rows,
-                &config.environment_overrides,
-                config.starting_title.as_deref(),
-                config.bootstrap.as_deref(),
-            )
+            create_pty_with_env(pty_options)
         }
         .map_err(|error| {
             error!("session create_pty failed: {error:?}");

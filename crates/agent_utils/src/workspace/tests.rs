@@ -1,6 +1,22 @@
 use crate::workspace::AgentWorkspace;
 
 #[test]
+fn stored_history_signatures_keep_root_spelling_case_and_order() {
+    #[cfg(windows)]
+    let (paths, expected) = (
+        vec![" C:/ÄBC/ ".into(), "./Relative/./".into(), "C:/".into()],
+        "c:/\\/Äbc\nrelative\nc:/\\",
+    );
+    #[cfg(unix)]
+    let (paths, expected) = (
+        vec![" /ÄBC/ ".into(), "./Relative/./".into(), "/".into()],
+        "//ÄBC\nRelative\n/",
+    );
+    let workspace = AgentWorkspace::new(Some("primary".into()), paths);
+    assert_eq!(workspace.history_signature(), expected);
+}
+
+#[test]
 fn ordered_directories_start_with_the_primary_one() {
     let workspace = AgentWorkspace::new(Some("C:/A".into()), vec!["C:/B".into(), "C:/C".into()]);
 

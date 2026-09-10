@@ -188,7 +188,9 @@ async fn client_runtime_byte_stream() {
     .unwrap()
     .expect("client runtime attaches");
 
-    session.send_input(format!("echo {MARKER}\r").into_bytes());
+    session
+        .input()
+        .send_input(format!("echo {MARKER}\r").into_bytes());
     let seen = task::spawn_blocking(move || {
         let mut buf = Vec::new();
         loop {
@@ -292,7 +294,9 @@ async fn client_runtime_resumes_after_transport_loss() {
     time::sleep(Duration::from_secs(45)).await;
 
     // Input after the restart can only arrive if the runtime re-attached.
-    session.send_input(format!("echo {MARKER}\r").into_bytes());
+    session
+        .input()
+        .send_input(format!("echo {MARKER}\r").into_bytes());
     let seen = task::spawn_blocking(move || {
         let mut buf = Vec::new();
         loop {

@@ -55,7 +55,9 @@ pub use crate::unix::shell_integration::{
     shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
 };
 use crate::unix::signals::Signals;
-use crate::{APP_ID, ChildEvent, EventedPty, ProcessReadWrite, Winsize, WinsizeBuilder};
+use crate::{
+    APP_ID, ChildEvent, EventedPty, ProcessReadWrite, PtyOptions, Winsize, WinsizeBuilder,
+};
 
 #[cfg(all(target_os = "linux", not(target_env = "musl")))]
 const TIOCSWINSZ: libc::c_ulong = 0x5414;
@@ -417,76 +419,14 @@ impl ShellUser {
     }
 }
 
-///
-/// Creates a pseudoterminal using spawn.
-///
-/// The [`create_pty`] creates a pseudoterminal with similar behavior as tty,
-/// which is a command in Unix and Unix-like operating systems to print the file name of the
-/// terminal connected to standard input. tty stands for TeleTYpewriter.
-///
-/// It returns two [`Pty`] along with respective process name [`String`] and process id (`libc::pid_`)
-///
-/// Create a shell PTY with explicit child-only environment overrides.
-///
-/// `starting_title` has no creation-time equivalent here: a Unix PTY carries
-/// no title of its own, and the window title is whatever the child emits
-/// through OSC 0/2.
-// The parameter list is the shared PTY creation surface: the Windows backend
-// declares the same one and callers hand it straight through, so its length is
-// decided by that shared signature rather than by anything this function does
-// with the values.
-#[allow(clippy::too_many_arguments)]
-pub fn create_pty_with_env(
-    shell: &str,
-    args: Vec<String>,
-    working_directory: &Option<String>,
-    columns: u16,
-    rows: u16,
-    environment_overrides: &[(String, String)],
-    _starting_title: Option<&str>,
-    bootstrap: Option<&str>,
-) -> Result<Pty, Error> {
-    create_pty_with_management(
-        shell,
-        args,
-        working_directory,
-        columns,
-        rows,
-        environment_overrides,
-        bootstrap,
-        false,
-    )
+/// Create a shell PTY with child-only environment overrides.
+pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
+    create_pty_with_management(options, false)
 }
 
-/// Create a shell PTY whose entire child process tree is terminated when the
-/// PTY is dropped. Background probes need deterministic cleanup regardless of
-/// the user setting that controls process-tree management for ordinary
-/// terminals.
-// The parameter list is the shared PTY creation surface: the Windows backend
-// declares the same one and callers hand it straight through, so its length is
-// decided by that shared signature rather than by anything this function does
-// with the values.
-#[allow(clippy::too_many_arguments)]
-pub fn create_managed_pty_with_env(
-    shell: &str,
-    args: Vec<String>,
-    working_directory: &Option<String>,
-    columns: u16,
-    rows: u16,
-    environment_overrides: &[(String, String)],
-    _starting_title: Option<&str>,
-    bootstrap: Option<&str>,
-) -> Result<Pty, Error> {
-    let pty = create_pty_with_management(
-        shell,
-        args,
-        working_directory,
-        columns,
-        rows,
-        environment_overrides,
-        bootstrap,
-        true,
-    )?;
+/// Create a shell PTY whose child process tree is terminated when it is dropped.
+pub fn create_managed_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
+    let pty = create_pty_with_management(options, true)?;
     if pty.process_tree().is_none() {
         return Err(Error::other(
             "managed PTY could not contain its child process group",
@@ -557,17 +497,20 @@ fn queue_bootstrap(main: libc::c_int, child: libc::c_int, bootstrap: &str) -> Re
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn create_pty_with_management(
-    shell: &str,
-    args: Vec<String>,
-    working_directory: &Option<String>,
-    columns: u16,
-    rows: u16,
-    environment_overrides: &[(String, String)],
-    bootstrap: Option<&str>,
+    options: PtyOptions<'_>,
     manage_process_tree: bool,
 ) -> Result<Pty, Error> {
+    let PtyOptions {
+        shell,
+        args,
+        working_directory,
+        columns,
+        rows,
+        environment_overrides,
+        bootstrap,
+        ..
+    } = options;
     let (width, height) = (UNKNOWN_PIXEL_SIZE, UNKNOWN_PIXEL_SIZE);
     #[cfg(not(any(target_os = "macos", target_os = "freebsd")))]
     let mut is_controling_terminal = true;
@@ -657,7 +600,7 @@ fn create_pty_with_management(
                 single_quoted(shell_program)
             );
 
-            for arg in &args {
+            for arg in args {
                 exec_cmd.push(' ');
                 exec_cmd.push_str(&single_quoted(arg));
             }

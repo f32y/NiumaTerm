@@ -1,7 +1,6 @@
 //! Pure slash-command parsing and catalog logic for the agent composer.
 
 use std::collections::HashSet;
-use std::mem;
 
 use nmt_agent_utils::chat::{
     SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo,
@@ -369,12 +368,6 @@ pub(super) fn resolve_choice(input: &str, choices: &[(String, String)]) -> Resul
         [] => Err(i18n("agent-command-value-unknown").replace("{value}", input)),
         _ => Err(i18n("agent-command-value-ambiguous").replace("{value}", input)),
     }
-}
-
-/// Consume the marker set by an accepted backend command. The caller starts
-/// command working UI only when this is invoked by a real TurnStarted event.
-pub(super) fn claim_command_turn_start(awaiting: &mut bool) -> bool {
-    mem::take(awaiting)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

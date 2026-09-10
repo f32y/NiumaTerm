@@ -1,5 +1,40 @@
 use crate::launcher::*;
 
+#[test]
+fn effective_environment_matches_child_case_rules_and_last_override() {
+    let launcher = AgentCli::new(
+        SHELL,
+        [
+            ("NMT_CASE_PROBE".into(), "first".into()),
+            ("NMT_CASE_PROBE".into(), "upper".into()),
+            ("nmt_case_probe".into(), "lower".into()),
+        ],
+    );
+    #[cfg(windows)]
+    let expected_upper = "lower";
+    #[cfg(unix)]
+    let expected_upper = "upper";
+    assert_eq!(
+        launcher.effective_env_os("NMT_CASE_PROBE"),
+        Some(OsString::from(expected_upper))
+    );
+    assert_eq!(
+        launcher.effective_env_os("nmt_case_probe"),
+        Some(OsString::from("lower"))
+    );
+    #[cfg(windows)]
+    let body = "if not %NMT_CASE_PROBE%==lower exit /b 9";
+    #[cfg(unix)]
+    let body = "[ \"$NMT_CASE_PROBE\" = upper ] && [ \"$nmt_case_probe\" = lower ]";
+    let output = run_bounded(
+        &launcher,
+        script(body),
+        ProcessLimits::new(Duration::from_secs(3), 1024),
+    )
+    .unwrap();
+    assert!(output.success());
+}
+
 /// The bounded runner is exercised through a real child process, so each
 /// assertion needs a shell that exists on the host. Only the spelling of the
 /// script differs; every case tests the same runner behaviour.

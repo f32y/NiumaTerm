@@ -201,16 +201,6 @@ fn enum_choice_requires_an_exact_or_unique_prefix_match() {
 }
 
 #[test]
-fn command_working_begins_only_when_a_pending_command_gets_turn_started() {
-    let mut local_command = false;
-    assert!(!claim_command_turn_start(&mut local_command));
-
-    let mut provider_command = true;
-    assert!(claim_command_turn_start(&mut provider_command));
-    assert!(!provider_command);
-}
-
-#[test]
 fn palette_direction_navigation_wraps_and_handles_catalog_changes() {
     assert_eq!(
         move_palette_selection(0, 5, PaletteDirection::Previous),

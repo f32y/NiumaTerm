@@ -8,6 +8,7 @@ use std::time::Duration;
 use std::{fmt, fs};
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use nmt_platform::filesystem::installation_path_spelling;
 use parking_lot::Mutex;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -75,12 +76,7 @@ impl InstallationKey {
             ProviderKind::Claude => b"claude\0".as_slice(),
             ProviderKind::Codex => b"codex\0".as_slice(),
         });
-        digest.update(
-            resolved_launcher
-                .to_string_lossy()
-                .to_ascii_lowercase()
-                .as_bytes(),
-        );
+        digest.update(installation_path_spelling(&resolved_launcher).as_bytes());
         digest.update([0]);
 
         for name in UPDATE_ENVIRONMENT_NAMES {
