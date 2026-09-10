@@ -19,6 +19,7 @@ pub(crate) mod turn;
 mod update_recovery;
 
 use std::collections::{HashMap, VecDeque};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{env, fs};
@@ -36,6 +37,7 @@ use nmt_agent_utils::{
 };
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
 use nmt_i18n::i18n;
+use nmt_platform::filesystem::path_identity;
 use serde_json::Value;
 use tracing::info;
 
@@ -72,19 +74,13 @@ impl Drop for AgentPane {
     }
 }
 
-/// Whether two recorded working directories name the same place. Compared
-/// case-insensitively with separators normalized, because the two sides come
-/// from different writers: one from the tab's own configuration, the other
-/// from whatever the agent recorded when it ran.
+/// Compare recorded directories with native path rules. Windows writers may
+/// disagree about case and separators; Unix names retain both distinctions.
 pub(crate) fn directories_match(left: Option<&str>, right: Option<&str>) -> bool {
-    let normalize = |path: &str| {
-        path.trim_end_matches(['/', '\\'])
-            .replace('\\', "/")
-            .to_lowercase()
-    };
-
     match (left, right) {
-        (Some(left), Some(right)) => normalize(left) == normalize(right),
+        (Some(left), Some(right)) => {
+            path_identity(Path::new(left)) == path_identity(Path::new(right))
+        }
         // A row that records no directory says nothing about belonging
         // elsewhere, so it stays resumable in place.
         _ => true,

@@ -11,6 +11,7 @@ use std::{env, fs, io, process, thread};
 use gpui::{App, Context, Entity, Global, Window};
 use gpui_component::input::TextareaState;
 use nmt_agent_utils::AgentWorkspace;
+use nmt_platform::filesystem::installation_path_spelling;
 use tracing::warn;
 
 use crate::input_history::store::{HistoryStore, StoredHistory, load_from_path, save_to_path};
@@ -60,9 +61,12 @@ fn normalize_working_directory(cwd: Option<&str>) -> String {
     };
     let normalized =
         fs::canonicalize(&absolute).unwrap_or_else(|_| normalize_path_components(&absolute));
-    let mut normalized = normalized.to_string_lossy().replace('\\', "/");
-    normalized.make_ascii_lowercase();
-    normalized
+    let spelling = installation_path_spelling(&normalized);
+    // Windows keeps its persisted slash spelling. On Unix both case and a
+    // backslash can distinguish directories, including after canonicalization.
+    #[cfg(windows)]
+    let spelling = spelling.replace('\\', "/");
+    spelling
 }
 
 fn normalize_path_components(path: &Path) -> PathBuf {

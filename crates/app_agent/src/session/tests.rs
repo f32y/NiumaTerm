@@ -471,6 +471,7 @@ mod conversation_title_tests {
 }
 
 #[test]
+#[cfg(windows)]
 fn a_recorded_directory_is_matched_against_the_tab_across_writers() {
     // The tab's configuration and the agent's own record disagree about
     // separators and case, and neither is wrong.
@@ -486,6 +487,16 @@ fn a_recorded_directory_is_matched_against_the_tab_across_writers() {
 
     // A row that records nothing claims nothing, so it stays resumable here.
     assert!(directories_match(None, Some(r"C:\A")));
+}
+
+#[test]
+#[cfg(unix)]
+fn recorded_unix_directories_preserve_case_and_backslashes() {
+    assert!(!directories_match(Some("/work/Foo"), Some("/work/foo")));
+    assert!(!directories_match(Some(r"/work/a\b"), Some("/work/a/b")));
+    assert!(directories_match(Some("/work/Foo/"), Some("/work/Foo")));
+    assert!(!directories_match(Some("/"), Some("")));
+    assert!(directories_match(None, Some("/work/Foo")));
 }
 
 #[test]

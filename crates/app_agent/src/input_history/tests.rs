@@ -141,6 +141,42 @@ fn scope_uses_target_backend_and_normalized_directory() {
 }
 
 #[test]
+fn history_directory_keys_follow_native_spelling() {
+    let directory = TestDirectory::new();
+    let upper = directory.path().join("Project");
+    let lower = directory.path().join("project");
+    let upper_scope = scope("local", AgentKind::Codex, &upper);
+    let lower_scope = scope("local", AgentKind::Codex, &lower);
+    let mut history = HistoryStore::default();
+    history.record(&upper_scope, "upper directory".into());
+    history.record(&lower_scope, "lower directory".into());
+    let path = directory.path().join("history.json");
+    save_to_path(&path, &history.snapshot()).expect("save scoped history");
+    let restored = load_from_path(&path).expect("restore scoped history");
+
+    #[cfg(windows)]
+    {
+        assert_eq!(upper_scope, lower_scope);
+        assert!(!upper_scope.cwd.contains('\\'));
+        assert_eq!(upper_scope.cwd, upper_scope.cwd.to_ascii_lowercase());
+        assert_eq!(
+            restored.entries(&upper_scope),
+            ["upper directory", "lower directory"]
+        );
+    }
+    #[cfg(unix)]
+    {
+        assert_ne!(upper_scope, lower_scope);
+        assert_eq!(restored.entries(&upper_scope), ["upper directory"]);
+        assert_eq!(restored.entries(&lower_scope), ["lower directory"]);
+        assert_ne!(
+            scope("local", AgentKind::Codex, &directory.path().join(r"a\b")),
+            scope("local", AgentKind::Codex, &directory.path().join("a/b")),
+        );
+    }
+}
+
+#[test]
 fn recording_collapses_neighbors_and_keeps_the_newest_hundred() {
     let directory = TestDirectory::new();
     let codex_scope = scope("local", AgentKind::Codex, directory.path());
