@@ -69,7 +69,7 @@ impl Shell {
                             if let Some(tab) = tabs.find_mut(tab_id)
                                 && tab.surface().tree().is_some_and(|t| !t.is_single_leaf())
                             {
-                                removed = tab.surface_mut().live_mut().remove(pane_id);
+                                removed = tab.surface_mut().live_mut().remove(pane_id, cx);
                             }
                             if removed.is_none() {
                                 tabs.mark_exited(tab_id);
@@ -80,11 +80,7 @@ impl Shell {
                             tabs.clear_progress(tab_id);
                         }
 
-                        if let Some((pane, outcome)) = removed {
-                            if let RemoveOutcome::RemovedFromSplit { state, index } = outcome {
-                                state.update(cx, |state, cx| state.remove_panel(index, cx));
-                            }
-
+                        if let Some(pane) = removed {
                             // Dropping the pane entity releases its surface and
                             // ConPTY, same as an explicit pane close.
                             drop(pane);

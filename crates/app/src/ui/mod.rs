@@ -82,6 +82,7 @@ mod settings;
 mod shell;
 mod sidebar_resize;
 mod tab_bar;
+mod terminal_layout;
 mod terminal_status;
 #[cfg(test)]
 mod tests;

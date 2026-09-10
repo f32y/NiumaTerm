@@ -63,7 +63,7 @@ use crate::agent_updates::{
 };
 use crate::agent_usage::AgentUsageView;
 use crate::cli::CliAction;
-use crate::pane_tree::{PaneId, PaneNode, PaneTree, RemoveOutcome, SplitDirection, SplitOutcome};
+use crate::pane_tree::{PaneId, PaneNode, SplitDirection};
 #[cfg(windows)]
 use crate::remote;
 use crate::tabs::{CommandOutcome, Tab, TabId, TabManager};
@@ -98,6 +98,7 @@ pub(crate) use crate::ui::shell::tab_surface::TabSurface;
 use crate::ui::shell::updates_layer::UpdateNotificationLayer;
 use crate::ui::shell::workspace_dirs::{RootAvailability, WorkspaceDirsEditor};
 use crate::ui::tab_bar::TabStrip;
+use crate::ui::terminal_layout::TerminalLayout;
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workflows::WorkflowsView;
 use crate::ui::workspace_sidebar::{self, Sidebar, SidebarTab, SidebarUsage};

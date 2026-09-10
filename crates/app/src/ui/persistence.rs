@@ -16,6 +16,7 @@ use crate::tabs::{TabId, TabManager};
 use crate::ui::Shell;
 use crate::ui::settings::{AgentProfile, AppSettings, builtin_agent_profile};
 use crate::ui::shell::{TabSurface, agent_workspace};
+use crate::ui::terminal_layout::TerminalLayout;
 use crate::window::WindowRegistry;
 use crate::workspace::{
     WorkspaceId, WorkspaceKind, WorkspaceManager, WorkspaceRoots, default_workspace_name,
@@ -187,7 +188,7 @@ pub(super) fn default_session(
     let pane = spawn_default_pane(cx, surface_id, default_profile, spawn_cwd);
     let title = pane.read(cx).profile_name().to_string();
     let tabs = TabManager::new(
-        TabSurface::Live(PaneTree::new_leaf(PaneId(surface_id), pane)),
+        TabSurface::Live(TerminalLayout::new_leaf(PaneId(surface_id), pane)),
         TabId(surface_id),
         title,
     );
@@ -318,7 +319,7 @@ pub(super) fn materialize_active_tab(
         .panes
         .as_ref()
         .and_then(|panes| restore_pane_node(panes, next_id, cx))
-        .map(PaneTree::from_root)
+        .map(TerminalLayout::from_root)
         .unwrap_or_else(|| {
             let surface_id = Shell::alloc_id(next_id);
             let default_profile = cx.global::<AppSettings>().default_profile_command();
@@ -336,7 +337,7 @@ pub(super) fn materialize_active_tab(
                 }
             };
 
-            PaneTree::new_leaf(PaneId(surface_id), pane)
+            TerminalLayout::new_leaf(PaneId(surface_id), pane)
         });
 
     *workspaces.active_tabs_mut().active_mut() = TabSurface::Live(tree);

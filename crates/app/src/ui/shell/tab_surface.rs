@@ -1,12 +1,12 @@
 use gpui::{App, Entity};
-use gpui_component::resizable::ResizableState;
 use nmt_app_agent::{AgentKind, AgentPane};
 use nmt_app_terminal::view::TerminalPane;
 use nmt_config::local_state::TabState;
 
-use crate::pane_tree::{PaneId, PaneTree};
+use crate::pane_tree::PaneId;
+use crate::ui::terminal_layout::TerminalLayout;
 
-pub(crate) type TerminalPaneTree = PaneTree<Entity<TerminalPane>, Entity<ResizableState>>;
+pub(crate) type TerminalPaneTree = TerminalLayout<Entity<TerminalPane>>;
 
 /// A tab's surface. Restored tabs start `Pending` — the saved snapshot with no
 /// shell process behind it — and become `Live` (spawning their shells) the

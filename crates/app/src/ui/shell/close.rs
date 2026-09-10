@@ -86,13 +86,9 @@ impl Shell {
     fn close_pane_now(&mut self, id: PaneId, window: &mut Window, cx: &mut Context<Self>) {
         let tree = self.workspaces.active_tabs_mut().active_mut().live_mut();
 
-        let Some((pane, outcome)) = tree.remove(id) else {
+        let Some(pane) = tree.remove(id, cx) else {
             return;
         };
-
-        if let RemoveOutcome::RemovedFromSplit { state, index } = outcome {
-            state.update(cx, |state, cx| state.remove_panel(index, cx));
-        }
 
         let route = pane.read(cx).agent_route().clone();
 

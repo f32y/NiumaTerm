@@ -83,7 +83,7 @@ impl Shell {
         let title = pane.read(cx).profile_name().to_string();
 
         self.workspaces.active_tabs_mut().new_tab(
-            TabSurface::Live(PaneTree::new_leaf(PaneId(id), pane)),
+            TabSurface::Live(TerminalLayout::new_leaf(PaneId(id), pane)),
             TabId(id),
             title,
         );
@@ -125,7 +125,7 @@ impl Shell {
                         this.leave_settings_workspace();
                         this.register_agent_pane(&pane, cx);
                         this.workspaces.active_tabs_mut().new_tab(
-                            TabSurface::Live(PaneTree::new_leaf(PaneId(id), pane)),
+                            TabSurface::Live(TerminalLayout::new_leaf(PaneId(id), pane)),
                             TabId(id),
                             i18n("shell-remote-tab-title").to_string(),
                         );

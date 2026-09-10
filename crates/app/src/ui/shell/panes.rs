@@ -51,8 +51,7 @@ impl Shell {
             return;
         };
 
-        // Guard before mutating: the tree insert and the resizable-state
-        // insert must both happen or neither (they are index-aligned).
+        // Avoid spawning a shell when its panel cannot fit beside this pane.
         let has_room = focused.read(cx).content_size().is_none_or(|size| {
             let extent = match direction.axis() {
                 Axis::Horizontal => size.width,
@@ -71,25 +70,12 @@ impl Shell {
 
         let pane = spawn_default_pane(cx, id, default_profile, cwd);
 
-        self.register_agent_pane(&pane, cx);
-
         let tree = self.workspaces.active_tabs_mut().active_mut().live_mut();
 
-        match tree.split(PaneId(id), pane, direction, || {
-            cx.new(|_| ResizableState::default())
-        }) {
-            SplitOutcome::Inserted {
-                state,
-                index,
-                before,
-            } => {
-                // Halve the focused panel into the new sibling; siblings keep
-                // their sizes.
-                state.update(cx, |state, cx| state.split_panel(index, before, cx));
-            }
-            // A fresh two-child split lays out 50/50 on its own.
-            SplitOutcome::Wrapped => {}
+        if !tree.split(PaneId(id), pane.clone(), direction, cx) {
+            return;
         }
+        self.register_agent_pane(&pane, cx);
 
         self.focus_active(window, cx);
 
@@ -148,25 +134,9 @@ impl Shell {
             return;
         };
 
-        let Some((state, index, count)) = tree.resize_split(direction.axis()) else {
+        if !tree.resize(direction, PANE_RESIZE_STEP, window, cx) {
             return;
-        };
-
-        let Some(current) = state.read(cx).sizes().get(index).copied() else {
-            return;
-        };
-
-        let grow = direction.positive() == (index + 1 < count);
-
-        let target = if grow {
-            current + PANE_RESIZE_STEP
-        } else {
-            current - PANE_RESIZE_STEP
-        };
-
-        state.update(cx, |state, cx| {
-            state.resize_panel(index, target, window, cx)
-        });
+        }
 
         self.sync_session_memory(cx);
 
@@ -197,11 +167,7 @@ impl Shell {
             return;
         };
 
-        tree.for_each_split_mut(&mut |state, pending| {
-            if let Some(ratios) = pending.take_if(|_| state.read(cx).has_bounds()) {
-                state.update(cx, |state, cx| state.set_ratios(&ratios, cx));
-            }
-        });
+        tree.apply_pending_ratios(cx);
     }
 
     /// The active tab's pane tree as nested resizable groups. The main surface

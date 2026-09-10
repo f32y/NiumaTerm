@@ -296,7 +296,7 @@ impl Shell {
         let title = pane.read(cx).profile_name().to_string();
 
         let tabs = TabManager::new(
-            TabSurface::Live(PaneTree::new_leaf(PaneId(surface_id), pane)),
+            TabSurface::Live(TerminalLayout::new_leaf(PaneId(surface_id), pane)),
             TabId(surface_id),
             title,
         );
