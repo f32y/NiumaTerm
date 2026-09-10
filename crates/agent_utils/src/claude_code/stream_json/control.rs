@@ -179,7 +179,11 @@ impl ControlState {
     pub(super) fn cancel_generated_title(&mut self) {
         self.operations.retain(|id, operation| {
             if matches!(operation, PendingControlOperation::SessionTitle) {
-                self.deadlines.remove(id);
+                if let Some(deadline) = self.deadlines.remove(id)
+                    && let Some(input) = deadline.input
+                {
+                    input.cancel();
+                }
                 false
             } else {
                 true
@@ -222,7 +226,13 @@ impl ControlState {
 
     pub(super) fn close(&mut self, message: &str) -> Vec<Event> {
         self.closed = true;
-        self.deadlines.clear();
+        for deadline in self.deadlines.drain().map(|(_, deadline)| deadline) {
+            if deadline.class != RequestClass::Control
+                && let Some(input) = deadline.input
+            {
+                input.cancel();
+            }
+        }
         self.timer.take();
         let mut events = self.finish_turn();
         events.extend(self.effort.close(message));

@@ -94,6 +94,19 @@ impl PendingRoute {
     }
 }
 
+impl Drop for PendingRoute {
+    fn drop(&mut self) {
+        // Interrupt and unsubscribe requests must survive owner detachment:
+        // they stop remote work and release subscriptions during tab closure.
+        // Other retired requests must not start after their owner moved on.
+        if self.class != RequestClass::Control
+            && let Some(input) = &self.input
+        {
+            input.cancel();
+        }
+    }
+}
+
 struct ServerRequestRoute {
     owner: RegistrationId,
     thread_id: String,

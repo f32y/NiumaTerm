@@ -10,6 +10,49 @@ use crate::subprocess::InputTicket;
 use crate::workspace::AgentWorkspace;
 
 #[test]
+fn retiring_control_state_cancels_pending_writes_but_preserves_cleanup() {
+    let mut state = ControlState::default();
+    let title = InputTicket::queued_for_test(false);
+    let restore = InputTicket::queued_for_test(false);
+    let interrupt = InputTicket::queued_for_test(false);
+    for (id, class, ticket, operation) in [
+        (
+            "title",
+            RequestClass::Mutation,
+            title.clone(),
+            PendingControlOperation::SessionTitle,
+        ),
+        (
+            "restore",
+            RequestClass::Mutation,
+            restore.clone(),
+            PendingControlOperation::FileRewind,
+        ),
+        (
+            "interrupt",
+            RequestClass::Control,
+            interrupt.clone(),
+            PendingControlOperation::Other,
+        ),
+    ] {
+        state.record_admitted(id.into(), class, Instant::now());
+        state.attach_input(id, ticket);
+        state.track(id.into(), operation);
+    }
+    state.cancel_generated_title();
+    assert!(title.is_cancelled());
+    assert!(!restore.is_cancelled());
+    state.close("stopped");
+    assert!(restore.is_cancelled());
+    assert!(!interrupt.is_cancelled());
+    assert!(
+        state
+            .expired(Instant::now() + Duration::from_secs(301))
+            .is_empty()
+    );
+}
+
+#[test]
 fn request_deadlines_wake_without_output_and_release_the_delivery_on_close() {
     use std::sync::mpsc::{RecvTimeoutError, channel};
 

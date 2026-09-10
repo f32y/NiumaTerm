@@ -70,6 +70,11 @@ pub(crate) struct InputTicket {
 
 impl InputTicket {
     #[cfg(test)]
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.state.load(Ordering::Acquire) == 2
+    }
+
+    #[cfg(test)]
     pub(crate) fn queued_for_test(batch: bool) -> Self {
         Self::new(batch)
     }

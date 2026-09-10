@@ -345,6 +345,11 @@ impl Session {
     /// descendant. Forced termination is used only after an explicit user
     /// choice to interrupt active work.
     pub fn shutdown(&mut self, timeout: Duration, force: bool) -> Result<(), String> {
+        if force {
+            // Forced closure retires requests before EOF can drain queued
+            // side effects. Graceful shutdown still drains accepted input.
+            self.process_exit();
+        }
         self.process.shutdown(timeout, force)
     }
 

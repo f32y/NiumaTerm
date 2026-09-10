@@ -14,6 +14,35 @@ use crate::request_policy::RequestClass;
 use crate::subprocess::InputTicket;
 
 #[test]
+fn retiring_routes_cancels_only_their_ordinary_pending_inputs() {
+    let router = router();
+    let (owner, _) = register(&router);
+    let (other, _) = register(&router);
+    let mut tickets = Vec::new();
+    for (id, owner, method) in [
+        (1, owner, "thread/resume"),
+        (2, owner, "thread/read"),
+        (3, other, "thread/read"),
+        (4, owner, "turn/interrupt"),
+        (5, owner, "thread/unsubscribe"),
+    ] {
+        let mut request = json!({"id": id, "method": method});
+        router.prepare_outgoing(owner, &mut request).unwrap();
+        let ticket = InputTicket::queued_for_test(false);
+        router.attach_input(request["id"].as_u64().unwrap(), ticket.clone());
+        tickets.push(ticket);
+    }
+    router.retain_requests(owner, &[2, 4, 5]);
+    assert!(tickets[0].is_cancelled());
+    assert!(tickets[1..].iter().all(|ticket| !ticket.is_cancelled()));
+    assert!(!router.detach(owner));
+    assert!(tickets[1].is_cancelled());
+    assert!(tickets[2..].iter().all(|ticket| !ticket.is_cancelled()));
+    router.handle_stdout_closed();
+    assert!(tickets[2].is_cancelled());
+}
+
+#[test]
 fn expired_queued_requests_report_not_sent_and_ignore_late_success() {
     let router = router();
     let (owner, rx) = register(&router);
