@@ -18,6 +18,7 @@ use gpui_component::{
 };
 use nmt_i18n::i18n;
 
+use crate::capabilities::AgentCapabilities as _;
 use crate::composer::attachments::MAX_ATTACHMENTS;
 use crate::composer::{annotation_count_label, parse_annotated_prompt};
 use crate::settings::UI_RADIUS;

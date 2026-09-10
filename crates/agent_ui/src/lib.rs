@@ -35,6 +35,7 @@ use nmt_agent::chat::{
     ContextComposition, ContextWindowUsage, ReplayTurn, SessionScope, SessionStats, SessionSummary,
     SkillCatalog, SkillReference, SlashCommandInfo,
 };
+use nmt_agent::session::lifecycle::SessionRuntime;
 use nmt_agent::{AgentEvent, AgentRoute, AgentWorkspace};
 use nmt_config::profile::AgentProfile;
 use nmt_i18n::i18n;
@@ -44,9 +45,8 @@ use crate::composer::{BranchFlow, CommandFeedback, PendingSlashCommand};
 use crate::fade::Fade;
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
 use crate::pane_state::{ChildAgents, TurnState};
-pub use crate::profile::{AgentKind, AgentThreadDefaults, agent_launch};
+pub use crate::profile::{AgentKind, AgentKindExt, AgentThreadDefaults, agent_launch};
 use crate::session::history::FilesystemHistoryRequest;
-use crate::session::lifecycle::SessionRuntime;
 use crate::session::prompts::PendingPrompts;
 pub use crate::session::{
     RecoveryIdentity, RecoveryReadiness, RecoverySnapshot, RestorationReadiness,

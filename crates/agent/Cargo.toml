@@ -8,6 +8,10 @@ authors.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Shared provider stand-ins for core and GUI regression tests.
+test-support = []
+
 [dependencies]
 base64.workspace = true
 chrono.workspace = true

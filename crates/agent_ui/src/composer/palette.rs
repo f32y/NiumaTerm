@@ -10,6 +10,7 @@ use nmt_agent::chat::{
 use nmt_agent::claude_code::sessions;
 use nmt_i18n::i18n;
 
+use crate::capabilities::AgentCapabilities as _;
 use crate::commands::{
     PaletteCatalogEntry, PaletteDirection, filter_palette_catalog, filter_skill_catalog,
     move_palette_selection, parse_skill_prefix, parse_slash_command, prepare_skill_selection,

@@ -10,6 +10,7 @@ use image_rs::{DynamicImage, ImageFormat as EncodedImageFormat, RgbaImage};
 use nmt_agent::AgentWorkspace;
 use nmt_agent::chat::{SendOutcome, SessionSummary, SlashCommandOutcome};
 use nmt_agent::codex::app_server;
+use nmt_agent::session::lifecycle::StartOutcome;
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
 use nmt_platform::process::hidden_command;
 use serde_json::{Value, json};
@@ -20,7 +21,6 @@ use crate::input_history::{
     AgentInputHistory, HistoryWriter, InputHistoryAction, InputHistoryDirection,
     InputHistoryNavigation, InputHistoryScope, replace_input_with_history,
 };
-use crate::session::lifecycle::StartOutcome;
 use crate::session::{Backend, TestBackend};
 use crate::settings::AgentSettings;
 use crate::{AgentKind, AgentPane, AgentThreadDefaults, RecentSessionsMode};

@@ -34,6 +34,7 @@ tempfile.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+nmt_agent = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 tree-sitter-bash.workspace = true
 tree-sitter-diff.workspace = true

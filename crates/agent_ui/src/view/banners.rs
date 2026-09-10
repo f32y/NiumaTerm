@@ -9,6 +9,7 @@ use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_f
 use nmt_agent::{AgentWorkspace, MultiRootAccess};
 use nmt_i18n::i18n;
 
+use crate::capabilities::AgentCapabilities as _;
 use crate::context_usage::{ContextUsageIndicator, cache_hit_percent};
 use crate::profile::AgentKind;
 use crate::session::UpdateSuspension;

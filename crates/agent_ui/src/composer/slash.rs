@@ -16,6 +16,7 @@ use nmt_agent::codex::app_server;
 use nmt_agent::deepseek;
 use nmt_i18n::i18n;
 
+use crate::capabilities::AgentCapabilities as _;
 use crate::commands::{
     local_commands, merge_catalog, parse_slash_command, resolve_choice, setting_value_label,
 };

@@ -1,14 +1,15 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use nmt_agent::chat::{SendOutcome, SlashCommandOutcome};
 use serde_json::json;
 
-use crate::session::backend::{Backend, TestBackend};
+use crate::chat::{SendOutcome, SlashCommandOutcome};
+use crate::session::backend::Backend;
 use crate::session::lifecycle::{
     InterruptOutcome, RecoverySnapshot, RestorationReadiness, SessionRuntime, StartOutcome, Status,
     UpdateSuspension,
 };
+use crate::session::test_support::TestBackend;
 
 fn backend() -> Backend {
     let mut backend = TestBackend::new([], SlashCommandOutcome::NotReady, Vec::new());

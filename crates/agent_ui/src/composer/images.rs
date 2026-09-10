@@ -13,6 +13,7 @@ use gpui::{Bounds, ClipboardEntry, Context, Image, ImageFormat, Pixels, Window, 
 use nmt_i18n::i18n;
 
 use crate::AgentPane;
+use crate::capabilities::AgentCapabilities as _;
 use crate::composer::CommandFeedbackKind;
 use crate::composer::attachments::render::THUMBNAIL;
 use crate::composer::attachments::{AttachError, MAX_ATTACHMENTS};

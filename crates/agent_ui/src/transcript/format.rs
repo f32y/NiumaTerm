@@ -6,6 +6,7 @@ use gpui_component::IconName;
 use nmt_agent::chat::{Compaction, CompactionTrigger, Item as SessionItem};
 use nmt_i18n::i18n;
 
+use crate::capabilities::AgentCapabilities as _;
 use crate::composer::visible_prompt;
 use crate::profile::AgentKind;
 use crate::transcript::code::clean_output;

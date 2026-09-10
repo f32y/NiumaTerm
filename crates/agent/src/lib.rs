@@ -6,6 +6,7 @@ pub mod deepseek;
 pub mod git;
 pub mod launcher;
 pub mod message_memory;
+pub mod session;
 pub mod update;
 pub mod usage;
 pub mod workflow;

@@ -3,7 +3,7 @@ use std::process;
 use dirs::home_dir;
 use gpui::{App, AppContext, Axis, Context, Entity, Window};
 use gpui_component::resizable::ResizableState;
-use nmt_agent_ui::{AgentKind, AgentPane};
+use nmt_agent_ui::{AgentKind, AgentKindExt as _, AgentPane};
 use nmt_config::local_state::{
     PaneNodeState, PaneSplitAxis, SessionState, TabState, WorkspaceState,
 };

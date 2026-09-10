@@ -6,6 +6,7 @@ use nmt_agent::chat::QueuedPrompt;
 use nmt_agent::{AgentWorkspace, MultiRootAccess};
 use nmt_config::system::NewlineShortcut;
 
+use crate::capabilities::AgentCapabilities as _;
 use crate::composer::prompt_with_response_annotations;
 use crate::session::UpdateSuspension;
 use crate::thread_controls::effort::effort_gauge_step;

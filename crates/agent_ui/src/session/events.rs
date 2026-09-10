@@ -10,7 +10,7 @@ use nmt_agent::chat::{
 use nmt_i18n::i18n;
 use tracing::{info, warn};
 
-use crate::capabilities::QueuedPromptDelivery;
+use crate::capabilities::{AgentCapabilities as _, QueuedPromptDelivery};
 use crate::composer::CommandFeedbackKind;
 use crate::questions::{QuestionPrompt, QuestionStatus};
 use crate::session::conversation::claimed_prompts;

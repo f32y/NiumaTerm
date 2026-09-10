@@ -195,8 +195,12 @@ const DEEPSEEK: Capabilities = Capabilities {
     multi_root_access: MultiRootAccess::PrimaryOnly,
 };
 
-impl AgentKind {
-    pub(crate) fn caps(self) -> &'static Capabilities {
+pub(crate) trait AgentCapabilities {
+    fn caps(self) -> &'static Capabilities;
+}
+
+impl AgentCapabilities for AgentKind {
+    fn caps(self) -> &'static Capabilities {
         match self {
             AgentKind::Codex => &CODEX,
             AgentKind::Claude => &CLAUDE,

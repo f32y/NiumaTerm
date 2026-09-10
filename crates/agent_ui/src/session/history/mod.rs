@@ -10,10 +10,11 @@ use std::time::Duration;
 use gpui::Context;
 use nmt_agent::chat::{SessionScope, SessionSummary};
 use nmt_agent::claude_code::sessions;
+use nmt_agent::session::RecoveryIdentity;
 use nmt_i18n::i18n;
 
+use crate::capabilities::AgentCapabilities as _;
 use crate::composer::CommandFeedbackKind;
-use crate::session::backend::RecoveryIdentity;
 use crate::session::directories_match;
 use crate::{AgentPane, AgentPaneEvent, RecentSessionsMode, SessionHistoryUi};
 

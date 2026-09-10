@@ -14,6 +14,7 @@ use nmt_i18n::i18n;
 
 use crate::composer::branch::rewind::{rewind_prompt_label, rewind_timestamp};
 use crate::composer::{CommandFeedbackKind, PaletteAction, PaletteModel, PaletteRow, RewindState};
+use crate::session::errors::operation_error;
 use crate::session::{Backend, Status};
 use crate::settings::AgentSettings;
 use crate::{AgentPane, RecentSessionsMode, translated};
@@ -364,7 +365,9 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         let outcome = match self.runtime.backend_mut() {
-            Some(session) => session.fork_conversation(&checkpoint.anchor),
+            Some(session) => session
+                .fork_conversation(&checkpoint.anchor)
+                .map_err(operation_error),
             None => {
                 Err(i18n("agent-session-still-starting").replace("{name}", self.kind.display()))
             }

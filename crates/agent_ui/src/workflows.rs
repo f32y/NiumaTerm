@@ -20,6 +20,7 @@ use nmt_agent::claude_code::workflows::{
 };
 use nmt_agent::workflow::{WorkflowAgentState, WorkflowRun, WorkflowSnapshot};
 
+use crate::capabilities::AgentCapabilities as _;
 use crate::session::Backend;
 use crate::{AgentPane, AgentPaneEvent};
 

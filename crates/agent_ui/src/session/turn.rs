@@ -10,10 +10,10 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use gpui::{Context, Window};
 use nmt_agent::AgentEventKind;
+use nmt_agent::session::Backend;
+use nmt_agent::session::lifecycle::InterruptOutcome;
 
 use crate::composer::{CommandFeedbackKind, restored_input_after_interruption};
-use crate::session::backend::Backend;
-use crate::session::lifecycle::InterruptOutcome;
 use crate::transcript::LAST_RESPONSE_LIMIT;
 use crate::{AgentPane, AgentPaneEvent};
 

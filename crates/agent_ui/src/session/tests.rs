@@ -345,9 +345,9 @@ mod conversation_title_tests {
     };
     use nmt_agent::AgentWorkspace;
     use nmt_agent::chat::{SendOutcome, SlashCommandOutcome};
+    use nmt_agent::session::lifecycle::StartOutcome;
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
-    use crate::session::lifecycle::StartOutcome;
     use crate::session::{Backend, RecoveryIdentity, Status, TestBackend};
     use crate::settings::AgentSettings;
     use crate::{AgentPane, AgentPaneEvent, AgentThreadDefaults};
@@ -419,8 +419,9 @@ mod conversation_title_tests {
 
     #[gpui::test]
     fn rejected_rename_keeps_latest_name_until_admitted(cx: &mut TestAppContext) {
+        use nmt_agent::session::RenameOutcome;
+
         use crate::profile::AgentKind;
-        use crate::session::backend::RenameOutcome;
 
         let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
@@ -716,9 +717,9 @@ mod queued_prompt_placement_tests {
     use nmt_agent::chat::{
         Event as SessionEvent, Item as SessionItem, QueuedPrompt, SendOutcome, SlashCommandOutcome,
     };
+    use nmt_agent::session::lifecycle::StartOutcome;
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
-    use crate::session::lifecycle::StartOutcome;
     use crate::session::{Backend, Status, TestBackend};
     use crate::settings::AgentSettings;
     use crate::{AgentPane, AgentThreadDefaults};
@@ -1049,9 +1050,9 @@ mod session_replacement_tests {
     use gpui::{AppContext as _, TestAppContext, VisualTestContext};
     use nmt_agent::AgentWorkspace;
     use nmt_agent::chat::{SendOutcome, SlashCommandOutcome};
+    use nmt_agent::session::lifecycle::StartOutcome;
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
-    use crate::session::lifecycle::StartOutcome;
     use crate::session::{Backend, TestBackend};
     use crate::settings::AgentSettings;
     use crate::{AgentPane, AgentThreadDefaults};
@@ -1126,9 +1127,9 @@ mod shared_host_recovery_tests {
     use gpui::{AppContext as _, TestAppContext, VisualTestContext};
     use nmt_agent::AgentWorkspace;
     use nmt_agent::chat::{Event as SessionEvent, SendOutcome, SlashCommandOutcome};
+    use nmt_agent::session::lifecycle::StartOutcome;
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
-    use crate::session::lifecycle::StartOutcome;
     use crate::session::{Backend, Status, TestBackend, UpdateSuspension};
     use crate::settings::AgentSettings;
     use crate::{AgentKind, AgentPane, AgentThreadDefaults};
@@ -1247,9 +1248,9 @@ mod command_catalog_cache_tests {
         Event as SessionEvent, SendOutcome, SlashCommandArguments, SlashCommandInfo,
         SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
     };
+    use nmt_agent::session::lifecycle::StartOutcome;
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
-    use crate::session::lifecycle::StartOutcome;
     use crate::session::{Backend, TestBackend};
     use crate::settings::AgentSettings;
     use crate::{AgentPane, AgentThreadDefaults};

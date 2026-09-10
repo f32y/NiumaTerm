@@ -3,7 +3,7 @@ use std::slice;
 use gpui::{App, Entity, SharedString};
 use gpui_component::modern_menu::ModernMenu;
 use gpui_component::{Icon, IconName, IconNamed, Sizable as _};
-use nmt_agent_ui::AgentKind;
+use nmt_agent_ui::{AgentKind, AgentKindExt as _};
 use nmt_config::profile::Profile;
 use nmt_i18n::i18n;
 

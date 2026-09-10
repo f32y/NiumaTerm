@@ -2,6 +2,8 @@ use gpui::prelude::*;
 use gpui_component::ActiveTheme as _;
 use gpui_component::button::ButtonVariants as _;
 
+use crate::capabilities::AgentCapabilities as _;
+
 pub(crate) mod attachments;
 mod branch;
 pub(super) mod images;

@@ -6,6 +6,7 @@ use nmt_agent::claude_code::sessions;
 use nmt_i18n::i18n;
 
 use crate::composer::branch::fork::{PromptTarget, checkpoint_at_depth};
+use crate::session::errors::operation_error;
 
 /// Rewind is a local multi-step operation, not a model turn. Keeping its
 /// state separate prevents timers, transcript rows, and slash queues from
@@ -451,7 +452,13 @@ impl AgentPane {
         let outcome = self
             .runtime
             .backend_mut()
-            .map(|session| session.rewind_files(&checkpoint.user_message_id))
+            .map(|session| {
+                session
+                    .rewind_files(&checkpoint.user_message_id)
+                    .unwrap_or_else(|error| SlashCommandOutcome::Rejected {
+                        message: operation_error(error),
+                    })
+            })
             .unwrap_or(SlashCommandOutcome::NotReady);
 
         match outcome {

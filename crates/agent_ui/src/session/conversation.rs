@@ -9,6 +9,7 @@ use nmt_agent::chat::{QueuedPrompt, SessionSummary};
 use nmt_i18n::i18n;
 
 use crate::composer::CommandFeedbackKind;
+use crate::session::errors::operation_error;
 use crate::{AgentPane, RecentSessionsMode};
 
 /// Which of the prompts this side is holding a new pending-inbox snapshot no
@@ -50,7 +51,7 @@ impl AgentPane {
         }
 
         let outcome = match self.runtime.backend_mut() {
-            Some(session) => session.rename_conversation(title),
+            Some(session) => session.rename_conversation(title).map_err(operation_error),
             None => {
                 Err(i18n("agent-session-still-starting").replace("{name}", self.kind.display()))
             }

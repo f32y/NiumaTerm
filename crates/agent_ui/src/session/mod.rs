@@ -1,21 +1,23 @@
 use futures::StreamExt as _;
 use gpui::prelude::*;
 use nmt_agent::AgentEvent;
+use nmt_agent::session::ImageAttachment;
+use nmt_agent::session::lifecycle::{SessionRuntime, StartOutcome};
 
 use crate::UnansweredPrompt;
+use crate::capabilities::AgentCapabilities as _;
 use crate::pane_state::{ChildAgents, TurnState};
-use crate::session::lifecycle::{SessionRuntime, StartOutcome};
+use crate::profile::AgentKindExt as _;
 use crate::session::output::{EventBatch, MAX_MESSAGES_PER_BATCH, MAX_UPDATE_TIME};
 use crate::session::prompts::PendingPrompts;
 use crate::thread_controls::{ThreadControls, launch_effort, launch_model, stored_thread_settings};
 use crate::view::session_state::SessionStateBadge;
-mod backend;
 mod background_tasks;
 mod conversation;
+pub(crate) mod errors;
 mod events;
 pub(crate) mod history;
 mod inbox;
-pub(crate) mod lifecycle;
 mod output;
 pub(crate) mod prompts;
 #[cfg(test)]
@@ -37,6 +39,13 @@ use nmt_agent::chat::{
 };
 use nmt_agent::claude_code::sessions as claude_sessions;
 use nmt_agent::codex::app_server;
+pub(super) use nmt_agent::session::Backend;
+use nmt_agent::session::ConversationTitleRequest;
+pub use nmt_agent::session::RecoveryIdentity;
+pub use nmt_agent::session::lifecycle::{RecoverySnapshot, RestorationReadiness};
+pub(super) use nmt_agent::session::lifecycle::{Status, UpdateSuspension};
+#[cfg(test)]
+pub(crate) use nmt_agent::session::test_support::TestBackend;
 use nmt_agent::{
     AgentEventKind, AgentRoute, AgentWorkspace, agent_process, git, normalize_body, normalize_title,
 };
@@ -53,13 +62,6 @@ use crate::fade::Fade;
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
 use crate::profile::{AgentKind, agent_launch};
 use crate::questions::QuestionStatus;
-pub(super) use crate::session::backend::Backend;
-use crate::session::backend::ConversationTitleRequest;
-pub use crate::session::backend::RecoveryIdentity;
-#[cfg(test)]
-pub(crate) use crate::session::backend::TestBackend;
-pub use crate::session::lifecycle::{RecoverySnapshot, RestorationReadiness};
-pub(super) use crate::session::lifecycle::{Status, UpdateSuspension};
 pub use crate::session::update_recovery::RecoveryReadiness;
 use crate::settings::AgentSettings;
 use crate::transcript::TranscriptView;
@@ -906,22 +908,21 @@ impl AgentPane {
         let settings = self.controls.settings.clone();
         let scratch = scratch_dir(self.agent_route.as_str());
 
-        let outcome = self.runtime.send(|session| match title_request.as_ref() {
-            Some(title) => session.send_user_message_with_title(
-                &text,
-                &settings,
-                skill,
-                self.attachments.images(),
-                &scratch,
-                title,
-            ),
-            None => session.send_user_message(
-                &text,
-                &settings,
-                skill,
-                self.attachments.images(),
-                &scratch,
-            ),
+        let outcome = self.runtime.send(|session| {
+            let images = self
+                .attachments
+                .images()
+                .iter()
+                .map(|image| ImageAttachment {
+                    bytes: image.bytes(),
+                    media_type: image.format().mime_type(),
+                });
+
+            match title_request.as_ref() {
+                Some(title) => session
+                    .send_user_message_with_title(&text, &settings, skill, images, &scratch, title),
+                None => session.send_user_message(&text, &settings, skill, images, &scratch),
+            }
         });
 
         // Both refusals keep the composed text recoverable; they differ only in
@@ -1067,7 +1068,7 @@ impl AgentPane {
     }
 
     pub(super) fn sync_pending_rename(&mut self) {
-        use crate::session::backend::RenameOutcome;
+        use nmt_agent::session::RenameOutcome;
 
         let can_address_conversation = self
             .runtime
