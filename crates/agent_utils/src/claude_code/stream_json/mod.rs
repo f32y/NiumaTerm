@@ -63,6 +63,7 @@ use crate::subprocess::{InputClass, JsonLineProcess};
 use crate::workspace::AgentWorkspace;
 
 mod control;
+mod effort;
 mod launch;
 mod parse;
 mod transcript;
@@ -115,13 +116,10 @@ pub struct Session {
     /// message after a send emits `TurnStarted` (the protocol has no explicit
     /// turn-started notification — `result` is the only turn boundary).
     turn_reported: bool,
-    /// Last model/permission/effort actually applied by the backend, so
-    /// settings picked in the UI turn into `set_model`,
-    /// `set_permission_mode` and `apply_flag_settings` control requests
-    /// exactly when they change.
+    /// Model and permission selections sent to the backend. Effort changes
+    /// additionally need ordered confirmation and are owned by control state.
     applied_model: Option<String>,
     applied_permission: Option<String>,
-    applied_effort: Option<String>,
     active_slash_command: Option<String>,
     /// A structured initialize catalog carries richer metadata than the
     /// string-only first-turn fallback and must remain authoritative.
@@ -277,7 +275,7 @@ impl Session {
         let mut session = Self {
             process,
             transcript: TranscriptState::default(),
-            control: ControlState::default(),
+            control: ControlState::with_effort(launch.effort.clone()),
             ready: false,
             // A resumed process may not emit `system/init` until its next
             // model turn. The caller already obtained this identity from the
@@ -288,8 +286,6 @@ impl Session {
             turn_reported: false,
             applied_model: initial_model,
             applied_permission: None,
-            // The launch flag below already put the process on this level.
-            applied_effort: launch.effort.clone(),
             active_slash_command: None,
             structured_commands_published: false,
             compacting: false,
@@ -421,7 +417,7 @@ impl Session {
             );
         }
         let mut pending_effort = None;
-        if settings.effort.is_some() && settings.effort != self.applied_effort {
+        if settings.effort.is_some() && settings.effort.as_deref() != self.control.effort() {
             let effort = settings.effort.clone().unwrap_or_default();
             let ultracode = effort == ULTRACODE_EFFORT;
             let level = if ultracode { "xhigh" } else { effort.as_str() };
@@ -434,7 +430,7 @@ impl Session {
             }));
 
             messages.push(request);
-            pending_effort = Some(request_id);
+            pending_effort = Some((request_id, effort));
         }
 
         let mut content = vec![json!({"type": "text", "text": text})];
@@ -471,12 +467,8 @@ impl Session {
         if settings.approval.is_some() {
             self.applied_permission = settings.approval.clone();
         }
-        if let Some(request_id) = pending_effort {
-            self.control.track(
-                request_id,
-                PendingControlOperation::EffortChange(self.applied_effort.clone()),
-            );
-            self.applied_effort = settings.effort.clone();
+        if let Some((request_id, effort)) = pending_effort {
+            self.control.record_effort(request_id, effort);
         }
 
         if self.turn_active {
@@ -1073,13 +1065,6 @@ impl Session {
             let Some(event) = self.control.resolve(response) else {
                 return Vec::new();
             };
-            // A refused change left the session on the level it had, so the
-            // next change is measured against that one rather than against the
-            // pick that never took.
-            if let Event::EffortRejected { effort, .. } = &event {
-                self.applied_effort = effort.clone();
-            }
-
             if let Event::ContextCompositionUpdated(composition) = &event
                 && let Some(usage) = self.transcript.apply_composition(composition)
             {

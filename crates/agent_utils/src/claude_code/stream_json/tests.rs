@@ -114,6 +114,18 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
     session
         .control
         .track(id.clone(), PendingControlOperation::SessionTitle);
+    session
+        .control
+        .record_effort("effort-first".into(), "high".into());
+    session
+        .control
+        .record_effort("effort-second".into(), "max".into());
+    let rejected = session.process(json!({"type": "control_response", "response": {"request_id": "effort-first", "subtype": "error", "error": "unavailable"}}));
+    assert!(
+        matches!(rejected.as_slice(), [Event::EffortRejected { effort: Some(effort), .. }] if effort == "max")
+    );
+    assert!(session.process(json!({"type": "control_response", "response": {"request_id": "effort-second", "subtype": "success"}})).is_empty());
+    assert_eq!(session.control.effort(), Some("max"));
     session.rename_session("User title");
     assert!(session.process(json!({"type": "control_response", "response": {"request_id": id, "subtype": "success", "response": {"title": "Late title"}}})).is_empty());
     session.compacting = true;
@@ -357,7 +369,7 @@ fn oversized_input_keeps_settings_unchanged_and_a_retry_is_atomic() {
     session.process(rx.recv_timeout(Duration::from_secs(5)).unwrap());
     let previous_model = session.applied_model.clone();
     let previous_permission = session.applied_permission.clone();
-    let previous_effort = session.applied_effort.clone();
+    let previous_effort = session.control.effort().map(str::to_owned);
     let pending = session.control.pending_count();
     let settings = ThreadSettings {
         model: Some("test-model".into()),
@@ -371,7 +383,7 @@ fn oversized_input_keeps_settings_unchanged_and_a_retry_is_atomic() {
     ));
     assert_eq!(session.applied_model, previous_model);
     assert_eq!(session.applied_permission, previous_permission);
-    assert_eq!(session.applied_effort, previous_effort);
+    assert_eq!(session.control.effort(), previous_effort.as_deref());
     assert_eq!(session.control.pending_count(), pending);
     assert!(!session.turn_active);
     assert!(session.process.has_stdin());

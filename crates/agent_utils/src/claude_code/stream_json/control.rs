@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use tracing::debug;
 
 use crate::chat::{ContextComposition, ContextSegment, Event, Question, QuestionOption};
+use crate::claude_code::stream_json::effort::EffortState;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PendingControlOperation {
@@ -12,16 +13,13 @@ pub(super) enum PendingControlOperation {
     FileRewind,
     ContextComposition,
     SessionTitle,
-    /// An effort change, carrying the level the session stays on when the CLI
-    /// refuses it: ultracode the deployment does not offer, an environment
-    /// variable that pins the level, or a level beyond what the model reaches.
-    EffortChange(Option<String>),
 }
 
 pub(super) struct ControlState {
     next_request_id: u64,
     operations: HashMap<String, PendingControlOperation>,
     closed: bool,
+    effort: EffortState,
     pub(super) pending_approval: Option<PendingApproval>,
     pub(super) pending_questions: Option<PendingQuestions>,
 }
@@ -32,6 +30,7 @@ impl Default for ControlState {
             next_request_id: 1,
             operations: HashMap::new(),
             closed: false,
+            effort: EffortState::default(),
             pending_approval: None,
             pending_questions: None,
         }
@@ -39,6 +38,24 @@ impl Default for ControlState {
 }
 
 impl ControlState {
+    pub(super) fn with_effort(value: Option<String>) -> Self {
+        Self {
+            effort: EffortState::new(value),
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn effort(&self) -> Option<&str> {
+        self.effort.desired()
+    }
+
+    pub(super) fn record_effort(&mut self, id: String, value: String) {
+        if !self.closed {
+            self.operations.remove(&id);
+            self.effort.record(id, value);
+        }
+    }
+
     pub(super) fn request(&mut self, request: Value) -> (String, Value) {
         let request_id = format!("nmt-{}", self.next_request_id);
         self.next_request_id += 1;
@@ -59,7 +76,8 @@ impl ControlState {
     }
 
     pub(super) fn has_active_request(&self) -> bool {
-        self.pending_approval.is_some()
+        self.effort.has_pending()
+            || self.pending_approval.is_some()
             || self.pending_questions.is_some()
             || self
                 .operations
@@ -68,6 +86,11 @@ impl ControlState {
     }
 
     pub(super) fn resolve(&mut self, response: &Value) -> Option<Event> {
+        if let Some(id) = response["request_id"].as_str()
+            && self.effort.contains(id)
+        {
+            return self.effort.resolve(id, control_response_error(response));
+        }
         resolve_pending_control_operation(&mut self.operations, response)
     }
 
@@ -111,6 +134,7 @@ impl ControlState {
     pub(super) fn close(&mut self, message: &str) -> Vec<Event> {
         self.closed = true;
         let mut events = self.finish_turn();
+        events.extend(self.effort.close(message));
         events.extend(fail_pending_control_operations(
             &mut self.operations,
             message,
@@ -124,7 +148,7 @@ impl ControlState {
 
     #[cfg(test)]
     pub(super) fn pending_count(&self) -> usize {
-        self.operations.len()
+        self.operations.len() + self.effort.pending_count()
     }
 }
 
@@ -226,16 +250,7 @@ pub(super) fn resolve_pending_control_operation(
 ) -> Option<Event> {
     let request_id = response["request_id"].as_str()?;
     let operation = pending.remove(request_id)?;
-    let error = match response["subtype"].as_str() {
-        Some("success") => None,
-        Some("error") => Some(
-            response["error"]
-                .as_str()
-                .unwrap_or("unknown Claude control error")
-                .to_string(),
-        ),
-        _ => Some("Claude returned a malformed file restore response.".to_string()),
-    };
+    let error = control_response_error(response);
 
     match operation {
         PendingControlOperation::Other => error.map(|message| Event::Error {
@@ -256,15 +271,6 @@ pub(super) fn resolve_pending_control_operation(
         // Neither is worth showing the user: the conversation keeps the name
         // it already had. Both are worth a line in the log, because nothing
         // else distinguishes them from a request that was never made.
-        // A level that was applied needs no announcement: the control already
-        // shows it. A refusal has to reach the user, because the control shows
-        // a level the session is not on until it does.
-        PendingControlOperation::EffortChange(previous) => {
-            error.map(|message| Event::EffortRejected {
-                message,
-                effort: previous,
-            })
-        }
         PendingControlOperation::SessionTitle => {
             let title = error
                 .is_none()
@@ -352,14 +358,19 @@ pub(super) fn fail_pending_control_operations(
             // A conversation that lost its naming request keeps the name it
             // already had, which is what an unnamed one shows anyway.
             PendingControlOperation::SessionTitle => None,
-            // The process this level was meant for is gone. Its replacement
-            // launches on the level the profile pins, so the control goes back
-            // to what the lost session was on rather than keeping a pick that
-            // no process ever accepted.
-            PendingControlOperation::EffortChange(previous) => Some(Event::EffortRejected {
-                message: message.to_string(),
-                effort: previous,
-            }),
         })
         .collect()
+}
+
+fn control_response_error(response: &Value) -> Option<String> {
+    match response["subtype"].as_str() {
+        Some("success") => None,
+        Some("error") => Some(
+            response["error"]
+                .as_str()
+                .unwrap_or("unknown Claude control error")
+                .to_string(),
+        ),
+        _ => Some("Claude returned a malformed file restore response.".to_string()),
+    }
 }
