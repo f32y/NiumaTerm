@@ -35,6 +35,7 @@ fn snapshot_text(engine: &Arc<FairMutex<GhosttyTerminal>>) -> Vec<String> {
     let mut e = engine.lock();
     let snap = e.snapshot().expect("snapshot");
     let mut out = vec![String::new(); snap.rows()];
+
     for (y, out_row) in out.iter_mut().enumerate() {
         *out_row = (0..snap.cols())
             .map(|x| match snap.cell(x, y).c() {
@@ -45,6 +46,7 @@ fn snapshot_text(engine: &Arc<FairMutex<GhosttyTerminal>>) -> Vec<String> {
             .trim_end()
             .to_string();
     }
+
     out
 }
 
@@ -157,18 +159,23 @@ fn per_keystroke_typing_does_not_duplicate() {
             let sb = rb.lock().scrollbar();
             sb.offset < sb.total.saturating_sub(sb.len)
         };
+
         if scrolled_up {
             engine.lock().scroll_viewport_bottom();
         }
+
         sender.send(Msg::Input(vec![b'x'].into())).expect("send x");
         thread::sleep(Duration::from_millis(5));
     }
+
     thread::sleep(Duration::from_millis(2000));
 
     // Check both the engine snapshot and the render buffer (what the app reads).
     let engine_text = snapshot_text(&engine);
+
     let buf_text: Vec<String> = {
         let b = rb.lock();
+
         (0..b.rows())
             .map(|y| {
                 (0..b.cols())
@@ -179,6 +186,7 @@ fn per_keystroke_typing_does_not_duplicate() {
             })
             .collect()
     };
+
     let engine_x: usize = engine_text.iter().map(|l| l.matches('x').count()).sum();
     let buf_x: usize = buf_text.iter().map(|l| l.matches('x').count()).sum();
 
@@ -224,6 +232,7 @@ fn resize_then_fast_per_keystroke_does_not_duplicate() {
     for _ in 0..120 {
         sender.send(Msg::Input(vec![b'x'].into())).expect("x");
     }
+
     thread::sleep(Duration::from_millis(2500));
 
     let text = snapshot_text(&engine);

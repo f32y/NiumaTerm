@@ -85,6 +85,7 @@ impl AgentPane {
                 translated("agent-composer-resume-idle-only"),
                 cx,
             );
+
             return false;
         }
 
@@ -92,6 +93,7 @@ impl AgentPane {
             .history_ui
             .pending
             .unwrap_or(self.history_ui.sessions.len());
+
         if rows == 0 {
             self.history_ui.mode = RecentSessionsMode::Hidden;
             self.palette.set_feedback(
@@ -99,11 +101,13 @@ impl AgentPane {
                 translated("agent-composer-no-recent-sessions"),
                 cx,
             );
+
             return true;
         }
 
         self.history_ui.mode = RecentSessionsMode::Open;
         self.history_ui.selected = 0;
+
         // A list opened from a command was opened without the pointer, and a
         // strip that was on screen the last time the pointer crossed it has
         // no way to report that the pointer has since left.
@@ -111,6 +115,7 @@ impl AgentPane {
         self.history_ui.pointer = None;
         self.palette.feedback = None;
         cx.notify();
+
         true
     }
 
@@ -135,6 +140,7 @@ impl AgentPane {
                 action: PaletteAction::Skill(skill),
             })
             .collect::<Vec<_>>();
+
         let note = if rows.is_empty() && !skill_catalog.errors.is_empty() {
             Some(SharedString::new(&skill_catalog.errors[0]))
         } else if rows.is_empty() && query.is_empty() {
@@ -156,9 +162,11 @@ impl AgentPane {
         if let Some(state) = self.branch.rewind.state.as_ref() {
             return self.rewind_palette_model(state);
         }
+
         if let Some(state) = self.branch.fork.state.as_ref() {
             return self.fork_palette_model(state);
         }
+
         if self.palette.dismissed {
             return None;
         }
@@ -186,6 +194,7 @@ impl AgentPane {
 
         let parsed = parse_slash_command(&text)?;
         let catalog = self.command_catalog();
+
         // A harness with `$name` skill references reaches them that way.
         // Listing them under `/` too is a convenience for users who expect one
         // command key, so it follows the compatibility setting as well. Where
@@ -209,6 +218,7 @@ impl AgentPane {
             }
 
             let query = parsed.arguments.to_ascii_lowercase();
+
             let rows = self
                 .command_choices(&command.name)
                 .into_iter()
@@ -252,6 +262,7 @@ impl AgentPane {
         } else {
             &[]
         };
+
         let rows = filter_palette_catalog(&catalog, skills, &parsed.name)
             .into_iter()
             .map(|entry| match entry {
@@ -294,6 +305,7 @@ impl AgentPane {
                 },
             })
             .collect::<Vec<_>>();
+
         let note = if rows.is_empty() {
             if slash_skills && self.palette.skill_catalog.is_none() {
                 Some(translated("agent-composer-skill-discovery-loading"))
@@ -349,9 +361,11 @@ impl AgentPane {
             if self.handle_question_control(control, cx) {
                 return;
             }
+
             if self.handle_recent_sessions_control(control, cx) {
                 return;
             }
+
             let direction = match control {
                 PaletteControl::Previous => Some(InputHistoryDirection::Older),
                 PaletteControl::Next => Some(InputHistoryDirection::Newer),
@@ -359,11 +373,13 @@ impl AgentPane {
                     None
                 }
             };
+
             if direction
                 .is_some_and(|direction| self.handle_input_history_control(direction, window, cx))
             {
                 return;
             }
+
             cx.propagate();
             return;
         };
@@ -427,6 +443,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) -> bool {
         let composer_empty = self.input.read(cx).text().len() == 0;
+
         if matches!(control, PaletteControl::Complete) || !composer_empty {
             return false;
         }
@@ -435,6 +452,7 @@ impl AgentPane {
             .history_ui
             .pending
             .unwrap_or(self.history_ui.sessions.len());
+
         if !self.history_ui.mode.is_visible(
             self.transcript.read(cx).is_empty(),
             composer_empty,
@@ -517,6 +535,7 @@ impl AgentPane {
         let (text, can_execute) = match row.action {
             PaletteAction::Command(command) => {
                 let needs_arguments = command.arguments != SlashCommandArguments::None;
+
                 (
                     format!(
                         "/{}{}",
@@ -532,6 +551,7 @@ impl AgentPane {
             // because what follows is the request the skill serves.
             PaletteAction::Skill(skill) if self.kind.caps().slash_skills_are_prompts => {
                 let text = format!("/{} ", skill.name);
+
                 self.input.update(cx, |input, cx| {
                     input.set_value(text.clone(), window, cx);
                     input.set_selected_range(text.len()..text.len(), cx);
@@ -549,6 +569,7 @@ impl AgentPane {
                             .replace("{name}", &skill.name),
                         cx,
                     );
+
                     return;
                 };
 
@@ -577,6 +598,7 @@ impl AgentPane {
                 else {
                     return;
                 };
+
                 self.branch.rewind.state = Some(RewindState::SelectingAction {
                     operation_id,
                     checkpoint,
@@ -614,11 +636,14 @@ impl AgentPane {
 
     pub(crate) fn render_command_palette(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let model = self.palette_model(cx)?;
+
         let selected = self
             .palette
             .selected
             .min(model.rows.len().saturating_sub(1));
+
         let hover_selects = self.branch_picker_is_open();
+
         let rows = model
             .rows
             .into_iter()

@@ -50,6 +50,7 @@ pub(crate) fn frozen_block_images(
 
         for k in 0..p.grid_rows {
             let row = p.screen_row as usize + k as usize;
+
             if !visible.contains(&row) {
                 continue;
             }
@@ -72,5 +73,6 @@ pub(crate) fn frozen_block_images(
             });
         }
     }
+
     out
 }

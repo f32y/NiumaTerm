@@ -37,6 +37,7 @@ pub(crate) fn install_agent_settings(cx: &mut App) {
 
 fn agent_snapshot(cx: &App) -> AgentSettings {
     let settings = cx.global::<AppSettings>();
+
     AgentSettings {
         pane_background_follows_terminal: settings.appearance.agent_pane_use_terminal_background,
         font_family: settings.appearance.agent_font_family.clone().into(),
@@ -64,6 +65,7 @@ fn agent_snapshot(cx: &App) -> AgentSettings {
 
 fn snapshot(cx: &App) -> TerminalSettings {
     let settings = cx.global::<AppSettings>();
+
     TerminalSettings {
         input_style: settings.appearance.input_style,
         cursor_shape: settings.cursor_shape,

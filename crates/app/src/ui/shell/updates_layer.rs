@@ -32,10 +32,12 @@ fn update_notification_card(
         UpdateNotificationTone::Warning => NotificationType::Warning,
         UpdateNotificationTone::Error => NotificationType::Error,
     };
+
     let icon = match view.provider {
         ProviderKind::Claude => Icon::new(ClaudeUpdateIcon),
         ProviderKind::Codex => Icon::new(CodexUpdateIcon),
     };
+
     let close_key = view.installation.clone();
     let close_target = view.target.clone();
     let close_phase = view.phase;
@@ -66,7 +68,9 @@ fn update_notification_card(
                         .into_any_element(),
                 ),
             };
+
             let has_progress = progress_bar.is_some();
+
             v_flex()
                 .w_full()
                 .when(has_progress, |this| this.pt_2())
@@ -75,6 +79,7 @@ fn update_notification_card(
         })
         .secondary_action(move |_, _, _| {
             let settings_shell = settings_shell.clone();
+
             Button::new(format!("{settings_key}-settings"))
                 .ghost()
                 .label(i18n("shell-updates-settings"))
@@ -88,6 +93,7 @@ fn update_notification_card(
             let Some(updates) = cx.try_global::<AgentUpdates>() else {
                 return;
             };
+
             if close_phase == UpdatePhase::Available {
                 if let Some(target) = close_target.as_ref() {
                     updates.coordinator.dismiss_available(&close_key, target);
@@ -95,11 +101,13 @@ fn update_notification_card(
             } else {
                 updates.coordinator.hide_notification(&close_key);
             }
+
             cx.refresh_windows();
         });
 
     if let Some(primary) = view.primary {
         let action_key = view.installation.clone();
+
         notification = notification.action(move |_, _, _| {
             Button::new(format!("{}-primary", action_key.as_str()))
                 .primary()
@@ -109,44 +117,54 @@ fn update_notification_card(
                 })
                 .on_click({
                     let action_key = action_key.clone();
+
                     move |_, window, cx| {
                         agent_updates::request_update(action_key.clone(), window, cx)
                     }
                 })
         });
     }
+
     notification
 }
 
 impl UpdateNotificationLayer {
     pub(super) fn render(&mut self, cx: &mut Context<Shell>) -> Option<AnyElement> {
         let snapshots = cx.global::<AgentUpdates>().coordinator.snapshots();
+
         let views = snapshots
             .iter()
             .filter_map(agent_updates::notification_view)
             .collect::<Vec<_>>();
+
         let active_keys = views
             .iter()
             .map(|view| view.key.clone())
             .collect::<collections::HashSet<_>>();
+
         self.cards.retain(|key, _| active_keys.contains(key));
 
         let shell = cx.weak_entity();
         let mut cards = Vec::with_capacity(views.len());
+
         for view in views {
             let entry = match self.cards.entry(view.key.clone()) {
                 collections::hash_map::Entry::Occupied(occupied) => {
                     let entry = occupied.into_mut();
+
                     if entry.view != view {
                         entry.card.update(cx, |card, _| {
                             *card = update_notification_card(view.clone(), shell.clone())
                         });
                     }
+
                     entry.view = view;
+
                     entry
                 }
                 collections::hash_map::Entry::Vacant(vacant) => {
                     let card = cx.new(|_| update_notification_card(view.clone(), shell.clone()));
+
                     vacant.insert(UpdateCard {
                         view,
                         card,
@@ -154,11 +172,13 @@ impl UpdateNotificationLayer {
                     })
                 }
             };
+
             // Auto-hiding phases keep a focused-visible clock; entering a
             // sticky one clears it, so a card cannot expire on time banked
             // while it still counted down.
             if entry.view.terminal_timeout {
                 let phase = entry.view.phase;
+
                 entry
                     .elapsed
                     .get_or_insert_with(|| FocusedVisibleLifetime::new(phase))
@@ -166,10 +186,12 @@ impl UpdateNotificationLayer {
             } else {
                 entry.elapsed = None;
             }
+
             cards.push(entry.card.clone());
         }
 
         self.ensure_timer(cx);
+
         (!cards.is_empty()).then(|| {
             v_flex()
                 .absolute()
@@ -184,18 +206,22 @@ impl UpdateNotificationLayer {
 
     fn ensure_timer(&mut self, cx: &mut Context<Shell>) {
         let any_expiring = self.cards.values().any(|entry| entry.elapsed.is_some());
+
         if self.timer_running || !any_expiring {
             return;
         }
+
         self.timer_running = true;
         cx.spawn(async move |shell, cx| {
             loop {
                 cx.background_executor()
                     .timer(time::Duration::from_millis(100))
                     .await;
+
                 let keep_running = shell
                     .update(cx, |shell, cx| {
                         let mut expired = Vec::new();
+
                         if shell.window_active {
                             for (key, entry) in &mut shell.update_notifications.cards {
                                 if let Some(lifetime) = &mut entry.elapsed
@@ -205,19 +231,24 @@ impl UpdateNotificationLayer {
                                 }
                             }
                         }
+
                         if !expired.is_empty() {
                             let coordinator = cx.global::<AgentUpdates>().coordinator.clone();
+
                             for key in &expired {
                                 if let Some(entry) = shell.update_notifications.cards.get_mut(key) {
                                     coordinator.hide_notification(&entry.view.installation);
+
                                     // The card stays until the coordinator's
                                     // next snapshot retires its key; only the
                                     // clock is spent.
                                     entry.elapsed = None;
                                 }
                             }
+
                             cx.refresh_windows();
                         }
+
                         shell
                             .update_notifications
                             .cards
@@ -225,10 +256,12 @@ impl UpdateNotificationLayer {
                             .any(|entry| entry.elapsed.is_some())
                     })
                     .unwrap_or(false);
+
                 if !keep_running {
                     let _ = shell.update(cx, |shell, _| {
                         shell.update_notifications.timer_running = false;
                     });
+
                     break;
                 }
             }

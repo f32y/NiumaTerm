@@ -216,6 +216,7 @@ impl TryFrom<PersistedAgentProfile> for AgentProfile {
             })?,
             None => (persisted.api_base_url, persisted.api_key),
         };
+
         let launcher = persisted.launcher.unwrap_or({
             if persisted.via_npx {
                 AgentProfileLauncher::Npx
@@ -223,6 +224,7 @@ impl TryFrom<PersistedAgentProfile> for AgentProfile {
                 AgentProfileLauncher::Custom
             }
         });
+
         Ok(AgentProfile {
             name: persisted.name,
             kind: persisted.kind,
@@ -248,13 +250,16 @@ pub(crate) fn patch_document(doc: &mut DocumentMut, profiles: &[Profile], defaul
     doc["profiles"]["default"] = value(default_profile);
 
     let mut tables = ArrayOfTables::new();
+
     for profile in profiles {
         let mut table = Table::new();
+
         table["name"] = value(&profile.name);
         table["shell"] = value(&profile.shell);
         table["args"] = value(&profile.args);
         tables.push(table);
     }
+
     doc["profiles"]["list"] = Item::ArrayOfTables(tables);
 }
 
@@ -272,13 +277,16 @@ pub(crate) fn patch_agent_document(
 ) -> Result<(), String> {
     ensure_explicit_table(doc, "agent-profiles");
     doc["agent-profiles"]["default"] = value(default_profile);
+
     // Saving means the dialog managed this section; from now on an empty
     // list is a deliberate state, never re-seeded.
     doc["agent-profiles"]["initialized"] = value(true);
 
     let mut tables = ArrayOfTables::new();
+
     for profile in profiles {
         let mut table = Table::new();
+
         table["name"] = value(&profile.name);
         table["kind"] = value(profile.kind.as_str());
         table["executable"] = value(&profile.executable);
@@ -288,6 +296,7 @@ pub(crate) fn patch_agent_document(
         table["replace-sub-models"] = value(profile.replace_sub_models);
         table["use-custom-endpoint"] = value(profile.use_custom_endpoint);
         table["cache-warn-minutes"] = value(i64::from(profile.cache_warn_minutes));
+
         if !profile.api_base_url.is_empty() || !profile.api_key.is_empty() {
             let stored =
                 credentials::encrypt(&profile.api_base_url, &profile.api_key).map_err(|err| {
@@ -296,21 +305,27 @@ pub(crate) fn patch_agent_document(
                         profile.name
                     )
                 })?;
+
             table["api-credentials"] = value(stored);
         }
 
         let mut env = toml_edit::Array::new();
+
         for var in &profile.env {
             let mut entry = toml_edit::InlineTable::new();
+
             entry.insert("name", var.name.as_str().into());
             entry.insert("value", var.value.as_str().into());
             env.push(entry);
         }
+
         table["env"] = value(env);
         table["vision-model"] = value(profile.vision_model);
 
         tables.push(table);
     }
+
     doc["agent-profiles"]["list"] = Item::ArrayOfTables(tables);
+
     Ok(())
 }

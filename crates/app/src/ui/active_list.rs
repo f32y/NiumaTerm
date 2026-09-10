@@ -38,8 +38,10 @@ impl<T: HasId> ActiveList<T> {
         if self.items.len() <= 1 {
             return None;
         }
+
         let idx = self.index_of(id)?;
         let removed = self.items.remove(idx);
+
         if idx < self.active {
             self.active -= 1;
         } else if idx == self.active {
@@ -47,6 +49,7 @@ impl<T: HasId> ActiveList<T> {
             // neighbor when the removed element was last.
             self.active = idx.min(self.items.len() - 1);
         }
+
         Some(removed)
     }
 
@@ -70,9 +73,11 @@ impl<T: HasId> ActiveList<T> {
     /// active. No-op for out-of-range or equal indices.
     pub fn reorder(&mut self, from: usize, to: usize) {
         let n = self.items.len();
+
         if from >= n || to >= n || from == to {
             return;
         }
+
         self.edit_preserving_active(|items| {
             let item = items.remove(from);
             items.insert(to, item);

@@ -80,7 +80,9 @@ pub(super) fn parse_async_questions(item: &Value) -> Option<Vec<Question>> {
     if item["delivery"].as_str() != Some("async") {
         return None;
     }
+
     let questions: Vec<AsyncQuestion> = serde_json::from_value(item["questions"].clone()).ok()?;
+
     if questions.is_empty()
         || questions.iter().any(|question| {
             question.title.trim().is_empty()
@@ -91,6 +93,7 @@ pub(super) fn parse_async_questions(item: &Value) -> Option<Vec<Question>> {
     {
         return None;
     }
+
     Some(
         questions
             .into_iter()
@@ -125,14 +128,17 @@ impl QuestionState {
     pub(super) fn observe_message(&mut self, item: &Value) -> Option<Event> {
         let item_id = item["id"].as_str().filter(|id| !id.is_empty())?;
         let questions = parse_async_questions(item)?;
+
         if !self.seen_messages.insert(item_id.to_string()) {
             return None;
         }
+
         let request = QuestionRequest {
             id: format!("message:{item_id}"),
             mode: QuestionMode::Async,
             questions,
         };
+
         self.pending.insert(
             request.id.clone(),
             PendingQuestion {
@@ -140,18 +146,21 @@ impl QuestionState {
                 source: QuestionSource::Message,
             },
         );
+
         Some(Event::InputRequested(request))
     }
 
     pub(super) fn resolve_request(&mut self, rpc_id: u64) -> Option<Event> {
         let id = format!("request:{rpc_id}");
         let pending = self.pending.remove(&id)?;
+
         let resolution = match pending.source {
             QuestionSource::Request { submitted, .. } => {
                 submitted.unwrap_or(QuestionResolution::Expired)
             }
             QuestionSource::Message => return None,
         };
+
         Some(Event::InputResolved { id, resolution })
     }
 
@@ -168,6 +177,7 @@ impl QuestionState {
                 _ => None,
             })
             .collect();
+
         ids.into_iter()
             .filter_map(|id| self.resolve_request(id))
             .collect()
@@ -186,9 +196,11 @@ impl Session {
             {
                 continue;
             }
+
             let Some(item_id) = request.id.strip_prefix("message:") else {
                 continue;
             };
+
             self.conversation
                 .questions
                 .seen_messages
@@ -208,6 +220,7 @@ impl Session {
             .map_err(|error| format!("Invalid user-input request: {error}"))
             .and_then(|request| {
                 let mut ids = HashSet::new();
+
                 if self.conversation.thread_id.as_deref() != Some(request.thread_id.as_str())
                     || request.turn_id.is_empty()
                     || request.item_id.is_empty()
@@ -220,8 +233,10 @@ impl Session {
                 {
                     return Err("Invalid question identity or thread".to_string());
                 }
+
                 Ok(request)
             });
+
         let request = match parsed {
             Ok(request) => request,
             Err(message) => {
@@ -230,15 +245,19 @@ impl Session {
                 return Vec::new();
             }
         };
+
         let id = format!("request:{rpc_id}");
+
         if self.conversation.questions.pending.contains_key(&id) {
             return Vec::new();
         }
+
         let question_ids = request
             .questions
             .iter()
             .map(|question| question.id.clone())
             .collect();
+
         let batch = QuestionRequest {
             id: id.clone(),
             mode: if request.is_blocking.unwrap_or(true) {
@@ -259,6 +278,7 @@ impl Session {
                             description: Some(option.description),
                         })
                         .collect();
+
                     let input = if question.is_secret {
                         QuestionInput::Secret
                     } else if question.is_other || options.is_empty() {
@@ -266,6 +286,7 @@ impl Session {
                     } else {
                         QuestionInput::SelectionOnly
                     };
+
                     Question {
                         header: Some(question.header),
                         question: question.question,
@@ -276,6 +297,7 @@ impl Session {
                 })
                 .collect(),
         };
+
         self.conversation.questions.pending.insert(
             id,
             PendingQuestion {
@@ -288,6 +310,7 @@ impl Session {
                 },
             },
         );
+
         vec![Event::InputRequested(batch)]
     }
 
@@ -304,6 +327,7 @@ impl Session {
             .pending
             .get(id)
             .ok_or("This question is no longer pending")?;
+
         if self
             .conversation
             .questions
@@ -313,6 +337,7 @@ impl Session {
         {
             return Err("These answers are already being submitted".to_string());
         }
+
         if let Some(answers) = answers.as_ref()
             && (answers.len() != pending.request.questions.len()
                 || answers
@@ -333,6 +358,7 @@ impl Session {
         {
             return Err("Complete every question before submitting".to_string());
         }
+
         match &pending.source {
             QuestionSource::Request {
                 rpc_id,
@@ -343,7 +369,9 @@ impl Session {
                 if submitted.is_some() {
                     return Err("These answers are already being submitted".to_string());
                 }
+
                 let rpc_id = *rpc_id;
+
                 let resolution = if answers.is_some() {
                     QuestionResolution::Submitted {
                         message: None,
@@ -352,15 +380,19 @@ impl Session {
                 } else {
                     QuestionResolution::Skipped
                 };
+
                 let values: HashMap<&str, Value> = question_ids
                     .iter()
                     .map(String::as_str)
                     .zip(answers.unwrap_or_default())
                     .map(|(id, answers)| (id, json!({"answers": answers})))
                     .collect();
+
                 let message =
                     json!({"jsonrpc": "2.0", "id": rpc_id, "result": {"answers": values}});
+
                 self.try_send(message)?;
+
                 if let Some(PendingQuestion {
                     source: QuestionSource::Request { submitted, .. },
                     ..
@@ -368,6 +400,7 @@ impl Session {
                 {
                     *submitted = Some(resolution);
                 }
+
                 Ok(())
             }
             QuestionSource::Message => {
@@ -375,7 +408,9 @@ impl Session {
                     self.conversation.questions.pending.remove(id);
                     return Ok(());
                 };
+
                 let mut text = String::from("Answers to your questions:\n");
+
                 for (index, (question, answers)) in
                     pending.request.questions.iter().zip(answers).enumerate()
                 {
@@ -386,12 +421,14 @@ impl Session {
                         answers.join("; ")
                     ));
                 }
+
                 let submission = AnswerSubmission {
                     question_id: id.to_string(),
                     text,
                     settings: settings.clone(),
                     steered: self.conversation.current_turn.is_some(),
                 };
+
                 self.send_question_message(submission)
             }
         }
@@ -404,13 +441,16 @@ impl Session {
             .as_deref()
             .ok_or("Codex is not connected")?
             .to_string();
+
         let input = codex_user_input(&submission.text, None, &[]);
+
         let (method, mut params) = if submission.steered {
             let turn_id = self
                 .conversation
                 .current_turn
                 .as_deref()
                 .ok_or("The active turn ended; submit again")?;
+
             (
                 "turn/steer",
                 json!({"threadId": thread_id, "expectedTurnId": turn_id, "input": input}),
@@ -421,7 +461,9 @@ impl Session {
                 turn_start_params(&thread_id, input, &submission.settings, &self.workspace),
             )
         };
+
         let rpc_id = self.alloc_rpc_id();
+
         params["clientUserMessageId"] =
             json!(format!("nmt-question-{}-{rpc_id}", self.registration_id));
         self.try_send(json!({"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params}))?;
@@ -429,6 +471,7 @@ impl Session {
             .questions
             .submissions
             .insert(rpc_id, submission);
+
         Ok(())
     }
 
@@ -439,12 +482,14 @@ impl Session {
     ) -> Option<Vec<Event>> {
         let submission = self.conversation.questions.submissions.remove(&rpc_id)?;
         let id = submission.question_id.clone();
+
         if let Some(error) = message["error"].as_object() {
             let error = error
                 .get("message")
                 .and_then(Value::as_str)
                 .unwrap_or("Could not submit answers")
                 .to_string();
+
             // Only an explicit rejection proves the first attempt was not accepted.
             // Transport loss has an unknown outcome and must never trigger another send.
             if submission.steered
@@ -455,14 +500,18 @@ impl Session {
                     steered: false,
                     ..submission
                 };
+
                 return Some(match self.send_question_message(retry) {
                     Ok(()) => Vec::new(),
                     Err(message) => vec![Event::InputSubmissionFailed { id, message }],
                 });
             }
+
             return Some(vec![Event::InputSubmissionFailed { id, message: error }]);
         }
+
         self.conversation.questions.pending.remove(&id);
+
         Some(vec![Event::InputResolved {
             id,
             resolution: QuestionResolution::Submitted {

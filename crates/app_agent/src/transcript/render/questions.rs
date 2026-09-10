@@ -18,6 +18,7 @@ impl TranscriptView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let owner = self.owner().cloned();
+
         v_flex()
             .w_full()
             .gap_2()

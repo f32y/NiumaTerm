@@ -250,17 +250,21 @@ impl Session {
             suppress_resume_replay,
             background: CodexTasks::default(),
         };
+
         session.request_skills(false);
+
         let initial_request = initial_thread_request(
             session.initial_resume.as_deref(),
             &session.thread_profile,
             &session.workspace,
         );
+
         let kind = if session.initial_resume.is_some() {
             QueryKind::Resume
         } else {
             QueryKind::Start
         };
+
         session.send_query(kind, initial_request);
 
         Ok(session)
@@ -292,12 +296,15 @@ impl Session {
         if self.detached {
             return Ok(());
         }
+
         self.cancel_title_generation();
+
         if let (Some(thread_id), Some(turn_id)) = (
             self.conversation.thread_id.clone(),
             self.conversation.current_turn.clone(),
         ) {
             let rpc_id = self.alloc_rpc_id();
+
             self.send(json!({
                 "jsonrpc": "2.0",
                 "id": rpc_id,
@@ -305,8 +312,10 @@ impl Session {
                 "params": {"threadId": thread_id, "turnId": turn_id},
             }));
         }
+
         if let Some(thread_id) = self.conversation.thread_id.clone() {
             let rpc_id = self.alloc_rpc_id();
+
             self.send(json!({
                 "jsonrpc": "2.0",
                 "id": rpc_id,
@@ -314,6 +323,7 @@ impl Session {
                 "params": {"threadId": thread_id},
             }));
         }
+
         let result = if let Some(host) = self.host.take() {
             if host.detach(self.registration_id) {
                 host.shutdown(timeout, force)
@@ -323,8 +333,10 @@ impl Session {
         } else {
             Ok(())
         };
+
         self.control.close();
         self.detached = true;
+
         result
     }
 
@@ -340,6 +352,7 @@ impl Session {
         if self.detached || self.control.is_closed() {
             return Vec::new();
         }
+
         let id = message["id"].as_u64();
         let method = message["method"].as_str().map(str::to_owned);
 
@@ -353,7 +366,9 @@ impl Session {
             (None, Some(method)) => self.process_notification(method, &message["params"]),
             (None, None) => Vec::new(),
         };
+
         self.sync_descendant_owners();
+
         events
     }
 
@@ -426,9 +441,11 @@ impl Session {
         provisional_title: &str,
     ) -> SendOutcome {
         let outcome = self.send_user_message_with_skill(text, settings, skill, images);
+
         if matches!(outcome, SendOutcome::StartedTurn | SendOutcome::Steered) {
             self.begin_title_generation(text, provisional_title);
         }
+
         outcome
     }
 
@@ -439,11 +456,13 @@ impl Session {
         let Some(thread_id) = self.conversation.thread_id.clone() else {
             return SlashCommandOutcome::NotReady;
         };
+
         if self.conversation.current_turn.is_some() {
             return SlashCommandOutcome::Rejected {
                 message: "Codex is already running a turn.".to_string(),
             };
         }
+
         if !arguments.trim().is_empty() {
             return SlashCommandOutcome::Rejected {
                 message: format!("/{name} does not accept arguments."),
@@ -451,6 +470,7 @@ impl Session {
         }
 
         let rpc_id = self.alloc_rpc_id();
+
         let Some(request) = codex_command_request(rpc_id, &thread_id, name) else {
             return SlashCommandOutcome::Rejected {
                 message: format!("Unsupported Codex command: /{name}"),
@@ -460,11 +480,14 @@ impl Session {
         if let Err(message) = self.try_send(request) {
             return SlashCommandOutcome::Rejected { message };
         }
+
         if name == "compact" {
             self.conversation.compaction.request_manual();
         }
+
         self.control
             .track(rpc_id, ControlOperation::Command(name.to_string()));
+
         SlashCommandOutcome::Accepted
     }
 
@@ -495,6 +518,7 @@ impl Session {
     /// session keeps the thread it started with, so the tab stays usable.
     pub fn resume_thread(&mut self, thread_id: &str) -> bool {
         let params = thread_resume_params(thread_id, &self.thread_profile);
+
         if self
             .try_send_query(
                 QueryKind::Resume,
@@ -508,7 +532,9 @@ impl Session {
         {
             return false;
         }
+
         self.cancel_title_generation();
+
         true
     }
 
@@ -548,6 +574,7 @@ impl Session {
             return Err("this conversation has no thread to branch".to_string());
         };
         let mut params = thread_resume_params(&thread_id, &self.thread_profile);
+
         params["lastTurnId"] = json!(last_turn_id);
         self.try_send_query(
             QueryKind::Fork,
@@ -558,6 +585,7 @@ impl Session {
             }),
         )?;
         self.cancel_title_generation();
+
         Ok(())
     }
 
@@ -569,6 +597,7 @@ impl Session {
         self.history_cursor = None;
 
         let params = thread_list_params(&self.thread_profile, None, scope, &self.workspace);
+
         self.send_query(
             QueryKind::History,
             json!({
@@ -591,6 +620,7 @@ impl Session {
             self.history_scope,
             &self.workspace,
         );
+
         self.send_query(
             QueryKind::History,
             json!({
@@ -617,6 +647,7 @@ impl Session {
         let Some(request) = self.background.interrupt_request(rpc_id, thread_id) else {
             return false;
         };
+
         // The child's own `turn/completed` reports the interruption, so the row
         // moves to Interrupted through the same path as any other outcome.
         self.try_send(request).is_ok()
@@ -629,6 +660,7 @@ impl Session {
         let Some(request) = self.background.transcript_request(rpc_id, thread_id) else {
             return Vec::new();
         };
+
         self.send(request);
 
         vec![Event::BackgroundTaskTranscript {
@@ -641,11 +673,15 @@ impl Session {
         let Some(thread_id) = self.conversation.thread_id.clone() else {
             return;
         };
+
         self.background.set_root(&thread_id);
+
         if self.background.query_in_flight() {
             return;
         }
+
         let rpc_id = self.alloc_rpc_id();
+
         if let Some(request) = self.background.descendant_request(rpc_id, None) {
             self.send(request);
         }
@@ -657,6 +693,7 @@ impl Session {
         if !changed {
             return Vec::new();
         }
+
         self.background
             .snapshot()
             .map(Event::BackgroundTasks)
@@ -681,7 +718,9 @@ impl Session {
         {
             return false;
         }
+
         self.conversation.pending_approval = None;
+
         true
     }
 
@@ -695,8 +734,11 @@ impl Session {
         }
 
         let rpc_id = self.alloc_rpc_id();
+
         self.skill_refresh.start(rpc_id);
+
         let request = skills_list_request(rpc_id, force_reload, &self.workspace);
+
         self.send(request);
     }
 
@@ -705,14 +747,18 @@ impl Session {
         if self.detached || self.control.is_closed() {
             return Err("Codex app-server is not connected".to_string());
         }
+
         let outgoing = ControlState::outgoing(&message);
+
         self.host
             .as_ref()
             .ok_or("Codex app-server is not connected")?
             .send(self.registration_id, message)?;
+
         if let Some((id, operation)) = outgoing {
             self.control.track(id, operation);
         }
+
         Ok(())
     }
 
@@ -724,15 +770,18 @@ impl Session {
 
     fn try_send_query(&mut self, kind: QueryKind, mut message: Value) -> Result<(), String> {
         let id = self.alloc_rpc_id();
+
         message["id"] = json!(id);
         self.try_send(message)?;
         self.control.track_query(id, kind);
         self.retain_request_routes();
+
         Ok(())
     }
 
     fn send_query(&mut self, kind: QueryKind, mut message: Value) {
         let id = self.alloc_rpc_id();
+
         message["id"] = json!(id);
         self.send(message);
         self.control.track_query(id, kind);
@@ -741,15 +790,19 @@ impl Session {
 
     fn send(&mut self, message: Value) {
         let outgoing = ControlState::outgoing(&message);
+
         let request_id = message["method"]
             .is_string()
             .then(|| message["id"].as_u64())
             .flatten();
+
         if let Err(error) = self.try_send(message) {
             if let Some((id, operation)) = outgoing {
                 self.control.track(id, operation);
             }
+
             tracing::warn!("could not write Codex app-server request: {error}");
+
             // Background requests already have local pending state. Deliver the
             // rejection through the usual response path so it can settle that
             // state even though the shared host remains available.
@@ -766,6 +819,7 @@ impl Session {
             }
             "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
                 let params = &message["params"];
+
                 let description = if method == "item/commandExecution/requestApproval" {
                     format!("Run command: `{}`", stringify_command(&params["command"]))
                 } else {
@@ -806,9 +860,11 @@ impl Session {
             }
             Some(ControlOperation::ThreadName) | None => return Vec::new(),
         };
+
         if let Some(events) = self.process_question_response(rpc_id, message) {
             return events;
         }
+
         if self.skill_refresh.in_flight == Some(rpc_id) {
             let catalog = skill_catalog_from_response(message);
             let force_reload_again = self.skill_refresh.finish(rpc_id).unwrap_or(false);
@@ -827,6 +883,7 @@ impl Session {
                 return Vec::new();
             };
             let key = BackgroundTaskKey::codex(&thread_id);
+
             let update = match message["error"]["message"].as_str() {
                 Some(error) => BackgroundTaskTranscriptUpdate::state(
                     BackgroundTaskTranscriptState::Unavailable {
@@ -848,6 +905,7 @@ impl Session {
                     ),
                 ),
             };
+
             return vec![Event::BackgroundTaskTranscript { key, update }];
         }
 
@@ -862,11 +920,13 @@ impl Session {
             let (mut changed, next_cursor) = self
                 .background
                 .apply_descendants(rpc_id, &message["result"]);
+
             // A server that keeps handing back the same cursor would page
             // forever, so a repeat ends discovery instead of looping.
             if let Some(cursor) = next_cursor.filter(|cursor| self.background.accept_cursor(cursor))
             {
                 let next_rpc_id = self.alloc_rpc_id();
+
                 if let Some(request) = self
                     .background
                     .descendant_request(next_rpc_id, Some(&cursor))
@@ -875,6 +935,7 @@ impl Session {
                     changed = true;
                 }
             }
+
             return self.background_events(changed);
         }
 
@@ -883,6 +944,7 @@ impl Session {
                 if command == "compact" {
                     self.conversation.compaction.reject_manual_request();
                 }
+
                 return vec![Event::SlashCommandResult {
                     name: command.to_string(),
                     outcome: codex_command_response(command, Some(error)),
@@ -901,6 +963,7 @@ impl Session {
             // keeps working for a fresh conversation.
             let initial_resume_failed =
                 query == Some(QueryKind::Resume) && self.initial_resume.is_some();
+
             let message = match query {
                 Some(QueryKind::Resume) => format!("Could not resume session: {error}"),
                 // A refused branch leaves the session on the thread it was
@@ -936,6 +999,7 @@ impl Session {
                         "params": {"limit": 100},
                     }),
                 );
+
                 // History for the empty-tab session list, over whatever scope
                 // the tab last asked for.
                 self.request_history(self.history_scope);
@@ -949,6 +1013,7 @@ impl Session {
                 } else {
                     parse_models(&message["result"], self.thread_profile.model.as_deref())
                 };
+
                 vec![Event::Models(models)]
             }
             Some(QueryKind::History) => {
@@ -982,10 +1047,12 @@ impl Session {
                 self.conversation.current_turn = None;
                 self.conversation.thread_id = result["thread"]["id"].as_str().map(str::to_owned);
                 self.initial_resume = None;
+
                 // A resumed parent can already have finished descendants, and
                 // a reconnect resumes into a new process with none of the live
                 // child state the previous one observed.
                 self.start_descendant_discovery();
+
                 resumed_thread_events(result, take(&mut self.suppress_resume_replay))
             }
             _ => Vec::new(),
@@ -1008,6 +1075,7 @@ impl Session {
                     .to_string(),
             }];
         }
+
         if is_legacy_compaction_notification(method) {
             // Current servers can publish this deprecated notification beside
             // the authoritative item lifecycle. Ignoring it prevents a second
@@ -1020,6 +1088,7 @@ impl Session {
                 self.background
                     .observe_raw_response_item(thread_id, &params["item"]);
             }
+
             return Vec::new();
         }
 
@@ -1028,18 +1097,22 @@ impl Session {
         // unrelated thread's content must not enter the parent transcript.
         if THREAD_SCOPED_NOTIFICATIONS.contains(&method) {
             let thread_id = notification_thread_id(params).map(str::to_owned);
+
             match self.background.scope(thread_id.as_deref()) {
                 ThreadScope::Descendant => {
                     let thread_id = thread_id.unwrap_or_default();
                     let changed = self
                         .background
                         .apply_descendant_notification(&thread_id, method, params);
+
                     return self.background_events(changed);
                 }
                 ThreadScope::Unrelated => {
                     let thread_id = thread_id.unwrap_or_default();
+
                     self.background
                         .hold_unrelated_notification(&thread_id, method, params);
+
                     return Vec::new();
                 }
                 // A thread-scoped notification that carries no usable thread id
@@ -1053,13 +1126,16 @@ impl Session {
             self.request_skills(true);
             return Vec::new();
         }
+
         // Child discovery observes only parent items after thread routing.
         // Its panel updates follow the parent's transcript events.
         let children_changed = matches!(method, "item/started" | "item/completed")
             && params["item"]["type"].as_str() != Some("contextCompaction")
             && self.background.observe_parent_item(&params["item"]);
         let mut events = self.conversation.process_notification(method, params);
+
         events.extend(self.background_events(children_changed));
+
         events
     }
 }

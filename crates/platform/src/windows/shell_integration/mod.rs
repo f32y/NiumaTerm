@@ -166,6 +166,7 @@ fn context_menu_owned_registry_roots() -> Vec<String> {
 
 fn context_menu_registered_registry_roots() -> Vec<String> {
     let mut roots = Vec::new();
+
     for verb in VERBS {
         roots.push(format!(
             r"Software\Classes\CLSID\{}\InprocServer32",

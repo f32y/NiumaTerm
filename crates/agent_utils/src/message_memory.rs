@@ -19,6 +19,7 @@ pub fn retained_bytes(value: &Value) -> usize {
         }),
         _ => 0,
     };
+
     size_of::<Value>().saturating_add(heap)
 }
 

@@ -136,6 +136,7 @@ impl Backend {
         let resume = recovery
             .filter(|identity| identity.kind == kind)
             .map(|identity| identity.id);
+
         // Harness stderr is forwarded at trace level: an agent turn emits tens of
         // thousands of these lines per second, and formatting plus writing them
         // costs enough main-thread time to drop frames.
@@ -231,6 +232,7 @@ impl Backend {
         match self {
             Backend::Codex(session) => {
                 let paths = write_attachments(attachments, scratch);
+
                 session.send_user_message_with_generated_title(
                     text,
                     settings,
@@ -242,9 +244,11 @@ impl Backend {
             Backend::Claude(session) => {
                 let outcome =
                     session.send_user_message(text, settings, &inline_images(attachments));
+
                 if matches!(outcome, SendOutcome::StartedTurn | SendOutcome::Steered) {
                     session.request_session_title(&title.description);
                 }
+
                 outcome
             }
             Backend::DeepSeek(session) => {
@@ -555,6 +559,7 @@ impl Backend {
             #[cfg(test)]
             Backend::Test(session) => return session.rename_outcome,
         };
+
         if accepted {
             RenameOutcome::Accepted
         } else {

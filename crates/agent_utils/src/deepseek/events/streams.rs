@@ -40,6 +40,7 @@ impl Streams {
         deliver: &dyn Fn(Value),
     ) -> Result<(), String> {
         let id = frame["streamId"].as_str().unwrap_or_default();
+
         match frame["type"].as_str() {
             Some("error") => {
                 return Err(format!(
@@ -53,7 +54,9 @@ impl Streams {
             Some("item") => {}
             _ => return Err("the harness sent an invalid stream message".to_string()),
         }
+
         let value = &frame["value"];
+
         match id {
             "events" => self.event(value, client, deliver)?,
             "control" => self.control(value, deliver),
@@ -71,6 +74,7 @@ impl Streams {
             },
             _ => {}
         }
+
         Ok(())
     }
 
@@ -78,11 +82,15 @@ impl Streams {
         match value["type"].as_str() {
             Some("baseline") => {
                 let baseline = &value["value"];
+
                 self.queue(&baseline["queues"][&self.session_id], deliver);
+
                 let projections = &baseline["projections"][&self.session_id];
+
                 for (key, value) in projections["values"].as_object().into_iter().flatten() {
                     self.projection(key, value, &projections["asOfSeq"], deliver);
                 }
+
                 self.control_ready = true;
             }
             Some("queue") if value["sessionId"] == self.session_id => {
@@ -137,9 +145,11 @@ impl Streams {
                     .client_id
                     .as_deref()
                     .ok_or("an interaction arrived before event readiness")?;
+
                 let event_id = value["eventId"]
                     .as_str()
                     .ok_or("an interaction arrived without an event id")?;
+
                 let kind = match value["event"].as_str() {
                     Some("approval/request") => Some(("approval/requested", "approval/resolved")),
                     Some("user-questions/request") => {
@@ -147,16 +157,21 @@ impl Streams {
                     }
                     _ => None,
                 };
+
                 if value["agentId"] != self.session_id || kind.is_none() {
                     client
                         .respond_event(client_id, event_id, json!({ "kind": "next" }))
                         .map_err(|error| error.message().to_string())?;
+
                     return Ok(());
                 }
+
                 let (requested, resolved) = kind.unwrap();
                 let mut payload = value["request"].clone();
+
                 payload["type"] = json!(requested);
                 payload["sessionId"] = json!(self.session_id);
+
                 // The pane holds one card of each kind. Successful answers do
                 // not echo a cancellation to their sender, so replace the old
                 // identity when the next card arrives instead of retaining it.
@@ -177,6 +192,7 @@ impl Streams {
             }
             _ => {}
         }
+
         Ok(())
     }
 }

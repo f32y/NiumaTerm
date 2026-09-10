@@ -85,6 +85,7 @@ fn wait_for(
 
 fn screen_text(session: &TerminalSession) -> String {
     let b = session.render_buffer.lock();
+
     (0..b.rows())
         .map(|y| {
             (0..b.cols())
@@ -117,6 +118,7 @@ fn block_texts(session: &TerminalSession) -> Vec<(Option<String>, String)> {
             let text = handle
                 .and_then(|handle| {
                     let engine = session.engine.lock();
+
                     engine.block_acquire(handle).and_then(|block| {
                         let rows = block.row_count();
 
@@ -132,6 +134,7 @@ fn block_texts(session: &TerminalSession) -> Vec<(Option<String>, String)> {
                     })
                 })
                 .unwrap_or_default();
+
             (command, text)
         })
         .collect()
@@ -216,6 +219,7 @@ fn ctrl_c_on_alt_screen_recovers_block_mode() {
     session.write_input(b"$e=[char]27; [Console]::Write(\"$e[?1049h\"); Start-Sleep 8");
     thread::sleep(Duration::from_millis(300));
     session.write_input(b"\r");
+
     assert!(
         wait_for(&session, &mut all, Duration::from_secs(10), |evs| {
             last_alt_screen(evs) == Some(true)
@@ -225,6 +229,7 @@ fn ctrl_c_on_alt_screen_recovers_block_mode() {
 
     // Ctrl-C, like interrupting vtebench.
     session.write_input(b"\x03");
+
     assert!(
         wait_for(&session, &mut all, Duration::from_secs(45), |evs| {
             evs.iter()
@@ -240,6 +245,7 @@ fn ctrl_c_on_alt_screen_recovers_block_mode() {
     let recovered = wait_for(&session, &mut all, Duration::from_secs(5), |evs| {
         last_alt_screen(evs) == Some(false)
     });
+
     assert!(
         recovered,
         "alt screen stayed latched ON after Ctrl-C back to prompt — block mode \
@@ -252,7 +258,9 @@ fn ctrl_c_on_alt_screen_recovers_block_mode() {
         run_command(&session, &mut all, "echo AFTER_MARKER"),
         "command after Ctrl-C never finished; events: {all:?}"
     );
+
     let blocks = block_texts(&session);
+
     assert!(
         blocks
             .iter()
@@ -276,19 +284,23 @@ fn full_tail_survives_after_alt_screen_roundtrip() {
     let cmd = "$e=[char]27; [Console]::Write(\"$e[?1049h\"); \
                [Console]::Write(\"$($e)c\"); \
                1..25 | ForEach-Object { [Console]::WriteLine(\"TAILLINE$_\") }";
+
     assert!(
         run_command(&session, &mut all, cmd),
         "command never finished; events: {all:?}"
     );
+
     thread::sleep(Duration::from_millis(500));
     pump(&session, &mut all);
 
     let blocks = block_texts(&session);
+
     let all_text = blocks
         .iter()
         .map(|(_, t)| t.as_str())
         .collect::<Vec<_>>()
         .join("\n");
+
     for n in [1, 12, 25] {
         assert!(
             all_text.contains(&format!("TAILLINE{n}")),
@@ -305,7 +317,9 @@ fn full_tail_survives_after_alt_screen_roundtrip() {
 #[test]
 fn engine_blocks_bridge_freezes_command_output() {
     let mut config = integration_config();
+
     config.engine_blocks = true;
+
     let session = match TerminalSession::new(&config, 1, None) {
         Ok(s) => s,
         Err(e) => {
@@ -313,7 +327,9 @@ fn engine_blocks_bridge_freezes_command_output() {
             return;
         }
     };
+
     let mut all = Vec::new();
+
     assert!(
         wait_for(&session, &mut all, Duration::from_secs(20), |evs| evs
             .contains(&HostEvent::PromptBoundaryTrusted(true)),),
@@ -322,22 +338,26 @@ fn engine_blocks_bridge_freezes_command_output() {
     );
 
     let cmd = "1..5 | ForEach-Object { [Console]::WriteLine(\"ENGINE_BLOCK_ROW_$_\") }";
+
     assert!(
         run_command(&session, &mut all, cmd),
         "command never finished; events: {all:?}"
     );
+
     thread::sleep(Duration::from_millis(500));
     pump(&session, &mut all);
 
     let handle_items = {
         let store = session.block_store();
         let store = store.lock();
+
         store
             .items()
             .iter()
             .filter(|item| item.handle().is_some())
             .count()
     };
+
     assert!(
         handle_items > 0,
         "engine-blocks mode must store block handles, not materialized lines; events: {all:?}"
@@ -347,6 +367,7 @@ fn engine_blocks_bridge_freezes_command_output() {
     let hit = blocks.iter().any(|(_, text)| {
         text.contains("ENGINE_BLOCK_ROW_1") && text.contains("ENGINE_BLOCK_ROW_5")
     });
+
     assert!(
         hit,
         "engine-blocks output missing from frozen blocks.\nblocks: {blocks:?}\nscreen:\n{}\nevents: {all:?}",
@@ -368,6 +389,7 @@ fn output_after_ris_survives_into_the_block() {
                1..40 | ForEach-Object { [Console]::Write(\"BENCHROW$_`r`n\") }; \
                [Console]::Write(\"$($e)c\"); \
                [Console]::WriteLine(\"RESULTS_MARKER_XYZ\")";
+
     assert!(
         run_command(&session, &mut all, cmd),
         "RIS command never finished; events: {all:?}"
@@ -376,12 +398,14 @@ fn output_after_ris_survives_into_the_block() {
     // Give the block events a beat to land, then look for the results text.
     thread::sleep(Duration::from_millis(500));
     pump(&session, &mut all);
+
     let blocks = block_texts(&session);
     let screen = screen_text(&session);
     let in_blocks = blocks
         .iter()
         .any(|(_, text)| text.contains("RESULTS_MARKER_XYZ"));
     let on_screen = screen.contains("RESULTS_MARKER_XYZ");
+
     eprintln!(
         "[diag] ris_emulation: in_blocks={in_blocks} on_screen={on_screen} \
          alt_screen={:?} blocks(cmd,len)={:?}",
@@ -391,6 +415,7 @@ fn output_after_ris_survives_into_the_block() {
             .map(|(c, t)| (c.clone(), t.len()))
             .collect::<Vec<_>>()
     );
+
     assert!(
         in_blocks || on_screen,
         "post-RIS results vanished: not in any frozen block and not on screen.\n\

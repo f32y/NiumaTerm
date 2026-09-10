@@ -9,6 +9,7 @@ const KEY: &str = "sk-test-1234";
 #[test]
 fn round_trip_restores_both_values() {
     let stored = encrypt(URL, KEY).unwrap();
+
     assert!(stored.starts_with(PREFIX));
     assert_eq!(
         decrypt(&stored).unwrap(),
@@ -35,6 +36,7 @@ fn known_vector_still_decrypts() {
 fn repeated_encryption_produces_different_output() {
     let first = encrypt(URL, KEY).unwrap();
     let second = encrypt(URL, KEY).unwrap();
+
     assert_ne!(first, second);
     assert_eq!(decrypt(&first).unwrap(), decrypt(&second).unwrap());
 }
@@ -44,10 +46,13 @@ fn modified_data_is_rejected() {
     let stored = encrypt(URL, KEY).unwrap();
     let mut bytes = BASE64.decode(stored.strip_prefix(PREFIX).unwrap()).unwrap();
     let last = bytes.len() - 1;
+
     bytes[last] ^= 0x01;
+
     let modified = format!("{PREFIX}{}", BASE64.encode(bytes));
 
     let err = decrypt(&modified).unwrap_err();
+
     assert!(err.contains("authentication"), "{err}");
 }
 

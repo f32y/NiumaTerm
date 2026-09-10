@@ -37,6 +37,7 @@ pub(crate) fn install_into(
     entry: impl Fn(&str) -> Value,
 ) -> io::Result<()> {
     uninstall_from(settings);
+
     let root = settings
         .as_object_mut()
         .expect("hook settings reads only yield objects");
@@ -179,6 +180,7 @@ pub(crate) fn write(path: &Path, settings: &Value) -> io::Result<()> {
     let temp = path.with_extension("json.niumaterm-tmp");
 
     fs::write(&temp, text)?;
+
     fs::rename(&temp, path)
 }
 

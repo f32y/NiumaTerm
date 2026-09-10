@@ -25,6 +25,7 @@ impl AgentPane {
         let provider = self.kind.provider_kind()?;
         let launch = agent_launch(&self.profile);
         let launcher = AgentCli::from_launch(&launch, provider.default_executable());
+
         Some(InstallationKey::derive(provider, &launcher).key)
     }
 
@@ -41,6 +42,7 @@ impl AgentPane {
                 i18n("agent-update-profile-already-updating").replace("{name}", &self.profile.name),
             );
         }
+
         if matches!(self.runtime.status(), Status::Starting | Status::Running)
             || self.prompts.approval_open()
             || self.palette.awaiting_command_turn
@@ -98,9 +100,11 @@ impl AgentPane {
         } else {
             self.interrupt(cx);
         }
+
         self.palette.command_queue.clear();
         self.palette.awaiting_command_turn = false;
         self.publish_queued_user_messages(cx);
+
         if self
             .branch
             .rewind
@@ -110,6 +114,7 @@ impl AgentPane {
         {
             self.branch.rewind.state = None;
         }
+
         if self
             .branch
             .fork
@@ -119,6 +124,7 @@ impl AgentPane {
         {
             self.branch.fork.state = None;
         }
+
         self.transcript
             .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
         self.runtime.wait_for_update();
@@ -134,6 +140,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) -> Task<Result<(), String>> {
         let (epoch, backend) = self.runtime.suspend_for_update();
+
         self.history_ui.invalidate_filesystem_history();
         cx.emit(AgentPaneEvent::Interrupted);
         cx.notify();
@@ -141,12 +148,15 @@ impl AgentPane {
         let Some(mut backend) = backend else {
             return Task::ready(Ok(()));
         };
+
         let worker = cx.background_executor().spawn(async move {
             let result = backend.shutdown(Duration::from_secs(5), force);
             (backend, result)
         });
+
         cx.spawn(async move |this, cx| {
             let (backend, result) = worker.await;
+
             if result.is_err() {
                 let _ = this.update(cx, |this, cx| {
                     if let Err(mut orphan) = this.runtime.shutdown_failed(epoch, backend) {
@@ -156,9 +166,11 @@ impl AgentPane {
                             })
                             .detach();
                     }
+
                     cx.notify();
                 });
             }
+
             result
         })
     }

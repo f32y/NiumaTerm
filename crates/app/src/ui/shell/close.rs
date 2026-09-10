@@ -54,6 +54,7 @@ impl Shell {
         let id = self.workspaces.active_tabs().active().live().focused();
         let pane = self.active_pane();
         let settings = cx.global::<AppSettings>();
+
         let count = if settings.system.manage_subprocess_job
             && settings.system.warn_before_terminating_shell != WarnBeforeTerminatingShell::Disabled
         {
@@ -226,6 +227,7 @@ impl Shell {
         let Some(ws_id) = self.workspaces.workspace_of_tab(id) else {
             return;
         };
+
         let Some(tab) = self
             .workspaces
             .tabs_of(ws_id)
@@ -238,6 +240,7 @@ impl Shell {
         let is_settings = surface.is_settings();
         let is_agent = surface.is_agent();
         let count = self.close_process_count(surface, cx);
+
         let last_tab = self
             .workspaces
             .tabs_of(ws_id)
@@ -402,6 +405,7 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         let ids = self.workspaces.temporary_ids().collect::<Vec<_>>();
+
         if ids.is_empty() {
             return;
         }
@@ -410,6 +414,7 @@ impl Shell {
             .iter()
             .map(|id| self.workspace_process_count(*id, cx))
             .sum();
+
         let settings = cx.global::<AppSettings>();
         let confirm = settings.system.confirm_before_closing_workspace;
         let warn = settings.system.warn_before_terminating_shell;
@@ -526,6 +531,7 @@ impl Shell {
                                         window.close_dialog(cx);
                                         return;
                                     }
+
                                     quit_shell.update(cx, |this, cx| this.doom_workspace(id, cx));
                                     cx.quit();
                                 }),
@@ -576,6 +582,7 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> bool {
         let saved = ui::settings::save_settings(window, cx);
+
         let count: usize = self
             .workspaces
             .all_tabs()
@@ -632,10 +639,13 @@ impl Shell {
                         if cx.windows().len() == 1 {
                             cx.global_mut::<AppSettings>().editing.discard_on_exit = true;
                         }
+
                         window.remove_window();
+
                         true
                     })
             });
+
             return false;
         }
 
@@ -647,6 +657,7 @@ impl Shell {
             note,
             |_, window, _| window.remove_window(),
         );
+
         false
     }
 

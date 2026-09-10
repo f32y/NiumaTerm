@@ -79,6 +79,7 @@ impl SkillRefreshState {
         }
 
         self.force_reload_queued |= force_reload;
+
         true
     }
 
@@ -95,6 +96,7 @@ impl SkillRefreshState {
         }
 
         self.in_flight = None;
+
         Some(take(&mut self.force_reload_queued))
     }
 }

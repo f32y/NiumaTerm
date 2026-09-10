@@ -100,6 +100,7 @@ fn paint_frame_images(
         }
 
         let top = img.top_row();
+
         let row_offset = if top >= 0 {
             row_y_offset(offsets, top as usize)
         } else {
@@ -189,6 +190,7 @@ fn paint_image_clipped(
     };
 
     let image_bounds = to_bounds(full);
+
     window.with_content_mask(Some(mask), |window| {
         // Keep clipping in the mask so fractional source crops are not rounded
         // to atlas texels by the image-bounds crop path.

@@ -65,23 +65,27 @@ impl ApiClient {
     pub(crate) fn new(address: String) -> Result<Self, String> {
         let url = Url::parse(&address)
             .map_err(|_| "the harness printed an invalid startup URL".to_string())?;
+
         let http = Client::builder()
             .timeout(CALL_TIMEOUT)
             .no_proxy()
             .redirect(Policy::none())
             .build()
             .map_err(|error| format!("could not create the DeepSeek client: {error}"))?;
+
         let cookie = if url.query_pairs().any(|(name, _)| name == "token") {
             let response = http
                 .get(url.clone())
                 .send()
                 .map_err(|error| format!("the harness login failed: {}", error.without_url()))?;
+
             if response.status() != StatusCode::SEE_OTHER {
                 return Err(format!(
                     "the harness login was refused with status {}",
                     response.status()
                 ));
             }
+
             let cookies: Vec<&str> = response
                 .headers()
                 .get_all(SET_COOKIE)
@@ -89,12 +93,16 @@ impl ApiClient {
                 .filter_map(|value| value.to_str().ok()?.split(';').next())
                 .filter(|value| value.contains('='))
                 .collect();
+
             if cookies.is_empty() {
                 return Err("the harness login returned no session cookie".to_string());
             }
+
             let mut cookie = HeaderValue::from_str(&cookies.join("; "))
                 .map_err(|_| "the harness login returned an invalid cookie".to_string())?;
+
             cookie.set_sensitive(true);
+
             Some(cookie)
         } else {
             None
@@ -135,30 +143,36 @@ impl ApiClient {
             "method": method,
             "payload": payload,
         });
+
         let mut pending = self
             .http
             .post(format!("{}/api/{method}", self.base))
             .header("content-type", "application/json")
             .body(request.to_string())
             .timeout(timeout);
+
         if let Some(cookie) = &self.cookie {
             pending = pending.header(COOKIE, cookie.clone());
         }
+
         let response = pending.send().map_err(|error| {
             CallError::Transport(format!("{method} could not be sent: {error}"))
         })?;
+
         if !response.status().is_success() {
             return Err(CallError::Transport(format!(
                 "{method} was refused by the harness host with status {}",
                 response.status()
             )));
         }
+
         let body = response.text().map_err(|error| {
             CallError::Transport(format!("{method} returned an unreadable response: {error}"))
         })?;
         let answer = serde_json::from_str::<ResponseMessage>(&body).map_err(|error| {
             CallError::Transport(format!("{method} returned an unreadable response: {error}"))
         })?;
+
         match (answer.result.ok, answer.result.value, answer.result.error) {
             (true, value, _) => Ok(value.unwrap_or(Value::Null)),
             (false, _, Some(error)) => Err(CallError::Business {
@@ -189,16 +203,20 @@ impl ApiClient {
     pub(crate) fn stream_request(&self) -> Result<Request, String> {
         let mut url = Url::parse(&self.base).map_err(|error| error.to_string())?;
         let scheme = if url.scheme() == "https" { "wss" } else { "ws" };
+
         url.set_scheme(scheme)
             .map_err(|_| "the harness URL has no WebSocket scheme".to_string())?;
         url.set_path("/api/remote.mux");
+
         let mut request = url
             .as_str()
             .into_client_request()
             .map_err(|error| error.to_string())?;
+
         if let Some(cookie) = &self.cookie {
             request.headers_mut().insert(COOKIE, cookie.clone());
         }
+
         Ok(request)
     }
 }

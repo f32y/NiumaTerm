@@ -27,6 +27,7 @@ pub(crate) fn spawn_pipe_server(tx: UnboundedSender<IpcAction>, testing: bool) {
             Ok(action) => return tx.unbounded_send(action).is_ok(),
             Err(error) => warn!("ignoring IPC message: {error}"),
         }
+
         true
     });
 }

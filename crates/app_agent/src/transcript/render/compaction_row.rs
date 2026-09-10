@@ -49,11 +49,13 @@ pub(super) fn render_compaction_row(
         .type_icon(IconName::Minimize)
         .preview(preview.clone())
         .accent(accent);
+
     if expandable {
         header_row = header_row
             .expanded(expanded)
             .opening(disclosures.progress(RevealKey::Row(index), Instant::now()));
     }
+
     let accessible_label = if expandable {
         format!(
             "{label}. {preview}. {}",
@@ -66,7 +68,9 @@ pub(super) fn render_compaction_row(
     } else {
         format!("{label}. {preview}")
     };
+
     let mut header = header_row.accessible_label(accessible_label).render(cx);
+
     if expandable {
         header = header.on_click(
             cx.listener(move |this, _, _, cx| this.toggle_disclosure(RevealKey::Row(index), cx)),
@@ -126,6 +130,7 @@ fn render_compaction_detail(
             detail.user_context.clone(),
         ),
     ];
+
     let summary_scroll = window
         .use_keyed_state(("compaction-scroll", index), cx, |_, _| {
             ScrollHandle::default()

@@ -20,10 +20,12 @@ pub(crate) fn open_file_use_prompt(
             let title = prompt_title(prompt.reason);
             let message = prompt_message(prompt.reason);
             let applications = display_names(&prompt.applications);
+
             let has_explorer = prompt
                 .applications
                 .iter()
                 .any(|application| application.kind == ApplicationKind::Explorer);
+
             let manual = display_names(
                 &prompt
                     .applications
@@ -73,6 +75,7 @@ pub(crate) fn open_file_use_prompt(
                         window.close_dialog(cx);
                         update::continue_install(cx);
                     });
+
                 footer = footer.child(
                     if matches!(
                         prompt.reason,
@@ -101,6 +104,7 @@ pub(crate) fn open_file_use_prompt(
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
                             .child(message);
+
                         if !applications.is_empty() {
                             body = body.child(
                                 v_flex().gap_1().children(
@@ -110,15 +114,18 @@ pub(crate) fn open_file_use_prompt(
                                 ),
                             );
                         }
+
                         if has_explorer {
                             body = body.child(i18n("settings-about-file-use-explorer-warning"));
                         }
+
                         if !manual.is_empty() {
                             body = body.child(
                                 i18n("settings-about-file-use-not-restartable")
                                     .replace("{applications}", &manual.join(", ")),
                             );
                         }
+
                         content.child(body)
                     })
                     .footer(footer)
@@ -137,6 +144,7 @@ pub(crate) fn open_recovery_warning(
             window.open_dialog(cx, move |dialog, _, _| {
                 let message = i18n("settings-about-recovery-warning-message")
                     .replace("{applications}", &applications.join(", "));
+
                 dialog
                     .title(i18n("settings-about-recovery-warning-title"))
                     .overlay_closable(false)
@@ -185,6 +193,7 @@ fn prompt_message(reason: FileUsePromptReason) -> &'static str {
 
 pub(super) fn display_names(applications: &[AffectedApplication]) -> Vec<String> {
     let mut counts = HashMap::new();
+
     for application in applications {
         *counts.entry(application.name.as_str()).or_insert(0usize) += 1;
     }
@@ -198,6 +207,7 @@ pub(super) fn display_names(applications: &[AffectedApplication]) -> Vec<String>
             } else {
                 application.name.clone()
             };
+
             if counts.get(application.name.as_str()).copied().unwrap_or(0) > 1 {
                 format!("{name} (PID {})", application.process_id)
             } else {

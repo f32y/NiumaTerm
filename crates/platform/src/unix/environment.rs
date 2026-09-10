@@ -9,11 +9,13 @@ use crate::APP_ID;
 /// a usable path rather than failing startup.
 pub fn data_dir() -> PathBuf {
     let directory = base_data_dir().map(|base| base.join(APP_ID));
+
     if let Some(directory) = directory
         && fs::create_dir_all(&directory).is_ok()
     {
         return directory;
     }
+
     env::temp_dir()
 }
 
@@ -65,6 +67,7 @@ pub fn config_dir(home: &Path) -> PathBuf {
 /// fully-qualified name carries.
 pub fn computer_name() -> Option<String> {
     let mut buffer = [0 as libc::c_char; 256];
+
     // SAFETY: the buffer outlives the call and the length matches its capacity.
     if unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len() - 1) } != 0 {
         return None;

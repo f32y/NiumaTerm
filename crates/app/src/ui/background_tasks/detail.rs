@@ -35,6 +35,7 @@ impl BackgroundTasksView {
         let Some(pane) = self.target.as_ref().and_then(WeakEntity::upgrade) else {
             return;
         };
+
         pane.update(cx, |pane, cx| {
             pane.load_background_task_transcript(&key, cx);
         });
@@ -46,13 +47,16 @@ impl BackgroundTasksView {
         let Some(pane) = self.target.as_ref().and_then(WeakEntity::upgrade) else {
             return;
         };
+
         let (kind, cwd) = {
             let pane = pane.read(cx);
             (pane.agent_kind(), pane.working_directory())
         };
+
         self.detail_transcript = Some(cx.new(|_| TranscriptView::new(kind, cwd)));
         self.mode
             .open(key.clone(), self.running_expanded, self.finished_expanded);
+
         // Codex stores a descendant's conversation and hands it over on
         // request; Claude Code has been accumulating it live, so this is a
         // no-op there.
@@ -69,6 +73,7 @@ impl BackgroundTasksView {
         let Some(pane) = self.target.as_ref().and_then(WeakEntity::upgrade) else {
             return;
         };
+
         pane.update(cx, |pane, _| pane.interrupt_background_task(key));
     }
 
@@ -76,6 +81,7 @@ impl BackgroundTasksView {
         let Some((running_expanded, finished_expanded)) = self.mode.close() else {
             return;
         };
+
         self.running_expanded = running_expanded;
         self.finished_expanded = finished_expanded;
         self.detail_transcript = None;
@@ -96,9 +102,11 @@ impl BackgroundTasksView {
             self.close_detail(cx);
             return div().into_any_element();
         };
+
         // A finished child's conversation cannot change again, so only one
         // that is still working keeps the refresh tick alive.
         let active = task.state.is_active();
+
         self.sync_elapsed_timer(active, cx);
 
         let (items, state, dropped, revision) = self
@@ -108,6 +116,7 @@ impl BackgroundTasksView {
             .and_then(|pane| {
                 let pane = pane.read(cx);
                 let child = pane.background_task_transcript(&key)?;
+
                 Some((
                     child.items().to_vec(),
                     child.state().clone(),
@@ -120,6 +129,7 @@ impl BackgroundTasksView {
         transcript.update(cx, |view, cx| view.show_items(&items, revision, cx));
 
         let theme = cx.theme();
+
         let header = v_flex()
             .px_2()
             .py_1()

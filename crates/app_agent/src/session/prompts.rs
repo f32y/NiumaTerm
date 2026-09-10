@@ -44,13 +44,17 @@ impl PendingPrompts {
                 self.active = Some(index);
                 self.collapsed = false;
             }
+
             return;
         }
+
         let reveal = self.questions().is_none_or(|question| {
             !question.pending()
                 || (prompt.mode != QuestionMode::Async && question.mode == QuestionMode::Async)
         });
+
         self.batches.push(prompt);
+
         if reveal {
             self.active = Some(self.batches.len() - 1);
             self.collapsed = false;
@@ -64,6 +68,7 @@ impl PendingPrompts {
         let settled = self
             .questions()
             .is_some_and(|prompt| !prompt.pending() && prompt.status != QuestionStatus::History);
+
         if settled {
             self.active = self.batches.iter().position(QuestionPrompt::pending);
         }

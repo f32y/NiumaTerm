@@ -44,6 +44,7 @@ pub fn preferred_shell() -> &'static str {
 
     SHELL.get_or_init(|| {
         let program_files = env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".into());
+
         newest_install(&Path::new(&program_files).join("PowerShell"))
             .or_else(|| Some(which::which("pwsh").ok()?.to_string_lossy().into_owned()))
             .unwrap_or_else(|| LEGACY_SHELL.to_string())
@@ -112,6 +113,7 @@ fn build_hook_command_for(
     let quoted = executable.replace('\'', "''");
     let script = format!("& '{quoted}' {argument}; exit $LASTEXITCODE");
     let encoded = encode_command(&script);
+
     let powershell = format!(
         "{}/System32/WindowsPowerShell/v1.0/powershell.exe",
         system_root.trim_end_matches(['\\', '/']).replace('\\', "/")
@@ -129,6 +131,7 @@ pub fn hook_command_contains(command: &str, marker: &str) -> bool {
 
 fn decode_command_argument(command: &str) -> Option<String> {
     let mut parts = command.split_whitespace();
+
     let encoded = loop {
         if parts.next()?.eq_ignore_ascii_case("-EncodedCommand") {
             break parts.next()?;
@@ -137,6 +140,7 @@ fn decode_command_argument(command: &str) -> Option<String> {
 
     let bytes = STANDARD.decode(encoded).ok()?;
     let mut chunks = bytes.chunks_exact(2);
+
     let units = chunks
         .by_ref()
         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))

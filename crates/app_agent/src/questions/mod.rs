@@ -64,6 +64,7 @@ pub(crate) struct QuestionPrompt {
 impl QuestionPrompt {
     pub(crate) fn new(questions: Vec<Question>) -> Self {
         let count = questions.len();
+
         Self {
             id: None,
             thread_id: None,
@@ -83,8 +84,10 @@ impl QuestionPrompt {
 
     pub(crate) fn from_request(request: QuestionRequest) -> Self {
         let mut prompt = Self::new(request.questions);
+
         prompt.id = Some(request.id);
         prompt.mode = request.mode;
+
         if request.mode == QuestionMode::Async {
             for (question, selected) in prompt.questions.iter().zip(&mut prompt.selected) {
                 if !question.options.is_empty() {
@@ -92,6 +95,7 @@ impl QuestionPrompt {
                 }
             }
         }
+
         prompt
     }
 
@@ -125,6 +129,7 @@ impl QuestionPrompt {
         if self.status != QuestionStatus::Pending {
             return false;
         }
+
         let order: Vec<(usize, usize)> = self
             .questions
             .iter()
@@ -133,20 +138,26 @@ impl QuestionPrompt {
                 (0..entry.options.len()).map(move |option| (question, option))
             })
             .collect();
+
         if order.is_empty() {
             return false;
         }
+
         self.touch();
+
         let Some(current) = order.iter().position(|entry| *entry == self.focus) else {
             self.focus = order[0];
             return true;
         };
+
         let next = if forward {
             (current + 1) % order.len()
         } else {
             (current + order.len() - 1) % order.len()
         };
+
         self.focus = order[next];
+
         true
     }
 
@@ -154,14 +165,19 @@ impl QuestionPrompt {
         let Some(entry) = self.questions.get(question) else {
             return;
         };
+
         if self.status != QuestionStatus::Pending || option >= entry.options.len() {
             return;
         }
+
         let multi_select = entry.multi_select;
+
         self.touch();
         self.custom[question] = false;
         self.focus = (question, option);
+
         let picks = &mut self.selected[question];
+
         if !multi_select {
             *picks = vec![option];
         } else {
@@ -214,6 +230,7 @@ impl QuestionPrompt {
     pub(crate) fn settle(&mut self, status: QuestionStatus) {
         self.status = status;
         self.error = None;
+
         // Secret values are used only for the live response, never for a history card.
         for (index, question) in self.questions.iter().enumerate() {
             if question.input == QuestionInput::Secret {

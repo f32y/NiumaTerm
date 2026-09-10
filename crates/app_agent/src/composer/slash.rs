@@ -51,16 +51,19 @@ impl AgentPane {
         let Some(parsed) = parse_slash_command(input) else {
             return false;
         };
+
         if parsed.name.is_empty() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-composer-choose-command").to_string(),
                 cx,
             );
+
             return false;
         }
 
         let catalog = self.command_catalog();
+
         let matched = catalog
             .iter()
             .find(|command| command.name == parsed.name)
@@ -80,6 +83,7 @@ impl AgentPane {
                 i18n("agent-composer-unknown-command").replace("{name}", &parsed.name),
                 cx,
             );
+
             return false;
         };
 
@@ -100,6 +104,7 @@ impl AgentPane {
 
             self.palette
                 .set_feedback(CommandFeedbackKind::Error, message, cx);
+
             return false;
         }
 
@@ -109,6 +114,7 @@ impl AgentPane {
                 i18n("agent-composer-command-no-arguments").replace("{name}", &command.name),
                 cx,
             );
+
             return false;
         }
 
@@ -119,10 +125,12 @@ impl AgentPane {
                     i18n("agent-composer-choose-value").replace("{name}", &command.name),
                     cx,
                 );
+
                 return false;
             }
 
             let choices = self.command_choices(&command.name);
+
             match resolve_choice(&parsed.arguments, &choices) {
                 Ok(value) if command.name == "model" => {
                     self.controls.settings.model = Some(value.clone());
@@ -133,6 +141,7 @@ impl AgentPane {
                         i18n("agent-composer-model-set").replace("{value}", &value),
                         cx,
                     );
+
                     // Where the harness adopts a model through its own request,
                     // recording the pick is not applying it. This runs after the
                     // notice so a refusal replaces it rather than hiding under
@@ -140,6 +149,7 @@ impl AgentPane {
                     if self.kind.caps().model_selection_is_a_request {
                         self.apply_model_selection(cx);
                     }
+
                     return true;
                 }
                 Ok(value) if command.name == "permissions" => {
@@ -152,6 +162,7 @@ impl AgentPane {
                             .replace("{value}", &setting_value_label(&value)),
                         cx,
                     );
+
                     return true;
                 }
                 Ok(_) => {}
@@ -171,6 +182,7 @@ impl AgentPane {
                         i18n("agent-composer-command-idle-only").replace("{name}", &command.name),
                         cx,
                     );
+
                     false
                 } else {
                     self.reset_conversation(cx);
@@ -218,8 +230,11 @@ impl AgentPane {
             return match policy {
                 SlashCommandRunPolicy::QueueUntilIdle => {
                     let name = command.name.clone();
+
                     self.palette.command_queue.push_back(command);
+
                     let count = self.palette.command_queue.len();
+
                     self.palette.set_feedback(
                         CommandFeedbackKind::Queued,
                         i18n(if count == 1 {
@@ -231,6 +246,7 @@ impl AgentPane {
                         .replace("{count}", &count.to_string()),
                         cx,
                     );
+
                     true
                 }
                 SlashCommandRunPolicy::IdleOnly => {
@@ -239,6 +255,7 @@ impl AgentPane {
                         i18n("agent-composer-command-idle-only").replace("{name}", &command.name),
                         cx,
                     );
+
                     false
                 }
                 SlashCommandRunPolicy::Immediate => self.execute_backend_command(command, cx),
@@ -267,6 +284,7 @@ impl AgentPane {
                     i18n("agent-composer-command-starting").replace("{name}", &command.name),
                     cx,
                 );
+
                 true
             }
             SlashCommandOutcome::Completed { message } => {
@@ -277,6 +295,7 @@ impl AgentPane {
                     }),
                     cx,
                 );
+
                 true
             }
             SlashCommandOutcome::Rejected { message } => {
@@ -290,6 +309,7 @@ impl AgentPane {
                     i18n("agent-session-still-starting").replace("{name}", self.kind.display()),
                     cx,
                 );
+
                 false
             }
         }
@@ -299,6 +319,7 @@ impl AgentPane {
         if self.is_command_busy() {
             return;
         }
+
         let Some(command) = self.palette.command_queue.pop_front() else {
             return;
         };
@@ -315,6 +336,7 @@ impl AgentPane {
             Status::Running => i18n("agent-composer-status-running"),
             Status::Exited => i18n("agent-composer-status-exited"),
         };
+
         let mut fields = vec![
             i18n("agent-composer-status-field")
                 .replace("{name}", i18n("agent-composer-status-backend"))
@@ -354,6 +376,7 @@ impl AgentPane {
                 );
             }
         }
+
         if !self.palette.command_queue.is_empty() {
             fields.push(
                 i18n("agent-composer-status-field")

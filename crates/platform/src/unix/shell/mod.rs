@@ -76,6 +76,7 @@ fn bash_integration() -> Option<PromptIntegration> {
     let directory = bash_directory()?;
 
     let mut environment = vec![(String::from("HISTCONTROL"), String::from("ignorespace"))];
+
     if let Ok(saved) = env::var("HISTCONTROL") {
         environment.push((String::from("NMT_SAVED_HISTCONTROL"), saved));
     }
@@ -155,6 +156,7 @@ fn install_files(shell: &str, files: &[(&str, &str)]) -> io::Result<PathBuf> {
     let dir = environment::data_dir()
         .join("shell-integration")
         .join(shell);
+
     fs::create_dir_all(&dir)?;
 
     for (name, contents) in files {
@@ -179,6 +181,7 @@ fn write_atomically(path: &Path, contents: &str) -> io::Result<()> {
     // counter separates concurrent calls inside one — two callers sharing a
     // staging path would rename each other's file away.
     static NEXT: AtomicU64 = AtomicU64::new(0);
+
     let staging = path.with_file_name(format!(
         "{name}.{}-{}.staging",
         id(),
@@ -186,6 +189,7 @@ fn write_atomically(path: &Path, contents: &str) -> io::Result<()> {
     ));
 
     fs::write(&staging, contents)?;
+
     filesystem::replace_file(&staging, path).inspect_err(|_| {
         let _ = fs::remove_file(&staging);
     })

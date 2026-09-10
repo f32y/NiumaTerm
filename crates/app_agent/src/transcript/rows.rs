@@ -315,6 +315,7 @@ impl TranscriptView {
             self.disclosures.row_expanded(index),
             self.disclosures.annotation_expanded(index),
         );
+
         // A reply being typed lays out to the part let through so far, so its
         // signature follows that edge rather than the text behind it. The
         // edge sits above the length bits, which keeps every position of it
@@ -391,6 +392,7 @@ impl TranscriptView {
                 turn,
                 output_tokens: self.turn_ledger.output_tokens(turn),
             });
+
             return;
         }
 
@@ -501,6 +503,7 @@ impl TranscriptView {
                 if !hidden(&self.items[j].item) {
                     visible.push(j);
                 }
+
                 j += 1;
             }
 
@@ -572,6 +575,7 @@ impl TranscriptView {
 
     pub(super) fn sync_transcript_tail(&mut self, start: usize, specs: &[RowSpec]) {
         let mut new = mem::take(&mut self.row_cache.scratch_rows);
+
         spaced_rows(&self.items, specs, &mut new);
 
         if self.rows[start..] == new {
@@ -585,12 +589,14 @@ impl TranscriptView {
             .zip(&new)
             .take_while(|(a, b)| a == b)
             .count();
+
         let suffix = self.rows[start + prefix..]
             .iter()
             .rev()
             .zip(new[prefix..].iter().rev())
             .take_while(|(a, b)| a == b)
             .count();
+
         let old_mid = start + prefix..self.rows.len() - suffix;
         let new_mid = new.len() - suffix - prefix;
 
@@ -651,6 +657,7 @@ impl TranscriptView {
         let SessionItem::UserMessage { text: Some(prompt) } = &self.items[index].item else {
             return None;
         };
+
         if *prompt != target.prompt {
             return None;
         }
@@ -681,11 +688,13 @@ impl TranscriptView {
             item_ix: row,
             offset_in_item: px(0.),
         };
+
         if smooth {
             self.transcript_list.scroll_to_smooth(offset);
         } else {
             self.transcript_list.scroll_to(offset);
         }
+
         cx.notify();
     }
 
@@ -727,6 +736,7 @@ impl TranscriptView {
             Some(ReadingPosition::At(offset)) => self.transcript_list.scroll_to(offset),
             None => {}
         }
+
         cx.notify();
     }
 }

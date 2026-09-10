@@ -139,6 +139,7 @@ impl Element for BlockListItem {
                 // store, so the reverse nesting here would deadlock.
                 let handle_info = {
                     let store = store.lock();
+
                     store
                         .items()
                         .get(*item_idx)
@@ -188,11 +189,13 @@ impl Element for BlockListItem {
                                         .or_else(|| {
                                             let generation =
                                                 surface.frozen_image_generation(&acq.block, id)?;
+
                                             surface.insert_frozen_image(
                                                 info.handle.id,
                                                 id,
                                                 generation.clone(),
                                             );
+
                                             Some(generation)
                                         })
                                         .map(|generation| (id, generation))
@@ -207,6 +210,7 @@ impl Element for BlockListItem {
                                 pad_rows,
                             );
                         }
+
                         view
                     }
                     None => Default::default(),

@@ -125,6 +125,7 @@ fn last_cup_row(bytes: &[u8]) -> Option<u16> {
             last = Some(r);
         }
     });
+
     last
 }
 

@@ -114,6 +114,7 @@ fn settings_patch_preserves_comments_and_unrelated_keys() {
     let mut doc = existing.parse::<DocumentMut>().unwrap();
 
     patch_settings(&mut doc);
+
     let out = doc.to_string();
 
     assert!(out.contains("# my terminal config"));
@@ -127,6 +128,7 @@ fn settings_patch_preserves_comments_and_unrelated_keys() {
     assert!(out.contains("human-friendly-agent-ui-layout = false"));
 
     let config: Config = parse_toml(&out).unwrap();
+
     assert_eq!(config.appearance, sample_appearance());
     assert_eq!(config.agent, sample_agent());
     assert_eq!(config.system, sample_system());
@@ -144,11 +146,15 @@ fn settings_patch_converts_inline_tables() {
         "fonts = { size = 12.0, hinting = true }\nappearance = { monospace-only = false }\n"
             .parse::<DocumentMut>()
             .unwrap();
+
     patch_settings(&mut doc);
 
     let out = doc.to_string();
+
     assert!(out.contains("fonts = { size = 12.0, hinting = true }"));
+
     let config: Config = parse_toml(&out).unwrap();
+
     assert_eq!(config.appearance, sample_appearance());
 }
 
@@ -163,10 +169,12 @@ update = { future-update = "keep" }
 "#
     .parse::<DocumentMut>()
     .unwrap();
+
     let appearance = AppearanceConfig {
         background_image: None,
         ..sample_appearance()
     };
+
     patch_settings_document(
         &mut doc,
         &SettingsPatch {
@@ -184,6 +192,7 @@ update = { future-update = "keep" }
         },
     )
     .unwrap();
+
     assert_eq!(
         doc["appearance"]["future-appearance"].as_integer(),
         Some(42)
@@ -205,9 +214,13 @@ update = { future-update = "keep" }
             .get("background-image")
             .is_none()
     );
+
     let saved = doc.to_string();
+
     assert!(saved.contains("# Keep user comments"));
+
     let reloaded: Config = parse_toml(&saved).unwrap();
+
     assert_eq!(reloaded.appearance, appearance);
     assert_eq!(reloaded.agent, sample_agent());
     assert_eq!(reloaded.system, sample_system());
@@ -239,21 +252,27 @@ fn save_settings_to_creates_updates_and_rejects_invalid() {
     };
 
     save().unwrap();
+
     let config: Config = parse_toml(&fs::read_to_string(&path).unwrap()).unwrap();
+
     assert_eq!(config.appearance, sample_appearance());
     assert_eq!(config.agent, sample_agent());
     assert_eq!(config.theme, "test-theme");
 
     save().unwrap();
+
     let config: Config = parse_toml(&fs::read_to_string(&path).unwrap()).unwrap();
+
     assert_eq!(config.profiles.default, "PowerShell");
     assert!(!path.with_extension("toml.tmp").exists());
 
     fs::write(&path, [0xff, 0xfe]).unwrap();
+
     assert_eq!(save().unwrap_err().kind(), io::ErrorKind::InvalidData);
     assert_eq!(fs::read(&path).unwrap(), [0xff, 0xfe]);
 
     fs::write(&path, "not [ valid").unwrap();
+
     assert!(save().is_err());
     assert_eq!(fs::read_to_string(&path).unwrap(), "not [ valid");
 
@@ -275,7 +294,9 @@ fn stored_credentials(doc: &DocumentMut) -> String {
 #[test]
 fn saved_agent_credentials_contain_no_plaintext() {
     let mut doc = DocumentMut::new();
+
     patch_settings(&mut doc);
+
     let out = doc.to_string();
 
     assert!(out.contains("api-credentials = \"aes256gcm-v1:"));
@@ -285,19 +306,24 @@ fn saved_agent_credentials_contain_no_plaintext() {
     assert!(!out.contains("api-key"));
 
     let config: Config = parse_toml(&out).unwrap();
+
     assert_eq!(config.agent_profiles.list, sample_agent_profiles());
 }
 
 #[test]
 fn repeated_saves_produce_different_stored_credentials() {
     let mut first = DocumentMut::new();
+
     patch_settings(&mut first);
+
     let mut second = DocumentMut::new();
+
     patch_settings(&mut second);
 
     assert_ne!(stored_credentials(&first), stored_credentials(&second));
 
     let restored: Config = parse_toml(&second.to_string()).unwrap();
+
     assert_eq!(restored.agent_profiles.list, sample_agent_profiles());
 }
 
@@ -307,8 +333,11 @@ fn empty_agent_credentials_are_omitted() {
         name: "Plain".to_string(),
         ..profile::AgentProfile::default()
     }];
+
     let mut doc = DocumentMut::new();
+
     profile::patch_agent_document(&mut doc, &profiles, "Plain").unwrap();
+
     let out = doc.to_string();
 
     assert!(!out.contains("api-credentials"));
@@ -325,14 +354,17 @@ kind = "deepseek"
 executable = "dsh"
 via-npx = true
 "#;
+
     let config: Config = parse_toml(legacy).unwrap();
     let loaded = &config.agent_profiles.list[0];
 
     assert_eq!(loaded.launcher, profile::AgentProfileLauncher::Npx);
 
     let mut doc = legacy.parse::<DocumentMut>().unwrap();
+
     profile::patch_agent_document(&mut doc, &config.agent_profiles.list, "DeepSeek Harness")
         .unwrap();
+
     let saved = doc.to_string();
 
     assert!(saved.contains("launcher = \"npx\""));
@@ -348,15 +380,19 @@ kind = "deepseek"
 executable = "dsh"
 launcher = "pnpm-dlx"
 "#;
+
     let config: Config = parse_toml(source).unwrap();
+
     assert_eq!(
         config.agent_profiles.list[0].launcher,
         profile::AgentProfileLauncher::PnpmDlx
     );
 
     let mut doc = DocumentMut::new();
+
     profile::patch_agent_document(&mut doc, &config.agent_profiles.list, "DeepSeek Harness")
         .unwrap();
+
     let restored: Config = parse_toml(&doc.to_string()).unwrap();
 
     assert_eq!(restored.agent_profiles.list, config.agent_profiles.list);
@@ -378,11 +414,14 @@ fn legacy_plaintext_credentials_load_without_touching_the_file() {
         .prefix("NiumaTerm-legacy-credentials-test")
         .tempdir()
         .unwrap();
+
     let path = dir.path().join("config.toml");
+
     fs::write(&path, LEGACY_PROFILE_TOML).unwrap();
 
     let config = Config::load_for_startup_from(&path, dir.path()).unwrap();
     let profile = &config.agent_profiles.list[0];
+
     assert_eq!(profile.api_base_url, "https://legacy.example.com");
     assert_eq!(profile.api_key, "sk-legacy");
     assert_eq!(fs::read_to_string(&path).unwrap(), LEGACY_PROFILE_TOML);
@@ -392,7 +431,9 @@ fn legacy_plaintext_credentials_load_without_touching_the_file() {
 fn legacy_plaintext_credentials_migrate_on_save() {
     let config: Config = parse_toml(LEGACY_PROFILE_TOML).unwrap();
     let mut doc = LEGACY_PROFILE_TOML.parse::<DocumentMut>().unwrap();
+
     profile::patch_agent_document(&mut doc, &config.agent_profiles.list, "Legacy").unwrap();
+
     let out = doc.to_string();
 
     assert!(out.contains("api-credentials = \"aes256gcm-v1:"));
@@ -402,6 +443,7 @@ fn legacy_plaintext_credentials_migrate_on_save() {
 
     let restored: Config = parse_toml(&out).unwrap();
     let profile = &restored.agent_profiles.list[0];
+
     assert_eq!(profile.api_base_url, "https://legacy.example.com");
     assert_eq!(profile.api_key, "sk-legacy");
 }
@@ -409,6 +451,7 @@ fn legacy_plaintext_credentials_migrate_on_save() {
 #[test]
 fn encrypted_credentials_win_over_adjacent_legacy_fields() {
     let stored = credentials::encrypt("https://current.example.com", "sk-current").unwrap();
+
     let toml_str = format!(
         "[[agent-profiles.list]]\nname = \"Both\"\napi-credentials = \"{stored}\"\n\
              api-base-url = \"https://stale.example.com\"\napi-key = \"sk-stale\"\n"
@@ -416,6 +459,7 @@ fn encrypted_credentials_win_over_adjacent_legacy_fields() {
 
     let config: Config = parse_toml(&toml_str).unwrap();
     let profile = &config.agent_profiles.list[0];
+
     assert_eq!(profile.api_base_url, "https://current.example.com");
     assert_eq!(profile.api_key, "sk-current");
 }
@@ -423,9 +467,11 @@ fn encrypted_credentials_win_over_adjacent_legacy_fields() {
 #[test]
 fn invalid_encrypted_credentials_fail_without_legacy_fallback() {
     let valid = credentials::encrypt("https://real.example.com", "sk-real").unwrap();
+
     // Corrupt the last Base64 character while keeping the text decodable.
     let mut modified = valid.clone();
     let last = modified.pop().unwrap();
+
     modified.push(if last == 'A' { 'B' } else { 'A' });
 
     for bad in [
@@ -437,11 +483,15 @@ fn invalid_encrypted_credentials_fail_without_legacy_fallback() {
             "[[agent-profiles.list]]\nname = \"Broken\"\napi-credentials = \"{bad}\"\n\
                  api-base-url = \"https://stale.example.com\"\napi-key = \"sk-stale\"\n"
         );
+
         let err = parse_toml::<Config>(&toml_str).unwrap_err().to_string();
+
         assert!(err.contains("Broken"), "{err}");
         assert!(!err.contains("sk-real"), "{err}");
         assert!(!err.contains("sk-stale"), "{err}");
+
         let payload = bad.strip_prefix("aes256gcm-").unwrap_or(&bad);
+
         assert!(!err.contains(payload), "{err}");
     }
 }
@@ -456,7 +506,9 @@ fn testing_mode_uses_test_subdirectory() {
 fn create_temporary_config(prefix: &str, toml_str: &str) -> Config {
     let dir = TempDirBuilder::new().prefix(prefix).tempdir().unwrap();
     let path = dir.path().join("config.toml");
+
     fs::write(&path, toml_str).unwrap();
+
     Config::load_for_startup_from(&path, dir.path()).unwrap()
 }
 
@@ -475,12 +527,15 @@ fn startup_load_defaults_when_missing_and_errors_on_bad_toml() {
         .prefix("NiumaTerm-startup-config-test")
         .tempdir()
         .unwrap();
+
     let path = dir.path().join("config.toml");
 
     let missing = Config::load_for_startup_from(&path, dir.path()).unwrap();
+
     assert_eq!(missing, Config::default());
 
     fs::write(&path, "not [ valid").unwrap();
+
     assert!(Config::load_for_startup_from(&path, dir.path()).is_err());
 }
 
@@ -509,6 +564,7 @@ fn unknown_config_fields_keep_defaults() {
     let result = create_temporary_config("unknown-config-fields", toml_str);
 
     assert_eq!(result.theme, default_theme());
+
     // Colors
     assert_eq!(result.colors, default_theme_colors());
 }
@@ -525,6 +581,7 @@ fn test_change_config_cursor() {
 
     assert_eq!(result.cursor.shape, CursorShape::Underline);
     assert_eq!(result.theme, default_theme());
+
     // Colors
     assert_eq!(result.colors, default_theme_colors());
 
@@ -535,6 +592,7 @@ fn test_change_config_cursor() {
             shape = 'line'
         "#,
     );
+
     assert_eq!(result.cursor.shape, CursorShape::Beam);
 }
 
@@ -548,6 +606,7 @@ fn test_change_theme() {
     );
 
     assert_eq!(result.theme, "lucario");
+
     // Colors
     assert_eq!(result.colors.background, colors::defaults::background());
     assert_eq!(result.colors.foreground, colors::defaults::foreground());
@@ -561,7 +620,9 @@ fn test_change_theme_with_colors() {
         .prefix("custom-theme-config")
         .tempdir()
         .unwrap();
+
     let themes = dir.path().join("themes");
+
     fs::create_dir(&themes).unwrap();
     fs::write(
         themes.join("lucario-with-colors.toml"),
@@ -580,6 +641,7 @@ fn test_change_theme_with_colors() {
     .unwrap();
 
     let path = dir.path().join("config.toml");
+
     fs::write(
         &path,
         r#"
@@ -587,6 +649,7 @@ fn test_change_theme_with_colors() {
         "#,
     )
     .unwrap();
+
     let result = Config::load_for_startup_from(&path, dir.path()).unwrap();
 
     // Colors
@@ -611,7 +674,9 @@ fn theme_list_loads_valid_toml_files_in_name_order() {
         .prefix("NiumaTerm-theme-list-test")
         .tempdir()
         .unwrap();
+
     let dir = temp.path();
+
     fs::write(
         dir.join("Zulu.toml"),
         "[colors.terminal]\nbackground = '#111111'\n",
@@ -626,6 +691,7 @@ fn theme_list_loads_valid_toml_files_in_name_order() {
     fs::write(dir.join("ignored.txt"), "[colors.terminal]\n").unwrap();
 
     let themes = Config::load_themes_from(dir);
+
     assert_eq!(
         themes
             .iter()
@@ -641,6 +707,7 @@ fn built_in_themes_load_without_user_files() {
         .prefix("NiumaTerm-missing-builtins")
         .tempdir()
         .unwrap();
+
     for builtin in BUILTIN_THEMES {
         let path = dir.path().join(builtin.name).with_extension("toml");
         let theme = Config::load_theme(&path).unwrap();
@@ -651,6 +718,7 @@ fn built_in_themes_load_without_user_files() {
 #[test]
 fn custom_theme_overrides_builtin_case_insensitively() {
     let mut themes = vec![(String::from("ubuntu"), Theme::default())];
+
     merge_theme(&mut themes, (String::from("Ubuntu"), Theme::default()));
 
     assert_eq!(themes.len(), 1);
@@ -717,14 +785,17 @@ fn example_config_matches_the_serialized_defaults() {
     let shipped =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(EXAMPLE_CONFIG_PATH))
             .expect("example config is readable");
+
     let body = shipped
         .split_once("\n\n")
         .map(|(_, body)| body)
         .unwrap_or(shipped.as_str());
+
     if body.trim() != generated.trim() {
         println!("---- regenerated assets/config-example.toml body ----");
         println!("{generated}");
     }
+
     assert_eq!(
         body.trim(),
         generated.trim(),

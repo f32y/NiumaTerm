@@ -43,6 +43,7 @@ pub fn row_selection_for(
     if sel.is_block {
         let lo = sel.start.col.0.min(cols_max);
         let hi = sel.end.col.0.min(cols_max);
+
         return Some(RowSelection {
             lo: lo as u16,
             hi: hi as u16,

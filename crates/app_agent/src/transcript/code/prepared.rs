@@ -35,24 +35,31 @@ impl PreparedCode {
             .strip_gutter
             .then(|| strip_read_gutter(&source.output))
             .flatten();
+
         let output = AnsiText::parse(normalized.as_deref().unwrap_or(&source.output));
         let mut text = String::new();
         let mut syntax = Vec::new();
+
         if let Some(command) = &source.command {
             text.push_str("$ ");
+
             let (language, range) = command_syntax(command);
+
             syntax.push(SyntaxRegion {
                 range: 2 + range.start..2 + range.end,
                 language: language.into(),
                 highlighter: None,
             });
             text.push_str(command);
+
             if !output.text.is_empty() {
                 text.push_str("\n\n");
             }
         }
+
         let output_start = text.len();
         let language = source.output_language(&output.text);
+
         if !language.is_empty() && !output.text.is_empty() {
             syntax.push(SyntaxRegion {
                 range: output_start..output_start + output.text.len(),
@@ -60,19 +67,25 @@ impl PreparedCode {
                 highlighter: None,
             });
         }
+
         text.push_str(&output.text);
+
         let ansi = output
             .spans
             .into_iter()
             .map(|(range, style)| (output_start + range.start..output_start + range.end, style))
             .collect();
+
         let segments = transcript_segments(&text);
+
         let widest_segment = segments
             .iter()
             .enumerate()
             .max_by_key(|(_, range)| range.len())
             .map_or(0, |(index, _)| index);
+
         let virtualized = should_virtualize_transcript(&text);
+
         Self {
             text: text.into(),
             segments: Arc::new(segments),
@@ -95,8 +108,10 @@ impl PreparedCode {
             {
                 continue;
             }
+
             let mut highlighter = SyntaxHighlighter::new(&region.language);
             let text = Rope::from_str(&self.text[region.range.clone()]);
+
             if highlighter.update(None, &text, Some(PARSE_BUDGET)) {
                 region.highlighter = Some(highlighter);
             }
@@ -113,15 +128,18 @@ impl PreparedCode {
         background: Hsla,
     ) -> Vec<(Range<usize>, HighlightStyle)> {
         let mut syntax = Vec::new();
+
         for region in &self.syntax {
             let Some(highlighter) = &region.highlighter else {
                 continue;
             };
             let start = range.start.max(region.range.start);
             let end = range.end.min(region.range.end);
+
             if start >= end {
                 continue;
             }
+
             syntax.extend(
                 highlighter
                     .styles(
@@ -138,9 +156,11 @@ impl PreparedCode {
                     }),
             );
         }
+
         let first = self
             .ansi
             .partition_point(|(span, _)| span.end <= range.start);
+
         let ansi: Vec<_> = self.ansi[first..]
             .iter()
             .take_while(|(span, _)| span.start < range.end)
@@ -152,6 +172,7 @@ impl PreparedCode {
                 )
             })
             .collect();
+
         overlay_styles(&syntax, &ansi)
     }
 }
@@ -168,38 +189,47 @@ fn overlay_styles(
         .chain(ansi)
         .flat_map(|(range, _)| [range.start, range.end])
         .collect::<Vec<_>>();
+
     boundaries.sort_unstable();
     boundaries.dedup();
+
     let mut syntax_index = 0;
     let mut ansi_index = 0;
     let mut result: Vec<(Range<usize>, HighlightStyle)> = Vec::new();
+
     for pair in boundaries.windows(2) {
         let start = pair[0];
+
         while syntax
             .get(syntax_index)
             .is_some_and(|(range, _)| range.end <= start)
         {
             syntax_index += 1;
         }
+
         while ansi
             .get(ansi_index)
             .is_some_and(|(range, _)| range.end <= start)
         {
             ansi_index += 1;
         }
+
         let base = syntax
             .get(syntax_index)
             .filter(|(range, _)| range.contains(&start))
             .map(|(_, style)| *style);
+
         let overlay = ansi
             .get(ansi_index)
             .filter(|(range, _)| range.contains(&start))
             .map(|(_, style)| *style);
+
         let style = match (base, overlay) {
             (Some(base), Some(overlay)) => base.highlight(overlay),
             (Some(style), None) | (None, Some(style)) => style,
             (None, None) => continue,
         };
+
         if let Some((range, previous)) = result.last_mut()
             && *previous == style
             && range.end == start
@@ -209,5 +239,6 @@ fn overlay_styles(
             result.push((start..pair[1], style));
         }
     }
+
     result
 }

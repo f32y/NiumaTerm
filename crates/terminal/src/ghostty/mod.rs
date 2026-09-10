@@ -141,6 +141,7 @@ impl GhosttyTerminal {
                 (&max_scrollback as *const usize).cast(),
             )
         };
+
         if let Err(err) = Error::from_code(scrollback) {
             unsafe { ghostty_terminal_free(terminal) };
             return Err(err);
@@ -170,6 +171,7 @@ impl GhosttyTerminal {
         // Raise the kitty image storage limit from the conservative 10 MB `.lib`
         // default; a non-zero limit also enables the protocol.
         let limit = KITTY_IMAGE_STORAGE_LIMIT_BYTES;
+
         unsafe {
             ghostty_terminal_set(
                 terminal,
@@ -182,6 +184,7 @@ impl GhosttyTerminal {
         // `Callbacks`; its heap address is stable across moves of `Self`.
         let mut callbacks = Box::new(Callbacks::default());
         let userdata = &mut *callbacks as *mut Callbacks as *mut os::raw::c_void;
+
         unsafe {
             ghostty_terminal_set(terminal, VtTerminalOption::USERDATA, userdata);
             ghostty_terminal_set(
@@ -421,6 +424,7 @@ impl GhosttyTerminal {
     /// for key press and release encoding. Empty when the protocol is inactive.
     pub fn kitty_keyboard_modes(&self) -> terminal::Mode {
         use crate::terminal::Mode;
+
         let mut flags: u8 = 0;
 
         let ok = unsafe {
@@ -612,6 +616,7 @@ impl GhosttyTerminal {
         use nmt_config::colors::{ColorRgb, NamedColor};
 
         let list = List::from(colors);
+
         let to_rgb = |color| {
             let color = ColorRgb::from_color_arr(color);
             [color.r, color.g, color.b]

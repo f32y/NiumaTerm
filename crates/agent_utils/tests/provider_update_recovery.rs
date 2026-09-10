@@ -179,15 +179,19 @@ impl FakeAgentFixture {
             "NiumaTerm provider update recovery {}",
             Uuid::new_v4()
         ));
+
         fs::create_dir_all(&root).unwrap();
+
         let script = root.join("fake-agent.ps1");
         let executable = root.join("fake agent.cmd");
+
         fs::write(&script, FAKE_AGENT).unwrap();
         fs::write(
             &executable,
             "@echo off\r\npwsh.exe -NoProfile -ExecutionPolicy Bypass -File \"%~dp0fake-agent.ps1\" %*\r\nexit /b %ERRORLEVEL%\r\n",
         )
         .unwrap();
+
         Self {
             root: root.clone(),
             executable,
@@ -220,9 +224,11 @@ impl FakeAgentFixture {
             ("NMT_FAKE_RPC_LOG".into(), display(&self.rpc_log)),
             ("NMT_FAKE_REQUEST_LOG".into(), display(&self.request_log)),
         ];
+
         if provider == ProviderKind::Claude {
             env.push(("NMT_FAKE_CONVERSATION_ID".into(), conversation_id.into()));
         }
+
         LaunchConfig {
             executable: self.executable.display().to_string(),
             model: (provider == ProviderKind::Codex).then(|| conversation_id.to_string()),
@@ -266,16 +272,20 @@ fn lines(path: &Path) -> Vec<String> {
 
 fn wait_for_rpc_count(fixture: &FakeAgentFixture, method: &str, expected: usize) {
     let deadline = Instant::now() + READY_TIMEOUT;
+
     loop {
         let count = fixture
             .rpc_methods()
             .iter()
             .filter(|candidate| candidate.as_str() == method)
             .count();
+
         if count >= expected {
             return;
         }
+
         assert!(Instant::now() < deadline, "timed out waiting for {method}");
+
         thread::sleep(Duration::from_millis(5));
     }
 }
@@ -295,17 +305,22 @@ fn register_available(
     maintenance: Arc<dyn ProviderMaintenance>,
 ) -> (UpdateCoordinator, InstallationKey) {
     let coordinator = fixture.coordinator();
+
     let key = coordinator.register(
         provider,
         AgentCli::from_launch(launch, provider.default_executable()),
         maintenance,
     );
+
     let status = coordinator.check(&key, true).unwrap();
+
     assert!(
         status.update_available(),
         "unexpected probe result: {status:?}"
     );
+
     coordinator.begin_update(&key).unwrap();
+
     (coordinator, key)
 }
 
@@ -324,6 +339,7 @@ const READY_TIMEOUT: Duration = Duration::from_secs(30);
 fn next_message(receiver: &Receiver<Value>, deadline: Instant) -> Option<Value> {
     loop {
         let remaining = deadline.checked_duration_since(Instant::now())?;
+
         match receiver.recv_timeout(remaining.min(Duration::from_millis(250))) {
             Ok(message) => return Some(message),
             Err(RecvTimeoutError::Timeout) => continue,
@@ -340,6 +356,7 @@ fn next_message(receiver: &Receiver<Value>, deadline: Instant) -> Option<Value> 
 
 fn wait_for_claude_ready(session: &mut stream_json::Session, receiver: &Receiver<Value>) -> String {
     let deadline = Instant::now() + READY_TIMEOUT;
+
     while let Some(message) = next_message(receiver, deadline) {
         if session
             .process(message)
@@ -349,11 +366,13 @@ fn wait_for_claude_ready(session: &mut stream_json::Session, receiver: &Receiver
             return session.session_id().unwrap().to_string();
         }
     }
+
     panic!("fake Claude session did not become ready");
 }
 
 fn wait_for_codex_ready(session: &mut app_server::Session, receiver: &Receiver<Value>) -> String {
     let deadline = Instant::now() + READY_TIMEOUT;
+
     while let Some(message) = next_message(receiver, deadline) {
         if session
             .process(message)
@@ -363,11 +382,13 @@ fn wait_for_codex_ready(session: &mut app_server::Session, receiver: &Receiver<V
             return session.thread_id().unwrap().to_string();
         }
     }
+
     panic!("fake Codex session did not become ready");
 }
 
 fn wait_for_codex_host_exit(session: &mut app_server::Session, receiver: &Receiver<Value>) {
     let deadline = Instant::now() + READY_TIMEOUT;
+
     while let Some(message) = next_message(receiver, deadline) {
         if session
             .process(message)
@@ -377,11 +398,13 @@ fn wait_for_codex_host_exit(session: &mut app_server::Session, receiver: &Receiv
             return;
         }
     }
+
     panic!("fake Codex host did not report its exit");
 }
 
 fn wait_for_codex_resume_failure(session: &mut app_server::Session, receiver: &Receiver<Value>) {
     let deadline = Instant::now() + READY_TIMEOUT;
+
     while let Some(message) = next_message(receiver, deadline) {
         if session.process(message).iter().any(|event| {
             matches!(
@@ -395,6 +418,7 @@ fn wait_for_codex_resume_failure(session: &mut app_server::Session, receiver: &R
             return;
         }
     }
+
     panic!("fake Codex resume did not fail as requested");
 }
 
@@ -409,19 +433,24 @@ impl ClaudeReleaseChannel for FixedClaudeRelease {
 #[test]
 fn one_claude_update_restores_multiple_sessions_in_place() {
     let fixture = FakeAgentFixture::new();
+
     let ids = [
         "10000000-0000-4000-8000-000000000001",
         "10000000-0000-4000-8000-000000000002",
     ];
+
     let launches = ids.map(|id| fixture.launch(ProviderKind::Claude, id));
+
     assert_eq!(
         installation_key(ProviderKind::Claude, &launches[0]),
         installation_key(ProviderKind::Claude, &launches[1])
     );
 
     let mut sessions = Vec::new();
+
     for launch in &launches {
         let (sender, receiver) = mpsc::channel();
+
         let mut session = stream_json::Session::spawn(
             launch,
             &AgentWorkspace::default(),
@@ -432,21 +461,28 @@ fn one_claude_update_restores_multiple_sessions_in_place() {
             |_| {},
         )
         .unwrap();
+
         let id = wait_for_claude_ready(&mut session, &receiver);
+
         sessions.push((session, id));
     }
+
     let maintenance: Arc<dyn ProviderMaintenance> =
         Arc::new(ClaudeMaintenance::new(FixedClaudeRelease));
     let (coordinator, key) =
         register_available(&fixture, ProviderKind::Claude, &launches[0], maintenance);
+
     for (session, _) in &mut sessions {
         session.shutdown(Duration::from_secs(5), false).unwrap();
     }
+
     coordinator.run_vendor_update(&key).unwrap();
+
     let verified = coordinator.verify(&key).unwrap();
 
     for ((_, id), launch) in sessions.into_iter().zip(&launches) {
         let (sender, receiver) = mpsc::channel();
+
         let mut resumed = stream_json::Session::spawn(
             launch,
             &AgentWorkspace::default(),
@@ -457,16 +493,22 @@ fn one_claude_update_restores_multiple_sessions_in_place() {
             |_| {},
         )
         .unwrap();
+
         assert_eq!(wait_for_claude_ready(&mut resumed, &receiver), id);
+
         resumed.shutdown(Duration::from_secs(5), false).unwrap();
     }
+
     coordinator.finish_update(&key, Some(verified), None, 0);
+
     assert_eq!(fixture.update_invocations(), ["update"]);
     assert_eq!(
         coordinator.snapshot(&key).unwrap().state.phase,
         UpdatePhase::Updated
     );
+
     let session_invocations = lines(&fixture.session_log);
+
     for id in ids {
         assert!(
             session_invocations
@@ -482,14 +524,17 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
     let fixture = FakeAgentFixture::new();
     let ids = ["thr_retained_1", "thr_retained_2"];
     let launches = ids.map(|id| fixture.launch(ProviderKind::Codex, id));
+
     assert_eq!(
         installation_key(ProviderKind::Codex, &launches[0]),
         installation_key(ProviderKind::Codex, &launches[1])
     );
 
     let mut sessions = Vec::new();
+
     for launch in &launches {
         let (sender, receiver) = mpsc::channel();
+
         let mut session = app_server::Session::spawn(
             launch,
             &launches,
@@ -500,9 +545,12 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
             |_| {},
         )
         .unwrap();
+
         let id = wait_for_codex_ready(&mut session, &receiver);
+
         sessions.push((session, id));
     }
+
     assert_eq!(
         fixture
             .rpc_methods()
@@ -523,15 +571,20 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
     let maintenance: Arc<dyn ProviderMaintenance> = Arc::new(CodexMaintenance);
     let (coordinator, key) =
         register_available(&fixture, ProviderKind::Codex, &launches[0], maintenance);
+
     for (session, _) in &mut sessions {
         session.shutdown(Duration::from_secs(5), false).unwrap();
     }
+
     coordinator.run_vendor_update(&key).unwrap();
+
     let verified = coordinator.verify(&key).unwrap();
 
     let mut resumed_sessions = Vec::new();
+
     for ((_, id), launch) in sessions.into_iter().zip(&launches) {
         let (sender, receiver) = mpsc::channel();
+
         let mut resumed = app_server::Session::spawn_resuming(
             launch,
             &launches,
@@ -544,9 +597,12 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
             |_| {},
         )
         .unwrap();
+
         assert_eq!(wait_for_codex_ready(&mut resumed, &receiver), id);
+
         resumed_sessions.push(resumed);
     }
+
     assert_eq!(
         fixture
             .rpc_methods()
@@ -563,11 +619,13 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
             .count(),
         2
     );
+
     for resumed in &mut resumed_sessions {
         resumed.shutdown(Duration::from_secs(5), false).unwrap();
     }
 
     coordinator.finish_update(&key, Some(verified), None, 0);
+
     assert_eq!(fixture.update_invocations(), ["update"]);
     assert_eq!(lines(&fixture.resume_log), ids);
     assert_eq!(
@@ -579,6 +637,7 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
 #[test]
 fn failed_and_unchanged_codex_updates_still_restore_all_threads() {
     let _guard = CODEX_TEST_LOCK.lock();
+
     for (outcome, expected_phase) in [
         ("failed", UpdatePhase::Failed),
         ("unchanged", UpdatePhase::Unchanged),
@@ -586,6 +645,7 @@ fn failed_and_unchanged_codex_updates_still_restore_all_threads() {
         let fixture = FakeAgentFixture::new();
         let ids = ["thread-outcome-a", "thread-outcome-b"];
         let mut launches = ids.map(|id| fixture.launch(ProviderKind::Codex, id));
+
         for launch in &mut launches {
             launch
                 .env
@@ -593,8 +653,10 @@ fn failed_and_unchanged_codex_updates_still_restore_all_threads() {
         }
 
         let mut sessions = Vec::new();
+
         for launch in &launches {
             let (sender, receiver) = mpsc::channel();
+
             let mut session = app_server::Session::spawn(
                 launch,
                 &launches,
@@ -605,17 +667,22 @@ fn failed_and_unchanged_codex_updates_still_restore_all_threads() {
                 |_| {},
             )
             .expect("session should start");
+
             let id = wait_for_codex_ready(&mut session, &receiver);
+
             sessions.push((session, id));
         }
 
         let maintenance: Arc<dyn ProviderMaintenance> = Arc::new(CodexMaintenance);
         let (coordinator, key) =
             register_available(&fixture, ProviderKind::Codex, &launches[0], maintenance);
+
         for (session, _) in &mut sessions {
             session.shutdown(Duration::from_secs(5), false).unwrap();
         }
+
         let update_error = coordinator.run_vendor_update(&key).err();
+
         let verified = update_error.is_none().then(|| {
             coordinator
                 .verify(&key)
@@ -623,8 +690,10 @@ fn failed_and_unchanged_codex_updates_still_restore_all_threads() {
         });
 
         let mut resumed_sessions = Vec::new();
+
         for ((_, id), launch) in sessions.into_iter().zip(&launches) {
             let (sender, receiver) = mpsc::channel();
+
             let mut resumed = app_server::Session::spawn_resuming(
                 launch,
                 &launches,
@@ -637,11 +706,14 @@ fn failed_and_unchanged_codex_updates_still_restore_all_threads() {
                 |_| {},
             )
             .expect("restoration should start");
+
             assert_eq!(wait_for_codex_ready(&mut resumed, &receiver), id);
+
             resumed_sessions.push(resumed);
         }
 
         coordinator.finish_update(&key, verified, update_error, 0);
+
         assert_eq!(
             coordinator.snapshot(&key).unwrap().state.phase,
             expected_phase
@@ -662,6 +734,7 @@ fn failed_and_unchanged_codex_updates_still_restore_all_threads() {
                 .count(),
             2
         );
+
         for session in &mut resumed_sessions {
             session.shutdown(Duration::from_secs(5), false).unwrap();
         }
@@ -673,6 +746,7 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
     let _guard = CODEX_TEST_LOCK.lock();
     let fixture = FakeAgentFixture::new();
     let mut first = fixture.launch(ProviderKind::Codex, "model-a");
+
     first.provider = Some(CodexProviderConfig {
         id: "provider-a".into(),
         name: "Provider A".into(),
@@ -682,7 +756,9 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
     first
         .env
         .push(("NMT_CODEX_KEY_A".into(), "secret-a".into()));
+
     let mut second = fixture.launch(ProviderKind::Codex, "model-b");
+
     second.provider = Some(CodexProviderConfig {
         id: "provider-b".into(),
         name: "Provider B".into(),
@@ -692,15 +768,19 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
     second
         .env
         .push(("NMT_CODEX_KEY_B".into(), "secret-b".into()));
+
     let launches = [first, second];
+
     let workspaces = [
         AgentWorkspace::single(Some("C:/WorkspaceA".into())),
         AgentWorkspace::single(Some("C:/WorkspaceB".into())),
     ];
 
     let mut sessions = Vec::new();
+
     for (launch, workspace) in launches.iter().zip(&workspaces) {
         let (sender, receiver) = mpsc::channel();
+
         let mut session = app_server::Session::spawn(
             launch,
             &launches,
@@ -711,7 +791,9 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
             |_| {},
         )
         .expect("custom gateway session should start");
+
         let _ = wait_for_codex_ready(&mut session, &receiver);
+
         sessions.push(session);
     }
 
@@ -720,6 +802,7 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
         .filter_map(|line| serde_json::from_str(&line).ok())
         .filter(|request: &Value| request["method"] == "thread/start")
         .collect();
+
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[0]["params"]["modelProvider"], "provider-a");
     assert_eq!(requests[0]["params"]["cwd"], "C:/WorkspaceA");
@@ -733,15 +816,19 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
     );
     assert_eq!(requests[1]["params"]["modelProvider"], "provider-b");
     assert_eq!(requests[1]["params"]["cwd"], "C:/WorkspaceB");
+
     let skill_requests: Vec<Value> = lines(&fixture.request_log)
         .into_iter()
         .filter_map(|line| serde_json::from_str(&line).ok())
         .filter(|request: &Value| request["method"] == "skills/list")
         .collect();
+
     assert_eq!(skill_requests.len(), 2);
     assert_eq!(skill_requests[0]["params"]["cwds"][0], "C:/WorkspaceA");
     assert_eq!(skill_requests[1]["params"]["cwds"][0], "C:/WorkspaceB");
+
     let request_text = fs::read_to_string(&fixture.request_log).unwrap();
+
     assert!(!request_text.contains("secret-a"));
     assert!(!request_text.contains("secret-b"));
     assert_eq!(
@@ -754,6 +841,7 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
 
     sessions[0].shutdown(Duration::from_secs(5), false).unwrap();
     wait_for_rpc_count(&fixture, "thread/unsubscribe", 1);
+
     assert_eq!(sessions[1].thread_id(), Some("model-b"));
     assert_eq!(
         lines(&fixture.session_log)
@@ -762,6 +850,7 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
             .count(),
         1
     );
+
     sessions[1].shutdown(Duration::from_secs(5), false).unwrap();
 }
 
@@ -769,18 +858,24 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
 fn simultaneous_codex_sessions_join_one_host_start() {
     let _guard = CODEX_TEST_LOCK.lock();
     let fixture = FakeAgentFixture::new();
+
     let launches = Arc::new([
         fixture.launch(ProviderKind::Codex, "thread-simultaneous-a"),
         fixture.launch(ProviderKind::Codex, "thread-simultaneous-b"),
     ]);
+
     let barrier = Arc::new(Barrier::new(3));
     let mut workers = Vec::new();
+
     for index in 0..2 {
         let launches = Arc::clone(&launches);
         let barrier = Arc::clone(&barrier);
+
         workers.push(thread::spawn(move || {
             let (sender, receiver) = mpsc::channel();
+
             barrier.wait();
+
             let session = app_server::Session::spawn(
                 &launches[index],
                 launches.as_ref(),
@@ -791,18 +886,22 @@ fn simultaneous_codex_sessions_join_one_host_start() {
                 |_| {},
             )
             .expect("simultaneous session should start");
+
             (session, receiver)
         }));
     }
+
     barrier.wait();
 
     let mut sessions: Vec<_> = workers
         .into_iter()
         .map(|worker| worker.join().expect("session worker"))
         .collect();
+
     for (session, receiver) in &mut sessions {
         let _ = wait_for_codex_ready(session, receiver);
     }
+
     assert_eq!(
         fixture
             .rpc_methods()
@@ -828,23 +927,29 @@ fn simultaneous_codex_sessions_join_one_host_start() {
 fn simultaneous_codex_sessions_share_one_startup_failure() {
     let _guard = CODEX_TEST_LOCK.lock();
     let fixture = FakeAgentFixture::new();
+
     let mut raw_launches = [
         fixture.launch(ProviderKind::Codex, "thread-failed-start-a"),
         fixture.launch(ProviderKind::Codex, "thread-failed-start-b"),
     ];
+
     for launch in &mut raw_launches {
         launch
             .env
             .push(("NMT_FAKE_FAIL_INITIALIZE".into(), "1".into()));
     }
+
     let launches = Arc::new(raw_launches);
     let barrier = Arc::new(Barrier::new(3));
     let mut workers = Vec::new();
+
     for index in 0..2 {
         let launches = Arc::clone(&launches);
         let barrier = Arc::clone(&barrier);
+
         workers.push(thread::spawn(move || {
             barrier.wait();
+
             app_server::Session::spawn(
                 &launches[index],
                 launches.as_ref(),
@@ -856,12 +961,14 @@ fn simultaneous_codex_sessions_share_one_startup_failure() {
             .expect("startup should fail")
         }));
     }
+
     barrier.wait();
 
     let errors: Vec<_> = workers
         .into_iter()
         .map(|worker| worker.join().expect("session worker"))
         .collect();
+
     assert!(
         errors
             .iter()
@@ -882,12 +989,15 @@ fn one_codex_host_rejects_incompatible_live_launch_settings() {
     let fixture = FakeAgentFixture::new();
     let first = fixture.launch(ProviderKind::Codex, "thread-compatible");
     let mut incompatible = fixture.launch(ProviderKind::Codex, "thread-incompatible");
+
     incompatible
         .env
         .push(("NMT_INCOMPATIBLE_SETTING".into(), "enabled".into()));
+
     let launches = [first.clone(), incompatible.clone()];
 
     let (sender, receiver) = mpsc::channel();
+
     let mut session = app_server::Session::spawn(
         &first,
         &launches,
@@ -898,6 +1008,7 @@ fn one_codex_host_rejects_incompatible_live_launch_settings() {
         |_| {},
     )
     .expect("first session should start");
+
     assert_eq!(
         wait_for_codex_ready(&mut session, &receiver),
         "thread-compatible"
@@ -912,6 +1023,7 @@ fn one_codex_host_rejects_incompatible_live_launch_settings() {
     )
     .err()
     .expect("incompatible launch should fail");
+
     assert!(error.contains("differ from the live shared host"));
     assert_eq!(session.thread_id(), Some("thread-compatible"));
     assert_eq!(
@@ -931,6 +1043,7 @@ fn two_codex_threads_recover_on_one_replacement_host() {
     let fixture = FakeAgentFixture::new();
     let ids = ["thread-crash-a", "thread-crash-b"];
     let mut launches = ids.map(|id| fixture.launch(ProviderKind::Codex, id));
+
     for launch in &mut launches {
         launch
             .env
@@ -938,8 +1051,10 @@ fn two_codex_threads_recover_on_one_replacement_host() {
     }
 
     let mut sessions = Vec::new();
+
     for launch in &launches {
         let (sender, receiver) = mpsc::channel();
+
         let mut session = app_server::Session::spawn(
             launch,
             &launches,
@@ -950,28 +1065,35 @@ fn two_codex_threads_recover_on_one_replacement_host() {
             |_| {},
         )
         .expect("session should start before the requested host exit");
+
         assert_eq!(
             wait_for_codex_ready(&mut session, &receiver),
             launch.model.as_deref().unwrap()
         );
+
         sessions.push((session, receiver));
     }
 
     for (session, receiver) in &mut sessions {
         wait_for_codex_host_exit(session, receiver);
     }
+
     assert_eq!(sessions[0].0.thread_id(), Some(ids[0]));
     assert_eq!(sessions[1].0.thread_id(), Some(ids[1]));
 
     let mut recovery_launches = launches.clone();
+
     for launch in &mut recovery_launches {
         launch
             .env
             .retain(|(name, _)| name != "NMT_FAKE_EXIT_AFTER_THREAD_STARTS");
     }
+
     let mut recovered = Vec::new();
+
     for (id, launch) in ids.into_iter().zip(&recovery_launches) {
         let (sender, receiver) = mpsc::channel();
+
         let mut session = app_server::Session::spawn_resuming(
             launch,
             &recovery_launches,
@@ -984,7 +1106,9 @@ fn two_codex_threads_recover_on_one_replacement_host() {
             |_| {},
         )
         .expect("recovery session should attach");
+
         assert_eq!(wait_for_codex_ready(&mut session, &receiver), id);
+
         recovered.push(session);
     }
 
@@ -1013,6 +1137,7 @@ fn two_codex_threads_recover_on_one_replacement_host() {
     );
 
     drop(sessions);
+
     for session in &mut recovered {
         session.shutdown(Duration::from_secs(5), false).unwrap();
     }
@@ -1022,10 +1147,12 @@ fn two_codex_threads_recover_on_one_replacement_host() {
 fn one_failed_codex_resume_does_not_block_another_session() {
     let _guard = CODEX_TEST_LOCK.lock();
     let fixture = FakeAgentFixture::new();
+
     let mut launches = [
         fixture.launch(ProviderKind::Codex, "thread-fails"),
         fixture.launch(ProviderKind::Codex, "thread-succeeds"),
     ];
+
     for launch in &mut launches {
         launch
             .env
@@ -1033,6 +1160,7 @@ fn one_failed_codex_resume_does_not_block_another_session() {
     }
 
     let (failed_sender, failed_receiver) = mpsc::channel();
+
     let mut failed = app_server::Session::spawn_resuming(
         &launches[0],
         &launches,
@@ -1045,9 +1173,11 @@ fn one_failed_codex_resume_does_not_block_another_session() {
         |_| {},
     )
     .expect("the host should start before the resume response");
+
     wait_for_codex_resume_failure(&mut failed, &failed_receiver);
 
     let (ready_sender, ready_receiver) = mpsc::channel();
+
     let mut ready = app_server::Session::spawn_resuming(
         &launches[1],
         &launches,
@@ -1060,6 +1190,7 @@ fn one_failed_codex_resume_does_not_block_another_session() {
         |_| {},
     )
     .expect("the second session should reuse the host");
+
     assert_eq!(
         wait_for_codex_ready(&mut ready, &ready_receiver),
         "thread-succeeds"

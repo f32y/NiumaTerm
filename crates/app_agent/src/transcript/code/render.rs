@@ -22,6 +22,7 @@ impl Render for CodeView {
                 .child(Spinner::new())
                 .into_any_element();
         };
+
         let theme = transcript_highlight_theme(cx);
         let foreground = cx.theme().foreground;
         let background = *cx.theme().tokens.muted;
@@ -31,6 +32,7 @@ impl Render for CodeView {
             let font_size = px(settings.transcript_font_size);
             let line_height = font_size * TRANSCRIPT_LINE_HEIGHT;
             let source = prepared.clone();
+
             return div()
                 .id("code-output")
                 .w_full()
@@ -49,6 +51,7 @@ impl Render for CodeView {
                             let range = source.segments.get(row)?.clone();
                             let styles =
                                 source.styles(range.clone(), &theme, foreground, background);
+
                             Some(
                                 div()
                                     .h(line_height)
@@ -91,9 +94,11 @@ impl Render for CodeView {
         }
 
         let styles = prepared.styles(0..prepared.text.len(), &theme, foreground, background);
+
         self.text_view.update(cx, |view, cx| {
             view.set_highlighted_code(prepared.text.clone(), styles, cx)
         });
+
         div()
             .w_full()
             .relative()

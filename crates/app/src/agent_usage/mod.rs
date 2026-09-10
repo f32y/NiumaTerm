@@ -99,6 +99,7 @@ impl Drop for AgentUsageView {
 impl AgentUsageView {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
         let enabled = cx.global::<AppSettings>().agent.show_agent_usage;
+
         let mut this = Self {
             codex: UsageSnapshot::default(),
             claude: UsageSnapshot::default(),
@@ -110,6 +111,7 @@ impl AgentUsageView {
 
         cx.observe_global::<AppSettings>(|this: &mut Self, cx| {
             let enabled = cx.global::<AppSettings>().agent.show_agent_usage;
+
             if enabled && !this.enabled {
                 this.enabled = true;
                 this.refresh_all(cx);
@@ -123,6 +125,7 @@ impl AgentUsageView {
         cx.spawn(
             async move |view: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| loop {
                 cx.background_executor().timer(REFRESH_INTERVAL).await;
+
                 if view
                     .update(cx, |this, cx| {
                         if this.enabled {
@@ -160,11 +163,14 @@ impl AgentUsageView {
         let fetch = cx
             .background_executor()
             .spawn(async move { codex_usage::fetch() });
+
         cx.spawn(
             async move |view: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
                 let output = fetch.await;
+
                 view.update(cx, |this, cx| {
                     this.codex_refresh.refreshing = false;
+
                     match output {
                         Ok(usage) => {
                             this.codex = usage;
@@ -175,6 +181,7 @@ impl AgentUsageView {
                             warn!("Codex usage refresh failed: {err}");
                         }
                     }
+
                     cx.notify();
                 })
                 .ok();
@@ -191,17 +198,22 @@ impl AgentUsageView {
         self.claude_refresh.refreshing = true;
         self.claude_cancel.store(true, Ordering::Relaxed);
         self.claude_cancel = Arc::new(AtomicBool::new(false));
+
         let cancelled = self.claude_cancel.clone();
+
         cx.notify();
 
         let fetch = cx
             .background_executor()
             .spawn(async move { claude_usage::fetch_with_cancel(&cancelled) });
+
         cx.spawn(
             async move |view: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
                 let output = fetch.await;
+
                 view.update(cx, |this, cx| {
                     this.claude_refresh.refreshing = false;
+
                     match output {
                         Ok(usage) => {
                             this.claude = usage;
@@ -212,6 +224,7 @@ impl AgentUsageView {
                         // back on, nothing else will start the fetch it skipped.
                         Err(UsageFetchError::Cancelled) => {
                             this.claude_refresh.failed = true;
+
                             if this.enabled {
                                 this.refresh_claude(cx);
                             }
@@ -221,6 +234,7 @@ impl AgentUsageView {
                             warn!("Claude usage refresh failed: {message}");
                         }
                     }
+
                     cx.notify();
                 })
                 .ok();
@@ -232,6 +246,7 @@ impl AgentUsageView {
     fn accessibility_label(&self) -> String {
         let [codex_five_hour, codex_week] = self.codex.compact_values();
         let [claude_five_hour, claude_week] = self.claude.compact_values();
+
         let refreshing = if self.codex_refresh.refreshing || self.claude_refresh.refreshing {
             i18n("agent-usage-accessibility-refreshing")
         } else {
@@ -265,24 +280,28 @@ struct UsageWindowRow<'a> {
 
 fn usage_window_rows(usage: &UsageSnapshot) -> Vec<UsageWindowRow<'_>> {
     let mut rows = Vec::with_capacity(3);
+
     if let Some(window) = usage.five_hour.as_ref() {
         rows.push(UsageWindowRow {
             label: i18n("agent-usage-session"),
             window,
         });
     }
+
     if let Some(window) = usage.weekly.as_ref() {
         rows.push(UsageWindowRow {
             label: i18n("agent-usage-weekly"),
             window,
         });
     }
+
     if let Some(window) = usage.fable_weekly.as_ref() {
         rows.push(UsageWindowRow {
             label: i18n("agent-usage-fable-weekly"),
             window,
         });
     }
+
     rows
 }
 
@@ -299,17 +318,20 @@ fn format_window_duration(window_minutes: u32) -> String {
 
 fn format_duration_until(timestamp: i64, now: i64) -> String {
     let remaining = timestamp.saturating_sub(now);
+
     if remaining <= 0 {
         return i18n("agent-usage-duration-now").to_string();
     }
 
     let total_minutes = remaining.saturating_add(59_999) / 60_000;
+
     if total_minutes < 60 {
         return i18n("agent-usage-duration-minutes").replace("{count}", &total_minutes.to_string());
     }
 
     let total_hours = total_minutes / 60;
     let minutes = total_minutes % 60;
+
     if total_hours < 24 {
         return if minutes == 0 {
             i18n("agent-usage-duration-hours").replace("{count}", &total_hours.to_string())
@@ -322,6 +344,7 @@ fn format_duration_until(timestamp: i64, now: i64) -> String {
 
     let days = total_hours / 24;
     let hours = total_hours % 24;
+
     if hours == 0 {
         i18n("agent-usage-duration-days").replace("{count}", &days.to_string())
     } else {
@@ -347,6 +370,7 @@ fn format_updated_label(usage: &UsageSnapshot, refreshing: bool, failed: bool, n
     if refreshing {
         return i18n("agent-usage-refreshing").to_string();
     }
+
     if failed && usage.updated_at.is_none() {
         return i18n("agent-usage-unavailable").to_string();
     }
@@ -355,6 +379,7 @@ fn format_updated_label(usage: &UsageSnapshot, refreshing: bool, failed: bool, n
         return i18n("agent-usage-waiting").to_string();
     };
     let elapsed = now.saturating_sub(updated_at);
+
     let age = if elapsed < 60_000 {
         i18n("agent-usage-just-now").to_string()
     } else if elapsed < 60 * 60_000 {
@@ -372,10 +397,12 @@ fn format_updated_label(usage: &UsageSnapshot, refreshing: bool, failed: bool, n
 
 fn reset_credit_label(usage: &UsageSnapshot, now: i64) -> Option<String> {
     let credits = usage.reset_credits.as_ref()?;
+
     let count_label = match credits.available_count {
         1 => i18n("agent-usage-one-reset-available").to_string(),
         count => i18n("agent-usage-many-resets-available").replace("{count}", &count.to_string()),
     };
+
     Some(match credits.next_expires_at {
         Some(expires_at) => match format_duration_until(expires_at, now) {
             duration if duration == i18n("agent-usage-duration-now") => {
@@ -401,6 +428,7 @@ fn usage_bar_color(remaining_percentage: u8, colors: UsagePanelColors) -> Hsla {
 
 fn render_usage_window(row: UsageWindowRow<'_>, now: i64, colors: UsagePanelColors) -> AnyElement {
     let remaining = row.window.remaining_percentage;
+
     v_flex()
         .gap_1()
         .child(
@@ -465,6 +493,7 @@ fn render_provider_panel(
 ) -> AnyElement {
     let rows = usage_window_rows(usage);
     let status = format_updated_label(usage, refreshing, failed, now);
+
     let plan = usage
         .plan_type
         .as_ref()
@@ -517,6 +546,7 @@ fn render_provider_panel(
 impl Render for AgentUsageView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let refreshing = self.codex_refresh.refreshing || self.claude_refresh.refreshing;
+
         let codex_gauge = quota_gauge(
             "agent-usage-codex",
             i18n("agent-provider-codex"),
@@ -524,6 +554,7 @@ impl Render for AgentUsageView {
             &self.codex,
             cx,
         );
+
         let claude_gauge = quota_gauge(
             "agent-usage-claude",
             i18n("agent-provider-claude"),
@@ -548,6 +579,7 @@ impl Render for AgentUsageView {
                 .h(px(12.))
                 .bg(cx.theme().sidebar_foreground.opacity(0.15))
         });
+
         let codex = self.codex.clone();
         let claude = self.claude.clone();
         let codex_refreshing = self.codex_refresh.refreshing;
@@ -597,6 +629,7 @@ impl Render for AgentUsageView {
                             warning: cx.theme().warning,
                             danger: cx.theme().danger,
                         };
+
                         let now = now_unix_millis();
 
                         v_flex()

@@ -18,16 +18,19 @@ impl AssetSource for AppAssets {
         if let Some(file) = ProjectAssets::get(path) {
             return Ok(Some(file.data));
         }
+
         Assets.load(path)
     }
 
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
         let mut items = Assets.list(path)?;
+
         items.extend(
             ProjectAssets::iter()
                 .filter(|p| p.starts_with(path))
                 .map(|p| SharedString::from(p.to_string())),
         );
+
         Ok(items)
     }
 }

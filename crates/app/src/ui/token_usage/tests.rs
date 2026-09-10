@@ -10,6 +10,7 @@ fn token_icon_is_embedded() {
     use gpui_component::IconNamed as _;
 
     let path = TokenIcon.path();
+
     assert!(AppAssets.load(path.as_ref()).unwrap().is_some());
 }
 
@@ -83,6 +84,7 @@ fn model_usage_rows_put_the_daily_total_before_models() {
             }]
         }]
     }"#;
+
     let usage = parse_usage(json, "2026-08-12").unwrap();
 
     let rows = model_usage_rows(&usage);

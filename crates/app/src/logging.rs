@@ -13,6 +13,7 @@ use crate::utils::get_data_dir;
 /// away or interleave with the logs of a normally launched terminal.
 fn log_dir(testing: bool) -> PathBuf {
     let base = get_data_dir();
+
     if testing {
         base.join("Test").join("logs")
     } else {
@@ -53,6 +54,7 @@ fn rotate_logs(log_path: &Path) -> io::Result<()> {
 
 pub fn init_logging(testing: bool) -> io::Result<WorkerGuard> {
     let log_path = log_dir(testing);
+
     rotate_logs(&log_path)?;
 
     let log_file = log_path.join("app.log");

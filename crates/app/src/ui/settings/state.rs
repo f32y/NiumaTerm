@@ -29,6 +29,7 @@ use crate::ui::settings::MAX_TAB_WIDTH;
 pub fn default_shell_for_tests() -> String {
     default_shell()
 }
+
 /// The fixed-pitch face the terminal grid falls back to, and the proportional
 /// one the interface does. Both mirror the configuration defaults; see
 /// `nmt_config::appearance` for why macOS names its system face through a
@@ -369,9 +370,11 @@ impl AppSettings {
 
         let name = loop {
             let candidate = i18n("settings-profiles-new-name").replace("{n}", &n.to_string());
+
             if !self.profiles.iter().any(|p| p.name == candidate) {
                 break candidate;
             }
+
             n += 1;
         };
 
@@ -436,10 +439,12 @@ impl AppSettings {
 
         let mut n = 2;
         let mut name = base.to_string();
+
         while taken(&name) {
             name = format!("{base} {n}");
             n += 1;
         }
+
         name
     }
 
@@ -549,7 +554,9 @@ impl AppSettings {
                 default_agent_profile: &self.default_agent_profile,
             },
         );
+
         self.editing.save_error = result.as_ref().err().map(ToString::to_string);
+
         result
     }
 }

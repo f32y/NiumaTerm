@@ -141,9 +141,11 @@ impl<L, S: Clone> PaneTree<L, S> {
     /// Focus `id` if it names an existing leaf; returns whether it did.
     pub fn set_focused(&mut self, id: PaneId) -> bool {
         let found = self.root.contains(id);
+
         if found {
             self.focused = id;
         }
+
         found
     }
 
@@ -195,6 +197,7 @@ impl<L, S: Clone> PaneTree<L, S> {
         let axis = direction.axis();
         let before = direction.before();
         let focused = self.focused;
+
         let outcome = Self::split_at(
             &mut self.root,
             focused,
@@ -248,6 +251,7 @@ impl<L, S: Clone> PaneTree<L, S> {
                 before,
             });
         }
+
         match node {
             PaneNode::Leaf { id, .. } if *id == at => {
                 // Wrap the leaf in a fresh split on the requested axis.
@@ -276,12 +280,14 @@ impl<L, S: Clone> PaneTree<L, S> {
                 } else {
                     children.extend([old, new_leaf]);
                 }
+
                 Some(SplitOutcome::Wrapped)
             }
             PaneNode::Leaf { .. } => None,
             PaneNode::Split { children, .. } => {
                 let mut new_pane = Some(new_pane);
                 let mut make_state = Some(make_state);
+
                 children.iter_mut().find_map(|child| {
                     if !child.contains(at) {
                         return None;
@@ -353,6 +359,7 @@ impl<L, S: Clone> PaneTree<L, S> {
 
             return Some((pane, outcome));
         }
+
         let result = children
             .iter_mut()
             .find(|c| c.contains(id))
@@ -368,6 +375,7 @@ impl<L, S: Clone> PaneTree<L, S> {
                 *child = inner.pop().expect("len checked");
             }
         }
+
         Some(result)
     }
 
@@ -399,6 +407,7 @@ impl<L, S: Clone> PaneTree<L, S> {
 
             (*split_axis == axis).then(|| (state.clone(), index, children.len()))
         }
+
         walk(&self.root, self.focused, axis)
     }
 
@@ -429,6 +438,7 @@ impl<L, S: Clone> PaneTree<L, S> {
         ratios: Option<Vec<f32>>,
     ) -> PaneNode<L, S> {
         let ratios = ratios.filter(|r| r.len() == children.len());
+
         PaneNode::Split {
             id: alloc_split_id(),
             axis,

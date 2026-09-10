@@ -81,12 +81,14 @@ impl TurnState {
             loop {
                 let Ok(interval) = this.update(cx, |this, cx| {
                     cx.notify();
+
                     this.turn
                         .last_response_at()
                         .and_then(|at| response_age_tick(at.elapsed()))
                 }) else {
                     break;
                 };
+
                 let Some(interval) = interval else {
                     break;
                 };

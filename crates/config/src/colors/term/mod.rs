@@ -194,6 +194,7 @@ impl List {
 
     pub fn fill_cube(&mut self) {
         let mut index: usize = 16;
+
         // Build colors.
         for r in 0..6 {
             for g in 0..6 {
@@ -205,6 +206,7 @@ impl List {
                     };
 
                     let arr = ColorBuilder::from_rgb(rgb, Format::SRGB0_1).to_arr();
+
                     self[index] = arr;
                     index += 1;
                 }
@@ -219,12 +221,15 @@ impl List {
 
         for i in 0..24 {
             let value = i * 10 + 8;
+
             let rgb = ColorRgb {
                 r: value,
                 g: value,
                 b: value,
             };
+
             let arr = ColorBuilder::from_rgb(rgb, Format::SRGB0_1).to_arr();
+
             self[index] = arr;
             index += 1;
         }

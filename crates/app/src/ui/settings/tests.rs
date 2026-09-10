@@ -90,8 +90,10 @@ fn window_transparency_controls_opacity_and_blur() {
     assert_eq!(clamp_background_opacity(0.65), 0.65);
     assert_eq!(clamp_background_opacity(2.0), 1.0);
     assert_eq!(clamp_background_opacity(f64::NAN), 1.0);
+
     // Off keeps the window fully opaque regardless of the slider value.
     assert_eq!(effective_background_opacity(WindowBackdrop::Off, 0.65), 1.0);
+
     // The Mica materials hand the background to DWM, so a configured opacity is
     // ignored.
     assert_eq!(
@@ -118,8 +120,10 @@ fn window_transparency_controls_opacity_and_blur() {
     assert!((effective_surface_background_opacity(1.0, Some(0.3)) - 0.7).abs() < 1e-12);
     assert_eq!(effective_background_image_layer_opacity(1.0, 0.0), 0.0);
     assert!((effective_background_image_layer_opacity(1.0, 0.3) - 1.0).abs() < 1e-12);
+
     let surface = effective_surface_background_opacity(0.65, Some(0.3));
     let image = effective_background_image_layer_opacity(0.65, 0.3);
+
     assert!((surface + (1.0 - surface) * image - 0.65).abs() < 1e-12);
     assert_eq!(
         window_background_appearance_for(WindowBackdrop::Acrylic),
@@ -149,6 +153,7 @@ fn window_backdrop_value_roundtrip() {
     ] {
         assert_eq!(WindowBackdrop::from_value(backdrop.as_str()), backdrop);
     }
+
     // Unknown values fall back to the opaque mode, which always renders.
     assert_eq!(WindowBackdrop::from_value("bogus"), WindowBackdrop::Off);
 }
@@ -158,6 +163,7 @@ fn git_interval_clamps_to_allowed_set() {
     for v in [10, 15, 30, 60] {
         assert_eq!(clamp_git_interval(v), v);
     }
+
     for v in [0, 7, 45, 1000] {
         assert_eq!(clamp_git_interval(v), 30);
     }
@@ -168,6 +174,7 @@ fn input_style_value_roundtrip() {
     for style in [InputStyle::Waterfall, InputStyle::FixedBottom] {
         assert_eq!(input_style_from_value(style.as_str()), style);
     }
+
     // Unknown values fall back to the default style.
     assert_eq!(input_style_from_value("bogus"), InputStyle::Waterfall);
 }
@@ -178,6 +185,7 @@ fn load_falls_back_to_default_profile() {
     // list maps to the single built-in profile, and the unset default
     // profile resolves to that profile's name.
     let settings = AppSettings::load();
+
     assert_eq!(settings.appearance.input_style, InputStyle::Waterfall);
     assert!(settings.appearance.scroll_to_bottom_when_typing);
     assert_eq!(settings.appearance.window_backdrop, WindowBackdrop::Acrylic);
@@ -212,18 +220,23 @@ fn default_profile_command_resolves_by_name() {
     };
 
     let (shell, args) = settings.default_profile_command();
+
     assert_eq!(shell.as_deref(), Some("cmd.exe"));
     assert_eq!(args, vec!["/k", "echo", "hi"]);
 
     // Dangling name falls back to the first profile.
     settings.default_profile = "Nope".into();
+
     let (shell, _) = settings.default_profile_command();
+
     assert_eq!(shell.as_deref(), Some(default_shell_for_tests().as_str()));
 
     // Blank shell path: no override, session uses its built-in default.
     settings.profiles[0].shell = "  ".into();
     settings.default_profile = "PowerShell".into();
+
     let (shell, args) = settings.default_profile_command();
+
     assert!(shell.is_none());
     assert!(args.is_empty());
 }
@@ -231,6 +244,7 @@ fn default_profile_command_resolves_by_name() {
 #[test]
 fn profile_name_resolves_from_launch_command() {
     let mut settings = AppSettings::default();
+
     settings.profiles.push(Profile {
         name: "Developer PowerShell".into(),
         shell: "pwsh.exe".into(),
@@ -250,27 +264,32 @@ fn profile_mutations_keep_default_valid() {
     // Add: unique placeholder names.
     settings.add_profile();
     settings.add_profile();
+
     assert_eq!(settings.profiles.len(), 3);
     assert_eq!(settings.profiles[1].name, "Profile 2");
     assert_eq!(settings.profiles[2].name, "Profile 3");
 
     // Rename the default: the reference follows.
     settings.rename_profile(0, "Pwsh".into());
+
     assert_eq!(settings.default_profile, "Pwsh");
 
     // Remove the default: falls back to the first remaining profile.
     settings.remove_profile(0);
+
     assert_eq!(settings.default_profile, "Profile 2");
 
     // The last profile cannot be removed.
     settings.remove_profile(0);
     settings.remove_profile(0);
+
     assert_eq!(settings.profiles.len(), 1);
 }
 
 #[test]
 fn agent_profile_mutations_keep_default_valid() {
     let mut settings = AppSettings::default();
+
     // One seeded profile per registered harness, the first of which is the
     // default a new installation launches.
     assert_eq!(settings.agent_profiles.len(), AgentKind::ALL.len());
@@ -297,17 +316,21 @@ fn agent_profile_mutations_keep_default_valid() {
         name: "Proxy".into(),
         ..settings.agent_profiles[0].clone()
     };
+
     settings.update_agent_profile(0, renamed);
+
     assert_eq!(settings.default_agent_profile, "Proxy");
 
     // Remove the default: falls back to the first remaining profile.
     settings.remove_agent_profile(0);
+
     assert_eq!(settings.default_agent_profile, "Codex");
 
     // Every profile can be removed; an empty list clears the default.
     while !settings.agent_profiles.is_empty() {
         settings.remove_agent_profile(0);
     }
+
     assert!(settings.agent_profiles.is_empty());
     assert_eq!(settings.default_agent_profile, "");
 
@@ -345,8 +368,10 @@ fn unchecked_installations_do_not_render_unknown_versions() {
 #[test]
 fn default_agent_profile_entry_resolves_by_name() {
     let mut settings = AppSettings::default();
+
     settings.agent_profiles[1].executable = "custom-codex".into();
     settings.default_agent_profile = "Codex".into();
+
     assert_eq!(
         settings.default_agent_profile_entry().executable,
         "custom-codex"
@@ -354,6 +379,7 @@ fn default_agent_profile_entry_resolves_by_name() {
 
     // Dangling name falls back to the first profile.
     settings.default_agent_profile = "Nope".into();
+
     assert_eq!(
         settings.default_agent_profile_entry().kind,
         AgentProfileKind::ClaudeCode
@@ -363,6 +389,7 @@ fn default_agent_profile_entry_resolves_by_name() {
 #[test]
 fn defaults_have_one_powershell_profile() {
     let settings = AppSettings::default();
+
     assert_eq!(settings.appearance.input_style, InputStyle::Waterfall);
     assert!(settings.appearance.scroll_to_bottom_when_typing);
     assert_eq!(settings.appearance.window_backdrop, WindowBackdrop::Acrylic);
@@ -383,8 +410,11 @@ fn defaults_have_one_powershell_profile() {
 fn failed_settings_save_keeps_edits_and_retry_clears_error() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
+
     fs::write(&path, "invalid [ configuration").unwrap();
+
     let mut settings = AppSettings::default();
+
     settings.appearance.scroll_to_bottom_when_typing = false;
     settings.appearance.reduce_motion = true;
     settings.appearance.human_friendly_agent_ui_layout = false;
@@ -392,6 +422,7 @@ fn failed_settings_save_keeps_edits_and_retry_clears_error() {
     settings.editing.theme_filter = "not persisted".into();
 
     let error = settings.save_to(&path).unwrap_err();
+
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     assert!(settings.editing.save_error.is_some());
     assert!(settings.appearance.reduce_motion);
@@ -403,12 +434,17 @@ fn failed_settings_save_keeps_edits_and_retry_clears_error() {
 
     fs::write(&path, "# keep this\n[appearance]\nfuture-setting = 42\n").unwrap();
     settings.save_to(&path).unwrap();
+
     assert!(settings.editing.save_error.is_none());
+
     let saved = fs::read_to_string(&path).unwrap();
+
     assert!(saved.contains("# keep this"));
     assert!(saved.contains("future-setting = 42"));
     assert!(!saved.contains("not persisted"));
+
     let config: Config = toml::from_str(&saved).unwrap();
+
     assert_eq!(config.appearance, settings.appearance);
     assert_eq!(config.agent, settings.agent);
     assert_eq!(config.system, settings.system);
@@ -420,8 +456,11 @@ fn failed_settings_save_keeps_edits_and_retry_clears_error() {
 fn settings_io_failure_preserves_edits_until_the_path_is_repaired() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
+
     fs::create_dir(&path).unwrap();
+
     let mut settings = AppSettings::default();
+
     settings.system.confirm_before_closing_workspace = false;
 
     assert!(settings.save_to(&path).is_err());
@@ -431,8 +470,11 @@ fn settings_io_failure_preserves_edits_until_the_path_is_repaired() {
 
     fs::remove_dir(&path).unwrap();
     settings.save_to(&path).unwrap();
+
     assert!(settings.editing.save_error.is_none());
+
     let config: Config = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+
     assert!(!config.system.confirm_before_closing_workspace);
 }
 
@@ -451,6 +493,7 @@ impl gpui::Render for SettingsAwareList {
                 .smooth_scrolling
                 .terminal_enabled(),
         );
+
         list(self.0.clone(), |_, _, _| {
             div().h(px(20.)).w_full().into_any_element()
         })
@@ -468,13 +511,17 @@ fn draw_settings_aware_list(cx: &mut gpui::VisualTestContext, view: &Entity<Sett
 #[gpui::test]
 fn smooth_scrolling_mode_updates_an_open_terminal_list(cx: &mut TestAppContext) {
     cx.set_global(AppSettings::default());
+
     let state = ListState::new(50, ListAlignment::Top, px(10.)).measure_all();
+
     state.scroll_to(ListOffset {
         item_ix: 10,
         offset_in_item: px(0.),
     });
+
     let cx = cx.add_empty_window();
     let view = cx.update(|_, cx| cx.new(|_| SettingsAwareList(state.clone())));
+
     draw_settings_aware_list(cx, &view);
 
     cx.simulate_event(ScrollWheelEvent {
@@ -482,11 +529,14 @@ fn smooth_scrolling_mode_updates_an_open_terminal_list(cx: &mut TestAppContext) 
         delta: ScrollDelta::Lines(point(0., 1.)),
         ..Default::default()
     });
+
     assert_eq!(list_pixel_position(&state), 200.);
 
     cx.executor().advance_clock(Duration::from_millis(100));
     draw_settings_aware_list(cx, &view);
+
     let stopped_at = list_pixel_position(&state);
+
     assert!(stopped_at > 150. && stopped_at < 200.);
 
     cx.update_global::<AppSettings, _>(|settings, _| {
@@ -495,6 +545,7 @@ fn smooth_scrolling_mode_updates_an_open_terminal_list(cx: &mut TestAppContext) 
     draw_settings_aware_list(cx, &view);
     cx.executor().advance_clock(Duration::from_millis(400));
     draw_settings_aware_list(cx, &view);
+
     assert!((list_pixel_position(&state) - stopped_at).abs() < 0.1);
 }
 
@@ -576,6 +627,7 @@ fn ui_color_names(name: &str) -> BTreeSet<String> {
 #[test]
 fn built_in_themes_state_the_same_colors() {
     let reference = ui_color_names("fluent_light");
+
     assert!(reference.len() > 100);
 
     for builtin in BUILTIN_THEMES {
@@ -602,6 +654,7 @@ fn built_in_themes_state_a_syntax_palette_for_their_mode() {
         let name = builtin.name;
         let theme: ConfigTheme = toml::from_str(builtin.source).unwrap();
         let config = ui_theme_config(&theme.ui_theme().unwrap()).unwrap();
+
         let highlight = config
             .highlight
             .as_ref()
@@ -610,9 +663,11 @@ fn built_in_themes_state_a_syntax_palette_for_their_mode() {
         let background = highlight
             .editor_background
             .unwrap_or_else(|| panic!("{name} states no editor background"));
+
         assert_eq!(background.l < 0.5, config.mode.is_dark(), "{name}");
 
         let syntax = &highlight.syntax;
+
         for (role, style) in [
             ("comment", &syntax.comment),
             ("keyword", &syntax.keyword),

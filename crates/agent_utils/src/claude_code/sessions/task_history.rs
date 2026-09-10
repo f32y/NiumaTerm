@@ -107,6 +107,7 @@ pub(super) fn load_child_transcript_at(
 /// file beside it. `agent-<id>.meta.json` names `agent-<id>.jsonl`.
 fn child_conversations(project: &Path, session_id: &str) -> Vec<(Value, PathBuf)> {
     let dir = project.join(session_id).join("subagents");
+
     let Ok(entries) = fs::read_dir(&dir) else {
         // No child ever ran, or this Claude version keeps them elsewhere.
         return Vec::new();
@@ -116,9 +117,11 @@ fn child_conversations(project: &Path, session_id: &str) -> Vec<(Value, PathBuf)
         .flatten()
         .filter_map(|entry| {
             let path = entry.path();
+
             if path.extension().is_none_or(|extension| extension != "json") {
                 return None;
             }
+
             let meta = fs::read_to_string(&path)
                 .ok()
                 .and_then(|text| serde_json::from_str::<Value>(&text).ok())?;
@@ -143,12 +146,15 @@ fn attach_child_transcripts(project: &Path, session_id: &str, tasks: &mut [Resto
         if let Ok(file) = fs::File::open(&conversation) {
             task.items = parse_child_replay(BufReader::new(file));
         }
+
         if task.update.agent_type.is_none() {
             task.update.agent_type = text_field(&meta, &["agentType"]);
         }
+
         if task.update.display_name.is_none() {
             task.update.display_name = text_field(&meta, &["description"]);
         }
+
         if task.update.depth.is_none() {
             task.update.depth = meta["spawnDepth"]
                 .as_u64()
@@ -159,6 +165,7 @@ fn attach_child_transcripts(project: &Path, session_id: &str, tasks: &mut [Resto
 
 fn load_launches(project: &Path, session_id: &str) -> Result<Vec<RestoredTask>, String> {
     let path = project.join(format!("{session_id}.jsonl"));
+
     let file = match fs::File::open(&path) {
         Ok(file) => file,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
@@ -182,6 +189,7 @@ pub(super) fn parse_task_history(reader: impl BufRead) -> Vec<RestoredTask> {
         if record["isSidechain"].as_bool() == Some(true) {
             continue;
         }
+
         collect_launches(record, &mut tasks, &mut index);
         collect_results(record, &mut tasks, &index);
     }
@@ -190,15 +198,18 @@ pub(super) fn parse_task_history(reader: impl BufRead) -> Vec<RestoredTask> {
     // link is accepted only against a launch the pass above already selected.
     let mut process_restarted = false;
     let mut open_tools: HashMap<String, Item> = HashMap::new();
+
     for record in &transcript.records {
         if is_process_boundary(record) {
             process_restarted = true;
             continue;
         }
+
         if let Some(parent) = linked_parent(record) {
             enrich_from_sidechain(parent, record, &mut tasks, &index, &mut open_tools);
             continue;
         }
+
         collect_lifecycle(record, &mut tasks, &index);
     }
 
@@ -223,6 +234,7 @@ fn collect_launches(
     if record["type"].as_str() != Some("assistant") {
         return;
     }
+
     for block in record["message"]["content"]
         .as_array()
         .into_iter()
@@ -231,20 +243,24 @@ fn collect_launches(
         if block["type"].as_str() != Some("tool_use") {
             continue;
         }
+
         let Some(name) = block["name"]
             .as_str()
             .filter(|name| LAUNCH_TOOLS.contains(name))
         else {
             continue;
         };
+
         let Some(tool_use_id) = block["id"].as_str() else {
             continue;
         };
+
         if index.contains_key(tool_use_id) {
             continue;
         }
 
         let input = &block["input"];
+
         index.insert(tool_use_id.to_owned(), tasks.len());
         tasks.push(RestoredTask {
             id: tool_use_id.to_owned(),
@@ -273,6 +289,7 @@ fn collect_results(record: &Value, tasks: &mut [RestoredTask], index: &HashMap<S
     if record["type"].as_str() != Some("user") {
         return;
     }
+
     for block in record["message"]["content"]
         .as_array()
         .into_iter()
@@ -281,10 +298,12 @@ fn collect_results(record: &Value, tasks: &mut [RestoredTask], index: &HashMap<S
         if block["type"].as_str() != Some("tool_result") {
             continue;
         }
+
         let Some(position) = block["tool_use_id"].as_str().and_then(|id| index.get(id)) else {
             continue;
         };
         let update = &mut tasks[*position].update;
+
         update.state = Some(if block["is_error"].as_bool().unwrap_or(false) {
             BackgroundTaskState::Failed
         } else {
@@ -306,13 +325,16 @@ fn enrich_from_sidechain(
         return;
     };
     let task = &mut tasks[*position];
+
     task.items.extend(child_items(record, open_tools));
 
     let Some(preview) = sidechain_preview(record) else {
         return;
     };
+
     task.update.status = Some(preview.clone());
     task.update.last_preview = Some(preview);
+
     if let Some(observed) = timestamp(record) {
         task.update.updated_at = Some(observed);
     }
@@ -322,9 +344,11 @@ fn enrich_from_sidechain(
 /// shapes the parent conversation renders.
 fn child_items(record: &Value, open_tools: &mut HashMap<String, Item>) -> Vec<Item> {
     let mut items = Vec::new();
+
     if let Some(text) = conversation_user_text(record) {
         items.push(Item::UserMessage { text: Some(text) });
     }
+
     for block in record["message"]["content"]
         .as_array()
         .into_iter()
@@ -338,6 +362,7 @@ fn child_items(record: &Value, open_tools: &mut HashMap<String, Item>) -> Vec<It
         else {
             continue;
         };
+
         match block["type"].as_str() {
             Some("text") if record["type"].as_str() != Some("user") => {
                 items.push(Item::AgentMessage {
@@ -357,6 +382,7 @@ fn child_items(record: &Value, open_tools: &mut HashMap<String, Item>) -> Vec<It
                     block["name"].as_str().unwrap_or("tool"),
                     &block["input"],
                 );
+
                 open_tools.insert(id, item.clone());
                 items.push(item);
             }
@@ -368,6 +394,7 @@ fn child_items(record: &Value, open_tools: &mut HashMap<String, Item>) -> Vec<It
             _ => {}
         }
     }
+
     items
 }
 
@@ -378,12 +405,14 @@ fn collect_lifecycle(record: &Value, tasks: &mut [RestoredTask], index: &HashMap
     else {
         return;
     };
+
     if record["task_type"]
         .as_str()
         .is_some_and(|task_type| task_type != AGENT_TASK_TYPE)
     {
         return;
     }
+
     // History only enriches launches the main conversation already selected, so
     // a record naming an unknown task belongs to another branch.
     let Some(position) = record_identifiers(record)
@@ -394,15 +423,19 @@ fn collect_lifecycle(record: &Value, tasks: &mut [RestoredTask], index: &HashMap
     };
 
     let update = &mut tasks[*position].update;
+
     if let Some(state) = lifecycle_state(kind, record) {
         update.state = Some(state);
+
         if state.is_terminal() {
             update.completed_at = timestamp(record).or(update.completed_at);
         }
     }
+
     if let Some(status) = text_field(record, &["summary", "last_tool_name"]) {
         update.status = Some(status);
     }
+
     if let Some(observed) = timestamp(record) {
         update.updated_at = Some(observed);
     }
@@ -440,6 +473,7 @@ fn lifecycle_state(kind: &str, record: &Value) -> Option<BackgroundTaskState> {
             .or_else(|| record["status"].as_str())?,
         _ => return None,
     };
+
     Some(match status {
         "pending" => BackgroundTaskState::Starting,
         "running" => BackgroundTaskState::Working,
@@ -463,10 +497,12 @@ fn sidechain_preview(record: &Value) -> Option<String> {
             Some("tool_use") => block["name"].as_str(),
             _ => None,
         };
+
         if let Some(condensed) = text.and_then(condense) {
             return Some(condensed);
         }
     }
+
     None
 }
 
@@ -476,5 +512,6 @@ fn timestamp(record: &Value) -> Option<SystemTime> {
     let raw = record["timestamp"].as_str()?;
     let parsed = DateTime::parse_from_rfc3339(raw).ok()?;
     let seconds = u64::try_from(parsed.timestamp()).ok()?;
+
     Some(UNIX_EPOCH + Duration::from_secs(seconds))
 }

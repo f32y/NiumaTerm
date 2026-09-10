@@ -52,6 +52,7 @@ fn local_resume_replaces_the_provider_catalog_entry() {
         Vec::new(),
         vec![info("resume", SlashCommandSource::Provider)],
     );
+
     let resume = merged
         .iter()
         .find(|command| command.name == "resume")
@@ -116,7 +117,9 @@ fn filter_ranks_ignore_case_on_both_sides() {
         info("review", SlashCommandSource::Provider),
         info("review-file", SlashCommandSource::Provider),
     ];
+
     let mut mixed = skill("Browser:Control", "C:\\p\\SKILL.md", "system", true);
+
     mixed.description = "Drives a REVIEW browser".into();
 
     let names: Vec<String> = filter_palette_catalog(&catalog, &[mixed], "ReViEw")
@@ -139,6 +142,7 @@ fn combined_palette_ranks_skill_exact_matches_before_command_substrings() {
         info("preview", SlashCommandSource::Provider),
         info("status", SlashCommandSource::Local),
     ];
+
     let skills = vec![
         skill("review", "C:\\user\\review\\SKILL.md", "user", true),
         skill("review", "C:\\repo\\review\\SKILL.md", "repo", true),
@@ -170,6 +174,7 @@ fn combined_palette_ranks_skill_exact_matches_before_command_substrings() {
     ));
 
     let all = filter_palette_catalog(&commands, &skills, "");
+
     assert_eq!(all.len(), commands.len() + skills.len());
     assert!(matches!(all[0], PaletteCatalogEntry::Command(_)));
     assert!(matches!(all[2], PaletteCatalogEntry::Skill(_)));
@@ -220,10 +225,12 @@ fn clear_resets_command_runtime_without_owning_history_state() {
         dismissed: true,
         ..SlashPalette::default()
     };
+
     palette.catalog = Some(CachedCatalog {
         language: 0,
         commands: palette.provider_commands.clone().into(),
     });
+
     let history_dismissed = true;
     let history = vec!["persisted session"];
 
@@ -259,7 +266,9 @@ fn skill_filter_ranks_fields_and_preserves_duplicate_paths() {
         "system",
         true,
     );
+
     plugin.display_name = Some("Browser Control".into());
+
     let catalog = vec![
         skill("review", "C:\\user\\review\\SKILL.md", "user", true),
         skill("review", "C:\\repo\\review\\SKILL.md", "repo", false),
@@ -267,6 +276,7 @@ fn skill_filter_ranks_fields_and_preserves_duplicate_paths() {
     ];
 
     let duplicate_results = filter_skill_catalog(&catalog, "review");
+
     assert_eq!(duplicate_results.len(), 3);
     assert_eq!(duplicate_results[0].name, "review");
     assert_eq!(duplicate_results[1].name, "review");
@@ -287,8 +297,11 @@ fn skill_binding_survives_argument_edits_but_not_token_edits() {
     });
 
     reconcile_skill_binding("$review focus on parsing", &mut binding);
+
     assert!(binding.is_some());
+
     reconcile_skill_binding("$other focus on parsing", &mut binding);
+
     assert!(binding.is_none());
 }
 
@@ -298,10 +311,12 @@ fn skill_binding_validation_rejects_stale_and_disabled_paths() {
         name: "review".into(),
         path: "C:\\skills\\review\\SKILL.md".into(),
     };
+
     let enabled = SkillCatalog {
         skills: vec![skill("review", &binding.path, "user", true)],
         errors: Vec::new(),
     };
+
     let disabled = SkillCatalog {
         skills: vec![skill("review", &binding.path, "user", false)],
         errors: Vec::new(),
@@ -334,6 +349,7 @@ fn skill_selection_keeps_exact_path_and_rejects_disabled_rows() {
         "system",
         true,
     );
+
     let disabled = skill(
         "browser:control",
         "C:\\repo\\browser\\SKILL.md",

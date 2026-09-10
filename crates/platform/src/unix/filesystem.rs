@@ -21,13 +21,16 @@ pub fn path_identity(path: &Path) -> Vec<String> {
 /// this representation is intentionally distinct from component comparison.
 pub fn lexical_path_spelling(path: &Path) -> String {
     let mut normalized = String::new();
+
     for component in path.components() {
         if component == Component::CurDir {
             continue;
         }
+
         if !normalized.is_empty() {
             normalized.push('/');
         }
+
         normalized.push_str(&component.as_os_str().to_string_lossy());
     }
 

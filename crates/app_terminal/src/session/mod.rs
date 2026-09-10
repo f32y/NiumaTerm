@@ -182,6 +182,7 @@ impl TerminalSession {
             starting_title: config.starting_title.as_deref(),
             bootstrap: config.bootstrap.as_deref(),
         };
+
         let pty = if config.manage_process_tree {
             create_managed_pty_with_env(pty_options)
         } else {
@@ -189,6 +190,7 @@ impl TerminalSession {
         }
         .map_err(|error| {
             error!("session create_pty failed: {error:?}");
+
             EngineError::new(
                 EngineErrorCode::PtySpawn,
                 format!("failed to start shell '{shell}': {error}"),
@@ -227,6 +229,7 @@ impl TerminalSession {
         let proxy = TerminalEventProxy::new(Arc::clone(&shared), id, wake);
         let engine_blocks = options.engine_blocks;
         let handles = start_session(pty, proxy, options).map_err(engine_init_error)?;
+
         Ok(Self {
             engine: handles.engine,
             render_buffer: handles.render_buffer,
@@ -327,6 +330,7 @@ impl Drop for TerminalSession {
 
 fn engine_init_error(error: Box<dyn StdError>) -> EngineError {
     error!("session start failed: {error:?}");
+
     EngineError::new(
         EngineErrorCode::EngineInit,
         format!("libghostty-vt engine init failed: {error}"),

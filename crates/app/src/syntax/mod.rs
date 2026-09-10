@@ -46,6 +46,7 @@ struct RawLanguageDescriptor {
 
 pub(crate) fn register_languages() -> Result<usize> {
     let path = get_exe_dir().join(BUNDLE_FILE);
+
     // The installed bundle is trusted executable code, and its parser tables
     // must remain mapped for every language registered below.
     let module = unsafe { ResidentLibrary::load(&path) }
@@ -58,6 +59,7 @@ pub(crate) fn register_languages() -> Result<usize> {
                 .with_context(|| format!("{BUNDLE_FILE} has no ABI version export"))?,
         )
     };
+
     let language_count: LanguageCountFn = unsafe {
         mem::transmute::<LibrarySymbol, LanguageCountFn>(
             module
@@ -65,6 +67,7 @@ pub(crate) fn register_languages() -> Result<usize> {
                 .with_context(|| format!("{BUNDLE_FILE} has no language count export"))?,
         )
     };
+
     let language_at: LanguageAtFn = unsafe {
         mem::transmute::<LibrarySymbol, LanguageAtFn>(
             module
@@ -74,6 +77,7 @@ pub(crate) fn register_languages() -> Result<usize> {
     };
 
     let actual_abi = unsafe { abi_version() };
+
     if actual_abi != ABI_VERSION {
         bail!(
             "{} uses ABI version {actual_abi}, expected {ABI_VERSION}",
@@ -82,6 +86,7 @@ pub(crate) fn register_languages() -> Result<usize> {
     }
 
     let count = unsafe { language_count() };
+
     if count > MAX_LANGUAGES {
         bail!(
             "{} reports an invalid language count of {count}",
@@ -90,13 +95,17 @@ pub(crate) fn register_languages() -> Result<usize> {
     }
 
     let mut languages = Vec::with_capacity(count as usize);
+
     for index in 0..count {
         let mut raw = mem::MaybeUninit::<RawLanguageDescriptor>::uninit();
+
         if unsafe { language_at(index, raw.as_mut_ptr()) } == 0 {
             bail!("{} rejected language index {index}", path.display());
         }
+
         // A successful call initializes every field in the descriptor.
         let raw = unsafe { raw.assume_init() };
+
         languages.push(config(raw).with_context(|| {
             format!(
                 "{} returned an invalid language at index {index}",
@@ -107,9 +116,11 @@ pub(crate) fn register_languages() -> Result<usize> {
 
     let registry = LanguageRegistry::singleton();
     let mut registered = 0;
+
     for (aliases, config) in languages {
         registry.register(&config.name, &config);
         registered += 1;
+
         for alias in aliases {
             registry.register(&alias, &config);
         }
@@ -120,18 +131,21 @@ pub(crate) fn register_languages() -> Result<usize> {
 
 fn config(raw: RawLanguageDescriptor) -> Result<(Vec<SharedString>, LanguageConfig)> {
     let name = text(raw.name)?;
+
     if name.is_empty() {
         bail!("empty language name");
     }
 
     let builder = raw.language.context("null language builder")?;
     let language = tree_sitter::Language::new(unsafe { LanguageFn::from_raw(builder) });
+
     Parser::new()
         .set_language(&language)
         .with_context(|| format!("unsupported Tree-sitter ABI for {name}"))?;
 
     let aliases = list(raw.aliases)?;
     let injection_languages = list(raw.injection_languages)?;
+
     let config = LanguageConfig::new(
         name,
         language,
@@ -156,6 +170,7 @@ fn text(raw: RawSlice) -> Result<&'static str> {
     if raw.len == 0 {
         return Ok("");
     }
+
     if raw.data.is_null() {
         bail!("null string pointer with non-zero length");
     }
@@ -163,6 +178,7 @@ fn text(raw: RawSlice) -> Result<&'static str> {
     // The checked DLL version defines every slice as immutable static storage,
     // and the module remains loaded for as long as any returned string can live.
     let bytes = unsafe { slice::from_raw_parts(raw.data, raw.len) };
+
     str::from_utf8(bytes).context("language data is not UTF-8")
 }
 

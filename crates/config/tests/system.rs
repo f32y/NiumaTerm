@@ -5,6 +5,7 @@ use toml::from_str;
 #[test]
 fn system_section_defaults_when_absent() {
     let config: Config = from_str("").unwrap();
+
     assert_eq!(config.system, SystemConfig::default());
     assert!(config.system.restore_last_session_when_opening);
     assert!(!config.system.manage_subprocess_job);
@@ -44,6 +45,7 @@ fn warn_before_terminating_shell_accepts_modes_and_rejects_booleans() {
             "[system]\nwarn-before-terminating-shell = {value}"
         ))
         .unwrap();
+
         assert_eq!(config.system.warn_before_terminating_shell, expected);
     }
 

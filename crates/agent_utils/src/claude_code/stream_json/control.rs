@@ -67,11 +67,13 @@ impl ControlState {
         if self.closed {
             return Err("Claude is not connected".into());
         }
+
         if count > 0 && self.deadlines.len().saturating_add(count) > class.limit() {
             return Err(
                 "too many unanswered Claude requests; wait for pending requests to finish".into(),
             );
         }
+
         Ok(())
     }
 
@@ -107,7 +109,9 @@ impl ControlState {
             .extract_if(|_, deadline| deadline.at <= now)
             .map(|(id, deadline)| (id, deadline.class, deadline.input))
             .collect();
+
         self.refresh_timer();
+
         expired
     }
 
@@ -137,10 +141,13 @@ impl ControlState {
 
     pub(super) fn request(&mut self, request: Value) -> (String, Value) {
         let request_id = format!("nmt-{}", self.next_request_id);
+
         self.next_request_id += 1;
+
         let message = json!({
             "type": "control_request", "request_id": request_id, "request": request,
         });
+
         (request_id, message)
     }
 
@@ -168,11 +175,13 @@ impl ControlState {
         if let Some(id) = response["request_id"].as_str() {
             self.complete(id);
         }
+
         if let Some(id) = response["request_id"].as_str()
             && self.effort.contains(id)
         {
             return self.effort.resolve(id, control_response_error(response));
         }
+
         resolve_pending_control_operation(&mut self.operations, response)
     }
 
@@ -184,6 +193,7 @@ impl ControlState {
                 {
                     input.cancel();
                 }
+
                 false
             } else {
                 true
@@ -194,6 +204,7 @@ impl ControlState {
 
     pub(super) fn cancel_prompt(&mut self, id: &str) -> Vec<Event> {
         let mut events = Vec::new();
+
         if self
             .pending_approval
             .as_ref()
@@ -202,6 +213,7 @@ impl ControlState {
             self.pending_approval = None;
             events.push(Event::ApprovalResolved);
         }
+
         if self
             .pending_questions
             .as_ref()
@@ -210,22 +222,27 @@ impl ControlState {
             self.pending_questions = None;
             events.push(Event::QuestionsResolved);
         }
+
         events
     }
 
     pub(super) fn finish_turn(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
+
         if self.pending_approval.take().is_some() {
             events.push(Event::ApprovalResolved);
         }
+
         if self.pending_questions.take().is_some() {
             events.push(Event::QuestionsResolved);
         }
+
         events
     }
 
     pub(super) fn close(&mut self, message: &str) -> Vec<Event> {
         self.closed = true;
+
         for deadline in self.deadlines.drain().map(|(_, deadline)| deadline) {
             if deadline.class != RequestClass::Control
                 && let Some(input) = deadline.input
@@ -233,13 +250,17 @@ impl ControlState {
                 input.cancel();
             }
         }
+
         self.timer.take();
+
         let mut events = self.finish_turn();
+
         events.extend(self.effort.close(message));
         events.extend(fail_pending_control_operations(
             &mut self.operations,
             message,
         ));
+
         events
     }
 
@@ -305,6 +326,7 @@ pub(super) fn merge_question_answers(
     }
 
     input["answers"] = Value::Object(answered);
+
     input
 }
 

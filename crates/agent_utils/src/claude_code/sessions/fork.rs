@@ -51,6 +51,7 @@ pub fn fork_session_before(
 
     let new_session_id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+
     let Some(records) = build_fork_records(
         &transcript,
         source_session_id,
@@ -100,6 +101,7 @@ pub(super) fn build_fork_records(
                 "Claude user message {user_message_id} is not a prompt on the active conversation"
             )
         })?;
+
     let prefix = transcript.chain[..cutoff]
         .iter()
         .filter_map(|index| transcript.records.get(*index))
@@ -117,6 +119,7 @@ pub(super) fn build_fork_records(
                 .map(|uuid| (uuid.to_string(), Uuid::new_v4().to_string()))
         })
         .collect::<HashMap<_, _>>();
+
     let by_uuid = prefix
         .iter()
         .filter_map(|record| {
@@ -125,6 +128,7 @@ pub(super) fn build_fork_records(
                 .map(|uuid| (uuid.to_string(), *record))
         })
         .collect::<HashMap<_, _>>();
+
     let writable = prefix
         .iter()
         .filter(|record| record["type"].as_str() != Some("progress"))
@@ -136,6 +140,7 @@ pub(super) fn build_fork_records(
     }
 
     let mut records = Vec::with_capacity(writable.len() + 2);
+
     for (position, original) in writable.iter().enumerate() {
         let original_uuid = original["uuid"]
             .as_str()
@@ -150,10 +155,12 @@ pub(super) fn build_fork_records(
             let Some(parent_record) = by_uuid.get(parent_uuid) else {
                 break;
             };
+
             if parent_record["type"].as_str() != Some("progress") {
                 new_parent = uuid_mapping.get(parent_uuid).cloned();
                 break;
             }
+
             parent = parent_record["parentUuid"].as_str();
         }
 
@@ -161,15 +168,18 @@ pub(super) fn build_fork_records(
         let object = forked
             .as_object_mut()
             .ok_or_else(|| "Claude fork record is not a JSON object".to_string())?;
+
         object.insert("uuid".into(), Value::String(new_uuid.clone()));
         object.insert(
             "parentUuid".into(),
             new_parent.map(Value::String).unwrap_or(Value::Null),
         );
+
         let logical_parent = original["logicalParentUuid"]
             .as_str()
             .and_then(|uuid| uuid_mapping.get(uuid))
             .cloned();
+
         object.insert(
             "logicalParentUuid".into(),
             logical_parent.map(Value::String).unwrap_or(Value::Null),
@@ -194,9 +204,11 @@ pub(super) fn build_fork_records(
                 "messageUuid": original_uuid,
             }),
         );
+
         for field in ["teamName", "agentName", "slug", "sourceToolAssistantUUID"] {
             object.remove(field);
         }
+
         records.push(forked);
     }
 
@@ -211,6 +223,7 @@ pub(super) fn build_fork_records(
         .flatten()
         .cloned()
         .collect::<Vec<_>>();
+
     if !replacements.is_empty() {
         records.push(serde_json::json!({
             "type": "content-replacement",
@@ -225,6 +238,7 @@ pub(super) fn build_fork_records(
         .iter()
         .find_map(|record| user_prompt_text(record).as_deref().and_then(title_line))
         .unwrap_or_else(|| "Rewound session".into());
+
     records.push(serde_json::json!({
         "type": "custom-title",
         "sessionId": new_session_id,
@@ -243,13 +257,16 @@ pub(super) fn write_fork_file(
 ) -> Result<PathBuf, String> {
     let target = project_dir.join(format!("{session_id}.jsonl"));
     let temp = project_dir.join(format!(".{session_id}.{}.tmp", Uuid::new_v4()));
+
     let write_result = (|| -> Result<(), String> {
         let file = fs::OpenOptions::new()
             .create_new(true)
             .write(true)
             .open(&temp)
             .map_err(|error| format!("could not create Claude fork: {error}"))?;
+
         let mut writer = BufWriter::new(file);
+
         for record in records {
             serde_json::to_writer(&mut writer, record)
                 .map_err(|error| format!("could not serialize Claude fork: {error}"))?;
@@ -257,6 +274,7 @@ pub(super) fn write_fork_file(
                 .write_all(b"\n")
                 .map_err(|error| format!("could not write Claude fork: {error}"))?;
         }
+
         writer
             .flush()
             .map_err(|error| format!("could not flush Claude fork: {error}"))?;
@@ -264,6 +282,7 @@ pub(super) fn write_fork_file(
             .get_ref()
             .sync_all()
             .map_err(|error| format!("could not sync Claude fork: {error}"))?;
+
         fs::rename(&temp, &target)
             .map_err(|error| format!("could not publish Claude fork: {error}"))
     })();
@@ -271,5 +290,6 @@ pub(super) fn write_fork_file(
     if write_result.is_err() {
         let _ = fs::remove_file(&temp);
     }
+
     write_result.map(|()| target)
 }

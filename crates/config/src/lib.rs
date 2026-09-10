@@ -147,10 +147,12 @@ impl Config {
                 .file_stem()
                 .and_then(|name| name.to_str())
                 .ok_or_else(|| String::from("invalid theme filepath"))?;
+
             get_builtin_theme(name)
                 .map(str::to_owned)
                 .ok_or_else(|| String::from("filepath does not exist"))?
         };
+
         parse_toml::<Theme>(&content)
             .map_err(|err_message| format!("error parsing: {err_message:?}"))
     }
@@ -158,9 +160,11 @@ impl Config {
     /// Load a named theme from the per-user `themes` directory.
     pub fn load_named_theme(name: &str) -> Result<Theme, String> {
         let path = Path::new(name);
+
         if path.file_name().and_then(|name| name.to_str()) != Some(name) {
             return Err(String::from("theme name must not contain a path"));
         }
+
         Self::load_theme(&theme_file_path(&config_dir_path().join("themes"), name))
     }
 
@@ -176,10 +180,13 @@ impl Config {
                 }
             })
             .collect::<Vec<_>>();
+
         for custom in Self::load_themes_from(&config_dir_path().join("themes")) {
             merge_theme(&mut themes, custom);
         }
+
         themes.sort_by_cached_key(|(name, _)| name.to_lowercase());
+
         themes
     }
 
@@ -187,12 +194,14 @@ impl Config {
         let Ok(entries) = fs::read_dir(path) else {
             return Vec::new();
         };
+
         let mut themes = entries
             .filter_map(Result::ok)
             .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("toml"))
             .filter_map(|entry| {
                 let path = entry.path();
                 let name = path.file_stem()?.to_str()?.to_string();
+
                 match Self::load_theme(&path) {
                     Ok(theme) => Some((name, theme)),
                     Err(err) => {
@@ -202,7 +211,9 @@ impl Config {
                 }
             })
             .collect::<Vec<_>>();
+
         themes.sort_by_cached_key(|(name, _)| name.to_lowercase());
+
         themes
     }
 
@@ -216,8 +227,10 @@ impl Config {
         };
         let mut decoded = parse_toml::<Config>(&content)?;
         let theme = &decoded.theme;
+
         if !theme.is_empty() {
             let path = theme_file_path(&config_dir.join("themes"), theme);
+
             if let Ok(loaded_theme) = Config::load_theme(&path) {
                 decoded.ui_theme = loaded_theme.ui_theme();
                 decoded.colors = loaded_theme.colors.terminal;
@@ -420,12 +433,14 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> 
 
     doc["theme"] = value(theme);
     patch_group(doc, "appearance", appearance)?;
+
     if appearance.background_image.is_none() {
         doc["appearance"]
             .as_table_mut()
             .expect("appearance is a table")
             .remove("background-image");
     }
+
     ensure_explicit_table(doc, "cursor");
     doc["cursor"]["shape"] = value(cursor_shape.as_str());
 
@@ -435,6 +450,7 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> 
     patch_group(doc, "update", update)?;
 
     profile::patch_document(doc, profiles, default_profile);
+
     profile::patch_agent_document(doc, agent_profiles, default_agent_profile)
 }
 
@@ -445,16 +461,22 @@ fn patch_group(doc: &mut DocumentMut, key: &str, settings: &impl Serialize) -> R
     let values = serialized
         .parse::<DocumentMut>()
         .map_err(|error| error.to_string())?;
+
     ensure_explicit_table(doc, key);
+
     let table = doc[key].as_table_mut().expect("settings group is a table");
+
     for (name, item) in values.iter() {
         let target = table.entry(name).or_insert(Item::None);
         let mut item = item.clone();
+
         if let (Some(previous), Some(next)) = (target.as_value(), item.as_value_mut()) {
             *next.decor_mut() = previous.decor().clone();
         }
+
         *target = item;
     }
+
     Ok(())
 }
 
@@ -462,6 +484,7 @@ fn patch_group(doc: &mut DocumentMut, key: &str, settings: &impl Serialize) -> R
 /// inline table and existing inline or malformed values are normalized safely.
 pub(crate) fn ensure_explicit_table(doc: &mut DocumentMut, key: &str) {
     let item = doc.entry(key).or_insert_with(|| Item::Table(Table::new()));
+
     if !item.is_table() {
         let previous = mem::replace(item, Item::None);
         *item = Item::Table(previous.into_table().unwrap_or_default());

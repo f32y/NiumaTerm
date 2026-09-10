@@ -44,6 +44,7 @@ impl ProviderMaintenance for FakeMaintenance {
 
     fn probe(&self, _: &AgentCli) -> Result<VersionStatus, UpdateError> {
         self.probes.fetch_add(1, Ordering::SeqCst);
+
         Ok(VersionStatus {
             provider: self.provider,
             current: Some(Version::new(1, 0, 0)),
@@ -58,6 +59,7 @@ impl ProviderMaintenance for FakeMaintenance {
 
     fn update(&self, _: &AgentCli) -> Result<VendorUpdateResult, UpdateError> {
         self.updates.fetch_add(1, Ordering::SeqCst);
+
         Ok(VendorUpdateResult {
             diagnostic: "updated".into(),
         })
@@ -75,11 +77,13 @@ fn fresh_cache_is_reused_and_manual_check_bypasses_it() {
         .unwrap()
         .with_timezone(&Utc);
     let coordinator = UpdateCoordinator::with_clock(path.clone(), Arc::new(move || now));
+
     let fake = Arc::new(FakeMaintenance {
         provider: ProviderKind::Codex,
         probes: AtomicUsize::new(0),
         updates: AtomicUsize::new(0),
     });
+
     let key = coordinator.register(
         ProviderKind::Codex,
         AgentCli::new("fake-codex", []),
@@ -88,14 +92,18 @@ fn fresh_cache_is_reused_and_manual_check_bypasses_it() {
 
     coordinator.check(&key, false).unwrap();
     coordinator.check(&key, false).unwrap();
+
     assert_eq!(fake.probes.load(Ordering::SeqCst), 1);
     assert!(
         !fs::read_to_string(&path)
             .unwrap()
             .contains("do-not-cache-provider-command")
     );
+
     coordinator.check(&key, true).unwrap();
+
     assert_eq!(fake.probes.load(Ordering::SeqCst), 2);
+
     let _ = fs::remove_file(path);
 }
 
@@ -103,41 +111,53 @@ fn fresh_cache_is_reused_and_manual_check_bypasses_it() {
 fn operation_claim_serializes_updates_and_dismissal_is_version_keyed() {
     let path = test_path("claim");
     let coordinator = UpdateCoordinator::new(path.clone());
+
     let fake = Arc::new(FakeMaintenance {
         provider: ProviderKind::Claude,
         probes: AtomicUsize::new(0),
         updates: AtomicUsize::new(0),
     });
+
     let key = coordinator.register(
         ProviderKind::Claude,
         AgentCli::new("fake-claude", []),
         fake.clone(),
     );
+
     let duplicate_key = coordinator.register(
         ProviderKind::Claude,
         AgentCli::new("fake-claude", []),
         fake.clone(),
     );
+
     assert_eq!(key, duplicate_key);
     assert_eq!(coordinator.snapshots().len(), 1);
+
     coordinator.check(&key, true).unwrap();
     coordinator.begin_update(&key).unwrap();
+
     assert!(coordinator.begin_update(&key).is_err());
+
     coordinator.run_vendor_update(&key).unwrap();
+
     assert_eq!(fake.updates.load(Ordering::SeqCst), 1);
 
     let target = Version::new(1, 1, 0);
+
     coordinator.dismiss_available(&key, &target);
+
     assert_eq!(
         coordinator.snapshot(&key).unwrap().dismissed_target,
         Some(target)
     );
+
     coordinator.finish_update(
         &key,
         None,
         Some(UpdateError::new(UpdateErrorKind::ProviderFailed, "failed")),
         0,
     );
+
     let _ = fs::remove_file(path);
 }
 
@@ -145,20 +165,26 @@ fn operation_claim_serializes_updates_and_dismissal_is_version_keyed() {
 fn unchanged_and_partial_recovery_outcomes_keep_verified_versions() {
     let path = test_path("outcomes");
     let coordinator = UpdateCoordinator::new(path.clone());
+
     let fake = Arc::new(FakeMaintenance {
         provider: ProviderKind::Claude,
         probes: AtomicUsize::new(0),
         updates: AtomicUsize::new(0),
     });
+
     let key = coordinator.register(
         ProviderKind::Claude,
         AgentCli::new("fake-outcomes-claude", []),
         fake,
     );
+
     let available = coordinator.check(&key, true).unwrap();
+
     coordinator.begin_update(&key).unwrap();
     coordinator.finish_update(&key, Some(available), None, 0);
+
     let unchanged = coordinator.snapshot(&key).unwrap();
+
     assert_eq!(unchanged.state.phase, UpdatePhase::Unchanged);
     assert_eq!(
         unchanged.state.error.unwrap().kind,
@@ -166,6 +192,7 @@ fn unchanged_and_partial_recovery_outcomes_keep_verified_versions() {
     );
 
     coordinator.begin_update(&key).unwrap();
+
     let verified = VersionStatus {
         provider: ProviderKind::Claude,
         current: Some(Version::new(1, 1, 0)),
@@ -176,6 +203,7 @@ fn unchanged_and_partial_recovery_outcomes_keep_verified_versions() {
         support: DiscoverySupport::Supported,
         remediation: None,
     };
+
     coordinator.finish_update(
         &key,
         Some(verified),
@@ -185,12 +213,15 @@ fn unchanged_and_partial_recovery_outcomes_keep_verified_versions() {
         )),
         0,
     );
+
     let partial = coordinator.snapshot(&key).unwrap();
+
     assert_eq!(partial.state.phase, UpdatePhase::Failed);
     assert_eq!(
         partial.state.versions.unwrap().current,
         Some(Version::new(1, 1, 0))
     );
+
     let _ = fs::remove_file(path);
 }
 
@@ -198,22 +229,29 @@ fn unchanged_and_partial_recovery_outcomes_keep_verified_versions() {
 fn updater_external_lock_is_preserved_as_an_actionable_failure() {
     let path = test_path("external-lock");
     let coordinator = UpdateCoordinator::new(path.clone());
+
     let key = coordinator.register(
         ProviderKind::Codex,
         AgentCli::new("fake-locked-codex", []),
         Arc::new(LockedMaintenance),
     );
+
     coordinator.check(&key, true).unwrap();
     coordinator.begin_update(&key).unwrap();
+
     let error = coordinator.run_vendor_update(&key).unwrap_err();
+
     assert_eq!(error.kind, UpdateErrorKind::ExternalLock);
+
     coordinator.finish_update(&key, None, Some(error), 0);
 
     let failed = coordinator.snapshot(&key).unwrap();
+
     assert_eq!(failed.state.phase, UpdatePhase::Failed);
     assert_eq!(
         failed.state.error.unwrap().kind,
         UpdateErrorKind::ExternalLock
     );
+
     let _ = fs::remove_file(path);
 }

@@ -98,10 +98,13 @@ impl InputTicket {
                 Ok(_) | Err(2)
             );
         };
+
         let mut state = queue.state.lock();
+
         if self.state.load(Ordering::Acquire) == 1 {
             return false;
         }
+
         if let Some(index) = state
             .pending
             .iter()
@@ -109,7 +112,9 @@ impl InputTicket {
         {
             state.pending.remove(index);
         }
+
         self.state.store(2, Ordering::Release);
+
         true
     }
 
@@ -141,14 +146,17 @@ pub(super) struct InputReceiver {
 impl InputReceiver {
     pub(super) fn recv(&self) -> Result<QueuedInput, mpsc::RecvError> {
         let mut state = self.queue.state.lock();
+
         loop {
             if let Some(input) = state.pending.pop_front() {
                 input.ticket.state.store(1, Ordering::Release);
                 return Ok(input);
             }
+
             if !state.sender_open {
                 return Err(mpsc::RecvError);
             }
+
             self.queue.ready.wait(&mut state);
         }
     }
@@ -156,6 +164,7 @@ impl InputReceiver {
     #[cfg(test)]
     pub(super) fn try_recv(&self) -> Result<QueuedInput, mpsc::TryRecvError> {
         let mut state = self.queue.state.lock();
+
         if let Some(input) = state.pending.pop_front() {
             input.ticket.state.store(1, Ordering::Release);
             Ok(input)
@@ -174,6 +183,7 @@ impl InputReceiver {
 
 impl Iterator for InputReceiver {
     type Item = QueuedInput;
+
     fn next(&mut self) -> Option<Self::Item> {
         self.recv().ok()
     }
@@ -182,7 +192,9 @@ impl Iterator for InputReceiver {
 impl Drop for InputReceiver {
     fn drop(&mut self) {
         let mut state = self.queue.state.lock();
+
         state.receiver_open = false;
+
         for input in state.pending.drain(..) {
             input.ticket.state.store(2, Ordering::Release);
         }
@@ -206,6 +218,7 @@ impl InputQueue {
             }),
             ready: Condvar::new(),
         });
+
         (
             Self {
                 queue: Arc::clone(&queue),
@@ -228,46 +241,60 @@ impl InputQueue {
         let mut ticket = InputTicket::new(
             messages.len() > 1 || messages.iter().any(|message| message["type"] == "user"),
         );
+
         ticket.queue = Arc::downgrade(&self.queue);
+
         if messages.is_empty() {
             return Ok(ticket);
         }
+
         let (max_messages, max_bytes) = match class {
             InputClass::Normal => (MAX_MESSAGES - RESERVED_MESSAGES, MAX_BYTES - RESERVED_BYTES),
             InputClass::Control => (MAX_MESSAGES, MAX_BYTES),
         };
+
         let bytes = messages.iter().fold(0usize, |total, message| {
             total.saturating_add(estimated_bytes(message))
         });
+
         if bytes > max_bytes {
             return Err(InputError::TooLarge { limit: max_bytes });
         }
+
         let mut state = self.queue.state.lock();
+
         if !state.receiver_open {
             return Err(InputError::Closed);
         }
+
         let reservation = {
             let mut budget = self.budget.lock();
+
             if messages.len() > max_messages.saturating_sub(budget.messages) {
                 return Err(InputError::MessageLimit);
             }
+
             if bytes > max_bytes.saturating_sub(budget.bytes) {
                 return Err(InputError::ByteLimit);
             }
+
             budget.messages += messages.len();
             budget.bytes += bytes;
+
             Reservation {
                 budget: Arc::clone(&self.budget),
                 messages: messages.len(),
                 bytes,
             }
         };
+
         state.pending.push_back(QueuedInput {
             messages,
             ticket: ticket.clone(),
             _reservation: reservation,
         });
         self.queue.ready.notify_one();
+
         Ok(ticket)
     }
 }

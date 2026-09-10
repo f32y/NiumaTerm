@@ -37,28 +37,36 @@ fn api_server(request_count: usize) -> (String, mpsc::Receiver<Value>, thread::J
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback API server");
     let address = listener.local_addr().unwrap();
     let (request_tx, request_rx) = mpsc::channel();
+
     let server = thread::spawn(move || {
         for _ in 0..request_count {
             let (mut stream, _) = listener.accept().expect("accept API client");
             let mut reader = BufReader::new(stream.try_clone().unwrap());
             let mut content_length = 0;
+
             loop {
                 let mut line = String::new();
+
                 reader.read_line(&mut line).expect("read request header");
+
                 if line == "\r\n" {
                     break;
                 }
+
                 if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
                     content_length = value.trim().parse().expect("parse content length");
                 }
             }
+
             let mut body = vec![0; content_length];
+
             reader.read_exact(&mut body).expect("read request body");
             request_tx
                 .send(serde_json::from_slice(&body).expect("parse request body"))
                 .unwrap();
 
             let answer = r#"{"result":{"ok":true,"value":{"accepted":true}}}"#;
+
             write!(
                 stream,
                 "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{answer}",
@@ -75,10 +83,13 @@ fn api_server(request_count: usize) -> (String, mpsc::Receiver<Value>, thread::J
 fn a_dropped_downlink_does_not_wait_for_the_next_frame() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback websocket server");
     let url = format!("ws://{}", listener.local_addr().unwrap());
+
     let server = thread::spawn(move || {
         let (stream, _) = listener.accept().expect("accept websocket client");
         let mut socket = accept(stream).expect("complete websocket handshake");
+
         thread::sleep(Duration::from_millis(700));
+
         let _ = socket.send(Message::Text("{}".into()));
         let _ = socket.close(None);
     });
@@ -88,6 +99,7 @@ fn a_dropped_downlink_does_not_wait_for_the_next_frame() {
     let pump_stopped = Arc::clone(&stopped);
     let (done_tx, done_rx) = mpsc::channel();
     let (read_tx, read_rx) = mpsc::channel();
+
     thread::spawn(move || {
         pump_for_test(socket, &|_| {}, &pump_stopped, &read_tx);
         let _ = done_tx.send(());
@@ -97,12 +109,15 @@ fn a_dropped_downlink_does_not_wait_for_the_next_frame() {
         .recv_timeout(Duration::from_secs(1))
         .expect("reader should enter the blocking receive");
     stopped.store(true, Ordering::Relaxed);
+
     let stopped_before_frame = done_rx.recv_timeout(Duration::from_millis(400)).is_ok();
+
     if !stopped_before_frame {
         done_rx
             .recv_timeout(Duration::from_secs(2))
             .expect("reader should exit after the server sends a frame");
     }
+
     server.join().expect("websocket server should exit");
 
     assert!(
@@ -115,6 +130,7 @@ fn a_dropped_downlink_does_not_wait_for_the_next_frame() {
 fn closing_a_session_drops_queued_work_before_cancelling_the_turn() {
     let (base, requests, server) = api_server(3);
     let client = ApiClient::new(base).expect("create API client");
+
     let actions = vec![
         CloseAction::RemoveQueued("queued-1".into()),
         CloseAction::RemoveQueued("steering-2".into()),
@@ -125,6 +141,7 @@ fn closing_a_session_drops_queued_work_before_cancelling_the_turn() {
         run_close_actions(&client, SESSION, &actions),
         Vec::<String>::new()
     );
+
     let requests: Vec<Value> = (0..actions.len())
         .map(|_| {
             requests
@@ -132,6 +149,7 @@ fn closing_a_session_drops_queued_work_before_cancelling_the_turn() {
                 .expect("receive close request")
         })
         .collect();
+
     server.join().expect("API server should exit");
 
     assert_eq!(requests[0]["method"], "session/updateQueue");
@@ -168,6 +186,7 @@ fn text_and_reasoning_stream_as_separate_rows() {
         SESSION,
         &mut ToolTracker::default(),
     );
+
     assert_eq!(
         started,
         vec![Event::ItemStarted(Item::Reasoning {
@@ -183,6 +202,7 @@ fn text_and_reasoning_stream_as_separate_rows() {
         SESSION,
         &mut ToolTracker::default(),
     );
+
     assert_eq!(
         reasoning,
         vec![Event::ReasoningSummaryDelta {
@@ -198,6 +218,7 @@ fn text_and_reasoning_stream_as_separate_rows() {
         SESSION,
         &mut ToolTracker::default(),
     );
+
     assert_eq!(
         text,
         vec![Event::AgentMessageDelta {
@@ -258,6 +279,7 @@ fn only_the_users_own_message_becomes_a_transcript_row() {
             "source": { "kind": "user" },
         },
     });
+
     assert_eq!(
         map_frame(&session_frame(prompt), SESSION, &mut ToolTracker::default()),
         vec![Event::ItemStarted(Item::UserMessage {
@@ -275,6 +297,7 @@ fn only_the_users_own_message_becomes_a_transcript_row() {
                 "source": { "kind": injected },
             },
         }));
+
         assert_eq!(
             map_frame(&frame, SESSION, &mut ToolTracker::default()),
             Vec::new(),
@@ -289,6 +312,7 @@ fn turn_end_reasons_separate_a_failure_from_a_stop() {
         "type": "turn/end",
         "data": { "turn": 1, "reason": { "kind": "aborted", "reason": { "kind": "user" } } },
     });
+
     assert_eq!(
         map_frame(
             &session_frame(aborted),
@@ -302,6 +326,7 @@ fn turn_end_reasons_separate_a_failure_from_a_stop() {
         "type": "turn/end",
         "data": { "turn": 1, "reason": { "kind": "completed" } },
     });
+
     assert_eq!(
         map_frame(
             &session_frame(completed),
@@ -315,6 +340,7 @@ fn turn_end_reasons_separate_a_failure_from_a_stop() {
         "type": "turn/end",
         "data": { "turn": 1, "reason": { "kind": "failed", "message": "NO_ADAPTER" } },
     });
+
     assert_eq!(
         map_frame(&session_frame(failed), SESSION, &mut ToolTracker::default()),
         vec![Event::TurnCompleted {
@@ -346,6 +372,7 @@ fn unknown_types_produce_nothing_rather_than_failing() {
         "type": "quantum/entanglement",
         "data": { "turn": 1 },
     }));
+
     assert_eq!(
         map_frame(&unknown_event, SESSION, &mut ToolTracker::default()),
         Vec::new()
@@ -355,6 +382,7 @@ fn unknown_types_produce_nothing_rather_than_failing() {
         "type": "server-request",
         "payload": { "type": "session/telepathy", "sessionId": SESSION },
     });
+
     assert_eq!(
         map_frame(&unknown_frame, SESSION, &mut ToolTracker::default()),
         Vec::new()
@@ -364,6 +392,7 @@ fn unknown_types_produce_nothing_rather_than_failing() {
     let unknown_chunk = session_frame(chunk(
         json!({ "type": "signature-delta", "index": 0, "text": "x" }),
     ));
+
     assert_eq!(
         map_frame(&unknown_chunk, SESSION, &mut ToolTracker::default()),
         Vec::new()
@@ -380,6 +409,7 @@ fn host_and_stream_failures_reach_the_transcript() {
             "message": "the model provider refused the request",
         },
     });
+
     assert_eq!(
         map_frame(&agent_error, SESSION, &mut ToolTracker::default()),
         vec![Event::ItemStarted(Item::Error {
@@ -400,6 +430,7 @@ fn host_and_stream_failures_reach_the_transcript() {
             "error": { "code": "internal", "message": "the stream ended" },
         },
     });
+
     assert_eq!(
         map_frame(&stream_error, SESSION, &mut ToolTracker::default()),
         vec![Event::ItemStarted(Item::Error {
@@ -484,6 +515,7 @@ fn an_approval_request_carries_what_answering_it_needs() {
     });
 
     let request = approval_request(&frame, SESSION).expect("the request should be recognized");
+
     assert_eq!(request.event_id, "3fcb9bcf-614d-414e-9041-ada82f9a0fad");
     assert_eq!(request.client_id, "generation-1");
     assert!(
@@ -539,6 +571,7 @@ fn a_command_result_reports_what_the_registry_settled() {
     let SlashCommandOutcome::Rejected { message } = commands::outcome("nope", &Value::Null) else {
         panic!("an unresolved name should be refused");
     };
+
     assert!(message.contains("/nope"), "{message}");
 }
 
@@ -566,6 +599,7 @@ fn the_skill_catalog_names_what_a_prompt_can_write() {
         "{}",
         catalog.skills[0].description
     );
+
     // The catalog lists what a user can invoke, so a row on it is reachable
     // whether or not the model may reach for it too.
     assert!(catalog.skills[1].enabled);
@@ -604,11 +638,13 @@ fn a_workflow_run_is_folded_from_its_own_increments() {
     }
 
     let run = workflows.snapshot(SESSION).runs.remove(0);
+
     // A member is published only once its session exists, so the run is under
     // way as soon as one arrives.
     assert_eq!(run.state, WorkflowRunState::Running);
     assert_eq!(run.agents.len(), 2);
     assert_eq!(run.agents[0].agent_id.as_deref(), Some("child-1"));
+
     // A member names its group by title alone, so the list is built as members
     // first mention one and both share the entry.
     assert_eq!(run.phases.len(), 1);
@@ -625,8 +661,10 @@ fn a_workflow_run_is_folded_from_its_own_increments() {
     }))));
 
     let run = workflows.snapshot(SESSION).runs.remove(0);
+
     assert_eq!(run.state, WorkflowRunState::Failed);
     assert_eq!(run.agents[0].state, WorkflowAgentState::Failed);
+
     // The second member never reported an ending of its own, and leaving it
     // Running under a finished run would claim work still in progress.
     assert_eq!(run.agents[1].state, WorkflowAgentState::Stopped);
@@ -669,13 +707,16 @@ fn the_child_catalog_becomes_rows_that_can_be_opened() {
     });
 
     let snapshot = subagents::snapshot(&catalog, SESSION, 7);
+
     assert_eq!(snapshot.tasks.len(), 2);
     assert_eq!(snapshot.parent_session.id, SESSION);
 
     let first = &snapshot.tasks[0];
+
     assert_eq!(first.key.id, "child-1");
     assert_eq!(first.display_name.as_deref(), Some("Review the diff"));
     assert_eq!(first.state, BackgroundTaskState::Working);
+
     // Only a running continuable child has anything a stop can reach.
     assert!(first.can_stop);
     assert!(!snapshot.tasks[1].can_stop);
@@ -707,12 +748,15 @@ fn the_command_registry_fills_the_palette() {
     ]);
 
     let catalog = commands::catalog(&listed);
+
     assert_eq!(catalog.len(), 2);
     assert_eq!(catalog[0].name, "compact");
     assert_eq!(catalog[0].source, SlashCommandSource::Provider);
+
     // The registry settles a command itself rather than handing it to the
     // model, so none of them wait for a turn.
     assert_eq!(catalog[0].run_policy, SlashCommandRunPolicy::Immediate);
+
     // An input hint is what says the name is followed by free text.
     assert_eq!(catalog[0].arguments, SlashCommandArguments::None);
     assert_eq!(catalog[1].arguments, SlashCommandArguments::Freeform);
@@ -759,12 +803,14 @@ fn the_session_list_offers_only_what_this_tab_can_continue() {
 
     let sessions = history::sessions(&listed, Some("C:/Workspace/NiumaTerm"));
     let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+
     assert_eq!(ids, vec!["s-1", "s-5"]);
     assert_eq!(sessions[0].title, "Map the harness");
     assert_eq!(
         sessions[0].last_active,
         UNIX_EPOCH + Duration::from_millis(1_770_000_000_000)
     );
+
     // An untitled row still names what picking it will open.
     assert_eq!(sessions[1].title, "s-5");
 }
@@ -774,6 +820,7 @@ fn a_replayed_page_rebuilds_turns_from_the_same_events_the_stream_carries() {
     use crate::deepseek::history;
 
     let entry = |event: Value| json!({ "event": event });
+
     let page = json!({
         "hasMore": false,
         "records": [
@@ -813,7 +860,9 @@ fn a_replayed_page_rebuilds_turns_from_the_same_events_the_stream_carries() {
     });
 
     let turns = history::replay(&page);
+
     assert_eq!(turns.len(), 1);
+
     // The item stream cannot express either, so both come from the boundary
     // events themselves.
     assert!(turns[0].interrupted);
@@ -821,6 +870,7 @@ fn a_replayed_page_rebuilds_turns_from_the_same_events_the_stream_carries() {
 
     // The streamed row and its completed payload are one row, not two.
     let items: Vec<&Item> = turns[0].items.iter().map(|entry| &entry.item).collect();
+
     assert_eq!(
         items,
         vec![
@@ -845,6 +895,7 @@ fn a_compaction_records_itself_only_once_it_produced_a_summary() {
         "type": "compaction/start",
         "data": { "compactionId": "cmp-1", "turn": 3 },
     }));
+
     assert_eq!(
         map_frame(&start, SESSION, &mut ToolTracker::default()),
         vec![Event::CompactionStarted]
@@ -863,6 +914,7 @@ fn a_compaction_records_itself_only_once_it_produced_a_summary() {
             "model": "deepseek-chat",
         },
     }));
+
     assert_eq!(
         map_frame(&summary, SESSION, &mut ToolTracker::default()),
         vec![Event::ItemCompleted(Item::Compaction {
@@ -883,6 +935,7 @@ fn a_compaction_records_itself_only_once_it_produced_a_summary() {
         "type": "compaction/end",
         "data": { "compactionId": "cmp-1", "turn": 3, "error": "the summarizer failed" },
     }));
+
     assert_eq!(
         map_frame(&end, SESSION, &mut ToolTracker::default()),
         vec![Event::CompactionFinished {
@@ -899,6 +952,7 @@ fn a_compaction_records_itself_only_once_it_produced_a_summary() {
             "source": { "kind": "plugin", "plugin": "compact", "compactionId": "cmp-1" },
         },
     }));
+
     assert_eq!(
         map_frame(&replacement, SESSION, &mut ToolTracker::default()),
         Vec::new()
@@ -924,6 +978,7 @@ fn a_retry_says_the_turn_is_waiting_rather_than_thinking() {
             "failure": { "message": "429 rate limited", "code": "rate_limit", "status": 429 },
         },
     }));
+
     assert_eq!(
         map_frame(&retry, SESSION, &mut ToolTracker::default()),
         vec![Event::StatusDetail(Some(TurnActivity::Retrying {
@@ -938,6 +993,7 @@ fn a_retry_says_the_turn_is_waiting_rather_than_thinking() {
         "type": "llm/retry-started",
         "data": { "retryId": "r-1", "turn": 1, "step": 1, "retry": 1 },
     }));
+
     assert_eq!(
         map_frame(&started, SESSION, &mut ToolTracker::default()),
         vec![Event::StatusDetail(None)]
@@ -948,6 +1004,7 @@ fn a_retry_says_the_turn_is_waiting_rather_than_thinking() {
         "type": "llm/retry",
         "data": { "retry": 2, "maxRetries": 2, "failure": { "code": "overloaded" } },
     }));
+
     assert_eq!(
         map_frame(&coded, SESSION, &mut ToolTracker::default()),
         vec![Event::StatusDetail(Some(TurnActivity::Retrying {
@@ -976,6 +1033,7 @@ fn a_todo_write_renders_as_the_shared_checklist_shape() {
     let [Event::ItemCompleted(item)] = events.as_slice() else {
         panic!("expected one todo row, got {events:?}");
     };
+
     // The tally the transcript shows reads this shape, so the row has to speak
     // it rather than a second vocabulary of its own.
     assert_eq!(item.task_tally(), Some((1, 3)));
@@ -983,7 +1041,9 @@ fn a_todo_write_renders_as_the_shared_checklist_shape() {
     let Item::Other { id, kind, .. } = item else {
         panic!("expected a generic row, got {item:?}");
     };
+
     assert_eq!(kind, "TodoWrite");
+
     // Each write describes its own moment, so rows do not collapse into one.
     assert_eq!(id, "todo:88");
 
@@ -992,6 +1052,7 @@ fn a_todo_write_renders_as_the_shared_checklist_shape() {
         "seq": 89,
         "data": { "todos": [] },
     }));
+
     assert_eq!(
         map_frame(&empty, SESSION, &mut ToolTracker::default()),
         Vec::new()
@@ -1032,6 +1093,7 @@ fn the_model_directory_addresses_a_pick_as_a_provider_and_model_pair() {
 
     let catalog = directory.catalog();
     let keys: Vec<&str> = catalog.iter().map(|m| m.model.as_str()).collect();
+
     // A model id two providers serve cannot address either one alone, while an
     // id only one serves stays bare so a profile can name it the plain way.
     assert_eq!(
@@ -1056,12 +1118,14 @@ fn the_model_directory_addresses_a_pick_as_a_provider_and_model_pair() {
         directory.route("openrouter/deepseek-chat"),
         ("openrouter", "deepseek-chat")
     );
+
     // A custom id the catalog never listed still routes, through the provider
     // the session is already on.
     assert_eq!(
         directory.route("nothing-like-this"),
         ("deepseek", "nothing-like-this")
     );
+
     // A slash inside a model id names no provider, so it survives the split.
     assert_eq!(
         directory.route("Qwen/Qwen3-32B"),
@@ -1107,14 +1171,17 @@ fn declaring_image_input_rewrites_the_catalog_the_harness_already_serves() {
 
     let written = models_with_image(&catalog, "custom-vision", "inputModalities")
         .expect("a text-only model changes");
+
     assert_eq!(written[0], catalog[0]);
     assert_eq!(written[1]["inputModalities"], json!(["text", "image"]));
+
     // The entry keeps what the harness knew about it; only its modalities move.
     assert_eq!(written[1]["name"], json!("Custom"));
 
     // A model the catalog never listed carries only what is being declared.
     let appended = models_with_image(&catalog, "proxy-model", "inputModalities")
         .expect("an unlisted model changes");
+
     assert_eq!(
         appended[2],
         json!({ "id": "proxy-model", "inputModalities": ["text", "image"] })
@@ -1127,6 +1194,7 @@ fn declaring_image_input_rewrites_the_catalog_the_harness_already_serves() {
     // The OpenAI-compatible adapter spells the same declaration `input`, and
     // reading the wrong field would rewrite a catalog that is already right.
     let pi_ai = json!([{ "id": "custom-vision", "input": ["text", "image"] }]);
+
     assert!(models_with_image(&pi_ai, "custom-vision", "input").is_none());
     assert_eq!(
         models_with_image(&pi_ai, "other", "input").expect("an unlisted model changes")[1],
@@ -1186,15 +1254,18 @@ fn usage_projections_combine_into_one_window_snapshot() {
     let [Event::ContextWindowUpdated(window)] = events.as_slice() else {
         panic!("expected one window snapshot, got {events:?}");
     };
+
     // The projected figure is what reacts to a compaction, so it wins over the
     // provider's older sample.
     assert_eq!(window.current.total_tokens, 9950);
     assert_eq!(window.max_tokens, Some(128_000));
 
     let cumulative = window.cumulative.expect("the totals should ride along");
+
     assert_eq!(cumulative.scope, ContextUsageScope::Thread);
     assert_eq!(cumulative.breakdown.total_tokens, 10_000);
     assert_eq!(cumulative.breakdown.cache_read_input_tokens, Some(8000));
+
     // Cache traffic belongs inside the input figure, so a reader dividing the
     // read count by it gets a share at or below 100%.
     assert_eq!(cumulative.breakdown.input_tokens, Some(9700));
@@ -1213,6 +1284,7 @@ fn the_permission_presets_come_from_the_deployment_rather_than_from_here() {
     use crate::deepseek::session::ready_settings;
 
     let mut projections = ProjectionTracker::default();
+
     let events = projections
         .apply(
             &projection_frame(
@@ -1233,10 +1305,12 @@ fn the_permission_presets_come_from_the_deployment_rather_than_from_here() {
     let [Event::ApprovalPresets { presets, current }] = events.as_slice() else {
         panic!("expected one preset snapshot, got {events:?}");
     };
+
     assert_eq!(presets.len(), 3);
     assert_eq!(presets[0].value, "read-only");
     assert_eq!(presets[0].label, "Read Only");
     assert_eq!(presets[0].description.as_deref(), Some("No writes"));
+
     // The derived entry is offered only while it is what the session is on.
     assert_eq!(current.as_deref(), Some("custom"));
 
@@ -1248,7 +1322,9 @@ fn the_permission_presets_come_from_the_deployment_rather_than_from_here() {
         },
         "groups": [],
     }));
+
     let settings = ready_settings(&models, &projections);
+
     assert_eq!(settings.model.as_deref(), Some("deepseek-chat"));
     assert_eq!(settings.approval.as_deref(), Some("custom"));
     assert_eq!(settings.effort.as_deref(), Some("max"));
@@ -1261,6 +1337,7 @@ fn the_history_page_baseline_seeds_what_a_live_push_would_not() {
     // A push reports only what changed after the tab attached, so a session
     // that has been running since before it opened would show nothing.
     let mut projections = ProjectionTracker::default();
+
     let events = projections.apply_baseline(
         &json!({
             "contextPressure": { "projectedTokens": 4200, "contextWindow": 64000 },
@@ -1276,8 +1353,10 @@ fn the_history_page_baseline_seeds_what_a_live_push_would_not() {
     else {
         panic!("expected a window snapshot and a title, got {events:?}");
     };
+
     assert_eq!(window.current.total_tokens, 4200);
     assert_eq!(window.max_tokens, Some(64_000));
+
     // The harness names a conversation itself, and a tab that read only live
     // pushes would keep its own placeholder until the name happened to change.
     assert_eq!(title, "Map the harness");
@@ -1309,6 +1388,7 @@ fn a_context_breakdown_becomes_the_composition_segments() {
     use crate::deepseek::projections::ProjectionTracker;
 
     let mut usage = ProjectionTracker::default();
+
     usage.apply(
         &projection_frame(
             "contextPressure",
@@ -1330,9 +1410,11 @@ fn a_context_breakdown_becomes_the_composition_segments() {
     let [Event::ContextCompositionUpdated(composition)] = events.as_slice() else {
         panic!("expected one composition, got {events:?}");
     };
+
     assert_eq!(composition.segments.len(), 3);
     assert_eq!(composition.segments[1].label, "Tools");
     assert_eq!(composition.segments[1].tokens, 250);
+
     // The three figures share one estimator, so their sum is the only total
     // that describes this split.
     assert_eq!(composition.used_tokens, 1650);
@@ -1374,8 +1456,10 @@ fn a_question_request_carries_the_ids_an_answer_is_matched_against() {
 
     let (request, questions) =
         question_request(&frame, SESSION).expect("the request should be recognized");
+
     assert_eq!(request.event_id, "0f21a6f2-7f52-4b0f-bb2f-9c0e9d2f0a11");
     assert_eq!(request.client_id, "generation-2");
+
     // The harness matches each answer against the question at the same
     // position, so the ask order is what makes the batch answerable.
     assert_eq!(request.ids, vec!["q1".to_string(), "q2".to_string()]);
@@ -1474,6 +1558,7 @@ fn a_shell_command_becomes_a_command_row_with_its_output_and_exit_code() {
         SESSION,
         &mut tools,
     );
+
     assert_eq!(
         started,
         vec![Event::ItemStarted(Item::CommandExecution {
@@ -1505,6 +1590,7 @@ fn a_shell_command_becomes_a_command_row_with_its_output_and_exit_code() {
         SESSION,
         &mut tools,
     );
+
     // The command line survives from the call: the result names only the id.
     assert_eq!(
         completed,
@@ -1538,9 +1624,11 @@ fn an_edit_becomes_a_file_row_whose_result_diff_carries_context() {
         SESSION,
         &mut tools,
     );
+
     let Some(Event::ItemStarted(Item::FileChange { paths, diff, .. })) = started.first() else {
         panic!("a diff card should open a file row, got {started:?}");
     };
+
     assert_eq!(paths, "probe-target.txt");
     assert!(diff.as_deref().unwrap_or_default().contains("-before"));
 
@@ -1564,12 +1652,15 @@ fn an_edit_becomes_a_file_row_whose_result_diff_carries_context() {
         SESSION,
         &mut tools,
     );
+
     let Some(Event::ItemCompleted(Item::FileChange { diff, status, .. })) = completed.first()
     else {
         panic!("the result should complete the file row, got {completed:?}");
     };
+
     // The result diff carries surrounding lines the arguments never had.
     let body = diff.as_deref().unwrap_or_default();
+
     assert!(body.contains("-line one"), "{body}");
     assert!(body.contains("+after"), "{body}");
     assert_eq!(status.as_deref(), Some("completed"));
@@ -1596,6 +1687,7 @@ fn a_card_this_build_does_not_model_still_shows_the_call() {
         SESSION,
         &mut tools,
     );
+
     assert_eq!(
         started,
         vec![Event::ItemStarted(Item::Other {
@@ -1641,6 +1733,7 @@ fn a_failed_call_reports_the_text_the_model_saw() {
         SESSION,
         &mut tools,
     );
+
     let Some(Event::ItemCompleted(Item::CommandExecution {
         aggregated_output,
         status,
@@ -1649,6 +1742,7 @@ fn a_failed_call_reports_the_text_the_model_saw() {
     else {
         panic!("the failure should still complete the row, got {completed:?}");
     };
+
     assert_eq!(status.as_deref(), Some("failed"));
     assert!(
         aggregated_output
@@ -1738,6 +1832,7 @@ fn a_search_answer_takes_its_display_from_the_list_and_keeps_the_rank_order() {
         ],
         "hasMore": false,
     });
+
     let listed = json!({
         "items": [
             { "sessionId": "s-1", "updatedAt": 1_000, "blank": false, "cwd": "C:/p",
@@ -1751,6 +1846,7 @@ fn a_search_answer_takes_its_display_from_the_list_and_keeps_the_rank_order() {
     let rows = search_results(&matches, &listed, Some("C:/p"));
 
     assert_eq!(rows.len(), 2);
+
     // The list is ordered by recency and the search by relevance; the rows
     // follow the search, because that is the question being answered.
     assert_eq!(rows[0].id, "s-2");
@@ -1765,6 +1861,7 @@ fn the_goal_projection_carries_the_objective_and_how_much_of_its_budget_is_spent
     use crate::deepseek::projections::ProjectionTracker;
 
     let mut projections = ProjectionTracker::default();
+
     let events = projections
         .apply(
             &projection_frame(
@@ -1787,6 +1884,7 @@ fn the_goal_projection_carries_the_objective_and_how_much_of_its_budget_is_spent
     let [Event::GoalUpdated(Some(goal))] = events.as_slice() else {
         panic!("expected one goal snapshot, got {events:?}");
     };
+
     assert_eq!(goal.objective, "Get the suite green");
     assert_eq!(goal.phase, "active");
     assert_eq!(goal.rounds_started, 3);
@@ -1797,6 +1895,7 @@ fn the_goal_projection_carries_the_objective_and_how_much_of_its_budget_is_spent
     let cleared = projections
         .apply(&projection_frame("goal", Value::Null), SESSION)
         .expect("a null goal is still this session's frame");
+
     assert_eq!(cleared, vec![Event::GoalUpdated(None)]);
 }
 
@@ -1831,6 +1930,7 @@ fn the_session_stats_projection_reports_whole_log_counters() {
     use crate::deepseek::projections::ProjectionTracker;
 
     let mut projections = ProjectionTracker::default();
+
     let events = projections
         .apply(
             &projection_frame(
@@ -1853,6 +1953,7 @@ fn the_session_stats_projection_reports_whole_log_counters() {
     let [Event::SessionStatsUpdated(stats)] = events.as_slice() else {
         panic!("expected one stats snapshot, got {events:?}");
     };
+
     assert_eq!(stats.turns, 7);
     assert_eq!(stats.steps, 23);
     assert_eq!(stats.model_ms, 61_000);
@@ -1872,14 +1973,17 @@ fn a_broken_preset_is_listed_by_the_harness_but_not_offered_for_selection() {
     ]));
 
     let ids: Vec<&str> = presets.iter().map(|preset| preset.value.as_str()).collect();
+
     assert_eq!(ids, ["coding", "research", "mine", "plain"]);
 
     assert_eq!(presets[0].label, "Coding");
     assert_eq!(presets[0].description.as_deref(), Some("Ships code"));
+
     // A preset that published no name is still addressed by its id, so the id
     // is what the row shows rather than a blank label.
     assert_eq!(presets[1].label, "research");
     assert_eq!(presets[1].description, None);
+
     // A locally authored preset is as privileged as the plugins it names, and a
     // row that read like a shipped one would imply it had been vetted.
     assert_eq!(
@@ -1895,6 +1999,7 @@ fn branch_points_pair_each_prompt_with_the_seq_of_the_one_ahead_of_it() {
     use crate::deepseek::history;
 
     let entry = |event: Value| json!({ "event": event });
+
     let prompt = |seq: u64, time: u64, text: &str| {
         entry(json!({
             "type": "user/message",
@@ -1906,6 +2011,7 @@ fn branch_points_pair_each_prompt_with_the_seq_of_the_one_ahead_of_it() {
             },
         }))
     };
+
     let page = json!({
         "hasMore": false,
         "records": [
@@ -1984,6 +2090,7 @@ fn recent_conversations_are_filtered_by_the_primary_directory() {
 
     let rows = sessions(&listed, Some(r"C:\Work\api"));
     let ids: Vec<_> = rows.iter().map(|row| row.id.as_str()).collect();
+
     assert_eq!(ids, ["in-primary"]);
 }
 
@@ -1998,25 +2105,31 @@ fn a_frame_missing_a_required_field_is_dropped_not_emptied() {
 
     // Renamed identity field: the whole frame is refused.
     let renamed = json!({ "type": "nmt/workflow-transcript", "task": "t1", "agentId": "a1" });
+
     assert_eq!(workflow_transcript_events(&renamed), Vec::new());
 
     let complete = json!({
         "type": "nmt/workflow-transcript", "taskId": "t1", "agentId": "a1",
         "page": { "records": [] },
     });
+
     assert!(matches!(
         complete_events(&complete).as_slice(),
         [Event::WorkflowAgentTranscript { task_id, agent_id, .. }]
             if task_id == "t1" && agent_id == "a1"
     ));
+
     fn complete_events(payload: &Value) -> Vec<Event> {
         workflow_transcript_events(payload)
     }
 
     // A search error whose value is not a string is drift, never a success.
     let drifted = json!({ "type": "nmt/search", "error": 500 });
+
     assert_eq!(search_events(&drifted), Vec::new());
+
     let failed = json!({ "type": "nmt/search", "error": "index unavailable" });
+
     assert!(matches!(
         search_events(&failed).as_slice(),
         [Event::Error { fatal: false, .. }]
@@ -2032,6 +2145,7 @@ fn a_frame_missing_a_required_field_is_dropped_not_emptied() {
         [Event::ForkCheckpoints(Ok(checkpoints))] if checkpoints.is_empty()
     ));
 }
+
 #[test]
 fn raw_tool_events_keep_commands_output_and_applied_diffs() {
     let mut tools = ToolTracker::default();
@@ -2039,38 +2153,51 @@ fn raw_tool_events_keep_commands_output_and_applied_diffs() {
         "callId":"raw-shell","name":"bash","arguments":"{\"command\":\"echo ok\",\"description\":\"Print a marker\"}"
     }});
     let started = mapping::map_session_event(&call, &Value::Null, &mut tools);
+
     assert!(
         matches!(&started[0], Event::ItemStarted(Item::CommandExecution { command, .. }) if command == "echo ok")
     );
+
     let result = json!({"type":"tool/result","data":{"message":{
         "source":{"callId":"raw-shell"},"content":[{"type":"tool-result","content":[{"type":"text","text":"ok\n"}]}]
     }}});
     let completed = mapping::map_session_event(&result, &Value::Null, &mut tools);
+
     assert!(
         matches!(&completed[0], Event::ItemCompleted(Item::CommandExecution { aggregated_output: Some(output), .. }) if output == "ok\n")
     );
+
     for (output, expected) in [
         ("ok\n", Some(0)),
         ("error\n[exit code: 17]\n", Some(17)),
         ("[timed out after 500ms]", None),
     ] {
         mapping::map_session_event(&call, &Value::Null, &mut tools);
+
         let mut result = result.clone();
+
         result["data"]["message"]["content"][0]["content"][0]["text"] = json!(output);
+
         let completed = mapping::map_session_event(&result, &Value::Null, &mut tools);
+
         assert!(
             matches!(&completed[0], Event::ItemCompleted(Item::CommandExecution { exit_code, .. }) if *exit_code == expected)
         );
     }
+
     let call = json!({"type":"tool/call","data":{
         "callId":"raw-edit","name":"edit","arguments":"{\"file_path\":\"a.txt\",\"old_string\":\"before\",\"new_string\":\"after\"}"
     }});
+
     mapping::map_session_event(&call, &Value::Null, &mut tools);
+
     let result = json!({"type":"tool/result","data":{
         "meta":{"diffs":[{"path":"a.txt","oldText":"context\nbefore","newText":"context\nafter"}]},
         "message":{"source":{"callId":"raw-edit"},"content":[{"content":[]}]}
     }});
+
     let completed = mapping::map_session_event(&result, &Value::Null, &mut tools);
+
     assert!(
         matches!(&completed[0], Event::ItemCompleted(Item::FileChange { paths, diff: Some(diff), .. }) if paths == "a.txt" && diff.contains("+after") && diff.contains("context"))
     );
@@ -2085,7 +2212,9 @@ fn stopped_history_keeps_packed_and_unpacked_partial_text() {
         {"event":{"type":"assistant/chunk","data":{"turn":1,"step":1,"chunk":{"type":"text-delta","index":0,"text":"world"}}}},
         {"event":{"type":"turn/end","time":4000,"data":{"reason":{"kind":"aborted"}}}}
     ]});
+
     let turns = history::replay(&page);
+
     assert_eq!(turns.len(), 1);
     assert!(turns[0].interrupted);
     assert!(
@@ -2096,8 +2225,10 @@ fn stopped_history_keeps_packed_and_unpacked_partial_text() {
 #[test]
 fn an_older_log_snapshot_cannot_overwrite_a_newer_control_update() {
     use crate::deepseek::projections::ProjectionTracker;
+
     let mut tracker = ProjectionTracker::default();
     let frame = json!({"payload":{"type":"session/projection","sessionId":SESSION,"key":"title","seq":12,"value":"new title"}});
+
     assert_eq!(
         tracker.apply(&frame, SESSION),
         Some(vec![Event::TitleUpdated("new title".into())])

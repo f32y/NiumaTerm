@@ -57,6 +57,7 @@ impl Shell {
                 Axis::Horizontal => size.width,
                 Axis::Vertical => size.height,
             };
+
             px(extent.as_f32() / 2.0) >= PANEL_MIN_SIZE
         });
 
@@ -75,6 +76,7 @@ impl Shell {
         if !tree.split(PaneId(id), pane.clone(), direction, cx) {
             return;
         }
+
         self.register_agent_pane(&pane, cx);
 
         self.focus_active(window, cx);
@@ -263,6 +265,7 @@ impl Shell {
                         resizable_panel().child(Self::render_pane_node(child, focused, multi, cx)),
                     );
                 }
+
                 group.into_any_element()
             }
         }

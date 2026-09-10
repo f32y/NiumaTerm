@@ -40,6 +40,7 @@ pub struct BlockRef {
 // acquire/release and all block_ref_* readers synchronize internally
 // (refcount under the block-set mutex; the pinned data is immutable).
 unsafe impl Send for BlockRef {}
+
 unsafe impl Sync for BlockRef {}
 
 impl BlockRef {

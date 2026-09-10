@@ -89,6 +89,7 @@ impl CodexTasks {
         if self.root() == Some(thread_id) {
             return false;
         }
+
         self.registry = Some(BackgroundTaskRegistry::new(BackgroundTaskKey::codex(
             thread_id,
         )));
@@ -101,6 +102,7 @@ impl CodexTasks {
         self.active_turns.clear();
         self.seen_cursors.clear();
         self.reads.clear();
+
         true
     }
 
@@ -125,12 +127,14 @@ impl CodexTasks {
             .registry
             .as_ref()
             .map(BackgroundTaskRegistry::snapshot)?;
+
         // Stoppability is derived here rather than merged through an update:
         // it is exactly "an active turn is known right now", which a patch that
         // only ever fills missing fields could not express when the turn ends.
         for task in &mut snapshot.tasks {
             task.can_stop = self.active_turns.contains_key(task.key.id.as_str());
         }
+
         Some(snapshot)
     }
 
@@ -141,12 +145,15 @@ impl CodexTasks {
         let (Some(thread_id), Some(root)) = (thread_id, self.root()) else {
             return ThreadScope::Unscoped;
         };
+
         if root == thread_id {
             return ThreadScope::Parent;
         }
+
         if self.confirmed.contains(thread_id) {
             return ThreadScope::Descendant;
         }
+
         ThreadScope::Unrelated
     }
 
@@ -158,20 +165,26 @@ impl CodexTasks {
         let Some(root) = self.root().map(str::to_owned) else {
             return false;
         };
+
         if thread_id == root {
             return false;
         }
+
         if let Some(parent) = parent_thread_id {
             if parent != root && !self.confirmed.contains(parent) {
                 return false;
             }
+
             if !self.chain_reaches_root(parent, &root) {
                 return false;
             }
+
             self.parents.insert(thread_id.to_owned(), parent.to_owned());
         }
+
         self.confirmed.insert(thread_id.to_owned());
         self.launch_messages.confirm(thread_id);
+
         true
     }
 
@@ -180,13 +193,16 @@ impl CodexTasks {
     fn chain_reaches_root(&self, start: &str, root: &str) -> bool {
         let mut seen = HashSet::new();
         let mut current = start;
+
         loop {
             if current == root {
                 return true;
             }
+
             if !seen.insert(current.to_owned()) {
                 return false;
             }
+
             match self.parents.get(current) {
                 Some(parent) => current = parent.as_str(),
                 // A confirmed descendant with no recorded parent was proven by
@@ -203,14 +219,18 @@ impl CodexTasks {
         let mut seen = HashSet::new();
         let mut current = thread_id.to_owned();
         let mut depth = 1;
+
         loop {
             let parent = self.parents.get(&current)?;
+
             if parent == root {
                 return Some(depth);
             }
+
             if !seen.insert(current.clone()) {
                 return None;
             }
+
             current = parent.clone();
             depth += 1;
         }
@@ -228,14 +248,17 @@ impl CodexTasks {
             self.hold_pending(thread_id, update);
             return false;
         }
+
         let depth = self.depth_of(thread_id);
         let Some(registry) = self.registry.as_mut() else {
             return false;
         };
+
         let update = BackgroundTaskUpdate {
             depth: update.depth.or(depth),
             ..update
         };
+
         registry.apply(BackgroundTaskKey::codex(thread_id), update)
     }
 
@@ -245,8 +268,10 @@ impl CodexTasks {
                 let oldest = self.pending_order.remove(0);
                 self.pending.remove(&oldest);
             }
+
             self.pending_order.push(thread_id.to_owned());
         }
+
         self.pending.insert(thread_id.to_owned(), update);
     }
 
@@ -255,7 +280,9 @@ impl CodexTasks {
         let Some(update) = self.pending.remove(thread_id) else {
             return false;
         };
+
         self.pending_order.retain(|held| held != thread_id);
+
         self.record(thread_id, update, true)
     }
 
@@ -281,6 +308,7 @@ impl CodexTasks {
             .as_str()
             .map(str::to_owned)
             .or_else(|| self.root().map(str::to_owned));
+
         let is_spawn = item["tool"].as_str() == Some("spawnAgent");
         let prompt = text_field(item, &["prompt"]);
         let model = text_field(item, &["model"]);
@@ -293,6 +321,7 @@ impl CodexTasks {
             .filter_map(Value::as_str)
             .map(str::to_owned)
             .collect();
+
         // A tool call can report a state for a child it does not list as a
         // receiver, so both sources contribute identities.
         for id in states.as_object().into_iter().flatten().map(|(id, _)| id) {
@@ -302,16 +331,20 @@ impl CodexTasks {
         }
 
         let mut changed = false;
+
         for thread_id in receivers {
             if !self.confirm(&thread_id, sender.as_deref()) {
                 continue;
             }
+
             changed |= self.drain_pending(&thread_id);
+
             if is_spawn && let Some(prompt) = prompt.as_deref() {
                 self.launch_messages.remember(&thread_id, prompt);
             }
 
             let state = &states[thread_id.as_str()];
+
             let mut update = BackgroundTaskUpdate {
                 refs: Some(BackgroundTaskRefs::Codex {
                     thread_id: thread_id.clone(),
@@ -325,6 +358,7 @@ impl CodexTasks {
                 updated_at: Some(SystemTime::now()),
                 ..BackgroundTaskUpdate::default()
             };
+
             if is_spawn {
                 // Only a spawn's prompt describes what the child was asked to
                 // do; a `sendInput` prompt is a later message to it.
@@ -333,12 +367,14 @@ impl CodexTasks {
             } else {
                 update.status = update.status.clone().or_else(|| prompt.clone());
             }
+
             if update.state.is_some_and(BackgroundTaskState::is_terminal) {
                 update.completed_at = Some(SystemTime::now());
             }
 
             changed |= self.record(&thread_id, update, true);
         }
+
         changed
     }
 
@@ -353,9 +389,11 @@ impl CodexTasks {
         else {
             return false;
         };
+
         if !self.confirm(&thread_id, self.root().map(str::to_owned).as_deref()) {
             return false;
         }
+
         let mut changed = self.drain_pending(&thread_id);
 
         let state = match item["kind"].as_str() {
@@ -365,6 +403,7 @@ impl CodexTasks {
             // has not moved.
             _ => None,
         };
+
         let update = BackgroundTaskUpdate {
             refs: Some(BackgroundTaskRefs::Codex {
                 thread_id: thread_id.clone(),
@@ -380,6 +419,7 @@ impl CodexTasks {
         };
 
         changed |= self.record(&thread_id, update, true);
+
         changed
     }
 
@@ -410,6 +450,7 @@ impl CodexTasks {
                     Some("interrupted") => BackgroundTaskState::Interrupted,
                     _ => BackgroundTaskState::Done,
                 };
+
                 BackgroundTaskUpdate {
                     state: Some(state),
                     completed_at: Some(SystemTime::now()),
@@ -425,6 +466,7 @@ impl CodexTasks {
                 let Some(state) = thread_status_state(status) else {
                     return turn_changed;
                 };
+
                 BackgroundTaskUpdate {
                     state: Some(state),
                     updated_at: Some(SystemTime::now()),
@@ -436,6 +478,7 @@ impl CodexTasks {
                 // Child transcript content stays out of the parent conversation;
                 // only the row's latest-status preview reflects it.
                 let item = &params["item"];
+
                 BackgroundTaskUpdate {
                     last_preview: item_preview(item),
                     updated_at: Some(SystemTime::now()),
@@ -466,6 +509,7 @@ impl CodexTasks {
                 let Some(turn_id) = params["turn"]["id"].as_str() else {
                     return false;
                 };
+
                 return self
                     .active_turns
                     .insert(thread_id.to_owned(), turn_id.to_owned())
@@ -501,9 +545,11 @@ impl CodexTasks {
             "thread/status/changed" => thread_status_state(&params["status"]),
             _ => None,
         };
+
         let Some(state) = state else {
             return;
         };
+
         self.hold_pending(
             thread_id,
             BackgroundTaskUpdate {
@@ -532,8 +578,10 @@ impl CodexTasks {
     ) -> Option<Value> {
         let root = self.root()?.to_owned();
         let starting_sequence = self.registry.as_ref()?.sequence();
+
         self.queries
             .insert(rpc_id, DescendantQuery { starting_sequence });
+
         if let Some(registry) = self.registry.as_mut() {
             registry.set_discovery(BackgroundTaskDiscoveryState::Loading);
         }
@@ -549,9 +597,11 @@ impl CodexTasks {
             "useStateDbOnly": true,
             "limit": DESCENDANT_PAGE_LIMIT,
         });
+
         if let Some(cursor) = cursor {
             params["cursor"] = json!(cursor);
         }
+
         Some(json!({
             "jsonrpc": "2.0",
             "id": rpc_id,
@@ -574,17 +624,21 @@ impl CodexTasks {
         };
 
         let mut changed = false;
+
         for thread in result["data"].as_array().into_iter().flatten() {
             let Some(id) = thread["id"].as_str().filter(|id| *id != root) else {
                 continue;
             };
             let parent = descendant_parent_id(thread);
+
             // Rows that do not chain back to the selected root belong to
             // another conversation on the same process.
             if !self.confirm(id, parent.as_deref().or(Some(root.as_str()))) {
                 continue;
             }
+
             let id = id.to_owned();
+
             changed |= self.drain_pending(&id);
 
             // A listed thread reports only whether it is loaded and busy. A row
@@ -596,6 +650,7 @@ impl CodexTasks {
                 .registry
                 .as_ref()
                 .is_some_and(|registry| registry.contains(&BackgroundTaskKey::codex(&id)));
+
             let state = thread_status_state(&thread["status"])
                 .or((!known).then_some(BackgroundTaskState::Stopped));
             let last_active = unix_seconds(thread, &["recencyAt", "updatedAt"]);
@@ -620,6 +675,7 @@ impl CodexTasks {
                 updated_at: last_active,
                 ..BackgroundTaskUpdate::default()
             };
+
             if let Some(registry) = self.registry.as_mut() {
                 changed |= registry.merge_restored(
                     BackgroundTaskKey::codex(&id),
@@ -630,12 +686,14 @@ impl CodexTasks {
         }
 
         let next_cursor = result["nextCursor"].as_str().map(str::to_owned);
+
         if next_cursor.is_none()
             && !self.query_in_flight()
             && let Some(registry) = self.registry.as_mut()
         {
             changed |= registry.set_discovery(BackgroundTaskDiscoveryState::Ready);
         }
+
         (changed, next_cursor)
     }
 
@@ -663,9 +721,11 @@ impl CodexTasks {
         if !self.confirmed.contains(thread_id) {
             return None;
         }
+
         if self.reads.values().any(|pending| pending == thread_id) {
             return None;
         }
+
         self.reads.insert(rpc_id, thread_id.to_owned());
 
         Some(json!({
@@ -689,9 +749,11 @@ impl CodexTasks {
         let Some(root) = self.root() else {
             return false;
         };
+
         if root == thread_id {
             return false;
         }
+
         self.launch_messages
             .observe(thread_id, item, self.confirmed.contains(thread_id))
     }
@@ -706,14 +768,17 @@ impl CodexTasks {
         if self.queries.remove(&rpc_id).is_none() {
             return false;
         }
+
         let Some(registry) = self.registry.as_mut() else {
             return false;
         };
+
         if registry.is_empty() {
             return registry.set_discovery(BackgroundTaskDiscoveryState::Unavailable {
                 message: message.to_owned(),
             });
         }
+
         registry.set_discovery(BackgroundTaskDiscoveryState::Ready)
     }
 }
@@ -764,6 +829,7 @@ fn thread_status_state(status: &Value) -> Option<BackgroundTaskState> {
 
 fn waiting_on_user(status: &Value) -> bool {
     const FLAGS: [&str; 2] = ["waitingOnApproval", "waitingOnUserInput"];
+
     status["activeFlags"]
         .as_array()
         .into_iter()
@@ -781,6 +847,7 @@ fn item_preview(item: &Value) -> Option<String> {
         .or_else(|| item["command"].as_str())
         .or_else(|| item["title"].as_str())
         .or_else(|| item["type"].as_str())?;
+
     condense(text)
 }
 

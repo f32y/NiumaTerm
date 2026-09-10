@@ -150,6 +150,7 @@ impl TerminalSurface {
 
         rows.filter_map(|row| {
             let mut builder = block_list::EngineRowBuilder::default();
+
             engine
                 .read_screen_row_visit(row.min(u32::MAX as u64) as u32, &palette, |x, t, w, s| {
                     builder.push(x, t, w, &s, default_fg)

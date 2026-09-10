@@ -22,6 +22,7 @@ pub(crate) fn snapshot(
     activity: u64,
 ) -> BackgroundTaskSnapshot {
     let parent_session = BackgroundTaskKey::deepseek(parent_session_id);
+
     let tasks = value["entries"]
         .as_array()
         .into_iter()
@@ -30,6 +31,7 @@ pub(crate) fn snapshot(
         .filter_map(|entry| {
             let id = entry["id"].as_str()?;
             let continuable = entry["mode"].as_str() == Some("continuable");
+
             // The harness samples whether the child's driver is running; it
             // reports no failure state, so an inactive child reads as finished
             // rather than as one whose outcome is known.

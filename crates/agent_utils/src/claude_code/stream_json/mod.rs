@@ -270,6 +270,7 @@ impl Session {
         let initial_model = launch_model(launch);
         let launcher = AgentCli::from_launch(launch, "claude");
         let executable = launcher.executable().to_string();
+
         let command = claude_command(
             &launcher,
             launch,
@@ -280,11 +281,14 @@ impl Session {
 
         let deliver = Arc::new(Mutex::new(deliver));
         let timer_delivery = Arc::clone(&deliver);
+
         let timer = DeadlineTimer::new(move || {
             (timer_delivery.lock())(json!({"method": TIMEOUT_METHOD}));
         })
         .map_err(|error| format!("could not start Claude deadline timer: {error}"))?;
+
         let stop = timer.handle();
+
         let process = JsonLineProcess::spawn_with_stdout_closed(
             command,
             &executable,
@@ -350,6 +354,7 @@ impl Session {
             // side effects. Graceful shutdown still drains accepted input.
             self.process_exit();
         }
+
         self.process.shutdown(timeout, force)
     }
 
@@ -359,9 +364,11 @@ impl Session {
         if self.control.is_closed() {
             return Vec::new();
         }
+
         if message["method"] == TIMEOUT_METHOD {
             return self.poll_timeouts(Instant::now());
         }
+
         let mut events = Vec::new();
 
         // Child reduction runs before parent handling because the parent path
@@ -406,9 +413,11 @@ impl Session {
         if tasks_changed && let Some(snapshot) = self.tasks.snapshot() {
             events.push(Event::BackgroundTasks(snapshot));
         }
+
         if workflows_changed && let Some(snapshot) = self.workflows.snapshot() {
             events.push(Event::Workflows(snapshot));
         }
+
         // A child's own conversation travels separately from its summary; the
         // parent transcript above has already dropped this content.
         for (key, update) in self.tasks.take_transcripts() {
@@ -434,6 +443,7 @@ impl Session {
         }
 
         let mut messages = Vec::new();
+
         if settings.model.is_some() && settings.model != self.applied_model {
             let model = settings.model.clone().unwrap_or_default();
 
@@ -443,6 +453,7 @@ impl Session {
                     .1,
             );
         }
+
         if settings.approval.is_some() && settings.approval != self.applied_permission {
             let mode = settings.approval.clone().unwrap_or_default();
 
@@ -452,7 +463,9 @@ impl Session {
                     .1,
             );
         }
+
         let mut pending_effort = None;
+
         if settings.effort.is_some() && settings.effort.as_deref() != self.control.effort() {
             let effort = settings.effort.clone().unwrap_or_default();
             let ultracode = effort == ULTRACODE_EFFORT;
@@ -470,6 +483,7 @@ impl Session {
         }
 
         let mut content = vec![json!({"type": "text", "text": text})];
+
         content.extend(images.iter().map(|image| {
             json!({
                 "type": "image",
@@ -485,16 +499,19 @@ impl Session {
             "type": "user",
             "message": {"role": "user", "content": content},
         }));
+
         let control_ids: Vec<String> = messages
             .iter()
             .filter_map(|message| message["request_id"].as_str().map(str::to_owned))
             .collect();
+
         if let Err(message) = self
             .control
             .check_capacity(RequestClass::Mutation, control_ids.len())
         {
             return SendOutcome::Rejected { message };
         }
+
         let ticket = match self.process.write_tracked(messages, InputClass::Normal) {
             Ok(ticket) => ticket,
             Err(error) => {
@@ -503,18 +520,22 @@ impl Session {
                 };
             }
         };
+
         for id in control_ids {
             self.control
                 .record_admitted(id.clone(), RequestClass::Mutation, Instant::now());
             self.control.attach_input(&id, ticket.clone());
             self.control.track(id, PendingControlOperation::Other);
         }
+
         if settings.model.is_some() {
             self.applied_model = settings.model.clone();
         }
+
         if settings.approval.is_some() {
             self.applied_permission = settings.approval.clone();
         }
+
         if let Some((request_id, effort)) = pending_effort {
             self.control.record_effort(request_id, effort);
         }
@@ -539,9 +560,11 @@ impl Session {
                 message: format!("/{name} is handled by NiumaTerm."),
             };
         }
+
         if !self.ready || !self.process.has_stdin() {
             return SlashCommandOutcome::NotReady;
         }
+
         if self.turn_active {
             return SlashCommandOutcome::Rejected {
                 message: "Claude is already running a turn.".to_string(),
@@ -561,6 +584,7 @@ impl Session {
                 message: error.to_string(),
             };
         }
+
         self.turn_active = true;
         self.turn_reported = false;
         self.transcript.begin_turn();
@@ -578,6 +602,7 @@ impl Session {
         if !self.ready || !self.process.has_stdin() {
             return false;
         }
+
         // One outstanding request is enough: a second would answer with the
         // same breakdown the first is already about to deliver.
         if self
@@ -590,8 +615,10 @@ impl Session {
         let Ok(request_id) = self.send_control(json!({"subtype": "get_context_usage"})) else {
             return false;
         };
+
         self.control
             .track(request_id, PendingControlOperation::ContextComposition);
+
         true
     }
 
@@ -608,6 +635,7 @@ impl Session {
         if !self.ready || !self.process.has_stdin() {
             return false;
         }
+
         // One outstanding request is enough: a second would name the same
         // conversation twice.
         if self
@@ -618,6 +646,7 @@ impl Session {
         }
 
         let description = session_title_description(description);
+
         if description.is_empty() {
             return false;
         }
@@ -629,8 +658,10 @@ impl Session {
         })) else {
             return false;
         };
+
         self.control
             .track(request_id, PendingControlOperation::SessionTitle);
+
         true
     }
 
@@ -655,7 +686,9 @@ impl Session {
         {
             return false;
         }
+
         self.control.cancel_generated_title();
+
         true
     }
 
@@ -663,11 +696,13 @@ impl Session {
         if !self.ready || !self.process.has_stdin() {
             return SlashCommandOutcome::NotReady;
         }
+
         if self.turn_active || self.control.pending_approval.is_some() {
             return SlashCommandOutcome::Rejected {
                 message: "Claude must be idle before restoring files.".to_string(),
             };
         }
+
         if self.control.contains(&PendingControlOperation::FileRewind) {
             return SlashCommandOutcome::Rejected {
                 message: "A Claude file restore is already running.".to_string(),
@@ -678,6 +713,7 @@ impl Session {
             Ok(id) => id,
             Err(message) => return SlashCommandOutcome::Rejected { message },
         };
+
         self.control
             .track(request_id, PendingControlOperation::FileRewind);
 
@@ -746,48 +782,59 @@ impl Session {
             .into_iter()
             .map(|(key, update)| Event::BackgroundTaskTranscript { key, update })
             .collect();
+
         if changed && let Some(snapshot) = self.tasks.snapshot() {
             events.push(Event::BackgroundTasks(snapshot));
         }
+
         events
     }
 
     /// Expire unanswered protocol requests without retrying side effects.
     pub fn poll_timeouts(&mut self, now: Instant) -> Vec<Event> {
         let mut events = Vec::new();
+
         for (id, class, ticket) in self.control.expired(now) {
             let cancelled = ticket.as_ref().is_some_and(|ticket| ticket.cancel());
+
             let message = if cancelled {
                 "Claude request expired before writing and was cancelled; it was not sent."
                     .to_string()
             } else {
                 class.timeout_message("Claude")
             };
+
             if cancelled && ticket.as_ref().is_some_and(|ticket| ticket.is_batch()) {
                 self.process.abort();
                 events.extend(self.control.close(&message));
                 events.push(Event::Error { message: format!("{message} The entire settings-and-prompt batch was cancelled. Reopen the session before retrying."), fatal: true });
                 break;
             }
+
             if id == INIT_REQUEST_ID {
                 events.extend(self.control.close(&message));
                 events.push(Event::Error {
                     message,
                     fatal: true,
                 });
+
                 break;
             }
+
             if !cancelled && let Some(effort_events) = self.control.expire_effort(&id) {
                 events.extend(effort_events);
                 events.push(Event::Error {
                     message,
                     fatal: false,
                 });
+
                 continue;
             }
+
             let result = self.process_control_response(
                 &json!({"response": {"request_id": id, "subtype": "error", "error": message}}),
             );
+
             if result.is_empty() {
                 events.push(Event::Error {
                     message,
@@ -797,6 +844,7 @@ impl Session {
                 events.extend(result);
             }
         }
+
         events
     }
 
@@ -804,14 +852,17 @@ impl Session {
         self.ready = false;
         self.turn_active = false;
         self.turn_reported = false;
+
         let message = "Claude exited before the control request completed.";
         let mut events = self.control.close(message);
+
         if self.compacting {
             self.compacting = false;
             events.push(Event::CompactionFinished {
                 error: Some(message.to_string()),
             });
         }
+
         if let Some(name) = self.active_slash_command.take() {
             events.push(Event::SlashCommandResult {
                 name,
@@ -820,6 +871,7 @@ impl Session {
                 },
             });
         }
+
         events
     }
 
@@ -839,6 +891,7 @@ impl Session {
         let Some(task_id) = self.tasks.stop_target(key).map(str::to_owned) else {
             return false;
         };
+
         self.send_control(json!({"subtype": "stop_task", "task_id": task_id}))
             .is_ok()
     }
@@ -888,11 +941,13 @@ impl Session {
         {
             return false;
         }
+
         self.control.pending_approval = None;
 
         if decision == "cancel" {
             self.interrupt();
         }
+
         true
     }
 
@@ -933,7 +988,9 @@ impl Session {
         {
             return false;
         }
+
         self.control.pending_questions = None;
+
         true
     }
 
@@ -972,6 +1029,7 @@ impl Session {
         {
             events.push(Event::Workflows(snapshot));
         }
+
         if let Some(transcript) = result.transcript {
             events.push(Event::WorkflowAgentTranscript {
                 task_id,
@@ -1001,22 +1059,28 @@ impl Session {
             Some("interrupt" | "stop_task") => RequestClass::Control,
             _ => RequestClass::Mutation,
         };
+
         self.control.check_capacity(class, 1)?;
+
         let (request_id, message) = self.control.request(request);
+
         let input_class = if class == RequestClass::Control {
             InputClass::Control
         } else {
             InputClass::Normal
         };
+
         let ticket = self
             .process
             .write_tracked(vec![message], input_class)
             .map_err(|error| error.to_string())?;
+
         self.control
             .record_admitted(request_id.clone(), class, Instant::now());
         self.control.attach_input(&request_id, ticket);
         self.control
             .track(request_id.clone(), PendingControlOperation::Other);
+
         Ok(request_id)
     }
 
@@ -1024,6 +1088,7 @@ impl Session {
         if self.control.is_closed() {
             return Err("Claude is not connected".into());
         }
+
         self.process
             .write_line(message)
             .map_err(|error| error.to_string())
@@ -1051,6 +1116,7 @@ impl Session {
 
     fn process_init(&mut self, message: &Value) -> Vec<Event> {
         self.control.complete(INIT_REQUEST_ID);
+
         // The session id makes this conversation resumable by a future tab
         // (`--resume`); captured on every `init` since a resumed session
         // keeps the id of the transcript it reloaded.
@@ -1072,6 +1138,7 @@ impl Session {
         } else {
             message["model"].as_str().map(str::to_owned)
         };
+
         let permission = message["permissionMode"].as_str().map(str::to_owned);
 
         self.ready = true;
@@ -1146,6 +1213,7 @@ impl Session {
             .as_str()
             .unwrap_or_default()
             .to_string();
+
         let request = &message["request"];
 
         if request["subtype"].as_str() != Some("can_use_tool") {
@@ -1212,6 +1280,7 @@ impl Session {
 
     fn process_control_response(&mut self, message: &Value) -> Vec<Event> {
         let response = &message["response"];
+
         if let Some(id) = response["request_id"].as_str() {
             self.control.complete(id);
         }
@@ -1220,11 +1289,13 @@ impl Session {
             let Some(event) = self.control.resolve(response) else {
                 return Vec::new();
             };
+
             if let Event::ContextCompositionUpdated(composition) = &event
                 && let Some(usage) = self.transcript.apply_composition(composition)
             {
                 return vec![Event::ContextWindowUpdated(usage), event];
             }
+
             return vec![event];
         }
 

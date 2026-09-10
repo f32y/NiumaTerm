@@ -81,6 +81,7 @@ pub fn current_branch(cwd: &str, max_age: Duration) -> Option<CheckedOut> {
     // this one.
     let fresh = {
         let entries = cache.lock();
+
         entries
             .get(cwd)
             .filter(|read| read.at.elapsed() < max_age)
@@ -94,6 +95,7 @@ pub fn current_branch(cwd: &str, max_age: Duration) -> Option<CheckedOut> {
     let answer = read_current_branch(cwd);
 
     let mut entries = cache.lock();
+
     entries.retain(|_, read| read.at.elapsed() < BRANCH_RETENTION);
     entries.insert(
         cwd.to_string(),
@@ -121,5 +123,6 @@ fn read_current_branch(cwd: &str) -> Option<CheckedOut> {
 
     let commit = run_git(cwd, &["rev-parse", "--short", "HEAD"]).ok()?;
     let commit = String::from_utf8_lossy(&commit).trim().to_string();
+
     (!commit.is_empty()).then_some(CheckedOut::Detached(commit))
 }

@@ -25,6 +25,7 @@ impl Clipboard {
             selection: None,
         }
     }
+
     pub fn set(&mut self, ty: ClipboardType, text: impl Into<String>) -> bool {
         let clipboard = match (ty, &mut self.selection) {
             (ClipboardType::Selection, Some(provider)) => provider,

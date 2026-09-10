@@ -10,6 +10,7 @@ fn completed_items_merge_without_erasing_streamed_fields() {
         status: Some("inProgress".into()),
         exit_code: None,
     };
+
     let completed = Item::CommandExecution {
         id: "command-1".into(),
         command: "cargo test".into(),
@@ -39,10 +40,12 @@ fn completed_reasoning_is_only_a_fallback_for_missing_stream_text() {
         id: "reasoning-1".into(),
         summary: Some("streamed".into()),
     };
+
     let completed = Item::Reasoning {
         id: "reasoning-1".into(),
         summary: Some("completed".into()),
     };
+
     assert!(streamed.merge_completed(&completed));
     assert_eq!(
         streamed,
@@ -56,6 +59,7 @@ fn completed_reasoning_is_only_a_fallback_for_missing_stream_text() {
         id: "reasoning-1".into(),
         summary: None,
     };
+
     assert!(missing.merge_completed(&completed));
     assert_eq!(missing, completed);
 }

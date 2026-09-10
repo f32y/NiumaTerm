@@ -9,10 +9,13 @@ pub use nmt_platform::filesystem::path_identity;
 /// placeholder that does not name a concrete filesystem location.
 pub fn root_identity(cwd: &str) -> Option<Vec<String>> {
     let cwd = cwd.trim();
+
     if cwd.is_empty() || cwd == "." {
         return None;
     }
+
     let comps = path_identity(path::Path::new(cwd));
+
     (!comps.is_empty()).then_some(comps)
 }
 
@@ -57,9 +60,11 @@ impl WorkspaceRoots {
     /// identities for the same path.
     pub fn new(primary: String, additional: Vec<String>) -> Self {
         let mut roots = Self::single(primary);
+
         for path in additional {
             roots.add(path);
         }
+
         roots
     }
 
@@ -86,7 +91,9 @@ impl WorkspaceRoots {
         if self.contains(&path) {
             return RootChange::Duplicate;
         }
+
         self.additional.push(path);
+
         RootChange::Applied
     }
 
@@ -97,9 +104,11 @@ impl WorkspaceRoots {
             if self.additional.is_empty() {
                 return RootChange::WouldBeEmpty;
             }
+
             self.primary = self.additional.remove(0);
             return RootChange::Applied;
         }
+
         match self
             .additional
             .iter()
@@ -120,6 +129,7 @@ impl WorkspaceRoots {
         if same_root(&self.primary, path) {
             return RootChange::Applied;
         }
+
         let Some(index) = self
             .additional
             .iter()
@@ -127,9 +137,12 @@ impl WorkspaceRoots {
         else {
             return RootChange::NotAttached;
         };
+
         let promoted = self.additional.remove(index);
         let demoted = mem::replace(&mut self.primary, promoted);
+
         self.additional.insert(0, demoted);
+
         RootChange::Applied
     }
 }

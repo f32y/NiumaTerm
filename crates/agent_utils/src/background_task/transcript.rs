@@ -66,8 +66,10 @@ impl BackgroundTaskTranscript {
         if self.state == state {
             return false;
         }
+
         self.state = state;
         self.revision += 1;
+
         true
     }
 
@@ -76,6 +78,7 @@ impl BackgroundTaskTranscript {
     /// row, which is the same rule the parent conversation applies.
     pub fn push(&mut self, item: Item) {
         self.revision += 1;
+
         if let Some(id) = item.id()
             && let Some(existing) = self
                 .items
@@ -87,6 +90,7 @@ impl BackgroundTaskTranscript {
         }
 
         self.items.push(item);
+
         if self.items.len() > MAX_TRANSCRIPT_ITEMS {
             let excess = self.items.len() - MAX_TRANSCRIPT_ITEMS;
             self.items.drain(..excess);
@@ -117,7 +121,9 @@ impl BackgroundTaskTranscript {
         if !self.items.is_empty() {
             return false;
         }
+
         self.replace(items);
+
         true
     }
 }
@@ -181,9 +187,11 @@ impl BackgroundTaskTranscriptUpdate {
     /// update.
     pub fn apply_to(self, transcript: &mut BackgroundTaskTranscript) -> bool {
         let mut changed = false;
+
         if let Some(state) = self.state {
             changed |= transcript.set_state(state);
         }
+
         if self.restore {
             changed |= transcript.restore(self.items);
         } else if self.replace {
@@ -195,6 +203,7 @@ impl BackgroundTaskTranscriptUpdate {
             transcript.extend(self.items);
             changed = true;
         }
+
         changed
     }
 }

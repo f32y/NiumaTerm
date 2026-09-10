@@ -23,10 +23,13 @@ pub(crate) fn text_field(value: &Value, keys: &[&str]) -> Option<String> {
 /// blank record falls through to the caller's next candidate.
 pub(crate) fn condense(text: &str) -> Option<String> {
     const MAX_PREVIEW_CHARS: usize = 160;
+
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+
     if text.is_empty() {
         return None;
     }
+
     Some(match text.char_indices().nth(MAX_PREVIEW_CHARS) {
         Some((cut, _)) => format!("{}…", &text[..cut]),
         None => text,

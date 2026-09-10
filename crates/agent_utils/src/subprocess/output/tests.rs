@@ -8,7 +8,9 @@ use crate::subprocess::output::{MAX_STARTUP_BYTES, MAX_STARTUP_LINES, read_messa
 fn startup_notices_bom_and_blank_lines_preserve_protocol_objects() {
     let mut reader = Cursor::new(b"\xef\xbb\xbfStarting agent\r\n[WARN] startup notice\n\n{\"ready\":true}\r\n  \n{\"done\":true}");
     let mut messages = Vec::new();
+
     read_messages(&mut reader, "Test", |message| messages.push(message)).unwrap();
+
     assert_eq!(messages, [json!({"ready":true}), json!({"done":true})]);
 }
 
@@ -18,6 +20,7 @@ fn malformed_protocol_stops_before_later_messages_without_exposing_input() {
         Cursor::new(b"{\"ready\":true}\n{\"token\":\"private-value\",\n{\"late\":true}\n");
     let mut messages = Vec::new();
     let error = read_messages(&mut reader, "Test", |message| messages.push(message)).unwrap_err();
+
     assert_eq!(messages, [json!({"ready":true})]);
     assert!(error.contains("JSON is invalid"));
     assert!(!error.contains("private-value"));
@@ -43,12 +46,15 @@ fn malformed_startup_json_invalid_utf8_and_non_objects_fail() {
 #[test]
 fn startup_allowance_is_bounded_by_lines_and_bytes() {
     let lines = "notice\n".repeat(MAX_STARTUP_LINES + 1);
+
     assert!(
         read_messages(&mut Cursor::new(lines), "Test", |_| {})
             .unwrap_err()
             .contains("allowance")
     );
+
     let bytes = "n".repeat(MAX_STARTUP_BYTES + 1);
+
     assert!(
         read_messages(&mut Cursor::new(bytes), "Test", |_| {})
             .unwrap_err()
@@ -59,6 +65,7 @@ fn startup_allowance_is_bounded_by_lines_and_bytes() {
 #[test]
 fn long_unterminated_output_is_bounded_and_preserves_following_bytes() {
     let mut reader = BufReader::with_capacity(3, Cursor::new(b"123456789\nnext\nlast"));
+
     assert_eq!(read_piece(&mut reader, 5).unwrap(), b"12345");
     assert_eq!(read_piece(&mut reader, 5).unwrap(), b"6789\n");
     assert_eq!(read_piece(&mut reader, 5).unwrap(), b"next\n");

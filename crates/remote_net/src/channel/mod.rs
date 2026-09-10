@@ -86,10 +86,12 @@ pub async fn with_timeout<T>(
 
 pub fn relay_ws_url(relay_url: &str, host_id: &str, role: &str, cid: Option<&str>) -> String {
     let mut url = format!("{relay_url}?host_id={host_id}&role={role}");
+
     if let Some(cid) = cid {
         url.push_str("&connection_id=");
         url.push_str(cid);
     }
+
     url
 }
 
@@ -99,6 +101,7 @@ pub async fn ws_connect(url: &str, bearer_token: Option<&str>) -> Result<WsStrea
     let mut request = url
         .into_client_request()
         .map_err(|e| NetError::Internal(e.to_string()))?;
+
     if let Some(token) = bearer_token {
         request.headers_mut().insert(
             "Authorization",
@@ -107,7 +110,9 @@ pub async fn ws_connect(url: &str, bearer_token: Option<&str>) -> Result<WsStrea
                 .map_err(|_| NetError::Internal("token contains invalid header bytes".into()))?,
         );
     }
+
     let (socket, _) = connect_async(request).await?;
+
     Ok(socket)
 }
 
@@ -181,6 +186,7 @@ async fn connect_ik(
 
     let mut handshake = Handshake::initiator_ik(&device.private, host_public_key)?;
     let mut first = vec![CONNECT_MODE_IK];
+
     first.extend_from_slice(&handshake.write_message()?);
     ws.send(Message::Binary(first.into())).await?;
     handshake.read_message(&next_binary(&mut ws).await?)?;
@@ -212,10 +218,13 @@ async fn connect_pair(
 
     let mut handshake = Handshake::initiator_xx(&device.private)?;
     let mut first = vec![CONNECT_MODE_PAIR];
+
     first.extend_from_slice(&handshake.write_message()?);
     ws.send(Message::Binary(first.into())).await?;
     handshake.read_message(&next_binary(&mut ws).await?)?;
+
     let msg3 = handshake.write_message()?;
+
     ws.send(Message::Binary(msg3.into())).await?;
 
     // XX reveals the responder's static key in message 2: pin it against the
@@ -223,6 +232,7 @@ async fn connect_pair(
     let remote = handshake
         .remote_static()
         .ok_or_else(|| NetError::Protocol("responder sent no static key".into()))?;
+
     if remote != code.host_public_key {
         return Err(NetError::Protocol(
             "relay peer is not the host from the pairing code".into(),
@@ -233,12 +243,14 @@ async fn connect_pair(
         ws,
         chan: handshake.into_transport()?,
     };
+
     channel
         .send_control(&HostBound::Pair {
             token: code.token,
             device_name: device_name.to_owned(),
         })
         .await?;
+
     match channel.recv_control::<ClientBound>().await? {
         ClientBound::Paired => Ok(channel),
         ClientBound::Error { message, .. } => Err(NetError::Protocol(message)),

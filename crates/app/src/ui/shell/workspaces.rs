@@ -97,6 +97,7 @@ impl Shell {
             self.workspaces.active_index(),
             self.workspaces.active_tabs().active_index(),
         );
+
         let active_position = positions
             .iter()
             .position(|&position| position == active)

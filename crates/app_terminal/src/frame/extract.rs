@@ -43,6 +43,7 @@ impl TerminalFrame {
     ) -> Self {
         let colors = BackgroundColors::new(buf.colors());
         let cursor = frame_cursor(buf, &colors);
+
         let reusable = previous.filter(|frame| {
             frame.cols == buf.cols()
                 && frame.lines.len() == buf.rows()
@@ -149,6 +150,7 @@ pub(super) fn extract_row_with_colors(
         let mut style = if is_codepoint {
             let style = buf.style(cell.style_id());
             let flags = style.flags;
+
             StyleRun {
                 len: 0,
                 fg: colors.cell_foreground(style),
@@ -200,6 +202,7 @@ pub(super) fn frame_cursor(
 ) -> Option<TerminalCursor> {
     let cursor = buf.cursor();
     let shape = buf.cursor_shape();
+
     (buf.cursor_visible() && cursor.row.0 >= 0 && shape != CursorShape::Hidden).then_some(
         TerminalCursor {
             col: cursor.col.0.min(u16::MAX as usize) as u16,

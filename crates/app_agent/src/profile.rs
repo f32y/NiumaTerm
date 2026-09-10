@@ -142,10 +142,12 @@ pub(super) const ANTHROPIC_SUB_MODEL_ENVS: [&str; 3] = [
 /// unique and act as the identity for restored tabs and remembered settings.
 fn codex_provider_id(profile_name: &str) -> String {
     let mut hash = 0xcbf29ce484222325_u64;
+
     for byte in profile_name.trim().as_bytes() {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x100000001b3);
     }
+
     format!("niumaterm-{hash:016x}")
 }
 
@@ -160,6 +162,7 @@ fn codex_credential_env(provider_id: &str) -> String {
             }
         })
         .collect();
+
     format!("{CODEX_CREDENTIAL_ENV_PREFIX}{suffix}")
 }
 
@@ -173,10 +176,12 @@ pub(super) fn launch_env_value(launch: &LaunchConfig, target: &str) -> Option<St
 pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
     let mut env: Vec<(String, String)> = Vec::new();
     let model = (!profile.model.trim().is_empty()).then(|| profile.model.trim().to_string());
+
     let codex_provider_id = (profile.kind == AgentProfileKind::Codex
         && profile.use_custom_endpoint
         && !profile.api_base_url.trim().is_empty())
     .then(|| codex_provider_id(&profile.name));
+
     let codex_credential_env = codex_provider_id.as_deref().map(codex_credential_env);
 
     if profile.use_custom_endpoint {
@@ -190,6 +195,7 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
         };
 
         let url = profile.api_base_url.trim();
+
         if let Some(name) = base_url_env
             && !url.is_empty()
         {
@@ -197,6 +203,7 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
         }
 
         let key = profile.api_key.trim();
+
         if !key.is_empty() {
             let key_env = match profile.kind {
                 AgentProfileKind::ClaudeCode => "ANTHROPIC_API_KEY",
@@ -205,6 +212,7 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
                     .unwrap_or(OPENAI_API_KEY_ENV),
                 AgentProfileKind::DeepSeek => DEEPSEEK_API_KEY_ENV,
             };
+
             env.push((key_env.to_string(), key.to_string()));
         }
     }
@@ -232,7 +240,9 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
     if let Some(generated_name) = codex_credential_env.as_deref() {
         let generated_value = launch_env_value_from_entries(&env, generated_name)
             .or_else(|| launch_env_value_from_entries(&env, OPENAI_API_KEY_ENV));
+
         env.retain(|(name, _)| !name.eq_ignore_ascii_case(OPENAI_API_KEY_ENV));
+
         if launch_env_value_from_entries(&env, generated_name).is_none()
             && let Some(value) = generated_value
         {
@@ -242,6 +252,7 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
 
     let api_key_env =
         codex_credential_env.filter(|name| launch_env_value_from_entries(&env, name).is_some());
+
     let codex_provider = codex_provider_id.map(|id| CodexProviderConfig {
         id,
         name: if profile.name.trim().is_empty() {
@@ -426,6 +437,7 @@ mod agent_profile_launch_tests {
             launch_env_value(&launch, ANTHROPIC_MODEL_ENV).as_deref(),
             Some("vendor/only-model")
         );
+
         for name in ANTHROPIC_SUB_MODEL_ENVS {
             assert_eq!(
                 launch_env_value(&launch, name).as_deref(),
@@ -543,6 +555,7 @@ mod agent_profile_launch_tests {
             launch_env_value(&launch, DEEPSEEK_API_KEY_ENV).as_deref(),
             Some("sk-deepseek")
         );
+
         // The endpoint is environment rather than a generated provider entry,
         // which is the shape only Codex needs.
         assert!(launch.provider.is_none());

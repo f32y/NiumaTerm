@@ -82,14 +82,18 @@ impl Session {
     /// provider write is queued, so a late worker result cannot rename it.
     pub fn rename_thread(&mut self, name: &str) -> bool {
         self.cancel_title_generation();
+
         let Some(thread_id) = self.conversation.thread_id.clone() else {
             return false;
         };
         let name = name.trim();
+
         if name.is_empty() {
             return false;
         }
+
         let rpc_id = self.alloc_rpc_id();
+
         self.try_send(thread_name_request(rpc_id, &thread_id, name))
             .is_ok()
     }
@@ -102,6 +106,7 @@ impl Session {
 
     pub(super) fn begin_title_generation(&mut self, prompt: &str, provisional_title: &str) {
         self.cancel_title_generation();
+
         let (Some(host), Some(root_thread_id)) =
             (self.host.as_ref(), self.conversation.thread_id.clone())
         else {
@@ -110,7 +115,9 @@ impl Session {
         };
 
         self.next_title_generation_id = self.next_title_generation_id.wrapping_add(1).max(1);
+
         let generation_id = self.next_title_generation_id;
+
         match start_title_generation(
             Arc::clone(host),
             Arc::clone(&self.deliver),
@@ -133,17 +140,22 @@ impl Session {
         else {
             return Vec::new();
         };
+
         let matches_active = self
             .title_generation
             .as_ref()
             .is_some_and(|active| active.accepts(&result, self.conversation.thread_id.as_deref()));
+
         if !matches_active {
             return Vec::new();
         }
 
         self.title_generation.take();
+
         let title = result.resolved_title().to_string();
+
         self.queue_thread_name(&title);
+
         vec![Event::TitleUpdated(title)]
     }
 
@@ -156,6 +168,7 @@ impl Session {
         // user rename that follows a generated name must be the final request
         // the server applies.
         let rpc_id = self.alloc_rpc_id();
+
         self.send(thread_name_request(rpc_id, &thread_id, name));
     }
 }
@@ -174,11 +187,13 @@ fn start_title_generation(
     let generation_id = request.generation_id;
     let root_thread_id = request.root_thread_id.clone();
     let provisional_title = request.provisional_title.clone();
+
     let spawn = thread::Builder::new()
         .name("codex-title".to_string())
         .spawn(move || {
             run_title_generation(worker_host, registration_id, rx, deliver, request);
         });
+
     if let Err(error) = spawn {
         host.detach(registration_id);
         return Err(format!("Could not start Codex title generation: {error}"));
@@ -199,6 +214,7 @@ pub(super) fn parse_title_generation_result(
     if method != TITLE_GENERATION_RESULT_METHOD {
         return None;
     }
+
     Some(TitleGenerationResult {
         generation_id: params["generationId"].as_u64()?,
         root_thread_id: params["rootThreadId"].as_str()?.to_string(),
@@ -222,6 +238,7 @@ fn run_title_generation(
         profile,
         workspace,
     } = request;
+
     let deadline = Instant::now() + TITLE_GENERATION_TIMEOUT;
     let mut title_thread_id = None;
     let mut title_turn_id = None;
@@ -241,26 +258,33 @@ fn run_title_generation(
                 Ok(message) => message,
                 Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => break,
             };
+
             if message["method"].as_str() == Some(TITLE_GENERATION_CANCEL_METHOD) {
                 cancelled = true;
                 break;
             }
+
             if message["method"].as_str() == Some(HOST_EXIT_METHOD) {
                 break;
             }
+
             if let Some(id) = message["id"].as_u64() {
                 if message["method"].is_string() {
                     answer_unsupported_server_request(&host, registration_id, id);
                     continue;
                 }
+
                 if message["error"].is_object() {
                     break;
                 }
+
                 if id == TITLE_THREAD_START_RPC_ID {
                     let Some(thread_id) = message["result"]["thread"]["id"].as_str() else {
                         break;
                     };
+
                     title_thread_id = Some(thread_id.to_string());
+
                     if host
                         .send(
                             registration_id,
@@ -273,14 +297,17 @@ fn run_title_generation(
                 } else if id == TITLE_TURN_START_RPC_ID {
                     title_turn_id = message["result"]["turn"]["id"].as_str().map(str::to_owned);
                 }
+
                 continue;
             }
 
             let method = message["method"].as_str().unwrap_or_default();
             let params = &message["params"];
+
             if params["threadId"].as_str() != title_thread_id.as_deref() {
                 continue;
             }
+
             match method {
                 "turn/started" => {
                     title_turn_id = params["turn"]["id"].as_str().map(str::to_owned);
@@ -309,6 +336,7 @@ fn run_title_generation(
     let generated_title = completed
         .then(|| generated_title_from_message(&output))
         .flatten();
+
     finish_title_thread(
         &host,
         registration_id,
@@ -316,6 +344,7 @@ fn run_title_generation(
         title_turn_id.as_deref(),
         !completed,
     );
+
     if !cancelled {
         deliver(json!({
             "method": TITLE_GENERATION_RESULT_METHOD,
@@ -362,6 +391,7 @@ fn finish_title_thread(
             }),
         );
     }
+
     if let Some(thread_id) = thread_id {
         let _ = host.send(
             registration_id,
@@ -373,6 +403,7 @@ fn finish_title_thread(
             }),
         );
     }
+
     host.detach(registration_id);
 }
 
@@ -381,11 +412,13 @@ fn finish_title_thread(
 /// than the subject the user wants to discuss.
 pub fn provisional_title_from_prompt(prompt: &str) -> Option<String> {
     let first_line = prompt.lines().find(|line| !line.trim().is_empty())?.trim();
+
     if first_line.starts_with('/') {
         return None;
     }
 
     let normalized = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
+
     truncate_with_ellipsis(&normalized, PROVISIONAL_TITLE_CHARS)
 }
 
@@ -395,6 +428,7 @@ pub(super) fn title_thread_start_request(
     workspace: &AgentWorkspace,
 ) -> Value {
     let mut params = thread_start_params(profile, workspace);
+
     params["ephemeral"] = json!(true);
     params["approvalPolicy"] = json!("never");
     params["allowProviderModelFallback"] = json!(true);
@@ -410,6 +444,7 @@ pub(super) fn title_thread_start_request(
         .or_insert_with(|| Value::Object(Map::new()))
         .as_object_mut()
         .expect("thread config is an object");
+
     for key in [
         "features.enable_fanout",
         "features.hooks",
@@ -421,6 +456,7 @@ pub(super) fn title_thread_start_request(
     ] {
         config.insert(key.to_string(), json!(false));
     }
+
     config.insert("web_search".to_string(), json!("disabled"));
 
     json!({
@@ -462,19 +498,23 @@ pub(super) fn title_turn_start_request(rpc_id: u64, thread_id: &str, prompt: &st
 
 pub(super) fn generated_title_from_message(message: &str) -> Option<String> {
     let value: Value = serde_json::from_str(message.trim()).ok()?;
+
     let normalized = value["title"]
         .as_str()?
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
+
     if normalized.is_empty() || normalized.chars().count() > GENERATED_TITLE_CHARS {
         return None;
     }
+
     Some(normalized)
 }
 
 fn title_prompt(prompt: &str) -> String {
     let prompt: String = prompt.trim().chars().take(TITLE_PROMPT_CHARS).collect();
+
     [
         "Generate a concise UI title for the coding task in the user prompt.",
         "Use at most 36 characters and fewer than five words when practical.",
@@ -491,18 +531,23 @@ fn title_prompt(prompt: &str) -> String {
 
 fn truncate_with_ellipsis(text: &str, limit: usize) -> Option<String> {
     let count = text.chars().count();
+
     if count == 0 {
         return None;
     }
+
     if count <= limit {
         return Some(text.to_string());
     }
 
     let mut truncated: String = text.chars().take(limit.saturating_sub(1)).collect();
+
     while truncated.ends_with(char::is_whitespace) {
         truncated.pop();
     }
+
     truncated.push('…');
+
     Some(truncated)
 }
 

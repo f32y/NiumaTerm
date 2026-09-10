@@ -25,6 +25,7 @@ impl TurnOutputUsage {
             .completed_responses
             .saturating_add(self.current_response.take().unwrap_or(0));
         self.current_response = Some(output_tokens);
+
         self.total()
     }
 
@@ -69,14 +70,17 @@ impl TranscriptState {
 
     pub(super) fn finish_turn(&mut self, message: &Value) -> Vec<Event> {
         let mut events = Vec::new();
+
         if let Some(max_tokens) = claude_context_window(&message["modelUsage"]) {
             self.context_window = Some(max_tokens);
         }
+
         self.last_turn_usage = parse_claude_usage(&message["usage"]);
 
         if let Some(usage) = self.context_window_usage() {
             events.push(Event::ContextWindowUpdated(usage));
         }
+
         if let Some(output_tokens) = self.last_turn_usage.and_then(|usage| usage.output_tokens) {
             events.push(Event::TurnOutputTokensUpdated(output_tokens));
         }
@@ -89,8 +93,10 @@ impl TranscriptState {
         composition: &ContextComposition,
     ) -> Option<ContextWindowUsage> {
         let filled = window_from_composition(self.context_usage, composition)?;
+
         self.context_usage = Some(filled);
         self.context_window = self.context_window.or(composition.max_tokens);
+
         self.context_window_usage()
     }
 
@@ -99,10 +105,12 @@ impl TranscriptState {
     /// visible there only, so a resumed thread shows it and this one does not.
     pub(super) fn process_compact_boundary(&mut self, message: &Value) -> Vec<Event> {
         let detail = parse_compaction(compaction_metadata(message));
+
         let id = match message["uuid"].as_str() {
             Some(uuid) => format!("compaction-{uuid}"),
             None => self.alloc_item_id("compaction"),
         };
+
         let post_tokens = detail.post_tokens;
 
         let mut events = vec![
@@ -148,6 +156,7 @@ impl TranscriptState {
                 self.open_thinkings.clear();
 
                 self.context_usage = parse_claude_usage(&event["message"]["usage"]);
+
                 let turn_output_tokens = self.turn_output_usage.start_response(
                     self.context_usage
                         .and_then(|usage| usage.output_tokens)
@@ -159,6 +168,7 @@ impl TranscriptState {
                     .map(Event::ContextWindowUpdated)
                     .into_iter()
                     .collect::<Vec<_>>();
+
                 events.push(Event::TurnOutputTokensUpdated(turn_output_tokens));
 
                 events
@@ -177,6 +187,7 @@ impl TranscriptState {
                     .map(Event::ContextWindowUpdated)
                     .into_iter()
                     .collect::<Vec<_>>();
+
                 if let Some(output_tokens) = turn_output_tokens {
                     events.push(Event::TurnOutputTokensUpdated(output_tokens));
                 }
@@ -261,9 +272,11 @@ impl TranscriptState {
 
         if let Some(usage) = parse_claude_usage(&message["message"]["usage"]) {
             self.context_usage = Some(usage);
+
             if let Some(snapshot) = self.context_window_usage() {
                 events.push(Event::ContextWindowUpdated(snapshot));
             }
+
             if let Some(output_tokens) = usage.output_tokens {
                 events.push(Event::TurnOutputTokensUpdated(
                     self.turn_output_usage.update_response(output_tokens),
@@ -300,6 +313,7 @@ impl TranscriptState {
                     let Some(id) = block["id"].as_str() else {
                         continue;
                     };
+
                     let item = tool_item(
                         id,
                         block["name"].as_str().unwrap_or("tool"),
@@ -328,6 +342,7 @@ impl TranscriptState {
             if block["type"].as_str() != Some("tool_result") {
                 continue;
             }
+
             let Some(id) = block["tool_use_id"].as_str() else {
                 continue;
             };

@@ -45,6 +45,7 @@ pub fn dll_main(instance: *mut ffi::c_void, reason: u32) -> bool {
     if reason == DLL_PROCESS_ATTACH {
         DLL_INSTANCE.store(instance, Ordering::Relaxed);
     }
+
     true
 }
 
@@ -234,6 +235,7 @@ pub unsafe fn dll_get_class_object(
         *ppv = ptr::null_mut();
 
         let clsid = *rclsid.cast::<GUID>();
+
         if clsid != CLSID_NIUMATERM_NEW_TAB {
             return CLASS_E_CLASSNOTAVAILABLE.0;
         }

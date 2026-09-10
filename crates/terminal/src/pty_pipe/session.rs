@@ -68,6 +68,7 @@ where
         options.cols.max(1) as usize,
         options.rows.max(1) as usize,
     )));
+
     let vt_modes = Arc::new(AtomicU32::new(0));
 
     let mut pipe = PtyPipe::new(

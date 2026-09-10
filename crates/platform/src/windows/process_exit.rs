@@ -25,6 +25,7 @@ pub fn wait_for_exit(pid: u32, timeout: Duration) -> bool {
     }
 
     let milliseconds = timeout.as_millis().try_into().unwrap_or(u32::MAX);
+
     // SAFETY: the handle came from OpenProcess above and is closed below,
     // exactly once, after the wait it was opened for.
     let signalled = unsafe { WaitForSingleObject(handle, milliseconds) } == WAIT_OBJECT_0;

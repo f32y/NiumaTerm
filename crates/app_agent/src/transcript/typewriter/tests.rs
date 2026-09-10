@@ -13,6 +13,7 @@ fn a_chunk_is_mostly_typed_within_a_quarter_second() {
     let mut typewriter = Typewriter::start(0, 0, start);
 
     let mut now = start;
+
     while now < start + Duration::from_millis(250) {
         now += FRAME;
         typewriter.advance(40, now);

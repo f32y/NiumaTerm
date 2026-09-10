@@ -92,8 +92,11 @@ impl PanelMode {
         else {
             return None;
         };
+
         let restored = (*running_expanded, *finished_expanded);
+
         *self = Self::List;
+
         Some(restored)
     }
 }
@@ -142,10 +145,13 @@ impl BackgroundTasksView {
             (None, None) => true,
             _ => false,
         };
+
         if same {
             return;
         }
+
         self.target = target;
+
         // A child belongs to one parent session, so pointing at another one
         // returns to the list rather than keeping that child on screen.
         self.mode = PanelMode::List;
@@ -160,10 +166,13 @@ impl BackgroundTasksView {
         if self.visible == visible {
             return;
         }
+
         self.visible = visible;
+
         if !visible {
             self.elapsed_timer = None;
         }
+
         cx.notify();
     }
 
@@ -179,16 +188,20 @@ impl BackgroundTasksView {
             self.elapsed_timer = None;
             return;
         }
+
         if self.elapsed_timer.is_some() {
             return;
         }
+
         self.elapsed_timer = Some(cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(ELAPSED_TICK).await;
+
                 let alive = this.update(cx, |this, cx| {
                     this.refresh_open_child(cx);
                     cx.notify();
                 });
+
                 if alive.is_err() {
                     return;
                 }
@@ -209,9 +222,11 @@ impl BackgroundTasksView {
     ) -> AnyElement {
         let shown = visible_rows(rows.len(), limit, expanded);
         let hidden = rows.len() - shown;
+
         let control = section_control_label(hidden, expanded).map(|label| {
             let expand = !expanded;
             let is_running = id == "background-tasks-running";
+
             Button::new(id)
                 .ghost()
                 .xsmall()
@@ -223,6 +238,7 @@ impl BackgroundTasksView {
                     } else {
                         this.finished_expanded = expand;
                     }
+
                     cx.notify();
                 }))
         });
@@ -290,6 +306,7 @@ impl BackgroundTasksView {
 
         let Some(snapshot) = snapshot else {
             self.sync_elapsed_timer(false, cx);
+
             // An Agent pane publishes its first snapshot only once the adapter
             // has something to report, so a targeted view with none yet is
             // still starting up rather than looking at the wrong kind of tab.
@@ -309,9 +326,11 @@ impl BackgroundTasksView {
 
         let running = running_rows(&snapshot);
         let finished = finished_rows(&snapshot);
+
         // A row without a start time has no counter to advance, so it alone
         // never justifies keeping the repaint task alive.
         let needs_timer = running.iter().any(|task| task.started_at.is_some());
+
         self.sync_elapsed_timer(needs_timer, cx);
 
         if running.is_empty() && finished.is_empty() {
@@ -344,6 +363,7 @@ impl BackgroundTasksView {
             now,
             cx,
         );
+
         let finished_section = self.render_section(
             "background-tasks-finished",
             finished_heading(&snapshot),

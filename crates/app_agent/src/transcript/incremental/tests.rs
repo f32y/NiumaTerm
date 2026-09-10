@@ -19,6 +19,7 @@ fn select_summary(item: &mut Item) -> Option<&mut Option<String>> {
 
 fn history(turns: u64) -> TranscriptView {
     let mut view = TranscriptView::new(AgentKind::Codex, None);
+
     for turn in 0..turns {
         view.push_stamped(
             turn,
@@ -36,6 +37,7 @@ fn history(turns: u64) -> TranscriptView {
         );
         view.turn_ledger.settle_replayed(turn, None);
     }
+
     view.push_stamped(
         turns,
         Item::Reasoning {
@@ -43,14 +45,18 @@ fn history(turns: u64) -> TranscriptView {
             summary: Some("working".into()),
         },
     );
+
     view
 }
 
 fn assert_rows_match_rebuild(view: &mut TranscriptView, mode: CollapseRows) {
     view.refresh_rows(mode);
+
     let cached = view.rows.clone();
     let specs = view.build_row_specs(mode);
+
     view.sync_transcript_list(specs);
+
     assert_eq!(cached, view.rows);
 }
 
@@ -58,13 +64,17 @@ fn assert_rows_match_rebuild(view: &mut TranscriptView, mode: CollapseRows) {
 fn streaming_rebuilds_only_the_changed_turn() {
     let mut view = history(1_000);
     let mode = CollapseRows::WorkAndToolCalls;
+
     assert_rows_match_rebuild(&mut view, mode);
+
     for _ in 0..20 {
         assert!(view.append_delta("live", "more", select_summary));
         assert_rows_match_rebuild(&mut view, mode);
         assert_eq!(view.row_cache.rebuilt_entries, 1);
     }
+
     view.refresh_rows(mode);
+
     assert_eq!(view.row_cache.rebuilt_entries, 0);
 
     view.push_stamped(
@@ -74,17 +84,23 @@ fn streaming_rebuilds_only_the_changed_turn() {
         },
     );
     assert_rows_match_rebuild(&mut view, mode);
+
     assert_eq!(view.row_cache.rebuilt_entries, 2);
+
     view.merge_completed(&Item::AgentMessage {
         id: "reply-500".into(),
         text: Some("updated answer".into()),
         questions: None,
     });
     assert_rows_match_rebuild(&mut view, mode);
+
     assert_eq!(view.row_cache.rebuilt_entries, 1_002);
+
     view.clear();
+
     assert!(!view.contains_item("live"));
     assert!(!view.append_delta("live", "stale", select_summary));
+
     assert_rows_match_rebuild(&mut view, mode);
     view.push_stamped(
         0,
@@ -93,13 +109,16 @@ fn streaming_rebuilds_only_the_changed_turn() {
             summary: None,
         },
     );
+
     assert!(view.append_delta("live", "new conversation", select_summary));
+
     assert_rows_match_rebuild(&mut view, mode);
 }
 
 #[test]
 fn indexed_updates_preserve_duplicate_id_order_and_item_kinds() {
     let mut view = history(0);
+
     view.push_stamped(
         0,
         Item::AgentMessage {
@@ -108,21 +127,25 @@ fn indexed_updates_preserve_duplicate_id_order_and_item_kinds() {
             questions: None,
         },
     );
+
     assert!(view.append_delta("live", "answer", |item| match item {
         Item::AgentMessage { text, .. } => Some(text),
         _ => None,
     }));
+
     view.merge_completed(&Item::AgentMessage {
         id: "live".into(),
         text: Some("complete".into()),
         questions: None,
     });
+
     assert!(
         matches!(&view.items[0].item, Item::Reasoning { summary: Some(text), .. } if text == "working")
     );
     assert!(
         matches!(&view.items[1].item, Item::AgentMessage { text: Some(text), .. } if text == "complete")
     );
+
     assert_rows_match_rebuild(&mut view, CollapseRows::Off);
 }
 
@@ -133,7 +156,9 @@ fn cached_rows_follow_disclosures_turns_and_mirrored_revisions(cx: &mut TestAppC
             reduce_motion: true,
             ..AgentSettings::default()
         });
+
         let entity = cx.new(|_| history(4));
+
         entity.update(cx, |view, cx| {
             for mode in [
                 CollapseRows::Off,
@@ -142,7 +167,9 @@ fn cached_rows_follow_disclosures_turns_and_mirrored_revisions(cx: &mut TestAppC
             ] {
                 assert_rows_match_rebuild(view, mode);
             }
+
             let mode = CollapseRows::WorkAndToolCalls;
+
             view.push_stamped(
                 4,
                 Item::Reasoning {
@@ -157,14 +184,17 @@ fn cached_rows_follow_disclosures_turns_and_mirrored_revisions(cx: &mut TestAppC
             view.set_compacting(false, cx);
             view.settle_turn(4, cx);
             assert_rows_match_rebuild(view, mode);
+
             for key in [RevealKey::Turn(4), RevealKey::Group(8), RevealKey::Row(8)] {
                 view.toggle_disclosure(key, cx);
                 assert_rows_match_rebuild(view, mode);
             }
+
             for key in [RevealKey::Row(8), RevealKey::Group(8), RevealKey::Turn(4)] {
                 view.toggle_disclosure(key, cx);
                 assert_rows_match_rebuild(view, mode);
             }
+
             view.mark_interrupted(4);
             assert_rows_match_rebuild(view, mode);
             view.discard_turn(4, cx);
@@ -184,22 +214,31 @@ fn cached_rows_follow_disclosures_turns_and_mirrored_revisions(cx: &mut TestAppC
                 },
                 cx,
             );
+
             assert!(view.contains_item("replayed"));
+
             assert_rows_match_rebuild(view, mode);
+
             assert!(view.append_delta("replayed", " and extended", select_summary));
+
             assert_rows_match_rebuild(view, mode);
 
             let mirrored = [Item::Reasoning {
                 id: "mirror".into(),
                 summary: Some("first".into()),
             }];
+
             view.show_items(&mirrored, 1, cx);
+
             assert!(view.contains_item("mirror"));
             assert!(!view.contains_item("live"));
+
             assert_rows_match_rebuild(view, mode);
             view.clear();
             view.show_items(&mirrored, 1, cx);
+
             assert!(view.contains_item("mirror"));
+
             assert_rows_match_rebuild(view, mode);
         });
     });
@@ -208,6 +247,7 @@ fn cached_rows_follow_disclosures_turns_and_mirrored_revisions(cx: &mut TestAppC
 #[test]
 fn typed_edges_invalidate_cached_rows_until_the_reply_is_complete() {
     let mut view = history(10);
+
     view.push_stamped(
         10,
         Item::AgentMessage {
@@ -216,23 +256,31 @@ fn typed_edges_invalidate_cached_rows_until_the_reply_is_complete() {
             questions: None,
         },
     );
+
     let mode = CollapseRows::Off;
+
     assert_rows_match_rebuild(&mut view, mode);
+
     assert!(
         view.append_delta("answer", "世界".repeat(100).as_str(), |item| match item {
             Item::AgentMessage { text, .. } => Some(text),
             _ => None,
         })
     );
+
     assert_rows_match_rebuild(&mut view, mode);
+
     let now = Instant::now();
+
     for elapsed in [16, 32, 80, 500, 2_000] {
         view.advance_typing(now + Duration::from_millis(elapsed));
         assert_rows_match_rebuild(&mut view, mode);
     }
+
     view.finish_typing();
     assert_rows_match_rebuild(&mut view, mode);
     view.refresh_rows(mode);
+
     assert_eq!(view.row_cache.rebuilt_entries, 0);
 }
 
@@ -241,21 +289,29 @@ fn typed_edges_invalidate_cached_rows_until_the_reply_is_complete() {
 fn long_transcript_timing() {
     let mut view = history(5_000);
     let started = Instant::now();
+
     for _ in 0..200 {
         assert!(view.append_delta("live", "x", select_summary));
+
         let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+
         view.sync_transcript_list(specs);
         black_box(&view.rows);
     }
+
     let full = started.elapsed();
     let mut view = history(5_000);
+
     view.refresh_rows(CollapseRows::WorkAndToolCalls);
+
     let started = Instant::now();
+
     for _ in 0..200 {
         assert!(view.append_delta("live", "x", select_summary));
         view.refresh_rows(CollapseRows::WorkAndToolCalls);
         black_box(&view.rows);
     }
+
     eprintln!(
         "5000 turns, 200 tail updates: full={full:?}, incremental={:?}",
         started.elapsed()

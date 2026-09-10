@@ -31,12 +31,14 @@ const MARKER: &str = "remote-e2e-marker";
 #[ignore = "requires `wrangler dev` running (npm run dev in the repo root)"]
 async fn pair_open_shell_reconnect() {
     let data_dir = env::temp_dir().join(format!("nmt-host-e2e-{}", process::id()));
+
     let host = HostHandle::start(HostConfig {
         relay_url: RELAY.to_owned(),
         access_token: TOKEN.to_owned(),
         data_dir: data_dir.clone(),
     })
     .expect("host service starts");
+
     let host_public: Vec<u8> = host.public_key().to_vec();
     let host_id = host.host_id().to_owned();
 
@@ -45,6 +47,7 @@ async fn pair_open_shell_reconnect() {
     let device = generate_keypair().unwrap();
     let code = host.begin_pairing();
     let mut channel = None;
+
     for _ in 0..40 {
         match client_connect_pair(&code, &device, "e2e-device").await {
             Ok(c) => {
@@ -54,7 +57,9 @@ async fn pair_open_shell_reconnect() {
             Err(_) => time::sleep(Duration::from_millis(500)).await,
         }
     }
+
     let mut channel = channel.expect("pairing must succeed once the host is registered");
+
     assert!(
         host.list_devices().iter().any(|d| d.name == "e2e-device"),
         "paired device must be persisted"
@@ -70,13 +75,16 @@ async fn pair_open_shell_reconnect() {
         }))
         .await
         .unwrap();
+
     let ClientBound::Opened { session_id } = channel.recv_control().await.unwrap() else {
         panic!("expected Opened");
     };
+
     channel
         .send_control(&HostBound::Attach { session_id })
         .await
         .unwrap();
+
     let ClientBound::Attached(_snapshot) = channel.recv_control().await.unwrap() else {
         panic!("expected Attached");
     };
@@ -89,14 +97,18 @@ async fn pair_open_shell_reconnect() {
         })
         .await
         .unwrap();
+
     let mut seen = Vec::new();
+
     time::timeout(Duration::from_secs(30), async {
         loop {
             if let Frame::Output { data, .. } = channel.recv().await.unwrap() {
                 seen.extend_from_slice(&data);
+
                 // Marker must appear beyond the local echo of the typed
                 // command, i.e. twice: once echoed, once as command output.
                 let text = String::from_utf8_lossy(&seen);
+
                 if text.matches(MARKER).count() >= 2 {
                     return;
                 }
@@ -115,14 +127,17 @@ async fn pair_open_shell_reconnect() {
     let mut channel = client_connect_ik(RELAY, &host_id, &host_public, &device)
         .await
         .expect("IK reconnect must succeed for a paired device");
+
     channel
         .send_control(&HostBound::Attach { session_id })
         .await
         .unwrap();
+
     let ClientBound::Attached(snapshot) = channel.recv_control().await.unwrap() else {
         panic!("expected Attached after reconnect");
     };
     let vt = String::from_utf8_lossy(&snapshot.vt);
+
     assert!(
         vt.contains(MARKER),
         "reattach snapshot must contain pre-disconnect output; got {} bytes",
@@ -144,18 +159,21 @@ async fn pair_open_shell_reconnect() {
 #[ignore = "requires `wrangler dev` running (npm run dev in the repo root)"]
 async fn client_runtime_byte_stream() {
     let data_dir = env::temp_dir().join(format!("nmt-host-e2e-client-{}", process::id()));
+
     let host = HostHandle::start(HostConfig {
         relay_url: RELAY.to_owned(),
         access_token: TOKEN.to_owned(),
         data_dir: data_dir.clone(),
     })
     .expect("host service starts");
+
     let host_public: Vec<u8> = host.public_key().to_vec();
     let host_id = host.host_id().to_owned();
 
     // Pair once so the device can use the IK client runtime.
     let device = generate_keypair().unwrap();
     let code = host.begin_pairing();
+
     for attempt in 0..40 {
         match client_connect_pair(&code, &device, "runtime-device").await {
             Ok(_) => break,
@@ -169,7 +187,9 @@ async fn client_runtime_byte_stream() {
         private: device.private.clone(),
         public: device.public.clone(),
     };
+
     let (relay, hid, hpub) = (RELAY.to_owned(), host_id.clone(), host_public.clone());
+
     let session = task::spawn_blocking(move || {
         open_remote_session(
             relay,
@@ -191,12 +211,15 @@ async fn client_runtime_byte_stream() {
     session
         .input()
         .send_input(format!("echo {MARKER}\r").into_bytes());
+
     let seen = task::spawn_blocking(move || {
         let mut buf = Vec::new();
+
         loop {
             match session.output().recv_timeout(Duration::from_secs(30)) {
                 Ok(SessionByteEvent::Output(data)) => {
                     buf.extend_from_slice(&data);
+
                     if String::from_utf8_lossy(&buf).matches(MARKER).count() >= 2 {
                         return buf;
                     }
@@ -208,6 +231,7 @@ async fn client_runtime_byte_stream() {
     })
     .await
     .unwrap();
+
     assert!(
         String::from_utf8_lossy(&seen).matches(MARKER).count() >= 2,
         "runtime byte stream must carry command output"
@@ -218,11 +242,14 @@ async fn client_runtime_byte_stream() {
         private: device.private.clone(),
         public: device.public.clone(),
     };
+
     let (relay, hid, hpub) = (RELAY.to_owned(), host_id.clone(), host_public.clone());
+
     let sessions = task::spawn_blocking(move || list_remote_sessions(relay, hid, hpub, dev))
         .await
         .unwrap()
         .expect("list succeeds");
+
     assert!(!sessions.is_empty(), "listing must show the open session");
 
     host.shutdown();
@@ -247,18 +274,22 @@ async fn client_runtime_resumes_after_transport_loss() {
         println!("skipped: set NMT_RELAY_BOUNCE=1 and bounce the relay during the pause");
         return;
     }
+
     let data_dir = env::temp_dir().join(format!("nmt-host-e2e-resume-{}", process::id()));
+
     let host = HostHandle::start(HostConfig {
         relay_url: RELAY.to_owned(),
         access_token: TOKEN.to_owned(),
         data_dir: data_dir.clone(),
     })
     .expect("host service starts");
+
     let host_public: Vec<u8> = host.public_key().to_vec();
     let host_id = host.host_id().to_owned();
 
     let device = generate_keypair().unwrap();
     let code = host.begin_pairing();
+
     for attempt in 0..40 {
         match client_connect_pair(&code, &device, "resume-device").await {
             Ok(_) => break,
@@ -271,7 +302,9 @@ async fn client_runtime_resumes_after_transport_loss() {
         private: device.private.clone(),
         public: device.public.clone(),
     };
+
     let (relay, hid, hpub) = (RELAY.to_owned(), host_id.clone(), host_public.clone());
+
     let session = task::spawn_blocking(move || {
         open_remote_session(
             relay,
@@ -297,12 +330,15 @@ async fn client_runtime_resumes_after_transport_loss() {
     session
         .input()
         .send_input(format!("echo {MARKER}\r").into_bytes());
+
     let seen = task::spawn_blocking(move || {
         let mut buf = Vec::new();
+
         loop {
             match session.output().recv_timeout(Duration::from_secs(60)) {
                 Ok(SessionByteEvent::Output(data)) => {
                     buf.extend_from_slice(&data);
+
                     if String::from_utf8_lossy(&buf).matches(MARKER).count() >= 2 {
                         return buf;
                     }
@@ -314,6 +350,7 @@ async fn client_runtime_resumes_after_transport_loss() {
     })
     .await
     .unwrap();
+
     assert!(
         String::from_utf8_lossy(&seen).matches(MARKER).count() >= 2,
         "the resumed session must carry command output"
@@ -327,19 +364,23 @@ async fn client_runtime_resumes_after_transport_loss() {
 #[ignore = "requires `wrangler dev` running (npm run dev in the repo root)"]
 async fn unpaired_device_rejected() {
     let data_dir = env::temp_dir().join(format!("nmt-host-e2e-rej-{}", process::id()));
+
     let host = HostHandle::start(HostConfig {
         relay_url: RELAY.to_owned(),
         access_token: TOKEN.to_owned(),
         data_dir: data_dir.clone(),
     })
     .expect("host service starts");
+
     let host_public: Vec<u8> = host.public_key().to_vec();
     let host_id = host.host_id().to_owned();
+
     time::sleep(Duration::from_secs(2)).await;
 
     // Never paired: the IK handshake must die without a reply.
     let intruder = generate_keypair().unwrap();
     let result = client_connect_ik(RELAY, &host_id, &host_public, &intruder).await;
+
     assert!(
         result.is_err(),
         "unauthorized device must not get a channel"
@@ -352,7 +393,9 @@ async fn unpaired_device_rejected() {
         host_public_key: host_public.as_slice().try_into().unwrap(),
         token: [0u8; 16],
     };
+
     let result = client_connect_pair(&code, &intruder, "intruder").await;
+
     assert!(result.is_err(), "bogus token must not pair");
     assert!(host.list_devices().is_empty(), "no device may be persisted");
 

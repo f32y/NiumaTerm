@@ -55,10 +55,13 @@ fn removing_the_first_attachment_renumbers_the_rest() {
 fn removing_a_middle_attachment_keeps_the_text_around_it() {
     let mut pending = PendingAttachments::default();
     let mut text = String::new();
+
     for (index, word) in ["one ", "two ", "three "].iter().enumerate() {
         let placeholder = pending.attach(&png(4, 4)).ok().expect("attach");
+
         text.push_str(word);
         text.push_str(&placeholder);
+
         assert_eq!(placeholder, placeholder_text(index + 1));
     }
 
@@ -141,6 +144,7 @@ fn a_range_naming_no_placeholder_resolves_to_nothing() {
 #[test]
 fn a_message_carries_no_more_than_the_cap() {
     let mut pending = PendingAttachments::default();
+
     for _ in 0..MAX_ATTACHMENTS {
         assert!(pending.attach(&png(4, 4)).is_ok());
     }
@@ -181,6 +185,7 @@ fn attaching_shrinks_an_oversized_image() {
 
     let from_ratio = f64::from(from_width) / f64::from(from_height);
     let to_ratio = f64::from(width) / f64::from(height);
+
     assert!((from_ratio - to_ratio).abs() < 0.01);
 }
 

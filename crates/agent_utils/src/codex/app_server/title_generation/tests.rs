@@ -22,6 +22,7 @@ fn provisional_title_flattens_and_bounds_the_prompt() {
 
     let long = "界".repeat(100);
     let title = provisional_title_from_prompt(&long).unwrap();
+
     assert_eq!(title.chars().count(), 60);
     assert!(title.ends_with('…'));
 }
@@ -52,12 +53,14 @@ fn internal_result_parser_keeps_generation_identity() {
 #[test]
 fn generation_identity_rejects_stale_results() {
     let (cancel_tx, cancel_rx) = mpsc::channel();
+
     let active = TitleGenerationHandle {
         generation_id: 7,
         root_thread_id: "thread-root".to_string(),
         provisional_title: "Opening prompt".to_string(),
         cancel_tx,
     };
+
     let current = TitleGenerationResult {
         generation_id: 7,
         root_thread_id: "thread-root".to_string(),
@@ -67,13 +70,16 @@ fn generation_identity_rejects_stale_results() {
 
     assert!(active.accepts(&current, Some("thread-root")));
     assert!(!active.accepts(&current, Some("thread-new")));
+
     let stale = TitleGenerationResult {
         generation_id: 6,
         ..current
     };
+
     assert!(!active.accepts(&stale, Some("thread-root")));
 
     active.cancel();
+
     assert_eq!(
         cancel_rx.recv().unwrap()["method"],
         TITLE_GENERATION_CANCEL_METHOD
@@ -88,12 +94,14 @@ fn generation_failure_resolves_to_the_provisional_title() {
         provisional_title: "Opening prompt".to_string(),
         generated_title: Some("Generated title".to_string()),
     };
+
     assert_eq!(generated.resolved_title(), "Generated title");
 
     let fallback = TitleGenerationResult {
         generated_title: None,
         ..generated
     };
+
     assert_eq!(fallback.resolved_title(), "Opening prompt");
     assert_eq!(
         thread_name_request(9, "thread-root", fallback.resolved_title()),
@@ -134,6 +142,7 @@ fn title_requests_are_ephemeral_read_only_and_structured() {
     assert_eq!(start["params"]["config"]["features.multi_agent"], false);
 
     let turn = title_turn_start_request(12, "thread-title", "Find the login parser");
+
     assert_eq!(turn["method"], "turn/start");
     assert_eq!(turn["params"]["threadId"], "thread-title");
     assert_eq!(turn["params"]["approvalPolicy"], "never");

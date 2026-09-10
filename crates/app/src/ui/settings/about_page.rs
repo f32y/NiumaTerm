@@ -118,6 +118,7 @@ fn update_check_item() -> SettingItem {
         // installed here can still be downloaded by hand.
         let open = status.release().map(|release| {
             let page_url = release.page_url.clone();
+
             Button::new("app-update-open")
                 .outline()
                 .label(i18n("settings-about-open-release"))

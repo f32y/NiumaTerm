@@ -93,11 +93,13 @@ pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, io::Error> {
 /// Create a ConPTY whose child process tree is terminated when it is dropped.
 pub fn create_managed_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, io::Error> {
     let pty = create_pty_with_management(options, true)?;
+
     if pty.process_tree().is_none() {
         return Err(io::Error::other(
             "managed ConPTY could not create its process-tree job",
         ));
     }
+
     Ok(pty)
 }
 
@@ -194,15 +196,19 @@ impl ProcessReadWrite for Pty {
     #[inline]
     fn drain_ready(&self) -> Vec<Token> {
         let mut ready = Vec::with_capacity(3);
+
         if self.conout.soft().is_ready() {
             ready.push(self.read_token);
         }
+
         if self.conin.soft().is_ready() {
             ready.push(self.write_token);
         }
+
         if self.child_watcher.soft().is_ready() {
             ready.push(self.child_event_token);
         }
+
         ready
     }
 
@@ -246,15 +252,18 @@ fn command_line(shell: &str, args: &[String]) -> String {
     } else {
         shell
     };
+
     if args.is_empty() {
         return shell.to_string();
     }
 
     let mut out = quote_command_arg(shell);
+
     for arg in args {
         out.push(' ');
         out.push_str(&quote_command_arg(arg));
     }
+
     out
 }
 
@@ -264,9 +273,11 @@ fn quote_command_arg(arg: &str) -> String {
     }
 
     let mut out = String::with_capacity(arg.len() + 2);
+
     out.push('"');
 
     let mut backslashes = 0;
+
     for ch in arg.chars() {
         match ch {
             '\\' => backslashes += 1,
@@ -285,6 +296,7 @@ fn quote_command_arg(arg: &str) -> String {
 
     out.extend(iter::repeat_n('\\', backslashes * 2));
     out.push('"');
+
     out
 }
 

@@ -33,10 +33,12 @@ impl ThreadControls {
         cx: &mut Context<AgentPane>,
     ) -> impl IntoElement + use<> {
         let model_options = self.model_options(cx);
+
         let permission_options: Vec<(String, String)> = stream_json::PERMISSION_OPTIONS
             .iter()
             .map(|v| (v.to_string(), setting_value_label(v)))
             .collect();
+
         // Which levels exist is this application's call, but whether the
         // model has the setting at all stays the harness's: a model that
         // advertises none (Haiku) gets no control rather than one whose every
@@ -61,6 +63,7 @@ impl ThreadControls {
             },
         )
         .into_any_element();
+
         let folded = vec![FoldedSetting {
             name: i18n("agent-setting-permissions"),
             icon: permission_icon(self.settings.approval.as_deref()),
@@ -98,6 +101,7 @@ impl ThreadControls {
                 },
             )
             .into_any_element();
+
             row = row.child(settings_group(
                 i18n("agent-settings-quality-cost"),
                 vec![effort],
@@ -121,6 +125,7 @@ impl ThreadControls {
         cx: &mut Context<AgentPane>,
     ) -> impl IntoElement + use<> {
         let model_options = self.model_options(cx);
+
         // The setting belongs to the exact model route, so a model that
         // advertises no levels simply has no effort control; the levels it
         // then offers are the shared ladder.
@@ -222,6 +227,7 @@ impl ThreadControls {
         cx: &mut Context<AgentPane>,
     ) -> impl IntoElement + use<> {
         let model_options = self.model_options(cx);
+
         // Service tiers are per model, and the catalog only lists the
         // additional tiers (e.g. "Fast") — the normal tier is implicit, so
         // the menu carries a synthetic entry for it. Empty protocol value =
@@ -236,18 +242,22 @@ impl ThreadControls {
                 .map(|m| m.tiers.clone())
                 .unwrap_or_default(),
         );
+
         let approval_options: Vec<(String, String)> = app_server::APPROVAL_OPTIONS
             .iter()
             .map(|v| (v.to_string(), setting_value_label(v)))
             .collect();
+
         let reviewer_options: Vec<(String, String)> = app_server::APPROVAL_REVIEWER_OPTIONS
             .iter()
             .map(|v| (v.to_string(), setting_value_label(v)))
             .collect();
+
         let sandbox_options: Vec<(String, String)> = app_server::SANDBOX_OPTIONS
             .iter()
             .map(|(v, label)| (v.to_string(), setting_value_label(label)))
             .collect();
+
         let model = setting_picker(
             cx,
             "agent-model",
@@ -268,12 +278,14 @@ impl ThreadControls {
                 {
                     this.controls.settings.tier = info.default_tier.clone();
                 }
+
                 this.controls.settings.model = Some(value);
                 this.controls
                     .remember_defaults(this.kind, &this.profile, cx);
             },
         )
         .into_any_element();
+
         let folded = vec![
             FoldedSetting {
                 name: i18n("agent-setting-approval"),
@@ -320,6 +332,7 @@ impl ThreadControls {
                 },
             },
         ];
+
         let effort = effort_panel(
             cx,
             self.settings.effort.clone(),

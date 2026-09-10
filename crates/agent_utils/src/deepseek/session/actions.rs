@@ -29,10 +29,12 @@ impl Session {
         let Some(request) = self.pending_approval.as_ref() else {
             return false;
         };
+
         let outcome = match decision {
             "accept" | "acceptForSession" => "allowed-once",
             _ => "rejected",
         };
+
         self.controls.submit(
             Operation::Approval(request.clone()),
             "$events/result",
@@ -48,6 +50,7 @@ impl Session {
             return false;
         };
         let skipped = answers.is_none();
+
         let outcome = match answers {
             Some(answers) if answers.len() == request.ids.len() => {
                 let answers: Vec<Value> = request
@@ -56,6 +59,7 @@ impl Session {
                     .zip(answers)
                     .map(|(id, selected)| json!({"id": id, "selected": selected}))
                     .collect();
+
                 json!({"kind": "result", "value": {"answers": answers}})
             }
             Some(_) => return false,
@@ -63,6 +67,7 @@ impl Session {
                 "name": "Error", "code": "cancelled", "message": "the user dismissed the question"
             }}),
         };
+
         self.controls.submit(
             Operation::Questions {
                 request: request.clone(),
@@ -86,6 +91,7 @@ impl Session {
         {
             return Err("This question is no longer pending.".to_string());
         }
+
         self.respond_questions(answers)
             .then_some(())
             .ok_or_else(|| "The question response could not be queued.".to_string())
@@ -174,6 +180,7 @@ impl Session {
             "provider": provider,
             "model": id,
         });
+
         if let Some(effort) = effort {
             payload["reasoningEffort"] = json!(effort);
         }
@@ -191,6 +198,7 @@ impl Session {
                 .as_str()
                 .map(str::to_string),
         );
+
         Ok(())
     }
 
@@ -274,6 +282,7 @@ impl Session {
                     "deepseek queued prompt could not be removed: {}",
                     error.message()
                 );
+
                 false
             }
         }
@@ -287,6 +296,7 @@ impl Session {
     /// conversation still carries the old one.
     pub fn rename(&mut self, title: &str) -> Result<String, String> {
         let payload = json!({ "sessionId": self.session_id, "title": title });
+
         let renamed = self
             .client
             .request("session/rename", payload)
@@ -330,6 +340,7 @@ impl Session {
         };
 
         let mut payload = json!({ "sessionId": self.session_id });
+
         if let Some(at_seq) = at_seq {
             payload["atSeq"] = json!(at_seq);
         }
@@ -394,6 +405,7 @@ impl Session {
     /// reports, so nothing is dropped silently to make a message fit.
     fn prompt(&self, text: &str, mode: &str, images: &[MessageImage]) -> Result<Value, CallError> {
         let mut content = vec![json!({ "type": "text", "text": text })];
+
         content.extend(images.iter().map(|image| {
             json!({
                 "type": "image",
@@ -440,14 +452,17 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         self.controls.clear();
+
         let mut actions: Vec<CloseAction> = self
             .queued_prompt_ids
             .drain(..)
             .map(CloseAction::RemoveQueued)
             .collect();
+
         if self.running {
             actions.push(CloseAction::CancelTurn);
         }
+
         schedule_close_actions(self.client.clone(), self.session_id.clone(), actions);
     }
 }

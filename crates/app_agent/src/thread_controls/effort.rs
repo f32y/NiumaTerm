@@ -75,6 +75,7 @@ pub(super) fn effort_panel(
 ) -> impl IntoElement + use<> {
     let pane = cx.entity();
     let name = i18n("agent-setting-effort");
+
     let current_label = current
         .as_ref()
         .map(|value| {
@@ -85,6 +86,7 @@ pub(super) fn effort_panel(
                 .unwrap_or_else(|| setting_value_label(value))
         })
         .unwrap_or_else(|| "-".to_string());
+
     // Claude never reports the level its session is on, so the label can
     // name a level that is not one of the stops. The track then carries no
     // thumb rather than pointing at a stop the session may not be on.
@@ -124,6 +126,7 @@ pub(super) fn effort_panel(
         .content(move |_, _, cx| {
             let stops = options.len().max(1);
             let width = relative(1.0 / stops as f32);
+
             // While a drag is in flight the thumb sits where the pointer
             // is rather than where the session is.
             let thumb = pane.read(cx).controls.effort_drag.or(selected);
@@ -169,6 +172,7 @@ pub(super) fn effort_panel(
                         // on a level the session is not on.
                         .on_mouse_up_out(MouseButton::Left, {
                             let pane = pane.clone();
+
                             move |_, _, cx| {
                                 pane.update(cx, |this, cx| {
                                     if this.controls.effort_drag.take().is_some() {
@@ -223,6 +227,7 @@ pub(super) fn effort_panel(
                                     })
                                     .on_mouse_down(MouseButton::Left, {
                                         let pane = pane.clone();
+
                                         move |_, _, cx| {
                                             pane.update(cx, |this, cx| {
                                                 this.controls.effort_drag = Some(index);
@@ -232,10 +237,12 @@ pub(super) fn effort_panel(
                                     })
                                     .on_mouse_move({
                                         let pane = pane.clone();
+
                                         move |event, _, cx| {
                                             if !event.dragging() {
                                                 return;
                                             }
+
                                             pane.update(cx, |this, cx| {
                                                 // Moving within the stop
                                                 // the drag already holds
@@ -248,6 +255,7 @@ pub(super) fn effort_panel(
                                                 {
                                                     return;
                                                 }
+
                                                 this.controls.effort_drag = Some(index);
                                                 cx.notify();
                                             });

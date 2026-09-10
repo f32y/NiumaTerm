@@ -25,16 +25,19 @@ fn tolerates_whitespace_and_case() {
 #[test]
 fn corrupted_inputs_error_cleanly() {
     let encoded = sample().encode();
+
     // Truncated payload.
     assert_eq!(
         PairingCode::decode(&encoded[..encoded.len() - 10]),
         Err(PairingCodeError::Malformed)
     );
+
     // Wrong prefix.
     assert_eq!(
         PairingCode::decode("XYZ-ABCDEF"),
         Err(PairingCodeError::MissingPrefix)
     );
+
     // Illegal base32 characters.
     assert_eq!(
         PairingCode::decode("NMT1-!!!!"),
@@ -49,6 +52,7 @@ fn corrupted_inputs_error_cleanly() {
 #[test]
 fn host_id_is_stable_hex() {
     let id = derive_host_id(&[1u8; 32]);
+
     assert_eq!(id.len(), 16);
     assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
     assert_eq!(id, derive_host_id(&[1u8; 32]));

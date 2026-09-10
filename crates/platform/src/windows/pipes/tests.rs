@@ -13,8 +13,10 @@ fn wait_until(mut cond: impl FnMut() -> bool) -> bool {
         if cond() {
             return true;
         }
+
         sleep(Duration::from_millis(1));
     }
+
     cond()
 }
 
@@ -39,6 +41,7 @@ fn soft_ready_stays_set_until_ring_fully_drained() {
     // Read only a slice — data remains buffered.
     let mut small = [0u8; 16];
     let got = reader.read(&mut small).expect("partial read");
+
     assert!(got > 0 && got <= 16);
     assert!(
         reader.soft().is_ready(),
@@ -48,6 +51,7 @@ fn soft_ready_stays_set_until_ring_fully_drained() {
     // Drain the rest; the flag clears only once the ring is empty.
     let mut drained = got;
     let mut sink = [0u8; 4096];
+
     while drained < 4096 {
         match reader.read(&mut sink) {
             Ok(0) => {
@@ -60,6 +64,7 @@ fn soft_ready_stays_set_until_ring_fully_drained() {
             Err(e) => panic!("drain read failed: {e}"),
         }
     }
+
     assert_eq!(drained, 4096, "should read back every byte written");
 
     assert!(

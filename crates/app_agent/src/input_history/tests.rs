@@ -36,7 +36,9 @@ impl TestDirectory {
             process::id(),
             NEXT_TEST_DIRECTORY.fetch_add(1, Ordering::Relaxed)
         ));
+
         fs::create_dir_all(&path).expect("create test directory");
+
         Self(path)
     }
 
@@ -91,9 +93,11 @@ fn open_test_pane(
             .into_owned(),
         ..AgentProfile::default()
     };
+
     let cwd = directory.path().to_string_lossy().into_owned();
     let history_path = directory.path().join("agent-input-history.json");
     let mut pane = None;
+
     let window = cx.update(|cx| {
         gpui_component::init(cx);
         cx.set_global(AgentSettings::default());
@@ -103,14 +107,18 @@ fn open_test_pane(
             path: history_path,
             writer: None,
         });
+
         cx.open_window(Default::default(), |window, cx| {
             let agent =
                 cx.new(|cx| AgentPane::new(profile, AgentWorkspace::single(Some(cwd)), window, cx));
+
             pane = Some(agent.clone());
+
             cx.new(|cx| gpui_component::Root::new(agent, window, cx))
         })
         .expect("open Agent test window")
     });
+
     (pane.expect("create Agent pane"), window)
 }
 
@@ -119,6 +127,7 @@ fn scope_uses_target_backend_and_normalized_directory() {
     let directory = TestDirectory::new();
     let first_cwd = directory.path().join("first");
     let second_cwd = directory.path().join("second");
+
     fs::create_dir_all(&first_cwd).expect("create first directory");
     fs::create_dir_all(&second_cwd).expect("create second directory");
 
@@ -134,10 +143,12 @@ fn scope_uses_target_backend_and_normalized_directory() {
     assert_ne!(local_codex, other_cwd);
 
     let mut history = HistoryStore::default();
+
     history.record(&local_codex, "local codex".into());
     history.record(&local_claude, "local claude".into());
     history.record(&remote_codex, "remote codex".into());
     history.record(&other_cwd, "other directory".into());
+
     assert_eq!(history.entries(&local_codex), ["local codex"]);
     assert_eq!(history.entries(&local_claude), ["local claude"]);
     assert_eq!(history.entries(&remote_codex), ["remote codex"]);
@@ -152,10 +163,14 @@ fn history_directory_keys_follow_native_spelling() {
     let upper_scope = scope("local", AgentKind::Codex, &upper);
     let lower_scope = scope("local", AgentKind::Codex, &lower);
     let mut history = HistoryStore::default();
+
     history.record(&upper_scope, "upper directory".into());
     history.record(&lower_scope, "lower directory".into());
+
     let path = directory.path().join("history.json");
+
     save_to_path(&path, &history.snapshot()).expect("save scoped history");
+
     let restored = load_from_path(&path).expect("restore scoped history");
 
     #[cfg(windows)]
@@ -168,6 +183,7 @@ fn history_directory_keys_follow_native_spelling() {
             ["upper directory", "lower directory"]
         );
     }
+
     #[cfg(unix)]
     {
         assert_ne!(upper_scope, lower_scope);
@@ -185,19 +201,25 @@ fn legacy_migration_and_stale_saves_preserve_distinct_records() {
     let directory = TestDirectory::new();
     let path = directory.path().join("history.json");
     let scope = scope("local", AgentKind::Codex, directory.path());
+
     let legacy = json!({"version":1,"scopes":[{
         "target":scope.target,"backend":scope.backend,"cwd":scope.cwd,
         "entries":["first","second","first"]
     }]});
+
     fs::write(&path, legacy.to_string()).unwrap();
+
     let mut first = load_from_path(&path).unwrap();
     let mut second = load_from_path(&path).unwrap();
+
     first.record(&scope, "from first".into());
     second.record(&scope, "from second".into());
     save_to_path(&path, &first.snapshot()).unwrap();
     save_to_path(&path, &second.snapshot()).unwrap();
     save_to_path(&path, &first.snapshot()).unwrap();
+
     let entries = load_from_path(&path).unwrap().entries(&scope);
+
     assert_eq!(&entries[..3], ["first", "second", "first"]);
     assert_eq!(entries.len(), 5);
     assert!(entries.contains(&"from first".to_string()));
@@ -214,16 +236,24 @@ fn stale_saves_do_not_revive_expired_entries_or_overwrite_invalid_files() {
     let path = directory.path().join("history.json");
     let scope = scope("local", AgentKind::Codex, directory.path());
     let mut store = HistoryStore::default();
+
     store.record(&scope, "expired".into());
+
     let stale = store.snapshot();
+
     for index in 0..100 {
         store.record(&scope, format!("new-{index}"));
     }
+
     save_to_path(&path, &store.snapshot()).unwrap();
     save_to_path(&path, &stale).unwrap();
+
     let entries = load_from_path(&path).unwrap().entries(&scope);
+
     assert_eq!(entries, store.entries(&scope));
+
     fs::write(&path, b"invalid history").unwrap();
+
     assert!(save_to_path(&path, &store.snapshot()).is_err());
     assert_eq!(fs::read(&path).unwrap(), b"invalid history");
 }
@@ -237,6 +267,7 @@ fn history_process_writer() {
     let writer = env::var("NMT_HISTORY_TEST_WRITER").unwrap();
     let scope = scope("local", AgentKind::Codex, path.parent().unwrap());
     let mut history = HistoryStore::default();
+
     for index in 0..15 {
         history.record(&scope, format!("writer-{writer}-{index}"));
         save_to_path(&path, &history.snapshot()).unwrap();
@@ -249,6 +280,7 @@ fn concurrent_processes_merge_history_without_losing_entries() {
     let path = directory.path().join("history.json");
     let executable = env::current_exe().unwrap();
     let mut children = Vec::new();
+
     for writer in 0..3 {
         children.push(
             hidden_command(&executable)
@@ -259,17 +291,22 @@ fn concurrent_processes_merge_history_without_losing_entries() {
                 .unwrap(),
         );
     }
+
     for mut child in children {
         assert!(child.wait().unwrap().success());
     }
+
     let scope = scope("local", AgentKind::Codex, directory.path());
     let entries = load_from_path(&path).unwrap().entries(&scope);
+
     assert_eq!(entries.len(), 45);
+
     for writer in 0..3 {
         for index in 0..15 {
             assert!(entries.contains(&format!("writer-{writer}-{index}")));
         }
     }
+
     assert_eq!(
         fs::read_dir(directory.path()).unwrap().count(),
         2,
@@ -290,10 +327,13 @@ fn recording_collapses_neighbors_and_keeps_the_newest_hundred() {
     assert_eq!(history.entries(&codex_scope), ["first", "second", "first"]);
 
     let limited = scope("remote-a", AgentKind::Claude, directory.path());
+
     for index in 0..=100 {
         assert!(history.record(&limited, format!("entry-{index}")));
     }
+
     let entries = history.entries(&limited);
+
     assert_eq!(entries.len(), 100);
     assert_eq!(entries.first().map(String::as_str), Some("entry-1"));
     assert_eq!(entries.last().map(String::as_str), Some("entry-100"));
@@ -306,10 +346,12 @@ fn json_round_trip_preserves_scoped_entries() {
     let codex = scope("local", AgentKind::Codex, directory.path());
     let claude = scope("local", AgentKind::Claude, directory.path());
     let mut history = HistoryStore::default();
+
     history.record(&codex, "line one\nline two".into());
     history.record(&claude, "/status".into());
 
     save_to_path(&path, &history.snapshot()).expect("save history");
+
     let restored = load_from_path(&path).expect("load history");
 
     assert_eq!(restored.entries(&codex), ["line one\nline two"]);
@@ -320,6 +362,7 @@ fn json_round_trip_preserves_scoped_entries() {
 fn missing_json_is_empty_and_invalid_json_is_reported() {
     let directory = TestDirectory::new();
     let missing = directory.path().join("missing.json");
+
     assert!(
         load_from_path(&missing)
             .expect("load missing history")
@@ -328,8 +371,11 @@ fn missing_json_is_empty_and_invalid_json_is_reported() {
     );
 
     let invalid = directory.path().join("invalid.json");
+
     fs::write(&invalid, b"not json").expect("write invalid history");
+
     let error = load_from_path(&invalid).expect_err("invalid history must fail");
+
     assert_eq!(error.kind(), ErrorKind::InvalidData);
 }
 
@@ -337,10 +383,13 @@ fn missing_json_is_empty_and_invalid_json_is_reported() {
 fn failed_save_leaves_the_in_memory_entry_available() {
     let directory = TestDirectory::new();
     let blocker = directory.path().join("not-a-directory");
+
     fs::write(&blocker, b"blocked").expect("write blocker");
+
     let path = blocker.join("agent-input-history.json");
     let scope = scope("local", AgentKind::Codex, directory.path());
     let mut history = HistoryStore::default();
+
     history.record(&scope, "still available".into());
 
     assert!(save_to_path(&path, &history.snapshot()).is_err());
@@ -355,36 +404,49 @@ fn slow_storage_coalesces_saves_and_flush_waits_for_latest_write() {
     let scope = scope("local", AgentKind::Codex, directory.path());
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
+
     let writer = HistoryWriter::start(move |snapshot| {
         started_tx.send(()).unwrap();
         release_rx.recv().unwrap();
         save_to_path(&saved_path, snapshot)
     })
     .unwrap();
+
     let mut store = HistoryStore::default();
+
     store.record(&scope, "first".into());
     writer.save(store.snapshot()).unwrap();
     started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
     for index in 0..50 {
         store.record(&scope, format!("entry {index}"));
         writer.save(store.snapshot()).unwrap();
     }
+
     let (flushed_tx, flushed_rx) = mpsc::sync_channel(0);
+
     writer.queue(store.snapshot(), Some(flushed_tx)).unwrap();
+
     assert!(flushed_rx.try_recv().is_err());
+
     release_tx.send(()).unwrap();
     started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
     assert!(flushed_rx.try_recv().is_err());
+
     release_tx.send(()).unwrap();
     flushed_rx
         .recv_timeout(Duration::from_secs(5))
         .unwrap()
         .unwrap();
+
     assert_eq!(
         load_from_path(&path).unwrap().entries(&scope),
         store.entries(&scope)
     );
+
     drop(writer);
+
     assert!(matches!(
         started_rx.recv_timeout(Duration::from_secs(5)),
         Err(mpsc::RecvTimeoutError::Disconnected)
@@ -397,10 +459,14 @@ fn snapshots_keep_entries_from_before_later_edits() {
     let path = directory.path().join("history.json");
     let scope = scope("local", AgentKind::Codex, directory.path());
     let mut store = HistoryStore::default();
+
     store.record(&scope, "original".into());
+
     let snapshot = store.snapshot();
+
     store.record(&scope, "later".into());
     save_to_path(&path, &snapshot).unwrap();
+
     assert_eq!(load_from_path(&path).unwrap().entries(&scope), ["original"]);
     assert_eq!(store.entries(&scope), ["original", "later"]);
 }
@@ -411,6 +477,7 @@ fn background_writer_flushes_the_latest_snapshot_in_order() {
     let path = directory.path().join("agent-input-history.json");
     let scope = scope("local", AgentKind::Codex, directory.path());
     let writer = HistoryWriter::spawn(path.clone()).expect("start history writer");
+
     let mut history = AgentInputHistory {
         store: HistoryStore::default(),
         path: path.clone(),
@@ -431,10 +498,13 @@ fn background_writer_flushes_the_latest_snapshot_in_order() {
 fn service_keeps_entries_when_background_writes_fail() {
     let directory = TestDirectory::new();
     let blocker = directory.path().join("not-a-directory");
+
     fs::write(&blocker, b"blocked").expect("write blocker");
+
     let path = blocker.join("agent-input-history.json");
     let scope = scope("local", AgentKind::Codex, directory.path());
     let writer = HistoryWriter::spawn(path.clone()).expect("start history writer");
+
     let mut history = AgentInputHistory {
         store: HistoryStore::default(),
         path,
@@ -442,6 +512,7 @@ fn service_keeps_entries_when_background_writes_fail() {
     };
 
     history.record(&scope, "still available".into());
+
     assert!(history.flush().is_err());
     assert_eq!(&*history.entries(&scope), ["still available"]);
 }
@@ -562,9 +633,11 @@ fn matching_tabs_start_from_the_latest_shared_snapshot() {
     let directory = TestDirectory::new();
     let scope = scope("local", AgentKind::Codex, directory.path());
     let mut history = HistoryStore::default();
+
     history.record(&scope, "first".into());
 
     let mut first_tab = InputHistoryNavigation::default();
+
     assert_eq!(
         first_tab.navigate(
             InputHistoryDirection::Older,
@@ -577,7 +650,9 @@ fn matching_tabs_start_from_the_latest_shared_snapshot() {
     );
 
     history.record(&scope, "second".into());
+
     let mut second_tab = InputHistoryNavigation::default();
+
     assert_eq!(
         second_tab.navigate(
             InputHistoryDirection::Older,
@@ -605,6 +680,7 @@ fn pane_navigation_keeps_palette_and_recent_sessions_ahead_of_history(cx: &mut T
                 .update(cx, |input, cx| input.set_value("/", window, cx));
             pane.palette.dismissed = false;
             pane.handle_palette_control(PaletteControl::Previous, window, cx);
+
             assert_eq!(pane.input.read(cx).text().to_string(), "/");
             assert!(pane.input_history_navigation.index.is_none());
 
@@ -620,6 +696,7 @@ fn pane_navigation_keeps_palette_and_recent_sessions_ahead_of_history(cx: &mut T
                 snippet: None,
             }];
             pane.handle_palette_control(PaletteControl::Previous, window, cx);
+
             assert_eq!(pane.input.read(cx).text().len(), 0);
             assert!(pane.input_history_navigation.index.is_none());
 
@@ -627,12 +704,14 @@ fn pane_navigation_keeps_palette_and_recent_sessions_ahead_of_history(cx: &mut T
             pane.input
                 .update(cx, |input, cx| input.set_value("draft", window, cx));
             pane.handle_palette_control(PaletteControl::Previous, window, cx);
+
             assert_eq!(pane.input.read(cx).text().to_string(), "draft");
             assert!(pane.input_history_navigation.index.is_none());
 
             pane.input
                 .update(cx, |input, cx| input.set_value("", window, cx));
             pane.handle_palette_control(PaletteControl::Previous, window, cx);
+
             assert_eq!(pane.input.read(cx).text().to_string(), "history entry");
         });
     });
@@ -647,6 +726,7 @@ fn accepted_new_turn_and_steering_record_only_typed_input(cx: &mut TestAppContex
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
             let epoch = pane.runtime.begin_start();
+
             assert!(matches!(
                 pane.runtime.install(
                     epoch,
@@ -662,6 +742,7 @@ fn accepted_new_turn_and_steering_record_only_typed_input(cx: &mut TestAppContex
                 ),
                 StartOutcome::Installed
             ));
+
             pane.runtime.ready();
 
             pane.input.update(cx, |input, cx| {
@@ -672,6 +753,7 @@ fn accepted_new_turn_and_steering_record_only_typed_input(cx: &mut TestAppContex
                 input.set_value("steer the turn", window, cx)
             });
             pane.send_user_message(window, cx);
+
             assert!(pane.send_text("/effort high".into(), cx));
 
             assert_eq!(
@@ -693,6 +775,7 @@ fn slash_history_requires_a_successful_action(cx: &mut TestAppContext) {
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
             let epoch = pane.runtime.begin_start();
+
             assert!(matches!(
                 pane.runtime.install(
                     epoch,
@@ -704,12 +787,14 @@ fn slash_history_requires_a_successful_action(cx: &mut TestAppContext) {
                 ),
                 StartOutcome::Installed
             ));
+
             pane.runtime.ready();
             pane.input
                 .update(cx, |input, cx| input.set_value("/compact", window, cx));
             pane.submit_current_slash(window, cx);
 
             let epoch = pane.runtime.begin_start();
+
             assert!(matches!(
                 pane.runtime.install(
                     epoch,
@@ -723,16 +808,19 @@ fn slash_history_requires_a_successful_action(cx: &mut TestAppContext) {
                 ),
                 StartOutcome::Installed
             ));
+
             pane.runtime.ready();
             pane.palette.awaiting_command_turn = false;
             pane.input
                 .update(cx, |input, cx| input.set_value("/review", window, cx));
             pane.submit_current_slash(window, cx);
+
             assert_eq!(pane.input.read(cx).text().to_string(), "/review");
 
             pane.input
                 .update(cx, |input, cx| input.set_value("/missing", window, cx));
             pane.submit_current_slash(window, cx);
+
             assert_eq!(pane.input.read(cx).text().to_string(), "/missing");
 
             pane.input
@@ -754,13 +842,17 @@ fn rejected_submission_preserves_draft_images_and_unnamed_state(cx: &mut TestApp
     let (pane, window) = open_test_pane(cx, &directory);
     let mut cx = VisualTestContext::from_window(window.into(), cx);
     let mut bytes = Cursor::new(Vec::new());
+
     DynamicImage::ImageRgba8(RgbaImage::new(1, 1))
         .write_to(&mut bytes, EncodedImageFormat::Png)
         .unwrap();
+
     let image = Image::from_bytes(ImageFormat::Png, bytes.into_inner());
+
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
             let epoch = pane.runtime.begin_start();
+
             assert!(matches!(
                 pane.runtime.install(
                     epoch,
@@ -774,6 +866,7 @@ fn rejected_submission_preserves_draft_images_and_unnamed_state(cx: &mut TestApp
                 ),
                 StartOutcome::Installed
             ));
+
             pane.runtime.ready();
             pane.conversation_named = false;
             pane.input.update(cx, |input, cx| {
@@ -783,8 +876,11 @@ fn rejected_submission_preserves_draft_images_and_unnamed_state(cx: &mut TestApp
                 .attach_image(&image, &pane.input, window, cx)
                 .ok()
                 .expect("attach test image");
+
             let draft = pane.input.read(cx).text().to_string();
+
             pane.send_user_message(window, cx);
+
             assert_eq!(pane.input.read(cx).text().to_string(), draft);
             assert_eq!(pane.attachments.images().iter().count(), 1);
             assert!(!pane.conversation_named);
@@ -827,15 +923,20 @@ fn restored_multiline_text_places_the_utf8_cursor_at_the_end(cx: &mut gpui::Test
     use gpui_component::input::TextareaState;
 
     let mut input = None;
+
     let window = cx.update(|cx| {
         cx.open_window(Default::default(), |window, cx| {
             gpui_component::init(cx);
+
             let state = cx.new(|cx| TextareaState::new(window, cx).auto_grow(1, 8));
+
             input = Some(state.clone());
+
             cx.new(|cx| gpui_component::Root::new(state, window, cx))
         })
         .expect("open test window")
     });
+
     let input = input.expect("create input state");
     let mut cx = VisualTestContext::from_window(window.into(), cx);
     let text = "词元\n/status".to_string();
@@ -843,6 +944,7 @@ fn restored_multiline_text_places_the_utf8_cursor_at_the_end(cx: &mut gpui::Test
 
     cx.update(|window, cx| {
         let owner = cx.new(|_| ());
+
         owner.update(cx, |_, owner_cx| {
             replace_input_with_history(&input, text, window, owner_cx);
         });
@@ -850,6 +952,7 @@ fn restored_multiline_text_places_the_utf8_cursor_at_the_end(cx: &mut gpui::Test
 
     cx.update(|_, cx| {
         let input = input.read(cx);
+
         assert_eq!(input.text().to_string(), "词元\n/status");
         assert_eq!(input.cursor(), expected_end);
         assert_eq!(input.selected_range(), expected_end..expected_end);
@@ -862,6 +965,7 @@ fn workspaces_sharing_a_primary_directory_keep_separate_histories() {
     let primary = directory.path().join("api");
     let web = directory.path().join("web");
     let docs = directory.path().join("docs");
+
     for path in [&primary, &web, &docs] {
         fs::create_dir_all(path).expect("create directory");
     }
@@ -881,6 +985,7 @@ fn workspaces_sharing_a_primary_directory_keep_separate_histories() {
     // An equivalent spelling of the same ordered directories is the same
     // scope, so history survives a path written with other separators.
     let equivalent = multi_root_scope(AgentKind::Codex, &primary, &[&web.join(".")]);
+
     assert_eq!(with_web, equivalent);
 
     // A single-directory workspace still resolves to the scope that predates
@@ -888,9 +993,11 @@ fn workspaces_sharing_a_primary_directory_keep_separate_histories() {
     assert_eq!(alone, scope("local", AgentKind::Codex, &primary));
 
     let mut history = HistoryStore::default();
+
     history.record(&alone, "alone".into());
     history.record(&with_web, "with web".into());
     history.record(&both, "both".into());
+
     assert_eq!(history.entries(&alone), ["alone"]);
     assert_eq!(history.entries(&with_web), ["with web"]);
     assert_eq!(history.entries(&both), ["both"]);
@@ -902,6 +1009,7 @@ async fn editing_a_workspace_reaches_the_next_conversation_only(cx: &mut TestApp
     let (pane, _window) = open_test_pane(cx, &directory);
 
     let started = AgentWorkspace::single(Some(directory.path().to_string_lossy().into_owned()));
+
     let edited = AgentWorkspace::new(
         Some(directory.path().to_string_lossy().into_owned()),
         vec![
@@ -934,6 +1042,7 @@ async fn editing_a_workspace_reaches_the_next_conversation_only(cx: &mut TestApp
                 &[&directory.path().join("attached")],
             )
         );
+
         cx.global_mut::<AgentInputHistory>()
             .record(&pane.input_history_scope, "after the edit".into());
     });
@@ -947,5 +1056,6 @@ async fn editing_a_workspace_reaches_the_next_conversation_only(cx: &mut TestApp
             directory.path(),
         ))
     });
+
     assert!(entries.is_empty());
 }

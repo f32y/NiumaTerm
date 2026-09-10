@@ -47,6 +47,7 @@ pub struct SelectionRange {
 impl SelectionRange {
     pub fn new(start: Pos, end: Pos, is_block: bool) -> Self {
         assert!(start <= end);
+
         Self {
             start,
             end,
@@ -66,14 +67,18 @@ impl SelectionRange {
         if rows == 0 {
             return None;
         }
+
         let last = rows as i32 - 1;
         let (start_row, end_row) = (self.start.row.0, self.end.row.0);
+
         // Fully above (end before row 0) or below (start past the last row).
         if end_row < 0 || start_row > last {
             return None;
         }
+
         let start = start_row.max(0) as usize;
         let end = end_row.clamp(0, last) as usize;
+
         Some(start..=end)
     }
 }
@@ -134,6 +139,7 @@ impl Selection {
         let range_top = range.start;
 
         let (mut start, mut end) = (&mut self.region.start, &mut self.region.end);
+
         if start.point > end.point {
             mem::swap(&mut start, &mut end);
         }
@@ -153,6 +159,7 @@ impl Selection {
                     start.point.col = Column(0);
                     start.side = Side::Left;
                 }
+
                 start.point.row = range_top;
             }
         }
@@ -172,6 +179,7 @@ impl Selection {
                     end.point.col = dimensions.last_column();
                     end.side = Side::Right;
                 }
+
                 end.point.row = range_bottom - 1;
             }
         }
@@ -183,6 +191,7 @@ impl Selection {
         match self.ty {
             SelectionType::Simple => {
                 let (mut start, mut end) = (self.region.start, self.region.end);
+
                 if start.point > end.point {
                     mem::swap(&mut start, &mut end);
                 }
@@ -253,9 +262,11 @@ impl Selection {
 
         let mut start = self.region.start;
         let mut end = self.region.end;
+
         if start.point > end.point {
             mem::swap(&mut start, &mut end);
         }
+
         start.point.row -= viewport_top;
         end.point.row -= viewport_top;
 
@@ -287,14 +298,17 @@ impl Selection {
             } else {
                 end = matching;
             }
+
             return SelectionRange {
                 start,
                 end,
                 is_block: false,
             };
         }
+
         let start = grid.semantic_search_left(start, escape_chars);
         let end = grid.semantic_search_right(end, escape_chars);
+
         SelectionRange {
             start,
             end,
@@ -305,6 +319,7 @@ impl Selection {
     fn range_lines_engine(grid: &VisibleGrid, start: Pos, end: Pos) -> SelectionRange {
         let start = grid.row_search_left(start);
         let end = grid.row_search_right(end);
+
         SelectionRange {
             start,
             end,

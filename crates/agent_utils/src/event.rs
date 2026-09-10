@@ -201,6 +201,7 @@ fn normalize_presentation(value: &str, max_chars: usize, preserve_newlines: bool
             if chars.peek() == Some(&'\n') {
                 chars.next();
             }
+
             '\n'
         } else if preserve_newlines && ch == '\n' {
             '\n'
@@ -221,6 +222,7 @@ fn normalize_presentation(value: &str, max_chars: usize, preserve_newlines: bool
             last_was_space = false;
         }
     }
+
     normalized.trim().chars().take(max_chars).collect()
 }
 

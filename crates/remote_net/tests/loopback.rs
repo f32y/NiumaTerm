@@ -9,9 +9,12 @@ use nmt_remote_net::protocol::{
 
 fn complete(mut initiator: Handshake, mut responder: Handshake) -> (SecureChannel, SecureChannel) {
     let mut to_responder = Some(initiator.write_message().unwrap());
+
     loop {
         let to_initiator = handshake_step(&mut responder, to_responder.as_deref()).unwrap();
+
         to_responder = handshake_step(&mut initiator, to_initiator.as_deref()).unwrap();
+
         if initiator.is_finished() && responder.is_finished() {
             return (
                 initiator.into_transport().unwrap(),
@@ -26,6 +29,7 @@ fn ik_pair() -> (SecureChannel, SecureChannel) {
     let client = generate_keypair().unwrap();
     let initiator = Handshake::initiator_ik(&client.private, &host.public).unwrap();
     let responder = Handshake::responder_ik(&host.private).unwrap();
+
     complete(initiator, responder)
 }
 
@@ -33,17 +37,22 @@ fn ik_pair() -> (SecureChannel, SecureChannel) {
 fn tampering_one_byte_fails_decryption() {
     let (mut client, mut host) = ik_pair();
     let mut ciphertext = client.seal(b"secret input").unwrap();
+
     // Flip one bit in every position in turn — no byte may be malleable.
     for i in 0..ciphertext.len() {
         let mut tampered = ciphertext.clone();
+
         tampered[i] ^= 0x01;
+
         assert!(
             matches!(host.open(&tampered), Err(NoiseError::Snow(_))),
             "tampered byte {i} was accepted"
         );
+
         // A fresh channel per attempt: a decrypt failure poisons the nonce
         // state by design, matching the "treat as fatal, drop connection" rule.
         let (c, h) = ik_pair();
+
         (client, host) = (c, h);
         ciphertext = client.seal(b"secret input").unwrap();
     }
@@ -53,7 +62,9 @@ fn tampering_one_byte_fails_decryption() {
 fn replayed_frame_fails_decryption() {
     let (mut client, mut host) = ik_pair();
     let ciphertext = client.seal(b"type a command").unwrap();
+
     assert_eq!(host.open(&ciphertext).unwrap(), b"type a command");
+
     // The relay (or anyone on the path) re-sends the identical ciphertext:
     // snow's receive nonce has advanced, so this must fail.
     assert!(matches!(host.open(&ciphertext), Err(NoiseError::Snow(_))));
@@ -71,10 +82,13 @@ fn unauthorized_client_static_key_is_visible_and_rejectable_before_data_flows() 
     // Host reads message 1 and must already see the client's static key,
     // before it has sent anything back or any application data exists.
     let msg1 = initiator.write_message().unwrap();
+
     responder.read_message(&msg1).unwrap();
+
     let remote = responder
         .remote_static()
         .expect("IK reveals initiator static in msg1");
+
     assert_eq!(remote, intruder.public.as_slice());
     assert_ne!(remote, authorized.public.as_slice());
     // Policy layer: not in the allowlist → the host drops the connection here.
@@ -90,6 +104,7 @@ fn frames_survive_the_encrypted_channel() {
     let Frame::Control(payload) = Frame::decode(&host.open(&ct).unwrap()).unwrap() else {
         panic!("expected control frame");
     };
+
     assert_eq!(
         Frame::parse_control::<HostBound>(&payload).unwrap(),
         HostBound::ListSessions
@@ -100,6 +115,7 @@ fn frames_survive_the_encrypted_channel() {
     let Frame::Control(payload) = Frame::decode(&client.open(&ct).unwrap()).unwrap() else {
         panic!("expected control frame");
     };
+
     assert_eq!(
         Frame::parse_control::<ClientBound>(&payload).unwrap(),
         ClientBound::SessionList(Vec::new())
@@ -110,6 +126,8 @@ fn frames_survive_the_encrypted_channel() {
         seq: 7,
         data: b"C:\\>".to_vec(),
     };
+
     let ct = host.seal(&output.encode().unwrap()).unwrap();
+
     assert_eq!(Frame::decode(&client.open(&ct).unwrap()).unwrap(), output);
 }

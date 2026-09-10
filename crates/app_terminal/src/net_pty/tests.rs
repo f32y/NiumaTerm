@@ -2,11 +2,14 @@ use crate::net_pty::*;
 
 fn reader_with(bytes: &[u8]) -> (NetReader, SoftReady) {
     let ready = SoftReady::new();
+
     ready.set_ready();
+
     let reader = NetReader {
         buffer: Arc::new(Mutex::new(VecDeque::from(bytes.to_vec()))),
         read_ready: ready.clone(),
     };
+
     (reader, ready)
 }
 
@@ -33,11 +36,14 @@ fn reader_yields_bytes_then_signals_drained() {
 #[test]
 fn buffer_overflow_keeps_the_newest_bytes() {
     let mut queue = VecDeque::from(vec![b'x'; MAX_BUFFERED_BYTES]);
+
     assert!(!push_bounded(&mut queue, Vec::new()), "at the cap is fine");
 
     assert!(push_bounded(&mut queue, b"tail".to_vec()));
     assert_eq!(queue.len(), MAX_BUFFERED_BYTES);
+
     let kept: Vec<u8> = queue.iter().rev().take(4).rev().copied().collect();
+
     assert_eq!(kept, b"tail");
 }
 
@@ -45,12 +51,14 @@ fn buffer_overflow_keeps_the_newest_bytes() {
 fn late_bytes_reset_readiness() {
     let (mut reader, ready) = reader_with(b"x");
     let mut buf = [0u8; 8];
+
     assert_eq!(reader.read(&mut buf).unwrap(), 1);
     assert!(!ready.is_ready());
 
     // Simulate the drain thread appending live output.
     reader.buffer.lock().extend(b"y".iter().copied());
     ready.set_ready();
+
     assert_eq!(reader.read(&mut buf).unwrap(), 1);
     assert_eq!(buf[0], b'y');
     assert!(!ready.is_ready());

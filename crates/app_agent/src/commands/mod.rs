@@ -146,6 +146,7 @@ pub(super) fn normalize_command(mut command: SlashCommandInfo) -> Option<SlashCo
     }
 
     command.name = name.to_ascii_lowercase();
+
     Some(command)
 }
 
@@ -253,6 +254,7 @@ pub(super) fn filter_palette_catalog<'a>(
             buckets[rank].push(PaletteCatalogEntry::Command(command));
         }
     }
+
     for skill in skills {
         if let Some(rank) = skill_match_rank(skill, query) {
             buckets[rank].push(PaletteCatalogEntry::Skill(skill));
@@ -305,6 +307,7 @@ pub(super) fn validate_skill_binding(
     let Some(binding) = binding else {
         return Ok(None);
     };
+
     if !input_has_bound_skill_token(input, binding) {
         return Ok(None);
     }
@@ -312,6 +315,7 @@ pub(super) fn validate_skill_binding(
     let Some(catalog) = catalog else {
         return Err(i18n("agent-command-skill-loading").to_string());
     };
+
     let Some(skill) = catalog
         .skills
         .iter()
@@ -319,6 +323,7 @@ pub(super) fn validate_skill_binding(
     else {
         return Err(i18n("agent-command-skill-unavailable").replace("{name}", &binding.name));
     };
+
     if !skill.enabled {
         return Err(i18n("agent-command-skill-disabled").replace("{name}", &binding.name));
     }

@@ -32,6 +32,7 @@ pub(crate) fn shape_lines<'a>(
     lines
         .map(|(key, line)| {
             let runs = terminal_text_runs(line, &base);
+
             window.text_system().shape_line_by_hash(
                 key,
                 line.text().len(),
@@ -147,6 +148,7 @@ pub(crate) fn paint_line_backgrounds_at(
             rgb(color.rgb_u32()),
         ));
     };
+
     for cell_data in line.cells() {
         let width: u16 = if cell_data.wide == Wide::Wide { 2 } else { 1 };
 

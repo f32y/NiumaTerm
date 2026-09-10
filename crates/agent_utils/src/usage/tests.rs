@@ -6,6 +6,7 @@ fn filling_adds_missing_windows_and_keeps_the_ones_already_read() {
         fable_weekly: Some(super::UsageWindow::new(30, 10_080)),
         ..super::UsageSnapshot::default()
     };
+
     let endpoint = super::UsageSnapshot {
         five_hour: Some(super::UsageWindow::new(88, 300)),
         ..super::UsageSnapshot::default()
@@ -51,6 +52,7 @@ fn the_compact_window_falls_back_to_the_weekly_limit() {
         weekly: Some(UsageWindow::new(40, WEEKLY_WINDOW_MINUTES)),
         ..UsageSnapshot::default()
     };
+
     let weekly_only = UsageSnapshot {
         weekly: Some(UsageWindow::new(40, WEEKLY_WINDOW_MINUTES)),
         ..UsageSnapshot::default()

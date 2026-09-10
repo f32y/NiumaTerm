@@ -52,11 +52,13 @@ impl RenderOnce for InlineRename {
             .id(self.id)
             .aria_label(self.label)
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
+
         let container = match self.style {
             InlineRenameStyle::HorizontalTab => container.flex_1(),
             InlineRenameStyle::SidebarTab => container.flex_1().overflow_hidden(),
             InlineRenameStyle::Workspace => container.w_full().text_left().text_sm().truncate(),
         };
+
         let input = match self.style {
             InlineRenameStyle::HorizontalTab => Input::new(&self.input)
                 .small()
@@ -74,6 +76,7 @@ impl RenderOnce for InlineRename {
                 .text_sm()
                 .appearance(false),
         };
+
         let cancel = self.cancel;
 
         container

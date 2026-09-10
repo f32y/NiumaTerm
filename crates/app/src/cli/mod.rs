@@ -67,6 +67,7 @@ pub(crate) fn parse_nmt_url(url: &str) -> Result<CliAction, String> {
         .strip_prefix("nmt://action/")
         .ok_or_else(|| format!("not an nmt://action/ url: {url}"))?;
     let (verb, query) = rest.split_once('?').unwrap_or((rest, ""));
+
     match verb {
         "activate" => Ok(CliAction::Activate),
         "focus_notification" => {

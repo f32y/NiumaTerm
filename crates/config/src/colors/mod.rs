@@ -43,6 +43,7 @@ impl Mul<f32> for ColorRgb {
             "Scaling ColorRgb by {} from {:?} to {:?}",
             rhs, self, result
         );
+
         result
     }
 }
@@ -64,6 +65,7 @@ impl ColorRgb {
         // Clamp + round (instead of truncating) so a channel like 0.9999
         // maps back to 255 on float→u8 round-trips.
         let channel = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+
         ColorRgb {
             r: channel(arr[0]),
             g: channel(arr[1]),
@@ -496,11 +498,13 @@ impl ColorBuilder {
         if hex.len() == 8 {
             let (rgb_part, alpha_part) = hex.split_at(6);
             let alpha_from_hex = i32::from_str_radix(alpha_part, 16).unwrap();
+
             hex = rgb_part.to_string();
             alpha = (alpha_from_hex as f64) / 255.0;
         }
 
         let rgb = decode_hex(&hex).unwrap_or_default();
+
         if rgb.is_empty() || (rgb.len() != 3 && rgb.len() != 4) {
             return Err(String::from("Error: Invalid string, not able to convert"));
         }
@@ -594,6 +598,7 @@ where
     D: de::Deserializer<'de>,
 {
     let s = String::deserialize(deserializer)?;
+
     match ColorBuilder::from_hex(s, Format::SRGB0_1) {
         Ok(color) => Ok((color.to_arr(), color.to_wgpu())),
         Err(e) => Err(DeError::custom(e)),
@@ -605,6 +610,7 @@ where
     D: de::Deserializer<'de>,
 {
     let s = String::deserialize(deserializer)?;
+
     match ColorBuilder::from_hex(s, Format::SRGB0_1) {
         Ok(color) => Ok(color.to_arr()),
         Err(e) => Err(DeError::custom(e)),
@@ -616,6 +622,7 @@ where
     D: de::Deserializer<'de>,
 {
     let s = String::deserialize(deserializer)?;
+
     match ColorBuilder::from_hex(s, Format::SRGB0_1) {
         Ok(color) => Ok(Some(color.to_arr())),
         Err(e) => Err(DeError::custom(e)),

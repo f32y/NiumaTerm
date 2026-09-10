@@ -21,7 +21,9 @@ pub(crate) struct BlockListState {
 impl BlockListState {
     pub(crate) fn new(alignment: ListAlignment) -> Self {
         let list = ListState::new(1, alignment, px(240.0));
+
         list.set_follow_mode(FollowMode::Tail);
+
         Self {
             list,
             item_count: 1,
@@ -87,17 +89,21 @@ pub(crate) fn block_list_render_metrics(
 
     for (ix, item) in items.iter().enumerate() {
         let item_px = block_list::item_px(item, cols, cell_h, pad_rows);
+
         if ix < offset.item_ix {
             offset_px += item_px;
         }
+
         if ix + 1 == store_len {
             last_item_px = item_px;
         }
+
         frozen_px += item_px;
     }
 
     let tail_px = history_rows as f32 * cell_h;
     let total_px = frozen_px + block_list::live_item_px(history_rows, live_rows, cell_h, pad_rows);
+
     if offset.item_ix >= item_count {
         offset_px = total_px;
     } else if offset.item_ix <= store_len {
@@ -122,6 +128,7 @@ pub(crate) fn shift_selected_item_for_eviction(
     store_len: usize,
 ) -> Option<usize> {
     let selected = selected?;
+
     if selected < evicted_delta {
         None
     } else {
@@ -175,6 +182,7 @@ pub(crate) fn plan_list_reconcile(
         // Replace the old live tail; the new items are the freshly frozen
         // blocks plus the new live tail.
         let old_live = mirrored.saturating_sub(1);
+
         (old_live..mirrored, item_count - old_live)
     });
 

@@ -48,18 +48,22 @@ impl ModelDirectory {
         // bare id everywhere else is what lets a profile name a model the way
         // its provider does.
         let mut routes: Vec<ModelRoute> = Vec::new();
+
         for group in &groups {
             let provider = group["id"].as_str().unwrap_or_default();
             let provider_name = group["name"].as_str().unwrap_or(provider);
+
             for model in group["models"].as_array().into_iter().flatten() {
                 let Some(id) = model["id"].as_str() else {
                     continue;
                 };
+
                 let ambiguous = groups
                     .iter()
                     .filter(|other| contains_model(other, id))
                     .count()
                     > 1;
+
                 let name = model["name"].as_str().unwrap_or(id);
 
                 routes.push(ModelRoute {
@@ -88,6 +92,7 @@ impl ModelDirectory {
         let current = &value["current"];
         let provider = current["provider"].as_str().unwrap_or_default();
         let model = current["model"].as_str().unwrap_or_default();
+
         let selected = match routes
             .iter()
             .find(|route| route.provider == provider && route.model == model)
@@ -101,6 +106,7 @@ impl ModelDirectory {
                     display: model.to_string(),
                     efforts: Vec::new(),
                 });
+
                 Some(model.to_string())
             }
             None => None,

@@ -100,11 +100,13 @@ pub(super) fn input_detail(name: &str, input: &Value) -> Option<String> {
                 .iter()
                 .filter_map(|todo| {
                     let content = todo["content"].as_str()?;
+
                     let mark = if todo["status"].as_str() == Some("completed") {
                         "x"
                     } else {
                         " "
                     };
+
                     Some(format!("- [{mark}] {content}"))
                 })
                 .collect::<Vec<_>>()
@@ -132,16 +134,19 @@ pub(super) fn edit_diff(name: &str, input: &Value) -> Option<String> {
     }
 
     let mut diff = String::new();
+
     for line in removed.lines() {
         diff.push('-');
         diff.push_str(line);
         diff.push('\n');
     }
+
     for line in added.lines() {
         diff.push('+');
         diff.push_str(line);
         diff.push('\n');
     }
+
     Some(diff)
 }
 

@@ -125,9 +125,11 @@ impl BackgroundTaskRefs {
                 if task_id.is_none() {
                     task_id.clone_from(incoming_task);
                 }
+
                 if tool_use_id.is_none() {
                     tool_use_id.clone_from(incoming_tool_use);
                 }
+
                 if agent_id.is_none() {
                     agent_id.clone_from(incoming_agent);
                 }
@@ -247,14 +249,17 @@ impl BackgroundTaskSummary {
         {
             return name.to_owned();
         }
+
         let id = self.key.id.as_str();
         let tail = id.rsplit(['-', '_', ':']).next().unwrap_or(id);
         let tail = if tail.len() >= 4 { tail } else { id };
         let start = tail.len().saturating_sub(8);
+
         let noun = match self.kind {
             BackgroundTaskKind::Agent => "Agent",
             BackgroundTaskKind::Shell => "Shell",
         };
+
         format!("{noun} {}", &tail[start..])
     }
 }
@@ -373,13 +378,16 @@ impl BackgroundTaskRegistry {
         if self.discovery == discovery {
             return false;
         }
+
         self.discovery = discovery;
+
         true
     }
 
     /// Apply a live update. Returns true when anything changed.
     pub fn apply(&mut self, key: BackgroundTaskKey, update: BackgroundTaskUpdate) -> bool {
         self.sequence += 1;
+
         let sequence = self.sequence;
         let parent_session = self.parent_session.clone();
 
@@ -387,16 +395,20 @@ impl BackgroundTaskRegistry {
             Some(existing) => {
                 let previous_state = existing.state;
                 let changed = merge_update(existing, &update, sequence);
+
                 if existing.state != previous_state {
                     self.activity += 1;
                 }
+
                 if !changed {
                     self.sequence -= 1;
                 }
+
                 changed
             }
             None => {
                 let refs = update.refs.clone().unwrap_or_else(|| default_refs(&key));
+
                 let mut summary = BackgroundTaskSummary {
                     key: key.clone(),
                     parent_session,
@@ -416,9 +428,11 @@ impl BackgroundTaskRegistry {
                     last_preview: None,
                     can_stop: false,
                 };
+
                 merge_update(&mut summary, &update, sequence);
                 self.tasks.insert(key, summary);
                 self.activity += 1;
+
                 true
             }
         }
@@ -439,6 +453,7 @@ impl BackgroundTaskRegistry {
             .tasks
             .get(&key)
             .is_some_and(|existing| existing.sequence > starting_sequence);
+
         if is_stale {
             let metadata_only = BackgroundTaskUpdate {
                 state: None,
@@ -446,8 +461,10 @@ impl BackgroundTaskRegistry {
                 updated_at: None,
                 ..update
             };
+
             return self.apply(key, metadata_only);
         }
+
         self.apply(key, update)
     }
 
@@ -456,17 +473,21 @@ impl BackgroundTaskRegistry {
         if self.tasks.is_empty() && self.discovery == BackgroundTaskDiscoveryState::NotLoaded {
             return false;
         }
+
         self.tasks.clear();
         self.discovery = BackgroundTaskDiscoveryState::NotLoaded;
         self.activity += 1;
+
         true
     }
 
     pub fn snapshot(&self) -> BackgroundTaskSnapshot {
         let mut tasks: Vec<_> = self.tasks.values().cloned().collect();
+
         // Stable order keeps snapshot comparisons meaningful; the view applies
         // its own running/finished ordering on top.
         tasks.sort_by(|left, right| left.key.cmp(&right.key));
+
         BackgroundTaskSnapshot {
             parent_session: self.parent_session.clone(),
             tasks,
@@ -505,36 +526,43 @@ fn merge_update(
 
     if let Some(refs) = update.refs.as_ref() {
         let mut merged = summary.refs.clone();
+
         merged.merge_from(refs);
+
         if merged != summary.refs {
             summary.refs = merged;
             changed = true;
         }
     }
+
     if let Some(kind) = update.kind
         && summary.kind != kind
     {
         summary.kind = kind;
         changed = true;
     }
+
     if let Some(state) = update.state
         && summary.state != state
     {
         summary.state = state;
         changed = true;
     }
+
     changed |= replace_text(&mut summary.display_name, &update.display_name);
     changed |= replace_text(&mut summary.agent_type, &update.agent_type);
     changed |= replace_text(&mut summary.objective, &update.objective);
     changed |= replace_text(&mut summary.status, &update.status);
     changed |= replace_text(&mut summary.model, &update.model);
     changed |= replace_text(&mut summary.last_preview, &update.last_preview);
+
     if let Some(depth) = update.depth
         && summary.depth != Some(depth)
     {
         summary.depth = Some(depth);
         changed = true;
     }
+
     // The earliest known start wins: a restored row can report a start time
     // that a live update observed only after the task was already running.
     if let Some(started_at) = update.started_at
@@ -543,12 +571,14 @@ fn merge_update(
         summary.started_at = Some(started_at);
         changed = true;
     }
+
     if let Some(completed_at) = update.completed_at
         && summary.completed_at != Some(completed_at)
     {
         summary.completed_at = Some(completed_at);
         changed = true;
     }
+
     if let Some(updated_at) = update.updated_at
         && summary.updated_at.is_none_or(|known| updated_at > known)
     {
@@ -559,6 +589,7 @@ fn merge_update(
     if changed {
         summary.sequence = sequence;
     }
+
     changed
 }
 
@@ -566,10 +597,13 @@ pub(crate) fn replace_text(current: &mut Option<String>, incoming: &Option<Strin
     let Some(incoming) = incoming else {
         return false;
     };
+
     if current.as_deref() == Some(incoming.as_str()) {
         return false;
     }
+
     *current = Some(incoming.clone());
+
     true
 }
 

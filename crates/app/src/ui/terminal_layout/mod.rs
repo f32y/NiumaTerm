@@ -75,14 +75,17 @@ impl<L> TerminalLayout<L> {
             else {
                 return None;
             };
+
             for (index, child) in children.iter().enumerate() {
                 if matches!(child, PaneNode::Leaf { id: child_id, .. } if *child_id == id) {
                     return (*axis == direction.axis()).then(|| (state.clone(), index));
                 }
+
                 if let Some(found) = parent_state(child, id, direction) {
                     return Some(found);
                 }
             }
+
             None
         }
 
@@ -105,11 +108,13 @@ impl<L> TerminalLayout<L> {
             }
             SplitOutcome::Wrapped => {}
         }
+
         true
     }
 
     pub(super) fn remove(&mut self, id: PaneId, cx: &mut App) -> Option<L> {
         let (pane, outcome) = self.tree.remove(id)?;
+
         match outcome {
             RemoveOutcome::RemovedFromSplit { state, index } => {
                 // Unrendered groups have no slots to remove. Their first
@@ -122,6 +127,7 @@ impl<L> TerminalLayout<L> {
             }
             RemoveOutcome::Collapsed => {}
         }
+
         Some(pane)
     }
 
@@ -140,9 +146,11 @@ impl<L> TerminalLayout<L> {
         };
         let grow = direction.positive() == (index + 1 < count);
         let target = if grow { current + step } else { current - step };
+
         state.update(cx, |state, cx| {
             state.resize_panel(index, target, window, cx)
         });
+
         true
     }
 

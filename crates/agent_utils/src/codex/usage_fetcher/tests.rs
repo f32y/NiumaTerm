@@ -13,6 +13,7 @@ fn formats_remaining_codex_windows() {
             }
         }
     });
+
     assert_eq!(
         parse_rate_limits(&response).unwrap(),
         UsageSnapshot {
@@ -39,6 +40,7 @@ fn keeps_the_available_window() {
             }
         }
     });
+
     assert_eq!(
         parse_rate_limits(&response).unwrap(),
         UsageSnapshot {
@@ -72,6 +74,7 @@ fn keeps_reset_plan_and_reset_credit_metadata() {
     });
 
     let usage = parse_rate_limits(&response).unwrap();
+
     assert_eq!(usage.plan_type.as_deref(), Some("plus"));
     assert_eq!(usage.five_hour.unwrap().resets_at, Some(1_770_000_000_000));
     assert_eq!(

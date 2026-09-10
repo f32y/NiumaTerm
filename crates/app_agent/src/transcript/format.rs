@@ -90,6 +90,7 @@ pub(super) fn timed_token_label(verb: &str, seconds: u64, output_tokens: Option<
     let duration = i18n("agent-transcript-timed-status")
         .replace("{verb}", verb)
         .replace("{duration}", &elapsed_label(seconds));
+
     match output_tokens {
         Some(tokens) => i18n("agent-transcript-status-tokens")
             .replace("{status}", &duration)
@@ -118,6 +119,7 @@ pub(super) fn elapsed_label(total_seconds: u64) -> String {
             "agent-duration-minutes",
         ),
     ];
+
     let seconds = total_seconds % 60;
 
     let mut parts = units
@@ -171,6 +173,7 @@ pub(crate) fn truncated_user_prompt(text: &str) -> Option<&str> {
     const MAX_CHARS: usize = 512;
 
     let mut completed_lines = 0;
+
     for (chars, (index, ch)) in text.char_indices().enumerate() {
         if chars == MAX_CHARS {
             return Some(&text[..index]);
@@ -178,7 +181,9 @@ pub(crate) fn truncated_user_prompt(text: &str) -> Option<&str> {
 
         if ch == '\n' {
             completed_lines += 1;
+
             let end = index + ch.len_utf8();
+
             if completed_lines == MAX_SOURCE_LINES && end < text.len() {
                 return Some(&text[..end]);
             }
@@ -192,6 +197,7 @@ pub(crate) fn truncated_user_prompt(text: &str) -> Option<&str> {
 /// Incomplete objects and arrays remain eligible while their contents stream.
 pub(crate) fn detect_output_language(output: &str) -> &'static str {
     let trimmed = output.trim_start();
+
     if trimmed.starts_with("diff --git")
         || trimmed.starts_with("@@ ")
         || (trimmed.starts_with("--- ")
@@ -205,6 +211,7 @@ pub(crate) fn detect_output_language(output: &str) -> &'static str {
         // Validate only a bounded prefix. An incomplete value is expected
         // during streaming; other parse errors identify prose or log markers.
         let end = trimmed.floor_char_boundary(trimmed.len().min(16 * 1024));
+
         match serde_json::from_str::<serde_json::Value>(&trimmed[..end]) {
             Ok(_) => "json",
             Err(error) if error.is_eof() => "json",
@@ -224,9 +231,11 @@ pub(crate) fn strip_read_gutter(output: &str) -> Option<String> {
     for line in output.lines() {
         let (gutter, text) = line.split_once('→')?;
         let number = gutter.trim_start();
+
         if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
             return None;
         }
+
         body.push_str(text);
         body.push('\n');
     }
@@ -255,6 +264,7 @@ pub(crate) fn command_execution_detail(command: &str, aggregated_output: Option<
     let mut detail = String::with_capacity(
         command.len() + aggregated_output.map_or(0, str::len) + "$ \n\n".len(),
     );
+
     detail.push_str("$ ");
     detail.push_str(command);
 

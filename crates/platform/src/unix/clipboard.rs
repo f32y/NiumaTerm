@@ -21,6 +21,7 @@ impl Clipboard {
                 let (selection, clipboard) = unsafe {
                     wayland_clipboard::create_clipboards_from_external(display.display.as_ptr())
                 };
+
                 Self {
                     clipboard: Box::new(clipboard),
                     selection: Some(Box::new(selection)),

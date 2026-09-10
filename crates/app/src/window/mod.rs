@@ -160,6 +160,7 @@ impl AppWindow {
                         px(w.height.max(MIN_WINDOW_HEIGHT)),
                     ),
                 );
+
                 if w.maximized {
                     WindowBounds::Maximized(bounds)
                 } else {
@@ -187,7 +188,9 @@ impl AppWindow {
                 cx.global_mut::<WindowRegistry>()
                     .0
                     .push((window.window_handle().window_id(), initial));
+
                 let shell: AnyView = cx.new(|cx| Shell::new(window, cx)).into();
+
                 // Each top-level region paints the configured alpha once. A
                 // background on Root would sit underneath all of them and make
                 // the effective opacity higher than the requested value.

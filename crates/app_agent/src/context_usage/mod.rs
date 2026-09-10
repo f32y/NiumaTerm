@@ -90,6 +90,7 @@ fn context_segment_rows(composition: &ContextComposition) -> Vec<ContextSegmentR
         .collect();
 
     rows.sort_by_key(|row| cmp::Reverse(row.tokens));
+
     rows
 }
 
@@ -97,6 +98,7 @@ impl RenderOnce for ContextSegmentRow {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let foreground = cx.theme().foreground;
         let muted = cx.theme().muted_foreground;
+
         // A deferred row is dimmed rather than relabelled: its name arrives as
         // the harness renders it, and Claude's already ends in "(deferred)".
         let label_color = if self.deferred {
@@ -218,6 +220,7 @@ fn token_usage_rows(usage: TokenUsageBreakdown, include_total: bool) -> Vec<Toke
             nested: false,
         });
     }
+
     if let Some(tokens) = usage.input_tokens {
         rows.push(TokenUsageRow {
             label: i18n("agent-context-input"),
@@ -225,6 +228,7 @@ fn token_usage_rows(usage: TokenUsageBreakdown, include_total: bool) -> Vec<Toke
             nested: false,
         });
     }
+
     if let Some(tokens) = usage.cache_read_input_tokens {
         rows.push(TokenUsageRow {
             label: i18n("agent-context-cache-read"),
@@ -232,6 +236,7 @@ fn token_usage_rows(usage: TokenUsageBreakdown, include_total: bool) -> Vec<Toke
             nested: true,
         });
     }
+
     if let Some(tokens) = usage.cache_write_input_tokens {
         rows.push(TokenUsageRow {
             label: i18n("agent-context-cache-write"),
@@ -239,6 +244,7 @@ fn token_usage_rows(usage: TokenUsageBreakdown, include_total: bool) -> Vec<Toke
             nested: true,
         });
     }
+
     if let Some(tokens) = usage.output_tokens {
         rows.push(TokenUsageRow {
             label: i18n("agent-context-output"),
@@ -246,6 +252,7 @@ fn token_usage_rows(usage: TokenUsageBreakdown, include_total: bool) -> Vec<Toke
             nested: false,
         });
     }
+
     if let Some(tokens) = usage.reasoning_output_tokens {
         rows.push(TokenUsageRow {
             label: i18n("agent-context-reasoning"),
@@ -303,17 +310,20 @@ impl RenderOnce for ContextUsageIndicator {
         let accessibility_label =
             i18n("agent-context-accessibility").replace("{usage}", &indicator_label);
         let (capacity_label, remaining_label) = context_capacity_labels(usage);
+
         // Both sections report the same categories, so the live context and
         // the last turn can be read against each other. A conversation
         // restored from history knows only its total, and that alone keeps the
         // section present until the first reply reports the categories.
         let current_rows = token_usage_rows(usage.current, /*include_total*/ true);
         let cumulative = usage.cumulative;
+
         let segment_rows = self
             .composition
             .as_ref()
             .map(context_segment_rows)
             .unwrap_or_default();
+
         // A conversation that has not closed a step yet reports zeroes, which
         // describe nothing; the section appears once there is something in it.
         let stats = self.stats.filter(|stats| stats.steps > 0);

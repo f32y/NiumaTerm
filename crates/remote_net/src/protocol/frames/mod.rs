@@ -61,9 +61,11 @@ pub enum FrameError {
 impl Frame {
     pub fn control<T: Serialize>(msg: &T) -> Result<Frame, FrameError> {
         let payload = postcard::to_stdvec(msg).map_err(|e| FrameError::Control(e.to_string()))?;
+
         if payload.len() > MAX_DATA_LEN {
             return Err(FrameError::TooLarge);
         }
+
         Ok(Frame::Control(payload))
     }
 
@@ -75,11 +77,13 @@ impl Frame {
 
     pub fn encode(&self) -> Result<Vec<u8>, FrameError> {
         let mut out = Vec::new();
+
         match self {
             Frame::Control(payload) => {
                 if payload.len() > MAX_DATA_LEN {
                     return Err(FrameError::TooLarge);
                 }
+
                 out.push(TYPE_CONTROL);
                 out.extend_from_slice(payload);
             }
@@ -91,6 +95,7 @@ impl Frame {
                 if data.len() > MAX_DATA_LEN {
                     return Err(FrameError::TooLarge);
                 }
+
                 out.push(TYPE_OUTPUT);
                 out.extend_from_slice(&session_id.to_le_bytes());
                 out.extend_from_slice(&seq.to_le_bytes());
@@ -100,6 +105,7 @@ impl Frame {
                 if data.len() > MAX_DATA_LEN {
                     return Err(FrameError::TooLarge);
                 }
+
                 out.push(TYPE_INPUT);
                 out.extend_from_slice(&session_id.to_le_bytes());
                 out.extend_from_slice(data);
@@ -120,24 +126,29 @@ impl Frame {
                 out.extend_from_slice(&seq.to_le_bytes());
             }
         }
+
         Ok(out)
     }
 
     pub fn decode(buf: &[u8]) -> Result<Frame, FrameError> {
         let (&kind, rest) = buf.split_first().ok_or(FrameError::Truncated)?;
+
         match kind {
             TYPE_CONTROL => {
                 if rest.len() > MAX_DATA_LEN {
                     return Err(FrameError::TooLarge);
                 }
+
                 Ok(Frame::Control(rest.to_vec()))
             }
             TYPE_OUTPUT => {
                 let (session_id, rest) = read_u64(rest)?;
                 let (seq, data) = read_u64(rest)?;
+
                 if data.len() > MAX_DATA_LEN {
                     return Err(FrameError::TooLarge);
                 }
+
                 Ok(Frame::Output {
                     session_id,
                     seq,
@@ -146,9 +157,11 @@ impl Frame {
             }
             TYPE_INPUT => {
                 let (session_id, data) = read_u64(rest)?;
+
                 if data.len() > MAX_DATA_LEN {
                     return Err(FrameError::TooLarge);
                 }
+
                 Ok(Frame::Input {
                     session_id,
                     data: data.to_vec(),
@@ -158,9 +171,11 @@ impl Frame {
                 let (session_id, rest) = read_u64(rest)?;
                 let (cols, rest) = read_u16(rest)?;
                 let (rows, rest) = read_u16(rest)?;
+
                 if !rest.is_empty() {
                     return Err(FrameError::Truncated);
                 }
+
                 Ok(Frame::Resize {
                     session_id,
                     cols,
@@ -170,9 +185,11 @@ impl Frame {
             TYPE_EXITED => {
                 let (session_id, rest) = read_u64(rest)?;
                 let (seq, rest) = read_u64(rest)?;
+
                 if !rest.is_empty() {
                     return Err(FrameError::Truncated);
                 }
+
                 Ok(Frame::Exited { session_id, seq })
             }
             other => Err(FrameError::UnknownType(other)),
@@ -184,7 +201,9 @@ fn read_u64(buf: &[u8]) -> Result<(u64, &[u8]), FrameError> {
     if buf.len() < 8 {
         return Err(FrameError::Truncated);
     }
+
     let (head, rest) = buf.split_at(8);
+
     Ok((u64::from_le_bytes(head.try_into().unwrap()), rest))
 }
 
@@ -192,7 +211,9 @@ fn read_u16(buf: &[u8]) -> Result<(u16, &[u8]), FrameError> {
     if buf.len() < 2 {
         return Err(FrameError::Truncated);
     }
+
     let (head, rest) = buf.split_at(2);
+
     Ok((u16::from_le_bytes(head.try_into().unwrap()), rest))
 }
 

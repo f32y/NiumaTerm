@@ -46,6 +46,7 @@ pub(crate) fn visible_rows(
     let pad = pad_rows * cell_h;
     let visible_top = (-item_top_in_window - OVERDRAW).max(0.0);
     let visible_bottom = viewport_h - item_top_in_window + OVERDRAW;
+
     if visible_bottom <= 0.0 || cell_h <= 0.0 {
         return 0..0;
     }
@@ -73,6 +74,7 @@ pub(crate) fn nav_item_top(
         if item_rows(item, cols) > 0 {
             tops.push(y);
         }
+
         y += item_px(item, cols, cell_h, pad_rows);
     }
 

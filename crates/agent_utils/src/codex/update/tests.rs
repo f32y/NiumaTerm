@@ -21,6 +21,7 @@ const CODEX_DOCTOR: &str = r#"{
 #[test]
 fn doctor_schema_is_validated_and_remediation_is_display_only() {
     let status = parse_codex_doctor(CODEX_DOCTOR).unwrap();
+
     assert_eq!(status.current, Some(Version::new(0, 146, 0)));
     assert_eq!(status.available, Some(Version::new(0, 147, 0)));
     assert!(status.update_available());
@@ -31,11 +32,14 @@ fn doctor_schema_is_validated_and_remediation_is_display_only() {
     );
 
     let unsupported = CODEX_DOCTOR.replacen("\"schemaVersion\": 1", "\"schemaVersion\": 2", 1);
+
     assert_eq!(
         parse_codex_doctor(&unsupported).unwrap_err().kind,
         UpdateErrorKind::InvalidResponse
     );
+
     let invalid_version = CODEX_DOCTOR.replacen("0.147.0", "latest", 1);
+
     assert!(parse_codex_doctor(&invalid_version).is_err());
 }
 
@@ -43,17 +47,20 @@ fn doctor_schema_is_validated_and_remediation_is_display_only() {
 fn version_fallback_uses_the_same_configured_launcher() {
     #[cfg(windows)]
     let script = "@echo off\r\nif \"%1\"==\"--version\" (echo configured-cli 9.8.7 & exit /b 0)\r\nexit /b 7\r\n";
+
     #[cfg(unix)]
     let script = "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'configured-cli 9.8.7'; exit 0; fi\nexit 7\n";
     let (root, executable) = fake_launcher("version fallback", script);
     let launcher = AgentCli::new(executable.display().to_string(), []);
 
     let status = CodexMaintenance.probe(&launcher).unwrap();
+
     assert_eq!(status.current, Some(Version::new(9, 8, 7)));
     assert!(matches!(
         status.support,
         DiscoverySupport::Unsupported { .. }
     ));
+
     let _ = fs::remove_dir_all(root);
 }
 
@@ -61,10 +68,12 @@ fn version_fallback_uses_the_same_configured_launcher() {
 /// execute bit are what make a script runnable on each platform.
 fn fake_launcher(name: &str, body: &str) -> (PathBuf, PathBuf) {
     let root = env::temp_dir().join(format!("NiumaTerm Codex update {} {}", name, process::id()));
+
     fs::create_dir_all(&root).unwrap();
 
     #[cfg(windows)]
     let launcher = root.join(format!("{name}.cmd"));
+
     #[cfg(unix)]
     let launcher = root.join(name);
 

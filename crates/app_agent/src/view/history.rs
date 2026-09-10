@@ -54,6 +54,7 @@ impl SessionHistoryUi {
         }
 
         self.selected = index;
+
         true
     }
 }
@@ -134,6 +135,7 @@ impl AgentPane {
             .history_ui
             .pending
             .unwrap_or(self.history_ui.sessions.len());
+
         let body_height =
             px((Self::HISTORY_ROW_HEIGHT * rows as f32).min(Self::HISTORY_MAX_HEIGHT));
 
@@ -183,9 +185,11 @@ impl AgentPane {
                     }
 
                     this.history_ui.pointer_inside = *inside;
+
                     if !*inside {
                         this.history_ui.pointer = None;
                     }
+
                     cx.notify();
                 }))
                 .child(
@@ -304,6 +308,7 @@ impl AgentPane {
         let Some(session) = self.history_ui.sessions.get(index) else {
             return div().into_any_element();
         };
+
         // The strip's own surface is the muted tint, so a row state derived
         // from `muted` again lands on the color it sits on and disappears.
         // The list tokens are the per-theme fills meant to read against a

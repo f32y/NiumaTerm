@@ -38,6 +38,7 @@ impl TranscriptView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let cwd = self.cwd.clone();
+
         let (icon, heading, reason, status, detail) = match &self.items[index].item {
             SessionItem::CommandExecution {
                 purpose,
@@ -115,6 +116,7 @@ impl TranscriptView {
         let detail_part = RevealedPart::Block(RevealKey::Row(index));
         let detail_height = self.disclosures.height(detail_part);
         let detail_view = cx.entity().downgrade();
+
         let status_label = match status.as_deref() {
             Some("failed") => i18n("agent-transcript-status-failed"),
             Some("declined") => i18n("agent-transcript-status-declined"),
@@ -123,6 +125,7 @@ impl TranscriptView {
             Some(status) => status,
             None => i18n("agent-transcript-no-status"),
         };
+
         // The outcome is a mark rather than a word: it lands in the same slot
         // on every card, so a run of steps can be scanned down that column
         // instead of read. The wording stays in the row's accessible label.
@@ -130,6 +133,7 @@ impl TranscriptView {
             Some("failed" | "declined") => AgentCardTone::Failed,
             _ => AgentCardTone::Neutral,
         };
+
         let status_icon = status.as_deref().map(|state| match state {
             "failed" | "declined" => (IconName::CircleX, cx.theme().danger),
             "completed" => (IconName::Check, cx.theme().success),
@@ -150,23 +154,28 @@ impl TranscriptView {
                 ""
             }
         );
+
         // A failure reason shows whether or not the step is expanded, so a
         // failed row usually heads a block even while its output is hidden.
         // Otherwise the header heads a block for exactly as long as there is
         // one: it squares off with the detail's arrival and returns to a pill
         // the moment the detail has finished shrinking away.
         let heads_body = reason.is_some() || (expanded && detail_reveal > 0.0);
+
         let mut header = AgentDisclosureRow::new(("wl-head", index), heading)
             .type_icon(icon)
             .tone(tone)
             .heads_body(heads_body)
             .accessible_label(accessible_label);
+
         if let Some((icon, color)) = status_icon {
             header = header.status(icon, color);
         }
+
         if expandable {
             header = header.expanded(expanded).opening(detail_reveal);
         }
+
         let header =
             header.render(cx).when(expandable, |this| {
                 this.on_click(cx.listener(move |this, _, _, cx| {
@@ -200,6 +209,7 @@ impl TranscriptView {
                         let view = self
                             .code_transcripts
                             .ensure(index, &self.items[index].item, cx);
+
                         div()
                             .w_full()
                             .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
@@ -212,6 +222,7 @@ impl TranscriptView {
                             })
                             .read(cx)
                             .clone();
+
                         div()
                             .w_full()
                             .relative()

@@ -76,11 +76,13 @@ impl TranscriptView {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let frost = self.zoom_fade.drive(self.zoom_open, now, window, cx);
+
         // The image is released only once the fade-out has nothing left to
         // show; an opening layer also starts at zero and must keep it.
         if frost.gone() {
             self.zoomed_image = None;
         }
+
         let Some(image) = self.zoomed_image.clone() else {
             return Vec::new();
         };
@@ -93,6 +95,7 @@ impl TranscriptView {
                 .on_click(cx.listener(|this, _, _, cx| this.close_zoomed_image(cx)))
                 .into_any_element(),
         ];
+
         elements.extend(
             self.render_preview_image(image, frost.progress(), window, cx)
                 // A composer thumbnail sits in a sibling of the transcript
@@ -103,6 +106,7 @@ impl TranscriptView {
                 // coordinates it is placed in belong.
                 .map(|image| deferred(image).into_any_element()),
         );
+
         elements
     }
 
@@ -121,19 +125,24 @@ impl TranscriptView {
         // pixels, so the decoded frame is the only place the image's own
         // dimensions can come from.
         let frame = image.clone().use_render_image(window, cx)?.size(0);
+
         // Decoded dimensions count device pixels, so dividing by the display
         // scale spends one screen pixel per image pixel: the image is shown as
         // sharp as it is, without the display's scale magnifying it.
         let scale = window.scale_factor();
+
         let natural = size(
             px(frame.width.0 as f32 / scale),
             px(frame.height.0 as f32 / scale),
         );
+
         let room = size(self.transcript_width?, self.transcript_height?);
+
         let shown = Bounds::centered_at(
             point(room.width / 2.0, room.height / 2.0),
             preview_size(natural, room),
         );
+
         // The thumbnail reports where it is in the window; the image is laid
         // out inside the viewport, so it needs the same place measured from
         // the viewport's corner.
@@ -144,6 +153,7 @@ impl TranscriptView {
                 origin: origin.origin - viewport,
                 size: origin.size,
             });
+
         let placed = preview_bounds(origin.unwrap_or(shown), shown, progress);
 
         Some(
@@ -211,6 +221,7 @@ fn preview_size(natural: Size<Pixels>, room: Size<Pixels>) -> Size<Pixels> {
     let factor = (room.width * PREVIEW_FRACTION / natural.width)
         .min(room.height * PREVIEW_FRACTION / natural.height)
         .min(1.0);
+
     size(natural.width * factor, natural.height * factor)
 }
 

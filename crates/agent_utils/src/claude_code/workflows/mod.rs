@@ -41,6 +41,7 @@ pub(crate) struct ClaudeWorkflows {
 impl ClaudeWorkflows {
     pub(crate) fn snapshot(&self) -> Option<WorkflowSnapshot> {
         let session_id = self.session_id.clone()?;
+
         let runs = self
             .order
             .iter()
@@ -56,9 +57,11 @@ impl ClaudeWorkflows {
         if self.session_id.as_deref() == Some(session_id) {
             return false;
         }
+
         self.session_id = Some(session_id.to_owned());
         self.runs.clear();
         self.order.clear();
+
         true
     }
 
@@ -67,6 +70,7 @@ impl ClaudeWorkflows {
         if let Some(session_id) = message["session_id"].as_str() {
             self.set_session(session_id);
         }
+
         if self.session_id.is_none() || message["type"].as_str() != Some("system") {
             return false;
         }
@@ -83,6 +87,7 @@ impl ClaudeWorkflows {
                 if message["task_type"].as_str() != Some("local_workflow") {
                     return false;
                 }
+
                 self.start_run(task_id, message)
             }
             "task_progress" | "task_updated" | "task_notification" => {
@@ -90,6 +95,7 @@ impl ClaudeWorkflows {
                 if !self.runs.contains_key(task_id) {
                     return false;
                 }
+
                 self.update_run(task_id, subtype, message)
             }
             _ => false,
@@ -100,6 +106,7 @@ impl ClaudeWorkflows {
         if self.runs.contains_key(task_id) {
             return false;
         }
+
         self.order.push(task_id.to_owned());
         self.runs.insert(
             task_id.to_owned(),
@@ -117,6 +124,7 @@ impl ClaudeWorkflows {
                 refresh_failed: false,
             },
         );
+
         true
     }
 
@@ -140,19 +148,23 @@ impl ClaudeWorkflows {
                 run.phases = phases;
                 changed = true;
             }
+
             if run.agents != agents {
                 run.agents = agents;
                 changed = true;
             }
         }
+
         if let Some(state) = state
             && run.state != state
         {
             run.state = state;
             changed = true;
         }
+
         changed |= replace_number(&mut run.total_tokens, total_tokens);
         changed |= replace_number(&mut run.total_tool_calls, total_tool_calls);
+
         // A terminal record's summary is the run's own final text; earlier ones
         // describe the run rather than its outcome.
         if run.state.is_terminal() {
@@ -175,6 +187,7 @@ impl ClaudeWorkflows {
             run.refresh_failed = refresh.failed;
             changed = true;
         }
+
         if let Some(run_id) = refresh.run_id
             && run.run_id.as_deref() != Some(run_id.as_str())
         {
@@ -192,10 +205,12 @@ impl ClaudeWorkflows {
             else {
                 continue;
             };
+
             let observed = match entry.result {
                 Some(_) => WorkflowAgentState::Done,
                 None => WorkflowAgentState::Running,
             };
+
             if agent.state == WorkflowAgentState::Queued
                 || (agent.state == WorkflowAgentState::Running
                     && observed == WorkflowAgentState::Done)
@@ -203,6 +218,7 @@ impl ClaudeWorkflows {
                 agent.state = observed;
                 changed = true;
             }
+
             if let Some(result) = entry.result {
                 changed |= replace_text(&mut agent.result_preview, &Some(result));
             }
@@ -215,14 +231,17 @@ impl ClaudeWorkflows {
     /// already reported keeps its live state.
     pub(crate) fn merge_restored(&mut self, restored: Vec<RestoredWorkflowRun>) -> bool {
         let mut changed = false;
+
         for run in restored {
             if self.runs.contains_key(&run.run.task_id) {
                 continue;
             }
+
             self.order.push(run.run.task_id.clone());
             self.runs.insert(run.run.task_id.clone(), run.run);
             changed = true;
         }
+
         changed
     }
 }
@@ -247,6 +266,7 @@ fn run_state(subtype: &str, record: &Value) -> Option<WorkflowRunState> {
             .or_else(|| record["status"].as_str())?,
         _ => return None,
     };
+
     Some(match status {
         "pending" => WorkflowRunState::Starting,
         "running" => WorkflowRunState::Running,
@@ -269,6 +289,7 @@ pub(crate) fn parse_progress(progress: &Value) -> (Vec<WorkflowPhase>, Vec<Workf
                 let Some(index) = entry["index"].as_u64() else {
                     continue;
                 };
+
                 phases.push(WorkflowPhase {
                     index,
                     title: entry["title"].as_str().unwrap_or_default().to_owned(),
@@ -278,6 +299,7 @@ pub(crate) fn parse_progress(progress: &Value) -> (Vec<WorkflowPhase>, Vec<Workf
                 let Some(index) = entry["index"].as_u64() else {
                     continue;
                 };
+
                 agents.push(WorkflowAgent {
                     index,
                     agent_id: text_field(entry, &["agentId"]),
@@ -302,6 +324,7 @@ pub(crate) fn parse_progress(progress: &Value) -> (Vec<WorkflowPhase>, Vec<Workf
 
     phases.sort_by_key(|phase| phase.index);
     agents.sort_by_key(|agent| agent.index);
+
     (phases, agents)
 }
 
@@ -321,10 +344,13 @@ fn replace_number(current: &mut Option<u64>, incoming: Option<u64>) -> bool {
     let Some(incoming) = incoming else {
         return false;
     };
+
     if *current == Some(incoming) {
         return false;
     }
+
     *current = Some(incoming);
+
     true
 }
 

@@ -160,6 +160,7 @@ impl Global for AppUpdate {}
 
 pub(crate) fn initialize(testing: bool, cx: &mut App) {
     let settings = cx.global::<AppSettings>();
+
     cx.set_global(AppUpdate {
         status: Status::Unknown,
         testing,
@@ -232,6 +233,7 @@ fn prepare_install(
     }
 
     let inspect_shell_extension = plan.contains(install::SHELL_EXTENSION_DLL);
+
     cx.global_mut::<AppUpdate>().pending = Some(PendingInstall {
         release,
         staged,
@@ -254,6 +256,7 @@ fn inspect_file_users(cx: &mut App) {
     };
     let release = pending.release.clone();
     let dll = pending.install.join(install::SHELL_EXTENSION_DLL);
+
     set_status(Status::InspectingFileUse(release), cx);
     cx.refresh_windows();
 
@@ -262,6 +265,7 @@ fn inspect_file_users(cx: &mut App) {
             .background_executor()
             .spawn(async move { file_usage(&dll) })
             .await;
+
         cx.update(|cx| finish_file_use_inspection(result, cx));
     })
     .detach();
@@ -280,12 +284,14 @@ fn finish_file_use_inspection(result: Result<FileUsage, RestartManagerError>, cx
         Ok(Some(prompt)) => prompt,
         Err(error) => {
             warn!("update: checking shell-extension users failed: {error}");
+
             FileUsePrompt {
                 reason: FileUsePromptReason::CheckFailed,
                 applications: Vec::new(),
             }
         }
     };
+
     show_file_use_prompt(prompt, cx);
 }
 
@@ -293,9 +299,11 @@ fn classify_file_usage(
     result: Result<FileUsage, RestartManagerError>,
 ) -> Result<Option<FileUsePrompt>, RestartManagerError> {
     let usage = result?;
+
     if usage.applications.is_empty() && usage.reboot_reasons.is_empty() {
         return Ok(None);
     }
+
     Ok(Some(FileUsePrompt {
         reason: if usage.reboot_reasons.is_empty() {
             FileUsePromptReason::InUse
@@ -310,6 +318,7 @@ fn show_file_use_prompt(prompt: FileUsePrompt, cx: &mut App) {
     let Some(pending) = cx.global::<AppUpdate>().pending.clone() else {
         return;
     };
+
     set_status(Status::AwaitingFileUse(pending.release.clone()), cx);
 
     for handle in pending_windows(&pending, cx) {
@@ -326,9 +335,11 @@ fn show_file_use_prompt(prompt: FileUsePrompt, cx: &mut App) {
 
 fn pending_windows(pending: &PendingInstall, cx: &App) -> Vec<AnyWindowHandle> {
     let mut handles = vec![pending.window];
+
     if let Some(registry) = cx.try_global::<ShellRegistry>() {
         handles.extend(registry.0.iter().map(|entry| entry.handle));
     }
+
     handles
 }
 
@@ -340,6 +351,7 @@ pub(crate) fn cancel_install(cx: &mut App) {
     let Some(pending) = cx.global_mut::<AppUpdate>().pending.take() else {
         return;
     };
+
     set_status(Status::Available(pending.release), cx);
     cx.refresh_windows();
 }
@@ -353,6 +365,7 @@ pub(crate) fn continue_install(cx: &mut App) {
     else {
         return;
     };
+
     set_status(Status::Installing(release), cx);
 
     match apply_pending_files(cx) {
@@ -367,6 +380,7 @@ fn apply_pending_files(cx: &App) -> Result<(), InstallError> {
         .pending
         .as_ref()
         .expect("an install action needs its staged plan");
+
     install::apply(&pending.staged, &pending.install, &pending.plan)
 }
 
@@ -441,6 +455,7 @@ pub(crate) fn close_file_users(cx: &mut App) {
         return;
     };
     let dll = pending.install.join(install::SHELL_EXTENSION_DLL);
+
     set_status(Status::ClosingFileUsers(pending.release), cx);
     cx.refresh_windows();
 
@@ -463,11 +478,13 @@ pub(crate) fn close_file_users(cx: &mut App) {
             } => {
                 cx.update(|cx| {
                     let applied = apply_pending_files(cx);
+
                     // Once the running executable has moved aside, no other UI
                     // callback may run before application recovery and relaunch:
                     // resolving current_exe during that gap would name the old
                     // copy instead of the installed executable.
                     let restarted = session.restart();
+
                     match applied {
                         Err(error) => fail_install(error, cx),
                         Ok(()) => finish_recovery(restarted, applications, cx),
@@ -494,6 +511,7 @@ where
             return check_failed_prompt();
         }
     };
+
     let usage = match session.file_usage() {
         Ok(usage) => usage,
         Err(error) => {
@@ -501,22 +519,27 @@ where
             return check_failed_prompt();
         }
     };
+
     if !usage.reboot_reasons.is_empty() {
         return ClosePreparation::Prompt(FileUsePrompt {
             reason: FileUsePromptReason::RebootRequired,
             applications: usage.applications,
         });
     }
+
     if usage.applications.is_empty() {
         return ClosePreparation::Clear;
     }
 
     let applications = usage.applications;
+
     if let Err(error) = session.shutdown() {
         warn!("update: closing shell-extension users failed: {error}");
+
         if let Err(restart_error) = session.restart() {
             warn!("update: restoring partially closed applications failed: {restart_error}");
         }
+
         return match session.file_usage() {
             Ok(usage) => ClosePreparation::Prompt(FileUsePrompt {
                 reason: if usage.reboot_reasons.is_empty() {
@@ -554,6 +577,7 @@ fn finish_recovery(
     if let Err(error) = &restarted {
         warn!("update: restarting shell-extension users failed: {error}");
     }
+
     let manual = recovery_application_names(&restarted, &applications);
 
     if manual.is_empty() {
@@ -587,6 +611,7 @@ fn show_recovery_warning(applications: Vec<String>, cx: &mut App) {
     let Some(pending) = cx.global::<AppUpdate>().pending.clone() else {
         return;
     };
+
     set_status(
         Status::RecoveryWarning {
             release: pending.release.clone(),
@@ -604,6 +629,7 @@ fn show_recovery_warning(applications: Vec<String>, cx: &mut App) {
 
     let message = i18n("settings-about-recovery-warning-message")
         .replace("{applications}", &applications.join(", "));
+
     show_error_dialog(i18n("settings-about-recovery-warning-title"), &message);
     complete_relaunch(cx);
 }
@@ -663,6 +689,7 @@ pub(crate) fn settings_changed(cx: &mut App) {
     let checking_enabled = settings.update.check_updates;
 
     let update = cx.global_mut::<AppUpdate>();
+
     // An install is already committed to a release. Clearing its status would
     // report nothing in progress while the download or user decision remains,
     // so the new settings are recorded and answered once it has finished.
@@ -675,8 +702,10 @@ pub(crate) fn settings_changed(cx: &mut App) {
 
     let switched = update.channel != channel;
     let turned_on = checking_enabled && !update.checking_enabled;
+
     update.channel = channel;
     update.checking_enabled = checking_enabled;
+
     if switched {
         update.status = Status::Unknown;
     }
@@ -692,8 +721,10 @@ pub(crate) fn schedule_automatic_checks(cx: &mut App) {
     if cx.global::<AppUpdate>().testing {
         return;
     }
+
     cx.spawn(async move |cx| {
         cx.background_executor().timer(FIRST_CHECK_DELAY).await;
+
         loop {
             // Read the switch every tick rather than at startup: the user can
             // turn checking on and off while the app runs.
@@ -715,7 +746,9 @@ fn check(cx: &mut App) {
     if cx.global::<AppUpdate>().status.busy() || cx.global::<AppUpdate>().pending.is_some() {
         return;
     }
+
     let channel = cx.global::<AppSettings>().update.channel;
+
     set_status(Status::Checking, cx);
 
     cx.spawn(async move |cx| {
@@ -723,6 +756,7 @@ fn check(cx: &mut App) {
             .background_executor()
             .spawn(async move { releases::latest(channel) })
             .await;
+
         cx.update(|cx| {
             // The channel can move while the request is out. A result for the
             // channel the user left says nothing about the one they chose, and
@@ -730,6 +764,7 @@ fn check(cx: &mut App) {
             if cx.global::<AppSettings>().update.channel != channel {
                 return;
             }
+
             set_status(outcome(found), cx);
             cx.refresh_windows();
         });

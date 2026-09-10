@@ -94,9 +94,11 @@ fn apply_ui_constants(config: &ComponentThemeConfig, theme: &mut ComponentTheme)
     if config.radius.is_none() {
         theme.radius = CONTROL_RADIUS;
     }
+
     if config.radius_lg.is_none() {
         theme.radius_lg = UI_RADIUS;
     }
+
     // No theme-file key backs this one, so it is not a fallback: button
     // padding is a property of the application's design language rather than
     // of the palette a theme chooses.
@@ -238,6 +240,7 @@ fn theme_preview(colors: Colors) -> Div {
 
 pub(super) fn theme_list(cx: &mut App) -> Div {
     let selected = cx.global::<AppSettings>().theme.clone();
+
     let filter = cx
         .global::<AppSettings>()
         .editing
@@ -256,6 +259,7 @@ pub(super) fn theme_list(cx: &mut App) -> Div {
             } else {
                 name
             };
+
             filter.is_empty()
                 || display_name.to_lowercase().contains(&filter)
                 || theme.name.to_lowercase().contains(&filter)
@@ -342,6 +346,7 @@ pub(super) fn tab_background_opacity(opacity: f32) -> f32 {
 /// effective window opacity. Reset first so repeated calls do not compound alpha.
 pub(crate) fn apply_window_translucency(cx: &mut App) {
     let opacity = surface_background_opacity(cx);
+
     // The sidebar color surfaces the agent pane and the right-hand panel, both
     // of which live inside a tab, so it follows the content-area switch instead
     // of the chrome opacity. Otherwise turning the switch off would still leave
@@ -380,6 +385,7 @@ pub(crate) fn apply_window_translucency(cx: &mut App) {
             .tab_active
             .color
             .opacity(tab_background_opacity(opacity));
+
         theme.tokens.tab_active = ComponentThemeToken::new(color, color.into());
     }
 }

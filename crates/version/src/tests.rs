@@ -25,6 +25,7 @@ fn reads_the_two_published_forms() {
             commit: "7567b41".to_owned()
         })
     );
+
     // `rev-parse --short` widens the abbreviation when seven characters would
     // be ambiguous.
     assert_eq!(

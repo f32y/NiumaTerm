@@ -93,6 +93,7 @@ impl gpui::Focusable for AgentPane {
 impl Render for AgentPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let command_palette = self.render_command_palette(cx);
+
         let command_feedback = self.palette.visible_feedback().map(|feedback| {
             let (color, label) = match feedback.kind {
                 CommandFeedbackKind::Notice => (cx.theme().primary, i18n("agent-feedback-notice")),
@@ -122,6 +123,7 @@ impl Render for AgentPane {
                         .child(feedback.message.clone()),
                 )
         });
+
         let queued_message = self.render_queued_prompts(cx);
         let session_state = self.session_state.render(cx);
 
@@ -134,13 +136,16 @@ impl Render for AgentPane {
         let multi_root_notice = self.render_multi_root_notice(cx);
         let update_overlay = self.render_update_overlay(cx);
         let start_overlay = self.render_start_overlay(cx);
+
         // A branch settled from the backend's answer has no window to reach
         // the composer through, so the prompt it cut in front of is put back
         // here, in the frame that answer asked for.
         self.fill_branch_prompt(window, cx);
+
         let branch_flow_active = self.branch_flow_holds_composer();
         let branch_flow_working = self.branch_flow_is_working();
         let session_loading = self.history_ui.mode == RecentSessionsMode::Loading;
+
         let background = if cx
             .global::<AgentSettings>()
             .pane_background_follows_terminal
@@ -157,23 +162,28 @@ impl Render for AgentPane {
             .history_ui
             .pending
             .unwrap_or(self.history_ui.sessions.len());
+
         let transcript_empty = self.transcript.read(cx).is_empty();
         let composer_empty = self.input.read(cx).text().len() == 0;
+
         let history = self
             .history_ui
             .mode
             .is_visible(transcript_empty, composer_empty, history_rows)
             .then(|| self.render_history(background, cx));
+
         // A list opened over a live conversation is a picker, and the
         // transcript behind it is not what the next click should reach. Blur
         // pushes it back a layer while keeping the tab recognizable as that
         // conversation; a blank tab has nothing to push back.
         let blur_transcript = history.is_some() && !transcript_empty;
         let now = Instant::now();
+
         let transcript_frost =
             self.history_ui
                 .transcript_blur
                 .drive(blur_transcript, now, window, cx);
+
         // One layer holds the pane for both the update and the start; a start
         // over an update is the more recent thing to say.
         let blocking_body = start_overlay.or(update_overlay);
@@ -226,11 +236,14 @@ impl Render for AgentPane {
                         MouseButton::Left,
                         cx.listener(|this, event: &MouseUpEvent, window, cx| {
                             this.focus(window, cx);
+
                             let pane = cx.entity().downgrade();
+
                             // Kept as the fallback anchor for a selection whose
                             // rect cannot be resolved, so the menu still opens
                             // somewhere the pointer just was.
                             let released_at = event.position;
+
                             window.on_next_frame(move |window, cx| {
                                 Self::show_selected_text_menu(pane, released_at, window, cx);
                             });
@@ -478,6 +491,7 @@ impl AgentPane {
         cx: &mut App,
     ) {
         let selected_text = TextSelection::selected_text(window, cx).trim().to_string();
+
         if selected_text.is_empty() {
             return;
         }
@@ -491,6 +505,7 @@ impl AgentPane {
             .map_or(released_at, |bounds| bounds.origin);
 
         let copy_text = selected_text.clone();
+
         ModernMenu::new()
             // A selection menu offers two actions that are recognised by icon, so
             // the command row reaches them in one horizontal band instead of a

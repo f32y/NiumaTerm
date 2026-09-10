@@ -30,12 +30,14 @@ fn main() {
     }
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+
     let source = match env::var_os(FRAMEWORK_DIR_ENV) {
         Some(dir) => PathBuf::from(dir),
         None => fetch_framework(&out_dir),
     };
 
     let framework = source.join("Sparkle.framework");
+
     assert!(
         framework.is_dir(),
         "no Sparkle.framework in {}",
@@ -60,6 +62,7 @@ fn main() {
         profile_dir.display()
     );
     println!("cargo:rustc-link-lib=framework=Sparkle");
+
     // The application crate emits the rpaths a packaged app needs, since it is
     // the one that knows the bundle layout. This crate's own test executables
     // run out of deps/, where the copy above sits.
@@ -69,16 +72,19 @@ fn main() {
 /// Download and unpack the pinned release, reusing an earlier unpack.
 fn fetch_framework(out_dir: &Path) -> PathBuf {
     let unpacked = out_dir.join(format!("sparkle-{SPARKLE_VERSION}"));
+
     if unpacked.join("Sparkle.framework").is_dir() {
         return unpacked;
     }
 
     let archive = out_dir.join(format!("Sparkle-{SPARKLE_VERSION}.tar.xz"));
+
     if !archive.is_file() {
         let url = format!(
             "https://github.com/sparkle-project/Sparkle/releases/download/{SPARKLE_VERSION}/Sparkle-{SPARKLE_VERSION}.tar.xz"
         );
         let mut curl = Command::new("curl");
+
         curl.args(["-fsSL", "-o"]).arg(&archive).arg(&url);
         run(curl, "download Sparkle");
     }
@@ -86,7 +92,9 @@ fn fetch_framework(out_dir: &Path) -> PathBuf {
     verify_checksum(&archive);
 
     fs::create_dir_all(&unpacked).expect("create the unpack directory");
+
     let mut tar = Command::new("tar");
+
     tar.arg("-xJf").arg(&archive).arg("-C").arg(&unpacked);
     run(tar, "unpack Sparkle");
 
@@ -101,6 +109,7 @@ fn verify_checksum(archive: &Path) {
         .arg(archive)
         .output()
         .expect("run shasum");
+
     assert!(
         output.status.success(),
         "shasum failed on {}",
@@ -108,6 +117,7 @@ fn verify_checksum(archive: &Path) {
     );
 
     let stdout = String::from_utf8(output.stdout).expect("shasum printed non-UTF-8");
+
     let digest = stdout
         .split_whitespace()
         .next()
@@ -132,6 +142,7 @@ fn install(framework: &Path, dir: &Path) {
 
     let destination = dir.join("Sparkle.framework");
     let mut ditto = Command::new("ditto");
+
     ditto.arg(framework).arg(&destination);
 
     match ditto.status() {
@@ -153,6 +164,7 @@ fn run(mut command: Command, context: &str) {
     let status = command
         .status()
         .unwrap_or_else(|e| panic!("could not {context}: {e}"));
+
     assert!(
         status.success(),
         "could not {context}: exited with {status}"

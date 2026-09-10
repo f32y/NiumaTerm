@@ -53,6 +53,7 @@ impl ProviderMaintenance for FakeMaintenance {
         } else {
             Version::new(1, 0, 0)
         };
+
         Ok(VersionStatus {
             provider: self.provider,
             current: Some(current),
@@ -67,6 +68,7 @@ impl ProviderMaintenance for FakeMaintenance {
 
     fn update(&self, _: &AgentCli) -> Result<VendorUpdateResult, UpdateError> {
         self.updated.store(true, Ordering::SeqCst);
+
         Ok(VendorUpdateResult {
             diagnostic: "testing provider updated".to_string(),
         })

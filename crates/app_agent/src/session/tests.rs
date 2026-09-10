@@ -16,10 +16,12 @@ use crate::transcript::LAST_RESPONSE_LIMIT;
 
 fn snapshot_for(parent: BackgroundTaskKey) -> BackgroundTaskSnapshot {
     let mut registry = BackgroundTaskRegistry::new(parent);
+
     registry.apply(
         BackgroundTaskKey::codex("child-1"),
         BackgroundTaskUpdate::state(BackgroundTaskState::Working),
     );
+
     registry.snapshot()
 }
 
@@ -51,16 +53,19 @@ fn a_snapshot_is_shown_only_for_the_session_it_describes() {
 fn a_later_snapshot_replaces_the_previous_one_and_carries_its_activity() {
     let parent = BackgroundTaskKey::claude_code("session-1");
     let mut registry = BackgroundTaskRegistry::new(parent.clone());
+
     registry.apply(
         BackgroundTaskKey::claude_code("task-1"),
         BackgroundTaskUpdate::state(BackgroundTaskState::Working),
     );
+
     let first = registry.snapshot();
 
     registry.apply(
         BackgroundTaskKey::claude_code("task-1"),
         BackgroundTaskUpdate::state(BackgroundTaskState::Done),
     );
+
     let second = registry.snapshot();
 
     assert_eq!(first.active_count(), 1);
@@ -76,6 +81,7 @@ fn a_later_snapshot_replaces_the_previous_one_and_carries_its_activity() {
 fn a_failed_refresh_reports_unavailable_without_dropping_known_rows() {
     let parent = BackgroundTaskKey::codex("thread-a");
     let mut registry = BackgroundTaskRegistry::new(parent);
+
     registry.apply(
         BackgroundTaskKey::codex("child-1"),
         BackgroundTaskUpdate::state(BackgroundTaskState::Working),
@@ -85,6 +91,7 @@ fn a_failed_refresh_reports_unavailable_without_dropping_known_rows() {
     });
 
     let snapshot = registry.snapshot();
+
     assert_eq!(snapshot.tasks.len(), 1);
     assert_eq!(snapshot.active_count(), 1);
     assert!(matches!(
@@ -103,6 +110,7 @@ fn resumed_codex_thread_uses_only_the_locally_remembered_reviewer() {
         effort: Some("low".into()),
         tier: Some("priority".into()),
     };
+
     let stored = ThreadSettings {
         model: Some("local-model".into()),
         approval: Some("on-request".into()),
@@ -133,12 +141,14 @@ fn claude_profile_and_local_settings_survive_later_ready_events() {
         effort: None,
         ..ThreadSettings::default()
     };
+
     let local = ThreadSettings {
         model: Some("remembered-model".into()),
         approval: Some("auto".into()),
         effort: Some("high".into()),
         ..ThreadSettings::default()
     };
+
     let initial = resolve_ready_settings(
         backend.clone(),
         Some(&local),
@@ -163,6 +173,7 @@ fn a_pinned_profile_effort_outranks_the_thread_and_the_remembered_pick() {
         effort: Some("low".into()),
         ..ThreadSettings::default()
     };
+
     let local = ThreadSettings {
         effort: Some("medium".into()),
         ..ThreadSettings::default()
@@ -179,6 +190,7 @@ fn no_pinned_effort_leaves_the_remembered_pick_in_place() {
         effort: Some("low".into()),
         ..ThreadSettings::default()
     };
+
     let local = ThreadSettings {
         effort: Some("medium".into()),
         ..ThreadSettings::default()
@@ -269,6 +281,7 @@ and the retry loop"
     );
 
     let long = "x".repeat(200);
+
     assert_eq!(
         tab_title_from_prompt(&long).map(|t| t.chars().count()),
         Some(60)
@@ -282,6 +295,7 @@ fn title_requests_keep_each_provider_semantics() {
         "  Inspect title generation\n and its fallback  ",
     )
     .unwrap();
+
     assert_eq!(
         codex.provisional_title,
         "Inspect title generation and its fallback"
@@ -292,6 +306,7 @@ fn title_requests_keep_each_provider_semantics() {
         "  Inspect title generation\n and its fallback  ",
     )
     .unwrap();
+
     assert_eq!(
         claude.provisional_title,
         "Inspect title generation and its fallback"
@@ -316,6 +331,7 @@ fn claude_provisional_titles_match_the_desktop_projection() {
     let title = conversation_title_request(crate::AgentKind::Claude, &long_word)
         .unwrap()
         .provisional_title;
+
     assert_eq!(title.chars().count(), 60);
     assert!(title.ends_with('…'));
 }
@@ -348,20 +364,26 @@ mod conversation_title_tests {
             executable: "missing-agent.exe".into(),
             ..AgentProfile::default()
         };
+
         let mut pane = None;
+
         let window = cx.update(|cx| {
             gpui_component::init(cx);
             cx.set_global(AgentSettings::default());
             cx.set_global(AgentThreadDefaults::default());
+
             cx.open_window(Default::default(), |window, cx| {
                 let agent = cx.new(|cx| {
                     AgentPane::new_resuming(profile, AgentWorkspace::default(), resume, window, cx)
                 });
+
                 pane = Some(agent.clone());
+
                 cx.new(|cx| gpui_component::Root::new(agent, window, cx))
             })
             .expect("open Agent test window")
         });
+
         (pane.expect("create Agent pane"), window)
     }
 
@@ -369,9 +391,11 @@ mod conversation_title_tests {
     fn output_failure_retires_backend_and_marks_session_exited(cx: &mut TestAppContext) {
         let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
+
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
                 let epoch = pane.runtime.begin_start();
+
                 assert!(matches!(
                     pane.runtime.install(
                         epoch,
@@ -383,8 +407,10 @@ mod conversation_title_tests {
                     ),
                     StartOutcome::Installed
                 ));
+
                 pane.runtime.turn_started();
                 pane.stop_for_output_failure("Output limit reached".into(), cx);
+
                 assert!(pane.runtime.backend().is_none());
                 assert_eq!(pane.runtime.status(), Status::Exited);
             });
@@ -398,32 +424,46 @@ mod conversation_title_tests {
 
         let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
+
         cx.update(|_, cx| {
             pane.update(cx, |pane, _| {
                 let mut backend = TestBackend::new([], SlashCommandOutcome::NotReady, vec![])
                     .with_recovery(AgentKind::Codex, "thread");
+
                 backend.rename_outcome = RenameOutcome::Rejected;
+
                 let epoch = pane.runtime.begin_start();
+
                 assert!(matches!(
                     pane.runtime.install(epoch, Ok(Backend::Test(backend))),
                     StartOutcome::Installed
                 ));
+
                 pane.rename_session("first");
                 pane.rename_session("latest");
+
                 assert_eq!(pane.pending_conversation_rename.as_deref(), Some("latest"));
+
                 pane.sync_pending_rename();
+
                 assert_eq!(pane.pending_conversation_rename.as_deref(), Some("latest"));
+
                 let Some(Backend::Test(backend)) = pane.runtime.backend_mut() else {
                     panic!("expected test backend");
                 };
+
                 backend.rename_outcome = RenameOutcome::Accepted;
                 pane.sync_pending_rename();
+
                 assert!(pane.pending_conversation_rename.is_none());
+
                 let Some(Backend::Test(backend)) = pane.runtime.backend_mut() else {
                     panic!("expected test backend");
                 };
+
                 backend.rename_outcome = RenameOutcome::Unsupported;
                 pane.rename_session("local only");
+
                 assert!(pane.pending_conversation_rename.is_none());
             });
         });
@@ -435,6 +475,7 @@ mod conversation_title_tests {
     ) -> (Rc<RefCell<Vec<String>>>, Subscription) {
         let titles = Rc::new(RefCell::new(Vec::new()));
         let observed = Rc::clone(&titles);
+
         let subscription = cx.update(|_, cx| {
             cx.subscribe(pane, move |_, event: &AgentPaneEvent, _| {
                 if let AgentPaneEvent::TitleSuggested(title) = event {
@@ -442,6 +483,7 @@ mod conversation_title_tests {
                 }
             })
         });
+
         (titles, subscription)
     }
 
@@ -451,9 +493,11 @@ mod conversation_title_tests {
 
         let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
+
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
                 let epoch = pane.runtime.begin_start();
+
                 assert!(matches!(
                     pane.runtime.install(
                         epoch,
@@ -465,6 +509,7 @@ mod conversation_title_tests {
                     ),
                     StartOutcome::Installed
                 ));
+
                 pane.apply_event(
                     Event::ApprovalRequested {
                         description: "Run a command".into(),
@@ -472,7 +517,9 @@ mod conversation_title_tests {
                     cx,
                 );
                 pane.respond_approval("accept", cx);
+
                 assert!(pane.prompts.approval().is_some());
+
                 pane.apply_event(Event::ApprovalResolved, cx);
                 pane.runtime.ready();
                 pane.apply_event(
@@ -488,10 +535,12 @@ mod conversation_title_tests {
                     cx,
                 );
                 pane.skip_current_questions(cx);
+
                 let question = pane
                     .prompts
                     .questions()
                     .expect("rejected answer remains visible");
+
                 assert!(question.error.is_some());
             });
         });
@@ -506,6 +555,7 @@ mod conversation_title_tests {
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
                 let epoch = pane.runtime.begin_start();
+
                 assert!(matches!(
                     pane.runtime.install(
                         epoch,
@@ -517,6 +567,7 @@ mod conversation_title_tests {
                     ),
                     StartOutcome::Installed
                 ));
+
                 pane.runtime.ready();
 
                 assert!(
@@ -544,7 +595,9 @@ mod conversation_title_tests {
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
                 pane.kind = crate::AgentKind::Claude;
+
                 let epoch = pane.runtime.begin_start();
+
                 assert!(matches!(
                     pane.runtime.install(
                         epoch,
@@ -556,6 +609,7 @@ mod conversation_title_tests {
                     ),
                     StartOutcome::Installed
                 ));
+
                 pane.runtime.ready();
 
                 assert!(pane.send_text("one two three four five six seven eight".into(), cx));
@@ -578,14 +632,18 @@ mod conversation_title_tests {
                 "resumed-conversation",
             )),
         );
+
         let mut cx = VisualTestContext::from_window(window.into(), cx);
         let (titles, _subscription) = collect_titles(&pane, &mut cx);
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
                 assert!(pane.conversation_named);
+
                 pane.kind = crate::AgentKind::Claude;
+
                 let epoch = pane.runtime.begin_start();
+
                 assert!(matches!(
                     pane.runtime.install(
                         epoch,
@@ -597,6 +655,7 @@ mod conversation_title_tests {
                     ),
                     StartOutcome::Installed
                 ));
+
                 pane.runtime.ready();
 
                 assert!(pane.send_text("follow up on the restored session".into(), cx));
@@ -675,19 +734,25 @@ mod queued_prompt_placement_tests {
             executable: "missing-agent.exe".into(),
             ..AgentProfile::default()
         };
+
         let mut pane = None;
+
         let window = cx.update(|cx| {
             gpui_component::init(cx);
             cx.set_global(AgentSettings::default());
             cx.set_global(AgentThreadDefaults::default());
+
             cx.open_window(Default::default(), |window, cx| {
                 let agent =
                     cx.new(|cx| AgentPane::new(profile, AgentWorkspace::default(), window, cx));
+
                 pane = Some(agent.clone());
+
                 cx.new(|cx| gpui_component::Root::new(agent, window, cx))
             })
             .expect("open Agent test window")
         });
+
         (pane.expect("create Agent pane"), window)
     }
 
@@ -712,9 +777,11 @@ mod queued_prompt_placement_tests {
         // a real stdout reader before the test backend replaces it.
         let (pane, window) = open_pane(cx, AgentProfileKind::Codex);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
+
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
                 let epoch = pane.runtime.begin_start();
+
                 assert!(matches!(
                     pane.runtime.install(
                         epoch,
@@ -726,18 +793,23 @@ mod queued_prompt_placement_tests {
                     ),
                     StartOutcome::Installed
                 ));
+
                 pane.runtime.ready();
                 pane.palette.awaiting_command_turn = true;
+
                 let previous_turn = pane.turn.seq;
+
                 assert!(!pane.transcript.read(cx).is_working());
 
                 pane.apply_event(SessionEvent::TurnStarted, cx);
+
                 assert!(!pane.palette.awaiting_command_turn);
                 assert_eq!(pane.turn.seq, previous_turn + 1);
                 assert_eq!(pane.runtime.status(), Status::Running);
                 assert!(pane.transcript.read(cx).is_working());
 
                 pane.apply_event(SessionEvent::TurnStarted, cx);
+
                 assert_eq!(
                     pane.turn.seq,
                     previous_turn + 1,
@@ -755,6 +827,7 @@ mod queued_prompt_placement_tests {
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
                 let epoch = pane.runtime.begin_start();
+
                 assert!(matches!(
                     pane.runtime.install(
                         epoch,
@@ -766,13 +839,17 @@ mod queued_prompt_placement_tests {
                     ),
                     StartOutcome::Installed
                 ));
+
                 pane.runtime.ready();
 
                 assert!(pane.send_text("open the turn".into(), cx));
+
                 pane.apply_event(SessionEvent::TurnStarted, cx);
+
                 let first_turn = pane.turn.seq;
 
                 assert!(pane.send_text("queued behind it".into(), cx));
+
                 pane.apply_event(
                     SessionEvent::ItemStarted(SessionItem::AgentMessage {
                         id: "msg-1".into(),
@@ -819,6 +896,7 @@ mod queued_prompt_placement_tests {
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
                 let epoch = pane.runtime.begin_start();
+
                 assert!(matches!(
                     pane.runtime.install(
                         epoch,
@@ -830,9 +908,11 @@ mod queued_prompt_placement_tests {
                     ),
                     StartOutcome::Installed
                 ));
+
                 pane.runtime.ready();
 
                 let text = "Reply with exactly: ok".to_string();
+
                 assert!(pane.send_text(text.clone(), cx));
 
                 // What the harness reports, in the order it reports it: the
@@ -845,6 +925,7 @@ mod queued_prompt_placement_tests {
                     }]),
                     cx,
                 );
+
                 assert!(
                     pane.turn.queued_user_messages.is_empty(),
                     "a prompt already in the transcript is not also waiting"
@@ -888,19 +969,25 @@ mod turn_error_tests {
             executable: "missing-codex.exe".into(),
             ..AgentProfile::default()
         };
+
         let mut pane = None;
+
         let window = cx.update(|cx| {
             gpui_component::init(cx);
             cx.set_global(AgentSettings::default());
             cx.set_global(AgentThreadDefaults::default());
+
             cx.open_window(Default::default(), |window, cx| {
                 let agent =
                     cx.new(|cx| AgentPane::new(profile, AgentWorkspace::default(), window, cx));
+
                 pane = Some(agent.clone());
+
                 cx.new(|cx| gpui_component::Root::new(agent, window, cx))
             })
             .expect("open Agent test window")
         });
+
         (pane.expect("create Agent pane"), window)
     }
 
@@ -944,6 +1031,7 @@ mod turn_error_tests {
                         _ => None,
                     })
                     .collect::<Vec<_>>();
+
                 assert_eq!(errors, vec!["model unavailable"]);
             });
         });
@@ -978,19 +1066,25 @@ mod session_replacement_tests {
             executable: "missing-agent.exe".into(),
             ..AgentProfile::default()
         };
+
         let mut pane = None;
+
         let window = cx.update(|cx| {
             gpui_component::init(cx);
             cx.set_global(AgentSettings::default());
             cx.set_global(AgentThreadDefaults::default());
+
             cx.open_window(Default::default(), |window, cx| {
                 let agent =
                     cx.new(|cx| AgentPane::new(profile, AgentWorkspace::default(), window, cx));
+
                 pane = Some(agent.clone());
+
                 cx.new(|cx| gpui_component::Root::new(agent, window, cx))
             })
             .expect("open Agent test window")
         });
+
         let pane = pane.expect("create Agent pane");
         let mut cx = VisualTestContext::from_window(window.into(), cx);
         let released = Arc::new(AtomicBool::new(false));
@@ -998,6 +1092,7 @@ mod session_replacement_tests {
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
                 let epoch = pane.runtime.begin_start();
+
                 assert!(matches!(
                     pane.runtime.install(
                         epoch,
@@ -1012,6 +1107,7 @@ mod session_replacement_tests {
                     ),
                     StartOutcome::Installed
                 ));
+
                 pane.runtime.ready();
 
                 pane.reset_conversation(cx);
@@ -1045,25 +1141,32 @@ mod shared_host_recovery_tests {
             executable: "missing-codex.exe".into(),
             ..AgentProfile::default()
         };
+
         let mut pane = None;
+
         let window = cx.update(|cx| {
             gpui_component::init(cx);
             cx.set_global(AgentSettings::default());
             cx.set_global(AgentThreadDefaults::default());
+
             cx.open_window(Default::default(), |window, cx| {
                 let agent =
                     cx.new(|cx| AgentPane::new(profile, AgentWorkspace::default(), window, cx));
+
                 pane = Some(agent.clone());
+
                 cx.new(|cx| gpui_component::Root::new(agent, window, cx))
             })
             .expect("open Agent test window")
         });
+
         let pane = pane.expect("create Agent pane");
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
                 let epoch = pane.runtime.begin_start();
+
                 assert!(matches!(
                     pane.runtime.install(
                         epoch,
@@ -1078,6 +1181,7 @@ mod shared_host_recovery_tests {
                     ),
                     StartOutcome::Installed
                 ));
+
                 pane.runtime.ready();
 
                 pane.apply_event(
@@ -1092,10 +1196,12 @@ mod shared_host_recovery_tests {
                     pane.runtime.update_suspension(),
                     Some(UpdateSuspension::Failed(_))
                 ));
+
                 let snapshot = pane
                     .runtime
                     .last_recovery_snapshot()
                     .expect("recovery snapshot");
+
                 assert_eq!(snapshot.profile_name, "Codex Recovery Test");
                 assert_eq!(
                     snapshot
@@ -1158,19 +1264,25 @@ mod command_catalog_cache_tests {
             executable: "missing-agent.exe".into(),
             ..AgentProfile::default()
         };
+
         let mut pane = None;
+
         let window = cx.update(|cx| {
             gpui_component::init(cx);
             cx.set_global(AgentSettings::default());
             cx.set_global(AgentThreadDefaults::default());
+
             cx.open_window(Default::default(), |window, cx| {
                 let agent =
                     cx.new(|cx| AgentPane::new(profile, AgentWorkspace::default(), window, cx));
+
                 pane = Some(agent.clone());
+
                 cx.new(|cx| gpui_component::Root::new(agent, window, cx))
             })
             .expect("open Agent test window")
         });
+
         (pane.expect("create Agent pane"), window)
     }
 
@@ -1202,6 +1314,7 @@ mod command_catalog_cache_tests {
         cx.update(|_, cx| {
             pane.update(cx, |pane, _| {
                 let epoch = pane.runtime.begin_start();
+
                 assert!(matches!(
                     pane.runtime.install(
                         epoch,
@@ -1222,11 +1335,13 @@ mod command_catalog_cache_tests {
                 assert!(!offers(pane, "deploy"), "nothing published this yet");
 
                 pane.apply_event(SessionEvent::Commands(vec![discovered("deploy")]), cx);
+
                 assert!(offers(pane, "deploy"), "a published command must show up");
 
                 // Discovery is a replacement snapshot, so a later one that
                 // omits the command withdraws it.
                 pane.apply_event(SessionEvent::Commands(vec![discovered("status")]), cx);
+
                 assert!(!offers(pane, "deploy"), "a withdrawn command must go");
             });
         });

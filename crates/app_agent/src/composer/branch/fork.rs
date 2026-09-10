@@ -131,6 +131,7 @@ impl AgentPane {
     /// distant prompts readable where the user asked for animated scrolling.
     pub(crate) fn follow_branch_selection(&mut self, cx: &mut Context<Self>) {
         let selected = self.palette.selected;
+
         let Some(target) = self
             .palette_model(cx)
             .and_then(|model| model.rows.get(selected).cloned())
@@ -140,6 +141,7 @@ impl AgentPane {
         };
 
         let smooth = cx.global::<AgentSettings>().smooth_wheel;
+
         self.transcript.update(cx, |transcript, cx| {
             transcript.scroll_to_prompt(&target, smooth, cx)
         });
@@ -158,6 +160,7 @@ impl AgentPane {
             self.cancel_rewind_picker(cx);
             return true;
         }
+
         if self
             .branch
             .fork
@@ -168,6 +171,7 @@ impl AgentPane {
             self.cancel_fork_picker(cx);
             return true;
         }
+
         false
     }
 
@@ -202,6 +206,7 @@ impl AgentPane {
                 translated("agent-fork-idle-only"),
                 cx,
             );
+
             return false;
         }
 
@@ -209,12 +214,14 @@ impl AgentPane {
             .runtime
             .backend_mut()
             .is_some_and(Backend::request_fork_checkpoints);
+
         if !asked {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-still-starting").replace("{name}", self.kind.display()),
                 cx,
             );
+
             return false;
         }
 
@@ -226,6 +233,7 @@ impl AgentPane {
             translated("agent-fork-loading-checkpoints"),
             cx,
         );
+
         true
     }
 
@@ -256,6 +264,7 @@ impl AgentPane {
                     checkpoint_at_depth(&checkpoints, target, |checkpoint| &checkpoint.prompt)
                         .cloned()
                 });
+
                 self.branch.fork.state = Some(ForkState::Selecting(checkpoints));
                 self.palette.feedback = None;
                 self.palette.selected = 0;
@@ -274,7 +283,9 @@ impl AgentPane {
                                 cx,
                             );
                         }
+
                         self.hold_transcript_for_picker(cx);
+
                         // The newest prompt is highlighted, and it usually
                         // sits under the picker that just opened over the
                         // bottom of the transcript.
@@ -301,6 +312,7 @@ impl AgentPane {
             self.branch.fork.state = None;
             self.palette.selected = 0;
             self.release_transcript_from_picker(cx);
+
             // Cancelling is the user's own no-op, and dropping the message
             // retires the non-transient "Reading branch points…" status that
             // would otherwise outlive the picker it described.
@@ -328,6 +340,7 @@ impl AgentPane {
                         action: PaletteAction::ForkCheckpoint(checkpoint),
                     })
                     .collect::<Vec<_>>();
+
                 rows.push(cancel_row());
 
                 Some(PaletteModel {
@@ -370,6 +383,7 @@ impl AgentPane {
         self.history_ui.mode = RecentSessionsMode::Loading;
         self.history_ui.pending_resume_replay = None;
         self.runtime.begin_conversation_change();
+
         // The branch inherits the parent's controls, so nothing is seeded over
         // what its own history is about to replay.
         self.controls.seed_thread_defaults = false;

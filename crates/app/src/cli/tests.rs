@@ -24,6 +24,7 @@ const ENCODED_A_B: &str = "%2FA%2FB";
 #[test]
 fn parses_new_tab() {
     let action = parse_nmt_url(&format!("nmt://action/new_tab?path={ENCODED_A_B}")).unwrap();
+
     assert_eq!(
         action,
         CliAction::NewTab {
@@ -37,6 +38,7 @@ fn parses_new_window() {
     let path = absolute(&["A"]);
     let action =
         parse_nmt_url(&format!("nmt://action/new_window?path={}", path.display())).unwrap();
+
     assert_eq!(action, CliAction::NewWindow { path });
 }
 
@@ -52,10 +54,12 @@ fn parses_activate() {
 fn decodes_spaces_and_cjk() {
     #[cfg(windows)]
     let encoded = "C%3A%2FMy%20Dir%2F%E9%A1%B9%E7%9B%AE";
+
     #[cfg(unix)]
     let encoded = "%2FMy%20Dir%2F%E9%A1%B9%E7%9B%AE";
 
     let action = parse_nmt_url(&format!("nmt://action/new_tab?path={encoded}")).unwrap();
+
     assert_eq!(
         action,
         CliAction::NewTab {
@@ -83,6 +87,7 @@ fn resolves_relative_path_against_cwd() {
     let CliAction::NewTab { path } = action else {
         panic!("expected NewTab");
     };
+
     assert_eq!(path, env::current_dir().unwrap().join("sub").join("dir"));
 }
 
@@ -91,6 +96,7 @@ fn url_round_trips_through_to_url() {
     let action = CliAction::NewWindow {
         path: absolute(&["My Dir", "项目"]),
     };
+
     assert_eq!(parse_nmt_url(&action.to_url()).unwrap(), action);
     assert_eq!(
         parse_nmt_url(&CliAction::Activate.to_url()).unwrap(),
@@ -104,6 +110,7 @@ fn focus_notification_round_trips_and_rejects_invalid_ids() {
         route: AgentRoute::parse("process:pane").unwrap(),
         notification_id: "process:pane:1".into(),
     };
+
     assert_eq!(parse_nmt_url(&action.to_url()).unwrap(), action);
     assert!(parse_nmt_url("nmt://action/focus_notification?route=a").is_err());
     assert!(

@@ -37,6 +37,7 @@ pub fn parse_codex_doctor(json: &str) -> Result<VersionStatus, UpdateError> {
             "Codex doctor did not return valid JSON",
         )
     })?;
+
     if report["schemaVersion"].as_u64() != Some(1) || !report["checks"].is_object() {
         return Err(UpdateError::new(
             UpdateErrorKind::InvalidResponse,
@@ -48,11 +49,13 @@ pub fn parse_codex_doctor(json: &str) -> Result<VersionStatus, UpdateError> {
         .as_str()
         .map(|value| parse_strict_version(value, "Codex version"))
         .transpose()?;
+
     let updates = &report["checks"]["updates.status"];
     let details = &updates["details"];
     let available = detail_string(details, "latest version")
         .map(|value| parse_strict_version(value, "Codex latest version"))
         .transpose()?;
+
     let install_method = detail_string(
         &report["checks"]["runtime.provenance"]["details"],
         "install method",
@@ -64,12 +67,15 @@ pub fn parse_codex_doctor(json: &str) -> Result<VersionStatus, UpdateError> {
         )
     })
     .map(|value| bounded_label(value, MAX_LABEL_CHARS));
+
     let remediation =
         detail_string(details, "update action").map(|value| bounded_label(value, MAX_LABEL_CHARS));
+
     let can_update = remediation.as_deref().is_some_and(|action| {
         !action.to_ascii_lowercase().contains("manual")
             && !action.to_ascii_lowercase().contains("unknown")
     });
+
     let support = if available.is_some() {
         DiscoverySupport::Supported
     } else {

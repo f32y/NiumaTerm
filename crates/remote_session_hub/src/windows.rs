@@ -309,6 +309,7 @@ impl RemoteSessionHub {
             starting_title: options.starting_title.as_deref(),
             bootstrap: None,
         };
+
         let pty = if options.manage_process_tree {
             create_managed_pty_with_env(pty_options)
         } else {
@@ -459,6 +460,7 @@ impl RemoteSessionHub {
             .values()
             .map(|session| {
                 let stream = session.stream.lock();
+
                 SessionInfo {
                     id: session.id,
                     shell: session.shell.clone(),

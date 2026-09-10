@@ -30,6 +30,7 @@ pub(super) fn declare_image_input(
     let providers = client
         .call("llm/listConfigurableProviders", json!({}))
         .map_err(|error| error.message().to_string())?;
+
     let route = providers
         .as_array()
         .into_iter()
@@ -38,6 +39,7 @@ pub(super) fn declare_image_input(
         .ok_or_else(|| format!("the harness does not configure the {provider} route"))?;
 
     let namespace = route["settingsNs"].as_str().unwrap_or_default();
+
     let Some((_, field)) = MODALITY_FIELDS
         .iter()
         .find(|(known, _)| *known == namespace)
@@ -46,6 +48,7 @@ pub(super) fn declare_image_input(
             "{provider} is configured by {namespace}, whose model catalog has a shape this cannot write"
         ));
     };
+
     // Where the provider's own settings live inside its section. Empty for a
     // section that is the provider profile itself, which is what the DeepSeek
     // route declares; the OpenAI-compatible adapter keeps one profile per
@@ -60,9 +63,11 @@ pub(super) fn declare_image_input(
     let described = client
         .call("settings/describe", json!({}))
         .map_err(|error| error.message().to_string())?;
+
     if described["writable"] != Value::Bool(true) {
         return Err("the harness runs on settings it cannot write".to_string());
     }
+
     let view = described["namespaces"]
         .as_array()
         .into_iter()
@@ -75,11 +80,14 @@ pub(super) fn declare_image_input(
     };
 
     let mut path: Vec<&str> = section.clone();
+
     path.push("models");
+
     let mut payload = json!({
         "ns": namespace,
         "ops": [{ "op": "set", "path": path, "value": models }],
     });
+
     // The revision the catalog was read at, so a concurrent edit from the
     // harness's own settings form is refused instead of being overwritten.
     if let Some(revision) = view["revision"].as_u64() {
@@ -101,15 +109,18 @@ pub(super) fn declare_image_input(
             "the {namespace} adapter in this harness kept {model} without image input, so this build serves it as text only"
         ));
     }
+
     Ok(true)
 }
 
 /// The model catalog inside one namespace view.
 fn catalog<'a>(view: &'a Value, section: &[&str]) -> &'a Value {
     let mut profile = &view["value"];
+
     for step in section {
         profile = &profile[*step];
     }
+
     &profile["models"]
 }
 

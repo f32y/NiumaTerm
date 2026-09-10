@@ -23,8 +23,10 @@ mod prompt_truncation_tests {
             font_fallbacks: FontFallbacks::from_fonts(vec!["Microsoft YaHei".into()]),
             ..AgentSettings::default()
         };
+
         let font = settings.font_with_fallbacks("JetBrains Mono".into());
         let style = transcript_code_block_style(font, 12.5);
+
         let fallbacks = style
             .text
             .font_fallbacks
@@ -46,6 +48,7 @@ mod prompt_truncation_tests {
     #[test]
     fn composer_replaces_send_with_stop_only_while_running() {
         assert_eq!(composer_action(Status::Running), ComposerAction::Stop);
+
         for status in [Status::Starting, Status::Idle, Status::Exited] {
             assert_eq!(composer_action(status), ComposerAction::Send);
         }
@@ -231,6 +234,7 @@ mod prompt_truncation_tests {
         else {
             panic!("expected a tool item");
         };
+
         assert_eq!(id, "tool-1");
         assert_eq!(kind, "Read");
         assert_eq!(title, "src/lib.rs");
@@ -244,14 +248,17 @@ mod prompt_truncation_tests {
 
         let four_lines = "line\n".repeat(4);
         let head = truncated_user_prompt(&four_lines).expect("over the line cap");
+
         assert_eq!(head.lines().count(), 3);
         assert!(head.ends_with('\n'));
 
         let exact_char_cap = "x".repeat(512);
+
         assert_eq!(truncated_user_prompt(&exact_char_cap), None);
 
         let giant_line = "\u{4f60}".repeat(3000);
         let head = truncated_user_prompt(&giant_line).expect("over the character cap");
+
         assert_eq!(head.chars().count(), 512);
         assert!(giant_line.is_char_boundary(head.len()));
     }
@@ -385,6 +392,7 @@ mod separate_view_state_tests {
 
             child.update(cx, |transcript, cx| {
                 transcript.push(1, message("b", "child reply"), Vec::new(), cx);
+
                 assert!(
                     transcript.disclosures.expanded_rows().is_empty(),
                     "row expansion belongs to one conversation"
@@ -418,6 +426,7 @@ mod separate_view_state_tests {
                 for index in 0..4 {
                     transcript.push(1, message(&format!("p{index}"), "row"), Vec::new(), cx);
                 }
+
                 transcript.sync_transcript_list(transcript.build_row_specs(CollapseRows::Off));
             });
             child.update(cx, |transcript, cx| {
@@ -523,6 +532,7 @@ mod steered_prompt_rows_tests {
                 transcript
                     .disclosures
                     .open(RevealKey::Turn(1), Instant::now(), false);
+
                 assert_eq!(
                     order(transcript),
                     vec!["0", "fold(1)", "1", "2", "3", "summary"],
@@ -581,6 +591,7 @@ mod steered_prompt_rows_tests {
                 transcript
                     .disclosures
                     .open(RevealKey::Turn(1), Instant::now(), false);
+
                 assert_eq!(
                     order(transcript),
                     vec!["0", "fold(1)", "1", "2", "3", "summary"]
@@ -610,6 +621,7 @@ mod steered_prompt_rows_tests {
                 transcript
                     .disclosures
                     .open(RevealKey::Turn(1), Instant::now(), false);
+
                 assert_eq!(order(transcript), vec!["0", "fold(1)", "1", "2"]);
             });
         });
@@ -702,8 +714,10 @@ mod resumed_collapse_tests {
 
                 // Folded away: only the prompt and the answer remain.
                 assert_eq!(row_count(transcript, CollapseRows::WorkAndToolCalls), 2);
+
                 // The work returns, with its two commands behind one run line.
                 assert_eq!(row_count(transcript, CollapseRows::ToolCalls), 2);
+
                 // Every row on its own line.
                 assert_eq!(row_count(transcript, CollapseRows::Off), 4);
 
@@ -756,6 +770,7 @@ mod branch_point_targeting_tests {
     /// "steered" and "third" are 0, 2, 3 and 5.
     fn transcript(cx: &mut gpui::App) -> gpui::Entity<TranscriptView> {
         let view = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+
         view.update(cx, |view, cx| {
             for (turn, items) in [
                 (1, vec![user("first"), agent("a")]),
@@ -774,6 +789,7 @@ mod branch_point_targeting_tests {
                 );
             }
         });
+
         view
     }
 
@@ -781,6 +797,7 @@ mod branch_point_targeting_tests {
     /// a disclosure row and the prompts no longer sit at their entry indices.
     fn transcript_with_work(cx: &mut gpui::App) -> gpui::Entity<TranscriptView> {
         let view = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+
         view.update(cx, |view, cx| {
             for (turn, items) in [
                 (1, vec![user("first"), command("ls"), agent("a")]),
@@ -796,6 +813,7 @@ mod branch_point_targeting_tests {
                 );
             }
         });
+
         view
     }
 
@@ -841,6 +859,7 @@ mod branch_point_targeting_tests {
                         depth: 2,
                     })
                 );
+
                 // A message steered into a running turn shares that turn with
                 // the prompt ahead of it and anchors nothing.
                 assert_eq!(view.prompt_target(index[2]), None);
@@ -886,6 +905,7 @@ mod branch_point_targeting_tests {
             ),
             Some(&"second".to_string())
         );
+
         // The oldest prompt is past the end of a list that does not offer it.
         assert_eq!(
             checkpoint_at_depth(
@@ -910,6 +930,7 @@ mod branch_point_targeting_tests {
 
             view.update(cx, |view, _| {
                 let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+
                 view.sync_transcript_list(specs);
 
                 // Rows: prompt, work disclosure, reply, prompt, reply.
@@ -927,6 +948,7 @@ mod branch_point_targeting_tests {
                     }),
                     Some(3)
                 );
+
                 // A depth landing on a different prompt names a list the
                 // transcript disagrees with, and moving to it would put the
                 // user in front of a turn they did not point at.
@@ -955,11 +977,13 @@ mod branch_point_targeting_tests {
 
             view.update(cx, |view, cx| {
                 let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+
                 view.sync_transcript_list(specs);
 
                 // Reading the live end: what is restored is the tail itself,
                 // not the offset the tail happened to stand at.
                 view.hold_for_picker();
+
                 assert!(
                     view.reserve_below,
                     "a held transcript can scroll past its last row"
@@ -968,8 +992,10 @@ mod branch_point_targeting_tests {
                     !view.transcript_list.is_following_tail(),
                     "the hold pins the view before the reserve opens below it"
                 );
+
                 view.scroll_to_prompt(&first, false, cx);
                 view.release_from_picker(cx);
+
                 assert!(view.transcript_list.is_following_tail());
                 assert!(!view.reserve_below);
 
@@ -980,13 +1006,17 @@ mod branch_point_targeting_tests {
                 });
                 view.hold_for_picker();
                 view.scroll_to_prompt(&first, false, cx);
+
                 assert_eq!(view.transcript_list.logical_scroll_top().item_ix, 0);
+
                 view.release_from_picker(cx);
+
                 assert_eq!(view.transcript_list.logical_scroll_top().item_ix, 3);
 
                 // Nothing left stashed, so a later cancel cannot drag the
                 // conversation back to a position from this one.
                 view.release_from_picker(cx);
+
                 assert_eq!(view.transcript_list.logical_scroll_top().item_ix, 3);
             })
         });
@@ -1088,6 +1118,7 @@ mod row_rhythm_tests {
                     RowSpec::Interrupted { .. } => "interrupted",
                     RowSpec::Working { .. } => "working",
                 };
+
                 (kind, row.gap)
             })
             .collect()
@@ -1102,6 +1133,7 @@ mod row_rhythm_tests {
         cx.set_global(AgentSettings::default());
 
         let view = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+
         view.update(cx, |view, cx| {
             view.append_replay(
                 1,
@@ -1115,6 +1147,7 @@ mod row_rhythm_tests {
                 cx,
             );
         });
+
         view
     }
 
@@ -1128,6 +1161,7 @@ mod row_rhythm_tests {
 
             view.update(cx, |view, _| {
                 let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
                 view.sync_transcript_list(specs);
 
                 assert_eq!(
@@ -1153,8 +1187,11 @@ mod row_rhythm_tests {
 
             view.update(cx, |view, cx| {
                 view.toggle_disclosure(RevealKey::Group(2), cx);
+
                 let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
                 view.sync_transcript_list(specs);
+
                 let now = Instant::now();
 
                 assert_eq!(
@@ -1193,10 +1230,13 @@ mod row_rhythm_tests {
 
             view.update(cx, |view, cx| {
                 let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
                 view.sync_transcript_list(specs);
 
                 assert!(view.transcript_list.is_following_tail());
+
                 view.toggle_disclosure(RevealKey::Group(2), cx);
+
                 assert!(
                     view.transcript_list.is_following_tail(),
                     "a view at the live end keeps following it"
@@ -1207,6 +1247,7 @@ mod row_rhythm_tests {
                     offset_in_item: px(0.),
                 });
                 view.toggle_disclosure(RevealKey::Row(3), cx);
+
                 assert!(
                     !view.transcript_list.is_following_tail(),
                     "a view reading an earlier turn is pinned where it sits"
@@ -1222,13 +1263,16 @@ mod row_rhythm_tests {
     fn reduced_motion_opens_a_disclosure_with_nothing_in_flight(cx: &mut TestAppContext) {
         cx.update(|cx| {
             let view = transcript_with_a_collapsed_run(cx);
+
             cx.global_mut::<AgentSettings>().reduce_motion = true;
 
             view.update(cx, |view, cx| {
                 let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
                 view.sync_transcript_list(specs);
 
                 view.toggle_disclosure(RevealKey::Group(2), cx);
+
                 let now = Instant::now();
 
                 assert!(view.disclosures.group_expanded(2), "the run still opens");
@@ -1251,7 +1295,9 @@ mod row_rhythm_tests {
                 view.toggle_disclosure(RevealKey::Group(2), cx);
 
                 let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
                 view.sync_transcript_list(specs);
+
                 assert!(
                     view.disclosures.group_expanded(2),
                     "the run is still on its way out"
@@ -1265,7 +1311,9 @@ mod row_rhythm_tests {
                 );
 
                 view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
+
                 let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
                 view.sync_transcript_list(specs);
 
                 assert!(view.disclosures.expanded_groups().is_empty());
@@ -1294,21 +1342,29 @@ mod row_rhythm_tests {
             view.update(cx, |view, cx| {
                 view.disclosures
                     .open(RevealKey::Group(2), Instant::now(), false);
+
                 let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
                 view.sync_transcript_list(specs);
 
                 let open = rhythm(view);
+
                 assert_eq!(open[2].0, "run");
                 assert_eq!(open[2].1, RowGap::Step, "the toggle heads its steps");
+
                 let last_step = open[4];
+
                 assert_eq!(last_step.0, "work");
 
                 view.toggle_disclosure(RevealKey::Group(2), cx);
                 view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
+
                 let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
                 view.sync_transcript_list(specs);
 
                 let shut = rhythm(view);
+
                 assert_eq!(shut[2].0, "run");
                 assert_eq!(shut[2].1, last_step.1);
             });
@@ -1325,10 +1381,13 @@ mod row_rhythm_tests {
 
             view.update(cx, |view, cx| {
                 view.toggle_disclosure(RevealKey::Group(2), cx);
+
                 let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
                 view.sync_transcript_list(specs);
 
                 let elsewhere = RevealedPart::Block(RevealKey::Row(0));
+
                 view.disclosures
                     .record_height(RevealedPart::Entry(2), px(40.));
                 view.disclosures
@@ -1358,6 +1417,7 @@ mod row_rhythm_tests {
                 view.toggle_disclosure(RevealKey::Group(2), cx);
 
                 view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
+
                 assert!(
                     view.disclosures.group_expanded(2),
                     "the run stayed open rather than finishing the exit"
@@ -1372,6 +1432,7 @@ mod row_rhythm_tests {
     fn reduced_motion_shuts_a_disclosure_at_the_click(cx: &mut TestAppContext) {
         cx.update(|cx| {
             let view = transcript_with_a_collapsed_run(cx);
+
             cx.global_mut::<AgentSettings>().reduce_motion = true;
 
             view.update(cx, |view, cx| {
@@ -1395,7 +1456,9 @@ mod row_rhythm_tests {
 
             view.update(cx, |view, cx| {
                 let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+
                 view.sync_transcript_list(specs);
+
                 assert_eq!(
                     rhythm(view)
                         .iter()
@@ -1405,8 +1468,11 @@ mod row_rhythm_tests {
                 );
 
                 view.toggle_disclosure(RevealKey::Turn(1), cx);
+
                 let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+
                 view.sync_transcript_list(specs);
+
                 let now = Instant::now();
 
                 assert_eq!(
@@ -1441,7 +1507,9 @@ mod row_rhythm_tests {
                 view.toggle_disclosure(RevealKey::Turn(1), cx);
 
                 let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+
                 view.sync_transcript_list(specs);
+
                 assert_eq!(rhythm(view).len(), 5, "the work is still on its way out");
                 assert!(
                     !view.disclosures.is_disclosing(RevealKey::Turn(1)),
@@ -1449,7 +1517,9 @@ mod row_rhythm_tests {
                 );
 
                 view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
+
                 let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+
                 view.sync_transcript_list(specs);
 
                 assert!(view.disclosures.toggled_turns().is_empty());
@@ -1471,14 +1541,18 @@ mod row_rhythm_tests {
                 view.disclosures
                     .open(RevealKey::Turn(1), Instant::now(), false);
                 view.toggle_disclosure(RevealKey::Group(2), cx);
+
                 let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+
                 view.sync_transcript_list(specs);
+
                 let now = Instant::now();
 
                 assert_eq!(rhythm(view)[4].0, "work");
                 assert_eq!(view.revealed_by(4, now), Some(RevealKey::Group(2)));
 
                 view.toggle_disclosure(RevealKey::Turn(1), cx);
+
                 let now = Instant::now();
 
                 assert_eq!(view.revealed_by(4, now), Some(RevealKey::Turn(1)));
@@ -1494,7 +1568,9 @@ mod row_rhythm_tests {
             view.update(cx, |view, _| {
                 view.disclosures
                     .open(RevealKey::Group(2), Instant::now(), false);
+
                 let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
                 view.sync_transcript_list(specs);
 
                 assert_eq!(
@@ -1524,16 +1600,22 @@ mod row_rhythm_tests {
             view.update(cx, |view, cx| {
                 view.push(1, user("ask").item, Vec::new(), cx);
                 view.push(1, command("ls").item, Vec::new(), cx);
+
                 let specs = view.build_row_specs(CollapseRows::Off);
+
                 view.sync_transcript_list(specs);
+
                 let before = view.rows.clone();
+
                 assert_eq!(
                     rhythm(view),
                     vec![("entry", RowGap::Group), ("work", RowGap::Group)]
                 );
 
                 view.push(1, command("cat").item, Vec::new(), cx);
+
                 let specs = view.build_row_specs(CollapseRows::Off);
+
                 view.sync_transcript_list(specs);
 
                 // The first step says exactly what it said before; what
@@ -1584,6 +1666,7 @@ mod typed_reply_tests {
                 assert_eq!(transcript.typed_edge(0), Some(5));
 
                 transcript.clear();
+
                 assert_eq!(transcript.typed_edge(0), None);
             });
         });
@@ -1633,7 +1716,9 @@ mod surface_palette_tests {
         cx.update(|cx| {
             gpui_component::init(cx);
             Theme::global_mut(cx).highlight_theme = HighlightTheme::default_light();
+
             let themed = cx.theme().highlight_theme.clone();
+
             cx.set_global(AgentSettings {
                 pane_background_follows_terminal: true,
                 terminal_background: rgb(0x101010).into(),
@@ -1644,11 +1729,14 @@ mod surface_palette_tests {
             assert_eq!(transcript_highlight_theme(cx).appearance, ThemeMode::Dark);
 
             cx.global_mut::<AgentSettings>().terminal_background = rgb(0xeeeeee).into();
+
             assert!(Arc::ptr_eq(&transcript_highlight_theme(cx), &themed));
 
             let settings = cx.global_mut::<AgentSettings>();
+
             settings.terminal_background = rgb(0x101010).into();
             settings.pane_background_follows_terminal = false;
+
             assert!(Arc::ptr_eq(&transcript_highlight_theme(cx), &themed));
         });
     }
@@ -1657,6 +1745,7 @@ mod surface_palette_tests {
     fn palette_is_kept_when_it_matches_the_surface() {
         let dark = HighlightTheme::default_dark();
         let light = HighlightTheme::default_light();
+
         let own = Arc::new(HighlightTheme {
             name: "Own Dark".to_string(),
             appearance: ThemeMode::Dark,
@@ -1742,6 +1831,7 @@ mod reading_column_tests {
             gpui_component::init(cx);
             cx.set_global(AgentSettings::default());
         });
+
         let (_, cx) = cx.add_window_view(|_, _| ColumnRoot);
         let cx: &mut VisualTestContext = cx;
 
@@ -1751,10 +1841,12 @@ mod reading_column_tests {
         });
 
         let bubble = cx.debug_bounds("bubble").unwrap();
+
         assert!(
             bubble.size.width > bubble.size.height,
             "bubble should stay on one line, got {bubble:?}"
         );
+
         // 1400px less the 10% margins leaves 1120px, more than the 880px
         // measure, so the column is centred in that space and the bubble
         // ends on its trailing edge: 140 + (1120 - 880) / 2 + 880.

@@ -74,11 +74,13 @@ pub(super) fn composer_stats_label(
     if steps > 0 {
         parts.push(i18n("agent-status-steps").replace("{count}", &steps.to_string()));
     }
+
     if let Some(first_output) = first_output {
         parts.push(
             i18n("agent-status-first-output").replace("{value}", &latency_readout(first_output)),
         );
     }
+
     if let Some(percent) = cache_hit {
         parts.push(i18n("agent-status-cache-hit").replace("{percent}", &percent.to_string()));
     }
@@ -268,6 +270,7 @@ impl AgentPane {
                     )
                 })
                 .into_any_element();
+
             Some(banner)
         })
     }
@@ -306,6 +309,7 @@ impl AgentPane {
     /// to: the transcript holds one error row and nothing else.
     pub(super) fn render_start_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let failure = self.runtime.start_failure().map(str::to_owned);
+
         if failure.is_none() && !self.shows_start_overlay() {
             return None;
         }

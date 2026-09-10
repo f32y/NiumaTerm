@@ -152,6 +152,7 @@ fn credentials_path(config_dir: Option<&OsStr>, home: Option<&Path>) -> Option<P
 fn parse_oauth_token(bytes: &[u8]) -> Result<String, String> {
     let credentials: ClaudeCredentials = serde_json::from_slice(bytes)
         .map_err(|_| "Claude OAuth credentials were not valid JSON".to_string())?;
+
     credentials
         .claude_ai_oauth
         .and_then(|oauth| oauth.access_token)
@@ -168,6 +169,7 @@ fn read_oauth_token() -> Result<String, String> {
         .ok_or_else(|| "Claude credentials directory unavailable".to_string())?;
     let file = File::open(path).map_err(|_| "Claude OAuth credentials unavailable".to_string())?;
     let bytes = read_bounded_bytes(file, MAX_CREDENTIALS_BYTES, "Claude credentials")?;
+
     parse_oauth_token(&bytes)
 }
 
@@ -178,6 +180,7 @@ fn oauth_status_allows_cli_fallback(status: StatusCode) -> bool {
 fn parse_oauth_usage(bytes: &[u8]) -> Result<UsageSnapshot, String> {
     let response: OAuthUsageResponse = serde_json::from_slice(bytes)
         .map_err(|_| "Claude OAuth usage response was not valid JSON".to_string())?;
+
     let usage = UsageSnapshot {
         five_hour: oauth_window(response.five_hour.as_ref(), FIVE_HOUR_WINDOW_MINUTES),
         weekly: oauth_window(response.seven_day.as_ref(), WEEKLY_WINDOW_MINUTES),
@@ -202,13 +205,16 @@ fn parse_oauth_usage(bytes: &[u8]) -> Result<UsageSnapshot, String> {
 fn oauth_window(window: Option<&OAuthUsageWindow>, window_minutes: u32) -> Option<UsageWindow> {
     let window = window?;
     let mut usage = UsageWindow::new(remaining_percentage(Some(window))?, window_minutes);
+
     usage.resets_at = window.resets_at.as_ref().and_then(parse_timestamp_millis);
+
     Some(usage)
 }
 
 fn remaining_percentage(window: Option<&OAuthUsageWindow>) -> Option<u8> {
     let window = window?;
     let used = window.utilization.or(window.used_percentage)?;
+
     used.is_finite()
         .then(|| (100.0 - used.clamp(0.0, 100.0)).round() as u8)
 }
@@ -219,6 +225,7 @@ fn fetch_via_oauth(cancelled: &AtomicBool) -> Result<UsageSnapshot, OAuthFetchEr
     }
 
     let token = read_oauth_token().map_err(OAuthFetchError::Fallback)?;
+
     let client = Client::builder()
         .timeout(OAUTH_FETCH_TIMEOUT)
         .build()
@@ -239,11 +246,13 @@ fn fetch_via_oauth(cancelled: &AtomicBool) -> Result<UsageSnapshot, OAuthFetchEr
     }
 
     let status = response.status();
+
     if !status.is_success() {
         let message = format!(
             "Claude OAuth usage request returned HTTP {}",
             status.as_u16()
         );
+
         return Err(if oauth_status_allows_cli_fallback(status) {
             OAuthFetchError::Fallback(message)
         } else {
@@ -257,6 +266,7 @@ fn fetch_via_oauth(cancelled: &AtomicBool) -> Result<UsageSnapshot, OAuthFetchEr
         "Claude OAuth usage response",
     )
     .map_err(OAuthFetchError::Fallback)?;
+
     if cancelled.load(Ordering::Relaxed) {
         return Err(OAuthFetchError::Cancelled);
     }
@@ -346,6 +356,7 @@ fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchErro
 
     let working_directory = Some(env::temp_dir().to_string_lossy().into_owned());
     let mut environment_overrides = vec![("TERM".to_string(), "xterm-256color".to_string())];
+
     // The same PATH every other CLI spawn in this application uses. A GUI
     // launch inherits neither the user's PATH nor a shell that would rebuild
     // it, and this session's shell is not an interactive one, so the startup
@@ -353,7 +364,9 @@ fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchErro
     if let Some(path) = launch_env_var("PATH") {
         environment_overrides.push(("PATH".to_string(), path.to_string_lossy().into_owned()));
     }
+
     let (shell, shell_arguments) = interactive_launch();
+
     // A real terminal is required because current Claude versions render
     // subscription limits only through the interactive `/usage` panel.
     let mut pty = nmt_platform::create_managed_pty_with_env(PtyOptions {
@@ -455,6 +468,7 @@ fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchErro
 /// spacing never reaches the stream.
 fn is_trust_prompt(panel: &str) -> bool {
     let condensed: String = panel.chars().filter(|ch| !ch.is_whitespace()).collect();
+
     TRUST_PROMPT_MARKERS
         .iter()
         .any(|marker| condensed.contains(marker))
@@ -462,6 +476,7 @@ fn is_trust_prompt(panel: &str) -> bool {
 
 fn drain_pty_output(pty: &mut nmt_platform::Pty, output: &mut Vec<u8>) -> Result<bool, String> {
     let mut buffer = [0u8; 8 * 1024];
+
     loop {
         match pty.reader().read(&mut buffer) {
             Ok(0) => return Ok(false),
@@ -488,9 +503,11 @@ fn append_bounded(output: &mut Vec<u8>, bytes: &[u8], max_bytes: usize) {
         .len()
         .saturating_add(bytes.len())
         .saturating_sub(max_bytes);
+
     if overflow > 0 {
         output.drain(..overflow);
     }
+
     output.extend_from_slice(bytes);
 }
 
@@ -503,6 +520,7 @@ fn write_pty(pty: &mut nmt_platform::Pty, bytes: &[u8], description: &str) -> Re
 pub fn parse_output(output: &str) -> Result<UsageSnapshot, String> {
     let normalized = strip_terminal_sequences(&output.replace("\r\n", "\n").replace('\r', "\n"));
     let lines: Vec<&str> = normalized.lines().collect();
+
     let usage = UsageSnapshot {
         five_hour: cli_window(&lines, is_session_label, FIVE_HOUR_WINDOW_MINUTES),
         weekly: cli_window(&lines, is_weekly_label, WEEKLY_WINDOW_MINUTES),
@@ -526,7 +544,9 @@ fn cli_window(
         extract_remaining_after_label(lines, matches_label)?,
         window_minutes,
     );
+
     usage.reset_description = extract_reset_description_after_label(lines, matches_label);
+
     Some(usage)
 }
 
@@ -540,11 +560,13 @@ fn extract_remaining_after_label(lines: &[&str], matches_label: fn(&str) -> bool
             if offset > 0 && is_section_label(candidate) {
                 break;
             }
+
             if let Some(remaining) = parse_remaining_percentage(candidate) {
                 return Some(remaining);
             }
         }
     }
+
     None
 }
 
@@ -561,30 +583,37 @@ fn extract_reset_description_after_label(
             if offset > 0 && is_section_label(candidate) {
                 break;
             }
+
             let lower = candidate.to_ascii_lowercase();
             let Some(reset_index) = lower.find("reset") else {
                 continue;
             };
             let description = candidate[reset_index..].trim();
+
             if !description.is_empty() {
                 return Some(description.to_string());
             }
         }
     }
+
     None
 }
 
 fn parse_remaining_percentage(line: &str) -> Option<u8> {
     let lower = line.to_ascii_lowercase();
+
     for (percent_index, _) in lower.match_indices('%') {
         let prefix = &lower[..percent_index];
+
         let number_start = prefix
             .bytes()
             .rposition(|byte| !byte.is_ascii_digit() && byte != b'.')
             .map_or(0, |index| index + 1);
+
         let Ok(value) = prefix[number_start..].parse::<f64>() else {
             continue;
         };
+
         if !value.is_finite() || !(0.0..=100.0).contains(&value) {
             continue;
         }
@@ -595,13 +624,16 @@ fn parse_remaining_percentage(line: &str) -> Option<u8> {
         else {
             continue;
         };
+
         let remaining = match word {
             "used" | "consumed" => 100.0 - value,
             "left" | "remaining" | "available" => value,
             _ => continue,
         };
+
         return Some(remaining.round() as u8);
     }
+
     None
 }
 
@@ -611,6 +643,7 @@ fn is_session_label(line: &str) -> bool {
 
 fn is_weekly_label(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
+
     !lower.contains("fable")
         && (lower.contains("current week")
             || lower.contains("weekly limit")
@@ -622,6 +655,7 @@ fn is_weekly_label(line: &str) -> bool {
 
 fn is_fable_label(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
+
     lower.contains("fable")
         && (lower.trim() == "fable"
             || lower.contains("current week")
@@ -648,6 +682,7 @@ fn strip_terminal_sequences(input: &str) -> String {
         match chars.peek().copied() {
             Some('[') => {
                 chars.next();
+
                 for next in chars.by_ref() {
                     if ('@'..='~').contains(&next) {
                         break;
@@ -656,11 +691,14 @@ fn strip_terminal_sequences(input: &str) -> String {
             }
             Some(']') => {
                 chars.next();
+
                 let mut escaped = false;
+
                 for next in chars.by_ref() {
                     if next == '\u{7}' || (escaped && next == '\\') {
                         break;
                     }
+
                     escaped = next == '\u{1b}';
                 }
             }
@@ -680,6 +718,7 @@ fn read_bounded_bytes(
     description: &str,
 ) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
+
     reader
         .by_ref()
         .take(max_bytes + 1)

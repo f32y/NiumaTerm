@@ -6,7 +6,9 @@ use crate::windows::self_update::{INCOMING_SUFFIX, PREVIOUS_SUFFIX, ReplaceFiles
 fn scratch(name: &str) -> PathBuf {
     let directory = env::temp_dir().join(format!("nmt-update-{}-{name}", process::id()));
     let _ = fs::remove_dir_all(&directory);
+
     fs::create_dir_all(&directory).expect("create the scratch directory");
+
     directory
 }
 
@@ -41,6 +43,7 @@ fn failed_swap_restores_moved_files() {
         fs::write(install.join(name), "installed").unwrap();
         fs::write(install.join(format!("{name}{INCOMING_SUFFIX}")), "staged").unwrap();
     }
+
     fs::remove_file(install.join(format!("three.txt{INCOMING_SUFFIX}"))).unwrap();
 
     assert!(matches!(

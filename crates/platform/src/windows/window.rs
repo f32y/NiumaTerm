@@ -14,6 +14,7 @@ pub fn is_foreground_and_not_minimized(hwnd: NonZeroIsize) -> bool {
 pub fn show_error_dialog(title: &str, message: &str) {
     let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
     let message: Vec<u16> = message.encode_utf16().chain(Some(0)).collect();
+
     unsafe {
         MessageBoxW(
             ptr::null_mut(),

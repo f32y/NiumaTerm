@@ -10,8 +10,11 @@ use crate::persistence::update;
 fn failed_edit_preserves_the_original_file() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("config.toml");
+
     fs::write(&path, "original").unwrap();
+
     let error = update(&path, |_| Err(io::Error::other("cannot encode"))).unwrap_err();
+
     assert_eq!(error.to_string(), "cannot encode");
     assert_eq!(fs::read_to_string(&path).unwrap(), "original");
     assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
@@ -21,8 +24,11 @@ fn failed_edit_preserves_the_original_file() {
 fn unreadable_content_never_reaches_the_edit() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("config.toml");
+
     fs::write(&path, [0xff, 0xfe]).unwrap();
+
     let error = update(&path, |_| panic!("read failure must stop the update")).unwrap_err();
+
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     assert_eq!(fs::read(&path).unwrap(), [0xff, 0xfe]);
 }
@@ -33,6 +39,7 @@ fn process_writer() {
         return;
     };
     let path = PathBuf::from(path);
+
     for _ in 0..25 {
         update(&path, |content| {
             let count: usize = content.unwrap_or("0").parse().unwrap();
@@ -48,6 +55,7 @@ fn concurrent_processes_preserve_every_update() {
     let path = directory.path().join("counter");
     let executable = env::current_exe().unwrap();
     let mut children = Vec::new();
+
     for _ in 0..4 {
         children.push(
             Command::new(&executable)
@@ -57,9 +65,11 @@ fn concurrent_processes_preserve_every_update() {
                 .unwrap(),
         );
     }
+
     for mut child in children {
         assert!(child.wait().unwrap().success());
     }
+
     assert_eq!(fs::read_to_string(&path).unwrap(), "100");
     assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
 }

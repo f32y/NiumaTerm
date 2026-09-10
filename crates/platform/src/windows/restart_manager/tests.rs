@@ -62,6 +62,7 @@ impl Default for State {
 impl ScriptedApi {
     fn new(state: State) -> (Self, Arc<Mutex<State>>) {
         let state = Arc::new(Mutex::new(state));
+
         (
             Self {
                 state: state.clone(),
@@ -98,16 +99,20 @@ impl Api for ScriptedApi {
         reboot_reasons: *mut u32,
     ) -> u32 {
         let reply = self.state.lock().list.pop_front().unwrap();
+
         unsafe {
             *needed = reply.needed;
             *reboot_reasons = reply.reboot_reasons;
+
             if !processes.is_null() {
                 let capacity = *count as usize;
                 let copied = capacity.min(reply.processes.len());
+
                 ptr::copy_nonoverlapping(reply.processes.as_ptr(), processes, copied);
                 *count = copied as u32;
             }
         }
+
         reply.code
     }
 
@@ -131,10 +136,13 @@ fn process(name: &str, pid: u32) -> RM_PROCESS_INFO {
         TSSessionId: 7,
         ..Default::default()
     };
+
     process.Process.dwProcessId = pid;
+
     for (target, source) in process.strAppName.iter_mut().zip(name.encode_utf16()) {
         *target = source;
     }
+
     process
 }
 
@@ -143,14 +151,18 @@ fn integration_scratch() -> PathBuf {
         "nmt-restart-manager-integration-{}",
         current_process::id()
     ));
+
     let _ = fs::remove_dir_all(&directory);
+
     fs::create_dir_all(&directory).unwrap();
+
     directory
 }
 
 #[test]
 fn growing_process_list_is_retried_and_decoded() {
     let explorer = process("Windows Explorer", 123);
+
     let state = State {
         list: VecDeque::from([
             ListReply {
@@ -174,6 +186,7 @@ fn growing_process_list_is_retried_and_decoded() {
         ]),
         ..Default::default()
     };
+
     let (api, shared) = ScriptedApi::new(state);
     let session =
         Session::for_files(api, &[Path::new(r"C:\NiumaTerm\NmtShellExtension.dll")]).unwrap();
@@ -187,7 +200,9 @@ fn growing_process_list_is_retried_and_decoded() {
     assert_eq!(usage.applications[0].terminal_session_id, Some(7));
     assert!(usage.applications[0].restartable);
     assert!(usage.reboot_reasons.permission_denied);
+
     drop(session);
+
     assert_eq!(shared.lock().ended, 1);
 }
 
@@ -197,6 +212,7 @@ fn registration_failure_still_ends_the_started_session() {
         register_code: ERROR_ACCESS_DENIED,
         ..Default::default()
     };
+
     let (api, shared) = ScriptedApi::new(state);
 
     let error = Session::for_files(api, &[Path::new(r"C:\NiumaTerm\NmtShellExtension.dll")])
@@ -224,16 +240,20 @@ fn shutdown_and_restart_use_normal_action_flags() {
         }]),
         ..Default::default()
     };
+
     let (api, shared) = ScriptedApi::new(state);
     let session =
         Session::for_files(api, &[Path::new(r"C:\NiumaTerm\NmtShellExtension.dll")]).unwrap();
 
     session.shutdown().unwrap();
     session.restart().unwrap();
+
     assert!(session.file_usage().unwrap().applications.is_empty());
+
     drop(session);
 
     let state = shared.lock();
+
     assert_eq!(state.shutdown_flags, [0]);
     assert_eq!(state.restart_flags, [0]);
     assert_eq!(state.ended, 1);
@@ -245,6 +265,7 @@ fn shutdown_error_preserves_its_operation_and_code() {
         shutdown_code: ERROR_ACCESS_DENIED,
         ..Default::default()
     };
+
     let (api, _) = ScriptedApi::new(state);
     let session =
         Session::for_files(api, &[Path::new(r"C:\NiumaTerm\NmtShellExtension.dll")]).unwrap();
@@ -263,16 +284,21 @@ fn dll_holder_process() {
     let Some(path) = env::var_os("NMT_RESTART_MANAGER_TEST_DLL") else {
         return;
     };
+
     let wide = OsStr::new(&path)
         .encode_wide()
         .chain(Some(0))
         .collect::<Vec<_>>();
+
     let module = unsafe { LoadLibraryW(wide.as_ptr()) };
+
     assert!(!module.is_null(), "load the isolated test DLL");
 
     println!("NMT_DLL_READY");
     io::stdout().flush().unwrap();
+
     let mut input = Vec::new();
+
     io::stdin().read_to_end(&mut input).unwrap();
 
     assert_ne!(unsafe { FreeLibrary(module) }, 0);
@@ -285,6 +311,7 @@ fn a_loaded_dll_is_reported_and_old_copy_cleans_up_after_exit() {
     let source = PathBuf::from(system_root).join(r"System32\version.dll");
     let target = scratch.join("NmtShellExtension.dll");
     let previous = scratch.join("NmtShellExtension.dll.nmt-previous");
+
     fs::copy(&source, &target).unwrap();
 
     let mut child = Command::new(env::current_exe().unwrap())
@@ -298,23 +325,28 @@ fn a_loaded_dll_is_reported_and_old_copy_cleans_up_after_exit() {
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
+
     let child_input = child.stdin.take().unwrap();
     let mut output = BufReader::new(child.stdout.take().unwrap());
     let mut ready = false;
     let mut line = String::new();
+
     while output.read_line(&mut line).unwrap() != 0 {
         if line.contains("NMT_DLL_READY") {
             ready = true;
             break;
         }
+
         line.clear();
     }
+
     assert!(ready, "child process loaded the isolated DLL");
 
     let usage = RestartManagerSession::for_files(&[&target])
         .unwrap()
         .file_usage()
         .unwrap();
+
     assert!(
         usage
             .applications
@@ -325,13 +357,17 @@ fn a_loaded_dll_is_reported_and_old_copy_cleans_up_after_exit() {
     fs::rename(&target, &previous).unwrap();
     fs::copy(&source, &target).unwrap();
     discard_previous(&scratch);
+
     assert!(previous.exists());
 
     drop(child_input);
+
     assert!(child.wait().unwrap().success());
+
     discard_previous(&scratch);
 
     assert!(target.exists());
     assert!(!previous.exists());
+
     fs::remove_dir_all(scratch).unwrap();
 }

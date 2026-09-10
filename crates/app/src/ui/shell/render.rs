@@ -63,6 +63,7 @@ impl Shell {
     fn bind_actions(element: Div, cx: &mut Context<Self>) -> Div {
         #[cfg(windows)]
         let element = element.on_action(cx.listener(Self::on_new_remote_tab));
+
         element
             .on_action(cx.listener(Self::on_new_tab))
             .on_action(cx.listener(Self::on_close_tab))
@@ -96,6 +97,7 @@ impl Shell {
         // middle of the bar free to name the session on screen instead.
         let vertical_tabs =
             cx.global::<AppSettings>().appearance.tab_bar_style == TabBarStyle::Vertical;
+
         let leading_width = if cfg!(target_os = "macos") {
             (self.sidebar.width + ui::composition::FLOATING_SURFACE_SIDE_INSET
                 - TITLE_BAR_LEADING_INSET)

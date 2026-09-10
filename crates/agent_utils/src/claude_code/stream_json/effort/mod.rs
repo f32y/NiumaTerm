@@ -58,21 +58,27 @@ impl EffortState {
 
     pub(super) fn resolve(&mut self, id: &str, error: Option<String>) -> Option<Event> {
         let change = self.pending.iter_mut().find(|change| change.id == id)?;
+
         if change.result.is_some() {
             return None;
         }
+
         change.result = Some(error.map_or(ChangeResult::Applied, ChangeResult::Rejected));
+
         self.settle()
     }
 
     pub(super) fn expire(&mut self, id: &str) -> Option<Event> {
         let change = self.pending.iter_mut().find(|change| change.id == id)?;
+
         if change.result.is_some() {
             return None;
         }
+
         // A missing acknowledgment is not a refusal. Retain the requested
         // level as uncertain so sending another prompt does not resend it.
         change.result = Some(ChangeResult::Unknown);
+
         self.settle()
     }
 
@@ -82,11 +88,13 @@ impl EffortState {
                 change.result = Some(ChangeResult::Rejected(message.to_string()));
             }
         }
+
         self.settle()
     }
 
     fn settle(&mut self) -> Option<Event> {
         let mut errors = Vec::new();
+
         while self
             .pending
             .front()
@@ -95,6 +103,7 @@ impl EffortState {
             let Some(change) = self.pending.pop_front() else {
                 break;
             };
+
             match change.result {
                 Some(ChangeResult::Applied) => {
                     self.confirmed = Some(change.value);
@@ -105,6 +114,7 @@ impl EffortState {
                 None => unreachable!("only completed changes are removed"),
             }
         }
+
         (!errors.is_empty()).then(|| Event::EffortRejected {
             message: errors.join("; "),
             effort: self.desired().map(str::to_owned),

@@ -41,9 +41,11 @@ const TRANSCRIPT_THUMBNAIL: f32 = 56.0;
 /// so the column keeps a little air at its sides instead of a fixed strip
 /// eating most of the width.
 const TRANSCRIPT_COLUMN_FRACTION: f32 = 0.8;
+
 fn transcript_column_margin() -> f32 {
     (1.0 - TRANSCRIPT_COLUMN_FRACTION) / 2.0
 }
+
 /// The measure the column stops growing at: 880px at the default root size,
 /// which is around 90 latin characters or 45 CJK ones a line of prose. On a
 /// maximised window a share of the pane would run well past that, the eye
@@ -83,6 +85,7 @@ pub(crate) fn transcript_column(body: impl IntoElement, cx: &App) -> Div {
                 .child(body),
         )
 }
+
 /// Three ranks of space, which is what makes a turn read as message / work /
 /// message rather than as one undifferentiated stack. The widest marks where
 /// one exchange ends; the middle one holds a turn's work off the prose it is
@@ -100,6 +103,7 @@ fn gap_px(gap: RowGap) -> f32 {
         RowGap::Group => TRANSCRIPT_GROUP_GAP,
     }
 }
+
 /// The rule down the left of a run of work rows. The steps carry no border of
 /// their own, so this is what marks where a run starts and ends and keeps its
 /// rows reading as one block. It holds the rows off nothing: a gap after it
@@ -242,6 +246,7 @@ impl TranscriptView {
             .take_while(|cursor| self.revealed_by(*cursor, now) == Some(key))
             .last()
             .unwrap_or(ix);
+
         let Some(above) = first.checked_sub(1).map(|above| &self.rows[above]) else {
             return px(0.);
         };

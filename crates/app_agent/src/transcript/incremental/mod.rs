@@ -69,45 +69,59 @@ impl TranscriptView {
         {
             self.row_cache.rebuilt_entries = 0;
         }
+
         if self.row_cache.mode != Some(collapse) {
             self.row_cache.mode = Some(collapse);
             self.row_cache.invalidate(0);
         }
+
         let Some(dirty) = self.row_cache.dirty_from.take() else {
             return;
         };
+
         let keep = self
             .row_cache
             .turns
             .partition_point(|(end, _)| *end <= dirty);
+
         self.row_cache.turns.truncate(keep);
+
         let (mut start, mut row_start) = self.row_cache.turns.last().copied().unwrap_or_default();
+
         #[cfg(test)]
         {
             self.row_cache.rebuilt_entries = self.items.len() - start;
         }
+
         let mut specs = mem::take(&mut self.row_cache.specs);
+
         specs.clear();
+
         // Reconsider the preceding row's gap along with the changed suffix.
         if row_start > 0 {
             row_start -= 1;
             specs.push(self.rows[row_start].spec.clone());
         }
+
         while start < self.items.len() {
             let turn = self.items[start].turn;
             let mut end = start + 1;
+
             while end < self.items.len() && self.items[end].turn == turn {
                 end += 1;
             }
+
             self.turn_specs(turn, start, end, collapse, &mut specs);
             self.row_cache.turns.push((end, row_start + specs.len()));
             start = end;
         }
+
         if self.live_turn.is_working() {
             specs.push(RowSpec::Working {
                 compacting: self.live_turn.is_compacting(),
             });
         }
+
         self.sync_transcript_tail(row_start, &specs);
         specs.clear();
         self.row_cache.specs = specs;

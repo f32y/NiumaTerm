@@ -8,9 +8,13 @@ use crate::claude_code::tasks::ShellDetail;
 
 fn scratch_file(name: &str, contents: &[u8]) -> PathBuf {
     let dir = env::temp_dir().join(format!("nmt-shell-output-{}", process::id()));
+
     fs::create_dir_all(&dir).expect("scratch directory is writable");
+
     let path = dir.join(name);
+
     fs::write(&path, contents).expect("scratch file is writable");
+
     path
 }
 
@@ -39,6 +43,7 @@ fn command_item(detail: &ShellDetail) -> (String, Option<String>, Option<String>
 #[test]
 fn a_running_command_reports_its_output_so_far() {
     let path = scratch_file("running.output", b"compiling\n");
+
     let detail = detail(
         Some(path.to_string_lossy().into_owned()),
         BackgroundTaskState::Working,
@@ -57,9 +62,11 @@ fn a_settled_command_carries_the_status_its_row_reports() {
     let file = path.to_string_lossy().into_owned();
 
     let (_, _, status) = command_item(&detail(Some(file.clone()), BackgroundTaskState::Failed));
+
     assert_eq!(status.as_deref(), Some("failed"));
 
     let (_, _, status) = command_item(&detail(Some(file), BackgroundTaskState::Done));
+
     assert_eq!(status.as_deref(), Some("completed"));
 }
 
@@ -67,7 +74,9 @@ fn a_settled_command_carries_the_status_its_row_reports() {
 fn an_output_file_longer_than_the_bound_is_shown_from_its_end() {
     let overflow = MAX_OUTPUT_BYTES as usize + 1024;
     let mut contents = vec![b'a'; overflow];
+
     contents.extend_from_slice(b"final line\n");
+
     let path = scratch_file("long.output", &contents);
 
     let (_, output, _) = command_item(&detail(
@@ -76,6 +85,7 @@ fn an_output_file_longer_than_the_bound_is_shown_from_its_end() {
     ));
 
     let output = output.expect("the tail is readable");
+
     assert!(output.ends_with("final line\n"));
     assert!(output.len() <= MAX_OUTPUT_BYTES as usize);
 }
@@ -86,10 +96,12 @@ fn a_command_with_nothing_written_yet_shows_no_output() {
     let file = path.to_string_lossy().into_owned();
 
     let (_, output, _) = command_item(&detail(Some(file), BackgroundTaskState::Working));
+
     assert_eq!(output, None);
 
     // A still-running command has no output file to name at all until its
     // completion notification reports one.
     let (_, output, _) = command_item(&detail(None, BackgroundTaskState::Working));
+
     assert_eq!(output, None);
 }

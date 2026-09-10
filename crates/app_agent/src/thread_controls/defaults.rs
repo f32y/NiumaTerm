@@ -37,6 +37,7 @@ pub(crate) fn stored_thread_settings<'a>(
     cx: &'a App,
 ) -> Option<&'a ThreadSettings> {
     let defaults = cx.try_global::<AgentThreadDefaults>()?;
+
     defaults
         .0
         .get(&defaults_key(kind, profile))
@@ -48,6 +49,7 @@ pub(crate) fn stored_thread_settings<'a>(
 /// semantics; Codex receives the profile field over app-server RPC.
 pub(crate) fn launch_model(kind: AgentKind, profile: &AgentProfile) -> Option<String> {
     let launch = agent_launch(profile);
+
     match kind {
         AgentKind::Claude => launch_env_value(&launch, ANTHROPIC_MODEL_ENV),
         AgentKind::Codex => launch.model,
@@ -76,11 +78,16 @@ impl ThreadControls {
         cx: &mut Context<AgentPane>,
     ) {
         let key = defaults_key(kind, profile);
+
         let stored = {
             let defaults = cx.default_global::<AgentThreadDefaults>();
+
             defaults.0.insert(key.clone(), self.settings.clone());
+
             let mut stored = defaults.to_local_state();
+
             stored.retain(|name, _| name == &key);
+
             stored
         };
 
@@ -125,6 +132,7 @@ impl AgentPane {
         // session is actually set to: the harness answers a model change with
         // the effort it chose, and a refusal leaves the previous pair standing.
         let (model, effort) = session.selection();
+
         self.controls.settings.model = model.map(str::to_string);
         self.controls.settings.effort = effort.map(str::to_string);
 
@@ -146,6 +154,7 @@ impl AgentPane {
         let Some(session) = self.runtime.backend_mut() else {
             return;
         };
+
         if self.controls.agent_preset.as_deref() == Some(preset.as_str()) {
             return;
         }

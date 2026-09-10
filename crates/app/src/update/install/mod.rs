@@ -69,6 +69,7 @@ fn staged_names(package: &Path) -> Vec<String> {
         .collect();
 
     names.sort();
+
     names
 }
 
@@ -173,6 +174,7 @@ impl InstallPlan {
 /// to the exact set that the swap will consume.
 pub(crate) fn plan(staging: &Path, install: &Path) -> InstallPlan {
     let versions = versions(staging, install);
+
     InstallPlan {
         names: differing(&versions),
     }
@@ -188,6 +190,7 @@ pub(crate) fn apply(
 
     replace_files(staging, install, &names).map_err(|error| {
         warn!("update: {error}");
+
         match error {
             ReplaceFilesError::Copy { .. } => InstallError::NotWritable,
             ReplaceFilesError::Replace { .. } => InstallError::Replace,

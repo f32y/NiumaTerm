@@ -105,10 +105,12 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         let hosts = remote::known_hosts();
+
         let Some(host) = hosts.into_iter().next() else {
             window.push_notification(i18n("shell-remote-no-hosts"), cx);
             return;
         };
+
         // Connects to the first paired host; a host picker is only meaningful
         // once a user keeps several hosts paired at the same time.
         let id = Self::alloc_id(&mut self.next_id);
@@ -229,6 +231,7 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         let summaries = self.workspaces.summaries();
+
         if let Some(index) = exact_match(&summaries, path).and_then(|workspace_id| {
             summaries
                 .iter()
@@ -260,6 +263,7 @@ impl Shell {
                 window,
                 cx,
             );
+
             return;
         };
 

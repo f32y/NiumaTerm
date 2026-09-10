@@ -19,12 +19,14 @@ impl AgentPane {
             for event in backend.process_exit() {
                 self.apply_event(event, cx);
             }
+
             cx.background_executor()
                 .spawn(async move {
                     let _ = backend.shutdown(Duration::from_millis(250), true);
                 })
                 .detach();
         }
+
         self.apply_event(
             Event::Error {
                 message: error,
@@ -69,6 +71,7 @@ pub(super) struct Sender {
 
 pub(super) fn channel() -> (Sender, mpsc::UnboundedReceiver<Result<Message, String>>) {
     let (sender, receiver) = mpsc::unbounded();
+
     (
         Sender {
             sender: Mutex::new(Some(sender)),
@@ -86,6 +89,7 @@ impl Sender {
         let Some(tx) = sender.as_ref() else { return };
         let bytes = retained_bytes(&value);
         let mut budget = self.budget.lock();
+
         let error = if value["method"] == OUTPUT_FAILURE_METHOD {
             Some(
                 value["params"]["message"]
@@ -99,20 +103,26 @@ impl Sender {
         } else {
             None
         };
+
         if let Some(error) = error {
             drop(budget);
+
             let _ = tx.unbounded_send(Err(error));
+
             sender.take();
             return;
         }
+
         budget.messages += 1;
         budget.bytes += bytes;
         drop(budget);
+
         let message = Message {
             value: Some(value),
             bytes,
             budget: Arc::clone(&self.budget),
         };
+
         if tx.unbounded_send(Ok(message)).is_err() {
             sender.take();
         }

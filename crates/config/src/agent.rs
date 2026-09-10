@@ -86,6 +86,7 @@ impl ModelListStyle {
     /// styles print the id once instead of twice.
     pub fn label(self, name: &str, id: &str) -> String {
         let name = name.trim();
+
         if name.is_empty() || name == id {
             return id.to_string();
         }

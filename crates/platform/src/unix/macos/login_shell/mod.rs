@@ -38,6 +38,7 @@ fn marker() -> String {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.subsec_nanos());
     let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+
     format!(
         "__NMT_LOGIN_ENVIRONMENT_{}_{clock}_{sequence}__",
         process::id()
@@ -74,16 +75,19 @@ pub(crate) fn missing_variables() -> &'static [(String, String)] {
         }
 
         let shell = default_shell();
+
         let Some(captured) = capture(&shell) else {
             warn!("could not read the environment of login shell {shell}");
             return Vec::new();
         };
 
         let variables = importable(captured, |name| env::var_os(name).is_some());
+
         debug!(
             "imported {} variables from login shell {shell}",
             variables.len()
         );
+
         variables
     })
 }
@@ -133,6 +137,7 @@ fn capture(shell: &str) -> Option<Vec<(String, String)>> {
 
     let mut stdout = child.stdout.take()?;
     let (sender, receiver) = mpsc::channel();
+
     thread::spawn(move || {
         let mut output = Vec::new();
         let read = stdout.read_to_end(&mut output);
@@ -147,14 +152,17 @@ fn capture(shell: &str) -> Option<Vec<(String, String)>> {
         }
         Err(_) => {
             warn!("login shell {shell} did not finish within {CAPTURE_TIMEOUT:?}");
+
             // SAFETY: the group id is this child's pid, which stays reserved
             // until the `wait` below reaps it.
             unsafe { libc::killpg(child.id() as libc::pid_t, libc::SIGKILL) };
+
             None
         }
     };
 
     let _ = child.wait();
+
     Some(parse(&captured?, &marker))
 }
 

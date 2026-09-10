@@ -73,6 +73,7 @@ fn a_held_answer_is_shared_but_never_outlives_the_freshness_asked_for() {
 #[test]
 fn a_directory_outside_a_repository_has_no_branch() {
     let dir = env::temp_dir().join(format!("nmt-git-branch-bare-{}", process::id()));
+
     fs::remove_dir_all(&dir).ok();
     fs::create_dir_all(&dir).expect("create non-repository directory");
 

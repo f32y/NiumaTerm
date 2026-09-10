@@ -124,6 +124,7 @@ impl FrameImage {
                 // Fold this row's displacement into the origin and paint the single
                 // row at screen line 0 of the adjusted origin.
                 let oy = origin_y + screen_line as f32 * cell_h + row_offset;
+
                 let g = kitty_virtual::compute_run_geometry(
                     &run,
                     placement_cols,
@@ -256,6 +257,7 @@ fn extract_virtual_images(
             }
 
             let style = buf.style(cell.style_id());
+
             let combining = cell
                 .extras_id()
                 .and_then(|id| buf.extras().get(&id))
@@ -275,6 +277,7 @@ fn extract_virtual_images(
                 }
             }
         }
+
         if let Some((run, start)) = current.take() {
             push_virtual_run(buf, generations, run, start, row, out);
         }

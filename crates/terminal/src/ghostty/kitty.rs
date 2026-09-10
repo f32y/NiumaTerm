@@ -145,6 +145,7 @@ impl KittyState {
             }
 
             let (mut vp_col, mut vp_row) = (0i32, 0i32);
+
             if unsafe {
                 ghostty_kitty_graphics_placement_viewport_pos(
                     iter,
@@ -245,6 +246,7 @@ impl KittyState {
             if image.is_null() {
                 continue;
             }
+
             let (g_cols, g_rows, [sx, sy, sw, sh]) = placement_geometry(iter, image, terminal);
 
             out.push(PlacementScreenPos {
@@ -311,9 +313,11 @@ impl KittyState {
 
                 let read_u32 = |data: VtKittyGraphicsImageData::Type| -> u32 {
                     let mut v: u32 = 0;
+
                     unsafe {
                         ghostty_kitty_graphics_image_get(image, data, (&mut v as *mut u32).cast());
                     }
+
                     v
                 };
 
@@ -385,9 +389,11 @@ impl GhosttyTerminal {
 
         let read_u32 = |data: VtKittyGraphicsImageData::Type| -> u32 {
             let mut v: u32 = 0;
+
             unsafe {
                 ghostty_kitty_graphics_image_get(image, data, (&mut v as *mut u32).cast());
             }
+
             v
         };
 
@@ -433,6 +439,7 @@ fn placement_scalar<T: Default>(
     unsafe {
         ghostty_kitty_graphics_placement_get(iter, data, (&mut v as *mut T).cast());
     }
+
     v
 }
 

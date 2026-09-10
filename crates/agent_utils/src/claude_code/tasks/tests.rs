@@ -58,11 +58,15 @@ fn state_of(tasks: &ClaudeTasks, id: &str) -> Option<BackgroundTaskState> {
 #[test]
 fn a_task_launch_creates_a_starting_row_before_any_child_activity() {
     let mut tasks = reducer();
+
     assert!(tasks.observe(&launch("toolu_1")));
 
     let snapshot = tasks.snapshot().expect("session is known");
+
     assert_eq!(snapshot.tasks.len(), 1);
+
     let task = &snapshot.tasks[0];
+
     assert_eq!(task.state, BackgroundTaskState::Starting);
     assert_eq!(task.display_name.as_deref(), Some("Review the diff"));
     assert_eq!(task.agent_type.as_deref(), Some("code-reviewer"));
@@ -84,6 +88,7 @@ fn a_task_launch_creates_a_starting_row_before_any_child_activity() {
 #[test]
 fn linked_sidechain_activity_advances_the_row_without_entering_the_transcript() {
     let mut tasks = reducer();
+
     tasks.observe(&launch("toolu_1"));
 
     assert!(tasks.observe(&json!({
@@ -95,6 +100,7 @@ fn linked_sidechain_activity_advances_the_row_without_entering_the_transcript() 
 
     let snapshot = tasks.snapshot().expect("session is known");
     let task = &snapshot.tasks[0];
+
     assert_eq!(task.state, BackgroundTaskState::Working);
     assert_eq!(task.status.as_deref(), Some("reading src/main.rs"));
     assert_eq!(task.last_preview.as_deref(), Some("reading src/main.rs"));
@@ -103,6 +109,7 @@ fn linked_sidechain_activity_advances_the_row_without_entering_the_transcript() 
 #[test]
 fn unlinked_sidechain_activity_never_creates_a_row() {
     let mut tasks = reducer();
+
     assert!(!tasks.observe(&json!({
         "type": "assistant",
         "session_id": SESSION,
@@ -115,12 +122,16 @@ fn unlinked_sidechain_activity_never_creates_a_row() {
 #[test]
 fn a_matching_result_completes_the_task_and_an_error_result_fails_it() {
     let mut done = reducer();
+
     done.observe(&launch("toolu_1"));
+
     assert!(done.observe(&tool_result("toolu_1", false)));
     assert_eq!(state_of(&done, "toolu_1"), Some(BackgroundTaskState::Done));
 
     let mut failed = reducer();
+
     failed.observe(&launch("toolu_1"));
+
     assert!(failed.observe(&tool_result("toolu_1", true)));
     assert_eq!(
         state_of(&failed, "toolu_1"),
@@ -131,7 +142,9 @@ fn a_matching_result_completes_the_task_and_an_error_result_fails_it() {
 #[test]
 fn a_result_for_another_tool_leaves_every_task_untouched() {
     let mut tasks = reducer();
+
     tasks.observe(&launch("toolu_1"));
+
     let baseline = tasks.snapshot();
 
     assert!(!tasks.observe(&tool_result("toolu_other", false)));
@@ -178,8 +191,11 @@ fn lifecycle_records_map_onto_the_shared_states() {
         ),
     ] {
         let mut tasks = reducer();
+
         tasks.observe(&launch("toolu_1"));
+
         let mut record = record;
+
         record["type"] = json!("system");
         record["session_id"] = json!(SESSION);
         record["tool_use_id"] = json!("toolu_1");
@@ -197,15 +213,19 @@ fn lifecycle_records_map_onto_the_shared_states() {
 #[test]
 fn a_child_is_stoppable_once_a_lifecycle_record_names_its_task() {
     let mut tasks = reducer();
+
     tasks.observe(&launch("toolu_1"));
 
     let snapshot = tasks.snapshot().expect("session is known");
+
     assert_eq!(snapshot.tasks[0].state, BackgroundTaskState::Starting);
     assert!(
         !snapshot.tasks[0].can_stop,
         "a row known only by its tool-use id names nothing to stop"
     );
+
     let key = snapshot.tasks[0].key.clone();
+
     assert_eq!(tasks.stop_target(&key), None);
 
     tasks.observe(&json!({
@@ -218,8 +238,10 @@ fn a_child_is_stoppable_once_a_lifecycle_record_names_its_task() {
     }));
 
     let snapshot = tasks.snapshot().expect("session is known");
+
     assert_eq!(snapshot.tasks.len(), 1, "the ids describe one child");
     assert!(snapshot.tasks[0].can_stop);
+
     // The row keeps its original key, so the lookup has to resolve the alias
     // rather than assume the key is the task id.
     assert_eq!(tasks.stop_target(&key), Some("task-9"));
@@ -233,6 +255,7 @@ fn a_child_is_stoppable_once_a_lifecycle_record_names_its_task() {
     }));
 
     let snapshot = tasks.snapshot().expect("session is known");
+
     assert!(snapshot.tasks[0].state.is_terminal());
     assert!(
         !snapshot.tasks[0].can_stop,
@@ -255,6 +278,7 @@ fn only_admitted_work_becomes_a_row() {
         "in_process_teammate",
     ] {
         let mut tasks = reducer();
+
         assert!(!tasks.observe(&json!({
             "type": "system",
             "subtype": "task_started",
@@ -268,6 +292,7 @@ fn only_admitted_work_becomes_a_row() {
 
     // A record with no task type at all is not assumed to be an agent.
     let mut tasks = reducer();
+
     assert!(!tasks.observe(&json!({
         "type": "system",
         "subtype": "task_started",
@@ -278,6 +303,7 @@ fn only_admitted_work_becomes_a_row() {
 
     // It may still enrich a row a parent Task launch already created.
     tasks.observe(&launch("toolu_1"));
+
     assert!(tasks.observe(&json!({
         "type": "system",
         "subtype": "task_progress",
@@ -285,13 +311,16 @@ fn only_admitted_work_becomes_a_row() {
         "tool_use_id": "toolu_1",
         "last_tool_name": "Grep",
     })));
+
     let snapshot = tasks.snapshot().expect("session is known");
+
     assert_eq!(snapshot.tasks[0].status.as_deref(), Some("Grep"));
 }
 
 #[test]
 fn a_paused_task_shows_needs_input_while_a_parent_approval_does_not() {
     let mut tasks = reducer();
+
     tasks.observe(&launch("toolu_1"));
 
     assert!(tasks.observe(&json!({
@@ -316,6 +345,7 @@ fn a_paused_task_shows_needs_input_while_a_parent_approval_does_not() {
     // The parent's own approval arrives as a control request, which carries no
     // task association and therefore changes no child row.
     let baseline = tasks.snapshot();
+
     assert!(!tasks.observe(&json!({
         "type": "control_request",
         "session_id": SESSION,
@@ -327,6 +357,7 @@ fn a_paused_task_shows_needs_input_while_a_parent_approval_does_not() {
 #[test]
 fn identifiers_are_aliased_only_when_one_record_carries_them_together() {
     let mut tasks = reducer();
+
     tasks.observe(&launch("toolu_1"));
 
     // A record naming both identifiers ties them to the same row.
@@ -338,6 +369,7 @@ fn identifiers_are_aliased_only_when_one_record_carries_them_together() {
         "task_id": "task_a",
         "tool_use_id": "toolu_1",
     }));
+
     assert_eq!(
         tasks.snapshot().expect("session is known").tasks.len(),
         1,
@@ -353,6 +385,7 @@ fn identifiers_are_aliased_only_when_one_record_carries_them_together() {
         "status": "completed",
         "summary": "reviewed 3 files",
     }));
+
     assert_eq!(state_of(&tasks, "toolu_1"), Some(BackgroundTaskState::Done));
 
     // An unrelated identifier with no stated relationship stays separate.
@@ -363,14 +396,17 @@ fn identifiers_are_aliased_only_when_one_record_carries_them_together() {
         "task_type": "local_agent",
         "task_id": "task_unrelated",
     }));
+
     assert_eq!(tasks.snapshot().expect("session is known").tasks.len(), 2);
 }
 
 #[test]
 fn an_explicit_lifecycle_record_resumes_a_finished_task() {
     let mut tasks = reducer();
+
     tasks.observe(&launch("toolu_1"));
     tasks.observe(&tool_result("toolu_1", false));
+
     assert_eq!(state_of(&tasks, "toolu_1"), Some(BackgroundTaskState::Done));
 
     tasks.observe(&json!({
@@ -380,6 +416,7 @@ fn an_explicit_lifecycle_record_resumes_a_finished_task() {
         "task_type": "local_agent",
         "tool_use_id": "toolu_1",
     }));
+
     assert_eq!(
         state_of(&tasks, "toolu_1"),
         Some(BackgroundTaskState::Working)
@@ -389,6 +426,7 @@ fn an_explicit_lifecycle_record_resumes_a_finished_task() {
 #[test]
 fn a_process_boundary_stops_children_the_previous_process_owned() {
     let mut tasks = reducer();
+
     tasks.observe(&launch("toolu_1"));
     tasks.observe(&json!({
         "type": "system",
@@ -397,6 +435,7 @@ fn a_process_boundary_stops_children_the_previous_process_owned() {
         "task_type": "local_agent",
         "tool_use_id": "toolu_1",
     }));
+
     assert_eq!(
         state_of(&tasks, "toolu_1"),
         Some(BackgroundTaskState::Working)
@@ -405,6 +444,7 @@ fn a_process_boundary_stops_children_the_previous_process_owned() {
     // A second `init` is a new CLI process, which cannot still be running the
     // children the previous one owned.
     tasks.observe(&json!({"type": "system", "subtype": "init", "session_id": SESSION}));
+
     assert_eq!(
         state_of(&tasks, "toolu_1"),
         Some(BackgroundTaskState::Stopped)
@@ -414,6 +454,7 @@ fn a_process_boundary_stops_children_the_previous_process_owned() {
 #[test]
 fn a_child_started_in_this_process_survives_its_own_init() {
     let mut tasks = reducer();
+
     // The launch lands after this process announced itself, so the boundary
     // that created its epoch must not retire it.
     tasks.observe(&launch("toolu_1"));
@@ -426,6 +467,7 @@ fn a_child_started_in_this_process_survives_its_own_init() {
     }));
 
     let baseline = tasks.snapshot();
+
     assert_eq!(
         state_of(&tasks, "toolu_1"),
         Some(BackgroundTaskState::Working)
@@ -436,6 +478,7 @@ fn a_child_started_in_this_process_survives_its_own_init() {
 #[test]
 fn the_live_background_set_never_retires_a_running_child() {
     let mut tasks = reducer();
+
     tasks.observe(&launch("toolu_1"));
 
     // A subagent is registered in the foreground and only flips to backgrounded
@@ -455,7 +498,9 @@ fn the_live_background_set_never_retires_a_running_child() {
 #[test]
 fn a_subagent_stop_hook_lands_only_on_a_child_an_earlier_record_identified() {
     let mut tasks = reducer();
+
     tasks.observe(&launch("toolu_1"));
+
     // The hook identifies its child by `agent_id` alone, so it can only match
     // once some earlier record tied that id to this task.
     tasks.observe(&json!({
@@ -479,6 +524,7 @@ fn a_subagent_stop_hook_lands_only_on_a_child_an_earlier_record_identified() {
     // An unmatched hook stays ignored rather than being charged to the most
     // recent task.
     let baseline = tasks.snapshot();
+
     assert!(!tasks.observe(&json!({
         "type": "system",
         "subtype": "hook_response",
@@ -492,7 +538,9 @@ fn a_subagent_stop_hook_lands_only_on_a_child_an_earlier_record_identified() {
 #[test]
 fn an_ordinary_user_message_changes_nothing() {
     let mut tasks = reducer();
+
     tasks.observe(&launch("toolu_1"));
+
     let baseline = tasks.snapshot();
 
     assert!(!tasks.observe(&json!({
@@ -507,10 +555,13 @@ fn an_ordinary_user_message_changes_nothing() {
 #[test]
 fn switching_to_another_session_drops_the_previous_rows() {
     let mut tasks = reducer();
+
     tasks.observe(&launch("toolu_1"));
 
     tasks.observe(&json!({"type": "system", "subtype": "init", "session_id": "sess-2"}));
+
     let snapshot = tasks.snapshot().expect("session is known");
+
     assert!(snapshot.tasks.is_empty());
     assert_eq!(
         snapshot.parent_session,
@@ -521,6 +572,7 @@ fn switching_to_another_session_drops_the_previous_rows() {
 #[test]
 fn linked_activity_becomes_the_childs_own_conversation() {
     let mut tasks = reducer();
+
     tasks.observe(&launch("toolu_1"));
     tasks.take_transcripts();
 
@@ -537,13 +589,17 @@ fn linked_activity_becomes_the_childs_own_conversation() {
     }));
 
     let published = tasks.take_transcripts();
+
     assert_eq!(published.len(), 1);
+
     let (key, update) = &published[0];
+
     assert_eq!(*key, BackgroundTaskKey::claude_code("toolu_1"));
     assert!(
         !update.replace,
         "live activity extends rather than replaces"
     );
+
     // The same item kinds the parent conversation renders, so a child reads
     // identically rather than through a second presentation.
     assert!(matches!(update.items[0], Item::Reasoning { .. }));
@@ -554,6 +610,7 @@ fn linked_activity_becomes_the_childs_own_conversation() {
 #[test]
 fn linked_user_text_becomes_the_childs_first_instruction() {
     let mut tasks = reducer();
+
     tasks.observe(&launch("toolu_1"));
     tasks.take_transcripts();
 
@@ -568,6 +625,7 @@ fn linked_user_text_becomes_the_childs_first_instruction() {
     }));
 
     let published = tasks.take_transcripts();
+
     assert_eq!(published.len(), 1);
     assert!(matches!(
         &published[0].1.items[0],
@@ -578,11 +636,13 @@ fn linked_user_text_becomes_the_childs_first_instruction() {
 #[test]
 fn a_launch_opens_the_childs_conversation_with_its_instructions() {
     let mut tasks = reducer();
+
     tasks.observe(&launch("toolu_1"));
 
     // Claude Code 2.1.2x streams a child's assistant output only, so the
     // launch block is the sole live source of the prompt.
     let published = tasks.take_transcripts();
+
     assert_eq!(published.len(), 1);
     assert_eq!(published[0].0, BackgroundTaskKey::claude_code("toolu_1"));
     assert!(matches!(
@@ -608,6 +668,7 @@ fn a_launch_opens_the_childs_conversation_with_its_instructions() {
 #[test]
 fn a_child_tool_result_completes_the_call_it_answers() {
     let mut tasks = reducer();
+
     tasks.observe(&launch("toolu_1"));
     tasks.observe(&json!({
         "type": "assistant",
@@ -629,8 +690,11 @@ fn a_child_tool_result_completes_the_call_it_answers() {
     }));
 
     let published = tasks.take_transcripts();
+
     assert_eq!(published.len(), 1);
+
     let items = &published[0].1.items;
+
     assert_eq!(items.len(), 1);
     assert_eq!(
         items[0].id(),
@@ -642,6 +706,7 @@ fn a_child_tool_result_completes_the_call_it_answers() {
 #[test]
 fn unlinked_sidechain_activity_publishes_no_conversation() {
     let mut tasks = reducer();
+
     tasks.observe(&launch("toolu_1"));
     tasks.take_transcripts();
 
@@ -658,6 +723,7 @@ fn unlinked_sidechain_activity_publishes_no_conversation() {
 #[test]
 fn switching_sessions_drops_pending_child_conversations() {
     let mut tasks = reducer();
+
     tasks.observe(&launch("toolu_1"));
     tasks.observe(&json!({
         "type": "assistant",
@@ -720,18 +786,25 @@ fn live_shell_set() -> Value {
 #[test]
 fn a_backgrounded_command_becomes_a_stoppable_shell_row() {
     let mut tasks = reducer();
+
     tasks.observe(&bash_launch("toolu_1", "cargo build"));
+
     assert!(tasks.observe(&shell_started(true)));
 
     let snapshot = tasks.snapshot().expect("session is known");
+
     assert_eq!(snapshot.tasks.len(), 1);
+
     let task = &snapshot.tasks[0];
+
     assert_eq!(task.key, BackgroundTaskKey::claude_code("b8vo1ylgc"));
     assert_eq!(task.kind, BackgroundTaskKind::Shell);
     assert_eq!(task.state, BackgroundTaskState::Working);
     assert_eq!(task.display_name.as_deref(), Some("Build the app"));
+
     // The command is what the row is about, so it reads as the row detail.
     assert_eq!(task.objective.as_deref(), Some("cargo build"));
+
     // A shell has no agent type; naming its protocol type there would only
     // describe the row as the stream spells it.
     assert_eq!(task.agent_type, None);
@@ -741,6 +814,7 @@ fn a_backgrounded_command_becomes_a_stoppable_shell_row() {
 #[test]
 fn a_foreground_command_becomes_a_row_only_once_it_is_backgrounded() {
     let mut tasks = reducer();
+
     tasks.observe(&bash_launch("toolu_1", "cargo build"));
 
     // Every `Bash` call registers a task; a foreground one is already visible
@@ -751,10 +825,13 @@ fn a_foreground_command_becomes_a_row_only_once_it_is_backgrounded() {
     // The live set is the only record stating that a command already under way
     // has moved to the background.
     assert!(tasks.observe(&live_shell_set()));
+
     let snapshot = tasks.snapshot().expect("session is known");
     let task = &snapshot.tasks[0];
+
     assert_eq!(task.kind, BackgroundTaskKind::Shell);
     assert_eq!(task.state, BackgroundTaskState::Working);
+
     // The rejected `task_started` still supplied what the live set omits.
     assert_eq!(task.objective.as_deref(), Some("cargo build"));
     assert_eq!(
@@ -770,6 +847,7 @@ fn a_foreground_command_becomes_a_row_only_once_it_is_backgrounded() {
 #[test]
 fn a_backgrounded_commands_tool_result_is_not_its_outcome() {
     let mut tasks = reducer();
+
     tasks.observe(&bash_launch("toolu_1", "cargo build"));
     tasks.observe(&shell_started(true));
 
@@ -795,6 +873,7 @@ fn a_backgrounded_commands_tool_result_is_not_its_outcome() {
 #[test]
 fn the_handoff_result_names_the_output_file_a_running_command_writes_to() {
     let mut tasks = reducer();
+
     tasks.observe(&bash_launch("toolu_1", "cargo build"));
     tasks.observe(&shell_started(true));
     tasks.observe(&json!({
@@ -817,6 +896,7 @@ fn the_handoff_result_names_the_output_file_a_running_command_writes_to() {
     }));
 
     let detail = tasks.shell_detail("b8vo1ylgc").expect("row is a shell");
+
     assert_eq!(
         detail.output_file.as_deref(),
         Some(
@@ -824,6 +904,7 @@ fn the_handoff_result_names_the_output_file_a_running_command_writes_to() {
              217943eb-a012-4714-9220-ce76bcc960a2\\tasks\\b8vo1ylgc.output"
         )
     );
+
     // The command is still running, so the card it renders says so.
     assert_eq!(detail.state, BackgroundTaskState::Working);
 }
@@ -831,6 +912,7 @@ fn the_handoff_result_names_the_output_file_a_running_command_writes_to() {
 #[test]
 fn a_completion_notification_settles_a_shell_and_names_its_output_file() {
     let mut tasks = reducer();
+
     tasks.observe(&bash_launch("toolu_1", "cargo build"));
     tasks.observe(&shell_started(true));
 
@@ -849,7 +931,9 @@ fn a_completion_notification_settles_a_shell_and_names_its_output_file() {
         state_of(&tasks, "b8vo1ylgc"),
         Some(BackgroundTaskState::Done)
     );
+
     let detail = tasks.shell_detail("b8vo1ylgc").expect("row is a shell");
+
     assert_eq!(detail.id, "b8vo1ylgc");
     assert_eq!(detail.command.as_deref(), Some("cargo build"));
     assert_eq!(detail.output_file.as_deref(), Some("/tmp/b8vo1ylgc.output"));
@@ -863,6 +947,7 @@ fn a_completion_notification_settles_a_shell_and_names_its_output_file() {
 #[test]
 fn the_live_set_does_not_revive_a_shell_that_already_reported_its_outcome() {
     let mut tasks = reducer();
+
     tasks.observe(&bash_launch("toolu_1", "cargo build"));
     tasks.observe(&shell_started(true));
     tasks.observe(&json!({
@@ -886,6 +971,7 @@ fn the_live_set_does_not_revive_a_shell_that_already_reported_its_outcome() {
 #[test]
 fn a_child_agent_has_no_shell_detail_to_read() {
     let mut tasks = reducer();
+
     tasks.observe(&launch("toolu_1"));
 
     assert!(tasks.shell_detail("toolu_1").is_none());

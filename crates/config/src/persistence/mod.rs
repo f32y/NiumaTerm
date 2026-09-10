@@ -24,7 +24,9 @@ pub(crate) fn update(
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
+
     fs::create_dir_all(parent)?;
+
     let mut lock_name = path
         .file_name()
         .ok_or_else(|| {
@@ -34,7 +36,9 @@ pub(crate) fn update(
             )
         })?
         .to_os_string();
+
     lock_name.push(".lock");
+
     // Keep this file after releasing the lock so waiting and newly arriving
     // processes always lock the same file identity.
     let lock = OpenOptions::new()
@@ -43,16 +47,20 @@ pub(crate) fn update(
         .create(true)
         .truncate(false)
         .open(parent.join(lock_name))?;
+
     lock.lock()?;
 
     let current = read(path)?;
     let content = edit(current.as_deref())?;
     let mut temporary = NamedTempFile::new_in(parent)?;
+
     temporary.write_all(content.as_bytes())?;
     temporary.as_file().sync_all()?;
+
     // Close the temporary handle before replacement; its path still owns
     // cleanup if replacement fails.
     let temporary = temporary.into_temp_path();
+
     replace_file(&temporary, path)
 }
 

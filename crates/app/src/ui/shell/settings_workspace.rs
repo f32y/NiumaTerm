@@ -60,6 +60,7 @@ impl SettingsSurface {
         self.was_active = false;
 
         self.theme_watcher = None;
+
         // Reopening starts on the first page, matching what the modal did.
         self.state = None;
     }
@@ -116,11 +117,13 @@ impl Shell {
         self.settings.open(window, cx);
 
         let id = Self::alloc_id(&mut self.next_id);
+
         let tabs = TabManager::new(
             TabSurface::Settings,
             TabId(id),
             settings_title().to_string(),
         );
+
         let ws_id = Self::alloc_id(&mut self.next_id);
 
         self.workspaces.new_workspace_of_kind(

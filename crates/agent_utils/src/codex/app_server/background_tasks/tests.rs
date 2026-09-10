@@ -13,8 +13,10 @@ const ROOT: &str = "thr_parent";
 
 fn rooted() -> CodexTasks {
     let mut tasks = CodexTasks::default();
+
     assert!(tasks.set_root(ROOT));
     assert!(!tasks.set_root(ROOT), "the same root does not reload");
+
     tasks
 }
 
@@ -65,7 +67,9 @@ fn a_spawn_item_confirms_the_child_and_applies_its_held_update() {
 
     // The child's first turn can arrive before the parent's spawn item.
     assert_eq!(tasks.scope(Some("thr_child")), ThreadScope::Unrelated);
+
     tasks.hold_unrelated_notification("thr_child", "turn/started", &json!({}));
+
     assert!(
         tasks.snapshot().expect("registry exists").tasks.is_empty(),
         "an unconfirmed thread never creates a row"
@@ -75,8 +79,11 @@ fn a_spawn_item_confirms_the_child_and_applies_its_held_update() {
     assert_eq!(tasks.scope(Some("thr_child")), ThreadScope::Descendant);
 
     let snapshot = tasks.snapshot().expect("registry exists");
+
     assert_eq!(snapshot.tasks.len(), 1);
+
     let child = &snapshot.tasks[0];
+
     assert_eq!(child.state, BackgroundTaskState::Working);
     assert_eq!(child.objective.as_deref(), Some("review the diff"));
     assert_eq!(child.model.as_deref(), Some("gpt-5-codex"));
@@ -93,6 +100,7 @@ fn a_spawn_item_confirms_the_child_and_applies_its_held_update() {
 #[test]
 fn unrelated_threads_are_evicted_instead_of_accumulating() {
     let mut tasks = rooted();
+
     for index in 0..MAX_PENDING_THREADS + 5 {
         tasks.hold_unrelated_notification(
             &format!("thr_other_{index}"),
@@ -110,6 +118,7 @@ fn unrelated_threads_are_evicted_instead_of_accumulating() {
     );
 
     let snapshot = tasks.snapshot().expect("registry exists");
+
     assert_eq!(
         snapshot.tasks.len(),
         1,
@@ -120,6 +129,7 @@ fn unrelated_threads_are_evicted_instead_of_accumulating() {
 #[test]
 fn a_child_turn_completion_reports_a_terminal_state_and_an_explicit_resume_reopens_it() {
     let mut tasks = rooted();
+
     tasks.observe_parent_item(&spawn_item("thr_child"));
 
     assert!(tasks.apply_descendant_notification(
@@ -143,6 +153,7 @@ fn a_child_turn_completion_reports_a_terminal_state_and_an_explicit_resume_reope
 #[test]
 fn live_events_apply_in_arrival_order() {
     let mut tasks = rooted();
+
     tasks.observe_parent_item(&spawn_item("thr_child"));
 
     // A loaded child waiting on the user reads as Needs Input.
@@ -151,6 +162,7 @@ fn live_events_apply_in_arrival_order() {
         "thread/status/changed",
         &json!({"status": {"type": "active", "activeFlags": ["waitingOnUserInput"]}}),
     );
+
     assert_eq!(
         state_of(&tasks, "thr_child"),
         Some(BackgroundTaskState::NeedsInput)
@@ -168,6 +180,7 @@ fn live_events_apply_in_arrival_order() {
         "thread/status/changed",
         &json!({"status": {"type": "active", "activeFlags": []}}),
     );
+
     assert_eq!(
         state_of(&tasks, "thr_child"),
         Some(BackgroundTaskState::Working)
@@ -180,6 +193,7 @@ fn live_events_apply_in_arrival_order() {
         "thread/status/changed",
         &json!({"status": {"type": "idle"}}),
     );
+
     assert_eq!(
         state_of(&tasks, "thr_child"),
         Some(BackgroundTaskState::Working)
@@ -190,6 +204,7 @@ fn live_events_apply_in_arrival_order() {
         "thread/status/changed",
         &json!({"status": {"type": "systemError"}}),
     );
+
     assert_eq!(
         state_of(&tasks, "thr_child"),
         Some(BackgroundTaskState::Failed)
@@ -214,13 +229,16 @@ fn codex_states_map_onto_the_shared_lifecycle() {
 
     // The reported message becomes the row's status line.
     let mut tasks = rooted();
+
     tasks.observe_parent_item(&spawn_item("thr_child"));
     tasks.observe_parent_item(&agent_status_item(
         "thr_child",
         "errored",
         Some("sandbox denied"),
     ));
+
     let snapshot = tasks.snapshot().expect("registry exists");
+
     assert_eq!(snapshot.tasks[0].state, BackgroundTaskState::Failed);
     assert_eq!(snapshot.tasks[0].status.as_deref(), Some("sandbox denied"));
 
@@ -230,6 +248,7 @@ fn codex_states_map_onto_the_shared_lifecycle() {
         "error",
         &json!({"error": {"message": "child crashed"}}),
     );
+
     assert_eq!(
         state_of(&tasks, "thr_child"),
         Some(BackgroundTaskState::Failed)
@@ -239,6 +258,7 @@ fn codex_states_map_onto_the_shared_lifecycle() {
 #[test]
 fn subagent_activity_moves_a_known_child_without_naming_a_new_one() {
     let mut tasks = rooted();
+
     tasks.observe_parent_item(&spawn_item_with_status("thr_child", "pendingInit"));
 
     assert!(tasks.observe_parent_item(&json!({
@@ -262,6 +282,7 @@ fn subagent_activity_moves_a_known_child_without_naming_a_new_one() {
         "agentThreadId": "thr_child",
         "agentPath": "reviewer",
     }));
+
     assert_eq!(
         state_of(&tasks, "thr_child"),
         Some(BackgroundTaskState::Working)
@@ -274,6 +295,7 @@ fn subagent_activity_moves_a_known_child_without_naming_a_new_one() {
         "agentThreadId": "thr_child",
         "agentPath": "reviewer",
     }));
+
     assert_eq!(
         state_of(&tasks, "thr_child"),
         Some(BackgroundTaskState::Interrupted)
@@ -298,7 +320,9 @@ fn can_stop(tasks: &CodexTasks, child: &str) -> bool {
 #[test]
 fn a_child_is_stoppable_only_while_its_active_turn_is_known() {
     let mut tasks = rooted();
+
     tasks.observe_parent_item(&spawn_item("thr_child"));
+
     assert_eq!(
         state_of(&tasks, "thr_child"),
         Some(BackgroundTaskState::Working)
@@ -321,6 +345,7 @@ fn a_child_is_stoppable_only_while_its_active_turn_is_known() {
     let request = tasks
         .interrupt_request(7, "thr_child")
         .expect("a known turn can be interrupted");
+
     assert_eq!(request["id"], 7);
     assert_eq!(request["method"], "turn/interrupt");
     assert_eq!(request["params"]["threadId"], "thr_child");
@@ -356,12 +381,14 @@ fn a_child_is_stoppable_only_while_its_active_turn_is_known() {
 #[test]
 fn an_idle_child_keeps_its_state_and_loses_its_stop_control() {
     let mut tasks = rooted();
+
     tasks.observe_parent_item(&spawn_item("thr_child"));
     tasks.apply_descendant_notification(
         "thr_child",
         "turn/started",
         &json!({"threadId": "thr_child", "turn": {"id": "turn-1", "status": "inProgress"}}),
     );
+
     assert!(can_stop(&tasks, "thr_child"));
 
     assert!(
@@ -382,6 +409,7 @@ fn an_idle_child_keeps_its_state_and_loses_its_stop_control() {
 #[test]
 fn child_transcript_items_only_update_the_row_preview() {
     let mut tasks = rooted();
+
     tasks.observe_parent_item(&spawn_item("thr_child"));
 
     assert!(tasks.apply_descendant_notification(
@@ -392,6 +420,7 @@ fn child_transcript_items_only_update_the_row_preview() {
 
     let snapshot = tasks.snapshot().expect("registry exists");
     let child = &snapshot.tasks[0];
+
     assert_eq!(child.last_preview.as_deref(), Some("found three issues"));
     assert_eq!(
         child.state,
@@ -423,6 +452,7 @@ fn every_parent_mutating_notification_is_routed_by_thread_id() {
     }
 
     let tasks = rooted();
+
     assert_eq!(tasks.scope(Some(ROOT)), ThreadScope::Parent);
     assert_eq!(tasks.scope(None), ThreadScope::Unscoped);
     assert_eq!(
@@ -446,12 +476,14 @@ fn notification_thread_ids_are_read_from_every_known_location() {
 fn descendant_requests_page_through_subagent_spawns() {
     let mut tasks = rooted();
     let request = tasks.descendant_request(7, None).expect("root is known");
+
     assert_eq!(request["method"], "thread/list");
     assert_eq!(request["params"]["ancestorThreadId"], ROOT);
     assert_eq!(
         request["params"]["sourceKinds"],
         json!(["subAgentThreadSpawn"])
     );
+
     // An empty provider list opts out of the provider filter entirely.
     assert_eq!(request["params"]["modelProviders"], json!([]));
     assert_eq!(request["params"]["useStateDbOnly"], json!(true));
@@ -478,11 +510,13 @@ fn descendant_requests_page_through_subagent_spawns() {
             "nextCursor": "page-2",
         }),
     );
+
     assert_eq!(next_cursor.as_deref(), Some("page-2"));
 
     let request = tasks
         .descendant_request(8, next_cursor.as_deref())
         .expect("root is known");
+
     assert_eq!(request["params"]["cursor"], "page-2");
 
     let (_, next_cursor) = tasks.apply_descendants(
@@ -493,15 +527,18 @@ fn descendant_requests_page_through_subagent_spawns() {
             "status": {"type": "active", "activeFlags": []},
         }]}),
     );
+
     assert!(next_cursor.is_none());
     assert!(!tasks.query_in_flight());
 
     let snapshot = tasks.snapshot().expect("registry exists");
+
     assert_eq!(snapshot.tasks.len(), 2);
     assert!(matches!(
         snapshot.discovery,
         BackgroundTaskDiscoveryState::Ready
     ));
+
     // A listed thread that is no longer loaded reads as ended, so a resumed
     // parent shows its past children under Finished.
     let restored = snapshot
@@ -509,18 +546,21 @@ fn descendant_requests_page_through_subagent_spawns() {
         .iter()
         .find(|task| task.key.id == "thr_a")
         .expect("restored row exists");
+
     assert_eq!(restored.state, BackgroundTaskState::Stopped);
     assert_eq!(restored.display_name.as_deref(), Some("swift-otter"));
     assert_eq!(restored.agent_type.as_deref(), Some("reviewer"));
     assert_eq!(restored.objective.as_deref(), Some("review the diff"));
     assert!(restored.started_at.is_some());
     assert!(restored.completed_at.is_some());
+
     // A nested descendant keeps its immediate parent and its depth below root.
     let nested = snapshot
         .tasks
         .iter()
         .find(|task| task.key.id == "thr_b")
         .expect("nested row exists");
+
     assert_eq!(
         nested.refs,
         BackgroundTaskRefs::Codex {
@@ -534,6 +574,7 @@ fn descendant_requests_page_through_subagent_spawns() {
 #[test]
 fn rows_outside_the_selected_root_and_cycles_are_rejected() {
     let mut tasks = rooted();
+
     tasks.descendant_request(7, None);
     tasks.apply_descendants(
         7,
@@ -555,6 +596,7 @@ fn rows_outside_the_selected_root_and_cycles_are_rejected() {
 #[test]
 fn a_delayed_query_response_cannot_replace_a_newer_live_state() {
     let mut tasks = rooted();
+
     tasks.observe_parent_item(&spawn_item("thr_child"));
     tasks.descendant_request(7, None);
 
@@ -579,6 +621,7 @@ fn a_delayed_query_response_cannot_replace_a_newer_live_state() {
 
     let snapshot = tasks.snapshot().expect("registry exists");
     let child = &snapshot.tasks[0];
+
     assert_eq!(child.state, BackgroundTaskState::Done);
     assert_eq!(
         child.display_name.as_deref(),
@@ -590,7 +633,9 @@ fn a_delayed_query_response_cannot_replace_a_newer_live_state() {
 #[test]
 fn a_failed_query_keeps_known_rows_and_only_reports_unavailable_when_empty() {
     let mut empty = rooted();
+
     empty.descendant_request(7, None);
+
     assert!(empty.fail_query(7, "thread/list unsupported"));
     assert!(matches!(
         empty.snapshot().expect("registry exists").discovery,
@@ -598,11 +643,13 @@ fn a_failed_query_keeps_known_rows_and_only_reports_unavailable_when_empty() {
     ));
 
     let mut populated = rooted();
+
     populated.observe_parent_item(&spawn_item("thr_child"));
     populated.descendant_request(7, None);
     populated.fail_query(7, "thread/list unsupported");
 
     let snapshot = populated.snapshot().expect("registry exists");
+
     assert_eq!(snapshot.tasks.len(), 1);
     assert_eq!(snapshot.active_count(), 1);
     assert!(matches!(
@@ -614,10 +661,13 @@ fn a_failed_query_keeps_known_rows_and_only_reports_unavailable_when_empty() {
 #[test]
 fn selecting_another_root_drops_the_previous_conversation_rows() {
     let mut tasks = rooted();
+
     tasks.observe_parent_item(&spawn_item("thr_child"));
+
     assert!(tasks.set_root("thr_other_parent"));
 
     let snapshot = tasks.snapshot().expect("registry exists");
+
     assert!(snapshot.tasks.is_empty());
     assert_eq!(
         snapshot.parent_session,
@@ -629,6 +679,7 @@ fn selecting_another_root_drops_the_previous_conversation_rows() {
 #[test]
 fn a_repeated_pagination_cursor_ends_discovery() {
     let mut tasks = rooted();
+
     assert!(tasks.accept_cursor("page-2"));
     assert!(
         !tasks.accept_cursor("page-2"),
@@ -640,11 +691,13 @@ fn a_repeated_pagination_cursor_ends_discovery() {
 #[test]
 fn a_descendant_transcript_is_read_without_resuming_the_child() {
     let mut tasks = rooted();
+
     tasks.observe_parent_item(&spawn_item("thr_child"));
 
     let request = tasks
         .transcript_request(9, "thr_child")
         .expect("a confirmed descendant can be read");
+
     // `thread/read` returns stored turns without loading the thread into this
     // session, so the parent keeps its own thread, turn, and approval state.
     assert_eq!(request["method"], "thread/read");
@@ -676,6 +729,7 @@ fn only_confirmed_descendants_can_be_read() {
 #[test]
 fn a_second_read_for_the_same_child_is_not_issued() {
     let mut tasks = rooted();
+
     tasks.observe_parent_item(&spawn_item("thr_child"));
 
     assert!(tasks.transcript_request(9, "thr_child").is_some());
@@ -685,6 +739,7 @@ fn a_second_read_for_the_same_child_is_not_issued() {
     );
 
     tasks.finish_transcript_read(9);
+
     assert!(
         tasks.transcript_request(11, "thr_child").is_some(),
         "a later refresh is allowed once the previous read settled"
@@ -694,6 +749,7 @@ fn a_second_read_for_the_same_child_is_not_issued() {
 #[test]
 fn selecting_another_root_drops_in_flight_reads() {
     let mut tasks = rooted();
+
     tasks.observe_parent_item(&spawn_item("thr_child"));
     tasks.transcript_request(9, "thr_child");
 
@@ -705,6 +761,7 @@ fn selecting_another_root_drops_in_flight_reads() {
 #[test]
 fn a_spawn_prompt_is_the_first_item_in_a_child_transcript() {
     let mut tasks = rooted();
+
     tasks.observe_parent_item(&spawn_item("thr_child"));
 
     let items = tasks.with_launch_message(
@@ -725,6 +782,7 @@ fn a_spawn_prompt_is_the_first_item_in_a_child_transcript() {
 #[test]
 fn a_raw_agent_message_supplies_the_v2_launch_instruction() {
     let mut tasks = rooted();
+
     assert!(tasks.observe_raw_response_item(
         "thr_child",
         &json!({
@@ -736,6 +794,7 @@ fn a_raw_agent_message_supplies_the_v2_launch_instruction() {
             ],
         }),
     ));
+
     tasks.observe_parent_item(&json!({
         "type": "subAgentActivity",
         "id": "activity-1",
@@ -743,6 +802,7 @@ fn a_raw_agent_message_supplies_the_v2_launch_instruction() {
         "agentThreadId": "thr_child",
         "agentPath": "reviewer",
     }));
+
     assert!(!tasks.observe_raw_response_item(
         "thr_child",
         &json!({
@@ -756,6 +816,7 @@ fn a_raw_agent_message_supplies_the_v2_launch_instruction() {
     ));
 
     let items = tasks.with_launch_message("thr_child", Vec::new());
+
     assert_eq!(
         items,
         vec![Item::UserMessage {
@@ -785,7 +846,9 @@ fn encrypted_agent_content_is_not_shown_as_a_partial_instruction() {
 #[test]
 fn a_matching_stored_user_message_is_not_added_twice() {
     let mut tasks = rooted();
+
     tasks.observe_parent_item(&spawn_item("thr_child"));
+
     let existing = Item::UserMessage {
         text: Some("review the diff".into()),
     };

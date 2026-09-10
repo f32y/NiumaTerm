@@ -153,6 +153,7 @@ pub(crate) struct AgentDisclosureRow {
 impl AgentDisclosureRow {
     pub(super) fn new(id: impl Into<ElementId>, label: impl Into<String>) -> Self {
         let label = label.into();
+
         Self {
             id: id.into(),
             expanded: None,
@@ -219,6 +220,7 @@ impl AgentDisclosureRow {
     pub(super) fn render(self, cx: &mut Context<TranscriptView>) -> Stateful<Div> {
         let colors = self.tone.colors(cx);
         let expandable = self.expanded.is_some();
+
         // The chevron alone: what it means is already carried by the card it
         // heads, and a word beside it repeats that in the widest slot of the
         // row. The state assistive technology reads stays in the row label.
@@ -236,15 +238,18 @@ impl AgentDisclosureRow {
                 .size(px(AGENT_CARD_HINT_SIZE))
                 .text_color(cx.theme().muted_foreground.opacity(0.8))
         });
+
         let icon_color = self.accent.unwrap_or(colors.icon);
         let label_color = self
             .accent
             .unwrap_or_else(|| cx.theme().foreground.opacity(AGENT_CARD_TITLE_FADE));
+
         let type_icon = self.type_icon.map(|icon| {
             Icon::new(icon)
                 .size(px(AGENT_CARD_ICON))
                 .text_color(icon_color)
         });
+
         h_flex()
             .id(self.id)
             // A work-log row is only as wide as what it says, so its fill

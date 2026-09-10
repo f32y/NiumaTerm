@@ -15,6 +15,7 @@ use crate::workspace::AgentWorkspace;
 
 pub(super) fn parse_context_window_usage(value: &Value) -> Option<ContextWindowUsage> {
     let current = parse_token_usage_breakdown(&value["last"])?;
+
     if current.total_tokens == 0 {
         return None;
     }
@@ -81,9 +82,11 @@ pub(super) fn skills_list_request(
     workspace: &AgentWorkspace,
 ) -> Value {
     let mut params = json!({});
+
     if force_reload {
         params["forceReload"] = json!(true);
     }
+
     if let Some(primary) = workspace.primary() {
         params["cwds"] = json!([primary]);
     }
@@ -148,29 +151,37 @@ pub(super) fn add_provider_config(params: &mut Value, provider: &CodexProviderCo
         "name": provider.name.as_str(),
         "base_url": provider.base_url.as_str(),
     });
+
     provider_value[PROVIDER_API_FIELD] = json!("responses");
+
     if let Some(env_key) = provider.api_key_env.as_deref() {
         provider_value["env_key"] = json!(env_key);
     }
 
     let mut config = serde_json::Map::new();
+
     config.insert(format!("model_providers.{}", provider.id), provider_value);
     params["config"] = Value::Object(config);
 }
 
 pub(super) fn thread_start_params(profile: &ThreadProfile, workspace: &AgentWorkspace) -> Value {
     let mut params = json!({"experimentalRawEvents": true});
+
     if let Some(model) = profile.model.as_deref() {
         params["model"] = json!(model);
     }
+
     if let Some(provider) = profile.provider.as_ref() {
         params["modelProvider"] = json!(provider.id.as_str());
         add_provider_config(&mut params, provider);
     }
+
     if let Some(primary) = workspace.primary() {
         params["cwd"] = json!(primary);
     }
+
     add_workspace_roots(&mut params, workspace);
+
     params
 }
 
@@ -185,6 +196,7 @@ fn add_workspace_roots(params: &mut Value, workspace: &AgentWorkspace) {
     if !workspace.is_multi_root() {
         return;
     }
+
     params["runtimeWorkspaceRoots"] = json!(workspace.ordered().collect::<Vec<_>>());
 }
 
@@ -213,9 +225,11 @@ pub(super) fn thread_resume_params(thread_id: &str, profile: &ThreadProfile) -> 
     // directory; the workspace snapshot reaches it through the turns that
     // follow, so re-declaring roots here would only risk contradicting it.
     let mut params = json!({"threadId": thread_id});
+
     if let Some(model) = profile.model.as_deref() {
         params["model"] = json!(model);
     }
+
     if let Some(provider) = profile.provider.as_ref() {
         // With no explicit model, omitting modelProvider lets Codex restore
         // both the persisted model and provider id while this config entry
@@ -223,8 +237,10 @@ pub(super) fn thread_resume_params(thread_id: &str, profile: &ThreadProfile) -> 
         if profile.model.is_some() {
             params["modelProvider"] = json!(provider.id.as_str());
         }
+
         add_provider_config(&mut params, provider);
     }
+
     params
 }
 
@@ -238,17 +254,21 @@ pub(super) fn thread_list_params(
         "sortKey": "recency_at",
         "limit": THREAD_LIST_LIMIT,
     });
+
     if scope == SessionScope::CurrentDirectory
         && let Some(primary) = workspace.primary()
     {
         params["cwd"] = json!(primary);
     }
+
     if let Some(provider) = profile.provider.as_ref() {
         params["modelProviders"] = json!([provider.id.as_str()]);
     }
+
     if let Some(cursor) = cursor {
         params["cursor"] = json!(cursor);
     }
+
     params
 }
 
@@ -277,23 +297,29 @@ pub(super) fn turn_start_params(
     if let Some(model) = &settings.model {
         params["model"] = json!(model);
     }
+
     if let Some(approval) = &settings.approval {
         params["approvalPolicy"] = json!(approval);
     }
+
     if let Some(reviewer) = &settings.approvals_reviewer {
         params["approvalsReviewer"] = json!(reviewer);
     }
+
     if let Some(sandbox) = &settings.sandbox {
         params["sandboxPolicy"] = sandbox_policy(sandbox, workspace);
     }
+
     if let Some(effort) = &settings.effort {
         params["effort"] = json!(effort);
     }
+
     // Codex defaults the reasoning summary to "auto", which lets the model emit
     // a terse summary or none at all, leaving the chat's reasoning section
     // sparse or empty. "detailed" asks for the fullest summary the model
     // produces, which is the only reasoning text this client renders.
     params["summary"] = json!("detailed");
+
     // An explicit null changes a previously selected service tier back to normal.
     params["serviceTier"] = json!(settings.tier);
 
@@ -336,6 +362,7 @@ fn sandbox_policy(sandbox: &str, workspace: &AgentWorkspace) -> Value {
     if sandbox != "workspaceWrite" || !workspace.is_multi_root() {
         return json!({"type": sandbox});
     }
+
     json!({
         "type": sandbox,
         "writableRoots": workspace.ordered().collect::<Vec<_>>(),
@@ -344,9 +371,11 @@ fn sandbox_policy(sandbox: &str, workspace: &AgentWorkspace) -> Value {
 
 pub(super) fn resumed_thread_events(result: &Value, suppress_replay: bool) -> Vec<Event> {
     let mut events = Vec::new();
+
     if !suppress_replay {
         events.push(Event::Replay(parse_replay(&result["thread"]["turns"])));
     }
+
     if let Some(title) = result["thread"]["name"]
         .as_str()
         .map(str::trim)
@@ -354,9 +383,11 @@ pub(super) fn resumed_thread_events(result: &Value, suppress_replay: bool) -> Ve
     {
         events.push(Event::TitleUpdated(title.to_string()));
     }
+
     // Resume restores the thread's persisted model/effort; Ready re-seeds the
     // pickers even when replay is suppressed for a retained transcript.
     events.push(Event::Ready(parse_thread_settings(result)));
+
     events
 }
 
@@ -368,11 +399,13 @@ pub(super) fn parse_models(result: &Value, selected_model: Option<&str>) -> Vec<
                 .filter(|m| !m["hidden"].as_bool().unwrap_or(false))
                 .filter_map(|m| {
                     let model = m["model"].as_str()?.to_string();
+
                     let display = m["displayName"]
                         .as_str()
                         .filter(|s| !s.is_empty())
                         .unwrap_or(&model)
                         .to_string();
+
                     let tiers = m["serviceTiers"]
                         .as_array()
                         .map(|tiers| {
@@ -380,16 +413,19 @@ pub(super) fn parse_models(result: &Value, selected_model: Option<&str>) -> Vec<
                                 .iter()
                                 .filter_map(|tier| {
                                     let id = tier["id"].as_str()?.to_string();
+
                                     let name = tier["name"]
                                         .as_str()
                                         .filter(|s| !s.is_empty())
                                         .unwrap_or(&id)
                                         .to_string();
+
                                     Some((id, name))
                                 })
                                 .collect()
                         })
                         .unwrap_or_default();
+
                     let default_tier = m["defaultServiceTier"].as_str().map(str::to_owned);
 
                     Some(ModelInfo {
@@ -447,6 +483,7 @@ pub(super) fn parse_thread_summaries(
                         .map(|title| title.split_whitespace().collect::<Vec<_>>().join(" "))
                         .filter(|s| !s.is_empty())
                         .unwrap_or_else(|| id.chars().take(8).collect());
+
                     // Backend timestamps are unix seconds; `recencyAt` advances
                     // when a turn starts, which matches "last active" better
                     // than `updatedAt` (background mutations move that).
@@ -454,6 +491,7 @@ pub(super) fn parse_thread_summaries(
                         .as_u64()
                         .or_else(|| thread["updatedAt"].as_u64())
                         .unwrap_or_default();
+
                     let branch = thread["gitInfo"]["branch"]
                         .as_str()
                         .filter(|s| !s.is_empty())
@@ -490,12 +528,14 @@ pub(super) fn parse_thread_summaries(
 /// than offered as a row that does nothing this composer cannot already do.
 pub(super) fn parse_fork_checkpoints(turns: &Value) -> Vec<ForkCheckpoint> {
     let turns: &[Value] = turns.as_array().map_or(&[], Vec::as_slice);
+
     let mut checkpoints: Vec<ForkCheckpoint> = turns
         .windows(2)
         .filter_map(|pair| {
             let [kept, opened] = pair else {
                 return None;
             };
+
             // An unfinished turn cannot anchor a cut, and a turn whose prompt
             // is gone has no row to show, so both drop out of the list rather
             // than reaching the server as a request it would refuse.
@@ -512,6 +552,7 @@ pub(super) fn parse_fork_checkpoints(turns: &Value) -> Vec<ForkCheckpoint> {
         .collect();
 
     checkpoints.reverse();
+
     checkpoints
 }
 
@@ -558,6 +599,7 @@ pub(super) fn parse_replay(turns: &Value) -> Vec<ReplayTurn> {
                             }
                             _ => true,
                         };
+
                         if visible {
                             items.push(ReplayItem { item, at });
                         }
@@ -616,6 +658,7 @@ pub(super) fn parse_item(item: &Value) -> Option<Item> {
     let parsed = match item["type"].as_str()? {
         "userMessage" => {
             let text = user_input_text(&item["content"]);
+
             Item::UserMessage {
                 text: (!text.is_empty()).then_some(text),
             }
@@ -676,6 +719,7 @@ pub(super) fn command_purpose(actions: &Value) -> Option<String> {
             "search" => {
                 let query = nonempty_string(action, "query");
                 let path = nonempty_string(action, "path");
+
                 match (query, path) {
                     (Some(query), Some(path)) => format!("Search {query} in {path}"),
                     (Some(query), None) => format!("Search {query}"),
@@ -706,6 +750,7 @@ pub(super) fn tool_output(item: &Value) -> Option<String> {
     // query and nothing the search found.
     for key in ["output", "result", "results", "aggregatedOutput", "content"] {
         let value = &item[key];
+
         if let Some(text) = value.as_str() {
             if !text.trim().is_empty() {
                 return Some(text.to_string());
@@ -714,6 +759,7 @@ pub(super) fn tool_output(item: &Value) -> Option<String> {
             return serde_json::to_string_pretty(value).ok();
         }
     }
+
     None
 }
 

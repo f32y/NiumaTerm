@@ -33,6 +33,7 @@ pub(super) fn item_accent(meta: &SegmentMeta) -> u32 {
 pub(super) fn item_header(meta: &SegmentMeta) -> Option<String> {
     let command = meta.command.as_deref()?;
     let ended_at = meta.ended_at?;
+
     let duration = meta
         .started_at
         .and_then(|started_at| ended_at.duration_since(started_at).ok())
@@ -150,6 +151,7 @@ pub(crate) fn paint_frozen_chrome(
 
     let style = window.text_style();
     let font_size = style.font_size.to_pixels(window.rem_size());
+
     for chrome in items_chrome {
         let Some(header) = chrome.header.as_deref() else {
             continue;
@@ -191,9 +193,11 @@ pub(crate) fn block_list_live_chrome(
     selected: bool,
 ) -> Option<block_list::FrozenItemChrome> {
     let running = in_flight.is_some();
+
     if !running && !has_open_prompt {
         return None;
     }
+
     block_list::live_chrome(live_index, live_rows, cell_h, running, selected)
 }
 
@@ -204,5 +208,6 @@ pub(crate) fn offset_frozen_chrome(
     chrome.top += item_top;
     chrome.bottom += item_top;
     chrome.header_y += item_top;
+
     chrome
 }

@@ -63,6 +63,7 @@ fn row_text(snapshot: &RenderBuffer, y: usize) -> String {
 /// repaint-lands-on-wrong-row corruption.
 fn viewport_geometry(s: &RenderBuffer) -> (i32, i32, i32) {
     let mut last_nonblank: i32 = -1;
+
     for y in 0..s.rows() {
         if (0..s.cols()).any(|x| {
             let c = s.cell(x, y).c();
@@ -71,9 +72,11 @@ fn viewport_geometry(s: &RenderBuffer) -> (i32, i32, i32) {
             last_nonblank = y as i32;
         }
     }
+
     let rows = s.rows() as i32;
     let trailing_blank = (rows - 1 - last_nonblank).max(0);
     let cursor_from_bottom = rows - 1 - s.cursor().row.0;
+
     (last_nonblank, trailing_blank, cursor_from_bottom)
 }
 
@@ -83,6 +86,7 @@ fn viewport_geometry(s: &RenderBuffer) -> (i32, i32, i32) {
 /// reflow doubling can be fixed by trimming trailing blanks (safe iff unstyled).
 fn trailing_pad_report(s: &RenderBuffer) -> String {
     let mut out = String::new();
+
     for y in 0..s.rows() {
         let row: Vec<_> = (0..s.cols())
             .filter_map(|x| {
@@ -90,6 +94,7 @@ fn trailing_pad_report(s: &RenderBuffer) -> String {
                 (cell.c() != '\0').then_some((x, cell))
             })
             .collect();
+
         // Last column holding a real (non-space) glyph.
         let content_end = row
             .iter()
@@ -97,22 +102,28 @@ fn trailing_pad_report(s: &RenderBuffer) -> String {
             .find(|(_, cell)| !cell.c().is_whitespace())
             .map(|(x, _)| *x as i32)
             .unwrap_or(-1);
+
         let trailing: Vec<_> = row
             .iter()
             .filter(|(x, _)| *x as i32 > content_end)
             .collect();
+
         if trailing.is_empty() {
             continue;
         }
+
         let styled_count = trailing
             .iter()
             .filter(|(_, cell)| s.style(cell.style_id()) != Style::default())
             .count();
+
         let max_x = row.iter().map(|(x, _)| *x).max().unwrap_or(0);
+
         let first_bg = trailing
             .first()
             .map(|(_, cell)| format!("{:?}", s.style(cell.style_id()).bg))
             .unwrap_or_default();
+
         let first_text = trailing
             .first()
             .map(|(_, cell)| {
@@ -123,6 +134,7 @@ fn trailing_pad_report(s: &RenderBuffer) -> String {
                 }
             })
             .unwrap_or_default();
+
         let _ = fmt::Write::write_fmt(
             &mut out,
             format_args!(
@@ -132,11 +144,13 @@ fn trailing_pad_report(s: &RenderBuffer) -> String {
             ),
         );
     }
+
     out
 }
 
 fn append_master(dir: &Path, line: &str) {
     let path = dir.join("nmt-vt-trace.log");
+
     if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(path) {
         let _ = f.write_all(line.as_bytes());
     }
@@ -151,6 +165,7 @@ pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
     if !enabled() {
         return;
     }
+
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
     let ts = now_ms();
     let dir = log_dir();
@@ -164,6 +179,7 @@ pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
     let summary = match &snapshot {
         Ok(s) => {
             let (last_nonblank, trailing_blank, cursor_from_bottom) = viewport_geometry(s);
+
             format!(
                 "[vt-trace] #{seq:06} ts={ts} {label} | {detail} | cols={} rows={} \
                  cursor=({},{} vis={}) sb=(total={} offset={} len={}) \
@@ -181,31 +197,40 @@ pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
         }
         Err(e) => format!("[vt-trace] #{seq:06} ts={ts} {label} | {detail} | snapshot_err={e:?}\n"),
     };
+
     append_master(&dir, &summary);
 
     let safe_label: String = label
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect();
+
     let path = dir.join(format!("{seq:06}-{safe_label}.txt"));
 
     let mut body = String::new();
+
     body.push_str(&summary);
     body.push_str("---- detail ----\n");
     body.push_str(detail);
     body.push('\n');
+
     if let Ok(s) = &snapshot {
         body.push_str("---- viewport (snapshot rows, y|text) ----\n");
+
         for y in 0..s.rows() {
             let _ = fmt::Write::write_fmt(&mut body, format_args!("{y:3}|{}\n", row_text(s, y)));
         }
+
         body.push_str("---- trailing-pad style (per row with trailing cells) ----\n");
         body.push_str(&trailing_pad_report(s));
     }
+
     body.push_str("---- full screen + scrollback (format_text) ----\n");
     body.push_str(&full);
+
     if !full.ends_with('\n') {
         body.push('\n');
     }
+
     let _ = fs::write(&path, body);
 }

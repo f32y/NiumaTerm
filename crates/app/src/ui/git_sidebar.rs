@@ -31,10 +31,12 @@ impl GitSidebar {
     pub(crate) fn new(model: Entity<GitStatusModel>, cx: &mut Context<Self>) -> Self {
         cx.observe(&model, |this: &mut Self, model, cx| {
             let seq = model.read(cx).snapshot_seq;
+
             if seq != this.seen_snapshot_seq {
                 this.seen_snapshot_seq = seq;
                 this.on_snapshot_changed(cx);
             }
+
             cx.notify();
         })
         .detach();

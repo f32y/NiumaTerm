@@ -32,6 +32,7 @@ impl HttpClaudeReleaseChannel {
                     "could not initialize Claude release client",
                 )
             })?;
+
         Ok(Self {
             client,
             base_url: RELEASE_BASE_URL.to_string(),
@@ -55,6 +56,7 @@ impl ClaudeReleaseChannel for HttpClaudeReleaseChannel {
                 format!("Claude release channel `{channel}` is not supported"),
             ));
         }
+
         let response = self
             .client
             .get(format!("{}/{channel}", self.base_url.trim_end_matches('/')))
@@ -66,19 +68,23 @@ impl ClaudeReleaseChannel for HttpClaudeReleaseChannel {
                     "Claude release service request failed",
                 )
             })?;
+
         let content_length = response.content_length().unwrap_or(0);
+
         if content_length > 256 {
             return Err(UpdateError::new(
                 UpdateErrorKind::InvalidResponse,
                 "Claude release response exceeded the version limit",
             ));
         }
+
         let body = response.text().map_err(|_| {
             UpdateError::new(
                 UpdateErrorKind::InvalidResponse,
                 "could not read Claude release response",
             )
         })?;
+
         parse_strict_version(body.trim(), "Claude release version")
     }
 }
@@ -103,6 +109,7 @@ where
 
     fn probe(&self, launcher: &AgentCli) -> Result<VersionStatus, UpdateError> {
         let doctor = run_bounded(launcher, ["doctor"], PROBE_LIMITS);
+
         let mut status = match doctor {
             Ok(output) => {
                 parse_claude_doctor(output.stdout_for_parsing()).unwrap_or_else(|error| {
@@ -141,6 +148,7 @@ where
         let Some(channel) = status.channel.as_deref() else {
             return Ok(status);
         };
+
         if !matches!(channel, "latest" | "stable") {
             status.support = DiscoverySupport::Unsupported {
                 reason: format!("Claude release channel `{channel}` is not supported"),
@@ -159,6 +167,7 @@ where
                 status.support = DiscoverySupport::Unsupported {
                     reason: error.message().to_string(),
                 };
+
                 Ok(status)
             }
         }
@@ -178,8 +187,10 @@ pub fn parse_claude_doctor(output: &str) -> Result<VersionStatus, UpdateError> {
 
     for line in output.lines().take(256) {
         let line = line.trim();
+
         if let Some(value) = line.strip_prefix("Running:") {
             let value = value.trim();
+
             if let (Some(open), Some(close)) = (value.rfind('('), value.rfind(')'))
                 && open < close
             {
@@ -206,11 +217,13 @@ pub fn parse_claude_doctor(output: &str) -> Result<VersionStatus, UpdateError> {
     }
 
     let install_method = configured_method.or(running_method);
+
     let supported_install = install_method.as_deref().is_some_and(|method| {
         ["native", "npm", "homebrew", "brew"]
             .iter()
             .any(|known| method.to_ascii_lowercase().contains(known))
     });
+
     let update_configuration = auto_updates.map(|value| format!("auto-updates {value}"));
 
     Ok(VersionStatus {

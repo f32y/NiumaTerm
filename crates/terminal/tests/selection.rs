@@ -8,15 +8,20 @@ use nmt_terminal::terminal::pos::{Column, Line, Pos, Side};
 #[test]
 fn to_range_engine_maps_screen_to_visible() {
     use nmt_terminal::render_buffer::RenderBuffer;
+
     let buf = RenderBuffer::new(10, 5);
+
     let mut sel = Selection::new(
         SelectionType::Simple,
         Pos::new(Line(7), Column(1)),
         Side::Left,
     );
+
     sel.update(Pos::new(Line(7), Column(4)), Side::Right);
+
     // viewport_top = 7 → screen row 7 maps to visible row 0.
     let r = sel.to_range_engine(&buf, 7, "").unwrap();
+
     assert_eq!(r.start.row, Line(0), "screen row - viewport_top");
     assert_eq!(r.end.row, Line(0));
 }
@@ -35,18 +40,25 @@ fn visible_rows_clamped_cases() {
 
     // Fully inside.
     assert_eq!(mk(1, 3).visible_rows_clamped(5), Some(1..=3));
+
     // Single row.
     assert_eq!(mk(2, 2).visible_rows_clamped(5), Some(2..=2));
+
     // Spans past the bottom → clamps end to last row.
     assert_eq!(mk(3, 9).visible_rows_clamped(5), Some(3..=4));
+
     // Starts above row 0 → clamps start to 0.
     assert_eq!(mk(-2, 1).visible_rows_clamped(5), Some(0..=1));
+
     // Spans the whole (and beyond) viewport.
     assert_eq!(mk(-5, 99).visible_rows_clamped(5), Some(0..=4));
+
     // Fully above the viewport → None.
     assert_eq!(mk(-4, -1).visible_rows_clamped(5), None);
+
     // Fully below the viewport → None.
     assert_eq!(mk(5, 8).visible_rows_clamped(5), None);
+
     // Zero-height viewport → None (no panic).
     assert_eq!(mk(0, 0).visible_rows_clamped(0), None);
 }
@@ -58,10 +70,15 @@ fn simple_is_empty() {
         Pos::new(Line(1), Column(0)),
         Side::Right,
     );
+
     assert!(selection.is_empty());
+
     selection.update(Pos::new(Line(1), Column(1)), Side::Left);
+
     assert!(selection.is_empty());
+
     selection.update(Pos::new(Line(0), Column(0)), Side::Right);
+
     assert!(!selection.is_empty());
 }
 
@@ -72,16 +89,27 @@ fn block_is_empty() {
         Pos::new(Line(1), Column(0)),
         Side::Right,
     );
+
     assert!(selection.is_empty());
+
     selection.update(Pos::new(Line(1), Column(1)), Side::Left);
+
     assert!(selection.is_empty());
+
     selection.update(Pos::new(Line(1), Column(1)), Side::Right);
+
     assert!(!selection.is_empty());
+
     selection.update(Pos::new(Line(0), Column(0)), Side::Right);
+
     assert!(selection.is_empty());
+
     selection.update(Pos::new(Line(0), Column(1)), Side::Left);
+
     assert!(selection.is_empty());
+
     selection.update(Pos::new(Line(0), Column(1)), Side::Right);
+
     assert!(!selection.is_empty());
 }
 
@@ -92,6 +120,7 @@ fn range_intersection() {
         Pos::new(Line(3), Column(1)),
         Side::Left,
     );
+
     selection.update(Pos::new(Line(6), Column(1)), Side::Right);
 
     assert!(selection.intersects_range(..));

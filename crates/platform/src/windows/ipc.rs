@@ -101,6 +101,7 @@ pub fn spawn_server(testing: bool, mut on_message: impl FnMut(Vec<u8>) -> bool +
                     warn!("CreateNamedPipeW failed ({}); IPC disabled", unsafe {
                         GetLastError()
                     });
+
                     return;
                 }
 
@@ -122,6 +123,7 @@ pub fn spawn_server(testing: bool, mut on_message: impl FnMut(Vec<u8>) -> bool +
                 {
                     continue;
                 }
+
                 if !on_message(bytes) {
                     return;
                 }

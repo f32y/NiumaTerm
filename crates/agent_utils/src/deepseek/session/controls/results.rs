@@ -7,6 +7,7 @@ use crate::deepseek::session::controls::{Operation, question_id};
 impl Session {
     pub(in crate::deepseek::session) fn expire_questions(&mut self) -> Vec<Event> {
         self.controls.retire_questions();
+
         self.pending_questions
             .take()
             .map(|request| Event::InputResolved {
@@ -27,14 +28,17 @@ impl Session {
         else {
             return Vec::new();
         };
+
         let error = payload["error"].as_str().map(str::to_string);
         let mut events = Vec::new();
+
         if let Some(message) = payload["stopError"].as_str() {
             events.push(Event::Error {
                 message: format!("DeepSeek could not confirm stopping the turn: {message}"),
                 fatal: false,
             });
         }
+
         match operation {
             Operation::Approval(request) => {
                 if self.pending_approval.as_ref() == Some(&request) {
@@ -53,6 +57,7 @@ impl Session {
             Operation::Questions { request, skipped } => {
                 if self.pending_questions.as_ref() == Some(&request) {
                     let id = question_id(&request);
+
                     match error {
                         Some(message) => events.push(Event::InputSubmissionFailed { id, message }),
                         None => {
@@ -81,6 +86,7 @@ impl Session {
                 }
             }
         }
+
         events
     }
 }

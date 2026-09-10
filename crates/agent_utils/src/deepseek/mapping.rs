@@ -38,6 +38,7 @@ pub(crate) struct ApprovalRequest {
 /// decides, and nothing in the transcript vocabulary carries them.
 pub(crate) fn approval_request(frame: &Value, session_id: &str) -> Option<ApprovalRequest> {
     let payload = &frame["payload"];
+
     if payload["type"] != "approval/requested" || payload["sessionId"].as_str() != Some(session_id)
     {
         return None;
@@ -45,6 +46,7 @@ pub(crate) fn approval_request(frame: &Value, session_id: &str) -> Option<Approv
 
     let tool = payload["toolName"].as_str().unwrap_or("a tool");
     let reason = payload["reason"].as_str().unwrap_or_default();
+
     // The reason is the asker's own sentence and already reads as an
     // explanation; the tool name is prepended because the reason does not
     // always name what is about to run.
@@ -83,6 +85,7 @@ pub(crate) fn question_request(
     session_id: &str,
 ) -> Option<(QuestionRequest, Vec<Question>)> {
     let payload = &frame["payload"];
+
     if payload["type"] != "question/requested" || payload["sessionId"].as_str() != Some(session_id)
     {
         return None;
@@ -97,6 +100,7 @@ pub(crate) fn question_request(
         // whole batch when one answer fails to name the question it settles —
         // so the card is not raised at all rather than raised unanswerable.
         let id = item["id"].as_str()?;
+
         ids.push(id.to_string());
         questions.push(Question {
             input: Default::default(),
@@ -153,6 +157,7 @@ pub(crate) fn map_frame(frame: &Value, session_id: &str, tools: &mut ToolTracker
             if payload["sessionId"].as_str() != Some(session_id) {
                 return Vec::new();
             }
+
             map_session_event(&payload["event"], &payload["view"], tools)
         }
         Some("host/agent-error") if payload["sessionId"].as_str() == Some(session_id) => {
@@ -196,6 +201,7 @@ pub(crate) struct ToolTracker {
 fn call_view(call: &Value) -> Value {
     let arguments = call["arguments"].as_str().unwrap_or_default();
     let args: Value = from_str(arguments).unwrap_or(Value::Null);
+
     match call["name"].as_str() {
         Some("bash" | "pwsh") if args["command"].is_string() => json!({
             "card": "terminal", "title": args["command"], "description": args["description"],
@@ -264,6 +270,7 @@ fn completed_tool_item(started: &Item, view: &Value, message: &Value, failed: bo
                 .as_str()
                 .map(str::to_string)
                 .or_else(|| result_text(message));
+
             let exit_code = view["exitCode"].as_i64().or_else(|| {
                 if failed {
                     None
@@ -271,6 +278,7 @@ fn completed_tool_item(started: &Item, view: &Value, message: &Value, failed: bo
                     output.as_deref().and_then(command_exit_code)
                 }
             });
+
             Item::CommandExecution {
                 id: id.clone(),
                 command: command.clone(),
@@ -308,15 +316,18 @@ fn completed_tool_item(started: &Item, view: &Value, message: &Value, failed: bo
 /// zero exit has no marker; a timeout or signal has no numeric exit code.
 fn command_exit_code(output: &str) -> Option<i64> {
     let line = output.trim_end().lines().next_back().unwrap_or_default();
+
     if let Some(code) = line
         .strip_prefix("[exit code: ")
         .and_then(|line| line.strip_suffix(']'))
     {
         return code.parse().ok();
     }
+
     if line.starts_with("[timed out after ") || line.starts_with("[killed by signal: ") {
         return None;
     }
+
     Some(0)
 }
 
@@ -358,15 +369,18 @@ fn render_diffs(diffs: &Value) -> Option<String> {
 
     for entry in entries {
         let path = entry["path"].as_str().unwrap_or("(unknown)");
+
         // A create has no prior content, which the card states as null rather
         // than as an empty string.
         let old = entry["oldText"].as_str().unwrap_or_default();
         let new = entry["newText"].as_str().unwrap_or_default();
 
         body.push_str(&format!("--- {path}\n+++ {path}\n"));
+
         for line in old.lines() {
             body.push_str(&format!("-{line}\n"));
         }
+
         for line in new.lines() {
             body.push_str(&format!("+{line}\n"));
         }
@@ -381,13 +395,16 @@ fn map_tool_call(data: &Value, view: &Value, tools: &mut ToolTracker) -> Vec<Eve
     };
 
     let derived;
+
     let view = if view.is_null() {
         derived = call_view(data);
         &derived
     } else {
         view
     };
+
     let item = started_tool_item(data, view);
+
     tools.started.insert(call_id.to_string(), item.clone());
 
     vec![Event::ItemStarted(item)]
@@ -411,6 +428,7 @@ fn map_tool_result(data: &Value, view: &Value, tools: &mut ToolTracker) -> Vec<E
     let failed = message["content"][0]["isError"] == Value::Bool(true);
 
     let view = if view.is_null() { &data["meta"] } else { view };
+
     vec![Event::ItemCompleted(completed_tool_item(
         &started, view, message, failed,
     ))]
@@ -438,7 +456,9 @@ pub(crate) fn map_session_event(
                 .flatten()
                 .filter_map(Value::as_str)
                 .collect();
+
             let item_id = block_id(data, data["index"].as_u64().unwrap_or_default());
+
             if kind == "chunkrow/text-chunks" {
                 vec![Event::AgentMessageDelta { item_id, delta }]
             } else {
@@ -471,6 +491,7 @@ pub(crate) fn map_session_event(
 fn map_retry(data: &Value) -> Vec<Event> {
     let attempt = data["retry"].as_u64().unwrap_or(1);
     let total = data["maxRetries"].as_u64().unwrap_or(attempt);
+
     // The provider's own sentence says the most; its neutral code is the
     // fallback because it at least separates a rate limit from an outage.
     let reason = data["failure"]["message"]
@@ -547,11 +568,13 @@ fn map_todo_write(event: &Value, data: &Value) -> Vec<Event> {
         .flatten()
         .filter_map(|todo| {
             let content = todo["content"].as_str()?;
+
             let mark = if todo["status"] == "completed" {
                 "x"
             } else {
                 " "
             };
+
             Some(format!("- [{mark}] {content}\n"))
         })
         .collect();
@@ -645,6 +668,7 @@ fn map_completed_message(data: &Value) -> Vec<Event> {
         .enumerate()
         .filter_map(|(index, block)| {
             let id = block_id(data, index as u64);
+
             match block["type"].as_str()? {
                 "reasoning" => Some(Event::ItemCompleted(Item::Reasoning {
                     id,

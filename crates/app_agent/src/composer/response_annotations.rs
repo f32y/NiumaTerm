@@ -30,6 +30,7 @@ pub(crate) fn prompt_with_response_annotations(prompt: &str, annotations: &[Stri
         .iter()
         .map(|text| json!({ "text": text }))
         .collect::<Vec<_>>();
+
     let annotations = serde_json::to_string(&annotations).expect("strings serialize as JSON");
 
     format!(
@@ -65,6 +66,7 @@ pub(crate) fn annotation_count_label(count: usize) -> String {
     } else {
         "agent-composer-annotation-count-other"
     };
+
     nmt_i18n::i18n(key).replace("{count}", &count.to_string())
 }
 

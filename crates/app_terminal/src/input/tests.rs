@@ -41,6 +41,7 @@ fn basic_control_keys_send_terminal_bytes() {
 #[test]
 fn legacy_enter_modifiers_match_windows_terminal() {
     let mut ctrl_alt = Modifiers::control();
+
     ctrl_alt.alt = true;
 
     assert_eq!(
@@ -121,6 +122,7 @@ fn function_keys_use_terminal_sequences() {
 #[test]
 fn modified_named_keys_include_modifier_parameters() {
     let mut ctrl_left = key("left", None);
+
     ctrl_left.modifiers.control = true;
 
     assert_eq!(
@@ -129,7 +131,9 @@ fn modified_named_keys_include_modifier_parameters() {
     );
 
     let mut shift_tab = key("tab", None);
+
     shift_tab.modifiers.shift = true;
+
     assert_eq!(
         pty_bytes_for_key(&shift_tab, NewlineShortcut::CtrlEnter).as_deref(),
         Some(&b"\x1b[Z"[..])
@@ -151,9 +155,12 @@ fn plain_ctrl_chords_send_legacy_control_bytes() {
             "ctrl-{name}"
         );
     }
+
     // Ctrl-Shift chords stay with the UI (copy/paste shortcuts).
     let mut ctrl_shift = Modifiers::control();
+
     ctrl_shift.shift = true;
+
     assert_eq!(
         pty_bytes_for_key(&modified("x", None, ctrl_shift), NewlineShortcut::CtrlEnter,),
         None
@@ -169,6 +176,7 @@ fn plain_text_defers_to_ime_but_special_keys_do_not() {
         Some("A"),
         Modifiers::shift()
     )));
+
     // Named keys and modified keys still encode in on_key_down.
     assert!(!should_defer_to_ime(&key("enter", Some("\r"))));
     assert!(!should_defer_to_ime(&key("tab", Some("\t"))));
@@ -177,6 +185,7 @@ fn plain_text_defers_to_ime_but_special_keys_do_not() {
         Some("c"),
         Modifiers::control()
     )));
+
     // A key with no committed character never defers.
     assert!(!should_defer_to_ime(&key("left", None)));
 }

@@ -38,9 +38,11 @@ impl<'a> VisibleGrid<'a> {
 
     pub(crate) fn cell(&self, p: Pos) -> Square {
         let y = p.row.0;
+
         if y < 0 {
             return Square::default();
         }
+
         self.rows
             .get(y as usize)
             .and_then(|r| r.inner.get(p.col.0))
@@ -53,6 +55,7 @@ impl<'a> VisibleGrid<'a> {
         if y < 0 {
             return false;
         }
+
         self.wrapped.get(y as usize).copied().unwrap_or(false)
     }
 
@@ -87,18 +90,24 @@ impl<'a> VisibleGrid<'a> {
     fn inline_search_left(&self, point: Pos, needles: &str) -> Result<Pos, Pos> {
         let mut last = point;
         let mut cur = point;
+
         while let Some(p) = self.prev(cur) {
             // Crossed a hard line break (last column of a non-wrapped row).
             if p.col.0 == self.last_col() && !self.wrapped(p.row.0) {
                 break;
             }
+
             last = p;
+
             let sq = self.cell(p);
+
             if !self.is_spacer(p) && needles.contains(sq.c()) {
                 return Ok(p);
             }
+
             cur = p;
         }
+
         Err(last)
     }
 
@@ -108,16 +117,21 @@ impl<'a> VisibleGrid<'a> {
         if point.col.0 == self.last_col() && !self.wrapped(point.row.0) {
             return Err(point);
         }
+
         let mut last = point;
         let mut cur = point;
+
         loop {
             let sq = self.cell(cur);
+
             if !self.is_spacer(cur) && needles.contains(sq.c()) {
                 return Ok(cur);
             }
+
             if cur.col.0 == self.last_col() && !self.wrapped(cur.row.0) {
                 break;
             }
+
             match self.next(cur) {
                 Some(p) => {
                     last = p;
@@ -126,6 +140,7 @@ impl<'a> VisibleGrid<'a> {
                 None => break,
             }
         }
+
         Err(last)
     }
 
@@ -135,12 +150,15 @@ impl<'a> VisibleGrid<'a> {
             // Step back one cell over the escape char, skipping wide spacers.
             Ok(p) => {
                 let mut q = p;
+
                 while let Some(n) = self.next(q) {
                     q = n;
+
                     if !self.is_spacer(q) {
                         break;
                     }
                 }
+
                 q
             }
             Err(p) => p,
@@ -160,7 +178,9 @@ impl<'a> VisibleGrid<'a> {
         while point.row.0 > 0 && self.wrapped(point.row.0 - 1) {
             point.row -= 1;
         }
+
         point.col = Column(0);
+
         point
     }
 
@@ -169,13 +189,16 @@ impl<'a> VisibleGrid<'a> {
         while point.row.0 + 1 < self.rows_len() && self.wrapped(point.row.0) {
             point.row += 1;
         }
+
         point.col = Column(self.last_col());
+
         point
     }
 
     /// The matching bracket for the bracket at `point`, if any.
     pub fn bracket_search(&self, point: Pos) -> Option<Pos> {
         let start_char = self.cell(point).c();
+
         let (forward, end_char) = BRACKET_PAIRS.iter().find_map(|(open, close)| {
             if *open == start_char {
                 Some((true, *close))
@@ -188,14 +211,17 @@ impl<'a> VisibleGrid<'a> {
 
         let mut skip_pairs = 0i32;
         let mut cur = point;
+
         loop {
             let next = if forward {
                 self.next(cur)
             } else {
                 self.prev(cur)
             };
+
             let p = next?;
             let c = self.cell(p).c();
+
             if c == end_char && skip_pairs == 0 {
                 return Some(p);
             } else if c == start_char {
@@ -203,6 +229,7 @@ impl<'a> VisibleGrid<'a> {
             } else if c == end_char {
                 skip_pairs -= 1;
             }
+
             cur = p;
         }
     }

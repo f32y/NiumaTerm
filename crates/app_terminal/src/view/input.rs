@@ -28,6 +28,7 @@ pub(super) fn dropped_paths_text(paths: &[PathBuf]) -> String {
         .iter()
         .map(|path| {
             let path = path.to_string_lossy();
+
             if path.contains(' ') {
                 format!("\"{path}\"")
             } else {
@@ -69,6 +70,7 @@ impl TerminalPane {
             &event.keystroke,
             cx.global::<TerminalSettings>().newline_shortcut,
         );
+
         let interrupts_agent = matches!(event.keystroke.key.as_str(), "escape" | "esc")
             && !event.keystroke.modifiers.modified();
 
@@ -77,6 +79,7 @@ impl TerminalPane {
             (&action, self.frozen_drag.current())
         {
             let text = self.frozen_selection_to_text(a, b);
+
             if !text.is_empty() {
                 self.surface.copy_text_to_clipboard(text);
                 show_text_copied(window, cx);

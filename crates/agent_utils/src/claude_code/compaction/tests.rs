@@ -6,6 +6,7 @@ fn live_and_persisted_metadata_parse_to_the_same_record() {
         "type": "system", "subtype": "compact_boundary",
         "compact_metadata": {"trigger": "auto", "pre_tokens": 154_000,
             "post_tokens": 32_000, "messages_summarized": 87}});
+
     let persisted = serde_json::json!({
         "type": "system", "subtype": "compact_boundary",
         "compactMetadata": {"trigger": "auto", "preTokens": 154_000,

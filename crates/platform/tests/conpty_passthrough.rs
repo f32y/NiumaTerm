@@ -16,14 +16,18 @@ use nmt_platform::{ProcessReadWrite, PtyOptions, create_pty_with_env};
 /// Minimal base64 (standard alphabet, padded) so the test needs no crates.
 fn b64(input: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
     let mut out = String::new();
+
     for chunk in input.chunks(3) {
         let b = [
             chunk[0],
             *chunk.get(1).unwrap_or(&0),
             *chunk.get(2).unwrap_or(&0),
         ];
+
         let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
+
         out.push(T[((n >> 18) & 63) as usize] as char);
         out.push(T[((n >> 12) & 63) as usize] as char);
         out.push(if chunk.len() > 1 {
@@ -37,6 +41,7 @@ fn b64(input: &[u8]) -> String {
             '='
         });
     }
+
     out
 }
 
@@ -57,6 +62,7 @@ fn drive_conpty(script: &str) -> Vec<u8> {
 fn drive_conpty_with_title(script: &str, title: Option<&str>) -> Vec<u8> {
     let encoded = b64(&utf16le(script));
     let cmdline = format!("powershell -NoProfile -NonInteractive -EncodedCommand {encoded}");
+
     let mut pty = create_pty_with_env(PtyOptions {
         shell: &cmdline,
         args: &[],
@@ -73,25 +79,31 @@ fn drive_conpty_with_title(script: &str, title: Option<&str>) -> Vec<u8> {
     let mut buf = [0u8; 4096];
     let deadline = Instant::now() + Duration::from_secs(8);
     let marker = b"MARKER_DONE";
+
     loop {
         if Instant::now() > deadline {
             break;
         }
+
         match pty.reader().read(&mut buf) {
             Ok(0) => thread::sleep(Duration::from_millis(20)),
             Ok(n) => {
                 collected.extend_from_slice(&buf[..n]);
+
                 if find_subslice(&collected, marker).is_some() {
                     thread::sleep(Duration::from_millis(50));
+
                     if let Ok(n2) = pty.reader().read(&mut buf) {
                         collected.extend_from_slice(&buf[..n2]);
                     }
+
                     break;
                 }
             }
             Err(_) => break,
         }
     }
+
     collected
 }
 
@@ -101,6 +113,7 @@ fn starting_title_reaches_the_console_process() {
         "[Console]::Write([Console]::Title + '|MARKER_DONE')",
         Some("Test Profile"),
     );
+
     assert!(
         find_subslice(&bytes, b"Test Profile").is_some(),
         "the console process did not inherit STARTUPINFO.lpTitle"
@@ -118,6 +131,7 @@ fn dump(tag: &str, bytes: &[u8]) {
             }
         })
         .collect();
+
     eprintln!("[conpty-test:{tag}] bytes={} ascii:\n{ascii}", bytes.len());
 }
 
@@ -137,13 +151,19 @@ Start-Sleep -Milliseconds 600
 [Console]::Out.Flush()
 Start-Sleep -Milliseconds 300
 "#;
+
     let out = drive_conpty(script);
+
     dump("osc8", &out);
+
     let saw_marker = find_subslice(&out, b"MARKER_DONE").is_some();
     let saw_osc8 = find_subslice(&out, &[0x1b, 0x5d, 0x38]).is_some(); // ESC ] 8
     let saw_uri = find_subslice(&out, b"example.com").is_some();
+
     eprintln!("[conpty-test:osc8] saw_marker={saw_marker} saw_osc8={saw_osc8} saw_uri={saw_uri}");
+
     assert!(saw_marker, "pipe/child broken, inconclusive");
+
     // Characterization: unlike the kitty APC, ConPTY DOES round-trip OSC 8
     // hyperlinks (it models them as a cell attribute and re-emits them, even
     // auto-assigning an `id=`). The engine therefore receives the link and hover lookup
@@ -183,11 +203,16 @@ Start-Sleep -Milliseconds 600
 [Console]::Out.Flush()
 Start-Sleep -Milliseconds 300
 "#;
+
     let out = drive_conpty(script);
+
     dump("osc133", &out);
+
     let saw_marker = find_subslice(&out, b"MARKER_DONE").is_some();
+
     // ESC ] 1 3 3  — the OSC 133 introducer.
     let saw_osc133 = find_subslice(&out, &[0x1b, 0x5d, 0x31, 0x33, 0x33]).is_some();
+
     eprintln!(
         "[conpty-test:osc133] saw_marker={saw_marker} saw_osc133={saw_osc133} \
          RESULT: ConPTY {} OSC 133 prompt marks",
@@ -197,6 +222,7 @@ Start-Sleep -Milliseconds 300
             "STRIPS"
         }
     );
+
     assert!(
         saw_marker,
         "child never produced MARKER_DONE — pipe/child broken, inconclusive"
@@ -212,7 +238,9 @@ $e = [char]0x1b
 [Console]::Out.Flush()
 Start-Sleep -Milliseconds 300
 "#;
+
     let out = drive_conpty(script);
+
     assert!(find_subslice(&out, b"MARKER_DONE").is_some());
     assert!(
         find_subslice(&out, b"\x1b]9;4;1;42").is_some(),
@@ -243,12 +271,15 @@ Start-Sleep -Milliseconds 600
 [Console]::Out.Flush()
 Start-Sleep -Milliseconds 300
 "#;
+
     let out = drive_conpty(script);
+
     dump("kitty-apc", &out);
 
     let apc = [0x1b, 0x5f, 0x47]; // ESC _ G
     let saw_marker = find_subslice(&out, b"MARKER_DONE").is_some();
     let saw_apc = find_subslice(&out, &apc).is_some();
+
     eprintln!("[conpty-test:kitty-apc] saw_marker={saw_marker} saw_apc={saw_apc}");
 
     // Health check first, so a broken pipe/child is not mistaken for stripping.
@@ -256,6 +287,7 @@ Start-Sleep -Milliseconds 300
         saw_marker,
         "child never produced MARKER_DONE — pipe/child broken, test inconclusive"
     );
+
     // The contract: the kitty graphics APC introducer survives ConPTY. If this
     // fails while the marker arrived, ConPTY regressed to stripping the APC and
     // live kitty graphics can no longer be fed through on Windows.

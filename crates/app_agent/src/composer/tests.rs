@@ -34,6 +34,7 @@ fn picker_cancellation_and_processing_phases_are_distinct() {
             checkpoint: checkpoint(),
         },
     ];
+
     for state in &picker_states {
         assert!(state.is_picker());
         assert!(state.has_operation(7));
@@ -64,6 +65,7 @@ fn file_phase_success_and_failure_choose_the_safe_next_step() {
 #[test]
 fn rewind_catalog_is_claude_only_and_idle_only() {
     let claude = stream_json::Session::adapter_commands();
+
     let rewind = claude
         .iter()
         .find(|command| command.name == "rewind")
@@ -99,6 +101,7 @@ fn response_annotations_are_separate_from_the_visible_request() {
         "Explain the difference",
         &["first excerpt".into(), "second\nexcerpt".into()],
     );
+
     let parsed = parse_annotated_prompt(&submitted).expect("annotated prompt");
 
     assert_eq!(parsed.prompt, "Explain the difference");
@@ -112,7 +115,9 @@ fn response_annotations_are_separate_from_the_visible_request() {
     );
     assert!(submitted.contains("# Response annotations:"));
     assert!(!submitted.contains("# Selected text:"));
+
     let restored = parse_annotated_prompt(submitted.trim()).expect("restored annotated prompt");
+
     assert_eq!(restored.prompt, "Explain the difference");
     assert_eq!(restored.annotations.len(), 2);
     assert_eq!(
@@ -161,6 +166,7 @@ fn every_message_kind_has_a_way_to_retire() {
     ] {
         let fades_on_its_own = feedback_is_transient(kind);
         let retires_with_its_queue = !feedback_is_current(kind, /*queue_is_empty*/ true);
+
         let holds_until_replaced = matches!(
             kind,
             CommandFeedbackKind::Status | CommandFeedbackKind::Error
@@ -190,6 +196,7 @@ fn an_image_placeholder_is_separated_from_the_prompt_it_is_written_into() {
     // preceding text it would be part of it, both for the reader and for the
     // agent that receives the prompt.
     assert_eq!(spaced_placeholder(Some('t'), "[Image #1]"), " [Image #1] ");
+
     // Nothing to separate it from, so a leading space would only open the
     // prompt with an empty column.
     assert_eq!(spaced_placeholder(None, "[Image #1]"), "[Image #1] ");
@@ -200,32 +207,39 @@ fn an_image_placeholder_is_separated_from_the_prompt_it_is_written_into() {
 #[test]
 fn branch_flows_hold_the_composer_until_cleared() {
     let mut flow = BranchFlow::default();
+
     assert!(!flow.holds_composer());
 
     flow.rewind.state = Some(RewindState::Loading { operation_id: 1 });
+
     assert!(flow.holds_composer());
     assert!(flow.picker_is_open());
     assert!(!flow.is_working());
 
     flow.rewind.state = Some(RewindState::RestoringFiles { operation_id: 1 });
+
     assert!(flow.holds_composer());
     assert!(!flow.picker_is_open());
     assert!(flow.is_working());
 
     flow.clear();
+
     assert!(!flow.holds_composer());
 
     flow.fork.state = Some(ForkState::Selecting(Vec::new()));
+
     assert!(flow.holds_composer());
     assert!(flow.picker_is_open());
     assert!(!flow.is_working());
 
     flow.fork.state = Some(ForkState::Branching);
+
     assert!(flow.holds_composer());
     assert!(!flow.picker_is_open());
     assert!(flow.is_working());
 
     flow.clear();
+
     assert!(!flow.holds_composer());
     assert!(!flow.picker_is_open());
     assert!(!flow.is_working());

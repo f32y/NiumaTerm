@@ -49,6 +49,7 @@ impl CodeSource {
             },
             _ => return None,
         };
+
         Some(Self {
             command,
             output,
@@ -68,27 +69,32 @@ impl CodeSource {
 /// metadata, so only distinctive PowerShell syntax overrides the Bash default.
 pub(super) fn command_syntax(command: &str) -> (&'static str, Range<usize>) {
     let trimmed = command.trim_start();
+
     let first = trimmed
         .split_whitespace()
         .next()
         .unwrap_or("")
         .trim_matches(['\'', '"']);
+
     let executable = first
         .rsplit(['/', '\\'])
         .next()
         .unwrap_or(first)
         .to_ascii_lowercase();
+
     let explicit = match executable.trim_end_matches(".exe") {
         "powershell" | "pwsh" => Some("powershell"),
         "bash" | "sh" | "zsh" => Some("bash"),
         _ => None,
     };
+
     if let Some(language) = explicit {
         // The script after an interpreter's command flag is executable source;
         // parsing its surrounding argument quotes would color it as one string.
         for flag in [" -Command ", " -command ", " -c ", " -lc "] {
             if let Some(start) = command.find(flag) {
                 let mut start = start + flag.len();
+
                 while command
                     .as_bytes()
                     .get(start)
@@ -96,7 +102,9 @@ pub(super) fn command_syntax(command: &str) -> (&'static str, Range<usize>) {
                 {
                     start += 1;
                 }
+
                 let mut end = command.trim_end().len();
+
                 if end > start + 1
                     && matches!(command.as_bytes()[start], b'\'' | b'"')
                     && command.as_bytes()[start] == command.as_bytes()[end - 1]
@@ -104,9 +112,11 @@ pub(super) fn command_syntax(command: &str) -> (&'static str, Range<usize>) {
                     start += 1;
                     end -= 1;
                 }
+
                 return (language, start..end);
             }
         }
+
         return (language, 0..command.len());
     }
 
@@ -116,6 +126,7 @@ pub(super) fn command_syntax(command: &str) -> (&'static str, Range<usize>) {
             let Some((verb, noun)) = word.split_once('-') else {
                 return false;
             };
+
             !noun.is_empty()
                 && matches!(
                     verb.to_ascii_lowercase().as_str(),
@@ -140,6 +151,7 @@ pub(super) fn command_syntax(command: &str) -> (&'static str, Range<usize>) {
                         | "stop"
                 )
         });
+
     (
         if powershell { "powershell" } else { "bash" },
         0..command.len(),
@@ -153,9 +165,11 @@ fn read_command_language(command: &str) -> Option<String> {
     let words = literal_words(&command[script])?;
     let (program, arguments) = words.split_first()?;
     let mut args = arguments.iter().map(String::as_str);
+
     let path = match program.to_ascii_lowercase().as_str() {
         "cat" => {
             let first = args.next()?;
+
             if first == "--" {
                 args.next()?
             } else if first.starts_with('-') {
@@ -166,6 +180,7 @@ fn read_command_language(command: &str) -> Option<String> {
         }
         "get-content" => {
             let mut path = None;
+
             while let Some(arg) = args.next() {
                 match arg.to_ascii_lowercase().as_str() {
                     "-raw" => {}
@@ -174,14 +189,18 @@ fn read_command_language(command: &str) -> Option<String> {
                     _ => return None,
                 }
             }
+
             path?
         }
         _ => return None,
     };
+
     if args.next().is_some() {
         return None;
     }
+
     let language = file_extension_lang(path);
+
     (!language.is_empty()).then_some(language)
 }
 
@@ -189,10 +208,12 @@ fn literal_words(text: &str) -> Option<Vec<String>> {
     let mut words = Vec::new();
     let mut word = String::new();
     let mut quote = None;
+
     for ch in text.chars() {
         if matches!(ch, '$' | '`' | '\n' | '\r') {
             return None;
         }
+
         match quote {
             Some(delimiter) if ch == delimiter => quote = None,
             Some(_) => word.push(ch),
@@ -208,11 +229,14 @@ fn literal_words(text: &str) -> Option<Vec<String>> {
             },
         }
     }
+
     if quote.is_some() {
         return None;
     }
+
     if !word.is_empty() {
         words.push(word);
     }
+
     Some(words)
 }

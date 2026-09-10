@@ -54,6 +54,7 @@ impl EngineRowBuilder {
         };
 
         let is_wide = wide == CellWide::Wide;
+
         let display: String = if cell_text.is_empty() {
             "\u{00a0}".into()
         } else {
@@ -175,6 +176,7 @@ pub(crate) fn frozen_block_view(
 
     for row in visible.start..visible.end.min(read_rows) {
         let mut builder = EngineRowBuilder::default();
+
         let ok = block
             .read_row_visit(row, palette, |x, t, w, s| {
                 builder.push(x, t, w, &s, default_fg)
@@ -201,6 +203,7 @@ pub(crate) fn frozen_block_view(
             shape_key: Some(block_row_shape_key(handle, row)),
         });
     }
+
     view
 }
 
@@ -209,6 +212,7 @@ pub(crate) fn frozen_block_view(
 /// caches across frames without hashing the row text.
 fn block_row_shape_key(handle: BlockHandle, row: usize) -> u64 {
     use std::hash::{Hash, Hasher};
+
     let mut hasher = collections::hash_map::DefaultHasher::new();
 
     (handle.id, handle.generation, row).hash(&mut hasher);
@@ -229,6 +233,7 @@ pub(crate) fn live_history_view(
     selection: Option<SelectionRange>,
 ) -> FrozenView {
     let pad = pad_rows * cell_h;
+
     let mut view = FrozenView {
         rows: Vec::new(),
         items_chrome: Vec::new(),
@@ -255,5 +260,6 @@ pub(crate) fn live_history_view(
             shape_key: None,
         });
     }
+
     view
 }

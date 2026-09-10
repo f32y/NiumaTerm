@@ -43,6 +43,7 @@ pub(crate) fn stage(release: &Release, staging: &Path) -> Result<PathBuf, Instal
     // A staging directory left by an earlier attempt may hold files from
     // another release, which unpacking over would mix into this one.
     let _ = fs::remove_dir_all(&directory);
+
     fs::create_dir_all(&directory).map_err(|error| {
         warn!("update: creating {} failed: {error}", directory.display());
 
@@ -73,6 +74,7 @@ fn package_assets(assets: &[Asset]) -> Option<(&Asset, &Asset)> {
             && asset.name.ends_with(".zip")
             && asset.url.starts_with(DOWNLOAD_URL_PREFIX)
     })?;
+
     let expected = format!("{}.sha256", package.name);
     let checksum = assets
         .iter()
@@ -164,6 +166,7 @@ fn hex(bytes: &[u8]) -> String {
 
 fn unpack(archive: &Path, into: &Path) -> Result<(), InstallError> {
     let file = File::open(archive).map_err(|_| InstallError::Unpack)?;
+
     let mut zip = zip::ZipArchive::new(file).map_err(|error| {
         warn!("update: the package is not a readable archive: {error}");
 
@@ -172,6 +175,7 @@ fn unpack(archive: &Path, into: &Path) -> Result<(), InstallError> {
 
     for index in 0..zip.len() {
         let mut entry = zip.by_index(index).map_err(|_| InstallError::Unpack)?;
+
         let name = flat_name(entry.name()).ok_or_else(|| {
             warn!(
                 "update: the package holds an entry named `{}`",

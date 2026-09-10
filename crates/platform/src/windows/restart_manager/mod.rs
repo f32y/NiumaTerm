@@ -158,6 +158,7 @@ impl<A: Api> Session<A> {
         if paths.is_empty() {
             return Err(RestartManagerError::NoFiles);
         }
+
         if let Some(path) = paths.iter().find(|path| !path.is_absolute()) {
             return Err(RestartManagerError::RelativePath((*path).to_path_buf()));
         }
@@ -165,10 +166,13 @@ impl<A: Api> Session<A> {
         let mut handle = 0;
         let mut key = [0u16; CCH_RM_SESSION_KEY as usize + 1];
         let code = api.start_session(&mut handle, key.as_mut_ptr());
+
         check(Operation::StartSession, code)?;
 
         let session = Self { api, handle };
+
         session.register_files(paths)?;
+
         Ok(session)
     }
 
@@ -177,11 +181,14 @@ impl<A: Api> Session<A> {
             .iter()
             .map(|path| wide(path.as_os_str()))
             .collect::<Vec<_>>();
+
         let pointers = wide_paths
             .iter()
             .map(|path| path.as_ptr())
             .collect::<Vec<_>>();
+
         let code = self.api.register_files(self.handle, &pointers);
+
         check(Operation::RegisterResources, code)
     }
 
@@ -189,6 +196,7 @@ impl<A: Api> Session<A> {
         let mut needed = 0;
         let mut count = 0;
         let mut reboot_reasons = 0;
+
         let code = self.api.get_list(
             self.handle,
             &mut needed,
@@ -203,13 +211,16 @@ impl<A: Api> Session<A> {
                 reboot_reasons: decode_reboot_reasons(reboot_reasons),
             });
         }
+
         if code != ERROR_MORE_DATA {
             return Err(windows_error(Operation::ListApplications, code));
         }
 
         for _ in 0..LIST_RETRIES {
             let mut processes = vec![RM_PROCESS_INFO::default(); needed as usize];
+
             count = processes.len() as u32;
+
             let code = self.api.get_list(
                 self.handle,
                 &mut needed,
@@ -217,9 +228,11 @@ impl<A: Api> Session<A> {
                 processes.as_mut_ptr(),
                 &mut reboot_reasons,
             );
+
             if code == ERROR_MORE_DATA {
                 continue;
             }
+
             check(Operation::ListApplications, code)?;
             processes.truncate(count as usize);
             return Ok(FileUsage {
@@ -273,11 +286,13 @@ fn wide_text(value: &[u16]) -> String {
         .iter()
         .position(|unit| *unit == 0)
         .unwrap_or(value.len());
+
     String::from_utf16_lossy(&value[..end])
 }
 
 fn decode_application(process: RM_PROCESS_INFO) -> AffectedApplication {
     let service_name = wide_text(&process.strServiceShortName);
+
     AffectedApplication {
         name: wide_text(&process.strAppName),
         service_name: (!service_name.is_empty()).then_some(service_name),
@@ -313,6 +328,7 @@ fn decode_reboot_reasons(bits: u32) -> RebootReasons {
         | RmRebootReasonCriticalProcess as u32
         | RmRebootReasonCriticalService as u32
         | RmRebootReasonDetectedSelf as u32;
+
     RebootReasons {
         permission_denied: bits & RmRebootReasonPermissionDenied as u32 != 0,
         session_mismatch: bits & RmRebootReasonSessionMismatch as u32 != 0,

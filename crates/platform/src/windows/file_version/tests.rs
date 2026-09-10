@@ -20,6 +20,7 @@ fn reads_a_named_string_from_a_version_resource() {
         version_string(&path, "CompanyName").as_deref(),
         Some("Microsoft Corporation")
     );
+
     // Microsoft's own resources are not written by the resource compiler this
     // workspace uses, so a readable value here is also evidence that the
     // translation table is being consulted rather than a default assumed.
@@ -32,6 +33,7 @@ fn reads_a_named_string_from_a_version_resource() {
 #[test]
 fn an_absent_key_or_resource_reads_as_nothing() {
     assert_eq!(version_string(&system_dll(), "NoSuchKey"), None);
+
     // A path that resolves to no file at all, and one that resolves to a file
     // with no version resource: neither may be reported as a version.
     assert_eq!(

@@ -23,6 +23,7 @@ impl AnsiColor {
                 16..=231 => {
                     let index = u32::from(index - 16);
                     let component = |value| if value == 0 { 0 } else { 55 + 40 * value };
+
                     component(index / 36) << 16
                         | component(index / 6 % 6) << 8
                         | component(index % 6)
@@ -30,6 +31,7 @@ impl AnsiColor {
                 232..=255 => u32::from(8 + 10 * (index - 232)) * 0x010101,
             },
         };
+
         rgb(value).into()
     }
 }
@@ -50,12 +52,14 @@ impl AnsiStyle {
     pub(super) fn resolve(self, foreground: Hsla, background: Hsla) -> HighlightStyle {
         let mut color = self.foreground.map(AnsiColor::resolve);
         let mut background_color = self.background.map(AnsiColor::resolve);
+
         if self.reverse {
             (color, background_color) = (
                 Some(background_color.unwrap_or(background)),
                 Some(color.unwrap_or(foreground)),
             );
         }
+
         HighlightStyle {
             color,
             background_color,
@@ -93,10 +97,13 @@ impl AnsiText {
 
     fn push(&mut self, ch: char) {
         let start = self.text.len();
+
         self.text.push(ch);
+
         if self.style == AnsiStyle::default() {
             return;
         }
+
         if let Some((range, style)) = self.spans.last_mut()
             && *style == self.style
             && range.end == start
@@ -116,6 +123,7 @@ impl Perform for AnsiText {
             self.push('\n');
             self.pending_cr = false;
         }
+
         self.push(ch);
     }
 
@@ -135,9 +143,12 @@ impl Perform for AnsiText {
         if ignore || !intermediates.is_empty() || action != 'm' {
             return;
         }
+
         let mut params = params.iter();
+
         while let Some(group) = params.next() {
             let code = group[0];
+
             match code {
                 0 => self.style = AnsiStyle::default(),
                 1 => self.style.bold = true,
@@ -169,15 +180,20 @@ impl Perform for AnsiText {
                         let Some(mode) = params.next().map(|group| group[0]) else {
                             break;
                         };
+
                         let count = match mode {
                             2 => 3,
                             5 => 1,
                             _ => break,
                         };
+
                         let mut values = vec![mode];
+
                         values.extend(params.by_ref().take(count).map(|group| group[0]));
+
                         values
                     };
+
                     let color = match values.as_slice() {
                         [5, index] => u8::try_from(*index).ok().map(AnsiColor::Indexed),
                         [2, r, g, b] | [2, 0, r, g, b] => u8::try_from(*r)
@@ -187,6 +203,7 @@ impl Perform for AnsiText {
                             .map(|((r, g), b)| AnsiColor::Rgb(r, g, b)),
                         _ => None,
                     };
+
                     if let Some(color) = color {
                         if code == 38 {
                             self.style.foreground = Some(color);

@@ -27,6 +27,7 @@ pub(super) fn render_turn_fold(
     // leaving: a row reading "hide" through the exit it started would be
     // offering to do again what it is in the middle of doing.
     let disclosing = disclosures.is_disclosing(RevealKey::Turn(turn));
+
     let label = if disclosing {
         i18n("agent-transcript-turn-work-hide").to_string()
     } else {
@@ -110,6 +111,7 @@ pub(super) fn render_run_toggle(
     // leaving: a toggle reading "show fewer" through the exit it started
     // would be offering to do again what it is in the middle of doing.
     let disclosing = disclosures.is_disclosing(RevealKey::Group(run_start));
+
     let label = if disclosing {
         i18n("agent-transcript-show-fewer-tool-calls").to_string()
     } else {

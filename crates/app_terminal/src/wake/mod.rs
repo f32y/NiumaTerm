@@ -48,6 +48,7 @@ pub(crate) struct WakeSignal {
 
 pub(crate) fn wake_channel() -> (WakeSignal, WakeReceiver) {
     let (tx, rx) = unbounded();
+
     (
         WakeSignal {
             queued: Arc::new(AtomicBool::new(false)),

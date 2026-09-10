@@ -69,7 +69,9 @@ fn save_load_roundtrip_and_bad_file_defaults() {
             },
         ],
     };
+
     save_to(&path, &state).unwrap();
+
     assert_eq!(load_from(&path), state);
     assert!(fs::read_to_string(&path).unwrap().contains("pinned = true"));
     assert!(
@@ -85,10 +87,12 @@ fn save_load_roundtrip_and_bad_file_defaults() {
         "window = { x = 1.0, y = 2.0, width = 3.0, height = 4.0 }",
     )
     .unwrap();
+
     assert_eq!(load_from(&path), LocalState::default());
 
     // Corrupt file: default state instead of an error.
     fs::write(&path, "not [ valid").unwrap();
+
     assert_eq!(load_from(&path), LocalState::default());
 
     let _ = fs::remove_dir_all(&dir);
@@ -104,6 +108,7 @@ fn try_load_defaults_when_missing_and_errors_on_bad_toml() {
 
     fs::create_dir_all(&dir).unwrap();
     fs::write(&path, "not [ valid").unwrap();
+
     assert!(try_load_from(&path).is_err());
 
     let _ = fs::remove_dir_all(&dir);
@@ -114,6 +119,7 @@ fn save_agent_defaults_updates_only_agent_defaults() {
     let dir = env::temp_dir().join("NiumaTerm-local-state-agent-defaults-test");
     let _ = fs::remove_dir_all(&dir);
     let path = dir.join("local_state.toml");
+
     let initial = LocalState {
         windows: vec![WindowLocalState {
             window: Some(WindowState {
@@ -134,6 +140,7 @@ fn save_agent_defaults_updates_only_agent_defaults() {
             },
         )]),
     };
+
     save_to(&path, &initial).unwrap();
 
     let defaults = BTreeMap::from([
@@ -159,6 +166,7 @@ fn save_agent_defaults_updates_only_agent_defaults() {
     save_agent_defaults_to(&path, &defaults).unwrap();
 
     let saved = try_load_from(&path).unwrap();
+
     assert_eq!(saved.windows, initial.windows);
     assert_eq!(saved.agent_defaults, defaults);
 
@@ -169,6 +177,7 @@ fn save_agent_defaults_updates_only_agent_defaults() {
 fn windows_and_profile_updates_preserve_other_writers() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("local_state.toml");
+
     let first = BTreeMap::from([(
         "first".to_string(),
         AgentDefaults {
@@ -176,6 +185,7 @@ fn windows_and_profile_updates_preserve_other_writers() {
             ..AgentDefaults::default()
         },
     )]);
+
     let second = BTreeMap::from([(
         "second".to_string(),
         AgentDefaults {
@@ -183,20 +193,27 @@ fn windows_and_profile_updates_preserve_other_writers() {
             ..AgentDefaults::default()
         },
     )]);
+
     save_agent_defaults_to(&path, &first).unwrap();
+
     let windows = vec![WindowLocalState {
         sidebar_width: Some(320.0),
         ..WindowLocalState::default()
     }];
+
     save_windows_to(&path, &windows).unwrap();
     save_agent_defaults_to(&path, &second).unwrap();
+
     let state = try_load_from(&path).unwrap();
+
     assert_eq!(state.windows, windows);
     assert_eq!(state.agent_defaults["first"], first["first"]);
     assert_eq!(state.agent_defaults["second"], second["second"]);
 
     save_windows_to(&path, &[]).unwrap();
+
     let cleared = try_load_from(&path).unwrap();
+
     assert!(cleared.windows.is_empty());
     assert_eq!(cleared.agent_defaults, state.agent_defaults);
 }
@@ -205,7 +222,9 @@ fn windows_and_profile_updates_preserve_other_writers() {
 fn local_state_read_errors_are_reported_and_preserved() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("local_state.toml");
+
     fs::write(&path, [0xff]).unwrap();
+
     assert_eq!(
         try_load_from(&path).unwrap_err().kind(),
         io::ErrorKind::InvalidData
@@ -258,6 +277,7 @@ fn pane_layout_roundtrips_and_old_snapshots_load_without_it() {
             ],
         }),
     };
+
     let state = LocalState {
         agent_defaults: Default::default(),
         windows: vec![WindowLocalState {
@@ -276,7 +296,9 @@ fn pane_layout_roundtrips_and_old_snapshots_load_without_it() {
             sidebar_width: None,
         }],
     };
+
     save_to(&path, &state).unwrap();
+
     assert_eq!(load_from(&path), state);
 
     // A single-pane tab serializes without any `panes` key at all.
@@ -298,7 +320,9 @@ fn pane_layout_roundtrips_and_old_snapshots_load_without_it() {
             sidebar_width: None,
         }],
     };
+
     save_to(&path, &flat).unwrap();
+
     assert!(!fs::read_to_string(&path).unwrap().contains("panes"));
 
     // A pre-pane-layout snapshot (no `panes` key) loads with `panes: None`.
@@ -317,8 +341,10 @@ shell = "pwsh.exe"
 "#,
     )
     .unwrap();
+
     let loaded = load_from(&path);
     let tab = &loaded.windows[0].session.as_ref().unwrap().workspaces[0].tabs[0];
+
     assert_eq!(tab.name.as_deref(), Some("Tab 1"));
     assert_eq!(tab.panes, None);
     assert!(!loaded.windows[0].session.as_ref().unwrap().workspaces[0].pinned);
@@ -331,6 +357,7 @@ fn additional_workspace_directories_survive_older_and_newer_snapshots() {
     let dir = env::temp_dir().join("NiumaTerm-additional-cwds-test");
     let _ = fs::remove_dir_all(&dir);
     let path = dir.join("local_state.toml");
+
     fs::create_dir_all(&dir).unwrap();
 
     // A snapshot written before multi-directory workspaces existed.
@@ -347,12 +374,14 @@ active_tab = 0
 "#,
     )
     .unwrap();
+
     let workspace = load_from(&path).windows[0]
         .session
         .clone()
         .unwrap()
         .workspaces
         .remove(0);
+
     assert_eq!(workspace.cwd.as_deref(), Some("C:/Projects/example"));
     assert!(workspace.additional_cwds.is_empty());
 
@@ -376,7 +405,9 @@ active_tab = 0
             sidebar_width: None,
         }],
     };
+
     save_to(&path, &single).unwrap();
+
     assert!(
         !fs::read_to_string(&path)
             .unwrap()
@@ -387,9 +418,11 @@ active_tab = 0
     // Ordered additions round-trip, and an older build that ignores the
     // key still restores the primary directory and the tabs.
     let mut multi = single.clone();
+
     multi.windows[0].session.as_mut().unwrap().workspaces[0].additional_cwds =
         vec!["C:/Projects/library".into(), "D:/Docs".into()];
     save_to(&path, &multi).unwrap();
+
     assert_eq!(load_from(&path), multi);
 
     #[derive(Debug, Deserialize)]
@@ -398,21 +431,26 @@ active_tab = 0
         #[serde(default)]
         tabs: Vec<TabState>,
     }
+
     #[derive(Debug, Deserialize)]
     struct LegacySession {
         workspaces: Vec<LegacyWorkspace>,
     }
+
     #[derive(Debug, Deserialize)]
     struct LegacyWindow {
         session: LegacySession,
     }
+
     #[derive(Debug, Deserialize)]
     struct LegacyState {
         windows: Vec<LegacyWindow>,
     }
+
     let legacy: LegacyState =
         toml::from_str(&fs::read_to_string(&path).unwrap()).expect("older build parses");
     let workspace = &legacy.windows[0].session.workspaces[0];
+
     assert_eq!(workspace.cwd.as_deref(), Some("C:/Projects/example"));
     assert_eq!(workspace.tabs.len(), 1);
 

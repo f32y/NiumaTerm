@@ -61,6 +61,7 @@ pub(crate) fn resolve_run_directory_at(
     // A finished run names its own directory, so prefer that over searching.
     if let Some(run_id) = run_id_for_task(&session, task_id) {
         let dir = session.join("subagents").join("workflows").join(&run_id);
+
         if dir.is_dir() {
             return Some(dir);
         }
@@ -69,11 +70,14 @@ pub(crate) fn resolve_run_directory_at(
     // A live run has no snapshot yet. Agent ids are unique, so the directory
     // holding one of this run's transcripts is this run's directory.
     let workflows = session.join("subagents").join("workflows");
+
     for entry in fs::read_dir(&workflows).ok()?.flatten() {
         let dir = entry.path();
+
         if !dir.is_dir() {
             continue;
         }
+
         if agent_ids
             .iter()
             .any(|agent_id| dir.join(format!("agent-{agent_id}.jsonl")).is_file())
@@ -81,6 +85,7 @@ pub(crate) fn resolve_run_directory_at(
             return Some(dir);
         }
     }
+
     None
 }
 
@@ -88,16 +93,20 @@ pub(crate) fn resolve_run_directory_at(
 fn run_id_for_task(session: &Path, task_id: &str) -> Option<String> {
     for entry in fs::read_dir(session.join("workflows")).ok()?.flatten() {
         let path = entry.path();
+
         if path.extension().is_none_or(|extension| extension != "json") {
             continue;
         }
+
         let Some(snapshot) = read_json(&path) else {
             continue;
         };
+
         if snapshot["taskId"].as_str() == Some(task_id) {
             return text_field(&snapshot, &["runId"]);
         }
     }
+
     None
 }
 
@@ -111,6 +120,7 @@ pub fn read_journal(dir: &Path) -> Result<Vec<WorkflowJournalEntry>, String> {
     let file = fs::File::open(&path).map_err(|error| format!("{}: {error}", path.display()))?;
 
     let mut entries: Vec<WorkflowJournalEntry> = Vec::new();
+
     for line in BufReader::new(file).lines().map_while(Result::ok) {
         let Ok(record) = serde_json::from_str::<Value>(&line) else {
             continue;
@@ -118,6 +128,7 @@ pub fn read_journal(dir: &Path) -> Result<Vec<WorkflowJournalEntry>, String> {
         let Some(agent_id) = text_field(&record, &["agentId"]) else {
             continue;
         };
+
         let result = match record["type"].as_str() {
             Some("started") => None,
             Some("result") => text_field(&record, &["result"]).or_else(|| Some(String::new())),
@@ -205,6 +216,7 @@ pub fn refresh_run(
     else {
         return result;
     };
+
     result.refresh.run_id = dir
         .file_name()
         .and_then(|name| name.to_str())
@@ -219,6 +231,7 @@ pub fn refresh_run(
 
     if let Some(agent_id) = request.open_agent.as_deref() {
         let len = agent_transcript_len(&dir, agent_id);
+
         // Re-parse only a file that grew; an unchanged one is already shown.
         if len.is_some()
             && len != request.open_agent_len
@@ -250,6 +263,7 @@ pub(crate) fn read_run_snapshots_at(
     session_id: &str,
 ) -> Result<Vec<RestoredWorkflowRun>, String> {
     let dir = project.join(session_id).join("workflows");
+
     let entries = match fs::read_dir(&dir) {
         Ok(entries) => entries,
         // A session that ran no workflow legitimately has no directory.
@@ -257,27 +271,33 @@ pub(crate) fn read_run_snapshots_at(
     };
 
     let mut runs: Vec<(u64, RestoredWorkflowRun)> = Vec::new();
+
     for entry in entries.flatten() {
         let path = entry.path();
+
         if path.extension().is_none_or(|extension| extension != "json") {
             continue;
         }
+
         let Some(snapshot) = read_json(&path) else {
             continue;
         };
         let Some(run) = restore_run(&snapshot) else {
             continue;
         };
+
         runs.push((snapshot["startTime"].as_u64().unwrap_or(0), run));
     }
 
     runs.sort_by_key(|(started_at, _)| *started_at);
+
     let mut restored: Vec<RestoredWorkflowRun> = runs.into_iter().map(|(_, run)| run).collect();
 
     let recorded: HashSet<String> = restored
         .iter()
         .filter_map(|run| run.run.run_id.clone())
         .collect();
+
     restored.extend(restore_interrupted_runs(
         &project.join(session_id),
         &recorded,
@@ -303,8 +323,10 @@ fn restore_interrupted_runs(
     };
 
     let mut runs = Vec::new();
+
     for entry in entries.flatten() {
         let dir = entry.path();
+
         let Some(run_id) = dir
             .file_name()
             .and_then(|name| name.to_str())
@@ -312,11 +334,13 @@ fn restore_interrupted_runs(
         else {
             continue;
         };
+
         if !dir.is_dir() || recorded.contains(&run_id) {
             continue;
         }
 
         let agents = restore_interrupted_agents(&dir);
+
         if agents.is_empty() {
             continue;
         }
@@ -360,8 +384,10 @@ fn restore_interrupted_agents(dir: &Path) -> Vec<WorkflowAgent> {
     };
 
     let mut found: Vec<(SystemTime, String, PathBuf)> = Vec::new();
+
     for entry in entries.flatten() {
         let path = entry.path();
+
         let Some(agent_id) = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -371,12 +397,15 @@ fn restore_interrupted_agents(dir: &Path) -> Vec<WorkflowAgent> {
         else {
             continue;
         };
+
         let started_at = entry
             .metadata()
             .and_then(|metadata| metadata.modified())
             .unwrap_or(SystemTime::UNIX_EPOCH);
+
         found.push((started_at, agent_id, path));
     }
+
     found.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
 
     found
@@ -414,6 +443,7 @@ fn interrupted_run_name(session: &Path, run_id: &str) -> Option<String> {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_str()?;
+
         if let Some(stem) = name
             .strip_suffix(".js")
             .and_then(|stem| stem.strip_suffix(run_id))
@@ -423,6 +453,7 @@ fn interrupted_run_name(session: &Path, run_id: &str) -> Option<String> {
             return Some(stem.to_owned());
         }
     }
+
     None
 }
 
@@ -435,6 +466,7 @@ fn agent_prompt_label(path: &Path) -> Option<String> {
     const MAX_LABEL_CHARS: usize = 80;
 
     let file = fs::File::open(path).ok()?;
+
     for line in BufReader::new(file)
         .lines()
         .take(SCAN_LINES)
@@ -443,10 +475,13 @@ fn agent_prompt_label(path: &Path) -> Option<String> {
         let Ok(record) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
+
         if record["type"].as_str() != Some("user") {
             continue;
         }
+
         let content = &record["message"]["content"];
+
         let text = content.as_str().map(str::to_owned).or_else(|| {
             content
                 .as_array()?
@@ -465,6 +500,7 @@ fn agent_prompt_label(path: &Path) -> Option<String> {
             None => heading.to_owned(),
         });
     }
+
     None
 }
 
@@ -501,6 +537,7 @@ fn restored_result(snapshot: &Value) -> Option<String> {
     if let Some(text) = text_field(snapshot, &["result"]) {
         return Some(text);
     }
+
     let parts: Vec<String> = snapshot["result"]
         .as_array()?
         .iter()

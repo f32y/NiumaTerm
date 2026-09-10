@@ -168,6 +168,7 @@ impl io::Read for EventedAnonRead {
         // (and will get this notify).
         drop(self.inner.wait_tag.lock());
         self.inner.sig_buffer_not_full.notify_one();
+
         Ok(nbytes)
     }
 }
@@ -251,6 +252,7 @@ impl EventedAnonWrite {
 
             spawn(move || {
                 use std::io::Write;
+
                 let mut tmp_buf = [0u8; 65535];
 
                 // The buffer starts empty, so the loop may write immediately.
@@ -332,6 +334,7 @@ impl io::Write for EventedAnonWrite {
         }
 
         let nbytes = self.producer.write_from_slice(buf);
+
         if self.producer.is_full() {
             // Backpressure: buffer full → not writable until the worker drains it.
             self.inner.soft.clear();

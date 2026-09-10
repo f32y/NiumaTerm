@@ -57,6 +57,7 @@ fn agents_group_under_their_phase_in_provider_order() {
     );
 
     let grouped = group_agents_by_phase(&run);
+
     assert_eq!(grouped.len(), 2);
     assert_eq!(grouped[0].0, Some("Find"));
     assert_eq!(
@@ -87,6 +88,7 @@ fn a_phase_with_no_agents_is_not_shown() {
     );
 
     let grouped = group_agents_by_phase(&run);
+
     assert_eq!(grouped.len(), 1);
     assert_eq!(grouped[0].0, Some("Find"));
 }
@@ -97,6 +99,7 @@ fn an_agent_outside_every_reported_phase_is_still_listed() {
     // listed, both have to remain visible.
     let unphased = run(Vec::new(), vec![agent(1, None), agent(2, Some(7))]);
     let grouped = group_agents_by_phase(&unphased);
+
     assert_eq!(grouped.len(), 1);
     assert_eq!(grouped[0].0, None);
     assert_eq!(grouped[0].1.len(), 2);
@@ -108,7 +111,9 @@ fn an_agent_outside_every_reported_phase_is_still_listed() {
         }],
         vec![agent(1, Some(1)), agent(2, Some(9))],
     );
+
     let grouped = group_agents_by_phase(&orphan);
+
     assert_eq!(grouped.len(), 2);
     assert_eq!(grouped[0].0, Some("Find"));
     assert_eq!(grouped[1].0, None);
@@ -119,12 +124,15 @@ fn an_agent_outside_every_reported_phase_is_still_listed() {
 fn run_totals_omit_what_the_provider_did_not_report() {
     let mut subject = run(Vec::new(), vec![agent(1, None), agent(2, None)]);
     let totals = run_totals(&subject);
+
     assert!(totals.contains('2'), "{totals}");
     assert!(!totals.contains("tokens"), "{totals}");
 
     subject.total_tokens = Some(31_154);
     subject.total_tool_calls = Some(4);
+
     let totals = run_totals(&subject);
+
     assert!(totals.contains("31154"), "{totals}");
     assert!(totals.contains('4'), "{totals}");
 }
@@ -133,6 +141,7 @@ fn run_totals_omit_what_the_provider_did_not_report() {
 fn every_state_has_its_own_label() {
     let mut subject = run(Vec::new(), Vec::new());
     let mut seen: Vec<String> = Vec::new();
+
     for state in [
         WorkflowRunState::Starting,
         WorkflowRunState::Running,
@@ -143,8 +152,10 @@ fn every_state_has_its_own_label() {
         subject.state = state;
         seen.push(run_state_label(&subject));
     }
+
     seen.sort();
     seen.dedup();
+
     assert_eq!(seen.len(), 5, "run states must be distinguishable");
 
     let mut seen: Vec<String> = [
@@ -156,7 +167,9 @@ fn every_state_has_its_own_label() {
     .into_iter()
     .map(agent_state_label)
     .collect();
+
     seen.sort();
     seen.dedup();
+
     assert_eq!(seen.len(), 4, "agent states must be distinguishable");
 }

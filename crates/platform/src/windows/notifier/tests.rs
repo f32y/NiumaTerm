@@ -9,6 +9,7 @@ fn toast_xml_escapes_text_attributes_and_uses_protocol_activation() {
         tag: "tag".into(),
         group: "group".into(),
     });
+
     assert!(xml.contains(r#"activationType="protocol""#));
     assert!(xml.contains("A &lt; B &amp; C"));
     assert!(xml.contains("route=a&amp;notification_id=&quot;b&quot;"));
@@ -24,6 +25,7 @@ fn empty_title_falls_back_to_niuma_term_identity() {
         tag: "tag".into(),
         group: "group".into(),
     });
+
     assert!(xml.contains("<text>NiumaTerm</text>"));
     assert!(!xml.contains("activationType"));
 }
@@ -33,6 +35,7 @@ fn empty_title_falls_back_to_niuma_term_identity() {
 fn windows_toast_smoke() {
     register_identity(&env::current_exe().unwrap())
         .expect("smoke executable should register its native identity");
+
     let notification = NativeNotification {
         title: "NiumaTerm Toast smoke test".into(),
         body: "If you see this, native notification identity works.".into(),
@@ -40,6 +43,7 @@ fn windows_toast_smoke() {
         tag: "niuma-term-smoke".into(),
         group: "manual-test".into(),
     };
+
     show(&notification).expect("Windows should accept the Toast");
     remove(&notification.tag, &notification.group)
         .expect("Windows should remove the Toast by tag and group");

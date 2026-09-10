@@ -58,9 +58,11 @@ fn terminal_profiles_group(profiles: &[Profile]) -> SettingGroup {
         ));
 
     let count = profiles.len();
+
     for ix in 0..count {
         group = group.item(terminal_profile_card(ix, count));
     }
+
     group
 }
 
@@ -120,6 +122,7 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
         );
 
         let browse_input = shell_input.clone();
+
         let shell_control = v_flex()
             .gap_2()
             .w_64()
@@ -186,6 +189,7 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
                     .get(ix)
                     .map(|profile| profile.name.clone())
                     .unwrap_or_default();
+
                 let subject = if name.is_empty() {
                     i18n("settings-profiles-this-profile").to_string()
                 } else {

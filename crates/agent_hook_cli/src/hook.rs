@@ -27,6 +27,7 @@ pub(crate) fn run() {
     };
 
     let mut input = Vec::new();
+
     if io::stdin()
         .take(MAX_MESSAGE_BYTES as u64 + 1)
         .read_to_end(&mut input)

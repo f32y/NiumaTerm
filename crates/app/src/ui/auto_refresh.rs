@@ -44,9 +44,11 @@ pub(crate) trait AutoRefresh: Sized + 'static {
 pub(crate) fn start<V: AutoRefresh>(view: &mut V, cx: &mut Context<V>) {
     cx.observe_global::<AppSettings>(|this: &mut V, cx| {
         let enabled = V::enabled(cx.global::<AppSettings>());
+
         if enabled && !this.state().enabled {
             refresh(this, cx);
         }
+
         this.state().enabled = enabled;
     })
     .detach();
@@ -54,11 +56,13 @@ pub(crate) fn start<V: AutoRefresh>(view: &mut V, cx: &mut Context<V>) {
     cx.spawn(async move |this, cx| {
         loop {
             cx.background_executor().timer(V::INTERVAL).await;
+
             let alive = this.update(cx, |this, cx| {
                 if this.state().enabled {
                     refresh(this, cx);
                 }
             });
+
             if alive.is_err() {
                 break;
             }
@@ -90,6 +94,7 @@ pub(crate) fn refresh<V: AutoRefresh>(view: &mut V, cx: &mut Context<V>) {
 
     cx.spawn(async move |this, cx| {
         let output = fetch.await;
+
         this.update(cx, |this, cx| {
             this.state().refreshing = false;
             this.state().user_requested = false;

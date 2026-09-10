@@ -133,10 +133,12 @@ impl TerminalPane {
     pub(crate) fn scroll_thumb_to(&mut self, thumb_top: f32, cx: &mut Context<Self>) {
         if self.block_list_mode(cx) {
             let (_, max_scroll) = self.block_list.scrollbar;
+
             let viewport = self
                 .content_bounds
                 .map(|b| b.size.height.as_f32())
                 .unwrap_or(0.0);
+
             let total = max_scroll + viewport;
 
             let Some(new) = scrollbar_offset_for_thumb(total as f64, viewport as f64, thumb_top)
@@ -153,6 +155,7 @@ impl TerminalPane {
                 let store = store.lock();
                 let offset =
                     self.list_offset_for_px(&store, &frame, cols, cell.height_px, pad_rows, new);
+
                 self.block_list.list.scroll_to(offset);
                 self.block_list.scrollbar.0 = new;
             }

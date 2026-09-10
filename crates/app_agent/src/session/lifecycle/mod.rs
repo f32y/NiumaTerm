@@ -115,10 +115,12 @@ impl SessionRuntime {
         if let Some(backend) = self.backend.as_mut() {
             backend.cancel_title_generation();
         }
+
         self.epoch = self.epoch.wrapping_add(1);
         self.status = Status::Starting;
         self.start_failure = None;
         self.pending_interrupt = None;
+
         self.epoch
     }
 
@@ -126,6 +128,7 @@ impl SessionRuntime {
         if !self.is_current(epoch) {
             return StartOutcome::Superseded(spawned.ok().map(Box::new));
         }
+
         match spawned {
             Ok(backend) => {
                 self.backend = Some(backend);
@@ -143,6 +146,7 @@ impl SessionRuntime {
         if !self.is_current(epoch) {
             return None;
         }
+
         Some(
             self.backend
                 .as_mut()
@@ -154,6 +158,7 @@ impl SessionRuntime {
         if !self.is_current(epoch) {
             return None;
         }
+
         Some(
             self.backend
                 .as_mut()
@@ -174,6 +179,7 @@ impl SessionRuntime {
         {
             return SendOutcome::NotReady;
         }
+
         self.backend.as_mut().map_or(SendOutcome::NotReady, send)
     }
 
@@ -183,6 +189,7 @@ impl SessionRuntime {
         if self.status != Status::Running {
             self.status = Status::Idle;
         }
+
         if matches!(self.update_suspension, Some(UpdateSuspension::Reconnecting)) {
             self.update_suspension = None;
         }
@@ -196,6 +203,7 @@ impl SessionRuntime {
         if let Some(turn) = turn {
             self.pending_interrupt = Some(turn);
         }
+
         match self.backend.as_mut() {
             None => InterruptOutcome::Unavailable,
             Some(backend) => {
@@ -210,9 +218,11 @@ impl SessionRuntime {
 
     pub(crate) fn turn_completed(&mut self, turn: u64) -> bool {
         let interrupted = self.pending_interrupt.take() == Some(turn);
+
         if self.status == Status::Running {
             self.status = Status::Idle;
         }
+
         interrupted
     }
 
@@ -222,6 +232,7 @@ impl SessionRuntime {
 
     pub(crate) fn exited(&mut self, message: &str) {
         self.status = Status::Exited;
+
         if matches!(self.update_suspension, Some(UpdateSuspension::Reconnecting)) {
             self.update_suspension = Some(UpdateSuspension::Failed(message.to_owned()));
         }
@@ -245,7 +256,9 @@ impl SessionRuntime {
         if !matches!(self.update_suspension, Some(UpdateSuspension::Waiting)) {
             return false;
         }
+
         self.update_suspension = None;
+
         true
     }
 
@@ -263,9 +276,11 @@ impl SessionRuntime {
         if !self.is_current(epoch) {
             return Err(Box::new(backend));
         }
+
         self.backend = Some(backend);
         self.update_suspension = None;
         self.status = Status::Idle;
+
         Ok(())
     }
 
@@ -277,6 +292,7 @@ impl SessionRuntime {
         if let Some(snapshot) = snapshot {
             self.last_recovery_snapshot = Some(snapshot);
         }
+
         self.update_suspension = Some(UpdateSuspension::Reconnecting);
     }
 

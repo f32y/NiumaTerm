@@ -72,6 +72,7 @@ impl InstallationKey {
     pub fn derive(provider: ProviderKind, launcher: &AgentCli) -> InstallationIdentity {
         let resolved_launcher = launcher.resolved_executable();
         let mut digest = Sha256::new();
+
         digest.update(match provider {
             ProviderKind::Claude => b"claude\0".as_slice(),
             ProviderKind::Codex => b"codex\0".as_slice(),
@@ -82,13 +83,16 @@ impl InstallationKey {
         for name in UPDATE_ENVIRONMENT_NAMES {
             digest.update(name.to_ascii_uppercase().as_bytes());
             digest.update(*b"=");
+
             if let Some(value) = launcher.effective_env_os(name) {
                 digest.update(value.to_string_lossy().as_bytes());
             }
+
             digest.update([0]);
         }
 
         let fingerprint = hex_digest(digest.finalize().as_slice());
+
         let key = Self(format!(
             "{}:{}",
             match provider {
@@ -97,6 +101,7 @@ impl InstallationKey {
             },
             fingerprint
         ));
+
         InstallationIdentity {
             key,
             provider,
@@ -271,11 +276,14 @@ pub(crate) fn vendor_update(
         } else {
             UpdateErrorKind::Launch
         };
+
         UpdateError::new(kind, error.to_string())
     })?;
+
     if !output.success() {
         return Err(classify_vendor_failure(provider, &output));
     }
+
     Ok(VendorUpdateResult {
         diagnostic: bounded_label(&output.diagnostic(), MAX_DIAGNOSTIC_CHARS),
     })
@@ -284,6 +292,7 @@ pub(crate) fn vendor_update(
 fn classify_vendor_failure(provider: ProviderKind, output: &ProcessOutput) -> UpdateError {
     let diagnostic = output.diagnostic();
     let lower = diagnostic.to_ascii_lowercase();
+
     let external_lock = [
         "ebusy",
         "eperm",
@@ -294,6 +303,7 @@ fn classify_vendor_failure(provider: ProviderKind, output: &ProcessOutput) -> Up
     ]
     .iter()
     .any(|marker| lower.contains(marker));
+
     UpdateError::new(
         if external_lock {
             UpdateErrorKind::ExternalLock
@@ -343,10 +353,13 @@ pub(crate) fn bounded_label(value: &str, max_chars: usize) -> String {
 
 fn hex_digest(bytes: &[u8]) -> String {
     use fmt::Write as _;
+
     let mut output = String::with_capacity(bytes.len() * 2);
+
     for byte in bytes {
         write!(output, "{byte:02x}").expect("writing to String cannot fail");
     }
+
     output
 }
 
@@ -428,13 +441,17 @@ impl UpdateCoordinator {
         maintenance: Arc<dyn ProviderMaintenance>,
     ) -> InstallationKey {
         debug_assert_eq!(provider, maintenance.provider());
+
         let identity = InstallationKey::derive(provider, &launcher);
         let key = identity.key.clone();
         let mut inner = self.inner.lock();
+
         if inner.records.contains_key(&key) {
             return key;
         }
+
         let cached = inner.cache.installations.get(key.as_str()).cloned();
+
         let (state, last_checked, dismissed_target) = cached.map_or_else(
             || (InstallationUpdateState::default(), None, None),
             |entry| {
@@ -445,6 +462,7 @@ impl UpdateCoordinator {
                 )
             },
         );
+
         inner.records.insert(
             key.clone(),
             InstallationRecord {
@@ -458,17 +476,21 @@ impl UpdateCoordinator {
                 notification_hidden: false,
             },
         );
+
         key
     }
 
     pub fn snapshots(&self) -> Vec<InstallationSnapshot> {
         let inner = self.inner.lock();
+
         let mut snapshots = inner
             .records
             .values()
             .map(record_snapshot)
             .collect::<Vec<_>>();
+
         snapshots.sort_by(|a, b| a.identity.key.as_str().cmp(b.identity.key.as_str()));
+
         snapshots
     }
 
@@ -481,19 +503,23 @@ impl UpdateCoordinator {
     pub fn check(&self, key: &InstallationKey, manual: bool) -> Result<VersionStatus, UpdateError> {
         let (launcher, maintenance) = {
             let mut inner = self.inner.lock();
+
             let record = inner.records.get_mut(key).ok_or_else(|| {
                 UpdateError::new(
                     UpdateErrorKind::Unsupported,
                     "unknown provider installation",
                 )
             })?;
+
             if record.busy {
                 return Err(UpdateError::new(
                     UpdateErrorKind::ProviderFailed,
                     "an update operation is already running for this installation",
                 ));
             }
+
             let now = (self.now)();
+
             if !manual
                 && let (Some(last_checked), Some(status)) =
                     (record.last_checked, record.state.versions.clone())
@@ -502,28 +528,35 @@ impl UpdateCoordinator {
             {
                 return Ok(status);
             }
+
             record.busy = true;
             record.notification_hidden = false;
             record.state.phase = UpdatePhase::Checking;
             record.state.error = None;
+
             (record.launcher.clone(), record.maintenance.clone())
         };
 
         let result = maintenance.probe(&launcher);
         let mut inner = self.inner.lock();
         let record = inner.records.get_mut(key).expect("registered installation");
+
         record.busy = false;
+
         match &result {
             Ok(status) => {
                 let now = (self.now)();
+
                 record.last_checked = Some(now);
                 record.state = state_from_status(status.clone());
+
                 if matches!(status.support, DiscoverySupport::Supported) {
                     let entry = CacheEntry {
                         status: cacheable_status(status),
                         checked_at: now,
                         dismissed_target: record.dismissed_target.clone(),
                     };
+
                     inner.cache.installations.insert(key.to_string(), entry);
                     write_cache(&self.cache_path, &inner.cache);
                 }
@@ -533,6 +566,7 @@ impl UpdateCoordinator {
                 record.state.error = Some(error.clone());
             }
         }
+
         result
     }
 
@@ -540,18 +574,21 @@ impl UpdateCoordinator {
     /// be dispatched, closing the notification double-click window.
     pub fn begin_update(&self, key: &InstallationKey) -> Result<(), UpdateError> {
         let mut inner = self.inner.lock();
+
         let record = inner.records.get_mut(key).ok_or_else(|| {
             UpdateError::new(
                 UpdateErrorKind::Unsupported,
                 "unknown provider installation",
             )
         })?;
+
         if record.busy {
             return Err(UpdateError::new(
                 UpdateErrorKind::ProviderFailed,
                 "an update operation is already running for this installation",
             ));
         }
+
         if !record
             .state
             .versions
@@ -563,11 +600,13 @@ impl UpdateCoordinator {
                 "this installation has no verified update available",
             ));
         }
+
         record.busy = true;
         record.notification_hidden = false;
         record.state.phase = UpdatePhase::WaitingForIdle;
         record.state.progress = None;
         record.state.error = None;
+
         Ok(())
     }
 
@@ -607,31 +646,40 @@ impl UpdateCoordinator {
         let Some(record) = inner.records.get_mut(key) else {
             return;
         };
+
         record.busy = false;
         record.state.progress = None;
+
         if let Some(status) = verified.as_ref() {
             record.last_checked = Some((self.now)());
             record.state.versions = Some(status.clone());
         }
+
         if let Some(error) = error {
             record.state.phase = UpdatePhase::Failed;
             record.state.error = Some(error);
             return;
         }
+
         if restore_failures > 0 {
             record.state.phase = UpdatePhase::Failed;
             record.state.error = Some(UpdateError::new(
                 UpdateErrorKind::Recovery,
                 format!("{restore_failures} agent tab(s) could not reconnect"),
             ));
+
             if let Some(status) = verified {
                 record.state.versions = Some(status);
             }
+
             return;
         }
+
         if let Some(status) = verified {
             let now = (self.now)();
+
             record.last_checked = Some(now);
+
             if let DiscoverySupport::Unsupported { reason } = &status.support {
                 record.state.phase = UpdatePhase::Failed;
                 record.state.error = Some(UpdateError::new(
@@ -641,6 +689,7 @@ impl UpdateCoordinator {
                 record.state.versions = Some(status);
                 return;
             }
+
             if status.current.is_none() {
                 record.state.phase = UpdatePhase::Failed;
                 record.state.error = Some(UpdateError::new(
@@ -650,6 +699,7 @@ impl UpdateCoordinator {
                 record.state.versions = Some(status);
                 return;
             }
+
             record.state.phase = if status.update_available() {
                 UpdatePhase::Unchanged
             } else {
@@ -662,7 +712,9 @@ impl UpdateCoordinator {
                 )
             });
             record.state.versions = Some(status.clone());
+
             let dismissed_target = record.dismissed_target.clone();
+
             inner.cache.installations.insert(
                 key.to_string(),
                 CacheEntry {
@@ -680,10 +732,13 @@ impl UpdateCoordinator {
         let Some(record) = inner.records.get_mut(key) else {
             return;
         };
+
         record.dismissed_target = Some(target.clone());
+
         if let Some(entry) = inner.cache.installations.get_mut(key.as_str()) {
             entry.dismissed_target = Some(target.clone());
         }
+
         write_cache(&self.cache_path, &inner.cache);
     }
 
@@ -698,18 +753,21 @@ impl UpdateCoordinator {
         key: &InstallationKey,
     ) -> Result<(AgentCli, Arc<dyn ProviderMaintenance>), UpdateError> {
         let inner = self.inner.lock();
+
         let record = inner.records.get(key).ok_or_else(|| {
             UpdateError::new(
                 UpdateErrorKind::Unsupported,
                 "unknown provider installation",
             )
         })?;
+
         if !record.busy {
             return Err(UpdateError::new(
                 UpdateErrorKind::ProviderFailed,
                 "the installation update was not claimed",
             ));
         }
+
         Ok((record.launcher.clone(), record.maintenance.clone()))
     }
 }
@@ -722,6 +780,7 @@ fn state_from_status(status: VersionStatus) -> InstallationUpdateState {
     } else {
         UpdatePhase::Current
     };
+
     InstallationUpdateState {
         phase,
         versions: Some(status),
@@ -732,9 +791,11 @@ fn state_from_status(status: VersionStatus) -> InstallationUpdateState {
 
 fn cacheable_status(status: &VersionStatus) -> VersionStatus {
     let mut status = status.clone();
+
     // Vendor remediation is presentation-only command text. The live probe
     // may show its bounded value, but persistence stores only status metadata.
     status.remediation = None;
+
     status
 }
 
@@ -764,13 +825,16 @@ fn write_cache(path: &Path, cache: &CacheFile) {
     let Some(parent) = path.parent() else {
         return;
     };
+
     if fs::create_dir_all(parent).is_err() {
         return;
     }
+
     let Ok(bytes) = serde_json::to_vec(cache) else {
         return;
     };
     let temporary = path.with_extension("tmp");
+
     if fs::write(&temporary, bytes).is_ok() && fs::rename(&temporary, path).is_err() {
         // Windows rename does not replace an existing destination. Cache
         // loss is recoverable by probing again, so a short replacement

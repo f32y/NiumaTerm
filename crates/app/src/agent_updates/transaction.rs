@@ -48,6 +48,7 @@ pub(super) fn resolve_preflight(
     }) {
         return PreflightResolution::Failed(message);
     }
+
     if assessments
         .iter()
         .all(|assessment| matches!(assessment, RecoveryReadiness::Ready(_)))
@@ -62,9 +63,11 @@ pub(super) fn resolve_preflight(
                 .collect(),
         );
     }
+
     if mode.interrupts_active_work() && stop_timeout_elapsed {
         return PreflightResolution::Failed(i18n("agent-update-interruption-timeout").to_string());
     }
+
     PreflightResolution::Wait
 }
 
@@ -75,6 +78,7 @@ pub(super) fn combine_transaction_error(
     if restore_failures == 0 {
         return operation_error;
     }
+
     Some(UpdateError::new(
         UpdateErrorKind::Recovery,
         operation_error.map_or_else(
@@ -93,6 +97,7 @@ pub(super) fn combine_transaction_error(
 
 pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut App) {
     let panes = matching_panes(&key, cx);
+
     let busy = panes
         .iter()
         .filter(|pane| {
@@ -102,6 +107,7 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
             )
         })
         .count();
+
     if busy == 0 {
         start_transaction(key, UpdateMode::WhenIdle, panes, cx);
         return;
@@ -110,6 +116,7 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
     window.open_dialog(cx, move |dialog, _, _| {
         let wait_key = key.clone();
         let stop_key = key.clone();
+
         dialog
             .title(i18n("agent-update-dialog-title"))
             .overlay_closable(false)
@@ -133,7 +140,9 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
                             .label(i18n("agent-update-dialog-when-idle"))
                             .on_click(move |_, window, cx| {
                                 window.close_dialog(cx);
+
                                 let panes = matching_panes(&wait_key, cx);
+
                                 start_transaction(
                                     wait_key.clone(),
                                     UpdateMode::WhenIdle,
@@ -171,17 +180,22 @@ fn matching_panes(key: &InstallationKey, cx: &mut App) -> Vec<Entity<AgentPane>>
         .iter()
         .map(|entry| entry.shell.clone())
         .collect::<Vec<_>>();
+
     let mut panes = Vec::new();
+
     for shell in shells {
         let _ = shell.update(cx, |shell: &mut Shell, _| panes.extend(shell.agent_panes()));
     }
+
     let installations = panes
         .iter()
         .map(|pane| pane.read(cx).installation_key())
         .collect::<Vec<_>>();
+
     let affected = affected_installation_indices(key, &installations)
         .into_iter()
         .collect::<HashSet<_>>();
+
     panes
         .into_iter()
         .enumerate()
@@ -209,6 +223,7 @@ fn start_transaction(
     cx: &mut App,
 ) {
     let coordinator = cx.global::<AgentUpdates>().coordinator.clone();
+
     if coordinator.begin_update(&key).is_err() {
         cx.refresh_windows();
         return;
@@ -242,10 +257,12 @@ fn start_transaction(
             }
         });
     }
+
     cx.refresh_windows();
 
     cx.spawn(async move |cx| {
         let wait_started = Instant::now();
+
         let snapshots = loop {
             let assessments = cx.update(|cx| {
                 panes
@@ -266,6 +283,7 @@ fn start_transaction(
                 }
                 PreflightResolution::Wait => {}
             }
+
             cx.background_executor()
                 .timer(Duration::from_millis(100))
                 .await;
@@ -279,6 +297,7 @@ fn start_transaction(
                 total: panes.len(),
             }),
         );
+
         let suspension_tasks = cx.update(|cx| {
             panes
                 .iter()
@@ -289,7 +308,9 @@ fn start_transaction(
                 })
                 .collect::<Vec<_>>()
         });
+
         let suspension_results = join_all(suspension_tasks).await;
+
         let suspended = suspension_results
             .iter()
             .enumerate()
@@ -301,6 +322,7 @@ fn start_transaction(
             .find_map(|result| result.as_ref().err())
         {
             let error = UpdateError::new(UpdateErrorKind::Recovery, error);
+
             restore_tabs(&coordinator, &key, &panes, &snapshots, &suspended, cx).await;
             coordinator.finish_update(&key, None, Some(error), 0);
             cx.update(|cx| cx.refresh_windows());
@@ -312,10 +334,13 @@ fn start_transaction(
             for pane in &panes {
                 pane.update(cx, |pane, cx| pane.mark_provider_updating(cx));
             }
+
             cx.refresh_windows();
         });
+
         let update_coordinator = coordinator.clone();
         let update_key = key.clone();
+
         let update_result = cx
             .background_executor()
             .spawn(async move { update_coordinator.run_vendor_update(&update_key) })
@@ -325,8 +350,10 @@ fn start_transaction(
             (None, Some(error))
         } else {
             coordinator.transition(&key, UpdatePhase::Verifying, None);
+
             let verify_coordinator = coordinator.clone();
             let verify_key = key.clone();
+
             match cx
                 .background_executor()
                 .spawn(async move { verify_coordinator.verify(&verify_key) })
@@ -339,6 +366,7 @@ fn start_transaction(
 
         let restore_failures =
             restore_tabs(&coordinator, &key, &panes, &snapshots, &suspended, cx).await;
+
         operation_error = combine_transaction_error(operation_error, restore_failures);
         coordinator.finish_update(&key, verified, operation_error, 0);
         cx.update(|cx| cx.refresh_windows());
@@ -363,6 +391,7 @@ fn finish_preflight_failure(
         for pane in panes {
             pane.update(cx, |pane, cx| pane.cancel_update_wait(cx));
         }
+
         cx.refresh_windows();
     });
 }
@@ -383,9 +412,11 @@ async fn restore_tabs(
             total: suspended.len(),
         }),
     );
+
     // A restart failure now surfaces through `restoration_readiness` below,
     // because the backend process comes up off the UI thread.
     let mut failures = 0;
+
     for index in suspended.iter().copied() {
         cx.update(|cx| {
             panes[index].update(cx, |pane, cx| {
@@ -395,6 +426,7 @@ async fn restore_tabs(
     }
 
     let started = Instant::now();
+
     loop {
         let readiness = cx.update(|cx| {
             suspended
@@ -403,14 +435,17 @@ async fn restore_tabs(
                 .map(|index| panes[index].read(cx).restoration_readiness())
                 .collect::<Vec<_>>()
         });
+
         let pending = readiness
             .iter()
             .filter(|state| matches!(state, RestorationReadiness::Pending))
             .count();
+
         let reported_failures = readiness
             .iter()
             .filter(|state| matches!(state, RestorationReadiness::Failed(_)))
             .count();
+
         failures = failures.max(reported_failures);
         coordinator.transition(
             key,
@@ -421,14 +456,17 @@ async fn restore_tabs(
             }),
         );
         cx.update(|cx| cx.refresh_windows());
+
         if pending == 0 {
             break;
         }
+
         if started.elapsed() >= Duration::from_secs(30) {
             cx.update(|cx| {
                 for (position, state) in readiness.iter().enumerate() {
                     if matches!(state, RestorationReadiness::Pending) {
                         let index = suspended[position];
+
                         panes[index].update(cx, |pane, cx| {
                             pane.fail_update_recovery(
                                 i18n("agent-update-recovery-timeout").to_string(),
@@ -447,12 +485,15 @@ async fn restore_tabs(
                     total: suspended.len(),
                 }),
             );
+
             break;
         }
+
         cx.background_executor()
             .timer(Duration::from_millis(100))
             .await;
     }
+
     failures
 }
 

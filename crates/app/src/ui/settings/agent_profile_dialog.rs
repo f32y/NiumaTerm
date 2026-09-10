@@ -88,6 +88,7 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
             ..builtin_agent_profile(AgentProfileKind::ClaudeCode)
         },
     };
+
     cx.set_global(AgentProfileDraft {
         target,
         profile,
@@ -100,6 +101,7 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
         } else {
             i18n("settings-agent-profile-add-title")
         };
+
         let settings_height = window.viewport_size().height;
         let dialog_height = settings_height * 0.72;
         let dialog_top = (settings_height - dialog_height) * 0.5;
@@ -156,6 +158,7 @@ fn save_agent_profile_draft(cx: &mut App) {
     profile.env.retain(|var| !var.name.trim().is_empty());
 
     let settings = cx.global_mut::<AppSettings>();
+
     profile.name = settings.unique_agent_profile_name(&profile.name, profile.kind, target);
 
     match target {
@@ -179,6 +182,7 @@ fn save_agent_profile_draft(cx: &mut App) {
 /// Point the draft at another agent type, as picked in the add dialog.
 fn select_profile_kind(profile_kind: AgentProfileKind, cx: &mut App) {
     let draft = cx.global_mut::<AgentProfileDraft>();
+
     if draft.profile.kind == profile_kind {
         return;
     }
@@ -188,17 +192,22 @@ fn select_profile_kind(profile_kind: AgentProfileKind, cx: &mut App) {
     // against every registered default is what keeps a newly added harness
     // from stranding its own default in the field.
     let executable = draft.profile.executable.trim();
+
     let follows_default = executable.is_empty()
         || AgentKind::ALL
             .into_iter()
             .any(|other| builtin_agent_profile(other.profile_kind()).executable == executable);
+
     if follows_default {
         let builtin = builtin_agent_profile(profile_kind);
+
         draft.profile.executable = builtin.executable;
+
         // How the harness is launched belongs to the harness, so the choice
         // follows the kind for as long as the executable does.
         draft.profile.launcher = builtin.launcher;
     }
+
     draft.profile.kind = profile_kind;
 }
 
@@ -275,6 +284,7 @@ fn env_cell(
     }
 
     let empty = text.trim().is_empty();
+
     let label = if empty {
         placeholder.to_string()
     } else {
@@ -374,9 +384,11 @@ fn env_var_table(env: &[EnvVar], window: &mut Window, cx: &mut App) -> AnyElemen
                             .tooltip(i18n("settings-common-delete"))
                             .on_click(move |_, _, cx: &mut App| {
                                 let draft = cx.global_mut::<AgentProfileDraft>();
+
                                 if row < draft.profile.env.len() {
                                     draft.profile.env.remove(row);
                                 }
+
                                 // Indices shift under the editor, so the open
                                 // cell would follow the wrong variable.
                                 draft.editing_env = None;
@@ -394,11 +406,13 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
     let is_edit = cx.global::<AgentProfileDraft>().target.is_some();
 
     let kind_label = agent_kind_display_label(profile.kind);
+
     let key_env = match profile.kind {
         AgentProfileKind::ClaudeCode => "ANTHROPIC_API_KEY",
         AgentProfileKind::Codex => "OPENAI_API_KEY",
         AgentProfileKind::DeepSeek => "DEEPSEEK_API_KEY",
     };
+
     let endpoint_on = profile.use_custom_endpoint;
 
     let name_input = card_text_input(
@@ -456,6 +470,7 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
         // front of the user; a hand-written list here is why one could be
         // selectable everywhere else and still impossible to create.
         let current = profile.kind;
+
         Button::new("agent-profile-dialog-kind")
             .outline()
             .w_64()
@@ -484,6 +499,7 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
     } else {
         profile.effort.trim().to_string()
     };
+
     let effort_control = Button::new("agent-profile-dialog-effort")
         .outline()
         .w_64()
@@ -514,6 +530,7 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
         });
 
     let cache_warn_minutes = profile.cache_warn_minutes;
+
     let cache_warn_control = Button::new("agent-profile-dialog-cache-warn")
         .outline()
         .w_64()
@@ -537,11 +554,13 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
     // package manager; every other harness is launched from a binary the user
     // installed and has nothing to pick between.
     let launcher = profile.launcher;
+
     let launcher_label = match launcher {
         AgentProfileLauncher::Custom => i18n("settings-agent-profile-launcher-custom"),
         AgentProfileLauncher::Npx => i18n("settings-agent-profile-launcher-npx"),
         AgentProfileLauncher::PnpmDlx => i18n("settings-agent-profile-launcher-pnpm-dlx"),
     };
+
     let launcher_control = Button::new("agent-profile-dialog-launcher")
         .outline()
         .w_64()

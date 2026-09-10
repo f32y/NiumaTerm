@@ -35,7 +35,9 @@ fn marks(stream: &[u8]) -> Vec<String> {
 
     while let Some(at) = rest.find(INTRODUCER) {
         rest = &rest[at + INTRODUCER.len()..];
+
         let end = rest.find(['\u{7}', '\u{1b}']).unwrap_or(rest.len());
+
         found.push(rest[..end].to_owned());
         rest = &rest[end..];
     }
@@ -62,7 +64,9 @@ impl Session {
                 Ok(0) => break,
                 Ok(n) => {
                     self.stream.extend_from_slice(&buf[..n]);
+
                     let seen = marks(&self.stream);
+
                     if done(&seen) {
                         return seen;
                     }
@@ -86,6 +90,7 @@ impl Session {
             if String::from_utf8_lossy(&self.stream).contains(needle) {
                 return true;
             }
+
             match self.pty.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => self.stream.extend_from_slice(&buf[..n]),
@@ -122,17 +127,23 @@ fn start_with_startup_files(
         eprintln!("skipping: no {shell} on this host");
         return None;
     };
+
     let integration = prompt_integration(Some(&program)).expect("the shell reports an integration");
 
     let home = env::temp_dir().join(format!("nmt-{shell}-{label}-{}", id()));
+
     fs::create_dir_all(&home).expect("temp home");
+
     for (name, contents) in startup_files {
         fs::write(home.join(name), contents).expect("startup file");
     }
+
     let home_value = home.to_string_lossy().into_owned();
 
     let mut environment = integration.environment;
+
     environment.push((String::from("HOME"), home_value.clone()));
+
     // The shell inherits this process's `HISTFILE`, which would be the
     // developer's own; give each session its own so a history assertion sees
     // only what this session did.
@@ -140,6 +151,7 @@ fn start_with_startup_files(
         String::from("HISTFILE"),
         home.join("history").to_string_lossy().into_owned(),
     ));
+
     if shell == "zsh" {
         // `/usr/bin/login` resets HOME from the password database whatever the
         // caller passes, so an empty home only isolates zsh if the bootstrap
@@ -295,11 +307,13 @@ fn zsh_still_reads_the_users_startup_files() {
 
     let deadline = Instant::now() + DEADLINE;
     let mut buf = [0u8; 8192];
+
     while Instant::now() < deadline {
         match session.pty.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
                 session.stream.extend_from_slice(&buf[..n]);
+
                 if String::from_utf8_lossy(&session.stream).contains("marker=[reached]") {
                     return;
                 }
@@ -323,8 +337,10 @@ fn bash_bootstrap_in_temp_home(label: &str, files: &[(&str, &str)], probe: &str)
         eprintln!("skipping: no bash on this host");
         return String::from("<skipped>");
     };
+
     let integration = prompt_integration(Some(&bash)).expect("bash is integrated");
     let bootstrap = integration.bootstrap.expect("bash is bootstrapped");
+
     // The injected line is `<space>source '<path>'<newline>`; the script it
     // names is what a shell without a terminal can be handed directly.
     let script = bootstrap
@@ -334,7 +350,9 @@ fn bash_bootstrap_in_temp_home(label: &str, files: &[(&str, &str)], probe: &str)
         .to_owned();
 
     let home = env::temp_dir().join(format!("nmt-bash-{label}-{}", id()));
+
     fs::create_dir_all(&home).expect("temp home");
+
     for (name, contents) in files {
         fs::write(home.join(name), contents).expect("startup file");
     }
@@ -495,6 +513,7 @@ fn assert_the_bootstrap_line_leaves_no_history(shell: &str, write_history: &[u8]
     let history_file = session.home.join("history");
 
     session.read_until(|seen| seen.len() >= 6);
+
     // The entry lingers until a later command is entered, so one has to be.
     session.pty.write_all(b"true\n").expect("write command");
     session.read_until(|seen| seen.len() >= 10);
@@ -570,6 +589,7 @@ fn a_session_tells_its_shell_which_terminal_it_is() {
     let Some(mut session) = start("zsh", "term") else {
         return;
     };
+
     session.read_until(|seen| seen.len() >= 6);
 
     session

@@ -89,7 +89,9 @@ impl StyleSet {
     pub fn new() -> Self {
         let default_style = Style::default();
         let mut lookup = FxHashMap::default();
+
         lookup.insert(default_style, DEFAULT_STYLE_ID);
+
         Self {
             styles: vec![default_style],
             lookup,
@@ -108,6 +110,7 @@ impl StyleSet {
         if id == DEFAULT_STYLE_ID {
             return Style::default();
         }
+
         // Safety: ids are only ever produced by `intern`, which guarantees
         // they index into `self.styles`. The bounds check is provably dead
         // on the hot path but the optimizer doesn't always remove it.
@@ -134,6 +137,7 @@ impl StyleSet {
             id,
             self.styles.len(),
         );
+
         unsafe { *self.styles.get_unchecked(id as usize) }
     }
 
@@ -147,16 +151,21 @@ impl StyleSet {
         if let Some(&id) = self.lookup.get(&style) {
             return id;
         }
+
         if self.styles.len() >= u16::MAX as usize {
             warn!(
                 "StyleSet hit u16::MAX styles ({}); falling back to default",
                 self.styles.len()
             );
+
             return DEFAULT_STYLE_ID;
         }
+
         let id = self.styles.len() as StyleId;
+
         self.styles.push(style);
         self.lookup.insert(style, id);
+
         id
     }
 

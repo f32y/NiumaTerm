@@ -19,10 +19,12 @@ pub(super) fn render_command_echo(bytes: &[u8]) -> String {
         match chars[i] {
             '\x1b' => {
                 i += 1;
+
                 match chars.get(i) {
                     Some('[') => {
                         // CSI: ESC [ params… final byte (0x40..=0x7e).
                         i += 1;
+
                         let params_start = i;
 
                         while i < chars.len() && !('\x40'..='\x7e').contains(&chars[i]) {
@@ -103,16 +105,19 @@ pub(super) fn render_command_echo(bytes: &[u8]) -> String {
                 while line.len() < col {
                     line.push(' ');
                 }
+
                 if col < line.len() {
                     line[col] = c;
                 } else {
                     line.push(c);
                 }
+
                 col += 1;
                 i += 1;
             }
             _ => i += 1, // LF (row collapse), TAB, BEL, other controls — drop
         }
     }
+
     line.into_iter().collect::<String>().trim().to_string()
 }

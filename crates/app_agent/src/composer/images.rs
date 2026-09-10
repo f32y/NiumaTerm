@@ -68,6 +68,7 @@ impl AgentPane {
                 i18n("agent-composer-images-unsupported").replace("{name}", self.kind.display()),
                 cx,
             );
+
             return true;
         }
 
@@ -86,6 +87,7 @@ impl AgentPane {
                         .replace("{count}", &MAX_ATTACHMENTS.to_string()),
                     cx,
                 );
+
                 true
             }
             // Something on the clipboard claimed to be an image and was not.
@@ -153,6 +155,7 @@ impl AgentPane {
         // was clicked is where the image comes from.
         let origin =
             Bounds::centered_at(window.mouse_position(), size(px(THUMBNAIL), px(THUMBNAIL)));
+
         self.open_image(image, Some(origin), cx);
     }
 }

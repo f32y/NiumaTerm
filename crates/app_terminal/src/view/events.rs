@@ -86,6 +86,7 @@ impl TerminalPane {
                     self.refresh_blocks();
                 }
             }
+
             if matches!(
                 event,
                 HostEvent::PromptBoundaryTrusted(false) | HostEvent::Exit
@@ -93,6 +94,7 @@ impl TerminalPane {
                 self.refresh_blocks();
             }
         }
+
         events
     }
 

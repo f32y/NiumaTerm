@@ -125,6 +125,7 @@ pub struct Workspace {
 
 impl HasId for Workspace {
     type Id = WorkspaceId;
+
     fn id(&self) -> WorkspaceId {
         self.id
     }
@@ -153,22 +154,27 @@ fn summary_roots(ws: &WorkspaceSummary) -> impl Iterator<Item = (bool, Vec<Strin
 /// identity as [`best_match`], while placeholder cwds remain ineligible.
 pub fn exact_match(summaries: &[WorkspaceSummary], target: &path::Path) -> Option<WorkspaceId> {
     let target = path_identity(target);
+
     if target.is_empty() {
         return None;
     }
 
     let mut additional: Option<WorkspaceId> = None;
+
     for ws in summaries {
         for (primary, comps) in summary_roots(ws) {
             if comps != target {
                 continue;
             }
+
             if primary {
                 return Some(ws.id);
             }
+
             additional = additional.or(Some(ws.id));
         }
     }
+
     additional
 }
 
@@ -180,19 +186,23 @@ pub fn exact_match(summaries: &[WorkspaceSummary], target: &path::Path) -> Optio
 pub fn best_match(summaries: &[WorkspaceSummary], target: &path::Path) -> Option<WorkspaceId> {
     let target = path_identity(target);
     let mut best: Option<(usize, bool, WorkspaceId)> = None;
+
     for ws in summaries {
         for (primary, comps) in summary_roots(ws) {
             if comps.len() > target.len() || !comps.iter().zip(&target).all(|(a, b)| a == b) {
                 continue;
             }
+
             let better = best.is_none_or(|(len, was_primary, _)| {
                 comps.len() > len || (comps.len() == len && primary && !was_primary)
             });
+
             if better {
                 best = Some((comps.len(), primary, ws.id));
             }
         }
     }
+
     best.map(|(_, _, id)| id)
 }
 
@@ -286,6 +296,7 @@ impl WorkspaceManager {
             kind,
             tabs,
         });
+
         id
     }
 
@@ -365,16 +376,21 @@ impl WorkspaceManager {
         let Some(idx) = self.workspaces.index_of(id) else {
             return;
         };
+
         if self.workspaces.items()[idx].pinned == pinned {
             return;
         }
+
         self.workspaces.edit_preserving_active(|workspaces| {
             let mut workspace = workspaces.remove(idx);
+
             workspace.pinned = pinned;
+
             let insert_at = workspaces
                 .iter()
                 .position(|ws| !ws.pinned)
                 .unwrap_or(workspaces.len());
+
             workspaces.insert(insert_at, workspace);
         });
     }
@@ -384,9 +400,11 @@ impl WorkspaceManager {
     pub fn reorder(&mut self, from: usize, to: usize) {
         let workspaces = self.workspaces.items();
         let n = workspaces.len();
+
         if from >= n || to >= n || workspaces[from].pinned != workspaces[to].pinned {
             return;
         }
+
         self.workspaces.reorder(from, to);
     }
 
@@ -398,6 +416,7 @@ impl WorkspaceManager {
         if self.workspaces.find(id)?.pinned {
             return None;
         }
+
         self.workspaces.close(id)
     }
 
@@ -447,6 +466,7 @@ impl WorkspaceManager {
         if name.trim().is_empty() {
             return;
         }
+
         if let Some(workspace) = self.workspaces.find_mut(id) {
             workspace.name = name;
         }
@@ -521,6 +541,7 @@ impl WorkspaceManager {
         // The settings entry is always dismissible; a normal workspace stays
         // closeable only while another normal one would remain.
         let closeable = self.real_len() > 1;
+
         self.workspaces
             .items()
             .iter()

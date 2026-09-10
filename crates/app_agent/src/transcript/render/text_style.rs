@@ -84,7 +84,9 @@ pub(crate) fn transcript_text_style(cx: &App) -> TextViewStyle {
     let mut style = TextViewStyle::default()
         .code_block(configured_transcript_code_block_style(cx))
         .table(transcript_table_style(cx));
+
     style.highlight_theme = transcript_highlight_theme(cx);
+
     style
 }
 

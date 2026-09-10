@@ -183,6 +183,7 @@ impl Item {
                 if let Some(completed) = completed {
                     *text = Some(completed.clone());
                 }
+
                 if let Some(completed) = completed_questions {
                     *questions = Some(completed.clone());
                 }
@@ -220,12 +221,15 @@ impl Item {
                 {
                     *purpose = Some(completed_purpose.clone());
                 }
+
                 if let Some(completed_output) = completed_output {
                     *aggregated_output = Some(completed_output.clone());
                 }
+
                 if let Some(completed_status) = completed_status {
                     *status = Some(completed_status.clone());
                 }
+
                 if completed_exit.is_some() {
                     *exit_code = *completed_exit;
                 }
@@ -241,6 +245,7 @@ impl Item {
                 if let Some(completed_diff) = completed_diff {
                     *diff = Some(completed_diff.clone());
                 }
+
                 if let Some(completed_status) = completed_status {
                     *status = Some(completed_status.clone());
                 }
@@ -256,6 +261,7 @@ impl Item {
                 if let Some(completed_output) = completed_output {
                     *output = Some(completed_output.clone());
                 }
+
                 if let Some(completed_status) = completed_status {
                     *status = Some(completed_status.clone());
                 }

@@ -48,7 +48,9 @@ fn detail_rows_include_the_optional_fable_window() {
 fn reset_and_update_labels_use_compact_relative_time() {
     let now = 1_000_000_000;
     let mut window = UsageWindow::new(75, 300);
+
     window.resets_at = Some(now + 2 * 60 * 60_000 + 5 * 60_000);
+
     assert_eq!(
         format_reset_label(&window, now).as_deref(),
         Some("Resets in 2h 5m")
@@ -58,6 +60,7 @@ fn reset_and_update_labels_use_compact_relative_time() {
         updated_at: Some(now - 7 * 60_000),
         ..UsageSnapshot::default()
     };
+
     assert_eq!(
         format_updated_label(&usage, false, true, now),
         "Refresh failed · updated 7m ago"

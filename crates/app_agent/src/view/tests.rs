@@ -82,10 +82,12 @@ fn composer_newline_shortcut_controls_enter_behavior() {
         secondary: false,
         shift: false,
     };
+
     let ctrl = Enter {
         secondary: true,
         shift: false,
     };
+
     let shift = Enter {
         secondary: false,
         shift: true,
@@ -202,6 +204,7 @@ fn a_still_pointer_does_not_take_the_highlight_back() {
     assert_eq!(history.selected, 1);
 
     history.selected = 3;
+
     assert!(
         !history.point_at(2, resting),
         "a row slid under the pointer while the arrow keys drove"

@@ -155,7 +155,9 @@ impl SlashPalette {
         cx: &mut Context<AgentPane>,
     ) {
         self.feedback_seq += 1;
+
         let seq = self.feedback_seq;
+
         self.feedback = Some(CommandFeedback {
             kind,
             message: message.into(),
@@ -172,6 +174,7 @@ impl SlashPalette {
         // line the user cannot dismiss, because only typing clears it.
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(FEEDBACK_LIFETIME).await;
+
             let _ = this.update(cx, |this, cx| {
                 if this.palette.feedback_seq == seq {
                     this.palette.feedback = None;
@@ -198,6 +201,7 @@ impl AgentPane {
         // than continue the conversation, so a warning about what the next
         // answer costs would fire in front of commands that ask for none.
         let text = self.input.read(cx).text().to_string();
+
         if !text.trim().is_empty()
             && parse_slash_command(&text).is_none()
             && self.prompt_cache_may_have_expired(cx)
@@ -214,6 +218,7 @@ impl AgentPane {
     /// live cache, so a mid-turn steer never counts as a cold start.
     fn prompt_cache_may_have_expired(&self, cx: &Context<Self>) -> bool {
         let minutes = self.profile.cache_warn_minutes;
+
         minutes > 0
             && !self.transcript.read(cx).is_working()
             && self
@@ -230,6 +235,7 @@ impl AgentPane {
             .last_response_at()
             .map(|at| last_response_label(at.elapsed().as_secs()))
             .unwrap_or_default();
+
         let pane = cx.entity();
 
         window.open_dialog(cx, move |dialog, _, _| {
@@ -281,6 +287,7 @@ impl AgentPane {
                 i18n("agent-session-rewind-blocks-send").to_string(),
                 cx,
             );
+
             return;
         }
 
@@ -298,6 +305,7 @@ impl AgentPane {
         }
 
         reconcile_skill_binding(&text, &mut self.palette.skill_binding);
+
         let skill = if self.kind.caps().skill_references {
             match validate_skill_binding(
                 &text,

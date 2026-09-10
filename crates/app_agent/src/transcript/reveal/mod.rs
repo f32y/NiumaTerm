@@ -124,6 +124,7 @@ impl Reveals {
         let resume = match self.active.get(&key) {
             Some(reveal) if reveal.direction != direction => {
                 let progress = self.progress(key, now);
+
                 let covered = match direction {
                     Direction::Opening => progress,
                     Direction::Closing => 1.0 - progress,
@@ -496,6 +497,7 @@ impl TranscriptView {
     /// no exit left to run.
     pub(crate) fn toggle_disclosure(&mut self, key: RevealKey, cx: &mut Context<Self>) {
         self.invalidate_disclosure_rows(key);
+
         if !self.transcript_list.is_following_tail() {
             self.transcript_list.freeze_scroll_position();
         }
@@ -506,6 +508,7 @@ impl TranscriptView {
         // for all fall away together while the pinning stays.
         let reduce_motion = cx.global::<AgentSettings>().reduce_motion;
         let now = Instant::now();
+
         // A disclosure part-way through its exit is still on screen but is on
         // its way out, so the click that catches it there is asking for it
         // back rather than asking again for what it is already doing.
@@ -523,6 +526,7 @@ impl TranscriptView {
     /// to move; by the time it runs there is nothing left on screen to lose.
     pub(crate) fn take_down_disclosure(&mut self, key: RevealKey) {
         self.invalidate_disclosure_rows(key);
+
         // The rows a run or a fold spliced in are measured a row at a time,
         // and those rows leave the list with it. Their heights are read off
         // the rows still standing, which is why they are collected before the
@@ -567,6 +571,7 @@ impl TranscriptView {
     /// on is what keeps that removal from moving it.
     pub(crate) fn settle_shut_disclosures(&mut self, now: Instant) {
         let shut = self.disclosures.shut(now);
+
         if shut.is_empty() {
             return;
         }
@@ -632,6 +637,7 @@ impl TranscriptView {
     /// the walk.
     fn fold_over(&self, ix: usize) -> Option<u64> {
         let turn = self.row_turn(ix)?;
+
         if !self.turn_ledger.is_settled(turn) || !self.hidden_by_fold(ix) {
             return None;
         }

@@ -293,12 +293,14 @@ impl TabStrip {
         // configured terminal profile, plus one per agent profile.
         // Ctrl+Shift+T still opens the default profile directly.
         let menu_shell = cx.entity();
+
         let new_tab = modern_dropdown(
             Button::new("tab-new").ghost().px_2().child("+"),
             move |menu, _, cx| new_tab_menu(menu, &menu_shell, cx),
         );
 
         let tab_count = items.len();
+
         // The settings entry presents one tab and no way to add another, so
         // its lone tab keeps a close control the tab strip would normally
         // withhold from a single tab.
@@ -312,11 +314,13 @@ impl TabStrip {
         let settings = cx.global::<AppSettings>();
         let configured_width = settings.appearance.tab_width as f32;
         let auto_size = settings.appearance.tab_auto_size;
+
         let tab_width = if auto_size {
             auto_tab_width(self.measured_width.get(), tab_count, configured_width)
         } else {
             configured_width
         };
+
         let density = tab_density(tab_width);
         let icon_only = density == TabDensity::IconOnly;
 
@@ -354,6 +358,7 @@ impl TabStrip {
                     progress,
                     terminal,
                 } = item;
+
                 // `×` closes this tab; `stop_propagation` keeps the click from
                 // also activating the tab (the TabBar's on_click). Shown only
                 // while the tab is hovered (visibility keeps its width, so the
@@ -362,14 +367,17 @@ impl TabStrip {
                 // hover state it would otherwise wait for is already the one
                 // the tab is in.
                 let close_pinned = icon_only && index == active_idx;
+
                 let close_layout = match icon_only {
                     true => HoverActionLayout::Fill,
                     false => HoverActionLayout::Inline,
                 };
+
                 let close_visibility = match close_pinned {
                     true => HoverActionVisibility::Always,
                     false => HoverActionVisibility::OnGroupHover("shell-tab".into()),
                 };
+
                 let close = hover_action(
                     ("tab-close", id as usize),
                     i18n("tabbar-menu-close"),
@@ -390,6 +398,7 @@ impl TabStrip {
                 } else {
                     (None, Some(close))
                 };
+
                 let suffix = div()
                     .relative()
                     .h_full()
@@ -406,6 +415,7 @@ impl TabStrip {
 
                 let content: AnyElement = if let Some(input) = renaming {
                     let rename_shell = cx.entity();
+
                     InlineRename::new(
                         ("tab-rename", id as usize),
                         label.clone(),
@@ -422,6 +432,7 @@ impl TabStrip {
                     // the hover `×` and is disabled for the last tab, which
                     // the manager would refuse to close anyway.
                     let menu_shell = shell.clone();
+
                     div()
                         .id(("tab-menu", id as usize))
                         // Fill the tab body so the whole tab is right-clickable,
@@ -542,7 +553,9 @@ impl TabStrip {
                         })
                         .into_any_element()
                 };
+
                 let drag_label: SharedString = label.into();
+
                 // `occlude` keeps the platform from treating the tab as
                 // title-bar drag area, so clicks and the wheel reach the
                 // client instead of starting a window move. That same
@@ -550,6 +563,7 @@ impl TabStrip {
                 // test, so the wheel is forwarded to its scroll handle here;
                 // prepaint clamps the offset to the scrollable range.
                 let scroll = self.scroll.clone();
+
                 Tab::new()
                     .occlude()
                     .on_scroll_wheel(move |event, window, _| {
@@ -561,6 +575,7 @@ impl TabStrip {
                         }
 
                         let mut offset = scroll.offset();
+
                         offset.x += step;
                         scroll.set_offset(offset);
                         window.refresh();
@@ -627,6 +642,7 @@ impl TabStrip {
                     })
                     .when_some(agent_kind.filter(|_| !icon_only), |this, agent_kind| {
                         let indicator = agent_tab_indicator(busy, unread);
+
                         this.prefix(
                             div()
                                 .relative()
@@ -731,6 +747,7 @@ impl TabStrip {
 
                 cx.notify();
             }));
+
         // Fallback drop target for the whole strip: a drop released over the
         // make-way gap (a margin, outside every tab's hitbox) still lands on
         // the tracked insertion position instead of silently ending the drag.
@@ -751,6 +768,7 @@ impl TabStrip {
 
                     if measured_width.get() != width {
                         measured_width.set(width);
+
                         // `Window::refresh` is a no-op mid-draw, so the redraw
                         // is requested through the shell entity instead.
                         measured_shell.update(cx, |_, cx| cx.notify());
@@ -764,6 +782,7 @@ impl TabStrip {
                     this.focus_active(window, cx);
                     this.sync_session_memory(cx);
                 }
+
                 cx.notify();
             }))
             .child(bar)

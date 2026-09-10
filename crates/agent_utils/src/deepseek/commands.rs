@@ -50,6 +50,7 @@ pub(crate) fn skills(value: &Value) -> SkillCatalog {
             .flatten()
             .filter_map(|skill| {
                 let name = skill["name"].as_str()?.to_string();
+
                 let description = match skill["whenToUse"].as_str() {
                     Some(when) if !when.is_empty() => {
                         format!(

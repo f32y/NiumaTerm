@@ -134,6 +134,7 @@ pub(super) fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
 
     let sub = s[OSC133_PREFIX.len()];
     let arg_start = OSC133_PREFIX.len() + 1;
+
     let exit_at = |term: usize| {
         (sub == b'D')
             .then(|| parse_exit_code(&s[arg_start..term]))

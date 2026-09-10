@@ -61,6 +61,7 @@ fn opacity_slider_field(target: OpacityTarget) -> SettingField<SharedString> {
         if !cx.has_global::<OpacitySliderState>() {
             let make_slider = |target: OpacityTarget, cx: &mut App| {
                 let value = target.value(cx.global::<AppSettings>()) as f32;
+
                 let slider = cx.new(|_| {
                     SliderState::new()
                         .min(target.min())
@@ -88,6 +89,7 @@ fn opacity_slider_field(target: OpacityTarget) -> SettingField<SharedString> {
         }
 
         let sliders = cx.global::<OpacitySliderState>();
+
         let slider = match target {
             OpacityTarget::Window => &sliders.window,
             OpacityTarget::Image => &sliders.image,
@@ -151,6 +153,7 @@ pub(super) fn background_image_field() -> SettingField<SharedString> {
             .appearance
             .background_image
             .clone();
+
         let label = SharedString::from(
             path.clone()
                 .unwrap_or_else(|| i18n("settings-common-none").to_string()),
@@ -185,6 +188,7 @@ pub(super) fn background_image_field() -> SettingField<SharedString> {
                                     .collect(),
                             }],
                         });
+
                         window
                             .spawn(cx, async move |cx| {
                                 if let Ok(Ok(Some(paths))) = rx.await

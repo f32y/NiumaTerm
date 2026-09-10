@@ -29,6 +29,7 @@ mod platform {
         static INIT: Once = Once::new();
         INIT.call_once(|| {
             let center = UNUserNotificationCenter::currentNotificationCenter();
+
             center.requestAuthorizationWithOptions_completionHandler(
                 UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
                 &RcBlock::new(|_ok: Bool, _err: *mut NSError| {}),
@@ -43,14 +44,18 @@ mod platform {
 
         let center = UNUserNotificationCenter::currentNotificationCenter();
         let content = UNMutableNotificationContent::new();
+
         content.setTitle(&NSString::from_str(&notification.title));
         content.setBody(&NSString::from_str(&notification.body));
+
         let identifier = NSString::from_str("rio-notification");
+
         let request = UNNotificationRequest::requestWithIdentifier_content_trigger(
             &identifier,
             &content,
             None,
         );
+
         center.addNotificationRequest_withCompletionHandler(&request, None);
 
         Ok(())
@@ -70,6 +75,7 @@ mod platform {
         let Ok(connection) = Connection::session() else {
             return Ok(());
         };
+
         let Ok(proxy) = Proxy::new(
             &connection,
             "org.freedesktop.Notifications",
@@ -78,7 +84,9 @@ mod platform {
         ) else {
             return Ok(());
         };
+
         let hints: HashMap<&str, Value<'_>> = HashMap::new();
+
         let _: Result<u32, _> = proxy.call(
             "Notify",
             &(
@@ -92,6 +100,7 @@ mod platform {
                 -1i32,
             ),
         );
+
         Ok(())
     }
 }

@@ -62,8 +62,10 @@ impl Render for WorkspaceDragPreview {
             "workspace-drag-busy",
             cx,
         );
+
         let vertical_tabs =
             cx.global::<AppSettings>().appearance.tab_bar_style == TabBarStyle::Vertical;
+
         // Dropped along with the lane on the row itself, so the ghost keeps
         // its name on the same leading edge as the list it came out of.
         let indicator = (!vertical_tabs).then(|| {
@@ -77,6 +79,7 @@ impl Render for WorkspaceDragPreview {
                 .aria_label(status_label)
                 .children(glyphs)
         });
+
         let background = cx
             .theme()
             .background

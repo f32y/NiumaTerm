@@ -204,6 +204,7 @@ fn cap_lines(iter: impl Iterator<Item = DiffLine>) -> Vec<DiffLine> {
         lines.truncate(MAX_DIFF_LINES);
         lines.push(line(DiffLineKind::Truncated, "··· diff truncated ···"));
     }
+
     lines
 }
 
@@ -213,6 +214,7 @@ fn cap_lines(iter: impl Iterator<Item = DiffLine>) -> Vec<DiffLine> {
 pub(crate) fn parse_status_z(raw: &[u8]) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let mut tokens = raw.split(|b| *b == 0).filter(|t| !t.is_empty());
+
     while let Some(token) = tokens.next() {
         if token.len() < 4 {
             continue;
@@ -227,6 +229,7 @@ pub(crate) fn parse_status_z(raw: &[u8]) -> Vec<(String, String)> {
 
         out.push((status, path));
     }
+
     out
 }
 
@@ -255,6 +258,7 @@ pub(crate) fn parse_numstat_z(raw: &[u8]) -> Vec<(String, u64, u64)> {
             // follow as their own NUL tokens.
             None | Some("") => {
                 tokens.next(); // old path
+
                 match tokens.next() {
                     Some(new) => String::from_utf8_lossy(new).to_string(),
                     None => continue,
@@ -265,6 +269,7 @@ pub(crate) fn parse_numstat_z(raw: &[u8]) -> Vec<(String, u64, u64)> {
 
         out.push((path, added, removed));
     }
+
     out
 }
 
@@ -439,10 +444,13 @@ impl GitStatusModel {
                         None => {
                             // Not a repo: clear and stop.
                             this.refreshing = false;
+
                             if this.snapshot.take().is_some() {
                                 this.snapshot_seq += 1;
                             }
+
                             cx.notify();
+
                             None
                         }
                         Some(root) => {
@@ -453,6 +461,7 @@ impl GitStatusModel {
                                 this.snapshot_seq += 1;
                                 cx.notify();
                             }
+
                             Some(root)
                         }
                     }

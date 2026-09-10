@@ -39,6 +39,7 @@ impl EventBatch {
             ) if *item_id == next_id => delta.push_str(&next),
             (_, event) => {
                 self.flush(&mut apply);
+
                 match event {
                     Event::AgentMessageDelta { .. }
                     | Event::ReasoningSummaryDelta { .. }

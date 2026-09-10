@@ -189,6 +189,7 @@ pub(super) fn display_char(ch: char) -> char {
 
 fn hash_line(text: &str, runs: &[StyleRun]) -> u64 {
     let mut hasher = DefaultHasher::new();
+
     text.hash(&mut hasher);
 
     // Fold style into the key so a same-text/different-color row invalidates the

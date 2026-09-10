@@ -63,6 +63,7 @@ fn su_realign_count_computes_push_to_align_prompt() {
     // Ghostty keeps the prompt on row 17 while ConPTY repaints it on row 1;
     // (CUP row 2, last CUP). N = 17 − 1 = 16, R_conpty = 1. Repaint fits 80x24.
     let repaint = b"\x1b[2;18Hdir\x1b[2;21H";
+
     assert_eq!(su_realign_count(repaint, 17, 80, 24, 80, 24), Some((16, 1)));
 }
 
@@ -72,6 +73,7 @@ fn su_realign_count_uses_last_cup_for_multirow_prompt() {
     // Anchoring on the LAST CUP (row 11 → R_conpty 10) matches R_ghostty (cursor
     // row 22), so N = 22 − 10 = 12 — not 13, which the first CUP (row 10) would give.
     let repaint = b"\x1b[10;22Hxxx\x1b[11;6H";
+
     assert_eq!(
         su_realign_count(repaint, 22, 90, 40, 90, 40),
         Some((12, 10))
@@ -88,10 +90,13 @@ fn su_realign_count_none_when_already_aligned() {
 #[test]
 fn su_realign_count_none_on_resize_mismatch() {
     let repaint = b"\x1b[2;18Hdir\x1b[2;21H";
+
     // engine size moved past the latch → repaint answers a different resize.
     assert_eq!(su_realign_count(repaint, 17, 80, 24, 100, 24), None);
+
     // repaint addresses col 90, beyond the latched 80 cols → different resize.
     let wide = b"\x1b[2;90Hx\x1b[2;90H";
+
     assert_eq!(su_realign_count(wide, 17, 80, 24, 80, 24), None);
 }
 
@@ -114,6 +119,7 @@ fn conpty_resize_echo_leaves_wrapped_redraw_when_cursor_already_aligned() {
     // untouched. Collapsing the first CUP onto row 11 re-wraps the content and
     // makes it accumulate (the cols=37 xxxx-duplication bug).
     let wrapped = b"\x1b[10;22Hxxxxxxxxxxxxxxxxxxxxx\x1b[11;6H";
+
     assert_eq!(rewrite_conpty_resize_echo_cup_rows(wrapped, 11), None);
 }
 
@@ -124,6 +130,7 @@ fn conpty_resize_echo_shifts_wrapped_redraw_by_delta_preserving_rows() {
     // the two-row structure intact.
     let rewritten = rewrite_conpty_resize_echo_cup_rows(b"\x1b[9;22Hxxx\x1b[10;6H", 22)
         .expect("divergent redraw should shift");
+
     assert_eq!(rewritten, b"\x1b[21;22Hxxx\x1b[22;6H");
 }
 
@@ -136,9 +143,12 @@ impl io::Read for FakeReader {
         if self.data.is_empty() {
             return Err(io::ErrorKind::WouldBlock.into());
         }
+
         let n = self.data.len().min(buf.len());
+
         buf[..n].copy_from_slice(&self.data[..n]);
         self.data.drain(..n);
+
         Ok(n)
     }
 }
@@ -224,12 +234,14 @@ impl EventedPty for FakePty {
 #[test]
 fn disabled_terminal_responses_are_forwarded_without_replying() {
     let queries = b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b[c";
+
     let pty = FakePty {
         reader: FakeReader {
             data: queries.to_vec(),
         },
         writer: FakeWriter::default(),
     };
+
     let mut machine = PtyPipe::new(
         Arc::new(FairMutex::new(RenderBuffer::new(20, 3))),
         Arc::new(AtomicU32::new(0)),
@@ -249,8 +261,10 @@ fn disabled_terminal_responses_are_forwarded_without_replying() {
         },
     )
     .unwrap();
+
     let forwarded = Arc::new(Mutex::new(Vec::new()));
     let forwarded_sink = Arc::clone(&forwarded);
+
     machine.set_output_sink(move |bytes| forwarded_sink.lock().extend_from_slice(&bytes));
     machine.set_terminal_responses_enabled(false);
 
@@ -266,10 +280,12 @@ fn disabled_terminal_responses_are_forwarded_without_replying() {
 fn resize_message_publishes_snapshot_to_render_buffer() {
     let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(20, 3)));
     let vt_modes = Arc::new(AtomicU32::new(0));
+
     let pty = FakePty {
         reader: FakeReader { data: Vec::new() },
         writer: FakeWriter::default(),
     };
+
     let mut machine = PtyPipe::new(
         Arc::clone(&render_buffer),
         vt_modes,
@@ -306,9 +322,11 @@ fn resize_message_publishes_snapshot_to_render_buffer() {
         .unwrap();
 
     let mut state = PtyState::default();
+
     assert!(machine.drain_recv_channel(&mut state));
 
     let buffer = render_buffer.lock();
+
     assert_eq!(buffer.rows(), 5);
     assert_eq!(render_buffer_row_text(&buffer, 0), "resize-ok");
 }
@@ -316,12 +334,14 @@ fn resize_message_publishes_snapshot_to_render_buffer() {
 #[test]
 fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
     let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(20, 3)));
+
     let pty = FakePty {
         reader: FakeReader {
             data: b"\x1b[3;1H> input\x1b[3;3H".to_vec(),
         },
         writer: FakeWriter::default(),
     };
+
     let mut machine = PtyPipe::new(
         Arc::clone(&render_buffer),
         Arc::new(AtomicU32::new(0)),
@@ -341,10 +361,12 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
         },
     )
     .unwrap();
+
     let mut state = PtyState::default();
     let mut buf = [0u8; READ_BUFFER_SIZE];
 
     machine.pty_read(&mut state, &mut buf).unwrap();
+
     assert_eq!(render_buffer.lock().cursor().row.0, 2);
 
     machine
@@ -355,6 +377,7 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
     machine.pty_read(&mut state, &mut buf).unwrap();
     {
         let buffer = render_buffer.lock();
+
         assert_eq!(
             buffer.cursor().row.0,
             2,
@@ -392,18 +415,21 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
         assert_eq!(buffer.cursor().row.0, 1);
         assert_eq!(render_buffer_row_text(&buffer, 1), "Stuck");
     }
+
     assert!(!machine.ghostty.lock().mode(mode::SYNC_OUTPUT));
 }
 
 #[test]
 fn osc_progress_hides_published_cursor_until_removed() {
     let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(80, 3)));
+
     let pty = FakePty {
         reader: FakeReader {
             data: b"\x1b]9;4;1".to_vec(),
         },
         writer: FakeWriter::default(),
     };
+
     let mut machine = PtyPipe::new(
         Arc::clone(&render_buffer),
         Arc::new(AtomicU32::new(0)),
@@ -423,11 +449,13 @@ fn osc_progress_hides_published_cursor_until_removed() {
         },
     )
     .unwrap();
+
     machine
         .ghostty
         .lock()
         .set_default_cursor_shape(ansi::CursorShape::Beam)
         .unwrap();
+
     let mut state = PtyState::default();
     let mut buf = [0u8; READ_BUFFER_SIZE];
 
@@ -450,6 +478,7 @@ fn osc_progress_hides_published_cursor_until_removed() {
         .data
         .extend_from_slice(b"\x1b]9;4;0;\x1b\\");
     machine.pty_read(&mut state, &mut buf).unwrap();
+
     assert!(
         render_buffer.lock().cursor_visible(),
         "removing progress restores the terminal cursor state"
@@ -464,12 +493,14 @@ fn osc_progress_hides_published_cursor_until_removed() {
 fn conpty_resize_echo_realigns_machine_pty_read_to_cursor_row() {
     let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(134, 42)));
     let vt_modes = Arc::new(AtomicU32::new(0));
+
     let pty = FakePty {
         reader: FakeReader {
             data: b"\x1b[10;24Hx\x1b[10;25H".to_vec(),
         },
         writer: FakeWriter::default(),
     };
+
     let mut machine = PtyPipe::new(
         render_buffer,
         vt_modes,
@@ -499,9 +530,11 @@ fn conpty_resize_echo_realigns_machine_pty_read_to_cursor_row() {
 
     let mut state = PtyState::default();
     let mut read_buf = [0u8; READ_BUFFER_SIZE];
+
     machine.pty_read(&mut state, &mut read_buf).unwrap();
 
     let snapshot = machine.ghostty.lock().snapshot().unwrap();
+
     assert_eq!(snapshot_row_text(&snapshot, 9), "HISTORY");
     assert_eq!(
         snapshot_row_text(&snapshot, 41),
@@ -517,12 +550,14 @@ fn conpty_resize_echo_realigns_machine_pty_read_to_cursor_row() {
 fn conpty_resize_repaint_realigns_clear_without_new_input() {
     let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(134, 42)));
     let vt_modes = Arc::new(AtomicU32::new(0));
+
     let pty = FakePty {
         reader: FakeReader {
             data: b"\x1b[1;24H\x1b[J\x1b[1;24HTERMINPUT123\x1b[1;36H".to_vec(),
         },
         writer: FakeWriter::default(),
     };
+
     let mut machine = PtyPipe::new(
         render_buffer,
         vt_modes,
@@ -552,9 +587,11 @@ fn conpty_resize_repaint_realigns_clear_without_new_input() {
 
     let mut state = PtyState::default();
     let mut read_buf = [0u8; READ_BUFFER_SIZE];
+
     machine.pty_read(&mut state, &mut read_buf).unwrap();
 
     let snapshot = machine.ghostty.lock().snapshot().unwrap();
+
     assert_eq!(snapshot_row_text(&snapshot, 9), "HISTORY");
     assert_eq!(
         snapshot_row_text(&snapshot, 41),
@@ -571,6 +608,7 @@ fn conpty_resize_repaint_realigns_clear_without_new_input() {
 fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
     let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(20, 4)));
     let vt_modes = Arc::new(AtomicU32::new(0));
+
     let pty = FakePty {
         // ConPTY targets active row 3 (its own coords). Differs from the
         // off-screen-cursor target row 1, so the old code would rewrite 3 -> 1.
@@ -579,6 +617,7 @@ fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
         },
         writer: FakeWriter::default(),
     };
+
     let mut machine = PtyPipe::new(
         render_buffer,
         vt_modes,
@@ -601,11 +640,15 @@ fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
 
     {
         let mut engine = machine.ghostty.lock();
+
         // Fill well past the 4-row viewport so there is scrollback to pin to.
         engine.write_vt(b"\x1b[2JL0\r\nL1\r\nL2\r\nL3\r\nL4\r\nL5\r\nL6\r\nL7\r\nL8\r\nPROMPT>");
+
         // Pin the viewport to the top of history: cursor now off-screen.
         engine.scroll_viewport_top();
+
         let sb = engine.snapshot().unwrap().scrollbar();
+
         assert!(
             sb.offset < sb.total.saturating_sub(sb.len),
             "precondition: viewport must be scrolled away from the bottom"
@@ -616,6 +659,7 @@ fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
 
     let mut state = PtyState::default();
     let mut read_buf = [0u8; READ_BUFFER_SIZE];
+
     machine.pty_read(&mut state, &mut read_buf).unwrap();
 
     // INJECT must be realigned onto the engine's active cursor row (read
@@ -623,14 +667,19 @@ fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
     let (active_row, snapshot) = {
         let mut engine = machine.ghostty.lock();
         let active_row = engine.active_cursor_row().unwrap();
+
         engine.scroll_viewport_bottom();
+
         (active_row, engine.snapshot().unwrap())
     };
+
     assert_eq!(snapshot_row_text(&snapshot, active_row), "INJECT");
     assert_ne!(snapshot_row_text(&snapshot, 0), "INJECT");
+
     let injects = (0..snapshot.rows() as u16)
         .filter(|&y| snapshot_row_text(&snapshot, y).contains("INJECT"))
         .count();
+
     assert_eq!(injects, 1, "INJECT must appear exactly once");
 }
 
@@ -646,6 +695,7 @@ fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
 fn conpty_resize_echo_routes_to_active_cursor_when_scrolled_typing() {
     let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(20, 4)));
     let vt_modes = Arc::new(AtomicU32::new(0));
+
     let pty = FakePty {
         // ConPTY echoes the typed 'Z' at its stale row 2, col 8 (after the
         // prompt in ConPTY's frame). The engine's real prompt is elsewhere.
@@ -654,6 +704,7 @@ fn conpty_resize_echo_routes_to_active_cursor_when_scrolled_typing() {
         },
         writer: FakeWriter::default(),
     };
+
     let mut machine = PtyPipe::new(
         render_buffer,
         vt_modes,
@@ -676,20 +727,25 @@ fn conpty_resize_echo_routes_to_active_cursor_when_scrolled_typing() {
 
     {
         let mut engine = machine.ghostty.lock();
+
         engine.write_vt(b"\x1b[2JL0\r\nL1\r\nL2\r\nL3\r\nL4\r\nL5\r\nL6\r\nL7\r\nL8\r\nPROMPT>");
         engine.scroll_viewport_top();
+
         let sb = engine.snapshot().unwrap().scrollbar();
+
         assert!(
             sb.offset < sb.total.saturating_sub(sb.len),
             "precondition: viewport scrolled away from the bottom"
         );
     }
+
     // echo_pending = this read is a ConPTY echo of user input.
     machine.conpty_resize_echo_realign = true;
     machine.conpty_resize_echo_pending = true;
 
     let mut state = PtyState::default();
     let mut read_buf = [0u8; READ_BUFFER_SIZE];
+
     machine.pty_read(&mut state, &mut read_buf).unwrap();
 
     // The echo went to the active screen (off the scrolled-to-top view); scroll
@@ -699,18 +755,23 @@ fn conpty_resize_echo_routes_to_active_cursor_when_scrolled_typing() {
         engine.scroll_viewport_bottom();
         engine.snapshot().unwrap()
     };
+
     // 'Z' lands exactly once, on the prompt row — not a history row.
     let mut z_rows = Vec::new();
     let mut prompt_y = None;
+
     for y in 0..snapshot.rows() as u16 {
         let text = snapshot_row_text(&snapshot, y);
+
         if text.contains('Z') {
             z_rows.push(y);
         }
+
         if text.contains("PROMPT") {
             prompt_y = Some(y);
         }
     }
+
     assert_eq!(z_rows.len(), 1, "echo 'Z' must appear exactly once");
     assert_eq!(
         Some(z_rows[0]),
@@ -743,12 +804,14 @@ fn pty_read_events(
     PtyPipe<FakePty, CollectingListener>,
 ) {
     let events = Arc::new(Mutex::new(Vec::new()));
+
     let pty = FakePty {
         reader: FakeReader {
             data: stream.to_vec(),
         },
         writer: FakeWriter::default(),
     };
+
     let mut machine = PtyPipe::new(
         Arc::new(FairMutex::new(RenderBuffer::new(80, 24))),
         Arc::new(AtomicU32::new(0)),
@@ -768,16 +831,20 @@ fn pty_read_events(
         },
     )
     .unwrap();
+
     let mut state = PtyState::default();
     let mut buf = [0u8; READ_BUFFER_SIZE];
+
     machine.pty_read(&mut state, &mut buf).unwrap();
 
     let collected = events.lock().clone();
+
     (collected, machine)
 }
 
 fn command_finished_events(stream: &[u8]) -> Vec<event::CommandCapture> {
     let (events, _machine) = pty_read_events(stream);
+
     events
         .iter()
         .filter_map(|e| match e {
@@ -793,6 +860,7 @@ fn pty_read_emits_osc_52_clipboard_store() {
     use crate::event::TerminalEvent;
 
     let (events, _) = pty_read_events(b"\x1b]52;c;Y2xhdWRlLWNvcHk=\x07");
+
     assert!(events.iter().any(|event| {
         matches!(
             event,
@@ -812,22 +880,28 @@ fn pty_read_emits_command_finished_with_launch_cwd() {
 \x1b]7;file:///C:/origin\x07\x1b]133;D;0\x07\x1b]133;A\x07PS> \x1b]133;B\x07\
 cd dest\r\n\x1b]133;C\x07\
 \x1b]7;file:///C:/dest\x07\x1b]133;D;0\x07\x1b]133;A\x07PS dest> \x1b]133;B\x07";
+
     let blocks = command_finished_events(stream);
+
     assert_eq!(
         blocks.len(),
         1,
         "one block for the cd; none for the synthetic prime"
     );
+
     let b = &blocks[0];
+
     assert_eq!(b.command, "cd dest");
     assert_eq!(b.exit_code, Some(0));
     assert!(b.started_at <= b.ended_at);
+
     let cwd = b
         .cwd
         .as_ref()
         .expect("launch cwd latched from OSC 7")
         .to_string_lossy()
         .to_string();
+
     assert!(
         cwd.contains("origin") && !cwd.contains("dest"),
         "cwd must be the launch (origin) directory, got {cwd}"
@@ -842,10 +916,12 @@ fn pty_read_boundary_protocol_snapshots_clears_then_starts_next_prompt() {
 \x1b]133;D;0\x07\x1b]133;A\x07PS> \x1b]133;B\x07\
 echo hi\r\n\x1b]133;C\x07hi\r\n\
 \x1b]133;D;0\x07\x1b[2J\x1b[3J\x1b[H\x1b]133;A\x07PS> \x1b]133;B\x07";
+
     let (events, machine) = pty_read_events(stream);
 
     let mut shape = Vec::new();
     let mut handles = Vec::new();
+
     for event in &events {
         if let TerminalEvent::BlockBatch(batch) = event {
             for event in batch {
@@ -874,10 +950,12 @@ echo hi\r\n\x1b]133;C\x07hi\r\n\
         let engine = machine.ghostty.lock();
         let block = engine.block_acquire(handles[0]).expect("block alive");
         let text = block.format_range((0, 0), (1, 79), true, true).unwrap();
+
         assert_eq!(text, "PS> echo hi\nhi");
     }
 
     let snapshot = machine.ghostty.lock().snapshot().unwrap();
+
     assert_eq!(snapshot_row_text(&snapshot, 0), "PS>");
     assert!(
         (1..snapshot.rows() as u16).all(|y| snapshot_row_text(&snapshot, y).is_empty()),
@@ -897,18 +975,21 @@ fn pty_read_history_clear_mark_drops_history_and_wipes_engine() {
 echo hi\r\n\x1b]133;C\x07hi\r\n\
 \x1b]133;D;0\x07\x1b[2J\x1b[3J\x1b[H\x1b]133;A\x07PS> \x1b]133;B\x07\
 clear\r\n\x1b]133;C\x07\x1b]133;K\x07\x1b[2J\x1b[3J\x1b[H";
+
     let (events, machine) = pty_read_events(stream);
 
     let cleared_at = events.iter().position(|event| {
         matches!(event, TerminalEvent::BlockBatch(batch)
             if batch.contains(&BlockEvent::HistoryCleared))
     });
+
     assert!(
         cleared_at.is_some(),
         "the ;K mark must surface HistoryCleared: {events:?}"
     );
 
     let snapshot = machine.ghostty.lock().snapshot().unwrap();
+
     assert!(
         (0..snapshot.rows() as u16).all(|y| snapshot_row_text(&snapshot, y).is_empty()),
         "the engine must be wiped at the ;K mark"
@@ -923,11 +1004,14 @@ vim\r\n\x1b]133;C\x07\x1b[?1049hTUI\x1b]133;D;0\x07";
     let (_events, machine) = pty_read_events(stream);
 
     let mut engine = machine.ghostty.lock();
+
     assert!(engine.mode(ghostty::mode::ALT_SCREEN));
+
     let snapshot = engine.snapshot().unwrap();
     let rows: Vec<_> = (0..snapshot.rows() as u16)
         .map(|y| snapshot_row_text(&snapshot, y))
         .collect();
+
     assert!(
         rows.iter().any(|row| row.contains("TUI")),
         "trusted ;D inside alt screen must not write the block-boundary clear"
@@ -946,12 +1030,14 @@ fn pty_read_emits_no_command_for_untrusted_stream() {
 #[test]
 fn pty_read_emits_start_and_finish_events_with_seq() {
     use crate::event::TerminalEvent;
+
     let stream = b"\x1b]133;A\x07\x1b]133;B\x07\x1b]133;C\x07\
 \x1b]7;file:///C:/w\x07\x1b]133;D;0\x07\x1b]133;A\x07PS> \x1b]133;B\x07\
 echo one\r\n\x1b]133;C\x07one\r\n\
 \x1b]7;file:///C:/w\x07\x1b]133;D;0\x07\x1b]133;A\x07PS> \x1b]133;B\x07\
 echo two\r\n\x1b]133;C\x07two\r\n\
 \x1b]7;file:///C:/w\x07\x1b]133;D;0\x07\x1b]133;A\x07PS> \x1b]133;B\x07";
+
     let (events, machine) = pty_read_events(stream);
 
     let starts: Vec<_> = events
@@ -961,6 +1047,7 @@ echo two\r\n\x1b]133;C\x07two\r\n\
             _ => None,
         })
         .collect();
+
     let finishes: Vec<_> = events
         .iter()
         .filter_map(|e| match e {
@@ -968,6 +1055,7 @@ echo two\r\n\x1b]133;C\x07two\r\n\
             _ => None,
         })
         .collect();
+
     assert_eq!(
         starts.len(),
         2,

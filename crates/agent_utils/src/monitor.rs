@@ -211,6 +211,7 @@ impl AgentMonitor {
                 let state = self.panes.get_mut(&route).expect("live route");
 
                 let same_turn = state.current_owner.as_ref() == Some(&owner);
+
                 if !same_turn {
                     state.turn_generation = state.turn_generation.wrapping_add(1).max(1);
                 }
@@ -233,13 +234,16 @@ impl AgentMonitor {
                 };
 
                 let state = self.panes.get_mut(&route).expect("live route");
+
                 if state.current_owner.as_ref() != Some(&owner) {
                     return MonitorMutation::default();
                 }
+
                 state.has_work_evidence = true;
                 state.pending_completion = None;
 
                 let visible_changed = state.set_status(AgentRuntimeStatus::Running, now);
+
                 MonitorMutation {
                     visible_changed,
                     ..MonitorMutation::default()
@@ -251,6 +255,7 @@ impl AgentMonitor {
                 };
 
                 let state = self.panes.get_mut(&route).expect("live route");
+
                 if state.current_owner.as_ref() != Some(&owner) || !state.has_work_evidence {
                     return MonitorMutation::default();
                 }
@@ -259,6 +264,7 @@ impl AgentMonitor {
 
                 let status_changed = state.set_status(AgentRuntimeStatus::NeedsInput, now);
                 let mut mutation = self.create_notification(&route, event.title, event.body);
+
                 mutation.visible_changed |= status_changed;
 
                 mutation
@@ -269,6 +275,7 @@ impl AgentMonitor {
                 };
 
                 let state = self.panes.get_mut(&route).expect("live route");
+
                 if state.current_owner.as_ref() != Some(&owner)
                     || !state.has_work_evidence
                     || state.status == AgentRuntimeStatus::Idle
@@ -289,6 +296,7 @@ impl AgentMonitor {
                         body: event.body,
                     });
                 }
+
                 MonitorMutation::default()
             }
         }
@@ -325,6 +333,7 @@ impl AgentMonitor {
 
                     let mut mutation =
                         self.create_notification(&route, pending.title, pending.body);
+
                     mutation.visible_changed |= status_changed;
 
                     result.merge(mutation);
@@ -346,6 +355,7 @@ impl AgentMonitor {
                 result.visible_changed |= state.set_status(AgentRuntimeStatus::Idle, now);
             }
         }
+
         result
     }
 
@@ -353,6 +363,7 @@ impl AgentMonitor {
         if !self.panes.contains_key(route) {
             return MonitorMutation::default();
         }
+
         self.create_notification(route, normalize_title(title), normalize_body(body))
     }
 
@@ -434,6 +445,7 @@ impl AgentMonitor {
                 }
             }
         }
+
         AgentProjection {
             status,
             unread_count,

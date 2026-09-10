@@ -28,6 +28,7 @@ fn test_conversion_from_hex_sgb_255() {
     let color: Color = ColorBuilder::from_hex(String::from("#151515"), Format::SRGB0_1)
         .unwrap()
         .to_wgpu();
+
     assert_eq!(
         color,
         ColorWGPU {
@@ -39,6 +40,7 @@ fn test_conversion_from_hex_sgb_255() {
     );
 
     let color = ColorBuilder::from_hex(String::from("#FFFFFF"), Format::SRGB0_1).unwrap();
+
     assert_eq!(
         color,
         ColorBuilder {
@@ -55,6 +57,7 @@ fn test_conversion_from_hex_sgb_1() {
     let color: Color = ColorBuilder::from_hex(String::from("#151515"), Format::SRGB0_255)
         .unwrap()
         .to_wgpu();
+
     assert_eq!(
         color,
         ColorWGPU {
@@ -66,6 +69,7 @@ fn test_conversion_from_hex_sgb_1() {
     );
 
     let color = ColorBuilder::from_hex(String::from("#FFFFFF"), Format::SRGB0_255).unwrap();
+
     assert_eq!(
         color,
         ColorBuilder {
@@ -81,6 +85,7 @@ fn test_conversion_from_hex_sgb_1() {
 fn test_conversion_from_gray_hex_with_alpha() {
     let color_with_alpha =
         ColorBuilder::from_hex(String::from("#15151580"), Format::SRGB0_255).unwrap();
+
     assert_eq!(
         color_with_alpha,
         ColorBuilder {
@@ -93,6 +98,7 @@ fn test_conversion_from_gray_hex_with_alpha() {
 
     let color_with_alpha_srgb0_1 =
         ColorBuilder::from_hex(String::from("#15151580"), Format::SRGB0_1).unwrap();
+
     assert_eq!(
         color_with_alpha_srgb0_1,
         ColorBuilder {
@@ -108,6 +114,7 @@ fn test_conversion_from_gray_hex_with_alpha() {
 fn test_conversion_from_teal_hex_with_alpha() {
     let color_with_alpha =
         ColorBuilder::from_hex(String::from("#06a49b99"), Format::SRGB0_255).unwrap();
+
     assert_eq!(
         color_with_alpha,
         ColorBuilder {
@@ -120,6 +127,7 @@ fn test_conversion_from_teal_hex_with_alpha() {
 
     let color_with_alpha_srgb0_1 =
         ColorBuilder::from_hex(String::from("#06a49b99"), Format::SRGB0_1).unwrap();
+
     assert_eq!(
         color_with_alpha_srgb0_1,
         ColorBuilder {

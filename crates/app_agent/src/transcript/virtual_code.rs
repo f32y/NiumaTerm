@@ -15,8 +15,10 @@ pub(crate) fn transcript_segments(text: &str) -> Vec<Range<usize>> {
 
     for line in text.split_inclusive('\n') {
         let mut line_end = line_start + line.len();
+
         if line.ends_with('\n') {
             line_end -= 1;
+
             if line_end > line_start && text.as_bytes()[line_end - 1] == b'\r' {
                 line_end -= 1;
             }
@@ -26,12 +28,15 @@ pub(crate) fn transcript_segments(text: &str) -> Vec<Range<usize>> {
             segments.push(line_start..line_start);
         } else {
             let mut segment_start = line_start;
+
             while segment_start < line_end {
                 let mut segment_end =
                     (segment_start + VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES).min(line_end);
+
                 while !text.is_char_boundary(segment_end) {
                     segment_end -= 1;
                 }
+
                 segments.push(segment_start..segment_end);
                 segment_start = segment_end;
             }

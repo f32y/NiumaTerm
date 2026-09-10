@@ -54,9 +54,11 @@ impl WorkflowsView {
             (None, None) => true,
             _ => false,
         };
+
         if same {
             return;
         }
+
         // The pane being replaced must stop refreshing for a view that is no
         // longer pointed at it.
         self.report_visibility(false, cx);
@@ -72,6 +74,7 @@ impl WorkflowsView {
         if self.visible == visible {
             return;
         }
+
         self.visible = visible;
         self.report_visibility(visible, cx);
         cx.notify();
@@ -81,6 +84,7 @@ impl WorkflowsView {
         let Some(pane) = self.target.as_ref().and_then(WeakEntity::upgrade) else {
             return;
         };
+
         pane.update(cx, |pane, cx| pane.set_workflows_visible(visible, cx));
     }
 
@@ -96,10 +100,12 @@ impl WorkflowsView {
         let Some(pane) = self.target.as_ref().and_then(WeakEntity::upgrade) else {
             return;
         };
+
         let (kind, cwd) = {
             let pane = pane.read(cx);
             (pane.agent_kind(), pane.working_directory())
         };
+
         self.detail_transcript = Some(cx.new(|_| TranscriptView::new(kind, cwd)));
         pane.update(cx, |pane, cx| {
             pane.open_workflow_agent(task_id, agent_id, cx);
@@ -109,9 +115,11 @@ impl WorkflowsView {
 
     fn close_agent(&mut self, cx: &mut Context<Self>) {
         self.detail_transcript = None;
+
         if let Some(pane) = self.target.as_ref().and_then(WeakEntity::upgrade) {
             pane.update(cx, |pane, cx| pane.close_workflow_agent(cx));
         }
+
         cx.notify();
     }
 }
@@ -155,6 +163,7 @@ impl WorkflowsView {
                 cx,
             );
         };
+
         // Only Claude Code reports workflows; every other pane has none.
         if pane.read(cx).workflow_session_id().is_none() {
             return empty_state(
@@ -169,6 +178,7 @@ impl WorkflowsView {
         }
 
         let runs = self.runs(cx);
+
         if runs.is_empty() {
             return empty_state(i18n("workflows-empty"), i18n("workflows-empty-detail"), cx);
         }
@@ -285,29 +295,36 @@ impl WorkflowsView {
         let danger = cx.theme().red;
         let hover = cx.theme().list_hover;
         let state_color = agent_state_color(agent.state, cx);
+
         let label = agent
             .label
             .clone()
             .unwrap_or_else(|| format!("#{}", agent.index));
+
         let agent_id = agent.agent_id.clone();
         let task_id = task_id.to_owned();
 
         // Only reported details are shown; an absent one leaves no placeholder.
         let mut detail: Vec<String> = Vec::new();
+
         if let Some(agent_type) = agent.agent_type.as_ref() {
             detail.push(agent_type.clone());
         }
+
         if let Some(model) = agent.model.as_ref() {
             detail.push(model.clone());
         }
+
         if let Some(tokens) = agent.tokens {
             detail.push(i18n("workflows-agent-tokens").replace("{count}", &tokens.to_string()));
         }
+
         if let Some(tool_calls) = agent.tool_calls {
             detail.push(
                 i18n("workflows-agent-tool-calls").replace("{count}", &tool_calls.to_string()),
             );
         }
+
         if agent.reused {
             detail.push(i18n("workflows-agent-reused").to_string());
         }
@@ -369,9 +386,11 @@ impl WorkflowsView {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let transcript = self.detail_transcript.clone()?;
+
         let (label, items, revision, unavailable) = {
             let pane = pane.read(cx);
             let open = pane.open_workflow_conversation()?;
+
             // The row's own label is what the user picked from; the agent id
             // is the fallback for a row that never got one.
             let label = pane
@@ -381,6 +400,7 @@ impl WorkflowsView {
                 .and_then(|run| run.agent(&open.agent_id))
                 .and_then(|agent| agent.label.clone())
                 .unwrap_or_else(|| open.agent_id.clone());
+
             (label, open.items.clone(), open.revision(), open.unavailable)
         };
 
@@ -437,6 +457,7 @@ impl WorkflowsView {
 
 fn run_state_color(state: WorkflowRunState, cx: &Context<WorkflowsView>) -> Hsla {
     let theme = cx.theme();
+
     match state {
         WorkflowRunState::Failed => theme.red,
         WorkflowRunState::Done => theme.green,
@@ -447,6 +468,7 @@ fn run_state_color(state: WorkflowRunState, cx: &Context<WorkflowsView>) -> Hsla
 
 fn agent_state_color(state: WorkflowAgentState, cx: &Context<WorkflowsView>) -> Hsla {
     let theme = cx.theme();
+
     match state {
         WorkflowAgentState::Failed => theme.red,
         WorkflowAgentState::Done => theme.green,
@@ -468,6 +490,7 @@ fn group_agents_by_phase(run: &WorkflowRun) -> Vec<(Option<&str>, Vec<&WorkflowA
             .iter()
             .filter(|agent| agent.phase_index == Some(phase.index))
             .collect();
+
         if !agents.is_empty() {
             sections.push((Some(phase.title.as_str()), agents));
         }
@@ -482,6 +505,7 @@ fn group_agents_by_phase(run: &WorkflowRun) -> Vec<(Option<&str>, Vec<&WorkflowA
                 .is_none_or(|index| !run.phases.iter().any(|phase| phase.index == index))
         })
         .collect();
+
     if !ungrouped.is_empty() {
         sections.push((None, ungrouped));
     }
@@ -515,12 +539,15 @@ fn agent_state_label(state: WorkflowAgentState) -> String {
 fn run_totals(run: &WorkflowRun) -> String {
     let mut parts =
         vec![i18n("workflows-run-agents").replace("{count}", &run.agent_count().to_string())];
+
     if let Some(tokens) = run.total_tokens {
         parts.push(i18n("workflows-run-tokens").replace("{count}", &tokens.to_string()));
     }
+
     if let Some(tool_calls) = run.total_tool_calls {
         parts.push(i18n("workflows-run-tool-calls").replace("{count}", &tool_calls.to_string()));
     }
+
     parts.join(" · ")
 }
 

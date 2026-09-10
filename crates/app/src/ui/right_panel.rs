@@ -58,6 +58,7 @@ impl RightPanelSelection {
             self.kind = kind;
             self.open = true;
         }
+
         self.open
     }
 }
@@ -106,9 +107,11 @@ impl RightPanel {
     /// `Background Tasks` records its activity as seen).
     pub(crate) fn select(&mut self, kind: RightPanelKind, cx: &mut Context<Self>) -> bool {
         let open = self.selection.select(kind);
+
         self.animated = true;
         self.sync_task_visibility(cx);
         cx.notify();
+
         open
     }
 
@@ -116,10 +119,12 @@ impl RightPanel {
     /// both are told on every selection change.
     fn sync_task_visibility(&self, cx: &mut Context<Self>) {
         let tasks_visible = self.shows(RightPanelKind::BackgroundTasks);
+
         self.tasks
             .update(cx, |view, cx| view.set_visible(tasks_visible, cx));
 
         let workflows_visible = self.shows(RightPanelKind::Workflows);
+
         self.workflows
             .update(cx, |view, cx| view.set_visible(workflows_visible, cx));
     }
@@ -173,13 +178,16 @@ impl Render for RightPanel {
                 if !e.drag(cx).is_from(RESIZE_HANDLE) {
                     return;
                 }
+
                 // The panel's right edge is pinned to the window edge, so
                 // the new width is right edge minus pointer x.
                 let width = (e.bounds.right() - e.event.position.x)
                     .max(px(MIN_WIDTH))
                     .min(px(MAX_WIDTH));
+
                 if width != this.width {
                     this.width = width;
+
                     // Render at the live drag width; the next toggle re-arms
                     // the slide animation.
                     this.animated = false;

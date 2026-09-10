@@ -36,6 +36,7 @@ pub(crate) fn sessions(value: &Value, cwd: Option<&str>) -> Vec<SessionSummary> 
         })
         .filter_map(|item| {
             let id = item["sessionId"].as_str()?.to_string();
+
             // The title rides the projection baseline the list row carries. A
             // session too new to have been titled shows its own id, which is
             // still what picking it will open.
@@ -85,6 +86,7 @@ pub(crate) fn search_results(
     // The search ranks its answers and the list is ordered by recency, so the
     // rows are emitted in the search's order rather than the list's.
     let rows = sessions(listed, cwd);
+
     matches["items"]
         .as_array()
         .into_iter()
@@ -117,6 +119,7 @@ pub(crate) fn replay(value: &Value) -> Vec<ReplayTurn> {
                 if !current.items.is_empty() {
                     turns.push(take(&mut current));
                 }
+
                 started_at = time;
             }
             Some("turn/end") => {
@@ -145,6 +148,7 @@ pub(crate) fn replay(value: &Value) -> Vec<ReplayTurn> {
                         .iter_mut()
                         .rev()
                         .any(|existing| existing.item.merge_completed(&item));
+
                     if !merged {
                         current.items.push(ReplayItem {
                             item,
@@ -231,10 +235,12 @@ pub(crate) fn fork_checkpoints(page: &Value) -> Vec<ForkCheckpoint> {
             // own messages under this type. A prompt maps to exactly one item,
             // and anything else the mapper produced is not one.
             let mut mapped = map_session_event(event, &Value::Null, &mut ToolTracker::default());
+
             let Some(Event::ItemStarted(Item::UserMessage { text: Some(text) })) = mapped.pop()
             else {
                 return None;
             };
+
             Some((event["seq"].as_u64()?, text, event["time"].as_u64()))
         })
         .collect();
@@ -245,6 +251,7 @@ pub(crate) fn fork_checkpoints(page: &Value) -> Vec<ForkCheckpoint> {
             let [(kept, _, _), (_, prompt, at)] = pair else {
                 return None;
             };
+
             Some(ForkCheckpoint {
                 prompt: prompt.clone(),
                 timestamp: at.map(unix_millis_to_rfc3339),
@@ -254,6 +261,7 @@ pub(crate) fn fork_checkpoints(page: &Value) -> Vec<ForkCheckpoint> {
         .collect();
 
     checkpoints.reverse();
+
     checkpoints
 }
 

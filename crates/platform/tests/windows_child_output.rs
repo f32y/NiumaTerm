@@ -17,6 +17,7 @@ fn cmd_diagnostic_round_trips_non_ascii_text() {
         .expect("cmd.exe should start");
 
     let text = decode_child_output(&output.stderr);
+
     assert!(
         text.contains(name),
         "decoded stderr should contain the echoed name, got {text:?}"

@@ -23,8 +23,10 @@ pub fn hidden_command(program: impl AsRef<OsStr>) -> Command {
 
 pub fn hidden_cmd_command(executable: impl AsRef<OsStr>) -> Command {
     let mut command = hidden_command("cmd.exe");
+
     command.args([OsStr::new("/D"), OsStr::new("/C")]);
     command.arg(executable);
+
     command
 }
 
@@ -42,11 +44,13 @@ pub fn decode_child_output(bytes: &[u8]) -> String {
     if let Ok(text) = str::from_utf8(bytes) {
         return text.to_owned();
     }
+
     decode_oem(bytes).unwrap_or_else(|| String::from_utf8_lossy(bytes).into_owned())
 }
 
 fn decode_oem(bytes: &[u8]) -> Option<String> {
     let len = i32::try_from(bytes.len()).ok()?;
+
     // SAFETY: the input pointer and length describe `bytes`; a null output
     // buffer asks only for the required length.
     let needed = unsafe {
@@ -59,10 +63,13 @@ fn decode_oem(bytes: &[u8]) -> Option<String> {
             0,
         )
     };
+
     if needed <= 0 {
         return None;
     }
+
     let mut wide = vec![0_u16; needed as usize];
+
     // SAFETY: `wide` holds exactly the number of code units the first call
     // reported for the same input.
     let written = unsafe {
@@ -75,9 +82,11 @@ fn decode_oem(bytes: &[u8]) -> Option<String> {
             needed,
         )
     };
+
     if written <= 0 {
         return None;
     }
+
     Some(String::from_utf16_lossy(&wide[..written as usize]))
 }
 
@@ -123,12 +132,15 @@ impl KillOnCloseJob {
     pub(crate) unsafe fn attach_handle(process: HANDLE) -> io::Result<Self> {
         unsafe {
             let job = CreateJobObjectW(ptr::null(), ptr::null());
+
             if job.is_null() {
                 return Err(io::Error::last_os_error());
             }
 
             let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = mem::zeroed();
+
             info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+
             if SetInformationJobObject(
                 job,
                 JobObjectExtendedLimitInformation,
@@ -180,6 +192,7 @@ fn query_process_count(job: HANDLE) -> usize {
     }
 
     let mut buffer: PidListBuffer = unsafe { mem::zeroed() };
+
     let result = unsafe {
         QueryInformationJobObject(
             job,

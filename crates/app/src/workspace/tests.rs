@@ -79,6 +79,7 @@ fn workspace_progress_averages_the_tabs_reporting_a_percentage() {
         TabId(1),
         "Tab".to_string(),
     );
+
     tabs.new_tab(
         TabSurface::Pending(Box::default()),
         TabId(2),
@@ -96,8 +97,10 @@ fn workspace_progress_averages_the_tabs_reporting_a_percentage() {
         state: ProgressState::Set,
         progress,
     };
+
     tabs.set_progress(TabId(1), set(Some(50)));
     tabs.set_progress(TabId(2), set(Some(100)));
+
     // No percentage to add, so this tab stays out of the average.
     tabs.set_progress(
         TabId(3),
@@ -179,6 +182,7 @@ fn settings_reorders_like_any_other_entry() {
         order,
         vec![WorkspaceId(100), WorkspaceId(1), WorkspaceId(2)]
     );
+
     // The settings entry was active before the move and stays active.
     assert_eq!(manager.active_id(), WorkspaceId(100));
 }
@@ -347,6 +351,7 @@ fn additional_directories_keep_the_order_they_were_added_in() {
         "C:/A".into(),
         vec!["C:/B".into(), "C:/C".into(), "C:/D".into()],
     );
+
     assert_eq!(ordered(&roots), ["C:/A", "C:/B", "C:/C", "C:/D"]);
     assert_eq!(roots.primary(), "C:/A");
 }
@@ -377,6 +382,7 @@ fn a_repeated_entry_in_a_saved_list_is_dropped_once() {
         "C:/A".into(),
         vec!["C:/B".into(), "C:/A/".into(), "C:/B/".into()],
     );
+
     assert_eq!(ordered(&roots), ["C:/A", "C:/B"]);
 
     #[cfg(windows)]
@@ -385,6 +391,7 @@ fn a_repeated_entry_in_a_saved_list_is_dropped_once() {
             "C:/A".into(),
             vec!["C:/B".into(), r"c:\a".into(), "C:/B/".into()],
         );
+
         assert_eq!(ordered(&roots), ["C:/A", "C:/B"]);
     }
 }
@@ -402,6 +409,7 @@ fn making_a_directory_primary_preserves_every_other_position() {
         "C:/A".into(),
         vec!["C:/B".into(), "C:/C".into(), "C:/D".into()],
     );
+
     assert_eq!(roots.make_primary("C:/C"), RootChange::Applied);
     assert_eq!(ordered(&roots), ["C:/C", "C:/A", "C:/B", "C:/D"]);
 }
@@ -416,6 +424,7 @@ fn making_the_current_primary_primary_again_changes_nothing() {
 #[test]
 fn an_unattached_directory_cannot_be_promoted_or_removed() {
     let mut roots = WorkspaceRoots::new("C:/A".into(), vec!["C:/B".into()]);
+
     assert_eq!(roots.make_primary("C:/Z"), RootChange::NotAttached);
     assert_eq!(roots.remove("C:/Z"), RootChange::NotAttached);
     assert_eq!(ordered(&roots), ["C:/A", "C:/B"]);
@@ -454,13 +463,17 @@ fn additional_directories_do_not_displace_the_primary_default() {
     );
 
     let summary = manager.summaries().remove(0);
+
     assert_eq!(summary.cwd, "C:/one");
     assert_eq!(summary.additional_cwds, ["C:/two", "C:/three"]);
 
     // Promotion is what moves the defaults; attaching a directory does not.
     let mut promoted = manager.roots_of(id).expect("roots").clone();
+
     assert_eq!(promoted.make_primary("C:/three"), RootChange::Applied);
+
     manager.set_roots(id, promoted);
+
     assert_eq!(manager.active_cwd(), "C:/three");
 }
 
@@ -470,8 +483,10 @@ fn the_location_free_settings_entry_owns_no_directory() {
     let settings = manager.settings_id().expect("settings entry");
 
     assert_eq!(manager.roots_of(settings), None);
+
     // The Settings entry stays location-free even when a caller offers it one.
     manager.set_roots(settings, WorkspaceRoots::single("C:/two".into()));
+
     assert_eq!(manager.roots_of(settings), None);
 
     let summary = manager
@@ -479,6 +494,7 @@ fn the_location_free_settings_entry_owns_no_directory() {
         .into_iter()
         .find(|ws| ws.id == settings)
         .expect("settings summary");
+
     assert!(summary.cwd.is_empty());
     assert!(summary.additional_cwds.is_empty());
 }
@@ -498,6 +514,7 @@ fn workspace_identity_survives_root_edits() {
     // id, so attaching a directory leaves every one of them untouched.
     manager.set_temporary(second, false);
     manager.set_pinned(second, true);
+
     assert!(manager.is_pinned(second));
     assert_eq!(
         manager.summaries().first().map(|ws| ws.id),
@@ -511,13 +528,17 @@ fn workspace_identity_survives_root_edits() {
 
     // A pinned workspace refuses to close; unpinning restores that.
     assert!(manager.close_workspace(second).is_none());
+
     manager.set_pinned(second, false);
 
     manager.reorder(0, 2);
+
     let ids: Vec<_> = manager.summaries().iter().map(|ws| ws.id).collect();
+
     assert_eq!(ids, [WorkspaceId(1), WorkspaceId(3), second]);
 
     let closed = manager.close_workspace(second).expect("closeable");
+
     assert_eq!(closed.id(), second);
 
     // The detached directory leaves with its workspace and stops routing.

@@ -16,6 +16,7 @@ const VERSION_FORMS: &str =
 /// `cargo:` directives below are read from the build script's standard output.
 pub fn emit() -> String {
     println!("cargo:rerun-if-env-changed=NIUMATERM_VERSION");
+
     if let Some(git_dir) = git_dir() {
         // HEAD covers moving to another revision; the tag directory covers
         // tagging the revision already checked out, which is how a release is
@@ -33,10 +34,12 @@ pub fn emit() -> String {
     {
         Some(label) => {
             let label = label.trim().to_owned();
+
             assert!(
                 Version::parse(&label).is_some(),
                 "NIUMATERM_VERSION `{label}` is not {VERSION_FORMS}"
             );
+
             label
         }
         None => derive_from_git(),
@@ -124,6 +127,7 @@ fn derive_from_git() -> String {
     };
 
     let label = format!("nightly-{date}-{commit}");
+
     assert!(
         matches!(Version::parse(&label), Some(Version::Nightly { .. })),
         "derived version `{label}` is not {VERSION_FORMS}"
@@ -138,6 +142,7 @@ fn derive_from_git() -> String {
 /// would have no revision to watch anyway.
 fn git_dir() -> Option<PathBuf> {
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR")?);
+
     manifest
         .ancestors()
         .map(|directory| directory.join(".git"))

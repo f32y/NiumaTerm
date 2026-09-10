@@ -174,18 +174,22 @@ fn workspace_display_label(name: &str, cwd: &str) -> String {
 /// every additional path in workspace order.
 fn workspace_dirs_description(cwd: &str, additional: &[String]) -> String {
     let mut description = i18n("sidebar-workspace-primary-label").replace("{path}", cwd);
+
     for path in additional {
         description.push('\n');
         description.push_str(path);
     }
+
     description
 }
 
 fn tail_preserving_path(path: &str, max_chars: usize) -> String {
     let length = path.chars().count();
+
     if length <= max_chars || max_chars == 0 {
         return path.to_string();
     }
+
     if max_chars == 1 {
         return "…".to_string();
     }
@@ -194,11 +198,13 @@ fn tail_preserving_path(path: &str, max_chars: usize) -> String {
         .chars()
         .skip(length - (max_chars - 1))
         .collect::<String>();
+
     let component_tail = raw_tail
         .find(['/', '\\'])
         .map(|separator| &raw_tail[separator..])
         .filter(|tail| tail.len() > 1)
         .unwrap_or(&raw_tail);
+
     format!("…{component_tail}")
 }
 
@@ -500,8 +506,11 @@ impl Sidebar {
                                 // from the next; a rule between them would
                                 // draw a second boundary inside the same gap.
                                 let mut rows = Vec::new();
+
                                 rows.push(self.render_item(idx, ws, renames, cx));
+
                                 let ws_tabs = tabs.get(idx).map(Vec::as_slice).unwrap_or_default();
+
                                 // Closing a workspace's last tab falls through to
                                 // closing the workspace, so the row keeps its
                                 // control as long as one of the two would take
@@ -560,6 +569,7 @@ impl Sidebar {
                 if !e.drag(cx).is_from(RESIZE_HANDLE) {
                     return;
                 }
+
                 // The sidebar's left edge is pinned, so the new width is the
                 // pointer x minus the left edge, clamped to the drag limits.
                 let width = (e.event.position.x - e.bounds.left())
@@ -568,6 +578,7 @@ impl Sidebar {
 
                 if width != this.sidebar.width {
                     this.sidebar.width = width;
+
                     // Render at the live width; the next toggle re-arms the
                     // slide animation.
 

@@ -82,10 +82,12 @@ impl JsonLineProcess {
             .stdin
             .take()
             .ok_or_else(|| format!("{provider} stdin unavailable"))?;
+
         let stdout = child
             .stdout
             .take()
             .ok_or_else(|| format!("{provider} stdout unavailable"))?;
+
         let stderr = child
             .stderr
             .take()
@@ -94,6 +96,7 @@ impl JsonLineProcess {
         let job = Arc::new(Mutex::new(Some(job)));
         let writer_job = Arc::clone(&job);
         let (input_tx, input_rx) = InputQueue::new();
+
         thread::Builder::new()
             .name(format!("{provider}-stdin"))
             .spawn(move || {
@@ -101,8 +104,10 @@ impl JsonLineProcess {
                     let result = input.messages.iter().try_for_each(|message| {
                         writeln!(stdin, "{message}").and_then(|_| stdin.flush())
                     });
+
                     if let Err(error) = result {
                         warn!(provider, %error, "agent input writer stopped");
+
                         // A child can close stdin without closing stdout. Terminating
                         // its tree makes the existing EOF notification reliable.
                         writer_job.lock().take();
@@ -113,23 +118,29 @@ impl JsonLineProcess {
             .map_err(|error| format!("could not start {provider} input writer: {error}"))?;
 
         let reader_job = Arc::clone(&job);
+
         thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
+
             if let Err(message) = read_messages(&mut reader, provider, &deliver) {
                 warn!(provider, reason = %message, "agent protocol reader stopped");
                 deliver(json!({"method": OUTPUT_FAILURE_METHOD, "params": {"message": message}}));
                 reader_job.lock().take();
             }
+
             on_stdout_closed();
         });
 
         thread::spawn(move || {
             let mut reader = BufReader::new(stderr);
+
             while let Ok(line) = read_piece(&mut reader, MAX_STDERR_CHUNK) {
                 if line.is_empty() {
                     break;
                 }
+
                 let line = line.strip_suffix(b"\n").unwrap_or(&line);
+
                 on_stderr(decode_child_output(
                     line.strip_suffix(b"\r").unwrap_or(line),
                 ));
@@ -148,13 +159,16 @@ impl JsonLineProcess {
     /// process tree so a missing reply cannot leave the session waiting forever.
     pub(crate) fn write_line(&mut self, message: Value) -> Result<(), InputError> {
         let result = self.try_write_line(message, InputClass::Control);
+
         if let Err(error) = &result {
             warn!(%error, "required agent control input was rejected");
+
             // Callers use this path for required replies and lifecycle controls.
             // Exhausting even the control reserve cannot silently lose them.
             self.stdin.take();
             self.job.lock().take();
         }
+
         result
     }
 
@@ -186,15 +200,18 @@ impl JsonLineProcess {
         if !self.has_stdin() {
             return Err(InputError::Closed);
         }
+
         let result = self
             .stdin
             .as_ref()
             .ok_or(InputError::Closed)?
             .submit_tracked(messages, class);
+
         if matches!(result, Err(InputError::Closed)) {
             self.stdin.take();
             self.job.lock().take();
         }
+
         result
     }
 
@@ -214,7 +231,9 @@ impl JsonLineProcess {
     /// affects only this process's tree.
     pub(crate) fn shutdown(&mut self, timeout: Duration, force: bool) -> Result<(), String> {
         drop(self.stdin.take());
+
         let started = Instant::now();
+
         loop {
             match self.child.try_wait() {
                 Ok(Some(_)) => {
@@ -229,6 +248,7 @@ impl JsonLineProcess {
                     self.child.wait().map_err(|error| {
                         format!("could not wait for {} to stop: {error}", self.provider)
                     })?;
+
                     return Ok(());
                 }
                 Ok(None) => {

@@ -17,6 +17,7 @@ fn an_untracked_disclosure_is_already_at_rest() {
 fn a_reveal_ramps_from_its_start_to_rest() {
     let mut reveals = Reveals::default();
     let start = Instant::now();
+
     reveals.open(RevealKey::Row(1), start);
 
     let opening = reveals.progress(RevealKey::Row(1), start);
@@ -38,6 +39,7 @@ fn a_reveal_ramps_from_its_start_to_rest() {
 fn every_kind_of_disclosure_travels_the_same_way() {
     let mut reveals = Reveals::default();
     let start = Instant::now();
+
     reveals.open(RevealKey::Row(1), start);
     reveals.open(RevealKey::Group(0), start);
 
@@ -56,6 +58,7 @@ fn every_kind_of_disclosure_travels_the_same_way() {
 fn shutting_runs_the_same_ramp_backwards() {
     let mut reveals = Reveals::default();
     let start = Instant::now();
+
     reveals.close(RevealKey::Row(1), start);
 
     let closing = reveals.progress(RevealKey::Row(1), start);
@@ -77,11 +80,14 @@ fn shutting_runs_the_same_ramp_backwards() {
 fn reversing_resumes_from_what_is_on_screen() {
     let mut reveals = Reveals::default();
     let start = Instant::now();
+
     reveals.close(RevealKey::Row(1), start);
 
     let turn = start + REVEAL_DURATION / 10;
     let leaving = reveals.progress(RevealKey::Row(1), turn);
+
     reveals.open(RevealKey::Row(1), turn);
+
     let returning = reveals.progress(RevealKey::Row(1), turn);
 
     assert!(
@@ -100,12 +106,14 @@ fn reversing_resumes_from_what_is_on_screen() {
 fn reveals_settle_once_their_duration_has_run() {
     let mut reveals = Reveals::default();
     let start = Instant::now();
+
     reveals.open(RevealKey::Group(0), start);
 
     assert!(!reveals.settled(start));
     assert!(reveals.settled(start + REVEAL_DURATION));
 
     reveals.end(RevealKey::Group(0));
+
     assert!(reveals.settled(start));
 }
 
@@ -115,6 +123,7 @@ fn reveals_settle_once_their_duration_has_run() {
 fn only_a_finished_exit_asks_to_be_taken_down() {
     let mut reveals = Reveals::default();
     let start = Instant::now();
+
     reveals.open(RevealKey::Row(1), start);
     reveals.close(RevealKey::Group(0), start);
 

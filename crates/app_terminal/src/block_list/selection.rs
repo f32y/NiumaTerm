@@ -246,6 +246,7 @@ pub(super) fn expand_wide_span(
             end = spacer.saturating_add(1);
         }
     }
+
     (start, end)
 }
 
@@ -288,5 +289,6 @@ pub(crate) fn frozen_selection_pieces(
             end: (item_idx == b.item).then_some((b.line, b.col)),
         });
     }
+
     out
 }

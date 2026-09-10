@@ -6,10 +6,12 @@ use crate::APP_ID;
 pub fn data_dir() -> PathBuf {
     if let Some(local) = env::var_os("LOCALAPPDATA") {
         let directory = Path::new(&local).join(APP_ID);
+
         if fs::create_dir_all(&directory).is_ok() {
             return directory;
         }
     }
+
     env::temp_dir()
 }
 

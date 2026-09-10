@@ -129,7 +129,9 @@ impl TranscriptView {
                 // they return to the bottom. The overdraw keeps a viewport's
                 // worth of offscreen rows measured so scrolling doesn't pop.
                 let state = ListState::new(0, ListAlignment::Bottom, px(512.));
+
                 state.set_follow_mode(FollowMode::Tail);
+
                 state
             },
             rows: Vec::new(),
@@ -178,7 +180,9 @@ impl TranscriptView {
         if self.source_revision == Some(revision) {
             return;
         }
+
         let follow = self.source_revision.is_none();
+
         self.source_revision = Some(revision);
         self.code_transcripts.invalidate_all();
         self.items = items
@@ -191,13 +195,17 @@ impl TranscriptView {
             })
             .collect();
         self.item_index.clear();
+
         for (index, entry) in self.items.iter().enumerate() {
             self.item_index.insert(entry, index);
         }
+
         self.row_cache.invalidate(0);
+
         if follow {
             self.scroll_to_bottom();
         }
+
         cx.notify();
     }
 
@@ -229,6 +237,7 @@ impl TranscriptView {
         if replay.items.is_empty() {
             self.invalidate_turn_rows(turn);
         }
+
         for entry in replay.items {
             self.append_entry(Entry {
                 at: entry
@@ -271,6 +280,7 @@ impl TranscriptView {
         let Some(id) = item.id() else {
             return;
         };
+
         for &index in self.item_index.positions(id) {
             if self.items[index].item.merge_completed(item) {
                 self.code_transcripts.invalidate(index);
@@ -291,8 +301,10 @@ impl TranscriptView {
         for &index in self.item_index.positions(item_id) {
             let entry = &mut self.items[index];
             let is_reply = matches!(entry.item, SessionItem::AgentMessage { .. });
+
             if let Some(text) = select(&mut entry.item) {
                 let text = text.get_or_insert_default();
+
                 // A reply starts typing from what it already showed when the
                 // stream reached it, so text that was on screen stays put and
                 // only the new arrival is let through the edge.
@@ -300,16 +312,19 @@ impl TranscriptView {
                     .typewriter
                     .as_ref()
                     .is_some_and(|typewriter| typewriter.index() == index);
+
                 if is_reply && !typing {
                     if let Some(previous) = &self.typewriter {
                         self.row_cache.invalidate(previous.index());
                     }
+
                     self.typewriter = Some(Typewriter::start(
                         index,
                         text.chars().count(),
                         Instant::now(),
                     ));
                 }
+
                 text.push_str(delta);
                 self.code_transcripts.invalidate(index);
                 self.row_cache.invalidate(index);
@@ -355,12 +370,15 @@ impl TranscriptView {
         let index = typewriter.index();
         let previous = typewriter.shown();
         let moving = typewriter.advance(reply_chars(&self.items, index), now);
+
         if typewriter.shown() != previous {
             self.row_cache.invalidate(index);
         }
+
         if !moving {
             self.finish_typing();
         }
+
         moving
     }
 
@@ -499,6 +517,7 @@ impl Render for TranscriptView {
         // rows are built, so the removal and the specs it changes land in one
         // pass rather than a frame apart.
         let now = Instant::now();
+
         self.settle_shut_disclosures(now);
 
         // A disclosure moves from a click, which wakes the frame pump once.
@@ -516,6 +535,7 @@ impl Render for TranscriptView {
         // frames between chunks are this view's to ask for. Reduced motion
         // shows what has arrived as it arrives.
         let reduce_motion = cx.global::<AgentSettings>().reduce_motion;
+
         if reduce_motion {
             self.finish_typing();
         } else if self.advance_typing(now) {
@@ -525,6 +545,7 @@ impl Render for TranscriptView {
         let settings = cx.global::<AgentSettings>();
         let collapse = settings.collapse_tool_calls;
         let smooth_wheel = settings.smooth_wheel;
+
         let font = (
             settings.font_family.clone(),
             settings.font_size,
@@ -540,14 +561,17 @@ impl Render for TranscriptView {
         // says.
         if self.collapse_mode != collapse {
             self.collapse_mode = collapse;
+
             // Anything mid-exit goes with its own state: dropping the reveal
             // alone would strand the disclosure open with nothing left to
             // finish shutting it.
             for key in self.disclosures.closing() {
                 self.take_down_disclosure(key);
             }
+
             self.disclosures.forget_departures(folds_turns(collapse));
         }
+
         self.transcript_list.set_smooth_wheel_enabled(smooth_wheel);
 
         // Transcript rows, one folded/expanded section per turn (entries are
@@ -568,6 +592,7 @@ impl Render for TranscriptView {
             .then_some(self.transcript_height)
             .flatten()
             .map(picker_reserve);
+
         let has_hidden_content_below = self.transcript_has_hidden_content_below();
 
         // The scrollbar must sit OUTSIDE the scrolling element (a child would
@@ -587,11 +612,14 @@ impl Render for TranscriptView {
                     .size_full()
                     .on_prepaint({
                         let view = cx.entity().downgrade();
+
                         move |bounds, _, cx| {
                             view.update(cx, |this, cx| {
                                 this.transcript_height = Some(bounds.size.height);
                                 this.transcript_origin = Some(bounds.origin);
+
                                 let width = bounds.size.width;
+
                                 if this.transcript_width != Some(width) {
                                     this.transcript_width = Some(width);
                                     this.transcript_list.remeasure();
@@ -607,6 +635,7 @@ impl Render for TranscriptView {
                         // through a weak handle.
                         list(self.transcript_list.clone(), {
                             let this = cx.entity().downgrade();
+
                             move |ix, window, cx| {
                                 this.update(cx, |this, cx| this.render_row(ix, window, cx))
                                     .unwrap_or_else(|_| div().into_any_element())
@@ -672,6 +701,7 @@ impl Render for TranscriptView {
                                             } else {
                                                 this.glide_to_bottom();
                                             }
+
                                             cx.notify();
                                         })),
                                 ),

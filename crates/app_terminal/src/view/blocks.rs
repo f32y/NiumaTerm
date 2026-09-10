@@ -69,12 +69,14 @@ impl TerminalPane {
 
         for (ix, item) in store.items().iter().enumerate() {
             let h = block_list::item_px(item, cols, cell_h, pad_rows);
+
             if target < y + h {
                 return ListOffset {
                     item_ix: ix,
                     offset_in_item: px((target - y).max(0.0)),
                 };
             }
+
             y += h;
         }
 
@@ -422,8 +424,10 @@ impl TerminalPane {
             let store = self.surface.block_store();
             let live_rows = frame_content_rows(frame);
             let history_rows = self.live_history_rows(frame);
+
             let metrics = {
                 let store = store.lock();
+
                 block_list_render_metrics(
                     &store,
                     live_rows,
@@ -485,6 +489,7 @@ impl TerminalPane {
             if !self.block_list.scroll_handler_set {
                 self.block_list.list.set_scroll_handler({
                     let pane = pane.clone();
+
                     move |_, _window, cx| {
                         pane.update(cx, |pane, cx| pane.scrollbar.mark_activity(cx));
                     }

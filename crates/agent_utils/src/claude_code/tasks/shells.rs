@@ -72,20 +72,27 @@ impl ShellIndex {
         let Some(task_id) = record["task_id"].as_str().filter(|id| !id.is_empty()) else {
             return;
         };
+
         self.reserve_shell_meta(task_id);
+
         let tool_use_id = text_field(record, &["tool_use_id"]);
+
         let command = tool_use_id
             .as_deref()
             .and_then(|id| self.bash_commands.get(id))
             .cloned();
+
         let description = text_field(record, &["description"]);
         let meta = self.shell_meta.entry(task_id.to_owned()).or_default();
+
         if tool_use_id.is_some() {
             meta.tool_use_id = tool_use_id;
         }
+
         if description.is_some() {
             meta.description = description;
         }
+
         if command.is_some() {
             meta.command = command;
         }
@@ -98,15 +105,18 @@ impl ShellIndex {
         let Some(meta) = self.shell_meta.get(canonical) else {
             return;
         };
+
         if meta.output_file.is_some() {
             return;
         }
+
         let Some(text) = result_content(block) else {
             return;
         };
         let Some(path) = handoff_output_file(&text, canonical) else {
             return;
         };
+
         if let Some(meta) = self.shell_meta.get_mut(canonical) {
             meta.output_file = Some(path);
         }
@@ -122,6 +132,7 @@ impl ShellIndex {
         let Some(task_id) = record["task_id"].as_str().filter(|id| !id.is_empty()) else {
             return;
         };
+
         if let Some(meta) = self.shell_meta.get_mut(task_id) {
             meta.output_file = Some(output_file);
         }
@@ -131,14 +142,17 @@ impl ShellIndex {
         let Some(command) = text_field(input, &["command"]) else {
             return;
         };
+
         if !self.bash_commands.contains_key(tool_use_id) {
             if self.bash_command_order.len() >= MAX_SHELL_META
                 && let Some(oldest) = self.bash_command_order.pop_front()
             {
                 self.bash_commands.remove(&oldest);
             }
+
             self.bash_command_order.push_back(tool_use_id.to_owned());
         }
+
         self.bash_commands.insert(tool_use_id.to_owned(), command);
     }
 
@@ -146,11 +160,13 @@ impl ShellIndex {
         if self.shell_meta.contains_key(task_id) {
             return;
         }
+
         if self.shell_meta_order.len() >= MAX_SHELL_META
             && let Some(oldest) = self.shell_meta_order.pop_front()
         {
             self.shell_meta.remove(&oldest);
         }
+
         self.shell_meta_order.push_back(task_id.to_owned());
     }
 
@@ -172,14 +188,18 @@ impl ClaudeTasks {
     /// to read a child conversation instead.
     pub(crate) fn shell_detail(&self, id: &str) -> Option<ShellDetail> {
         let canonical = self.canonical(id)?;
+
         let task = self
             .registry
             .as_ref()?
             .get(&BackgroundTaskKey::claude_code(&canonical))?;
+
         if task.kind != BackgroundTaskKind::Shell {
             return None;
         }
+
         let meta = self.shells.meta(&canonical);
+
         Some(ShellDetail {
             id: canonical.clone(),
             command: meta.and_then(|meta| meta.command.clone()),

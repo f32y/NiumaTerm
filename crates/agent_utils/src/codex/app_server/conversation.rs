@@ -24,12 +24,14 @@ impl TurnOutputUsage {
 
     pub(super) fn observe(&mut self, total: u64, last: u64, active: bool) -> Option<u64> {
         self.latest_total = Some(total);
+
         if !active {
             return None;
         }
 
         let inferred_baseline = total.saturating_sub(last);
         let baseline = self.baseline.get_or_insert(inferred_baseline);
+
         if total < *baseline {
             *baseline = inferred_baseline;
         }
@@ -62,6 +64,7 @@ impl ConversationState {
                 let mut events = self
                     .questions
                     .end_turn(params["turn"]["id"].as_str().unwrap_or_default());
+
                 self.current_turn = None;
                 self.turn_output_usage.finish_turn();
 
@@ -69,9 +72,11 @@ impl ConversationState {
                     .then(|| params["turn"]["error"]["message"].as_str())
                     .flatten()
                     .map(str::to_owned);
+
                 self.compaction.clear_incomplete();
 
                 events.push(Event::TurnCompleted { error });
+
                 events
             }
             "thread/tokenUsage/updated" => {
@@ -80,9 +85,11 @@ impl ConversationState {
                 };
 
                 self.compaction.update_usage(usage);
+
                 let active = params["turnId"]
                     .as_str()
                     .is_some_and(|turn_id| self.current_turn.as_deref() == Some(turn_id));
+
                 let turn_output_tokens = usage
                     .cumulative
                     .and_then(|usage| usage.breakdown.output_tokens)
@@ -90,13 +97,16 @@ impl ConversationState {
                     .and_then(|(total, last)| self.turn_output_usage.observe(total, last, active));
 
                 let mut events = vec![Event::ContextWindowUpdated(usage)];
+
                 if let Some(output_tokens) = turn_output_tokens {
                     events.push(Event::TurnOutputTokensUpdated(output_tokens));
                 }
+
                 events
             }
             "item/started" => {
                 let item = &params["item"];
+
                 if item["type"].as_str() == Some("contextCompaction") {
                     return compaction_started(&mut self.compaction, item);
                 }
@@ -108,6 +118,7 @@ impl ConversationState {
             }
             "item/completed" => {
                 let item = &params["item"];
+
                 if item["type"].as_str() == Some("contextCompaction") {
                     return compaction_completed(&mut self.compaction, item);
                 }
@@ -116,7 +127,9 @@ impl ConversationState {
                     .map(Event::ItemCompleted)
                     .into_iter()
                     .collect();
+
                 events.extend(self.questions.observe_message(item));
+
                 events
             }
             "item/agentMessage/delta" => delta_event(params, |item_id, delta| {
@@ -141,12 +154,14 @@ impl ConversationState {
                 if params["threadId"].as_str() != self.thread_id.as_deref() {
                     return Vec::new();
                 }
+
                 if let Some(event) = params["requestId"]
                     .as_u64()
                     .and_then(|id| self.questions.resolve_request(id))
                 {
                     return vec![event];
                 }
+
                 // Fires when a pending approval is answered or cleared by
                 // turn lifecycle — tear down the approval UI either way.
                 if self.pending_approval.is_some()

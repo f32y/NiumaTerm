@@ -113,6 +113,7 @@ impl Shell {
             .window_active
             .then(|| self.active_agent_route(cx))
             .flatten();
+
         for notification in self.agent_monitor.pending_native_notifications() {
             if !request_native_delivery(visible_route.as_ref(), &notification.route) {
                 self.acknowledge_notification(&notification.route, &notification.id, cx);
@@ -209,6 +210,7 @@ impl Shell {
                 }
             }
         }
+
         None
     }
 
@@ -252,6 +254,7 @@ impl Shell {
                     .set_focused(pane_id);
 
                 let handle = pane.read(cx).focus.clone();
+
                 window.focus(&handle, cx);
             }
             AgentRouteTarget::Agent(pane) => {
@@ -331,6 +334,7 @@ impl Shell {
     pub(crate) fn watch_agent_tab(pane: &Entity<AgentPane>, cx: &mut Context<Self>) {
         cx.subscribe(pane, |this, pane, event: &AgentPaneEvent, cx| {
             let route = pane.read(cx).agent_route().clone();
+
             let mutation = match event {
                 AgentPaneEvent::Lifecycle(event) if event.route == route => this
                     .agent_monitor
@@ -374,6 +378,7 @@ impl Shell {
                     {
                         cx.notify();
                     }
+
                     return;
                 }
                 AgentPaneEvent::CloseRequested => {

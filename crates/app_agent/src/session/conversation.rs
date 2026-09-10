@@ -38,12 +38,14 @@ impl AgentPane {
     /// composer would have discarded the line in the meantime.
     pub(crate) fn rename_conversation(&mut self, title: &str, cx: &mut Context<Self>) -> bool {
         let title = title.trim();
+
         if title.is_empty() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-rename-needs-title").to_string(),
                 cx,
             );
+
             return false;
         }
 
@@ -64,6 +66,7 @@ impl AgentPane {
                     i18n("agent-session-renamed").replace("{title}", &accepted),
                     cx,
                 );
+
                 true
             }
             Err(error) => {
@@ -81,12 +84,14 @@ impl AgentPane {
     /// rather than one they would have to go and find.
     pub(crate) fn search_conversations(&mut self, query: &str, cx: &mut Context<Self>) -> bool {
         let query = query.trim();
+
         if query.is_empty() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-search-needs-query").to_string(),
                 cx,
             );
+
             return false;
         }
 
@@ -96,6 +101,7 @@ impl AgentPane {
                 i18n("agent-session-still-starting").replace("{name}", self.kind.display()),
                 cx,
             );
+
             return false;
         };
 
@@ -105,6 +111,7 @@ impl AgentPane {
             i18n("agent-session-searching").replace("{query}", query),
             cx,
         );
+
         true
     }
 
@@ -123,10 +130,12 @@ impl AgentPane {
                 i18n("agent-session-search-no-matches").to_string(),
                 cx,
             );
+
             return;
         }
 
         let count = results.len();
+
         self.history_ui.invalidate_filesystem_history();
         self.history_ui.sessions = results;
         self.history_ui.showing_search = true;
@@ -157,6 +166,7 @@ impl AgentPane {
                 i18n("agent-session-queued-remove-failed").to_string(),
                 cx,
             );
+
             return;
         }
 

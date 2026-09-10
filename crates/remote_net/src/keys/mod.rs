@@ -39,6 +39,7 @@ pub fn load_or_create_keypair(path: &Path) -> Result<StaticKeypair, KeyStoreErro
                 serde_json::from_slice(&bytes).map_err(|_| KeyStoreError::Corrupt)?;
             let private =
                 data_protection::unprotect(&stored.private_dpapi).map_err(KeyStoreError::Dpapi)?;
+
             Ok(StaticKeypair {
                 private,
                 public: stored.public,
@@ -46,15 +47,19 @@ pub fn load_or_create_keypair(path: &Path) -> Result<StaticKeypair, KeyStoreErro
         }
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             let keypair = generate_keypair()?;
+
             let stored = StoredKey {
                 public: keypair.public.clone(),
                 private_dpapi: data_protection::protect(&keypair.private)
                     .map_err(KeyStoreError::Dpapi)?,
             };
+
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)?;
             }
+
             fs::write(path, serde_json::to_vec(&stored).expect("serializable"))?;
+
             Ok(keypair)
         }
         Err(e) => Err(e.into()),

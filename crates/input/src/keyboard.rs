@@ -151,12 +151,15 @@ impl ModifiersState {
     pub fn shift_key(&self) -> bool {
         self.contains(Self::SHIFT)
     }
+
     pub fn control_key(&self) -> bool {
         self.contains(Self::CONTROL)
     }
+
     pub fn alt_key(&self) -> bool {
         self.contains(Self::ALT)
     }
+
     pub fn super_key(&self) -> bool {
         self.contains(Self::SUPER)
     }

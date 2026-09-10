@@ -7,6 +7,7 @@ use nmt_terminal::ghostty::BlockHandle;
 
 use crate::block_list::BlockListPoint;
 use crate::view::{TerminalPane, terminal_cell_at_position};
+
 /// A link resolved under the pointer: the URL plus underline rects relative
 /// to the content origin (only the visible rows of a wrapped URL get rects).
 #[derive(Clone, Debug, PartialEq)]
@@ -28,6 +29,7 @@ const URL_SCHEMES: [&str; 4] = ["https://", "http://", "file://", "mailto:"];
 pub(crate) fn follows_link(modifiers: Modifiers) -> bool {
     #[cfg(target_os = "macos")]
     let modifier_held = modifiers.platform && !modifiers.control;
+
     #[cfg(not(target_os = "macos"))]
     let modifier_held = modifiers.control && !modifiers.platform;
 
@@ -213,6 +215,7 @@ impl TerminalPane {
                     let store = store.lock();
                     store.items().get(pt.item)?.handle()?
                 };
+
                 (
                     RowSource::Block {
                         handle,
@@ -235,6 +238,7 @@ impl TerminalPane {
                 }
 
                 let (cell, _) = terminal_cell_at_position(position, origin, cell_metrics, &offsets);
+
                 (
                     RowSource::Screen(viewport_top? as i64 + cell.row as i64),
                     cell.col as usize,
@@ -277,6 +281,7 @@ impl TerminalPane {
                     .row_top(item, usize::try_from(line + delta).ok()?),
             }
         };
+
         let underline = |delta: i64, start_col: usize, cols: usize| -> Option<Bounds<Pixels>> {
             let y = row_y(delta)?;
 
@@ -367,6 +372,7 @@ impl TerminalPane {
                 ));
             }
         }
+
         Some(LinkHit { url, rects })
     }
 }

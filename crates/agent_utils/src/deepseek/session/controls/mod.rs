@@ -65,6 +65,7 @@ impl Controls {
         deliver: Arc<dyn Fn(Value) + Send + Sync>,
     ) -> Result<Self, String> {
         let (sender, receiver) = mpsc::sync_channel::<Call>(MAX_PENDING);
+
         thread::Builder::new()
             .name("deepseek-controls".to_string())
             .spawn(move || {
@@ -72,6 +73,7 @@ impl Controls {
                     if call.cancelled.load(Ordering::Acquire) {
                         continue;
                     }
+
                     let result = match call.deadline.checked_duration_since(Instant::now()) {
                         Some(timeout) => client
                             .call_with_timeout(call.method, call.args, timeout)
@@ -82,9 +84,11 @@ impl Controls {
                             )),
                         None => Err("DeepSeek control expired before sending; please retry.".to_string()),
                     };
+
                     if call.cancelled.load(Ordering::Acquire) {
                         continue;
                     }
+
                     // Refusal and stopping are separate outcomes: a failed stop
                     // cannot make an accepted refusal retryable again.
                     let stop_error = if result.is_ok() && let Some(session_id) = call.cancel_after {
@@ -95,6 +99,7 @@ impl Controls {
                             None => Some("The approval was refused, but the stop expired before sending.".to_string()),
                         }
                     } else { None };
+
                     if !call.cancelled.load(Ordering::Acquire) {
                         (deliver)(json!({"payload": {
                             "type": COMPLETED_FRAME, "id": call.id,
@@ -104,6 +109,7 @@ impl Controls {
                 }
             })
             .map_err(|error| format!("could not start DeepSeek control worker: {error}"))?;
+
         Ok(Self {
             sender,
             pending: HashMap::new(),
@@ -136,11 +142,15 @@ impl Controls {
         {
             return false;
         }
+
         let Some(id) = self.next_id.checked_add(1) else {
             return false;
         };
+
         self.next_id = id;
+
         let cancelled = Arc::new(AtomicBool::new(false));
+
         let call = Call {
             id,
             method,
@@ -149,9 +159,11 @@ impl Controls {
             deadline: Instant::now() + CALL_DEADLINE,
             cancelled: Arc::clone(&cancelled),
         };
+
         if self.sender.try_send(call).is_err() {
             return false;
         }
+
         self.pending.insert(
             id,
             Pending {
@@ -159,6 +171,7 @@ impl Controls {
                 cancelled,
             },
         );
+
         true
     }
 

@@ -90,6 +90,7 @@ impl RightPanelController {
             .filter(|pane| pane.read(cx).workflow_session_id().is_some())
             .map(|pane| pane.downgrade());
         let workflows = self.panel.read(cx).workflows().clone();
+
         workflows.update(cx, |view, cx| view.set_target(handle, cx));
     }
 
@@ -106,6 +107,7 @@ impl RightPanelController {
             .filter(|pane| pane.read(cx).background_task_parent().is_some())
             .map(|pane| pane.downgrade());
         let tasks = self.panel.read(cx).tasks().clone();
+
         tasks.update(cx, |view, cx| view.set_target(handle, cx));
     }
 
@@ -120,6 +122,7 @@ impl RightPanelController {
     pub(super) fn set_git_sidebar_open(&self, open: bool, cx: &mut Context<Shell>) {
         self.git_model.update(cx, |model, cx| {
             model.sidebar_open = open;
+
             if open {
                 model.refresh(cx);
             }
@@ -166,6 +169,7 @@ impl Shell {
 
         if open {
             self.panels.sync_task_target(self.active_agent(), cx);
+
             // Asking for fresher data happens on the open edge, not on every
             // render, so a visible panel does not re-query the provider each
             // frame. The adapter still ignores overlapping requests.
@@ -173,6 +177,7 @@ impl Shell {
                 pane.update(cx, |pane, _| pane.refresh_background_tasks());
             }
         }
+
         // Git content owns the poller's own visibility flag; leaving Git for
         // another view stops the polling it turned on.
         self.panels.set_git_sidebar_open(false, cx);
@@ -191,6 +196,7 @@ impl Shell {
         if open {
             self.panels.sync_workflow_target(self.active_agent(), cx);
         }
+
         // Git owns the poller's own visibility flag; leaving Git for another
         // view stops the polling it turned on.
         self.panels.set_git_sidebar_open(false, cx);

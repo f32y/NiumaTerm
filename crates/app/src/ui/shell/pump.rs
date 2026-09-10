@@ -58,6 +58,7 @@ impl Shell {
                 }
                 HostEvent::Exit => {
                     self.remove_agent_route(&agent_route, cx);
+
                     if let Some(tab_id) = self.tab_for_pane(pane_id) {
                         // A pane whose shell exits auto-closes when the tab has
                         // other panes (the split collapses around it); the last
@@ -71,6 +72,7 @@ impl Shell {
                             {
                                 removed = tab.surface_mut().live_mut().remove(pane_id, cx);
                             }
+
                             if removed.is_none() {
                                 tabs.mark_exited(tab_id);
                             }
@@ -91,6 +93,7 @@ impl Shell {
 
                             self.sync_session_memory(cx);
                         }
+
                         chrome_changed = true;
                     }
                 }
@@ -161,10 +164,12 @@ impl Shell {
                 _ => {}
             }
         }
+
         if session_changed {
             self.sync_session_memory(cx);
             self.sync_git_target(cx);
         }
+
         if chrome_changed {
             cx.notify();
         }

@@ -36,11 +36,13 @@ pub fn hidden_command(program: impl AsRef<OsStr>) -> Command {
 #[cfg(target_os = "macos")]
 pub fn hidden_cmd_command(executable: impl AsRef<OsStr>) -> Command {
     let mut command = hidden_command(executable);
+
     command.envs(
         login_shell::missing_variables()
             .iter()
             .map(|(name, value)| (name, value)),
     );
+
     command
 }
 
@@ -115,6 +117,7 @@ impl KillOnCloseJob {
         // SAFETY: both arguments are plain integers.
         if unsafe { libc::setpgid(pid, pid) } != 0 {
             let error = io::Error::last_os_error();
+
             if !matches!(error.raw_os_error(), Some(libc::EACCES) | Some(libc::EPERM)) {
                 return Err(error);
             }
@@ -122,6 +125,7 @@ impl KillOnCloseJob {
 
         // SAFETY: `pid` is a live child; this process has not reaped it yet.
         let group = unsafe { libc::getpgid(pid) };
+
         if group != pid {
             return Err(io::Error::other(
                 "child process does not lead its own process group",
@@ -186,6 +190,7 @@ fn group_process_count(pgid: libc::pid_t) -> usize {
             let Some((_, after_comm)) = status.rsplit_once(')') else {
                 return false;
             };
+
             after_comm
                 .split_whitespace()
                 .nth(2)

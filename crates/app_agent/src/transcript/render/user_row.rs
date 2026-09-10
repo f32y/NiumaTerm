@@ -84,6 +84,7 @@ impl TranscriptView {
     ) -> impl Fn(ModernMenu, &mut Window, &mut App) -> ModernMenu + 'static {
         let copy = Self::copy_menu(cx.entity().downgrade(), index);
         let caps = self.kind.caps();
+
         // Resolved now rather than when the menu opens: a prompt's place among
         // the turns is a property of the transcript as it stands, and the rows
         // can move under a menu that is already up.
@@ -135,10 +136,12 @@ impl TranscriptView {
         let text = parsed.as_ref().map_or(text, |parsed| parsed.prompt);
         let head_len = truncated_user_prompt(text).map(str::len);
         let expanded = head_len.is_some() && self.disclosures.row_expanded(index);
+
         let shown = match (head_len, expanded) {
             (Some(len), false) => text[..len].to_string(),
             _ => text.to_string(),
         };
+
         // A prompt long enough to fold is a pasted block rather than a
         // sentence, and it takes the column's whole measure. Sized to its
         // content it would instead be as wide as the longest line of whichever
@@ -146,6 +149,7 @@ impl TranscriptView {
         // height; measuring the hidden half to avoid that is the layout pass
         // the fold exists to skip.
         let fills_column = head_len.is_some();
+
         let toggle = head_len.is_some().then(|| {
             div()
                 .mt_1()
@@ -171,6 +175,7 @@ impl TranscriptView {
         let annotations_reveal = self
             .disclosures
             .progress(RevealKey::Annotation(index), Instant::now());
+
         // The quotations open a rounded bubble, and a clip box is a rectangle,
         // so they fade in place rather than growing by height: squaring off
         // the corner the bubble is known by would cost more than the height
@@ -179,6 +184,7 @@ impl TranscriptView {
         let annotations_shown =
             self.disclosures.annotation_expanded(index) && annotations_reveal > 0.0;
         let annotations_disclosing = self.disclosures.is_disclosing(RevealKey::Annotation(index));
+
         let annotations = parsed.as_ref().and_then(|parsed| {
             (!parsed.annotations.is_empty()).then(|| {
                 let action_label = if annotations_disclosing {
@@ -186,6 +192,7 @@ impl TranscriptView {
                 } else {
                     i18n("agent-transcript-annotations-expand")
                 };
+
                 let content = annotations_shown.then(|| {
                     v_flex()
                         .w_full()
@@ -283,6 +290,7 @@ impl TranscriptView {
                     .children(content)
             })
         });
+
         let message = div()
             // The width cap lives on the column below, which has a definite
             // width to take a fraction of. A fraction here would resolve
@@ -345,6 +353,7 @@ impl TranscriptView {
     /// the message was being written.
     fn render_entry_images(&self, index: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
         let images = &self.items.get(index)?.images;
+
         if images.is_empty() {
             return None;
         }
@@ -388,6 +397,7 @@ impl TranscriptView {
                         })
                         .on_click(cx.listener({
                             let image = image.clone();
+
                             move |this, _, _, cx| {
                                 this.zoom_image(image.clone(), Some(placed.get()), cx)
                             }

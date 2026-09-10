@@ -9,6 +9,7 @@ const fn hex(s: &str) -> ColorArray {
     let r = (nibble(b[1]) << 4 | nibble(b[2])) as f32 / 255.0;
     let g = (nibble(b[3]) << 4 | nibble(b[4])) as f32 / 255.0;
     let bl = (nibble(b[5]) << 4 | nibble(b[6])) as f32 / 255.0;
+
     [r, g, bl, 1.0]
 }
 
@@ -24,6 +25,7 @@ const fn nibble(c: u8) -> u8 {
 #[inline]
 pub fn background() -> ColorComposition {
     let color = hex("#0F0D0E");
+
     (
         color,
         render_types::Color {
@@ -114,30 +116,37 @@ pub fn white() -> ColorArray {
 pub fn default_light_black() -> ColorArray {
     hex("#6B6B6B")
 }
+
 #[inline]
 pub fn default_light_blue() -> ColorArray {
     hex("#82B8C8")
 }
+
 #[inline]
 pub fn default_light_cyan() -> ColorArray {
     hex("#93D3C3")
 }
+
 #[inline]
 pub fn default_light_green() -> ColorArray {
     hex("#AAC474")
 }
+
 #[inline]
 pub fn default_light_magenta() -> ColorArray {
     hex("#C28CB8")
 }
+
 #[inline]
 pub fn default_light_red() -> ColorArray {
     hex("#C55555")
 }
+
 #[inline]
 pub fn default_light_white() -> ColorArray {
     hex("#F8F8F8")
 }
+
 #[inline]
 pub fn default_light_yellow() -> ColorArray {
     hex("#FECA88")
@@ -167,23 +176,28 @@ pub fn selection_background() -> ColorArray {
 pub fn search_match_background() -> ColorArray {
     hex("#44C9F0")
 }
+
 #[inline]
 pub fn search_match_foreground() -> ColorArray {
     [1., 1., 1., 1.]
 }
+
 #[inline]
 pub fn search_focused_match_background() -> ColorArray {
     hex("#E6A003")
 }
+
 #[inline]
 pub fn search_focused_match_foreground() -> ColorArray {
     [1., 1., 1., 1.]
 }
+
 #[inline]
 pub fn hint_foreground() -> ColorArray {
     // Dark text color (#181818)
     hex("#181818")
 }
+
 #[inline]
 pub fn hint_background() -> ColorArray {
     // Orange background color (#f4bf75)

@@ -151,7 +151,9 @@ impl From<&str> for CellText {
     fn from(s: &str) -> Self {
         if s.len() <= 22 {
             let mut buf = [0u8; 22];
+
             buf[..s.len()].copy_from_slice(s.as_bytes());
+
             CellText(CellTextRepr::Inline {
                 len: s.len() as u8,
                 buf,
@@ -174,6 +176,7 @@ impl From<String> for CellText {
 
 impl ops::Deref for CellText {
     type Target = str;
+
     fn deref(&self) -> &str {
         self.as_str()
     }

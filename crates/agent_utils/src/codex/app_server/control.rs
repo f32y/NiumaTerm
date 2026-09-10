@@ -52,6 +52,7 @@ impl ControlState {
     pub(super) fn request_ids(&self) -> Vec<u64> {
         self.pending.keys().copied().collect()
     }
+
     pub(super) fn alloc_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
@@ -63,11 +64,13 @@ impl ControlState {
         let id = message["id"]
             .as_u64()
             .filter(|id| *id >= FIRST_TURN_RPC_ID)?;
+
         let operation = match method {
             "thread/name/set" => ControlOperation::ThreadName,
             _ if message["params"]["threadId"].is_string() => ControlOperation::ThreadRequest,
             _ => ControlOperation::Other,
         };
+
         Some((id, operation))
     }
 

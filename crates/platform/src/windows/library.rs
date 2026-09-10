@@ -10,13 +10,16 @@ use crate::library::LibrarySymbol;
 
 pub(crate) unsafe fn load(path: &Path) -> io::Result<NonNull<c_void>> {
     let mut name: Vec<u16> = path.as_os_str().encode_wide().collect();
+
     if name.contains(&0) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "library path contains a NUL",
         ));
     }
+
     name.push(0);
+
     // SAFETY: the caller accepts the module's initializers; the terminated
     // path buffer remains valid throughout the native call.
     NonNull::new(unsafe { LoadLibraryW(name.as_ptr()) }).ok_or_else(io::Error::last_os_error)

@@ -28,6 +28,7 @@ pub fn hex_decode(hex: &str) -> Option<Vec<u8>> {
     if !hex.len().is_multiple_of(2) {
         return None;
     }
+
     (0..hex.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
@@ -43,6 +44,7 @@ impl AuthorizedDevices {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(e),
         };
+
         Ok(Self { path, entries })
     }
 
@@ -53,22 +55,28 @@ impl AuthorizedDevices {
 
     pub fn add(&mut self, name: &str, public_key: &[u8]) -> io::Result<()> {
         let hex = hex_encode(public_key);
+
         // Re-pairing the same device just refreshes its name.
         self.entries.retain(|d| d.public_key != hex);
         self.entries.push(DeviceEntry {
             name: name.to_owned(),
             public_key: hex,
         });
+
         self.save()
     }
 
     pub fn remove(&mut self, public_key_hex: &str) -> io::Result<bool> {
         let before = self.entries.len();
+
         self.entries.retain(|d| d.public_key != public_key_hex);
+
         let removed = self.entries.len() != before;
+
         if removed {
             self.save()?;
         }
+
         Ok(removed)
     }
 
@@ -80,6 +88,7 @@ impl AuthorizedDevices {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
+
         fs::write(
             &self.path,
             serde_json::to_vec_pretty(&self.entries).expect("serializable"),

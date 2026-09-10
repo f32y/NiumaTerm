@@ -33,6 +33,7 @@ use crate::terminal::style::{Style, StyleFlags, StyleId, StyleSet};
 /// synthesizing unsupported styling.
 pub(crate) fn style_from_snapshot(s: &SnapshotStyle) -> Style {
     let mut flags = StyleFlags::empty();
+
     flags.set(StyleFlags::BOLD, s.bold);
     flags.set(StyleFlags::ITALIC, s.italic);
     flags.set(StyleFlags::DIM, s.faint);
@@ -222,6 +223,7 @@ impl RenderBuffer {
         if x >= self.cols || y >= self.rows {
             return Square::default();
         }
+
         self.grid[y][Column(x)]
     }
 

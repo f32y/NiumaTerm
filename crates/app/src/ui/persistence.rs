@@ -53,13 +53,16 @@ fn launch_with_profile(
     cx: &mut impl AppContext,
 ) -> (TabState, String) {
     let mut tab_state = tab_state.unwrap_or_default();
+
     if tab_state.shell.is_none() {
         tab_state.shell = default_profile.0;
         tab_state.args = default_profile.1;
     }
+
     let profile_name = cx.read_global(|settings: &AppSettings, _| {
         settings.profile_name_for_command(tab_state.shell.as_deref(), &tab_state.args)
     });
+
     (tab_state, profile_name)
 }
 
@@ -75,6 +78,7 @@ fn resolve_restored_launch(state: &mut TabState, settings: &AppSettings) {
             .iter()
             .any(|p| p.shell.trim().eq_ignore_ascii_case(shell))
     });
+
     if !keep {
         let (shell, args) = settings.default_profile_command();
         state.shell = shell;
@@ -130,7 +134,9 @@ fn pane_node_state(
     match node {
         PaneNode::Leaf { pane, .. } => {
             let mut state = pane.read(cx).tab_state();
+
             normalize_saved_launch(&mut state, default_profile);
+
             PaneNodeState::Leaf {
                 shell: state.shell,
                 args: state.args,
@@ -145,12 +151,14 @@ fn pane_node_state(
         } => {
             let sizes = state.read(cx).sizes().clone();
             let total: f32 = sizes.iter().map(|size| size.as_f32()).sum();
+
             let ratios = if sizes.len() == children.len() && total > 0.0 {
                 sizes.iter().map(|size| size.as_f32() / total).collect()
             } else {
                 // Sizes not laid out yet (tab never shown): equal split.
                 vec![1.0 / children.len() as f32; children.len()]
             };
+
             PaneNodeState::Split {
                 axis: axis_to_state(*axis),
                 ratios,
@@ -187,11 +195,13 @@ pub(super) fn default_session(
     let surface_id = Shell::alloc_id(next_id);
     let pane = spawn_default_pane(cx, surface_id, default_profile, spawn_cwd);
     let title = pane.read(cx).profile_name().to_string();
+
     let tabs = TabManager::new(
         TabSurface::Live(TerminalLayout::new_leaf(PaneId(surface_id), pane)),
         TabId(surface_id),
         title,
     );
+
     let workspace_id = Shell::alloc_id(next_id);
 
     WorkspaceManager::new(
@@ -231,14 +241,17 @@ pub(super) fn restore_session(
         restored_count += 1;
 
         let workspace_id = WorkspaceId(Shell::alloc_id(next_id));
+
         let name = if name.trim().is_empty() {
             i18n("workspace-restored-default-name").replace("{count}", &restored_count.to_string())
         } else {
             name
         };
+
         let cwd = cwd
             .filter(|cwd| !cwd.trim().is_empty())
             .unwrap_or_else(|| ".".to_string());
+
         // A saved directory restores whether or not it currently resolves:
         // a disconnected drive or a temporarily missing tree would
         // otherwise silently drop the workspace's own tabs and layout. The
@@ -301,11 +314,13 @@ pub(super) fn materialize_active_tab(
     // path below rather than losing the tab.
     if let Some(kind) = state.agent.as_deref().and_then(AgentKind::from_id) {
         let workspace = agent_workspace(workspaces.active_roots());
+
         let profile = restored_agent_profile(
             state.agent_profile.as_deref(),
             kind,
             cx.global::<AppSettings>(),
         );
+
         let pane = cx.new(|cx| AgentPane::new(profile, workspace, window, cx));
 
         Shell::watch_agent_tab(&pane, cx);
@@ -326,6 +341,7 @@ pub(super) fn materialize_active_tab(
 
             let (launch, profile_name) =
                 launch_with_profile(Some(state), default_profile.clone(), cx);
+
             let pane = match TerminalPane::spawn(cx, surface_id, launch, profile_name) {
                 Ok(pane) => {
                     Shell::watch_pane(&pane, cx);
@@ -412,6 +428,7 @@ fn restore_tabs(
 
     for (pane, id, name, default_title) in restored {
         tab_manager.new_tab(pane, id, default_title);
+
         if let Some(name) = name {
             tab_manager.rename(id, name);
         }
@@ -450,6 +467,7 @@ fn restore_pane_node(
 
             // Spawn retries without the saved cwd internally.
             let (launch, profile_name) = launch_with_profile(Some(launch), (None, Vec::new()), cx);
+
             match TerminalPane::spawn(cx, surface_id, launch, profile_name) {
                 Ok(pane) => {
                     Shell::watch_pane(&pane, cx);
@@ -476,6 +494,7 @@ fn restore_pane_node(
                 1 => built.into_iter().next(),
                 _ => {
                     let state = cx.new(|_| ResizableState::default());
+
                     // `restored_split` drops the ratios when their length
                     // no longer matches (a leaf was skipped).
                     Some(PaneTree::restored_split(
@@ -508,6 +527,7 @@ pub(super) fn spawn_default_pane(
     });
 
     let (launch, profile_name) = launch_with_profile(launch, default_profile.clone(), cx);
+
     let spawned = TerminalPane::spawn(cx, surface_id, launch, profile_name).or_else(|error| {
         warn!("spawn with workspace cwd/profile failed, retrying default: {error}");
         let (launch, profile_name) = launch_with_profile(None, default_profile, cx);
@@ -518,7 +538,9 @@ pub(super) fn spawn_default_pane(
         Ok(pane) => pane,
         Err(error) => {
             warn!("default profile failed, retrying built-in shell: {error}");
+
             let (launch, profile_name) = launch_with_profile(None, (None, Vec::new()), cx);
+
             match TerminalPane::spawn(cx, surface_id, launch, profile_name) {
                 Ok(pane) => pane,
                 Err(error) => {
@@ -602,8 +624,10 @@ fn session_state(
                         // from a split one.
                         TabSurface::Live(tree) => {
                             let mut state = tree.focused_pane().read(cx).tab_state();
+
                             state.panes = (!tree.is_single_leaf())
                                 .then(|| pane_node_state(tree.root(), &default_profile, cx));
+
                             state
                         }
                         // Agent conversations are not persisted (the
@@ -619,9 +643,11 @@ fn session_state(
                         // exists so the match stays exhaustive.
                         TabSurface::Settings => TabState::default(),
                     };
+
                     normalize_saved_launch(&mut state, &default_profile);
                     state.name = tab.user_title().map(str::to_owned);
                     state.user_named = state.name.is_some();
+
                     state
                 })
                 .collect(),
@@ -699,7 +725,9 @@ mod launch_resolution_tests {
     fn default_profile_pane_saves_as_follow_default() {
         let default = (Some("pwsh.exe".to_string()), vec!["-NoLogo".to_string()]);
         let mut state = tab(Some("pwsh.exe"), &["-NoLogo"]);
+
         normalize_saved_launch(&mut state, &default);
+
         assert_eq!(state.shell, None);
         assert!(state.args.is_empty());
     }
@@ -708,7 +736,9 @@ mod launch_resolution_tests {
     fn pinned_pane_keeps_its_saved_command() {
         let default = (Some("pwsh.exe".to_string()), Vec::new());
         let mut state = tab(Some("wsl.exe"), &["-d", "Ubuntu"]);
+
         normalize_saved_launch(&mut state, &default);
+
         assert_eq!(state.shell.as_deref(), Some("wsl.exe"));
         assert_eq!(state.args, vec!["-d".to_string(), "Ubuntu".to_string()]);
     }
@@ -717,7 +747,9 @@ mod launch_resolution_tests {
     fn restore_resolves_none_to_default_profile() {
         let settings = settings_with_pwsh_default();
         let mut state = tab(None, &[]);
+
         resolve_restored_launch(&mut state, &settings);
+
         assert_eq!(
             state.shell.as_deref(),
             Some(r"C:\Program Files\PowerShell\7\pwsh.exe")
@@ -730,11 +762,14 @@ mod launch_resolution_tests {
         // The former built-in default is no longer in the profile list: the saved
         // pin is stale and must follow the current default profile instead.
         let settings = settings_with_pwsh_default();
+
         let mut state = tab(
             Some(r"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe"),
             &[],
         );
+
         resolve_restored_launch(&mut state, &settings);
+
         assert_eq!(
             state.shell.as_deref(),
             Some(r"C:\Program Files\PowerShell\7\pwsh.exe")
@@ -745,7 +780,9 @@ mod launch_resolution_tests {
     fn restore_keeps_shell_still_present_in_profiles() {
         let settings = settings_with_pwsh_default();
         let mut state = tab(Some("WSL.EXE"), &["-d", "Ubuntu"]);
+
         resolve_restored_launch(&mut state, &settings);
+
         assert_eq!(state.shell.as_deref(), Some("WSL.EXE"));
         assert_eq!(state.args, vec!["-d".to_string(), "Ubuntu".to_string()]);
     }

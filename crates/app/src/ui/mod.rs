@@ -24,6 +24,7 @@ pub(crate) fn font_with_default_fallback(family: impl Into<SharedString>) -> Fon
     let mut font = font(family);
 
     font.fallbacks = Some(DEFAULT_FONT_FALLBACKS.clone());
+
     font
 }
 

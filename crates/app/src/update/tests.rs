@@ -41,6 +41,7 @@ impl FileUserSessionSource for ScriptedSessionSource {
 
     fn open(&self, _path: &Path) -> Result<Self::Session, RestartManagerError> {
         self.state.lock().events.push("open");
+
         Ok(ScriptedSession {
             state: self.state.clone(),
         })
@@ -50,7 +51,9 @@ impl FileUserSessionSource for ScriptedSessionSource {
 impl FileUserSession for ScriptedSession {
     fn file_usage(&self) -> Result<FileUsage, RestartManagerError> {
         let mut state = self.state.lock();
+
         state.events.push("list");
+
         state
             .usage
             .pop_front()
@@ -63,7 +66,9 @@ impl FileUserSession for ScriptedSession {
 
     fn shutdown(&self) -> Result<(), RestartManagerError> {
         let mut state = self.state.lock();
+
         state.events.push("shutdown");
+
         match state.shutdown_error {
             Some(code) => Err(RestartManagerError::Windows {
                 operation: Operation::ShutdownApplications,
@@ -75,7 +80,9 @@ impl FileUserSession for ScriptedSession {
 
     fn restart(&self) -> Result<(), RestartManagerError> {
         let mut state = self.state.lock();
+
         state.events.push("restart");
+
         match state.restart_error {
             Some(code) => Err(RestartManagerError::Windows {
                 operation: Operation::RestartApplications,
@@ -123,7 +130,9 @@ fn application(name: &str, process_id: u32, restartable: bool) -> AffectedApplic
 fn scratch(name: &str) -> PathBuf {
     let directory = env::temp_dir().join(format!("nmt-update-flow-{}-{name}", process::id()));
     let _ = fs::remove_dir_all(&directory);
+
     fs::create_dir_all(&directory).unwrap();
+
     directory
 }
 
@@ -135,6 +144,7 @@ fn a_higher_release_supersedes_a_lower_one() {
 
     assert!(!supersedes(&version("v1.3.0"), &undated("v1.2.0")));
     assert!(!supersedes(&version("v1.2.0"), &undated("v1.2.0")));
+
     // Component order, which a lexical comparison of the labels would get
     // wrong once a number reaches two digits.
     assert!(!supersedes(&version("v1.10.0"), &undated("v1.9.0")));
@@ -174,11 +184,14 @@ fn a_release_older_than_a_running_nightly_is_not_offered() {
     // revision it was built from, so its lower number is not a downgrade to
     // offer.
     assert!(!supersedes(&installed, &published_on("v1.2.3", 20260814)));
+
     // A release cut the same day is the ambiguous case, and it is the one a
     // build made from that day's tree keeps being offered.
     assert!(!supersedes(&installed, &published_on("v1.2.3", 20260822)));
+
     // A later day carries revisions the nightly cannot have.
     assert!(supersedes(&installed, &published_on("v1.2.3", 20260823)));
+
     // With nothing to place it by, it cannot be shown to be ahead.
     assert!(!supersedes(&installed, &undated("v1.2.3")));
 }
@@ -280,6 +293,7 @@ fn the_latest_endpoint_answers_the_stable_channel() {
         "draft": false, "prerelease": false }"#;
 
     let release = select_latest(published).unwrap().unwrap();
+
     assert_eq!(release.label, "v1.3.0");
     assert_eq!(release.page_url, "https://example.invalid/r3");
 
@@ -287,6 +301,7 @@ fn the_latest_endpoint_answers_the_stable_channel() {
     // whether its tag is one this build can be placed against.
     let predates_the_naming = r#"{ "tag_name": "build-4", "html_url": "https://example.invalid/b4",
         "draft": false, "prerelease": false }"#;
+
     assert_eq!(select_latest(predates_the_naming).unwrap(), None);
 
     // A repository with no full release yet has nothing to render here, and a
@@ -301,6 +316,7 @@ fn the_latest_endpoint_answers_the_stable_channel() {
 fn a_publishing_timestamp_is_reduced_to_a_comparable_date() {
     let dated = r#"{ "tag_name": "v1.3.0", "html_url": "https://example.invalid/r3",
         "draft": false, "prerelease": false, "published_at": "2026-08-14T09:12:33Z" }"#;
+
     assert_eq!(
         select_latest(dated).unwrap().unwrap().published,
         Some(20260814)
@@ -310,12 +326,14 @@ fn a_publishing_timestamp_is_reduced_to_a_comparable_date() {
     // rather than dated from whatever sat at those offsets.
     let malformed = r#"{ "tag_name": "v1.3.0", "html_url": "https://example.invalid/r3",
         "draft": false, "prerelease": false, "published_at": "20260814T09:12:33Z" }"#;
+
     assert_eq!(select_latest(malformed).unwrap().unwrap().published, None);
 
     // A release that was never published carries a null timestamp, and the
     // recorded responses carry none at all.
     let null = r#"{ "tag_name": "v1.3.0", "html_url": "https://example.invalid/r3",
         "draft": false, "prerelease": false, "published_at": null }"#;
+
     assert_eq!(select_latest(null).unwrap().unwrap().published, None);
 }
 
@@ -325,14 +343,18 @@ fn file_use_results_distinguish_clear_used_unknown_and_reboot_states() {
         applications: Vec::new(),
         reboot_reasons: RebootReasons::default(),
     };
+
     assert_eq!(classify_file_usage(Ok(clear)).unwrap(), None);
 
     let explorer = application("Windows Explorer", 101, true);
+
     let used = FileUsage {
         applications: vec![explorer.clone()],
         reboot_reasons: RebootReasons::default(),
     };
+
     let prompt = classify_file_usage(Ok(used)).unwrap().unwrap();
+
     assert_eq!(prompt.reason, FileUsePromptReason::InUse);
     assert_eq!(prompt.applications, slice::from_ref(&explorer));
 
@@ -343,6 +365,7 @@ fn file_use_results_distinguish_clear_used_unknown_and_reboot_states() {
             ..Default::default()
         },
     };
+
     assert_eq!(
         classify_file_usage(Ok(reboot)).unwrap().unwrap().reason,
         FileUsePromptReason::RebootRequired
@@ -352,6 +375,7 @@ fn file_use_results_distinguish_clear_used_unknown_and_reboot_states() {
         operation: Operation::ListApplications,
         code: 5,
     };
+
     assert!(matches!(
         classify_file_usage(Err(error)),
         Err(RestartManagerError::Windows {
@@ -398,6 +422,7 @@ fn duplicate_application_names_include_process_identifiers() {
 #[test]
 fn close_preparation_uses_a_fresh_session_application_list() {
     let current = application("Current host", 22, true);
+
     let state = Arc::new(Mutex::new(CloseState {
         usage: VecDeque::from([Ok(FileUsage {
             applications: vec![current.clone()],
@@ -407,6 +432,7 @@ fn close_preparation_uses_a_fresh_session_application_list() {
         restart_error: None,
         events: Vec::new(),
     }));
+
     let source = ScriptedSessionSource {
         state: state.clone(),
     };
@@ -419,12 +445,14 @@ fn close_preparation_uses_a_fresh_session_application_list() {
         }
         ClosePreparation::Clear | ClosePreparation::Prompt(_) => panic!("expected shutdown"),
     }
+
     assert_eq!(state.lock().events, ["open", "list", "shutdown"]);
 }
 
 #[test]
 fn failed_shutdown_restarts_before_remaining_users_are_reported() {
     let current = application("Current host", 22, true);
+
     let state = Arc::new(Mutex::new(CloseState {
         usage: VecDeque::from([
             Ok(FileUsage {
@@ -440,6 +468,7 @@ fn failed_shutdown_restarts_before_remaining_users_are_reported() {
         restart_error: None,
         events: Vec::new(),
     }));
+
     let source = ScriptedSessionSource {
         state: state.clone(),
     };
@@ -455,6 +484,7 @@ fn failed_shutdown_restarts_before_remaining_users_are_reported() {
             panic!("expected remaining users")
         }
     }
+
     assert_eq!(
         state.lock().events,
         ["open", "list", "shutdown", "restart", "list"]
@@ -497,7 +527,9 @@ fn cancelling_a_staged_update_replaces_nothing_and_restores_availability(cx: &mu
 fn continuing_applies_the_plan_before_reporting_relaunch_failure(cx: &mut TestAppContext) {
     let staging = scratch("continue-staging");
     let install_root = scratch("continue-install");
+
     fs::write(staging.join(install::SHELL_EXTENSION_DLL), "new dll").unwrap();
+
     let plan = install::plan(&staging, &install_root);
     let release = undated("v2.0.0");
     let window = cx.add_empty_window();

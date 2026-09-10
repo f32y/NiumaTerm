@@ -66,6 +66,7 @@ pub(crate) fn schedule_close_actions(
                 tracing::warn!("deepseek session close cleanup failed: {failure}");
             }
         });
+
     if let Err(error) = spawn {
         tracing::warn!("deepseek session close cleanup could not start: {error}");
     }

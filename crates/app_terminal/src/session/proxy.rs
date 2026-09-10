@@ -36,9 +36,11 @@ impl TerminalEventProxy {
     /// render they belong to. Empty in steady state.
     fn flush_staged_blocks(&self) {
         let batch = mem::take(&mut *self.shared.staged_blocks.lock());
+
         if batch.is_empty() {
             return;
         }
+
         graphics::prune_frozen_images(&self.shared.frozen_images, &batch);
         self.shared.block_store.lock().apply(batch);
     }
@@ -93,6 +95,7 @@ impl EventListener for TerminalEventProxy {
 
             return;
         }
+
         let host = match event {
             TerminalEvent::Title(t) | TerminalEvent::TitleWithSubtitle(t, _) => HostEvent::Title(t),
             TerminalEvent::ResetTitle => HostEvent::Title(String::new()),

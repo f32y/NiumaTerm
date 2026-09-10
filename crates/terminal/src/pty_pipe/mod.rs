@@ -491,6 +491,7 @@ where
         let (orig_escaped, cursor_vis_at_decision) =
             if vt_trace::enabled() && (repaint_window || was_rewritten || echo_pending_at_entry) {
                 let orig = input;
+
                 (
                     escape_bytes(&orig[..orig.len().min(240)]),
                     engine.snapshot().ok().map(|s| s.cursor_visible()),
@@ -626,6 +627,7 @@ where
                     Ok(()) => engine.take_image_deltas(self.back_buffer.placements()),
                     Err(_) => (Vec::new(), Vec::new()),
                 };
+
                 (Some(capture), image_delta)
             } else {
                 (None, (Vec::new(), Vec::new()))
@@ -905,6 +907,7 @@ where
                 }
             }
         }
+
         Ok(())
     }
 
@@ -1033,6 +1036,7 @@ where
             // Don't do I/O on a dead PTY (Unix HUP / `is_read_closed`).
             #[cfg(unix)]
             let skip_io = hup;
+
             #[cfg(not(unix))]
             let skip_io = false;
 

@@ -35,6 +35,7 @@ extern "system" fn child_exit_callback(ctx: *mut c_void, timed_out: bool) {
     // watcher (the callback never fires, nobody frees the allocation).
     let ctx = unsafe { &*(ctx as *const CallbackCtx) };
     let _ = ctx.event_tx.send(ChildEvent::Exited);
+
     ctx.soft.set_ready();
 }
 
@@ -59,6 +60,7 @@ impl ChildExitWatcher {
         let soft = SoftReady::new();
 
         let mut wait_handle: HANDLE = ptr::null_mut();
+
         let ctx = Box::into_raw(Box::new(CallbackCtx {
             event_tx,
             soft: soft.clone(),

@@ -18,6 +18,7 @@ fn scrollbar_opacity_fades_after_linger() {
         Some(SCROLLBAR_AUTO_HIDE_DELAY + SCROLLBAR_FADE_OUT_DURATION / 2),
     )
     .unwrap();
+
     assert!(fading > 0.0 && fading < 1.0);
 
     assert_eq!(

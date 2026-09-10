@@ -150,6 +150,7 @@ pub fn process_group_count(pgid: c_int) -> usize {
     // SAFETY: a null buffer with zero capacity is the documented way to ask
     // for the required size, and the call only reads the group id.
     let bytes = unsafe { sys::proc_listpgrppids(pgid, ptr::null_mut(), 0) };
+
     if bytes <= 0 {
         return 0;
     }
@@ -162,6 +163,7 @@ pub fn macos_process_name(pid: c_int) -> String {
 
     if pid >= 0 {
         let proc_path = get_proc_path(pid);
+
         name = Path::new(&proc_path)
             .file_name()
             .unwrap_or(OsStr::new(""))
@@ -175,6 +177,7 @@ pub fn macos_process_name(pid: c_int) -> String {
 
 fn get_proc_path(pid: i32) -> String {
     let mut pathbuf: Vec<u8> = Vec::with_capacity(4 * 1024); // 4 * MAXPATHLEN
+
     #[allow(unused)]
     let mut ret: i32 = 0;
     let mut out = String::new();
@@ -191,9 +194,11 @@ fn get_proc_path(pid: i32) -> String {
         unsafe {
             pathbuf.set_len(ret as usize);
         }
+
         out = String::from_utf8(pathbuf)
             .unwrap_or("An error occurred while retrieving process path".to_string())
     }
+
     out
 }
 
@@ -204,6 +209,7 @@ pub fn macos_cwd(pid: c_int) -> Result<PathBuf, Error> {
 
     let c_str = unsafe {
         let pidinfo_size = sys::proc_pidinfo(pid, sys::PROC_PIDVNODEPATHINFO, 0, info_ptr, size);
+
         match pidinfo_size {
             c if c < 0 => return Err(io::Error::last_os_error().into()),
             s if s != size => return Err(Error::InvalidSize),

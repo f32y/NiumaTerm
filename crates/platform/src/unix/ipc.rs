@@ -30,6 +30,7 @@ fn runtime_dir() -> io::Result<PathBuf> {
 
     fs::create_dir_all(&directory)?;
     fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+
     Ok(directory)
 }
 
@@ -79,6 +80,7 @@ pub fn try_become_primary(testing: bool) -> bool {
     }
 
     let error = io::Error::last_os_error();
+
     if matches!(
         error.raw_os_error(),
         Some(libc::EWOULDBLOCK) | Some(libc::EINTR)
@@ -87,6 +89,7 @@ pub fn try_become_primary(testing: bool) -> bool {
     }
 
     warn!("flock failed ({error}); skipping single-instance");
+
     true
 }
 
@@ -145,6 +148,7 @@ pub fn spawn_server(testing: bool, mut on_message: impl FnMut(Vec<u8>) -> bool +
                 let Ok(stream) = stream else { continue };
 
                 let mut bytes = Vec::new();
+
                 if Read::take(stream, (MAX_MESSAGE_BYTES + 1) as u64)
                     .read_to_end(&mut bytes)
                     .is_err()
@@ -152,6 +156,7 @@ pub fn spawn_server(testing: bool, mut on_message: impl FnMut(Vec<u8>) -> bool +
                 {
                     continue;
                 }
+
                 if !on_message(bytes) {
                     return;
                 }

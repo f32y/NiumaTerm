@@ -63,14 +63,17 @@ impl NetPty {
         let drain_read_ready = read_ready.clone();
         let drain_child_ready = child_ready.clone();
         let drain_exited = Arc::clone(&exited);
+
         thread::Builder::new()
             .name("net-pty-drain".into())
             .spawn(move || {
                 let mut overflowed = false;
+
                 while let Ok(event) = output.recv() {
                     match event {
                         SessionByteEvent::Output(bytes) => {
                             let dropped = push_bounded(&mut drain_buffer.lock(), bytes);
+
                             if dropped && !overflowed {
                                 overflowed = true;
                                 warn!(
@@ -78,11 +81,13 @@ impl NetPty {
                                      dropping the oldest buffered bytes"
                                 );
                             }
+
                             drain_read_ready.set_ready();
                         }
                         SessionByteEvent::Exited => break,
                     }
                 }
+
                 // The channel closing (host gone / session ended) is a child exit.
                 drain_exited.store(true, Ordering::SeqCst);
                 drain_child_ready.set_ready();
@@ -112,10 +117,13 @@ impl NetPty {
 /// [`MAX_BUFFERED_BYTES`]. Reports whether anything had to be discarded.
 fn push_bounded(queue: &mut VecDeque<u8>, bytes: Vec<u8>) -> bool {
     queue.extend(bytes);
+
     let Some(excess) = queue.len().checked_sub(MAX_BUFFERED_BYTES) else {
         return false;
     };
+
     queue.drain(..excess);
+
     excess > 0
 }
 
@@ -127,6 +135,7 @@ pub struct NetReader {
 impl Read for NetReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut queue = self.buffer.lock();
+
         if queue.is_empty() {
             // Drained: clear the level flag so the loop can block until the
             // drain thread signals more data. `Ok(0)` means "no more readable",
@@ -134,13 +143,17 @@ impl Read for NetReader {
             self.read_ready.clear();
             return Ok(0);
         }
+
         let n = queue.len().min(buf.len());
+
         for slot in buf.iter_mut().take(n) {
             *slot = queue.pop_front().expect("len checked");
         }
+
         if queue.is_empty() {
             self.read_ready.clear();
         }
+
         Ok(n)
     }
 }
@@ -154,6 +167,7 @@ impl Write for NetWriter {
         // The network sink never blocks; the send is fire-and-forget (a dropped
         // channel just means the session is tearing down).
         self.input.send_input(buf.to_vec());
+
         Ok(buf.len())
     }
 
@@ -176,9 +190,11 @@ impl ProcessReadWrite for NetPty {
         self.read_token = token.next().expect("read token");
         self.write_token = token.next().expect("write token");
         self.child_token = token.next().expect("child token");
+
         // The drain thread signals the loop through the same waker ConPTY uses.
         self.read_ready.set_waker(waker.clone());
         self.child_ready.set_waker(waker.clone());
+
         Ok(())
     }
 
@@ -208,16 +224,20 @@ impl ProcessReadWrite for NetPty {
 
     fn drain_ready(&self) -> Vec<Token> {
         let mut ready = Vec::with_capacity(3);
+
         if self.read_ready.is_ready() {
             ready.push(self.read_token);
         }
+
         // Writability is always signalled: the network sink never blocks, so
         // queued input is flushed on the next wakeup. Excluded from
         // `has_ready` below so it never forces a busy-spin.
         ready.push(self.write_token);
+
         if self.child_ready.is_ready() {
             ready.push(self.child_token);
         }
+
         ready
     }
 

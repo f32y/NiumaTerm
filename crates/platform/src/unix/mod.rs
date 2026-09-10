@@ -96,6 +96,7 @@ fn default_shell_command(shell: &str) {
     let command_pointer = command_shell_string.as_ptr();
     let args = CString::new("--login").unwrap();
     let args_pointer = args.as_ptr();
+
     unsafe {
         libc::execvp(command_pointer, vec![args_pointer].as_ptr());
     }
@@ -105,6 +106,7 @@ fn default_shell_command(shell: &str) {
 fn default_shell_command(shell: &str) {
     let command_shell_string = CString::new(shell).unwrap();
     let command_pointer = command_shell_string.as_ptr();
+
     unsafe {
         libc::execvp(command_pointer, vec![command_pointer, ptr::null()].as_ptr());
     }
@@ -132,6 +134,7 @@ impl Pty {
 
 impl Deref for Pty {
     type Target = Child;
+
     fn deref(&self) -> &Child {
         &self.child
     }
@@ -150,6 +153,7 @@ impl io::Write for Pty {
             _ => Err(io::Error::last_os_error()),
         }
     }
+
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
@@ -213,6 +217,7 @@ impl ProcessReadWrite for Pty {
             .register(&mut SourceFd(&self.file.as_raw_fd()), self.token, interest)?;
 
         self.signals_token = token.next().unwrap();
+
         poll.registry()
             .register(&mut self.signals, self.signals_token, Interest::READABLE)
     }
@@ -292,6 +297,7 @@ pub fn terminfo_exists(terminfo: &str) -> bool {
 
     if let Ok(prefix) = env::var("PREFIX") {
         let path = PathBuf::from(prefix);
+
         check_path!(path.join("etc/terminfo"));
         check_path!(path.join("lib/terminfo"));
         check_path!(path.join("share/terminfo"));
@@ -407,6 +413,7 @@ impl ShellUser {
             (Ok(user), Ok(home), Ok(shell)) => (user, home, shell),
             (user, home, shell) => {
                 let pw = pw?;
+
                 (
                     user.unwrap_or_else(|_| pw.name.to_owned()),
                     home.unwrap_or_else(|_| pw.dir.to_owned()),
@@ -427,11 +434,13 @@ pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
 /// Create a shell PTY whose child process tree is terminated when it is dropped.
 pub fn create_managed_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
     let pty = create_pty_with_management(options, true)?;
+
     if pty.process_tree().is_none() {
         return Err(Error::other(
             "managed PTY could not contain its child process group",
         ));
     }
+
     Ok(pty)
 }
 
@@ -489,6 +498,7 @@ fn queue_bootstrap(main: libc::c_int, child: libc::c_int, bootstrap: &str) -> Re
     // Hand the session the echo it expects, now that the one write that had to
     // stay invisible is already in the queue.
     let restored = create_termp(true);
+
     // SAFETY: `child` is the pty's terminal side, open for the whole call.
     if unsafe { libc::tcsetattr(child, libc::TCSANOW, &restored) } != 0 {
         return Err(Error::last_os_error());
@@ -511,7 +521,9 @@ fn create_pty_with_management(
         bootstrap,
         ..
     } = options;
+
     let (width, height) = (UNKNOWN_PIXEL_SIZE, UNKNOWN_PIXEL_SIZE);
+
     #[cfg(not(any(target_os = "macos", target_os = "freebsd")))]
     let mut is_controling_terminal = true;
 
@@ -520,13 +532,16 @@ fn create_pty_with_management(
 
     let mut main: libc::c_int = 0;
     let mut child: libc::c_int = 0;
+
     let winsize = Winsize {
         ws_row: rows as libc::c_ushort,
         ws_col: columns as libc::c_ushort,
         ws_xpixel: width as libc::c_ushort,
         ws_ypixel: height as libc::c_ushort,
     };
+
     let mut term = create_termp(true);
+
     if bootstrap.is_some() {
         term.c_lflag &= !libc::ECHO;
     }
@@ -577,6 +592,7 @@ fn create_pty_with_management(
 
             // Check for .hushlogin in home directory
             let hushlogin_path = Path::new(&user.home).join(".hushlogin");
+
             let flags = if hushlogin_path.exists() {
                 "-qflp"
             } else {
@@ -666,6 +682,7 @@ fn create_pty_with_management(
 
     builder.env("USER", user.user);
     builder.env("HOME", user.home);
+
     // Name the terminal to what runs inside it. Startup files branch on this —
     // macOS `/etc/bashrc` sources `/etc/bashrc_$TERM_PROGRAM` — so inheriting
     // the value of whichever terminal launched the app would attach that
@@ -673,6 +690,7 @@ fn create_pty_with_management(
     // `HISTFILE` into its own session store.
     builder.env("TERM_PROGRAM", APP_ID);
     builder.env("TERM", terminal_type());
+
     // Announced rather than inherited for the same reason as `TERM`: the
     // Windows backend declares it on every session it creates, so a Unix child
     // that only sees it when some outer terminal happened to export it would
@@ -684,6 +702,7 @@ fn create_pty_with_management(
         builder.pre_exec(move || {
             // Create a new process group.
             let err = libc::setsid();
+
             if err == -1 {
                 return Err(Error::last_os_error());
             }
@@ -722,11 +741,13 @@ fn create_pty_with_management(
             }
 
             let ptsname: String = tty_ptsname(main).unwrap_or_else(|_| "".to_string());
+
             // `pre_exec` made the child a session leader, so it already leads
             // its own group and attaching only records it.
             let job = manage_process_tree
                 .then(|| KillOnCloseJob::attach(&child_process))
                 .transpose()?;
+
             let child_unix = Child {
                 id: Arc::new(main),
                 ptsname,
@@ -771,12 +792,14 @@ pub fn create_pty_with_fork(
     height: u16,
 ) -> Result<Pty, Error> {
     let mut main = 0;
+
     let winsize = Winsize {
         ws_row: rows as libc::c_ushort,
         ws_col: columns as libc::c_ushort,
         ws_xpixel: width as libc::c_ushort,
         ws_ypixel: height as libc::c_ushort,
     };
+
     let term = create_termp(true);
 
     let mut shell_program = shell;
@@ -806,6 +829,7 @@ pub fn create_pty_with_fork(
     } {
         0 => {
             default_shell_command(shell_program);
+
             Err(Error::other(format!(
                 "forkpty has reach unreachable with {shell_program}"
             )))
@@ -815,6 +839,7 @@ pub fn create_pty_with_fork(
             // Whenever it happens it will just simply shut down the teletyperwriter
             // In the future add an option to check before release the method
             let ptsname: String = tty_ptsname(main).unwrap_or_else(|_| "".to_string());
+
             let child = Child {
                 id: Arc::new(main),
                 ptsname,
@@ -828,6 +853,7 @@ pub fn create_pty_with_fork(
 
             let signals =
                 Signals::new([sigconsts::SIGCHLD]).expect("error preparing signal handling");
+
             Ok(Pty {
                 child,
                 signals,
@@ -869,6 +895,7 @@ unsafe fn set_nonblocking(fd: libc::c_int) {
 
     // SAFETY: the caller guarantees `fd` is a live descriptor this owns.
     let res = unsafe { fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK) };
+
     assert_eq!(res, 0);
 }
 
@@ -902,6 +929,7 @@ impl Child {
     /// change the actual window size, and if not, will not generate a SIGWINCH.
     pub fn set_winsize(&self, winsize_builder: WinsizeBuilder) -> io::Result<()> {
         let winsize: Winsize = winsize_builder.build();
+
         match unsafe { libc::ioctl(**self, TIOCSWINSZ, &winsize as *const _) } {
             -1 => Err(io::Error::last_os_error()),
             _ => Ok(()),
@@ -912,8 +940,10 @@ impl Child {
     /// https://linux.die.net/man/2/waitpid
     pub fn waitpid(&self) -> Result<Option<i32>, String> {
         let mut status = 0 as libc::c_int;
+
         // If WNOHANG was specified in options and there were no children in a waitable state, then waitid() returns 0 immediately and the state of the siginfo_t structure pointed to by infop is unspecified. To distinguish this case from that where a child was in a waitable state, zero out the si_pid field before the call and check for a nonzero value in this field after the call returns.
         let res = unsafe { waitpid(*self.pid, &mut status as *mut libc::c_int, libc::WNOHANG) };
+
         if res <= -1 {
             return Err(String::from("error"));
         }
@@ -934,6 +964,7 @@ pub fn kill_pid(pid: i32) {
 
 impl Deref for Child {
     type Target = libc::c_int;
+
     fn deref(&self) -> &libc::c_int {
         &self.id
     }
@@ -1007,6 +1038,7 @@ fn get_pw_entry(buf: &mut [i8; 1024]) -> Result<Passwd<'_>, Error> {
 
     // Try and read the pw file.
     let uid = unsafe { libc::getuid() };
+
     let status = unsafe {
         libc::getpwuid_r(
             uid,
@@ -1016,6 +1048,7 @@ fn get_pw_entry(buf: &mut [i8; 1024]) -> Result<Passwd<'_>, Error> {
             &mut res,
         )
     };
+
     let entry = unsafe { entry.assume_init() };
 
     if status < 0 {
@@ -1049,6 +1082,7 @@ pub fn tty_ptsname(fd: libc::c_int) -> Result<String, String> {
         let name_ptr = ptsname(fd as *mut _);
         CStr::from_ptr(name_ptr)
     };
+
     let str_slice: &str = c_str.to_str().unwrap();
     let str_buf: String = str_slice.to_owned();
 
@@ -1057,12 +1091,14 @@ pub fn tty_ptsname(fd: libc::c_int) -> Result<String, String> {
 
 pub fn foreground_process_name(main_fd: RawFd, shell_pid: u32) -> String {
     let mut pid = unsafe { libc::tcgetpgrp(main_fd) };
+
     if pid < 0 {
         pid = shell_pid as libc::pid_t;
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "freebsd")))]
     let comm_path = format!("/proc/{pid}/comm");
+
     #[cfg(target_os = "freebsd")]
     let comm_path = format!("/compat/linux/proc/{pid}/comm");
 
@@ -1086,12 +1122,14 @@ pub fn foreground_process_path(
     shell_pid: u32,
 ) -> Result<PathBuf, Box<dyn error::Error>> {
     let mut pid = unsafe { libc::tcgetpgrp(main_fd) };
+
     if pid < 0 {
         pid = shell_pid as libc::pid_t;
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "freebsd")))]
     let link_path = format!("/proc/{pid}/cwd");
+
     #[cfg(target_os = "freebsd")]
     let link_path = format!("/compat/linux/proc/{pid}/cwd");
 
@@ -1111,14 +1149,17 @@ where
     S: AsRef<OsStr>,
 {
     let mut command = Command::new(program);
+
     command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+
     if let Ok(cwd) = foreground_process_path(main_fd, shell_pid) {
         command.current_dir(cwd);
     }
+
     unsafe {
         command
             .pre_exec(|| {

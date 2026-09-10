@@ -53,15 +53,19 @@ impl CodeTranscriptCache {
         if let Some(cached) = self.entries.get_mut(&index) {
             if cached.dirty {
                 let source = CodeSource::from_item(item).expect("code transcript item");
+
                 cached
                     .view
                     .update(cx, |view, cx| view.set_source(source, cx));
                 cached.dirty = false;
             }
+
             return cached.view.clone();
         }
+
         let source = CodeSource::from_item(item).expect("code transcript item");
         let view = cx.new(|cx| CodeView::new(source, cx));
+
         let observation = cx.observe(&view, move |transcript, _, cx| {
             // Asynchronous normalization can alter row height. Remeasure the
             // corresponding visible work row when its prepared text arrives.
@@ -70,8 +74,10 @@ impl CodeTranscriptCache {
             ) {
                 transcript.transcript_list.remeasure_items(row..row + 1);
             }
+
             cx.notify();
         });
+
         self.entries.insert(
             index,
             CachedCode {
@@ -80,6 +86,7 @@ impl CodeTranscriptCache {
                 _observation: observation,
             },
         );
+
         view
     }
 
@@ -98,6 +105,7 @@ impl CodeTranscriptCache {
     pub(crate) fn drop_row(&mut self, index: usize) {
         self.entries.remove(&index);
     }
+
     pub(crate) fn clear(&mut self) {
         self.entries.clear();
     }
@@ -116,9 +124,11 @@ pub(crate) struct CodeView {
 impl CodeView {
     fn new(source: CodeSource, cx: &mut Context<Self>) -> Self {
         let size = source.output.len() + source.command.as_ref().map_or(0, String::len);
+
         // Short content has its final layout on the first frame. Larger
         // output starts with a fixed-height viewport while it is prepared.
         let prepared = (size < 16 * 1024).then(|| Arc::new(PreparedCode::new(&source)));
+
         let mut view = Self {
             source: Arc::new(source),
             revision: 0,
@@ -128,7 +138,9 @@ impl CodeView {
             virtual_scroll: UniformListScrollHandle::default(),
             parse_task: None,
         };
+
         view.start_parse(cx);
+
         view
     }
 
@@ -136,8 +148,10 @@ impl CodeView {
         if self.source.as_ref() == &source {
             return;
         }
+
         self.source = Arc::new(source);
         self.revision += 1;
+
         if self.parse_task.is_none() {
             self.start_parse(cx);
         }
@@ -152,12 +166,15 @@ impl CodeView {
                 cx.background_executor()
                     .timer(Duration::from_millis(24))
                     .await;
+
                 let Ok((revision, source)) =
                     view.read_with(cx, |view, _| (view.revision, view.source.clone()))
                 else {
                     break;
                 };
+
                 let parsing = source.clone();
+
                 let prepared = cx
                     .background_spawn(async move {
                         let mut prepared = PreparedCode::new(&parsing);
@@ -165,8 +182,10 @@ impl CodeView {
                         prepared
                     })
                     .await;
+
                 let Ok(done) = view.update(cx, |view, cx| {
                     let done = view.revision == revision;
+
                     // A completed prefix remains useful during sustained output.
                     // Replacements must never display an older result, while
                     // append-only streams can show progress before they pause.
@@ -179,13 +198,16 @@ impl CodeView {
                         view.prepared = Some(Arc::new(prepared));
                         cx.notify();
                     }
+
                     if done {
                         view.parse_task = None;
                     }
+
                     done
                 }) else {
                     break;
                 };
+
                 if done {
                     break;
                 }

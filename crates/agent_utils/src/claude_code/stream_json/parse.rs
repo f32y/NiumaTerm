@@ -15,6 +15,7 @@ pub(super) fn parse_claude_usage(usage: &Value) -> Option<TokenUsageBreakdown> {
     let cache_write_input_tokens = usage["cache_creation_input_tokens"].as_u64();
     let cache_read_input_tokens = usage["cache_read_input_tokens"].as_u64();
     let output_tokens = usage["output_tokens"].as_u64();
+
     let input_tokens = [
         direct_input,
         cache_write_input_tokens,
@@ -23,6 +24,7 @@ pub(super) fn parse_claude_usage(usage: &Value) -> Option<TokenUsageBreakdown> {
     .into_iter()
     .flatten()
     .fold(0_u64, u64::saturating_add);
+
     let total_tokens = input_tokens.saturating_add(output_tokens.unwrap_or(0));
 
     (total_tokens > 0).then_some(TokenUsageBreakdown {
@@ -42,6 +44,7 @@ pub(super) fn update_claude_output(usage: &mut Option<TokenUsageBreakdown>, outp
     let Some(usage) = usage else {
         return;
     };
+
     usage.output_tokens = Some(output_tokens);
     usage.total_tokens = usage
         .input_tokens
@@ -181,11 +184,13 @@ fn is_offerable_command(name: &str, description: &str) -> bool {
     if name.starts_with('_') {
         return false;
     }
+
     if HOST_OWNED_COMMANDS.contains(&name) {
         return false;
     }
 
     let description = description.trim_start();
+
     !description.starts_with("(removed)") && !description.starts_with("Renamed to")
 }
 
@@ -204,17 +209,21 @@ pub(super) fn parse_slash_commands(commands: &Value) -> Vec<SlashCommandInfo> {
         else {
             continue;
         };
+
         let canonical = raw_name.trim().trim_start_matches('/').to_ascii_lowercase();
+
         let argument_hint = entry["argumentHint"]
             .as_str()
             .or_else(|| entry["argument_hint"].as_str())
             .filter(|value| !value.is_empty())
             .map(str::to_owned);
+
         let description = entry["description"]
             .as_str()
             .filter(|value| !value.is_empty())
             .map(str::to_owned)
             .unwrap_or_else(|| format!("Run Claude's /{canonical} command"));
+
         let aliases = entry["aliases"]
             .as_array()
             .into_iter()
@@ -290,11 +299,13 @@ pub(super) fn parse_models(models: &Value, selected_model: Option<&str>) -> Vec<
             list.iter()
                 .filter_map(|entry| {
                     let model = entry["value"].as_str()?.to_string();
+
                     let display = entry["displayName"]
                         .as_str()
                         .filter(|s| !s.is_empty())
                         .unwrap_or(&model)
                         .to_string();
+
                     let efforts = entry["supportedEffortLevels"]
                         .as_array()
                         .map(|levels| {
@@ -344,6 +355,7 @@ pub(super) fn parse_models(models: &Value, selected_model: Option<&str>) -> Vec<
         if !parsed[i].efforts.is_empty() {
             continue;
         }
+
         if let Some(efforts) = parsed
             .iter()
             .find(|other| {

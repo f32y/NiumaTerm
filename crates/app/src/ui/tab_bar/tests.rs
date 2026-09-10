@@ -29,6 +29,7 @@ fn auto_size_shares_the_strip_between_tabs() {
     assert_eq!(width(1200.0, 2), configured);
 
     let crowded = width(800.0, 8);
+
     assert!(
         crowded < configured,
         "{crowded} should be under {configured}"
@@ -53,7 +54,9 @@ fn a_shrinking_tab_gives_up_the_title_first() {
     assert_eq!(tab_density(FULL_TAB_WIDTH - 1.0), TabDensity::Compact);
     assert_eq!(tab_density(COMPACT_TAB_WIDTH), TabDensity::Compact);
     assert_eq!(tab_density(COMPACT_TAB_WIDTH - 1.0), TabDensity::IconOnly);
+
     const { assert!(MIN_AUTO_TAB_WIDTH < COMPACT_TAB_WIDTH) };
+
     assert_eq!(tab_density(MIN_AUTO_TAB_WIDTH), TabDensity::IconOnly);
 }
 
@@ -90,10 +93,12 @@ fn combinations_are_profile_major_and_cover_every_directory() {
     let choices = profile_root_choices(&profiles, &roots(&["C:/A", "C:/B", "C:/C"]));
 
     assert_eq!(choices.len(), 6);
+
     let pairs: Vec<_> = choices
         .iter()
         .map(|choice| (choice.launch.0.as_deref().unwrap(), choice.cwd.as_str()))
         .collect();
+
     assert_eq!(
         pairs,
         [
@@ -114,6 +119,7 @@ fn a_profile_without_a_command_contributes_no_combination() {
         profile("Empty", "   "),
         profile("P2", "cmd.exe"),
     ];
+
     let choices = profile_root_choices(&profiles, &roots(&["C:/A", "C:/B"]));
 
     assert_eq!(choices.len(), 4);
@@ -138,13 +144,17 @@ fn each_combination_launches_in_exactly_the_selected_directory() {
 #[test]
 fn combinations_of_an_unavailable_directory_stay_listed_and_disabled() {
     let profiles = [profile("P1", "pwsh.exe"), profile("P2", "cmd.exe")];
+
     let roots = vec![
         ("C:/A".to_string(), true),
         ("Z:/detached".to_string(), false),
     ];
+
     let choices = profile_root_choices(&profiles, &roots);
 
     assert_eq!(choices.len(), 4);
+
     let enabled: Vec<_> = choices.iter().map(|choice| choice.enabled).collect();
+
     assert_eq!(enabled, [true, false, true, false]);
 }

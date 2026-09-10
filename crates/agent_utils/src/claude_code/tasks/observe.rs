@@ -25,11 +25,13 @@ impl ClaudeTasks {
         if let Some(session_id) = message["session_id"].as_str() {
             self.set_session(session_id);
         }
+
         if self.registry.is_none() {
             return false;
         }
 
         let linked_parent = message["parent_tool_use_id"].as_str();
+
         match message["type"].as_str() {
             Some("system") => self.observe_system(message),
             Some("assistant") | Some("stream_event") => match linked_parent {
@@ -46,6 +48,7 @@ impl ClaudeTasks {
 
     pub(super) fn observe_system(&mut self, message: &Value) -> bool {
         let subtype = message["subtype"].as_str().unwrap_or_default();
+
         match subtype {
             // The CLI emits `init` once per process, so it is the only
             // reliable process boundary in the stream.
@@ -60,10 +63,12 @@ impl ClaudeTasks {
     /// A new process cannot still be running the children of the previous one.
     pub(super) fn advance_epoch(&mut self) -> bool {
         self.epoch += 1;
+
         let epoch = self.epoch;
         let Some(snapshot) = self.snapshot() else {
             return false;
         };
+
         let stale: Vec<String> = snapshot
             .tasks
             .into_iter()
@@ -77,6 +82,7 @@ impl ClaudeTasks {
             .collect();
 
         let mut changed = false;
+
         for id in stale {
             changed |= self.apply(
                 &id,
@@ -88,6 +94,7 @@ impl ClaudeTasks {
                 },
             );
         }
+
         changed
     }
 
@@ -98,9 +105,11 @@ impl ClaudeTasks {
         let event = message["hook_event"]
             .as_str()
             .or_else(|| message["hook_event_name"].as_str());
+
         if event != Some("SubagentStop") {
             return false;
         }
+
         self.apply_subagent_stop(message)
     }
 
@@ -109,6 +118,7 @@ impl ClaudeTasks {
     /// tool row the user already sees.
     pub(super) fn observe_parent_assistant(&mut self, message: &Value) -> bool {
         let mut changed = false;
+
         for block in message["message"]["content"]
             .as_array()
             .into_iter()
@@ -117,25 +127,30 @@ impl ClaudeTasks {
             if block["type"].as_str() != Some("tool_use") {
                 continue;
             }
+
             let Some(name) = block["name"].as_str() else {
                 continue;
             };
             let Some(tool_use_id) = block["id"].as_str() else {
                 continue;
             };
+
             if name == "Bash" {
                 // Recorded for every `Bash` call, because whether the command
                 // ends up backgrounded is decided after the block is written.
                 self.shells
                     .remember_bash_command(tool_use_id, &block["input"]);
+
                 continue;
             }
+
             if !LAUNCH_TOOLS.contains(&name) {
                 continue;
             }
 
             let input = &block["input"];
             let objective = text_field(input, &["prompt", "task", "instructions"]);
+
             changed |= self.apply(
                 tool_use_id,
                 BackgroundTaskUpdate {
@@ -159,6 +174,7 @@ impl ClaudeTasks {
             );
             changed |= self.open_child_conversation(tool_use_id, objective);
         }
+
         changed
     }
 
@@ -174,6 +190,7 @@ impl ClaudeTasks {
         let Some(prompt) = objective else {
             return false;
         };
+
         self.children.open(tool_use_id, prompt)
     }
 
@@ -182,6 +199,7 @@ impl ClaudeTasks {
     /// are left untouched.
     pub(super) fn observe_parent_user(&mut self, message: &Value) -> bool {
         let mut changed = false;
+
         for block in message["message"]["content"]
             .as_array()
             .into_iter()
@@ -191,11 +209,13 @@ impl ClaudeTasks {
                 let Some(tool_use_id) = block["tool_use_id"].as_str() else {
                     continue;
                 };
+
                 // Only a result matching a known launch is a child
                 // outcome; every other tool result belongs to the parent.
                 let Some(canonical) = self.canonical(tool_use_id) else {
                     continue;
                 };
+
                 // A backgrounded command answers its `Bash` call the moment it
                 // is handed off, so its result is the acknowledgement that it
                 // started rather than what it did. Its outcome arrives later,
@@ -204,7 +224,9 @@ impl ClaudeTasks {
                     self.shells.remember_handoff_output_file(&canonical, block);
                     continue;
                 }
+
                 let failed = block["is_error"].as_bool().unwrap_or(false);
+
                 changed |= self.apply(
                     &canonical,
                     BackgroundTaskUpdate {
@@ -221,6 +243,7 @@ impl ClaudeTasks {
                 );
             }
         }
+
         changed
     }
 
@@ -234,17 +257,22 @@ impl ClaudeTasks {
             // relationship the stream never stated.
             return false;
         };
+
         let preview = sidechain_preview(message);
+
         // The same content the parent transcript drops becomes the child's own
         // conversation; it still never reaches the parent.
         let items = self.child_items(&canonical, message);
+
         self.children.push(&canonical, items);
+
         // Linked child activity proves the task is doing work, but it cannot
         // revive one that already reported a terminal state.
         let state = self
             .state_of(&canonical)
             .filter(|state| *state == BackgroundTaskState::Starting)
             .map(|_| BackgroundTaskState::Working);
+
         self.apply(
             &canonical,
             BackgroundTaskUpdate {
@@ -261,6 +289,7 @@ impl ClaudeTasks {
     /// the parent conversation renders so a child reads identically.
     pub(super) fn child_items(&mut self, canonical: &str, message: &Value) -> Vec<Item> {
         let mut items = Vec::new();
+
         if message["type"].as_str() == Some("user") {
             let text = message["message"]["content"]
                 .as_array()
@@ -270,11 +299,14 @@ impl ClaudeTasks {
                 .filter_map(|block| block["text"].as_str())
                 .collect::<Vec<_>>()
                 .join("\n");
+
             let repeats_launch = self.children.repeats_launch(canonical, &text);
+
             if !text.trim().is_empty() && !repeats_launch {
                 items.push(Item::UserMessage { text: Some(text) });
             }
         }
+
         for block in message["message"]["content"]
             .as_array()
             .into_iter()
@@ -288,6 +320,7 @@ impl ClaudeTasks {
             else {
                 continue;
             };
+
             match block["type"].as_str() {
                 Some("text") if message["type"].as_str() != Some("user") => {
                     items.push(Item::AgentMessage {
@@ -307,6 +340,7 @@ impl ClaudeTasks {
                         block["name"].as_str().unwrap_or("tool"),
                         &block["input"],
                     );
+
                     self.children.open_tool(id, item.clone());
                     items.push(item);
                 }
@@ -318,6 +352,7 @@ impl ClaudeTasks {
                 _ => {}
             }
         }
+
         items
     }
 
@@ -327,25 +362,31 @@ impl ClaudeTasks {
     /// timeout reaches the view at all.
     pub(super) fn observe_background_snapshot(&mut self, message: &Value) -> bool {
         let mut changed = false;
+
         for entry in message["tasks"].as_array().into_iter().flatten() {
             if entry["task_type"].as_str() != Some(SHELL_TASK_TYPE) {
                 continue;
             }
+
             // Ambient work is the CLI watching something on its own behalf
             // rather than a command this conversation asked for.
             if entry["ambient"].as_bool().unwrap_or(false) {
                 continue;
             }
+
             let Some(task_id) = entry["task_id"].as_str().filter(|id| !id.is_empty()) else {
                 continue;
             };
+
             // A shell row is only ever created from its task id, by this
             // snapshot or by its own `task_started`, so the row's canonical id
             // and the key its metadata is stored under are the same string.
             let canonical = self
                 .canonical(task_id)
                 .unwrap_or_else(|| task_id.to_owned());
+
             self.shells.reserve_shell_meta(task_id);
+
             // The snapshot lists what is running now. A row that already
             // reported its outcome keeps it: the CLI publishes the snapshot
             // before the terminal record, so re-asserting Working here would
@@ -354,12 +395,15 @@ impl ClaudeTasks {
                 Some(state) if state.is_terminal() => None,
                 _ => Some(BackgroundTaskState::Working),
             };
+
             let meta = self.shells.meta(&canonical);
+
             let refs = BackgroundTaskRefs::ClaudeCode {
                 task_id: Some(task_id.to_owned()),
                 tool_use_id: meta.and_then(|meta| meta.tool_use_id.clone()),
                 agent_id: None,
             };
+
             let display_name = text_field(entry, &["description"])
                 .or_else(|| meta.and_then(|meta| meta.description.clone()));
 
@@ -381,6 +425,7 @@ impl ClaudeTasks {
                 },
             );
         }
+
         changed
     }
 }

@@ -94,6 +94,7 @@ pub(super) fn paste_payload(text: &str, bracketed: bool) -> Option<Vec<u8>> {
 
     Some(bracket_paste(body.as_bytes(), bracketed))
 }
+
 use std::sync::atomic::Ordering;
 
 use nmt_input::bracket_paste;

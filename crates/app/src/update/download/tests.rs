@@ -49,6 +49,7 @@ fn the_archive_built_for_another_system_is_passed_over() {
             "https://niumaterm-downloads.f32.io/v1.3.0/NiumaTerm-macos-arm64-v1.3.0.zip.sha256",
         ),
     ];
+
     assets.extend(published("NiumaTerm-windows-x86_64-v1.3.0.zip"));
 
     let (package, checksum) = package_assets(&assets).expect("the windows package");
@@ -60,6 +61,7 @@ fn the_archive_built_for_another_system_is_passed_over() {
 #[test]
 fn a_package_without_its_own_checksum_is_not_installable() {
     let mut assets = published("NiumaTerm-windows-x86_64-v1.3.0.zip");
+
     // A checksum for some other file is not one for this package.
     assets[1].name = "NiumaTerm-windows-x86_64-v1.2.0.zip.sha256".to_owned();
 
@@ -92,6 +94,7 @@ fn a_checksum_hosted_somewhere_else_is_refused() {
     // moves it off the pinned host is the case this rejects: whoever could name
     // where it comes from would be naming the answer.
     let mut assets = published("NiumaTerm-windows-x86_64-v1.3.0.zip");
+
     assets[1].url = "https://example.invalid/NiumaTerm-windows-x86_64-v1.3.0.zip.sha256".to_owned();
 
     assert!(package_assets(&assets).is_none());
@@ -103,6 +106,7 @@ fn the_digest_is_read_out_of_a_sha256sum_line() {
         expected_digest(&format!("{DIGEST}  NiumaTerm-windows-x86_64-v1.3.0.zip\n")).as_deref(),
         Some(DIGEST)
     );
+
     // GitHub serves the file as published, and a digest written in upper case
     // is the same digest.
     assert_eq!(

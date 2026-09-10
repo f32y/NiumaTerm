@@ -17,25 +17,31 @@ use crate::session::Status;
 impl AgentPane {
     pub(crate) fn receive_questions(&mut self, request: QuestionRequest, cx: &mut Context<Self>) {
         let id = request.id.clone();
+
         if self.prompts.batches.iter().any(|prompt| {
             prompt.id.as_deref() == Some(id.as_str()) && prompt.status != QuestionStatus::History
         }) {
             return;
         }
+
         let optional = request.mode == QuestionMode::Optional;
         let waiting = request.mode != QuestionMode::Async;
+
         let description = request
             .questions
             .first()
             .map(|question| question.question.clone())
             .unwrap_or_default();
+
         let mut prompt = QuestionPrompt::from_request(request);
+
         prompt.thread_id = self
             .runtime
             .backend()
             .and_then(|backend| backend.recovery_identity())
             .map(|identity| identity.id);
         self.prompts.ask_questions(prompt);
+
         if waiting {
             self.emit_lifecycle(
                 AgentEventKind::PermissionRequested,
@@ -44,19 +50,25 @@ impl AgentPane {
                 cx,
             );
         }
+
         cx.notify();
+
         if !optional {
             return;
         }
+
         let epoch = self.runtime.epoch();
+
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
+
                 let keep_running = this.update(cx, |this, cx| {
                     if !this.runtime.is_current(epoch) || this.runtime.update_suspension().is_some()
                     {
                         return false;
                     }
+
                     let Some(index) = this
                         .prompts
                         .batches
@@ -65,17 +77,22 @@ impl AgentPane {
                     else {
                         return false;
                     };
+
                     let Some(remaining) = this.prompts.batches[index].auto_resolve_remaining()
                     else {
                         return false;
                     };
+
                     if remaining.is_zero() {
                         this.submit_question(index, None, cx);
                         return false;
                     }
+
                     cx.notify();
+
                     true
                 });
+
                 if !keep_running.unwrap_or(false) {
                     break;
                 }
@@ -98,7 +115,9 @@ impl AgentPane {
         else {
             return;
         };
+
         let waiting = self.prompts.batches[index].mode != QuestionMode::Async;
+
         let status = match resolution {
             QuestionResolution::Submitted {
                 message,
@@ -111,15 +130,19 @@ impl AgentPane {
                         self.runtime.turn_started();
                         self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
                     }
+
                     self.push_item(Item::UserMessage { text: Some(text) }, cx);
                 }
+
                 QuestionStatus::Submitted
             }
             QuestionResolution::Skipped => QuestionStatus::Skipped,
             QuestionResolution::Expired => QuestionStatus::Expired,
         };
+
         self.prompts.batches[index].settle(status);
         self.prompts.hide_settled();
+
         if waiting
             && !self
                 .prompts
@@ -130,6 +153,7 @@ impl AgentPane {
         {
             self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
         }
+
         self.transcript.update(cx, |_, cx| cx.notify());
         cx.notify();
     }
@@ -150,6 +174,7 @@ impl AgentPane {
             prompt.error = Some(message);
             prompt.touch();
         }
+
         cx.notify();
     }
 
@@ -160,6 +185,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         let id = format!("message:{item_id}");
+
         let index = match self
             .prompts
             .batches
@@ -173,12 +199,15 @@ impl AgentPane {
                     questions,
                     mode: QuestionMode::Async,
                 });
+
                 prompt.status = QuestionStatus::History;
                 prompt.selected.iter_mut().for_each(Vec::clear);
                 self.prompts.batches.push(prompt);
+
                 self.prompts.batches.len() - 1
             }
         };
+
         self.prompts.active = Some(index);
         self.prompts.collapsed = false;
         self.prompts.batches[index].touch();
@@ -205,18 +234,22 @@ impl AgentPane {
         if self.prompts.collapsed {
             return false;
         }
+
         let Some(prompt) = self.prompts.questions_mut() else {
             return false;
         };
+
         // Async drafts leave the composer's normal keyboard shortcuts available.
         if prompt.mode == QuestionMode::Async || prompt.status != QuestionStatus::Pending {
             return false;
         }
+
         let handled = match control {
             PaletteControl::Previous => prompt.move_focus(false),
             PaletteControl::Next => prompt.move_focus(true),
             PaletteControl::Activate => {
                 let (question, option) = prompt.focus;
+
                 if prompt
                     .questions
                     .get(question)
@@ -225,15 +258,19 @@ impl AgentPane {
                 {
                     return false;
                 }
+
                 prompt.toggle(question, option);
+
                 true
             }
             PaletteControl::Complete | PaletteControl::Dismiss => false,
         };
+
         if handled {
             cx.stop_propagation();
             cx.notify();
         }
+
         handled
     }
 
@@ -242,10 +279,13 @@ impl AgentPane {
             return;
         };
         let prompt = &self.prompts.batches[index];
+
         if prompt.status != QuestionStatus::Pending || !prompt.is_complete() {
             return;
         }
+
         let answers = prompt.answers();
+
         self.submit_question(index, Some(answers), cx);
     }
 
@@ -268,7 +308,9 @@ impl AgentPane {
         {
             return;
         }
+
         let prompt = &self.prompts.batches[index];
+
         if prompt.status != QuestionStatus::Pending
             || self
                 .prompts
@@ -278,12 +320,14 @@ impl AgentPane {
         {
             return;
         }
+
         let id = prompt.id.clone();
         let mode = prompt.mode;
         let skipped = answers.is_none();
         let Some(backend) = self.runtime.backend_mut() else {
             return;
         };
+
         let result = match id.as_deref() {
             Some(id) => backend.respond_input(id, answers, &self.controls.settings),
             None => {
@@ -294,17 +338,22 @@ impl AgentPane {
                 }
             }
         };
+
         let prompt = &mut self.prompts.batches[index];
+
         prompt.touch();
+
         match result {
             Ok(()) => {
                 prompt.error = None;
+
                 if id.is_none() || (mode == QuestionMode::Async && skipped) {
                     prompt.settle(if skipped {
                         QuestionStatus::Skipped
                     } else {
                         QuestionStatus::Submitted
                     });
+
                     if mode != QuestionMode::Async {
                         self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
                     }
@@ -316,6 +365,7 @@ impl AgentPane {
                 prompt.error = Some(message);
             }
         }
+
         self.prompts.hide_settled();
         cx.notify();
     }
@@ -326,25 +376,31 @@ impl AgentPane {
         };
         let thread_id = backend.recovery_identity().map(|identity| identity.id);
         let mut requests = Vec::new();
+
         for prompt in &mut self.prompts.batches {
             prompt.reset_editors();
+
             if !prompt.pending() || prompt.id.is_none() {
                 continue;
             }
+
             if prompt.thread_id != thread_id || prompt.mode != QuestionMode::Async {
                 prompt.settle(QuestionStatus::Expired);
                 continue;
             }
+
             if prompt.status == QuestionStatus::Submitting {
                 prompt.status = QuestionStatus::Pending;
                 prompt.error = Some(i18n("agent-question-disconnected").to_string());
             }
+
             requests.push(QuestionRequest {
                 id: prompt.id.clone().unwrap_or_default(),
                 mode: prompt.mode,
                 questions: prompt.questions.clone(),
             });
         }
+
         backend.restore_question_requests(requests);
     }
 
@@ -352,39 +408,49 @@ impl AgentPane {
         if self.prompts.collapsed {
             return;
         }
+
         let Some(batch) = self.prompts.active else {
             return;
         };
         let count = self.prompts.batches[batch].questions.len();
+
         for index in 0..count {
             let prompt = &self.prompts.batches[batch];
             let input = prompt.questions[index].input;
+
             if input == QuestionInput::SelectionOnly
                 || prompt.editors[index].is_some()
                 || !prompt.pending()
             {
                 continue;
             }
+
             let text = prompt.text[index].clone();
             let epoch = self.runtime.epoch();
+
             let on_change = move |this: &mut Self, value: String, cx: &mut Context<Self>| {
                 if !this.runtime.is_current(epoch) {
                     return;
                 }
+
                 let Some(prompt) = this.prompts.batches.get_mut(batch) else {
                     return;
                 };
+
                 if prompt.status != QuestionStatus::Pending {
                     return;
                 }
+
                 if prompt.text[index] == value {
                     return;
                 }
+
                 prompt.text[index] = value;
                 prompt.custom[index] = true;
                 prompt.touch();
                 cx.notify();
             };
+
             let (state, subscription) = if input == QuestionInput::Secret {
                 let state = cx.new(|cx| {
                     InputState::new(window, cx)
@@ -392,11 +458,13 @@ impl AgentPane {
                         .placeholder(i18n("agent-question-free-text"))
                         .default_value(text)
                 });
+
                 let subscription = cx.subscribe(&state, move |this, input, event, cx| {
                     if matches!(event, InputEvent::Change) {
                         on_change(this, input.read(cx).value().to_string(), cx);
                     }
                 });
+
                 (QuestionEditorState::Secret(state), subscription)
             } else {
                 let state = cx.new(|cx| {
@@ -405,13 +473,16 @@ impl AgentPane {
                         .placeholder(i18n("agent-question-free-text"))
                         .default_value(text)
                 });
+
                 let subscription = cx.subscribe(&state, move |this, input, event, cx| {
                     if matches!(event, InputEvent::Change) {
                         on_change(this, input.read(cx).value().to_string(), cx);
                     }
                 });
+
                 (QuestionEditorState::Text(state), subscription)
             };
+
             self.prompts.batches[batch].editors[index] = Some(QuestionEditor {
                 state,
                 _subscription: subscription,

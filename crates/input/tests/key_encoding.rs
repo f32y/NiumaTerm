@@ -22,6 +22,7 @@ fn named(key: NamedKey) -> KeyInput {
 
 fn character(c: &str) -> KeyInput {
     let k = Key::Character(c.into());
+
     KeyInput {
         logical_key: k.clone(),
         key_without_modifiers: k,
@@ -45,6 +46,7 @@ fn legacy_arrow_up_no_mods() {
         ModifiersState::empty(),
         KeyEncodeFlags::empty(),
     );
+
     assert_eq!(got, b"\x1b[A");
 }
 
@@ -55,6 +57,7 @@ fn legacy_arrow_up_ctrl() {
         ModifiersState::CONTROL,
         KeyEncodeFlags::empty(),
     );
+
     assert_eq!(got, b"\x1b[1;5A");
 }
 
@@ -65,6 +68,7 @@ fn legacy_f5_no_mods() {
         ModifiersState::empty(),
         KeyEncodeFlags::empty(),
     );
+
     assert_eq!(got, b"\x1b[15~");
 }
 
@@ -75,6 +79,7 @@ fn legacy_delete_no_mods() {
         ModifiersState::empty(),
         KeyEncodeFlags::empty(),
     );
+
     assert_eq!(got, b"\x1b[3~");
 }
 
@@ -85,6 +90,7 @@ fn legacy_delete_ctrl() {
         ModifiersState::CONTROL,
         KeyEncodeFlags::empty(),
     );
+
     assert_eq!(got, b"\x1b[3;5~");
 }
 
@@ -98,6 +104,7 @@ fn legacy_f1_is_csi_not_ss3() {
         ModifiersState::empty(),
         KeyEncodeFlags::empty(),
     );
+
     assert_eq!(got, b"\x1b[P");
 }
 
@@ -110,6 +117,7 @@ fn legacy_character_is_empty() {
         ModifiersState::empty(),
         KeyEncodeFlags::empty(),
     );
+
     assert!(got.is_empty());
 }
 
@@ -122,6 +130,7 @@ fn kitty_character_disambiguate() {
         ModifiersState::empty(),
         KeyEncodeFlags::DISAMBIGUATE_ESC_CODES,
     );
+
     assert_eq!(got, b"\x1b[97u");
 }
 
@@ -132,6 +141,7 @@ fn kitty_escape_disambiguate() {
         ModifiersState::empty(),
         KeyEncodeFlags::DISAMBIGUATE_ESC_CODES,
     );
+
     assert_eq!(got, b"\x1b[27u");
 }
 
@@ -151,6 +161,7 @@ fn kitty_release_reports_event_type_3() {
         ModifiersState::empty(),
         KeyEncodeFlags::DISAMBIGUATE_ESC_CODES | KeyEncodeFlags::REPORT_EVENT_TYPES,
     );
+
     assert_eq!(got, b"\x1b[27;1:3u");
 }
 
@@ -164,6 +175,7 @@ fn kitty_press_omits_event_type() {
         ModifiersState::empty(),
         KeyEncodeFlags::DISAMBIGUATE_ESC_CODES | KeyEncodeFlags::REPORT_EVENT_TYPES,
     );
+
     assert_eq!(press, b"\x1b[27u");
     assert_ne!(press, b"\x1b[27;1:3u");
 }
@@ -178,11 +190,13 @@ fn release_without_event_types_is_a_phantom_press() {
         ModifiersState::empty(),
         KeyEncodeFlags::DISAMBIGUATE_ESC_CODES,
     );
+
     let press = seq(
         &named(NamedKey::Escape),
         ModifiersState::empty(),
         KeyEncodeFlags::DISAMBIGUATE_ESC_CODES,
     );
+
     assert_eq!(release, press);
     assert_eq!(release, b"\x1b[27u");
 }
@@ -200,6 +214,7 @@ fn enc_app_cursor_arrow_is_ss3() {
         ModifiersState::empty(),
         KeyEncodeFlags::APP_CURSOR,
     );
+
     assert_eq!(got.as_deref(), Some(&b"\x1bOA"[..]));
 }
 
@@ -210,6 +225,7 @@ fn enc_app_cursor_home_is_ss3() {
         ModifiersState::empty(),
         KeyEncodeFlags::APP_CURSOR,
     );
+
     assert_eq!(got.as_deref(), Some(&b"\x1bOH"[..]));
 }
 
@@ -220,6 +236,7 @@ fn enc_non_app_cursor_arrow_is_csi() {
         ModifiersState::empty(),
         KeyEncodeFlags::empty(),
     );
+
     assert_eq!(got.as_deref(), Some(&b"\x1b[A"[..]));
 }
 
@@ -232,6 +249,7 @@ fn enc_app_cursor_arrow_with_ctrl_is_csi() {
         ModifiersState::CONTROL,
         KeyEncodeFlags::APP_CURSOR,
     );
+
     assert_eq!(got.as_deref(), Some(&b"\x1b[1;5A"[..]));
 }
 
@@ -242,6 +260,7 @@ fn enc_f1_legacy_is_ss3() {
         ModifiersState::empty(),
         KeyEncodeFlags::empty(),
     );
+
     assert_eq!(got.as_deref(), Some(&b"\x1bOP"[..]));
 }
 
@@ -253,6 +272,7 @@ fn enc_f1_disambiguate_is_csi() {
         ModifiersState::empty(),
         KeyEncodeFlags::DISAMBIGUATE_ESC_CODES,
     );
+
     assert_eq!(got.as_deref(), Some(&b"\x1b[P"[..]));
 }
 
@@ -263,6 +283,7 @@ fn enc_delete_is_csi_tilde() {
         ModifiersState::empty(),
         KeyEncodeFlags::empty(),
     );
+
     assert_eq!(got.as_deref(), Some(&b"\x1b[3~"[..]));
 }
 
@@ -273,6 +294,7 @@ fn enc_backspace_is_del() {
         ModifiersState::empty(),
         KeyEncodeFlags::empty(),
     );
+
     assert_eq!(got.as_deref(), Some(&b"\x7f"[..]));
 }
 
@@ -283,6 +305,7 @@ fn enc_alt_backspace_is_esc_del() {
         ModifiersState::ALT,
         KeyEncodeFlags::empty(),
     );
+
     assert_eq!(got.as_deref(), Some(&b"\x1b\x7f"[..]));
 }
 
@@ -293,6 +316,7 @@ fn enc_shift_tab_is_csi_z() {
         ModifiersState::SHIFT,
         KeyEncodeFlags::empty(),
     );
+
     assert_eq!(got.as_deref(), Some(&b"\x1b[Z"[..]));
 }
 

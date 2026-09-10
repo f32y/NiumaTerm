@@ -43,8 +43,10 @@ impl Downlinks {
         let stopped = Arc::new(AtomicBool::new(false));
         let worker_stopped = Arc::clone(&stopped);
         let (connected_tx, connected) = mpsc::channel();
+
         thread::spawn(move || {
             let mut connected_tx = Some(connected_tx);
+
             while !worker_stopped.load(Ordering::Relaxed) {
                 let result = read_downlink(
                     &client,
@@ -53,20 +55,24 @@ impl Downlinks {
                     &worker_stopped,
                     &mut connected_tx,
                 );
+
                 if let Err(message) = result {
                     if let Some(sender) = connected_tx.take() {
                         let _ = sender.send(Err(message));
                         return;
                     }
+
                     if !worker_stopped.load(Ordering::Relaxed) {
                         warn!("deepseek stream disconnected: {message}");
                     }
                 }
+
                 if worker_stopped.load(Ordering::Relaxed)
                     || !host.upgrade().is_some_and(|host| host.is_running())
                 {
                     return;
                 }
+
                 deliver(json!({ "payload": {
                     "type": "nmt/connection-reset", "sessionId": session_id,
                 } }));
@@ -78,6 +84,7 @@ impl Downlinks {
             Ok(Ok(snapshot)) => Ok((Self { stopped }, snapshot)),
             outcome => {
                 stopped.store(true, Ordering::Relaxed);
+
                 Err(match outcome {
                     Ok(Err(message)) => message,
                     Err(_) => "the harness streams did not become ready in time".to_string(),
@@ -102,6 +109,7 @@ fn read_downlink(
     connected: &mut Option<mpsc::Sender<Result<Value, String>>>,
 ) -> Result<(), String> {
     let (mut socket, _) = connect(client.stream_request()?).map_err(|error| error.to_string())?;
+
     for (id, endpoint, args) in [
         ("events", "$events", json!({})),
         ("control", "session/control", json!({})),
@@ -113,14 +121,18 @@ fn read_downlink(
     ] {
         open_stream(&mut socket, id, endpoint, args)?;
     }
+
     let mut streams = Streams::new(session_id);
+
     pump(&mut socket, stopped, None, |frame| {
         streams.process(frame, client, deliver)?;
+
         if let Some(snapshot) = streams.ready_snapshot()
             && let Some(sender) = connected.take()
         {
             let _ = sender.send(Ok(snapshot.clone()));
         }
+
         Ok(())
     })
 }
@@ -157,6 +169,7 @@ pub(crate) fn snapshot(
     let read = || -> Result<Value, String> {
         let (mut socket, _) =
             connect(client.stream_request()?).map_err(|error| error.to_string())?;
+
         set_poll_interval(&mut socket)?;
         open_stream(
             &mut socket,
@@ -164,7 +177,9 @@ pub(crate) fn snapshot(
             "session/follow",
             follow_args(address, max_messages),
         )?;
+
         let deadline = Instant::now() + CONNECT_TIMEOUT;
+
         while Instant::now() < deadline {
             match read_message(&mut socket)? {
                 Some(frame) if frame["type"] == "item" && frame["value"]["type"] == "snapshot" => {
@@ -180,8 +195,10 @@ pub(crate) fn snapshot(
                 _ => {}
             }
         }
+
         Err("the harness history snapshot did not arrive in time".to_string())
     };
+
     read().map_err(CallError::Transport)
 }
 
@@ -191,6 +208,7 @@ fn set_poll_interval(socket: &mut Socket) -> Result<(), String> {
             .set_read_timeout(Some(STOP_POLL_INTERVAL))
             .map_err(|error| error.to_string())?;
     }
+
     Ok(())
 }
 
@@ -223,15 +241,19 @@ fn pump(
     mut deliver: impl FnMut(Value) -> Result<(), String>,
 ) -> Result<(), String> {
     set_poll_interval(socket)?;
+
     if let Some(sender) = read_started {
         let _ = sender.send(());
     }
+
     while !stopped.load(Ordering::Relaxed) {
         if let Some(frame) = read_message(socket)? {
             deliver(frame)?;
         }
     }
+
     let _ = socket.close(None);
+
     Ok(())
 }
 

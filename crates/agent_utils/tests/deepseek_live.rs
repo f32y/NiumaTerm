@@ -57,9 +57,12 @@ fn collect_until(
         let Ok(frame) = frames.recv_timeout(Duration::from_millis(200)) else {
             continue;
         };
+
         for event in session.process(frame) {
             let matched = stop(&event);
+
             seen.push(event);
+
             if matched {
                 return (seen, true);
             }
@@ -93,6 +96,7 @@ fn item_text(item: &Item) -> &str {
 #[ignore = "starts a real harness host and spends a model call"]
 fn a_turn_streams_and_survives_being_stopped() {
     let (tx, frames) = channel();
+
     let mut session = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
         let _ = tx.send(frame);
     })
@@ -108,12 +112,14 @@ fn a_turn_streams_and_survives_being_stopped() {
     let (started, saw_start) = collect_until(&mut session, &frames, Duration::from_secs(60), |e| {
         matches!(e, Event::TurnStarted)
     });
+
     assert!(saw_start, "no turn started; saw {started:?}");
 
     // Let real output accumulate before stopping, so "the partial answer
     // survives" is a claim about text that actually existed.
     let (streamed, _) = collect_until(&mut session, &frames, Duration::from_secs(15), |_| false);
     let before_stop = folded_text(&streamed);
+
     assert!(
         before_stop.len() > 40,
         "expected streamed text before the stop, got {before_stop:?}"
@@ -125,6 +131,7 @@ fn a_turn_streams_and_survives_being_stopped() {
     let (after, ended) = collect_until(&mut session, &frames, Duration::from_secs(30), |e| {
         matches!(e, Event::TurnCompleted { .. })
     });
+
     assert!(ended, "the stopped turn never completed; saw {after:?}");
     assert!(
         matches!(
@@ -144,6 +151,7 @@ fn a_turn_streams_and_survives_being_stopped() {
             _ => None,
         })
         .collect();
+
     assert!(
         saved.contains(before_stop.trim()),
         "the interrupted message should retain the streamed text"
@@ -156,12 +164,15 @@ fn a_turn_streams_and_survives_being_stopped() {
     assert!(session.host_is_running(), "the host outlives its turns");
 
     let id = session.session_id().unwrap().to_string();
+
     assert!(session.resume_thread(&id));
+
     let (replayed, restored) =
         collect_until(&mut session, &frames, Duration::from_secs(15), |event| {
             matches!(event, Event::Replay(turns) if turns.iter().flat_map(|turn| &turn.items)
             .map(|entry| item_text(&entry.item)).collect::<String>().contains(before_stop.trim()))
         });
+
     assert!(restored, "partial output was lost on resume: {replayed:?}");
 
     // The tab keeps working after a stop. The instruction is emphatic because
@@ -175,9 +186,11 @@ fn a_turn_streams_and_survives_being_stopped() {
         // The stop settled before this line, so the conversation is idle and
         // the prompt starts its own turn rather than steering the old one.
         .assert_started_a_turn();
+
     let (second, restarted) = collect_until(&mut session, &frames, Duration::from_secs(180), |e| {
         matches!(e, Event::TurnCompleted { .. })
     });
+
     assert!(restarted, "the second turn never completed; saw {second:?}");
     assert!(
         second
@@ -202,6 +215,7 @@ fn the_host_serves_whether_or_not_it_knows_the_no_browser_flag() {
 #[ignore = "starts a real harness host without sending a prompt"]
 fn a_session_opens_and_receives_its_preset_catalog() {
     let (tx, frames) = channel();
+
     let mut session = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
         let _ = tx.send(frame);
     })
@@ -209,9 +223,11 @@ fn a_session_opens_and_receives_its_preset_catalog() {
 
     assert!(session.host_is_running());
     assert!(session.session_id().is_some());
+
     let (seen, received) = collect_until(&mut session, &frames, Duration::from_secs(15), |event| {
         matches!(event, Event::AgentPresets { .. })
     });
+
     assert!(
         received,
         "the session should receive its preset catalog: {seen:?}"
@@ -222,12 +238,14 @@ fn a_session_opens_and_receives_its_preset_catalog() {
 #[ignore = "starts a real harness host"]
 fn two_sessions_share_one_host_and_do_not_see_each_other() {
     let (first_tx, first_frames) = channel();
+
     let mut first = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
         let _ = first_tx.send(frame);
     })
     .expect("the first conversation should open");
 
     let (second_tx, second_frames) = channel();
+
     let mut second = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
         let _ = second_tx.send(frame);
     })
@@ -242,6 +260,7 @@ fn two_sessions_share_one_host_and_do_not_see_each_other() {
     let (own, ended) = collect_until(&mut first, &first_frames, Duration::from_secs(60), |e| {
         matches!(e, Event::TurnCompleted { .. })
     });
+
     assert!(ended, "the first turn never completed; saw {own:?}");
 
     // The mux stream is aggregated across every attached session, so the second
@@ -249,6 +268,7 @@ fn two_sessions_share_one_host_and_do_not_see_each_other() {
     let (leaked, _) = collect_until(&mut second, &second_frames, Duration::from_secs(2), |_| {
         false
     });
+
     assert!(
         !leaked.iter().any(|event| matches!(
             event,
@@ -285,6 +305,7 @@ fn an_approval_is_raised_answered_and_the_turn_continues() {
         env::temp_dir().join(format!("nmt-deepseek-approval-{}.txt", Uuid::new_v4()));
 
     let (tx, frames) = channel();
+
     let mut session = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
         let _ = tx.send(frame);
     })
@@ -309,6 +330,7 @@ fn an_approval_is_raised_answered_and_the_turn_continues() {
             Event::ApprovalRequested { .. } | Event::TurnCompleted { .. }
         )
     });
+
     assert!(
         before
             .iter()
@@ -324,6 +346,7 @@ fn an_approval_is_raised_answered_and_the_turn_continues() {
             _ => None,
         })
         .expect("the request carries a description");
+
     assert!(
         !description.trim().is_empty(),
         "an approval card with no text tells the user nothing"
@@ -336,6 +359,7 @@ fn an_approval_is_raised_answered_and_the_turn_continues() {
     let (after, ended) = collect_until(&mut session, &frames, Duration::from_secs(180), |e| {
         matches!(e, Event::TurnCompleted { .. })
     });
+
     assert!(
         ended,
         "the turn did not continue after the approval was answered; saw {after:?}"
@@ -351,6 +375,7 @@ fn an_approval_is_raised_answered_and_the_turn_continues() {
         "the approved command did not run: {} was never written",
         outside.display()
     );
+
     let _ = fs::remove_file(&outside);
 }
 
@@ -361,11 +386,15 @@ fn a_real_turn_shows_its_commands_and_file_changes() {
     // refuses to run its shell tool when its ACL temp root and the workspace
     // are the same directory, which a bare temp-dir workspace makes true.
     let workspace = env::temp_dir().join(format!("nmt-deepseek-tool-{}", Uuid::new_v4()));
+
     fs::create_dir_all(&workspace).expect("the probe workspace should exist");
+
     let target = workspace.join("probe-target.txt");
+
     fs::write(&target, "line one\nbefore\nline three\n").expect("the probe file should be written");
 
     let (tx, frames) = channel();
+
     let mut session = Session::create(
         &launch(),
         &AgentWorkspace::single(Some(workspace.display().to_string())),
@@ -390,6 +419,7 @@ fn a_real_turn_shows_its_commands_and_file_changes() {
     // answered here too; otherwise the turn blocks and this measures nothing.
     let mut events = Vec::new();
     let mut ended = false;
+
     for _ in 0..12 {
         let (batch, done) = collect_until(&mut session, &frames, Duration::from_secs(60), |e| {
             matches!(
@@ -397,16 +427,21 @@ fn a_real_turn_shows_its_commands_and_file_changes() {
                 Event::TurnCompleted { .. } | Event::ApprovalRequested { .. }
             )
         });
+
         let asked = matches!(batch.last(), Some(Event::ApprovalRequested { .. }));
+
         events.extend(batch);
+
         if done && !asked {
             ended = true;
             break;
         }
+
         if asked {
             session.respond_approval("accept");
         }
     }
+
     assert!(
         ended,
         "the turn never completed; saw {} events, last: {:?}",
@@ -423,6 +458,7 @@ fn a_real_turn_shows_its_commands_and_file_changes() {
             _ => None,
         })
         .collect();
+
     let completed: Vec<&Item> = events
         .iter()
         .filter_map(|e| match e {
@@ -436,6 +472,7 @@ fn a_real_turn_shows_its_commands_and_file_changes() {
             if aggregated_output.as_deref().unwrap_or_default().contains("tool-probe-ok")
                 && status.as_deref() == Some("completed"))
     });
+
     assert!(
         command_ran,
         "no completed command row carried the output; started={started:?} completed={completed:?}"
@@ -446,6 +483,7 @@ fn a_real_turn_shows_its_commands_and_file_changes() {
             if diff.as_deref().unwrap_or_default().contains("+after")
                 && status.as_deref() == Some("completed"))
     });
+
     assert!(
         file_changed,
         "no completed file row carried the change; completed={completed:?}"
@@ -477,6 +515,7 @@ fn a_profile_pinning_an_unserved_effort_is_told_rather_than_ignored() {
     };
 
     let (tx, frames) = channel();
+
     let mut session = Session::create(&launch, &AgentWorkspace::default(), move |frame| {
         let _ = tx.send(frame);
     })
@@ -485,6 +524,7 @@ fn a_profile_pinning_an_unserved_effort_is_told_rather_than_ignored() {
     let (seen, refused) = collect_until(&mut session, &frames, Duration::from_secs(60), |e| {
         matches!(e, Event::EffortRejected { .. })
     });
+
     assert!(refused, "the refusal should reach the pane, got {seen:?}");
 
     let Some(Event::EffortRejected { message, effort }) = seen
@@ -493,7 +533,9 @@ fn a_profile_pinning_an_unserved_effort_is_told_rather_than_ignored() {
     else {
         unreachable!("the refusal was just matched");
     };
+
     assert!(!message.is_empty());
+
     // The level reported back is the one the session is on, so the control
     // lands on something the route actually serves.
     assert_ne!(effort.as_deref(), Some("medium"));
@@ -503,6 +545,7 @@ fn a_profile_pinning_an_unserved_effort_is_told_rather_than_ignored() {
 #[ignore = "starts a real harness host"]
 fn the_agent_preset_roster_reaches_the_picker() {
     let (tx, frames) = channel();
+
     let mut session = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
         let _ = tx.send(frame);
     })
@@ -511,6 +554,7 @@ fn the_agent_preset_roster_reaches_the_picker() {
     let (seen, listed) = collect_until(&mut session, &frames, Duration::from_secs(60), |e| {
         matches!(e, Event::AgentPresets { .. })
     });
+
     assert!(listed, "the roster should reach the pane, got {seen:?}");
 
     let Some(Event::AgentPresets { presets, current }) = seen
@@ -530,6 +574,7 @@ fn the_agent_preset_roster_reaches_the_picker() {
     let current = current
         .as_deref()
         .expect("a composed session names its preset");
+
     assert!(
         presets.iter().any(|preset| preset.value == current),
         "the conversation's own preset {current} should be one the picker offers",
@@ -540,27 +585,34 @@ fn the_agent_preset_roster_reaches_the_picker() {
 #[ignore = "starts a real harness host and spends a model call"]
 fn a_question_is_answered_and_the_turn_continues() {
     let (tx, frames) = channel();
+
     let mut session = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
         let _ = tx.send(frame);
     })
     .unwrap();
+
     session.send_user_message("Ask the protocol-probe question using ask_user_question. Offer Yes and No, then report the answer.", &[]).assert_started_a_turn();
+
     let (before, _) = collect_until(&mut session, &frames, Duration::from_secs(60), |event| {
         matches!(
             event,
             Event::QuestionsRequested { .. } | Event::TurnCompleted { .. }
         )
     });
+
     assert!(
         before.iter().any(
             |event| matches!(event, Event::QuestionsRequested { questions } if questions.len() == 1)
         ),
         "no question arrived: {before:?}"
     );
+
     session.respond_questions(Some(vec![vec!["Yes".into()]]));
+
     let (after, ended) = collect_until(&mut session, &frames, Duration::from_secs(60), |event| {
         matches!(event, Event::TurnCompleted { .. })
     });
+
     assert!(ended, "the answer did not resume the turn: {after:?}");
     assert!(
         after
@@ -574,18 +626,23 @@ fn a_question_is_answered_and_the_turn_continues() {
 #[ignore = "starts an isolated harness and declares a test model"]
 fn a_profile_can_declare_and_select_an_image_model() {
     let isolated = env::temp_dir().join(format!("nmt-deepseek-profile-{}", Uuid::new_v4()));
+
     let launch = LaunchConfig {
         model: Some("nmt-probe-vision".into()),
         declares_image_input: true,
         env: vec![("DSH_HOME".into(), isolated.display().to_string())],
         ..launch()
     };
+
     let (tx, frames) = channel();
+
     let mut session = Session::create(&launch, &AgentWorkspace::default(), move |frame| {
         let _ = tx.send(frame);
     })
     .unwrap();
+
     let (seen, _) = collect_until(&mut session, &frames, Duration::from_secs(5), |_| false);
+
     assert!(seen.iter().any(|event| matches!(event, Event::Ready(settings) if settings.model.as_deref() == Some("nmt-probe-vision"))), "the custom model was not selected: {seen:?}");
     assert!(
         !seen
@@ -593,6 +650,8 @@ fn a_profile_can_declare_and_select_an_image_model() {
             .any(|event| matches!(event, Event::EffortRejected { .. } | Event::Error { .. })),
         "model declaration failed: {seen:?}"
     );
+
     drop(session);
+
     let _ = fs::remove_dir_all(&isolated);
 }

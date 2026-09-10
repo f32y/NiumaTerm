@@ -30,6 +30,7 @@ pub(super) fn render_row(
     let detail = row_detail(task);
     let timing = row_timing(task, now);
     let state_label = background_task_state_label(task.state);
+
     // Everything the row shows visually, in one string. A screen reader
     // announces the row as a whole, so it needs the parts the layout separates
     // into two lines plus the child id, which is not rendered anywhere.
@@ -119,6 +120,7 @@ pub(super) fn render_row(
 /// row with no optional metadata still reads as a real entry.
 pub(super) fn state_color(state: BackgroundTaskState, cx: &Context<BackgroundTasksView>) -> Hsla {
     let theme = cx.theme();
+
     match state {
         BackgroundTaskState::Failed => theme.red,
         BackgroundTaskState::NeedsInput => theme.yellow,
@@ -144,6 +146,7 @@ pub(super) fn row_timing(task: &BackgroundTaskSummary, now: SystemTime) -> Optio
                 .replace("{duration}", &duration_label(now, completed))
         });
     }
+
     task.started_at.map(|started| duration_label(now, started))
 }
 
@@ -151,6 +154,7 @@ pub(super) fn row_timing(task: &BackgroundTaskSummary, now: SystemTime) -> Optio
 /// reads longer than the real elapsed time is the worse error.
 pub(super) fn duration_label(now: SystemTime, past: SystemTime) -> String {
     let seconds = now.duration_since(past).unwrap_or_default().as_secs();
+
     match seconds {
         0..60 => i18n("tasks-background-duration-seconds").replace("{count}", &seconds.to_string()),
         60..3600 => i18n("tasks-background-duration-minutes")
@@ -192,12 +196,14 @@ pub(super) fn running_rows(snapshot: &BackgroundTaskSnapshot) -> Vec<&Background
         .iter()
         .filter(|task| task.state.is_active())
         .collect();
+
     rows.sort_by(|left, right| match (left.started_at, right.started_at) {
         (Some(left_start), Some(right_start)) => left_start.cmp(&right_start),
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => left.sequence.cmp(&right.sequence),
     });
+
     rows
 }
 
@@ -209,6 +215,7 @@ pub(super) fn finished_rows(snapshot: &BackgroundTaskSnapshot) -> Vec<&Backgroun
         .iter()
         .filter(|task| task.state.is_terminal())
         .collect();
+
     rows.sort_by(
         |left, right| match (left.completed_at, right.completed_at) {
             (Some(left_end), Some(right_end)) => right_end.cmp(&left_end),
@@ -217,6 +224,7 @@ pub(super) fn finished_rows(snapshot: &BackgroundTaskSnapshot) -> Vec<&Backgroun
             (None, None) => right.sequence.cmp(&left.sequence),
         },
     );
+
     rows
 }
 
@@ -228,17 +236,20 @@ pub(super) fn section_control_label(hidden: usize, expanded: bool) -> Option<Str
     if expanded {
         return Some(i18n("tasks-background-show-fewer").to_string());
     }
+
     (hidden > 0).then(|| i18n("tasks-background-show-more").replace("{count}", &hidden.to_string()))
 }
 
 pub(super) fn running_heading(snapshot: &BackgroundTaskSnapshot) -> String {
     let active = snapshot.active_count();
     let needs_input = snapshot.needs_input_count();
+
     if needs_input > 0 {
         return i18n("tasks-background-heading-running-needs-input")
             .replace("{count}", &active.to_string())
             .replace("{needs}", &needs_input.to_string());
     }
+
     i18n("tasks-background-heading-running").replace("{count}", &active.to_string())
 }
 

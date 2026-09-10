@@ -59,6 +59,7 @@ impl CompactionState {
 
     fn finish(&mut self, id: &str) -> Compaction {
         let active = self.active.take().filter(|active| active.id == id);
+
         let (trigger, pre_tokens) = match active {
             Some(active) => (active.trigger, active.pre_tokens),
             None => {
@@ -67,9 +68,11 @@ impl CompactionState {
                 } else {
                     CompactionTrigger::Automatic
                 };
+
                 (trigger, None)
             }
         };
+
         let post_tokens = pre_tokens.and_then(|pre_tokens| {
             self.latest_usage
                 .map(ContextWindowUsage::used_tokens)
@@ -119,6 +122,7 @@ pub(super) fn compaction_completed(state: &mut CompactionState, item: &Value) ->
     };
     let detail = state.finish(id);
     let manual = detail.trigger == Some(CompactionTrigger::Manual);
+
     let mut events = vec![
         Event::CompactionFinished { error: None },
         Event::ItemCompleted(Item::Compaction {

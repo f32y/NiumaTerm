@@ -41,14 +41,17 @@ impl AgentPane {
         else {
             return;
         };
+
         if self.children.restored_session.as_deref() == Some(session_id.as_str()) {
             return;
         }
+
         self.children.restored_session = Some(session_id.clone());
 
         let Some(session) = self.runtime.backend_mut() else {
             return;
         };
+
         // Captured before the read starts so live updates that land while it
         // runs keep their newer state.
         let starting_sequence = session.begin_task_restoration();
@@ -65,9 +68,11 @@ impl AgentPane {
                 if !this.runtime.is_current(epoch) {
                     return;
                 }
+
                 let Some(session) = this.runtime.backend_mut() else {
                     return;
                 };
+
                 for event in session.finish_task_restoration(restored, starting_sequence) {
                     this.apply_event(event, cx);
                 }
@@ -87,6 +92,7 @@ impl AgentPane {
     /// disables the title-bar `Background Tasks` button.
     pub fn background_task_parent(&self) -> Option<BackgroundTaskKey> {
         let identity = self.runtime.backend()?.recovery_identity()?;
+
         Some(match identity.kind {
             AgentKind::Codex => BackgroundTaskKey::codex(identity.id),
             AgentKind::Claude => BackgroundTaskKey::claude_code(identity.id),
@@ -107,6 +113,7 @@ impl AgentPane {
         let Some(session) = self.runtime.backend_mut() else {
             return;
         };
+
         for event in session.load_background_task_transcript(key, cwd.as_deref()) {
             self.apply_event(event, cx);
         }

@@ -168,16 +168,19 @@ impl ComposerAttachments {
                 // letting an edit in the middle of a prompt throw the caret to
                 // the top of the composer.
                 let cursor = input.read(cx).cursor();
+
                 input.update(cx, |input, cx| {
                     input.set_value(renumbered.clone(), window, cx);
                     input.set_selected_range(cursor..cursor, cx);
                 });
+
                 renumbered
             }
             None => text.to_string(),
         };
 
         let links = self.images.placeholder_links(&text);
+
         input.update(cx, |input, cx| input.set_links(links, cx));
 
         true
@@ -275,6 +278,7 @@ impl PendingAttachments {
         };
 
         let placeholder = placeholder_text(self.items.len() + 1);
+
         self.items.push(Attachment {
             image: Arc::new(Image::from_bytes(ImageFormat::Png, bytes)),
             placeholder: placeholder.clone(),
@@ -334,11 +338,14 @@ impl PendingAttachments {
         // reader meets the images in. Cutting a placeholder and pasting it
         // elsewhere therefore reorders the strip to match.
         let mut ordered: Vec<Attachment> = Vec::with_capacity(self.items.len());
+
         for (_, number) in &spans {
             let placeholder = placeholder_text(*number);
+
             if ordered.iter().any(|item| item.placeholder == placeholder) {
                 continue;
             }
+
             if let Some(position) = self
                 .items
                 .iter()
@@ -351,6 +358,7 @@ impl PendingAttachments {
         self.items = ordered;
 
         let renumbered = renumber(text, &spans, &self.items);
+
         for (index, item) in self.items.iter_mut().enumerate() {
             item.placeholder = placeholder_text(index + 1);
         }
@@ -373,6 +381,7 @@ fn renumber(text: &str, spans: &[(Range<usize>, usize)], items: &[Attachment]) -
             continue;
         };
         let new = placeholder_text(position + 1);
+
         if new == old {
             continue;
         }
@@ -406,6 +415,7 @@ fn placeholder_spans(text: &str) -> Vec<(Range<usize>, usize)> {
             break;
         };
         let digits = &text[digits_at..digits_at + length];
+
         cursor = digits_at + length + PLACEHOLDER_SUFFIX.len_utf8();
 
         if let Ok(number) = digits.parse::<usize>() {
@@ -421,6 +431,7 @@ fn placeholder_spans(text: &str) -> Vec<(Range<usize>, usize)> {
 /// the shape is kept.
 fn scaled_dimensions(width: u32, height: u32) -> Option<(u32, u32)> {
     let long_edge = width.max(height);
+
     if long_edge <= MAX_IMAGE_EDGE {
         return None;
     }

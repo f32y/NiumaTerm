@@ -19,14 +19,18 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let count = self.prompts.pending_count();
+
         if self.prompts.collapsed && count == 0 {
             return None;
         }
+
         self.prepare_question_editors(window, cx);
+
         let active = self.prompts.active?;
         let prompt = self.prompts.questions()?;
         let collapsed = self.prompts.collapsed;
         let pending = prompt.pending();
+
         let enabled = prompt.status == QuestionStatus::Pending
             && matches!(self.runtime.status(), Status::Idle | Status::Running)
             && self.runtime.update_suspension().is_none()
@@ -37,6 +41,7 @@ impl AgentPane {
                 .batches
                 .iter()
                 .any(|prompt| prompt.status == QuestionStatus::Submitting);
+
         let status = match prompt.status {
             QuestionStatus::Pending => {
                 if prompt.mode == QuestionMode::Async {
@@ -51,7 +56,9 @@ impl AgentPane {
             QuestionStatus::Expired => "agent-question-expired",
             QuestionStatus::History => "agent-question-history",
         };
+
         let count_label = i18n("agent-question-count").replace("{count}", &count.to_string());
+
         let mut heading = h_flex().w_full().items_center().gap_2().child(
             div()
                 .flex_1()
@@ -64,6 +71,7 @@ impl AgentPane {
                     i18n(status).to_string()
                 }),
         );
+
         let candidates: Vec<usize> = self
             .prompts
             .batches
@@ -71,13 +79,16 @@ impl AgentPane {
             .enumerate()
             .filter_map(|(index, prompt)| (prompt.pending() || index == active).then_some(index))
             .collect();
+
         if candidates.len() > 1 {
             let position = candidates
                 .iter()
                 .position(|index| *index == active)
                 .unwrap_or(0);
+
             let previous = candidates[(position + candidates.len() - 1) % candidates.len()];
             let next = candidates[(position + 1) % candidates.len()];
+
             heading = heading
                 .child(
                     Button::new("question-previous-batch")
@@ -107,6 +118,7 @@ impl AgentPane {
                         })),
                 );
         }
+
         heading = heading.child(
             Button::new("question-collapse")
                 .ghost()
@@ -121,6 +133,7 @@ impl AgentPane {
                     cx.notify();
                 })),
         );
+
         let mut panel = v_flex()
             .w_full()
             .px_4()
@@ -136,6 +149,7 @@ impl AgentPane {
                     if let Some(prompt) = this.prompts.questions_mut() {
                         prompt.touch();
                     }
+
                     cx.notify();
                 }),
             )
@@ -143,15 +157,19 @@ impl AgentPane {
                 if let Some(prompt) = this.prompts.questions_mut() {
                     prompt.touch();
                 }
+
                 cx.notify();
             }));
+
         if collapsed {
             return Some(panel.into_any_element());
         }
 
         let mut rows = Vec::new();
+
         for (index, question) in prompt.questions.iter().enumerate() {
             let group: SharedString = format!("question-{active}-{index}").into();
+
             let mut row = v_flex()
                 .w_full()
                 .gap_1p5()
@@ -168,6 +186,7 @@ impl AgentPane {
                         }),
                 )
                 .child(div().text_sm().child(question.question.clone()));
+
             for (option_index, option) in question.options.iter().enumerate() {
                 let label = option
                     .description
@@ -177,6 +196,7 @@ impl AgentPane {
                         || option.label.clone(),
                         |description| format!("{} — {description}", option.label),
                     );
+
                 let control = if question.multi_select {
                     Checkbox::new((group.clone(), option_index))
                         .label(label)
@@ -196,6 +216,7 @@ impl AgentPane {
                         }))
                         .into_any_element()
                 };
+
                 row = row.child(
                     div()
                         .w_full()
@@ -211,6 +232,7 @@ impl AgentPane {
                         .child(control),
                 );
             }
+
             if question.input != QuestionInput::SelectionOnly {
                 if !question.options.is_empty() {
                     row = row.child(
@@ -222,14 +244,17 @@ impl AgentPane {
                                 if let Some(prompt) = this.prompts.questions_mut() {
                                     prompt.custom[index] = true;
                                     prompt.touch();
+
                                     if let Some(editor) = &prompt.editors[index] {
                                         editor.state.focus(window, cx);
                                     }
+
                                     cx.notify();
                                 }
                             })),
                     );
                 }
+
                 if pending {
                     if let Some(editor) = &prompt.editors[index] {
                         row = row.child(editor.state.render(!enabled));
@@ -247,8 +272,10 @@ impl AgentPane {
                     );
                 }
             }
+
             rows.push(row.into_any_element());
         }
+
         panel = panel.child(
             v_flex()
                 .id(("question-scroll", active))
@@ -258,6 +285,7 @@ impl AgentPane {
                 .gap_3()
                 .children(rows),
         );
+
         if let Some(error) = &prompt.error {
             panel = panel.child(
                 div()
@@ -266,6 +294,7 @@ impl AgentPane {
                     .child(error.clone()),
             );
         }
+
         if let Some(remaining) = prompt
             .auto_resolve_remaining()
             .filter(|remaining| remaining.as_secs() <= 60)
@@ -280,6 +309,7 @@ impl AgentPane {
                     ),
             );
         }
+
         let mut footer = h_flex().w_full().items_center().gap_2().child(
             div()
                 .flex_1()
@@ -287,6 +317,7 @@ impl AgentPane {
                 .text_color(cx.theme().muted_foreground)
                 .child(i18n(status)),
         );
+
         if pending {
             footer = footer
                 .child(
@@ -308,6 +339,7 @@ impl AgentPane {
                         .on_click(cx.listener(|this, _, _, cx| this.submit_current_questions(cx))),
                 );
         }
+
         Some(panel.child(footer).into_any_element())
     }
 }

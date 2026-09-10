@@ -60,11 +60,13 @@ pub(crate) fn encrypt(api_base_url: &str, api_key: &str) -> Result<String, Strin
     .map_err(|_| String::from("credential payload could not be encoded"))?;
 
     let mut nonce = [0u8; NONCE_LEN];
+
     OsRng
         .try_fill_bytes(&mut nonce)
         .map_err(|_| String::from("operating-system random source unavailable"))?;
 
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&KEY));
+
     let ciphertext = cipher
         .encrypt(
             Nonce::from_slice(&nonce),
@@ -76,7 +78,9 @@ pub(crate) fn encrypt(api_base_url: &str, api_key: &str) -> Result<String, Strin
         .map_err(|_| String::from("credential encryption failed"))?;
 
     let mut bytes = nonce.to_vec();
+
     bytes.extend_from_slice(&ciphertext);
+
     Ok(format!("{PREFIX}{}", BASE64.encode(bytes)))
 }
 
@@ -90,12 +94,14 @@ pub(crate) fn decrypt(stored: &str) -> Result<(String, String), String> {
     let bytes = BASE64
         .decode(encoded)
         .map_err(|_| String::from("credential value is not valid Base64"))?;
+
     if bytes.len() < NONCE_LEN + TAG_LEN {
         return Err(String::from("credential value is too short"));
     }
 
     let (nonce, ciphertext) = bytes.split_at(NONCE_LEN);
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&KEY));
+
     let plaintext = cipher
         .decrypt(
             Nonce::from_slice(nonce),
@@ -110,5 +116,6 @@ pub(crate) fn decrypt(stored: &str) -> Result<(String, String), String> {
         .map_err(|_| String::from("decrypted credential payload is not valid UTF-8"))?;
     let payload: CredentialPayload = toml::from_str(&text)
         .map_err(|_| String::from("decrypted credential payload could not be decoded"))?;
+
     Ok((payload.api_base_url, payload.api_key))
 }

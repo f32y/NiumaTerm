@@ -63,6 +63,7 @@ impl ComposerAttachments {
         cx: &mut Context<AgentPane>,
     ) -> AnyElement {
         let image = attachment.image();
+
         // A click carries the pointer's position, not the thumbnail's; the
         // bounds the layout gave it are kept from the prepaint that precedes
         // the click, so the preview knows where to grow from.
@@ -110,6 +111,7 @@ impl ComposerAttachments {
                                 // opens the image; taking the image off is not
                                 // a request to look at it.
                                 cx.stop_propagation();
+
                                 this.remove_attachment(index, window, cx)
                             })),
                     ),
@@ -132,9 +134,11 @@ impl ComposerAttachments {
     ) -> AnyElement {
         let mut chars = text.chars();
         let mut preview: String = chars.by_ref().take(ANNOTATION_PREVIEW_CHARS).collect();
+
         if chars.next().is_some() {
             preview.push('…');
         }
+
         let label =
             i18n("agent-composer-annotation-item").replace("{index}", &(index + 1).to_string());
         let group = SharedString::from(format!("agent-response-annotation-{index}"));

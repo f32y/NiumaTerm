@@ -80,6 +80,7 @@ impl UsageSnapshot {
         self.fable_weekly = self.fable_weekly.or_else(|| other.fable_weekly.clone());
         self.plan_type = self.plan_type.or_else(|| other.plan_type.clone());
         self.reset_credits = self.reset_credits.or_else(|| other.reset_credits.clone());
+
         self
     }
 }
@@ -99,14 +100,17 @@ pub(crate) fn parse_timestamp_millis(value: &Value) -> Option<i64> {
         } else {
             number
         };
+
         return (millis >= i64::MIN as f64 && millis <= i64::MAX as f64)
             .then_some(millis.round() as i64);
     }
 
     let text = value.as_str()?.trim();
+
     if text.is_empty() {
         return None;
     }
+
     if let Ok(number) = text.parse::<f64>() {
         return parse_timestamp_millis(&Value::from(number));
     }

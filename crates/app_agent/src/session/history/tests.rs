@@ -20,8 +20,11 @@ fn rows(id: &str) -> Vec<SessionSummary> {
 fn late_count_cannot_replace_new_scope_loading_or_completed_rows() {
     let mut history = SessionHistoryUi::default();
     let old = history.begin_filesystem_history(Some("project".into()), 1);
+
     history.scope = SessionScope::AllDirectories;
+
     let new = history.begin_filesystem_history(Some("project".into()), 1);
+
     assert!(matches!(
         history.publish_filesystem_count(&new, Some("project"), 1, 3),
         CountPublication::LoadRows
@@ -44,14 +47,20 @@ fn late_count_cannot_replace_new_scope_loading_or_completed_rows() {
 fn late_rows_cannot_replace_new_rows_after_scope_returns_to_original() {
     let mut history = SessionHistoryUi::default();
     let old = history.begin_filesystem_history(Some("project".into()), 1);
+
     assert!(matches!(
         history.publish_filesystem_count(&old, Some("project"), 1, 1),
         CountPublication::LoadRows
     ));
+
     history.scope = SessionScope::AllDirectories;
+
     let middle = history.begin_filesystem_history(Some("project".into()), 1);
+
     history.scope = SessionScope::CurrentDirectory;
+
     let new = history.begin_filesystem_history(Some("project".into()), 1);
+
     assert!(matches!(
         history.publish_filesystem_count(&new, Some("project"), 1, 1),
         CountPublication::LoadRows
@@ -75,7 +84,9 @@ fn empty_count_finishes_loading_and_removes_previous_rows() {
         selected: 8,
         ..Default::default()
     };
+
     let request = history.begin_filesystem_history(None, 1);
+
     assert!(matches!(
         history.publish_filesystem_count(&request, None, 1, 0),
         CountPublication::Empty
@@ -90,18 +101,23 @@ fn empty_count_finishes_loading_and_removes_previous_rows() {
 fn replacement_invalidation_rejects_both_passes_and_clears_placeholders() {
     let mut history = SessionHistoryUi::default();
     let old = history.begin_filesystem_history(None, 1);
+
     assert!(matches!(
         history.publish_filesystem_count(&old, None, 1, 4),
         CountPublication::LoadRows
     ));
+
     history.invalidate_filesystem_history();
+
     assert_eq!(history.pending, None);
     assert!(matches!(
         history.publish_filesystem_count(&old, None, 1, 9),
         CountPublication::Stale
     ));
     assert!(!history.publish_filesystem_rows(&old, None, 1, rows("old")));
+
     let new = history.begin_filesystem_history(None, 2);
+
     assert!(matches!(
         history.publish_filesystem_count(&new, None, 2, 1),
         CountPublication::LoadRows
@@ -119,7 +135,9 @@ fn changed_session_directory_or_scope_rejects_publication() {
     ] {
         let mut history = SessionHistoryUi::default();
         let request = history.begin_filesystem_history(Some("project".into()), 1);
+
         history.scope = scope;
+
         assert!(matches!(
             history.publish_filesystem_count(&request, cwd, epoch, 5),
             CountPublication::Stale

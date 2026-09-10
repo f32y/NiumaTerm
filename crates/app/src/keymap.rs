@@ -31,6 +31,7 @@ use crate::ui::{
 pub(crate) fn bind(cx: &mut App) {
     cx.bind_keys(shell_bindings());
     cx.bind_keys(terminal_bindings());
+
     #[cfg(target_os = "macos")]
     cx.bind_keys(application_bindings());
 }

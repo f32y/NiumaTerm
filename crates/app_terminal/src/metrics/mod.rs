@@ -54,6 +54,7 @@ pub(crate) fn measure_cell(window: &mut Window, cx: &App) -> CellMetrics {
     let style = terminal_text_style(window, cx);
     let font_size = style.font_size.to_pixels(window.rem_size());
     let run = style.to_run(1);
+
     let shaped =
         window
             .text_system()

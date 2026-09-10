@@ -15,6 +15,7 @@ fn retiring_control_state_cancels_pending_writes_but_preserves_cleanup() {
     let title = InputTicket::queued_for_test(false);
     let restore = InputTicket::queued_for_test(false);
     let interrupt = InputTicket::queued_for_test(false);
+
     for (id, class, ticket, operation) in [
         (
             "title",
@@ -39,10 +40,14 @@ fn retiring_control_state_cancels_pending_writes_but_preserves_cleanup() {
         state.attach_input(id, ticket);
         state.track(id.into(), operation);
     }
+
     state.cancel_generated_title();
+
     assert!(title.is_cancelled());
     assert!(!restore.is_cancelled());
+
     state.close("stopped");
+
     assert!(restore.is_cancelled());
     assert!(!interrupt.is_cancelled());
     assert!(
@@ -60,6 +65,7 @@ fn request_deadlines_wake_without_output_and_release_the_delivery_on_close() {
 
     let (tx, rx) = channel();
     let mut state = ControlState::default();
+
     state.set_timer(
         DeadlineTimer::new(move || {
             let _ = tx.send(());
@@ -73,15 +79,21 @@ fn request_deadlines_wake_without_output_and_release_the_delivery_on_close() {
         Instant::now() - Duration::from_secs(31),
     );
     rx.recv_timeout(Duration::from_secs(2)).unwrap();
+
     let expired = state.expired(Instant::now());
+
     assert_eq!(expired.len(), 1);
     assert_eq!(expired[0].0, "due");
+
     state.complete("slow");
+
     assert_eq!(
         rx.recv_timeout(Duration::from_millis(20)),
         Err(RecvTimeoutError::Timeout)
     );
+
     state.close("stopped");
+
     assert_eq!(
         rx.recv_timeout(Duration::from_secs(2)),
         Err(RecvTimeoutError::Disconnected)
@@ -92,35 +104,45 @@ fn request_deadlines_wake_without_output_and_release_the_delivery_on_close() {
 fn pending_control_capacity_preserves_urgent_slots_and_releases_expired_queries() {
     let now = Instant::now();
     let mut state = ControlState::default();
+
     for index in 0..120 {
         state.check_capacity(RequestClass::Query, 1).unwrap();
         state.record_admitted(index.to_string(), RequestClass::Query, now);
         state.track(index.to_string(), PendingControlOperation::Other);
     }
+
     assert!(state.check_capacity(RequestClass::Mutation, 1).is_err());
     assert!(state.check_capacity(RequestClass::Mutation, 0).is_ok());
+
     for index in 120..128 {
         state.check_capacity(RequestClass::Control, 1).unwrap();
         state.record_admitted(index.to_string(), RequestClass::Control, now);
         state.track(index.to_string(), PendingControlOperation::Other);
     }
+
     assert!(state.check_capacity(RequestClass::Control, 1).is_err());
     assert!(state.expired(now + Duration::from_secs(14)).is_empty());
+
     let expired = state.expired(now + Duration::from_secs(15));
+
     assert_eq!(expired.len(), 8);
+
     for (id, class, _) in expired {
         assert_eq!(class, RequestClass::Control);
         state.resolve(&json!({"request_id": id, "subtype": "error", "error": class.timeout_message("Claude")}));
     }
+
     assert!(state.check_capacity(RequestClass::Query, 1).is_err());
     assert_eq!(state.expired(now + Duration::from_secs(30)).len(), 120);
     assert!(state.expired(now + Duration::from_secs(30)).is_empty());
+
     state.check_capacity(RequestClass::Mutation, 3).unwrap();
 }
 
 #[test]
 fn control_cancellation_matches_prompt_ids_and_close_settles_once() {
     let mut control = ControlState::default();
+
     control.pending_approval = Some(PendingApproval {
         request_id: "approval".into(),
         input: json!({}),
@@ -131,8 +153,11 @@ fn control_cancellation_matches_prompt_ids_and_close_settles_once() {
         input: json!({}),
         questions: Vec::new(),
     });
+
     let (id, _) = control.request(json!({"subtype": "rewind_files"}));
+
     control.track(id.clone(), PendingControlOperation::FileRewind);
+
     assert!(control.cancel_prompt("unknown").is_empty());
     assert_eq!(
         control.cancel_prompt("approval"),
@@ -161,13 +186,17 @@ fn control_cancellation_matches_prompt_ids_and_close_settles_once() {
 #[test]
 fn turn_completion_preserves_session_requests_and_retires_prompts() {
     let mut control = ControlState::default();
+
     control.pending_questions = Some(PendingQuestions {
         request_id: "questions".into(),
         input: json!({}),
         questions: Vec::new(),
     });
+
     let (id, _) = control.request(json!({"subtype": "generate_session_title"}));
+
     control.track(id.clone(), PendingControlOperation::SessionTitle);
+
     assert_eq!(control.finish_turn(), vec![Event::QuestionsResolved]);
     assert!(control.finish_turn().is_empty());
     assert_eq!(
@@ -190,6 +219,7 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/fake-stream-json.cmd");
     let log = env::temp_dir().join(format!("niumaterm-controls-{}.jsonl", Uuid::new_v4()));
+
     let launch = LaunchConfig {
         executable: fixture.to_string_lossy().into_owned(),
         env: vec![(
@@ -198,24 +228,34 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
         )],
         ..LaunchConfig::default()
     };
+
     let mut session =
         Session::spawn(&launch, &AgentWorkspace::default(), None, |_| {}, |_| {}).unwrap();
+
     session.ready = true;
+
     for operation in [
         PendingControlOperation::SessionTitle,
         PendingControlOperation::ContextComposition,
     ] {
         let (id, _) = session.control.request(json!({}));
+
         session.control.track(id.clone(), operation);
+
         let response = json!({"type": "control_response", "response": {"request_id": id, "subtype": "error", "error": "unsupported"}});
+
         assert!(session.process(response.clone()).is_empty());
         assert!(session.process(response).is_empty());
     }
+
     let (id, _) = session.control.request(json!({}));
+
     session
         .control
         .track(id.clone(), PendingControlOperation::Other);
+
     let response = json!({"type": "control_response", "response": {"request_id": id, "subtype": "error", "error": "denied"}});
+
     assert!(matches!(
         session.process(response.clone()).as_slice(),
         [Event::Error { fatal: false, .. }]
@@ -223,6 +263,7 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
     assert!(session.process(response).is_empty());
 
     let ticket = InputTicket::queued_for_test(false);
+
     session.control.record_admitted(
         "queued-restore".into(),
         RequestClass::Mutation,
@@ -235,11 +276,14 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
         .control
         .track("queued-restore".into(), PendingControlOperation::FileRewind);
     session.control.complete(INIT_REQUEST_ID);
+
     let events = session.poll_timeouts(Instant::now() + Duration::from_secs(301));
+
     assert!(events.iter().any(|event| matches!(event, Event::FileRewindCompleted { error: Some(message) } if message.contains("not sent"))));
     assert!(ticket.cancel());
 
     let (id, _) = session.control.request(json!({}));
+
     session
         .control
         .track(id.clone(), PendingControlOperation::SessionTitle);
@@ -249,14 +293,19 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
     session
         .control
         .record_effort("effort-second".into(), "max".into());
+
     let rejected = session.process(json!({"type": "control_response", "response": {"request_id": "effort-first", "subtype": "error", "error": "unavailable"}}));
+
     assert!(
         matches!(rejected.as_slice(), [Event::EffortRejected { effort: Some(effort), .. }] if effort == "max")
     );
     assert!(session.process(json!({"type": "control_response", "response": {"request_id": "effort-second", "subtype": "success"}})).is_empty());
     assert_eq!(session.control.effort(), Some("max"));
+
     session.rename_session("User title");
+
     assert!(session.process(json!({"type": "control_response", "response": {"request_id": id, "subtype": "success", "response": {"title": "Late title"}}})).is_empty());
+
     session.control.complete(INIT_REQUEST_ID);
     session.control.track(
         "restore-timeout".into(),
@@ -275,7 +324,9 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
         RequestClass::Mutation,
         Instant::now(),
     );
+
     let timeout_events = session.poll_timeouts(Instant::now() + Duration::from_secs(301));
+
     assert!(timeout_events.iter().any(|event| matches!(event, Event::FileRewindCompleted { error: Some(message) } if message.contains("result is unknown"))));
     assert!(timeout_events.iter().any(|event| matches!(event, Event::Error { message, fatal: false } if message.contains("result is unknown"))));
     assert!(
@@ -290,6 +341,7 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
             .is_empty()
     );
     assert!(session.process(json!({"type": "control_response", "response": {"request_id": "restore-timeout", "subtype": "success"}})).is_empty());
+
     session.compacting = true;
     session
         .process
@@ -305,6 +357,7 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
         input: json!({}),
         questions: Vec::new(),
     });
+
     assert!(!session.respond_approval("accept"));
     assert!(!session.respond_questions(None));
     assert!(session.control.pending_approval.is_some());
@@ -315,8 +368,11 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
         session.rewind_files("checkpoint"),
         SlashCommandOutcome::NotReady
     ));
+
     session.active_slash_command = Some("compact".into());
+
     let events = session.process_exit();
+
     assert!(
         events
             .iter()
@@ -340,17 +396,21 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
         session.send_user_message("late", &ThreadSettings::default(), &[]),
         SendOutcome::NotReady
     );
+
     drop(session);
+
     let _ = fs::remove_file(log);
 }
 
 #[test]
 fn transcript_snapshots_complete_their_streamed_items() {
     let mut transcript = TranscriptState::default();
+
     transcript.begin_turn();
     transcript.process_stream_event(
         &json!({"event":{"type":"message_start","message":{"usage":{"output_tokens":0}}}}),
     );
+
     let started = transcript.process_stream_event(
         &json!({"event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}),
     );
@@ -358,11 +418,14 @@ fn transcript_snapshots_complete_their_streamed_items() {
         panic!("text block should start a transcript item");
     };
     let deltas = transcript.process_stream_event(&json!({"event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}}));
+
     assert!(
         matches!(deltas.as_slice(), [Event::AgentMessageDelta { item_id, delta }] if item_id == id && delta == "hello")
     );
+
     let completed = transcript
         .process_assistant(&json!({"message":{"content":[{"type":"text","text":"hello world"}]}}));
+
     assert!(
         matches!(completed.as_slice(), [Event::ItemCompleted(Item::AgentMessage { id: completed_id, text: Some(text), .. })] if completed_id == id && text == "hello world")
     );
@@ -374,10 +437,14 @@ fn transcript_state_isolates_children_and_tool_results() {
     let mut other = TranscriptState::default();
     let tool = json!({"message":{"content":[{"type":"tool_use","id":"tool-1","name":"Bash","input":{"command":"pwd"}}]}});
     let mut child = tool.clone();
+
     child["parent_tool_use_id"] = json!("child");
+
     assert!(parent.process_assistant(&child).is_empty());
     assert_eq!(parent.process_assistant(&tool).len(), 1);
+
     let result = json!({"message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"done"}]}});
+
     assert!(other.process_tool_results(&result).is_empty());
     assert!(matches!(
         parent.process_tool_results(&result).as_slice(),
@@ -396,6 +463,7 @@ fn turn_output_usage_accumulates_model_responses() {
     assert_eq!(usage.update_response(35), 155);
 
     usage.reset();
+
     assert_eq!(usage.update_response(9), 9);
 }
 
@@ -439,7 +507,9 @@ fn claude_context_updates_output_and_labels_last_turn_usage() {
         "cache_read_input_tokens": 1_000,
         "output_tokens": 0
     }));
+
     update_claude_output(&mut current, 750);
+
     let last_turn = parse_claude_usage(&json!({
         "input_tokens": 20_000,
         "cache_creation_input_tokens": 4_000,
@@ -484,6 +554,7 @@ fn post_compaction_total_clears_category_detail() {
 #[test]
 fn every_claude_process_enables_sdk_file_checkpointing() {
     let mut command = Command::new("claude");
+
     command.env(FILE_CHECKPOINTING_ENV, "false");
 
     enable_file_checkpointing(&mut command);
@@ -493,12 +564,14 @@ fn every_claude_process_enables_sdk_file_checkpointing() {
         .find(|(name, _)| *name == FILE_CHECKPOINTING_ENV)
         .and_then(|(_, value)| value)
         .and_then(|value| value.to_str());
+
     assert_eq!(value, Some("true"));
 }
 
 #[test]
 fn rewind_is_an_idle_ui_command_not_a_provider_slash_turn() {
     let commands = Session::adapter_commands();
+
     let rewind = commands
         .iter()
         .find(|command| command.name == "rewind")
@@ -526,6 +599,7 @@ fn rejected_input_keeps_settings_unchanged_and_a_retry_is_atomic() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/capture-stream.ps1");
     let log = env::temp_dir().join(format!("niumaterm-admission-{}.jsonl", Uuid::new_v4()));
+
     let launch = LaunchConfig {
         executable: "powershell.exe".into(),
         executable_args: vec![
@@ -541,7 +615,9 @@ fn rejected_input_keeps_settings_unchanged_and_a_retry_is_atomic() {
         )],
         ..LaunchConfig::default()
     };
+
     let (tx, rx) = mpsc::channel();
+
     let mut session = Session::spawn(
         &launch,
         &AgentWorkspace::default(),
@@ -552,17 +628,21 @@ fn rejected_input_keeps_settings_unchanged_and_a_retry_is_atomic() {
         |_| {},
     )
     .unwrap();
+
     session.process(rx.recv_timeout(Duration::from_secs(5)).unwrap());
+
     let previous_model = session.applied_model.clone();
     let previous_permission = session.applied_permission.clone();
     let previous_effort = session.control.effort().map(str::to_owned);
     let pending = session.control.pending_count();
+
     let settings = ThreadSettings {
         model: Some("test-model".into()),
         approval: Some("plan".into()),
         effort: Some("high".into()),
         ..ThreadSettings::default()
     };
+
     assert!(matches!(
         session.send_user_message(&"x".repeat(32 * 1024 * 1024), &settings, &[]),
         SendOutcome::Rejected { .. }
@@ -573,14 +653,18 @@ fn rejected_input_keeps_settings_unchanged_and_a_retry_is_atomic() {
     assert_eq!(session.control.pending_count(), pending);
     assert!(!session.turn_active);
     assert!(session.process.has_stdin());
+
     let now = Instant::now();
+
     for index in 0..120 - pending {
         let id = format!("capacity-{index}");
+
         session
             .control
             .record_admitted(id.clone(), RequestClass::Query, now);
         session.control.track(id, PendingControlOperation::Other);
     }
+
     assert!(matches!(
         session.send_user_message("capacity rejected prompt", &settings, &[]),
         SendOutcome::Rejected { message } if message.contains("too many unanswered")
@@ -591,19 +675,24 @@ fn rejected_input_keeps_settings_unchanged_and_a_retry_is_atomic() {
     assert_eq!(session.control.pending_count(), 120);
     assert!(!session.turn_active);
     assert!(session.interrupt());
+
     let expired = session.poll_timeouts(now + Duration::from_secs(31));
+
     assert_eq!(expired.len(), 121);
     assert_eq!(session.control.pending_count(), 0);
     assert_eq!(
         session.send_user_message("retry prompt", &settings, &[]),
         SendOutcome::StartedTurn
     );
+
     session.shutdown(Duration::from_secs(5), false).unwrap();
+
     let lines: Vec<Value> = fs::read_to_string(&log)
         .unwrap()
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
+
     let changed: Vec<_> = lines
         .iter()
         .filter(|message| {
@@ -613,11 +702,13 @@ fn rejected_input_keeps_settings_unchanged_and_a_retry_is_atomic() {
             ) || message["type"] == "user"
         })
         .collect();
+
     assert_eq!(changed.len(), 4);
     assert_eq!(changed[0]["request"]["subtype"], "set_model");
     assert_eq!(changed[1]["request"]["subtype"], "set_permission_mode");
     assert_eq!(changed[2]["request"]["subtype"], "apply_flag_settings");
     assert_eq!(changed[3]["message"]["content"][0]["text"], "retry prompt");
+
     fs::remove_file(log).unwrap();
 }
 
@@ -634,6 +725,7 @@ fn fake_stream_json_process_never_receives_rewind_as_a_user_turn() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/fake-stream-json.cmd");
     let log = env::temp_dir().join(format!("niumaterm-fake-claude-{}.jsonl", Uuid::new_v4()));
+
     let launch = LaunchConfig {
         executable: fixture.to_string_lossy().into_owned(),
         env: vec![(
@@ -642,7 +734,9 @@ fn fake_stream_json_process_never_receives_rewind_as_a_user_turn() {
         )],
         ..LaunchConfig::default()
     };
+
     let (messages_tx, messages_rx) = mpsc::channel();
+
     let mut session = Session::spawn(
         &launch,
         &AgentWorkspace::default(),
@@ -653,9 +747,11 @@ fn fake_stream_json_process_never_receives_rewind_as_a_user_turn() {
         |_| {},
     )
     .expect("fake Claude process starts");
+
     let init = messages_rx
         .recv_timeout(Duration::from_secs(3))
         .expect("fake Claude init");
+
     assert!(
         session
             .process(init)
@@ -672,13 +768,18 @@ fn fake_stream_json_process_never_receives_rewind_as_a_user_turn() {
         if log.exists() {
             break;
         }
+
         thread::sleep(Duration::from_millis(20));
     }
+
     drop(session);
+
     let input = fs::read_to_string(&log).expect("fake process captured stdin");
+
     assert!(input.contains("initialize"));
     assert!(!input.contains("/rewind"));
     assert!(!input.contains("\"type\":\"user\""));
+
     fs::remove_file(log).unwrap();
 }
 
@@ -694,6 +795,7 @@ fn resumed_session_id_is_available_before_the_first_init_event() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/fake-stream-json.cmd");
     let log = env::temp_dir().join(format!("niumaterm-resume-{}.jsonl", Uuid::new_v4()));
+
     let launch = LaunchConfig {
         executable: fixture.to_string_lossy().into_owned(),
         env: vec![(
@@ -702,7 +804,9 @@ fn resumed_session_id_is_available_before_the_first_init_event() {
         )],
         ..LaunchConfig::default()
     };
+
     let resume_id = "70000000-0000-4000-8000-000000000000".to_string();
+
     let session = Session::spawn(
         &launch,
         &AgentWorkspace::default(),
@@ -713,13 +817,17 @@ fn resumed_session_id_is_available_before_the_first_init_event() {
     .expect("fake resumed Claude process starts");
 
     let published_id = session.session_id().map(str::to_owned);
+
     drop(session);
+
     for _ in 0..50 {
         if log.exists() {
             break;
         }
+
         thread::sleep(Duration::from_millis(20));
     }
+
     if log.exists() {
         fs::remove_file(log).unwrap();
     }
@@ -771,6 +879,7 @@ fn file_rewind_rejection_and_malformed_responses_are_nonfatal_results() {
     ] {
         let mut pending =
             HashMap::from([("nmt-8".to_string(), PendingControlOperation::FileRewind)]);
+
         let response = if subtype == "error" {
             json!({
                 "request_id": "nmt-8",
@@ -813,9 +922,11 @@ fn content_bearing_inputs_seed_the_card_detail() {
             {"content": "next thing", "status": "pending"},
         ]}),
     );
+
     assert_eq!(todos.as_deref(), Some("- [x] done thing\n- [ ] next thing"));
 
     let plan = input_detail("ExitPlanMode", &json!({"plan": "1. do it"}));
+
     assert_eq!(plan.as_deref(), Some("1. do it"));
 
     assert_eq!(input_detail("Grep", &json!({"pattern": "x"})), None);
@@ -843,6 +954,7 @@ fn a_todo_card_counts_back_out_as_a_task_tally() {
 #[test]
 fn edit_diff_prefixes_old_and_new_lines() {
     let diff = edit_diff("Edit", &json!({"old_string": "a\nb", "new_string": "c"}));
+
     assert_eq!(diff.as_deref(), Some("-a\n-b\n+c\n"));
 
     assert_eq!(edit_diff("Edit", &json!({})), None);
@@ -931,6 +1043,7 @@ fn only_the_compaction_status_shapes_drive_progress_events() {
         compaction_progress(&mut active, &json!({"status": "compacting"})).is_empty(),
         "repeat announcements are not new transitions"
     );
+
     // The summarization call itself reports as a request in flight.
     assert!(compaction_progress(&mut active, &json!({"status": "requesting"})).is_empty());
     assert!(active, "a request in flight must not end the compaction");
@@ -1098,6 +1211,7 @@ fn dynamic_commands_accept_both_json_shapes_and_drop_invalid_duplicates() {
     assert_eq!(parsed[1].argument_hint.as_deref(), Some("[focus]"));
     assert_eq!(parsed[2].description, "Compact it");
     assert_eq!(parsed[1].arguments, SlashCommandArguments::Freeform);
+
     // A command the catalog gave no hint for still takes arguments. Skills
     // arrive this way, and rejecting them client-side made every one of them
     // unusable with input.
@@ -1112,6 +1226,7 @@ fn initialize_commands_are_primary_and_legacy_catalogs_are_fallbacks() {
         "commands": [{"name": "plugin:review", "aliases": ["pr"]}],
         "slash_commands": ["legacy"]
     });
+
     let (commands, structured) = initialize_command_catalog(&response).unwrap();
 
     assert!(structured);
@@ -1126,6 +1241,7 @@ fn initialize_commands_are_primary_and_legacy_catalogs_are_fallbacks() {
 
     let (legacy, structured) =
         initialize_command_catalog(&json!({"slash_commands": ["legacy"]})).unwrap();
+
     assert!(!structured);
     assert_eq!(legacy[0].name, "legacy");
     assert_eq!(
@@ -1181,11 +1297,13 @@ fn a_context_usage_response_becomes_a_composition_breakdown() {
         "nmt-3".to_string(),
         PendingControlOperation::ContextComposition,
     )]);
+
     let event = resolve_pending_control_operation(&mut pending, &response);
 
     let Some(Event::ContextCompositionUpdated(composition)) = event else {
         panic!("expected a composition update, got {event:?}");
     };
+
     assert_eq!(composition.used_tokens, 45_100);
     assert_eq!(composition.max_tokens, Some(155_000));
     assert_eq!(
@@ -1256,6 +1374,7 @@ fn a_restored_window_is_filled_from_the_breakdown() {
     };
 
     let filled = window_from_composition(None, &composition).expect("the window is unknown");
+
     assert_eq!(filled.total_tokens, 41_000);
 }
 
@@ -1269,6 +1388,7 @@ fn live_accounting_is_never_replaced_by_the_breakdown() {
         output_tokens: Some(345),
         reasoning_output_tokens: None,
     };
+
     let composition = ContextComposition {
         segments: Vec::new(),
         used_tokens: 41_000,
@@ -1311,6 +1431,7 @@ fn a_resumed_session_asks_for_its_context_before_the_first_turn() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/fake-stream-json.cmd");
     let log = env::temp_dir().join(format!("niumaterm-fake-resume-{}.jsonl", Uuid::new_v4()));
+
     let launch = LaunchConfig {
         executable: fixture.to_string_lossy().into_owned(),
         env: vec![(
@@ -1319,6 +1440,7 @@ fn a_resumed_session_asks_for_its_context_before_the_first_turn() {
         )],
         ..LaunchConfig::default()
     };
+
     let mut session = Session::spawn(
         &launch,
         &AgentWorkspace::default(),
@@ -1340,6 +1462,7 @@ fn a_resumed_session_asks_for_its_context_before_the_first_turn() {
     }));
 
     assert!(events.iter().any(|event| matches!(event, Event::Ready(_))));
+
     // The request is recorded only once it has been written, so an
     // outstanding operation is what proves the session asked.
     assert!(
@@ -1350,6 +1473,7 @@ fn a_resumed_session_asks_for_its_context_before_the_first_turn() {
     );
 
     drop(session);
+
     let _ = fs::remove_file(log);
 }
 
@@ -1360,10 +1484,12 @@ fn a_resumed_session_asks_for_its_context_before_the_first_turn() {
 #[test]
 fn adapter_commands_declare_the_arguments_the_cli_accepts() {
     let commands = Session::adapter_commands();
+
     let compact = commands
         .iter()
         .find(|command| command.name == "compact")
         .expect("compact is offered as a fallback");
+
     let rewind = commands
         .iter()
         .find(|command| command.name == "rewind")
@@ -1402,6 +1528,7 @@ fn the_catalog_drops_internal_retired_and_host_owned_commands() {
     ]));
 
     let names: Vec<&str> = parsed.iter().map(|command| command.name.as_str()).collect();
+
     assert_eq!(names, ["caveman", "compact"]);
 }
 
@@ -1462,6 +1589,7 @@ fn answered_questions_merge_into_the_original_tool_input() {
         "questions": [{"question": "Which database?"}, {"question": "Which extras?"}],
         "metadata": {"source": "cli"},
     });
+
     let questions = parse_questions(&json!({
         "questions": [
             {
@@ -1513,6 +1641,7 @@ fn unanswered_questions_are_omitted_rather_than_reported_as_empty() {
     );
 
     let answers = merged["answers"].as_object().expect("answers object");
+
     assert!(!answers.contains_key("Which database?"));
     assert_eq!(answers["Which extras?"], json!("Tracing"));
 }
@@ -1532,6 +1661,7 @@ fn model_output_after_a_finished_turn_opens_the_next_one() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/fake-stream-json.cmd");
     let log = env::temp_dir().join(format!("niumaterm-fake-queued-{}.jsonl", Uuid::new_v4()));
+
     let launch = LaunchConfig {
         executable: fixture.to_string_lossy().into_owned(),
         env: vec![(
@@ -1540,8 +1670,10 @@ fn model_output_after_a_finished_turn_opens_the_next_one() {
         )],
         ..LaunchConfig::default()
     };
+
     let mut session = Session::spawn(&launch, &AgentWorkspace::default(), None, |_| {}, |_| {})
         .expect("fake Claude process starts");
+
     session.ready = true;
 
     let assistant = json!({
@@ -1583,6 +1715,7 @@ fn model_output_after_a_finished_turn_opens_the_next_one() {
     );
 
     drop(session);
+
     let _ = fs::remove_file(log);
 }
 
@@ -1592,7 +1725,9 @@ fn launch_arguments(workspace: &AgentWorkspace, resume: Option<&str>) -> Vec<Str
         executable: "claude".into(),
         ..LaunchConfig::default()
     };
+
     let launcher = AgentCli::from_launch(&launch, "claude");
+
     claude_command(&launcher, &launch, workspace, resume, &None)
         .get_args()
         .map(|arg| arg.to_string_lossy().into_owned())
@@ -1604,10 +1739,12 @@ fn launch_arguments(workspace: &AgentWorkspace, resume: Option<&str>) -> Vec<Str
 fn add_dir_group(arguments: &[String]) -> Option<&[String]> {
     let start = arguments.iter().position(|arg| arg == "--add-dir")?;
     let rest = &arguments[start + 1..];
+
     let end = rest
         .iter()
         .position(|arg| arg.starts_with("--"))
         .unwrap_or(rest.len());
+
     Some(&rest[..end])
 }
 
@@ -1654,6 +1791,7 @@ fn a_resumed_launch_carries_both_the_session_id_and_the_directories() {
         .iter()
         .position(|arg| arg == "--resume")
         .expect("resume flag");
+
     assert_eq!(arguments[resume + 1], "8365ddfc");
     assert_eq!(
         add_dir_group(&arguments),

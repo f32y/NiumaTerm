@@ -122,11 +122,13 @@ fn remote_host_status(cx: &mut App) -> Div {
     }
 
     let host_id = remote::host_id().unwrap_or_default();
+
     let pairing = cx
         .global::<AppSettings>()
         .editing
         .remote_pairing_code
         .clone();
+
     let devices = remote::list_devices();
 
     v_flex()
@@ -200,6 +202,7 @@ fn remote_host_status(cx: &mut App) -> Div {
         })
         .children(devices.into_iter().enumerate().map(|(index, device)| {
             let key = device.public_key.clone();
+
             h_flex()
                 .w_full()
                 .py_2()
@@ -230,11 +233,13 @@ fn remote_client_status(cx: &mut App) -> Div {
 
     let muted = cx.theme().muted_foreground;
     let border = cx.theme().border;
+
     let status = cx
         .global::<AppSettings>()
         .editing
         .remote_client_status
         .clone();
+
     let hosts = remote::known_hosts();
 
     v_flex()
@@ -254,13 +259,16 @@ fn remote_client_status(cx: &mut App) -> Div {
                                 .editing
                                 .remote_pairing_input
                                 .to_string();
+
                             if code.trim().is_empty() {
                                 cx.global_mut::<AppSettings>().editing.remote_client_status =
                                     Some(i18n("settings-remote-enter-code-first").to_owned());
                                 return;
                             }
+
                             cx.global_mut::<AppSettings>().editing.remote_client_status =
                                 Some(i18n("settings-remote-pairing").to_owned());
+
                             // Pairing is a network round trip: running it inline
                             // would freeze the window until the relay answers or
                             // the attempt times out.
@@ -274,11 +282,13 @@ fn remote_client_status(cx: &mut App) -> Div {
                                         )
                                     })
                                     .await;
+
                                 cx.update_global(|settings: &mut AppSettings, _| {
                                     let message = match paired {
                                         Ok(host) => {
                                             settings.editing.remote_pairing_input =
                                                 SharedString::default();
+
                                             i18n("settings-remote-paired-success")
                                                 .replace("{name}", &host.name)
                                                 .replace("{id}", &host.host_id)
@@ -286,6 +296,7 @@ fn remote_client_status(cx: &mut App) -> Div {
                                         Err(e) => i18n("settings-remote-pairing-failed")
                                             .replace("{error}", &e.to_string()),
                                     };
+
                                     settings.editing.remote_client_status = Some(message);
                                 })
                             })
@@ -312,6 +323,7 @@ fn remote_client_status(cx: &mut App) -> Div {
         })
         .children(hosts.into_iter().enumerate().map(|(index, host)| {
             let host_id = host.host_id.clone();
+
             h_flex()
                 .w_full()
                 .py_2()

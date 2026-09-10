@@ -78,6 +78,7 @@ impl CodexHost {
     pub(super) fn retain_requests(&self, owner: RegistrationId, ids: &[u64]) {
         self.router.retain_requests(owner, ids);
     }
+
     pub(super) fn acquire(
         launch: &LaunchConfig,
         catalog: &[LaunchConfig],
@@ -85,8 +86,10 @@ impl CodexHost {
     ) -> Result<Arc<Self>, String> {
         let bootstrap = HostBootstrap::from_launches(launch, catalog)?;
         let mut on_stderr = Some(on_stderr);
+
         loop {
             let mut shared = SHARED_HOST.state.lock();
+
             if let Some(host) = shared.host.upgrade()
                 && host.router.alive.load(Ordering::Acquire)
             {
@@ -96,9 +99,11 @@ impl CodexHost {
 
             if shared.starting {
                 let attempt = shared.attempt;
+
                 while shared.starting && shared.attempt == attempt {
                     SHARED_HOST.ready.wait(&mut shared);
                 }
+
                 if let Some((_, error)) = shared
                     .failed_attempts
                     .iter()
@@ -106,12 +111,15 @@ impl CodexHost {
                 {
                     return Err(error.clone());
                 }
+
                 continue;
             }
 
             shared.starting = true;
             shared.attempt = shared.attempt.wrapping_add(1).max(1);
+
             let attempt = shared.attempt;
+
             drop(shared);
 
             let started = Self::start(
@@ -121,17 +129,22 @@ impl CodexHost {
                     .expect("host startup callback is consumed by one attempt"),
             )
             .map(Arc::new);
+
             let mut shared = SHARED_HOST.state.lock();
+
             shared.starting = false;
+
             match &started {
                 Ok(host) => shared.host = Arc::downgrade(host),
                 Err(error) => {
                     shared.failed_attempts.push_back((attempt, error.clone()));
+
                     while shared.failed_attempts.len() > 8 {
                         shared.failed_attempts.pop_front();
                     }
                 }
             }
+
             SHARED_HOST.ready.notify_all();
             return started;
         }
@@ -148,6 +161,7 @@ impl CodexHost {
         let command = launcher.command(["app-server"]);
         let (startup_tx, startup_rx) = mpsc::sync_channel(1);
         let router = Arc::new(Router::new(startup_tx));
+
         let process = JsonLineProcess::spawn_with_stdout_closed(
             command,
             &format!("{executable} app-server"),
@@ -162,20 +176,24 @@ impl CodexHost {
                 move || router.handle_stdout_closed()
             },
         )?;
+
         let host = Self {
             key: bootstrap.key,
             credential_hashes: bootstrap.credential_hashes,
             router,
             process: Mutex::new(process),
         };
+
         host.router.start_timer()?;
         host.process
             .lock()
             .write_line(initialize_request())
             .map_err(|error| error.to_string())?;
+
         let initialized = startup_rx
             .recv_timeout(START_TIMEOUT)
             .map_err(|_| "Codex app-server did not initialize in time".to_string())?;
+
         initialized.map_err(|error| redact(&error, &credential_values))?;
         host.process
             .lock()
@@ -185,6 +203,7 @@ impl CodexHost {
                 "params": {},
             }))
             .map_err(|error| error.to_string())?;
+
         Ok(host)
     }
 
@@ -199,6 +218,7 @@ impl CodexHost {
                     .to_string(),
             );
         }
+
         if let Some(name) = requested
             .provider
             .as_ref()
@@ -206,6 +226,7 @@ impl CodexHost {
         {
             let normalized = normalize_env_name(name);
             let expected = bootstrap.credential_hashes.get(&normalized);
+
             if self.credential_hashes.get(&normalized) != expected {
                 return Err(
                     "This Codex profile requires credentials that are not present in the live shared host; close existing Codex tabs before retrying"
@@ -213,6 +234,7 @@ impl CodexHost {
                 );
             }
         }
+
         Ok(())
     }
 
@@ -225,18 +247,22 @@ impl CodexHost {
 
     pub(super) fn send(&self, owner: RegistrationId, mut message: Value) -> Result<(), String> {
         self.router.prepare_outgoing(owner, &mut message)?;
+
         let request_id = message["method"]
             .is_string()
             .then(|| message["id"].as_u64())
             .flatten();
+
         let result = match message["method"].as_str() {
             None => self.process.lock().write_line(message).map(|_| None),
             Some("turn/interrupt" | "thread/unsubscribe") => {
                 let mut process = self.process.lock();
                 let result = process.write_tracked(vec![message], InputClass::Control);
+
                 if result.is_err() {
                     process.abort();
                 }
+
                 result.map(Some)
             }
             _ => self
@@ -245,11 +271,13 @@ impl CodexHost {
                 .write_tracked(vec![message], InputClass::Normal)
                 .map(Some),
         };
+
         if result.is_err()
             && let Some(id) = request_id
         {
             self.router.reject_outgoing(id);
         }
+
         match result {
             Ok(ticket) => {
                 if let Some(id) = request_id
@@ -257,6 +285,7 @@ impl CodexHost {
                 {
                     self.router.attach_input(id, ticket);
                 }
+
                 Ok(())
             }
             Err(error) => Err(error.to_string()),
@@ -284,6 +313,7 @@ impl CodexHost {
 impl Drop for CodexHost {
     fn drop(&mut self) {
         self.router.expected_shutdown.store(true, Ordering::Release);
+
         let _ = self
             .process
             .get_mut()
@@ -294,6 +324,7 @@ impl Drop for CodexHost {
 impl HostBootstrap {
     fn from_launches(selected: &LaunchConfig, catalog: &[LaunchConfig]) -> Result<Self, String> {
         let mut launches = Vec::with_capacity(catalog.len() + 1);
+
         launches.push(selected);
         launches.extend(catalog.iter());
 
@@ -307,6 +338,7 @@ impl HostBootstrap {
             })
             .map(normalize_env_name)
             .collect();
+
         let key = HostKey::from_launch(selected, &credential_names);
         let mut credentials = BTreeMap::<String, (String, String)>::new();
         let mut providers = BTreeMap::<String, (String, String)>::new();
@@ -315,6 +347,7 @@ impl HostBootstrap {
             if HostKey::from_launch(launch, &credential_names) != key {
                 continue;
             }
+
             let Some(provider) = launch.provider.as_ref() else {
                 continue;
             };
@@ -326,6 +359,7 @@ impl HostBootstrap {
             };
             let normalized = normalize_env_name(name);
             let provider_identity = (provider.id.clone(), provider.base_url.clone());
+
             if let Some(existing) = providers.get(&normalized)
                 && existing != &provider_identity
             {
@@ -333,7 +367,9 @@ impl HostBootstrap {
                     "Codex provider credential name {name} is used by conflicting provider definitions"
                 ));
             }
+
             providers.insert(normalized.clone(), provider_identity);
+
             if let Some((_, existing)) = credentials.get(&normalized)
                 && existing != &value
             {
@@ -341,22 +377,27 @@ impl HostBootstrap {
                     "Codex provider credential name {name} resolves to more than one profile value"
                 ));
             }
+
             credentials.insert(normalized, (name.to_string(), value));
         }
 
         let mut launch = selected.clone();
+
         launch.env = effective_process_env(selected, &credential_names)
             .into_values()
             .collect();
         launch.env.extend(credentials.values().cloned());
+
         let credential_values = credentials
             .values()
             .map(|(_, value)| value.clone())
             .collect();
+
         let credential_hashes = credentials
             .into_iter()
             .map(|(name, (_, value))| (name, hash_secret(&value)))
             .collect();
+
         Ok(Self {
             key,
             launch,
@@ -369,6 +410,7 @@ impl HostBootstrap {
 impl HostKey {
     fn from_launch(launch: &LaunchConfig, credential_names: &HashSet<String>) -> Self {
         let launcher = AgentCli::from_launch(launch, "codex");
+
         Self {
             executable: launcher
                 .resolved_executable()
@@ -388,12 +430,15 @@ fn effective_process_env(
     credential_names: &HashSet<String>,
 ) -> BTreeMap<String, (String, String)> {
     let mut environment = BTreeMap::new();
+
     for (name, value) in &launch.env {
         let normalized = normalize_env_name(name);
+
         if !credential_names.contains(&normalized) {
             environment.insert(normalized, (name.clone(), value.clone()));
         }
     }
+
     environment
 }
 
@@ -416,16 +461,20 @@ fn hash_secret(secret: &str) -> [u8; 32] {
 
 fn redact(text: &str, credential_values: &[String]) -> String {
     let mut redacted = text.to_string();
+
     let mut values: Vec<&str> = credential_values
         .iter()
         .map(String::as_str)
         .filter(|value| !value.is_empty())
         .collect();
+
     values.sort_unstable_by_key(|value| Reverse(value.len()));
     values.dedup();
+
     for value in values {
         redacted = redacted.replace(value, "<redacted>");
     }
+
     redacted
 }
 

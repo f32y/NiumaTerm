@@ -27,9 +27,12 @@ fn coalesces_until_delivered() {
     assert!(rx.try_recv().is_err());
 
     wake.mark_delivered(7);
+
     assert!(rx.try_recv().is_ok());
     assert!(rx.try_recv().is_err());
+
     wake.mark_delivered(7);
+
     assert!(wake.signal(Wake::Content(7)));
     assert!(rx.try_recv().is_ok());
 }

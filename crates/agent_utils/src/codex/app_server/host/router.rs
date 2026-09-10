@@ -81,11 +81,13 @@ struct PendingRoute {
 impl PendingRoute {
     fn timeout_response(&self) -> Value {
         let cancelled = self.input.as_ref().is_some_and(InputTicket::cancel);
+
         let message = if cancelled {
             "Codex request expired before writing and was cancelled; it was not sent.".to_string()
         } else {
             self.class.timeout_message("Codex")
         };
+
         json!({
             "id": self.purpose.local_id(),
             "error": {
@@ -143,12 +145,16 @@ impl RouterState {
 
     fn allocate_request_id(&mut self) -> Option<u64> {
         let start = self.next_request_id;
+
         loop {
             let candidate = self.next_request_id;
+
             self.next_request_id = self.next_request_id.wrapping_add(1).max(FIRST_HOST_RPC_ID);
+
             if !self.pending_requests.contains_key(&candidate) && candidate != HOST_INIT_RPC_ID {
                 return Some(candidate);
             }
+
             if self.next_request_id == start {
                 return None;
             }
@@ -177,17 +183,21 @@ impl RouterState {
                 ))
             };
         }
+
         self.thread_owners.insert(thread_id.clone(), owner);
+
         let Some(delivery) = self.delivery(owner) else {
             return Ok(Vec::new());
         };
         let early = self.early_messages.take(&thread_id);
+
         let closed = early.iter().any(|message| {
             matches!(
                 message["method"].as_str(),
                 Some("thread/closed" | "thread/deleted")
             )
         });
+
         let deliveries = early
             .into_iter()
             .map(|message| {
@@ -200,17 +210,21 @@ impl RouterState {
                         },
                     );
                 }
+
                 if message["method"].as_str() == Some("serverRequest/resolved")
                     && let Some(id) = message["params"]["requestId"].as_u64()
                 {
                     self.server_requests.remove(&id);
                 }
+
                 (Arc::clone(&delivery), message)
             })
             .collect();
+
         if closed {
             self.remove_thread(&thread_id);
         }
+
         Ok(deliveries)
     }
 
@@ -226,10 +240,12 @@ impl RouterState {
                 "Codex thread {thread_id} is already attached to another Agent Tab"
             ));
         }
+
         self.thread_owners
             .retain(|_, candidate| *candidate != owner);
         self.server_requests.retain(|_, route| route.owner != owner);
         self.root_by_owner.insert(owner, thread_id.clone());
+
         self.claim_thread(owner, thread_id)
     }
 
@@ -262,22 +278,28 @@ impl Router {
     pub(super) fn register(&self, delivery: Delivery) -> RegistrationId {
         let mut state = self.state.lock();
         let id = state.next_registration_id;
+
         state.next_registration_id = state.next_registration_id.wrapping_add(1).max(1);
         state.sessions.insert(id, delivery);
+
         id
     }
 
     pub(super) fn start_timer(self: &Arc<Self>) -> Result<(), String> {
         let weak = Arc::downgrade(self);
+
         let timer = DeadlineTimer::new(move || {
             if let Some(router) = weak.upgrade() {
                 router.expire_requests(Instant::now());
             }
         })
         .map_err(|error| format!("could not start Codex deadline timer: {error}"))?;
+
         let state = self.state.lock();
+
         *self.timer.lock() = Some(timer);
         self.refresh_timer(&state);
+
         Ok(())
     }
 
@@ -305,17 +327,22 @@ impl Router {
         let Some(id) = message["id"].as_u64() else {
             return Ok(());
         };
+
         if message["method"].is_string() {
             let mut state = self.state.lock();
+
             if !state.sessions.contains_key(&owner) {
                 return Err("Codex session is detached".to_string());
             }
+
             let class = request_class(message);
+
             let host_limit = if class == RequestClass::Control {
                 MAX_HOST_REQUESTS
             } else {
                 MAX_HOST_REQUESTS - RESERVED_HOST_CONTROLS
             };
+
             if state.pending_requests.len() >= host_limit
                 || state
                     .pending_requests
@@ -329,9 +356,11 @@ impl Router {
                         .into(),
                 );
             }
+
             let global_id = state
                 .allocate_request_id()
                 .ok_or_else(|| "Codex app-server request IDs are exhausted".to_string())?;
+
             state.pending_requests.insert(
                 global_id,
                 PendingRoute {
@@ -348,6 +377,7 @@ impl Router {
         }
 
         let mut state = self.state.lock();
+
         match state.server_requests.remove(&id) {
             Some(route) if route.owner == owner => Ok(()),
             Some(route) => {
@@ -374,6 +404,7 @@ impl Router {
 
     pub(super) fn retain_requests(&self, owner: RegistrationId, ids: &[u64]) {
         let mut state = self.state.lock();
+
         state
             .pending_requests
             .retain(|_, route| route.owner != owner || ids.contains(&route.purpose.local_id()));
@@ -383,12 +414,15 @@ impl Router {
     pub(super) fn expire_requests(&self, now: Instant) {
         let deliveries = {
             let mut state = self.state.lock();
+
             let expired: Vec<_> = state
                 .pending_requests
                 .extract_if(|_, route| route.deadline <= now)
                 .map(|(_, route)| route)
                 .collect();
+
             self.refresh_timer(&state);
+
             expired
                 .into_iter()
                 .filter_map(|route| {
@@ -397,6 +431,7 @@ impl Router {
                 })
                 .collect::<Vec<_>>()
         };
+
         // Delivery can re-enter routing, so no callback runs while state is locked.
         for (delivery, message) in deliveries {
             delivery(message);
@@ -415,6 +450,7 @@ impl Router {
         } else {
             Vec::new()
         };
+
         for (delivery, message) in deliveries {
             delivery(message);
         }
@@ -422,30 +458,37 @@ impl Router {
 
     fn route_response(&self, id: u64, mut message: Value) -> Vec<(Delivery, Value)> {
         let mut state = self.state.lock();
+
         if id == HOST_INIT_RPC_ID {
             if let Some(tx) = state.startup_tx.take() {
                 let result = message["error"]["message"]
                     .as_str()
                     .map(|error| Err(error.to_string()))
                     .unwrap_or(Ok(()));
+
                 let _ = tx.send(result);
             }
+
             return Vec::new();
         }
 
         let Some(route) = state.pending_requests.remove(&id) else {
             return Vec::new();
         };
+
         self.refresh_timer(&state);
         message["id"] = json!(route.purpose.local_id());
+
         if route.deadline <= Instant::now() {
             message = route.timeout_response();
         }
+
         let Some(delivery) = state.delivery(route.owner) else {
             return Vec::new();
         };
 
         let mut deliveries = Vec::new();
+
         if route.purpose.replaces_root()
             && message["error"].is_null()
             && let Some(thread_id) = message["result"]["thread"]["id"].as_str()
@@ -460,7 +503,9 @@ impl Router {
                 }
             }
         }
+
         deliveries.insert(0, (delivery, message));
+
         deliveries
     }
 
@@ -472,16 +517,20 @@ impl Router {
             return Vec::new();
         };
         let mut state = self.state.lock();
+
         let Some(owner) = state.thread_owners.get(&thread_id).copied() else {
             state.hold_early(&thread_id, message);
             return Vec::new();
         };
+
         let Some(delivery) = state.delivery(owner) else {
             return Vec::new();
         };
+
         state
             .server_requests
             .insert(id, ServerRequestRoute { owner, thread_id });
+
         vec![(delivery, message)]
     }
 
@@ -494,6 +543,7 @@ impl Router {
                 .unwrap_or("Codex protocol reader failed");
             let _ = startup.send(Err(reason.to_string()));
         }
+
         let Some(thread_id) = message_thread_id(&message).map(str::to_string) else {
             return self
                 .state
@@ -507,6 +557,7 @@ impl Router {
 
         let mut state = self.state.lock();
         let mut deliveries = Vec::new();
+
         if method == "serverRequest/resolved"
             && let Some(id) = message["params"]["requestId"].as_u64()
             && state
@@ -516,6 +567,7 @@ impl Router {
         {
             state.server_requests.remove(&id);
         }
+
         if method == "thread/started"
             && !state.thread_owners.contains_key(&thread_id)
             && let Some(parent_id) = message["params"]["thread"]["parentThreadId"].as_str()
@@ -529,13 +581,17 @@ impl Router {
             state.hold_early(&thread_id, message);
             return Vec::new();
         };
+
         let Some(delivery) = state.delivery(owner) else {
             return Vec::new();
         };
+
         deliveries.push((delivery, message));
+
         if matches!(method, "thread/closed" | "thread/deleted") {
             state.remove_thread(&thread_id);
         }
+
         deliveries
     }
 
@@ -547,13 +603,16 @@ impl Router {
         let deliveries = {
             let mut state = self.state.lock();
             let mut deliveries = Vec::new();
+
             for thread_id in thread_ids {
                 if let Ok(early) = state.claim_thread(owner, thread_id) {
                     deliveries.extend(early);
                 }
             }
+
             deliveries
         };
+
         for (delivery, message) in deliveries {
             delivery(message);
         }
@@ -561,6 +620,7 @@ impl Router {
 
     pub(super) fn detach(&self, owner: RegistrationId) -> bool {
         let mut state = self.state.lock();
+
         state.sessions.remove(&owner);
         state
             .pending_requests
@@ -573,6 +633,7 @@ impl Router {
             .retain(|_, thread_owner| *thread_owner != owner);
         state.root_by_owner.remove(&owner);
         self.refresh_timer(&state);
+
         state.sessions.is_empty()
     }
 
@@ -580,31 +641,38 @@ impl Router {
         if !self.alive.swap(false, Ordering::AcqRel) {
             return;
         }
+
         let (startup_tx, deliveries) = {
             let mut state = self.state.lock();
             let startup_tx = state.startup_tx.take();
+
             let deliveries = if self.expected_shutdown.load(Ordering::Acquire) {
                 Vec::new()
             } else {
                 state.sessions.values().cloned().collect::<Vec<_>>()
             };
+
             state.pending_requests.clear();
             self.refresh_timer(&state);
             state.server_requests.clear();
             state.thread_owners.clear();
             state.root_by_owner.clear();
             state.early_messages.clear();
+
             (startup_tx, deliveries)
         };
+
         if let Some(tx) = startup_tx {
             let _ = tx.send(Err(
                 "Codex app-server exited during initialization".to_string()
             ));
         }
+
         let message = json!({
             "method": HOST_EXIT_METHOD,
             "params": {"message": "Codex app-server stopped unexpectedly"},
         });
+
         for delivery in deliveries {
             delivery(message.clone());
         }

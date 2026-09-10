@@ -134,6 +134,7 @@ impl TerminalPane {
         let (wake, wake_rx) = wake::wake_channel();
         let agent_route = agent_process().allocate_route();
         let environment = agent_process().environment_for(&agent_route);
+
         let (cursor_shape, manage_process_tree) =
             cx.read_global(|settings: &TerminalSettings, _| {
                 (settings.cursor_shape, settings.manage_subprocess_job)
@@ -417,6 +418,7 @@ impl Render for TerminalPane {
         let settings = cx.global::<TerminalSettings>();
         let fixed_bottom = settings.fixed_bottom();
         let show_block_chrome = settings.command_blocks;
+
         self.block_list
             .list
             .set_smooth_wheel_enabled(settings.smooth_wheel);

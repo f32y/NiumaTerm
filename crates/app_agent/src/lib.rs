@@ -147,7 +147,9 @@ impl GitBranchPoll {
         if self.refreshing {
             return None;
         }
+
         self.refreshing = true;
+
         Some(self.generation)
     }
 
@@ -155,6 +157,7 @@ impl GitBranchPoll {
         if generation != self.generation {
             return;
         }
+
         self.branch = branch;
         self.ready = true;
         self.refreshing = false;
@@ -168,7 +171,9 @@ impl GitBranchPoll {
                 i18n("agent-git-detecting-branch").to_string()
             }
         });
+
         let opacity = if self.branch.is_some() { 0.72 } else { 0.48 };
+
         (label, opacity)
     }
 }

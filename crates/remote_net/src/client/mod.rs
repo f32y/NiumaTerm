@@ -68,6 +68,7 @@ impl RemoteSession {
             session_id: self.session_id,
             commands: self.commands,
         };
+
         (self.snapshot, input, self.output)
     }
 }
@@ -124,6 +125,7 @@ pub fn open_remote_session(
                     return;
                 }
             };
+
             runtime.block_on(session_thread(
                 relay_url,
                 host_id,
@@ -142,6 +144,7 @@ pub fn open_remote_session(
     let snapshot = ready_rx
         .recv_timeout(NET_TIMEOUT * 2)
         .map_err(|_| NetError::Timeout)??;
+
     Ok(RemoteSession {
         session_id: snapshot.session_id,
         snapshot,
@@ -182,10 +185,12 @@ async fn session_thread(
         };
 
     let session_id = snapshot.session_id;
+
     // Everything up to and including `base_seq` is already in the snapshot the
     // caller renders, so the pump only forwards events past it. After a resume
     // this is what suppresses the replay the fresh checkpoint already covers.
     let mut resume_after = snapshot.base_seq;
+
     if ready.send(Ok(snapshot)).is_err() {
         return; // Caller gave up before we finished attaching.
     }
@@ -220,6 +225,7 @@ async fn session_thread(
         if output.send(SessionByteEvent::Output(snapshot.vt)).is_err() {
             return;
         }
+
         resume_after = snapshot.base_seq;
         channel = resumed;
     }
@@ -240,6 +246,7 @@ async fn connect_and_attach(
         AttachTarget::Existing(id) => id,
         AttachTarget::Open(options) => {
             with_timeout(channel.send_control(&HostBound::Open(options))).await?;
+
             match with_timeout(channel.recv_control::<ClientBound>()).await? {
                 ClientBound::Opened { session_id } => session_id,
                 ClientBound::Error { message, .. } => return Err(NetError::Protocol(message)),
@@ -253,6 +260,7 @@ async fn connect_and_attach(
     };
 
     with_timeout(channel.send_control(&HostBound::Attach { session_id })).await?;
+
     match with_timeout(channel.recv_control::<ClientBound>()).await? {
         ClientBound::Attached(snapshot) => Ok((channel, snapshot)),
         ClientBound::Error { message, .. } => Err(NetError::Protocol(message)),
@@ -276,7 +284,9 @@ async fn reconnect(
         if commands.is_closed() {
             return None; // Tab closed while we were retrying.
         }
+
         time::sleep(RECONNECT_BACKOFF * attempt).await;
+
         match connect_and_attach(
             relay_url,
             host_id,
@@ -297,10 +307,12 @@ async fn reconnect(
                     warn!(session_id, "remote session cannot be resumed: {message}");
                     return None;
                 }
+
                 warn!(session_id, attempt, "remote resume failed: {error}");
             }
         }
     }
+
     None
 }
 
@@ -326,6 +338,7 @@ async fn pump(
 ) -> PumpExit {
     let FrameChannel { ws, mut chan } = channel;
     let (mut sink, mut stream) = ws.split();
+
     loop {
         tokio::select! {
             command = commands.recv() => {
@@ -375,6 +388,7 @@ pub fn pair_device(
     device_name: String,
 ) -> Result<(), NetError> {
     let (tx, rx) = std_mpsc::channel();
+
     thread::Builder::new()
         .name("remote-pair".into())
         .spawn(move || {
@@ -388,14 +402,17 @@ pub fn pair_device(
                     return;
                 }
             };
+
             let result = runtime.block_on(async {
                 crate::client_connect_pair(&code, &device, &device_name)
                     .await
                     .map(|_| ())
             });
+
             let _ = tx.send(result);
         })
         .map_err(|e| NetError::Internal(e.to_string()))?;
+
     rx.recv().map_err(|_| NetError::Closed)?
 }
 
@@ -407,6 +424,7 @@ pub fn list_remote_sessions(
     device: StaticKeypair,
 ) -> Result<Vec<ProtocolSessionInfo>, NetError> {
     let (tx, rx) = std_mpsc::channel();
+
     thread::Builder::new()
         .name("remote-list".into())
         .spawn(move || {
@@ -420,10 +438,13 @@ pub fn list_remote_sessions(
                     return;
                 }
             };
+
             let result = runtime.block_on(async {
                 let mut channel =
                     client_connect_ik(&relay_url, &host_id, &host_public_key, &device).await?;
+
                 channel.send_control(&HostBound::ListSessions).await?;
+
                 // Bound the wait so a silent host can't hang the caller. A
                 // silent host is indistinguishable from a slow one, so this is
                 // Timeout (retryable), not a protocol violation.
@@ -436,8 +457,10 @@ pub fn list_remote_sessions(
                     Err(_) => Err(NetError::Timeout),
                 }
             });
+
             let _ = tx.send(result);
         })
         .map_err(|e| NetError::Internal(e.to_string()))?;
+
     rx.recv().map_err(|_| NetError::Closed)?
 }

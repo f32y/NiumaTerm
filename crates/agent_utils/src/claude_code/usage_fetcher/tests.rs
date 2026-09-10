@@ -44,11 +44,13 @@ fn the_panel_supplement_runs_only_for_a_live_reading_without_fable() {
         fable_weekly: fable,
         ..UsageSnapshot::default()
     };
+
     assert_eq!(supplement_from_cli(complete.clone(), &cancelled), complete);
 
     // An endpoint that described no window at all describes an account the
     // panel cannot be trusted to describe either.
     let empty = UsageSnapshot::default();
+
     assert_eq!(supplement_from_cli(empty.clone(), &cancelled), empty);
 
     // A supplement that cannot run leaves the reading it was adding to.
@@ -56,6 +58,7 @@ fn the_panel_supplement_runs_only_for_a_live_reading_without_fable() {
         five_hour,
         ..UsageSnapshot::default()
     };
+
     assert_eq!(supplement_from_cli(partial.clone(), &cancelled), partial);
 }
 
@@ -110,6 +113,7 @@ fn oauth_fallback_is_limited_to_recoverable_statuses() {
 #[test]
 fn parses_interactive_usage_panel_with_split_labels_and_values() {
     let output = "\u{1b}[32mCurrent session\u{1b}[0m\r\n████ 97% used\r\nCurrent week (all models)\r\n17% consumed\r\nCurrent week (Fable)\r\n32% used\r\n";
+
     assert_eq!(
         parse_output(output).unwrap(),
         UsageSnapshot {
@@ -124,6 +128,7 @@ fn parses_interactive_usage_panel_with_split_labels_and_values() {
 #[test]
 fn accepts_remaining_wording_and_weekly_label_variants() {
     let output = "Current session: 62% left\nWeekly limits\n41.6% available\n";
+
     assert_eq!(
         parse_output(output).unwrap(),
         UsageSnapshot {
@@ -163,6 +168,7 @@ fn keeps_cli_output_bounded_to_the_newest_bytes() {
 fn a_cancelled_request_reports_cancellation_not_failure() {
     let error = fetch_with_cancel(&AtomicBool::new(true))
         .expect_err("a cancelled fetch produces no snapshot");
+
     assert!(
         matches!(error, UsageFetchError::Cancelled),
         "expected Cancelled, got {error:?}"

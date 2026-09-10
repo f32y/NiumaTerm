@@ -160,6 +160,7 @@ pub(super) fn mouse_report_mods(modifiers: ModifiersState) -> u8 {
 
     mods
 }
+
 use std::sync::atomic::Ordering;
 
 use nmt_input::encode_mouse_report;

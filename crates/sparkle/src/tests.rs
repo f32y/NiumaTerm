@@ -36,6 +36,7 @@ fn nightly_allows_the_nightly_channel() {
 #[test]
 fn changing_the_channel_is_visible_to_the_next_check() {
     let delegate = UpdaterDelegate::new(Channel::Stable);
+
     delegate.ivars().channel.set(Channel::Nightly);
 
     assert!(ask_for_channels(&delegate).containsObject(ns_string!("nightly")));

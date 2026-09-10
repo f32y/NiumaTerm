@@ -19,6 +19,7 @@ impl DirtyState {
         }
 
         self.pending = false;
+
         true
     }
 

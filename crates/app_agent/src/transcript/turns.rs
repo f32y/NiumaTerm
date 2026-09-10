@@ -54,6 +54,7 @@ impl LiveTurn {
     pub(crate) fn start(&mut self) {
         self.started = Some(Instant::now());
         self.output_tokens = None;
+
         // Whatever the last turn was doing has nothing to say about this one.
         self.detail = None;
     }

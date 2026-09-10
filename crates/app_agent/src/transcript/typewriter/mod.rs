@@ -58,12 +58,14 @@ impl Typewriter {
     /// backlog at once rather than typing text the reader was not watching.
     pub(crate) fn advance(&mut self, total: usize, now: Instant) -> bool {
         let elapsed = now.saturating_duration_since(self.ticked).as_secs_f32();
+
         self.ticked = now;
 
         let total = total as f32;
         let backlog = (total - self.shown).max(0.0);
         let share = 1.0 - (-elapsed / CATCH_UP.as_secs_f32()).exp();
         let step = (backlog * share).max(FLOOR_RATE * elapsed).min(backlog);
+
         self.shown = (self.shown + step).min(total);
 
         self.shown < total

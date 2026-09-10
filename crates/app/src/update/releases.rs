@@ -121,6 +121,7 @@ fn get(client: &Client, url: &str) -> Result<String, CheckError> {
     if !response.status().is_success() {
         return Err(CheckError::Unreachable);
     }
+
     if response.content_length().unwrap_or(0) > MAX_RESPONSE_BYTES {
         return Err(CheckError::Unreadable);
     }
@@ -163,6 +164,7 @@ fn newest_in_channel(entries: &[ReleaseEntry], channel: UpdateChannel) -> Option
                 Some(version) => version,
                 None => return false,
             };
+
             channel_of(&published) == channel
                 && entry.prerelease == (channel == UpdateChannel::Nightly)
         })

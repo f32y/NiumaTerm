@@ -393,6 +393,7 @@ impl PromptSniffer {
         // Command output started (;C).
         if r == PromptRegion::Output && self.region != PromptRegion::Output {
             self.command_started_at = Some(time::SystemTime::now());
+
             // Render the echo once here; the ;D capture reuses it. A trusted,
             // non-empty start becomes the in-flight block.
             self.current_command = render_command_echo(&self.command_buf);

@@ -52,7 +52,9 @@ fn a_version_that_cannot_be_read_counts_as_a_difference() {
 fn scratch(name: &str) -> PathBuf {
     let directory = env::temp_dir().join(format!("nmt-install-plan-{}-{name}", process::id()));
     let _ = fs::remove_dir_all(&directory);
+
     fs::create_dir_all(&directory).unwrap();
+
     directory
 }
 
@@ -94,6 +96,7 @@ fn applying_a_plan_reports_a_missing_staged_file() {
 fn a_file_no_build_knows_about_is_planned_from_the_package() {
     let staging = scratch("unlisted-staging");
     let install = scratch("unlisted-install");
+
     // The build that performs a swap is the one being replaced, so a release
     // adding a file can only install it if the list comes from the package.
     fs::write(staging.join("nmt_later_addition.dll"), b"a later addition").unwrap();
@@ -105,6 +108,7 @@ fn a_file_no_build_knows_about_is_planned_from_the_package() {
 fn a_new_syntax_language_dll_is_selected_for_installation() {
     let staging = scratch("syntax-staging");
     let install = scratch("syntax-install");
+
     fs::write(staging.join("tree_sitter.dll"), b"new syntax languages").unwrap();
 
     assert!(plan(&staging, &install).contains("tree_sitter.dll"));
@@ -124,6 +128,7 @@ fn versioned_binary() -> PathBuf {
 fn a_file_the_installation_lacks_is_taken_from_the_staged_package() {
     let package = scratch("addition-package");
     let install = scratch("addition-install");
+
     fs::copy(versioned_binary(), package.join(APP_EXE)).unwrap();
     fs::copy(versioned_binary(), install.join(APP_EXE)).unwrap();
     fs::write(package.join("tree_sitter.dll"), b"staged languages").unwrap();
@@ -140,6 +145,7 @@ fn a_file_the_installation_lacks_is_taken_from_the_staged_package() {
 fn an_installed_file_is_kept_over_the_staged_copy() {
     let package = scratch("kept-package");
     let install = scratch("kept-install");
+
     fs::copy(versioned_binary(), package.join(APP_EXE)).unwrap();
     fs::copy(versioned_binary(), install.join(APP_EXE)).unwrap();
     fs::write(package.join("conpty.dll"), b"staged conpty").unwrap();
@@ -157,6 +163,7 @@ fn an_installed_file_is_kept_over_the_staged_copy() {
 fn a_package_that_is_not_the_installed_release_contributes_nothing() {
     let package = scratch("foreign-package");
     let install = scratch("foreign-install");
+
     // An executable whose version cannot be read names no release, so the
     // package holding it cannot be shown to be the one installed.
     fs::write(package.join(APP_EXE), b"not an executable").unwrap();

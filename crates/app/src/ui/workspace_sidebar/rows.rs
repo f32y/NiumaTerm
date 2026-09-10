@@ -17,12 +17,14 @@ impl Sidebar {
     ) -> AnyElement {
         let settings_entry = ws.kind == WorkspaceKind::Settings;
         let selection = sidebar_selection(cx);
+
         // In the vertical tab-bar style every tab of this workspace is on
         // screen as its own row carrying its own status mark and progress, so
         // the workspace's aggregate of them would say the same thing twice.
         let vertical_tabs =
             cx.global::<AppSettings>().appearance.tab_bar_style == TabBarStyle::Vertical;
         let highlight_active = ws.active && !vertical_tabs;
+
         let (glyphs, status_label) = workspace_status_glyphs(
             ws.agent_status,
             ws.terminal_activity,
@@ -63,6 +65,7 @@ impl Sidebar {
             // press from reaching the row behind it, so the activation has to
             // run on the capture side of the mouse-down.
             let menu_shell = cx.entity();
+
             hover_action(
                 ("workspace-new-tab", idx),
                 i18n("sidebar-tab-new"),
@@ -90,6 +93,7 @@ impl Sidebar {
             .into_any_element()
         } else if ws.pinned {
             let label = i18n("sidebar-workspace-menu-unpin");
+
             hover_action(
                 ("workspace-pin", idx),
                 label,
@@ -138,6 +142,7 @@ impl Sidebar {
             .child(controls);
 
         let full_path = ws.cwd.clone();
+
         // A temporary workspace wears the same `*` an unsaved document does,
         // so its absence from the next session is visible before the user
         // closes the window.
@@ -148,16 +153,19 @@ impl Sidebar {
             true => format!("* {}", workspace_display_label(&ws.name, &ws.cwd)).into(),
             false => workspace_display_label(&ws.name, &ws.cwd).into(),
         };
+
         // The `+N` token holds a fixed lane beside the path, so the path's own
         // budget shrinks by its width instead of pushing it off the row. The
         // name now shares that line and is charged against the same budget; a
         // name long enough to exhaust it leaves the path at its floor, where
         // the tail still names the leaf directory.
         let additional_count = ws.additional_cwds.len();
+
         let additional_summary = (additional_count > 0).then(|| {
             i18n("sidebar-workspace-additional-count")
                 .replace("{count}", &additional_count.to_string())
         });
+
         let path_budget = (self.width
             - 80.0
             - 8.0 * display_label.chars().count() as f32
@@ -165,14 +173,17 @@ impl Sidebar {
                 .as_ref()
                 .map_or(0.0, |token| 8.0 + 7.0 * token.chars().count() as f32))
             / 7.0;
+
         let display_path: SharedString = tail_preserving_path(
             &full_path,
             (path_budget.floor().max(0.0) as usize).clamp(8, 64),
         )
         .into();
+
         // Tooltip and assistive technology get every directory in order; the
         // row itself only has room for the primary path.
         let dirs_description = workspace_dirs_description(&ws.cwd, &ws.additional_cwds);
+
         let name = div()
             .id(("workspace-secondary", idx))
             .aria_label(display_label.clone())
@@ -194,6 +205,7 @@ impl Sidebar {
         // own, and the column fits about twice as many workspaces on screen.
         let name: AnyElement = if let Some(input) = renaming {
             let rename_shell = cx.entity();
+
             InlineRename::new(
                 ("workspace-secondary", idx),
                 display_label.clone(),
@@ -250,6 +262,7 @@ impl Sidebar {
         // Replicate the item's rendered width: sidebar width minus the card
         // gutter/border and the card's inner paddings around the list.
         let drag_width = (self.width - 36.0).max(80.0);
+
         let item = Button::new(("workspace", idx))
             .ghost()
             .when(!settings_entry, |this| {
@@ -307,11 +320,13 @@ impl Sidebar {
         let drag_shell = shell.clone();
         let pinned = ws.pinned;
         let closeable = ws.closeable;
+
         let pin_label = if pinned {
             i18n("sidebar-workspace-menu-unpin")
         } else {
             i18n("sidebar-workspace-menu-pin")
         };
+
         let cwd = ws.cwd.clone();
         let temporary = ws.temporary;
 
@@ -335,6 +350,7 @@ impl Sidebar {
                     this.sidebar.dragging = Some(idx);
                     cx.notify();
                 });
+
                 cx.new(|_| WorkspaceDragPreview {
                     name: drag_name.clone(),
                     cwd: drag_cwd.clone(),
@@ -348,9 +364,11 @@ impl Sidebar {
                     if !e.bounds.contains(&e.event.position) {
                         return;
                     }
+
                     // No gap over the drag's own item: dropping there is a
                     // no-op.
                     let target = (e.drag(cx).from != idx).then_some(idx);
+
                     if this.sidebar.drag_over != target {
                         this.sidebar.drag_over = target;
                         cx.notify();
@@ -514,6 +532,7 @@ impl Sidebar {
         let label: AnyElement = match renaming {
             Some(input) => {
                 let rename_shell = cx.entity();
+
                 InlineRename::new(
                     ("sidebar-tab-rename", key),
                     tab.label.clone(),
@@ -538,6 +557,7 @@ impl Sidebar {
         let menu_shell = cx.entity();
         let drag_shell = cx.entity();
         let drag_label = tab.label.clone();
+
         // The row spans the list column: sidebar width minus the panel inset
         // on both sides and the scrollbar lane the list reserves.
         let drag_width = (self.width - SIDEBAR_PADDING_X * 2.0 - 12.0).max(80.0);
@@ -613,6 +633,7 @@ impl Sidebar {
             .when(closeable, |this| this.child(close))
             .children(tab.progress.map(|report| {
                 let (color, fraction) = progress_visual(report, cx);
+
                 div()
                     .absolute()
                     .bottom_0()
@@ -657,6 +678,7 @@ impl Sidebar {
                         this.sidebar.tab_dragging = Some((ws_idx, tab_idx));
                         cx.notify();
                     });
+
                     cx.new(|_| SidebarTabDragPreview {
                         label: drag_label.clone(),
                         width: drag_width,
@@ -668,7 +690,9 @@ impl Sidebar {
                     if !e.bounds.contains(&e.event.position) {
                         return;
                     }
+
                     let drag = e.drag(cx);
+
                     // No gap over the drag's own row, and none over another
                     // workspace's rows, where the drop would be refused.
                     let target = (drag.workspace == ws_idx && drag.from != tab_idx)

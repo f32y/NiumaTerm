@@ -50,14 +50,17 @@ pub(in crate::ui) struct ProfileRootChoice {
 /// no executable and therefore has nothing to start.
 fn launch_command(profile: &Profile) -> Option<LaunchCommand> {
     let shell = profile.shell.trim().to_string();
+
     if shell.is_empty() {
         return None;
     }
+
     let args = profile
         .args
         .split_whitespace()
         .map(str::to_string)
         .collect();
+
     Some((Some(shell), args))
 }
 
@@ -72,10 +75,12 @@ pub(in crate::ui) fn profile_root_choices(
     roots: &[(String, bool)],
 ) -> Vec<ProfileRootChoice> {
     let mut choices = Vec::new();
+
     for profile in profiles {
         let Some(launch) = launch_command(profile) else {
             continue;
         };
+
         for (cwd, available) in roots {
             choices.push(ProfileRootChoice {
                 label: i18n("tabbar-menu-profile-in-directory")
@@ -87,6 +92,7 @@ pub(in crate::ui) fn profile_root_choices(
             });
         }
     }
+
     choices
 }
 
@@ -107,17 +113,21 @@ pub(in crate::ui) fn new_tab_menu(
         this.refresh_root_availability(cx);
         this.active_root_availability()
     });
+
     for profile in profiles {
         let Some(launch) = launch_command(&profile) else {
             continue;
         };
         let item_shell = shell.clone();
+
         if roots.len() > 1 {
             let choices = profile_root_choices(slice::from_ref(&profile), &roots);
+
             menu = menu
                 .submenu(profile.name.clone(), move |mut menu| {
                     for choice in choices {
                         let item_shell = item_shell.clone();
+
                         menu = menu
                             .item_disabled(choice.label, !choice.enabled, move |window, cx| {
                                 item_shell.update(cx, |this, cx| {
@@ -131,6 +141,7 @@ pub(in crate::ui) fn new_tab_menu(
                             })
                             .icon(tab_icon(None, false));
                     }
+
                     menu
                 })
                 .icon(tab_icon(None, false));
@@ -146,6 +157,7 @@ pub(in crate::ui) fn new_tab_menu(
     }
 
     let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
+
     if !agent_profiles.is_empty() {
         menu = menu.separator();
     }
@@ -156,6 +168,7 @@ pub(in crate::ui) fn new_tab_menu(
         } else {
             profile.name.clone()
         };
+
         let item_shell = shell.clone();
         let icon = tab_icon(Some(AgentKind::from_profile(profile.kind)), false);
 

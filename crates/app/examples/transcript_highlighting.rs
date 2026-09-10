@@ -60,6 +60,7 @@ impl Render for Preview {
                                 } else {
                                     ThemeMode::Dark
                                 };
+
                                 Theme::change(mode, Some(window), cx);
                                 window.refresh();
                             }),
@@ -103,11 +104,15 @@ fn main() {
         env::args().any(|arg| arg == "--testing"),
         "launch this preview with --testing"
     );
+
     nmt_config::enable_testing_mode();
+
     #[cfg(windows)]
     let platform = Rc::new(Platform::new(false).expect("initialize preview platform"));
+
     #[cfg(target_os = "macos")]
     let platform = Rc::new(Platform::new(false));
+
     Application::with_platform(platform)
         .with_assets(AppAssets)
         .run(|cx: &mut App| {
@@ -133,7 +138,9 @@ fn main() {
                 reduce_motion: true,
                 ..Default::default()
             });
+
             let bounds = Bounds::centered(None, size(px(1100.), px(850.)), cx);
+
             cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -149,7 +156,9 @@ fn main() {
                         transcript.show_items(&samples(), 1, cx);
                         transcript
                     });
+
                     let preview = cx.new(|_| Preview { transcript });
+
                     cx.new(|cx| Root::new(preview, window, cx))
                 },
             )

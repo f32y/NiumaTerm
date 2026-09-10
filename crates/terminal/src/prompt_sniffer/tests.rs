@@ -9,9 +9,11 @@ use crate::prompt_sniffer::{
 fn run(chunks: &[&[u8]]) -> Vec<(PromptRegion, Vec<u8>)> {
     let mut s = PromptSniffer::default();
     let mut out = Vec::new();
+
     for c in chunks {
         s.feed(c, |r, _, b| out.push((r, b.to_vec())));
     }
+
     out
 }
 
@@ -19,6 +21,7 @@ fn run(chunks: &[&[u8]]) -> Vec<(PromptRegion, Vec<u8>)> {
 fn engine_stream(chunks: &[&[u8]]) -> Vec<u8> {
     let mut s = PromptSniffer::default();
     let out = cell::RefCell::new(Vec::new());
+
     for c in chunks {
         s.feed_hooked(
             c,
@@ -26,6 +29,7 @@ fn engine_stream(chunks: &[&[u8]]) -> Vec<u8> {
             |m| out.borrow_mut().extend_from_slice(m.bytes),
         );
     }
+
     out.into_inner()
 }
 
@@ -34,6 +38,7 @@ fn classifies_full_prompt_command_output_cycle() {
     // Marks are BEL-terminated: ESC]133;A BEL  PS>  ESC]133;B BEL  ls CRLF  …
     let stream = b"\x1b]133;A\x07PS> \x1b]133;B\x07ls\r\n\x1b]133;C\x07out\r\n\x1b]133;D;0\x07";
     let segs = run(&[stream]);
+
     assert_eq!(
         segs,
         vec![
@@ -69,6 +74,7 @@ fn ordinary_escape_sequences_are_not_marks() {
     // The OSC 133 mark and an SGR color escape inside output pass through untouched.
     let sgr = b"\x1b]133;C\x07\x1b[31mred\x1b[0m";
     let out = engine_stream(&[sgr]);
+
     assert_eq!(out, sgr);
 }
 
@@ -79,6 +85,7 @@ fn mark_split_across_two_reads_is_carried() {
         b"\x1b]133;A\x07PS> \x1b]133;B\x07cmd\x1b]13",
         b"3;C\x07output",
     ]);
+
     assert_eq!(
         segs,
         vec![
@@ -96,6 +103,7 @@ fn region_persists_across_reads_without_marks() {
         b"\x1b]133;A\x07PS> \x1b]133;B\x07cmd\x1b]133;C\x07first",
         b"second",
     ]);
+
     assert_eq!(
         segs,
         vec![
@@ -110,9 +118,11 @@ fn region_persists_across_reads_without_marks() {
 fn run_with_trust(chunks: &[&[u8]]) -> Vec<(PromptRegion, bool, Vec<u8>)> {
     let mut s = PromptSniffer::default();
     let mut out = Vec::new();
+
     for c in chunks {
         s.feed(c, |r, trusted, b| out.push((r, trusted, b.to_vec())));
     }
+
     out
 }
 
@@ -121,6 +131,7 @@ fn boundary_trust_follows_ordered_prompt_command_output_cycle() {
     let stream =
         b"\x1b]133;A\x07PS1> \x1b]133;B\x07first\r\n\x1b]133;C\x07out1\r\n\x1b]133;D;0\x07\x1b]133;A\x07PS2> \x1b]133;B\x07second\r\n\x1b]133;C\x07out2\r\n\x1b]133;D;0\x07";
     let segs = run_with_trust(&[stream]);
+
     assert_eq!(
         segs,
         vec![
@@ -141,6 +152,7 @@ fn startup_synthetic_cycle_grants_trust_at_first_prompt() {
     // trust engages before the first Enter.
     let stream = b"banner\r\n\x1b]133;A\x07\x1b]133;B\x07\x1b]133;C\x07\x1b]133;D\x07\x1b]133;A\x07PS> \x1b]133;B\x07";
     let segs = run_with_trust(&[stream]);
+
     assert_eq!(
         segs,
         vec![
@@ -154,6 +166,7 @@ fn startup_synthetic_cycle_grants_trust_at_first_prompt() {
 #[test]
 fn prompt_without_completed_lifecycle_is_not_trusted() {
     let segs = run_with_trust(&[b"\x1b]133;A\x07PS> \x1b]133;B\x07cmd"]);
+
     assert_eq!(
         segs,
         vec![
@@ -161,7 +174,9 @@ fn prompt_without_completed_lifecycle_is_not_trusted() {
             (PromptRegion::Command, false, b"cmd".to_vec()),
         ]
     );
+
     let stream = b"\x1b]133;A\x07PS> \x1b]133;B\x07cmd";
+
     assert_eq!(engine_stream(&[stream]), stream);
 }
 
@@ -180,10 +195,12 @@ fn untrusted_stream_forwards_prompt_and_command() {
 #[test]
 fn invalid_transition_drops_boundary_trust() {
     let mut s = PromptSniffer::default();
+
     s.feed(
         b"\x1b]133;A\x07PS> \x1b]133;B\x07\x1b]133;B\x07",
         |_, _, _| {},
     );
+
     assert!(!s.boundary_trusted());
 }
 
@@ -194,6 +211,7 @@ fn split_marker_keeps_trust_when_lifecycle_is_valid() {
         b"\x1b]133;A\x07PS> \x1b]13",
         b"3;B\x07cmd\x1b]133;C\x07out",
     ]);
+
     assert_eq!(
         segs,
         vec![
@@ -211,11 +229,14 @@ fn split_marker_keeps_trust_when_lifecycle_is_valid() {
 fn malformed_carried_mark_clears_trust_before_forwarding() {
     let mut s = PromptSniffer::default();
     let mut out = Vec::new();
+
     s.feed(
         b"\x1b]133;A\x07p\x1b]133;B\x07c\x1b]133;C\x07o\x1b]133;D\x07\x1b]133;A\x07",
         |_, _, _| {},
     );
+
     assert!(s.boundary_trusted());
+
     s.feed(b"\x1b]133;", |r, trusted, b| {
         if !trusted || matches!(r, PromptRegion::Output | PromptRegion::None) {
             out.extend_from_slice(b);
@@ -226,6 +247,7 @@ fn malformed_carried_mark_clears_trust_before_forwarding() {
             out.extend_from_slice(b);
         }
     });
+
     assert!(!s.boundary_trusted());
     assert!(out.starts_with(b"\x1b]133;"));
 }
@@ -245,16 +267,21 @@ fn ordinary_escape_split_across_reads_keeps_trust() {
     ] {
         let mut s = primed();
         let mut fwd = Vec::new();
+
         s.feed(a, |_, _, seg| fwd.extend_from_slice(seg));
         s.feed(b_, |_, _, seg| fwd.extend_from_slice(seg));
+
         assert!(
             s.boundary_trusted(),
             "trust lost on split escape {:?}+{:?}",
             String::from_utf8_lossy(a),
             String::from_utf8_lossy(b_)
         );
+
         let mut joined = a.to_vec();
+
         joined.extend_from_slice(b_);
+
         assert_eq!(fwd, joined, "split escape bytes must forward verbatim");
     }
 }
@@ -267,11 +294,13 @@ use crate::event::CommandCapture;
 /// delivers (in stream order — multiple completions per read stay ordered).
 fn feed_commands(s: &mut PromptSniffer, input: &[u8]) -> Vec<CommandCapture> {
     let mut out = Vec::new();
+
     s.feed_hooked(
         input,
         |_, _, _| {},
         |mut m| out.extend(m.command_finished.take()),
     );
+
     out
 }
 
@@ -280,15 +309,18 @@ fn feed_commands(s: &mut PromptSniffer, input: &[u8]) -> Vec<CommandCapture> {
 /// `;D` — which itself must produce no command block (the trust-establishing cycle).
 fn primed() -> PromptSniffer {
     let mut s = PromptSniffer::default();
+
     let cmds = feed_commands(
         &mut s,
         b"\x1b]133;A\x07\x1b]133;B\x07\x1b]133;C\x07\x1b]133;D;0\x07",
     );
+
     assert!(s.boundary_trusted());
     assert!(
         cmds.is_empty(),
         "the trust-establishing ;D must not produce a block"
     );
+
     s
 }
 
@@ -301,10 +333,12 @@ fn escape_split_inside_command_region_keeps_captured_text() {
     // command text ("echo [31mhi").
     let mut s = primed();
     let mut cmds = feed_commands(&mut s, b"\x1b]133;A\x07PS> \x1b]133;B\x07echo \x1b");
+
     cmds.extend(feed_commands(
         &mut s,
         b"[31mhi\r\n\x1b]133;C\x07hi\r\n\x1b]133;D;0\x07",
     ));
+
     assert_eq!(cmds.len(), 1);
     assert_eq!(cmds[0].command, "echo hi");
 }
@@ -312,12 +346,16 @@ fn escape_split_inside_command_region_keeps_captured_text() {
 #[test]
 fn trusted_cycle_produces_block_with_exit_code_and_timing() {
     let mut s = primed();
+
     let cmds = feed_commands(
         &mut s,
         b"\x1b]133;A\x07PS> \x1b]133;B\x07echo hi\r\n\x1b]133;C\x07hi\r\n\x1b]133;D;0\x07",
     );
+
     assert_eq!(cmds.len(), 1, "trusted cycle yields exactly one block");
+
     let cmd = &cmds[0];
+
     assert_eq!(cmd.command, "echo hi");
     assert_eq!(cmd.exit_code, Some(0));
     assert!(cmd.started_at <= cmd.ended_at);
@@ -326,10 +364,12 @@ fn trusted_cycle_produces_block_with_exit_code_and_timing() {
 #[test]
 fn failing_exit_code_with_st_terminator_is_extracted() {
     let mut s = primed();
+
     let cmds = feed_commands(
         &mut s,
         b"\x1b]133;A\x07> \x1b]133;B\x07cmd /c exit 3\r\n\x1b]133;C\x07\x1b]133;D;3\x1b\\",
     );
+
     assert_eq!(cmds[0].exit_code, Some(3));
 }
 
@@ -337,10 +377,12 @@ fn failing_exit_code_with_st_terminator_is_extracted() {
 fn negative_exit_code_is_parsed() {
     // Windows native failures commonly surface as negative NTSTATUS-style codes.
     let mut s = primed();
+
     let cmds = feed_commands(
         &mut s,
         b"\x1b]133;A\x07> \x1b]133;B\x07x\r\n\x1b]133;C\x07\x1b]133;D;-1073741510\x07",
     );
+
     assert_eq!(cmds[0].exit_code, Some(-1073741510));
 }
 
@@ -348,10 +390,12 @@ fn negative_exit_code_is_parsed() {
 fn bare_d_records_unknown_exit_code() {
     // A foreign integration emitting a bare ;D still records the block.
     let mut s = primed();
+
     let cmds = feed_commands(
         &mut s,
         b"\x1b]133;A\x07> \x1b]133;B\x07ls\r\n\x1b]133;C\x07out\r\n\x1b]133;D\x07",
     );
+
     assert_eq!(cmds.len(), 1, "block recorded without an exit code");
     assert_eq!(cmds[0].exit_code, None);
     assert_eq!(cmds[0].command, "ls");
@@ -360,12 +404,16 @@ fn bare_d_records_unknown_exit_code() {
 #[test]
 fn exit_code_mark_split_across_reads_is_carried() {
     let mut s = primed();
+
     let cmds = feed_commands(
         &mut s,
         b"\x1b]133;A\x07> \x1b]133;B\x07x\r\n\x1b]133;C\x07out\x1b]13",
     );
+
     assert!(cmds.is_empty(), "mark incomplete — no block yet");
+
     let cmds = feed_commands(&mut s, b"3;D;42\x07");
+
     assert_eq!(cmds[0].exit_code, Some(42));
 }
 
@@ -374,11 +422,13 @@ fn two_completions_in_one_read_stay_ordered() {
     // A pasted multiline script can complete several commands in one PTY read;
     // the hook delivers each block at its own ;D in stream order.
     let mut s = primed();
+
     let cmds = feed_commands(
         &mut s,
         b"\x1b]133;A\x07> \x1b]133;B\x07first\r\n\x1b]133;C\x07\x1b]133;D;0\x07\
 \x1b]133;A\x07> \x1b]133;B\x07second\r\n\x1b]133;C\x07\x1b]133;D;1\x07",
     );
+
     assert_eq!(cmds.len(), 2);
     assert_eq!(
         (cmds[0].command.as_str(), cmds[0].exit_code),
@@ -394,19 +444,23 @@ fn two_completions_in_one_read_stay_ordered() {
 fn untrusted_or_partial_cycle_produces_no_block() {
     // Lifecycle starting at ;B (out of order): untrusted, no block.
     let mut s = PromptSniffer::default();
+
     let cmds = feed_commands(
         &mut s,
         b"\x1b]133;B\x07cmd\x1b]133;C\x07out\x1b]133;D;0\x07",
     );
+
     assert!(cmds.is_empty());
 
     // A first ordered cycle with no prior trust: its ;D establishes trust but the
     // cycle itself is skipped (Decision 5 — trust-recovery command is not recorded).
     let mut s = PromptSniffer::default();
+
     let cmds = feed_commands(
         &mut s,
         b"\x1b]133;A\x07> \x1b]133;B\x07real\r\n\x1b]133;C\x07out\x1b]133;D;0\x07",
     );
+
     assert!(s.boundary_trusted());
     assert!(cmds.is_empty());
 }
@@ -414,11 +468,13 @@ fn untrusted_or_partial_cycle_produces_no_block() {
 #[test]
 fn empty_or_whitespace_command_produces_no_block() {
     let mut s = primed();
+
     // Enter at an empty prompt: the echo region holds only the CRLF.
     let cmds = feed_commands(
         &mut s,
         b"\x1b]133;A\x07> \x1b]133;B\x07\r\n\x1b]133;C\x07\x1b]133;D;0\x07",
     );
+
     assert!(cmds.is_empty());
 }
 
@@ -426,10 +482,12 @@ fn empty_or_whitespace_command_produces_no_block() {
 fn command_text_is_stripped_of_sgr_and_controls() {
     // PSReadLine colorizes the echo; the recorded command must be plain text.
     let mut s = primed();
+
     let cmds = feed_commands(
         &mut s,
         b"\x1b]133;A\x07> \x1b]133;B\x07\x1b[93mgit\x1b[0m status\r\n\x1b]133;C\x07\x1b]133;D;0\x07",
     );
+
     assert_eq!(cmds[0].command, "git status");
 }
 
@@ -438,6 +496,7 @@ fn command_echo_redraws_converge_to_final_line() {
     // PSReadLine redraws the input per keystroke and ConPTY reprojects each redraw
     // at absolute columns; the emulation must overwrite in place, not concatenate.
     let mut s = primed();
+
     let cmds = feed_commands(
         &mut s,
         b"\x1b]133;A\x07> \x1b]133;B\x07\
@@ -446,6 +505,7 @@ fn command_echo_redraws_converge_to_final_line() {
 \x1b[1;9H\x1b[K\x1b[93mecho\x1b[0m hi2\r\n\
 \x1b]133;C\x07\x1b]133;D;0\x07",
     );
+
     assert_eq!(cmds[0].command, "echo hi2");
 }
 
@@ -458,6 +518,7 @@ fn command_echo_redraws_converge_to_final_line() {
 fn mark_hook_fires_in_stream_order_with_edges() {
     let mut s = primed();
     let log = cell::RefCell::new(Vec::<String>::new());
+
     s.feed_hooked(
         b"\x1b]133;A\x07p>\x1b]133;B\x07cmd\x1b]133;C\x07OUT",
         |_, _, seg| {
@@ -466,18 +527,23 @@ fn mark_hook_fires_in_stream_order_with_edges() {
         },
         |m| {
             let mut tags = Vec::new();
+
             if m.prompt_started {
                 tags.push("A".to_string());
             }
+
             if let Some(start) = &m.command_started {
                 tags.push(format!("C:{}", start.command));
             }
+
             if m.command_finished.is_some() {
                 tags.push("D".to_string());
             }
+
             log.borrow_mut().push(format!("mark[{}]", tags.join(",")));
         },
     );
+
     assert_eq!(
         log.into_inner(),
         vec![
@@ -498,6 +564,7 @@ fn mark_hook_fires_in_stream_order_with_edges() {
 fn mark_hook_receives_raw_mark_bytes_including_carry() {
     let mut s = PromptSniffer::default();
     let marks = cell::RefCell::new(Vec::<Vec<u8>>::new());
+
     let feed = |s: &mut PromptSniffer, input: &[u8]| {
         s.feed_hooked(
             input,
@@ -505,9 +572,12 @@ fn mark_hook_receives_raw_mark_bytes_including_carry() {
             |m| marks.borrow_mut().push(m.bytes.to_vec()),
         );
     };
+
     feed(&mut s, b"\x1b]133;A\x07p\x1b]13");
     feed(&mut s, b"3;B\x07");
+
     let marks = marks.into_inner();
+
     assert_eq!(
         marks,
         vec![b"\x1b]133;A\x07".to_vec(), b"\x1b]133;B\x07".to_vec()]
@@ -521,6 +591,7 @@ fn mark_hook_receives_raw_mark_bytes_including_carry() {
 fn command_started_only_for_trusted_nonempty_commands() {
     let mut s = PromptSniffer::default();
     let starts = cell::RefCell::new(Vec::<String>::new());
+
     let feed = |s: &mut PromptSniffer, input: &[u8]| {
         s.feed_hooked(
             input,
@@ -532,23 +603,29 @@ fn command_started_only_for_trusted_nonempty_commands() {
             },
         );
     };
+
     // Synthetic prime: untrusted at its ;C, empty command — no start.
     feed(
         &mut s,
         b"\x1b]133;A\x07\x1b]133;B\x07\x1b]133;C\x07\x1b]133;D;0\x07",
     );
+
     assert!(starts.borrow().is_empty());
+
     // First real command: trusted, non-empty — one start with the echo text.
     feed(
         &mut s,
         b"\x1b]133;A\x07> \x1b]133;B\x07sleep 5\r\n\x1b]133;C\x07",
     );
+
     assert_eq!(starts.borrow().as_slice(), ["sleep 5".to_string()]);
+
     // Empty Enter afterwards: no start.
     feed(
         &mut s,
         b"\x1b]133;D;0\x07\x1b]133;A\x07> \x1b]133;B\x07\r\n\x1b]133;C\x07",
     );
+
     assert_eq!(starts.borrow().len(), 1);
 }
 
@@ -568,6 +645,7 @@ fn osc_progress_carries_state_and_percentage() {
             progress: Some(40),
         }
     );
+
     // ST-terminated, and a percentage past 100 clamps.
     assert_eq!(
         report(b"\x1b]9;4;2;250\x1b\\"),
@@ -576,6 +654,7 @@ fn osc_progress_carries_state_and_percentage() {
             progress: Some(100),
         }
     );
+
     // Indeterminate carries no meaningful percentage.
     assert_eq!(
         report(b"\x1b]9;4;3;0\x07"),
@@ -601,6 +680,7 @@ fn osc_progress_carries_state_and_percentage() {
 fn right_prompt_marker_stays_in_prompt_region() {
     let stream = b"\x1b]133;A\x07left>\x1b]133;P;k=r\x07right\x1b]133;B\x07cmd\x1b]133;C\x07out";
     let segs = run_with_trust(&[stream]);
+
     assert_eq!(
         segs,
         vec![

@@ -444,6 +444,7 @@ pub unsafe extern "system" fn nmt_tree_sitter_language(
     let Some(value) = descriptor(index) else {
         return 0;
     };
+
     if output.is_null() {
         return 0;
     }
@@ -451,6 +452,7 @@ pub unsafe extern "system" fn nmt_tree_sitter_language(
     // The null check above establishes writable storage as the remaining
     // caller obligation; `write` avoids reading uninitialized output bytes.
     unsafe { ptr::write(output, value) };
+
     1
 }
 

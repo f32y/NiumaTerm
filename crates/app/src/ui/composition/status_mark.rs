@@ -12,6 +12,7 @@ use gpui_component::{ActiveTheme as _, Sizable as _};
 /// to read as ongoing work rather than as a blinking alert.
 const PULSE_PERIOD: Duration = Duration::from_millis(1_600);
 const PULSE_MIN_OPACITY: f32 = 0.35;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StatusMarkTone {
     Warning,
@@ -76,6 +77,7 @@ impl RenderOnce for StatusMark {
                     .size(size)
                     .rounded_full()
                     .when_some(self.label, |this, label| this.aria_label(label));
+
                 let mark = match tone {
                     StatusMarkTone::Warning => mark.bg(cx.theme().warning),
                     StatusMarkTone::Success => mark.bg(cx.theme().success),

@@ -40,12 +40,14 @@ fn remote_session_renders_through_net_pty() {
     const MARKER: &str = "netpty-render-marker";
 
     let data_dir = env::temp_dir().join(format!("nmt-netpty-{}", process::id()));
+
     let host = HostHandle::start(HostConfig {
         relay_url: RELAY.to_owned(),
         access_token: TOKEN.to_owned(),
         data_dir: data_dir.clone(),
     })
     .expect("host starts");
+
     let host_public = host.public_key().to_vec();
     let host_id = host.host_id().to_owned();
 
@@ -54,11 +56,13 @@ fn remote_session_renders_through_net_pty() {
     let code = host.begin_pairing();
     let rt = tokio_runtime();
     let mut paired = false;
+
     for _ in 0..40 {
         let dev = StaticKeypair {
             private: device.private.clone(),
             public: device.public.clone(),
         };
+
         if rt
             .block_on(client_connect_pair(&code, &dev, "netpty-test"))
             .is_ok()
@@ -66,8 +70,10 @@ fn remote_session_renders_through_net_pty() {
             paired = true;
             break;
         }
+
         thread::sleep(time::Duration::from_millis(500));
     }
+
     assert!(paired, "pairing must succeed");
 
     let remote = open_remote_session(
@@ -85,18 +91,23 @@ fn remote_session_renders_through_net_pty() {
     .expect("attach");
 
     let session = TerminalSession::new_remote(remote, 1, None).expect("remote session");
+
     session.write_input(format!("echo {MARKER}\r").as_bytes());
 
     let deadline = time::Instant::now() + time::Duration::from_secs(30);
     let mut rendered = false;
+
     while time::Instant::now() < deadline {
         let vt = session.engine.lock().format_vt_state().unwrap_or_default();
+
         if String::from_utf8_lossy(&vt).contains(MARKER) {
             rendered = true;
             break;
         }
+
         thread::sleep(time::Duration::from_millis(200));
     }
+
     assert!(
         rendered,
         "command output must render through NetPty into the engine"
@@ -156,6 +167,7 @@ fn powershell_bootstrap_is_passed_as_utf16_encoded_command() {
     let config = TerminalSessionConfig::default().with_shell_integration();
     let encoded = &config.args[2];
     let bytes = STANDARD.decode(encoded).unwrap();
+
     let utf16: Vec<u16> = bytes
         .chunks_exact(2)
         .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
@@ -186,6 +198,7 @@ fn zsh_is_integrated_through_an_injected_bootstrap() {
 
     assert!(integrated.bootstrap.is_some());
     assert!(integrated.environment_overrides.is_empty());
+
     // The launch has to suppress zsh's own startup files, since the bootstrap
     // replays them itself.
     assert!(integrated.args.contains(&String::from("-f")));
@@ -209,6 +222,7 @@ fn bash_is_integrated_through_an_injected_bootstrap() {
 
     assert!(state.args.is_empty());
     assert!(integrated.bootstrap.is_some());
+
     // The launch has to suppress bash's own startup files, since the bootstrap
     // replays them itself.
     assert!(integrated.args.contains(&String::from("--norc")));
@@ -264,9 +278,11 @@ fn bad_shell_returns_structured_error() {
         shell: Some("this-shell-does-not-exist-xyz".into()),
         ..TerminalSessionConfig::default()
     };
+
     let err = TerminalSession::new(&config, 1, None)
         .err()
         .expect("a non-existent shell must fail");
+
     assert_eq!(err.code, EngineErrorCode::PtySpawn);
     assert!(!err.message.is_empty());
 }
@@ -278,8 +294,10 @@ fn local_session_publishes_engine_output_and_host_events() {
 
     const ROUTE: u64 = 91_301;
     const MARKER: &str = "nmt-session-shared-state";
+
     let wakes = Arc::new(Mutex::new(Vec::new()));
     let received_wakes = Arc::clone(&wakes);
+
     let session = TerminalSession::new(
         &TerminalSessionConfig {
             shell: Some("cmd.exe".into()),
@@ -295,28 +313,38 @@ fn local_session_publishes_engine_output_and_host_events() {
         })),
     )
     .unwrap();
+
     assert!(session.engine_blocks());
     assert_eq!(session.engine.lock().cols(), 90);
     assert_eq!(session.engine.lock().rows(), 25);
+
     session.write_input(format!("title {MARKER}\r\necho {MARKER}\r\n").as_bytes());
+
     let deadline = time::Instant::now() + time::Duration::from_secs(10);
     let mut title_seen = false;
+
     loop {
         title_seen |= session
             .poll_events()
             .iter()
             .any(|event| matches!(event, HostEvent::Title(title) if title == MARKER));
+
         let output = session.engine.lock().format_vt_state().unwrap();
+
         if title_seen && String::from_utf8_lossy(&output).contains(MARKER) {
             break;
         }
+
         assert!(
             time::Instant::now() < deadline,
             "shell output and title must reach the session"
         );
+
         thread::sleep(time::Duration::from_millis(10));
     }
+
     let wakes = wakes.lock();
+
     assert!(wakes.contains(&Wake::Content(ROUTE)));
     assert!(wakes.contains(&Wake::Chrome(ROUTE)));
 }
@@ -335,11 +363,13 @@ fn restorable_tab_state_keeps_original_launch_command() {
     assert_eq!(state.shell.as_deref(), Some("pwsh.exe"));
     assert!(state.args.is_empty());
     assert_eq!(state.cwd.as_deref(), Some("C:/Projects/example"));
+
     // PowerShell's integration rewrites the launch args, so the restorable
     // state has to be the copy taken before it. Elsewhere the shell is not one
     // with an integration and the args stay empty either way.
     #[cfg(windows)]
     assert!(!integrated.args.is_empty());
+
     #[cfg(unix)]
     assert!(integrated.args.is_empty());
 }
@@ -371,6 +401,7 @@ fn host_events_map_from_terminal_events() {
 
     let q = events.lock();
     let v: Vec<&HostEvent> = q.iter().collect();
+
     assert!(matches!(v[0], HostEvent::Title(s) if s == "t"));
     assert!(matches!(v[1], HostEvent::Title(s) if s.is_empty()));
     assert!(matches!(v[2], HostEvent::Bell));
@@ -391,6 +422,7 @@ fn osc_notification_drains_into_shared_exact_notification_lifecycle() {
     let shared = Arc::new(SessionSharedState::default());
     let events = &shared.events;
     let listener = TerminalEventProxy::new(Arc::clone(&shared), 1, None);
+
     listener.send_event(
         TerminalEvent::DesktopNotification {
             title: "T".repeat(300),
@@ -401,18 +433,22 @@ fn osc_notification_drains_into_shared_exact_notification_lifecycle() {
 
     let route = AgentRoute::parse("osc-route").unwrap();
     let mut monitor = AgentMonitor::new("process");
+
     monitor.register_route(
         route.clone(),
         AgentActivityPolicy::ExpireAfterInactivity,
         Instant::now(),
     );
+
     let event = events.lock().pop_front().unwrap();
     let HostEvent::Notification { title, body } = event else {
         panic!("expected OSC notification host event");
     };
+
     monitor.notify(&route, &title, &body);
 
     let notification = monitor.notification(&route).unwrap().clone();
+
     assert_eq!(notification.title.chars().count(), 256);
     assert_eq!(notification.body.chars().count(), 4_096);
     assert_eq!(monitor.project([&route]).status, AgentRuntimeStatus::Idle);
@@ -446,6 +482,7 @@ fn in_flight_block_lifecycle() {
     }
     fn capture(cmd: &str) -> CommandCapture {
         let now = SystemTime::now();
+
         CommandCapture {
             seq: 0,
             command: cmd.to_string(),
@@ -464,16 +501,20 @@ fn in_flight_block_lifecycle() {
     let wid = WindowId::dummy();
 
     proxy.send_event(TerminalEvent::PromptStarted, wid);
+
     assert!(*open_prompt.lock());
 
     // start -> finish: in-flight visible while running, then cleared.
     proxy.send_event(TerminalEvent::CommandStarted(start("sleep 5")), wid);
+
     assert!(!*open_prompt.lock(), "command start closes prompt");
+
     {
         let running = in_flight.lock().clone().expect("in-flight set");
         assert_eq!(running.command.as_str(), "sleep 5");
     }
     proxy.send_event(TerminalEvent::CommandFinished(capture("sleep 5")), wid);
+
     assert!(
         in_flight.lock().is_none(),
         "finished command clears live state"
@@ -481,10 +522,15 @@ fn in_flight_block_lifecycle() {
 
     // start -> trust loss: cleared.
     proxy.send_event(TerminalEvent::CommandStarted(start("nested")), wid);
+
     assert_eq!(in_flight.lock().clone().unwrap().command, "nested");
+
     proxy.send_event(TerminalEvent::PromptStarted, wid);
+
     assert!(*open_prompt.lock());
+
     proxy.send_event(TerminalEvent::PromptBoundaryTrusted(false), wid);
+
     assert!(
         in_flight.lock().is_none(),
         "trust loss drops the running block"
@@ -494,13 +540,17 @@ fn in_flight_block_lifecycle() {
     // start -> exit: cleared as well.
     proxy.send_event(TerminalEvent::CommandStarted(start("hang")), wid);
     proxy.send_event(TerminalEvent::PromptStarted, wid);
+
     assert!(*open_prompt.lock());
+
     proxy.send_event(TerminalEvent::CloseTerminal(0), wid);
+
     assert!(in_flight.lock().is_none(), "exit drops the running block");
     assert!(!*open_prompt.lock(), "exit closes prompt");
 
     // The host queue saw the prompt and command events too, in order.
     let q = events.lock();
+
     assert!(matches!(&q[0], HostEvent::PromptStarted));
     assert!(matches!(&q[1], HostEvent::CommandStarted));
     assert!(matches!(&q[2], HostEvent::CommandFinished { .. }));
@@ -546,6 +596,7 @@ fn block_batches_and_seq_metadata_reach_the_block_store() {
         }),
         wid,
     );
+
     // ...the item materializes later, at the block's finish. The batch is
     // staged and only flushed to the store on the read's damage wake, so
     // nothing lands until the following `TerminalDamaged`.
@@ -560,14 +611,17 @@ fn block_batches_and_seq_metadata_reach_the_block_store() {
         }]),
         wid,
     );
+
     assert!(
         store.lock().items().is_empty(),
         "staged batch must not reach the store before the damage flush"
     );
+
     proxy.send_event(TerminalEvent::TerminalDamaged(1), wid);
 
     let store = store.lock();
     let items = store.items();
+
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].seq, Some(1));
     assert_eq!(items[0].engine_rows(), 3);
@@ -583,6 +637,7 @@ fn graphics_proxy(id: u64) -> (TerminalEventProxy, GraphicsProbes) {
     let shared = Arc::new(SessionSharedState::default());
     let wakes = Arc::new(Mutex::new(Vec::new()));
     let wakes_for_sender = Arc::clone(&wakes);
+
     let proxy = TerminalEventProxy::new(
         Arc::clone(&shared),
         id,
@@ -590,6 +645,7 @@ fn graphics_proxy(id: u64) -> (TerminalEventProxy, GraphicsProbes) {
             wakes_for_sender.lock().push(w)
         })),
     );
+
     (proxy, GraphicsProbes { shared, wakes })
 }
 
@@ -600,6 +656,7 @@ struct GraphicsProbes {
 
 fn rgba_update(route_id: usize, image_id: u32, w: usize, h: usize) -> TerminalEvent {
     use nmt_terminal::graphics::{ColorType, GraphicData, GraphicId, UpdateQueues};
+
     let data = GraphicData {
         id: GraphicId(image_id as u64),
         width: w,
@@ -612,6 +669,7 @@ fn rgba_update(route_id: usize, image_id: u32, w: usize, h: usize) -> TerminalEv
         display_height: None,
         transmit_time: time::Instant::now(),
     };
+
     TerminalEvent::UpdateGraphics {
         route_id,
         queues: UpdateQueues {
@@ -627,10 +685,12 @@ fn rgba_update(route_id: usize, image_id: u32, w: usize, h: usize) -> TerminalEv
 #[test]
 fn graphics_events_bypass_host_queue_and_are_route_scoped() {
     use nmt_terminal::event::{EventListener, WindowId};
+
     let (proxy, p) = graphics_proxy(4);
     let wid = WindowId::dummy();
 
     proxy.send_event(rgba_update(4, 7, 2, 2), wid);
+
     assert!(
         p.shared.events.lock().is_empty(),
         "graphics never enters the host queue"
@@ -643,6 +703,7 @@ fn graphics_events_bypass_host_queue_and_are_route_scoped() {
 
     // A cross-session route is dropped: no install, no wake.
     proxy.send_event(rgba_update(999, 8, 2, 2), wid);
+
     assert!(
         p.shared.generation_store.lock().get(8).is_none(),
         "wrong route ignored"
@@ -657,6 +718,7 @@ fn graphics_events_bypass_host_queue_and_are_route_scoped() {
 fn sustained_output_does_not_grow_ui_queue() {
     use nmt_terminal::event::{BlockEvent, EventListener, WindowId};
     use nmt_terminal::ghostty::BlockHandle;
+
     let (proxy, p) = graphics_proxy(1);
     let wid = WindowId::dummy();
 
@@ -673,16 +735,19 @@ fn sustained_output_does_not_grow_ui_queue() {
         );
         proxy.send_event(rgba_update(1, 1, 1, 1), wid);
         proxy.send_event(TerminalEvent::TerminalDamaged(1), wid);
+
         // After each read's damage flush the staging buffer is empty again.
         assert!(
             p.shared.staged_blocks.lock().is_empty(),
             "staging bounded to one read"
         );
     }
+
     assert!(
         p.shared.events.lock().is_empty(),
         "host queue never grew from graphics/block events"
     );
+
     // The live generation is a single replaced entry, not 1000 accumulated ones.
     assert_eq!(
         p.shared.generation_store.lock().len(),
@@ -698,6 +763,7 @@ fn sustained_output_does_not_grow_ui_queue() {
 fn active_and_frozen_state_coherent_at_wake() {
     use nmt_terminal::event::{BlockEvent, EventListener, WindowId};
     use nmt_terminal::ghostty::BlockHandle;
+
     let (proxy, p) = graphics_proxy(1);
     let wid = WindowId::dummy();
 
@@ -715,8 +781,10 @@ fn active_and_frozen_state_coherent_at_wake() {
         wid,
     );
     proxy.send_event(rgba_update(1, 42, 2, 2), wid);
+
     // Before the flush the frozen row is not yet in the store.
     assert!(p.shared.block_store.lock().items().is_empty());
+
     proxy.send_event(TerminalEvent::TerminalDamaged(1), wid);
 
     // At the wake both sides are coherent: live generation present AND frozen row

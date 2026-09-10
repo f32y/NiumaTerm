@@ -15,6 +15,7 @@ use crate::agent_updates::*;
 fn snapshot(phase: UpdatePhase) -> InstallationSnapshot {
     let launcher = AgentCli::new("fake-codex", []);
     let identity = InstallationKey::derive(ProviderKind::Codex, &launcher);
+
     InstallationSnapshot {
         identity,
         state: InstallationUpdateState {
@@ -43,11 +44,14 @@ fn snapshot(phase: UpdatePhase) -> InstallationSnapshot {
 fn reducer_keeps_identity_and_maps_phase_actions() {
     let available = notification_view(&snapshot(UpdatePhase::Available)).unwrap();
     let mut running = snapshot(UpdatePhase::Suspending);
+
     running.state.progress = Some(UpdateProgress {
         completed: 1,
         total: 2,
     });
+
     let running = notification_view(&running).unwrap();
+
     let failed = notification_view(&InstallationSnapshot {
         state: InstallationUpdateState {
             phase: UpdatePhase::Failed,
@@ -68,26 +72,36 @@ fn reducer_keeps_identity_and_maps_phase_actions() {
 #[test]
 fn dismissal_is_scoped_to_the_reported_target() {
     let mut dismissed = snapshot(UpdatePhase::Available);
+
     dismissed.dismissed_target = Some(Version::new(1, 1, 0));
+
     assert!(notification_view(&dismissed).is_none());
+
     dismissed.state.versions.as_mut().unwrap().available = Some(Version::new(1, 2, 0));
+
     assert!(notification_view(&dismissed).is_some());
 
     let mut running = snapshot(UpdatePhase::Updating);
+
     running.dismissed_target = Some(Version::new(1, 1, 0));
+
     assert!(notification_view(&running).is_some());
+
     running.notification_hidden = true;
+
     assert!(notification_view(&running).is_none());
 }
 
 #[test]
 fn terminal_lifetime_counts_only_focused_visible_time_and_resets_by_phase() {
     let mut lifetime = FocusedVisibleLifetime::new(UpdatePhase::Updated);
+
     assert!(!lifetime.tick(false, Duration::from_secs(5)));
     assert!(!lifetime.tick(true, Duration::from_millis(2_999)));
     assert!(lifetime.tick(true, Duration::from_millis(1)));
 
     lifetime.set_phase(UpdatePhase::Unchanged);
+
     assert!(!lifetime.tick(true, Duration::from_millis(2_999)));
     assert!(lifetime.tick(true, Duration::from_millis(1)));
 }
@@ -96,12 +110,14 @@ fn terminal_lifetime_counts_only_focused_visible_time_and_resets_by_phase() {
 fn reducer_stacks_installations_and_never_fabricates_provider_progress() {
     let first = snapshot(UpdatePhase::Updating);
     let mut second = snapshot(UpdatePhase::Available);
+
     second.identity =
         InstallationKey::derive(ProviderKind::Codex, &AgentCli::new("another-codex", []));
     second.state.versions.as_mut().unwrap().can_update = false;
 
     let first_view = notification_view(&first).unwrap();
     let second_view = notification_view(&second).unwrap();
+
     assert_ne!(first_view.key, second_view.key);
     assert_eq!(first_view.progress, NotificationProgress::Indeterminate);
     assert_eq!(first_view.primary, None);
@@ -112,11 +128,14 @@ fn reducer_stacks_installations_and_never_fabricates_provider_progress() {
 #[test]
 fn failed_diagnostics_are_bounded_and_persistent() {
     let mut failed = snapshot(UpdatePhase::Failed);
+
     failed.state.error = Some(UpdateError::new(
         UpdateErrorKind::ProviderFailed,
         "x".repeat(10_000),
     ));
+
     let view = notification_view(&failed).unwrap();
+
     assert!(view.message.chars().count() <= 512);
     assert!(!view.terminal_timeout);
     assert_eq!(view.primary, Some(NotificationPrimaryAction::Retry));
@@ -126,6 +145,7 @@ fn failed_diagnostics_are_bounded_and_persistent() {
 #[test]
 fn testing_mode_uses_only_fake_maintenance_and_a_process_local_cache() {
     let testing_cache = update_cache_path(true);
+
     assert!(testing_cache.starts_with(env::temp_dir()));
     assert!(
         testing_cache
@@ -136,8 +156,11 @@ fn testing_mode_uses_only_fake_maintenance_and_a_process_local_cache() {
 
     let fake = FakeMaintenance::new(ProviderKind::Claude);
     let launcher = AgentCli::new("this-executable-must-never-run", []);
+
     assert!(fake.probe(&launcher).unwrap().update_available());
+
     fake.update(&launcher).unwrap();
+
     assert!(!fake.probe(&launcher).unwrap().update_available());
 }
 
@@ -147,6 +170,7 @@ fn mixed_installations_select_only_tabs_for_the_target_transaction() {
         InstallationKey::derive(ProviderKind::Claude, &AgentCli::new("shared-claude", [])).key;
     let unrelated =
         InstallationKey::derive(ProviderKind::Claude, &AgentCli::new("other-claude", [])).key;
+
     // The `None` stands for a tab whose harness updates outside the
     // application; it must not be suspended by anyone else's transaction.
     let installations = vec![
@@ -155,6 +179,7 @@ fn mixed_installations_select_only_tabs_for_the_target_transaction() {
         Some(shared.clone()),
         None,
     ];
+
     assert_eq!(
         affected_installation_indices(&shared, &installations),
         vec![0, 2]
@@ -229,11 +254,13 @@ fn preflight_retains_every_ready_tab_and_aggregates_partial_resume_failure() {
             profile_name: "Claude B".into(),
         }),
     ];
+
     let PreflightResolution::Ready(snapshots) =
         resolve_preflight(assessments, UpdateMode::WhenIdle, false)
     else {
         panic!("ready tabs should pass preflight");
     };
+
     assert_eq!(snapshots.len(), 2);
 
     let combined = combine_transaction_error(
@@ -244,6 +271,7 @@ fn preflight_retains_every_ready_tab_and_aggregates_partial_resume_failure() {
         1,
     )
     .unwrap();
+
     assert_eq!(combined.kind, UpdateErrorKind::Recovery);
     assert!(combined.message().contains("updater failed"));
     assert!(combined.message().contains("1 agent tab"));

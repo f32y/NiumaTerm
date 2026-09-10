@@ -214,6 +214,7 @@ impl WorkflowUi {
                     request.open_agent = Some(open.agent_id.clone());
                     request.open_agent_len = open.len;
                 }
+
                 request
             })
             .collect()
@@ -275,6 +276,7 @@ impl AgentPane {
         if self.workflows.set_snapshot(snapshot) {
             cx.emit(AgentPaneEvent::WorkflowActivity);
         }
+
         // A run that just started is what makes refreshing worth doing.
         self.sync_workflow_refresh(cx);
         cx.notify();
@@ -299,9 +301,11 @@ impl AgentPane {
         if !self.workflows.set_visible(visible) {
             return;
         }
+
         if visible {
             self.restore_workflows(cx);
         }
+
         self.sync_workflow_refresh(cx);
         cx.notify();
     }
@@ -312,6 +316,7 @@ impl AgentPane {
         if !self.kind.caps().workflows {
             return None;
         }
+
         self.runtime
             .backend()
             .and_then(Backend::session_id)
@@ -369,6 +374,7 @@ impl AgentPane {
         else {
             return;
         };
+
         if !self.workflows.claim_restore(&session_id) {
             return;
         }
@@ -381,12 +387,14 @@ impl AgentPane {
 
         cx.spawn(async move |this, cx| {
             let restored = read.await;
+
             this.update(cx, |this, cx| {
                 // A restoration that outlived its session says nothing about
                 // the conversation now open.
                 if !this.runtime.is_current(epoch) {
                     return;
                 }
+
                 this.merge_restored_workflows(restored, cx);
             })
             .ok();
@@ -405,9 +413,11 @@ impl AgentPane {
             self.workflows.forget_restore();
             return;
         };
+
         let Some(session) = self.runtime.backend_mut() else {
             return;
         };
+
         for event in session.restore_workflows(restored) {
             self.apply_event(event, cx);
         }
@@ -419,6 +429,7 @@ impl AgentPane {
             self.workflows.refresh = None;
             return;
         }
+
         if self.workflows.refresh.is_some() {
             return;
         }
@@ -433,6 +444,7 @@ impl AgentPane {
                 let cwd = plan.cwd;
                 let session_id = plan.session_id;
                 let requests = plan.requests;
+
                 // A tick does its own reads before the next beat, so ticks can
                 // fall behind but never overlap or queue up.
                 let results = cx
@@ -450,6 +462,7 @@ impl AgentPane {
                 let applied = this.update(cx, |this, cx| {
                     this.apply_workflow_refresh_results(plan.epoch, results, cx)
                 });
+
                 if !matches!(applied, Ok(true)) {
                     break;
                 }
@@ -466,6 +479,7 @@ impl AgentPane {
         if !self.should_refresh_workflows() {
             return None;
         }
+
         let session = self.runtime.backend()?;
         let session_id = session.session_id()?.to_owned();
 
@@ -499,6 +513,7 @@ impl AgentPane {
             let Some(session) = self.runtime.backend_mut() else {
                 return false;
             };
+
             for event in session.apply_workflow_refresh(result) {
                 self.apply_event(event, cx);
             }
@@ -522,9 +537,11 @@ impl AgentPane {
         // it is one request whose answer arrives as an ordinary event.
         if !self.kind.caps().workflows_read_from_disk {
             let (task_id, agent_id) = (open.task_id.clone(), open.agent_id.clone());
+
             if let Some(session) = self.runtime.backend_mut() {
                 session.request_workflow_agent_transcript(&task_id, &agent_id);
             }
+
             return;
         }
 
@@ -543,6 +560,7 @@ impl AgentPane {
             open_agent: Some(open.agent_id.clone()),
             open_agent_len: None,
         };
+
         let cwd = self.cwd();
         let epoch = self.runtime.epoch();
         let read = cx
@@ -551,10 +569,12 @@ impl AgentPane {
 
         cx.spawn(async move |this, cx| {
             let result = read.await;
+
             this.update(cx, |this, cx| {
                 if !this.runtime.is_current(epoch) {
                     return;
                 }
+
                 this.apply_workflow_refresh_results(epoch, vec![result], cx);
             })
             .ok();

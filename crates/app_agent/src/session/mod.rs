@@ -138,6 +138,7 @@ fn conversation_title_request(kind: AgentKind, text: &str) -> Option<Conversatio
         AgentKind::Claude => claude_sessions::provisional_title_from_prompt(text),
         AgentKind::DeepSeek => tab_title_from_prompt(text),
     }?;
+
     Some(ConversationTitleRequest {
         description: text.to_string(),
         provisional_title,
@@ -169,6 +170,7 @@ impl AgentPane {
         let cwd = workspace.primary().map(str::to_string);
         let input_history_scope = InputHistoryScope::local(kind, &workspace);
         let name = kind.display();
+
         // Auto-grow wraps long prompts instead of scrolling them off-screen.
         // The view intercepts modified Enter actions before this input's
         // submit-on-enter behavior runs.
@@ -190,6 +192,7 @@ impl AgentPane {
                 this.send_user_message(window, cx);
             } else if matches!(event, InputEvent::Change) {
                 let text = this.input.read(cx).text().to_string();
+
                 // The text is the record of which images the message still
                 // carries, so an edit that removed a placeholder removes its
                 // image here, whichever way the text was edited.
@@ -198,6 +201,7 @@ impl AgentPane {
                 reconcile_skill_binding(&text, &mut this.palette.skill_binding);
                 this.palette.selected = 0;
                 this.palette.dismissed = false;
+
                 if !matches!(
                     this.palette
                         .feedback
@@ -207,6 +211,7 @@ impl AgentPane {
                 ) {
                     this.palette.feedback = None;
                 }
+
                 cx.notify();
             } else if let InputEvent::ClickLink(range) = event {
                 this.open_attached_image(range.clone(), window, cx);
@@ -218,6 +223,7 @@ impl AgentPane {
         // the pane's own transcript is told which pane it belongs to; a view
         // mirroring somebody else's conversation is left without one.
         let owner = cx.entity().downgrade();
+
         let transcript = cx.new(|_| {
             let mut transcript = TranscriptView::new(kind, cwd.clone());
             transcript.set_owner(owner);
@@ -350,13 +356,17 @@ impl AgentPane {
         if self.workspace == workspace {
             return;
         }
+
         let primary_changed = self.workspace.primary() != workspace.primary();
+
         self.input_history_scope = InputHistoryScope::local(self.kind, &workspace);
         self.workspace = workspace;
+
         if primary_changed {
             self.git_branch_poll.invalidate();
             self.refresh_git_branch(cx);
         }
+
         cx.notify();
     }
 
@@ -375,6 +385,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         let turn = self.turn.seq;
+
         self.transcript
             .update(cx, |transcript, cx| transcript.push(turn, item, images, cx));
         cx.notify();
@@ -401,6 +412,7 @@ impl AgentPane {
                 .git_status_refresh_interval
                 .max(1),
         );
+
         let fetch = cx
             .background_executor()
             .spawn(async move { branch_label(&cwd, max_age) });
@@ -510,12 +522,15 @@ impl AgentPane {
 
         let kind = self.kind;
         let name = kind.display();
+
         // The conversation about to start owns this snapshot for its whole
         // life; a later workspace edit reaches the one after it.
         self.active_workspace = self.workspace.clone();
+
         let workspace = self.active_workspace.clone();
 
         let caps = kind.caps();
+
         // A resume into a backend that replays its own thread controls keeps
         // them; anything else starts from the remembered picks. The reviewer is
         // seeded separately because a backend can replay the rest without it.
@@ -531,10 +546,13 @@ impl AgentPane {
         // Replacing a conversation must clear any running or unread state
         // associated with the previous backend before the new epoch can emit.
         cx.emit(AgentPaneEvent::Interrupted);
+
         // The previous attempt's reason describes a backend nobody is waiting
         // on any more, and this start is what the pane now reports.
         let epoch = self.runtime.begin_start();
+
         self.history_ui.invalidate_filesystem_history();
+
         // A resumed conversation already has an opening prompt, even when an
         // older transcript has no stored title. Only a fresh conversation may
         // claim its next accepted prompt as the subject.
@@ -548,6 +566,7 @@ impl AgentPane {
             tx.send(message);
         };
         let mut launch = agent_launch(&self.profile);
+
         // A backend that builds its system prompt from the model it resolves at
         // launch would otherwise describe a different model than the one
         // serving the turns, because the pick would only reach the CLI
@@ -561,6 +580,7 @@ impl AgentPane {
                     .and_then(|stored| stored.model.clone())
             });
         }
+
         let codex_host_catalog = if kind == AgentKind::Codex {
             cx.global::<AgentSettings>()
                 .profiles
@@ -571,6 +591,7 @@ impl AgentPane {
         } else {
             Vec::new()
         };
+
         // Env names only: the values can carry API keys.
         info!(
             "agent session start: profile=\"{}\", executable=\"{}\", model={:?}, env=[{}]",
@@ -584,6 +605,7 @@ impl AgentPane {
                 .collect::<Vec<_>>()
                 .join(", ")
         );
+
         // Process creation blocks for hundreds of milliseconds on Windows
         // (cmd.exe, then the CLI's own launcher), which is long enough to drop
         // frames if it runs on the UI thread. The pane already models the gap
@@ -602,6 +624,7 @@ impl AgentPane {
 
         cx.spawn(async move |this, cx| {
             let spawned = spawned.await;
+
             let started = this
                 .update(cx, |this, cx| {
                     // A superseded start reports nothing: the newer one owns
@@ -617,52 +640,65 @@ impl AgentPane {
                     }
                 })
                 .unwrap_or(false);
+
             if !started {
                 return;
             }
 
             while let Some(messages) = batches.next().await {
                 let mut messages = messages.into_iter();
+
                 while messages.len() > 0 {
                     let updated = this.update(cx, |this, cx| {
                         let started = Instant::now();
                         let mut events = EventBatch::default();
+
                         for message in messages.by_ref() {
                             // A transition during this batch can replace the backend.
                             // Remaining messages still belong to the earlier session.
                             if !this.runtime.is_current(epoch) {
                                 return false;
                             }
+
                             let mut message = match message {
                                 Ok(message) => message,
                                 Err(error) => {
                                     events
                                         .flush(|event| this.apply_session_event(epoch, event, cx));
+
                                     if this.runtime.is_current(epoch) {
                                         this.stop_for_output_failure(error, cx);
                                     }
+
                                     return false;
                                 }
                             };
+
                             let Some(next_events) = this.runtime.process(epoch, message.take())
                             else {
                                 return false;
                             };
+
                             for event in next_events {
                                 events.push(event, |event| {
                                     this.apply_session_event(epoch, event, cx)
                                 });
                             }
+
                             if started.elapsed() >= MAX_UPDATE_TIME {
                                 break;
                             }
                         }
+
                         events.flush(|event| this.apply_session_event(epoch, event, cx));
+
                         true
                     });
+
                     if !updated.unwrap_or(false) {
                         return;
                     }
+
                     // An already-ready stream need not yield at its next await.
                     // Give input and frame work a chance between bounded slices.
                     cx.background_executor()
@@ -677,16 +713,20 @@ impl AgentPane {
                 let Some(exit_events) = this.runtime.process_exit(epoch) else {
                     return;
                 };
+
                 for event in exit_events {
                     this.apply_session_event(epoch, event, cx);
                 }
+
                 if !this.runtime.is_current(epoch) {
                     return;
                 }
+
                 cx.emit(AgentPaneEvent::Interrupted);
                 this.runtime
                     .exited(&i18n("agent-session-exited-before-restored").replace("{name}", name));
                 this.palette.awaiting_command_turn = false;
+
                 if !this.palette.command_queue.is_empty() {
                     this.palette.command_queue.clear();
                     this.palette.set_feedback(
@@ -695,6 +735,7 @@ impl AgentPane {
                         cx,
                     );
                 }
+
                 this.publish_queued_user_messages(cx);
                 this.finish_working(cx);
                 this.push_item(
@@ -733,6 +774,7 @@ impl AgentPane {
                 .replace("{name}", name)
                 .replace("{error}", &error)
         });
+
         match self.runtime.install(epoch, spawned) {
             StartOutcome::Installed => Some(true),
             StartOutcome::Superseded(orphan) => {
@@ -743,6 +785,7 @@ impl AgentPane {
                         })
                         .detach();
                 }
+
                 None
             }
             StartOutcome::Failed(text) => {
@@ -750,10 +793,13 @@ impl AgentPane {
                 self.palette.awaiting_command_turn = false;
                 self.palette.command_queue.clear();
                 self.turn.queued_user_messages.clear();
+
                 let turn = self.turn.seq;
+
                 self.transcript.update(cx, |transcript, _| {
                     transcript.push_stamped(turn, SessionItem::Error { text });
                 });
+
                 Some(false)
             }
         }
@@ -821,36 +867,45 @@ impl AgentPane {
                 i18n("agent-question-send-pending"),
                 cx,
             );
+
             return false;
         }
+
         if self.branch_flow_holds_composer() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-rewind-blocks-send").to_string(),
                 cx,
             );
+
             return false;
         }
+
         if self.palette.awaiting_command_turn {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-command-starting").to_string(),
                 cx,
             );
+
             return false;
         }
 
         self.sync_pending_rename();
+
         let title_text = restore_on_interrupt
             .as_ref()
             .map_or(text.as_str(), |(prompt, _)| prompt.as_str());
+
         let title_request = if self.conversation_named {
             None
         } else {
             conversation_title_request(self.kind, title_text)
         };
+
         let settings = self.controls.settings.clone();
         let scratch = scratch_dir(self.agent_route.as_str());
+
         let outcome = self.runtime.send(|session| match title_request.as_ref() {
             Some(title) => session.send_user_message_with_title(
                 &text,
@@ -878,6 +933,7 @@ impl AgentPane {
             SendOutcome::Rejected { message } => Some(message.clone()),
             SendOutcome::StartedTurn | SendOutcome::Steered => None,
         };
+
         if let Some(text) = refusal {
             self.push_item(SessionItem::Error { text }, cx);
             return false;
@@ -902,7 +958,9 @@ impl AgentPane {
             .iter()
             .map(|attachment| attachment.image())
             .collect();
+
         self.attachments.clear_images();
+
         if restore_on_interrupt.is_some() {
             self.attachments.clear_annotations();
         }
@@ -914,12 +972,14 @@ impl AgentPane {
         match outcome {
             SendOutcome::StartedTurn => {
                 self.turn.seq += 1;
+
                 // A backend that publishes its pending inbox lists this prompt
                 // until the turn claims it; the row below is the claim's, so
                 // the claim has to know it was already drawn.
                 if self.kind.caps().queued_prompt_delivery == QueuedPromptDelivery::PendingInbox {
                     self.turn.published_prompt = Some(text.clone());
                 }
+
                 let unanswered_prompt =
                     restore_on_interrupt.map(|(text, response_annotations)| UnansweredPrompt {
                         turn: self.turn.seq,
@@ -927,6 +987,7 @@ impl AgentPane {
                         response_annotations,
                         skill: skill.cloned(),
                     });
+
                 self.push_item_with_images(
                     SessionItem::UserMessage { text: Some(text) },
                     sent_images,
@@ -957,11 +1018,13 @@ impl AgentPane {
         self.turn.submitted_at = None;
         self.turn.published_prompt = None;
         self.turn.first_output_latency = None;
+
         // The reading answers "how long has this conversation been waiting on
         // me"; the replaced conversation's last answer says nothing about the
         // fresh one, which has never been answered at all.
         self.turn.forget_last_response();
         self.turn.unanswered_prompt = None;
+
         // The new conversation restarts turn ids from zero, so a stop request
         // left over from the old one could match an unrelated future turn.
         self.runtime.clear_turn();
@@ -973,18 +1036,22 @@ impl AgentPane {
         self.branch.clear();
         self.history_ui.pending_resume_replay = None;
         self.history_ui.invalidate_filesystem_history();
+
         // An approval belongs to the tool call that asked for it. The backend
         // that asked is the one being replaced, so leaving the card up offers a
         // decision that would be answered into a different conversation.
         self.prompts.dismiss_approval();
+
         // Child rows belong to the conversation being replaced; keeping them
         // would show another parent session's tasks until the new adapter
         // publishes its first snapshot.
         self.children.background_tasks = None;
         self.children.transcripts.clear();
+
         // Workflow runs are scoped the same way, and their refresh must not
         // keep polling a directory that belongs to the replaced conversation.
         self.clear_workflows();
+
         // The question card is answered into the backend being replaced, so it
         // cannot outlive it either.
         self.prompts.dismiss_questions();
@@ -1007,6 +1074,7 @@ impl AgentPane {
             .backend()
             .and_then(Backend::recovery_identity)
             .is_some();
+
         if can_address_conversation
             && let Some(session) = self.runtime.backend_mut()
             && let Some(title) = self.pending_conversation_rename.as_deref()
@@ -1025,6 +1093,7 @@ impl AgentPane {
         // released. Keeping the retired backend until the replacement starts
         // transfers that reference without restarting an unchanged host.
         let retiring = self.runtime.retire();
+
         // A fresh conversation always follows the live tail again, even if
         // the previous transcript was scrolled up when it was discarded.
         self.clear_conversation_presentation(cx);
@@ -1037,6 +1106,7 @@ impl AgentPane {
             .reset_command_runtime(!self.kind.caps().async_command_discovery);
         self.palette.feedback = None;
         self.history_ui.mode = RecentSessionsMode::Hidden;
+
         // The discarded conversation's subject no longer describes this tab,
         // so the tab falls back to its profile name until the replacement
         // conversation names itself.

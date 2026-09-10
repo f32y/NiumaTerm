@@ -24,6 +24,7 @@ impl LaunchMessages {
         let Some(message) = self.pending.remove(thread_id) else {
             return;
         };
+
         self.pending_order.retain(|held| held != thread_id);
         self.confirmed
             .entry(thread_id.to_owned())
@@ -34,6 +35,7 @@ impl LaunchMessages {
         if message.trim().is_empty() {
             return;
         }
+
         self.confirmed
             .entry(thread_id.to_owned())
             .or_insert_with(|| message.to_owned());
@@ -46,6 +48,7 @@ impl LaunchMessages {
         if item["type"].as_str() != Some("agent_message") {
             return false;
         }
+
         let Some(content) = item["content"].as_array().filter(|content| {
             content
                 .iter()
@@ -53,11 +56,13 @@ impl LaunchMessages {
         }) else {
             return false;
         };
+
         let message = content
             .iter()
             .filter_map(|block| block["text"].as_str())
             .collect::<Vec<_>>()
             .join("\n");
+
         if message.trim().is_empty() {
             return false;
         }
@@ -66,18 +71,23 @@ impl LaunchMessages {
             if self.confirmed.contains_key(thread_id) {
                 return false;
             }
+
             self.confirmed.insert(thread_id.to_owned(), message);
             return true;
         }
+
         if self.pending.contains_key(thread_id) {
             return false;
         }
+
         self.pending.insert(thread_id.to_owned(), message);
         self.pending_order.push(thread_id.to_owned());
+
         while self.pending_order.len() > MAX_PENDING_MESSAGES {
             let oldest = self.pending_order.remove(0);
             self.pending.remove(&oldest);
         }
+
         true
     }
 
@@ -90,6 +100,7 @@ impl LaunchMessages {
         let included = items.iter().any(|item| {
             matches!(item, Item::UserMessage { text: Some(text) } if text.trim() == message.trim())
         });
+
         if !included {
             items.insert(
                 0,
@@ -98,6 +109,7 @@ impl LaunchMessages {
                 },
             );
         }
+
         items
     }
 }

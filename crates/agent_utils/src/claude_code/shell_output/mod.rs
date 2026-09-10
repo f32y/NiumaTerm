@@ -54,8 +54,10 @@ fn read_tail(path: &str) -> Option<String> {
     }
 
     let mut bytes = Vec::new();
+
     file.read_to_end(&mut bytes).ok()?;
 
     let text = String::from_utf8_lossy(&bytes).into_owned();
+
     (!text.trim().is_empty()).then_some(text)
 }

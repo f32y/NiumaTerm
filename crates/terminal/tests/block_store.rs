@@ -11,6 +11,7 @@ fn handle(id: u64, generation: u64) -> BlockHandle {
 #[test]
 fn engine_block_items_marry_meta() {
     let mut store = BlockStore::default();
+
     store.update_meta(1, |m| m.command = Some("cargo build".into()));
     store.apply([
         BlockEvent::EngineBlock {
@@ -27,6 +28,7 @@ fn engine_block_items_marry_meta() {
     store.update_meta(2, |m| m.exit_code = Some(0));
 
     let items = store.items();
+
     assert_eq!(items.len(), 2);
     assert_eq!(items[0].handle(), Some(handle(10, 1)));
     assert_eq!(items[0].engine_rows(), 42);
@@ -40,6 +42,7 @@ fn engine_block_items_marry_meta() {
 #[test]
 fn engine_blocks_sync_prunes_and_refreshes() {
     let mut store = BlockStore::default();
+
     store.apply([
         BlockEvent::EngineBlock {
             seq: 1,
@@ -57,6 +60,7 @@ fn engine_blocks_sync_prunes_and_refreshes() {
     store.apply([BlockEvent::EngineBlocksSync(vec![(handle(11, 2), 9)])]);
 
     let items = store.items();
+
     assert_eq!(items.len(), 1, "evicted handle pruned");
     assert_eq!(store.evicted_items, 1, "eviction counted for the list");
     assert_eq!(items[0].seq, Some(2));
@@ -69,6 +73,7 @@ fn engine_blocks_sync_prunes_and_refreshes() {
 #[test]
 fn history_cleared_drops_items() {
     let mut store = BlockStore::default();
+
     store.apply([
         BlockEvent::EngineBlock {
             seq: 1,
@@ -77,5 +82,6 @@ fn history_cleared_drops_items() {
         },
         BlockEvent::HistoryCleared,
     ]);
+
     assert!(store.items().is_empty());
 }

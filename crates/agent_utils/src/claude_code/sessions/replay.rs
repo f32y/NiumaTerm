@@ -91,6 +91,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
     let mut message_seq = 0usize;
     let mut thinking_seq = 0usize;
     let mut compaction_seq = 0usize;
+
     // A compaction writes two records, a boundary marker carrying the token
     // accounting and a synthesized user turn carrying the summary, and their
     // order in the chain differs between CLI versions: current builds parent
@@ -109,15 +110,18 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
         }
 
         let at = record_time(record);
+
         if let Some(turn) = turns.last_mut() {
             if let Some(uuid) = record["uuid"].as_str()
                 && let Some(duration) = durations.get(uuid)
             {
                 turn.seconds = Some(duration / 1000);
             }
+
             if is_interruption(record) {
                 turn.interrupted = true;
             }
+
             turn.output_tokens = match (turn.output_tokens, output_tokens(record)) {
                 (Some(total), Some(tokens)) => Some(total + tokens),
                 (total, tokens) => total.or(tokens),
@@ -152,6 +156,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                             });
                         }
                     }
+
                     continue;
                 }
 
@@ -161,6 +166,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                     } else {
                         clean_prompt(&text)
                     };
+
                     if !text.is_empty() {
                         // A prompt opens a turn, the same boundary the live path
                         // draws when the user sends one.
@@ -170,6 +176,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                                 ..TurnBuilder::default()
                             });
                         }
+
                         items.push(ReplayItem {
                             at,
                             item: Item::UserMessage { text: Some(text) },
@@ -230,18 +237,22 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                                     }
                                 } else {
                                     let id = format!("replay-message-{message_seq}");
+
                                     message_seq += 1;
+
                                     Item::AgentMessage {
                                         id,
                                         text: Some(text.to_string()),
                                         questions: None,
                                     }
                                 };
+
                                 items.push(ReplayItem { item, at });
                             }
                         }
                         Some("thinking") => {
                             let summary = block["thinking"].as_str().unwrap_or_default().trim();
+
                             if summary.is_empty() {
                                 continue;
                             }
@@ -251,6 +262,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                                 thinking_seq += 1;
                                 id
                             });
+
                             items.push(ReplayItem {
                                 at,
                                 item: Item::Reasoning {
@@ -263,11 +275,13 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                             let Some(id) = block["id"].as_str() else {
                                 continue;
                             };
+
                             let item = tool_item(
                                 id,
                                 block["name"].as_str().unwrap_or("tool"),
                                 &block["input"],
                             );
+
                             pending_tools.insert(id.to_string(), items.len());
                             items.push(ReplayItem { item, at });
                         }
@@ -348,6 +362,7 @@ fn output_tokens(record: &Value) -> Option<u64> {
 /// Wall-clock time of a record as Unix seconds.
 fn record_time(record: &Value) -> Option<i64> {
     let stamp = record["timestamp"].as_str()?;
+
     DateTime::parse_from_rfc3339(stamp)
         .ok()
         .map(|time| time.timestamp())
@@ -379,6 +394,7 @@ fn complete_replayed_tools(
         if block["type"].as_str() != Some("tool_result") {
             continue;
         }
+
         let Some(id) = block["tool_use_id"].as_str() else {
             continue;
         };

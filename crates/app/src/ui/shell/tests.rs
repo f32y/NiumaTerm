@@ -69,19 +69,25 @@ fn inline_rename_routes_escape_to_cancellation(cx: &mut TestAppContext) {
     use gpui::{AppContext as _, VisualTestContext};
 
     let cancelled = Rc::new(Cell::new(false));
+
     let window = cx.update(|cx| {
         cx.open_window(Default::default(), |window, cx| {
             gpui_component::init(cx);
+
             let input = cx.new(|cx| InputState::new(window, cx).default_value("old name"));
+
             input.update(cx, |input, cx| input.focus(window, cx));
+
             let probe = cx.new(|_| InlineRenameProbe {
                 input,
                 cancelled: cancelled.clone(),
             });
+
             cx.new(|cx| gpui_component::Root::new(probe, window, cx))
         })
         .expect("open inline rename test window")
     });
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     cx.run_until_parked();
@@ -99,6 +105,7 @@ fn right_side_views_share_one_area() {
     use crate::ui::right_panel::{RightPanelKind, RightPanelSelection};
 
     let mut selection = RightPanelSelection::new();
+
     assert!(!selection.shows(RightPanelKind::Git));
     assert!(!selection.shows(RightPanelKind::BackgroundTasks));
 
@@ -149,6 +156,7 @@ impl gpui::Render for TitleBarProbeView {
                 probe.borrow_mut().push((name, bounds));
             }
         };
+
         let probe = self.0.clone();
 
         let tab_bar = TabBar::new("probe-tabs")
@@ -209,10 +217,12 @@ fn title_bar_controls_stay_inside_a_narrow_window(cx: &mut TestAppContext) {
     cx.update(gpui_component::init);
 
     let probe: TitleBarProbe = Default::default();
+
     let handle = cx.add_window({
         let probe = probe.clone();
         move |_, _| TitleBarProbeView(probe, MAX_WIDTH)
     });
+
     let mut cx = VisualTestContext::from_window(handle.into(), cx);
 
     // Also reserve the Windows caption controls and title bar padding:
@@ -225,6 +235,7 @@ fn title_bar_controls_stay_inside_a_narrow_window(cx: &mut TestAppContext) {
         cx.run_until_parked();
 
         let captured = probe.borrow().clone();
+
         let group = |name: &str| {
             captured
                 .iter()
@@ -235,12 +246,14 @@ fn title_bar_controls_stay_inside_a_narrow_window(cx: &mut TestAppContext) {
 
         let right = group("right");
         let right_edge = f32::from(right.origin.x + right.size.width);
+
         assert!(
             right_edge <= width,
             "at window width {width} the right-hand controls end at {right_edge}",
         );
 
         let tabs = group("tabs");
+
         assert!(
             f32::from(tabs.size.width) >= TAB_STRIP_MIN_WIDTH,
             "at window width {width} the tab strip collapsed to {}",

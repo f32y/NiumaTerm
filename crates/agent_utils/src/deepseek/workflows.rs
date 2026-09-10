@@ -33,6 +33,7 @@ impl WorkflowTracker {
                 if self.run(run_id).is_some() {
                     return false;
                 }
+
                 self.runs.push(WorkflowRun {
                     task_id: run_id.to_string(),
                     // The identity that names a stored record belongs to the
@@ -48,6 +49,7 @@ impl WorkflowTracker {
                     result: None,
                     refresh_failed: false,
                 });
+
                 true
             }
             Some("tool-workflow/agent-start") => self.start_agent(run_id, data),
@@ -55,6 +57,7 @@ impl WorkflowTracker {
                 let Some(seq) = data["seq"].as_u64() else {
                     return false;
                 };
+
                 let state = match data["outcome"].as_str() {
                     Some("completed") => WorkflowAgentState::Done,
                     Some("failed") => WorkflowAgentState::Failed,
@@ -62,13 +65,16 @@ impl WorkflowTracker {
                     // the state a stopped member already means.
                     _ => WorkflowAgentState::Stopped,
                 };
+
                 let Some(agent) = self
                     .run_mut(run_id)
                     .and_then(|run| run.agents.iter_mut().find(|agent| agent.index == seq))
                 else {
                     return false;
                 };
+
                 agent.state = state;
+
                 true
             }
             Some("tool-workflow/run-end") => {
@@ -77,10 +83,13 @@ impl WorkflowTracker {
                     Some("error") => WorkflowRunState::Failed,
                     _ => WorkflowRunState::Stopped,
                 };
+
                 let Some(run) = self.run_mut(run_id) else {
                     return false;
                 };
+
                 run.state = state;
+
                 // A member the run outlived reports no ending of its own, so
                 // its row would otherwise stay Running under a finished run.
                 for agent in &mut run.agents {
@@ -88,6 +97,7 @@ impl WorkflowTracker {
                         agent.state = WorkflowAgentState::Stopped;
                     }
                 }
+
                 true
             }
             _ => false,
@@ -105,12 +115,14 @@ impl WorkflowTracker {
         let Some(seq) = data["seq"].as_u64() else {
             return false;
         };
+
         // A member names its group by title alone, so the run's list of groups
         // is built in the order members first mention one.
         let phase = data["phase"].as_str().map(str::to_string);
         let Some(run) = self.run_mut(run_id) else {
             return false;
         };
+
         if run.agents.iter().any(|agent| agent.index == seq) {
             return false;
         }
@@ -120,10 +132,12 @@ impl WorkflowTracker {
                 Some(entry) => entry.index,
                 None => {
                     let index = run.phases.len() as u64;
+
                     run.phases.push(WorkflowPhase {
                         index,
                         title: title.clone(),
                     });
+
                     index
                 }
             }
@@ -150,8 +164,10 @@ impl WorkflowTracker {
             prompt_preview: None,
             result_preview: None,
         });
+
         // The first member is what turns a declared run into a running one.
         run.state = WorkflowRunState::Running;
+
         true
     }
 

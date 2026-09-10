@@ -39,10 +39,12 @@ fn call(
 ) -> io::Result<Vec<u8>> {
     let length = u32::try_from(data.len())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "input is too large"))?;
+
     let input = CRYPT_INTEGER_BLOB {
         cbData: length,
         pbData: data.as_ptr().cast_mut(),
     };
+
     let mut output = CRYPT_INTEGER_BLOB {
         cbData: 0,
         pbData: ptr::null_mut(),
@@ -57,6 +59,8 @@ fn call(
     } else {
         unsafe { slice::from_raw_parts(output.pbData, output.cbData as usize) }.to_vec()
     };
+
     unsafe { LocalFree(output.pbData.cast()) };
+
     Ok(result)
 }

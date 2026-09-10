@@ -46,6 +46,7 @@ fn remembered() -> WindowLocalState {
 #[test]
 fn restore_enabled_loads_session_and_quit_saves_both() {
     let state = AppWindow::from_local_state(&remembered(), true);
+
     assert_eq!(state.bounds, Some(window_state()));
     assert_eq!(state.session, Some(session_state()));
     assert_eq!(state.to_local_state(true), remembered());
@@ -54,14 +55,17 @@ fn restore_enabled_loads_session_and_quit_saves_both() {
 #[test]
 fn restore_disabled_discards_session_and_quit_skips_session_save() {
     let state = AppWindow::from_local_state(&remembered(), false);
+
     assert_eq!(state.bounds, Some(window_state()));
     assert_eq!(state.session, None);
+
     // The startup-cleanup save and the quit save both go through
     // `to_local_state(false)`: geometry kept, session cleared.
     let state = AppWindow {
         session: Some(session_state()),
         ..state
     };
+
     assert_eq!(
         state.to_local_state(false),
         WindowLocalState {

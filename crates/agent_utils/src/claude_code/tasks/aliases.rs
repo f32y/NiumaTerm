@@ -36,11 +36,13 @@ impl AliasTable {
             if id == canonical || self.aliases.contains_key(id) {
                 continue;
             }
+
             if self.order.len() >= MAX_ALIASES
                 && let Some(oldest) = self.order.pop_front()
             {
                 self.aliases.remove(&oldest);
             }
+
             self.order.push_back(id.clone());
             self.aliases.insert(id.clone(), canonical.to_owned());
         }

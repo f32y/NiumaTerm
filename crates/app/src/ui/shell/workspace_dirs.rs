@@ -38,9 +38,11 @@ fn resolve_directory(path: path::PathBuf) -> Resolved {
     let Ok(resolved) = fs::canonicalize(&path) else {
         return Resolved::Unusable(display);
     };
+
     if !resolved.is_dir() {
         return Resolved::Unusable(display);
     }
+
     Resolved::Directory(strip_verbatim_prefix(&resolved.to_string_lossy()))
 }
 
@@ -87,7 +89,9 @@ impl WorkspaceDirsEditor {
             available: Vec::new(),
             notice: None,
         };
+
         editor.refresh_availability(cx);
+
         editor
     }
 
@@ -140,6 +144,7 @@ impl WorkspaceDirsEditor {
 
             let _ = editor.update(cx, |editor, cx| {
                 let mut notice = None;
+
                 for entry in resolved {
                     match entry {
                         Resolved::Unusable(path) => {
@@ -162,6 +167,7 @@ impl WorkspaceDirsEditor {
                         },
                     }
                 }
+
                 editor.notice = notice.map(SharedString::from);
                 editor.refresh_availability(cx);
                 cx.notify();
@@ -175,6 +181,7 @@ impl WorkspaceDirsEditor {
             .roots
             .as_mut()
             .map_or(RootChange::NotAttached, |roots| roots.remove(path));
+
         self.notice = match outcome {
             RootChange::WouldBeEmpty => Some(i18n("shell-workspace-dirs-keep-one").into()),
             _ => None,
@@ -187,6 +194,7 @@ impl WorkspaceDirsEditor {
         if let Some(roots) = self.roots.as_mut() {
             roots.make_primary(path);
         }
+
         self.notice = None;
         self.refresh_availability(cx);
         cx.notify();
@@ -197,11 +205,13 @@ impl WorkspaceDirsEditor {
     /// where it sits.
     fn row(&self, index: usize, path: String, cx: &mut Context<Self>) -> Div {
         let primary = index == 0;
+
         // A row whose check has not returned yet reads as available; marking
         // it unavailable first would flash a warning on every edit.
         let unavailable = self.available.get(index).is_some_and(|ok| !ok);
         let promote = path.clone();
         let detach = path.clone();
+
         let name = path::Path::new(&path)
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
@@ -276,6 +286,7 @@ impl Render for WorkspaceDirsEditor {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let paths = self.ordered();
         let last = paths.len().saturating_sub(1);
+
         let rows: Vec<_> = paths
             .into_iter()
             .enumerate()
@@ -418,7 +429,9 @@ impl Shell {
                     let Some(roots) = editor.read(cx).roots().cloned() else {
                         return false;
                     };
+
                     shell.update(cx, |this, cx| this.replace_workspace_roots(id, roots, cx));
+
                     true
                 })
         });
@@ -449,11 +462,13 @@ impl Shell {
         let Some(tabs) = self.workspaces.tabs_of(id) else {
             return;
         };
+
         let panes: Vec<_> = tabs
             .tabs()
             .iter()
             .filter_map(|tab| tab.surface().agent().cloned())
             .collect();
+
         for pane in panes {
             pane.update(cx, |pane, cx| {
                 pane.set_workspace(workspace.clone(), cx);

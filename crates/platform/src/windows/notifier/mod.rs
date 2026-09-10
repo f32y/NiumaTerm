@@ -7,6 +7,7 @@ use crate::{APP_ID, NativeNotification};
 
 fn shortcut_path() -> Result<PathBuf, String> {
     let app_data = env::var_os("APPDATA").ok_or("APPDATA is unavailable")?;
+
     Ok(PathBuf::from(app_data)
         .join("Microsoft")
         .join("Windows")
@@ -23,23 +24,30 @@ pub(crate) fn show(notification: &NativeNotification) -> Result<(), String> {
 
     unsafe { SetCurrentProcessExplicitAppUserModelID(&HSTRING::from(APP_ID)) }
         .map_err(|error| error.to_string())?;
+
     let xml = XmlDocument::new().map_err(|error| error.to_string())?;
+
     xml.LoadXml(&HSTRING::from(toast_xml(notification)))
         .map_err(|error| error.to_string())?;
+
     let toast =
         ToastNotification::CreateToastNotification(&xml).map_err(|error| error.to_string())?;
+
     if !notification.tag.is_empty() {
         toast
             .SetTag(&HSTRING::from(&notification.tag))
             .map_err(|error| error.to_string())?;
     }
+
     if !notification.group.is_empty() {
         toast
             .SetGroup(&HSTRING::from(&notification.group))
             .map_err(|error| error.to_string())?;
     }
+
     let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(APP_ID))
         .map_err(|error| error.to_string())?;
+
     notifier.Show(&toast).map_err(|error| error.to_string())
 }
 
@@ -70,9 +78,12 @@ pub(crate) fn register_identity(exe_path: &Path) -> Result<(), String> {
     use windows::core::{Error, GUID, HSTRING, Interface};
 
     let shortcut = shortcut_path()?;
+
     fs::create_dir_all(shortcut.parent().expect("shortcut has parent"))
         .map_err(|error| error.to_string())?;
+
     let initialized = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+
     if initialized.is_err() {
         return Err(Error::from_hresult(initialized).to_string());
     }
@@ -80,6 +91,7 @@ pub(crate) fn register_identity(exe_path: &Path) -> Result<(), String> {
     let result = (|| unsafe {
         let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
         let exe = HSTRING::from(exe_path.to_string_lossy().as_ref());
+
         link.SetPath(&exe)?;
         link.SetIconLocation(&exe, 0)?;
 
@@ -87,21 +99,27 @@ pub(crate) fn register_identity(exe_path: &Path) -> Result<(), String> {
             fmtid: GUID::from_u128(0x9f4c2855_9f79_4b39_a8d0_e1d42de1d5f3),
             pid: 5,
         };
+
         let store: IPropertyStore = link.cast()?;
         let app_id = PROPVARIANT::from(APP_ID);
+
         store.SetValue(&APP_ID_KEY, &app_id)?;
         store.Commit()?;
 
         let persist: IPersistFile = link.cast()?;
+
         persist.Save(&HSTRING::from(shortcut.to_string_lossy().as_ref()), true)
     })()
     .map_err(|error: WindowsError| error.to_string());
+
     unsafe { CoUninitialize() };
+
     result
 }
 
 pub(crate) fn unregister_identity() -> Result<(), String> {
     let shortcut = shortcut_path()?;
+
     match fs::remove_file(shortcut) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -119,12 +137,14 @@ fn toast_xml(notification: &NativeNotification) -> String {
     } else {
         &notification.title
     };
+
     let activation = (!notification.activation_url.is_empty()).then(|| {
         format!(
             r#" activationType="protocol" launch="{}""#,
             escape_xml(&notification.activation_url, true)
         )
     });
+
     format!(
         r#"<toast{}><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text></binding></visual></toast>"#,
         activation.unwrap_or_default(),
@@ -135,6 +155,7 @@ fn toast_xml(notification: &NativeNotification) -> String {
 
 fn escape_xml(value: &str, attribute: bool) -> String {
     let mut escaped = String::with_capacity(value.len());
+
     for ch in value.chars() {
         match ch {
             '&' => escaped.push_str("&amp;"),
@@ -145,6 +166,7 @@ fn escape_xml(value: &str, attribute: bool) -> String {
             _ => escaped.push(ch),
         }
     }
+
     escaped
 }
 

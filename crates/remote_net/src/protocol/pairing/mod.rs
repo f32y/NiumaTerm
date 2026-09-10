@@ -38,15 +38,18 @@ impl PairingCode {
         // Tolerate the mangling that happens to hand-copied strings:
         // surrounding whitespace and lowercased letters.
         let code = code.trim();
+
         let body = code
             .strip_prefix(CODE_PREFIX)
             .or_else(|| code.strip_prefix(&CODE_PREFIX.to_lowercase()))
             .ok_or(PairingCodeError::MissingPrefix)?;
+
         let payload = base32::decode(
             base32::Alphabet::Rfc4648 { padding: false },
             &body.to_uppercase(),
         )
         .ok_or(PairingCodeError::InvalidBase32)?;
+
         postcard::from_bytes(&payload).map_err(|_| PairingCodeError::Malformed)
     }
 }

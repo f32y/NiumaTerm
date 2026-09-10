@@ -21,6 +21,7 @@ struct SpscBuffer {
 // by the atomic `len` (release on publish, acquire on consume via SeqCst).
 // The UnsafeCell contents are never touched through `&SpscBuffer` directly.
 unsafe impl Send for SpscBuffer {}
+
 unsafe impl Sync for SpscBuffer {}
 
 impl SpscBuffer {
@@ -201,6 +202,7 @@ pub fn spsc_buffer(size: usize) -> (SpscBufferWriter, SpscBufferReader) {
         end: 0,
         buffer: buffer.clone(),
     };
+
     let consumer = SpscBufferReader { start: 0, buffer };
 
     (producer, consumer)

@@ -128,6 +128,7 @@ pub fn shared(launch: &crate::LaunchConfig) -> Result<Arc<Host>, HostError> {
     }
 
     let host = Arc::new(Host::start(launch)?);
+
     hosts.push((key, Arc::downgrade(&host)));
 
     Ok(host)
@@ -156,6 +157,7 @@ impl Host {
     fn start_with(launch: &crate::LaunchConfig, arguments: &[&str]) -> Result<Self, HostError> {
         let start_timeout = start_timeout(launch);
         let cli = AgentCli::from_launch(launch, DEFAULT_EXECUTABLE);
+
         // A bare name that PATH cannot resolve comes back as the configured
         // spelling, which is not a file; that is the missing-installation case
         // rather than a start failure, and it has a different answer.
@@ -164,6 +166,7 @@ impl Host {
         }
 
         let mut command = cli.command(arguments);
+
         command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -179,6 +182,7 @@ impl Host {
             .stdout
             .take()
             .ok_or_else(|| HostError::FailedToStart("the host produced no output".to_string()))?;
+
         let stderr = child
             .stderr
             .take()
@@ -186,13 +190,16 @@ impl Host {
 
         let retained = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&retained);
+
         thread::spawn(move || {
             for line in BufReader::new(stderr).split(b'\n').map_while(Result::ok) {
                 let line = decode_child_output(line.strip_suffix(b"\r").unwrap_or(&line));
                 let mut lines = sink.lock();
+
                 if lines.len() == RETAINED_STDERR_LINES {
                     lines.remove(0);
                 }
+
                 lines.push(line);
             }
         });
@@ -201,12 +208,15 @@ impl Host {
         // further use, so the reader thread reports that line and then drains
         // the pipe to keep the host from blocking on a full buffer.
         let (address_tx, address_rx) = channel();
+
         thread::spawn(move || {
             let mut announced = false;
+
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                 if announced {
                     continue;
                 }
+
                 if let Some(address) = address_in(&line) {
                     announced = address_tx.send(address).is_ok();
                 }
@@ -301,6 +311,7 @@ fn address_in(line: &str) -> Option<String> {
 
 fn start_failure(reason: RecvTimeoutError, stderr: &Mutex<Vec<String>>) -> String {
     let detail = stderr.lock().join("\n");
+
     let cause = match reason {
         // The sender is dropped when the reader thread ends, which happens when
         // stdout closes: the host exited before it bound a port.

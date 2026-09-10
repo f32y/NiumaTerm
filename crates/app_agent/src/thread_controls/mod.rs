@@ -190,6 +190,7 @@ pub(super) fn folded_settings_pill(
                             .unwrap_or_else(|| setting_value_label(value))
                     })
                     .unwrap_or_else(|| "—".to_string());
+
                 let label = i18n("agent-settings-folded-entry")
                     .replace("{name}", setting.name)
                     .replace("{value}", &value);
@@ -331,6 +332,7 @@ pub(super) fn setting_picker(
 
             for (value, label) in options.clone() {
                 let pane = pane.clone();
+
                 menu = menu.item(PopupMenuItem::new(label).on_click(move |_, _, cx| {
                     pane.update(cx, |this, cx| {
                         set(this, value.clone(), cx);

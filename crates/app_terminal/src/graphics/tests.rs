@@ -35,6 +35,7 @@ fn frozen_image_cache_prunes_with_block_lifecycle() {
     let q: ReleaseQueue = Default::default();
     let g = graphic_to_generation(data(1, 1, 1, ColorType::Rgba, vec![0; 4]), &q).unwrap();
     let cache: FrozenImageCache = Default::default();
+
     cache.lock().insert((10, 1), g.clone());
     cache.lock().insert((11, 1), g.clone());
 
@@ -49,10 +50,12 @@ fn frozen_image_cache_prunes_with_block_lifecycle() {
             9,
         )])],
     );
+
     assert!(!cache.lock().contains_key(&(10, 1)), "evicted block pruned");
     assert!(cache.lock().contains_key(&(11, 1)));
 
     prune_frozen_images(&cache, &[BlockEvent::HistoryCleared]);
+
     assert!(cache.lock().is_empty(), "user clear drops everything");
 }
 
@@ -72,6 +75,7 @@ fn expanded_bounds_crop_enlarges_and_offsets() {
         expanded_full_bounds([0.0, 0.0, 100.0, 50.0], [0.0, 0.0, 0.5, 0.5]).unwrap(),
         [0.0, 0.0, 200.0, 100.0],
     );
+
     // Bottom-right quarter [0.5,0.5,1,1] → full 2x, offset up/left by one dest.
     approx4(
         expanded_full_bounds([0.0, 0.0, 100.0, 50.0], [0.5, 0.5, 1.0, 1.0]).unwrap(),
@@ -107,9 +111,11 @@ fn rgb_expands_with_opaque_alpha() {
 fn rejects_invalid_dimensions_and_lengths() {
     assert!(graphic_to_bgra(0, 1, ColorType::Rgba, vec![]).is_none());
     assert!(graphic_to_bgra(1, 0, ColorType::Rgb, vec![]).is_none());
+
     // Mismatched byte length for the stated dimensions.
     assert!(graphic_to_bgra(2, 2, ColorType::Rgba, vec![0; 4]).is_none());
     assert!(graphic_to_bgra(2, 2, ColorType::Rgb, vec![0; 8]).is_none());
+
     // Pixel-count overflow.
     assert!(graphic_to_bgra(usize::MAX, 2, ColorType::Rgb, vec![]).is_none());
 }
@@ -123,6 +129,7 @@ fn install_replaces_under_same_id() {
     let b = store
         .install(7, data(7, 1, 1, ColorType::Rgba, vec![0, 0, 255, 255]))
         .unwrap();
+
     // The store now maps to the newer generation; the two are distinct.
     assert!(!Arc::ptr_eq(&a, &b));
     assert!(Arc::ptr_eq(&store.get(7).unwrap(), &b));
@@ -135,6 +142,7 @@ fn invalid_pixels_leave_previous_cached() {
     let good = store
         .install(1, data(1, 1, 1, ColorType::Rgba, vec![1, 2, 3, 4]))
         .unwrap();
+
     // Wrong length: install fails, cache untouched.
     assert!(
         store
@@ -147,13 +155,17 @@ fn invalid_pixels_leave_previous_cached() {
 #[test]
 fn remove_and_id_reuse() {
     let mut store = GenerationStore::default();
+
     store.install(3, data(3, 1, 1, ColorType::Rgb, vec![1, 1, 1]));
     store.remove(3);
+
     assert!(store.get(3).is_none());
+
     // A later transmission may reuse the same numeric id independently.
     let reused = store
         .install(3, data(3, 1, 1, ColorType::Rgb, vec![2, 2, 2]))
         .unwrap();
+
     assert!(Arc::ptr_eq(&store.get(3).unwrap(), &reused));
 }
 
@@ -161,10 +173,12 @@ fn remove_and_id_reuse() {
 fn unpainted_generation_releases_nothing() {
     let store = GenerationStore::default();
     let queue = store.release_queue();
+
     {
         let _g = graphic_to_generation(data(1, 1, 1, ColorType::Rgba, vec![0; 4]), &queue).unwrap();
         // Never marked uploaded.
     }
+
     assert!(
         queue.lock().is_empty(),
         "unpainted drop must not enqueue release"
@@ -175,13 +189,17 @@ fn unpainted_generation_releases_nothing() {
 fn uploaded_generation_releases_exactly_once() {
     let store = GenerationStore::default();
     let queue = store.release_queue();
+
     {
         let g = graphic_to_generation(data(1, 1, 1, ColorType::Rgba, vec![0; 4]), &queue).unwrap();
+
         g.mark_uploaded();
+
         // Extra clones must not each enqueue a release — only the final drop does.
         let _c1 = g.clone();
         let _c2 = g.clone();
     }
+
     assert_eq!(
         store.drain_released().len(),
         1,
@@ -195,14 +213,18 @@ fn replacement_releases_old_when_uploaded_and_unreferenced() {
     let old = store
         .install(9, data(9, 1, 1, ColorType::Rgba, vec![0; 4]))
         .unwrap();
+
     old.mark_uploaded();
     drop(old); // store still holds a ref
+
     assert!(
         store.drain_released().is_empty(),
         "still referenced by store"
     );
+
     // Replacing drops the store's last ref to the old generation.
     store.install(9, data(9, 1, 1, ColorType::Rgba, vec![255; 4]));
+
     assert_eq!(
         store.drain_released().len(),
         1,
@@ -214,16 +236,21 @@ fn replacement_releases_old_when_uploaded_and_unreferenced() {
 fn independent_sessions_do_not_share() {
     let mut s1 = GenerationStore::default();
     let mut s2 = GenerationStore::default();
+
     s1.install(1, data(1, 1, 1, ColorType::Rgba, vec![0; 4]));
+
     assert_eq!(s1.len(), 1);
     assert!(s2.is_empty(), "second session's store is independent");
+
     // A release in s1 does not surface in s2's queue.
     let g = s2
         .install(1, data(1, 1, 1, ColorType::Rgba, vec![0; 4]))
         .unwrap();
+
     g.mark_uploaded();
     s2.remove(1);
     drop(g);
+
     assert!(
         s1.drain_released().is_empty(),
         "s1 queue unaffected by s2 release"

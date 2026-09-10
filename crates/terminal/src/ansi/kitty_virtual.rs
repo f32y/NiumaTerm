@@ -438,11 +438,13 @@ impl IncompletePlacement {
     pub fn from_cell(fg: AnsiColor, underline: Option<AnsiColor>, combining: &[char]) -> Self {
         let row = combining.first().copied().and_then(diacritic_to_index);
         let col = combining.get(1).copied().and_then(diacritic_to_index);
+
         let image_id_high = combining
             .get(2)
             .copied()
             .and_then(diacritic_to_index)
             .and_then(|i| if i <= 255 { Some(i as u8) } else { None });
+
         Self {
             image_id_low: color_to_id(fg),
             image_id_high,
@@ -557,6 +559,7 @@ pub fn compute_run_geometry(
 ) -> Option<RunGeometry> {
     let img_w = image_width_px as f32;
     let img_h = image_height_px as f32;
+
     if img_w <= 0.0 || img_h <= 0.0 {
         return None;
     }
@@ -588,6 +591,7 @@ pub fn compute_run_geometry(
     let vis_y0 = run_box_y.max(img_box_y0);
     let vis_x1 = (run_box_x + run_box_w).min(img_box_x1);
     let vis_y1 = (run_box_y + run_box_h).min(img_box_y1);
+
     if vis_x1 <= vis_x0 || vis_y1 <= vis_y0 {
         return None;
     }
@@ -600,6 +604,7 @@ pub fn compute_run_geometry(
 
     let intra_x = vis_x0 - run_box_x;
     let intra_y = vis_y0 - run_box_y;
+
     Some(RunGeometry {
         x: origin_x + start_screen_col as f32 * cell_width + intra_x,
         y: origin_y + screen_line as f32 * cell_height + intra_y,

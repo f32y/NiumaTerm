@@ -184,6 +184,7 @@ pub fn new(shell: &str, options: PtyOptions<'_>, manage_process_tree: bool) -> R
         starting_title,
         ..
     } = options;
+
     let api = ConptyApi::new();
     let mut pty_handle: HPCON = 0;
 
@@ -306,6 +307,7 @@ pub fn new(shell: &str, options: PtyOptions<'_>, manage_process_tree: bool) -> R
     let mut environment = build_environment_block(environment_overrides);
 
     let mut proc_info: PROCESS_INFORMATION = unsafe { mem::zeroed() };
+
     unsafe {
         success = CreateProcessW(
             ptr::null(),
@@ -372,6 +374,7 @@ pub fn new(shell: &str, options: PtyOptions<'_>, manage_process_tree: bool) -> R
 /// inherited spelling such as `Path` even when it is supplied as `PATH`.
 fn build_environment_block(overrides: &[(String, String)]) -> Vec<u16> {
     let mut values: Vec<(OsString, OsString)> = env::vars_os().collect();
+
     // ConPTY supports 24-bit SGR colors, but Windows does not provide a standard
     // capability variable, so child TUIs otherwise downgrade computed RGB styles.
     values.retain(|(key, _)| !key.eq_ignore_ascii_case("COLORTERM"));

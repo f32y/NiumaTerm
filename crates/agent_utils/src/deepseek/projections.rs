@@ -34,6 +34,7 @@ impl ProjectionTracker {
     /// against the other mappings.
     pub(crate) fn apply(&mut self, frame: &Value, session_id: &str) -> Option<Vec<Event>> {
         let payload = &frame["payload"];
+
         if payload["type"] != "session/projection"
             || payload["sessionId"].as_str() != Some(session_id)
         {
@@ -70,8 +71,10 @@ impl ProjectionTracker {
             if self.seen.get(key).is_some_and(|seen| *seen > seq) {
                 return Vec::new();
             }
+
             self.seen.insert(key.to_string(), seq);
         }
+
         self.apply_unit(key, value)
     }
 
@@ -90,6 +93,7 @@ impl ProjectionTracker {
                     .as_u64()
                     .or_else(|| value["pressureTokens"].as_u64());
                 self.context_window = value["contextWindow"].as_u64().filter(|max| *max > 0);
+
                 self.window_event().into_iter().collect()
             }
             "contextBreakdown" => self.composition_event(value).into_iter().collect(),
@@ -106,10 +110,12 @@ impl ProjectionTracker {
                 .collect(),
             "permissions" => {
                 let event = permission_presets(value);
+
                 self.permission = match &event {
                     Some(Event::ApprovalPresets { current, .. }) => current.clone(),
                     _ => None,
                 };
+
                 event.into_iter().collect()
             }
             // A cleared goal is reported as a null value rather than by the

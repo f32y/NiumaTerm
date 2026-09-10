@@ -66,6 +66,7 @@ pub fn i18n(key: &'static str) -> &'static str {
     // default while the main app still selects its configured language first.
     let catalogs = CATALOGS.get_or_init(|| [parse_catalog(EN), parse_catalog(ZH_CN)]);
     let catalog = &catalogs[ACTIVE.load(Ordering::Relaxed) as usize];
+
     match catalog.get(key) {
         Some(value) => value.as_str(),
         None => {

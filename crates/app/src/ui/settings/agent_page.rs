@@ -48,6 +48,7 @@ fn agent_hook_item(
 
 pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPage {
     let installations = agent_updates::installations_for_profiles(agent_profiles, cx);
+
     let general = SettingGroup::new()
         .title(i18n("settings-agent-general"))
         .item(SettingItem::new(
@@ -159,14 +160,17 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
 
     for (index, snapshot) in installations.iter().enumerate() {
         let provider = snapshot.identity.provider;
+
         let provider_total = installations
             .iter()
             .filter(|item| item.identity.provider == provider)
             .count();
+
         let provider_ordinal = installations[..=index]
             .iter()
             .filter(|item| item.identity.provider == provider)
             .count();
+
         cli_updates = cli_updates.item(agent_update_status_item(
             index,
             installation_update_title(provider, provider_ordinal, provider_total),
@@ -244,6 +248,7 @@ fn agent_update_check_item() -> SettingItem {
         let installations = agent_updates::installations_for_profiles(&profiles, cx);
         let busy = installations.iter().any(|snapshot| snapshot.busy);
         let check_profiles = profiles.clone();
+
         let check = Button::new("agent-updates-check-all")
             .outline()
             .label(if busy {
@@ -263,6 +268,7 @@ fn agent_update_check_item() -> SettingItem {
 fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> SettingItem {
     SettingItem::render(move |options, _window, cx| {
         let snapshot = agent_updates::installation(&key, cx);
+
         let (detail, busy, can_update) = snapshot.map_or_else(
             || {
                 (
@@ -273,14 +279,17 @@ fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> S
             },
             |snapshot| {
                 let versions = snapshot.state.versions.as_ref();
+
                 let current = versions
                     .and_then(|status| status.current.as_ref())
                     .map(ToString::to_string)
                     .unwrap_or_else(|| i18n("settings-agent-version-unknown").to_string());
+
                 let available = versions
                     .and_then(|status| status.available.as_ref())
                     .map(ToString::to_string)
                     .unwrap_or_else(|| i18n("settings-agent-version-unknown").to_string());
+
                 let labels = versions
                     .map(|status| {
                         [status.install_method.as_deref(), status.channel.as_deref()]
@@ -292,6 +301,7 @@ fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> S
                     .filter(|labels| !labels.is_empty())
                     .map(|labels| format!(" · {labels}"))
                     .unwrap_or_default();
+
                 let checked = snapshot
                     .last_checked
                     .map(|time| {
@@ -299,6 +309,7 @@ fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> S
                             .replace("{time}", &time.format("%Y-%m-%d %H:%M").to_string())
                     })
                     .unwrap_or_default();
+
                 let diagnostic = snapshot
                     .state
                     .error
@@ -312,6 +323,7 @@ fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> S
                     })
                     .map(|message| format!(" · {}", message.chars().take(256).collect::<String>()))
                     .unwrap_or_default();
+
                 let phase = match snapshot.state.phase {
                     UpdatePhase::Unknown => i18n("settings-agent-phase-not-checked"),
                     UpdatePhase::Checking => i18n("settings-agent-phase-checking"),
@@ -327,19 +339,23 @@ fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> S
                     UpdatePhase::Unsupported => i18n("settings-agent-phase-unsupported"),
                     UpdatePhase::Failed => i18n("settings-agent-phase-failed"),
                 };
+
                 let can_update =
                     versions.is_some_and(|status| status.can_update && status.update_available());
                 let version = installation_version_text(snapshot.state.phase, &current, &available);
+
                 let detail = if snapshot.state.phase == UpdatePhase::Unknown {
                     version
                 } else {
                     format!("{version} · {phase}{labels}{checked}{diagnostic}")
                 };
+
                 (detail, snapshot.busy, can_update)
             },
         );
 
         let update_key = key.clone();
+
         let update = Button::new(("agent-update-install", ix))
             .primary()
             .label(i18n("settings-agent-update-button"))

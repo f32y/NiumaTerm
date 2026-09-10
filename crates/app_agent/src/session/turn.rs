@@ -80,6 +80,7 @@ impl AgentPane {
     /// so they stay outside the shared item stream.
     pub(super) fn finish_working(&mut self, cx: &mut Context<Self>) {
         let turn = self.turn.seq;
+
         self.transcript
             .update(cx, |transcript, cx| transcript.settle_turn(turn, cx));
         self.turn.note_response_settled(Instant::now(), cx);
@@ -95,12 +96,14 @@ impl AgentPane {
     pub(super) fn note_replayed_response(&mut self, at_unix: i64, cx: &mut Context<Self>) {
         let age = replayed_response_age(at_unix, Utc::now().timestamp());
         let now = Instant::now();
+
         self.turn
             .note_response_settled(now.checked_sub(age).unwrap_or(now), cx);
     }
 
     pub(crate) fn interrupt_from_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let working = self.transcript.read(cx).is_working();
+
         if let Some(prompt) = self
             .turn
             .unanswered_prompt
@@ -108,12 +111,14 @@ impl AgentPane {
             .filter(|prompt| prompt.turn == self.turn.seq && working)
         {
             let turn = prompt.turn;
+
             self.transcript
                 .update(cx, |transcript, cx| transcript.discard_turn(turn, cx));
 
             let current = self.input.read(cx).text().to_string();
             let restored = restored_input_after_interruption(&prompt.text, &current);
             let cursor = restored.len();
+
             self.input.update(cx, |input, cx| {
                 input.set_value(restored, window, cx);
                 input.set_selected_range(cursor..cursor, cx);
@@ -125,6 +130,7 @@ impl AgentPane {
         }
 
         let outcome = self.runtime.interrupt(working.then_some(self.turn.seq));
+
         self.present_interrupt_result(outcome, cx);
     }
 
@@ -155,6 +161,7 @@ impl AgentPane {
             .runtime
             .backend_mut()
             .is_some_and(|session| session.respond_approval(decision));
+
         if accepted {
             if !matches!(self.runtime.backend(), Some(Backend::DeepSeek(_))) {
                 self.prompts.dismiss_approval();
@@ -167,6 +174,7 @@ impl AgentPane {
                 cx,
             );
         }
+
         cx.notify();
     }
 }

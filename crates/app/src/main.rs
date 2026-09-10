@@ -98,6 +98,7 @@ fn main() {
     if let Some(pid) = await_exit {
         update::await_predecessor(pid);
     }
+
     #[cfg(not(windows))]
     let _ = await_exit;
 
@@ -216,6 +217,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
 
     if !platform_ipc::try_become_primary(testing) {
         let action = argv_action.clone().unwrap_or(CliAction::Activate);
+
         match platform_ipc::send(&action.to_url(), time::Duration::from_secs(2), testing) {
             Ok(()) => return,
             Err(error) => warn!("primary instance pipe unreachable: {error}"),
@@ -236,6 +238,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
 
     #[cfg(windows)]
     let platform = Rc::new(Platform::new(false).expect("failed to initialize GPUI Windows"));
+
     #[cfg(target_os = "macos")]
     let platform = Rc::new(Platform::new(false));
 
@@ -261,6 +264,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
         // Initialize gpui-component (theme, root, component globals) before any
         // component renders. Themes without `[colors.ui]` retain the dark default.
         init_components(cx);
+
         // An update is performed by the instance it replaces, so this
         // startup is where the files that instance renamed aside are
         // finally removable and where a package file it was too old to know
@@ -282,17 +286,22 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
         ui::apply_ui_theme(get().ui_theme.as_ref(), cx);
 
         let notification = &mut ComponentTheme::global_mut(cx).notification;
+
         notification.placement = Anchor::TopCenter;
         notification.margins.top = px(16.);
 
         cx.set_global(AppSettings::load());
         ui::install_terminal_settings(cx);
         ui::install_agent_settings(cx);
+
         let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
+
         agent_updates::initialize(testing, &agent_profiles, cx);
         input_history::initialize(testing, cx);
+
         #[cfg(windows)]
         update::initialize(testing, cx);
+
         #[cfg(target_os = "macos")]
         sparkle::initialize(testing, cx);
 
@@ -311,6 +320,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             .appearance
             .smooth_scrolling
             .panels_enabled();
+
         cx.set_smooth_wheel_scrolling(smooth_panels);
 
         // The platform remembers the choice and applies it to the vsync
@@ -327,16 +337,21 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
         // deferred to when the settings dialog closes (see Shell::on_show_settings).
         cx.observe_global::<AppSettings>(|cx| {
             let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
+
             agent_updates::reconcile_profiles(&agent_profiles, cx);
+
             #[cfg(windows)]
             update::settings_changed(cx);
+
             #[cfg(target_os = "macos")]
             sparkle::settings_changed(cx);
+
             let smooth_panels = cx
                 .global::<AppSettings>()
                 .appearance
                 .smooth_scrolling
                 .panels_enabled();
+
             cx.set_smooth_wheel_scrolling(smooth_panels);
 
             // Opacity changes retint the theme and switch each window
@@ -349,9 +364,11 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             // pay for a full re-render of every window.
             let language = cx.global::<AppSettings>().appearance.language;
             let language_changed = &*gpui_component::locale() != language.as_str();
+
             if language_changed {
                 nmt_i18n::set_language(language.as_str());
                 gpui_component::set_locale(language.as_str());
+
                 // AppKit holds the strings the bar was built from, so it
                 // keeps the previous language until it is rebuilt.
                 #[cfg(target_os = "macos")]
@@ -373,6 +390,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
                     .update(cx, |_, window, cx| {
                         window.set_background_appearance(background);
                         window.set_appearance_override(Some(appearance), cx);
+
                         if language_changed {
                             window.refresh();
                         }
@@ -412,6 +430,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
                 .first()
                 .cloned()
                 .unwrap_or_default();
+
             vec![AppWindow::from_local_state(&first, false)]
         };
 
@@ -450,8 +469,11 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             if cx.any_window_keeps_app_alive() {
                 cx.global_mut::<WindowRegistry>().remove(window_id);
             }
+
             cx.global_mut::<ShellRegistry>().remove(window_id);
+
             let last_active = cx.global_mut::<LastActiveWindow>();
+
             if last_active.0 == Some(window_id) {
                 last_active.0 = None;
             }
@@ -497,7 +519,9 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
         for initial in initials {
             AppWindow::open(cx, initial);
         }
+
         agent_updates::schedule_automatic_checks(cx);
+
         #[cfg(windows)]
         update::schedule_automatic_checks(cx);
 
@@ -521,6 +545,7 @@ fn load_startup_files_or_exit() -> StartupFiles {
     let config = Config::load_for_startup().unwrap_or_else(|err| {
         startup_error_and_exit("config.toml", &err.to_string());
     });
+
     init(config);
 
     let remembered_state = local_state::try_load().unwrap_or_else(|err| {
@@ -551,6 +576,7 @@ mod tests;
 fn last_active_shell(cx: &App) -> Option<(AnyWindowHandle, WeakEntity<ui::Shell>)> {
     let registry = cx.global::<ShellRegistry>();
     let last = cx.global::<LastActiveWindow>().0;
+
     registry
         .0
         .iter()
@@ -609,6 +635,7 @@ pub(crate) fn open_window_without_a_source(cx: &mut App) {
     {
         initial.bounds = remembered.bounds;
         initial.sidebar_width = remembered.sidebar_width;
+
         if cx
             .global::<AppSettings>()
             .system
@@ -636,6 +663,7 @@ fn dispatch_cli_action(action: CliAction, cx: &mut App) {
             let Some(path) = openable_directory(path, cx) else {
                 return;
             };
+
             // Prefer an exact-path workspace across all windows. The most
             // recently active window wins when duplicates already exist;
             // remaining windows are checked newest first.
@@ -672,6 +700,7 @@ fn dispatch_cli_action(action: CliAction, cx: &mut App) {
                                 }
 
                                 shell.open_dir_tab(&path, window, cx);
+
                                 true
                             })
                             .unwrap_or(false)
@@ -688,15 +717,19 @@ fn dispatch_cli_action(action: CliAction, cx: &mut App) {
                 open_window_at(&path, cx);
                 return;
             };
+
             let opened = handle.update(cx, |_, window, cx| {
                 let ok = shell
                     .update(cx, |shell, cx| shell.open_dir_tab(&path, window, cx))
                     .is_ok();
+
                 if ok {
                     window.activate_window();
                 }
+
                 ok
             });
+
             if !matches!(opened, Ok(true)) {
                 open_window_at(&path, cx);
             }
@@ -721,6 +754,7 @@ fn openable_directory(path: path::PathBuf, cx: &mut App) -> Option<path::PathBuf
 
     warn!("nmt:// target is not a directory: {}", path.display());
     foreground_last_active(cx);
+
     None
 }
 
@@ -731,6 +765,7 @@ fn dispatch_focus_notification(route: &AgentRoute, notification_id: &str, cx: &m
         .iter()
         .map(|entry| (entry.handle, entry.shell.clone()))
         .collect();
+
     for (handle, shell) in targets {
         let focused = handle
             .update(cx, |_, window, cx| {
@@ -741,10 +776,12 @@ fn dispatch_focus_notification(route: &AgentRoute, notification_id: &str, cx: &m
                     .unwrap_or(false)
             })
             .unwrap_or(false);
+
         if focused {
             return;
         }
     }
+
     warn!("ignoring stale notification focus action");
 }
 
@@ -762,6 +799,7 @@ fn dispatch_agent_event(event: AgentEvent, cx: &mut App) {
 
     for shell in shells {
         let event = event.clone();
+
         if shell
             .update(cx, |shell, cx| shell.apply_agent_event(event, cx))
             .unwrap_or(false)

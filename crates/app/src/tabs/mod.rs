@@ -55,6 +55,7 @@ pub struct Tab<S> {
 
 impl<S> HasId for Tab<S> {
     type Id = TabId;
+
     fn id(&self) -> TabId {
         self.id
     }

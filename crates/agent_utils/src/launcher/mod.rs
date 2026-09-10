@@ -49,6 +49,7 @@ impl fmt::Debug for AgentCli {
 impl AgentCli {
     pub fn from_launch(launch: &LaunchConfig, default_executable: &str) -> Self {
         let executable = launch.executable.trim();
+
         Self {
             executable: if executable.is_empty() {
                 default_executable.to_string()
@@ -92,6 +93,7 @@ impl AgentCli {
     /// spelling so a missing binary still receives a stable diagnostic key.
     pub fn resolved_executable(&self) -> PathBuf {
         let configured = Path::new(&self.executable);
+
         let resolved = if configured.components().count() > 1 || configured.is_absolute() {
             Some(configured.to_path_buf())
         } else {
@@ -99,6 +101,7 @@ impl AgentCli {
                 .effective_env_os("PATH")
                 .unwrap_or_else(|| OsString::from(""));
             let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
             which::which_in(&self.executable, Some(path), cwd).ok()
         };
 
@@ -113,26 +116,32 @@ impl AgentCli {
         S: AsRef<OsStr>,
     {
         let mut command = hidden_cmd_command(&self.executable);
+
         command
             .args(&self.arguments)
             .args(arguments)
             .envs(self.environment.iter().map(|(name, value)| (name, value)));
+
         command
     }
 
     fn redact(&self, text: &str) -> String {
         let mut redacted = text.to_string();
+
         let mut secrets: Vec<&str> = self
             .environment
             .iter()
             .map(|(_, value)| value.as_str())
             .filter(|value| value.len() >= 4)
             .collect();
+
         secrets.sort_unstable_by_key(|value| Reverse(value.len()));
         secrets.dedup();
+
         for secret in secrets {
             redacted = redacted.replace(secret, "<redacted>");
         }
+
         redact_common_credentials(&redacted)
     }
 
@@ -218,6 +227,7 @@ impl ProcessOutput {
         } else {
             self.stderr.trim()
         };
+
         text.chars().take(4_096).collect()
     }
 
@@ -261,9 +271,11 @@ impl fmt::Display for ProcessError {
             | Self::Reader(message) => formatter.write_str(message),
             Self::TimedOut { after, diagnostic } => {
                 write!(formatter, "command timed out after {}s", after.as_secs())?;
+
                 if !diagnostic.is_empty() {
                     write!(formatter, ": {diagnostic}")?;
                 }
+
                 Ok(())
             }
         }
@@ -287,6 +299,7 @@ where
 {
     let started = Instant::now();
     let mut command = launcher.command(arguments);
+
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -298,11 +311,13 @@ where
             launcher.executable()
         ))
     })?;
+
     let job = KillOnCloseJob::attach_or_kill(&mut child)
         .map_err(|error| ProcessError::Containment(error.to_string()))?;
 
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
+
     // Retain enough additional bytes to recognize a secret that straddles the
     // public output boundary, then redact before applying the configured cap.
     let capture_limit = limits
@@ -317,15 +332,19 @@ where
             Ok(None) if started.elapsed() < limits.timeout => thread::sleep(POLL_INTERVAL),
             Ok(None) => {
                 drop(job);
+
                 let _ = child.wait();
                 let stdout = join_reader(stdout_reader)?;
                 let stderr = join_reader(stderr_reader)?;
+
                 let raw_diagnostic = if stderr.bytes.is_empty() {
                     decode_child_output(&stdout.bytes)
                 } else {
                     decode_child_output(&stderr.bytes)
                 };
+
                 let diagnostic = launcher.redact(&raw_diagnostic);
+
                 return Err(ProcessError::TimedOut {
                     after: limits.timeout,
                     diagnostic: diagnostic.trim().chars().take(4_096).collect(),
@@ -333,15 +352,18 @@ where
             }
             Err(error) => {
                 drop(job);
+
                 let _ = child.wait();
                 let _ = stdout_reader.join();
                 let _ = stderr_reader.join();
+
                 return Err(ProcessError::Wait(format!(
                     "could not observe configured launcher exit: {error}"
                 )));
             }
         }
     };
+
     drop(job);
 
     let stdout = join_reader(stdout_reader)?;
@@ -351,6 +373,7 @@ where
         launcher.redact_capped(&stdout.bytes, limits.max_output_bytes);
     let (stderr_text, stderr_redaction_truncated) =
         launcher.redact_capped(&stderr.bytes, limits.max_output_bytes);
+
     Ok(ProcessOutput {
         status,
         stdout: stdout_text,
@@ -370,10 +393,13 @@ fn utf8_suffix(value: &str, max_bytes: usize) -> String {
     if value.len() <= max_bytes {
         return value.to_string();
     }
+
     let mut start = value.len().saturating_sub(max_bytes);
+
     while start < value.len() && !value.is_char_boundary(start) {
         start += 1;
     }
+
     value[start..].to_string()
 }
 
@@ -390,16 +416,20 @@ fn spawn_bounded_reader(
         let mut retained = VecDeque::with_capacity(limit.min(64 * 1024));
         let mut buffer = [0_u8; 8 * 1024];
         let mut truncated = false;
+
         loop {
             let read = reader.read(&mut buffer)?;
+
             if read == 0 {
                 break;
             }
+
             for byte in &buffer[..read] {
                 if retained.len() == limit {
                     retained.pop_front();
                     truncated = true;
                 }
+
                 if limit > 0 {
                     retained.push_back(*byte);
                 } else {
@@ -407,6 +437,7 @@ fn spawn_bounded_reader(
                 }
             }
         }
+
         Ok(BoundedBytes {
             bytes: retained.into(),
             truncated,
@@ -427,6 +458,7 @@ fn redact_common_credentials(text: &str) -> String {
     text.lines()
         .map(|line| {
             let lower = line.to_ascii_lowercase();
+
             if ["api_key", "api-key", "authorization", "bearer ", "token="]
                 .iter()
                 .any(|marker| lower.contains(marker))

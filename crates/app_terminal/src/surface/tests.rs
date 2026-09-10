@@ -30,7 +30,9 @@ fn bad_shell_returns_error() {
 #[test]
 fn frozen_click_selection_expands_words_and_wrapped_lines() {
     let mut terminal = GhosttyTerminal::new(8, 4, 100).unwrap();
+
     terminal.write_vt(b"foo bar\r\nabcdefghijk");
+
     let handle = terminal.finish_block().unwrap().expect("block created");
     let block = terminal.block_acquire(handle).expect("block acquired");
     let palette = terminal.color_palette();
@@ -52,9 +54,13 @@ fn frozen_click_selection_expands_words_and_wrapped_lines() {
 #[test]
 fn screen_word_selection_searches_the_visible_row_before_rebasing() {
     let mut terminal = GhosttyTerminal::new(24, 2, 100).unwrap();
+
     terminal.write_vt(b"pipelines.universal\r\npi");
+
     let mut buf = RenderBuffer::new(24, 2);
+
     terminal.snapshot_into(&mut buf).unwrap();
+
     let selection = Selection::new(
         SelectionType::Semantic,
         Pos::new(Line(1), Column(1)),
@@ -70,6 +76,7 @@ fn screen_word_selection_searches_the_visible_row_before_rebasing() {
 #[test]
 fn osc7_pwd_normalizes_to_filesystem_path() {
     use crate::surface::normalize_osc7_pwd;
+
     assert_eq!(
         normalize_osc7_pwd("file:///C:/Projects/example"),
         "C:/Projects/example"

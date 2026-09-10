@@ -76,6 +76,7 @@ pub(in crate::deepseek) fn workflow_transcript_events(payload: &Value) -> Vec<Ev
     else {
         return Vec::new();
     };
+
     vec![Event::WorkflowAgentTranscript {
         task_id: frame.task_id,
         agent_id: frame.agent_id,
@@ -87,6 +88,7 @@ pub(in crate::deepseek) fn history_events(payload: &Value) -> Vec<Event> {
     let Some(frame) = frames::parse::<frames::HistoryFrame>(HISTORY_FRAME, payload) else {
         return Vec::new();
     };
+
     vec![Event::History(history::sessions(
         &frame.sessions,
         frame.cwd.as_deref(),
@@ -97,6 +99,7 @@ pub(in crate::deepseek) fn search_events(payload: &Value) -> Vec<Event> {
     let Some(frame) = frames::parse::<frames::SearchFrame>(SEARCH_FRAME, payload) else {
         return Vec::new();
     };
+
     if let Some(message) = frame.error {
         return vec![Event::Error {
             message,
@@ -104,6 +107,7 @@ pub(in crate::deepseek) fn search_events(payload: &Value) -> Vec<Event> {
             fatal: false,
         }];
     }
+
     vec![Event::SessionSearchResults(history::search_results(
         &frame.matches,
         &frame.sessions,
@@ -117,6 +121,7 @@ pub(in crate::deepseek) fn fork_checkpoint_events(payload: &Value) -> Vec<Event>
     else {
         return Vec::new();
     };
+
     vec![Event::ForkCheckpoints(match frame.error {
         Some(message) => Err(message),
         None => Ok(history::fork_checkpoints(&frame.page)),
@@ -147,6 +152,7 @@ pub(super) fn load_search(
             },
             Err(error) => json!({ "type": SEARCH_FRAME, "error": error.message() }),
         };
+
         // A failure is delivered rather than only logged: the search takes over
         // the recent list, so one that reported nothing would leave the user
         // looking at rows that no longer answer the question they asked.
@@ -233,6 +239,7 @@ pub(super) fn load_subagents(
 ) {
     thread::spawn(move || {
         let payload = json!({ "parentSessionId": session_id });
+
         match client.call("subagents/list", payload) {
             Ok(catalog) => deliver(json!({
                 "payload": {
@@ -265,6 +272,7 @@ pub(super) fn load_subagent_transcript(
             "childSessionId": child,
             "mode": if continuable { "continuable" } else { "one-shot" },
         });
+
         match events::snapshot(&client, address, REPLAY_MESSAGES) {
             Ok(page) => deliver(json!({
                 "payload": {
@@ -340,6 +348,7 @@ pub(super) fn load_fork_checkpoints(
                 "error": error.message(),
             }),
         };
+
         deliver(json!({ "payload": payload }));
     });
 }
@@ -370,9 +379,11 @@ pub(super) fn load_models(
                     } else {
                         selected.clone()
                     };
+
                     catalog
                 })
         };
+
         let mut catalog = match read_catalog() {
             Ok(catalog) => catalog,
             Err(error) => {
@@ -380,6 +391,7 @@ pub(super) fn load_models(
                     "deepseek model directory could not be read: {}",
                     error.message()
                 );
+
                 return;
             }
         };
@@ -430,11 +442,13 @@ pub(super) fn load_models(
             // the endpoint stopped advertising.
             if !already {
                 let (provider, id) = directory.route(&model);
+
                 let mut payload = json!({
                     "sessionId": session_id,
                     "provider": provider,
                     "model": id,
                 });
+
                 if let Some(effort) = &wanted_effort {
                     payload["reasoningEffort"] = json!(effort);
                 }
@@ -448,9 +462,11 @@ pub(super) fn load_models(
 
         let mut payload =
             json!({ "type": MODELS_FRAME, "sessionId": session_id, "models": catalog });
+
         if let Some(message) = refusal {
             payload["error"] = json!(message);
         }
+
         deliver(json!({ "payload": payload }));
     });
 }

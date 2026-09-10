@@ -28,6 +28,7 @@ pub(super) fn admits_new_row(task_type: Option<&str>, record: &Value) -> bool {
 /// record is what makes them aliases of the same child.
 pub(super) fn record_identifiers(record: &Value) -> Vec<String> {
     let mut ids = Vec::new();
+
     for key in ["task_id", "tool_use_id", "agent_id"] {
         if let Some(id) = record[key].as_str().filter(|id| !id.is_empty())
             && !ids.iter().any(|known| known == id)
@@ -35,6 +36,7 @@ pub(super) fn record_identifiers(record: &Value) -> Vec<String> {
             ids.push(id.to_owned());
         }
     }
+
     ids
 }
 
@@ -72,6 +74,7 @@ pub(super) fn lifecycle_state(kind: &str, record: &Value) -> Option<BackgroundTa
             .or_else(|| record["status"].as_str())?,
         _ => return None,
     };
+
     Some(match status {
         "pending" => BackgroundTaskState::Starting,
         "running" => BackgroundTaskState::Working,
@@ -94,12 +97,14 @@ pub(super) fn result_text(block: &Value) -> Option<String> {
 /// than the preview bound and would be cut in half by it.
 pub(super) fn result_content(block: &Value) -> Option<String> {
     let content = &block["content"];
+
     content.as_str().map(str::to_owned).or_else(|| {
         let parts: Vec<&str> = content
             .as_array()?
             .iter()
             .filter_map(|part| part["text"].as_str())
             .collect();
+
         (!parts.is_empty()).then(|| parts.join("\n"))
     })
 }
@@ -117,9 +122,11 @@ pub(super) fn sidechain_preview(message: &Value) -> Option<String> {
             Some("tool_use") => block["name"].as_str(),
             _ => None,
         };
+
         if let Some(condensed) = text.and_then(condense) {
             return Some(condensed);
         }
     }
+
     None
 }

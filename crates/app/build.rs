@@ -5,10 +5,12 @@ use winres::WindowsResource;
 
 fn main() {
     let version = nmt_version::emit();
+
     nmt_version::emit_internal();
 
     if env::var_os("CARGO_CFG_WINDOWS").is_some() {
         let icon = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/windows/app.ico");
+
         println!("cargo:rerun-if-changed={}", icon.display());
         WindowsResource::new()
             .set_icon(icon.to_str().unwrap())

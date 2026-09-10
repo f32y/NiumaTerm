@@ -42,6 +42,7 @@ pub fn replace_files(
 fn copy_in(staging: &Path, install: &Path, names: &[&str]) -> Result<(), ReplaceFilesError> {
     for name in names {
         let incoming = install.join(format!("{name}{INCOMING_SUFFIX}"));
+
         if let Err(source) = fs::copy(staging.join(name), &incoming) {
             discard_incoming(install, names);
             return Err(ReplaceFilesError::Copy {
@@ -50,6 +51,7 @@ fn copy_in(staging: &Path, install: &Path, names: &[&str]) -> Result<(), Replace
             });
         }
     }
+
     Ok(())
 }
 
@@ -69,6 +71,7 @@ fn swap(install: &Path, names: &[&str]) -> Result<(), ReplaceFilesError> {
             }
         }
     }
+
     Ok(())
 }
 
@@ -88,6 +91,7 @@ fn replace(install: &Path, name: &str) -> io::Result<bool> {
             if had_previous {
                 let _ = fs::rename(&previous, &target);
             }
+
             Err(error)
         }
     }
@@ -97,6 +101,7 @@ fn undo(install: &Path, done: &[(&str, bool)]) {
     for (name, had_previous) in done {
         let target = install.join(name);
         let _ = fs::rename(&target, install.join(format!("{name}{INCOMING_SUFFIX}")));
+
         if *had_previous {
             let _ = fs::rename(install.join(format!("{name}{PREVIOUS_SUFFIX}")), &target);
         }

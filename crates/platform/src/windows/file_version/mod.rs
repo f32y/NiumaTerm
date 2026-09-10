@@ -48,6 +48,7 @@ pub fn version_string(path: &Path, key: &str) -> Option<String> {
 
 fn read_block(path: &[u16]) -> Option<Vec<u8>> {
     let mut unused_handle = 0u32;
+
     // SAFETY: `path` is NUL-terminated. The handle out-parameter is documented
     // as unused and is only required to be writable.
     let size = unsafe { GetFileVersionInfoSizeW(path.as_ptr(), &mut unused_handle) };
@@ -57,6 +58,7 @@ fn read_block(path: &[u16]) -> Option<Vec<u8>> {
     }
 
     let mut block = vec![0u8; size as usize];
+
     // SAFETY: the buffer is exactly the size the call above asked for.
     let read = unsafe { GetFileVersionInfoW(path.as_ptr(), 0, size, block.as_mut_ptr().cast()) };
 
@@ -78,6 +80,7 @@ fn string(block: &[u8], sub_block: &str) -> Option<String> {
     // SAFETY: the pointer addresses `block`, which outlives this borrow. A
     // string value's reported length is a character count, not a byte count.
     let text = unsafe { slice::from_raw_parts(value.cast::<u16>(), characters as usize) };
+
     // That count includes the terminator, which must not become part of the
     // text; a value written without one is accepted as it stands.
     let text = text.strip_suffix(&[0]).unwrap_or(text);

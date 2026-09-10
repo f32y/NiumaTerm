@@ -135,6 +135,7 @@ pub fn fetch() -> Result<UsageSnapshot, String> {
     // Dropping the job terminates the shim and its descendant together, so
     // the output pipes always close and the reader joins below cannot hang.
     drop(job);
+
     let _ = child.kill();
     let _ = child.wait();
 
@@ -165,16 +166,20 @@ fn parse_rate_limits(message: &Value) -> Result<UsageSnapshot, String> {
     let window_for_duration = |duration_mins: u32| {
         ["primary", "secondary"].into_iter().find_map(|name| {
             let window = &limits[name];
+
             if window["windowDurationMins"].as_u64() != Some(u64::from(duration_mins)) {
                 return None;
             }
 
             let used = window["usedPercent"].as_f64()?;
+
             let mut usage = UsageWindow::new(
                 (100.0 - used).clamp(0.0, 100.0).round() as u8,
                 duration_mins,
             );
+
             usage.resets_at = parse_timestamp_millis(&window["resetsAt"]);
+
             Some(usage)
         })
     };
@@ -196,6 +201,7 @@ fn parse_rate_limits(message: &Value) -> Result<UsageSnapshot, String> {
 
 fn parse_reset_credits(value: &Value) -> Option<UsageResetCredits> {
     let available_count = value["availableCount"].as_u64()?;
+
     let next_expires_at = parse_timestamp_millis(&value["nextExpiresAt"]).or_else(|| {
         value["credits"].as_array().and_then(|credits| {
             credits

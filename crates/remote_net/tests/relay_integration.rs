@@ -25,12 +25,14 @@ async fn connect(query: &str, token: Option<&str>) -> Result<Socket, String> {
     let mut request = format!("{RELAY}?{query}")
         .into_client_request()
         .expect("valid request");
+
     if let Some(token) = token {
         request.headers_mut().insert(
             "Authorization",
             format!("Bearer {token}").parse().expect("valid header"),
         );
     }
+
     match connect_async(request).await {
         Ok((socket, _)) => Ok(socket),
         Err(e) => Err(e.to_string()),
@@ -69,6 +71,7 @@ async fn noise_echo_through_relay() {
         .await
         .expect("host registration must succeed");
     let sync = next_json(&mut control).await;
+
     assert_eq!(sync["type"], "sync");
 
     // Client connects and immediately sends Noise message 1 — the relay must
@@ -78,6 +81,7 @@ async fn noise_echo_through_relay() {
         .expect("client connect must succeed");
     let mut client_hs = Handshake::initiator_ik(&client_keys.private, &host_keys.public).unwrap();
     let msg1 = client_hs.write_message().unwrap();
+
     client_sock
         .send(Message::Binary(msg1.into()))
         .await
@@ -85,8 +89,11 @@ async fn noise_echo_through_relay() {
 
     // Relay tells the host about the new client; host dials the data socket.
     let connected = next_json(&mut control).await;
+
     assert_eq!(connected["type"], "connected");
+
     let cid = connected["connectionId"].as_str().unwrap().to_owned();
+
     assert!(cid.starts_with("conn_"), "relay-assigned id, got {cid}");
 
     let mut host_data = connect(
@@ -98,20 +105,25 @@ async fn noise_echo_through_relay() {
 
     // The buffered message 1 arrives; host verifies the device and replies.
     let mut host_hs = Handshake::responder_ik(&host_keys.private).unwrap();
+
     host_hs
         .read_message(&next_binary(&mut host_data).await)
         .unwrap();
+
     assert_eq!(
         host_hs.remote_static(),
         Some(client_keys.public.as_slice()),
         "authorized-device check happens on this key"
     );
+
     let msg2 = host_hs.write_message().unwrap();
+
     host_data.send(Message::Binary(msg2.into())).await.unwrap();
 
     client_hs
         .read_message(&next_binary(&mut client_sock).await)
         .unwrap();
+
     let mut client_chan = client_hs.into_transport().unwrap();
     let mut host_chan = host_hs.into_transport().unwrap();
 
@@ -120,9 +132,13 @@ async fn noise_echo_through_relay() {
         session_id: 1,
         data: b"echo hello".to_vec(),
     };
+
     let ct = client_chan.seal(&ping.encode().unwrap()).unwrap();
+
     client_sock.send(Message::Binary(ct.into())).await.unwrap();
+
     let received = Frame::decode(&host_chan.open(&next_binary(&mut host_data).await).unwrap());
+
     assert_eq!(received.unwrap(), ping);
 
     let pong = Frame::Output {
@@ -130,13 +146,17 @@ async fn noise_echo_through_relay() {
         seq: 0,
         data: b"hello".to_vec(),
     };
+
     let ct = host_chan.seal(&pong.encode().unwrap()).unwrap();
+
     host_data.send(Message::Binary(ct.into())).await.unwrap();
+
     let received = Frame::decode(
         &client_chan
             .open(&next_binary(&mut client_sock).await)
             .unwrap(),
     );
+
     assert_eq!(received.unwrap(), pong);
 }
 
@@ -146,11 +166,13 @@ async fn invalid_token_rejected() {
     let err = connect("host_id=deadbeef00000000&role=host", Some("wrong-token"))
         .await
         .expect_err("wrong token must be rejected");
+
     assert!(err.contains("401"), "expected HTTP 401, got: {err}");
 
     let err = connect("host_id=deadbeef00000000&role=host", None)
         .await
         .expect_err("missing token must be rejected");
+
     assert!(err.contains("401"), "expected HTTP 401, got: {err}");
 }
 
@@ -160,6 +182,7 @@ async fn client_rejected_when_host_offline() {
     let err = connect("host_id=0000000000000000&role=client", None)
         .await
         .expect_err("client must be rejected when host is offline");
+
     assert!(err.contains("404"), "expected HTTP 404, got: {err}");
 }
 
@@ -178,6 +201,7 @@ async fn client_socket_cap_enforced() {
 
     // Hold the sockets open: dropping them would free slots as we go.
     let mut clients = Vec::new();
+
     for i in 0..16 {
         clients.push(
             connect(&format!("host_id={host_id}&role=client"), None)
@@ -185,9 +209,11 @@ async fn client_socket_cap_enforced() {
                 .unwrap_or_else(|e| panic!("client {i} must fit under the cap: {e}")),
         );
     }
+
     let err = connect(&format!("host_id={host_id}&role=client"), None)
         .await
         .expect_err("the socket past the cap must be refused");
+
     assert!(err.contains("429"), "expected HTTP 429, got: {err}");
 }
 
@@ -207,12 +233,14 @@ async fn buffer_overflow_closes_client() {
     let mut client_sock = connect(&format!("host_id={host_id}&role=client"), None)
         .await
         .expect("client connect must succeed");
+
     for _ in 0..40 {
         client_sock
             .send(Message::Binary(vec![0u8; 32 * 1024].into()))
             .await
             .expect("send while relay still accepts");
     }
+
     loop {
         match client_sock.next().await {
             Some(Ok(Message::Close(Some(frame)))) => {
@@ -221,6 +249,7 @@ async fn buffer_overflow_closes_client() {
                     CloseCode::Library(4429),
                     "expected overflow close code"
                 );
+
                 break;
             }
             Some(Ok(_)) => continue,

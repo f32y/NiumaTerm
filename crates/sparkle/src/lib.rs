@@ -86,6 +86,7 @@ impl UpdaterDelegate {
         let this = Self::alloc().set_ivars(DelegateState {
             channel: Cell::new(channel),
         });
+
         unsafe { msg_send![super(this), init] }
     }
 }
@@ -143,6 +144,7 @@ impl Updater {
         MainThreadMarker::new().ok_or(StartError::NotMainThread)?;
 
         let bundle = NSBundle::mainBundle();
+
         if bundle
             .objectForInfoDictionaryKey(ns_string!("SUFeedURL"))
             .is_none()
@@ -153,6 +155,7 @@ impl Updater {
         let user_driver = standard_user_driver(&bundle)?;
         let delegate = UpdaterDelegate::new(channel);
         let updater = updater_for(&bundle, &user_driver, &delegate)?;
+
         start_updater(&updater)?;
 
         Ok(Self {
@@ -213,6 +216,7 @@ fn standard_user_driver(bundle: &NSBundle) -> Result<Retained<AnyObject>, StartE
         let allocated: *mut AnyObject = msg_send![&SPU_STANDARD_USER_DRIVER, alloc];
         msg_send![allocated, initWithHostBundle: bundle, delegate: ptr::null::<AnyObject>()]
     };
+
     // An initializer hands back a reference this side owns.
     unsafe { Retained::from_raw(driver) }.ok_or(StartError::InitFailed("SPUStandardUserDriver"))
 }
@@ -226,6 +230,7 @@ fn updater_for(
     // one to relaunch. They differ only when updating a plug-in.
     let updater: *mut AnyObject = unsafe {
         let allocated: *mut AnyObject = msg_send![&SPU_UPDATER, alloc];
+
         msg_send![
             allocated,
             initWithHostBundle: bundle,
@@ -234,6 +239,7 @@ fn updater_for(
             delegate: delegate,
         ]
     };
+
     unsafe { Retained::from_raw(updater) }.ok_or(StartError::InitFailed("SPUUpdater"))
 }
 
@@ -241,6 +247,7 @@ fn start_updater(updater: &AnyObject) -> Result<(), StartError> {
     autoreleasepool(|pool| {
         let mut error: *mut NSError = ptr::null_mut();
         let started: bool = unsafe { msg_send![updater, startUpdater: &mut error] };
+
         if started {
             return Ok(());
         }
@@ -251,6 +258,7 @@ fn start_updater(updater: &AnyObject) -> Result<(), StartError> {
             Some(error) => unsafe { error.localizedDescription().to_str(pool).to_owned() },
             None => "no reason given".to_owned(),
         };
+
         Err(StartError::Refused(reason))
     })
 }

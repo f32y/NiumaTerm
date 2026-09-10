@@ -122,6 +122,7 @@ pub(super) fn agent_workspace(roots: Option<&WorkspaceRoots>) -> AgentWorkspace 
     let Some(roots) = roots else {
         return AgentWorkspace::default();
     };
+
     AgentWorkspace::new(
         explicit_cwd(roots.primary()),
         roots
@@ -263,6 +264,7 @@ impl Shell {
 
         cx.observe_window_activation(window, |this, window, cx| {
             this.window_active = Self::exact_window_active(window);
+
             if this.window_active {
                 cx.global_mut::<LastActiveWindow>().0 = Some(this.window_id);
                 this.acknowledge_visible(window, true, cx);
@@ -272,6 +274,7 @@ impl Shell {
                 // what says the user has moved on from the menu.
                 ui::dismiss_modern_menu(cx);
             }
+
             this.process_native_notifications(cx);
             cx.notify();
         })
@@ -282,6 +285,7 @@ impl Shell {
 
         // A CLI new_window target replaces session restore for this window.
         let initial_cwd = registry_entry.and_then(|entry| entry.initial_cwd.clone());
+
         let remembered_session = if initial_cwd.is_some() {
             None
         } else {
@@ -315,6 +319,7 @@ impl Shell {
                     TabSurface::Agent(_) => AgentActivityPolicy::ExplicitLifecycle,
                     _ => AgentActivityPolicy::ExpireAfterInactivity,
                 };
+
                 for route in Self::agent_routes_in_surface(tab.surface(), cx) {
                     agent_monitor.register_route(route, activity_policy, now);
                 }
@@ -347,6 +352,7 @@ impl Shell {
                 let tasks = cx.new(|_| BackgroundTasksView::new());
                 let workflows = cx.new(|_| WorkflowsView::new());
                 let panel = cx.new(|_| RightPanel::new(git, tasks, workflows));
+
                 RightPanelController::new(panel, git_model)
             },
             update_notifications: UpdateNotificationLayer::default(),
@@ -412,10 +418,12 @@ impl Shell {
         }
 
         let surface = self.workspaces.active_tabs().active();
+
         let activity_policy = match surface {
             TabSurface::Agent(_) => AgentActivityPolicy::ExplicitLifecycle,
             _ => AgentActivityPolicy::ExpireAfterInactivity,
         };
+
         let routes = Self::agent_routes_in_surface(surface, cx);
 
         let now = time::Instant::now();
@@ -460,6 +468,7 @@ impl Shell {
         // Every activation path funnels through here, so this is the one place
         // that acknowledges the tab's bell and its last command's result.
         let tabs = self.workspaces.active_tabs_mut();
+
         if tabs.clear_active_bell() | tabs.clear_active_outcome() {
             cx.notify();
         }
@@ -526,6 +535,7 @@ impl Shell {
 
     fn projected_workspace_summaries(&self, cx: &App) -> Vec<workspace::WorkspaceSummary> {
         let mut summaries = self.workspaces.summaries();
+
         for summary in &mut summaries {
             let routes: Vec<_> = self
                 .workspaces
@@ -562,6 +572,7 @@ impl Shell {
                 .map(|(done, total)| ProgressTally::tasks(done, total))
                 .fold(summary.progress, ProgressTally::merge);
         }
+
         summaries
     }
 
@@ -587,6 +598,7 @@ impl Shell {
             if projection.unread_count > 0 {
                 unread_tabs.insert(tab.id());
             }
+
             if matches!(tab.surface(), TabSurface::Agent(_))
                 && projection.status == AgentRuntimeStatus::Running
             {

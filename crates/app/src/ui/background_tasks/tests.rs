@@ -90,6 +90,7 @@ fn mixed_states_group_into_running_and_finished_with_their_counts() {
         .iter()
         .map(|task| task.state.label())
         .collect();
+
     assert!(labels.contains(&"Failed"));
     assert!(labels.contains(&"Done"));
 }
@@ -120,12 +121,14 @@ fn running_rows_lead_with_the_earliest_start_and_finished_with_the_latest_end() 
         .iter()
         .map(|task| task.key.id.clone())
         .collect();
+
     assert_eq!(running, ["early", "late", "untimed"]);
 
     let finished: Vec<_> = finished_rows(&snapshot)
         .iter()
         .map(|task| task.key.id.clone())
         .collect();
+
     assert_eq!(finished, ["new", "old"]);
 }
 
@@ -139,6 +142,7 @@ fn both_providers_render_from_the_same_snapshot_shape() {
         .build();
 
     let rows = running_rows(&claude);
+
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].key.provider.label(), "Claude Code");
     assert_eq!(rows[0].display_label(), "Review the diff");
@@ -154,6 +158,7 @@ fn a_row_without_optional_metadata_still_reads_as_an_entry() {
         .build();
 
     let task = &running_rows(&snapshot)[0];
+
     assert_eq!(task.display_label(), "Agent 01H9ZQF4");
     assert_eq!(row_detail(task), "No description reported");
     assert_eq!(row_timing(task, at(200)), None);
@@ -208,6 +213,7 @@ fn a_failed_restoration_with_no_rows_is_distinguishable_from_an_empty_session() 
             message: "thread/list failed".into(),
         })
         .build();
+
     assert!(unavailable.tasks.is_empty());
     assert!(matches!(
         unavailable.discovery,
@@ -217,6 +223,7 @@ fn a_failed_restoration_with_no_rows_is_distinguishable_from_an_empty_session() 
     let empty = Builder::codex()
         .discovery(BackgroundTaskDiscoveryState::Ready)
         .build();
+
     assert!(empty.tasks.is_empty());
     assert_eq!(empty.discovery, BackgroundTaskDiscoveryState::Ready);
 }
@@ -233,13 +240,16 @@ mod detail_navigation {
     #[test]
     fn opening_a_child_replaces_the_list_and_returning_restores_it() {
         let mut mode = PanelMode::List;
+
         assert_eq!(mode.detail_key(), None);
         assert_eq!(mode.close(), None, "the list is already showing");
 
         let key = BackgroundTaskKey::codex("thr_child");
+
         mode.open(key.clone(), true, false);
 
         assert_eq!(mode.detail_key(), Some(&key));
+
         // One view at a time: opening a child is not a second column.
         assert_eq!(
             mode.close(),
@@ -252,6 +262,7 @@ mod detail_navigation {
     #[test]
     fn each_child_is_opened_in_its_own_right() {
         let mut mode = PanelMode::List;
+
         mode.open(BackgroundTaskKey::codex("a"), false, false);
         mode.open(BackgroundTaskKey::claude_code("a"), false, true);
 
@@ -266,6 +277,7 @@ mod detail_navigation {
     #[test]
     fn a_failed_read_reports_itself_without_hiding_what_is_known() {
         let mut transcript = BackgroundTaskTranscript::default();
+
         BackgroundTaskTranscriptUpdate::appended(vec![Item::AgentMessage {
             id: "a".into(),
             text: Some("partial output".into()),
@@ -288,6 +300,7 @@ mod detail_navigation {
     #[test]
     fn a_truncated_conversation_reports_what_is_missing() {
         let mut transcript = BackgroundTaskTranscript::default();
+
         for index in 0..MAX_TRANSCRIPT_ITEMS + 3 {
             transcript.push(Item::AgentMessage {
                 id: format!("m{index}"),
@@ -314,10 +327,13 @@ mod detail_navigation {
             questions: None,
         }])
         .apply_to(&mut transcript);
+
         let after_append = transcript.revision();
+
         assert!(after_append > start);
 
         BackgroundTaskTranscriptUpdate::appended(Vec::new()).apply_to(&mut transcript);
+
         assert_eq!(
             transcript.revision(),
             after_append,

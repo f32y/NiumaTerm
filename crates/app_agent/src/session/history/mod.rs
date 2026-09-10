@@ -52,13 +52,16 @@ impl SessionHistoryUi {
             .next_request_id
             .checked_add(1)
             .expect("history request id exhausted");
+
         let request = FilesystemHistoryRequest {
             id: self.next_request_id,
             scope: self.scope,
             cwd,
             epoch,
         };
+
         self.filesystem_request = Some(request.clone());
+
         request
     }
 
@@ -84,10 +87,12 @@ impl SessionHistoryUi {
         if !self.owns_filesystem_request(request, cwd, epoch) {
             return CountPublication::Stale;
         }
+
         if count == 0 {
             self.sessions.clear();
             self.selected = 0;
             self.invalidate_filesystem_history();
+
             CountPublication::Empty
         } else {
             self.pending = Some(count);
@@ -105,9 +110,11 @@ impl SessionHistoryUi {
         if !self.owns_filesystem_request(request, cwd, epoch) {
             return false;
         }
+
         self.sessions = sessions;
         self.selected = self.selected.min(self.sessions.len().saturating_sub(1));
         self.invalidate_filesystem_history();
+
         true
     }
 }
@@ -148,6 +155,7 @@ impl AgentPane {
         if let Some(session) = self.runtime.backend_mut() {
             session.request_history(self.history_ui.scope);
         }
+
         self.load_filesystem_history(cx);
 
         cx.notify();
@@ -168,10 +176,12 @@ impl AgentPane {
         let request = self
             .history_ui
             .begin_filesystem_history(cwd.clone(), self.runtime.epoch());
+
         cx.notify();
 
         cx.spawn(async move |this, cx| {
             let count_cwd = cwd.clone();
+
             let count = cx
                 .background_executor()
                 .spawn(async move { count_scoped_sessions(scope, count_cwd.as_deref()) })
@@ -180,6 +190,7 @@ impl AgentPane {
             let proceed = this
                 .update(cx, |this, cx| {
                     let cwd = this.cwd();
+
                     match this.history_ui.publish_filesystem_count(
                         &request,
                         cwd.as_deref(),
@@ -218,6 +229,7 @@ impl AgentPane {
 
             let _ = this.update(cx, |this, cx| {
                 let cwd = this.cwd();
+
                 if this.history_ui.publish_filesystem_rows(
                     &request,
                     cwd.as_deref(),
@@ -238,6 +250,7 @@ impl AgentPane {
             return;
         };
         let id = summary.id.clone();
+
         let elsewhere = summary
             .cwd
             .clone()
@@ -261,13 +274,16 @@ impl AgentPane {
         }
 
         let previous_status = self.runtime.begin_conversation_change();
+
         self.history_ui.mode = RecentSessionsMode::Loading;
         self.history_ui.selected = index;
         self.history_ui.pending_resume_replay = None;
+
         // A backend that replays the resumed conversation's controls owns them;
         // otherwise they stay local profile preferences. The reviewer is seeded
         // separately because a backend can replay the rest without it.
         let caps = self.kind.caps();
+
         self.controls.seed_thread_defaults = !caps.resume_restores_thread_settings;
         self.controls.seed_approval_reviewer =
             caps.resume_restores_thread_settings && !caps.resume_restores_approval_reviewer;

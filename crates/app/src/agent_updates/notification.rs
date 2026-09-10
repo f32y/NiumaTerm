@@ -50,6 +50,7 @@ impl FocusedVisibleLifetime {
         if focused_visible {
             self.elapsed = self.elapsed.saturating_add(elapsed);
         }
+
         self.elapsed >= Duration::from_secs(3)
     }
 }
@@ -74,15 +75,19 @@ pub(crate) struct UpdateNotificationView {
 /// The identity retains installation plus target version across every phase.
 pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<UpdateNotificationView> {
     let versions = snapshot.state.versions.as_ref();
+
     let current = versions
         .and_then(|status| status.current.as_ref())
         .map(ToString::to_string)
         .unwrap_or_else(|| i18n("agent-update-version-unknown").to_string());
+
     let target = versions.and_then(|status| status.available.clone());
+
     let target_text = target
         .as_ref()
         .map(ToString::to_string)
         .unwrap_or_else(|| i18n("agent-update-version-unknown").to_string());
+
     let phase = snapshot.state.phase;
 
     if snapshot.notification_hidden
@@ -102,6 +107,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
     }
 
     let provider = snapshot.identity.provider.display();
+
     let (title, message, tone, primary, progress, terminal_timeout) = match phase {
         UpdatePhase::Available => (
             i18n("agent-update-notice-available-title").replace("{provider}", provider),
@@ -184,6 +190,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
         .as_ref()
         .map(ToString::to_string)
         .unwrap_or_else(|| "unknown".to_string());
+
     Some(UpdateNotificationView {
         key: format!("{}:{identity_target}", snapshot.identity.key),
         installation: snapshot.identity.key.clone(),

@@ -22,6 +22,7 @@ const MISSING_PARENT_FIXTURE: &str =
 #[test]
 fn active_chain_uses_the_latest_main_leaf_without_logical_parent_jumps() {
     let transcript = TranscriptIndex::read(ACTIVE_CHAIN_FIXTURE.as_bytes());
+
     let uuids = transcript
         .active_records()
         .filter_map(|record| record["uuid"].as_str())
@@ -78,6 +79,7 @@ fn rewind_checkpoints_are_human_prompts_on_the_active_chain() {
 #[test]
 fn forking_before_the_first_prompt_starts_a_fresh_session() {
     let transcript = TranscriptIndex::read(ACTIVE_CHAIN_FIXTURE.as_bytes());
+
     let fork = build_fork_records(
         &transcript,
         "10000000-0000-4000-8000-000000000000",
@@ -100,9 +102,11 @@ fn fork_remaps_the_exact_active_prefix_and_preserves_unknown_fields() {
         "timestamp": "2026-08-07T01:00:14Z",
         "message": {"role": "user", "content": "next prompt"}
     });
+
     let source = format!("{ACTIVE_CHAIN_FIXTURE}\n{next_prompt}\n");
     let transcript = TranscriptIndex::read(source.as_bytes());
     let new_session_id = "30000000-0000-4000-8000-000000000000";
+
     let records = build_fork_records(
         &transcript,
         "10000000-0000-4000-8000-000000000000",
@@ -117,6 +121,7 @@ fn fork_remaps_the_exact_active_prefix_and_preserves_unknown_fields() {
         .iter()
         .filter(|record| is_transcript_entry(record))
         .collect::<Vec<_>>();
+
     assert_eq!(transcript_records.len(), 10);
     assert!(
         records
@@ -138,8 +143,10 @@ fn fork_remaps_the_exact_active_prefix_and_preserves_unknown_fields() {
         .iter()
         .filter_map(|record| record["uuid"].as_str())
         .collect::<HashSet<_>>();
+
     assert_eq!(new_uuids.len(), transcript_records.len());
     assert!(new_uuids.iter().all(|uuid| !source.contains(*uuid)));
+
     for record in &transcript_records {
         if let Some(parent) = record["parentUuid"].as_str() {
             assert!(new_uuids.contains(parent));
@@ -151,8 +158,10 @@ fn fork_remaps_the_exact_active_prefix_and_preserves_unknown_fields() {
         .map(Value::to_string)
         .collect::<Vec<_>>()
         .join("\n");
+
     let mut expected = replayed_items(ACTIVE_CHAIN_FIXTURE.as_bytes());
     let mut actual = replayed_items(serialized.as_bytes());
+
     for items in [&mut expected, &mut actual] {
         for item in items {
             if let Item::Compaction { id, .. } = item {
@@ -160,12 +169,14 @@ fn fork_remaps_the_exact_active_prefix_and_preserves_unknown_fields() {
             }
         }
     }
+
     assert_eq!(actual, expected);
 }
 
 #[test]
 fn fork_rejects_a_message_outside_the_active_chain() {
     let transcript = TranscriptIndex::read(ACTIVE_CHAIN_FIXTURE.as_bytes());
+
     let error = build_fork_records(
         &transcript,
         "10000000-0000-4000-8000-000000000000",
@@ -185,6 +196,7 @@ fn legacy_transcripts_without_file_snapshots_still_support_conversation_forks() 
         .filter(|line| !line.contains("\"type\":\"file-history-snapshot\""))
         .collect::<Vec<_>>()
         .join("\n");
+
     let transcript = TranscriptIndex::read(legacy.as_bytes());
 
     assert!(transcript.checkpoints().iter().all(|checkpoint| {
@@ -206,10 +218,14 @@ fn legacy_transcripts_without_file_snapshots_still_support_conversation_forks() 
 #[test]
 fn atomic_fork_write_never_changes_the_source_file() {
     let test_dir = env::temp_dir().join(format!("niumaterm-fork-{}", Uuid::new_v4()));
+
     fs::create_dir(&test_dir).unwrap();
+
     let source_path = test_dir.join("source.jsonl");
     let source = b"source transcript remains immutable\n";
+
     fs::write(&source_path, source).unwrap();
+
     let session_id = Uuid::new_v4().to_string();
     let records = vec![serde_json::json!({"type": "custom-title"})];
 
@@ -220,6 +236,7 @@ fn atomic_fork_write_never_changes_the_source_file() {
         fs::read_to_string(target).unwrap(),
         "{\"type\":\"custom-title\"}\n"
     );
+
     fs::remove_dir_all(test_dir).unwrap();
 }
 
@@ -260,6 +277,7 @@ fn active_chain_replay_keeps_tools_and_compaction_but_drops_abandoned_content() 
             _ => None,
         })
         .collect::<Vec<_>>();
+
     assert!(visible_text.contains(&"first prompt"));
     assert!(visible_text.contains(&"active prompt"));
     assert!(visible_text.contains(&"active answer"));
@@ -271,6 +289,7 @@ fn active_chain_replay_keeps_tools_and_compaction_but_drops_abandoned_content() 
 #[test]
 fn a_missing_parent_keeps_only_the_reachable_suffix() {
     let transcript = TranscriptIndex::read(MISSING_PARENT_FIXTURE.as_bytes());
+
     let uuids = transcript
         .active_records()
         .filter_map(|record| record["uuid"].as_str())
@@ -365,6 +384,7 @@ fn a_compaction_replays_as_one_row_carrying_summary_and_accounting() {
             "parentUuid": "summary-uuid",
             "message": {"content": [{"type": "text", "text": "answer"}]}}),
     ];
+
     let content: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
 
     let items = replayed_items(content.join("\n").as_bytes());
@@ -414,6 +434,7 @@ fn a_summary_before_its_boundary_marker_still_replays_as_one_row() {
             "parentUuid": "boundary-uuid",
             "message": {"content": [{"type": "text", "text": "answer"}]}}),
     ];
+
     let content: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
 
     let items = replayed_items(content.join("\n").as_bytes());
@@ -452,6 +473,7 @@ fn a_boundary_without_a_summary_turn_still_marks_the_break() {
         serde_json::json!({"type": "assistant",
             "message": {"content": [{"type": "text", "text": "after"}]}}),
     ];
+
     let content: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
 
     let items = replayed_items(content.join("\n").as_bytes());
@@ -540,6 +562,7 @@ fn replay_keeps_dialogue_and_preserves_tool_details() {
         serde_json::json!({"type": "assistant",
             "message": {"content": [{"type": "text", "text": "answer"}]}}),
     ];
+
     let content: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
 
     let items = replayed_items(content.join("\n").as_bytes());
@@ -872,9 +895,11 @@ fn task_history_rebuilds_a_childs_own_conversation_from_linked_sidechains() {
     // tool result carries its call's id, and folding it into that row is what
     // the accumulator does for both live and restored content.
     let mut transcript = BackgroundTaskTranscript::default();
+
     assert!(transcript.restore(tasks[0].items.clone()));
 
     let ids: Vec<_> = transcript.items().iter().map(Item::id).collect();
+
     assert_eq!(ids, [None, Some("th-1"), Some("tu-1"), Some("tx-1")]);
     assert!(
         matches!(
@@ -923,18 +948,21 @@ fn a_session_uses_recorded_title_precedence() {
     use std::fs;
 
     let root = env::temp_dir().join(format!("nmt-session-name-{}", Uuid::new_v4()));
+
     fs::create_dir_all(&root).unwrap();
 
     let filler = format!(
         "{}\n",
         serde_json::json!({"type": "user", "padding": "x".repeat(4096)})
     );
+
     let named = |title: &str| {
         format!(
             "{}\n",
             serde_json::json!({"type": "custom-title", "customTitle": title})
         )
     };
+
     let generated = |title: &str| {
         format!(
             "{}\n",
@@ -943,19 +971,24 @@ fn a_session_uses_recorded_title_precedence() {
     };
 
     let mut transcript = named("first name");
+
     // Enough to push the first name out of the window the tail scan reads,
     // and to make that window start partway through a record.
     for _ in 0..32 {
         transcript.push_str(&filler);
     }
+
     transcript.push_str(&named("second name"));
     transcript.push_str(&filler);
 
     let renamed = root.join("renamed.jsonl");
+
     fs::write(&renamed, transcript).unwrap();
+
     assert_eq!(recorded_title(&renamed).as_deref(), Some("second name"));
 
     let generated_only = root.join("generated.jsonl");
+
     fs::write(
         &generated_only,
         format!(
@@ -965,6 +998,7 @@ fn a_session_uses_recorded_title_precedence() {
         ),
     )
     .unwrap();
+
     assert_eq!(
         resolved_session_title(
             &generated_only,
@@ -975,18 +1009,22 @@ fn a_session_uses_recorded_title_precedence() {
     );
 
     let user_named = root.join("user-named.jsonl");
+
     fs::write(
         &user_named,
         format!("{}{}", named("user name"), generated("later model name")),
     )
     .unwrap();
+
     assert_eq!(
         resolved_session_title(&user_named, Some("prompt fallback".into()), "12345678-rest"),
         "user name"
     );
 
     let untouched = root.join("untouched.jsonl");
+
     fs::write(&untouched, &filler).unwrap();
+
     assert_eq!(
         resolved_session_title(&untouched, Some("prompt fallback".into()), "12345678-rest"),
         "prompt fallback"
@@ -1009,6 +1047,7 @@ fn a_child_conversation_is_read_from_its_own_file_and_linked_by_metadata() {
     let root = env::temp_dir().join(format!("nmt-subagent-history-{}", Uuid::new_v4()));
     let session_id = "sess-abc";
     let subagents = root.join(session_id).join("subagents");
+
     fs::create_dir_all(&subagents).unwrap();
 
     fs::write(
@@ -1030,6 +1069,7 @@ fn a_child_conversation_is_read_from_its_own_file_and_linked_by_metadata() {
         .to_string(),
     )
     .unwrap();
+
     // Every record in a child's own file is a sidechain record.
     fs::write(
         subagents.join("agent-abc123.jsonl"),
@@ -1092,6 +1132,7 @@ fn one_childs_conversation_is_readable_without_rebuilding_the_session() {
     let root = env::temp_dir().join(format!("nmt-subagent-read-{}", Uuid::new_v4()));
     let session_id = "sess-abc";
     let subagents = root.join(session_id).join("subagents");
+
     fs::create_dir_all(&subagents).unwrap();
 
     fs::write(
@@ -1115,6 +1156,7 @@ fn one_childs_conversation_is_readable_without_rebuilding_the_session() {
 
     let items =
         load_child_transcript_at(&root, session_id, "toolu_1").expect("the child wrote a file");
+
     assert!(matches!(
         &items[0],
         Item::AgentMessage { text: Some(text), .. } if text == "found the popup component"
@@ -1140,6 +1182,7 @@ fn a_child_conversation_with_no_matching_launch_is_left_alone() {
     let root = env::temp_dir().join(format!("nmt-subagent-history-{}", Uuid::new_v4()));
     let session_id = "sess-abc";
     let subagents = root.join(session_id).join("subagents");
+
     fs::create_dir_all(&subagents).unwrap();
 
     fs::write(
@@ -1172,6 +1215,7 @@ fn task_notifications_are_not_replayed_as_user_prompts() {
     let notification = "<task-notification>\n<task-id>af51619832c5b38f5</task-id>\n\
                         <tool-use-id>toolu_01WjVSCJychqyGiWnTbV9jRg</tool-use-id>\n\
                         <status>completed</status>\n</task-notification>";
+
     let lines = task_history_lines(&[
         serde_json::json!({
             "type": "user",
@@ -1285,6 +1329,7 @@ fn replay_divides_a_session_into_the_turns_it_recorded() {
             "interruptedMessageId": "msg_1",
             "message": {"role": "user", "content": "[Request interrupted by user]"}}),
     ];
+
     let content: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
 
     let turns = parse_replay(content.join("\n").as_bytes());

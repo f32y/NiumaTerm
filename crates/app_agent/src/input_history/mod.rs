@@ -53,6 +53,7 @@ fn normalize_working_directory(cwd: Option<&str>) -> String {
         .filter(|cwd| !cwd.trim().is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
     let absolute = if supplied.is_absolute() {
         supplied
     } else {
@@ -60,18 +61,22 @@ fn normalize_working_directory(cwd: Option<&str>) -> String {
             .map(|current| current.join(&supplied))
             .unwrap_or(supplied)
     };
+
     let normalized =
         fs::canonicalize(&absolute).unwrap_or_else(|_| normalize_path_components(&absolute));
     let spelling = installation_path_spelling(&normalized);
+
     // Windows keeps its persisted slash spelling. On Unix both case and a
     // backslash can distinguish directories, including after canonicalization.
     #[cfg(windows)]
     let spelling = spelling.replace('\\', "/");
+
     spelling
 }
 
 fn normalize_path_components(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
+
     for component in path.components() {
         match component {
             Component::CurDir => {}
@@ -81,6 +86,7 @@ fn normalize_path_components(path: &Path) -> PathBuf {
             component => normalized.push(component.as_os_str()),
         }
     }
+
     normalized
 }
 
@@ -107,26 +113,31 @@ impl AgentInputHistory {
         {
             warn!("failed to queue Agent input history save");
         }
+
         true
     }
 
     fn flush(&self) -> io::Result<()> {
         let snapshot = self.store.snapshot();
+
         if let Some(writer) = self.writer.as_ref()
             && writer.flush(snapshot.clone()).is_ok()
         {
             return Ok(());
         }
+
         save_to_path(&self.path, &snapshot)
     }
 }
 
 pub fn initialize(testing: bool, cx: &mut App) {
     let path = history_file_path(testing);
+
     let store = load_from_path(&path).unwrap_or_else(|error| {
         warn!("failed to load Agent input history: {error}");
         HistoryStore::default()
     });
+
     let writer = match HistoryWriter::spawn(path.clone()) {
         Ok(writer) => Some(writer),
         Err(error) => {
@@ -134,6 +145,7 @@ pub fn initialize(testing: bool, cx: &mut App) {
             None
         }
     };
+
     cx.set_global(AgentInputHistory {
         store,
         path,
@@ -177,9 +189,11 @@ impl HistoryWriter {
         let (sender, receiver) = mpsc::sync_channel(1);
         let pending = Arc::new(Mutex::new(None));
         let worker_pending = Arc::clone(&pending);
+
         thread::Builder::new()
             .name("agent-input-history".to_string())
             .spawn(move || run_writer(receiver, worker_pending, save))?;
+
         Ok(Self { sender, pending })
     }
 
@@ -189,7 +203,9 @@ impl HistoryWriter {
 
     fn flush(&self, snapshot: StoredHistory) -> io::Result<()> {
         let (sender, receiver) = mpsc::sync_channel(0);
+
         self.queue(snapshot, Some(sender))?;
+
         receiver
             .recv()
             .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "history writer stopped"))?
@@ -204,14 +220,17 @@ impl HistoryWriter {
         let mut waiters = pending
             .take()
             .map_or_else(Vec::new, |pending| pending.waiters);
+
         waiters.extend(waiter);
         *pending = Some(PendingWrite { snapshot, waiters });
+
         // Only the newest snapshot matters. The wake token carries no history,
         // so a slow disk cannot accumulate a queue of obsolete copies.
         match self.sender.try_send(()) {
             Ok(()) | Err(mpsc::TrySendError::Full(())) => Ok(()),
             Err(mpsc::TrySendError::Disconnected(())) => {
                 pending.take();
+
                 Err(io::Error::new(
                     io::ErrorKind::BrokenPipe,
                     "history writer stopped",
@@ -230,9 +249,11 @@ fn run_writer(
         let request = pending.lock().take();
         let Some(request) = request else { continue };
         let result = save(&request.snapshot);
+
         if let Err(error) = &result {
             warn!("failed to save Agent input history: {error}");
         }
+
         // A flush completes only after its snapshot, or a newer replacement,
         // has reached storage. Waiters arriving during I/O join the next write.
         for sender in request.waiters {
@@ -240,6 +261,7 @@ fn run_writer(
                 .as_ref()
                 .copied()
                 .map_err(|error| io::Error::new(error.kind(), error.to_string()));
+
             let _ = sender.send(result);
         }
     }
@@ -284,12 +306,14 @@ impl InputHistoryNavigation {
                 self.reset();
                 return InputHistoryAction::Declined;
             };
+
             if text != recalled {
                 self.reset();
             } else {
                 if !selection.is_empty() || (cursor != 0 && cursor != text.len()) {
                     return InputHistoryAction::Declined;
                 }
+
                 return match direction {
                     InputHistoryDirection::Older if index > 0 => {
                         let index = index - 1;
@@ -313,12 +337,15 @@ impl InputHistoryNavigation {
         if direction == InputHistoryDirection::Newer || !text.is_empty() || !selection.is_empty() {
             return InputHistoryAction::Declined;
         }
+
         let Some(index) = available.len().checked_sub(1) else {
             return InputHistoryAction::Declined;
         };
         let text = available[index].clone();
+
         self.entries = available;
         self.index = Some(index);
+
         InputHistoryAction::Replace(text)
     }
 }
@@ -332,12 +359,14 @@ impl AgentPane {
     ) -> bool {
         let (text, selection, cursor) = {
             let input = self.input.read(cx);
+
             (
                 input.text().to_string(),
                 input.selected_range(),
                 input.cursor(),
             )
         };
+
         let available = cx
             .global::<AgentInputHistory>()
             .entries(&self.input_history_scope);
@@ -356,6 +385,7 @@ impl AgentPane {
                 replace_input_with_history(&self.input, text, window, cx);
                 cx.stop_propagation();
                 cx.notify();
+
                 true
             }
             InputHistoryAction::Clear => {
@@ -363,6 +393,7 @@ impl AgentPane {
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 cx.stop_propagation();
                 cx.notify();
+
                 true
             }
         }
@@ -370,9 +401,11 @@ impl AgentPane {
 
     pub(super) fn record_input_history(&mut self, text: &str, cx: &mut Context<Self>) {
         let text = text.trim();
+
         if text.is_empty() {
             return;
         }
+
         cx.global_mut::<AgentInputHistory>()
             .record(&self.input_history_scope, text.to_string());
         self.input_history_navigation.reset();
@@ -386,6 +419,7 @@ fn replace_input_with_history<T: 'static>(
     cx: &mut Context<T>,
 ) {
     let end = text.len();
+
     input.update(cx, |input, cx| {
         input.set_value(text, window, cx);
         input.set_selected_range(end..end, cx);

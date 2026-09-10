@@ -41,6 +41,7 @@ fn the_cache_share_is_measured_over_the_turn_not_its_last_request() {
         output_tokens: Some(1_000),
         reasoning_output_tokens: None,
     };
+
     let turn = TokenUsageBreakdown {
         total_tokens: 310_000,
         input_tokens: Some(300_000),
@@ -58,6 +59,7 @@ fn the_cache_share_is_measured_over_the_turn_not_its_last_request() {
         }),
         max_tokens: Some(200_000),
     };
+
     assert_eq!(cache_hit_percent(usage), Some(90));
 
     // Without an aggregate — a sparse or post-compaction snapshot — the
@@ -98,6 +100,7 @@ fn the_live_context_and_the_last_turn_report_the_same_categories() {
         .iter()
         .map(|row| row.label)
         .collect();
+
     assert_eq!(
         labels,
         ["Total", "Input", "Cache read", "Cache write", "Output"]
@@ -128,7 +131,9 @@ fn segments_lead_with_what_fills_the_window() {
     ));
 
     let labels: Vec<_> = rows.iter().map(|row| row.label.as_str()).collect();
+
     assert_eq!(labels, ["Messages", "Tools", "System prompt"]);
+
     // Shares are taken against the measured window, so they agree with the
     // capacity line the card shows above them.
     assert_eq!(rows[0].percent, 40);
@@ -165,6 +170,7 @@ fn shares_fall_back_to_the_measured_total_without_a_window() {
 #[test]
 fn context_capacity_formats_known_and_unknown_limits() {
     let known = context_usage(41_000, Some(258_400));
+
     assert_eq!(context_indicator_label(known), "41k used · 84% left");
     assert_eq!(
         context_capacity_labels(known),
@@ -172,6 +178,7 @@ fn context_capacity_formats_known_and_unknown_limits() {
     );
 
     let unknown = context_usage(9_000, None);
+
     assert_eq!(context_indicator_label(unknown), "9k used");
     assert_eq!(
         context_capacity_labels(unknown),

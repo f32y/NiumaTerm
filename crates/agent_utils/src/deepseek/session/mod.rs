@@ -169,12 +169,15 @@ struct OpenedConversation {
 /// behalf. The Agent Tab discloses what that leaves out.
 pub(crate) fn session_create_payload(cwd: Option<&str>, session_id: Option<&str>) -> Value {
     let mut payload = json!({});
+
     if let Some(cwd) = cwd {
         payload["cwd"] = json!(cwd);
     }
+
     if let Some(session_id) = session_id {
         payload["sessionId"] = json!(session_id);
     }
+
     payload
 }
 
@@ -253,22 +256,26 @@ impl Session {
         // would hand the agent directories the user never selected. The Agent
         // Tab discloses what is missing before the first prompt.
         let cwd = workspace.primary().map(str::to_string);
+
         // The host is shared by every DeepSeek tab and keyed by launch
         // configuration alone, so which directories a conversation uses must
         // not enter that identity.
         let host = host::shared(launch)?;
         let client = host.client().clone();
+
         let opened = open_conversation(&client, cwd.as_deref(), None).map_err(|error| {
             HostError::FailedToStart(format!(
                 "the harness could not open a conversation: {error}"
             ))
         })?;
+
         let session_id = opened.session_id;
 
         // Opening the downlinks after the session exists means its first frames
         // cannot be missed: the stream replays a baseline for every attached
         // session when it opens.
         let deliver: Arc<dyn Fn(Value) + Send + Sync> = Arc::new(deliver);
+
         let (downlinks, snapshot) = Downlinks::open(
             client.clone(),
             Arc::downgrade(&host),
@@ -286,6 +293,7 @@ impl Session {
             launch.declares_image_input,
             Arc::clone(&deliver),
         );
+
         // The list is read now rather than when the picker opens, because the
         // picker refuses to open on an empty list and cannot wait for one.
         load_sessions(client.clone(), cwd.clone(), Arc::clone(&deliver));
@@ -343,9 +351,11 @@ impl Session {
                         return false;
                     }
                 };
+
                 self.session_id = opened.session_id;
                 self.controls.clear();
                 self._downlinks = downlinks;
+
                 // Everything below describes the conversation this tab just
                 // left; carrying it over would attribute it to the new one.
                 self.running = false;
@@ -375,6 +385,7 @@ impl Session {
                     self.cwd.clone(),
                     Arc::clone(&self.deliver),
                 );
+
                 // Commands and skills are scoped to the agent and its project,
                 // and a resumed conversation may have been composed from a
                 // different preset or rooted elsewhere.
@@ -394,6 +405,7 @@ impl Session {
                     opened.agent_preset,
                     Arc::clone(&self.deliver),
                 );
+
                 true
             }
             Err(error) => {
@@ -416,6 +428,7 @@ impl Session {
         if frame["payload"]["type"] == COMPLETED_FRAME {
             return self.control_completed(&frame["payload"]);
         }
+
         // An approval is answerable, so recognizing it means recording what an
         // answer will need. The stream replays a still-pending request when it
         // reconnects, and re-raising the card from the replay is what lets a
@@ -424,7 +437,9 @@ impl Session {
             if self.pending_approval.as_ref() != Some(&request) {
                 self.controls.retire_approval();
             }
+
             let description = request.description.clone();
+
             self.pending_approval = Some(request);
             return vec![Event::ApprovalRequested { description }];
         }
@@ -433,6 +448,7 @@ impl Session {
         // rule applies: recognizing the frame is what makes it answerable.
         if let Some((request, questions)) = mapping::question_request(&frame, &self.session_id) {
             let mut events = Vec::new();
+
             if self
                 .pending_questions
                 .as_ref()
@@ -440,6 +456,7 @@ impl Session {
             {
                 events.extend(self.expire_questions());
             }
+
             events.push(Event::InputRequested(ChatQuestionRequest {
                 id: question_id(&request),
                 mode: QuestionMode::Blocking,
@@ -457,6 +474,7 @@ impl Session {
         }
 
         let payload = &frame["payload"];
+
         let resolved_identity = match payload["type"].as_str() {
             Some("approval/resolved") => self
                 .pending_approval
@@ -468,17 +486,21 @@ impl Session {
                 .map(|request| (&request.client_id, &request.event_id)),
             _ => None,
         };
+
         if let Some((client_id, event_id)) = resolved_identity
             && (frame["eventId"].as_str().is_some_and(|id| id != event_id)
                 || frame["clientId"].as_str().is_some_and(|id| id != client_id))
         {
             return Vec::new();
         }
+
         match payload["type"].as_str() {
             Some("nmt/connection-reset") if self.is_current_session(payload) => {
                 self.controls.clear();
                 self.pending_approval = None;
+
                 let mut events = self.expire_questions();
+
                 events.push(Event::ApprovalResolved);
                 return events;
             }
@@ -509,6 +531,7 @@ impl Session {
         // A finished turn re-reads it because a child's activity is sampled
         // when asked rather than pushed.
         let event_type = payload["event"]["type"].as_str();
+
         if self.is_current_session(payload)
             && (event_type == Some("subagent/descriptor")
                 || (event_type == Some("turn/end") && !self.subagent_modes.is_empty()))
@@ -526,12 +549,14 @@ impl Session {
         }
 
         let mut resolved = Vec::new();
+
         for event in &events {
             match event {
                 Event::TurnStarted => self.running = true,
                 Event::TurnCompleted { .. } => {
                     self.running = false;
                     self.controls.retire_interrupt();
+
                     // A turn that ended cannot still be waiting on an answer.
                     self.pending_approval = None;
                     self.controls.retire_approval();
@@ -546,6 +571,7 @@ impl Session {
         }
 
         events.extend(resolved);
+
         events
     }
 
@@ -560,12 +586,15 @@ impl Session {
         let Some(frame) = frames::parse::<frames::SubagentsFrame>(SUBAGENTS_FRAME, payload) else {
             return Vec::new();
         };
+
         // Several reads can be in flight, and an older answer describes a
         // moment the panel has already moved past.
         if frame.session_id != self.session_id || frame.activity < self.subagent_activity {
             return Vec::new();
         }
+
         let snapshot = subagents::snapshot(&frame.catalog, &self.session_id, frame.activity);
+
         self.subagent_modes = snapshot
             .tasks
             .iter()
@@ -576,6 +605,7 @@ impl Session {
                 _ => None,
             })
             .collect();
+
         vec![Event::BackgroundTasks(snapshot)]
     }
 
@@ -585,9 +615,11 @@ impl Session {
         else {
             return Vec::new();
         };
+
         if frame.session_id != self.session_id {
             return Vec::new();
         }
+
         vec![Event::BackgroundTaskTranscript {
             key: BackgroundTaskKey::deepseek(&frame.child_session_id),
             update: BackgroundTaskTranscriptUpdate::loaded(history::items(&frame.page)),
@@ -598,9 +630,11 @@ impl Session {
         let Some(frame) = frames::parse::<frames::SkillsFrame>(SKILLS_FRAME, payload) else {
             return Vec::new();
         };
+
         if frame.session_id != self.session_id {
             return Vec::new();
         }
+
         vec![Event::Skills(commands::skills(&frame.skills))]
     }
 
@@ -608,9 +642,11 @@ impl Session {
         let Some(frame) = frames::parse::<frames::PresetsFrame>(PRESETS_FRAME, payload) else {
             return Vec::new();
         };
+
         if frame.session_id != self.session_id {
             return Vec::new();
         }
+
         vec![Event::AgentPresets {
             presets: presets::catalog(&frame.presets),
             current: frame.current,
@@ -621,9 +657,11 @@ impl Session {
         let Some(frame) = frames::parse::<frames::CommandsFrame>(COMMANDS_FRAME, payload) else {
             return Vec::new();
         };
+
         if frame.session_id != self.session_id {
             return Vec::new();
         }
+
         vec![Event::Commands(commands::catalog(&frame.commands))]
     }
 
@@ -635,10 +673,12 @@ impl Session {
             return Vec::new();
         };
         let prompts = queued_prompts(&frame.items);
+
         self.queued_prompt_ids = prompts
             .iter()
             .filter_map(|prompt| prompt.id.clone())
             .collect();
+
         vec![Event::QueuedPrompts(prompts)]
     }
 
@@ -646,11 +686,13 @@ impl Session {
         let Some(frame) = frames::parse::<frames::ReplayFrame>(REPLAY_FRAME, payload) else {
             return Vec::new();
         };
+
         // A page belonging to the conversation this tab has since left
         // would replace the visible transcript with another one's.
         if frame.session_id != self.session_id {
             return Vec::new();
         }
+
         if let Some(message) = frame.error {
             return vec![Event::Error {
                 message,
@@ -661,6 +703,7 @@ impl Session {
         }
 
         let page = &frame.page;
+
         // The tail page is also where a projection's current value can be
         // read: a live push reports only what changed after the tab
         // attached, so accounting and the permission preset would otherwise
@@ -674,11 +717,14 @@ impl Session {
         // a resumed conversation rebuilds them from its own history rather
         // than from a record kept beside it.
         let mut folded = false;
+
         self.tools = ToolTracker::default();
         self.workflows = WorkflowTracker::default();
         self.running = false;
+
         for entry in page["records"].as_array().into_iter().flatten() {
             folded |= self.workflows.apply(&entry["event"]);
+
             for event in mapping::map_session_event(&entry["event"], &Value::Null, &mut self.tools)
             {
                 match event {
@@ -688,14 +734,17 @@ impl Session {
                 }
             }
         }
+
         if folded {
             events.push(Event::Workflows(self.workflows.snapshot(&self.session_id)));
         }
 
         events.push(Event::Replay(history::replay(page)));
+
         if self.running {
             events.push(Event::TurnStarted);
         }
+
         events
     }
 
@@ -703,10 +752,13 @@ impl Session {
         let Some(frame) = frames::parse::<frames::ModelsFrame>(MODELS_FRAME, payload) else {
             return Vec::new();
         };
+
         if frame.session_id != self.session_id {
             return Vec::new();
         }
+
         self.models = ModelDirectory::parse(&frame.models);
+
         // The catalog and the selection travel together, so the pickers
         // gain their options and their current value in one repaint.
         let mut events = vec![

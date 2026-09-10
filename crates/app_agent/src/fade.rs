@@ -67,6 +67,7 @@ impl Fade {
         cx: &App,
     ) -> FadeFrame {
         let to = if open { 1.0 } else { 0.0 };
+
         if self.to != to {
             *self = Self {
                 from: self.progress(now),
@@ -82,6 +83,7 @@ impl Fade {
             if now.duration_since(self.start) < self.duration {
                 window.request_animation_frame();
             }
+
             self.progress(now)
         };
 

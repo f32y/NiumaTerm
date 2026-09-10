@@ -16,6 +16,7 @@ pub(crate) struct RewindFlow {
     pub(crate) operation_seq: u64,
     pub(crate) file_completion: Option<oneshot::Sender<Result<(), String>>>,
 }
+
 use crate::composer::{CommandFeedbackKind, PaletteAction, PaletteModel, PaletteRow};
 use crate::profile::AgentKind;
 use crate::session::{Backend, RecoveryIdentity, Status};
@@ -104,15 +105,19 @@ pub(crate) fn rewind_prompt_label(prompt: &str) -> String {
         .find(|line| !line.trim().is_empty())
         .unwrap_or_else(|| i18n("agent-rewind-untitled-prompt"))
         .trim();
+
     let mut label = line.chars().take(72).collect::<String>();
+
     if line.chars().count() > 72 {
         label.push('…');
     }
+
     label
 }
 
 pub(crate) fn rewind_timestamp(timestamp: Option<&str>) -> Option<String> {
     let timestamp = timestamp?;
+
     chrono::DateTime::parse_from_rfc3339(timestamp)
         .map(|time| {
             time.with_timezone(&Local)
@@ -155,6 +160,7 @@ impl AgentPane {
                 translated("agent-rewind-idle-only"),
                 cx,
             );
+
             return false;
         }
 
@@ -169,11 +175,14 @@ impl AgentPane {
                 translated("agent-rewind-no-session-id"),
                 cx,
             );
+
             return false;
         };
 
         self.branch.rewind.operation_seq = self.branch.rewind.operation_seq.wrapping_add(1);
+
         let operation_id = self.branch.rewind.operation_seq;
+
         self.branch.rewind.state = Some(RewindState::Loading { operation_id });
         self.palette.selected = 0;
         self.palette.dismissed = false;
@@ -187,6 +196,7 @@ impl AgentPane {
         let load = cx
             .background_executor()
             .spawn(async move { sessions::load_checkpoints(cwd.as_deref(), &session_id) });
+
         cx.spawn(async move |this, cx| {
             let checkpoints = load.await;
 
@@ -197,6 +207,7 @@ impl AgentPane {
                         operation_id: current,
                     }) if *current == operation_id
                 );
+
                 if !is_current {
                     return;
                 }
@@ -220,7 +231,9 @@ impl AgentPane {
                             })
                             .cloned()
                         });
+
                         let unresolved = target.is_some() && pointed_at.is_none();
+
                         this.branch.rewind.state = Some(match pointed_at {
                             Some(checkpoint) => RewindState::SelectingAction {
                                 operation_id,
@@ -231,6 +244,7 @@ impl AgentPane {
                                 checkpoints,
                             },
                         });
+
                         if unresolved {
                             this.palette.set_feedback(
                                 CommandFeedbackKind::Error,
@@ -240,8 +254,10 @@ impl AgentPane {
                         } else {
                             this.palette.feedback = None;
                         }
+
                         this.palette.selected = 0;
                         this.hold_transcript_for_picker(cx);
+
                         // The newest prompt is highlighted, and it usually
                         // sits under the picker that just opened over the
                         // bottom of the transcript.
@@ -272,6 +288,7 @@ impl AgentPane {
             self.branch.rewind.state = None;
             self.palette.selected = 0;
             self.release_transcript_from_picker(cx);
+
             // Cancelling is the user's own no-op, so an acknowledgement tells
             // them nothing they do not already know. Dropping the message also
             // retires the non-transient "Loading checkpoints…" status, which
@@ -306,6 +323,7 @@ impl AgentPane {
                         action: PaletteAction::RewindCheckpoint(checkpoint),
                     })
                     .collect::<Vec<_>>();
+
                 rows.push(PaletteRow {
                     label: translated("agent-rewind-cancel"),
                     description: translated("agent-rewind-cancel-description"),
@@ -326,6 +344,7 @@ impl AgentPane {
                     }
                     _ => None,
                 };
+
                 let file_description = match checkpoint.file_restore_availability {
                     sessions::FileRestoreAvailability::Available => {
                         i18n("agent-rewind-files-description-available")
@@ -448,6 +467,7 @@ impl AgentPane {
                     translated("agent-rewind-files-not-ready"),
                     cx,
                 );
+
                 return;
             }
             SlashCommandOutcome::Completed { message } => {
@@ -456,11 +476,13 @@ impl AgentPane {
                     message.unwrap_or_else(|| i18n("agent-rewind-invalid-file-state").to_string()),
                     cx,
                 );
+
                 return;
             }
         }
 
         let (completion_tx, completion_rx) = oneshot::channel();
+
         self.branch.rewind.file_completion = Some(completion_tx);
         self.branch.rewind.state = Some(RewindState::RestoringFiles { operation_id });
         self.palette.set_feedback(
@@ -483,6 +505,7 @@ impl AgentPane {
                     state.has_operation(operation_id)
                         && matches!(state, RewindState::RestoringFiles { .. })
                 });
+
                 if !is_current {
                     return;
                 }
@@ -549,11 +572,13 @@ impl AgentPane {
                 },
                 cx,
             );
+
             return;
         };
 
         let cwd = self.cwd();
         let user_message_id = checkpoint.user_message_id.clone();
+
         self.branch.rewind.state = Some(RewindState::ForkingConversation { operation_id });
         self.palette.set_feedback(
             CommandFeedbackKind::Status,
@@ -564,6 +589,7 @@ impl AgentPane {
         let fork = cx.background_executor().spawn(async move {
             sessions::fork_session_before(cwd.as_deref(), &source_session_id, &user_message_id)
         });
+
         cx.spawn_in(window, async move |this, cx| {
             let result = fork.await;
 
@@ -572,6 +598,7 @@ impl AgentPane {
                     state.has_operation(operation_id)
                         && matches!(state, RewindState::ForkingConversation { .. })
                 });
+
                 if !is_current {
                     return;
                 }

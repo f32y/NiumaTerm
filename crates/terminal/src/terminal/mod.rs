@@ -78,6 +78,7 @@ impl Default for Mode {
 impl From<KeyboardModes> for Mode {
     fn from(value: KeyboardModes) -> Self {
         let mut mode = Self::empty();
+
         mode.set(
             Mode::DISAMBIGUATE_ESC_CODES,
             value.contains(KeyboardModes::DISAMBIGUATE_ESC_CODES),
@@ -98,6 +99,7 @@ impl From<KeyboardModes> for Mode {
             Mode::REPORT_ASSOCIATED_TEXT,
             value.contains(KeyboardModes::REPORT_ASSOCIATED_TEXT),
         );
+
         mode
     }
 }

@@ -263,6 +263,7 @@ pub(super) fn visit_row_cells(
                 VtCellData::HAS_STYLING,
                 VtCellData::CODEPOINT,
             ];
+
             let mut values: [*mut os::raw::c_void; 4] = [
                 (&mut tag as *mut i32).cast(),
                 (&mut wide_raw as *mut i32).cast(),

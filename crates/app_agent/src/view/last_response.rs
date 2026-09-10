@@ -57,15 +57,18 @@ impl AgentPane {
     /// clocks a few pixels apart would be read as disagreeing.
     pub(super) fn render_last_response(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let at = self.turn.last_response_at()?;
+
         if self.transcript.read(cx).is_working() {
             return None;
         }
 
         let seconds = at.elapsed().as_secs();
+
         let color = match last_response_tone(seconds)? {
             LastResponseTone::Warning => cx.theme().warning,
             LastResponseTone::Danger => cx.theme().danger,
         };
+
         let label = last_response_label(seconds);
         let tooltip = label.clone();
 

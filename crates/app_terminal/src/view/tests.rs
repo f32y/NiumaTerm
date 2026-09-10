@@ -31,7 +31,9 @@ fn dropped_paths_are_space_delimited_and_paths_with_spaces_are_quoted() {
 #[test]
 fn block_gutter_hit_band() {
     use crate::view::block_gutter_hit;
+
     let origin_x = 10.0;
+
     assert!(block_gutter_hit(10.0 - 5.0, origin_x), "on the strip");
     assert!(
         block_gutter_hit(10.0 + 2.0, origin_x),
@@ -57,6 +59,7 @@ fn mouse_position_maps_to_cell_and_side() {
 
     // Content origin at (10, 10): position 26,46 -> local 16,36 -> col 2 row 2.
     let origin = point(px(10.0), px(10.0));
+
     assert_eq!(
         terminal_cell_at_position(point(px(26.0), px(46.0)), origin, cell, &[]),
         (SurfaceCell { col: 2, row: 2 }, SurfaceCellSide::Left)
@@ -107,6 +110,7 @@ fn scroll_delta_maps_to_terminal_lines() {
 #[test]
 fn typed_input_can_restore_a_scrolled_block_list() {
     let mut block_list = BlockListState::new(block_list_alignment(false));
+
     block_list.scrollbar = (24.0, 120.0);
 
     assert!(scroll_block_list_to_latest(&mut block_list));

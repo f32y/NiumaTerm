@@ -36,6 +36,7 @@ fn selection_and_clipboard_keep_separate_contents() {
         clipboard: Box::new(MemoryClipboard(String::new())),
         selection: Some(Box::new(MemoryClipboard(String::new()))),
     };
+
     assert!(clipboard.set(ClipboardType::Clipboard, "copied"));
     assert!(clipboard.set(ClipboardType::Selection, "selected"));
     assert_eq!(clipboard.get(ClipboardType::Clipboard), "copied");
@@ -48,6 +49,7 @@ fn missing_selection_reads_clipboard_without_accepting_selection_writes() {
         clipboard: Box::new(MemoryClipboard("copied".into())),
         selection: None,
     };
+
     assert!(!clipboard.set(ClipboardType::Selection, "selected"));
     assert_eq!(clipboard.get(ClipboardType::Selection), "copied");
     assert_eq!(clipboard.get(ClipboardType::Clipboard), "copied");
@@ -59,6 +61,7 @@ fn provider_failure_returns_rejected_write_and_empty_read() {
         clipboard: Box::new(UnavailableClipboard),
         selection: None,
     };
+
     assert!(!clipboard.set(ClipboardType::Clipboard, "copied"));
     assert!(clipboard.get(ClipboardType::Clipboard).is_empty());
 }

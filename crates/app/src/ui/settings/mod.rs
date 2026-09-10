@@ -167,6 +167,7 @@ pub(crate) fn save_settings(window: &mut Window, cx: &mut App) -> bool {
                     }),
                 cx,
             );
+
             false
         }
     }
@@ -176,11 +177,13 @@ pub fn settings_view(cx: &App) -> Settings {
     let profiles = cx.global::<AppSettings>().profiles.clone();
     let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
     let backdrop = cx.global::<AppSettings>().appearance.window_backdrop;
+
     let background_image_enabled = cx
         .global::<AppSettings>()
         .appearance
         .background_image
         .is_some();
+
     let shell_integration_mismatched = shell_integration_dll_mismatched();
 
     let sidebar_style = sidebar_surface(cx).border_r_0();

@@ -67,6 +67,7 @@ pub fn build_key_sequence(key: &KeyInput, mods: ModifiersState, flags: KeyEncode
     );
 
     let kitty_encode_all = flags.contains(KeyEncodeFlags::REPORT_ALL_KEYS_AS_ESC);
+
     // The default parameter is 1, so we can omit it.
     let kitty_event_type = flags.contains(KeyEncodeFlags::REPORT_EVENT_TYPES)
         && (key.repeat || key.state == ElementState::Released);
@@ -124,19 +125,23 @@ pub fn build_key_sequence(key: &KeyInput, mods: ModifiersState, flags: KeyEncode
     // Push event type.
     if kitty_event_type {
         payload.push(':');
+
         let event_type = match key.state {
             _ if key.repeat => '2',
             ElementState::Pressed => '1',
             ElementState::Released => '3',
         };
+
         payload.push(event_type);
     }
 
     if let Some(text) = associated_text {
         let mut codepoints = text.chars().map(u32::from);
+
         if let Some(codepoint) = codepoints.next() {
             payload.push_str(&format!(";{codepoint}"));
         }
+
         for codepoint in codepoints {
             payload.push_str(&format!(":{codepoint}"));
         }
@@ -166,11 +171,14 @@ pub fn encode_terminal_key(
     if let Some(bytes) = named_key_escape(input, mods, flags) {
         return Some(bytes);
     }
+
     let text = input.text_with_all_modifiers.as_deref().unwrap_or_default();
+
     if should_build_sequence(input, text, mods, flags) {
         let seq = build_key_sequence(input, mods, flags);
         return (!seq.is_empty()).then_some(seq);
     }
+
     None
 }
 
@@ -212,9 +220,11 @@ pub fn bracket_paste(body: &[u8], bracketed: bool) -> Vec<u8> {
     }
 
     let mut out = Vec::with_capacity(body.len() + 12);
+
     out.extend_from_slice(b"\x1b[200~");
     out.extend_from_slice(body);
     out.extend_from_slice(b"\x1b[201~");
+
     out
 }
 
@@ -232,9 +242,11 @@ pub fn encode_mouse_report(
         Some(format!("\x1b[<{};{};{}{}", button + mods, col + 1, row + 1, c).into_bytes())
     } else {
         let b = if pressed { button + mods } else { 3 + mods };
+
         if col >= 223 || row >= 223 {
             return None;
         }
+
         Some(vec![
             b'\x1b',
             b'[',
@@ -278,6 +290,7 @@ fn named_key_escape(
         Key::Named(named) => named,
         _ => return None,
     };
+
     let app_cursor = flags.contains(KeyEncodeFlags::APP_CURSOR);
     let all_keys = flags.contains(KeyEncodeFlags::REPORT_ALL_KEYS_AS_ESC);
     let disamb = flags.contains(KeyEncodeFlags::DISAMBIGUATE_ESC_CODES);
@@ -295,6 +308,7 @@ fn named_key_escape(
             NamedKey::End => b"\x1bOF",
             _ => b"",
         };
+
         if !b.is_empty() {
             return Some(b.to_vec());
         }
@@ -309,6 +323,7 @@ fn named_key_escape(
             NamedKey::F4 => b"\x1bOS",
             _ => b"",
         };
+
         if !b.is_empty() {
             return Some(b.to_vec());
         }
@@ -319,9 +334,11 @@ fn named_key_escape(
         if empty && !all_keys {
             return Some(b"\x7f".to_vec());
         }
+
         if mods == ModifiersState::SHIFT && !all_keys && !disamb {
             return Some(b"\x7f".to_vec());
         }
+
         if mods == ModifiersState::ALT && !all_keys && !disamb {
             return Some(b"\x1b\x7f".to_vec());
         }
@@ -332,6 +349,7 @@ fn named_key_escape(
         if mods == ModifiersState::SHIFT {
             return Some(b"\x1b[Z".to_vec());
         }
+
         if mods == ModifiersState::SHIFT | ModifiersState::ALT {
             return Some(b"\x1b\x1b[Z".to_vec());
         }
@@ -399,11 +417,13 @@ impl SequenceBuilder {
         if character.chars().count() == 1 {
             let shift = self.modifiers.contains(SequenceModifiers::SHIFT);
             let ch = character.chars().next().unwrap();
+
             let unshifted_ch = if shift {
                 ch.to_lowercase().next().unwrap()
             } else {
                 ch
             };
+
             let alternate_key_code = u32::from(ch);
             let mut unicode_key_code = u32::from(unshifted_ch);
 
@@ -556,6 +576,7 @@ impl SequenceBuilder {
             } else {
                 "1"
             };
+
         let (base, terminator) = match named {
             NamedKey::PageUp => ("5", SequenceTerminator::Normal('~')),
             NamedKey::PageDown => ("6", SequenceTerminator::Normal('~')),
@@ -646,6 +667,7 @@ impl SequenceBuilder {
         // itself apply the state based on keysyms and not the _actual_ modifiers
         // state, which is how kitty is doing so and what is suggested in such case.
         let press = key.state.is_pressed();
+
         match named {
             NamedKey::Shift => mods.set(SequenceModifiers::SHIFT, press),
             NamedKey::Control => mods.set(SequenceModifiers::CONTROL, press),
@@ -717,10 +739,12 @@ impl SequenceModifiers {
 impl From<ModifiersState> for SequenceModifiers {
     fn from(mods: ModifiersState) -> Self {
         let mut modifiers = Self::empty();
+
         modifiers.set(Self::SHIFT, mods.shift_key());
         modifiers.set(Self::ALT, mods.alt_key());
         modifiers.set(Self::CONTROL, mods.control_key());
         modifiers.set(Self::SUPER, mods.super_key());
+
         modifiers
     }
 }
@@ -730,5 +754,6 @@ fn is_control_character(text: &str) -> bool {
     // 0x7f (DEL) is included here since it has a dedicated control code (`^?`) which generally
     // does not match the reported text (`^H`), despite not technically being part of C0 or C1.
     let codepoint = text.bytes().next().unwrap();
+
     text.len() == 1 && (codepoint < 0x20 || (0x7f..=0x9f).contains(&codepoint))
 }

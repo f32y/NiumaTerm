@@ -140,6 +140,7 @@ pub(super) fn recorded_title(path: &Path) -> Option<String> {
     file.seek(SeekFrom::Start(start)).ok()?;
 
     let mut tail = Vec::new();
+
     file.take(RECORDED_TITLE_SCAN_BYTES)
         .read_to_end(&mut tail)
         .ok()?;
@@ -335,6 +336,7 @@ pub(super) fn clean_prompt(text: &str) -> String {
         if end < start {
             break;
         }
+
         text.replace_range(start..end + "</system-reminder>".len(), "");
     }
 
@@ -360,6 +362,7 @@ pub fn provisional_title_from_prompt(text: &str) -> Option<String> {
     let cleaned = clean_prompt(text);
     let mut words = cleaned.split_whitespace();
     let first = words.next()?;
+
     if first.starts_with('/') {
         return None;
     }
@@ -368,6 +371,7 @@ pub fn provisional_title_from_prompt(text: &str) -> Option<String> {
         .chain(words.take(PROVISIONAL_TITLE_WORDS - 1))
         .collect::<Vec<_>>()
         .join(" ");
+
     let mut chars = normalized.chars();
     let prefix: String = chars.by_ref().take(PROVISIONAL_TITLE_CHARS).collect();
 
@@ -376,7 +380,9 @@ pub fn provisional_title_from_prompt(text: &str) -> Option<String> {
     }
 
     let mut truncated: String = prefix.chars().take(PROVISIONAL_TITLE_CHARS - 1).collect();
+
     truncated.push('…');
+
     Some(truncated)
 }
 

@@ -25,6 +25,7 @@ impl TranscriptIndex {
             .map_while(Result::ok)
             .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
             .collect::<Vec<_>>();
+
         let (chain, broken_parent) = active_chain_indices(&records);
         let mut snapshot_message_ids = HashSet::new();
         let mut malformed_snapshot = false;
@@ -88,6 +89,7 @@ impl TranscriptIndex {
             .collect::<Vec<_>>();
 
         checkpoints.reverse();
+
         checkpoints
     }
 }
@@ -122,6 +124,7 @@ pub(super) fn active_chain_indices(records: &[Value]) -> (Vec<usize>, Option<Str
     for &index in &transcript {
         let record = &records[index];
         let uuid = record["uuid"].as_str().unwrap_or_default().to_string();
+
         by_uuid.insert(uuid, index);
 
         if let Some(parent) = record["parentUuid"].as_str() {
@@ -134,6 +137,7 @@ pub(super) fn active_chain_indices(records: &[Value]) -> (Vec<usize>, Option<Str
             .as_str()
             .is_some_and(|uuid| !parent_uuids.contains(uuid))
     });
+
     let mut leaves = Vec::new();
 
     for terminal in terminals {
@@ -145,9 +149,11 @@ pub(super) fn active_chain_indices(records: &[Value]) -> (Vec<usize>, Option<Str
             let Some(uuid) = record["uuid"].as_str() else {
                 break;
             };
+
             if !seen.insert(uuid.to_string()) {
                 break;
             }
+
             if matches!(record["type"].as_str(), Some("user" | "assistant")) {
                 leaves.push(index);
                 break;
@@ -161,10 +167,12 @@ pub(super) fn active_chain_indices(records: &[Value]) -> (Vec<usize>, Option<Str
 
     let main_leaves = leaves.iter().copied().filter(|index| {
         let record = &records[*index];
+
         record["isSidechain"].as_bool() != Some(true)
             && record["isMeta"].as_bool() != Some(true)
             && record["teamName"].as_str().is_none()
     });
+
     let leaf = main_leaves.max().or_else(|| leaves.into_iter().max());
     let Some(mut current) = leaf else {
         return (Vec::new(), None);
@@ -179,21 +187,26 @@ pub(super) fn active_chain_indices(records: &[Value]) -> (Vec<usize>, Option<Str
         let Some(uuid) = record["uuid"].as_str() else {
             break;
         };
+
         if !seen.insert(uuid.to_string()) {
             break;
         }
+
         reversed.push(current);
 
         let Some(parent) = record["parentUuid"].as_str() else {
             break;
         };
+
         let Some(parent_index) = by_uuid.get(parent).copied() else {
             broken_parent = Some(parent.to_string());
             break;
         };
+
         current = parent_index;
     }
 
     reversed.reverse();
+
     (reversed, broken_parent)
 }

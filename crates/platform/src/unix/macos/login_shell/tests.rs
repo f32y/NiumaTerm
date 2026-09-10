@@ -53,6 +53,7 @@ fn importable_replaces_path_and_adds_only_what_is_missing() {
         ("PNPM_HOME", "/Users/someone/Library/pnpm"),
         ("PWD", "/Users/someone"),
     ]);
+
     let already_set: HashSet<&str> = ["PATH", "HOME"].into_iter().collect();
 
     assert_eq!(

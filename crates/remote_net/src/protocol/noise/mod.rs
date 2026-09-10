@@ -37,6 +37,7 @@ fn builder(pattern: &str) -> Builder<'static> {
 
 pub fn generate_keypair() -> Result<StaticKeypair, NoiseError> {
     let keypair = builder(PATTERN_IK).generate_keypair()?;
+
     Ok(StaticKeypair {
         private: keypair.private,
         public: keypair.public,
@@ -57,6 +58,7 @@ impl Handshake {
             .local_private_key(local_private)?
             .remote_public_key(remote_public)?
             .build_initiator()?;
+
         Ok(Self { state })
     }
 
@@ -67,6 +69,7 @@ impl Handshake {
         let state = builder(PATTERN_IK)
             .local_private_key(local_private)?
             .build_responder()?;
+
         Ok(Self { state })
     }
 
@@ -75,6 +78,7 @@ impl Handshake {
         let state = builder(PATTERN_XX)
             .local_private_key(local_private)?
             .build_initiator()?;
+
         Ok(Self { state })
     }
 
@@ -83,6 +87,7 @@ impl Handshake {
         let state = builder(PATTERN_XX)
             .local_private_key(local_private)?
             .build_responder()?;
+
         Ok(Self { state })
     }
 
@@ -90,7 +95,9 @@ impl Handshake {
     pub fn write_message(&mut self) -> Result<Vec<u8>, NoiseError> {
         let mut buf = vec![0u8; MSG_BUF];
         let len = self.state.write_message(&[], &mut buf)?;
+
         buf.truncate(len);
+
         Ok(buf)
     }
 
@@ -116,6 +123,7 @@ impl Handshake {
         if !self.state.is_handshake_finished() {
             return Err(NoiseError::HandshakeNotFinished);
         }
+
         Ok(SecureChannel {
             state: self.state.into_transport_mode()?,
         })
@@ -133,14 +141,18 @@ impl SecureChannel {
     pub fn seal(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, NoiseError> {
         let mut buf = vec![0u8; plaintext.len() + 16];
         let len = self.state.write_message(plaintext, &mut buf)?;
+
         buf.truncate(len);
+
         Ok(buf)
     }
 
     pub fn open(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, NoiseError> {
         let mut buf = vec![0u8; ciphertext.len()];
         let len = self.state.read_message(ciphertext, &mut buf)?;
+
         buf.truncate(len);
+
         Ok(buf)
     }
 
@@ -159,9 +171,11 @@ pub fn handshake_step(
     if let Some(message) = inbound {
         handshake.read_message(message)?;
     }
+
     if handshake.is_finished() {
         return Ok(None);
     }
+
     Ok(Some(handshake.write_message()?))
 }
 

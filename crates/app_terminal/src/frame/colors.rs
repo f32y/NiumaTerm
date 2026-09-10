@@ -19,6 +19,7 @@ impl BackgroundColors {
         // Active theme from config (loader resolves the theme/adaptive palette);
         // `term_colors` still overrides per-index via engine OSC 4 changes.
         let colors = active_colors();
+
         Self {
             colors: List::from(&colors),
             term_colors,
@@ -84,6 +85,7 @@ impl BackgroundColors {
                 } else {
                     *named
                 };
+
                 self.named(named)
             }
             AnsiColor::Spec(rgb) => {

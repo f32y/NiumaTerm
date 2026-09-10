@@ -41,17 +41,21 @@ pub(super) fn resolve_ready_settings(
             tier: local.tier.clone().or(next.tier),
         };
     }
+
     if use_local_reviewer
         && let Some(reviewer) = local.and_then(|local| local.approvals_reviewer.clone())
     {
         next.approvals_reviewer = Some(reviewer);
     }
+
     if let Some(model) = startup_model {
         next.model = Some(model.to_string());
     }
+
     if let Some(effort) = startup_effort {
         next.effort = Some(effort.to_string());
     }
+
     next
 }
 
@@ -124,12 +128,14 @@ impl AgentPane {
             SessionEvent::CompactionFinished { error } => {
                 self.transcript
                     .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
+
                 // A failed compaction is not the turn's own failure, so it needs
                 // its own row: the turn continues (and usually then dies on an
                 // over-length prompt) with no other trace of why.
                 if let Some(text) = error {
                     self.push_item(SessionItem::Error { text }, cx);
                 }
+
                 cx.notify();
             }
             SessionEvent::ItemStarted(item) => self.start_item(item, cx),
@@ -187,6 +193,7 @@ impl AgentPane {
             }
             SessionEvent::QuestionsRequested { questions } => {
                 self.turn.note_visible_output();
+
                 // The turn is blocked on the user exactly as an approval is, so
                 // it raises the same attention signal rather than a new one.
                 self.emit_lifecycle(
@@ -226,11 +233,13 @@ impl AgentPane {
                 {
                     prompt.settle(QuestionStatus::Expired);
                 }
+
                 self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
                 cx.notify();
             }
             SessionEvent::FileRewindCompleted { error } => {
                 let result = error.map_or(Ok(()), Err);
+
                 if let Some(completion) = self.branch.rewind.file_completion.take() {
                     let _ = completion.send(result);
                 } else {
@@ -282,7 +291,9 @@ impl AgentPane {
                     self.history_ui.mode = RecentSessionsMode::Hidden;
                     self.palette.feedback = None;
                 }
+
                 self.apply_replay(items, cx);
+
                 // A branch is finished once the copy's own history has replaced
                 // the transcript, which is the moment it is a conversation the
                 // user can type into rather than one still being cut.
@@ -298,6 +309,7 @@ impl AgentPane {
 
     fn on_host_exited(&mut self, message: String, cx: &mut Context<Self>) {
         let identity = self.runtime.backend().and_then(Backend::recovery_identity);
+
         self.runtime.reconnect(Some(RecoverySnapshot {
             identity,
             profile_name: self.profile.name.clone(),
@@ -330,6 +342,7 @@ impl AgentPane {
             .effort
             .clone()
             .or(self.controls.settings.effort.clone());
+
         let mut next = ThreadSettings { effort, ..settings };
 
         // Fresh conversations, and resumes into a harness that does not
@@ -343,17 +356,20 @@ impl AgentPane {
             .then(|| stored_thread_settings(self.kind, &self.profile, cx))
             .flatten();
         let preserve_current = self.kind.caps().repeats_ready_during_init && !seed_thread_defaults;
+
         let local = if preserve_current {
             Some(&self.controls.settings)
         } else {
             stored
         };
+
         let startup_model = seed_thread_defaults
             .then(|| launch_model(self.kind, &self.profile))
             .flatten();
         let startup_effort = seed_thread_defaults
             .then(|| launch_effort(&self.profile))
             .flatten();
+
         next = resolve_ready_settings(
             next,
             local,
@@ -368,6 +384,7 @@ impl AgentPane {
         }
 
         self.controls.settings = next;
+
         // Seeding only fills in the pickers. Where the harness adopts a
         // model through its own request, a remembered or profile pick
         // still has to be pushed, or the row would name a model the
@@ -375,6 +392,7 @@ impl AgentPane {
         if self.kind.caps().model_selection_is_a_request {
             self.apply_model_selection(cx);
         }
+
         self.sync_pending_rename();
         info!(
             "agent thread ready: profile=\"{}\", model={:?}, profile_model={:?}",
@@ -383,6 +401,7 @@ impl AgentPane {
             launch_model(self.kind, &self.profile)
         );
         self.runtime.ready();
+
         // The session id is known by now, so child agents that ran
         // before this tab opened can be rebuilt from history.
         self.restore_background_tasks(cx);
@@ -415,6 +434,7 @@ impl AgentPane {
                     }),
                     cx,
                 );
+
                 if self.palette.awaiting_command_turn && self.runtime.status() != Status::Running {
                     self.palette.awaiting_command_turn = false;
                     self.run_next_queued_command(cx);
@@ -451,6 +471,7 @@ impl AgentPane {
             self.turn.seq += 1;
             self.start_working(cx);
         }
+
         // The prompt the harness held is what this turn answers, so it
         // heads this turn rather than trailing the finished one.
         if harness_opened
@@ -458,6 +479,7 @@ impl AgentPane {
         {
             self.publish_queued_user_messages(cx);
         }
+
         self.runtime.turn_started();
         self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
         cx.notify();
@@ -474,22 +496,27 @@ impl AgentPane {
             self.transcript
                 .update(cx, |transcript, _| transcript.mark_interrupted(turn));
         }
+
         let interrupted_by_user = self.transcript.read(cx).was_interrupted(self.turn.seq);
         let error_already_shown = error
             .as_deref()
             .is_some_and(|text| self.transcript.read(cx).turn_has_error(self.turn.seq, text));
+
         let completion_body = error
             .clone()
             .or_else(|| self.latest_agent_message(cx))
             .unwrap_or_else(|| {
                 i18n("agent-session-turn-completed").replace("{name}", self.kind.display())
             });
+
         self.palette.awaiting_command_turn = false;
         self.turn.unanswered_prompt = None;
+
         // Compaction lives inside a turn; a flag surviving the turn
         // would leave the indicator spinning with nothing behind it.
         self.transcript
             .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
+
         // A prompt steered into this turn is one the backend never
         // acknowledges, so the turn's end is the last moment that can
         // still say it went in. The other two deliveries run their
@@ -498,14 +525,17 @@ impl AgentPane {
         if self.kind.caps().queued_prompt_delivery == QueuedPromptDelivery::RunningTurn {
             self.publish_queued_user_messages(cx);
         }
+
         self.finish_working(cx);
         self.refresh_git_branch(cx);
+
         if let Some(text) = error
             && !interrupted_by_user
             && !error_already_shown
         {
             self.push_item(SessionItem::Error { text }, cx);
         }
+
         self.emit_lifecycle(
             AgentEventKind::Stopped,
             &i18n("agent-session-provider-finished").replace("{name}", self.kind.display()),
@@ -520,22 +550,28 @@ impl AgentPane {
     /// session, returns queued work, and reports the interruption outward.
     fn on_error(&mut self, message: String, fatal: bool, cx: &mut Context<Self>) {
         self.turn.note_visible_output();
+
         if self.history_ui.mode == RecentSessionsMode::Loading {
             self.history_ui.mode = RecentSessionsMode::Open;
             self.history_ui.pending_resume_replay = None;
+
             // A branch that never arrives would otherwise hold the
             // composer behind a conversation that is not being cut.
             self.abandon_conversation_branch();
+
             if !fatal {
                 self.runtime.conversation_change_rejected(Status::Idle);
             }
+
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-open-failed").replace("{error}", &message),
                 cx,
             );
         }
+
         let cancelled_queue = fatal && !self.palette.command_queue.is_empty();
+
         if fatal {
             for prompt in &mut self.prompts.batches {
                 if prompt.mode == QuestionMode::Async && prompt.pending() {
@@ -545,6 +581,7 @@ impl AgentPane {
                     prompt.settle(QuestionStatus::Expired);
                 }
             }
+
             cx.emit(AgentPaneEvent::Interrupted);
             self.runtime.exited(&message);
             self.turn.unanswered_prompt = None;
@@ -554,7 +591,9 @@ impl AgentPane {
         } else if self.palette.awaiting_command_turn {
             self.palette.awaiting_command_turn = false;
         }
+
         self.push_item(SessionItem::Error { text: message }, cx);
+
         if cancelled_queue {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
@@ -587,6 +626,7 @@ impl AgentPane {
                 self.history_ui.sessions.push(session);
             }
         }
+
         cx.notify();
     }
 
@@ -598,7 +638,9 @@ impl AgentPane {
             self.background_task_count(),
             self.running_background_tasks(),
         );
+
         self.children.background_tasks = Some(snapshot);
+
         // The chrome reveals its control on this tab's first child and
         // then carries the running count, so it is told when either
         // number moves rather than on every refreshed snapshot. A child
@@ -612,6 +654,7 @@ impl AgentPane {
         {
             cx.emit(AgentPaneEvent::BackgroundTaskActivity);
         }
+
         cx.notify();
     }
 
@@ -634,7 +677,9 @@ impl AgentPane {
         // the moment the turn took it — retires the record.
         if let Some(drawn) = self.turn.published_prompt.take() {
             let before = prompts.len();
+
             prompts.retain(|prompt| prompt.text != drawn);
+
             if prompts.len() != before {
                 self.turn.published_prompt = Some(drawn);
             }
@@ -643,9 +688,11 @@ impl AgentPane {
         let claimed = claimed_prompts(&self.turn.queued_user_messages, &prompts);
 
         self.turn.queued_user_messages = prompts.into();
+
         for text in claimed {
             self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
         }
+
         cx.notify();
     }
 
@@ -663,6 +710,7 @@ impl AgentPane {
                 .replace("{total}", &total.to_string())
                 .replace("{reason}", &reason),
         });
+
         self.transcript.update(cx, |transcript, cx| {
             transcript.set_working_detail(detail, cx)
         });
@@ -673,22 +721,27 @@ impl AgentPane {
     /// so they render as a plain chronological stream above the new turns.
     pub(crate) fn apply_replay(&mut self, replay: Vec<ReplayTurn>, cx: &mut Context<Self>) {
         let mut answered_at = None;
+
         for turn in replay {
             // Each restored turn takes its own id, so the sequence continues
             // past the replay and new turns cannot merge into the last one.
             self.turn.seq += 1;
+
             let id = self.turn.seq;
             let newest = turn.items.iter().filter_map(|item| item.at).max();
+
             answered_at = answered_at.max(newest);
             self.transcript
                 .update(cx, |transcript, cx| transcript.append_replay(id, turn, cx));
         }
+
         // The restored conversation's idle span runs from the provider's own
         // stamp for its last answer. A transcript that carries no stamps leaves
         // the reading absent, which is all it can honestly say.
         if let Some(at) = answered_at {
             self.note_replayed_response(at, cx);
         }
+
         cx.notify();
     }
 
@@ -705,6 +758,7 @@ impl AgentPane {
                 self.turn.queued_user_messages.pop_front();
                 self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
             }
+
             return;
         }
 
@@ -773,9 +827,11 @@ impl AgentPane {
         let visible = self.transcript.update(cx, |transcript, _| {
             transcript.append_delta(item_id, delta, select)
         });
+
         if visible {
             self.turn.note_visible_output();
         }
+
         cx.notify();
     }
 }

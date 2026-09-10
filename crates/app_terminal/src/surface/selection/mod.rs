@@ -298,6 +298,7 @@ pub(super) fn block_selection_range(
 
                 if x < cols {
                     classes[offset + x] = class;
+
                     if wide == CellWide::Wide && x + 1 < cols {
                         classes[offset + x + 1] = class;
                     }

@@ -42,18 +42,22 @@ pub fn reconcile(config: &RemoteSessionConfig) {
 
     let should_run =
         config.host_enabled && !config.relay_url.is_empty() && !config.access_token.is_empty();
+
     if !should_run {
         if let Some(handle) = state.handle.take() {
             handle.shutdown();
         }
+
         state.started_with = None;
         return;
     }
 
     let desired = (config.relay_url.clone(), config.access_token.clone());
+
     if state.handle.is_some() && state.started_with.as_ref() == Some(&desired) {
         return; // Already running with this config.
     }
+
     if let Some(handle) = state.handle.take() {
         handle.shutdown();
     }
@@ -132,6 +136,7 @@ pub fn known_hosts() -> Vec<KnownHost> {
             // Losing the pinned host keys silently would look like the pairing
             // never happened, so make the file corruption visible.
             warn!("known_hosts.json is unreadable, treating as empty: {e}");
+
             Vec::new()
         }),
         Err(_) => Vec::new(),
@@ -169,9 +174,11 @@ pub fn pair_with_code(code_text: &str, name: &str) -> Result<KnownHost, String> 
     nmt_remote_net::pair_device(code, device, hostname()).map_err(|e| e.to_string())?;
 
     let mut hosts = known_hosts();
+
     hosts.retain(|h| h.host_id != host.host_id);
     hosts.push(host.clone());
     save_known_hosts(&hosts);
+
     Ok(host)
 }
 
@@ -180,6 +187,7 @@ pub fn connect_new_session(host: &KnownHost) -> Result<RemoteSession, String> {
     let device = load_or_create_keypair(&device_key_path()).map_err(|e| e.to_string())?;
     let host_public_key =
         hex_decode(&host.host_public_key).ok_or("stored host public key is not valid hex")?;
+
     open_remote_session(
         host.relay_url.clone(),
         host.host_id.clone(),

@@ -49,11 +49,13 @@ pub(super) struct HistoryStore {
 impl HistoryStore {
     pub(super) fn record(&mut self, scope: &InputHistoryScope, text: String) -> bool {
         let text = text.trim().to_string();
+
         if text.is_empty() {
             return false;
         }
 
         let entries = self.scopes.entry(scope.clone()).or_default();
+
         if entries.back().is_some_and(|entry| entry.text == text) {
             return false;
         }
@@ -62,20 +64,25 @@ impl HistoryStore {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_micros();
+
         let created_at = u64::try_from(timestamp).unwrap_or(u64::MAX).max(
             entries
                 .back()
                 .map_or(0, |entry| entry.created_at.saturating_add(1)),
         );
+
         let entries = Arc::make_mut(entries);
+
         entries.push_back(HistoryEntry {
             id: Uuid::new_v4(),
             created_at,
             text,
         });
+
         while entries.len() > MAX_ENTRIES_PER_SCOPE {
             entries.pop_front();
         }
+
         true
     }
 
@@ -107,6 +114,7 @@ impl HistoryStore {
         for scope in &snapshot.scopes {
             let key = scope.key();
             let entries = self.scopes.entry(key).or_default();
+
             // Stable identities make repeated saves idempotent even when a
             // snapshot predates another process's writes. Sorting before the
             // cap prevents old snapshots from reviving expired entries.
@@ -115,9 +123,13 @@ impl HistoryStore {
                 .chain(scope.entries.iter())
                 .map(|entry| (entry.id, entry.clone()))
                 .collect();
+
             let mut merged: Vec<_> = unique.into_values().collect();
+
             merged.sort_by_key(|entry| (entry.created_at, entry.id));
+
             let keep_from = merged.len().saturating_sub(MAX_ENTRIES_PER_SCOPE);
+
             *entries = Arc::new(merged.into_iter().skip(keep_from).collect());
         }
     }
@@ -142,25 +154,32 @@ pub(super) fn load_from_path(path: &Path) -> io::Result<HistoryStore> {
         }
         Err(error) => return Err(error),
     };
+
     #[derive(Deserialize)]
     struct Version {
         version: u32,
     }
+
     let version: Version = serde_json::from_slice(&bytes)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let mut history = HistoryStore::default();
+
     match version.version {
         1 => {
             let stored: StoredHistory<String> = serde_json::from_slice(&bytes)
                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+
             for scope in stored.scopes {
                 let key = scope.key();
                 let mut entries = VecDeque::<HistoryEntry>::new();
+
                 for (index, text) in scope.entries.iter().enumerate() {
                     let text = text.trim();
+
                     if text.is_empty() || entries.back().is_some_and(|entry| entry.text == text) {
                         continue;
                     }
+
                     // Every process migrating the same legacy row must assign
                     // the same identity, including repeated nonadjacent text.
                     let identity = serde_json::to_vec(&(
@@ -172,15 +191,18 @@ pub(super) fn load_from_path(path: &Path) -> io::Result<HistoryStore> {
                         text,
                     ))
                     .map_err(io::Error::other)?;
+
                     entries.push_back(HistoryEntry {
                         id: Uuid::new_v5(&Uuid::NAMESPACE_URL, &identity),
                         created_at: u64::try_from(index).unwrap_or(u64::MAX),
                         text: text.to_string(),
                     });
+
                     if entries.len() > MAX_ENTRIES_PER_SCOPE {
                         entries.pop_front();
                     }
                 }
+
                 history.scopes.insert(key, Arc::new(entries));
             }
         }
@@ -196,6 +218,7 @@ pub(super) fn load_from_path(path: &Path) -> io::Result<HistoryStore> {
             ));
         }
     }
+
     Ok(history)
 }
 
@@ -204,12 +227,16 @@ pub(super) fn save_to_path(path: &Path, history: &StoredHistory) -> io::Result<(
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
+
     fs::create_dir_all(parent)?;
+
     let mut lock_name = path
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing history filename"))?
         .to_os_string();
+
     lock_name.push(".lock");
+
     // The destination is replaced on every save. A persistent sibling lock
     // keeps all writers synchronized on one unchanged file identity.
     let lock = OpenOptions::new()
@@ -218,13 +245,20 @@ pub(super) fn save_to_path(path: &Path, history: &StoredHistory) -> io::Result<(
         .create(true)
         .truncate(false)
         .open(parent.join(lock_name))?;
+
     lock.lock()?;
+
     let mut merged = load_from_path(path)?;
+
     merged.merge(history);
+
     let content = serde_json::to_vec_pretty(&merged.snapshot()).map_err(io::Error::other)?;
     let mut temporary = NamedTempFile::new_in(parent)?;
+
     temporary.write_all(&content)?;
     temporary.as_file().sync_all()?;
+
     let temporary = temporary.into_temp_path();
+
     replace_file(&temporary, path)
 }

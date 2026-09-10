@@ -155,6 +155,7 @@ impl GraphicData {
             _ => {
                 // Non-RGB image. Convert it to RGBA.
                 let image = image.into_rgba8();
+
                 color_type = ColorType::Rgba;
                 width = image.width() as usize;
                 height = image.height() as usize;
@@ -257,6 +258,7 @@ impl GraphicData {
             let scale_w = width as f64 / self.width as f64;
             let scale_h = height as f64 / self.height as f64;
             let scale = scale_w.min(scale_h);
+
             width = (self.width as f64 * scale).round() as usize;
             height = (self.height as f64 * scale).round() as usize;
         }
@@ -278,6 +280,7 @@ impl GraphicData {
                 ResizeTarget::Invalid => return None,
                 ResizeTarget::Target(width, height) => (width, height),
             };
+
         let resize = self
             .resize
             .expect("resize_target yields Target only when resize is set");
@@ -302,6 +305,7 @@ impl GraphicData {
         // Finally, use `resize` or `resize_exact` to make the new image.
         let width = width as u32;
         let height = height as u32;
+
         // https://doc.servo.org/image/imageops/enum.FilterType.html
         let filter = FilterType::Triangle;
 
@@ -372,10 +376,12 @@ fn check_opaque_region() {
     let pixels = {
         // Put a transparent 3x3 box inside the picture.
         let mut data = vec![255; 10 * 10 * 4];
+
         for y in 3..6 {
             let offset = y * 10 * 4;
             data[offset..offset + 3 * 4].fill(0);
         }
+
         data
     };
 

@@ -155,6 +155,7 @@ impl RenderStateReader {
         self.row_versions.resize(rows, revision);
 
         let full = dimensions_changed || dirty != VtRenderStateDirty::PARTIAL;
+
         if full {
             self.row_versions.fill(revision);
         }
@@ -360,6 +361,7 @@ impl RenderStateReader {
 
         let bg_effective = read_term(VtTerminalData::COLOR_BACKGROUND);
         let bg_default = read_term(VtTerminalData::COLOR_BACKGROUND_DEFAULT);
+
         let bg_override = if bg_effective != bg_default {
             bg_effective
         } else {

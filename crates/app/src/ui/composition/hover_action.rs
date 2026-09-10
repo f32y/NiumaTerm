@@ -25,6 +25,7 @@ pub(crate) fn hover_action(
     child: impl IntoElement,
 ) -> Stateful<Div> {
     let action = div().id(id).aria_label(label);
+
     let action = match layout {
         HoverActionLayout::Bare => action,
         HoverActionLayout::Inline => action.px_1(),
@@ -35,6 +36,7 @@ pub(crate) fn hover_action(
             .items_center()
             .justify_center(),
     };
+
     let action = match visibility {
         HoverActionVisibility::Always => action,
         HoverActionVisibility::OnGroupHover(group) => {

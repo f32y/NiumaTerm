@@ -16,11 +16,14 @@ fn question_editors_keep_multiline_text_and_mask_secrets(cx: &mut TestAppContext
         executable: "missing-question-test-agent.exe".into(),
         ..AgentProfile::default()
     };
+
     let mut pane = None;
+
     let window = cx.update(|cx| {
         gpui_component::init(cx);
         cx.set_global(AgentSettings::default());
         cx.set_global(AgentThreadDefaults::default());
+
         cx.open_window(Default::default(), |window, cx| {
             let agent = cx.new(|cx| AgentPane::new(profile, AgentWorkspace::default(), window, cx));
             pane = Some(agent.clone());
@@ -28,35 +31,50 @@ fn question_editors_keep_multiline_text_and_mask_secrets(cx: &mut TestAppContext
         })
         .expect("open question editor test window")
     });
+
     let pane = pane.expect("create agent pane");
     let mut cx = VisualTestContext::from_window(window.into(), cx);
+
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
             let mut plain = question("Describe the change", false, &[]);
+
             plain.input = QuestionInput::Text;
+
             let mut secret = question("Enter a token", false, &[]);
+
             secret.input = QuestionInput::Secret;
+
             let mut prompt = QuestionPrompt::new(vec![plain, secret]);
+
             prompt.text = vec!["first line\nsecond line".into(), "test-token".into()];
             pane.prompts.ask_questions(prompt);
             pane.prepare_question_editors(window, cx);
+
             let prompt = pane.prompts.questions().expect("active questions");
+
             let QuestionEditorState::Text(plain) =
                 &prompt.editors[0].as_ref().expect("plain editor").state
             else {
                 panic!("ordinary answers use a textarea");
             };
+
             let plain = plain.read(cx);
+
             assert!(plain.is_multi_line());
             assert!(!plain.presentation().is_masked());
             assert_eq!(plain.value().as_ref(), "first line\nsecond line");
+
             let QuestionEditorState::Secret(secret) =
                 &prompt.editors[1].as_ref().expect("secret editor").state
             else {
                 panic!("secret answers use a password input");
             };
+
             secret.update(cx, |secret, cx| secret.select_all(window, cx));
+
             let secret = secret.read(cx);
+
             assert!(secret.is_single_line());
             assert!(secret.presentation().is_masked());
             assert!(secret.context_menu_capabilities().has_selection());
@@ -93,12 +111,14 @@ fn single_select_replaces_and_multi_select_toggles_in_option_order() {
 
     prompt.toggle(0, 1);
     prompt.toggle(0, 0);
+
     assert!(prompt.is_selected(0, 0));
     assert!(!prompt.is_selected(0, 1));
 
     // Picked out of order; the answer still follows the visible order.
     prompt.toggle(1, 2);
     prompt.toggle(1, 0);
+
     assert!(prompt.is_complete());
     assert_eq!(
         prompt.answers(),
@@ -112,6 +132,7 @@ fn single_select_replaces_and_multi_select_toggles_in_option_order() {
     // pick of a question blocks submission again.
     prompt.toggle(1, 0);
     prompt.toggle(1, 2);
+
     assert!(!prompt.is_complete());
     assert_eq!(prompt.answers()[1], Vec::<String>::new());
 }
@@ -133,10 +154,12 @@ fn the_highlight_walks_every_option_across_questions_and_wraps() {
             prompt.focus
         })
         .collect();
+
     assert_eq!(walked, vec![(0, 1), (1, 0), (1, 1), (0, 0)]);
 
     // Up from the first option wraps to the last.
     prompt.move_focus(false);
+
     assert_eq!(prompt.focus, (1, 1));
 }
 
@@ -158,5 +181,6 @@ fn a_question_with_no_options_cannot_trap_the_highlight() {
     // A card with nothing to pick consumes no keys, so they still reach
     // whatever else is listening.
     let empty = &mut QuestionPrompt::new(vec![question("Nothing at all", false, &[])]);
+
     assert!(!empty.move_focus(true));
 }

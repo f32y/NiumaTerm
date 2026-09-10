@@ -29,6 +29,7 @@ fn data_frames_roundtrip() {
         },
         Frame::Control(vec![1, 2, 3]),
     ];
+
     for frame in frames {
         let encoded = frame.encode().unwrap();
         assert_eq!(Frame::decode(&encoded).unwrap(), frame);
@@ -51,12 +52,14 @@ fn control_messages_roundtrip() {
             device_name: "laptop".into(),
         },
     ];
+
     for msg in host_bound {
         let frame = Frame::control(&msg).unwrap();
         let bytes = frame.encode().unwrap();
         let Frame::Control(payload) = Frame::decode(&bytes).unwrap() else {
             panic!("expected control frame");
         };
+
         assert_eq!(Frame::parse_control::<HostBound>(&payload).unwrap(), msg);
     }
 
@@ -67,10 +70,12 @@ fn control_messages_roundtrip() {
         cols: 120,
         rows: 30,
     });
+
     let frame = Frame::control(&msg).unwrap();
     let Frame::Control(payload) = Frame::decode(&frame.encode().unwrap()).unwrap() else {
         panic!("expected control frame");
     };
+
     assert_eq!(Frame::parse_control::<ClientBound>(&payload).unwrap(), msg);
 }
 
@@ -97,5 +102,6 @@ fn oversized_payload_rejected() {
         session_id: 1,
         data: vec![0; MAX_DATA_LEN + 1],
     };
+
     assert_eq!(frame.encode(), Err(FrameError::TooLarge));
 }

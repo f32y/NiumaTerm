@@ -91,6 +91,7 @@ impl HostHandle {
         let devices = AuthorizedDevices::load(config.data_dir.join("authorized_devices.json"))
             .map_err(HostStartError::Devices)?;
         let host_id = derive_host_id(&keys.public);
+
         info!(host_id, "starting remote session host");
 
         let shared = Arc::new(Shared {
@@ -109,7 +110,9 @@ impl HostHandle {
             .enable_all()
             .build()
             .map_err(HostStartError::Runtime)?;
+
         let control = Arc::clone(&shared);
+
         thread::Builder::new()
             .name("remote-host".into())
             .spawn(move || runtime.block_on(control_loop(control)))
@@ -130,10 +133,12 @@ impl HostHandle {
     /// outstanding code — only the newest one can be redeemed.
     pub fn begin_pairing(&self) -> PairingCode {
         let token = new_pairing_token();
+
         *self.shared.pending_pairing.lock() = Some(PendingPairing {
             token,
             expires: Instant::now() + PAIRING_TTL,
         });
+
         PairingCode {
             relay_url: self.shared.config.relay_url.clone(),
             host_id: self.shared.host_id.clone(),
@@ -156,8 +161,10 @@ impl HostHandle {
     /// that device are dropped immediately.
     pub fn revoke_device(&self, public_key_hex: &str) -> io::Result<bool> {
         let removed = self.shared.devices.lock().remove(public_key_hex)?;
+
         if removed {
             let active = self.shared.active.lock();
+
             for conn in active.values() {
                 if conn
                     .device_public_key
@@ -168,12 +175,15 @@ impl HostHandle {
                 }
             }
         }
+
         Ok(removed)
     }
 
     pub fn shutdown(&self) {
         self.shared.shutdown.store(true, Ordering::SeqCst);
+
         let active = self.shared.active.lock();
+
         for conn in active.values() {
             let _ = conn.cancel.send(true);
         }
@@ -182,11 +192,14 @@ impl HostHandle {
 
 async fn control_loop(shared: Arc<Shared>) {
     let mut attempt: u32 = 0;
+
     loop {
         if shared.shutdown.load(Ordering::SeqCst) {
             return;
         }
+
         let url = relay_ws_url(&shared.config.relay_url, &shared.host_id, "host", None);
+
         match ws_connect(&url, Some(&shared.config.access_token)).await {
             Ok(ws) => {
                 attempt = 0;
@@ -196,17 +209,22 @@ async fn control_loop(shared: Arc<Shared>) {
             }
             Err(e) => warn!("relay control connect failed: {e}"),
         }
+
         if shared.shutdown.load(Ordering::SeqCst) {
             return;
         }
+
         attempt = attempt.saturating_add(1);
+
         let backoff = RECONNECT_CAP.min(Duration::from_millis(1000) * attempt);
+
         time::sleep(backoff).await;
     }
 }
 
 async fn run_control(shared: &Arc<Shared>, mut ws: WsStream) {
     let mut ping = time::interval(CONTROL_PING_INTERVAL);
+
     loop {
         tokio::select! {
             _ = ping.tick() => {
@@ -267,10 +285,13 @@ fn spawn_connection(shared: &Arc<Shared>, cid: String) {
     // dial a second data socket for the same client.
     let cancel_rx = {
         let mut active = shared.active.lock();
+
         if active.contains_key(&cid) {
             return;
         }
+
         let (cancel_tx, cancel_rx) = watch::channel(false);
+
         active.insert(
             cid.clone(),
             ActiveConnection {
@@ -278,14 +299,17 @@ fn spawn_connection(shared: &Arc<Shared>, cid: String) {
                 cancel: cancel_tx,
             },
         );
+
         cancel_rx
     };
 
     let shared = Arc::clone(shared);
+
     tokio::spawn(async move {
         if let Err(e) = serve_connection(&shared, &cid, cancel_rx).await {
             info!("connection {cid} ended: {e}");
         }
+
         shared.active.lock().remove(&cid);
     });
 }
@@ -307,31 +331,42 @@ async fn serve_connection(
     let (chan, device_public_key) = match mode {
         CONNECT_MODE_IK => {
             let mut handshake = Handshake::responder_ik(&shared.keys.private)?;
+
             handshake.read_message(msg1)?;
+
             let remote = handshake
                 .remote_static()
                 .ok_or_else(|| NetError::Protocol("IK peer sent no static key".into()))?
                 .to_vec();
+
             // The authorization gate: unknown device keys never get a reply,
             // so no session data (not even a handshake completion) leaks.
             if !shared.devices.lock().contains(&remote) {
                 let _ = ws.close(None).await;
                 return Err(NetError::Protocol("unauthorized device".into()));
             }
+
             let msg2 = handshake.write_message()?;
+
             ws.send(Message::Binary(msg2.into())).await?;
+
             (handshake.into_transport()?, remote)
         }
         CONNECT_MODE_PAIR => {
             let mut handshake = Handshake::responder_xx(&shared.keys.private)?;
+
             handshake.read_message(msg1)?;
+
             let msg2 = handshake.write_message()?;
+
             ws.send(Message::Binary(msg2.into())).await?;
             handshake.read_message(&next_binary(&mut ws).await?)?;
+
             let remote = handshake
                 .remote_static()
                 .ok_or_else(|| NetError::Protocol("XX peer sent no static key".into()))?
                 .to_vec();
+
             let mut chan = handshake.into_transport()?;
 
             // The channel is encrypted but the peer is untrusted until the
@@ -345,6 +380,7 @@ async fn serve_connection(
             let HostBound::Pair { token, device_name } = Frame::parse_control(&payload)? else {
                 return Err(NetError::Protocol("expected Pair control frame".into()));
             };
+
             if !redeem_pairing_token(shared, token) {
                 send_frame(
                     &mut ws,
@@ -355,9 +391,12 @@ async fn serve_connection(
                     })?,
                 )
                 .await?;
+
                 let _ = ws.close(None).await;
+
                 return Err(NetError::Protocol("bad pairing token".into()));
             }
+
             shared
                 .devices
                 .lock()
@@ -365,6 +404,7 @@ async fn serve_connection(
                 .map_err(|e| NetError::Protocol(format!("persisting device failed: {e}")))?;
             info!(device = %device_name, "device paired");
             send_frame(&mut ws, &mut chan, &Frame::control(&ClientBound::Paired)?).await?;
+
             (chan, remote)
         }
         other => {
@@ -378,6 +418,7 @@ async fn serve_connection(
     if let Some(conn) = shared.active.lock().get_mut(cid) {
         conn.device_public_key = Some(device_public_key);
     }
+
     serve_session(shared, ws, chan, cancel_rx).await
 }
 
@@ -406,6 +447,7 @@ impl SubscriptionBridge {
     ) -> Self {
         let cancel = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&cancel);
+
         thread::spawn(move || {
             while !flag.load(Ordering::Relaxed) {
                 match subscription
@@ -424,6 +466,7 @@ impl SubscriptionBridge {
             // `subscription` drops here, unregistering the subscriber while
             // leaving the shell running (detach semantics).
         });
+
         Self { cancel }
     }
 }
@@ -515,18 +558,21 @@ fn handle_frame(
     bridges: &mut HashMap<u64, SubscriptionBridge>,
 ) -> Option<Result<Frame, NetError>> {
     let reply = |msg: &ClientBound| Some(Frame::control(msg).map_err(NetError::from));
+
     let error = |session_id: Option<u64>, e: &dyn Display| {
         reply(&ClientBound::Error {
             session_id,
             message: e.to_string(),
         })
     };
+
     match frame {
         Frame::Control(payload) => {
             let msg = match Frame::parse_control::<HostBound>(&payload) {
                 Ok(msg) => msg,
                 Err(e) => return Some(Err(e.into())),
             };
+
             match msg {
                 HostBound::ListSessions => {
                     let sessions = shared
@@ -535,6 +581,7 @@ fn handle_frame(
                         .into_iter()
                         .map(to_protocol_info)
                         .collect();
+
                     reply(&ClientBound::SessionList(sessions))
                 }
                 HostBound::Open(options) => match shared.hub.open(to_hub_options(options)) {
@@ -545,6 +592,7 @@ fn handle_frame(
                     match shared.hub.attach(SessionId(session_id)) {
                         Ok(subscription) => {
                             let snapshot = to_protocol_snapshot(subscription.snapshot());
+
                             bridges.insert(
                                 session_id,
                                 SubscriptionBridge::spawn(
@@ -553,6 +601,7 @@ fn handle_frame(
                                     event_tx.clone(),
                                 ),
                             );
+
                             reply(&ClientBound::Attached(snapshot))
                         }
                         Err(e) => error(Some(session_id), &e),
@@ -595,6 +644,7 @@ fn handle_frame(
 
 fn redeem_pairing_token(shared: &Arc<Shared>, token: [u8; 16]) -> bool {
     let mut pending = shared.pending_pairing.lock();
+
     match pending.take() {
         // One-shot by construction: `take()` consumes the pending entry, so a
         // second redeem — even with the right token — fails until the user
@@ -615,16 +665,21 @@ fn constant_time_eq(a: &[u8; 16], b: &[u8; 16]) -> bool {
 
 fn to_hub_options(request: ProtocolSessionOptions) -> SessionOptions {
     let mut options = SessionOptions::default();
+
     if let Some(shell) = request.shell {
         options.shell = shell;
     }
+
     options.working_directory = request.working_directory;
+
     if request.cols > 0 {
         options.cols = request.cols;
     }
+
     if request.rows > 0 {
         options.rows = request.rows;
     }
+
     options
 }
 

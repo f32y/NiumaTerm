@@ -52,10 +52,12 @@ impl AgentUpdates {
         let provider = provider_for_profile(profile.kind)?;
         let launch = agent_launch(profile);
         let launcher = AgentCli::from_launch(&launch, provider.default_executable());
+
         let maintenance = match provider {
             ProviderKind::Claude => self.claude.clone(),
             ProviderKind::Codex => self.codex.clone(),
         };
+
         Some(self.coordinator.register(provider, launcher, maintenance))
     }
 
@@ -82,6 +84,7 @@ pub(crate) fn initialize(testing: bool, profiles: &[AgentProfile], cx: &mut App)
             },
             |releases| Arc::new(ClaudeMaintenance::new(releases)),
         );
+
         (claude, Arc::new(CodexMaintenance))
     };
 
@@ -91,9 +94,11 @@ pub(crate) fn initialize(testing: bool, profiles: &[AgentProfile], cx: &mut App)
         claude,
         codex,
     };
+
     for profile in profiles {
         updates.register_profile(profile);
     }
+
     cx.set_global(updates);
 }
 
@@ -112,6 +117,7 @@ pub(crate) fn reconcile_profiles(profiles: &[AgentProfile], cx: &mut App) {
     let Some(updates) = cx.try_global::<AgentUpdates>() else {
         return;
     };
+
     for profile in profiles {
         updates.register_profile(profile);
     }
@@ -121,6 +127,7 @@ fn distinct_installation_keys(
     keys: impl IntoIterator<Item = InstallationKey>,
 ) -> Vec<InstallationKey> {
     let mut seen = HashSet::new();
+
     keys.into_iter()
         .filter(|key| seen.insert(key.clone()))
         .collect()
@@ -133,6 +140,7 @@ pub(crate) fn installations_for_profiles(
     let Some(updates) = cx.try_global::<AgentUpdates>() else {
         return Vec::new();
     };
+
     distinct_installation_keys(
         profiles
             .iter()
@@ -149,18 +157,22 @@ pub(crate) fn installation(key: &InstallationKey, cx: &App) -> Option<Installati
 
 pub(crate) fn manual_check_profiles(profiles: &[AgentProfile], cx: &mut App) {
     let updates = cx.global::<AgentUpdates>();
+
     let keys = distinct_installation_keys(
         profiles
             .iter()
             .filter_map(|profile| updates.register_profile(profile)),
     );
+
     let coordinator = updates.coordinator.clone();
+
     cx.spawn(async move |cx| {
         let worker = cx.background_executor().spawn(async move {
             for key in keys {
                 let _ = coordinator.check(&key, true);
             }
         });
+
         worker.await;
         cx.update(|cx| cx.refresh_windows());
     })
@@ -175,28 +187,34 @@ pub(crate) fn schedule_automatic_checks(cx: &mut App) {
     if cx.global::<AgentUpdates>().testing() {
         return;
     }
+
     cx.spawn(async move |cx| {
         // Let the first windows finish opening before probing providers.
         cx.background_executor().timer(Duration::from_secs(3)).await;
+
         loop {
             // Re-read the switch every tick: the user can toggle it, and the
             // registered installations change, while the app runs.
             let active = cx.update(|cx| {
                 let coordinator = cx.global::<AgentUpdates>().coordinator.clone();
+
                 cx.global::<AppSettings>()
                     .agent
                     .check_agent_updates
                     .then_some(coordinator)
             });
+
             if let Some(coordinator) = active {
                 let worker = cx.background_executor().spawn(async move {
                     for snapshot in coordinator.snapshots() {
                         let _ = coordinator.check(&snapshot.identity.key, false);
                     }
                 });
+
                 worker.await;
                 cx.update(|cx| cx.refresh_windows());
             }
+
             cx.background_executor()
                 .timer(AUTOMATIC_CHECK_INTERVAL)
                 .await;

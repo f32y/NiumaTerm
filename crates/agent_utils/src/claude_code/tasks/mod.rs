@@ -117,6 +117,7 @@ impl ClaudeTasks {
             .registry
             .as_ref()
             .map(BackgroundTaskRegistry::snapshot)?;
+
         // A child is stoppable while it is still running and the stream has
         // named the task the CLI registered it under. A row built only from the
         // parent's tool-use block has no such id yet, and a settled one has
@@ -124,6 +125,7 @@ impl ClaudeTasks {
         for task in &mut snapshot.tasks {
             task.can_stop = task.state.is_active() && stop_target(&task.refs).is_some();
         }
+
         Some(snapshot)
     }
 
@@ -133,12 +135,15 @@ impl ClaudeTasks {
     pub(crate) fn stop_target(&self, key: &BackgroundTaskKey) -> Option<&str> {
         let registry = self.registry.as_ref()?;
         let canonical = self.aliases.lookup(&key.id);
+
         let task = registry
             .get(&BackgroundTaskKey::claude_code(
                 canonical.unwrap_or(&key.id),
             ))
             .or_else(|| registry.get(key))?;
+
         task.state.is_active().then_some(())?;
+
         stop_target(&task.refs)
     }
 
@@ -155,7 +160,9 @@ impl ClaudeTasks {
         let Some(registry) = self.registry.as_mut() else {
             return 0;
         };
+
         registry.set_discovery(BackgroundTaskDiscoveryState::Loading);
+
         registry.sequence()
     }
 
@@ -170,11 +177,14 @@ impl ClaudeTasks {
         if self.registry.is_none() {
             return false;
         }
+
         match restored {
             Ok(tasks) => {
                 let mut changed = false;
+
                 for task in tasks {
                     let key = BackgroundTaskKey::claude_code(&task.id);
+
                     if !task.items.is_empty() {
                         // History predates whatever the live stream produced,
                         // so it is offered as a restore: it fills a child
@@ -182,15 +192,19 @@ impl ClaudeTasks {
                         // live content.
                         self.children.push_restored(key.clone(), task.items);
                     }
+
                     if let Some(registry) = self.registry.as_mut() {
                         changed |= registry.merge_restored(key, task.update, starting_sequence);
                     }
                 }
+
                 let registry = self.registry.as_mut().expect("registry exists");
+
                 changed | registry.set_discovery(BackgroundTaskDiscoveryState::Ready)
             }
             Err(message) => {
                 let registry = self.registry.as_mut().expect("registry exists");
+
                 if registry.is_empty() {
                     registry.set_discovery(BackgroundTaskDiscoveryState::Unavailable { message })
                 } else {
@@ -206,6 +220,7 @@ impl ClaudeTasks {
         if self.session_id() == Some(session_id) {
             return false;
         }
+
         self.registry = Some(BackgroundTaskRegistry::new(BackgroundTaskKey::claude_code(
             session_id,
         )));
@@ -213,6 +228,7 @@ impl ClaudeTasks {
         self.created_epoch.clear();
         self.children.clear();
         self.shells.clear();
+
         true
     }
 
@@ -229,28 +245,35 @@ impl ClaudeTasks {
         // at all is not assumed to be either kind — it may still enrich a row
         // an earlier record already created.
         let task_type = record["task_type"].as_str();
+
         if task_type
             .is_some_and(|task_type| task_type != AGENT_TASK_TYPE && task_type != SHELL_TASK_TYPE)
         {
             return false;
         }
+
         if task_type == Some(SHELL_TASK_TYPE) {
             self.shells.remember_shell(record);
         }
+
         self.shells.remember_output_file(record);
 
         let ids = record_identifiers(record);
         let known = ids.iter().any(|id| self.canonical(id).is_some());
+
         if !known && !admits_new_row(task_type, record) {
             return false;
         }
+
         let Some(canonical) = self.canonical_from(&ids) else {
             return false;
         };
+
         self.aliases.link_all(&canonical, &ids);
 
         let shell = task_type == Some(SHELL_TASK_TYPE) || self.is_shell(&canonical);
         let state = lifecycle_state(kind, record);
+
         let update = BackgroundTaskUpdate {
             refs: Some(refs_from(record)),
             kind: shell.then_some(BackgroundTaskKind::Shell),
@@ -272,6 +295,7 @@ impl ClaudeTasks {
             updated_at: Some(SystemTime::now()),
             ..BackgroundTaskUpdate::default()
         };
+
         self.apply(&canonical, update)
     }
 
@@ -283,6 +307,7 @@ impl ClaudeTasks {
         let Some(canonical) = self.canonical_from(&ids) else {
             return false;
         };
+
         // The child already reported its own outcome when a terminal state is
         // set; the hook only closes one that is still shown as running.
         if self
@@ -291,6 +316,7 @@ impl ClaudeTasks {
         {
             return false;
         }
+
         self.apply(
             &canonical,
             BackgroundTaskUpdate {
@@ -314,6 +340,7 @@ impl ClaudeTasks {
         if let Some(canonical) = self.aliases.lookup(id) {
             return Some(canonical.to_owned());
         }
+
         self.registry
             .as_ref()
             .filter(|registry| registry.contains(&BackgroundTaskKey::claude_code(id)))
@@ -331,12 +358,15 @@ impl ClaudeTasks {
 
     fn apply(&mut self, canonical: &str, update: BackgroundTaskUpdate) -> bool {
         let epoch = self.epoch;
+
         self.created_epoch
             .entry(canonical.to_owned())
             .or_insert(epoch);
+
         let Some(registry) = self.registry.as_mut() else {
             return false;
         };
+
         registry.apply(BackgroundTaskKey::claude_code(canonical), update)
     }
 }

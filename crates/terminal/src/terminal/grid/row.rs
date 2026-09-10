@@ -40,6 +40,7 @@ impl<T: Clone + Default> Row<T> {
         // `columns == 0` (it wrote one element past a zero-capacity Vec) and
         // compiles to the same fill loop as the safe version below.
         let mut inner: Vec<T> = Vec::with_capacity(columns);
+
         inner.resize_with(columns, T::default);
 
         Row {

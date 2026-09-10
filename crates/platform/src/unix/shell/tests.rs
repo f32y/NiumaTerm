@@ -44,6 +44,7 @@ fn zsh_is_launched_bare_and_handed_its_bootstrap() {
     assert!(integration.environment.is_empty());
 
     let bootstrap = integration.bootstrap.expect("zsh is bootstrapped");
+
     assert!(bootstrap.starts_with(" source '"), "{bootstrap:?}");
     assert!(
         bootstrap.ends_with(&format!("{ZSH_HOOKS}'\n")),
@@ -62,6 +63,7 @@ fn bash_is_launched_bare_and_handed_its_bootstrap() {
     assert_eq!(integration.args, ["--norc", "--noprofile"]);
 
     let bootstrap = integration.bootstrap.expect("bash is bootstrapped");
+
     assert!(bootstrap.starts_with(" source '"), "{bootstrap:?}");
     assert!(
         bootstrap.ends_with(&format!("{BASH_HOOKS}'\n")),

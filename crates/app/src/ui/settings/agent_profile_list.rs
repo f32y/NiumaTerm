@@ -169,9 +169,11 @@ impl ListDelegate for AgentProfileList {
         let profile = self.profiles.get(row)?;
         let label = profile_label(row, profile);
         let drag_label: SharedString = label.clone().into();
+
         // The frame around the list supplies the last row's bottom edge, so
         // repeating it here would double the line.
         let ruled = row + 1 < self.profiles.len();
+
         // A gap is marked on the bottom edge of the row above it; the gap
         // before the first row has no such row, so it goes on that row's top
         // edge instead.
@@ -235,10 +237,12 @@ impl ListDelegate for AgentProfileList {
 
                             let from = drag.from;
                             let profiles = &mut cx.global_mut::<AppSettings>().agent_profiles;
+
                             // Removing the profile first shifts every gap below
                             // it up by one, so a gap past the profile's own
                             // position lands one row earlier than it reads.
                             let to = gap.map(|gap| if from < gap { gap - 1 } else { gap });
+
                             // Stale indices only appear if the list changed
                             // mid-drag; skip the move rather than panic.
                             if let Some(to) = to

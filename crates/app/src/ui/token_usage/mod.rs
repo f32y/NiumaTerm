@@ -147,6 +147,7 @@ impl AutoRefresh for TokenUsageView {
         let now = Local::now();
         let since = now.format("%Y%m%d").to_string();
         let date = now.format("%Y-%m-%d").to_string();
+
         fetch_usage(&since, &date)
     }
 
@@ -182,6 +183,7 @@ impl TokenUsageView {
         let mut label = i18n("usage-token-summary")
             .replace("{total}", &format_token_count(usage.counts.total()))
             .replace("{price}", &format_price(usage.price_usd));
+
         for model in &usage.model_breakdowns {
             label.push_str(&format!(
                 "; {}: {}, {}",
@@ -190,6 +192,7 @@ impl TokenUsageView {
                 format_price(model.price_usd)
             ));
         }
+
         label
     }
 }
@@ -202,6 +205,7 @@ impl Render for TokenUsageView {
             .map(|usage| compact(usage.counts.total()))
             .unwrap_or_else(|| PLACEHOLDER.to_string())
             .into();
+
         let usage = self.usage.clone();
 
         let trigger = Button::new("token-usage")
@@ -245,6 +249,7 @@ struct ModelUsageRow {
 
 fn model_usage_rows(usage: &DailyTokenUsage) -> Vec<ModelUsageRow> {
     let mut rows = Vec::with_capacity(usage.model_breakdowns.len() + 1);
+
     rows.push(ModelUsageRow {
         label: i18n("usage-token-today-total").to_string(),
         counts: usage.counts,
@@ -257,6 +262,7 @@ fn model_usage_rows(usage: &DailyTokenUsage) -> Vec<ModelUsageRow> {
         price_usd: model.price_usd,
         is_daily_total: false,
     }));
+
     rows
 }
 
@@ -286,6 +292,7 @@ impl ListDelegate for ModelUsageList {
         let ruled = row_index + 1 < self.rows.len();
         let foreground = cx.theme().foreground;
         let muted = cx.theme().muted_foreground;
+
         let row_color = if is_daily_total {
             foreground
         } else {
@@ -434,6 +441,7 @@ fn render_model_usage_list(
 ) -> AnyElement {
     let rows = model_usage_rows(usage);
     let row_count = rows.len() as f32;
+
     let state: Entity<ListState<ModelUsageList>> =
         window.use_keyed_state("token-usage-model-list", cx, |window, cx| {
             ListState::new(ModelUsageList { rows: Vec::new() }, window, cx).selectable(false)
@@ -473,6 +481,7 @@ fn render_usage_panel(
         .text_size(px(14.0))
         .when_some(usage, |this, usage| {
             let list = render_model_usage_list(&usage, window, cx);
+
             this.child(
                 h_flex()
                     .w_full()
@@ -536,12 +545,15 @@ fn format_price(price_usd: f64) -> String {
 fn format_token_count(tokens: u64) -> String {
     let digits = tokens.to_string();
     let mut formatted = String::with_capacity(digits.len() + digits.len() / 3);
+
     for (index, digit) in digits.chars().enumerate() {
         if index > 0 && (digits.len() - index).is_multiple_of(3) {
             formatted.push(',');
         }
+
         formatted.push(digit);
     }
+
     formatted
 }
 
