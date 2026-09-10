@@ -32,11 +32,12 @@ use gpui::{Entity, FocusHandle, Pixels, Point, ScrollHandle, SharedString};
 use gpui_component::VirtualListScrollHandle;
 use gpui_component::input::TextareaState;
 use nmt_agent::chat::{
-    ContextComposition, ContextWindowUsage, ReplayTurn, SessionScope, SessionStats, SessionSummary,
+    ContextComposition, ContextWindowUsage, SessionScope, SessionStats, SessionSummary,
     SkillCatalog, SkillReference, SlashCommandInfo,
 };
 use nmt_agent::session::delivery::MessageDelivery;
 use nmt_agent::session::lifecycle::SessionRuntime;
+use nmt_agent::session::restore::ConversationRestore;
 use nmt_agent::{AgentEvent, AgentRoute, AgentWorkspace};
 use nmt_config::profile::AgentProfile;
 use nmt_i18n::i18n;
@@ -206,9 +207,6 @@ struct SessionHistoryUi {
     /// pointer that has not moved cannot take the highlight back. Keyboard
     /// navigation scrolls the list, which does exactly that.
     pointer: Option<Point<Pixels>>,
-    /// Claude replay is loaded before process replacement and published only
-    /// after the resumed process confirms readiness.
-    pending_resume_replay: Option<Vec<ReplayTurn>>,
     /// Which directories the rows come from. A conversation belongs to the
     /// directory it ran in, so widening the list means rows this tab cannot
     /// resume in place; those open where they worked instead.
@@ -229,7 +227,6 @@ impl Default for SessionHistoryUi {
             selected: 0,
             pointer_inside: false,
             pointer: None,
-            pending_resume_replay: None,
             scope: SessionScope::default(),
             scroll: VirtualListScrollHandle::new(),
             transcript_blur: Fade::default(),
@@ -320,6 +317,7 @@ pub struct AgentPane {
     history_ui: SessionHistoryUi,
     /// The backend process and its lifecycle; a (re)spawn replaces it whole.
     runtime: SessionRuntime,
+    restore: ConversationRestore,
     /// Thread controls under the composer: values, catalogs, seeding flags.
     controls: ThreadControls,
     /// The running turn's bookkeeping, from submission to settled output.

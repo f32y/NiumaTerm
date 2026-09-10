@@ -384,7 +384,7 @@ impl AgentPane {
 
         self.branch.fork.state = Some(ForkState::Branching);
         self.history_ui.mode = RecentSessionsMode::Loading;
-        self.history_ui.pending_resume_replay = None;
+        self.restore.cancel();
         self.runtime.begin_conversation_change();
 
         // The branch inherits the parent's controls, so nothing is seeded over

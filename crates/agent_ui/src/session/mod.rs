@@ -4,6 +4,8 @@ use nmt_agent::AgentEvent;
 use nmt_agent::session::ImageAttachment;
 use nmt_agent::session::delivery::{MessageDelivery, RecoverablePrompt, Submission};
 use nmt_agent::session::lifecycle::{SessionRuntime, StartOutcome};
+pub(crate) use nmt_agent::session::restore::directories_match;
+use nmt_agent::session::restore::{ConversationRestore, SettingsSeed};
 
 use crate::capabilities::AgentCapabilities as _;
 use crate::pane_state::{ChildAgents, TurnPresentation};
@@ -26,7 +28,6 @@ pub(crate) mod turn;
 mod update_recovery;
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{env, fs};
@@ -48,7 +49,6 @@ use nmt_agent::{
 };
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
 use nmt_i18n::i18n;
-use nmt_platform::filesystem::path_identity;
 use tracing::info;
 
 use crate::commands::reconcile_skill_binding;
@@ -72,19 +72,6 @@ use crate::{
 impl Drop for AgentPane {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(scratch_dir(self.agent_route.as_str()));
-    }
-}
-
-/// Compare recorded directories with native path rules. Windows writers may
-/// disagree about case and separators; Unix names retain both distinctions.
-pub(crate) fn directories_match(left: Option<&str>, right: Option<&str>) -> bool {
-    match (left, right) {
-        (Some(left), Some(right)) => {
-            path_identity(Path::new(left)) == path_identity(Path::new(right))
-        }
-        // A row that records no directory says nothing about belonging
-        // elsewhere, so it stays resumable in place.
-        _ => true,
     }
 }
 
@@ -245,6 +232,7 @@ impl AgentPane {
             transcript,
             input,
             runtime: SessionRuntime::default(),
+            restore: ConversationRestore::default(),
             history_ui: SessionHistoryUi::default(),
             prompts: PendingPrompts::default(),
             controls: ThreadControls {
@@ -529,12 +517,14 @@ impl AgentPane {
         // A resume into a backend that replays its own thread controls keeps
         // them; anything else starts from the remembered picks. The reviewer is
         // seeded separately because a backend can replay the rest without it.
-        self.controls.seed_thread_defaults = !preserve_thread_settings
-            && (recovery.is_none() || !caps.resume_restores_thread_settings);
-        self.controls.seed_approval_reviewer = !preserve_thread_settings
-            && recovery.is_some()
-            && caps.resume_restores_thread_settings
-            && !caps.resume_restores_approval_reviewer;
+        let seed = if preserve_thread_settings {
+            SettingsSeed::None
+        } else if recovery.is_some() {
+            SettingsSeed::resumed(kind)
+        } else {
+            SettingsSeed::Defaults
+        };
+        self.seed_restored_settings(seed);
         self.controls.restore_on_ready =
             preserve_thread_settings.then(|| self.controls.settings.clone());
 
@@ -545,6 +535,7 @@ impl AgentPane {
         // The previous attempt's reason describes a backend nobody is waiting
         // on any more, and this start is what the pane now reports.
         let epoch = self.runtime.begin_start();
+        self.restore.starting(epoch, recovery.as_ref());
 
         self.history_ui.invalidate_filesystem_history();
 
@@ -718,6 +709,9 @@ impl AgentPane {
                 }
 
                 cx.emit(AgentPaneEvent::Interrupted);
+                if this.restore.failed(&mut this.runtime) {
+                    this.history_ui.mode = RecentSessionsMode::Open;
+                }
                 this.runtime
                     .exited(&i18n("agent-session-exited-before-restored").replace("{name}", name));
                 this.palette.awaiting_command_turn = false;
@@ -1010,7 +1004,7 @@ impl AgentPane {
         self.session_state.clear();
         self.session_stats = None;
         self.branch.clear();
-        self.history_ui.pending_resume_replay = None;
+        self.restore.cancel();
         self.history_ui.invalidate_filesystem_history();
 
         // An approval belongs to the tool call that asked for it. The backend

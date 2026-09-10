@@ -38,13 +38,6 @@ pub(crate) struct Capabilities {
     /// A message can carry images beside its text. A harness without this
     /// refuses a pasted image rather than attaching one it cannot deliver.
     pub(crate) image_input: bool,
-    /// Resuming replays the conversation's own thread controls, so remembered
-    /// picks must not be seeded over them.
-    pub(crate) resume_restores_thread_settings: bool,
-    /// Resuming also replays the approval reviewer. A harness that restores
-    /// the other controls but not this one leaves the pane to re-apply the
-    /// remembered reviewer itself.
-    pub(crate) resume_restores_approval_reviewer: bool,
     /// The launch fixes the model for the whole session because the system
     /// prompt is built from it, so a pick has to be resolved before spawning
     /// rather than sent as a later setting change.
@@ -74,11 +67,6 @@ pub(crate) struct Capabilities {
     /// The harness indexes its own conversations and can be asked which of
     /// them mention a phrase, which is what `/find` offers.
     pub(crate) session_search: bool,
-    /// An earlier conversation can be continued inside the running session,
-    /// which is what makes reopening one from the recent list a request rather
-    /// than a relaunch. A harness without this has to be respawned with the
-    /// conversation's id, and the pane replays the transcript itself.
-    pub(crate) session_resume: bool,
     /// The model pick is its own request the harness answers immediately, so a
     /// remembered pick seeded into the picker has to be pushed to reach the
     /// session at all. Where the pick instead rides the launch or the next
@@ -100,15 +88,12 @@ const CODEX: Capabilities = Capabilities {
     repeats_ready_during_init: false,
     filesystem_session_history: false,
     image_input: true,
-    resume_restores_thread_settings: true,
-    resume_restores_approval_reviewer: false,
     model_baked_into_launch: false,
     expandable_compaction_rows: false,
     session_scoped_approval: true,
     slash_skills_are_prompts: false,
     session_fork: true,
     session_rename: false,
-    session_resume: true,
     session_search: false,
     model_selection_is_a_request: false,
     multi_root_access: MultiRootAccess::Full,
@@ -123,15 +108,12 @@ const CLAUDE: Capabilities = Capabilities {
     repeats_ready_during_init: true,
     filesystem_session_history: true,
     image_input: true,
-    resume_restores_thread_settings: false,
-    resume_restores_approval_reviewer: false,
     model_baked_into_launch: true,
     expandable_compaction_rows: true,
     session_scoped_approval: true,
     slash_skills_are_prompts: false,
     session_fork: false,
     session_rename: false,
-    session_resume: false,
     session_search: false,
     model_selection_is_a_request: false,
     multi_root_access: MultiRootAccess::Full,
@@ -150,15 +132,12 @@ const DEEPSEEK: Capabilities = Capabilities {
     repeats_ready_during_init: false,
     filesystem_session_history: false,
     image_input: true,
-    resume_restores_thread_settings: false,
-    resume_restores_approval_reviewer: false,
     model_baked_into_launch: false,
     expandable_compaction_rows: true,
     session_scoped_approval: false,
     slash_skills_are_prompts: true,
     session_fork: true,
     session_rename: true,
-    session_resume: true,
     session_search: true,
     model_selection_is_a_request: true,
     // The installed Harness resolves one workspace root per session and its

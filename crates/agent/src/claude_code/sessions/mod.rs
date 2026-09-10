@@ -20,30 +20,34 @@ use std::collections::HashSet;
 #[cfg(test)]
 use std::{env, fs};
 
-pub use fork::{ClaudeFork, fork_session_before};
-#[cfg(test)]
-use fork::{build_fork_records, write_fork_file};
-#[cfg(test)]
-use index::{TranscriptIndex, is_transcript_entry};
-#[cfg(test)]
-use paths::munge_cwd;
-/// The workflow reader resolves the same project directory and parses the same
-/// child transcript shape, so both are shared rather than reimplemented.
-pub(super) use paths::project_dir;
-pub(super) use replay::parse_child_replay;
-#[cfg(test)]
-use replay::parse_replay;
-pub use replay::{load_checkpoints, load_replay};
 #[cfg(test)]
 use serde_json::Value;
-pub use task_history::{RestoredTask, load_child_transcript, load_task_history};
-#[cfg(test)]
-use task_history::{load_child_transcript_at, load_task_history_at, parse_task_history};
 #[cfg(test)]
 use uuid::Uuid;
 
 #[cfg(test)]
 use crate::chat::Compaction;
+pub use crate::claude_code::sessions::fork::{ClaudeFork, fork_session_before};
+#[cfg(test)]
+use crate::claude_code::sessions::fork::{build_fork_records, write_fork_file};
+#[cfg(test)]
+use crate::claude_code::sessions::index::{TranscriptIndex, is_transcript_entry};
+#[cfg(test)]
+use crate::claude_code::sessions::paths::munge_cwd;
+/// The workflow reader resolves the same project directory and parses the same
+/// child transcript shape, so both are shared rather than reimplemented.
+pub(super) use crate::claude_code::sessions::paths::project_dir;
+pub(super) use crate::claude_code::sessions::replay::parse_child_replay;
+#[cfg(test)]
+use crate::claude_code::sessions::replay::parse_replay;
+pub use crate::claude_code::sessions::replay::{load_checkpoints, load_replay, try_load_replay};
+pub use crate::claude_code::sessions::task_history::{
+    RestoredTask, load_child_transcript, load_task_history,
+};
+#[cfg(test)]
+use crate::claude_code::sessions::task_history::{
+    load_child_transcript_at, load_task_history_at, parse_task_history,
+};
 #[cfg(test)]
 use crate::claude_code::sessions::titles::{
     compaction_summary_text, recorded_title, resolved_session_title, title_line, user_prompt_text,

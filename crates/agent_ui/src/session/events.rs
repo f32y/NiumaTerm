@@ -7,6 +7,7 @@ use nmt_agent::chat::{
     Event as SessionEvent, Item as SessionItem, QuestionMode, QueuedPrompt, ReplayTurn,
     SessionSummary, SlashCommandOutcome, ThreadSettings, TurnActivity,
 };
+use nmt_agent::session::restore::{ReadyAction, ReplayAction};
 use nmt_i18n::i18n;
 use tracing::{info, warn};
 
@@ -285,7 +286,12 @@ impl AgentPane {
                 cx.notify();
             }
             SessionEvent::Replay(items) => {
-                if self.history_ui.mode == RecentSessionsMode::Loading {
+                let resumed = match self.restore.replayed(self.runtime.epoch()) {
+                    ReplayAction::Ignore => return,
+                    ReplayAction::Append => false,
+                    ReplayAction::Replace => true,
+                };
+                if resumed || self.history_ui.mode == RecentSessionsMode::Loading {
                     self.clear_conversation_presentation(cx);
                     self.history_ui.mode = RecentSessionsMode::Hidden;
                     self.palette.feedback = None;
@@ -320,13 +326,15 @@ impl AgentPane {
     /// Handshake finished. Fold the reported thread settings together with
     /// remembered picks, settle status, and rebuild child state from history.
     fn on_ready(&mut self, settings: ThreadSettings, cx: &mut Context<Self>) {
-        if self.history_ui.mode == RecentSessionsMode::Loading
-            && let Some(replay) = self.history_ui.pending_resume_replay.take()
-        {
-            self.clear_conversation_presentation(cx);
-            self.history_ui.mode = RecentSessionsMode::Hidden;
-            self.palette.feedback = None;
-            self.apply_replay(replay, cx);
+        match self.restore.ready(self.runtime.epoch()) {
+            ReadyAction::Ignore => return,
+            ReadyAction::Apply => {}
+            ReadyAction::Replay(replay) => {
+                self.clear_conversation_presentation(cx);
+                self.history_ui.mode = RecentSessionsMode::Hidden;
+                self.palette.feedback = None;
+                self.apply_replay(replay, cx);
+            }
         }
 
         self.restore_question_drafts();
@@ -545,15 +553,15 @@ impl AgentPane {
     fn on_error(&mut self, message: String, fatal: bool, cx: &mut Context<Self>) {
         self.note_visible_output();
 
-        if self.history_ui.mode == RecentSessionsMode::Loading {
+        let resume_failed = self.restore.failed(&mut self.runtime);
+        if resume_failed || self.history_ui.mode == RecentSessionsMode::Loading {
             self.history_ui.mode = RecentSessionsMode::Open;
-            self.history_ui.pending_resume_replay = None;
 
             // A branch that never arrives would otherwise hold the
             // composer behind a conversation that is not being cut.
             self.abandon_conversation_branch();
 
-            if !fatal {
+            if !fatal && !resume_failed {
                 self.runtime.conversation_change_rejected(Status::Idle);
             }
 

@@ -20,14 +20,18 @@ use crate::claude_code::tool_items::{complete_tool_item, tool_item};
 /// whole file (resume replays nothing from the backend, so this is the only
 /// source); meant for a background thread.
 pub fn load_replay(cwd: Option<&str>, session_id: &str) -> Vec<ReplayTurn> {
-    let Some(path) = session_path(cwd, session_id) else {
-        return Vec::new();
-    };
-    let Ok(file) = fs::File::open(path) else {
-        return Vec::new();
-    };
+    try_load_replay(cwd, session_id).unwrap_or_default()
+}
 
-    parse_replay(BufReader::new(file))
+/// Opening a selected conversation must distinguish unreadable history from an
+/// empty transcript, so a failed read cannot replace the visible conversation.
+pub fn try_load_replay(cwd: Option<&str>, session_id: &str) -> Result<Vec<ReplayTurn>, String> {
+    let path = session_path(cwd, session_id)
+        .ok_or_else(|| format!("Claude session {session_id} has no project directory"))?;
+    let file = fs::File::open(path)
+        .map_err(|error| format!("could not read Claude session {session_id}: {error}"))?;
+
+    Ok(parse_replay(BufReader::new(file)))
 }
 
 /// Rewindable human prompts from the current active branch, newest first.

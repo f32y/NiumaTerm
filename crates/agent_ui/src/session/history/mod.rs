@@ -10,14 +10,15 @@ use std::time::Duration;
 use gpui::Context;
 use nmt_agent::chat::{SessionScope, SessionSummary};
 use nmt_agent::claude_code::sessions;
-use nmt_agent::session::RecoveryIdentity;
+use nmt_agent::session::restore::{ReplayLoaded, ResumeStart, SettingsSeed};
 use nmt_i18n::i18n;
 
 use crate::capabilities::AgentCapabilities as _;
 use crate::composer::CommandFeedbackKind;
-use crate::session::directories_match;
 use crate::{AgentPane, AgentPaneEvent, RecentSessionsMode, SessionHistoryUi};
 
+#[cfg(test)]
+mod restore_tests;
 #[cfg(test)]
 mod tests;
 
@@ -244,110 +245,114 @@ impl AgentPane {
         .detach();
     }
 
-    /// Resume the picked history entry without discarding the visible
-    /// conversation until the target confirms it can be opened.
+    pub(super) fn seed_restored_settings(&mut self, seed: SettingsSeed) {
+        let (defaults, reviewer) = match seed {
+            SettingsSeed::Defaults => (true, false),
+            SettingsSeed::Reviewer => (false, true),
+            SettingsSeed::None => (false, false),
+        };
+        self.controls.seed_thread_defaults = defaults;
+        self.controls.seed_approval_reviewer = reviewer;
+    }
+
+    /// Keep the displayed conversation until the replacement supplies its replay.
     pub(crate) fn resume_session(&mut self, index: usize, cx: &mut Context<Self>) {
         let Some(summary) = self.history_ui.sessions.get(index) else {
             return;
         };
-        let id = summary.id.clone();
 
-        let elsewhere = summary
-            .cwd
-            .clone()
-            .filter(|cwd| !directories_match(Some(cwd.as_str()), self.cwd().as_deref()));
-
+        // Fork also uses the loading presentation while its own operation runs.
         if self.history_ui.mode == RecentSessionsMode::Loading {
             return;
         }
 
-        // A conversation belongs to the directory it ran in. Continuing one
-        // from elsewhere in this tab would either fail to find it or run it
-        // against the wrong tree, so it opens where it worked instead.
-        if let Some(cwd) = elsewhere {
-            self.history_ui.selected = index;
-            cx.emit(AgentPaneEvent::ResumeElsewhere {
-                cwd,
-                session_id: id,
-            });
-            cx.notify();
-            return;
-        }
-
-        let previous_status = self.runtime.begin_conversation_change();
+        let cwd = self.cwd();
+        let request =
+            match self
+                .restore
+                .begin(&mut self.runtime, self.kind, summary, cwd.as_deref())
+            {
+                ResumeStart::Busy => return,
+                ResumeStart::Elsewhere { cwd, session_id } => {
+                    self.history_ui.selected = index;
+                    cx.emit(AgentPaneEvent::ResumeElsewhere { cwd, session_id });
+                    cx.notify();
+                    return;
+                }
+                ResumeStart::Rejected => {
+                    self.history_ui.mode = RecentSessionsMode::Open;
+                    self.history_ui.selected = index;
+                    self.palette.set_feedback(
+                        CommandFeedbackKind::Error,
+                        i18n("agent-session-codex-recent-not-ready").to_string(),
+                        cx,
+                    );
+                    return;
+                }
+                ResumeStart::Requested => {
+                    self.seed_restored_settings(SettingsSeed::resumed(self.kind));
+                    None
+                }
+                ResumeStart::ReadReplay(request) => Some(request),
+            };
 
         self.history_ui.mode = RecentSessionsMode::Loading;
         self.history_ui.selected = index;
-        self.history_ui.pending_resume_replay = None;
-
-        // A backend that replays the resumed conversation's controls owns them;
-        // otherwise they stay local profile preferences. The reviewer is seeded
-        // separately because a backend can replay the rest without it.
-        let caps = self.kind.caps();
-
-        self.controls.seed_thread_defaults = !caps.resume_restores_thread_settings;
-        self.controls.seed_approval_reviewer =
-            caps.resume_restores_thread_settings && !caps.resume_restores_approval_reviewer;
         self.palette.set_feedback(
             CommandFeedbackKind::Notice,
             i18n("agent-session-opening-recent").to_string(),
             cx,
         );
 
-        if caps.session_resume {
-            // The backend answers whether the request reached a session that
-            // could take it, because a conversation rooted somewhere else is
-            // one this tab cannot adopt.
-            if !self
-                .runtime
-                .backend_mut()
-                .is_some_and(|session| session.resume_thread(&id))
-            {
-                self.history_ui.mode = RecentSessionsMode::Open;
-                self.runtime.conversation_change_rejected(previous_status);
-                self.palette.set_feedback(
-                    CommandFeedbackKind::Error,
-                    i18n("agent-session-codex-recent-not-ready").to_string(),
-                    cx,
-                );
-            }
-        } else {
-            // Without in-session resume the conversation is a file this side
-            // reads, so the pane respawns against its id and replays what it
-            // read into the fresh session.
-            let kind = self.kind;
-            let cwd = self.cwd();
-            let replay_id = id.clone();
-            let selected = index;
+        let Some(request) = request else {
+            return;
+        };
 
-            cx.spawn(async move |this, cx| {
-                let replay = cx
-                    .background_executor()
-                    .spawn(async move { sessions::load_replay(cwd.as_deref(), &replay_id) })
-                    .await;
+        cx.spawn(async move |this, cx| {
+            let (request, replay) = cx
+                .background_executor()
+                .spawn(async move {
+                    let replay = request.load();
+                    (request, replay)
+                })
+                .await;
 
-                let _ = this.update(cx, |this, cx| {
-                    if this.history_ui.mode != RecentSessionsMode::Loading
-                        || this.history_ui.selected != selected
-                    {
-                        return;
+            let _ = this.update(cx, |this, cx| {
+                let cwd = this.cwd();
+                match this
+                    .restore
+                    .loaded(&mut this.runtime, request, cwd.as_deref(), replay)
+                {
+                    ReplayLoaded::Stale => {}
+                    ReplayLoaded::Cancelled => {
+                        this.history_ui.mode = RecentSessionsMode::Open;
+                        this.palette.feedback = None;
+                        cx.notify();
                     }
-
-                    this.start_session_with_options(
-                        Some(RecoveryIdentity::new(kind, id)),
-                        false,
-                        move |this, started, _| {
-                            if started {
-                                this.history_ui.pending_resume_replay = Some(replay);
-                            } else {
-                                this.history_ui.mode = RecentSessionsMode::Open;
-                            }
-                        },
-                        cx,
-                    );
-                });
-            })
-            .detach();
-        }
+                    ReplayLoaded::Failed(message) => {
+                        this.history_ui.mode = RecentSessionsMode::Open;
+                        this.palette.set_feedback(
+                            CommandFeedbackKind::Error,
+                            i18n("agent-session-open-failed").replace("{error}", &message),
+                            cx,
+                        );
+                    }
+                    ReplayLoaded::Restart(identity) => {
+                        this.start_session_with_options(
+                            Some(identity),
+                            false,
+                            |this, started, _| {
+                                if !started {
+                                    this.restore.failed(&mut this.runtime);
+                                    this.history_ui.mode = RecentSessionsMode::Open;
+                                }
+                            },
+                            cx,
+                        );
+                    }
+                }
+            });
+        })
+        .detach();
     }
 }

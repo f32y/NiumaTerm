@@ -8,6 +8,7 @@ use crate::session::{AgentKind, RecoveryIdentity, RenameOutcome};
 pub struct TestBackend {
     pub rename_outcome: RenameOutcome,
     pub interrupt_accepted: bool,
+    pub resume_accepted: bool,
     pub(super) send_outcomes: VecDeque<SendOutcome>,
     pub(super) slash_outcome: SlashCommandOutcome,
     pub(super) commands: Vec<SlashCommandInfo>,
@@ -27,6 +28,7 @@ impl TestBackend {
         Self {
             rename_outcome: RenameOutcome::Unsupported,
             interrupt_accepted: false,
+            resume_accepted: false,
             send_outcomes: send_outcomes.into_iter().collect(),
             slash_outcome,
             commands,

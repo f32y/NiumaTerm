@@ -428,12 +428,10 @@ impl Backend {
             // The harness answers whether it attached, because a conversation
             // rooted in another directory is one this tab cannot adopt.
             Backend::DeepSeek(session) => session.resume_thread(thread_id),
-            // `Capabilities::session_resume` sends this harness down the
-            // respawn-and-replay path instead, so nothing routes a request
-            // here to begin with.
+            // Claude selects its conversation only when a process starts.
             Backend::Claude(_) => false,
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(_) => false,
+            Backend::Test(session) => session.resume_accepted,
         }
     }
 

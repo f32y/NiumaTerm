@@ -6,6 +6,7 @@ mod attachments;
 mod backend;
 pub mod delivery;
 pub mod lifecycle;
+pub mod restore;
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
 pub mod test_support;
