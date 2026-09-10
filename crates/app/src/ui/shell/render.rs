@@ -61,6 +61,8 @@ pub(super) fn title_bar_leading_region(width: f32) -> Div {
 
 impl Shell {
     fn bind_actions(element: Div, cx: &mut Context<Self>) -> Div {
+        #[cfg(windows)]
+        let element = element.on_action(cx.listener(Self::on_new_remote_tab));
         element
             .on_action(cx.listener(Self::on_new_tab))
             .on_action(cx.listener(Self::on_close_tab))

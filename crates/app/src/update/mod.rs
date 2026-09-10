@@ -30,10 +30,6 @@ use crate::update::releases::{Release, supersedes};
 use crate::utils::get_exe_dir;
 use crate::window::ShellRegistry;
 
-/// Hidden argument the instance started by an update is given, naming the
-/// process it replaces. Hidden because nothing but that restart has a reason to
-/// pass it.
-
 /// Where a package is unpacked before any of it replaces an installed file.
 const STAGING_DIRECTORY: &str = "update";
 
