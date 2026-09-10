@@ -73,6 +73,7 @@ pub(crate) fn wide_from(w: CellWide) -> Wide {
 
 /// A decoupled, renderable copy of the visible viewport.
 pub struct RenderBuffer {
+    snapshot_revision: u64,
     cols: usize,
     rows: usize,
     /// One `Row<Square>` per visible line. The GPUI app extracts terminal frames
@@ -117,8 +118,24 @@ pub struct RenderBuffer {
 }
 
 impl RenderBuffer {
+    pub(crate) fn set_snapshot_revision(&mut self, revision: u64) {
+        self.snapshot_revision = revision;
+    }
+
+    /// Publish a snapshot from the same engine without replacing newer output.
+    /// Capture order is assigned while the engine is locked; callers hold the
+    /// front-buffer lock while checking and swapping so publication is atomic.
+    pub fn publish_snapshot(&mut self, next: &mut Self) -> bool {
+        if next.snapshot_revision < self.snapshot_revision {
+            return false;
+        }
+        mem::swap(self, next);
+        true
+    }
+
     pub fn new(cols: usize, rows: usize) -> Self {
         Self {
+            snapshot_revision: 0,
             cols,
             rows,
             grid: (0..rows).map(|_| Row::new(cols.max(1))).collect(),

@@ -4,7 +4,7 @@ use std::fmt::{self, Debug, Formatter};
 use std::sync::{self, Arc};
 use std::{option, path, time};
 
-use nmt_config::colors::ColorRgb;
+use nmt_config::colors::{ColorRgb, Colors};
 use nmt_platform::{Waker, WinsizeBuilder};
 
 use crate::clipboard::ClipboardType;
@@ -103,6 +103,8 @@ pub enum Msg {
     Shutdown,
 
     Resize(WinsizeBuilder),
+
+    SetThemeColors(Box<Colors>),
 }
 
 /// A `Msg` sender that wakes the PTY event loop's mio `Poll` after each send, so the

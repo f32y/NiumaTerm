@@ -112,6 +112,7 @@ pub struct GhosttyTerminal {
     callbacks: Box<Callbacks>,
     titles: TitleMirror,
     scrollbar_override: Option<ScrollbarInfo>,
+    snapshot_revision: u64,
 }
 
 // The Ghostty `Terminal` and its render-state handles are raw FFI pointers
@@ -223,6 +224,7 @@ impl GhosttyTerminal {
             callbacks,
             titles: TitleMirror::default(),
             scrollbar_override: None,
+            snapshot_revision: 0,
         })
     }
 

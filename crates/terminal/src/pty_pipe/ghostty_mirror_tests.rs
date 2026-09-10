@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 use std::{io, sync, time};
 
-use nmt_config::colors::Colors;
+use nmt_config::colors::{Colors, NamedColor};
 use nmt_platform::conpty_realign::{
     max_cup_row_col, rewrite_conpty_resize_echo_cup_rows, su_realign_count,
 };
@@ -300,7 +300,7 @@ fn resize_message_publishes_snapshot_to_render_buffer() {
 }
 
 #[test]
-fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
+fn theme_refresh_preserves_synchronized_output_until_commit() {
     let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(20, 3)));
     let pty = FakePty {
         reader: FakeReader {
@@ -320,6 +320,10 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
         false,
     )
     .unwrap();
+    let colors = Colors {
+        foreground: [0.2, 0.4, 0.6, 1.0],
+        ..Colors::default()
+    };
     let mut state = PtyState::default();
     let mut buf = [0u8; READ_BUFFER_SIZE];
 
@@ -332,6 +336,11 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
         .data
         .extend_from_slice(b"\x1b[?2026h\x1b[1;1HWorking");
     machine.pty_read(&mut state, &mut buf).unwrap();
+    machine
+        .sender
+        .send(event::Msg::SetThemeColors(Box::new(colors)))
+        .unwrap();
+    assert!(machine.drain_recv_channel(&mut state));
     {
         let buffer = render_buffer.lock();
         assert_eq!(
@@ -355,6 +364,10 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
         let buffer = render_buffer.lock();
         assert_eq!(buffer.cursor().row.0, 2);
         assert_eq!(render_buffer_row_text(&buffer, 0), "Working");
+        assert_eq!(
+            buffer.colors()[NamedColor::Foreground],
+            Some(colors.foreground)
+        );
     }
 
     machine
@@ -375,7 +388,7 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
 }
 
 #[test]
-fn osc_progress_hides_published_cursor_until_removed() {
+fn theme_refresh_preserves_progress_cursor_suppression() {
     let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(80, 3)));
     let pty = FakePty {
         reader: FakeReader {
@@ -400,6 +413,10 @@ fn osc_progress_hides_published_cursor_until_removed() {
         .lock()
         .set_default_cursor_shape(ansi::CursorShape::Beam)
         .unwrap();
+    let colors = Colors {
+        foreground: [0.2, 0.4, 0.6, 1.0],
+        ..Colors::default()
+    };
     let mut state = PtyState::default();
     let mut buf = [0u8; READ_BUFFER_SIZE];
 
@@ -410,10 +427,19 @@ fn osc_progress_hides_published_cursor_until_removed() {
         .data
         .extend_from_slice(b";42\x1b\\    Building [====>     ] 4/10\r");
     machine.pty_read(&mut state, &mut buf).unwrap();
+    machine
+        .sender
+        .send(event::Msg::SetThemeColors(Box::new(colors)))
+        .unwrap();
+    assert!(machine.drain_recv_channel(&mut state));
     {
         let buffer = render_buffer.lock();
         assert_eq!(buffer.cursor_shape(), ansi::CursorShape::Beam);
         assert!(!buffer.cursor_visible(), "active progress hides the cursor");
+        assert_eq!(
+            buffer.colors()[NamedColor::Foreground],
+            Some(colors.foreground)
+        );
     }
 
     machine
@@ -925,4 +951,36 @@ echo two\r\n\x1b]133;C\x07two\r\n\
         machine.ghostty.lock().has_prompt_tagged_row(),
         "engine rows must carry semantic prompt tags after mark forwarding"
     );
+}
+
+#[test]
+fn delayed_pty_snapshot_cannot_replace_new_theme_or_output() {
+    let mut engine = ghostty::GhosttyTerminal::new(40, 3, 100).unwrap();
+    engine.write_vt(b"old output");
+    let mut old_pty = engine.snapshot().unwrap();
+    let colors = Colors {
+        foreground: [26.0 / 255.0, 51.0 / 255.0, 77.0 / 255.0, 1.0],
+        ..Colors::default()
+    };
+    engine.set_theme_colors(&colors);
+    let mut theme = engine.snapshot().unwrap();
+    let front = FairMutex::new(RenderBuffer::new(40, 3));
+    assert!(front.lock().publish_snapshot(&mut theme));
+    assert!(!publish_render_buffer(&front, &mut old_pty, Ok(()), false));
+    assert_eq!(
+        front.lock().colors()[NamedColor::Foreground],
+        Some(colors.foreground)
+    );
+
+    let mut delayed_ui = engine.snapshot().unwrap();
+    engine.write_vt(b" new output");
+    let mut current_pty = engine.snapshot().unwrap();
+    assert!(publish_render_buffer(
+        &front,
+        &mut current_pty,
+        Ok(()),
+        false
+    ));
+    assert!(!front.lock().publish_snapshot(&mut delayed_ui));
+    assert!(render_buffer_row_text(&front.lock(), 0).contains("new output"));
 }

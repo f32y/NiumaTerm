@@ -1,5 +1,3 @@
-use std::mem;
-
 use nmt_input::keyboard::ModifiersState;
 
 use crate::surface::TerminalSurface;
@@ -52,8 +50,6 @@ impl TerminalSurface {
 
         next.set_cursor_visible(buf.cursor_visible());
 
-        mem::swap(&mut *buf, &mut next);
-
-        changed
+        buf.publish_snapshot(&mut next) && changed
     }
 }
