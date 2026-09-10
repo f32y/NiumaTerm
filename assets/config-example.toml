@@ -75,6 +75,7 @@ codex-skill-command-compat = true
 model-list-style = "name-and-id"
 
 [system]
+send-system-notifications = true
 restore-last-session-when-opening = true
 manage-subprocess-job = false
 warn-before-terminating-shell = "when-child-processes-running"

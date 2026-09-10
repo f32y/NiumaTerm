@@ -1,6 +1,6 @@
 use nmt_config::Config;
 use nmt_config::system::*;
-use toml::from_str;
+use toml::{Value, from_str};
 
 #[test]
 fn system_section_defaults_when_absent() {
@@ -56,4 +56,12 @@ fn warn_mode_decides_from_child_process_count() {
     assert!(!WarnBeforeTerminatingShell::WhenChildProcessesRunning.should_warn(0));
     assert!(WarnBeforeTerminatingShell::WhenChildProcessesRunning.should_warn(1));
     assert!(WarnBeforeTerminatingShell::Always.should_warn(0));
+}
+
+#[test]
+fn shipped_system_example_matches_serialized_defaults() {
+    let example: Value = from_str(include_str!("../../../assets/config-example.toml"))
+        .expect("example config parses");
+    let defaults = Value::try_from(SystemConfig::default()).expect("defaults serialize");
+    assert_eq!(example.get("system"), Some(&defaults));
 }
