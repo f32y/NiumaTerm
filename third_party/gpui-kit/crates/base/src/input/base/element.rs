@@ -20,7 +20,7 @@ use crate::{
     input::{RopeExt as _, blink_cursor::CURSOR_WIDTH, display_map::LineLayout},
 };
 
-use super::{
+use crate::input::{
     InputBaseState, TextDecoration,
     layout::{LastLayout, WhitespaceIndicators},
     mode::LayoutMode,
@@ -299,7 +299,7 @@ fn editor_gutter_bounds(
     }
 }
 
-use super::MASK_CHAR;
+use crate::input::MASK_CHAR;
 
 /// Convert a byte offset in the original text to a byte offset in the masked display string.
 ///
@@ -2792,7 +2792,7 @@ fn split_runs_by_bg_segments(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::input::element::*;
 
     #[test]
     fn test_plain_text_decorations_include_unstyled_gaps() {
@@ -3180,7 +3180,7 @@ mod tests {
         );
 
         // Styles fully inside the ranges are unchanged.
-        let clipped = clip_styles_to_ranges(styles.clone(), &[0..20]);
+        let clipped = clip_styles_to_ranges(styles.clone(), std::slice::from_ref(&(0..20)));
         assert_eq!(
             clipped
                 .iter()

@@ -19,7 +19,10 @@ use std::rc::Rc;
 use sum_tree::Bias;
 use unicode_segmentation::*;
 
-use super::{
+use crate::actions::{SelectDown, SelectLeft, SelectRight, SelectUp};
+use crate::input::blink_cursor::CURSOR_WIDTH;
+use crate::input::movement::MoveDirection;
+use crate::input::{
     DiagnosticSet, DisplayMap, InputContextMenuCapabilities, InputEditorStyle,
     InputHighlighterFactory, MASK_CHAR, MaskPattern, NativeMenu, NumberStep, WrappingIndent,
     blink_cursor::BlinkCursor,
@@ -30,9 +33,6 @@ use super::{
     mode::LayoutMode,
     undo_manager::{EditIntent, UndoManager},
 };
-use crate::actions::{SelectDown, SelectLeft, SelectRight, SelectUp};
-use crate::input::blink_cursor::CURSOR_WIDTH;
-use crate::input::movement::MoveDirection;
 use crate::input::{
     InputExtras as _, Position, RopeExt as _, Selection, element::RIGHT_MARGIN, layout::LastLayout,
 };
@@ -3275,7 +3275,7 @@ impl<M: InputModeKind> Render for InputBaseState<M> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::input::state::*;
 
     use crate::theme::Theme;
     use gpui::{TestAppContext, VisualTestContext};
@@ -3787,7 +3787,7 @@ mod tests {
         cx.update(|window, cx| {
             input.update(cx, |state, cx| {
                 state.set_value("a link z", window, cx);
-                state.set_links(vec![2..6], cx);
+                state.set_links(std::iter::once(2..6).collect(), cx);
                 state.set_selected_range(6..6, cx);
                 state.backspace(&Backspace, window, cx);
                 assert_eq!(state.value(), "a  z");
