@@ -19,9 +19,8 @@ fn replayed_items(turns: &Value) -> Vec<Item> {
         .collect()
 }
 
-#[test]
-fn routed_child_completion_does_not_finish_the_parent_turn() {
-    let mut session = Session {
+fn disconnected_session() -> Session {
+    Session {
         host: None,
         conversation: ConversationState::default(),
         registration_id: 0,
@@ -40,7 +39,40 @@ fn routed_child_completion_does_not_finish_the_parent_turn() {
         initial_resume: None,
         suppress_resume_replay: false,
         background: CodexTasks::default(),
-    };
+    }
+}
+
+#[test]
+fn disconnected_submissions_are_rejected_without_requesting_a_title() {
+    let mut session = disconnected_session();
+    session.conversation.thread_id = Some("parent".into());
+    for turn in [None, Some("active".to_string())] {
+        session.conversation.current_turn = turn.clone();
+        let next_rpc_id = session.next_rpc_id;
+        let outcome = session.send_user_message_with_generated_title(
+            "keep this draft",
+            &ThreadSettings::default(),
+            None,
+            &[],
+            "draft title",
+        );
+        assert!(
+            matches!(outcome, SendOutcome::Rejected { message } if message.contains("not connected"))
+        );
+        assert_eq!(session.conversation.current_turn, turn);
+        assert_eq!(
+            session.next_rpc_id,
+            next_rpc_id + 1,
+            "a rejected prompt must not queue a title request"
+        );
+        assert!(session.title_generation.is_none());
+        assert!(session.pending_thread_names.is_empty());
+    }
+}
+
+#[test]
+fn routed_child_completion_does_not_finish_the_parent_turn() {
+    let mut session = disconnected_session();
     session.conversation.thread_id = Some("parent".into());
     session.background.set_root("parent");
     session.process_notification(

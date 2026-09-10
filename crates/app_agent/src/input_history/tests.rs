@@ -1,11 +1,12 @@
-use std::io::ErrorKind;
+use std::io::{Cursor, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, SystemTime};
 use std::{env, fs, process};
 
-use gpui::{Entity, TestAppContext, VisualTestContext, WindowHandle};
+use gpui::{Entity, Image, ImageFormat, TestAppContext, VisualTestContext, WindowHandle};
+use image_rs::{DynamicImage, ImageFormat as EncodedImageFormat, RgbaImage};
 use nmt_agent_utils::AgentWorkspace;
 use nmt_agent_utils::chat::{SendOutcome, SessionSummary, SlashCommandOutcome};
 use nmt_agent_utils::codex::app_server;
@@ -621,6 +622,48 @@ fn slash_history_requires_a_successful_action(cx: &mut TestAppContext) {
                 &*cx.global::<AgentInputHistory>()
                     .entries(&pane.input_history_scope),
                 ["/compact", "/status"]
+            );
+        });
+    });
+}
+
+#[gpui::test]
+fn rejected_submission_preserves_draft_images_and_unnamed_state(cx: &mut TestAppContext) {
+    let directory = TestDirectory::new();
+    let (pane, window) = open_test_pane(cx, &directory);
+    let mut cx = VisualTestContext::from_window(window.into(), cx);
+    let mut bytes = Cursor::new(Vec::new());
+    DynamicImage::ImageRgba8(RgbaImage::new(1, 1))
+        .write_to(&mut bytes, EncodedImageFormat::Png)
+        .unwrap();
+    let image = Image::from_bytes(ImageFormat::Png, bytes.into_inner());
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
+            pane.runtime.backend = Some(Backend::Test(TestBackend::new(
+                [SendOutcome::Rejected {
+                    message: "input queue unavailable".into(),
+                }],
+                SlashCommandOutcome::NotReady,
+                Vec::new(),
+            )));
+            pane.runtime.status = Status::Idle;
+            pane.conversation_named = false;
+            pane.input.update(cx, |input, cx| {
+                input.set_value("keep this draft", window, cx)
+            });
+            pane.attachments
+                .attach_image(&image, &pane.input, window, cx)
+                .ok()
+                .expect("attach test image");
+            let draft = pane.input.read(cx).text().to_string();
+            pane.send_user_message(window, cx);
+            assert_eq!(pane.input.read(cx).text().to_string(), draft);
+            assert_eq!(pane.attachments.images().iter().count(), 1);
+            assert!(!pane.conversation_named);
+            assert!(
+                cx.global::<AgentInputHistory>()
+                    .entries(&pane.input_history_scope)
+                    .is_empty()
             );
         });
     });

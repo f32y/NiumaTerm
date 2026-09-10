@@ -395,7 +395,7 @@ impl Session {
         let input = codex_user_input(text, skill, images);
 
         if let Some(turn_id) = self.conversation.current_turn.clone() {
-            self.send(json!({
+            if let Err(message) = self.try_send(json!({
                 "jsonrpc": "2.0",
                 "id": rpc_id,
                 "method": "turn/steer",
@@ -404,19 +404,23 @@ impl Session {
                     "expectedTurnId": turn_id,
                     "input": input,
                 },
-            }));
+            })) {
+                return SendOutcome::Rejected { message };
+            }
 
             return SendOutcome::Steered;
         }
 
         let params = turn_start_params(&thread_id, input, settings, &self.workspace);
 
-        self.send(json!({
+        if let Err(message) = self.try_send(json!({
             "jsonrpc": "2.0",
             "id": rpc_id,
             "method": "turn/start",
             "params": params,
-        }));
+        })) {
+            return SendOutcome::Rejected { message };
+        }
 
         SendOutcome::StartedTurn
     }
