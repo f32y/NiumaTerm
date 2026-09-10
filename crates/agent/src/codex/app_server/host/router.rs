@@ -24,9 +24,6 @@ use crate::message_memory::OUTPUT_FAILURE_METHOD;
 use crate::request_policy::RequestClass;
 use crate::subprocess::InputTicket;
 
-const MAX_HOST_REQUESTS: usize = 1024;
-const RESERVED_HOST_CONTROLS: usize = 64;
-
 fn request_class(message: &Value) -> RequestClass {
     match message["method"].as_str() {
         Some("model/list" | "skills/list" | "thread/list" | "thread/read") => RequestClass::Query,
@@ -336,26 +333,6 @@ impl Router {
             }
 
             let class = request_class(message);
-
-            let host_limit = if class == RequestClass::Control {
-                MAX_HOST_REQUESTS
-            } else {
-                MAX_HOST_REQUESTS - RESERVED_HOST_CONTROLS
-            };
-
-            if state.pending_requests.len() >= host_limit
-                || state
-                    .pending_requests
-                    .values()
-                    .filter(|route| route.owner == owner)
-                    .count()
-                    >= class.limit()
-            {
-                return Err(
-                    "too many unanswered Codex requests; wait for pending requests to finish"
-                        .into(),
-                );
-            }
 
             let global_id = state
                 .allocate_request_id()

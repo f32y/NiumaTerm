@@ -1,8 +1,5 @@
 use std::time::Duration;
 
-pub(crate) const MAX_PENDING_REQUESTS: usize = 128;
-pub(crate) const RESERVED_CONTROL_REQUESTS: usize = 8;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RequestClass {
     Query,
@@ -19,13 +16,6 @@ impl RequestClass {
             Self::Mutation => 300,
             Self::Control => 15,
         })
-    }
-
-    pub(crate) fn limit(self) -> usize {
-        match self {
-            Self::Control => MAX_PENDING_REQUESTS,
-            Self::Query | Self::Mutation => MAX_PENDING_REQUESTS - RESERVED_CONTROL_REQUESTS,
-        }
     }
 
     pub(crate) fn timeout_message(self, provider: &str) -> String {

@@ -10,7 +10,6 @@ use serde_json::{Value, json};
 
 use crate::deepseek::api::ApiClient;
 use crate::deepseek::mapping::{ApprovalRequest, QuestionRequest};
-use crate::message_memory::retained_bytes;
 
 mod results;
 
@@ -18,8 +17,6 @@ mod results;
 mod tests;
 
 pub(super) const COMPLETED_FRAME: &str = "nmt/control-completed";
-const MAX_PENDING: usize = 32;
-const MAX_CALL_BYTES: usize = 32 * 1024;
 const CALL_DEADLINE: Duration = Duration::from_secs(15);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,7 +51,7 @@ struct Call {
 }
 
 pub(super) struct Controls {
-    sender: mpsc::SyncSender<Call>,
+    sender: mpsc::Sender<Call>,
     pending: HashMap<u64, Pending>,
     next_id: u64,
 }
@@ -64,7 +61,7 @@ impl Controls {
         client: ApiClient,
         deliver: Arc<dyn Fn(Value) + Send + Sync>,
     ) -> Result<Self, String> {
-        let (sender, receiver) = mpsc::sync_channel::<Call>(MAX_PENDING);
+        let (sender, receiver) = mpsc::channel::<Call>();
 
         thread::Builder::new()
             .name("deepseek-controls".to_string())
@@ -124,21 +121,16 @@ impl Controls {
         args: Value,
         cancel_after: Option<String>,
     ) -> bool {
-        // Capacity includes calls awaiting UI consumption, not just queued HTTP work.
-        if self.pending.len() >= MAX_PENDING
-            || retained_bytes(&args)
-                .saturating_add(cancel_after.as_ref().map_or(0, String::capacity))
-                > MAX_CALL_BYTES
-            || self
-                .pending
-                .values()
-                .any(|pending| match (&pending.operation, &operation) {
-                    (
-                        Operation::Questions { request: left, .. },
-                        Operation::Questions { request: right, .. },
-                    ) => left == right,
-                    _ => pending.operation == operation,
-                })
+        if self
+            .pending
+            .values()
+            .any(|pending| match (&pending.operation, &operation) {
+                (
+                    Operation::Questions { request: left, .. },
+                    Operation::Questions { request: right, .. },
+                ) => left == right,
+                _ => pending.operation == operation,
+            })
         {
             return false;
         }
@@ -160,7 +152,7 @@ impl Controls {
             cancelled: Arc::clone(&cancelled),
         };
 
-        if self.sender.try_send(call).is_err() {
+        if self.sender.send(call).is_err() {
             return false;
         }
 

@@ -1,6 +1,4 @@
 use std::collections::VecDeque;
-#[cfg(test)]
-use std::iter::from_fn;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Weak, mpsc};
 
@@ -8,57 +6,15 @@ use parking_lot::{Condvar, Mutex};
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::message_memory::retained_bytes as estimated_bytes;
-
-const MAX_MESSAGES: usize = 64;
-const MAX_BYTES: usize = 32 * 1024 * 1024;
-const RESERVED_MESSAGES: usize = 8;
-const RESERVED_BYTES: usize = 256 * 1024;
-
-#[derive(Clone, Copy)]
-pub(crate) enum InputClass {
-    Normal,
-    Control,
-}
-
 #[derive(Debug, Error, PartialEq, Eq)]
 pub(crate) enum InputError {
-    #[error("Agent input exceeds the {limit} byte message budget")]
-    TooLarge { limit: usize },
-    #[error("Agent input queue has no free message slots; retry shortly")]
-    MessageLimit,
-    #[error("Agent input queue has no free byte budget; retry shortly")]
-    ByteLimit,
     #[error("The agent input is closed")]
     Closed,
-}
-
-#[derive(Default)]
-struct Budget {
-    messages: usize,
-    bytes: usize,
-}
-
-struct Reservation {
-    budget: Arc<Mutex<Budget>>,
-    messages: usize,
-    bytes: usize,
-}
-
-impl Drop for Reservation {
-    fn drop(&mut self) {
-        let mut budget = self.budget.lock();
-        budget.messages -= self.messages;
-        budget.bytes -= self.bytes;
-    }
 }
 
 pub(super) struct QueuedInput {
     pub(super) messages: Vec<Value>,
     pub(super) ticket: InputTicket,
-    // The writer retains this reservation until every line has finished.
-    // Removing a blocked write from the channel must not free its budget.
-    _reservation: Reservation,
 }
 
 #[derive(Clone)]
@@ -88,8 +44,7 @@ impl InputTicket {
     }
 
     /// Cancellation removes the pending payload while holding the same lock
-    /// used to start writes. Started writes retain their reservation until I/O
-    /// finishes; a cancelled item releases memory and slots before returning.
+    /// used to start writes, so cancellation cannot split a started batch.
     pub(crate) fn cancel(&self) -> bool {
         let Some(queue) = self.queue.upgrade() else {
             return matches!(
@@ -136,7 +91,6 @@ struct Queue {
 
 pub(super) struct InputQueue {
     queue: Arc<Queue>,
-    budget: Arc<Mutex<Budget>>,
 }
 
 pub(super) struct InputReceiver {
@@ -173,11 +127,6 @@ impl InputReceiver {
         } else {
             Err(mpsc::TryRecvError::Disconnected)
         }
-    }
-
-    #[cfg(test)]
-    pub(super) fn try_iter(&self) -> impl Iterator<Item = QueuedInput> + '_ {
-        from_fn(|| self.try_recv().ok())
     }
 }
 
@@ -222,22 +171,17 @@ impl InputQueue {
         (
             Self {
                 queue: Arc::clone(&queue),
-                budget: Arc::new(Mutex::new(Budget::default())),
             },
             InputReceiver { queue },
         )
     }
 
     #[cfg(test)]
-    pub(super) fn submit(&self, messages: Vec<Value>, class: InputClass) -> Result<(), InputError> {
-        self.submit_tracked(messages, class).map(|_| ())
+    pub(super) fn submit(&self, messages: Vec<Value>) -> Result<(), InputError> {
+        self.submit_tracked(messages).map(|_| ())
     }
 
-    pub(super) fn submit_tracked(
-        &self,
-        messages: Vec<Value>,
-        class: InputClass,
-    ) -> Result<InputTicket, InputError> {
+    pub(super) fn submit_tracked(&self, messages: Vec<Value>) -> Result<InputTicket, InputError> {
         let mut ticket = InputTicket::new(
             messages.len() > 1 || messages.iter().any(|message| message["type"] == "user"),
         );
@@ -248,50 +192,15 @@ impl InputQueue {
             return Ok(ticket);
         }
 
-        let (max_messages, max_bytes) = match class {
-            InputClass::Normal => (MAX_MESSAGES - RESERVED_MESSAGES, MAX_BYTES - RESERVED_BYTES),
-            InputClass::Control => (MAX_MESSAGES, MAX_BYTES),
-        };
-
-        let bytes = messages.iter().fold(0usize, |total, message| {
-            total.saturating_add(estimated_bytes(message))
-        });
-
-        if bytes > max_bytes {
-            return Err(InputError::TooLarge { limit: max_bytes });
-        }
-
         let mut state = self.queue.state.lock();
 
         if !state.receiver_open {
             return Err(InputError::Closed);
         }
 
-        let reservation = {
-            let mut budget = self.budget.lock();
-
-            if messages.len() > max_messages.saturating_sub(budget.messages) {
-                return Err(InputError::MessageLimit);
-            }
-
-            if bytes > max_bytes.saturating_sub(budget.bytes) {
-                return Err(InputError::ByteLimit);
-            }
-
-            budget.messages += messages.len();
-            budget.bytes += bytes;
-
-            Reservation {
-                budget: Arc::clone(&self.budget),
-                messages: messages.len(),
-                bytes,
-            }
-        };
-
         state.pending.push_back(QueuedInput {
             messages,
             ticket: ticket.clone(),
-            _reservation: reservation,
         });
         self.queue.ready.notify_one();
 

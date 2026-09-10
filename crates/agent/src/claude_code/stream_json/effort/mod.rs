@@ -120,11 +120,6 @@ impl EffortState {
             effort: self.desired().map(str::to_owned),
         })
     }
-
-    #[cfg(test)]
-    pub(super) fn pending_count(&self) -> usize {
-        self.pending.len()
-    }
 }
 
 #[cfg(test)]

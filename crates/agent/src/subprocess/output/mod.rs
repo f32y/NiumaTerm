@@ -1,13 +1,8 @@
-use std::io::{self, BufRead};
+use std::io::BufRead;
 use std::str::from_utf8;
 
 use serde_json::Value;
 use tracing::warn;
-
-pub(super) const MAX_STDOUT_LINE: usize = 8 * 1024 * 1024;
-pub(super) const MAX_STDERR_CHUNK: usize = 64 * 1024;
-const MAX_STARTUP_LINES: usize = 8;
-const MAX_STARTUP_BYTES: usize = 64 * 1024;
 
 /// Startup wrappers may print plain-text notices before the first protocol
 /// object. Once the protocol starts, skipping a malformed line could lose a
@@ -19,21 +14,17 @@ pub(super) fn read_messages(
 ) -> Result<(), String> {
     let mut started = false;
     let mut first_line = true;
-    let mut startup_lines = 0;
-    let mut startup_bytes = 0usize;
+    let mut startup_notice_seen = false;
+    let mut line = Vec::new();
 
     loop {
-        let line = read_piece(reader, MAX_STDOUT_LINE)
+        line.clear();
+        reader
+            .read_until(b'\n', &mut line)
             .map_err(|error| format!("Agent output read failed: {error}"))?;
 
         if line.is_empty() {
             return Ok(());
-        }
-
-        if line.len() == MAX_STDOUT_LINE && line.last() != Some(&b'\n') {
-            return Err(
-                "Agent output line exceeded the 8 MiB limit; the process was stopped.".into(),
-            );
         }
 
         let raw = if first_line {
@@ -86,14 +77,8 @@ pub(super) fn read_messages(
                     ));
                 }
 
-                startup_lines += 1;
-                startup_bytes = startup_bytes.saturating_add(line.len());
-
-                if startup_lines > MAX_STARTUP_LINES || startup_bytes > MAX_STARTUP_BYTES {
-                    return Err("Agent startup output exceeded the non-protocol allowance; the process was stopped.".into());
-                }
-
-                if startup_lines == 1 {
+                if !startup_notice_seen {
+                    startup_notice_seen = true;
                     warn!(
                         provider,
                         "agent launcher produced non-protocol startup output; content omitted"
@@ -102,35 +87,6 @@ pub(super) fn read_messages(
             }
         }
     }
-}
-
-/// Return one bounded piece, including a newline when present. A full piece
-/// without a newline may continue in the next read; EOF returns an empty piece.
-pub(super) fn read_piece(reader: &mut impl BufRead, limit: usize) -> io::Result<Vec<u8>> {
-    let mut line = Vec::new();
-
-    while line.len() < limit {
-        let available = reader.fill_buf()?;
-
-        if available.is_empty() {
-            break;
-        }
-
-        let count = available
-            .iter()
-            .position(|byte| *byte == b'\n')
-            .map_or(available.len(), |index| index + 1)
-            .min(limit - line.len());
-
-        line.extend_from_slice(&available[..count]);
-        reader.consume(count);
-
-        if line.last() == Some(&b'\n') {
-            break;
-        }
-    }
-
-    Ok(line)
 }
 
 #[cfg(test)]

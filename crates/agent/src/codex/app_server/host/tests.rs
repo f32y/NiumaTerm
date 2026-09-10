@@ -105,34 +105,22 @@ fn register(router: &Router) -> (u64, Receiver<Value>) {
 }
 
 #[test]
-fn unanswered_requests_reserve_controls_and_expire_by_class() {
+fn large_request_bursts_keep_independent_deadlines() {
     let router = router();
     let (owner, rx) = register(&router);
     let (other, other_rx) = register(&router);
 
-    for id in 0..120 {
+    for id in 0..2048 {
         router
             .prepare_outgoing(owner, &mut json!({"id": id, "method": "thread/list"}))
             .unwrap();
     }
 
-    assert!(
-        router
-            .prepare_outgoing(owner, &mut json!({"id": 120, "method": "thread/read"}))
-            .is_err()
-    );
-
-    for id in 120..128 {
+    for id in 2048..2064 {
         router
             .prepare_outgoing(owner, &mut json!({"id": id, "method": "turn/interrupt"}))
             .unwrap();
     }
-
-    assert!(
-        router
-            .prepare_outgoing(owner, &mut json!({"id": 128, "method": "turn/interrupt"}))
-            .is_err()
-    );
 
     let mut mutation = json!({"id": 1, "method": "thread/fork"});
 
@@ -144,7 +132,7 @@ fn unanswered_requests_reserve_controls_and_expire_by_class() {
 
     let controls: Vec<_> = rx.try_iter().collect();
 
-    assert_eq!(controls.len(), 8);
+    assert_eq!(controls.len(), 16);
     assert!(controls.iter().all(|response| {
         response["error"]["message"]
             .as_str()
@@ -157,7 +145,7 @@ fn unanswered_requests_reserve_controls_and_expire_by_class() {
 
     let queries: Vec<_> = rx.try_iter().collect();
 
-    assert_eq!(queries.len(), 120);
+    assert_eq!(queries.len(), 2048);
     assert!(queries.iter().all(|response| {
         response["error"]["message"]
             .as_str()
@@ -215,7 +203,7 @@ fn retired_requests_cannot_reassign_roots_or_affect_other_owners() {
 }
 
 #[test]
-fn shared_host_bounds_pending_requests_across_many_owners() {
+fn a_busy_shared_host_accepts_requests_from_additional_owners() {
     let router = router();
     let mut owners = Vec::new();
 
@@ -236,7 +224,7 @@ fn shared_host_bounds_pending_requests_across_many_owners() {
     assert!(
         router
             .prepare_outgoing(ninth, &mut json!({"id": 1, "method": "thread/list"}))
-            .is_err()
+            .is_ok()
     );
 
     for owner in owners {
@@ -250,7 +238,7 @@ fn shared_host_bounds_pending_requests_across_many_owners() {
     assert!(
         router
             .prepare_outgoing(ninth, &mut json!({"id": 2, "method": "turn/interrupt"}))
-            .is_err()
+            .is_ok()
     );
 }
 

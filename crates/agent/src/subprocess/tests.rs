@@ -6,7 +6,7 @@ use nmt_platform::process::hidden_command;
 use serde_json::json;
 
 use crate::message_memory::OUTPUT_FAILURE_METHOD;
-use crate::subprocess::{InputClass, JsonLineProcess};
+use crate::subprocess::JsonLineProcess;
 
 #[test]
 fn malformed_output_reports_failure_before_eof_and_stops_delivery() {
@@ -83,7 +83,44 @@ fn script(windows: &str, unix: &str) -> Command {
 }
 
 #[test]
-fn stalled_input_rejects_normal_overflow_without_closing_the_process() {
+fn long_stderr_lines_remain_complete_and_separate_from_protocol_output() {
+    let command = script(
+        "[Console]::Error.WriteLine(('x' * 131072)); [Console]::Error.WriteLine('next'); [Console]::Out.WriteLine('{\"ready\":true}')",
+        "head -c 131072 /dev/zero | tr '\\000' x >&2; printf '\\nnext\\n' >&2; echo '{\"ready\":true}'",
+    );
+    let (output_tx, output_rx) = channel();
+    let (stderr_tx, stderr_rx) = channel();
+    let mut process = JsonLineProcess::spawn(
+        command,
+        "long-stderr",
+        "Test",
+        move |message| {
+            let _ = output_tx.send(message);
+        },
+        move |line| {
+            let _ = stderr_tx.send(line);
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        stderr_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+        "x".repeat(128 * 1024)
+    );
+    assert_eq!(
+        stderr_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+        "next"
+    );
+    assert_eq!(
+        output_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+        json!({"ready":true})
+    );
+
+    process.shutdown(Duration::from_secs(5), false).unwrap();
+}
+
+#[test]
+fn stalled_input_accepts_a_message_burst_without_closing_the_process() {
     let command = script(
         "[Console]::Out.WriteLine('{\"ready\":true}'); Start-Sleep -Seconds 30",
         "echo '{\"ready\":true}'; sleep 30",
@@ -111,75 +148,18 @@ fn stalled_input_rejects_normal_overflow_without_closing_the_process() {
     let large = json!({"text": "x".repeat(1024 * 1024)});
     let started = Instant::now();
 
-    process.try_write_line(large, InputClass::Normal).unwrap();
+    process.try_write_line(large).unwrap();
 
     assert!(started.elapsed() < Duration::from_secs(1));
 
-    let mut rejected = false;
-
-    for _ in 0..65 {
-        if process
-            .try_write_line(json!({"next":true}), InputClass::Normal)
-            .is_err()
-        {
-            rejected = true;
-            break;
-        }
+    for _ in 0..2048 {
+        process.try_write_line(json!({"next":true})).unwrap();
     }
-
-    assert!(rejected);
     assert!(process.has_stdin());
     assert!(closed_rx.try_recv().is_err());
 
-    process
-        .try_write_line(json!({"interrupt":true}), InputClass::Control)
-        .unwrap();
+    process.try_write_line(json!({"interrupt":true})).unwrap();
     process.shutdown(Duration::from_millis(20), true).unwrap();
-    closed_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-    process.shutdown(Duration::from_secs(1), false).unwrap();
-}
-
-#[test]
-fn exhausting_required_control_capacity_reports_process_exit() {
-    let command = script(
-        "[Console]::Out.WriteLine('{\"ready\":true}'); Start-Sleep -Seconds 30",
-        "echo '{\"ready\":true}'; sleep 30",
-    );
-
-    let (tx, rx) = channel();
-    let (closed_tx, closed_rx) = channel();
-
-    let mut process = JsonLineProcess::spawn_with_stdout_closed(
-        command,
-        "blocked-controls",
-        "Test",
-        move |value| {
-            let _ = tx.send(value);
-        },
-        |_| {},
-        move || {
-            let _ = closed_tx.send(());
-        },
-    )
-    .unwrap();
-
-    rx.recv_timeout(Duration::from_secs(5)).unwrap();
-    process
-        .try_write_line(json!({"text":"x".repeat(1024 * 1024)}), InputClass::Normal)
-        .unwrap();
-
-    let mut rejected = false;
-
-    for _ in 0..65 {
-        if process.write_line(json!({"control":true})).is_err() {
-            rejected = true;
-            break;
-        }
-    }
-
-    assert!(rejected);
-    assert!(!process.has_stdin());
-
     closed_rx.recv_timeout(Duration::from_secs(5)).unwrap();
     process.shutdown(Duration::from_secs(1), false).unwrap();
 }
@@ -205,9 +185,7 @@ fn shutdown_drains_accepted_messages_in_order() {
     .unwrap();
 
     for index in 0..20 {
-        process
-            .try_write_line(json!({"index":index}), InputClass::Normal)
-            .unwrap();
+        process.try_write_line(json!({"index":index})).unwrap();
     }
 
     process.shutdown(Duration::from_secs(5), false).unwrap();

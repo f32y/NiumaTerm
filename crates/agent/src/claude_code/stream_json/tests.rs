@@ -101,42 +101,39 @@ fn request_deadlines_wake_without_output_and_release_the_delivery_on_close() {
 }
 
 #[test]
-fn pending_control_capacity_preserves_urgent_slots_and_releases_expired_queries() {
+fn large_pending_control_sets_keep_independent_deadlines() {
     let now = Instant::now();
     let mut state = ControlState::default();
 
-    for index in 0..120 {
-        state.check_capacity(RequestClass::Query, 1).unwrap();
+    for index in 0..2048 {
+        state.check_connected().unwrap();
         state.record_admitted(index.to_string(), RequestClass::Query, now);
         state.track(index.to_string(), PendingControlOperation::Other);
     }
 
-    assert!(state.check_capacity(RequestClass::Mutation, 1).is_err());
-    assert!(state.check_capacity(RequestClass::Mutation, 0).is_ok());
-
-    for index in 120..128 {
-        state.check_capacity(RequestClass::Control, 1).unwrap();
+    for index in 2048..2064 {
+        state.check_connected().unwrap();
         state.record_admitted(index.to_string(), RequestClass::Control, now);
         state.track(index.to_string(), PendingControlOperation::Other);
     }
 
-    assert!(state.check_capacity(RequestClass::Control, 1).is_err());
+    assert!(state.check_connected().is_ok());
     assert!(state.expired(now + Duration::from_secs(14)).is_empty());
 
     let expired = state.expired(now + Duration::from_secs(15));
 
-    assert_eq!(expired.len(), 8);
+    assert_eq!(expired.len(), 16);
 
     for (id, class, _) in expired {
         assert_eq!(class, RequestClass::Control);
         state.resolve(&json!({"request_id": id, "subtype": "error", "error": class.timeout_message("Claude")}));
     }
 
-    assert!(state.check_capacity(RequestClass::Query, 1).is_err());
-    assert_eq!(state.expired(now + Duration::from_secs(30)).len(), 120);
+    assert!(state.check_connected().is_ok());
+    assert_eq!(state.expired(now + Duration::from_secs(30)).len(), 2048);
     assert!(state.expired(now + Duration::from_secs(30)).is_empty());
 
-    state.check_capacity(RequestClass::Mutation, 3).unwrap();
+    state.check_connected().unwrap();
 }
 
 #[test]
@@ -588,7 +585,7 @@ fn rewind_is_an_idle_ui_command_not_a_provider_slash_turn() {
 
 #[cfg(windows)]
 #[test]
-fn rejected_input_keeps_settings_unchanged_and_a_retry_is_atomic() {
+fn pending_queries_do_not_block_an_atomic_settings_and_prompt_batch() {
     use std::env;
     use std::path::Path;
     use std::sync::mpsc;
@@ -631,59 +628,28 @@ fn rejected_input_keeps_settings_unchanged_and_a_retry_is_atomic() {
 
     session.process(rx.recv_timeout(Duration::from_secs(5)).unwrap());
 
-    let previous_model = session.applied_model.clone();
-    let previous_permission = session.applied_permission.clone();
-    let previous_effort = session.control.effort().map(str::to_owned);
-    let pending = session.control.pending_count();
-
     let settings = ThreadSettings {
         model: Some("test-model".into()),
         approval: Some("plan".into()),
         effort: Some("high".into()),
         ..ThreadSettings::default()
     };
-
-    assert!(matches!(
-        session.send_user_message(&"x".repeat(32 * 1024 * 1024), &settings, &[]),
-        SendOutcome::Rejected { .. }
-    ));
-    assert_eq!(session.applied_model, previous_model);
-    assert_eq!(session.applied_permission, previous_permission);
-    assert_eq!(session.control.effort(), previous_effort.as_deref());
-    assert_eq!(session.control.pending_count(), pending);
-    assert!(!session.turn_active);
-    assert!(session.process.has_stdin());
-
     let now = Instant::now();
-
-    for index in 0..120 - pending {
-        let id = format!("capacity-{index}");
-
+    for index in 0..256 {
+        let id = format!("pending-{index}");
         session
             .control
             .record_admitted(id.clone(), RequestClass::Query, now);
         session.control.track(id, PendingControlOperation::Other);
     }
-
-    assert!(matches!(
-        session.send_user_message("capacity rejected prompt", &settings, &[]),
-        SendOutcome::Rejected { message } if message.contains("too many unanswered")
-    ));
-    assert_eq!(session.applied_model, previous_model);
-    assert_eq!(session.applied_permission, previous_permission);
-    assert_eq!(session.control.effort(), previous_effort.as_deref());
-    assert_eq!(session.control.pending_count(), 120);
-    assert!(!session.turn_active);
-    assert!(session.interrupt());
-
-    let expired = session.poll_timeouts(now + Duration::from_secs(31));
-
-    assert_eq!(expired.len(), 121);
-    assert_eq!(session.control.pending_count(), 0);
     assert_eq!(
-        session.send_user_message("retry prompt", &settings, &[]),
+        session.send_user_message("queued prompt", &settings, &[]),
         SendOutcome::StartedTurn
     );
+    assert!(session.turn_active);
+    assert_eq!(session.applied_model.as_deref(), Some("test-model"));
+    assert_eq!(session.applied_permission.as_deref(), Some("plan"));
+    assert_eq!(session.control.effort(), Some("high"));
 
     session.shutdown(Duration::from_secs(5), false).unwrap();
 
@@ -707,7 +673,7 @@ fn rejected_input_keeps_settings_unchanged_and_a_retry_is_atomic() {
     assert_eq!(changed[0]["request"]["subtype"], "set_model");
     assert_eq!(changed[1]["request"]["subtype"], "set_permission_mode");
     assert_eq!(changed[2]["request"]["subtype"], "apply_flag_settings");
-    assert_eq!(changed[3]["message"]["content"][0]["text"], "retry prompt");
+    assert_eq!(changed[3]["message"]["content"][0]["text"], "queued prompt");
 
     fs::remove_file(log).unwrap();
 }

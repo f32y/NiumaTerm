@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use crate::LaunchConfig;
 use crate::codex::app_server::host::router::Router;
 use crate::launcher::AgentCli;
-use crate::subprocess::{InputClass, JsonLineProcess};
+use crate::subprocess::JsonLineProcess;
 
 const HOST_INIT_RPC_ID: u64 = 1;
 const FIRST_HOST_RPC_ID: u64 = 2;
@@ -257,7 +257,7 @@ impl CodexHost {
             None => self.process.lock().write_line(message).map(|_| None),
             Some("turn/interrupt" | "thread/unsubscribe") => {
                 let mut process = self.process.lock();
-                let result = process.write_tracked(vec![message], InputClass::Control);
+                let result = process.write_tracked(vec![message]);
 
                 if result.is_err() {
                     process.abort();
@@ -265,11 +265,7 @@ impl CodexHost {
 
                 result.map(Some)
             }
-            _ => self
-                .process
-                .lock()
-                .write_tracked(vec![message], InputClass::Normal)
-                .map(Some),
+            _ => self.process.lock().write_tracked(vec![message]).map(Some),
         };
 
         if result.is_err()

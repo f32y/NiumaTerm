@@ -63,15 +63,9 @@ impl ControlState {
         }
     }
 
-    pub(super) fn check_capacity(&self, class: RequestClass, count: usize) -> Result<(), String> {
+    pub(super) fn check_connected(&self) -> Result<(), String> {
         if self.closed {
             return Err("Claude is not connected".into());
-        }
-
-        if count > 0 && self.deadlines.len().saturating_add(count) > class.limit() {
-            return Err(
-                "too many unanswered Claude requests; wait for pending requests to finish".into(),
-            );
         }
 
         Ok(())
@@ -266,11 +260,6 @@ impl ControlState {
 
     pub(super) fn is_closed(&self) -> bool {
         self.closed
-    }
-
-    #[cfg(test)]
-    pub(super) fn pending_count(&self) -> usize {
-        self.operations.len() + self.effort.pending_count()
     }
 }
 

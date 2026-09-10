@@ -2,7 +2,7 @@
 //! Job Object containment and the newline-delimited-JSON process shape used
 //! by the chat sessions.
 
-use std::io::{BufReader, Write as _};
+use std::io::{BufRead as _, BufReader, Write as _};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::thread;
@@ -17,8 +17,8 @@ mod input;
 mod output;
 use crate::message_memory::OUTPUT_FAILURE_METHOD;
 use crate::subprocess::input::InputQueue;
-pub(crate) use crate::subprocess::input::{InputClass, InputError, InputTicket};
-use crate::subprocess::output::{MAX_STDERR_CHUNK, read_messages, read_piece};
+pub(crate) use crate::subprocess::input::{InputError, InputTicket};
+use crate::subprocess::output::read_messages;
 
 /// A spawned agent CLI with piped stdio, kill-on-close containment, and
 /// newline-delimited JSON output. Stdout lines that parse as JSON are handed
@@ -132,17 +132,9 @@ impl JsonLineProcess {
         });
 
         thread::spawn(move || {
-            let mut reader = BufReader::new(stderr);
-
-            while let Ok(line) = read_piece(&mut reader, MAX_STDERR_CHUNK) {
-                if line.is_empty() {
-                    break;
-                }
-
-                let line = line.strip_suffix(b"\n").unwrap_or(&line);
-
+            for line in BufReader::new(stderr).split(b'\n').map_while(Result::ok) {
                 on_stderr(decode_child_output(
-                    line.strip_suffix(b"\r").unwrap_or(line),
+                    line.strip_suffix(b"\r").unwrap_or(&line),
                 ));
             }
         });
@@ -155,16 +147,16 @@ impl JsonLineProcess {
         })
     }
 
-    /// Queue a required control line using reserved capacity. Failure ends the
+    /// Queue a required control line. Failure ends the
     /// process tree so a missing reply cannot leave the session waiting forever.
     pub(crate) fn write_line(&mut self, message: Value) -> Result<(), InputError> {
-        let result = self.try_write_line(message, InputClass::Control);
+        let result = self.try_write_line(message);
 
         if let Err(error) = &result {
             warn!(%error, "required agent control input was rejected");
 
             // Callers use this path for required replies and lifecycle controls.
-            // Exhausting even the control reserve cannot silently lose them.
+            // A disconnected writer cannot deliver a required reply.
             self.stdin.take();
             self.job.lock().take();
         }
@@ -172,30 +164,19 @@ impl JsonLineProcess {
         result
     }
 
-    /// Success means admission, not completed I/O. Capacity rejection leaves
-    /// the transport open so the caller can retain its input and retry.
-    pub(crate) fn try_write_line(
-        &mut self,
-        message: Value,
-        class: InputClass,
-    ) -> Result<(), InputError> {
-        self.try_write_batch(vec![message], class)
+    /// Success means the writer accepted the message, not completed I/O.
+    pub(crate) fn try_write_line(&mut self, message: Value) -> Result<(), InputError> {
+        self.try_write_batch(vec![message])
     }
 
-    /// Reserve all settings and prompt lines together before publishing any of
-    /// them; the caller changes its local settings only after admission.
-    pub(crate) fn try_write_batch(
-        &mut self,
-        messages: Vec<Value>,
-        class: InputClass,
-    ) -> Result<(), InputError> {
-        self.write_tracked(messages, class).map(|_| ())
+    /// Queue settings and prompt lines together so cancellation cannot split them.
+    pub(crate) fn try_write_batch(&mut self, messages: Vec<Value>) -> Result<(), InputError> {
+        self.write_tracked(messages).map(|_| ())
     }
 
     pub(crate) fn write_tracked(
         &mut self,
         messages: Vec<Value>,
-        class: InputClass,
     ) -> Result<InputTicket, InputError> {
         if !self.has_stdin() {
             return Err(InputError::Closed);
@@ -205,9 +186,9 @@ impl JsonLineProcess {
             .stdin
             .as_ref()
             .ok_or(InputError::Closed)?
-            .submit_tracked(messages, class);
+            .submit_tracked(messages);
 
-        if matches!(result, Err(InputError::Closed)) {
+        if result.is_err() {
             self.stdin.take();
             self.job.lock().take();
         }

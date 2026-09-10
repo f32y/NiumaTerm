@@ -2,7 +2,24 @@ use std::io::{BufReader, Cursor};
 
 use serde_json::json;
 
-use crate::subprocess::output::{MAX_STARTUP_BYTES, MAX_STARTUP_LINES, read_messages, read_piece};
+use crate::subprocess::output::read_messages;
+
+#[test]
+fn large_history_reply_preserves_following_messages() {
+    let history = "x".repeat(9 * 1024 * 1024);
+    let input = format!(
+        "{}\n{{\"next\":true}}\n",
+        json!({"result":{"history":history}})
+    );
+    let mut reader = BufReader::new(Cursor::new(input));
+    let mut messages = Vec::new();
+
+    read_messages(&mut reader, "Test", |message| messages.push(message)).unwrap();
+
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0]["result"]["history"].as_str().unwrap(), history);
+    assert_eq!(messages[1], json!({"next":true}));
+}
 
 #[test]
 fn startup_notices_bom_and_blank_lines_preserve_protocol_objects() {
@@ -44,31 +61,16 @@ fn malformed_startup_json_invalid_utf8_and_non_objects_fail() {
 }
 
 #[test]
-fn startup_allowance_is_bounded_by_lines_and_bytes() {
-    let lines = "notice\n".repeat(MAX_STARTUP_LINES + 1);
-
-    assert!(
-        read_messages(&mut Cursor::new(lines), "Test", |_| {})
-            .unwrap_err()
-            .contains("allowance")
+fn long_startup_notices_preserve_the_first_protocol_message() {
+    let input = format!(
+        "{}{}\n{{\"ready\":true}}",
+        "notice\n".repeat(32),
+        "n".repeat(128 * 1024)
     );
-
-    let bytes = "n".repeat(MAX_STARTUP_BYTES + 1);
-
-    assert!(
-        read_messages(&mut Cursor::new(bytes), "Test", |_| {})
-            .unwrap_err()
-            .contains("allowance")
-    );
-}
-
-#[test]
-fn long_unterminated_output_is_bounded_and_preserves_following_bytes() {
-    let mut reader = BufReader::with_capacity(3, Cursor::new(b"123456789\nnext\nlast"));
-
-    assert_eq!(read_piece(&mut reader, 5).unwrap(), b"12345");
-    assert_eq!(read_piece(&mut reader, 5).unwrap(), b"6789\n");
-    assert_eq!(read_piece(&mut reader, 5).unwrap(), b"next\n");
-    assert_eq!(read_piece(&mut reader, 5).unwrap(), b"last");
-    assert!(read_piece(&mut reader, 5).unwrap().is_empty());
+    let mut messages = Vec::new();
+    read_messages(&mut Cursor::new(input), "Test", |message| {
+        messages.push(message)
+    })
+    .unwrap();
+    assert_eq!(messages, [json!({"ready":true})]);
 }

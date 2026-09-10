@@ -67,7 +67,7 @@ use crate::claude_code::workflows::{
 };
 use crate::launcher::AgentCli;
 use crate::request_policy::RequestClass;
-use crate::subprocess::{InputClass, JsonLineProcess};
+use crate::subprocess::JsonLineProcess;
 use crate::workspace::AgentWorkspace;
 
 mod control;
@@ -505,14 +505,11 @@ impl Session {
             .filter_map(|message| message["request_id"].as_str().map(str::to_owned))
             .collect();
 
-        if let Err(message) = self
-            .control
-            .check_capacity(RequestClass::Mutation, control_ids.len())
-        {
+        if let Err(message) = self.control.check_connected() {
             return SendOutcome::Rejected { message };
         }
 
-        let ticket = match self.process.write_tracked(messages, InputClass::Normal) {
+        let ticket = match self.process.write_tracked(messages) {
             Ok(ticket) => ticket,
             Err(error) => {
                 return SendOutcome::Rejected {
@@ -573,13 +570,10 @@ impl Session {
 
         let text = slash_command_text(name, arguments);
 
-        if let Err(error) = self.process.try_write_line(
-            json!({
-                "type": "user",
-                "message": {"role": "user", "content": [{"type": "text", "text": text}]},
-            }),
-            InputClass::Normal,
-        ) {
+        if let Err(error) = self.process.try_write_line(json!({
+            "type": "user",
+            "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+        })) {
             return SlashCommandOutcome::Rejected {
                 message: error.to_string(),
             };
@@ -1060,19 +1054,13 @@ impl Session {
             _ => RequestClass::Mutation,
         };
 
-        self.control.check_capacity(class, 1)?;
+        self.control.check_connected()?;
 
         let (request_id, message) = self.control.request(request);
 
-        let input_class = if class == RequestClass::Control {
-            InputClass::Control
-        } else {
-            InputClass::Normal
-        };
-
         let ticket = self
             .process
-            .write_tracked(vec![message], input_class)
+            .write_tracked(vec![message])
             .map_err(|error| error.to_string())?;
 
         self.control

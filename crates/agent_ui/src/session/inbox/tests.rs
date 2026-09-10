@@ -1,40 +1,50 @@
 use futures::StreamExt as _;
 use futures::executor::block_on;
+use nmt_agent::message_memory::OUTPUT_FAILURE_METHOD;
 use serde_json::json;
 
-use crate::session::inbox::{MAX_BYTES, MAX_MESSAGES, channel};
+use crate::session::inbox::channel;
 
 #[test]
-fn overflow_keeps_accepted_messages_then_ends_with_one_error() {
+fn large_history_and_message_burst_preserve_later_events() {
     let (sender, mut receiver) = channel();
+    sender.send(json!({"history":"x".repeat(33 * 1024 * 1024)}));
 
-    for index in 0..MAX_MESSAGES {
-        sender.send(json!(index));
+    for index in 0..2048 {
+        sender.send(json!({"index":index}));
     }
 
-    sender.send(json!("overflow"));
-    sender.send(json!("late"));
+    drop(sender);
+    let mut history = block_on(receiver.next()).unwrap().unwrap();
+    assert_eq!(
+        history.take()["history"].as_str().unwrap().len(),
+        33 * 1024 * 1024
+    );
 
-    for index in 0..MAX_MESSAGES {
+    for index in 0..2048 {
         let mut message = block_on(receiver.next()).unwrap().unwrap();
-        assert_eq!(message.take(), json!(index));
+        assert_eq!(message.take(), json!({"index":index}));
     }
 
-    assert!(block_on(receiver.next()).unwrap().is_err());
     assert!(block_on(receiver.next()).is_none());
 }
 
 #[test]
-fn consumed_messages_release_budget_and_large_messages_fail_closed() {
+fn protocol_failure_keeps_accepted_messages_then_ends_with_one_error() {
     let (sender, mut receiver) = channel();
 
-    for _ in 0..MAX_MESSAGES * 2 {
-        sender.send(json!("text"));
-        drop(block_on(receiver.next()).unwrap().unwrap());
+    for index in 0..4 {
+        sender.send(json!(index));
     }
 
-    sender.send(json!("x".repeat(MAX_BYTES)));
+    sender.send(json!({"method":OUTPUT_FAILURE_METHOD,"params":{"message":"invalid JSON"}}));
+    sender.send(json!("late"));
 
-    assert!(block_on(receiver.next()).unwrap().is_err());
+    for index in 0..4 {
+        let mut message = block_on(receiver.next()).unwrap().unwrap();
+        assert_eq!(message.take(), json!(index));
+    }
+
+    assert!(matches!(block_on(receiver.next()).unwrap(), Err(error) if error == "invalid JSON"));
     assert!(block_on(receiver.next()).is_none());
 }

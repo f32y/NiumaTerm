@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use crate::deepseek::api::ApiClient;
 use crate::deepseek::mapping::ApprovalRequest;
-use crate::deepseek::session::controls::{Controls, MAX_CALL_BYTES, MAX_PENDING, Operation};
+use crate::deepseek::session::controls::{Controls, Operation};
 
 fn read_request(stream: &TcpStream) -> Value {
     stream
@@ -53,7 +53,7 @@ fn reply(stream: &mut TcpStream, success: bool) {
 }
 
 #[test]
-fn stalled_http_does_not_block_admission_and_bounds_pending_payloads() {
+fn stalled_http_accepts_large_payloads_and_a_burst_of_distinct_controls() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let client = ApiClient::new(format!("http://{}", listener.local_addr().unwrap())).unwrap();
     let (entered_tx, entered_rx) = mpsc::channel();
@@ -85,14 +85,14 @@ fn stalled_http_does_not_block_admission_and_bounds_pending_payloads() {
 
     assert!(done_rx.try_recv().is_err());
     assert!(!controls.submit(Operation::Interrupt, "session/cancel", json!({}), None));
-    assert!(!controls.submit(
+    assert!(controls.submit(
         Operation::InterruptChild("large".into()),
         "child",
-        json!("x".repeat(MAX_CALL_BYTES)),
+        json!("x".repeat(64 * 1024)),
         None
     ));
 
-    for id in 1..MAX_PENDING {
+    for id in 1..256 {
         assert!(controls.submit(
             Operation::InterruptChild(id.to_string()),
             "child",
@@ -101,7 +101,7 @@ fn stalled_http_does_not_block_admission_and_bounds_pending_payloads() {
         ));
     }
 
-    assert!(!controls.submit(
+    assert!(controls.submit(
         Operation::InterruptChild("full".into()),
         "child",
         json!({}),
