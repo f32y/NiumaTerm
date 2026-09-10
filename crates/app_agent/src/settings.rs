@@ -6,7 +6,7 @@
 //! whenever the source settings change, so pane code observes and reads this
 //! type alone.
 
-use gpui::{Font, FontFallbacks, Global, Pixels, SharedString, font, px};
+use gpui::{Font, FontFallbacks, Global, Hsla, Pixels, SharedString, font, px};
 use nmt_config::agent::{CollapseRows, ModelListStyle};
 use nmt_config::profile::AgentProfile;
 use nmt_config::system::NewlineShortcut;
@@ -50,6 +50,9 @@ pub struct AgentSettings {
     /// Hold the conversation column at a reading width and centre it in the
     /// pane; off, the column follows the pane width with a fixed margin.
     pub human_friendly_layout: bool,
+    /// Opaque terminal palette background, resolved by the application when
+    /// settings or the selected theme change. Pane opacity is applied at paint.
+    pub terminal_background: Hsla,
 }
 
 impl Global for AgentSettings {}
@@ -92,6 +95,7 @@ impl Default for AgentSettings {
             background_opacity: 1.0,
             font_fallbacks: FontFallbacks::default(),
             human_friendly_layout: true,
+            terminal_background: Hsla::black(),
         }
     }
 }

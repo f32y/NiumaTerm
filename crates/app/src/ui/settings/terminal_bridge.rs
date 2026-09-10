@@ -8,8 +8,9 @@
 //! path. Panes observe their snapshot global, which puts the rebuild ahead
 //! of their reaction by construction.
 
-use gpui::App;
+use gpui::{App, rgb};
 use nmt_app_agent::settings::AgentSettings;
+use nmt_app_terminal::frame::theme_default_background;
 use nmt_app_terminal::settings::TerminalSettings;
 
 use crate::ui::settings::opacity::main_view_background_opacity;
@@ -53,6 +54,7 @@ fn agent_snapshot(cx: &App) -> AgentSettings {
         profiles: settings.agent_profiles.clone(),
         background_opacity: main_view_background_opacity(cx),
         font_fallbacks: default_font_fallbacks(),
+        terminal_background: rgb(theme_default_background().rgb_u32()).into(),
     }
 }
 

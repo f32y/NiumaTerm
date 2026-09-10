@@ -4261,7 +4261,6 @@ dependencies = [
  "gpui-component",
  "image",
  "nmt_agent_utils",
- "nmt_app_terminal",
  "nmt_config",
  "nmt_i18n",
  "nmt_platform",

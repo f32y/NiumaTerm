@@ -22,7 +22,6 @@ use gpui_component::button::Button;
 use gpui_component::input::{Enter, Escape, IndentInline, MoveDown, MoveUp, Paste, Textarea};
 use gpui_component::modern_menu::ModernMenu;
 use gpui_component::{IconName, IconNamed, WindowExt as _, h_flex, v_flex};
-use nmt_app_terminal::frame::theme_default_background;
 use nmt_config::system::NewlineShortcut;
 use nmt_i18n::i18n;
 
@@ -146,7 +145,7 @@ impl Render for AgentPane {
             .global::<AgentSettings>()
             .pane_background_follows_terminal
         {
-            gpui::rgb(theme_default_background().rgb_u32()).into()
+            cx.global::<AgentSettings>().terminal_background
         } else {
             cx.theme().sidebar
         };

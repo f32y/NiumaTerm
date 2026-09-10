@@ -9,7 +9,6 @@ use gpui::{App, ElementId, Font, Hsla, SharedString, StyleRefinement, px};
 use gpui_component::highlighter::HighlightTheme;
 use gpui_component::text::TextViewStyle;
 use gpui_component::{ActiveTheme as _, text};
-use nmt_app_terminal::frame::theme_default_background;
 
 use crate::links;
 use crate::settings::AgentSettings;
@@ -56,7 +55,7 @@ pub(crate) fn transcript_highlight_theme(cx: &App) -> Arc<HighlightTheme> {
         return themed;
     }
 
-    let surface: Hsla = gpui::rgb(theme_default_background().rgb_u32()).into();
+    let surface = cx.global::<AgentSettings>().terminal_background;
 
     highlight_theme_for_surface(themed, is_dark_surface(surface))
 }

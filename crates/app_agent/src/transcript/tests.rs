@@ -1620,11 +1620,38 @@ mod typed_reply_tests {
 mod surface_palette_tests {
     use std::sync::Arc;
 
-    use gpui::rgb;
-    use gpui_component::ThemeMode;
+    use gpui::{TestAppContext, rgb};
     use gpui_component::highlighter::HighlightTheme;
+    use gpui_component::{ActiveTheme as _, Theme, ThemeMode};
 
+    use crate::settings::AgentSettings;
+    use crate::transcript::render::text_style::transcript_highlight_theme;
     use crate::transcript::render::{highlight_theme_for_surface, is_dark_surface};
+
+    #[gpui::test]
+    fn transcript_palette_tracks_background_snapshot_and_pane_choice(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            Theme::global_mut(cx).highlight_theme = HighlightTheme::default_light();
+            let themed = cx.theme().highlight_theme.clone();
+            cx.set_global(AgentSettings {
+                pane_background_follows_terminal: true,
+                terminal_background: rgb(0x101010).into(),
+                background_opacity: 0.25,
+                ..AgentSettings::default()
+            });
+
+            assert_eq!(transcript_highlight_theme(cx).appearance, ThemeMode::Dark);
+
+            cx.global_mut::<AgentSettings>().terminal_background = rgb(0xeeeeee).into();
+            assert!(Arc::ptr_eq(&transcript_highlight_theme(cx), &themed));
+
+            let settings = cx.global_mut::<AgentSettings>();
+            settings.terminal_background = rgb(0x101010).into();
+            settings.pane_background_follows_terminal = false;
+            assert!(Arc::ptr_eq(&transcript_highlight_theme(cx), &themed));
+        });
+    }
 
     #[test]
     fn palette_is_kept_when_it_matches_the_surface() {

@@ -10,7 +10,6 @@ workspace = true
 
 [dependencies]
 nmt_agent_utils.workspace = true
-nmt_app_terminal.workspace = true
 nmt_config.workspace = true
 nmt_i18n.workspace = true
 nmt_platform.workspace = true
