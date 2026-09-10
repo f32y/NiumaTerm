@@ -45,6 +45,7 @@ use crate::fade::Fade;
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
 use crate::pane_state::{ChildAgents, TurnState};
 pub use crate::profile::{AgentKind, AgentThreadDefaults, agent_launch};
+use crate::session::history::FilesystemHistoryRequest;
 use crate::session::lifecycle::SessionRuntime;
 use crate::session::prompts::PendingPrompts;
 pub use crate::session::{
@@ -177,6 +178,8 @@ mod tests;
 
 /// Recent-session list shown above the composer.
 struct SessionHistoryUi {
+    next_request_id: u64,
+    filesystem_request: Option<FilesystemHistoryRequest>,
     /// Resumable sessions for this cwd, newest first; shown above the
     /// composer while the transcript is empty.
     sessions: Vec<SessionSummary>,
@@ -218,6 +221,8 @@ struct SessionHistoryUi {
 impl Default for SessionHistoryUi {
     fn default() -> Self {
         Self {
+            next_request_id: 0,
+            filesystem_request: None,
             sessions: Vec::new(),
             pending: None,
             mode: RecentSessionsMode::Automatic,

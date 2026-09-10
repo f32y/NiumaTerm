@@ -127,6 +127,7 @@ impl AgentPane {
         }
 
         let count = results.len();
+        self.history_ui.invalidate_filesystem_history();
         self.history_ui.sessions = results;
         self.history_ui.showing_search = true;
         self.history_ui.pending = None;

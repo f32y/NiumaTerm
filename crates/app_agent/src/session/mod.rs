@@ -13,7 +13,7 @@ mod backend;
 mod background_tasks;
 mod conversation;
 mod events;
-mod history;
+pub(crate) mod history;
 mod inbox;
 pub(crate) mod lifecycle;
 mod output;
@@ -534,6 +534,7 @@ impl AgentPane {
         // The previous attempt's reason describes a backend nobody is waiting
         // on any more, and this start is what the pane now reports.
         let epoch = self.runtime.begin_start();
+        self.history_ui.invalidate_filesystem_history();
         // A resumed conversation already has an opening prompt, even when an
         // older transcript has no stored title. Only a fresh conversation may
         // claim its next accepted prompt as the subject.
@@ -971,6 +972,7 @@ impl AgentPane {
         self.turn.queued_user_messages.clear();
         self.branch.clear();
         self.history_ui.pending_resume_replay = None;
+        self.history_ui.invalidate_filesystem_history();
         // An approval belongs to the tool call that asked for it. The backend
         // that asked is the one being replaced, so leaving the card up offers a
         // decision that would be answered into a different conversation.

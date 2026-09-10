@@ -134,6 +134,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) -> Task<Result<(), String>> {
         let (epoch, backend) = self.runtime.suspend_for_update();
+        self.history_ui.invalidate_filesystem_history();
         cx.emit(AgentPaneEvent::Interrupted);
         cx.notify();
 

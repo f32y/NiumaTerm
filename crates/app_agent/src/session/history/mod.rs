@@ -15,7 +15,102 @@ use nmt_i18n::i18n;
 use crate::composer::CommandFeedbackKind;
 use crate::session::backend::RecoveryIdentity;
 use crate::session::directories_match;
-use crate::{AgentPane, AgentPaneEvent, RecentSessionsMode};
+use crate::{AgentPane, AgentPaneEvent, RecentSessionsMode, SessionHistoryUi};
+
+#[cfg(test)]
+mod tests;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FilesystemHistoryRequest {
+    id: u64,
+    scope: SessionScope,
+    cwd: Option<String>,
+    epoch: u64,
+}
+
+enum CountPublication {
+    Stale,
+    Empty,
+    LoadRows,
+}
+
+impl SessionHistoryUi {
+    // Disk reads may finish after their view has been replaced. Retiring the
+    // request also removes its placeholders without waiting for that work.
+    pub(super) fn invalidate_filesystem_history(&mut self) {
+        self.filesystem_request = None;
+        self.pending = None;
+    }
+
+    fn begin_filesystem_history(
+        &mut self,
+        cwd: Option<String>,
+        epoch: u64,
+    ) -> FilesystemHistoryRequest {
+        self.invalidate_filesystem_history();
+        self.next_request_id = self
+            .next_request_id
+            .checked_add(1)
+            .expect("history request id exhausted");
+        let request = FilesystemHistoryRequest {
+            id: self.next_request_id,
+            scope: self.scope,
+            cwd,
+            epoch,
+        };
+        self.filesystem_request = Some(request.clone());
+        request
+    }
+
+    fn owns_filesystem_request(
+        &self,
+        request: &FilesystemHistoryRequest,
+        cwd: Option<&str>,
+        epoch: u64,
+    ) -> bool {
+        self.filesystem_request.as_ref() == Some(request)
+            && self.scope == request.scope
+            && request.cwd.as_deref() == cwd
+            && request.epoch == epoch
+    }
+
+    fn publish_filesystem_count(
+        &mut self,
+        request: &FilesystemHistoryRequest,
+        cwd: Option<&str>,
+        epoch: u64,
+        count: usize,
+    ) -> CountPublication {
+        if !self.owns_filesystem_request(request, cwd, epoch) {
+            return CountPublication::Stale;
+        }
+        if count == 0 {
+            self.sessions.clear();
+            self.selected = 0;
+            self.invalidate_filesystem_history();
+            CountPublication::Empty
+        } else {
+            self.pending = Some(count);
+            CountPublication::LoadRows
+        }
+    }
+
+    fn publish_filesystem_rows(
+        &mut self,
+        request: &FilesystemHistoryRequest,
+        cwd: Option<&str>,
+        epoch: u64,
+        sessions: Vec<SessionSummary>,
+    ) -> bool {
+        if !self.owns_filesystem_request(request, cwd, epoch) {
+            return false;
+        }
+        self.sessions = sessions;
+        self.selected = self.selected.min(self.sessions.len().saturating_sub(1));
+        self.invalidate_filesystem_history();
+        true
+    }
+}
 
 /// The filesystem history a scope covers. Only a backend that reads its own
 /// transcripts takes this route; one that lists over the protocol asks its
@@ -41,6 +136,7 @@ impl AgentPane {
     /// the protocol is asked again, one that reads its own transcripts is
     /// rescanned.
     pub(crate) fn toggle_history_scope(&mut self, cx: &mut Context<Self>) {
+        self.history_ui.invalidate_filesystem_history();
         self.history_ui.scope = match self.history_ui.scope {
             SessionScope::CurrentDirectory => SessionScope::AllDirectories,
             SessionScope::AllDirectories => SessionScope::CurrentDirectory,
@@ -69,6 +165,10 @@ impl AgentPane {
 
         let cwd = self.cwd();
         let scope = self.history_ui.scope;
+        let request = self
+            .history_ui
+            .begin_filesystem_history(cwd.clone(), self.runtime.epoch());
+        cx.notify();
 
         cx.spawn(async move |this, cx| {
             let count_cwd = cwd.clone();
@@ -79,10 +179,23 @@ impl AgentPane {
 
             let proceed = this
                 .update(cx, |this, cx| {
-                    this.history_ui.pending = Some(count);
-                    cx.notify();
-
-                    count > 0
+                    let cwd = this.cwd();
+                    match this.history_ui.publish_filesystem_count(
+                        &request,
+                        cwd.as_deref(),
+                        this.runtime.epoch(),
+                        count,
+                    ) {
+                        CountPublication::Stale => false,
+                        CountPublication::Empty => {
+                            cx.notify();
+                            false
+                        }
+                        CountPublication::LoadRows => {
+                            cx.notify();
+                            true
+                        }
+                    }
                 })
                 .unwrap_or(false);
 
@@ -104,9 +217,15 @@ impl AgentPane {
             let sessions = load.await;
 
             let _ = this.update(cx, |this, cx| {
-                this.history_ui.sessions = sessions;
-                this.history_ui.pending = None;
-                cx.notify();
+                let cwd = this.cwd();
+                if this.history_ui.publish_filesystem_rows(
+                    &request,
+                    cwd.as_deref(),
+                    this.runtime.epoch(),
+                    sessions,
+                ) {
+                    cx.notify();
+                }
             });
         })
         .detach();
