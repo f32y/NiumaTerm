@@ -306,13 +306,17 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
         // Terminal and agent scrolling are their own elements carrying
         // their own switch; this one covers every container that scrolls
         // through a plain scroll handle, which is the rest of the app.
-        let smooth_panels = cx.global::<AppSettings>().smooth_scrolling.panels_enabled();
+        let smooth_panels = cx
+            .global::<AppSettings>()
+            .appearance
+            .smooth_scrolling
+            .panels_enabled();
         cx.set_smooth_wheel_scrolling(smooth_panels);
 
         // The platform remembers the choice and applies it to the vsync
         // thread when that spawns (after this closure returns).
         #[cfg(windows)]
-        if cx.global::<AppSettings>().prioritize_ui_threads {
+        if cx.global::<AppSettings>().system.prioritize_ui_threads {
             platform_handle.set_ui_thread_priority(true);
         }
 
@@ -328,7 +332,11 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             update::settings_changed(cx);
             #[cfg(target_os = "macos")]
             sparkle::settings_changed(cx);
-            let smooth_panels = cx.global::<AppSettings>().smooth_scrolling.panels_enabled();
+            let smooth_panels = cx
+                .global::<AppSettings>()
+                .appearance
+                .smooth_scrolling
+                .panels_enabled();
             cx.set_smooth_wheel_scrolling(smooth_panels);
 
             // Opacity changes retint the theme and switch each window
@@ -339,7 +347,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             // the observer fires on every settings edit (including theme
             // filter keystrokes), and only a real language switch should
             // pay for a full re-render of every window.
-            let language = cx.global::<AppSettings>().language;
+            let language = cx.global::<AppSettings>().appearance.language;
             let language_changed = &*gpui_component::locale() != language.as_str();
             if language_changed {
                 nmt_i18n::set_language(language.as_str());
@@ -386,7 +394,10 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
         // Restore local state; first run centers and starts one default tab.
         let remembered_state = startup_files.remembered_state.clone();
 
-        let restore_session = cx.global::<AppSettings>().restore_last_session_when_opening;
+        let restore_session = cx
+            .global::<AppSettings>()
+            .system
+            .restore_last_session_when_opening;
 
         let mut initials: Vec<AppWindow> = if restore_session {
             remembered_state
@@ -455,9 +466,16 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             // Settings edits live in the global until something writes
             // them out. Closing the settings surface does that, and so
             // does quitting with it still open.
-            cx.global::<AppSettings>().save();
+            if !cx.global::<AppSettings>().editing.discard_on_exit
+                && let Err(error) = cx.global_mut::<AppSettings>().save()
+            {
+                warn!("failed to save settings on application shutdown: {error}");
+            }
 
-            let save_session = cx.global::<AppSettings>().restore_last_session_when_opening;
+            let save_session = cx
+                .global::<AppSettings>()
+                .system
+                .restore_last_session_when_opening;
 
             let windows: Vec<_> = cx
                 .global::<WindowRegistry>()
@@ -591,7 +609,11 @@ pub(crate) fn open_window_without_a_source(cx: &mut App) {
     {
         initial.bounds = remembered.bounds;
         initial.sidebar_width = remembered.sidebar_width;
-        if cx.global::<AppSettings>().restore_last_session_when_opening {
+        if cx
+            .global::<AppSettings>()
+            .system
+            .restore_last_session_when_opening
+        {
             initial.session = remembered.session;
         }
     }
@@ -727,7 +749,7 @@ fn dispatch_focus_notification(route: &AgentRoute, notification_id: &str, cx: &m
 }
 
 fn dispatch_agent_event(event: AgentEvent, cx: &mut App) {
-    if !cx.global::<AppSettings>().enable_agent_hooks {
+    if !cx.global::<AppSettings>().agent.enable_agent_hooks {
         return;
     }
 

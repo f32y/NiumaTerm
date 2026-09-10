@@ -1,7 +1,6 @@
 //! Update settings persisted as the `[update]` section of `config.toml`.
 
 use serde::{Deserialize, Serialize};
-use toml_edit::{DocumentMut, value};
 
 use crate::defaults::default_bool_true;
 
@@ -49,9 +48,4 @@ impl UpdateChannel {
             _ => Self::Stable,
         }
     }
-}
-
-pub(crate) fn patch_document(doc: &mut DocumentMut, update: &UpdateConfig) {
-    doc["update"]["check-updates"] = value(update.check_updates);
-    doc["update"]["channel"] = value(update.channel.as_str());
 }

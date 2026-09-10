@@ -79,16 +79,20 @@ fn current_family(target: FontTarget, cx: &App) -> SharedString {
     let settings = cx.global::<AppSettings>();
 
     match target {
-        FontTarget::Terminal => settings.terminal_font_family.clone(),
-        FontTarget::Ui => settings.ui_font_family.clone(),
-        FontTarget::Agent => settings.agent_font_family.clone(),
-        FontTarget::AgentTranscript => settings.agent_transcript_font_family.clone(),
+        FontTarget::Terminal => settings.appearance.terminal_font_family.clone().into(),
+        FontTarget::Ui => settings.appearance.ui_font.clone().into(),
+        FontTarget::Agent => settings.appearance.agent_font_family.clone().into(),
+        FontTarget::AgentTranscript => settings
+            .appearance
+            .agent_transcript_font_family
+            .clone()
+            .into(),
     }
 }
 
 fn monospace_filter(target: FontTarget, cx: &App) -> bool {
     matches!(target, FontTarget::Terminal | FontTarget::AgentTranscript)
-        && cx.global::<AppSettings>().monospace_only
+        && cx.global::<AppSettings>().appearance.monospace_only
 }
 
 fn slot(target: FontTarget, cx: &App) -> &Option<FontPicker> {
@@ -146,11 +150,13 @@ fn ensure_picker(target: FontTarget, window: &mut Window, cx: &mut App) -> Entit
                 let settings = cx.global_mut::<AppSettings>();
 
                 match target {
-                    FontTarget::Terminal => settings.terminal_font_family = name.clone(),
-                    FontTarget::Ui => settings.ui_font_family = name.clone(),
-                    FontTarget::Agent => settings.agent_font_family = name.clone(),
+                    FontTarget::Terminal => {
+                        settings.appearance.terminal_font_family = name.to_string()
+                    }
+                    FontTarget::Ui => settings.appearance.ui_font = name.to_string(),
+                    FontTarget::Agent => settings.appearance.agent_font_family = name.to_string(),
                     FontTarget::AgentTranscript => {
-                        settings.agent_transcript_font_family = name.clone()
+                        settings.appearance.agent_transcript_font_family = name.to_string()
                     }
                 }
             }

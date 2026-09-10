@@ -136,7 +136,7 @@ impl AutoRefresh for TokenUsageView {
     const INTERVAL: Duration = Duration::from_secs(60);
 
     fn enabled(settings: &AppSettings) -> bool {
-        settings.show_daily_token_usage
+        settings.appearance.show_daily_token_usage
     }
 
     fn state(&mut self) -> &mut RefreshState {

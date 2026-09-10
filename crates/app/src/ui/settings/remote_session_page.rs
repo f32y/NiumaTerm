@@ -15,9 +15,9 @@ pub(super) fn remote_session_page() -> SettingPage {
                     SettingItem::new(
                         i18n("settings-remote-enable-host"),
                         SettingField::switch(
-                            |cx| cx.global::<AppSettings>().remote_host_enabled,
+                            |cx| cx.global::<AppSettings>().remote_session.host_enabled,
                             |value, cx| {
-                                cx.global_mut::<AppSettings>().remote_host_enabled = value;
+                                cx.global_mut::<AppSettings>().remote_session.host_enabled = value;
                                 reconcile_remote_host(cx);
                             },
                         ),
@@ -28,9 +28,16 @@ pub(super) fn remote_session_page() -> SettingPage {
                     SettingItem::new(
                         i18n("settings-remote-relay-url"),
                         SettingField::input(
-                            |cx| cx.global::<AppSettings>().remote_relay_url.clone(),
+                            |cx| {
+                                cx.global::<AppSettings>()
+                                    .remote_session
+                                    .relay_url
+                                    .clone()
+                                    .into()
+                            },
                             |value, cx| {
-                                cx.global_mut::<AppSettings>().remote_relay_url = value;
+                                cx.global_mut::<AppSettings>().remote_session.relay_url =
+                                    value.to_string();
                             },
                         ),
                     )
@@ -40,9 +47,16 @@ pub(super) fn remote_session_page() -> SettingPage {
                     SettingItem::new(
                         i18n("settings-remote-access-token"),
                         SettingField::input(
-                            |cx| cx.global::<AppSettings>().remote_access_token.clone(),
+                            |cx| {
+                                cx.global::<AppSettings>()
+                                    .remote_session
+                                    .access_token
+                                    .clone()
+                                    .into()
+                            },
                             |value, cx| {
-                                cx.global_mut::<AppSettings>().remote_access_token = value;
+                                cx.global_mut::<AppSettings>().remote_session.access_token =
+                                    value.to_string();
                             },
                         ),
                     )
@@ -62,9 +76,14 @@ pub(super) fn remote_session_page() -> SettingPage {
                     SettingItem::new(
                         i18n("settings-remote-pairing-code"),
                         SettingField::input(
-                            |cx| cx.global::<AppSettings>().remote_pairing_input.clone(),
+                            |cx| {
+                                cx.global::<AppSettings>()
+                                    .editing
+                                    .remote_pairing_input
+                                    .clone()
+                            },
                             |value, cx| {
-                                cx.global_mut::<AppSettings>().remote_pairing_input = value;
+                                cx.global_mut::<AppSettings>().editing.remote_pairing_input = value;
                             },
                         ),
                     )
@@ -79,11 +98,7 @@ pub(super) fn remote_session_page() -> SettingPage {
 #[cfg(windows)]
 pub(crate) fn reconcile_remote_host(cx: &App) {
     let settings = cx.global::<AppSettings>();
-    reconcile_remote_session(&RemoteSessionConfig {
-        host_enabled: settings.remote_host_enabled,
-        relay_url: settings.remote_relay_url.to_string(),
-        access_token: settings.remote_access_token.to_string(),
-    });
+    reconcile_remote_session(&settings.remote_session);
 }
 
 #[cfg(not(windows))]
@@ -107,7 +122,11 @@ fn remote_host_status(cx: &mut App) -> Div {
     }
 
     let host_id = remote::host_id().unwrap_or_default();
-    let pairing = cx.global::<AppSettings>().remote_pairing_code.clone();
+    let pairing = cx
+        .global::<AppSettings>()
+        .editing
+        .remote_pairing_code
+        .clone();
     let devices = remote::list_devices();
 
     v_flex()
@@ -134,7 +153,7 @@ fn remote_host_status(cx: &mut App) -> Div {
                         .label(i18n("settings-remote-generate-pairing-code"))
                         .on_click(|_, _, cx: &mut App| {
                             if let Some(code) = remote::begin_pairing() {
-                                cx.global_mut::<AppSettings>().remote_pairing_code =
+                                cx.global_mut::<AppSettings>().editing.remote_pairing_code =
                                     Some(code.encode());
                             }
                         }),
@@ -211,7 +230,11 @@ fn remote_client_status(cx: &mut App) -> Div {
 
     let muted = cx.theme().muted_foreground;
     let border = cx.theme().border;
-    let status = cx.global::<AppSettings>().remote_client_status.clone();
+    let status = cx
+        .global::<AppSettings>()
+        .editing
+        .remote_client_status
+        .clone();
     let hosts = remote::known_hosts();
 
     v_flex()
@@ -226,13 +249,17 @@ fn remote_client_status(cx: &mut App) -> Div {
                         .outline()
                         .label(i18n("settings-remote-pair"))
                         .on_click(|_, _, cx: &mut App| {
-                            let code = cx.global::<AppSettings>().remote_pairing_input.to_string();
+                            let code = cx
+                                .global::<AppSettings>()
+                                .editing
+                                .remote_pairing_input
+                                .to_string();
                             if code.trim().is_empty() {
-                                cx.global_mut::<AppSettings>().remote_client_status =
+                                cx.global_mut::<AppSettings>().editing.remote_client_status =
                                     Some(i18n("settings-remote-enter-code-first").to_owned());
                                 return;
                             }
-                            cx.global_mut::<AppSettings>().remote_client_status =
+                            cx.global_mut::<AppSettings>().editing.remote_client_status =
                                 Some(i18n("settings-remote-pairing").to_owned());
                             // Pairing is a network round trip: running it inline
                             // would freeze the window until the relay answers or
@@ -250,7 +277,8 @@ fn remote_client_status(cx: &mut App) -> Div {
                                 cx.update_global(|settings: &mut AppSettings, _| {
                                     let message = match paired {
                                         Ok(host) => {
-                                            settings.remote_pairing_input = SharedString::default();
+                                            settings.editing.remote_pairing_input =
+                                                SharedString::default();
                                             i18n("settings-remote-paired-success")
                                                 .replace("{name}", &host.name)
                                                 .replace("{id}", &host.host_id)
@@ -258,7 +286,7 @@ fn remote_client_status(cx: &mut App) -> Div {
                                         Err(e) => i18n("settings-remote-pairing-failed")
                                             .replace("{error}", &e.to_string()),
                                     };
-                                    settings.remote_client_status = Some(message);
+                                    settings.editing.remote_client_status = Some(message);
                                 })
                             })
                             .detach();

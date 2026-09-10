@@ -1,11 +1,13 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
+use std::{fs, io};
 
 use gpui::{
     Context, Entity, IntoElement, ListAlignment, ListOffset, ListState, ScrollDelta,
     ScrollWheelEvent, TestAppContext, list, point, size,
 };
 use nmt_app_agent::AgentKind;
+use nmt_config::Config;
 use nmt_config::builtin_themes::{THEMES as BUILTIN_THEMES, get as builtin_theme_source};
 use nmt_config::theme::Theme as ConfigTheme;
 
@@ -70,17 +72,12 @@ fn terminal_font_metrics_clamp_to_allowed_range() {
 fn agent_transcript_font_has_first_party_defaults() {
     let settings = AppSettings::default();
 
-    assert_eq!(settings.agent_transcript_font_family, DEFAULT_FONT_FAMILY);
     assert_eq!(
-        settings.agent_transcript_font_size,
-        DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE
-    );
-    assert_eq!(
-        settings.appearance_config().agent_transcript_font_family,
+        settings.appearance.agent_transcript_font_family,
         DEFAULT_FONT_FAMILY
     );
     assert_eq!(
-        settings.appearance_config().agent_transcript_font_size,
+        settings.appearance.agent_transcript_font_size,
         DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE
     );
 }
@@ -181,15 +178,18 @@ fn load_falls_back_to_default_profile() {
     // list maps to the single built-in profile, and the unset default
     // profile resolves to that profile's name.
     let settings = AppSettings::load();
-    assert_eq!(settings.input_style, InputStyle::Waterfall);
-    assert!(settings.scroll_to_bottom_when_typing);
-    assert_eq!(settings.window_backdrop, WindowBackdrop::Acrylic);
+    assert_eq!(settings.appearance.input_style, InputStyle::Waterfall);
+    assert!(settings.appearance.scroll_to_bottom_when_typing);
+    assert_eq!(settings.appearance.window_backdrop, WindowBackdrop::Acrylic);
     assert_eq!(settings.profiles.len(), 1);
     assert_eq!(settings.default_profile, settings.profiles[0].name);
     assert_eq!(settings.default_profile, "PowerShell");
-    assert!(settings.monospace_only);
-    assert!(settings.restore_last_session_when_opening);
-    assert_eq!(settings.smooth_scrolling, SmoothScrollingMode::All);
+    assert!(settings.appearance.monospace_only);
+    assert!(settings.system.restore_last_session_when_opening);
+    assert_eq!(
+        settings.appearance.smooth_scrolling,
+        SmoothScrollingMode::All
+    );
 }
 
 #[test]
@@ -363,65 +363,77 @@ fn default_agent_profile_entry_resolves_by_name() {
 #[test]
 fn defaults_have_one_powershell_profile() {
     let settings = AppSettings::default();
-    assert_eq!(settings.input_style, InputStyle::Waterfall);
-    assert!(settings.scroll_to_bottom_when_typing);
-    assert_eq!(settings.window_backdrop, WindowBackdrop::Acrylic);
+    assert_eq!(settings.appearance.input_style, InputStyle::Waterfall);
+    assert!(settings.appearance.scroll_to_bottom_when_typing);
+    assert_eq!(settings.appearance.window_backdrop, WindowBackdrop::Acrylic);
     assert_eq!(settings.profiles.len(), 1);
     assert!(
         settings.profiles[0].shell == default_shell_for_tests()
             || settings.profiles[0].shell.ends_with(r"\pwsh.exe")
     );
     assert_eq!(settings.profiles[0].args, "");
-    assert!(settings.restore_last_session_when_opening);
-    assert_eq!(settings.smooth_scrolling, SmoothScrollingMode::All);
+    assert!(settings.system.restore_last_session_when_opening);
+    assert_eq!(
+        settings.appearance.smooth_scrolling,
+        SmoothScrollingMode::All
+    );
 }
 
 #[test]
-fn scroll_to_bottom_when_typing_maps_to_saved_appearance() {
-    let settings = AppSettings {
-        scroll_to_bottom_when_typing: false,
-        ..AppSettings::default()
-    };
-
-    assert!(!settings.appearance_config().scroll_to_bottom_when_typing);
-}
-
-#[test]
-fn smooth_scrolling_maps_to_saved_appearance() {
+fn failed_settings_save_keeps_edits_and_retry_clears_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    fs::write(&path, "invalid [ configuration").unwrap();
     let mut settings = AppSettings::default();
-    for mode in [
-        SmoothScrollingMode::All,
-        SmoothScrollingMode::OnlyTerminal,
-        SmoothScrollingMode::OnlyAgent,
-        SmoothScrollingMode::Off,
-    ] {
-        settings.smooth_scrolling = mode;
-        assert_eq!(settings.appearance_config().smooth_scrolling, mode);
-    }
+    settings.appearance.scroll_to_bottom_when_typing = false;
+    settings.appearance.reduce_motion = true;
+    settings.appearance.human_friendly_agent_ui_layout = false;
+    settings.appearance.smooth_scrolling = SmoothScrollingMode::OnlyAgent;
+    settings.editing.theme_filter = "not persisted".into();
+
+    let error = settings.save_to(&path).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert!(settings.editing.save_error.is_some());
+    assert!(settings.appearance.reduce_motion);
+    assert!(!settings.appearance.scroll_to_bottom_when_typing);
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "invalid [ configuration"
+    );
+
+    fs::write(&path, "# keep this\n[appearance]\nfuture-setting = 42\n").unwrap();
+    settings.save_to(&path).unwrap();
+    assert!(settings.editing.save_error.is_none());
+    let saved = fs::read_to_string(&path).unwrap();
+    assert!(saved.contains("# keep this"));
+    assert!(saved.contains("future-setting = 42"));
+    assert!(!saved.contains("not persisted"));
+    let config: Config = toml::from_str(&saved).unwrap();
+    assert_eq!(config.appearance, settings.appearance);
+    assert_eq!(config.agent, settings.agent);
+    assert_eq!(config.system, settings.system);
+    assert_eq!(config.update, settings.update);
+    assert_eq!(config.remote_session, settings.remote_session);
 }
 
-/// Motion is on for a fresh configuration, and turning it down is what gets
-/// written to disk rather than being forgotten at the next launch.
 #[test]
-fn reduce_motion_is_off_by_default_and_is_saved_when_turned_on() {
+fn settings_io_failure_preserves_edits_until_the_path_is_repaired() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    fs::create_dir(&path).unwrap();
     let mut settings = AppSettings::default();
-    assert!(!settings.reduce_motion);
-    assert!(!settings.appearance_config().reduce_motion);
+    settings.system.confirm_before_closing_workspace = false;
 
-    settings.reduce_motion = true;
-    assert!(settings.appearance_config().reduce_motion);
-}
+    assert!(settings.save_to(&path).is_err());
+    assert!(settings.editing.save_error.is_some());
+    assert!(!settings.system.confirm_before_closing_workspace);
+    assert!(path.is_dir());
 
-/// The reading column is on for a fresh configuration, and turning it off
-/// is what gets written to disk.
-#[test]
-fn human_friendly_agent_ui_layout_is_on_by_default_and_is_saved_when_turned_off() {
-    let mut settings = AppSettings::default();
-    assert!(settings.human_friendly_agent_ui_layout);
-    assert!(settings.appearance_config().human_friendly_agent_ui_layout);
-
-    settings.human_friendly_agent_ui_layout = false;
-    assert!(!settings.appearance_config().human_friendly_agent_ui_layout);
+    fs::remove_dir(&path).unwrap();
+    settings.save_to(&path).unwrap();
+    assert!(settings.editing.save_error.is_none());
+    let config: Config = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(!config.system.confirm_before_closing_workspace);
 }
 
 fn list_pixel_position(state: &ListState) -> f32 {
@@ -435,6 +447,7 @@ impl gpui::Render for SettingsAwareList {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.0.set_smooth_wheel_enabled(
             cx.global::<AppSettings>()
+                .appearance
                 .smooth_scrolling
                 .terminal_enabled(),
         );
@@ -477,7 +490,7 @@ fn smooth_scrolling_mode_updates_an_open_terminal_list(cx: &mut TestAppContext) 
     assert!(stopped_at > 150. && stopped_at < 200.);
 
     cx.update_global::<AppSettings, _>(|settings, _| {
-        settings.smooth_scrolling = SmoothScrollingMode::OnlyAgent;
+        settings.appearance.smooth_scrolling = SmoothScrollingMode::OnlyAgent;
     });
     draw_settings_aware_list(cx, &view);
     cx.executor().advance_clock(Duration::from_millis(400));

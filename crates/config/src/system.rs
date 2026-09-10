@@ -2,7 +2,6 @@
 //! `config.toml` by the settings dialog (System page).
 
 use serde::{Deserialize, Serialize};
-use toml_edit::{DocumentMut, value};
 
 use crate::defaults::default_bool_true;
 
@@ -113,19 +112,4 @@ impl Default for SystemConfig {
             open_in_best_workspace: true,
         }
     }
-}
-
-/// Write the `[system]` keys into a parsed `config.toml` document. The table
-/// must already exist as an explicit table (the caller ensures it).
-pub(crate) fn patch_document(doc: &mut DocumentMut, system: &SystemConfig) {
-    doc["system"]["restore-last-session-when-opening"] =
-        value(system.restore_last_session_when_opening);
-    doc["system"]["manage-subprocess-job"] = value(system.manage_subprocess_job);
-    doc["system"]["warn-before-terminating-shell"] =
-        value(system.warn_before_terminating_shell.as_str());
-    doc["system"]["confirm-before-closing-workspace"] =
-        value(system.confirm_before_closing_workspace);
-    doc["system"]["prioritize-ui-threads"] = value(system.prioritize_ui_threads);
-    doc["system"]["newline-shortcut"] = value(system.newline_shortcut.as_str());
-    doc["system"]["open-in-best-workspace"] = value(system.open_in_best_workspace);
 }

@@ -1,7 +1,6 @@
 //! Agent settings persisted as the `[agent]` section of `config.toml`.
 
 use serde::{Deserialize, Deserializer, Serialize};
-use toml_edit::{DocumentMut, value};
 
 use crate::defaults::default_bool_true;
 
@@ -155,13 +154,4 @@ where
         CollapseRowsValue::Legacy(true) => CollapseRows::WorkAndToolCalls,
         CollapseRowsValue::Legacy(false) => CollapseRows::WorkAndToolCalls,
     })
-}
-
-pub(crate) fn patch_document(doc: &mut DocumentMut, agent: &AgentConfig) {
-    doc["agent"]["enable-agent-hooks"] = value(agent.enable_agent_hooks);
-    doc["agent"]["show-agent-usage"] = value(agent.show_agent_usage);
-    doc["agent"]["collapse-tool-calls"] = value(agent.collapse_tool_calls.as_str());
-    doc["agent"]["check-agent-updates"] = value(agent.check_agent_updates);
-    doc["agent"]["codex-skill-command-compat"] = value(agent.codex_skill_command_compat);
-    doc["agent"]["model-list-style"] = value(agent.model_list_style.as_str());
 }

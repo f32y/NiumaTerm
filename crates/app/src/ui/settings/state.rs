@@ -1,22 +1,25 @@
-use gpui::{Global, SharedString};
+use std::io;
+use std::path::Path;
+
+use gpui::Global;
+#[cfg(windows)]
+use gpui::SharedString;
 use nmt_agent_utils::deepseek;
 use nmt_app_agent::AgentKind;
 use nmt_config::agent::AgentConfig;
 pub use nmt_config::agent::{CollapseRows, ModelListStyle};
-use nmt_config::appearance::{AppearanceConfig, SmoothScrollingMode};
+use nmt_config::appearance::AppearanceConfig;
 pub use nmt_config::appearance::{InputStyle, Language, TabBarStyle, WindowBackdrop};
 use nmt_config::defaults::default_theme;
 pub use nmt_config::profile::{
     AgentProfile, AgentProfileKind, AgentProfileLauncher, EnvVar, Profile,
 };
 use nmt_config::remote_session::RemoteSessionConfig;
-use nmt_config::system::{NewlineShortcut, SystemConfig, WarnBeforeTerminatingShell};
+use nmt_config::system::SystemConfig;
 use nmt_config::theme::Theme;
-pub use nmt_config::update::UpdateChannel;
 use nmt_config::update::UpdateConfig;
-use nmt_config::{Config, CursorShape, SettingsPatch, get, save_settings};
+use nmt_config::{Config, CursorShape, SettingsPatch, config_file_path, get, save_settings_to};
 use nmt_i18n::i18n;
-use tracing::warn;
 
 use crate::ui::settings::MAX_TAB_WIDTH;
 
@@ -47,134 +50,39 @@ pub const DEFAULT_UI_FONT: &str = ".SystemUIFont";
 pub const MIN_TAB_WIDTH: f64 = 120.0;
 pub const DEFAULT_TAB_WIDTH: f64 = 220.0;
 
-/// The app-wide settings model, stored as a gpui global.
+/// Persistent settings are shared with the configuration reader and writer.
+/// Picker state and save errors live separately and never enter a pane snapshot.
 pub struct AppSettings {
-    /// Selected file stem in the per-user `themes` directory.
+    /// File stem selected from the per-user themes directory.
     pub theme: String,
-    /// Ephemeral filter for the theme list; it is not persisted.
-    pub theme_filter: String,
-    /// Parsed theme files, refreshed when the themes directory changes.
-    pub themes: Vec<(String, Theme)>,
-    pub agent_pane_use_terminal_background: bool,
-    pub input_style: InputStyle,
-    /// Move a scrolled terminal viewport to the latest output on typed input.
-    pub scroll_to_bottom_when_typing: bool,
+    pub appearance: AppearanceConfig,
+    pub agent: AgentConfig,
+    pub system: SystemConfig,
+    pub remote_session: RemoteSessionConfig,
+    pub update: UpdateConfig,
     pub cursor_shape: CursorShape,
     pub profiles: Vec<Profile>,
-    /// Name of the profile new terminals use. Always references an existing
-    /// profile by name (seeded to the first profile when unset).
+    /// Resolves by name; loading and profile edits repair dangling references.
     pub default_profile: String,
-    /// Launch profiles for agent tabs (executable, endpoint, env vars).
     pub agent_profiles: Vec<AgentProfile>,
-    /// Name of the agent profile new agent tabs use. Always references an
-    /// existing profile by name (seeded to the first profile when unset).
+    /// Empty when the user has deliberately removed every agent profile.
     pub default_agent_profile: String,
-    /// Render command blocks as a split frozen-history list.
-    pub command_blocks: bool,
-    /// Show today's ccusage token totals in the sidebar status cluster.
-    pub show_daily_token_usage: bool,
-    /// Show the git `+added -removed` line counts in the titlebar.
-    pub show_git_status_on_title_bar: bool,
-    /// Seconds between git status refreshes; always one of 10/15/30/60.
-    pub git_status_refresh_interval: u64,
-    /// Font family for the app chrome (titlebar, sidebar, tabs, dialogs).
-    pub ui_font_family: SharedString,
-    /// Font family used by the terminal view.
-    pub terminal_font_family: SharedString,
-    /// Font size (px) used by the terminal view.
-    pub terminal_font_size: f64,
-    /// Line height as a multiplier on font size.
-    pub terminal_line_height: f64,
-    /// Font family used by agent (chat) tabs.
-    pub agent_font_family: SharedString,
-    /// Font size (px) used by agent (chat) tabs.
-    pub agent_font_size: f64,
-    /// Font family used by code-oriented agent transcript content.
-    pub agent_transcript_font_family: SharedString,
-    /// Font size (px) used by code-oriented agent transcript content.
-    pub agent_transcript_font_size: f64,
-    /// Fixed tab width in pixels (MIN_TAB_WIDTH..=MAX_TAB_WIDTH). Ignored
-    /// while `tab_auto_size` is on.
-    pub tab_width: f64,
-    /// Shrink tabs toward a minimum as the strip fills, rather than holding
-    /// `tab_width` and overflowing into the strip's horizontal scroll.
-    pub tab_auto_size: bool,
-    /// Tab strip placement: a title-bar row, or rows nested under each
-    /// workspace in the sidebar.
-    pub tab_bar_style: TabBarStyle,
-    /// Filter the settings font picker to monospace fonts.
-    pub monospace_only: bool,
-    /// Window backdrop material: Mica, Acrylic, or Off (see
-    /// [`WindowBackdrop`]). Only Off forces an opaque window.
-    pub window_backdrop: WindowBackdrop,
-    /// Allow the Terminal View and Agent Pane background to remain translucent.
-    pub transparent_main_view: bool,
-    /// Select which scrolling views animate line-based mouse-wheel input.
-    pub smooth_scrolling: SmoothScrollingMode,
-    /// Put disclosed content on screen at once, skipping the entrance the
-    /// agent transcript otherwise plays for it.
-    pub reduce_motion: bool,
-    /// Hold the agent conversation column at a reading width and centre it.
-    pub human_friendly_agent_ui_layout: bool,
-    /// Whole-window background opacity (0.2..=1.0) while transparency is enabled.
-    pub background_opacity: f64,
-    /// Local image drawn behind all window content.
-    pub background_image: Option<String>,
-    /// How strongly the image shows through the window surfaces (0.0..=1.0).
-    pub background_image_opacity: f64,
-    /// UI display language.
-    pub language: Language,
-    /// Process lifecycle events received from Agent Hook executables.
-    pub enable_agent_hooks: bool,
-    /// Show Agent account usage in the workspace sidebar.
-    pub show_agent_usage: bool,
-    /// Which consecutive rows agent tabs fold into a one-line summary.
-    pub collapse_tool_calls: CollapseRows,
-    /// Probe each Agent installation for a newer provider version in the
-    /// background.
-    pub check_agent_updates: bool,
-    /// List Codex skills in the `/` command palette and rewrite a chosen one
-    /// to its `$name` form.
-    pub codex_skill_command_compat: bool,
-    /// How the composer's model picker spells each model it offers.
-    pub model_list_style: ModelListStyle,
-    /// Ask GitHub in the background whether the selected channel published
-    /// something newer than this build.
-    pub check_updates: bool,
-    /// Which published channel counts as an update.
-    pub update_channel: UpdateChannel,
-    /// Restore the last saved workspace/tab session on startup.
-    pub restore_last_session_when_opening: bool,
-    /// Manage each tab's shell with a Windows Job Object: closing the tab
-    /// kills the shell's entire process tree. Applies to new tabs.
-    pub manage_subprocess_job: bool,
-    /// When to warn before closing a shell.
-    pub warn_before_terminating_shell: WarnBeforeTerminatingShell,
-    /// Ask for confirmation before closing a workspace, Agent tab, or window.
-    pub confirm_before_closing: bool,
-    /// Raise the main (UI) and render thread priority to AboveNormal.
-    pub prioritize_ui_threads: bool,
-    /// Modified Enter key that inserts a new line without submitting input.
-    pub newline_shortcut: NewlineShortcut,
-    /// Open a directory in the deepest workspace that already contains it,
-    /// instead of always opening a workspace of its own.
-    pub open_in_best_workspace: bool,
-    /// Host this machine's local sessions for remote clients via the relay.
-    pub remote_host_enabled: bool,
-    /// Relay endpoint both host and clients dial.
-    pub remote_relay_url: SharedString,
-    /// Shared token the relay requires from hosts on registration.
-    pub remote_access_token: SharedString,
-    /// Most recently generated pairing code, shown until the dialog closes.
-    /// Ephemeral: never persisted. Carried only where the remote-session page
-    /// that reads it is built, which is the platform that can host a session.
+    pub editing: SettingsEditing,
+}
+
+#[derive(Default)]
+pub struct SettingsEditing {
+    pub theme_filter: String,
+    /// Parsed theme files refreshed by the settings surface's watcher.
+    pub themes: Vec<(String, Theme)>,
+    /// Cleared only after another save succeeds.
+    pub save_error: Option<String>,
+    /// The last window's explicit choice must also bypass the final quit hook.
+    pub discard_on_exit: bool,
     #[cfg(windows)]
     pub remote_pairing_code: Option<String>,
-    /// Client-side: pairing code being entered to pair with a remote host.
-    /// Ephemeral.
     #[cfg(windows)]
     pub remote_pairing_input: SharedString,
-    /// Client-side: last pairing attempt result message. Ephemeral.
     #[cfg(windows)]
     pub remote_client_status: Option<String>,
 }
@@ -183,76 +91,22 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             theme: String::new(),
-            theme_filter: String::new(),
-            themes: Vec::new(),
-            agent_pane_use_terminal_background: false,
-            input_style: InputStyle::Waterfall,
-            scroll_to_bottom_when_typing: true,
+            appearance: AppearanceConfig::default(),
+            agent: AgentConfig::default(),
+            system: SystemConfig::default(),
+            remote_session: RemoteSessionConfig::default(),
+            update: UpdateConfig::default(),
             cursor_shape: CursorShape::Block,
             profiles: vec![builtin_profile()],
             default_profile: builtin_profile().name,
             agent_profiles: builtin_agent_profiles(),
             default_agent_profile: agent_kind_label(AgentProfileKind::ClaudeCode).to_string(),
-            command_blocks: true,
-            show_daily_token_usage: false,
-            show_git_status_on_title_bar: false,
-            git_status_refresh_interval: 30,
-            ui_font_family: DEFAULT_UI_FONT.into(),
-            terminal_font_family: initial_font_family(),
-            terminal_font_size: DEFAULT_FONT_SIZE,
-            terminal_line_height: DEFAULT_LINE_HEIGHT,
-            agent_font_family: DEFAULT_UI_FONT.into(),
-            agent_font_size: DEFAULT_FONT_SIZE,
-            agent_transcript_font_family: initial_font_family(),
-            agent_transcript_font_size: DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE,
-            tab_width: DEFAULT_TAB_WIDTH,
-            tab_auto_size: false,
-            tab_bar_style: TabBarStyle::default(),
-            monospace_only: true,
-            window_backdrop: WindowBackdrop::Acrylic,
-            transparent_main_view: true,
-            smooth_scrolling: SmoothScrollingMode::All,
-            reduce_motion: false,
-            human_friendly_agent_ui_layout: true,
-            background_opacity: 1.0,
-            background_image: None,
-            background_image_opacity: DEFAULT_BACKGROUND_IMAGE_OPACITY,
-            language: Language::default(),
-            enable_agent_hooks: true,
-            show_agent_usage: true,
-            collapse_tool_calls: CollapseRows::WorkAndToolCalls,
-            check_agent_updates: true,
-            codex_skill_command_compat: true,
-            model_list_style: ModelListStyle::default(),
-            check_updates: true,
-            update_channel: UpdateChannel::default(),
-            restore_last_session_when_opening: true,
-            manage_subprocess_job: false,
-            warn_before_terminating_shell: WarnBeforeTerminatingShell::default(),
-            confirm_before_closing: true,
-            prioritize_ui_threads: false,
-            newline_shortcut: NewlineShortcut::default(),
-            open_in_best_workspace: true,
-            remote_host_enabled: false,
-            remote_relay_url: SharedString::default(),
-            remote_access_token: SharedString::default(),
-            #[cfg(windows)]
-            remote_pairing_code: None,
-            #[cfg(windows)]
-            remote_pairing_input: SharedString::default(),
-            #[cfg(windows)]
-            remote_client_status: None,
+            editing: SettingsEditing::default(),
         }
     }
 }
 
 impl Global for AppSettings {}
-
-/// Initial terminal font. Live changes then go through
-/// `AppSettings.terminal_font_family`.
-fn initial_font_family() -> SharedString {
-    DEFAULT_FONT_FAMILY.into()
-}
 
 pub(super) fn input_style_label(style: InputStyle) -> &'static str {
     match style {
@@ -354,19 +208,19 @@ pub(super) fn clamp_git_interval(seconds: u64) -> u64 {
 
 /// The configured UI font, or the default when the config leaves it blank
 /// (an empty family would fall back to gpui's default, not Segoe UI).
-pub(super) fn ui_font_or_default(family: &str) -> SharedString {
+pub(super) fn ui_font_or_default(family: &str) -> String {
     if family.trim().is_empty() {
         DEFAULT_UI_FONT.into()
     } else {
-        family.to_string().into()
+        family.to_string()
     }
 }
 
-pub(super) fn terminal_font_or_default(family: &str) -> SharedString {
+pub(super) fn terminal_font_or_default(family: &str) -> String {
     if family.trim().is_empty() {
         DEFAULT_FONT_FAMILY.into()
     } else {
-        family.to_string().into()
+        family.to_string()
     }
 }
 
@@ -427,7 +281,7 @@ impl AppSettings {
     pub fn load() -> Self {
         let config = get();
 
-        let appearance = &config.appearance;
+        let mut appearance = config.appearance.clone();
 
         let profiles: Vec<Profile> = if config.profiles.list.is_empty() {
             vec![builtin_profile()]
@@ -464,80 +318,48 @@ impl AppSettings {
                 .unwrap_or_default()
         };
 
+        appearance.git_status_refresh_interval =
+            clamp_git_interval(appearance.git_status_refresh_interval);
+        appearance.ui_font = ui_font_or_default(&appearance.ui_font);
+        appearance.terminal_font_family =
+            terminal_font_or_default(&appearance.terminal_font_family);
+        appearance.agent_font_family = ui_font_or_default(&appearance.agent_font_family);
+        appearance.agent_transcript_font_family =
+            terminal_font_or_default(&appearance.agent_transcript_font_family);
+        appearance.terminal_font_size = clamp_terminal_font_size(appearance.terminal_font_size);
+        appearance.agent_font_size = clamp_terminal_font_size(appearance.agent_font_size);
+        appearance.agent_transcript_font_size =
+            clamp_agent_transcript_font_size(appearance.agent_transcript_font_size);
+        appearance.terminal_line_height =
+            clamp_terminal_line_height(appearance.terminal_line_height);
+        appearance.tab_width = clamp_tab_width(appearance.tab_width);
+        appearance.background_opacity = clamp_background_opacity(appearance.background_opacity);
+        appearance.background_image_opacity =
+            clamp_background_image_opacity(appearance.background_image_opacity);
+        appearance.background_image = appearance
+            .background_image
+            .filter(|path| !path.trim().is_empty());
+
         Self {
             theme: if config.theme.is_empty() {
                 default_theme()
             } else {
                 config.theme.clone()
             },
-            theme_filter: String::new(),
-            themes: Config::load_themes(),
-            agent_pane_use_terminal_background: appearance.agent_pane_use_terminal_background,
-            input_style: appearance.input_style,
-            scroll_to_bottom_when_typing: appearance.scroll_to_bottom_when_typing,
+            appearance,
+            agent: config.agent.clone(),
+            system: config.system.clone(),
+            remote_session: config.remote_session.clone(),
+            update: config.update.clone(),
             cursor_shape: config.cursor.shape,
             profiles,
             default_profile,
             agent_profiles,
             default_agent_profile,
-            command_blocks: appearance.command_blocks,
-            show_daily_token_usage: appearance.show_daily_token_usage,
-            show_git_status_on_title_bar: appearance.show_git_status_on_title_bar,
-            git_status_refresh_interval: clamp_git_interval(appearance.git_status_refresh_interval),
-            ui_font_family: ui_font_or_default(&appearance.ui_font),
-            terminal_font_family: terminal_font_or_default(&appearance.terminal_font_family),
-            terminal_font_size: clamp_terminal_font_size(appearance.terminal_font_size),
-            terminal_line_height: clamp_terminal_line_height(appearance.terminal_line_height),
-            agent_font_family: ui_font_or_default(&appearance.agent_font_family),
-            agent_font_size: clamp_terminal_font_size(appearance.agent_font_size),
-            agent_transcript_font_family: terminal_font_or_default(
-                &appearance.agent_transcript_font_family,
-            ),
-            agent_transcript_font_size: clamp_agent_transcript_font_size(
-                appearance.agent_transcript_font_size,
-            ),
-            tab_width: clamp_tab_width(appearance.tab_width),
-            tab_auto_size: appearance.tab_auto_size,
-            tab_bar_style: appearance.tab_bar_style,
-            monospace_only: appearance.monospace_only,
-            window_backdrop: appearance.window_backdrop,
-            transparent_main_view: appearance.transparent_main_view,
-            smooth_scrolling: appearance.smooth_scrolling,
-            reduce_motion: appearance.reduce_motion,
-            human_friendly_agent_ui_layout: appearance.human_friendly_agent_ui_layout,
-            background_opacity: clamp_background_opacity(appearance.background_opacity),
-            background_image: appearance
-                .background_image
-                .clone()
-                .filter(|path| !path.trim().is_empty()),
-            background_image_opacity: clamp_background_image_opacity(
-                appearance.background_image_opacity,
-            ),
-            language: appearance.language,
-            enable_agent_hooks: config.agent.enable_agent_hooks,
-            show_agent_usage: config.agent.show_agent_usage,
-            collapse_tool_calls: config.agent.collapse_tool_calls,
-            check_agent_updates: config.agent.check_agent_updates,
-            codex_skill_command_compat: config.agent.codex_skill_command_compat,
-            model_list_style: config.agent.model_list_style,
-            check_updates: config.update.check_updates,
-            update_channel: config.update.channel,
-            restore_last_session_when_opening: config.system.restore_last_session_when_opening,
-            manage_subprocess_job: config.system.manage_subprocess_job,
-            warn_before_terminating_shell: config.system.warn_before_terminating_shell,
-            confirm_before_closing: config.system.confirm_before_closing_workspace,
-            prioritize_ui_threads: config.system.prioritize_ui_threads,
-            newline_shortcut: config.system.newline_shortcut,
-            open_in_best_workspace: config.system.open_in_best_workspace,
-            remote_host_enabled: config.remote_session.host_enabled,
-            remote_relay_url: config.remote_session.relay_url.clone().into(),
-            remote_access_token: config.remote_session.access_token.clone().into(),
-            #[cfg(windows)]
-            remote_pairing_code: None,
-            #[cfg(windows)]
-            remote_pairing_input: SharedString::default(),
-            #[cfg(windows)]
-            remote_client_status: None,
+            editing: SettingsEditing {
+                themes: Config::load_themes(),
+                ..SettingsEditing::default()
+            },
         }
     }
 
@@ -704,91 +526,30 @@ impl AppSettings {
             .unwrap_or_else(|| self.default_profile.clone())
     }
 
-    pub(super) fn appearance_config(&self) -> AppearanceConfig {
-        AppearanceConfig {
-            input_style: self.input_style,
-            scroll_to_bottom_when_typing: self.scroll_to_bottom_when_typing,
-            agent_pane_use_terminal_background: self.agent_pane_use_terminal_background,
-            command_blocks: self.command_blocks,
-            show_daily_token_usage: self.show_daily_token_usage,
-            show_git_status_on_title_bar: self.show_git_status_on_title_bar,
-            git_status_refresh_interval: self.git_status_refresh_interval,
-            tab_width: self.tab_width,
-            tab_auto_size: self.tab_auto_size,
-            tab_bar_style: self.tab_bar_style,
-            ui_font: self.ui_font_family.to_string(),
-            terminal_font_family: self.terminal_font_family.to_string(),
-            terminal_font_size: self.terminal_font_size,
-            terminal_line_height: self.terminal_line_height,
-            agent_font_family: self.agent_font_family.to_string(),
-            agent_font_size: self.agent_font_size,
-            monospace_only: self.monospace_only,
-            window_backdrop: self.window_backdrop,
-            transparent_main_view: self.transparent_main_view,
-            smooth_scrolling: self.smooth_scrolling,
-            reduce_motion: self.reduce_motion,
-            human_friendly_agent_ui_layout: self.human_friendly_agent_ui_layout,
-            background_opacity: self.background_opacity,
-            background_image: self.background_image.clone(),
-            background_image_opacity: self.background_image_opacity,
-            language: self.language,
-            agent_transcript_font_family: self.agent_transcript_font_family.to_string(),
-            agent_transcript_font_size: self.agent_transcript_font_size,
-        }
+    /// Persist the current edits without replacing unrelated TOML content.
+    /// On failure the edited values remain available for another attempt.
+    pub fn save(&mut self) -> io::Result<()> {
+        self.save_to(&config_file_path())
     }
 
-    /// Persist the dialog-managed settings into `config.toml` (patch-style,
-    /// preserving unrelated content). Called once on dialog close. Failures are
-    /// logged, never fatal.
-    pub fn save(&self) {
-        let appearance = self.appearance_config();
-
-        let agent = AgentConfig {
-            enable_agent_hooks: self.enable_agent_hooks,
-            show_agent_usage: self.show_agent_usage,
-            collapse_tool_calls: self.collapse_tool_calls,
-            check_agent_updates: self.check_agent_updates,
-            codex_skill_command_compat: self.codex_skill_command_compat,
-            model_list_style: self.model_list_style,
-        };
-
-        let system = SystemConfig {
-            restore_last_session_when_opening: self.restore_last_session_when_opening,
-            manage_subprocess_job: self.manage_subprocess_job,
-            warn_before_terminating_shell: self.warn_before_terminating_shell,
-            confirm_before_closing_workspace: self.confirm_before_closing,
-            prioritize_ui_threads: self.prioritize_ui_threads,
-            newline_shortcut: self.newline_shortcut,
-            open_in_best_workspace: self.open_in_best_workspace,
-        };
-
-        let remote_session = RemoteSessionConfig {
-            host_enabled: self.remote_host_enabled,
-            relay_url: self.remote_relay_url.to_string(),
-            access_token: self.remote_access_token.to_string(),
-        };
-
-        let update = UpdateConfig {
-            check_updates: self.check_updates,
-            channel: self.update_channel,
-        };
-
-        let profiles = self.profiles.clone();
-
-        if let Err(err) = save_settings(&SettingsPatch {
-            theme: &self.theme,
-            appearance: &appearance,
-            cursor_shape: self.cursor_shape,
-            agent: &agent,
-            system: &system,
-            remote_session: &remote_session,
-            update: &update,
-            profiles: &profiles,
-            default_profile: &self.default_profile,
-            agent_profiles: &self.agent_profiles,
-            default_agent_profile: &self.default_agent_profile,
-        }) {
-            warn!("failed to save settings to config.toml: {err}");
-        }
+    pub(super) fn save_to(&mut self, path: &Path) -> io::Result<()> {
+        let result = save_settings_to(
+            path,
+            &SettingsPatch {
+                theme: &self.theme,
+                appearance: &self.appearance,
+                cursor_shape: self.cursor_shape,
+                agent: &self.agent,
+                system: &self.system,
+                remote_session: &self.remote_session,
+                update: &self.update,
+                profiles: &self.profiles,
+                default_profile: &self.default_profile,
+                agent_profiles: &self.agent_profiles,
+                default_agent_profile: &self.default_agent_profile,
+            },
+        );
+        self.editing.save_error = result.as_ref().err().map(ToString::to_string);
+        result
     }
 }

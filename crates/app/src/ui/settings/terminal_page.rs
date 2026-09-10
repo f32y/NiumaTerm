@@ -21,9 +21,15 @@ pub(super) fn terminal_page() -> SettingPage {
                                 input_style_label(InputStyle::FixedBottom).into(),
                             ),
                         ],
-                        |cx| cx.global::<AppSettings>().input_style.as_str().into(),
+                        |cx| {
+                            cx.global::<AppSettings>()
+                                .appearance
+                                .input_style
+                                .as_str()
+                                .into()
+                        },
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().input_style =
+                            cx.global_mut::<AppSettings>().appearance.input_style =
                                 input_style_from_value(&value);
                         },
                     )
@@ -54,18 +60,24 @@ pub(super) fn terminal_page() -> SettingPage {
                 .item(SettingItem::new(
                     i18n("settings-terminal-command-blocks"),
                     SettingField::switch(
-                        |cx| cx.global::<AppSettings>().command_blocks,
+                        |cx| cx.global::<AppSettings>().appearance.command_blocks,
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().command_blocks = value;
+                            cx.global_mut::<AppSettings>().appearance.command_blocks = value;
                         },
                     ),
                 ))
                 .item(SettingItem::new(
                     i18n("settings-terminal-scroll-on-typing"),
                     SettingField::switch(
-                        |cx| cx.global::<AppSettings>().scroll_to_bottom_when_typing,
+                        |cx| {
+                            cx.global::<AppSettings>()
+                                .appearance
+                                .scroll_to_bottom_when_typing
+                        },
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().scroll_to_bottom_when_typing = value;
+                            cx.global_mut::<AppSettings>()
+                                .appearance
+                                .scroll_to_bottom_when_typing = value;
                         },
                     ),
                 )),

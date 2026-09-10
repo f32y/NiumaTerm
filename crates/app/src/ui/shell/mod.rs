@@ -443,7 +443,7 @@ impl Shell {
         let settings_active = self.workspaces.active_tabs().active().is_settings();
 
         if self.settings.note_active(settings_active) {
-            cx.global::<AppSettings>().save();
+            ui::settings::save_settings(window, cx);
         }
 
         // The settings surface owns its inner focus (its search field and

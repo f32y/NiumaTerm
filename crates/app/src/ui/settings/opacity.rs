@@ -25,11 +25,15 @@ pub(crate) fn surface_background_opacity(cx: &App) -> f32 {
     let settings = cx.global::<AppSettings>();
 
     effective_surface_background_opacity(
-        effective_background_opacity(settings.window_backdrop, settings.background_opacity),
+        effective_background_opacity(
+            settings.appearance.window_backdrop,
+            settings.appearance.background_opacity,
+        ),
         settings
+            .appearance
             .background_image
             .as_ref()
-            .map(|_| settings.background_image_opacity),
+            .map(|_| settings.appearance.background_image_opacity),
     ) as f32
 }
 
@@ -44,7 +48,7 @@ pub(super) fn effective_main_view_background_opacity(
 }
 
 fn effect_on_content_area(cx: &App) -> bool {
-    cx.global::<AppSettings>().transparent_main_view
+    cx.global::<AppSettings>().appearance.transparent_main_view
 }
 
 pub(crate) fn main_view_background_opacity(cx: &App) -> f32 {
@@ -71,8 +75,11 @@ pub(crate) fn background_image_layer_opacity(cx: &App) -> f32 {
     let settings = cx.global::<AppSettings>();
 
     effective_background_image_layer_opacity(
-        effective_background_opacity(settings.window_backdrop, settings.background_opacity),
-        settings.background_image_opacity,
+        effective_background_opacity(
+            settings.appearance.window_backdrop,
+            settings.appearance.background_opacity,
+        ),
+        settings.appearance.background_image_opacity,
     ) as f32
 }
 
@@ -93,5 +100,5 @@ pub(super) fn window_background_appearance_for(
 
 /// Select the DWM backdrop material for the configured mode.
 pub(crate) fn window_background_appearance(cx: &App) -> WindowBackgroundAppearance {
-    window_background_appearance_for(cx.global::<AppSettings>().window_backdrop)
+    window_background_appearance_for(cx.global::<AppSettings>().appearance.window_backdrop)
 }

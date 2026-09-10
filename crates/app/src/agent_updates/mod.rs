@@ -184,6 +184,7 @@ pub(crate) fn schedule_automatic_checks(cx: &mut App) {
             let active = cx.update(|cx| {
                 let coordinator = cx.global::<AgentUpdates>().coordinator.clone();
                 cx.global::<AppSettings>()
+                    .agent
                     .check_agent_updates
                     .then_some(coordinator)
             });

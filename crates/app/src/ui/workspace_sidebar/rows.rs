@@ -20,7 +20,8 @@ impl Sidebar {
         // In the vertical tab-bar style every tab of this workspace is on
         // screen as its own row carrying its own status mark and progress, so
         // the workspace's aggregate of them would say the same thing twice.
-        let vertical_tabs = cx.global::<AppSettings>().tab_bar_style == TabBarStyle::Vertical;
+        let vertical_tabs =
+            cx.global::<AppSettings>().appearance.tab_bar_style == TabBarStyle::Vertical;
         let highlight_active = ws.active && !vertical_tabs;
         let (glyphs, status_label) = workspace_status_glyphs(
             ws.agent_status,

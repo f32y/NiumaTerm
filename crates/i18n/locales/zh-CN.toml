@@ -1009,3 +1009,7 @@
 "menu-previous-tab" = "上一个标签页"
 "menu-next-workspace" = "下一个工作区"
 "menu-previous-workspace" = "上一个工作区"
+"settings-save-failed-title" = "设置未保存"
+"settings-save-failed-description" = "修改仍保留在应用中。请修复配置文件或其访问权限，然后重试。"
+"settings-save-failed-close-description" = "设置无法保存。可取消以保留修改并重试，或不保存直接关闭。应用退出后，未保存的修改将丢失。"
+"settings-close-without-saving" = "不保存直接关闭"

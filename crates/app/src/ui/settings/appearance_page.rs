@@ -22,9 +22,16 @@ pub(super) fn appearance_page(
                             ("en".into(), "English".into()),
                             ("zh-CN".into(), "简体中文".into()),
                         ],
-                        |cx| cx.global::<AppSettings>().language.as_str().into(),
+                        |cx| {
+                            cx.global::<AppSettings>()
+                                .appearance
+                                .language
+                                .as_str()
+                                .into()
+                        },
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().language = Language::from_value(&value);
+                            cx.global_mut::<AppSettings>().appearance.language =
+                                Language::from_value(&value);
                         },
                     )
                     .default_value(SharedString::from("en")),
@@ -38,10 +45,12 @@ pub(super) fn appearance_page(
                     SettingField::switch(
                         |cx| {
                             cx.global::<AppSettings>()
+                                .appearance
                                 .agent_pane_use_terminal_background
                         },
                         |value, cx| {
                             cx.global_mut::<AppSettings>()
+                                .appearance
                                 .agent_pane_use_terminal_background = value;
                         },
                     ),
@@ -49,9 +58,15 @@ pub(super) fn appearance_page(
                 .item(SettingItem::new(
                     i18n("settings-appearance-theme-search"),
                     SettingField::input(
-                        |cx| cx.global::<AppSettings>().theme_filter.clone().into(),
+                        |cx| {
+                            cx.global::<AppSettings>()
+                                .editing
+                                .theme_filter
+                                .clone()
+                                .into()
+                        },
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().theme_filter = value.to_string();
+                            cx.global_mut::<AppSettings>().editing.theme_filter = value.to_string();
                         },
                     ),
                 ))
@@ -82,9 +97,15 @@ pub(super) fn appearance_page(
                             ),
                             ("off".into(), i18n("settings-common-off").into()),
                         ],
-                        |cx| cx.global::<AppSettings>().window_backdrop.as_str().into(),
+                        |cx| {
+                            cx.global::<AppSettings>()
+                                .appearance
+                                .window_backdrop
+                                .as_str()
+                                .into()
+                        },
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().window_backdrop =
+                            cx.global_mut::<AppSettings>().appearance.window_backdrop =
                                 WindowBackdrop::from_value(&value);
                         },
                     )
@@ -93,9 +114,11 @@ pub(super) fn appearance_page(
                 .item(SettingItem::new(
                     i18n("settings-appearance-effect-on-content-area"),
                     SettingField::switch(
-                        |cx| cx.global::<AppSettings>().transparent_main_view,
+                        |cx| cx.global::<AppSettings>().appearance.transparent_main_view,
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().transparent_main_view = value;
+                            cx.global_mut::<AppSettings>()
+                                .appearance
+                                .transparent_main_view = value;
                         },
                     ),
                 ))
@@ -140,9 +163,15 @@ pub(super) fn appearance_page(
                             ),
                             ("off".into(), i18n("settings-common-off").into()),
                         ],
-                        |cx| cx.global::<AppSettings>().smooth_scrolling.as_str().into(),
+                        |cx| {
+                            cx.global::<AppSettings>()
+                                .appearance
+                                .smooth_scrolling
+                                .as_str()
+                                .into()
+                        },
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().smooth_scrolling =
+                            cx.global_mut::<AppSettings>().appearance.smooth_scrolling =
                                 SmoothScrollingMode::from_value(&value);
                         },
                     )
@@ -151,9 +180,9 @@ pub(super) fn appearance_page(
                 .item(SettingItem::new(
                     i18n("settings-appearance-reduce-motion"),
                     SettingField::switch(
-                        |cx| cx.global::<AppSettings>().reduce_motion,
+                        |cx| cx.global::<AppSettings>().appearance.reduce_motion,
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().reduce_motion = value;
+                            cx.global_mut::<AppSettings>().appearance.reduce_motion = value;
                         },
                     ),
                 ))
@@ -161,9 +190,14 @@ pub(super) fn appearance_page(
                     SettingItem::new(
                         i18n("settings-appearance-human-friendly-agent-ui-layout"),
                         SettingField::switch(
-                            |cx| cx.global::<AppSettings>().human_friendly_agent_ui_layout,
+                            |cx| {
+                                cx.global::<AppSettings>()
+                                    .appearance
+                                    .human_friendly_agent_ui_layout
+                            },
                             |value, cx| {
                                 cx.global_mut::<AppSettings>()
+                                    .appearance
                                     .human_friendly_agent_ui_layout = value;
                             },
                         ),
@@ -192,9 +226,9 @@ pub(super) fn appearance_page(
                             max: 72.0,
                             step: 0.1,
                         },
-                        |cx| cx.global::<AppSettings>().terminal_font_size,
+                        |cx| cx.global::<AppSettings>().appearance.terminal_font_size,
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().terminal_font_size = value;
+                            cx.global_mut::<AppSettings>().appearance.terminal_font_size = value;
                         },
                     ),
                 ))
@@ -206,9 +240,11 @@ pub(super) fn appearance_page(
                             max: 3.0,
                             step: 0.1,
                         },
-                        |cx| cx.global::<AppSettings>().terminal_line_height,
+                        |cx| cx.global::<AppSettings>().appearance.terminal_line_height,
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().terminal_line_height = value;
+                            cx.global_mut::<AppSettings>()
+                                .appearance
+                                .terminal_line_height = value;
                         },
                     ),
                 ))
@@ -224,18 +260,18 @@ pub(super) fn appearance_page(
                             max: 72.0,
                             step: 0.1,
                         },
-                        |cx| cx.global::<AppSettings>().agent_font_size,
+                        |cx| cx.global::<AppSettings>().appearance.agent_font_size,
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().agent_font_size = value;
+                            cx.global_mut::<AppSettings>().appearance.agent_font_size = value;
                         },
                     ),
                 ))
                 .item(SettingItem::new(
                     i18n("settings-appearance-monospace-only"),
                     SettingField::switch(
-                        |cx| cx.global::<AppSettings>().monospace_only,
+                        |cx| cx.global::<AppSettings>().appearance.monospace_only,
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().monospace_only = value;
+                            cx.global_mut::<AppSettings>().appearance.monospace_only = value;
                         },
                     ),
                 ))
@@ -253,9 +289,15 @@ pub(super) fn appearance_page(
                             max: 72.0,
                             step: 0.1,
                         },
-                        |cx| cx.global::<AppSettings>().agent_transcript_font_size,
+                        |cx| {
+                            cx.global::<AppSettings>()
+                                .appearance
+                                .agent_transcript_font_size
+                        },
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().agent_transcript_font_size = value;
+                            cx.global_mut::<AppSettings>()
+                                .appearance
+                                .agent_transcript_font_size = value;
                         },
                     ),
                 )),
@@ -277,9 +319,15 @@ pub(super) fn appearance_page(
                                     i18n("settings-appearance-tab-bar-style-vertical").into(),
                                 ),
                             ],
-                            |cx| cx.global::<AppSettings>().tab_bar_style.as_str().into(),
+                            |cx| {
+                                cx.global::<AppSettings>()
+                                    .appearance
+                                    .tab_bar_style
+                                    .as_str()
+                                    .into()
+                            },
                             |value, cx| {
-                                cx.global_mut::<AppSettings>().tab_bar_style =
+                                cx.global_mut::<AppSettings>().appearance.tab_bar_style =
                                     TabBarStyle::from_value(&value);
                             },
                         )
@@ -290,9 +338,9 @@ pub(super) fn appearance_page(
                 .item(SettingItem::new(
                     i18n("settings-appearance-tab-auto-size"),
                     SettingField::switch(
-                        |cx| cx.global::<AppSettings>().tab_auto_size,
+                        |cx| cx.global::<AppSettings>().appearance.tab_auto_size,
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().tab_auto_size = value;
+                            cx.global_mut::<AppSettings>().appearance.tab_auto_size = value;
                         },
                     ),
                 ))
@@ -305,9 +353,10 @@ pub(super) fn appearance_page(
                                 max: MAX_TAB_WIDTH,
                                 step: 1.0,
                             },
-                            |cx| cx.global::<AppSettings>().tab_width,
+                            |cx| cx.global::<AppSettings>().appearance.tab_width,
                             |value, cx| {
-                                cx.global_mut::<AppSettings>().tab_width = clamp_tab_width(value);
+                                cx.global_mut::<AppSettings>().appearance.tab_width =
+                                    clamp_tab_width(value);
                             },
                         ),
                     )
@@ -323,9 +372,11 @@ pub(super) fn appearance_page(
                     SettingItem::new(
                         i18n("settings-appearance-daily-token-usage"),
                         SettingField::switch(
-                            |cx| cx.global::<AppSettings>().show_daily_token_usage,
+                            |cx| cx.global::<AppSettings>().appearance.show_daily_token_usage,
                             |value, cx| {
-                                cx.global_mut::<AppSettings>().show_daily_token_usage = value;
+                                cx.global_mut::<AppSettings>()
+                                    .appearance
+                                    .show_daily_token_usage = value;
                             },
                         ),
                     )
@@ -334,9 +385,15 @@ pub(super) fn appearance_page(
                 .item(SettingItem::new(
                     i18n("settings-appearance-git-status"),
                     SettingField::switch(
-                        |cx| cx.global::<AppSettings>().show_git_status_on_title_bar,
+                        |cx| {
+                            cx.global::<AppSettings>()
+                                .appearance
+                                .show_git_status_on_title_bar
+                        },
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().show_git_status_on_title_bar = value;
+                            cx.global_mut::<AppSettings>()
+                                .appearance
+                                .show_git_status_on_title_bar = value;
                         },
                     ),
                 ))
@@ -364,12 +421,15 @@ pub(super) fn appearance_page(
                             ],
                             |cx| {
                                 cx.global::<AppSettings>()
+                                    .appearance
                                     .git_status_refresh_interval
                                     .to_string()
                                     .into()
                             },
                             |value, cx| {
-                                cx.global_mut::<AppSettings>().git_status_refresh_interval =
+                                cx.global_mut::<AppSettings>()
+                                    .appearance
+                                    .git_status_refresh_interval =
                                     clamp_git_interval(value.parse().unwrap_or(30));
                             },
                         )

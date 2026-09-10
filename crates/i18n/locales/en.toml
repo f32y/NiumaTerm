@@ -1010,3 +1010,7 @@
 "menu-previous-tab" = "Previous Tab"
 "menu-next-workspace" = "Next Workspace"
 "menu-previous-workspace" = "Previous Workspace"
+"settings-save-failed-title" = "Settings were not saved"
+"settings-save-failed-description" = "Your edits remain available. Fix the configuration file or its permissions, then retry."
+"settings-save-failed-close-description" = "Settings could not be saved. Cancel to keep your edits and retry, or close without saving. Unsaved edits will be lost when the app exits."
+"settings-close-without-saving" = "Close without saving"

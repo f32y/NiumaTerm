@@ -110,7 +110,7 @@ fn patch_settings(doc: &mut DocumentMut) {
 
 #[test]
 fn settings_patch_preserves_comments_and_unrelated_keys() {
-    let existing = "# my terminal config\ntheme = \"dark\"\n\n[window]\nwidth = 960\n";
+    let existing = "# my terminal config\ntheme = \"dark\"\n\n[window]\nwidth = 960\n\n[appearance]\n# Keep my font note\nterminal-font-size = 14.0 # reading size\n";
     let mut doc = existing.parse::<DocumentMut>().unwrap();
 
     patch_settings(&mut doc);
@@ -118,6 +118,8 @@ fn settings_patch_preserves_comments_and_unrelated_keys() {
 
     assert!(out.contains("# my terminal config"));
     assert!(out.contains("width = 960"));
+    assert!(out.contains("# Keep my font note"));
+    assert!(out.contains("terminal-font-size = 16.0 # reading size"));
     assert!(out.contains("smooth-scrolling = \"off\""));
     assert!(out.contains("agent-transcript-font-family = \"JetBrains Mono\""));
     assert!(out.contains("agent-transcript-font-size = 12.5"));
@@ -148,6 +150,67 @@ fn settings_patch_converts_inline_tables() {
     assert!(out.contains("fonts = { size = 12.0, hinting = true }"));
     let config: Config = parse_toml(&out).unwrap();
     assert_eq!(config.appearance, sample_appearance());
+}
+
+#[test]
+fn settings_patch_preserves_unknown_group_keys_and_removes_cleared_image() {
+    let mut doc = r#"# Keep user comments
+appearance = { future-appearance = 42, background-image = "old.png" }
+agent = { future-agent = "keep" }
+system = { future-system = true }
+remote-session = { future-remote = [1, 2] }
+update = { future-update = "keep" }
+"#
+    .parse::<DocumentMut>()
+    .unwrap();
+    let appearance = AppearanceConfig {
+        background_image: None,
+        ..sample_appearance()
+    };
+    patch_settings_document(
+        &mut doc,
+        &SettingsPatch {
+            theme: "test-theme",
+            appearance: &appearance,
+            cursor_shape: CursorShape::Beam,
+            agent: &sample_agent(),
+            system: &sample_system(),
+            remote_session: &remote_session::RemoteSessionConfig::default(),
+            update: &update::UpdateConfig::default(),
+            profiles: &sample_profiles(),
+            default_profile: "PowerShell",
+            agent_profiles: &sample_agent_profiles(),
+            default_agent_profile: "Claude Code",
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        doc["appearance"]["future-appearance"].as_integer(),
+        Some(42)
+    );
+    assert_eq!(doc["agent"]["future-agent"].as_str(), Some("keep"));
+    assert_eq!(doc["system"]["future-system"].as_bool(), Some(true));
+    assert_eq!(
+        doc["remote-session"]["future-remote"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(doc["update"]["future-update"].as_str(), Some("keep"));
+    assert!(
+        doc["appearance"]
+            .as_table()
+            .unwrap()
+            .get("background-image")
+            .is_none()
+    );
+    let saved = doc.to_string();
+    assert!(saved.contains("# Keep user comments"));
+    let reloaded: Config = parse_toml(&saved).unwrap();
+    assert_eq!(reloaded.appearance, appearance);
+    assert_eq!(reloaded.agent, sample_agent());
+    assert_eq!(reloaded.system, sample_system());
 }
 
 #[test]

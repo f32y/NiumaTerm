@@ -53,9 +53,9 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
         .item(SettingItem::new(
             i18n("settings-agent-show-usage"),
             SettingField::switch(
-                |cx| cx.global::<AppSettings>().show_agent_usage,
+                |cx| cx.global::<AppSettings>().agent.show_agent_usage,
                 |value, cx| {
-                    cx.global_mut::<AppSettings>().show_agent_usage = value;
+                    cx.global_mut::<AppSettings>().agent.show_agent_usage = value;
                 },
             ),
         ))
@@ -79,12 +79,13 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                     ],
                     |cx| {
                         cx.global::<AppSettings>()
+                            .agent
                             .collapse_tool_calls
                             .as_str()
                             .into()
                     },
                     |value, cx| {
-                        cx.global_mut::<AppSettings>().collapse_tool_calls =
+                        cx.global_mut::<AppSettings>().agent.collapse_tool_calls =
                             CollapseRows::from_value(&value);
                     },
                 ),
@@ -95,9 +96,11 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
             SettingItem::new(
                 i18n("settings-agent-codex-skill-compat"),
                 SettingField::switch(
-                    |cx| cx.global::<AppSettings>().codex_skill_command_compat,
+                    |cx| cx.global::<AppSettings>().agent.codex_skill_command_compat,
                     |value, cx| {
-                        cx.global_mut::<AppSettings>().codex_skill_command_compat = value;
+                        cx.global_mut::<AppSettings>()
+                            .agent
+                            .codex_skill_command_compat = value;
                     },
                 ),
             )
@@ -125,9 +128,15 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                             i18n("settings-agent-model-list-style-id-only").into(),
                         ),
                     ],
-                    |cx| cx.global::<AppSettings>().model_list_style.as_str().into(),
+                    |cx| {
+                        cx.global::<AppSettings>()
+                            .agent
+                            .model_list_style
+                            .as_str()
+                            .into()
+                    },
                     |value, cx| {
-                        cx.global_mut::<AppSettings>().model_list_style =
+                        cx.global_mut::<AppSettings>().agent.model_list_style =
                             ModelListStyle::from_value(&value);
                     },
                 ),
@@ -140,9 +149,9 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
         .item(SettingItem::new(
             i18n("settings-agent-check-updates"),
             SettingField::switch(
-                |cx| cx.global::<AppSettings>().check_agent_updates,
+                |cx| cx.global::<AppSettings>().agent.check_agent_updates,
                 |value, cx| {
-                    cx.global_mut::<AppSettings>().check_agent_updates = value;
+                    cx.global_mut::<AppSettings>().agent.check_agent_updates = value;
                 },
             ),
         ))
@@ -175,9 +184,9 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                     SettingItem::new(
                         i18n("settings-agent-enable-hooks"),
                         SettingField::switch(
-                            |cx| cx.global::<AppSettings>().enable_agent_hooks,
+                            |cx| cx.global::<AppSettings>().agent.enable_agent_hooks,
                             |value, cx| {
-                                cx.global_mut::<AppSettings>().enable_agent_hooks = value;
+                                cx.global_mut::<AppSettings>().agent.enable_agent_hooks = value;
                             },
                         ),
                     )

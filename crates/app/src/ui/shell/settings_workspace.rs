@@ -10,7 +10,6 @@ use nmt_i18n::i18n;
 
 use crate::tabs::{TabId, TabManager};
 use crate::ui;
-use crate::ui::settings::AppSettings;
 use crate::ui::shell::Shell;
 use crate::ui::shell::actions::ShowSettings;
 use crate::ui::shell::tab_surface::TabSurface;
@@ -139,13 +138,12 @@ impl Shell {
         cx.notify();
     }
 
-    /// Persist settings and drop the machinery the settings surface owns.
+    /// Drop the settings surface after its edits have been saved successfully.
     /// Reached from every path that removes the settings entry.
-    pub(super) fn retire_settings_workspace(&mut self, cx: &mut Context<Self>) {
-        cx.global::<AppSettings>().save();
+    pub(super) fn retire_settings_workspace(&mut self, _cx: &mut Context<Self>) {
         // Pick up relay URL / token edits made while the entry was open.
         #[cfg(windows)]
-        ui::settings::reconcile_remote_host(cx);
+        ui::settings::reconcile_remote_host(_cx);
 
         self.settings.retire();
     }

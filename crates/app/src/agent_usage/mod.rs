@@ -98,7 +98,7 @@ impl Drop for AgentUsageView {
 
 impl AgentUsageView {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
-        let enabled = cx.global::<AppSettings>().show_agent_usage;
+        let enabled = cx.global::<AppSettings>().agent.show_agent_usage;
         let mut this = Self {
             codex: UsageSnapshot::default(),
             claude: UsageSnapshot::default(),
@@ -109,7 +109,7 @@ impl AgentUsageView {
         };
 
         cx.observe_global::<AppSettings>(|this: &mut Self, cx| {
-            let enabled = cx.global::<AppSettings>().show_agent_usage;
+            let enabled = cx.global::<AppSettings>().agent.show_agent_usage;
             if enabled && !this.enabled {
                 this.enabled = true;
                 this.refresh_all(cx);

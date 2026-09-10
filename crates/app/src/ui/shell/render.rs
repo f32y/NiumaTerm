@@ -94,7 +94,8 @@ impl Shell {
     ) -> impl IntoElement {
         // Vertical tabs move the strip into the sidebar, which leaves the
         // middle of the bar free to name the session on screen instead.
-        let vertical_tabs = cx.global::<AppSettings>().tab_bar_style == TabBarStyle::Vertical;
+        let vertical_tabs =
+            cx.global::<AppSettings>().appearance.tab_bar_style == TabBarStyle::Vertical;
         let leading_width = if cfg!(target_os = "macos") {
             (self.sidebar.width + ui::composition::FLOATING_SURFACE_SIDE_INSET
                 - TITLE_BAR_LEADING_INSET)
@@ -234,6 +235,7 @@ impl Shell {
                     // `ToggleGitSidebar` action while the button is hidden.
                     .children(
                         cx.global::<AppSettings>()
+                            .appearance
                             .show_git_status_on_title_bar
                             .then(|| {
                                 div().occlude().child(
@@ -534,7 +536,8 @@ impl Render for Shell {
 
         // Vertical style folds the tab strip into the sidebar as child rows of
         // each workspace, leaving the title bar's strip slot empty.
-        let vertical_tabs = cx.global::<AppSettings>().tab_bar_style == TabBarStyle::Vertical;
+        let vertical_tabs =
+            cx.global::<AppSettings>().appearance.tab_bar_style == TabBarStyle::Vertical;
 
         let (unread_tabs, busy_agent_tabs) = self.tab_agent_indicators(cx);
 
@@ -625,6 +628,7 @@ impl Render for Shell {
 
         let background_image = cx
             .global::<AppSettings>()
+            .appearance
             .background_image
             .clone()
             .map(|path| {
@@ -665,7 +669,7 @@ impl Render for Shell {
             .flex_col()
             // All chrome inherits the configured UI font; terminal panes override it.
             .font(ui::font_with_default_fallback(
-                cx.global::<AppSettings>().ui_font_family.clone(),
+                cx.global::<AppSettings>().appearance.ui_font.clone(),
             ))
             .key_context("Shell");
 

@@ -38,19 +38,23 @@ pub(crate) fn install_agent_settings(cx: &mut App) {
 fn agent_snapshot(cx: &App) -> AgentSettings {
     let settings = cx.global::<AppSettings>();
     AgentSettings {
-        pane_background_follows_terminal: settings.agent_pane_use_terminal_background,
-        font_family: settings.agent_font_family.clone(),
-        font_size: settings.agent_font_size as f32,
-        transcript_font_family: settings.agent_transcript_font_family.clone(),
-        transcript_font_size: settings.agent_transcript_font_size as f32,
-        newline_shortcut: settings.newline_shortcut,
-        collapse_tool_calls: settings.collapse_tool_calls,
-        codex_skill_command_compat: settings.codex_skill_command_compat,
-        model_list_style: settings.model_list_style,
-        smooth_wheel: settings.smooth_scrolling.agent_enabled(),
-        reduce_motion: settings.reduce_motion,
-        human_friendly_layout: settings.human_friendly_agent_ui_layout,
-        git_status_refresh_interval: settings.git_status_refresh_interval,
+        pane_background_follows_terminal: settings.appearance.agent_pane_use_terminal_background,
+        font_family: settings.appearance.agent_font_family.clone().into(),
+        font_size: settings.appearance.agent_font_size as f32,
+        transcript_font_family: settings
+            .appearance
+            .agent_transcript_font_family
+            .clone()
+            .into(),
+        transcript_font_size: settings.appearance.agent_transcript_font_size as f32,
+        newline_shortcut: settings.system.newline_shortcut,
+        collapse_tool_calls: settings.agent.collapse_tool_calls,
+        codex_skill_command_compat: settings.agent.codex_skill_command_compat,
+        model_list_style: settings.agent.model_list_style,
+        smooth_wheel: settings.appearance.smooth_scrolling.agent_enabled(),
+        reduce_motion: settings.appearance.reduce_motion,
+        human_friendly_layout: settings.appearance.human_friendly_agent_ui_layout,
+        git_status_refresh_interval: settings.appearance.git_status_refresh_interval,
         profiles: settings.agent_profiles.clone(),
         background_opacity: main_view_background_opacity(cx),
         font_fallbacks: default_font_fallbacks(),
@@ -61,16 +65,16 @@ fn agent_snapshot(cx: &App) -> AgentSettings {
 fn snapshot(cx: &App) -> TerminalSettings {
     let settings = cx.global::<AppSettings>();
     TerminalSettings {
-        input_style: settings.input_style,
+        input_style: settings.appearance.input_style,
         cursor_shape: settings.cursor_shape,
-        manage_subprocess_job: settings.manage_subprocess_job,
-        command_blocks: settings.command_blocks,
-        smooth_wheel: settings.smooth_scrolling.terminal_enabled(),
-        scroll_to_bottom_when_typing: settings.scroll_to_bottom_when_typing,
-        newline_shortcut: settings.newline_shortcut,
-        font_family: settings.terminal_font_family.clone(),
-        font_size: settings.terminal_font_size as f32,
-        line_height: settings.terminal_line_height as f32,
+        manage_subprocess_job: settings.system.manage_subprocess_job,
+        command_blocks: settings.appearance.command_blocks,
+        smooth_wheel: settings.appearance.smooth_scrolling.terminal_enabled(),
+        scroll_to_bottom_when_typing: settings.appearance.scroll_to_bottom_when_typing,
+        newline_shortcut: settings.system.newline_shortcut,
+        font_family: settings.appearance.terminal_font_family.clone().into(),
+        font_size: settings.appearance.terminal_font_size as f32,
+        line_height: settings.appearance.terminal_line_height as f32,
         background_opacity: main_view_background_opacity(cx),
         corner_radius: UI_RADIUS,
         font_fallbacks: default_font_fallbacks(),

@@ -17,6 +17,7 @@
 use gpui::{App, Menu, MenuItem, SystemMenuType, Window, actions};
 use nmt_i18n::i18n;
 
+use crate::ui::settings::save_settings;
 use crate::ui::{
     CloseTab, NewAgentTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace, PrevTab,
     PrevWorkspace, ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp, ToggleSidebar,
@@ -48,7 +49,17 @@ actions!(
 /// Call after the key bindings are installed; the shortcut shown beside an item
 /// comes from the binding registered for its action.
 pub(crate) fn install(cx: &mut App) {
-    cx.on_action(|_: &Quit, cx: &mut App| cx.quit());
+    cx.on_action(|_: &Quit, cx: &mut App| {
+        if let Some(handle) = cx.active_window() {
+            let _ = handle.update(cx, |_, window, cx| {
+                if save_settings(window, cx) {
+                    cx.quit();
+                }
+            });
+        } else {
+            cx.quit();
+        }
+    });
     cx.on_action(|_: &Hide, cx: &mut App| cx.hide());
     cx.on_action(|_: &HideOthers, cx: &mut App| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx: &mut App| cx.unhide_other_apps());

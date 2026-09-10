@@ -1,4 +1,5 @@
 use gpui_component::StyledExt;
+use gpui_component::dialog::DialogButtonProps;
 use nmt_i18n::i18n;
 
 use crate::ui::shell::*;
@@ -53,15 +54,19 @@ impl Shell {
         let id = self.workspaces.active_tabs().active().live().focused();
         let pane = self.active_pane();
         let settings = cx.global::<AppSettings>();
-        let count = if settings.manage_subprocess_job
-            && settings.warn_before_terminating_shell != WarnBeforeTerminatingShell::Disabled
+        let count = if settings.system.manage_subprocess_job
+            && settings.system.warn_before_terminating_shell != WarnBeforeTerminatingShell::Disabled
         {
             pane.read(cx).child_process_count()
         } else {
             0
         };
 
-        if !settings.warn_before_terminating_shell.should_warn(count) {
+        if !settings
+            .system
+            .warn_before_terminating_shell
+            .should_warn(count)
+        {
             self.close_pane_now(id, window, cx);
             return;
         }
@@ -191,8 +196,8 @@ impl Shell {
     fn close_process_count(&self, tree: &TabSurface, cx: &App) -> usize {
         let settings = cx.global::<AppSettings>();
 
-        if !settings.manage_subprocess_job
-            || settings.warn_before_terminating_shell == WarnBeforeTerminatingShell::Disabled
+        if !settings.system.manage_subprocess_job
+            || settings.system.warn_before_terminating_shell == WarnBeforeTerminatingShell::Disabled
         {
             return 0;
         }
@@ -274,9 +279,14 @@ impl Shell {
         }
 
         let settings = cx.global::<AppSettings>();
-        let warn = settings.warn_before_terminating_shell;
+        let warn = settings.system.warn_before_terminating_shell;
 
-        if !should_confirm_tab_close(is_agent, settings.confirm_before_closing, warn, count) {
+        if !should_confirm_tab_close(
+            is_agent,
+            settings.system.confirm_before_closing_workspace,
+            warn,
+            count,
+        ) {
             self.close_tab_now(id, window, cx);
             return;
         }
@@ -349,11 +359,17 @@ impl Shell {
             return;
         }
 
-        let confirm = cx.global::<AppSettings>().confirm_before_closing;
+        let confirm = cx
+            .global::<AppSettings>()
+            .system
+            .confirm_before_closing_workspace;
 
         let count = self.workspace_process_count(id, cx);
 
-        let warn = cx.global::<AppSettings>().warn_before_terminating_shell;
+        let warn = cx
+            .global::<AppSettings>()
+            .system
+            .warn_before_terminating_shell;
 
         if !confirm && !warn.should_warn(count) {
             self.close_workspace_now(id, window, cx);
@@ -395,8 +411,8 @@ impl Shell {
             .map(|id| self.workspace_process_count(*id, cx))
             .sum();
         let settings = cx.global::<AppSettings>();
-        let confirm = settings.confirm_before_closing;
-        let warn = settings.warn_before_terminating_shell;
+        let confirm = settings.system.confirm_before_closing_workspace;
+        let warn = settings.system.warn_before_terminating_shell;
 
         if !should_confirm_close(confirm, warn, process_count) {
             self.close_temporary_workspaces_now(&ids, window, cx);
@@ -505,7 +521,11 @@ impl Shell {
                                 .min_w(DIALOG_BUTTON_MIN_WIDTH)
                                 .label(i18n("shell-close-quit"))
                                 .danger()
-                                .on_click(move |_, _, cx| {
+                                .on_click(move |_, window, cx| {
+                                    if !ui::settings::save_settings(window, cx) {
+                                        window.close_dialog(cx);
+                                        return;
+                                    }
                                     quit_shell.update(cx, |this, cx| this.doom_workspace(id, cx));
                                     cx.quit();
                                 }),
@@ -555,6 +575,7 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        let saved = ui::settings::save_settings(window, cx);
         let count: usize = self
             .workspaces
             .all_tabs()
@@ -563,23 +584,61 @@ impl Shell {
             .sum();
 
         let settings = cx.global::<AppSettings>();
-        let warn = settings.warn_before_terminating_shell;
+        let warn = settings.system.warn_before_terminating_shell;
 
-        if !should_confirm_close(settings.confirm_before_closing, warn, count) {
+        if saved
+            && !should_confirm_close(
+                settings.system.confirm_before_closing_workspace,
+                warn,
+                count,
+            )
+        {
             return true;
         }
 
-        let description = if count > 0 {
+        let mut description = if count > 0 {
             i18n("shell-close-window-processes-description")
                 .replace("{processes}", &Self::processes_running(count))
         } else {
             i18n("shell-close-window-description").to_string()
         };
 
+        if !saved {
+            description.push_str("\n\n");
+            description.push_str(i18n("settings-save-failed-close-description"));
+        }
+
         let note = self.temporary_workspace_note();
 
         // `remove_window` tears the window down directly (no WM_CLOSE
         // round-trip), so this dialog won't re-trigger.
+        if !saved {
+            window.open_alert_dialog(cx, move |alert, _, _| {
+                alert
+                    .title(i18n("settings-save-failed-title"))
+                    .description(
+                        v_flex()
+                            .gap_1()
+                            .child(description.clone())
+                            .children(note.clone().map(|note| div().font_bold().child(note))),
+                    )
+                    .button_props(
+                        DialogButtonProps::default()
+                            .show_cancel(true)
+                            .ok_text(i18n("settings-close-without-saving"))
+                            .cancel_text(i18n("shell-close-cancel")),
+                    )
+                    .on_ok(|_, window, cx| {
+                        if cx.windows().len() == 1 {
+                            cx.global_mut::<AppSettings>().editing.discard_on_exit = true;
+                        }
+                        window.remove_window();
+                        true
+                    })
+            });
+            return false;
+        }
+
         Self::open_close_confirm(
             window,
             cx,
@@ -609,6 +668,10 @@ impl Shell {
             .unwrap_or_default();
 
         let settings = self.workspaces.kind_of(id) == Some(WorkspaceKind::Settings);
+
+        if settings && !ui::settings::save_settings(window, cx) {
+            return;
+        }
 
         if self.workspaces.close_workspace(id).is_some() {
             for route in routes {

@@ -1,7 +1,7 @@
 //! Persisted to `config.toml`: seeded via [`AppSettings::load`] at startup,
-//! written back patch-style via [`AppSettings::save`] once when the settings
-//! dialog closes (see `Shell::on_show_settings`). Field edits mutate the global
-//! live for preview; only closing the dialog persists them.
+//! written back patch-style via [`AppSettings::save`] when the settings
+//! workspace is left or closed. Field edits mutate the global live for preview;
+//! failed writes retain those edits and expose a retry action.
 
 mod about_page;
 mod agent_page;
@@ -39,6 +39,7 @@ use gpui_component::group_box::{GroupBox, GroupBoxVariants as _};
 use gpui_component::input::{Input, InputEvent};
 use gpui_component::label::Label;
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_component::notification::{Notification, NotificationType};
 use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::setting::{
     NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings,
@@ -54,9 +55,8 @@ use nmt_agent_utils::update::{DiscoverySupport, InstallationKey, ProviderKind, U
 #[cfg(test)]
 use nmt_config::CursorShape;
 use nmt_config::appearance::SmoothScrollingMode;
-#[cfg(windows)]
-use nmt_config::remote_session::RemoteSessionConfig;
 use nmt_config::system::{NewlineShortcut, WarnBeforeTerminatingShell};
+use nmt_i18n::i18n;
 use nmt_platform::{
     is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
     shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
@@ -136,11 +136,51 @@ const RELEASE_PAGE_URL: &str = "https://github.com/f32y/NiumaTerm/releases";
 
 pub const MAX_TAB_WIDTH: f64 = MIN_TAB_WIDTH * 3.0;
 
+struct SettingsSaveFailure;
+
+/// Keep failed edits in memory and offer another write after the user fixes
+/// the configuration file or its permissions.
+pub(crate) fn save_settings(window: &mut Window, cx: &mut App) -> bool {
+    match cx.global_mut::<AppSettings>().save() {
+        Ok(()) => {
+            window.remove_notification::<SettingsSaveFailure>(cx);
+            true
+        }
+        Err(error) => {
+            warn!("failed to save settings: {error}");
+            window.push_notification(
+                Notification::new()
+                    .id::<SettingsSaveFailure>()
+                    .with_type(NotificationType::Error)
+                    .title(i18n("settings-save-failed-title"))
+                    .message(format!(
+                        "{} {error}",
+                        i18n("settings-save-failed-description")
+                    ))
+                    .autohide(false)
+                    .action(|_, _, _| {
+                        Button::new("retry-settings-save")
+                            .label(i18n("shell-updates-retry"))
+                            .on_click(|_, window, cx| {
+                                save_settings(window, cx);
+                            })
+                    }),
+                cx,
+            );
+            false
+        }
+    }
+}
+
 pub fn settings_view(cx: &App) -> Settings {
     let profiles = cx.global::<AppSettings>().profiles.clone();
     let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
-    let backdrop = cx.global::<AppSettings>().window_backdrop;
-    let background_image_enabled = cx.global::<AppSettings>().background_image.is_some();
+    let backdrop = cx.global::<AppSettings>().appearance.window_backdrop;
+    let background_image_enabled = cx
+        .global::<AppSettings>()
+        .appearance
+        .background_image
+        .is_some();
     let shell_integration_mismatched = shell_integration_dll_mismatched();
 
     let sidebar_style = sidebar_surface(cx).border_r_0();
@@ -154,8 +194,10 @@ pub fn settings_view(cx: &App) -> Settings {
         .page(appearance_page(
             backdrop,
             background_image_enabled,
-            cx.global::<AppSettings>().tab_auto_size,
-            cx.global::<AppSettings>().show_git_status_on_title_bar,
+            cx.global::<AppSettings>().appearance.tab_auto_size,
+            cx.global::<AppSettings>()
+                .appearance
+                .show_git_status_on_title_bar,
         ))
         .page(system_page(shell_integration_mismatched))
         .page(profiles_page(&profiles, &agent_profiles))

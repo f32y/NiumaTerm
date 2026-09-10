@@ -310,8 +310,8 @@ impl TabStrip {
         // own overflow_hidden. Auto Size treats that value as the upper bound
         // and divides the strip between the tabs instead.
         let settings = cx.global::<AppSettings>();
-        let configured_width = settings.tab_width as f32;
-        let auto_size = settings.tab_auto_size;
+        let configured_width = settings.appearance.tab_width as f32;
+        let auto_size = settings.appearance.tab_auto_size;
         let tab_width = if auto_size {
             auto_tab_width(self.measured_width.get(), tab_count, configured_width)
         } else {

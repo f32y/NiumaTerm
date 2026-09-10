@@ -42,7 +42,7 @@ pub(crate) fn initialize(testing: bool, cx: &mut App) {
     }
 
     let settings = cx.global::<AppSettings>();
-    let (enabled, channel) = (settings.check_updates, channel(settings));
+    let (enabled, channel) = (settings.update.check_updates, channel(settings));
 
     match Updater::start(channel) {
         Ok(updater) => {
@@ -61,7 +61,7 @@ pub(crate) fn initialize(testing: bool, cx: &mut App) {
 /// Mirror the application's own settings onto Sparkle.
 pub(crate) fn settings_changed(cx: &mut App) {
     let settings = cx.global::<AppSettings>();
-    let (enabled, channel) = (settings.check_updates, channel(settings));
+    let (enabled, channel) = (settings.update.check_updates, channel(settings));
 
     if let Some(update) = cx.try_global::<AppUpdate>() {
         update.0.set_automatic_checks(enabled);
@@ -71,7 +71,7 @@ pub(crate) fn settings_changed(cx: &mut App) {
 
 /// The channel the user has chosen, in the terms Sparkle understands.
 fn channel(settings: &AppSettings) -> Channel {
-    match settings.update_channel {
+    match settings.update.channel {
         UpdateChannel::Stable => Channel::Stable,
         UpdateChannel::Nightly => Channel::Nightly,
     }

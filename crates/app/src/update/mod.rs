@@ -164,8 +164,8 @@ pub(crate) fn initialize(testing: bool, cx: &mut App) {
         status: Status::Unknown,
         testing,
         pending: None,
-        channel: settings.update_channel,
-        checking_enabled: settings.check_updates,
+        channel: settings.update.channel,
+        checking_enabled: settings.update.check_updates,
     });
 }
 
@@ -659,8 +659,8 @@ pub(crate) fn await_predecessor(pid: u32) {
 /// checking switch, which is the user saying not to reach the network unasked.
 pub(crate) fn settings_changed(cx: &mut App) {
     let settings = cx.global::<AppSettings>();
-    let channel = settings.update_channel;
-    let checking_enabled = settings.check_updates;
+    let channel = settings.update.channel;
+    let checking_enabled = settings.update.check_updates;
 
     let update = cx.global_mut::<AppUpdate>();
     // An install is already committed to a release. Clearing its status would
@@ -698,7 +698,7 @@ pub(crate) fn schedule_automatic_checks(cx: &mut App) {
             // Read the switch every tick rather than at startup: the user can
             // turn checking on and off while the app runs.
             cx.update(|cx| {
-                if cx.global::<AppSettings>().check_updates {
+                if cx.global::<AppSettings>().update.check_updates {
                     check(cx);
                 }
             });
@@ -715,7 +715,7 @@ fn check(cx: &mut App) {
     if cx.global::<AppUpdate>().status.busy() || cx.global::<AppUpdate>().pending.is_some() {
         return;
     }
-    let channel = cx.global::<AppSettings>().update_channel;
+    let channel = cx.global::<AppSettings>().update.channel;
     set_status(Status::Checking, cx);
 
     cx.spawn(async move |cx| {
@@ -727,7 +727,7 @@ fn check(cx: &mut App) {
             // The channel can move while the request is out. A result for the
             // channel the user left says nothing about the one they chose, and
             // the switch has already started the check that does.
-            if cx.global::<AppSettings>().update_channel != channel {
+            if cx.global::<AppSettings>().update.channel != channel {
                 return;
             }
             set_status(outcome(found), cx);

@@ -376,7 +376,9 @@ pub fn save_settings(patch: &SettingsPatch<'_>) -> io::Result<()> {
     save_settings_to(&config_file_path(), patch)
 }
 
-fn save_settings_to(path: &Path, patch: &SettingsPatch<'_>) -> io::Result<()> {
+/// Save settings to an explicit configuration path using the same locked,
+/// atomic update as the default user configuration.
+pub fn save_settings_to(path: &Path, patch: &SettingsPatch<'_>) -> io::Result<()> {
     persistence::update(path, |content| {
         let mut doc = match content {
             Some(content) => content.parse::<DocumentMut>().map_err(|err| {
@@ -417,66 +419,43 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> 
     } = patch;
 
     doc["theme"] = value(theme);
-    ensure_explicit_table(doc, "appearance");
-    doc["appearance"]["input-style"] = value(appearance.input_style.as_str());
-    doc["appearance"]["scroll-to-bottom-when-typing"] =
-        value(appearance.scroll_to_bottom_when_typing);
-    doc["appearance"]["agent-pane-use-terminal-background"] =
-        value(appearance.agent_pane_use_terminal_background);
-    doc["appearance"]["command-blocks"] = value(appearance.command_blocks);
-    doc["appearance"]["show-daily-token-usage"] = value(appearance.show_daily_token_usage);
-    doc["appearance"]["show-git-status-on-title-bar"] =
-        value(appearance.show_git_status_on_title_bar);
-    doc["appearance"]["git-status-refresh-interval"] =
-        value(appearance.git_status_refresh_interval as i64);
-    doc["appearance"]["tab-width"] = value(appearance.tab_width);
-    doc["appearance"]["tab-auto-size"] = value(appearance.tab_auto_size);
-    doc["appearance"]["tab-bar-style"] = value(appearance.tab_bar_style.as_str());
-    doc["appearance"]["ui-font"] = value(&appearance.ui_font);
-    doc["appearance"]["terminal-font-family"] = value(&appearance.terminal_font_family);
-    doc["appearance"]["terminal-font-size"] = value(appearance.terminal_font_size);
-    doc["appearance"]["terminal-line-height"] = value(appearance.terminal_line_height);
-    doc["appearance"]["agent-font-family"] = value(&appearance.agent_font_family);
-    doc["appearance"]["agent-font-size"] = value(appearance.agent_font_size);
-    doc["appearance"]["monospace-only"] = value(appearance.monospace_only);
-    doc["appearance"]["enable-window-transparency"] = value(appearance.window_backdrop.as_str());
-    doc["appearance"]["transparent-main-view"] = value(appearance.transparent_main_view);
-    doc["appearance"]["smooth-scrolling"] = value(appearance.smooth_scrolling.as_str());
-    doc["appearance"]["background-opacity"] = value(appearance.background_opacity);
-    if let Some(path) = &appearance.background_image {
-        doc["appearance"]["background-image"] = value(path);
-    } else {
+    patch_group(doc, "appearance", appearance)?;
+    if appearance.background_image.is_none() {
         doc["appearance"]
             .as_table_mut()
-            .expect("appearance was normalized to a table")
+            .expect("appearance is a table")
             .remove("background-image");
     }
-    doc["appearance"]["background-image-opacity"] = value(appearance.background_image_opacity);
-    doc["appearance"]["language"] = value(appearance.language.as_str());
-    doc["appearance"]["agent-transcript-font-family"] =
-        value(&appearance.agent_transcript_font_family);
-    doc["appearance"]["agent-transcript-font-size"] = value(appearance.agent_transcript_font_size);
-    doc["appearance"]["reduce-motion"] = value(appearance.reduce_motion);
-    doc["appearance"]["human-friendly-agent-ui-layout"] =
-        value(appearance.human_friendly_agent_ui_layout);
-
     ensure_explicit_table(doc, "cursor");
     doc["cursor"]["shape"] = value(cursor_shape.as_str());
 
-    ensure_explicit_table(doc, "system");
-    system::patch_document(doc, system);
-
-    ensure_explicit_table(doc, "agent");
-    agent::patch_document(doc, agent);
-
-    ensure_explicit_table(doc, "remote-session");
-    remote_session::patch_document(doc, remote_session);
-
-    ensure_explicit_table(doc, "update");
-    update::patch_document(doc, update);
+    patch_group(doc, "system", system)?;
+    patch_group(doc, "agent", agent)?;
+    patch_group(doc, "remote-session", remote_session)?;
+    patch_group(doc, "update", update)?;
 
     profile::patch_document(doc, profiles, default_profile);
     profile::patch_agent_document(doc, agent_profiles, default_agent_profile)
+}
+
+/// Each group's serde names also define the keys edited by the settings UI.
+/// Updating individual entries retains keys this build does not recognize.
+fn patch_group(doc: &mut DocumentMut, key: &str, settings: &impl Serialize) -> Result<(), String> {
+    let serialized = toml::to_string(settings).map_err(|error| error.to_string())?;
+    let values = serialized
+        .parse::<DocumentMut>()
+        .map_err(|error| error.to_string())?;
+    ensure_explicit_table(doc, key);
+    let table = doc[key].as_table_mut().expect("settings group is a table");
+    for (name, item) in values.iter() {
+        let target = table.entry(name).or_insert(Item::None);
+        let mut item = item.clone();
+        if let (Some(previous), Some(next)) = (target.as_value(), item.as_value_mut()) {
+            *next.decor_mut() = previous.decor().clone();
+        }
+        *target = item;
+    }
+    Ok(())
 }
 
 /// Make `doc[key]` an explicit table so nested managed keys never turn into an

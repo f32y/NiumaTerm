@@ -128,7 +128,7 @@ fn select_theme(name: String, cx: &mut App) {
 }
 
 fn reload_themes(cx: &mut App) {
-    cx.global_mut::<AppSettings>().themes = Config::load_themes();
+    cx.global_mut::<AppSettings>().editing.themes = Config::load_themes();
 
     let selected = cx.global::<AppSettings>().theme.clone();
 
@@ -238,10 +238,15 @@ fn theme_preview(colors: Colors) -> Div {
 
 pub(super) fn theme_list(cx: &mut App) -> Div {
     let selected = cx.global::<AppSettings>().theme.clone();
-    let filter = cx.global::<AppSettings>().theme_filter.to_lowercase();
+    let filter = cx
+        .global::<AppSettings>()
+        .editing
+        .theme_filter
+        .to_lowercase();
 
     let themes = cx
         .global::<AppSettings>()
+        .editing
         .themes
         .clone()
         .into_iter()

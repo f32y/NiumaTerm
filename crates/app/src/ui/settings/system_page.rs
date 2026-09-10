@@ -11,9 +11,14 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                 .item(SettingItem::new(
                     i18n("settings-system-restore-session"),
                     SettingField::switch(
-                        |cx| cx.global::<AppSettings>().restore_last_session_when_opening,
+                        |cx| {
+                            cx.global::<AppSettings>()
+                                .system
+                                .restore_last_session_when_opening
+                        },
                         |value, cx| {
                             cx.global_mut::<AppSettings>()
+                                .system
                                 .restore_last_session_when_opening = value;
                         },
                     ),
@@ -21,9 +26,15 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                 .item(SettingItem::new(
                     i18n("settings-system-confirm-closing"),
                     SettingField::switch(
-                        |cx| cx.global::<AppSettings>().confirm_before_closing,
+                        |cx| {
+                            cx.global::<AppSettings>()
+                                .system
+                                .confirm_before_closing_workspace
+                        },
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().confirm_before_closing = value;
+                            cx.global_mut::<AppSettings>()
+                                .system
+                                .confirm_before_closing_workspace = value;
                         },
                     ),
                 ))
@@ -43,12 +54,15 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                         ],
                         |cx| {
                             cx.global::<AppSettings>()
+                                .system
                                 .warn_before_terminating_shell
                                 .as_str()
                                 .into()
                         },
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().warn_before_terminating_shell =
+                            cx.global_mut::<AppSettings>()
+                                .system
+                                .warn_before_terminating_shell =
                                 WarnBeforeTerminatingShell::from_value(&value);
                         },
                     )
@@ -96,9 +110,10 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                     SettingItem::new(
                         i18n("settings-system-open-best-workspace"),
                         SettingField::switch(
-                            |cx| cx.global::<AppSettings>().open_in_best_workspace,
+                            |cx| cx.global::<AppSettings>().system.open_in_best_workspace,
                             |value, cx| {
-                                cx.global_mut::<AppSettings>().open_in_best_workspace = value;
+                                cx.global_mut::<AppSettings>().system.open_in_best_workspace =
+                                    value;
                             },
                         ),
                     )
@@ -108,9 +123,9 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                     SettingItem::new(
                         i18n("settings-system-manage-job"),
                         SettingField::switch(
-                            |cx| cx.global::<AppSettings>().manage_subprocess_job,
+                            |cx| cx.global::<AppSettings>().system.manage_subprocess_job,
                             |value, cx| {
-                                cx.global_mut::<AppSettings>().manage_subprocess_job = value;
+                                cx.global_mut::<AppSettings>().system.manage_subprocess_job = value;
                             },
                         ),
                     )
@@ -123,9 +138,9 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                 .item(SettingItem::new(
                     i18n("settings-system-prioritize-ui"),
                     SettingField::switch(
-                        |cx| cx.global::<AppSettings>().prioritize_ui_threads,
+                        |cx| cx.global::<AppSettings>().system.prioritize_ui_threads,
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().prioritize_ui_threads = value;
+                            cx.global_mut::<AppSettings>().system.prioritize_ui_threads = value;
 
                             #[cfg(windows)]
                             cx.global::<PlatformHandle>()
@@ -146,9 +161,15 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                             ("shift-enter".into(), "Shift-Enter".into()),
                             ("off".into(), i18n("settings-common-off").into()),
                         ],
-                        |cx| cx.global::<AppSettings>().newline_shortcut.as_str().into(),
+                        |cx| {
+                            cx.global::<AppSettings>()
+                                .system
+                                .newline_shortcut
+                                .as_str()
+                                .into()
+                        },
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().newline_shortcut =
+                            cx.global_mut::<AppSettings>().system.newline_shortcut =
                                 NewlineShortcut::from_value(&value);
                         },
                     )

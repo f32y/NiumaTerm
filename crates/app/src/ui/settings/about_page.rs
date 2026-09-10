@@ -41,9 +41,9 @@ pub(super) fn about_page() -> SettingPage {
             SettingItem::new(
                 i18n("settings-about-check-updates"),
                 SettingField::switch(
-                    |cx| cx.global::<AppSettings>().check_updates,
+                    |cx| cx.global::<AppSettings>().update.check_updates,
                     |value, cx| {
-                        cx.global_mut::<AppSettings>().check_updates = value;
+                        cx.global_mut::<AppSettings>().update.check_updates = value;
                     },
                 ),
             )
@@ -62,9 +62,9 @@ pub(super) fn about_page() -> SettingPage {
                         i18n("settings-about-channel-nightly").into(),
                     ),
                 ],
-                |cx| cx.global::<AppSettings>().update_channel.as_str().into(),
+                |cx| cx.global::<AppSettings>().update.channel.as_str().into(),
                 |value, cx| {
-                    cx.global_mut::<AppSettings>().update_channel =
+                    cx.global_mut::<AppSettings>().update.channel =
                         UpdateChannel::from_value(&value);
                 },
             )

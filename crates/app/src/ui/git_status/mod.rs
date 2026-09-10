@@ -308,10 +308,16 @@ pub(crate) struct GitStatusModel {
 
 impl GitStatusModel {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
-        let enabled = cx.global::<AppSettings>().show_git_status_on_title_bar;
+        let enabled = cx
+            .global::<AppSettings>()
+            .appearance
+            .show_git_status_on_title_bar;
 
         cx.observe_global::<AppSettings>(|this, cx| {
-            let enabled = cx.global::<AppSettings>().show_git_status_on_title_bar;
+            let enabled = cx
+                .global::<AppSettings>()
+                .appearance
+                .show_git_status_on_title_bar;
 
             if enabled && !this.enabled {
                 this.refresh(cx);
@@ -326,7 +332,9 @@ impl GitStatusModel {
         cx.spawn(async move |this, cx| {
             loop {
                 let Ok(interval) = this.update(cx, |_, cx| {
-                    cx.global::<AppSettings>().git_status_refresh_interval
+                    cx.global::<AppSettings>()
+                        .appearance
+                        .git_status_refresh_interval
                 }) else {
                     break;
                 };
@@ -407,6 +415,7 @@ impl GitStatusModel {
         // rather than read again here.
         let branch_max_age = Duration::from_secs(
             cx.global::<AppSettings>()
+                .appearance
                 .git_status_refresh_interval
                 .max(1),
         );
@@ -501,7 +510,11 @@ impl GitStatusView {
 
 impl Render for GitStatusView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if !cx.global::<AppSettings>().show_git_status_on_title_bar {
+        if !cx
+            .global::<AppSettings>()
+            .appearance
+            .show_git_status_on_title_bar
+        {
             return div().into_any_element();
         }
 

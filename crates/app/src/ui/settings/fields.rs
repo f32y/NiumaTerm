@@ -22,8 +22,8 @@ enum OpacityTarget {
 impl OpacityTarget {
     fn value(self, settings: &AppSettings) -> f64 {
         match self {
-            Self::Window => settings.background_opacity,
-            Self::Image => settings.background_image_opacity,
+            Self::Window => settings.appearance.background_opacity,
+            Self::Image => settings.appearance.background_image_opacity,
         }
     }
 
@@ -36,9 +36,11 @@ impl OpacityTarget {
 
     fn set(self, value: f64, settings: &mut AppSettings) {
         match self {
-            Self::Window => settings.background_opacity = clamp_background_opacity(value),
+            Self::Window => {
+                settings.appearance.background_opacity = clamp_background_opacity(value)
+            }
             Self::Image => {
-                settings.background_image_opacity = clamp_background_image_opacity(value)
+                settings.appearance.background_image_opacity = clamp_background_image_opacity(value)
             }
         }
     }
@@ -144,7 +146,11 @@ pub(super) fn background_image_opacity_field() -> SettingField<SharedString> {
 
 pub(super) fn background_image_field() -> SettingField<SharedString> {
     SettingField::render(|options, _window, cx| {
-        let path = cx.global::<AppSettings>().background_image.clone();
+        let path = cx
+            .global::<AppSettings>()
+            .appearance
+            .background_image
+            .clone();
         let label = SharedString::from(
             path.clone()
                 .unwrap_or_else(|| i18n("settings-common-none").to_string()),
@@ -186,7 +192,7 @@ pub(super) fn background_image_field() -> SettingField<SharedString> {
                                 {
                                     let path = path.display().to_string();
                                     let _ = cx.update_global(|settings: &mut AppSettings, _, _| {
-                                        settings.background_image = Some(path);
+                                        settings.appearance.background_image = Some(path);
                                     });
                                 }
                             })
@@ -199,7 +205,7 @@ pub(super) fn background_image_field() -> SettingField<SharedString> {
                     .label(i18n("settings-common-clear"))
                     .disabled(options.is_disabled())
                     .on_click(|_, _, cx: &mut App| {
-                        cx.global_mut::<AppSettings>().background_image = None;
+                        cx.global_mut::<AppSettings>().appearance.background_image = None;
                     })
             }))
     })

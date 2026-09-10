@@ -4,7 +4,6 @@
 //! per-user data directory (DPAPI-protected), not in the plaintext config.
 
 use serde::{Deserialize, Serialize};
-use toml_edit::{DocumentMut, value};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RemoteSessionConfig {
@@ -19,10 +18,4 @@ pub struct RemoteSessionConfig {
     /// never send it, so this gates host registration only.
     #[serde(default, rename = "access-token")]
     pub access_token: String,
-}
-
-pub(crate) fn patch_document(doc: &mut DocumentMut, remote: &RemoteSessionConfig) {
-    doc["remote-session"]["host-enabled"] = value(remote.host_enabled);
-    doc["remote-session"]["relay-url"] = value(&remote.relay_url);
-    doc["remote-session"]["access-token"] = value(&remote.access_token);
 }
