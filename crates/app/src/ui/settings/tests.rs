@@ -620,3 +620,71 @@ fn fluent_themes_carry_their_own_corner_radii() {
     assert_eq!(config.radius, Some(4));
     assert_eq!(config.radius_lg, Some(8));
 }
+
+#[gpui::test]
+fn windows_notification_switch_restores_imported_disabled_setting(cx: &mut TestAppContext) {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use gpui_component::setting::AnySettingField;
+
+    use crate::ui::settings::system_page::windows_notification_field;
+
+    cx.set_global(AppSettings {
+        send_system_notifications: false,
+        ..AppSettings::default()
+    });
+    let registered = Rc::new(Cell::new(true));
+    let field = windows_notification_field(
+        {
+            let registered = registered.clone();
+            move || registered.get()
+        },
+        {
+            let registered = registered.clone();
+            move |enabled| {
+                registered.set(enabled);
+                Ok(())
+            }
+        },
+    )
+    .default_value(true);
+    let cx = cx.add_empty_window();
+    cx.update(|window, cx| {
+        // Reset uses the same setter as clicking the switch, and dirty state
+        // reads its displayed value through the same getter.
+        assert!(field.is_resettable(cx));
+        field.reset(window, cx);
+        assert!(!field.is_resettable(cx));
+        assert!(cx.global::<AppSettings>().send_system_notifications);
+        assert!(registered.get());
+
+        let field = field.default_value(false);
+        assert!(field.is_resettable(cx));
+        field.reset(window, cx);
+        assert!(!field.is_resettable(cx));
+        assert!(!cx.global::<AppSettings>().send_system_notifications);
+        assert!(!registered.get());
+    });
+}
+
+#[gpui::test]
+fn windows_notification_switch_keeps_setting_after_registration_failure(cx: &mut TestAppContext) {
+    use anyhow::anyhow;
+    use gpui_component::setting::AnySettingField;
+
+    use crate::ui::settings::system_page::windows_notification_field;
+
+    cx.set_global(AppSettings {
+        send_system_notifications: false,
+        ..AppSettings::default()
+    });
+    let field = windows_notification_field(|| false, |_| Err(anyhow!("registration failed")))
+        .default_value(true);
+    let cx = cx.add_empty_window();
+    cx.update(|window, cx| {
+        field.reset(window, cx);
+        assert!(!cx.global::<AppSettings>().send_system_notifications);
+        assert!(field.is_resettable(cx));
+    });
+}

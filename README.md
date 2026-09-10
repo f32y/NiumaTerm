@@ -4,6 +4,10 @@
 
 <h1 align="center">NiumaTerm</h1>
 
+<p align="center">
+  <a href="https://github.com/f32y/NiumaTerm"><img src="https://img.shields.io/badge/Forked%20from-f32y%2FNiumaTerm-181717?style=for-the-badge&amp;logo=github&amp;logoColor=white" alt="Forked from f32y/NiumaTerm" width="360"></a>
+</p>
+
 <p align="center">A high performance multi-tab, multi-workspace terminal application.</p>
 
 <p align="center">
@@ -11,6 +15,12 @@
   <a href="#windows"><img src="https://img.shields.io/badge/platform-Windows-0078D4" alt="Platform: Windows"></a>
   <a href="#macos"><img src="https://img.shields.io/badge/platform-macOS%20Apple%20silicon-333333?logo=apple&amp;logoColor=white" alt="Platform: macOS Apple silicon"></a>
 </p>
+
+## About this fork
+
+This is an independently maintained fork of [f32y/NiumaTerm](https://github.com/f32y/NiumaTerm), focused on improving the macOS experience, terminal menus, and visual design. It is maintained separately from the upstream project and is not an official upstream release.
+
+Thanks to f32y and all upstream contributors for building the foundation of this project. The original copyright and [MIT license](LICENSE) are preserved.
 
 ## Features
 

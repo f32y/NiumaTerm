@@ -20,11 +20,17 @@ fn catalogs_have_identical_key_sets() {
 fn lookup_follows_active_language_and_falls_back_to_key() {
     init("en");
     assert_eq!(i18n("settings-appearance-language"), "Language");
+    assert_eq!(i18n("settings-system-workspaces"), "Workspaces");
+    assert_eq!(i18n("settings-system-integration"), "System integration");
     assert_eq!(i18n("no-such-key"), "no-such-key");
 
     set_language("zh-CN");
     assert_eq!(i18n("settings-appearance-language"), "语言");
+    assert_eq!(i18n("settings-system-workspaces"), "工作区");
+    assert_eq!(i18n("settings-system-integration"), "系统集成");
 
     set_language("klingon");
     assert_eq!(i18n("settings-appearance-language"), "Language");
+    assert_eq!(i18n("settings-system-workspaces"), "Workspaces");
+    assert_eq!(i18n("settings-system-integration"), "System integration");
 }

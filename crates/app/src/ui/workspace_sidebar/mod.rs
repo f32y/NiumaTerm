@@ -20,7 +20,7 @@ use crate::tabs::TabId;
 use crate::ui::composition::{
     FLOATING_SURFACE_BOTTOM_INSET, FLOATING_SURFACE_SIDE_INSET, FLOATING_SURFACE_TOP_INSET,
     HoverActionLayout, HoverActionVisibility, StatusMark, StatusMarkTone, hover_action,
-    sidebar_selection,
+    sidebar_selection, toolbar_button,
 };
 use crate::ui::fluent::{SELECTION_BAR_HEIGHT, SELECTION_BAR_RADIUS, SELECTION_BAR_WIDTH};
 use crate::ui::shell::{
@@ -31,6 +31,8 @@ use crate::ui::tab_bar::{new_tab_menu, progress_visual, tab_icon};
 use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::{AppSettings, NewWorkspace, Shell, UI_RADIUS};
+#[cfg(target_os = "macos")]
+use crate::window::TRAFFIC_LIGHT_INSET;
 use crate::window::WindowRegistry;
 use crate::workspace::{TerminalActivity, WorkspaceKind, WorkspaceSummary};
 
@@ -53,13 +55,6 @@ pub(super) const RESIZE_HANDLE: &str = "workspace-sidebar-resize";
 
 pub(super) const MIN_WIDTH: f32 = MIN_SIDEBAR_WIDTH;
 pub(crate) const MAX_WIDTH: f32 = 480.0;
-
-/// Side of the vertical tab-bar new-tab control on a workspace row, and the
-/// size the `+` glyph inside it is drawn at. The control is hover-only, so it
-/// is sized as a comfortable pointer target rather than to match the `×` it
-/// replaces.
-const NEW_TAB_BUTTON: f32 = 32.0;
-const NEW_TAB_GLYPH: f32 = 18.0;
 
 /// Diameter of a status dot in the sidebar column. Smaller than the agent
 /// spinner's `size_3`, so a stacked pair reads as a spinner with a mark under
@@ -259,11 +254,7 @@ const TAB_ROW_TEXT: f32 = 13.0;
 /// than the rows inside them, which is what makes a workspace and its tabs
 /// read as one block rather than as a flat list.
 ///
-/// The horizontal inset is the panel's alone: the rows inside carry none, so
-/// it is what every glyph and every run of text in the column stands on. It
-/// is set to land that edge under the glyph of the titlebar control directly
-/// above it, past that control's own button padding, so the window's leading
-/// chrome reads as one edge from the title bar down.
+/// The panel owns the horizontal text inset; row fills extend into its gutter.
 const SIDEBAR_PADDING_X: f32 = 12.0;
 /// How far a row's fill reaches back into that inset on each side, and how
 /// much padding the row then puts back so its content still lands on the
@@ -271,13 +262,17 @@ const SIDEBAR_PADDING_X: f32 = 12.0;
 /// glyph starts and reads as clipped; the leading half of it is also the lane
 /// the selected-row mark stands in.
 const SIDEBAR_ROW_GUTTER: f32 = 6.0;
-const SIDEBAR_PADDING_TOP: f32 = 14.0;
-const SIDEBAR_GROUP_GAP: f32 = 14.0;
+// Remove the outer panel offset and restore the row's negative margin so
+// the visible row fill starts directly below the native close button.
+#[cfg(target_os = "macos")]
+const SIDEBAR_PADDING_LEFT: f32 =
+    TRAFFIC_LIGHT_INSET - FLOATING_SURFACE_SIDE_INSET + SIDEBAR_ROW_GUTTER;
+#[cfg(not(target_os = "macos"))]
+const SIDEBAR_PADDING_LEFT: f32 = SIDEBAR_PADDING_X;
+const SIDEBAR_GROUP_GAP: f32 = 8.0;
 const WORKSPACE_LIST_GAP: f32 = 6.0;
-/// The list heading. It names the column rather than competing with the
-/// workspaces under it, so it is the smallest run of text in the panel.
-const SIDEBAR_SECTION_TEXT: f32 = 10.5;
-const SIDEBAR_SECTION_BUTTON: f32 = 20.0;
+/// The heading uses one size across languages to keep the section easy to scan.
+const SIDEBAR_SECTION_TEXT: f32 = 12.0;
 /// A workspace heading: its name, and the path that trails it on the same
 /// line. The path is set small enough to read as an annotation on the name.
 const WORKSPACE_NAME_TEXT: f32 = 13.0;
@@ -285,12 +280,15 @@ const WORKSPACE_PATH_TEXT: f32 = 10.5;
 /// The status cluster along the bottom edge: today's spend over the
 /// subscription gauges. Both report what the agents have consumed, so they
 /// stack as one block under a single rule rather than each carrying an edge.
-const SIDEBAR_STATUS_PADDING_Y: f32 = 8.0;
+const SIDEBAR_STATUS_PADDING_TOP: f32 = 8.0;
+const SIDEBAR_STATUS_PADDING_BOTTOM: f32 = 2.0;
 const SIDEBAR_STATUS_ROW_GAP: f32 = 2.0;
 
 /// Distance from the row box's leading edge. The row is a rounded rectangle,
 /// so a mark flush against that edge would sit outside the fill at the corners.
 const SELECTION_BAR_INSET: f32 = 2.0;
+/// Names retain an 8px gap after the selection mark on active and idle rows.
+const WORKSPACE_NAME_INSET: f32 = SELECTION_BAR_INSET + SELECTION_BAR_WIDTH + 8.0;
 
 /// The accent bar that marks the selected row. It is drawn out of the row's
 /// flow so it can sit in the gutter left of the row's own padding, and it
@@ -402,8 +400,8 @@ impl Sidebar {
             .overflow_hidden()
             .flex()
             .flex_col()
-            .px(px(SIDEBAR_PADDING_X))
-            .pt(px(SIDEBAR_PADDING_TOP))
+            .pl(px(SIDEBAR_PADDING_LEFT))
+            .pr(px(SIDEBAR_PADDING_X))
             .gap(px(SIDEBAR_GROUP_GAP))
             .child(
                 h_flex()
@@ -411,6 +409,7 @@ impl Sidebar {
                     .justify_between()
                     .child(
                         div()
+                            .ml(px(-SIDEBAR_ROW_GUTTER))
                             .text_size(px(SIDEBAR_SECTION_TEXT))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(cx.theme().sidebar_foreground.opacity(0.5))
@@ -424,9 +423,7 @@ impl Sidebar {
                         h_flex()
                             .gap_1()
                             .child(
-                                Button::new("new-workspace")
-                                    .ghost()
-                                    .size(px(SIDEBAR_SECTION_BUTTON))
+                                toolbar_button("new-workspace")
                                     .icon(IconName::Plus)
                                     .accessibility_label(i18n("shell-workspace-new-title"))
                                     .tooltip(i18n("shell-workspace-new-title"))
@@ -435,9 +432,7 @@ impl Sidebar {
                                     })),
                             )
                             .child(
-                                Button::new("close-temporary-workspaces")
-                                    .ghost()
-                                    .size(px(SIDEBAR_SECTION_BUTTON))
+                                toolbar_button("close-temporary-workspaces")
                                     .icon(CloseTemporaryWorkspacesIcon)
                                     .accessibility_label(i18n("sidebar-workspace-close-temporary"))
                                     .tooltip(i18n("sidebar-workspace-close-temporary"))
@@ -457,17 +452,14 @@ impl Sidebar {
                     .relative()
                     .flex_1()
                     .min_h_0()
+                    // Stretch the wrapper over the leading gutter so the list
+                    // retains the header controls' trailing edge.
+                    .ml(px(-SIDEBAR_ROW_GUTTER))
                     .child(
                         v_flex()
                             .id("workspace-list")
                             .size_full()
                             .gap(px(WORKSPACE_LIST_GAP))
-                            // Pulled back over the panel's inset so a row's
-                            // fill can reach into it. The list clips its own
-                            // children horizontally, so a row cannot overhang
-                            // this box; the box has to move instead.
-                            .ml(px(-SIDEBAR_ROW_GUTTER))
-                            .pr_3()
                             .overflow_y_scroll()
                             .track_scroll(&self.scroll)
                             // Fallback drop target for the whole list: a drop released
@@ -525,11 +517,14 @@ impl Sidebar {
                     .w_full()
                     .flex_none()
                     .gap(px(SIDEBAR_STATUS_ROW_GAP))
-                    .py(px(SIDEBAR_STATUS_PADDING_Y))
+                    .pt(px(SIDEBAR_STATUS_PADDING_TOP))
+                    .pb(px(SIDEBAR_STATUS_PADDING_BOTTOM))
                     .border_t_1()
                     .border_color(cx.theme().sidebar_border)
                     .children(show_daily_usage.then_some(usage.daily))
-                    .children(show_quotas.then_some(usage.quotas))
+                    .children(
+                        show_quotas.then(|| div().ml(px(-SIDEBAR_ROW_GUTTER)).child(usage.quotas)),
+                    )
             }));
 
         // The terminal column's left gutter forms the gap between panels and

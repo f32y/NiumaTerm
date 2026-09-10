@@ -2,7 +2,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui::{
-    App, Bounds, IntoElement, ParentElement as _, Pixels, Styled as _, Window, canvas, div,
+    App, Bounds, IntoElement, ParentElement as _, Pixels, Styled as _, Window, canvas, div, px,
 };
 use gpui_component::button::Button;
 use gpui_component::modern_menu::ModernMenu;
@@ -27,11 +27,11 @@ pub(crate) fn modern_dropdown(
         .flex_none()
         .relative()
         .child(button.on_click(move |_, window, cx| {
-            builder(ModernMenu::new(), window, cx).show_at(
-                measured.get().bottom_left(),
-                window,
-                cx,
-            );
+            let mut position = measured.get().bottom_left();
+            // Native menus position their content, leaving the rounded outer
+            // frame above it. Reserve enough space to keep the trigger visible.
+            position.y += px(8.);
+            builder(ModernMenu::new(), window, cx).show_at(position, window, cx);
         }))
         .child(
             canvas(move |bounds, _, _| recorded.set(bounds), |_, _, _, _| {})

@@ -107,7 +107,8 @@ impl Shell {
     }
 
     pub(super) fn process_native_notifications(&mut self, cx: &mut Context<Self>) {
-        let system_notifications_enabled = system_notification_enabled();
+        let system_notifications_enabled =
+            cx.global::<AppSettings>().send_system_notifications && system_notification_enabled();
 
         let visible_route = self
             .window_active

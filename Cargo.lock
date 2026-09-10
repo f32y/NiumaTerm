@@ -330,6 +330,7 @@ dependencies = [
  "tracing-subscriber",
  "tree-sitter",
  "tree-sitter-language",
+ "unicode-width-16",
  "windows-sys 0.61.2",
  "winres",
  "zed-font-kit",

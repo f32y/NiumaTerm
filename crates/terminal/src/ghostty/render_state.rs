@@ -427,6 +427,9 @@ impl GhosttyTerminal {
         let placements = self.kitty.placements(self.terminal);
         let scrollbar = self.scrollbar();
 
+        self.snapshot_revision += 1;
+        buffer.set_snapshot_revision(self.snapshot_revision);
+
         buffer.finish_capture(
             cursor,
             colors,

@@ -9,3 +9,6 @@ pub(crate) const FLOATING_SURFACE_TOP_INSET: f32 = 1.0;
 /// Bottom gutter for the workspace sidebar, which floats clear of the window
 /// edge; the main pane runs into that edge instead.
 pub(crate) const FLOATING_SURFACE_BOTTOM_INSET: f32 = 6.0;
+
+/// Toolbar controls share the 30px outer height of Large Modern tabs.
+pub(crate) const TOOLBAR_BUTTON_SIZE: f32 = 30.0;

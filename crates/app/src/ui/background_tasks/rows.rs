@@ -9,14 +9,14 @@ use std::time::SystemTime;
 
 use gpui::prelude::*;
 use gpui::{AnyElement, Context, Hsla, SharedString, div, px};
-use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
+use gpui_component::{ActiveTheme as _, h_flex, v_flex};
 use nmt_agent_utils::background_task::{
     BackgroundTaskKind, BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskSummary,
 };
 use nmt_i18n::i18n;
 
 use crate::ui::background_tasks::{BackgroundTasksView, StopTaskIcon};
+use crate::ui::composition::toolbar_button;
 
 pub(super) fn render_row(
     index: usize,
@@ -52,12 +52,10 @@ pub(super) fn render_row(
     let stop = task.can_stop.then(|| {
         // Keyed by the child rather than by row position: the two sections
         // enumerate independently, so a positional id is not unique across them.
-        Button::new(SharedString::from(format!(
+        toolbar_button(SharedString::from(format!(
             "background-task-stop-{}",
             task.key.id
         )))
-        .ghost()
-        .xsmall()
         .icon(StopTaskIcon)
         .tooltip(i18n("tasks-background-stop-tooltip"))
         .accessibility_label(i18n("tasks-background-stop-tooltip"))

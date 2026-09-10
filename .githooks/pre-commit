@@ -1,6 +1,47 @@
 #!/bin/sh
 set -eu
 
+# A merge carries changes already committed on both parents. The automatic
+# merge tree isolates conflict resolutions and edits made during the merge,
+# including changes in files that merged without conflicts.
+merge_in_progress=false
+merge_base_tree=
+merge_head_file=$(git rev-parse --git-path MERGE_HEAD)
+if [ -f "$merge_head_file" ]; then
+    merge_in_progress=true
+    if merge_base_tree=$(git rev-parse --verify -q 'AUTO_MERGE^{tree}'); then
+        :
+    else
+        # Clean merges may not leave AUTO_MERGE. Reconstruct the same baseline
+        # without changing the working tree or the real index.
+        if [ "$(wc -l <"$merge_head_file" | tr -d ' ')" -ne 1 ]; then
+            echo 'pre-commit: merge checks require exactly two parents' >&2
+            exit 1
+        fi
+        merge_parent=$(cat "$merge_head_file")
+        if merge_output=$(git merge-tree --write-tree HEAD "$merge_parent"); then
+            :
+        else
+            merge_status=$?
+            if [ "$merge_status" -ne 1 ]; then
+                echo 'pre-commit: could not reconstruct the automatic merge tree' >&2
+                exit 1
+            fi
+        fi
+        merge_base_tree=$(printf '%s\n' "$merge_output" | sed -n '1p')
+        git cat-file -e "$merge_base_tree^{tree}" || exit 1
+    fi
+    echo 'pre-commit: checking resolutions and edits against the automatic merge'
+fi
+
+staged_diff() {
+    if [ "$merge_in_progress" = true ]; then
+        git diff --cached --find-renames "$merge_base_tree" "$@"
+    else
+        git diff --cached "$@"
+    fi
+}
+
 collect_staged_code_files() {
     printf '%s\n' "$staged_files" |
         awk -v protected="$protected_paths" -v code_path="$code_file_pattern" '
@@ -10,7 +51,7 @@ collect_staged_code_files() {
 }
 
 collect_added_comment_lines() {
-    git diff --cached --diff-filter=ACMR -U0 |
+    staged_diff --diff-filter=ACMR -U0 |
         awk -v protected="$protected_paths" -v code_path="$code_file_pattern"             -v generated="$generated_paths" '
             /^\+\+\+ b\// {
                 file = substr($0, 7)
@@ -26,6 +67,12 @@ collect_added_comment_lines() {
 }
 
 check_ai_docs_are_separate() {
+    # Conflict resolution can span directories whose original commits remain
+    # separate in the merge's parent history.
+    if [ "$merge_in_progress" = true ]; then
+        return 0
+    fi
+
     if [ -z "$protected_files" ] || [ -z "$code_files" ]; then
         return 0
     fi
@@ -43,7 +90,7 @@ EOF
 }
 
 check_no_incomplete_openspec_changes() {
-    incomplete_spec_files=$(git diff --cached --name-only --diff-filter=ACMR |
+    incomplete_spec_files=$(staged_diff --name-only --diff-filter=ACMR |
         grep -E '^openspec/changes/' |
         grep -Ev '^openspec/changes/archive/' || true)
     if [ -z "$incomplete_spec_files" ]; then
@@ -59,6 +106,12 @@ EOF
 }
 
 check_third_party_dirs_are_separate() {
+    # Conflict resolution can span directories whose original commits remain
+    # separate in the merge's parent history.
+    if [ "$merge_in_progress" = true ]; then
+        return 0
+    fi
+
     for isolated_path in third_party/gpui 'third_party/gpui-(kit|component)'; do
         isolated_files=$(printf '%s\n' "$staged_files" | grep -E "^$isolated_path/" || true)
         other_files=$(printf '%s\n' "$staged_files" | grep -Ev "^$isolated_path/" || true)
@@ -94,7 +147,7 @@ EOF
 
 check_no_ai_slop_marker() {
     slop_markers='ponytail|seam|fact|parity|envelope|wire|contract'
-    slop=$(git diff --cached --diff-filter=ACMR -U0 |
+    slop=$(staged_diff --diff-filter=ACMR -U0 |
         awk -v generated="$generated_paths" '
             /^\+\+\+ b\// { file = substr($0, 7); vendored = file ~ generated; next }
             !vendored && /^\+/ { print file ": " $0 }
@@ -142,7 +195,7 @@ EOF
 }
 
 check_rustfmt_and_clippy() {
-    rust_files=$(git diff --cached --name-only --diff-filter=ACMRD -- '*.rs')
+    rust_files=$(staged_diff --name-only --diff-filter=ACMRD -- '*.rs')
 
     if [ -z "$rust_files" ]; then
         echo "pre-commit: no staged Rust files; skipping rustfmt and clippy"
@@ -207,7 +260,7 @@ check_rustfmt_and_clippy() {
     }
     package_classes=$(printf '%s\n' "$package_classes" | tr -d '\r')
 
-    rustfmt_files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')
+    rustfmt_files=$(staged_diff --name-only --diff-filter=ACMR -- '*.rs')
     if [ -n "$rustfmt_files" ]; then
         echo "pre-commit: checking rustfmt on staged Rust files"
         set --
@@ -263,7 +316,7 @@ protected_paths='^([.]agents|[.]claude|[.]codex|[.]scratch|openspec|spec|docs/ad
 # third_party stay covered because we write those.
 generated_paths='^third_party/[^/]+/(prebuilt/|src/bindings[.]rs$)'
 code_file_pattern='(^|/)(Cargo[.](toml|lock)|build[.]rs)$|[.](rs|zig|c|cc|cpp|cxx|h|hh|hpp|hxx|m|mm|swift|py|sh|bash|zsh|ps1|js|jsx|ts|tsx|css|scss|html|wgsl|hlsl|metal)$'
-staged_files=$(git diff --cached --name-only --diff-filter=ACMRD)
+staged_files=$(staged_diff --name-only --diff-filter=ACMRD)
 protected_files=$(printf '%s\n' "$staged_files" | grep -E "$protected_paths" || true)
 code_files=$(collect_staged_code_files)
 

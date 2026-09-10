@@ -8,8 +8,7 @@ use std::time::SystemTime;
 
 use gpui::prelude::*;
 use gpui::{AnyElement, Context, Entity, WeakEntity, div};
-use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
+use gpui_component::{ActiveTheme as _, IconName, h_flex, v_flex};
 use nmt_agent_utils::background_task::{
     BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscriptState,
 };
@@ -21,6 +20,7 @@ use crate::ui::background_tasks::rows::{
     background_task_kind_label, background_task_state_label, empty_state, row_detail, row_timing,
     state_color,
 };
+use crate::ui::composition::toolbar_button;
 
 impl BackgroundTasksView {
     /// Re-read the open child while it is still working. Claude Code writes a
@@ -131,9 +131,7 @@ impl BackgroundTasksView {
                     .gap_1()
                     .items_center()
                     .child(
-                        Button::new("background-task-back")
-                            .ghost()
-                            .xsmall()
+                        toolbar_button("background-task-back")
                             .icon(IconName::ArrowLeft)
                             .tooltip(i18n("tasks-background-back-tooltip"))
                             .accessibility_label(i18n("tasks-background-back-tooltip"))

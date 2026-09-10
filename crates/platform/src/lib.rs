@@ -195,3 +195,6 @@ pub struct PromptIntegration {
 pub fn prompt_integration(shell: Option<&str>) -> Option<PromptIntegration> {
     platform::prompt_integration(shell)
 }
+
+#[cfg(target_os = "macos")]
+pub mod macos_notifications;

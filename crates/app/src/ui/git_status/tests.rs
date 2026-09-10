@@ -41,27 +41,29 @@ fn numstat_z_handles_unicode_paths() {
 }
 
 #[test]
-fn diff_lines_classify_by_prefix() {
+fn diff_hides_headers_and_tracks_both_line_numbers() {
     let text = "diff --git a/f b/f\nindex 123..456 100644\n--- a/f\n+++ b/f\n@@ -1,2 +1,2 @@\n context\n-removed\n+added\n";
-    let kinds: Vec<DiffLineKind> = parse_diff(text).iter().map(|l| l.kind).collect();
+    let rows = parse_diff(text);
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows[0].kind, DiffLineKind::Hunk);
     assert_eq!(
-        kinds,
-        vec![
-            DiffLineKind::FileHeader,
-            DiffLineKind::FileHeader,
-            DiffLineKind::FileHeader,
-            DiffLineKind::FileHeader,
-            DiffLineKind::Hunk,
-            DiffLineKind::Context,
-            DiffLineKind::Removed,
-            DiffLineKind::Added,
-        ]
+        (rows[1].old_line, rows[1].new_line, rows[1].text.as_ref()),
+        (Some(1), Some(1), "context")
+    );
+    assert_eq!(
+        (rows[2].old_line, rows[2].new_line, rows[2].text.as_ref()),
+        (Some(2), None, "removed")
+    );
+    assert_eq!(
+        (rows[3].old_line, rows[3].new_line, rows[3].text.as_ref()),
+        (None, Some(2), "added")
     );
 }
 
 #[test]
 fn diff_truncates_past_cap() {
-    let text = "+x\n".repeat(MAX_DIFF_LINES + 10);
+    let count = MAX_DIFF_LINES + 10;
+    let text = format!("@@ -0,0 +1,{count} @@\n{}", "+x\n".repeat(count));
     let lines = parse_diff(&text);
     assert_eq!(lines.len(), MAX_DIFF_LINES + 1);
     assert_eq!(lines.last().unwrap().kind, DiffLineKind::Truncated);
@@ -85,4 +87,73 @@ fn count_lines_handles_trailing_newline_and_binary() {
     assert_eq!(count_file_lines(&root, "missing"), 0);
 
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn diff_resets_numbers_and_keeps_header_like_code() {
+    let rows = parse_diff(
+        "@@ -7 +9 @@\n---code\n+++code\n\\ No newline at end of file\n@@ -30,0 +32,2 @@\n+first\n+second\n@@ -40,2 +43,0 @@\n-old\n-last\n",
+    );
+    let content: Vec<_> = rows
+        .iter()
+        .filter(|r| r.old_line.is_some() || r.new_line.is_some())
+        .map(|r| (r.old_line, r.new_line, r.text.as_ref()))
+        .collect();
+    assert_eq!(
+        content,
+        vec![
+            (Some(7), None, "--code"),
+            (None, Some(9), "++code"),
+            (None, Some(32), "first"),
+            (None, Some(33), "second"),
+            (Some(40), None, "old"),
+            (Some(41), None, "last"),
+        ]
+    );
+    assert_eq!(rows[3].kind, DiffLineKind::Notice);
+    assert_eq!((rows[3].old_line, rows[3].new_line), (None, None));
+}
+
+#[test]
+fn diff_preserves_binary_notice_without_file_metadata() {
+    let rows = parse_diff(
+        "diff --git a/image b/image\nindex a..b 100644\nBinary files a/image and b/image differ\n",
+    );
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].kind, DiffLineKind::Notice);
+    assert!(!rows[0].text.contains("diff --git"));
+    assert!(
+        parse_diff("diff --git a/a b/b\nsimilarity index 100%\nrename from a\nrename to b\n")
+            .is_empty()
+    );
+}
+
+#[test]
+fn untracked_diff_has_new_line_numbers_without_added_prefix() {
+    let dir = env::temp_dir().join(format!("nmt-untracked-diff-{}", process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("new.txt"), "first\n+second").unwrap();
+    let rows = fetch_file_diff(dir.to_str().unwrap(), "new.txt", true);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        (rows[0].old_line, rows[0].new_line, rows[0].text.as_ref()),
+        (None, Some(1), "first")
+    );
+    assert_eq!(
+        (rows[1].old_line, rows[1].new_line, rows[1].text.as_ref()),
+        (None, Some(2), "+second")
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn diff_handles_windows_line_endings_without_changing_source_numbers() {
+    let rows = parse_diff(
+        "diff --git a/f b/f\r\n--- a/f\r\n+++ b/f\r\n@@ -20,2 +20,2 @@\r\n unchanged\r\n-old\r\n+new\r\n",
+    );
+    assert_eq!(rows.len(), 4);
+    assert_eq!((rows[1].old_line, rows[1].new_line), (Some(20), Some(20)));
+    assert_eq!((rows[2].old_line, rows[2].new_line), (Some(21), None));
+    assert_eq!((rows[3].old_line, rows[3].new_line), (None, Some(21)));
+    assert_eq!(rows[3].text.as_ref(), "new");
 }

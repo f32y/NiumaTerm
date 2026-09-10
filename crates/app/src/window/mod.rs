@@ -15,11 +15,9 @@ use crate::ui::{self, Shell};
 /// centers them.
 #[cfg(target_os = "macos")]
 const TRAFFIC_LIGHT_HEIGHT: f32 = 14.0;
-/// Distance from the window's leading edge to the close button, matching the
-/// inset AppKit uses by default. The drawn title bar reserves room for the
-/// group ahead of its own leading controls.
+/// Leading edge shared by the native close button and workspace row fills.
 #[cfg(target_os = "macos")]
-const TRAFFIC_LIGHT_INSET_X: f32 = 9.0;
+pub(crate) const TRAFFIC_LIGHT_INSET: f32 = (ui::TITLE_BAR_HEIGHT - TRAFFIC_LIGHT_HEIGHT) / 2.0;
 
 /// Titlebar setup for a shell window. macOS keeps drawing its own window
 /// buttons over the transparent titlebar, and AppKit centers them in a 32px
@@ -36,10 +34,10 @@ fn titlebar_options() -> TitlebarOptions {
 
     #[cfg(target_os = "macos")]
     {
-        titlebar.traffic_light_position = Some(point(
-            px(TRAFFIC_LIGHT_INSET_X),
-            px((ui::TITLE_BAR_HEIGHT - TRAFFIC_LIGHT_HEIGHT) / 2.0),
-        ));
+        // Equal top and leading insets center the close button within the
+        // rounded corner instead of retaining the narrower native titlebar inset.
+        let inset = px(TRAFFIC_LIGHT_INSET);
+        titlebar.traffic_light_position = Some(point(inset, inset));
     }
 
     titlebar

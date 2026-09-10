@@ -71,6 +71,9 @@ impl NewlineShortcut {
 /// The `[system]` section: process/system behavior settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SystemConfig {
+    /// Allow the application to send native notifications.
+    #[serde(default = "default_bool_true", rename = "send-system-notifications")]
+    pub send_system_notifications: bool,
     /// Reopen the last saved workspace/tab session on startup.
     #[serde(
         default = "default_bool_true",
@@ -104,6 +107,7 @@ pub struct SystemConfig {
 impl Default for SystemConfig {
     fn default() -> Self {
         Self {
+            send_system_notifications: true,
             restore_last_session_when_opening: true,
             manage_subprocess_job: false,
             warn_before_terminating_shell: WarnBeforeTerminatingShell::default(),
@@ -127,5 +131,6 @@ pub(crate) fn patch_document(doc: &mut DocumentMut, system: &SystemConfig) {
         value(system.confirm_before_closing_workspace);
     doc["system"]["prioritize-ui-threads"] = value(system.prioritize_ui_threads);
     doc["system"]["newline-shortcut"] = value(system.newline_shortcut.as_str());
+    doc["system"]["send-system-notifications"] = value(system.send_system_notifications);
     doc["system"]["open-in-best-workspace"] = value(system.open_in_best_workspace);
 }

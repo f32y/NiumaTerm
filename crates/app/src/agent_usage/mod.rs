@@ -560,7 +560,11 @@ impl Render for AgentUsageView {
             .small()
             .w_full()
             .h(px(QUOTA_ROW_HEIGHT))
-            .px_1()
+            // The sidebar supplies the leading alignment; the gauge does not
+            // add a second inset before its provider icon.
+            .pl_0()
+            .pr_1()
+            .border_0()
             .accessibility_label(self.accessibility_label())
             // Opacity communicates in-flight work without replacing or moving
             // the last successful values in this tightly packed status line.

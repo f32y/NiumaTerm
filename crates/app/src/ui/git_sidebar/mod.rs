@@ -1,15 +1,19 @@
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, Entity, ScrollStrategy, UniformListScrollHandle, Window, div, px,
+    AnyElement, Context, Entity, Point, ScrollStrategy, UniformListScrollHandle, Window, div, px,
     uniform_list,
 };
-use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::scroll::Scrollbar;
-use gpui_component::{ActiveTheme, IconName, Sizable as _, h_flex, v_flex};
-use nmt_app_terminal::metrics;
+use gpui_component::{ActiveTheme, IconName, h_flex, v_flex};
 use nmt_i18n::i18n;
 
-use crate::ui::git_status::{DiffLine, DiffLineKind, GitStatusModel, fetch_file_diff};
+use crate::ui::composition::{GitColors, toolbar_button};
+use crate::ui::git_sidebar::diff_view::DiffView;
+use crate::ui::git_status::{GitStatusModel, fetch_file_diff};
+
+mod diff_view;
+#[cfg(test)]
+mod tests;
 
 /// Git content for the shared right-side host. Open state, width, slide
 /// animation, resizing, and the outer card belong to that host, so Git and
@@ -17,7 +21,7 @@ use crate::ui::git_status::{DiffLine, DiffLineKind, GitStatusModel, fetch_file_d
 pub(crate) struct GitSidebar {
     model: Entity<GitStatusModel>,
     selected: Option<String>,
-    diff: Vec<DiffLine>,
+    diff: DiffView,
     /// Guards a slow diff fetch from overwriting a newer selection's diff.
     diff_seq: u64,
     /// Last `snapshot_seq` reacted to, so `refreshing` flag flips don't
@@ -42,7 +46,7 @@ impl GitSidebar {
         Self {
             model,
             selected: None,
-            diff: Vec::new(),
+            diff: DiffView::default(),
             diff_seq: 0,
             seen_snapshot_seq: 0,
             files_scroll: UniformListScrollHandle::default(),
@@ -66,7 +70,7 @@ impl GitSidebar {
             self.fetch_diff(cx);
         } else {
             self.selected = None;
-            self.diff.clear();
+            self.diff = DiffView::default();
             self.diff_seq += 1;
         }
     }
@@ -74,6 +78,12 @@ impl GitSidebar {
     fn select(&mut self, path: String, cx: &mut Context<Self>) {
         if self.selected.as_deref() != Some(&path) {
             self.selected = Some(path);
+            self.diff = DiffView::default();
+            self.diff_scroll
+                .0
+                .borrow()
+                .base_handle
+                .set_offset(Point::default());
 
             self.diff_scroll.scroll_to_item(0, ScrollStrategy::Top);
 
@@ -110,7 +120,7 @@ impl GitSidebar {
 
             this.update(cx, |this, cx| {
                 if this.diff_seq == seq {
-                    this.diff = lines;
+                    this.diff = DiffView::new(lines);
                     cx.notify();
                 }
             })
@@ -160,6 +170,7 @@ impl GitSidebar {
                             let sidebar = sidebar.clone();
                             let path = file.path.clone();
                             let theme = cx.theme();
+                            let colors = GitColors::new(cx);
 
                             h_flex()
                                 .id(("git-file", ix))
@@ -184,12 +195,12 @@ impl GitSidebar {
                                 .child(div().flex_1().truncate().child(file.path.clone()))
                                 .child(
                                     div()
-                                        .text_color(theme.green)
+                                        .text_color(colors.added)
                                         .child(format!("+{}", file.added)),
                                 )
                                 .child(
                                     div()
-                                        .text_color(theme.red)
+                                        .text_color(colors.removed)
                                         .child(format!("-{}", file.removed)),
                                 )
                                 .on_click(move |_, _, cx| {
@@ -218,50 +229,24 @@ impl GitSidebar {
                 .into_any_element();
         }
 
-        let line_count = self.diff.len();
-        let sidebar = cx.entity();
-
-        div()
+        v_flex()
             .flex_1()
-            .relative()
+            .min_h_0()
             .overflow_hidden()
-            .font_family(metrics::font_family(cx))
-            .text_size(px(12.0))
             .child(
-                uniform_list("git-diff", line_count, move |range, _window, cx| {
-                    let theme = cx.theme();
-                    let sidebar = sidebar.read(cx);
-
-                    range
-                        .filter_map(|ix| sidebar.diff.get(ix))
-                        .map(|line| {
-                            let color = match line.kind {
-                                DiffLineKind::Added => theme.green,
-                                DiffLineKind::Removed => theme.red,
-                                DiffLineKind::Hunk => theme.cyan,
-                                DiffLineKind::FileHeader | DiffLineKind::Truncated => {
-                                    theme.muted_foreground
-                                }
-                                DiffLineKind::Context => theme.foreground,
-                            };
-
-                            div()
-                                // Full width + truncate clips long diff lines
-                                // at the sidebar edge (ellipsis marks the cut)
-                                // instead of overflowing the window.
-                                .w_full()
-                                .h(px(18.0))
-                                .px_2()
-                                .truncate()
-                                .text_color(color)
-                                .child(line.text.clone())
-                        })
-                        .collect()
-                })
-                .track_scroll(&self.diff_scroll)
-                .h_full(),
+                div()
+                    .w_full()
+                    .h(px(26.0))
+                    .flex_none()
+                    .px_2()
+                    .border_b_1()
+                    .border_color(cx.theme().sidebar_border)
+                    .text_sm()
+                    .line_height(px(26.0))
+                    .truncate()
+                    .child(self.selected.clone().unwrap_or_default()),
             )
-            .child(scrollbar(&self.diff_scroll))
+            .child(self.diff.render(&self.diff_scroll, cx))
             .into_any_element()
     }
 }
@@ -294,9 +279,7 @@ impl Render for GitSidebar {
             .border_color(cx.theme().sidebar_border)
             .child(div().text_sm().child(i18n("sidebar-git-title")))
             .child(
-                Button::new("git-refresh")
-                    .ghost()
-                    .xsmall()
+                toolbar_button("git-refresh")
                     .icon(IconName::Redo)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.model.update(cx, |model, cx| model.refresh(cx));

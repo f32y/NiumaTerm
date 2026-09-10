@@ -5,7 +5,7 @@ use nmt_agent_utils::AgentRuntimeStatus;
 use nmt_config::appearance::TabBarStyle;
 
 use crate::tabs::TabId;
-use crate::ui::workspace_sidebar::{TAB_ROW_HEIGHT, workspace_status_glyphs};
+use crate::ui::workspace_sidebar::{TAB_ROW_HEIGHT, WORKSPACE_NAME_INSET, workspace_status_glyphs};
 use crate::ui::{AppSettings, UI_RADIUS};
 use crate::workspace::TerminalActivity;
 
@@ -63,8 +63,8 @@ impl Render for WorkspaceDragPreview {
             cx,
         );
         let vertical_tabs = cx.global::<AppSettings>().tab_bar_style == TabBarStyle::Vertical;
-        // Dropped along with the lane on the row itself, so the ghost keeps
-        // its name on the same leading edge as the list it came out of.
+        // Match the trailing status placement of the workspace row so picking
+        // it up does not move its name horizontally.
         let indicator = (!vertical_tabs).then(|| {
             v_flex()
                 .id("workspace-drag-status")
@@ -84,7 +84,8 @@ impl Render for WorkspaceDragPreview {
 
         h_flex()
             .w(px(self.width))
-            .px_2()
+            .pl(px(WORKSPACE_NAME_INSET))
+            .pr_2()
             .py_1()
             .gap_2()
             .items_center()
@@ -92,7 +93,6 @@ impl Render for WorkspaceDragPreview {
             .overflow_hidden()
             .bg(background)
             .text_color(cx.theme().sidebar_accent_foreground)
-            .children(indicator)
             // Laid out like the row it was lifted from, so the ghost stays the
             // same height as the gap it will drop into.
             .child(
@@ -120,5 +120,6 @@ impl Render for WorkspaceDragPreview {
                             .child(self.cwd.clone()),
                     ),
             )
+            .children(indicator)
     }
 }

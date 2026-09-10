@@ -128,16 +128,18 @@ impl RightPanelController {
 }
 
 impl Shell {
-    /// Centralized target-CWD sync: read the active pane's
-    /// OSC7-tracked CWD (falling back to the configured working-dir) and
-    /// hand it to the git model, which no-ops when unchanged. Called on
-    /// every render and on `HostEvent::Cwd`, so no switch path is missed.
+    /// Follow the active terminal's OSC7 directory or the active Agent's
+    /// primary directory, falling back to the configured directory only when
+    /// neither provides one. Rendering and CWD events both synchronize the
+    /// target so tab switches and workspace directory edits refresh the panel.
     pub(super) fn sync_git_target(&self, cx: &mut Context<Self>) {
-        // Agent tabs have no OSC7-tracking pane; the configured working dir
-        // keeps the git indicator on something sensible.
         let cwd = self
             .try_active_pane()
             .and_then(|pane| pane.read(cx).tab_state().cwd)
+            .or_else(|| {
+                self.active_agent()
+                    .and_then(|pane| pane.read(cx).working_directory())
+            })
             .or_else(|| get().working_dir.clone());
 
         self.panels.set_git_target(cwd, cx);

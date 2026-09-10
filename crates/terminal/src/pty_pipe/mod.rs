@@ -2,7 +2,7 @@ use std::io::{self, ErrorKind, Read, Write};
 use std::sync::atomic::{AtomicU32, AtomicU64};
 use std::sync::{self, Arc, mpsc};
 use std::thread::{Builder, JoinHandle};
-use std::{cell, error, fmt, mem, path, time};
+use std::{cell, error, fmt, path, time};
 
 #[cfg(target_os = "linux")]
 use libc::EIO;
@@ -201,9 +201,7 @@ fn publish_render_buffer(
         back.set_cursor_visible(false);
     }
 
-    mem::swap(&mut *front.lock(), back);
-
-    true
+    front.lock().publish_snapshot(back)
 }
 
 /// Convert `scrollback-history-limit` (in **lines**) to the engine's
@@ -879,6 +877,12 @@ where
 
                     if let Err(err) = self.pty.set_winsize(window_size) {
                         warn!("pty set_winsize failed: {err}");
+                    }
+                }
+                Msg::SetThemeColors(colors) => {
+                    self.ghostty.lock().set_theme_colors(&colors);
+                    if let Err(error) = self.flush_engine_state(true) {
+                        warn!("failed to refresh terminal theme: {error}");
                     }
                 }
                 Msg::Shutdown => return false,

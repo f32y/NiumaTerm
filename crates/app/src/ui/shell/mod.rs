@@ -28,7 +28,7 @@ use gpui::{
     Anchor, AnyElement, App, Axis, Context, Div, Entity, FocusHandle, Focusable, MouseDownEvent,
     ObjectFit, Pixels, Render, SharedString, Window, WindowBounds, WindowId, div, img, px,
 };
-use gpui_component::button::{Button, ButtonVariants, Toggle, ToggleVariants};
+use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::dialog::{
     DIALOG_BUTTON_MIN_WIDTH, DialogAction, DialogButtonProps, DialogClose, DialogFooter,
 };

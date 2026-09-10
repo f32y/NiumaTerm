@@ -5,7 +5,6 @@ use gpui::{
     AnyElement, App, Context, DragMoveEvent, Hsla, IsZero as _, Pixels, ScrollHandle, SharedString,
     div, px, relative,
 };
-use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
 use gpui_component::{ActiveTheme, ElementExt as _, IconName, Sizable};
@@ -15,7 +14,8 @@ use nmt_terminal::event::{ProgressReport, ProgressState};
 
 use crate::tabs::{TabId, TabManager};
 use crate::ui::composition::{
-    HoverActionLayout, HoverActionVisibility, StatusMark, StatusMarkTone, hover_action,
+    HoverActionLayout, HoverActionVisibility, StatusMark, StatusMarkTone, TOOLBAR_BUTTON_SIZE,
+    hover_action, toolbar_button,
 };
 use crate::ui::shell::{
     InlineRename, InlineRenameSession, InlineRenameStyle, TabSurface, pending_tab_icon,
@@ -104,7 +104,7 @@ const TAB_BAR_PADDING: f32 = TAB_GAP * 2.0;
 
 /// Room held back for the trailing new-tab button, which shares the row with
 /// the tabs.
-const NEW_TAB_BUTTON_WIDTH: f32 = 28.0;
+const NEW_TAB_BUTTON_WIDTH: f32 = TOOLBAR_BUTTON_SIZE;
 
 /// Width one tab takes under `Auto Size`. Tabs hold `configured` while the row
 /// has room and then shrink together, never past the point where the leading
@@ -294,7 +294,7 @@ impl TabStrip {
         // Ctrl+Shift+T still opens the default profile directly.
         let menu_shell = cx.entity();
         let new_tab = modern_dropdown(
-            Button::new("tab-new").ghost().px_2().child("+"),
+            toolbar_button("tab-new").icon(IconName::Plus),
             move |menu, _, cx| new_tab_menu(menu, &menu_shell, cx),
         );
 
