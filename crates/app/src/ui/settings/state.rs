@@ -14,12 +14,11 @@ use nmt_config::system::{NewlineShortcut, SystemConfig, WarnBeforeTerminatingShe
 use nmt_config::theme::Theme;
 pub use nmt_config::update::UpdateChannel;
 use nmt_config::update::UpdateConfig;
-use nmt_config::{CursorShape, SettingsPatch, get, save_settings};
+use nmt_config::{Config, CursorShape, SettingsPatch, get, save_settings};
 use nmt_i18n::i18n;
 use tracing::warn;
 
 use crate::ui::settings::MAX_TAB_WIDTH;
-use crate::ui::settings::theme::load_theme_choices;
 
 /// The shell a freshly seeded profile names, which is the platform's own
 /// default rather than a fixed program.
@@ -472,7 +471,7 @@ impl AppSettings {
                 config.theme.clone()
             },
             theme_filter: String::new(),
-            themes: load_theme_choices(),
+            themes: Config::load_themes(),
             agent_pane_use_terminal_background: appearance.agent_pane_use_terminal_background,
             input_style: appearance.input_style,
             scroll_to_bottom_when_typing: appearance.scroll_to_bottom_when_typing,

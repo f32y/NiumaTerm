@@ -122,8 +122,7 @@ pub(crate) fn paint_line_backgrounds_at(
     bounds: Bounds<Pixels>,
     line: &TerminalLine,
     y: f32,
-    cell_w: f32,
-    cell_h: f32,
+    cell: metrics::CellMetrics,
     window: &mut Window,
 ) {
     let mut run_start = 0u16;
@@ -140,10 +139,10 @@ pub(crate) fn paint_line_backgrounds_at(
         window.paint_quad(fill(
             Bounds::new(
                 point(
-                    bounds.left() + px(start as f32 * cell_w),
+                    bounds.left() + px(start as f32 * cell.width_px),
                     bounds.top() + px(y),
                 ),
-                size(px(width as f32 * cell_w), px(cell_h)),
+                size(px(width as f32 * cell.width_px), px(cell.height_px)),
             ),
             rgb(color.rgb_u32()),
         ));

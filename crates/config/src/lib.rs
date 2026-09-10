@@ -19,14 +19,8 @@ use std::sync::{OnceLock, RwLock};
 use std::{env, fs, io, mem};
 
 use dirs::home_dir;
-#[cfg(target_os = "macos")]
-use nmt_platform::environment::config_dir as macos_config_dir;
-#[cfg(target_os = "windows")]
-use nmt_platform::windows::environment::config_dir as windows_config_dir;
+use nmt_platform::environment::config_dir;
 use serde::{Deserialize, Serialize};
-#[cfg(test)]
-use theme::AppearanceTheme;
-use theme::{Theme, UiTheme};
 use toml::de::Error as TomlDeError;
 use toml::from_str as parse_toml;
 use toml_edit::{DocumentMut, Item, Table, value};
@@ -39,6 +33,9 @@ use crate::colors::Colors;
 use crate::defaults::*;
 use crate::profile::Profile;
 use crate::system::SystemConfig;
+#[cfg(test)]
+use crate::theme::AppearanceTheme;
+use crate::theme::{Theme, UiTheme};
 
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct Shell {
@@ -119,31 +116,11 @@ fn home_dir_or_temp() -> PathBuf {
     home_dir().unwrap_or_else(env::temp_dir)
 }
 
-#[cfg(target_os = "macos")]
 #[inline]
 fn base_config_dir_path() -> PathBuf {
     env::var("NMT_CONFIG_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| macos_config_dir(&home_dir_or_temp()))
-}
-
-#[cfg(target_os = "windows")]
-#[inline]
-fn base_config_dir_path() -> PathBuf {
-    env::var("NMT_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| windows_config_dir(&home_dir_or_temp()))
-}
-
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
-#[inline]
-fn base_config_dir_path() -> PathBuf {
-    env::var("NMT_CONFIG_HOME").map(PathBuf::from).unwrap_or(
-        env::var("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or(home_dir_or_temp().join(".config"))
-            .join("NiumaTerm"),
-    )
+        .unwrap_or_else(|_| config_dir(&home_dir_or_temp()))
 }
 
 #[inline]
@@ -240,7 +217,7 @@ impl Config {
         for custom in Self::load_themes_from(&config_dir_path().join("themes")) {
             merge_theme(&mut themes, custom);
         }
-        themes.sort_by_key(|(name, _)| name.to_lowercase());
+        themes.sort_by_cached_key(|(name, _)| name.to_lowercase());
         themes
     }
 
@@ -263,7 +240,7 @@ impl Config {
                 }
             })
             .collect::<Vec<_>>();
-        themes.sort_by_key(|(name, _)| name.to_lowercase());
+        themes.sort_by_cached_key(|(name, _)| name.to_lowercase());
         themes
     }
 

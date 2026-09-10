@@ -18,9 +18,9 @@ use nmt_i18n::i18n;
 
 use crate::ui::background_tasks::BackgroundTasksView;
 use crate::ui::background_tasks::rows::{
-    background_task_kind_label, background_task_state_label, empty_state, row_detail, row_timing,
-    state_color,
+    background_task_kind_label, background_task_state_label, row_detail, row_timing, state_color,
 };
+use crate::ui::composition::empty_state;
 
 impl BackgroundTasksView {
     /// Re-read the open child while it is still working. Claude Code writes a

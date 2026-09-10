@@ -127,12 +127,8 @@ fn select_theme(name: String, cx: &mut App) {
     }
 }
 
-pub(super) fn load_theme_choices() -> Vec<(String, Theme)> {
-    Config::load_themes()
-}
-
 fn reload_themes(cx: &mut App) {
-    cx.global_mut::<AppSettings>().themes = load_theme_choices();
+    cx.global_mut::<AppSettings>().themes = Config::load_themes();
 
     let selected = cx.global::<AppSettings>().theme.clone();
 

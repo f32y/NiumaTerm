@@ -562,7 +562,7 @@ fn merge_update(
     changed
 }
 
-fn replace_text(current: &mut Option<String>, incoming: &Option<String>) -> bool {
+pub(crate) fn replace_text(current: &mut Option<String>, incoming: &Option<String>) -> bool {
     let Some(incoming) = incoming else {
         return false;
     };

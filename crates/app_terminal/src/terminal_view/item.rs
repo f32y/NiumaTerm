@@ -325,15 +325,7 @@ impl Element for BlockListItem {
             ) => {
                 paint_frozen_images(bounds, view, *cell, window, false);
 
-                block_list::paint_frozen(
-                    bounds,
-                    view,
-                    shaped,
-                    cell.width_px,
-                    cell.height_px,
-                    window,
-                    cx,
-                );
+                block_list::paint_frozen(bounds, view, shaped, *cell, window, cx);
 
                 paint_frozen_images(bounds, view, *cell, window, true);
             }
@@ -345,15 +337,7 @@ impl Element for BlockListItem {
                     active_shaped,
                 },
             ) => {
-                block_list::paint_frozen(
-                    bounds,
-                    tail_view,
-                    tail_shaped,
-                    cell.width_px,
-                    cell.height_px,
-                    window,
-                    cx,
-                );
+                block_list::paint_frozen(bounds, tail_view, tail_shaped, *cell, window, cx);
 
                 let active_bounds = Bounds::new(
                     point(bounds.left(), bounds.top() + px(tail_view.active_top)),

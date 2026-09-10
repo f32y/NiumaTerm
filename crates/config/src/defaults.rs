@@ -1,5 +1,4 @@
-#[cfg(target_os = "windows")]
-use nmt_platform::windows::environment::DEFAULT_EDITOR;
+use nmt_platform::environment::DEFAULT_EDITOR;
 #[cfg(target_os = "windows")]
 use nmt_platform::windows::powershell::DEFAULT_CONFIG_SHELL;
 
@@ -51,19 +50,8 @@ pub fn default_theme() -> String {
 
 #[inline]
 pub fn default_editor() -> Shell {
-    #[cfg(not(target_os = "windows"))]
-    {
-        Shell {
-            program: String::from("vi"),
-            args: vec![],
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        Shell {
-            program: String::from(DEFAULT_EDITOR),
-            args: vec![],
-        }
+    Shell {
+        program: String::from(DEFAULT_EDITOR),
+        args: vec![],
     }
 }

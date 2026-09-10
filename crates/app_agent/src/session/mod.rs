@@ -40,9 +40,7 @@ use serde_json::Value;
 use tracing::info;
 
 use crate::capabilities::QueuedPromptDelivery;
-use crate::commands::{
-    is_current_session_epoch, next_session_epoch, reconcile_skill_binding, reset_command_runtime,
-};
+use crate::commands::{is_current_session_epoch, next_session_epoch, reconcile_skill_binding};
 use crate::composer::attachments::{ComposerAttachments, scratch_dir};
 use crate::composer::{BranchFlow, CommandFeedbackKind, prompt_with_response_annotations};
 use crate::fade::Fade;
@@ -1029,16 +1027,8 @@ impl AgentPane {
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
         self.prompts.dismiss_approval();
-        reset_command_runtime(
-            !self.kind.caps().async_command_discovery,
-            &mut self.palette.provider_commands,
-            &mut self.palette.provider_commands_ready,
-            &mut self.palette.command_queue,
-            &mut self.palette.awaiting_command_turn,
-            &mut self.palette.selected,
-            &mut self.palette.dismissed,
-        );
-        self.palette.catalog = None;
+        self.palette
+            .reset_command_runtime(!self.kind.caps().async_command_discovery);
         self.palette.feedback = None;
         self.history_ui.mode = RecentSessionsMode::Hidden;
         // The discarded conversation's subject no longer describes this tab,

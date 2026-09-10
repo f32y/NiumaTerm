@@ -11,8 +11,8 @@ use parking_lot::{FairMutex, Mutex};
 
 use crate::event::{self, VoidListener};
 use crate::pty_pipe::{
-    Interest, Poll, PtyPipe, PtyState, READ_BUFFER_SIZE, SYNC_OUTPUT_TIMEOUT, Token, Waker, mode,
-    publish_render_buffer,
+    Interest, Poll, PtyPipe, PtyState, READ_BUFFER_SIZE, SYNC_OUTPUT_TIMEOUT, SessionOptions,
+    Token, Waker, mode, publish_render_buffer,
 };
 use crate::render_buffer::RenderBuffer;
 use crate::{ansi, ghostty};
@@ -236,10 +236,17 @@ fn disabled_terminal_responses_are_forwarded_without_replying() {
         pty,
         VoidListener {},
         event::WindowId::from(0),
-        0,
-        Colors::default(),
-        1000,
-        false,
+        &SessionOptions {
+            cols: 20,
+            rows: 3,
+            route_id: 0,
+            colors: Colors::default(),
+            cursor_shape: ansi::CursorShape::Block,
+            scrollback_lines: 1000,
+            engine_blocks: false,
+            terminal_responses: true,
+            output_sink: None,
+        },
     )
     .unwrap();
     let forwarded = Arc::new(Mutex::new(Vec::new()));
@@ -269,10 +276,17 @@ fn resize_message_publishes_snapshot_to_render_buffer() {
         pty,
         VoidListener {},
         event::WindowId::from(0),
-        0,
-        Colors::default(),
-        1000,
-        false,
+        &SessionOptions {
+            cols: 20,
+            rows: 3,
+            route_id: 0,
+            colors: Colors::default(),
+            cursor_shape: ansi::CursorShape::Block,
+            scrollback_lines: 1000,
+            engine_blocks: false,
+            terminal_responses: true,
+            output_sink: None,
+        },
     )
     .unwrap();
 
@@ -314,10 +328,17 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
         pty,
         VoidListener {},
         event::WindowId::from(0),
-        0,
-        Colors::default(),
-        1000,
-        false,
+        &SessionOptions {
+            cols: 20,
+            rows: 3,
+            route_id: 0,
+            colors: Colors::default(),
+            cursor_shape: ansi::CursorShape::Block,
+            scrollback_lines: 1000,
+            engine_blocks: false,
+            terminal_responses: true,
+            output_sink: None,
+        },
     )
     .unwrap();
     let mut state = PtyState::default();
@@ -389,10 +410,17 @@ fn osc_progress_hides_published_cursor_until_removed() {
         pty,
         VoidListener {},
         event::WindowId::from(0),
-        0,
-        Colors::default(),
-        1000,
-        false,
+        &SessionOptions {
+            cols: 80,
+            rows: 3,
+            route_id: 0,
+            colors: Colors::default(),
+            cursor_shape: ansi::CursorShape::Block,
+            scrollback_lines: 1000,
+            engine_blocks: false,
+            terminal_responses: true,
+            output_sink: None,
+        },
     )
     .unwrap();
     machine
@@ -448,10 +476,17 @@ fn conpty_resize_echo_realigns_machine_pty_read_to_cursor_row() {
         pty,
         VoidListener {},
         event::WindowId::from(0),
-        0,
-        Colors::default(),
-        1000,
-        false,
+        &SessionOptions {
+            cols: 134,
+            rows: 42,
+            route_id: 0,
+            colors: Colors::default(),
+            cursor_shape: ansi::CursorShape::Block,
+            scrollback_lines: 1000,
+            engine_blocks: false,
+            terminal_responses: true,
+            output_sink: None,
+        },
     )
     .unwrap();
 
@@ -494,10 +529,17 @@ fn conpty_resize_repaint_realigns_clear_without_new_input() {
         pty,
         VoidListener {},
         event::WindowId::from(0),
-        0,
-        Colors::default(),
-        1000,
-        false,
+        &SessionOptions {
+            cols: 134,
+            rows: 42,
+            route_id: 0,
+            colors: Colors::default(),
+            cursor_shape: ansi::CursorShape::Block,
+            scrollback_lines: 1000,
+            engine_blocks: false,
+            terminal_responses: true,
+            output_sink: None,
+        },
     )
     .unwrap();
 
@@ -543,10 +585,17 @@ fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
         pty,
         VoidListener {},
         event::WindowId::from(0),
-        0,
-        Colors::default(),
-        1000,
-        false,
+        &SessionOptions {
+            cols: 20,
+            rows: 4,
+            route_id: 0,
+            colors: Colors::default(),
+            cursor_shape: ansi::CursorShape::Block,
+            scrollback_lines: 1000,
+            engine_blocks: false,
+            terminal_responses: true,
+            output_sink: None,
+        },
     )
     .unwrap();
 
@@ -611,10 +660,17 @@ fn conpty_resize_echo_routes_to_active_cursor_when_scrolled_typing() {
         pty,
         VoidListener {},
         event::WindowId::from(0),
-        0,
-        Colors::default(),
-        1000,
-        false,
+        &SessionOptions {
+            cols: 20,
+            rows: 4,
+            route_id: 0,
+            colors: Colors::default(),
+            cursor_shape: ansi::CursorShape::Block,
+            scrollback_lines: 1000,
+            engine_blocks: false,
+            terminal_responses: true,
+            output_sink: None,
+        },
     )
     .unwrap();
 
@@ -699,10 +755,17 @@ fn pty_read_events(
         pty,
         CollectingListener(Arc::clone(&events)),
         event::WindowId::from(0),
-        0,
-        Colors::default(),
-        1000,
-        true,
+        &SessionOptions {
+            cols: 80,
+            rows: 24,
+            route_id: 0,
+            colors: Colors::default(),
+            cursor_shape: ansi::CursorShape::Block,
+            scrollback_lines: 1000,
+            engine_blocks: true,
+            terminal_responses: true,
+            output_sink: None,
+        },
     )
     .unwrap();
     let mut state = PtyState::default();

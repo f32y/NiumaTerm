@@ -1,4 +1,5 @@
 use crate::block_list::*;
+use crate::metrics::CellMetrics;
 
 /// Shape the visible frozen rows. Block rows cache by `(block_id,
 /// generation, row)`; live-history rows hash their text.
@@ -24,13 +25,12 @@ pub(crate) fn paint_frozen(
     bounds: Bounds<Pixels>,
     view: &FrozenView,
     shaped: &[ShapedLine],
-    cell_w: f32,
-    cell_h: f32,
+    cell: CellMetrics,
     window: &mut Window,
     cx: &mut App,
 ) {
     for row in &view.rows {
-        paint_line_backgrounds_at(bounds, &row.line, row.y, cell_w, cell_h, window);
+        paint_line_backgrounds_at(bounds, &row.line, row.y, cell, window);
     }
 
     // Selection tint under the glyphs (over the cell backgrounds).
@@ -44,10 +44,10 @@ pub(crate) fn paint_frozen(
         window.paint_quad(fill(
             Bounds::new(
                 point(
-                    bounds.left() + px(start as f32 * cell_w),
+                    bounds.left() + px(start as f32 * cell.width_px),
                     bounds.top() + px(row.y),
                 ),
-                size(px((end - start) as f32 * cell_w), px(cell_h)),
+                size(px((end - start) as f32 * cell.width_px), px(cell.height_px)),
             ),
             rgb(selection_bg.rgb_u32()),
         ));
@@ -59,7 +59,7 @@ pub(crate) fn paint_frozen(
             .iter()
             .zip(shaped)
             .map(|(row, line)| (row.y, line)),
-        cell_h,
+        cell.height_px,
         window,
         cx,
     );

@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 use std::time::SystemTime;
 
 use gpui::prelude::*;
-use gpui::{AnyElement, Context, Hsla, SharedString, div, px};
+use gpui::{AnyElement, Context, Hsla, SharedString, div};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use nmt_agent_utils::background_task::{
@@ -245,25 +245,4 @@ pub(super) fn running_heading(snapshot: &BackgroundTaskSnapshot) -> String {
 pub(super) fn finished_heading(snapshot: &BackgroundTaskSnapshot) -> String {
     i18n("tasks-background-heading-finished")
         .replace("{count}", &snapshot.terminal_count().to_string())
-}
-
-pub(super) fn empty_state(
-    title: &str,
-    detail: &str,
-    cx: &Context<BackgroundTasksView>,
-) -> AnyElement {
-    v_flex()
-        .flex_1()
-        .items_center()
-        .justify_center()
-        .gap_1()
-        .px(px(16.0))
-        .child(div().text_sm().child(title.to_string()))
-        .child(
-            div()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child(detail.to_string()),
-        )
-        .into_any_element()
 }

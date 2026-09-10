@@ -267,7 +267,7 @@ fn bad_shell_returns_structured_error() {
         shell: Some("this-shell-does-not-exist-xyz".into()),
         ..TerminalSessionConfig::default()
     };
-    let err = TerminalSession::new_internal(&config, 1, None)
+    let err = TerminalSession::new(&config, 1, None)
         .err()
         .expect("a non-existent shell must fail");
     assert_eq!(err.code, EngineErrorCode::PtySpawn);

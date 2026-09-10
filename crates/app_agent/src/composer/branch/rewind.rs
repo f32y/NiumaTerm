@@ -5,7 +5,6 @@ use nmt_agent_utils::chat::SlashCommandOutcome;
 use nmt_agent_utils::claude_code::sessions;
 use nmt_i18n::i18n;
 
-use crate::commands::reset_command_runtime;
 use crate::composer::branch::fork::{PromptTarget, checkpoint_at_depth};
 
 /// Rewind is a local multi-step operation, not a model turn. Keeping its
@@ -625,16 +624,7 @@ impl AgentPane {
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
         self.prompts.dismiss_approval();
-        reset_command_runtime(
-            false,
-            &mut self.palette.provider_commands,
-            &mut self.palette.provider_commands_ready,
-            &mut self.palette.command_queue,
-            &mut self.palette.awaiting_command_turn,
-            &mut self.palette.selected,
-            &mut self.palette.dismissed,
-        );
-        self.palette.catalog = None;
+        self.palette.reset_command_runtime(false);
         self.history_ui.mode = RecentSessionsMode::Hidden;
 
         self.apply_replay(fork.replay, cx);

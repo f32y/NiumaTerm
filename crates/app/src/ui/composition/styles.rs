@@ -22,16 +22,6 @@ pub(crate) fn sidebar_selection(cx: &App) -> SidebarSelection {
     }
 }
 
-/// Outer frame shared by pane and sidebar surfaces. Callers supply size and
-/// semantic background because those values differ by host.
-pub(crate) fn surface_frame(cx: &App) -> StyleRefinement {
-    StyleRefinement::default()
-        .border_1()
-        .border_color(cx.theme().sidebar_border)
-        .rounded(UI_RADIUS)
-        .overflow_hidden()
-}
-
 /// A full bordered region whose children must stay clipped to rounded edges.
 pub(crate) fn framed_region(cx: &App) -> StyleRefinement {
     StyleRefinement::default()
@@ -55,7 +45,12 @@ pub(crate) fn panel_header(cx: &App) -> StyleRefinement {
 /// Sidebar-content surface shared by the right panel and Settings navigation.
 /// Callers retain ownership of size and any edge they intentionally suppress.
 pub(crate) fn sidebar_surface(cx: &App) -> StyleRefinement {
-    surface_frame(cx).bg(cx.theme().sidebar)
+    StyleRefinement::default()
+        .border_1()
+        .border_color(cx.theme().sidebar_border)
+        .rounded(UI_RADIUS)
+        .overflow_hidden()
+        .bg(cx.theme().sidebar)
 }
 
 /// Common table heading treatment. Callers retain ownership of height and text

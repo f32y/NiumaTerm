@@ -6,7 +6,6 @@ use std::{cell, error, fmt, mem, path, time};
 
 #[cfg(target_os = "linux")]
 use libc::EIO;
-use nmt_config::colors::Colors;
 use nmt_platform::{ChildEvent, EventedPty, Events, Interest, Poll, Token, Waker};
 use parking_lot::FairMutex;
 use tracing::{error, warn};
@@ -141,9 +140,7 @@ pub struct PtyPipe<T: EventedPty, U: EventListener> {
     mark_seq: u64,
     /// Last-seen alt-screen state, for edge-triggered interactive-state events.
     prev_alt_screen: bool,
-    /// Last InteractiveState value sent, so the signal stays edge-triggered.
-    prev_interactive: bool,
-    /// Last AltScreen value sent.
+    /// Last value sent by both alt-screen notifications, which share one edge.
     prev_alt_screen_sent: bool,
     /// When the last `snapshot()` readback ran, for saturation coalescing
     /// (`SNAPSHOT_MIN_INTERVAL`). PTY-thread-private.
@@ -225,17 +222,13 @@ where
     T: EventedPty + Send + 'static,
     U: EventListener + Send + 'static,
 {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         render_buffer: Arc<FairMutex<RenderBuffer>>,
         vt_modes: Arc<AtomicU32>,
         pty: T,
         event_proxy: U,
         window_id: WindowId,
-        route_id: usize,
-        colors: Colors,
-        scrollback_lines: usize,
-        engine_blocks: bool,
+        options: &SessionOptions,
     ) -> Result<PtyPipe<T, U>, Box<dyn error::Error>> {
         let poll = Poll::new()?;
 
@@ -256,14 +249,14 @@ where
         // "lines" doc is wrong (verified: budgets ≤1 MB floor at ~3297 lines, 10 MB
         // holds ~36k at 20 cols ≈ 273 B/line). `scrollback-history-limit` is
         // in lines, so convert through `scrollback_bytes`.
-        let max_scrollback = scrollback_bytes(scrollback_lines, cols.max(1));
+        let max_scrollback = scrollback_bytes(options.scrollback_lines, cols.max(1));
 
         let mut ghostty = GhosttyTerminal::new(cols.max(1), rows.max(1), max_scrollback)
             .map_err(|err| Box::new(err) as Box<dyn error::Error>)?;
 
         // Push the host theme's default colors + 256-palette into the engine so
         // SGR-indexed and default colors resolve to theme.
-        ghostty.set_theme_colors(&colors);
+        ghostty.set_theme_colors(&options.colors);
 
         // Seed the atomic with the engine's initial VT modes (SHOW_CURSOR,
         // LINE_WRAP, …) so the facade is correct before the first PTY batch.
@@ -287,7 +280,7 @@ where
             terminal_responses_enabled: true,
             event_proxy,
             window_id,
-            route_id,
+            route_id: options.route_id,
             conpty_resize_echo_realign: false,
             conpty_resize_echo_pending: false,
             conpty_resize_repaint_reads_remaining: 0,
@@ -298,10 +291,9 @@ where
             su_realign_armed: false,
             sniffer: PromptSniffer::default(),
             launch_cwd: None,
-            engine_blocks,
+            engine_blocks: options.engine_blocks,
             mark_seq: 0,
             prev_alt_screen: false,
-            prev_interactive: false,
             prev_alt_screen_sent: false,
             last_snapshot_at: time::Instant::now(),
             snapshot_pending: false,
@@ -313,19 +305,12 @@ where
     fn emit_interactive_state(&mut self) {
         let on = self.prev_alt_screen;
 
-        if on != self.prev_interactive {
-            self.prev_interactive = on;
+        if on != self.prev_alt_screen_sent {
+            self.prev_alt_screen_sent = on;
             self.event_proxy
                 .send_event(TerminalEvent::InteractiveState(on), self.window_id);
-        }
-
-        if self.prev_alt_screen != self.prev_alt_screen_sent {
-            self.prev_alt_screen_sent = self.prev_alt_screen;
-
-            self.event_proxy.send_event(
-                TerminalEvent::AltScreen(self.prev_alt_screen),
-                self.window_id,
-            );
+            self.event_proxy
+                .send_event(TerminalEvent::AltScreen(on), self.window_id);
         }
     }
 

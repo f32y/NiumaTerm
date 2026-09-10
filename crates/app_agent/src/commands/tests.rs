@@ -1,5 +1,8 @@
-use crate::RecentSessionsMode;
+use std::collections::VecDeque;
+
 use crate::commands::*;
+use crate::composer::PendingSlashCommand;
+use crate::{CachedCatalog, RecentSessionsMode, SlashPalette};
 
 #[test]
 fn replaced_session_epoch_rejects_expected_old_output_and_eof() {
@@ -226,31 +229,31 @@ fn palette_direction_navigation_wraps_and_handles_catalog_changes() {
 
 #[test]
 fn clear_resets_command_runtime_without_owning_history_state() {
-    let mut provider = vec![info("review", SlashCommandSource::Provider)];
-    let mut ready = true;
-    let mut queue = VecDeque::from(["compact"]);
-    let mut awaiting = true;
-    let mut selected = 3;
-    let mut dismissed = true;
+    let mut palette = SlashPalette {
+        provider_commands: vec![info("review", SlashCommandSource::Provider)],
+        provider_commands_ready: true,
+        command_queue: VecDeque::from([PendingSlashCommand::new("compact", String::new())]),
+        awaiting_command_turn: true,
+        selected: 3,
+        dismissed: true,
+        ..SlashPalette::default()
+    };
+    palette.catalog = Some(CachedCatalog {
+        language: 0,
+        commands: palette.provider_commands.clone().into(),
+    });
     let history_dismissed = true;
     let history = vec!["persisted session"];
 
-    reset_command_runtime(
-        false,
-        &mut provider,
-        &mut ready,
-        &mut queue,
-        &mut awaiting,
-        &mut selected,
-        &mut dismissed,
-    );
+    palette.reset_command_runtime(false);
 
-    assert!(provider.is_empty());
-    assert!(!ready);
-    assert!(queue.is_empty());
-    assert!(!awaiting);
-    assert_eq!(selected, 0);
-    assert!(!dismissed);
+    assert!(palette.provider_commands.is_empty());
+    assert!(palette.catalog.is_none());
+    assert!(!palette.provider_commands_ready);
+    assert!(palette.command_queue.is_empty());
+    assert!(!palette.awaiting_command_turn);
+    assert_eq!(palette.selected, 0);
+    assert!(!palette.dismissed);
     assert!(history_dismissed);
     assert_eq!(history, vec!["persisted session"]);
     assert_eq!(next_session_epoch(7), 8);

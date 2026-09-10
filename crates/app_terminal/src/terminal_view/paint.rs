@@ -49,8 +49,7 @@ pub(super) fn paint_frame(
             bounds,
             line,
             row as f32 * cell.height_px + row_y_offset(offsets, row),
-            cell.width_px,
-            cell.height_px,
+            cell,
             window,
         );
     }

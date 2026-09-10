@@ -111,18 +111,6 @@ pub struct TerminalSession {
 }
 
 impl TerminalSession {
-    /// Create a terminal session and start its shell through ConPTY. `id` is the
-    /// per-surface unique identity used as the engine's event route id (multi-tab
-    /// safety). `wake` signals the shell's render loop on PTY damage / host events
-    /// to coalesce render work; `None` runs headless without render driving.
-    pub fn new(
-        config: &TerminalSessionConfig,
-        id: u64,
-        wake: Option<WakeSender>,
-    ) -> Result<TerminalSession, EngineError> {
-        Self::new_internal(config, id, wake)
-    }
-
     /// Create a terminal session backed by a remote session instead of a local
     /// ConPTY. The attach snapshot primes the screen; live output, input, and
     /// resize flow over the network through `NetPty`. Every other layer (engine,
@@ -196,7 +184,10 @@ impl TerminalSession {
         })
     }
 
-    fn new_internal(
+    /// Create a terminal session and start its shell through the platform PTY.
+    /// `id` routes engine events to this surface; `wake` coalesces render work
+    /// on PTY damage and host events. `None` runs headless.
+    pub fn new(
         config: &TerminalSessionConfig,
         id: u64,
         wake: Option<WakeSender>,

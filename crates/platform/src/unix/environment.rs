@@ -54,7 +54,10 @@ pub fn config_dir(home: &Path) -> PathBuf {
 
 #[cfg(not(target_os = "macos"))]
 pub fn config_dir(home: &Path) -> PathBuf {
-    home.join(".config").join(APP_ID)
+    env::var("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| home.join(".config"))
+        .join(APP_ID)
 }
 
 /// The machine name a remote peer sees. `HOSTNAME` is not exported by every

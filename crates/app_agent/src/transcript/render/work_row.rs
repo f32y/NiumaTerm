@@ -19,7 +19,7 @@ use crate::transcript::disclosure_row::{
     AGENT_CARD_BODY_PADDING_Y, AGENT_CARD_DETAIL_SIZE, AGENT_CARD_PADDING_X, AGENT_CARD_RADIUS,
     AGENT_DISCLOSURE_DETAIL_INSET, AgentCardTone, AgentDisclosureRow, agent_card,
 };
-use crate::transcript::render::text_style::{markdown_view, work_detail_text_style};
+use crate::transcript::render::text_style::{markdown_view, transcript_text_style};
 use crate::transcript::reveal::{RevealKey, RevealedPart, revealed_block};
 use crate::transcript::{TranscriptView, command_execution_heading, command_failure_reason};
 
@@ -235,7 +235,7 @@ impl TranscriptView {
                                             detail.to_owned(),
                                             cwd.clone(),
                                         )
-                                        .style(work_detail_text_style(cx))
+                                        .style(transcript_text_style(cx))
                                         .selectable(true),
                                     ),
                             )

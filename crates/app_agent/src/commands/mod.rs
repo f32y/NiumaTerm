@@ -1,6 +1,6 @@
 //! Pure slash-command parsing and catalog logic for the agent composer.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::mem;
 
 use nmt_agent_utils::chat::{
@@ -405,25 +405,6 @@ pub(super) fn next_session_epoch(current: u64) -> u64 {
 
 pub(super) fn is_current_session_epoch(current: u64, event_epoch: u64) -> bool {
     current == event_epoch
-}
-
-/// Reset command-only session state while keeping provider history and the
-/// tab's history-dismissal choice outside this function untouched.
-pub(super) fn reset_command_runtime<T>(
-    commands_ready: bool,
-    provider_commands: &mut Vec<SlashCommandInfo>,
-    provider_commands_ready: &mut bool,
-    queue: &mut VecDeque<T>,
-    awaiting_turn: &mut bool,
-    palette_selected: &mut usize,
-    palette_dismissed: &mut bool,
-) {
-    provider_commands.clear();
-    *provider_commands_ready = commands_ready;
-    queue.clear();
-    *awaiting_turn = false;
-    *palette_selected = 0;
-    *palette_dismissed = false;
 }
 
 #[cfg(test)]

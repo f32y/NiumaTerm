@@ -13,6 +13,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+use crate::background_task::replace_text;
 use crate::json::text_field;
 use crate::workflow::{
     WorkflowAgent, WorkflowAgentState, WorkflowPhase, WorkflowRun, WorkflowRunState,
@@ -314,17 +315,6 @@ fn agent_state(entry: &Value) -> WorkflowAgentState {
         _ if entry["startedAt"].as_u64().is_some() => WorkflowAgentState::Running,
         _ => WorkflowAgentState::Queued,
     }
-}
-
-fn replace_text(current: &mut Option<String>, incoming: &Option<String>) -> bool {
-    let Some(incoming) = incoming else {
-        return false;
-    };
-    if current.as_deref() == Some(incoming.as_str()) {
-        return false;
-    }
-    *current = Some(incoming.clone());
-    true
 }
 
 fn replace_number(current: &mut Option<u64>, incoming: Option<u64>) -> bool {

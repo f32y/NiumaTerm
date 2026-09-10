@@ -134,13 +134,9 @@ impl TerminalPane {
         let (wake, wake_rx) = wake::wake_channel();
         let agent_route = agent_process().allocate_route();
         let environment = agent_process().environment_for(&agent_route);
-        let (fixed_bottom_requested, cursor_shape, manage_process_tree) =
+        let (cursor_shape, manage_process_tree) =
             cx.read_global(|settings: &TerminalSettings, _| {
-                (
-                    settings.fixed_bottom(),
-                    settings.cursor_shape,
-                    settings.manage_subprocess_job,
-                )
+                (settings.cursor_shape, settings.manage_subprocess_job)
             });
 
         let surface = terminal_surface_for_tab(
@@ -162,8 +158,6 @@ impl TerminalPane {
                 wake,
                 wake_rx,
                 surface,
-                fixed_bottom_requested,
-                cursor_shape,
             )
         }))
     }
@@ -179,10 +173,6 @@ impl TerminalPane {
     ) -> Result<Entity<Self>, String> {
         let (wake, wake_rx) = wake::wake_channel();
         let agent_route = agent_process().allocate_route();
-        let (fixed_bottom_requested, cursor_shape) =
-            cx.read_global(|settings: &TerminalSettings, _| {
-                (settings.fixed_bottom(), settings.cursor_shape)
-            });
 
         let surface = TerminalSurface::for_gpui_remote(wake.clone(), surface_id, remote)?;
 
@@ -195,13 +185,10 @@ impl TerminalPane {
                 wake,
                 wake_rx,
                 surface,
-                fixed_bottom_requested,
-                cursor_shape,
             )
         }))
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn from_surface(
         cx: &mut Context<Self>,
         surface_id: u64,
@@ -210,8 +197,6 @@ impl TerminalPane {
         wake: wake::WakeSignal,
         mut wake_rx: wake::WakeReceiver,
         surface: TerminalSurface,
-        fixed_bottom_requested: bool,
-        cursor_shape: CursorShape,
     ) -> Self {
         // Apply terminal presentation settings to existing panes and invalidate
         // measurements that depend on font metrics.
@@ -252,6 +237,10 @@ impl TerminalPane {
             }
         })
         .detach();
+
+        let settings = cx.global::<TerminalSettings>();
+        let cursor_shape = settings.cursor_shape;
+        let fixed_bottom_requested = settings.fixed_bottom();
 
         Self {
             focus: cx.focus_handle(),

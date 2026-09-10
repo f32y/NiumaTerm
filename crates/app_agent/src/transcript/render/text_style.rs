@@ -81,15 +81,7 @@ pub(crate) fn is_dark_surface(color: Hsla) -> bool {
     color.l < 0.5
 }
 
-pub(crate) fn agent_text_style(cx: &App) -> TextViewStyle {
-    let mut style = TextViewStyle::default()
-        .code_block(configured_transcript_code_block_style(cx))
-        .table(transcript_table_style(cx));
-    style.highlight_theme = transcript_highlight_theme(cx);
-    style
-}
-
-pub(crate) fn work_detail_text_style(cx: &App) -> TextViewStyle {
+pub(crate) fn transcript_text_style(cx: &App) -> TextViewStyle {
     let mut style = TextViewStyle::default()
         .code_block(configured_transcript_code_block_style(cx))
         .table(transcript_table_style(cx));

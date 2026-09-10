@@ -25,10 +25,10 @@ use nmt_i18n::i18n;
 
 use crate::ui::AppSettings;
 use crate::ui::background_tasks::rows::{
-    empty_state, finished_heading, finished_rows, render_row, running_heading, running_rows,
+    finished_heading, finished_rows, render_row, running_heading, running_rows,
     section_control_label, visible_rows,
 };
-use crate::ui::composition::panel_header;
+use crate::ui::composition::{empty_state, panel_header};
 
 /// Rows shown before the section control offers the rest. Running work is the
 /// part a user watches, so the finished list stays shorter per row of interest.

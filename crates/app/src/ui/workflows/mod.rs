@@ -19,7 +19,7 @@ use nmt_app_agent::transcript::TranscriptView;
 use nmt_i18n::i18n;
 
 use crate::ui::AppSettings;
-use crate::ui::composition::panel_header;
+use crate::ui::composition::{empty_state, panel_header};
 
 pub(crate) struct WorkflowsView {
     /// The Agent pane whose runs are shown. Weak because the tab can close
@@ -433,25 +433,6 @@ impl WorkflowsView {
                 .into_any_element(),
         )
     }
-}
-
-/// Two-line centered state, matching how the sibling panel reports having
-/// nothing to show.
-fn empty_state(title: &str, detail: &str, cx: &Context<WorkflowsView>) -> AnyElement {
-    v_flex()
-        .flex_1()
-        .items_center()
-        .justify_center()
-        .gap_1()
-        .px(px(16.0))
-        .child(div().text_sm().child(title.to_string()))
-        .child(
-            div()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child(detail.to_string()),
-        )
-        .into_any_element()
 }
 
 fn run_state_color(state: WorkflowRunState, cx: &Context<WorkflowsView>) -> Hsla {

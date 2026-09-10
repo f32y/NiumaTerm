@@ -76,10 +76,7 @@ where
         pty,
         event_proxy,
         WindowId::dummy(),
-        options.route_id,
-        options.colors,
-        options.scrollback_lines,
-        options.engine_blocks,
+        &options,
     )?;
 
     // The pipe has not spawned yet, so the engine lock is uncontended and the

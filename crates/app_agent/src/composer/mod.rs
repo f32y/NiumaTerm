@@ -127,6 +127,18 @@ pub(super) fn restored_input_after_interruption(submitted: &str, current: &str) 
 }
 
 impl SlashPalette {
+    /// Provider commands and their cached catalog belong to one session, so
+    /// resetting discovery must invalidate both together.
+    pub(crate) fn reset_command_runtime(&mut self, commands_ready: bool) {
+        self.provider_commands.clear();
+        self.provider_commands_ready = commands_ready;
+        self.catalog = None;
+        self.command_queue.clear();
+        self.awaiting_command_turn = false;
+        self.selected = 0;
+        self.dismissed = false;
+    }
+
     /// Stand down for text the composer did not type. A recalled entry is a
     /// whole message, so a skill bound to what was there no longer applies and
     /// the palette must not reopen on the leading `/` the entry may carry.

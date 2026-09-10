@@ -10,7 +10,7 @@ use gpui_component::text::TextView;
 use crate::settings::{AgentSettings, UI_RADIUS};
 use crate::transcript::code::CodeView;
 use crate::transcript::render::TRANSCRIPT_LINE_HEIGHT;
-use crate::transcript::render::text_style::{transcript_highlight_theme, work_detail_text_style};
+use crate::transcript::render::text_style::{transcript_highlight_theme, transcript_text_style};
 
 impl Render for CodeView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -108,7 +108,7 @@ impl Render for CodeView {
                     .text_color(foreground)
                     .child(
                         TextView::new(&self.text_view)
-                            .style(work_detail_text_style(cx))
+                            .style(transcript_text_style(cx))
                             .selectable(true),
                     ),
             )

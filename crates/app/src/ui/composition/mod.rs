@@ -1,3 +1,4 @@
+pub(crate) use crate::ui::composition::empty_state::empty_state;
 pub(crate) use crate::ui::composition::hover_action::{
     HoverActionLayout, HoverActionVisibility, hover_action,
 };
@@ -9,6 +10,7 @@ pub(crate) use crate::ui::composition::styles::{
     framed_region, panel_header, sidebar_selection, sidebar_surface, table_header,
 };
 
+mod empty_state;
 mod hover_action;
 mod metrics;
 mod status_mark;
