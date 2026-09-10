@@ -5,7 +5,44 @@ use std::time::{Duration, Instant};
 use nmt_platform::process::hidden_command;
 use serde_json::json;
 
+use crate::message_memory::OUTPUT_FAILURE_METHOD;
 use crate::subprocess::{InputClass, JsonLineProcess};
+
+#[test]
+fn malformed_output_reports_failure_before_eof_and_stops_delivery() {
+    let command = script(
+        "[Console]::Out.WriteLine('Starting agent'); [Console]::Out.WriteLine('{\"ready\":true}'); [Console]::Out.WriteLine('{\"token\":\"private-value\",'); [Console]::Out.WriteLine('{\"late\":true}'); Start-Sleep -Seconds 30",
+        "echo 'Starting agent'; echo '{\"ready\":true}'; echo '{\"token\":\"private-value\",'; echo '{\"late\":true}'; sleep 30",
+    );
+    let (tx, rx) = channel();
+    let (closed_tx, closed_rx) = channel();
+    let mut process = JsonLineProcess::spawn_with_stdout_closed(
+        command,
+        "malformed-output",
+        "Test",
+        move |message| {
+            let _ = tx.send(message);
+        },
+        |_| {},
+        move || {
+            let _ = closed_tx.send(());
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+        json!({"ready":true})
+    );
+    let failure = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(failure["method"], OUTPUT_FAILURE_METHOD);
+    let reason = failure["params"]["message"].as_str().unwrap();
+    assert!(reason.contains("JSON is invalid"));
+    assert!(!reason.contains("private-value"));
+    closed_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(rx.try_recv().is_err());
+    assert!(!process.has_stdin());
+    process.shutdown(Duration::from_secs(1), true).unwrap();
+}
 
 fn script(windows: &str, unix: &str) -> Command {
     #[cfg(windows)]

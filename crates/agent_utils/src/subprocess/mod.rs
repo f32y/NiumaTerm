@@ -18,7 +18,7 @@ mod output;
 use crate::message_memory::OUTPUT_FAILURE_METHOD;
 use crate::subprocess::input::InputQueue;
 pub(crate) use crate::subprocess::input::{InputClass, InputError, InputTicket};
-use crate::subprocess::output::{MAX_STDERR_CHUNK, MAX_STDOUT_LINE, read_piece};
+use crate::subprocess::output::{MAX_STDERR_CHUNK, read_messages, read_piece};
 
 /// A spawned agent CLI with piped stdio, kill-on-close containment, and
 /// newline-delimited JSON output. Stdout lines that parse as JSON are handed
@@ -115,25 +115,10 @@ impl JsonLineProcess {
         let reader_job = Arc::clone(&job);
         thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
-            loop {
-                let line = match read_piece(&mut reader, MAX_STDOUT_LINE) {
-                    Ok(line) if line.is_empty() => break,
-                    Ok(line) if line.len() < MAX_STDOUT_LINE || line.last() == Some(&b'\n') => line,
-                    result => {
-                        let message = match result {
-                            Err(error) => format!("Agent output read failed: {error}"),
-                            _ => "Agent output line exceeded the 8 MiB limit; the process was stopped.".to_string(),
-                        };
-                        deliver(
-                            json!({"method": OUTPUT_FAILURE_METHOD, "params": {"message": message}}),
-                        );
-                        reader_job.lock().take();
-                        break;
-                    }
-                };
-                if let Ok(message) = serde_json::from_slice::<Value>(&line) {
-                    deliver(message);
-                }
+            if let Err(message) = read_messages(&mut reader, provider, &deliver) {
+                warn!(provider, reason = %message, "agent protocol reader stopped");
+                deliver(json!({"method": OUTPUT_FAILURE_METHOD, "params": {"message": message}}));
+                reader_job.lock().take();
             }
             on_stdout_closed();
         });

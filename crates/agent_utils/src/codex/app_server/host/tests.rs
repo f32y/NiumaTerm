@@ -10,8 +10,21 @@ use crate::codex::ProviderConfig;
 use crate::codex::app_server::host::{
     HOST_INIT_RPC_ID, HostBootstrap, HostKey, Router, initialize_request, redact,
 };
+use crate::message_memory::OUTPUT_FAILURE_METHOD;
 use crate::request_policy::RequestClass;
 use crate::subprocess::InputTicket;
+
+#[test]
+fn startup_preserves_the_protocol_failure_reason() {
+    let (tx, rx) = sync_channel(1);
+    let router = Router::new(tx);
+    router.handle_message(json!({"method":OUTPUT_FAILURE_METHOD,"params":{"message":"Agent protocol JSON is invalid"}}));
+    router.handle_stdout_closed();
+    assert_eq!(
+        rx.try_recv().unwrap(),
+        Err("Agent protocol JSON is invalid".to_string())
+    );
+}
 
 #[test]
 fn retiring_routes_cancels_only_their_ordinary_pending_inputs() {

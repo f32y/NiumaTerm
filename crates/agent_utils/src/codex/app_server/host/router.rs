@@ -19,6 +19,7 @@ use crate::codex::app_server::host::{
     MAX_EARLY_THREADS, RegistrationId, message_thread_id,
 };
 use crate::deadline_timer::DeadlineTimer;
+use crate::message_memory::OUTPUT_FAILURE_METHOD;
 use crate::request_policy::RequestClass;
 use crate::subprocess::InputTicket;
 
@@ -501,6 +502,14 @@ impl Router {
     }
 
     fn route_notification(&self, method: &str, message: Value) -> Vec<(Delivery, Value)> {
+        if method == OUTPUT_FAILURE_METHOD
+            && let Some(startup) = self.state.lock().startup_tx.take()
+        {
+            let reason = message["params"]["message"]
+                .as_str()
+                .unwrap_or("Codex protocol reader failed");
+            let _ = startup.send(Err(reason.to_string()));
+        }
         let Some(thread_id) = message_thread_id(&message).map(str::to_string) else {
             return self
                 .state
