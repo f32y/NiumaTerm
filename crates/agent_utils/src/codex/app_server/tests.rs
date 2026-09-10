@@ -42,6 +42,125 @@ fn disconnected_session() -> Session {
 }
 
 #[test]
+fn history_refresh_rejects_old_pages_and_keeps_the_latest_cursor() {
+    let mut session = disconnected_session();
+    let old = session.control.next_id();
+    session.request_history(SessionScope::default());
+    let current = session.control.next_id();
+    session.request_history(SessionScope::AllDirectories);
+    assert_eq!(session.history_scope, SessionScope::AllDirectories);
+    assert_ne!(old, current);
+    assert!(
+        session
+            .process(json!({"id": old, "result": {"data": [], "nextCursor": "old"}}))
+            .is_empty()
+    );
+    assert!(session.history_cursor.is_none());
+    assert!(matches!(
+        session
+            .process(json!({"id": current, "result": {"data": [], "nextCursor": "next"}}))
+            .as_slice(),
+        [Event::History(_)]
+    ));
+    let page = session.control.next_id();
+    session.request_more_history();
+    assert!(session.history_cursor.is_none());
+    let refresh = session.control.next_id();
+    session.request_history(SessionScope::default());
+    assert!(
+        session
+            .process(json!({"id": page, "error": {"message": "old page"}}))
+            .is_empty()
+    );
+    assert!(
+        session
+            .process(json!({"id": current, "result": {"nextCursor": "duplicate"}}))
+            .is_empty()
+    );
+    session.process(json!({"id": refresh, "result": {"data": [], "nextCursor": "fresh"}}));
+    assert_eq!(session.history_cursor.as_deref(), Some("fresh"));
+}
+
+#[test]
+fn latest_thread_selection_wins_over_late_resume_and_fork_results() {
+    let mut session = disconnected_session();
+    session.conversation.thread_id = Some("parent".into());
+    let resume = session.control.next_id();
+    session.resume_thread("old-choice");
+    let fork = session.control.next_id();
+    session
+        .fork_thread(&ForkAnchor::CodexThrough("turn".into()))
+        .unwrap();
+    let latest = session.control.next_id();
+    session.resume_thread("chosen");
+    for id in [resume, fork] {
+        assert!(
+            session
+                .process(json!({"id": id, "result": {"thread": {"id": "stale", "turns": []}}}))
+                .is_empty()
+        );
+        assert!(
+            session
+                .process(json!({"id": id, "error": {"message": "stale"}}))
+                .is_empty()
+        );
+        assert_eq!(session.thread_id(), Some("parent"));
+    }
+    session.process(json!({"id": latest, "result": {"thread": {"id": "chosen", "turns": []}}}));
+    assert_eq!(session.thread_id(), Some("chosen"));
+    assert!(
+        session
+            .process(json!({"id": latest, "error": {"message": "duplicate"}}))
+            .is_empty()
+    );
+}
+
+#[test]
+fn checkpoint_refresh_and_thread_switch_invalidate_old_results() {
+    let mut session = disconnected_session();
+    session.conversation.thread_id = Some("parent".into());
+    let old = session.control.next_id();
+    assert!(session.request_fork_checkpoints());
+    let current = session.control.next_id();
+    assert!(session.request_fork_checkpoints());
+    assert!(
+        session
+            .process(json!({"id": old, "error": {"message": "stale"}}))
+            .is_empty()
+    );
+    let resume = session.control.next_id();
+    session.resume_thread("new");
+    session.process(json!({"id": resume, "result": {"thread": {"id": "new", "turns": []}}}));
+    assert!(
+        session
+            .process(json!({"id": current, "result": {"thread": {"turns": []}}}))
+            .is_empty()
+    );
+}
+
+#[test]
+fn rejected_initial_requests_keep_their_fatal_error_semantics() {
+    for kind in [QueryKind::Start, QueryKind::Resume] {
+        let mut session = disconnected_session();
+        session.initial_resume = Some("retained".into());
+        let (tx, rx) = channel();
+        session.deliver = Arc::new(move |message| {
+            let _ = tx.send(message);
+        });
+        let request = initial_thread_request(
+            session.initial_resume.as_deref(),
+            &session.thread_profile,
+            &session.workspace,
+        );
+        session.send_query(kind, request);
+        assert!(matches!(
+            session.process(rx.try_recv().unwrap()).as_slice(),
+            [Event::Error { fatal: true, .. }]
+        ));
+    }
+}
+
+#[test]
 fn control_responses_complete_once_and_ignore_unknown_ids() {
     let mut session = disconnected_session();
     let id = session.alloc_rpc_id();
@@ -65,7 +184,7 @@ fn control_responses_complete_once_and_ignore_unknown_ids() {
 
 #[test]
 fn thread_switch_retires_commands_but_keeps_catalog_responses() {
-    for transition in [THREAD_RESUME_RPC_ID, THREAD_FORK_RPC_ID] {
+    for kind in [QueryKind::Resume, QueryKind::Fork] {
         let mut session = disconnected_session();
         session.conversation.thread_id = Some("old".into());
         session.conversation.pending_approval = Some(42);
@@ -84,6 +203,8 @@ fn thread_switch_retires_commands_but_keeps_catalog_responses() {
         .unwrap();
         session.control.track(id, operation);
 
+        let transition = session.alloc_rpc_id();
+        session.control.track_query(transition, kind);
         session
             .process(json!({"id": transition, "result": {"thread": {"id": "new", "turns": []}}}));
         assert_eq!(session.thread_id(), Some("new"));
@@ -117,7 +238,9 @@ fn failed_thread_switch_preserves_pending_command() {
     session
         .control
         .track(id, ControlOperation::Command("review".into()));
-    session.process(json!({"id": THREAD_RESUME_RPC_ID, "error": {"message": "missing"}}));
+    let transition = session.alloc_rpc_id();
+    session.control.track_query(transition, QueryKind::Resume);
+    session.process(json!({"id": transition, "error": {"message": "missing"}}));
     assert!(session.has_active_operation());
     assert!(
         matches!(session.process(json!({"id": id, "result": {}})).as_slice(), [Event::SlashCommandResult { name, .. }] if name == "review")
@@ -142,7 +265,7 @@ fn host_exit_closes_requests_and_prevents_late_revival() {
     );
     assert!(
         session
-            .process(json!({"id": THREAD_START_RPC_ID, "result": {"thread": {"id": "late"}}}))
+            .process(json!({"id": 2, "result": {"thread": {"id": "late"}}}))
             .is_empty()
     );
     assert!(
@@ -754,7 +877,7 @@ fn initial_resume_never_creates_an_orphan_thread() {
     let workspace = AgentWorkspace::new(Some("C:/A".into()), vec!["C:/B".into()]);
     let resumed = initial_thread_request(Some("thr_retained"), &profile, &workspace);
     assert_eq!(resumed["method"], "thread/resume");
-    assert_eq!(resumed["id"], THREAD_RESUME_RPC_ID);
+    assert!(resumed.get("id").is_none());
     assert_eq!(resumed["params"]["threadId"], "thr_retained");
 
     // A resumed thread keeps the directory the server persisted for it; its
@@ -767,7 +890,7 @@ fn initial_resume_never_creates_an_orphan_thread() {
         json!(["C:/A", "C:/B"])
     );
     assert_eq!(fresh["method"], "thread/start");
-    assert_eq!(fresh["id"], THREAD_START_RPC_ID);
+    assert!(fresh.get("id").is_none());
 }
 
 #[test]

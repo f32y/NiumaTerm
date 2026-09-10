@@ -40,7 +40,7 @@ mod title_generation;
 
 use crate::codex::app_server::background_tasks::{CodexTasks, ThreadScope, notification_thread_id};
 use crate::codex::app_server::compaction::is_legacy_compaction_notification;
-use crate::codex::app_server::control::{ControlOperation, ControlState};
+use crate::codex::app_server::control::{ControlOperation, ControlState, QueryKind};
 use crate::codex::app_server::conversation::ConversationState;
 #[cfg(test)]
 use crate::codex::app_server::conversation::TurnOutputUsage;
@@ -65,14 +65,6 @@ use crate::codex::app_server::title_generation::{
     TITLE_GENERATION_RESULT_METHOD, TitleGenerationHandle,
 };
 
-/// JSON-RPC ids for the fixed handshake requests; turn requests count up from
-/// `FIRST_TURN_RPC_ID` so response routing can tell the phases apart.
-const THREAD_START_RPC_ID: u64 = 2;
-const MODEL_LIST_RPC_ID: u64 = 3;
-const THREAD_LIST_RPC_ID: u64 = 4;
-const THREAD_RESUME_RPC_ID: u64 = 5;
-const THREAD_READ_RPC_ID: u64 = 6;
-const THREAD_FORK_RPC_ID: u64 = 7;
 const FIRST_TURN_RPC_ID: u64 = 100;
 const PROVIDER_API_FIELD: &str = concat!("wi", "re_api");
 
@@ -264,7 +256,12 @@ impl Session {
             &session.thread_profile,
             &session.workspace,
         );
-        session.send(initial_request);
+        let kind = if session.initial_resume.is_some() {
+            QueryKind::Resume
+        } else {
+            QueryKind::Start
+        };
+        session.send_query(kind, initial_request);
 
         Ok(session)
     }
@@ -499,12 +496,14 @@ impl Session {
         self.cancel_title_generation();
         self.conversation.compaction.reset_thread();
         let params = thread_resume_params(thread_id, &self.thread_profile);
-        self.send(json!({
-            "jsonrpc": "2.0",
-            "id": THREAD_RESUME_RPC_ID,
-            "method": "thread/resume",
-            "params": params,
-        }));
+        self.send_query(
+            QueryKind::Resume,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "thread/resume",
+                "params": params,
+            }),
+        );
     }
 
     /// Ask which prompts this conversation can be branched in front of.
@@ -518,12 +517,14 @@ impl Session {
             return false;
         };
 
-        self.send(json!({
-            "jsonrpc": "2.0",
-            "id": THREAD_READ_RPC_ID,
-            "method": "thread/read",
-            "params": {"threadId": thread_id, "includeTurns": true},
-        }));
+        self.send_query(
+            QueryKind::Checkpoints,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "thread/read",
+                "params": {"threadId": thread_id, "includeTurns": true},
+            }),
+        );
         true
     }
 
@@ -545,12 +546,14 @@ impl Session {
         self.conversation.compaction.reset_thread();
         let mut params = thread_resume_params(&thread_id, &self.thread_profile);
         params["lastTurnId"] = json!(last_turn_id);
-        self.send(json!({
-            "jsonrpc": "2.0",
-            "id": THREAD_FORK_RPC_ID,
-            "method": "thread/fork",
-            "params": params,
-        }));
+        self.send_query(
+            QueryKind::Fork,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "thread/fork",
+                "params": params,
+            }),
+        );
         Ok(())
     }
 
@@ -562,12 +565,14 @@ impl Session {
         self.history_cursor = None;
 
         let params = thread_list_params(&self.thread_profile, None, scope, &self.workspace);
-        self.send(json!({
-            "jsonrpc": "2.0",
-            "id": THREAD_LIST_RPC_ID,
-            "method": "thread/list",
-            "params": params,
-        }));
+        self.send_query(
+            QueryKind::History,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "thread/list",
+                "params": params,
+            }),
+        );
     }
 
     /// Request the next history page; a no-op when the final page arrived.
@@ -582,12 +587,14 @@ impl Session {
             self.history_scope,
             &self.workspace,
         );
-        self.send(json!({
-            "jsonrpc": "2.0",
-            "id": THREAD_LIST_RPC_ID,
-            "method": "thread/list",
-            "params": params,
-        }));
+        self.send_query(
+            QueryKind::History,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "thread/list",
+                "params": params,
+            }),
+        );
     }
 
     /// Reload descendant threads for the current parent. Opening the panel can
@@ -699,6 +706,13 @@ impl Session {
         Ok(())
     }
 
+    fn send_query(&mut self, kind: QueryKind, mut message: Value) {
+        let id = self.alloc_rpc_id();
+        message["id"] = json!(id);
+        self.send(message);
+        self.control.track_query(id, kind);
+    }
+
     fn send(&mut self, message: Value) {
         let outgoing = ControlState::outgoing(&message);
         let request_id = message["method"]
@@ -755,14 +769,11 @@ impl Session {
     }
 
     fn process_response(&mut self, rpc_id: u64, message: &Value) -> Vec<Event> {
-        let pending_command = if rpc_id >= FIRST_TURN_RPC_ID {
-            match self.control.finish(rpc_id) {
-                Some(ControlOperation::Command(command)) => Some(command),
-                Some(ControlOperation::Other | ControlOperation::ThreadRequest) => None,
-                Some(ControlOperation::ThreadName) | None => return Vec::new(),
-            }
-        } else {
-            None
+        let (pending_command, query) = match self.control.finish(rpc_id) {
+            Some(ControlOperation::Command(command)) => (Some(command), None),
+            Some(ControlOperation::Query(kind)) => (None, Some(kind)),
+            Some(ControlOperation::Other | ControlOperation::ThreadRequest) => (None, None),
+            Some(ControlOperation::ThreadName) | None => return Vec::new(),
         };
         if let Some(events) = self.process_question_response(rpc_id, message) {
             return events;
@@ -836,8 +847,6 @@ impl Session {
             return self.background_events(changed);
         }
 
-        let is_command = pending_command.is_some();
-
         if let Some(error) = message["error"]["message"].as_str() {
             if let Some(command) = pending_command.as_deref() {
                 if command == "compact" {
@@ -852,7 +861,7 @@ impl Session {
             // A branch-point list nobody could read leaves the picker with
             // nothing to show, which is the picker's own failure to report
             // rather than something that happened to the conversation.
-            if rpc_id == THREAD_READ_RPC_ID {
+            if query == Some(QueryKind::Checkpoints) {
                 return vec![Event::ForkCheckpoints(Err(error.to_string()))];
             }
 
@@ -860,18 +869,18 @@ impl Session {
             // session still has the thread it started with, so the composer
             // keeps working for a fresh conversation.
             let initial_resume_failed =
-                rpc_id == THREAD_RESUME_RPC_ID && self.initial_resume.is_some();
-            let message = match rpc_id {
-                THREAD_RESUME_RPC_ID => format!("Could not resume session: {error}"),
+                query == Some(QueryKind::Resume) && self.initial_resume.is_some();
+            let message = match query {
+                Some(QueryKind::Resume) => format!("Could not resume session: {error}"),
                 // A refused branch leaves the session on the thread it was
                 // already holding, so the conversation stays usable.
-                THREAD_FORK_RPC_ID => format!("Could not branch this conversation: {error}"),
+                Some(QueryKind::Fork) => format!("Could not branch this conversation: {error}"),
                 _ => error.to_string(),
             };
 
             return vec![Event::Error {
                 message,
-                fatal: initial_resume_failed || (!is_command && rpc_id <= THREAD_START_RPC_ID),
+                fatal: initial_resume_failed || query == Some(QueryKind::Start),
             }];
         }
 
@@ -882,18 +891,20 @@ impl Session {
             }];
         }
 
-        match rpc_id {
-            THREAD_START_RPC_ID => {
+        match query {
+            Some(QueryKind::Start) => {
                 let result = &message["result"];
 
                 self.conversation.thread_id = result["thread"]["id"].as_str().map(str::to_owned);
 
-                self.send(json!({
-                    "jsonrpc": "2.0",
-                    "id": MODEL_LIST_RPC_ID,
-                    "method": "model/list",
-                    "params": {"limit": 100},
-                }));
+                self.send_query(
+                    QueryKind::Models,
+                    json!({
+                        "jsonrpc": "2.0",
+                        "method": "model/list",
+                        "params": {"limit": 100},
+                    }),
+                );
                 // History for the empty-tab session list, over whatever scope
                 // the tab last asked for.
                 self.request_history(self.history_scope);
@@ -901,7 +912,7 @@ impl Session {
 
                 vec![Event::Ready(parse_thread_settings(result))]
             }
-            MODEL_LIST_RPC_ID => {
+            Some(QueryKind::Models) => {
                 let models = if self.thread_profile.provider.is_some() {
                     parse_models(&json!({"data": []}), self.thread_profile.model.as_deref())
                 } else {
@@ -909,7 +920,7 @@ impl Session {
                 };
                 vec![Event::Models(models)]
             }
-            THREAD_LIST_RPC_ID => {
+            Some(QueryKind::History) => {
                 let result = &message["result"];
 
                 self.history_cursor = result["nextCursor"].as_str().map(str::to_owned);
@@ -923,13 +934,13 @@ impl Session {
                     self.conversation.thread_id.as_deref(),
                 ))]
             }
-            THREAD_READ_RPC_ID => vec![Event::ForkCheckpoints(Ok(parse_fork_checkpoints(
-                &message["result"]["thread"]["turns"],
-            )))],
+            Some(QueryKind::Checkpoints) => vec![Event::ForkCheckpoints(Ok(
+                parse_fork_checkpoints(&message["result"]["thread"]["turns"]),
+            ))],
             // A branch answers with the same payload a resume answers with,
             // down to the settings block, so both switch this session onto the
             // thread the reply names.
-            THREAD_RESUME_RPC_ID | THREAD_FORK_RPC_ID => {
+            Some(QueryKind::Resume | QueryKind::Fork) => {
                 let result = &message["result"];
 
                 self.control.reset_thread();

@@ -10,9 +10,7 @@ use crate::chat::{
     SkillReference, SlashCommandOutcome, ThreadSettings, TokenUsageBreakdown,
 };
 use crate::codex::app_server::questions::parse_async_questions;
-use crate::codex::app_server::{
-    PROVIDER_API_FIELD, THREAD_LIST_LIMIT, THREAD_RESUME_RPC_ID, THREAD_START_RPC_ID, ThreadProfile,
-};
+use crate::codex::app_server::{PROVIDER_API_FIELD, THREAD_LIST_LIMIT, ThreadProfile};
 use crate::workspace::AgentWorkspace;
 
 pub(super) fn parse_context_window_usage(value: &Value) -> Option<ContextWindowUsage> {
@@ -198,14 +196,12 @@ pub(super) fn initial_thread_request(
     if let Some(thread_id) = thread_id {
         json!({
             "jsonrpc": "2.0",
-            "id": THREAD_RESUME_RPC_ID,
             "method": "thread/resume",
             "params": thread_resume_params(thread_id, profile),
         })
     } else {
         json!({
             "jsonrpc": "2.0",
-            "id": THREAD_START_RPC_ID,
             "method": "thread/start",
             "params": thread_start_params(profile, workspace),
         })

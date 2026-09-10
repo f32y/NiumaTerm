@@ -4,7 +4,26 @@ use serde_json::Value;
 
 use crate::codex::app_server::FIRST_TURN_RPC_ID;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum QueryKind {
+    Start,
+    Models,
+    History,
+    Resume,
+    Checkpoints,
+    Fork,
+}
+
+impl QueryKind {
+    fn replaces(self, previous: Self) -> bool {
+        self == previous
+            || (matches!(self, Self::Start | Self::Resume | Self::Fork)
+                && matches!(previous, Self::Start | Self::Resume | Self::Fork))
+    }
+}
+
 pub(super) enum ControlOperation {
+    Query(QueryKind),
     Other,
     ThreadRequest,
     Command(String),
@@ -59,6 +78,13 @@ impl ControlState {
         self.pending.remove(&id)
     }
 
+    pub(super) fn track_query(&mut self, id: u64, kind: QueryKind) {
+        // A unique id is also the generation token: removing the previous
+        // request rejects both its late success and its late failure.
+        self.pending.retain(|_, operation| !matches!(operation, ControlOperation::Query(previous) if kind.replaces(*previous)));
+        self.track(id, ControlOperation::Query(kind));
+    }
+
     pub(super) fn has_command(&self) -> bool {
         self.pending
             .values()
@@ -68,8 +94,13 @@ impl ControlState {
     pub(super) fn reset_thread(&mut self) {
         // Catalog and descendant requests have separate owners that still
         // need their responses to release their own in-flight state.
-        self.pending
-            .retain(|_, operation| matches!(operation, ControlOperation::Other));
+        self.pending.retain(|_, operation| {
+            matches!(
+                operation,
+                ControlOperation::Other
+                    | ControlOperation::Query(QueryKind::Models | QueryKind::History)
+            )
+        });
     }
 
     pub(super) fn close(&mut self) {
