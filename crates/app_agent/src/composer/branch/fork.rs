@@ -196,7 +196,7 @@ impl AgentPane {
         target: Option<PromptTarget>,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.runtime.status != Status::Idle || self.is_command_busy() {
+        if self.runtime.status() != Status::Idle || self.is_command_busy() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 translated("agent-fork-idle-only"),
@@ -207,8 +207,7 @@ impl AgentPane {
 
         let asked = self
             .runtime
-            .backend
-            .as_mut()
+            .backend_mut()
             .is_some_and(Backend::request_fork_checkpoints);
         if !asked {
             self.palette.set_feedback(
@@ -351,7 +350,7 @@ impl AgentPane {
         checkpoint: ForkCheckpoint,
         cx: &mut Context<Self>,
     ) {
-        let outcome = match self.runtime.backend.as_mut() {
+        let outcome = match self.runtime.backend_mut() {
             Some(session) => session.fork_conversation(&checkpoint.anchor),
             None => {
                 Err(i18n("agent-session-still-starting").replace("{name}", self.kind.display()))
@@ -370,7 +369,7 @@ impl AgentPane {
         self.branch.fork.state = Some(ForkState::Branching);
         self.history_ui.mode = RecentSessionsMode::Loading;
         self.history_ui.pending_resume_replay = None;
-        self.runtime.status = Status::Starting;
+        self.runtime.begin_conversation_change();
         // The branch inherits the parent's controls, so nothing is seeded over
         // what its own history is about to replay.
         self.controls.seed_thread_defaults = false;

@@ -16,28 +16,7 @@ use nmt_agent_utils::background_task::{
 use nmt_agent_utils::chat::QueuedPrompt;
 
 use crate::session::turn::response_age_tick;
-use crate::session::{Backend, RecoverySnapshot, Status, UpdateSuspension};
 use crate::{AgentPane, UnansweredPrompt};
-
-/// The backend process and its lifecycle: everything a (re)spawn replaces.
-pub(crate) struct SessionRuntime {
-    pub(crate) backend: Option<Backend>,
-    /// Bumped on every (re)spawn; the message pump and EOF handler of an
-    /// older session compare against it and stand down, so deliberately
-    /// replacing the session (resume) doesn't route stale messages into the
-    /// new one or report a bogus exit.
-    pub(crate) epoch: u64,
-    pub(crate) status: Status,
-    /// Why the backend never came up, while that is still the pane's whole
-    /// state. Held rather than derived from [`Status::Exited`], which a
-    /// conversation that ran and then ended also reaches.
-    pub(crate) start_failure: Option<String>,
-    /// Process replacement for a provider update is pane state rather than a
-    /// terminal exit. Keeping it separate retains transcript and composer
-    /// contents while preventing input from reaching a missing backend.
-    pub(crate) update_suspension: Option<UpdateSuspension>,
-    pub(crate) last_recovery_snapshot: Option<RecoverySnapshot>,
-}
 
 /// One turn's bookkeeping, from submission to settled output.
 pub(crate) struct TurnState {
@@ -56,11 +35,6 @@ pub(crate) struct TurnState {
     /// The active prompt remains recoverable until provider activity becomes
     /// visible, allowing an immediate stop to return it to the composer.
     pub(crate) unanswered_prompt: Option<UnansweredPrompt>,
-    /// Turn the user asked to stop. Interruption is a completion state of a
-    /// turn, so the "Interrupted" transcript row is drawn only when that turn
-    /// actually ends; a backend that keeps streaming past the stop request
-    /// keeps its truthful working row until then.
-    pub(crate) pending_interrupt: Option<u64>,
     /// Mid-turn inputs stay near the composer until provider activity
     /// confirms they have joined the running response. A backend that owns
     /// its own pending queue republishes this whole list, which is what gives

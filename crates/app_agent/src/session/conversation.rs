@@ -47,7 +47,7 @@ impl AgentPane {
             return false;
         }
 
-        let outcome = match self.runtime.backend.as_mut() {
+        let outcome = match self.runtime.backend_mut() {
             Some(session) => session.rename_conversation(title),
             None => {
                 Err(i18n("agent-session-still-starting").replace("{name}", self.kind.display()))
@@ -90,7 +90,7 @@ impl AgentPane {
             return false;
         }
 
-        let Some(session) = self.runtime.backend.as_mut() else {
+        let Some(session) = self.runtime.backend_mut() else {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-still-starting").replace("{name}", self.kind.display()),
@@ -147,8 +147,7 @@ impl AgentPane {
     pub(crate) fn remove_queued_prompt(&mut self, item_id: &str, cx: &mut Context<Self>) {
         let removed = self
             .runtime
-            .backend
-            .as_mut()
+            .backend_mut()
             .is_some_and(|session| session.remove_queued_prompt(item_id));
 
         if !removed {

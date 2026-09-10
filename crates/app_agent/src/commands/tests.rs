@@ -4,14 +4,6 @@ use crate::commands::*;
 use crate::composer::PendingSlashCommand;
 use crate::{CachedCatalog, RecentSessionsMode, SlashPalette};
 
-#[test]
-fn replaced_session_epoch_rejects_expected_old_output_and_eof() {
-    let old_epoch = 41;
-    let current_epoch = next_session_epoch(old_epoch);
-    assert!(!is_current_session_epoch(current_epoch, old_epoch));
-    assert!(is_current_session_epoch(current_epoch, current_epoch));
-}
-
 fn info(name: &str, source: SlashCommandSource) -> SlashCommandInfo {
     SlashCommandInfo {
         name: name.to_string(),
@@ -246,9 +238,6 @@ fn clear_resets_command_runtime_without_owning_history_state() {
     assert!(!palette.dismissed);
     assert!(history_dismissed);
     assert_eq!(history, vec!["persisted session"]);
-    assert_eq!(next_session_epoch(7), 8);
-    assert!(is_current_session_epoch(8, 8));
-    assert!(!is_current_session_epoch(8, 7));
 }
 
 fn skill(name: &str, path: &str, scope: &str, enabled: bool) -> SkillInfo {

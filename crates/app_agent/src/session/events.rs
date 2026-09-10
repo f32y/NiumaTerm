@@ -14,7 +14,7 @@ use crate::capabilities::QueuedPromptDelivery;
 use crate::composer::CommandFeedbackKind;
 use crate::questions::{QuestionPrompt, QuestionStatus};
 use crate::session::conversation::claimed_prompts;
-use crate::session::{Backend, RecoverySnapshot, Status, UpdateSuspension};
+use crate::session::{Backend, RecoverySnapshot, Status};
 use crate::thread_controls::{launch_effort, launch_model, stored_thread_settings};
 use crate::transcript::hidden;
 use crate::{AgentPane, AgentPaneEvent, RecentSessionsMode};
@@ -297,16 +297,12 @@ impl AgentPane {
     }
 
     fn on_host_exited(&mut self, message: String, cx: &mut Context<Self>) {
-        let identity = self
-            .runtime
-            .backend
-            .as_ref()
-            .and_then(Backend::recovery_identity);
-        self.runtime.last_recovery_snapshot = Some(RecoverySnapshot {
+        let identity = self.runtime.backend().and_then(Backend::recovery_identity);
+        self.runtime.reconnect(Some(RecoverySnapshot {
             identity,
             profile_name: self.profile.name.clone(),
-        });
-        self.runtime.update_suspension = Some(UpdateSuspension::Failed(message.clone()));
+        }));
+        self.runtime.recovery_failed(message.clone());
         self.on_error(message, true, cx);
     }
 
@@ -386,18 +382,7 @@ impl AgentPane {
             self.controls.settings.model,
             launch_model(self.kind, &self.profile)
         );
-        // Claude's first-turn init confirms settings after its
-        // synthetic TurnStarted event; that confirmation must not
-        // make an active turn look idle and admit overlapping work.
-        if self.runtime.status != Status::Running {
-            self.runtime.status = Status::Idle;
-        }
-        if matches!(
-            self.runtime.update_suspension,
-            Some(UpdateSuspension::Reconnecting)
-        ) {
-            self.runtime.update_suspension = None;
-        }
+        self.runtime.ready();
         // The session id is known by now, so child agents that ran
         // before this tab opened can be rebuilt from history.
         self.restore_background_tasks(cx);
@@ -430,7 +415,7 @@ impl AgentPane {
                     }),
                     cx,
                 );
-                if self.palette.awaiting_command_turn && self.runtime.status != Status::Running {
+                if self.palette.awaiting_command_turn && self.runtime.status() != Status::Running {
                     self.palette.awaiting_command_turn = false;
                     self.run_next_queued_command(cx);
                 }
@@ -473,7 +458,7 @@ impl AgentPane {
         {
             self.publish_queued_user_messages(cx);
         }
-        self.runtime.status = Status::Running;
+        self.runtime.turn_started();
         self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
         cx.notify();
     }
@@ -484,7 +469,7 @@ impl AgentPane {
     /// never shows an "Interrupted" row above live output. A stale request
     /// for an earlier turn is dropped at this boundary.
     fn on_turn_completed(&mut self, error: Option<String>, cx: &mut Context<Self>) {
-        if self.turn.pending_interrupt.take() == Some(self.turn.seq) {
+        if self.runtime.turn_completed(self.turn.seq) {
             let turn = self.turn.seq;
             self.transcript
                 .update(cx, |transcript, _| transcript.mark_interrupted(turn));
@@ -515,9 +500,6 @@ impl AgentPane {
         }
         self.finish_working(cx);
         self.refresh_git_branch(cx);
-        if self.runtime.status == Status::Running {
-            self.runtime.status = Status::Idle;
-        }
         if let Some(text) = error
             && !interrupted_by_user
             && !error_already_shown
@@ -545,21 +527,13 @@ impl AgentPane {
             // composer behind a conversation that is not being cut.
             self.abandon_conversation_branch();
             if !fatal {
-                self.runtime.status = Status::Idle;
+                self.runtime.conversation_change_rejected(Status::Idle);
             }
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-open-failed").replace("{error}", &message),
                 cx,
             );
-        }
-        if fatal
-            && matches!(
-                self.runtime.update_suspension,
-                Some(UpdateSuspension::Reconnecting)
-            )
-        {
-            self.runtime.update_suspension = Some(UpdateSuspension::Failed(message.clone()));
         }
         let cancelled_queue = fatal && !self.palette.command_queue.is_empty();
         if fatal {
@@ -572,7 +546,7 @@ impl AgentPane {
                 }
             }
             cx.emit(AgentPaneEvent::Interrupted);
-            self.runtime.status = Status::Exited;
+            self.runtime.exited(&message);
             self.turn.unanswered_prompt = None;
             self.palette.awaiting_command_turn = false;
             self.palette.command_queue.clear();

@@ -198,7 +198,7 @@ impl AgentPane {
     }
 
     pub(super) fn render_update_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.runtime.update_suspension.as_ref().and_then(|state| {
+        self.runtime.update_suspension().and_then(|state| {
             // The phases that tear the backend down and bring it back own the
             // whole surface through `render_update_overlay`, so the strip only
             // covers the two states the tab stays usable in.
@@ -276,7 +276,7 @@ impl AgentPane {
     /// backend: input would go nowhere, and the transcript underneath is a
     /// stale snapshot of a conversation that is about to be replayed.
     pub(super) fn render_update_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let label = update_overlay_phase(self.runtime.update_suspension.as_ref()?)?.label();
+        let label = update_overlay_phase(self.runtime.update_suspension()?)?.label();
 
         let body = v_flex()
             .items_center()
@@ -305,7 +305,7 @@ impl AgentPane {
     /// left to do, because the pane behind it has no conversation to return
     /// to: the transcript holds one error row and nothing else.
     pub(super) fn render_start_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let failure = self.runtime.start_failure.clone();
+        let failure = self.runtime.start_failure().map(str::to_owned);
         if failure.is_none() && !self.shows_start_overlay() {
             return None;
         }

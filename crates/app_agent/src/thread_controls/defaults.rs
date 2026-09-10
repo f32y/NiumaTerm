@@ -101,7 +101,7 @@ impl AgentPane {
         let Some(model) = self.controls.settings.model.clone() else {
             return;
         };
-        let Some(session) = self.runtime.backend.as_mut() else {
+        let Some(session) = self.runtime.backend_mut() else {
             return;
         };
 
@@ -143,7 +143,7 @@ impl AgentPane {
     /// tools. That rule is not repeated here: the picker reports whatever the
     /// harness answers, and the row stays on the preset still in force.
     pub(crate) fn apply_agent_preset(&mut self, preset: String, cx: &mut Context<Self>) {
-        let Some(session) = self.runtime.backend.as_mut() else {
+        let Some(session) = self.runtime.backend_mut() else {
             return;
         };
         if self.controls.agent_preset.as_deref() == Some(preset.as_str()) {

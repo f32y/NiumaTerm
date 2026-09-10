@@ -324,7 +324,7 @@ impl AgentPane {
     }
 
     pub(super) fn is_command_busy(&self) -> bool {
-        self.runtime.status == Status::Running
+        self.runtime.status() == Status::Running
             || self.palette.awaiting_command_turn
             || self.history_ui.mode == RecentSessionsMode::Loading
             || self.branch_flow_holds_composer()

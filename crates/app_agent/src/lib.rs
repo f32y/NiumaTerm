@@ -43,8 +43,9 @@ use crate::composer::attachments::ComposerAttachments;
 use crate::composer::{BranchFlow, CommandFeedback, PendingSlashCommand};
 use crate::fade::Fade;
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
-use crate::pane_state::{ChildAgents, SessionRuntime, TurnState};
+use crate::pane_state::{ChildAgents, TurnState};
 pub use crate::profile::{AgentKind, AgentThreadDefaults, agent_launch};
+use crate::session::lifecycle::SessionRuntime;
 use crate::session::prompts::PendingPrompts;
 pub use crate::session::{
     RecoveryIdentity, RecoveryReadiness, RecoverySnapshot, RestorationReadiness,

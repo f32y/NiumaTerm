@@ -71,6 +71,7 @@ pub(super) enum RenameOutcome {
 #[cfg(test)]
 pub(crate) struct TestBackend {
     pub(super) rename_outcome: RenameOutcome,
+    pub(super) interrupt_accepted: bool,
     send_outcomes: VecDeque<SendOutcome>,
     slash_outcome: SlashCommandOutcome,
     commands: Vec<SlashCommandInfo>,
@@ -90,6 +91,7 @@ impl TestBackend {
     ) -> Self {
         Self {
             rename_outcome: RenameOutcome::Unsupported,
+            interrupt_accepted: false,
             send_outcomes: send_outcomes.into_iter().collect(),
             slash_outcome,
             commands,
@@ -603,7 +605,7 @@ impl Backend {
             Backend::Claude(session) => session.interrupt(),
             Backend::DeepSeek(session) => session.interrupt(),
             #[cfg(test)]
-            Backend::Test(_) => false,
+            Backend::Test(session) => session.interrupt_accepted,
         }
     }
 

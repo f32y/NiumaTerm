@@ -331,6 +331,7 @@ mod conversation_title_tests {
     use nmt_agent_utils::chat::{SendOutcome, SlashCommandOutcome};
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
+    use crate::session::lifecycle::StartOutcome;
     use crate::session::{Backend, RecoveryIdentity, Status, TestBackend};
     use crate::settings::AgentSettings;
     use crate::{AgentPane, AgentPaneEvent, AgentThreadDefaults};
@@ -370,16 +371,22 @@ mod conversation_title_tests {
         let mut cx = VisualTestContext::from_window(window.into(), cx);
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                pane.runtime.epoch += 1;
-                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
-                    [],
-                    SlashCommandOutcome::NotReady,
-                    vec![],
-                )));
-                pane.runtime.status = Status::Running;
+                let epoch = pane.runtime.begin_start();
+                assert!(matches!(
+                    pane.runtime.install(
+                        epoch,
+                        Ok(Backend::Test(TestBackend::new(
+                            [],
+                            SlashCommandOutcome::NotReady,
+                            vec![],
+                        )))
+                    ),
+                    StartOutcome::Installed
+                ));
+                pane.runtime.turn_started();
                 pane.stop_for_output_failure("Output limit reached".into(), cx);
-                assert!(pane.runtime.backend.is_none());
-                assert_eq!(pane.runtime.status, Status::Exited);
+                assert!(pane.runtime.backend().is_none());
+                assert_eq!(pane.runtime.status(), Status::Exited);
             });
         });
     }
@@ -393,23 +400,26 @@ mod conversation_title_tests {
         let mut cx = VisualTestContext::from_window(window.into(), cx);
         cx.update(|_, cx| {
             pane.update(cx, |pane, _| {
-                pane.runtime.epoch += 1;
                 let mut backend = TestBackend::new([], SlashCommandOutcome::NotReady, vec![])
                     .with_recovery(AgentKind::Codex, "thread");
                 backend.rename_outcome = RenameOutcome::Rejected;
-                pane.runtime.backend = Some(Backend::Test(backend));
+                let epoch = pane.runtime.begin_start();
+                assert!(matches!(
+                    pane.runtime.install(epoch, Ok(Backend::Test(backend))),
+                    StartOutcome::Installed
+                ));
                 pane.rename_session("first");
                 pane.rename_session("latest");
                 assert_eq!(pane.pending_conversation_rename.as_deref(), Some("latest"));
                 pane.sync_pending_rename();
                 assert_eq!(pane.pending_conversation_rename.as_deref(), Some("latest"));
-                let Some(Backend::Test(backend)) = pane.runtime.backend.as_mut() else {
+                let Some(Backend::Test(backend)) = pane.runtime.backend_mut() else {
                     panic!("expected test backend");
                 };
                 backend.rename_outcome = RenameOutcome::Accepted;
                 pane.sync_pending_rename();
                 assert!(pane.pending_conversation_rename.is_none());
-                let Some(Backend::Test(backend)) = pane.runtime.backend.as_mut() else {
+                let Some(Backend::Test(backend)) = pane.runtime.backend_mut() else {
                     panic!("expected test backend");
                 };
                 backend.rename_outcome = RenameOutcome::Unsupported;
@@ -443,11 +453,18 @@ mod conversation_title_tests {
         let mut cx = VisualTestContext::from_window(window.into(), cx);
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
-                    [],
-                    SlashCommandOutcome::NotReady,
-                    Vec::new(),
-                )));
+                let epoch = pane.runtime.begin_start();
+                assert!(matches!(
+                    pane.runtime.install(
+                        epoch,
+                        Ok(Backend::Test(TestBackend::new(
+                            [],
+                            SlashCommandOutcome::NotReady,
+                            Vec::new(),
+                        )))
+                    ),
+                    StartOutcome::Installed
+                ));
                 pane.apply_event(
                     Event::ApprovalRequested {
                         description: "Run a command".into(),
@@ -457,7 +474,7 @@ mod conversation_title_tests {
                 pane.respond_approval("accept", cx);
                 assert!(pane.prompts.approval().is_some());
                 pane.apply_event(Event::ApprovalResolved, cx);
-                pane.runtime.status = Status::Idle;
+                pane.runtime.ready();
                 pane.apply_event(
                     Event::QuestionsRequested {
                         questions: vec![Question {
@@ -488,12 +505,19 @@ mod conversation_title_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
-                    [SendOutcome::StartedTurn],
-                    SlashCommandOutcome::NotReady,
-                    Vec::new(),
-                )));
-                pane.runtime.status = Status::Idle;
+                let epoch = pane.runtime.begin_start();
+                assert!(matches!(
+                    pane.runtime.install(
+                        epoch,
+                        Ok(Backend::Test(TestBackend::new(
+                            [SendOutcome::StartedTurn],
+                            SlashCommandOutcome::NotReady,
+                            Vec::new(),
+                        )))
+                    ),
+                    StartOutcome::Installed
+                ));
+                pane.runtime.ready();
 
                 assert!(
                     pane.send_text("  Inspect title generation\n and its fallback  ".into(), cx)
@@ -520,12 +544,19 @@ mod conversation_title_tests {
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
                 pane.kind = crate::AgentKind::Claude;
-                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
-                    [SendOutcome::StartedTurn, SendOutcome::Steered],
-                    SlashCommandOutcome::NotReady,
-                    Vec::new(),
-                )));
-                pane.runtime.status = Status::Idle;
+                let epoch = pane.runtime.begin_start();
+                assert!(matches!(
+                    pane.runtime.install(
+                        epoch,
+                        Ok(Backend::Test(TestBackend::new(
+                            [SendOutcome::StartedTurn, SendOutcome::Steered],
+                            SlashCommandOutcome::NotReady,
+                            Vec::new(),
+                        )))
+                    ),
+                    StartOutcome::Installed
+                ));
+                pane.runtime.ready();
 
                 assert!(pane.send_text("one two three four five six seven eight".into(), cx));
                 assert!(pane.conversation_named);
@@ -554,12 +585,19 @@ mod conversation_title_tests {
             pane.update(cx, |pane, cx| {
                 assert!(pane.conversation_named);
                 pane.kind = crate::AgentKind::Claude;
-                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
-                    [SendOutcome::StartedTurn],
-                    SlashCommandOutcome::NotReady,
-                    Vec::new(),
-                )));
-                pane.runtime.status = Status::Idle;
+                let epoch = pane.runtime.begin_start();
+                assert!(matches!(
+                    pane.runtime.install(
+                        epoch,
+                        Ok(Backend::Test(TestBackend::new(
+                            [SendOutcome::StartedTurn],
+                            SlashCommandOutcome::NotReady,
+                            Vec::new(),
+                        )))
+                    ),
+                    StartOutcome::Installed
+                ));
+                pane.runtime.ready();
 
                 assert!(pane.send_text("follow up on the restored session".into(), cx));
             });
@@ -621,6 +659,7 @@ mod queued_prompt_placement_tests {
     };
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
+    use crate::session::lifecycle::StartOutcome;
     use crate::session::{Backend, Status, TestBackend};
     use crate::settings::AgentSettings;
     use crate::{AgentPane, AgentThreadDefaults};
@@ -675,12 +714,19 @@ mod queued_prompt_placement_tests {
         let mut cx = VisualTestContext::from_window(window.into(), cx);
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
-                    [],
-                    SlashCommandOutcome::NotReady,
-                    Vec::new(),
-                )));
-                pane.runtime.status = Status::Idle;
+                let epoch = pane.runtime.begin_start();
+                assert!(matches!(
+                    pane.runtime.install(
+                        epoch,
+                        Ok(Backend::Test(TestBackend::new(
+                            [],
+                            SlashCommandOutcome::NotReady,
+                            Vec::new(),
+                        )))
+                    ),
+                    StartOutcome::Installed
+                ));
+                pane.runtime.ready();
                 pane.palette.awaiting_command_turn = true;
                 let previous_turn = pane.turn.seq;
                 assert!(!pane.transcript.read(cx).is_working());
@@ -688,7 +734,7 @@ mod queued_prompt_placement_tests {
                 pane.apply_event(SessionEvent::TurnStarted, cx);
                 assert!(!pane.palette.awaiting_command_turn);
                 assert_eq!(pane.turn.seq, previous_turn + 1);
-                assert_eq!(pane.runtime.status, Status::Running);
+                assert_eq!(pane.runtime.status(), Status::Running);
                 assert!(pane.transcript.read(cx).is_working());
 
                 pane.apply_event(SessionEvent::TurnStarted, cx);
@@ -708,12 +754,19 @@ mod queued_prompt_placement_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
-                    [SendOutcome::StartedTurn, SendOutcome::Steered],
-                    SlashCommandOutcome::NotReady,
-                    Vec::new(),
-                )));
-                pane.runtime.status = Status::Idle;
+                let epoch = pane.runtime.begin_start();
+                assert!(matches!(
+                    pane.runtime.install(
+                        epoch,
+                        Ok(Backend::Test(TestBackend::new(
+                            [SendOutcome::StartedTurn, SendOutcome::Steered],
+                            SlashCommandOutcome::NotReady,
+                            Vec::new(),
+                        )))
+                    ),
+                    StartOutcome::Installed
+                ));
+                pane.runtime.ready();
 
                 assert!(pane.send_text("open the turn".into(), cx));
                 pane.apply_event(SessionEvent::TurnStarted, cx);
@@ -740,7 +793,7 @@ mod queued_prompt_placement_tests {
                 pane.apply_event(SessionEvent::TurnStarted, cx);
 
                 assert_eq!(pane.turn.seq, first_turn + 1, "that turn is numbered");
-                assert_eq!(pane.runtime.status, Status::Running);
+                assert_eq!(pane.runtime.status(), Status::Running);
                 assert!(pane.transcript.read(cx).is_working());
                 assert_eq!(
                     user_rows(pane, cx),
@@ -765,12 +818,19 @@ mod queued_prompt_placement_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
-                    [SendOutcome::StartedTurn],
-                    SlashCommandOutcome::NotReady,
-                    Vec::new(),
-                )));
-                pane.runtime.status = Status::Idle;
+                let epoch = pane.runtime.begin_start();
+                assert!(matches!(
+                    pane.runtime.install(
+                        epoch,
+                        Ok(Backend::Test(TestBackend::new(
+                            [SendOutcome::StartedTurn],
+                            SlashCommandOutcome::NotReady,
+                            Vec::new(),
+                        )))
+                    ),
+                    StartOutcome::Installed
+                ));
+                pane.runtime.ready();
 
                 let text = "Reply with exactly: ok".to_string();
                 assert!(pane.send_text(text.clone(), cx));
@@ -903,7 +963,8 @@ mod session_replacement_tests {
     use nmt_agent_utils::chat::{SendOutcome, SlashCommandOutcome};
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
-    use crate::session::{Backend, Status, TestBackend};
+    use crate::session::lifecycle::StartOutcome;
+    use crate::session::{Backend, TestBackend};
     use crate::settings::AgentSettings;
     use crate::{AgentPane, AgentThreadDefaults};
 
@@ -936,19 +997,26 @@ mod session_replacement_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                pane.runtime.backend = Some(Backend::Test(
-                    TestBackend::new(
-                        [SendOutcome::StartedTurn],
-                        SlashCommandOutcome::NotReady,
-                        Vec::new(),
-                    )
-                    .watch_release(released.clone()),
+                let epoch = pane.runtime.begin_start();
+                assert!(matches!(
+                    pane.runtime.install(
+                        epoch,
+                        Ok(Backend::Test(
+                            TestBackend::new(
+                                [SendOutcome::StartedTurn],
+                                SlashCommandOutcome::NotReady,
+                                Vec::new(),
+                            )
+                            .watch_release(released.clone()),
+                        ))
+                    ),
+                    StartOutcome::Installed
                 ));
-                pane.runtime.status = Status::Idle;
+                pane.runtime.ready();
 
                 pane.reset_conversation(cx);
 
-                assert!(pane.runtime.backend.is_none(), "the pane sends nowhere");
+                assert!(pane.runtime.backend().is_none(), "the pane sends nowhere");
                 assert!(
                     !released.load(Ordering::SeqCst),
                     "the replaced session outlives the reset, so the host it holds keeps running"
@@ -964,6 +1032,7 @@ mod shared_host_recovery_tests {
     use nmt_agent_utils::chat::{Event as SessionEvent, SendOutcome, SlashCommandOutcome};
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
+    use crate::session::lifecycle::StartOutcome;
     use crate::session::{Backend, Status, TestBackend, UpdateSuspension};
     use crate::settings::AgentSettings;
     use crate::{AgentKind, AgentPane, AgentThreadDefaults};
@@ -994,15 +1063,22 @@ mod shared_host_recovery_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                pane.runtime.backend = Some(Backend::Test(
-                    TestBackend::new(
-                        [SendOutcome::StartedTurn],
-                        SlashCommandOutcome::NotReady,
-                        Vec::new(),
-                    )
-                    .with_recovery(AgentKind::Codex, "thread-recovery"),
+                let epoch = pane.runtime.begin_start();
+                assert!(matches!(
+                    pane.runtime.install(
+                        epoch,
+                        Ok(Backend::Test(
+                            TestBackend::new(
+                                [SendOutcome::StartedTurn],
+                                SlashCommandOutcome::NotReady,
+                                Vec::new(),
+                            )
+                            .with_recovery(AgentKind::Codex, "thread-recovery"),
+                        ))
+                    ),
+                    StartOutcome::Installed
                 ));
-                pane.runtime.status = Status::Idle;
+                pane.runtime.ready();
 
                 pane.apply_event(
                     SessionEvent::HostExited {
@@ -1011,15 +1087,14 @@ mod shared_host_recovery_tests {
                     cx,
                 );
 
-                assert_eq!(pane.runtime.status, Status::Exited);
+                assert_eq!(pane.runtime.status(), Status::Exited);
                 assert!(matches!(
-                    pane.runtime.update_suspension,
+                    pane.runtime.update_suspension(),
                     Some(UpdateSuspension::Failed(_))
                 ));
                 let snapshot = pane
                     .runtime
-                    .last_recovery_snapshot
-                    .as_ref()
+                    .last_recovery_snapshot()
                     .expect("recovery snapshot");
                 assert_eq!(snapshot.profile_name, "Codex Recovery Test");
                 assert_eq!(
@@ -1029,7 +1104,7 @@ mod shared_host_recovery_tests {
                         .map(|identity| identity.id.as_str()),
                     Some("thread-recovery")
                 );
-                assert!(pane.runtime.backend.is_some());
+                assert!(pane.runtime.backend().is_some());
             });
         });
     }
@@ -1068,6 +1143,7 @@ mod command_catalog_cache_tests {
     };
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
+    use crate::session::lifecycle::StartOutcome;
     use crate::session::{Backend, TestBackend};
     use crate::settings::AgentSettings;
     use crate::{AgentPane, AgentThreadDefaults};
@@ -1125,11 +1201,18 @@ mod command_catalog_cache_tests {
         // assertions run.
         cx.update(|_, cx| {
             pane.update(cx, |pane, _| {
-                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
-                    [SendOutcome::StartedTurn],
-                    SlashCommandOutcome::NotReady,
-                    Vec::new(),
-                )));
+                let epoch = pane.runtime.begin_start();
+                assert!(matches!(
+                    pane.runtime.install(
+                        epoch,
+                        Ok(Backend::Test(TestBackend::new(
+                            [SendOutcome::StartedTurn],
+                            SlashCommandOutcome::NotReady,
+                            Vec::new(),
+                        )))
+                    ),
+                    StartOutcome::Installed
+                ));
             });
         });
         cx.run_until_parked();

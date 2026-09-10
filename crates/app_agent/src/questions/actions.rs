@@ -32,8 +32,7 @@ impl AgentPane {
         let mut prompt = QuestionPrompt::from_request(request);
         prompt.thread_id = self
             .runtime
-            .backend
-            .as_ref()
+            .backend()
             .and_then(|backend| backend.recovery_identity())
             .map(|identity| identity.id);
         self.prompts.ask_questions(prompt);
@@ -49,12 +48,13 @@ impl AgentPane {
         if !optional {
             return;
         }
-        let epoch = self.runtime.epoch;
+        let epoch = self.runtime.epoch();
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 let keep_running = this.update(cx, |this, cx| {
-                    if this.runtime.epoch != epoch || this.runtime.update_suspension.is_some() {
+                    if !this.runtime.is_current(epoch) || this.runtime.update_suspension().is_some()
+                    {
                         return false;
                     }
                     let Some(index) = this
@@ -105,10 +105,10 @@ impl AgentPane {
                 started_turn,
             } => {
                 if let Some(text) = message {
-                    if started_turn && self.runtime.status == Status::Idle {
+                    if started_turn && self.runtime.status() == Status::Idle {
                         self.turn.seq += 1;
                         self.start_working(cx);
-                        self.runtime.status = Status::Running;
+                        self.runtime.turn_started();
                         self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
                     }
                     self.push_item(Item::UserMessage { text: Some(text) }, cx);
@@ -261,8 +261,8 @@ impl AgentPane {
         answers: Option<Vec<Vec<String>>>,
         cx: &mut Context<Self>,
     ) {
-        if !matches!(self.runtime.status, Status::Idle | Status::Running)
-            || self.runtime.update_suspension.is_some()
+        if !matches!(self.runtime.status(), Status::Idle | Status::Running)
+            || self.runtime.update_suspension().is_some()
             || self.branch_flow_holds_composer()
             || self.palette.awaiting_command_turn
         {
@@ -281,7 +281,7 @@ impl AgentPane {
         let id = prompt.id.clone();
         let mode = prompt.mode;
         let skipped = answers.is_none();
-        let Some(backend) = self.runtime.backend.as_mut() else {
+        let Some(backend) = self.runtime.backend_mut() else {
             return;
         };
         let result = match id.as_deref() {
@@ -321,7 +321,7 @@ impl AgentPane {
     }
 
     pub(crate) fn restore_question_drafts(&mut self) {
-        let Some(backend) = self.runtime.backend.as_mut() else {
+        let Some(backend) = self.runtime.backend_mut() else {
             return;
         };
         let thread_id = backend.recovery_identity().map(|identity| identity.id);
@@ -366,9 +366,9 @@ impl AgentPane {
                 continue;
             }
             let text = prompt.text[index].clone();
-            let epoch = self.runtime.epoch;
+            let epoch = self.runtime.epoch();
             let on_change = move |this: &mut Self, value: String, cx: &mut Context<Self>| {
-                if this.runtime.epoch != epoch {
+                if !this.runtime.is_current(epoch) {
                     return;
                 }
                 let Some(prompt) = this.prompts.batches.get_mut(batch) else {

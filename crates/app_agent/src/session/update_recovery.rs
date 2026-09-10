@@ -5,41 +5,16 @@ use nmt_agent_utils::launcher::AgentCli;
 use nmt_agent_utils::update::InstallationKey;
 use nmt_i18n::i18n;
 
-use crate::commands::next_session_epoch;
 use crate::composer::{ForkState, RewindState};
 use crate::profile::agent_launch;
-use crate::session::{Backend, RecoveryIdentity, Status};
+use crate::session::{Backend, RecoverySnapshot, RestorationReadiness, Status, UpdateSuspension};
 use crate::{AgentPane, AgentPaneEvent};
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RecoverySnapshot {
-    /// `None` for an untouched conversation, which has nothing to resume and
-    /// so restarts as a new one rather than failing the update.
-    pub identity: Option<RecoveryIdentity>,
-    pub profile_name: String,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RecoveryReadiness {
     Ready(RecoverySnapshot),
     Busy(String),
     MissingIdentity(String),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RestorationReadiness {
-    Pending,
-    Ready,
-    Failed(String),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum UpdateSuspension {
-    Waiting,
-    Stopping,
-    Updating,
-    Reconnecting,
-    Failed(String),
 }
 
 impl AgentPane {
@@ -59,15 +34,14 @@ impl AgentPane {
     pub fn recovery_readiness(&self, cx: &App) -> RecoveryReadiness {
         if self
             .runtime
-            .update_suspension
-            .as_ref()
+            .update_suspension()
             .is_some_and(|state| !matches!(state, UpdateSuspension::Waiting))
         {
             return RecoveryReadiness::Busy(
                 i18n("agent-update-profile-already-updating").replace("{name}", &self.profile.name),
             );
         }
-        if matches!(self.runtime.status, Status::Starting | Status::Running)
+        if matches!(self.runtime.status(), Status::Starting | Status::Running)
             || self.prompts.approval_open()
             || self.palette.awaiting_command_turn
             || !self.palette.command_queue.is_empty()
@@ -77,8 +51,7 @@ impl AgentPane {
             || self.transcript.read(cx).is_compacting()
             || self
                 .runtime
-                .backend
-                .as_ref()
+                .backend()
                 .is_some_and(Backend::has_active_operation)
         {
             return RecoveryReadiness::Busy(
@@ -92,12 +65,7 @@ impl AgentPane {
     pub fn recovery_identity_snapshot(&self, cx: &App) -> RecoveryReadiness {
         let identity = if self.transcript.read(cx).is_empty() {
             None
-        } else if let Some(identity) = self
-            .runtime
-            .backend
-            .as_ref()
-            .and_then(Backend::recovery_identity)
-        {
+        } else if let Some(identity) = self.runtime.backend().and_then(Backend::recovery_identity) {
             Some(identity)
         } else {
             return RecoveryReadiness::MissingIdentity(
@@ -114,16 +82,12 @@ impl AgentPane {
     }
 
     pub fn prepare_update_wait(&mut self, cx: &mut Context<Self>) {
-        self.runtime.update_suspension = Some(UpdateSuspension::Waiting);
+        self.runtime.wait_for_update();
         cx.notify();
     }
 
     pub fn cancel_update_wait(&mut self, cx: &mut Context<Self>) {
-        if matches!(
-            self.runtime.update_suspension,
-            Some(UpdateSuspension::Waiting)
-        ) {
-            self.runtime.update_suspension = None;
+        if self.runtime.cancel_update_wait() {
             cx.notify();
         }
     }
@@ -157,7 +121,7 @@ impl AgentPane {
         }
         self.transcript
             .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
-        self.runtime.update_suspension = Some(UpdateSuspension::Waiting);
+        self.runtime.wait_for_update();
         cx.notify();
     }
 
@@ -169,13 +133,11 @@ impl AgentPane {
         force: bool,
         cx: &mut Context<Self>,
     ) -> Task<Result<(), String>> {
-        self.runtime.epoch = next_session_epoch(self.runtime.epoch);
-        self.runtime.update_suspension = Some(UpdateSuspension::Stopping);
-        self.runtime.status = Status::Starting;
+        let (epoch, backend) = self.runtime.suspend_for_update();
         cx.emit(AgentPaneEvent::Interrupted);
         cx.notify();
 
-        let Some(mut backend) = self.runtime.backend.take() else {
+        let Some(mut backend) = backend else {
             return Task::ready(Ok(()));
         };
         let worker = cx.background_executor().spawn(async move {
@@ -186,9 +148,13 @@ impl AgentPane {
             let (backend, result) = worker.await;
             if result.is_err() {
                 let _ = this.update(cx, |this, cx| {
-                    this.runtime.backend = Some(backend);
-                    this.runtime.update_suspension = None;
-                    this.runtime.status = Status::Idle;
+                    if let Err(mut orphan) = this.runtime.shutdown_failed(epoch, backend) {
+                        cx.background_executor()
+                            .spawn(async move {
+                                let _ = orphan.shutdown(Duration::from_secs(5), true);
+                            })
+                            .detach();
+                    }
                     cx.notify();
                 });
             }
@@ -197,7 +163,7 @@ impl AgentPane {
     }
 
     pub fn mark_provider_updating(&mut self, cx: &mut Context<Self>) {
-        self.runtime.update_suspension = Some(UpdateSuspension::Updating);
+        self.runtime.provider_updating();
         cx.notify();
     }
 
@@ -205,16 +171,14 @@ impl AgentPane {
     /// the process now comes up on a background thread, so a failure lands
     /// after this returns.
     pub fn restore_after_update(&mut self, snapshot: &RecoverySnapshot, cx: &mut Context<Self>) {
-        self.runtime.update_suspension = Some(UpdateSuspension::Reconnecting);
-        self.runtime.last_recovery_snapshot = Some(snapshot.clone());
+        self.runtime.reconnect(Some(snapshot.clone()));
         self.start_session_with_options(
             snapshot.identity.clone(),
             true,
             |this, started, _| {
                 if !started {
-                    this.runtime.update_suspension = Some(UpdateSuspension::Failed(
-                        i18n("agent-update-recovery-restart-failed").to_string(),
-                    ));
+                    this.runtime
+                        .recovery_failed(i18n("agent-update-recovery-restart-failed").to_string());
                 }
             },
             cx,
@@ -223,36 +187,30 @@ impl AgentPane {
     }
 
     pub(crate) fn retry_update_recovery(&mut self, cx: &mut Context<Self>) {
-        if let Some(snapshot) = self.runtime.last_recovery_snapshot.clone() {
+        if let Some(snapshot) = self.runtime.last_recovery_snapshot().cloned() {
             self.restore_after_update(&snapshot, cx);
         }
     }
 
     pub fn restoration_readiness(&self) -> RestorationReadiness {
-        match self.runtime.update_suspension.as_ref() {
-            None if self.runtime.status == Status::Idle => RestorationReadiness::Ready,
-            Some(UpdateSuspension::Failed(message)) => {
-                RestorationReadiness::Failed(message.clone())
-            }
-            _ => RestorationReadiness::Pending,
-        }
+        self.runtime.restoration_readiness()
     }
 
     pub fn fail_update_recovery(&mut self, message: String, cx: &mut Context<Self>) {
-        self.runtime.update_suspension = Some(UpdateSuspension::Failed(message));
+        self.runtime.recovery_failed(message);
         cx.notify();
     }
 
     pub(crate) fn start_new_after_update_failure(&mut self, cx: &mut Context<Self>) {
-        self.runtime.update_suspension = Some(UpdateSuspension::Reconnecting);
+        self.runtime.reconnect(None);
         self.start_session_with_options(
             None,
             true,
             |this, started, _| {
                 if !started {
-                    this.runtime.update_suspension = Some(UpdateSuspension::Failed(
+                    this.runtime.recovery_failed(
                         i18n("agent-update-recovery-new-session-failed").to_string(),
-                    ));
+                    );
                 }
             },
             cx,

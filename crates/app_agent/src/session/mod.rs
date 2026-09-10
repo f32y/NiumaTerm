@@ -3,7 +3,8 @@ use gpui::prelude::*;
 use nmt_agent_utils::AgentEvent;
 
 use crate::UnansweredPrompt;
-use crate::pane_state::{ChildAgents, SessionRuntime, TurnState};
+use crate::pane_state::{ChildAgents, TurnState};
+use crate::session::lifecycle::{SessionRuntime, StartOutcome};
 use crate::session::output::{EventBatch, MAX_MESSAGES_PER_BATCH, MAX_UPDATE_TIME};
 use crate::session::prompts::PendingPrompts;
 use crate::thread_controls::{ThreadControls, launch_effort, launch_model, stored_thread_settings};
@@ -14,6 +15,7 @@ mod conversation;
 mod events;
 mod history;
 mod inbox;
+pub(crate) mod lifecycle;
 mod output;
 pub(crate) mod prompts;
 #[cfg(test)]
@@ -30,7 +32,8 @@ use std::{env, fs};
 use gpui::{App, Context, Image, Window};
 use gpui_component::input::{InputEvent, TextareaState};
 use nmt_agent_utils::chat::{
-    Item as SessionItem, QueuedPrompt, SendOutcome, SkillReference, ThreadSettings,
+    Event as SessionEvent, Item as SessionItem, QueuedPrompt, SendOutcome, SkillReference,
+    ThreadSettings,
 };
 use nmt_agent_utils::claude_code::sessions as claude_sessions;
 use nmt_agent_utils::codex::app_server;
@@ -43,7 +46,7 @@ use nmt_platform::filesystem::path_identity;
 use tracing::info;
 
 use crate::capabilities::QueuedPromptDelivery;
-use crate::commands::{is_current_session_epoch, next_session_epoch, reconcile_skill_binding};
+use crate::commands::reconcile_skill_binding;
 use crate::composer::attachments::{ComposerAttachments, scratch_dir};
 use crate::composer::{BranchFlow, CommandFeedbackKind, prompt_with_response_annotations};
 use crate::fade::Fade;
@@ -55,10 +58,9 @@ use crate::session::backend::ConversationTitleRequest;
 pub use crate::session::backend::RecoveryIdentity;
 #[cfg(test)]
 pub(crate) use crate::session::backend::TestBackend;
-pub(super) use crate::session::update_recovery::UpdateSuspension;
-pub use crate::session::update_recovery::{
-    RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
-};
+pub use crate::session::lifecycle::{RecoverySnapshot, RestorationReadiness};
+pub(super) use crate::session::lifecycle::{Status, UpdateSuspension};
+pub use crate::session::update_recovery::RecoveryReadiness;
 use crate::settings::AgentSettings;
 use crate::transcript::TranscriptView;
 use crate::workflows::WorkflowUi;
@@ -140,14 +142,6 @@ fn conversation_title_request(kind: AgentKind, text: &str) -> Option<Conversatio
         description: text.to_string(),
         provisional_title,
     })
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Status {
-    Starting,
-    Idle,
-    Running,
-    Exited,
 }
 
 impl AgentPane {
@@ -246,14 +240,7 @@ impl AgentPane {
             pending_conversation_rename: None,
             transcript,
             input,
-            runtime: SessionRuntime {
-                backend: None,
-                epoch: 0,
-                status: Status::Starting,
-                start_failure: None,
-                update_suspension: None,
-                last_recovery_snapshot: None,
-            },
+            runtime: SessionRuntime::default(),
             history_ui: SessionHistoryUi::default(),
             prompts: PendingPrompts::default(),
             controls: ThreadControls {
@@ -272,7 +259,6 @@ impl AgentPane {
                 submitted_at: None,
                 first_output_latency: None,
                 unanswered_prompt: None,
-                pending_interrupt: None,
                 queued_user_messages: VecDeque::new(),
                 published_prompt: None,
                 last_response_at: None,
@@ -441,7 +427,7 @@ impl AgentPane {
         cx.emit(AgentPaneEvent::Lifecycle(AgentEvent {
             route: self.agent_route.clone(),
             agent: self.kind.id().to_string(),
-            session_id: format!("agent-tab-{}", self.runtime.epoch),
+            session_id: format!("agent-tab-{}", self.runtime.epoch()),
             turn_id: (kind != AgentEventKind::SessionStarted)
                 .then(|| format!("turn-{}", self.turn.seq)),
             kind,
@@ -472,7 +458,7 @@ impl AgentPane {
     /// the process was already up and left it there once the harness was
     /// ready.
     pub(super) fn shows_start_overlay(&self) -> bool {
-        self.runtime.status == Status::Starting
+        self.runtime.status() == Status::Starting
     }
 
     pub(super) fn start_session(&mut self, resume: Option<String>, cx: &mut Context<Self>) {
@@ -542,24 +528,18 @@ impl AgentPane {
         self.controls.restore_on_ready =
             preserve_thread_settings.then(|| self.controls.settings.clone());
 
-        if let Some(session) = self.runtime.backend.as_mut() {
-            session.cancel_title_generation();
-        }
-
         // Replacing a conversation must clear any running or unread state
         // associated with the previous backend before the new epoch can emit.
         cx.emit(AgentPaneEvent::Interrupted);
         // The previous attempt's reason describes a backend nobody is waiting
         // on any more, and this start is what the pane now reports.
-        self.runtime.start_failure = None;
-        self.runtime.epoch = next_session_epoch(self.runtime.epoch);
+        let epoch = self.runtime.begin_start();
         // A resumed conversation already has an opening prompt, even when an
         // older transcript has no stored title. Only a fresh conversation may
         // claim its next accepted prompt as the subject.
         self.conversation_named = recovery.is_some();
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
-        let epoch = self.runtime.epoch;
 
         let (tx, rx) = inbox::channel();
         let mut batches = rx.ready_chunks(MAX_MESSAGES_PER_BATCH);
@@ -608,7 +588,6 @@ impl AgentPane {
         // frames if it runs on the UI thread. The pane already models the gap
         // as `Status::Starting` with no backend installed, so the spawn moves
         // to a background thread and the result arrives in a later update.
-        self.runtime.status = Status::Starting;
         let spawned = cx.background_executor().spawn(async move {
             Backend::spawn(
                 kind,
@@ -650,29 +629,34 @@ impl AgentPane {
                         for message in messages.by_ref() {
                             // A transition during this batch can replace the backend.
                             // Remaining messages still belong to the earlier session.
-                            if !is_current_session_epoch(this.runtime.epoch, epoch) {
+                            if !this.runtime.is_current(epoch) {
                                 return false;
                             }
                             let mut message = match message {
                                 Ok(message) => message,
                                 Err(error) => {
-                                    events.flush(|event| this.apply_event(event, cx));
-                                    this.stop_for_output_failure(error, cx);
+                                    events
+                                        .flush(|event| this.apply_session_event(epoch, event, cx));
+                                    if this.runtime.is_current(epoch) {
+                                        this.stop_for_output_failure(error, cx);
+                                    }
                                     return false;
                                 }
                             };
-                            let next_events = match this.runtime.backend.as_mut() {
-                                Some(session) => session.process(message.take()),
-                                None => Vec::new(),
+                            let Some(next_events) = this.runtime.process(epoch, message.take())
+                            else {
+                                return false;
                             };
                             for event in next_events {
-                                events.push(event, |event| this.apply_event(event, cx));
+                                events.push(event, |event| {
+                                    this.apply_session_event(epoch, event, cx)
+                                });
                             }
                             if started.elapsed() >= MAX_UPDATE_TIME {
                                 break;
                             }
                         }
-                        events.flush(|event| this.apply_event(event, cx));
+                        events.flush(|event| this.apply_session_event(epoch, event, cx));
                         true
                     });
                     if !updated.unwrap_or(false) {
@@ -689,28 +673,18 @@ impl AgentPane {
             let _ = this.update(cx, |this, cx| {
                 // A deliberately replaced session exits by design;
                 // only the live session's death is worth a line.
-                if !is_current_session_epoch(this.runtime.epoch, epoch) {
+                let Some(exit_events) = this.runtime.process_exit(epoch) else {
+                    return;
+                };
+                for event in exit_events {
+                    this.apply_session_event(epoch, event, cx);
+                }
+                if !this.runtime.is_current(epoch) {
                     return;
                 }
-                let exit_events = this
-                    .runtime
-                    .backend
-                    .as_mut()
-                    .map(Backend::process_exit)
-                    .unwrap_or_default();
-                for event in exit_events {
-                    this.apply_event(event, cx);
-                }
                 cx.emit(AgentPaneEvent::Interrupted);
-                this.runtime.status = Status::Exited;
-                if matches!(
-                    this.runtime.update_suspension,
-                    Some(UpdateSuspension::Reconnecting)
-                ) {
-                    this.runtime.update_suspension = Some(UpdateSuspension::Failed(
-                        i18n("agent-session-exited-before-restored").replace("{name}", name),
-                    ));
-                }
+                this.runtime
+                    .exited(&i18n("agent-session-exited-before-restored").replace("{name}", name));
                 this.palette.awaiting_command_turn = false;
                 if !this.palette.command_queue.is_empty() {
                     this.palette.command_queue.clear();
@@ -733,6 +707,15 @@ impl AgentPane {
         .detach();
     }
 
+    /// Applying an event can start another conversation, including while a
+    /// batch is being flushed. Every remaining event still belongs to the
+    /// session that produced that batch.
+    fn apply_session_event(&mut self, epoch: u64, event: SessionEvent, cx: &mut Context<Self>) {
+        if self.runtime.is_current(epoch) {
+            self.apply_event(event, cx);
+        }
+    }
+
     /// Take ownership of a backend that finished spawning, reporting whether it
     /// came up. `None` means a newer start superseded this one while the
     /// process was coming up; that leaves a live CLI behind, so the orphan is
@@ -744,39 +727,35 @@ impl AgentPane {
         name: &'static str,
         cx: &mut Context<Self>,
     ) -> Option<bool> {
-        if !is_current_session_epoch(self.runtime.epoch, epoch) {
-            if let Ok(mut orphan) = spawned {
-                cx.background_executor()
-                    .spawn(async move {
-                        let _ = orphan.shutdown(Duration::from_secs(5), true);
-                    })
-                    .detach();
+        let spawned = spawned.map_err(|error| {
+            i18n("agent-session-start-failed")
+                .replace("{name}", name)
+                .replace("{error}", &error)
+        });
+        match self.runtime.install(epoch, spawned) {
+            StartOutcome::Installed => Some(true),
+            StartOutcome::Superseded(orphan) => {
+                if let Some(mut orphan) = orphan {
+                    cx.background_executor()
+                        .spawn(async move {
+                            let _ = orphan.shutdown(Duration::from_secs(5), true);
+                        })
+                        .detach();
+                }
+                None
             }
-            return None;
-        }
-
-        Some(match spawned {
-            Ok(session) => {
-                self.runtime.backend = Some(session);
-                true
-            }
-            Err(err) => {
+            StartOutcome::Failed(text) => {
                 cx.emit(AgentPaneEvent::Interrupted);
-                self.runtime.status = Status::Exited;
                 self.palette.awaiting_command_turn = false;
                 self.palette.command_queue.clear();
                 self.turn.queued_user_messages.clear();
-                let text = i18n("agent-session-start-failed")
-                    .replace("{name}", name)
-                    .replace("{error}", &err);
-                self.runtime.start_failure = Some(text.clone());
                 let turn = self.turn.seq;
                 self.transcript.update(cx, |transcript, _| {
                     transcript.push_stamped(turn, SessionItem::Error { text });
                 });
-                false
+                Some(false)
             }
-        })
+        }
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -871,25 +850,23 @@ impl AgentPane {
         };
         let settings = self.controls.settings.clone();
         let scratch = scratch_dir(self.agent_route.as_str());
-        let outcome = match self.runtime.backend.as_mut() {
-            Some(session) if let Some(title) = title_request.as_ref() => session
-                .send_user_message_with_title(
-                    &text,
-                    &settings,
-                    skill,
-                    self.attachments.images(),
-                    &scratch,
-                    title,
-                ),
-            Some(session) => session.send_user_message(
+        let outcome = self.runtime.send(|session| match title_request.as_ref() {
+            Some(title) => session.send_user_message_with_title(
+                &text,
+                &settings,
+                skill,
+                self.attachments.images(),
+                &scratch,
+                title,
+            ),
+            None => session.send_user_message(
                 &text,
                 &settings,
                 skill,
                 self.attachments.images(),
                 &scratch,
             ),
-            None => SendOutcome::NotReady,
-        };
+        });
 
         // Both refusals keep the composed text recoverable; they differ only in
         // whether the backend could say why.
@@ -986,7 +963,7 @@ impl AgentPane {
         self.turn.unanswered_prompt = None;
         // The new conversation restarts turn ids from zero, so a stop request
         // left over from the old one could match an unrelated future turn.
-        self.turn.pending_interrupt = None;
+        self.runtime.clear_turn();
         self.context_window_usage = None;
         self.context_composition = None;
         self.session_state.clear();
@@ -1025,12 +1002,11 @@ impl AgentPane {
 
         let can_address_conversation = self
             .runtime
-            .backend
-            .as_ref()
+            .backend()
             .and_then(Backend::recovery_identity)
             .is_some();
         if can_address_conversation
-            && let Some(session) = self.runtime.backend.as_mut()
+            && let Some(session) = self.runtime.backend_mut()
             && let Some(title) = self.pending_conversation_rename.as_deref()
         {
             match session.rename_session(title) {
@@ -1046,10 +1022,7 @@ impl AgentPane {
         // DeepSeek and Codex hosts stop once their final session reference is
         // released. Keeping the retired backend until the replacement starts
         // transfers that reference without restarting an unchanged host.
-        if let Some(session) = self.runtime.backend.as_mut() {
-            session.cancel_title_generation();
-        }
-        let retiring = self.runtime.backend.take();
+        let retiring = self.runtime.retire();
         // A fresh conversation always follows the live tail again, even if
         // the previous transcript was scrolled up when it was discarded.
         self.clear_conversation_presentation(cx);

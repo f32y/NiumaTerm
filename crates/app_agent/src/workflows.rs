@@ -20,7 +20,6 @@ use nmt_agent_utils::claude_code::workflows::{
 };
 use nmt_agent_utils::workflow::{WorkflowAgentState, WorkflowRun, WorkflowSnapshot};
 
-use crate::commands::is_current_session_epoch;
 use crate::session::Backend;
 use crate::{AgentPane, AgentPaneEvent};
 
@@ -314,8 +313,7 @@ impl AgentPane {
             return None;
         }
         self.runtime
-            .backend
-            .as_ref()
+            .backend()
             .and_then(Backend::session_id)
             .map(str::to_owned)
     }
@@ -365,8 +363,7 @@ impl AgentPane {
 
         let Some(session_id) = self
             .runtime
-            .backend
-            .as_ref()
+            .backend()
             .and_then(Backend::session_id)
             .map(str::to_owned)
         else {
@@ -377,7 +374,7 @@ impl AgentPane {
         }
 
         let cwd = self.cwd();
-        let epoch = self.runtime.epoch;
+        let epoch = self.runtime.epoch();
         let read = cx
             .background_executor()
             .spawn(async move { workflows::read_run_snapshots(cwd.as_deref(), &session_id) });
@@ -387,7 +384,7 @@ impl AgentPane {
             this.update(cx, |this, cx| {
                 // A restoration that outlived its session says nothing about
                 // the conversation now open.
-                if !is_current_session_epoch(this.runtime.epoch, epoch) {
+                if !this.runtime.is_current(epoch) {
                     return;
                 }
                 this.merge_restored_workflows(restored, cx);
@@ -408,7 +405,7 @@ impl AgentPane {
             self.workflows.forget_restore();
             return;
         };
-        let Some(session) = self.runtime.backend.as_mut() else {
+        let Some(session) = self.runtime.backend_mut() else {
             return;
         };
         for event in session.restore_workflows(restored) {
@@ -469,7 +466,7 @@ impl AgentPane {
         if !self.should_refresh_workflows() {
             return None;
         }
-        let session = self.runtime.backend.as_ref()?;
+        let session = self.runtime.backend()?;
         let session_id = session.session_id()?.to_owned();
 
         let requests = self
@@ -479,7 +476,7 @@ impl AgentPane {
         (!requests.is_empty()).then_some(RefreshPlan {
             cwd: self.cwd(),
             session_id,
-            epoch: self.runtime.epoch,
+            epoch: self.runtime.epoch(),
             requests,
         })
     }
@@ -492,14 +489,14 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) -> bool {
         // A tick that outlived its session must not touch the new one.
-        if !is_current_session_epoch(self.runtime.epoch, epoch) {
+        if !self.runtime.is_current(epoch) {
             return false;
         }
 
         for result in results {
             self.workflows.note_open_len(&result);
 
-            let Some(session) = self.runtime.backend.as_mut() else {
+            let Some(session) = self.runtime.backend_mut() else {
                 return false;
             };
             for event in session.apply_workflow_refresh(result) {
@@ -525,7 +522,7 @@ impl AgentPane {
         // it is one request whose answer arrives as an ordinary event.
         if !self.kind.caps().workflows_read_from_disk {
             let (task_id, agent_id) = (open.task_id.clone(), open.agent_id.clone());
-            if let Some(session) = self.runtime.backend.as_mut() {
+            if let Some(session) = self.runtime.backend_mut() {
                 session.request_workflow_agent_transcript(&task_id, &agent_id);
             }
             return;
@@ -533,8 +530,7 @@ impl AgentPane {
 
         let Some(session_id) = self
             .runtime
-            .backend
-            .as_ref()
+            .backend()
             .and_then(Backend::session_id)
             .map(str::to_owned)
         else {
@@ -548,7 +544,7 @@ impl AgentPane {
             open_agent_len: None,
         };
         let cwd = self.cwd();
-        let epoch = self.runtime.epoch;
+        let epoch = self.runtime.epoch();
         let read = cx
             .background_executor()
             .spawn(async move { workflows::refresh_run(cwd.as_deref(), &session_id, &request) });
@@ -556,7 +552,7 @@ impl AgentPane {
         cx.spawn(async move |this, cx| {
             let result = read.await;
             this.update(cx, |this, cx| {
-                if !is_current_session_epoch(this.runtime.epoch, epoch) {
+                if !this.runtime.is_current(epoch) {
                     return;
                 }
                 this.apply_workflow_refresh_results(epoch, vec![result], cx);

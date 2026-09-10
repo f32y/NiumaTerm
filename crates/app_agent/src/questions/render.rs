@@ -28,8 +28,8 @@ impl AgentPane {
         let collapsed = self.prompts.collapsed;
         let pending = prompt.pending();
         let enabled = prompt.status == QuestionStatus::Pending
-            && matches!(self.runtime.status, Status::Idle | Status::Running)
-            && self.runtime.update_suspension.is_none()
+            && matches!(self.runtime.status(), Status::Idle | Status::Running)
+            && self.runtime.update_suspension().is_none()
             && !self.branch_flow_holds_composer()
             && !self.palette.awaiting_command_turn
             && !self

@@ -14,7 +14,7 @@ use nmt_i18n::i18n;
 
 use crate::composer::CommandFeedbackKind;
 use crate::session::backend::RecoveryIdentity;
-use crate::session::{Status, directories_match};
+use crate::session::directories_match;
 use crate::{AgentPane, AgentPaneEvent, RecentSessionsMode};
 
 /// The filesystem history a scope covers. Only a backend that reads its own
@@ -49,7 +49,7 @@ impl AgentPane {
         self.history_ui.showing_search = false;
         self.history_ui.selected = 0;
 
-        if let Some(session) = self.runtime.backend.as_mut() {
+        if let Some(session) = self.runtime.backend_mut() {
             session.request_history(self.history_ui.scope);
         }
         self.load_filesystem_history(cx);
@@ -141,11 +141,10 @@ impl AgentPane {
             return;
         }
 
-        let previous_status = self.runtime.status;
+        let previous_status = self.runtime.begin_conversation_change();
         self.history_ui.mode = RecentSessionsMode::Loading;
         self.history_ui.selected = index;
         self.history_ui.pending_resume_replay = None;
-        self.runtime.status = Status::Starting;
         // A backend that replays the resumed conversation's controls owns them;
         // otherwise they stay local profile preferences. The reviewer is seeded
         // separately because a backend can replay the rest without it.
@@ -165,12 +164,11 @@ impl AgentPane {
             // one this tab cannot adopt.
             if !self
                 .runtime
-                .backend
-                .as_mut()
+                .backend_mut()
                 .is_some_and(|session| session.resume_thread(&id))
             {
                 self.history_ui.mode = RecentSessionsMode::Open;
-                self.runtime.status = previous_status;
+                self.runtime.conversation_change_rejected(previous_status);
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,
                     i18n("agent-session-codex-recent-not-ready").to_string(),

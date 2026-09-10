@@ -253,7 +253,7 @@ impl AgentPane {
         command: PendingSlashCommand,
         cx: &mut Context<Self>,
     ) -> bool {
-        let outcome = match self.runtime.backend.as_mut() {
+        let outcome = match self.runtime.backend_mut() {
             Some(session) => session.execute_slash_command(&command.name, &command.arguments),
             None => SlashCommandOutcome::NotReady,
         };
@@ -309,7 +309,7 @@ impl AgentPane {
     }
 
     pub(super) fn show_status(&mut self, cx: &mut Context<Self>) {
-        let status = match self.runtime.status {
+        let status = match self.runtime.status() {
             Status::Starting => i18n("agent-composer-status-starting"),
             Status::Idle => i18n("agent-composer-status-idle"),
             Status::Running => i18n("agent-composer-status-running"),
@@ -374,7 +374,7 @@ impl AgentPane {
         } else {
             // A skill is invoked through the harness, so it needs a session
             // that has finished starting and has not ended.
-            match self.runtime.status {
+            match self.runtime.status() {
                 Status::Starting => Some(translated("agent-composer-agent-starting")),
                 Status::Exited => Some(translated("agent-composer-agent-exited")),
                 _ => None,
@@ -396,8 +396,7 @@ impl AgentPane {
 
         let adapter = self
             .runtime
-            .backend
-            .as_ref()
+            .backend()
             .map(Backend::adapter_commands)
             .unwrap_or_else(|| match self.kind {
                 AgentKind::Codex => app_server::Session::adapter_commands(),

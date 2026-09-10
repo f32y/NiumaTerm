@@ -20,7 +20,8 @@ use crate::input_history::{
     AgentInputHistory, HistoryWriter, InputHistoryAction, InputHistoryDirection,
     InputHistoryNavigation, InputHistoryScope, replace_input_with_history,
 };
-use crate::session::{Backend, Status, TestBackend};
+use crate::session::lifecycle::StartOutcome;
+use crate::session::{Backend, TestBackend};
 use crate::settings::AgentSettings;
 use crate::{AgentKind, AgentPane, AgentThreadDefaults, RecentSessionsMode};
 
@@ -645,16 +646,23 @@ fn accepted_new_turn_and_steering_record_only_typed_input(cx: &mut TestAppContex
 
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
-            pane.runtime.backend = Some(Backend::Test(TestBackend::new(
-                [
-                    SendOutcome::StartedTurn,
-                    SendOutcome::Steered,
-                    SendOutcome::Steered,
-                ],
-                SlashCommandOutcome::NotReady,
-                Vec::new(),
-            )));
-            pane.runtime.status = Status::Idle;
+            let epoch = pane.runtime.begin_start();
+            assert!(matches!(
+                pane.runtime.install(
+                    epoch,
+                    Ok(Backend::Test(TestBackend::new(
+                        [
+                            SendOutcome::StartedTurn,
+                            SendOutcome::Steered,
+                            SendOutcome::Steered,
+                        ],
+                        SlashCommandOutcome::NotReady,
+                        Vec::new(),
+                    )))
+                ),
+                StartOutcome::Installed
+            ));
+            pane.runtime.ready();
 
             pane.input.update(cx, |input, cx| {
                 input.set_value("  start the turn  ", window, cx)
@@ -684,24 +692,38 @@ fn slash_history_requires_a_successful_action(cx: &mut TestAppContext) {
 
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
-            pane.runtime.backend = Some(Backend::Test(TestBackend::new(
-                [],
-                SlashCommandOutcome::Accepted,
-                app_server::Session::adapter_commands(),
-            )));
-            pane.runtime.status = Status::Idle;
+            let epoch = pane.runtime.begin_start();
+            assert!(matches!(
+                pane.runtime.install(
+                    epoch,
+                    Ok(Backend::Test(TestBackend::new(
+                        [],
+                        SlashCommandOutcome::Accepted,
+                        app_server::Session::adapter_commands(),
+                    )))
+                ),
+                StartOutcome::Installed
+            ));
+            pane.runtime.ready();
             pane.input
                 .update(cx, |input, cx| input.set_value("/compact", window, cx));
             pane.submit_current_slash(window, cx);
 
-            pane.runtime.backend = Some(Backend::Test(TestBackend::new(
-                [],
-                SlashCommandOutcome::Rejected {
-                    message: "rejected".into(),
-                },
-                app_server::Session::adapter_commands(),
-            )));
-            pane.runtime.status = Status::Idle;
+            let epoch = pane.runtime.begin_start();
+            assert!(matches!(
+                pane.runtime.install(
+                    epoch,
+                    Ok(Backend::Test(TestBackend::new(
+                        [],
+                        SlashCommandOutcome::Rejected {
+                            message: "rejected".into(),
+                        },
+                        app_server::Session::adapter_commands(),
+                    )))
+                ),
+                StartOutcome::Installed
+            ));
+            pane.runtime.ready();
             pane.palette.awaiting_command_turn = false;
             pane.input
                 .update(cx, |input, cx| input.set_value("/review", window, cx));
@@ -738,14 +760,21 @@ fn rejected_submission_preserves_draft_images_and_unnamed_state(cx: &mut TestApp
     let image = Image::from_bytes(ImageFormat::Png, bytes.into_inner());
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
-            pane.runtime.backend = Some(Backend::Test(TestBackend::new(
-                [SendOutcome::Rejected {
-                    message: "input queue unavailable".into(),
-                }],
-                SlashCommandOutcome::NotReady,
-                Vec::new(),
-            )));
-            pane.runtime.status = Status::Idle;
+            let epoch = pane.runtime.begin_start();
+            assert!(matches!(
+                pane.runtime.install(
+                    epoch,
+                    Ok(Backend::Test(TestBackend::new(
+                        [SendOutcome::Rejected {
+                            message: "input queue unavailable".into(),
+                        }],
+                        SlashCommandOutcome::NotReady,
+                        Vec::new(),
+                    )))
+                ),
+                StartOutcome::Installed
+            ));
+            pane.runtime.ready();
             pane.conversation_named = false;
             pane.input.update(cx, |input, cx| {
                 input.set_value("keep this draft", window, cx)
@@ -776,8 +805,8 @@ fn unavailable_session_keeps_input_without_recording(cx: &mut TestAppContext) {
 
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
-            pane.runtime.backend = None;
-            pane.runtime.status = Status::Starting;
+            pane.runtime.retire();
+            pane.runtime.begin_conversation_change();
             pane.input
                 .update(cx, |input, cx| input.set_value("not accepted", window, cx));
             pane.send_user_message(window, cx);

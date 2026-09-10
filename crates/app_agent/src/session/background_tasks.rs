@@ -35,8 +35,7 @@ impl AgentPane {
     pub(crate) fn restore_background_tasks(&mut self, cx: &mut Context<Self>) {
         let Some(session_id) = self
             .runtime
-            .backend
-            .as_ref()
+            .backend()
             .and_then(|session| session.session_id())
             .map(str::to_owned)
         else {
@@ -47,14 +46,14 @@ impl AgentPane {
         }
         self.children.restored_session = Some(session_id.clone());
 
-        let Some(session) = self.runtime.backend.as_mut() else {
+        let Some(session) = self.runtime.backend_mut() else {
             return;
         };
         // Captured before the read starts so live updates that land while it
         // runs keep their newer state.
         let starting_sequence = session.begin_task_restoration();
         let cwd = self.cwd();
-        let epoch = self.runtime.epoch;
+        let epoch = self.runtime.epoch();
 
         cx.spawn(async move |this, cx| {
             let restored = cx
@@ -63,10 +62,10 @@ impl AgentPane {
                 .await;
 
             let _ = this.update(cx, |this, cx| {
-                if this.runtime.epoch != epoch {
+                if !this.runtime.is_current(epoch) {
                     return;
                 }
-                let Some(session) = this.runtime.backend.as_mut() else {
+                let Some(session) = this.runtime.backend_mut() else {
                     return;
                 };
                 for event in session.finish_task_restoration(restored, starting_sequence) {
@@ -78,7 +77,7 @@ impl AgentPane {
     }
 
     pub fn refresh_background_tasks(&mut self) {
-        if let Some(session) = self.runtime.backend.as_mut() {
+        if let Some(session) = self.runtime.backend_mut() {
             session.refresh_background_tasks();
         }
     }
@@ -87,7 +86,7 @@ impl AgentPane {
     /// `None` until the backend reports a thread or session id, which is what
     /// disables the title-bar `Background Tasks` button.
     pub fn background_task_parent(&self) -> Option<BackgroundTaskKey> {
-        let identity = self.runtime.backend.as_ref()?.recovery_identity()?;
+        let identity = self.runtime.backend()?.recovery_identity()?;
         Some(match identity.kind {
             AgentKind::Codex => BackgroundTaskKey::codex(identity.id),
             AgentKind::Claude => BackgroundTaskKey::claude_code(identity.id),
@@ -105,7 +104,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         let cwd = self.cwd();
-        let Some(session) = self.runtime.backend.as_mut() else {
+        let Some(session) = self.runtime.backend_mut() else {
             return;
         };
         for event in session.load_background_task_transcript(key, cwd.as_deref()) {
@@ -119,8 +118,7 @@ impl AgentPane {
     /// from can be a moment behind the child finishing on its own.
     pub fn interrupt_background_task(&mut self, key: &BackgroundTaskKey) -> bool {
         self.runtime
-            .backend
-            .as_mut()
+            .backend_mut()
             .is_some_and(|session| session.interrupt_background_task(key))
     }
 

@@ -266,7 +266,7 @@ impl AgentPane {
                     } else if command.source == SlashCommandSource::Local {
                         None
                     } else {
-                        match self.runtime.status {
+                        match self.runtime.status() {
                             Status::Starting => Some(translated("agent-composer-agent-starting")),
                             Status::Exited => Some(translated("agent-composer-agent-exited")),
                             _ => None,

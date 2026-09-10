@@ -13,6 +13,7 @@ use nmt_agent_utils::AgentEventKind;
 
 use crate::composer::{CommandFeedbackKind, restored_input_after_interruption};
 use crate::session::backend::Backend;
+use crate::session::lifecycle::InterruptOutcome;
 use crate::transcript::LAST_RESPONSE_LIMIT;
 use crate::{AgentPane, AgentPaneEvent};
 
@@ -100,9 +101,6 @@ impl AgentPane {
 
     pub(crate) fn interrupt_from_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let working = self.transcript.read(cx).is_working();
-        if working {
-            self.turn.pending_interrupt = Some(self.turn.seq);
-        }
         if let Some(prompt) = self
             .turn
             .unanswered_prompt
@@ -126,32 +124,39 @@ impl AgentPane {
             cx.notify();
         }
 
-        self.interrupt(cx);
+        let outcome = self.runtime.interrupt(working.then_some(self.turn.seq));
+        self.present_interrupt_result(outcome, cx);
     }
 
     pub(super) fn interrupt(&mut self, cx: &mut Context<Self>) {
-        if let Some(session) = self.runtime.backend.as_mut() {
-            if !session.interrupt() {
+        let outcome = self.runtime.interrupt(None);
+        self.present_interrupt_result(outcome, cx);
+    }
+
+    fn present_interrupt_result(&mut self, outcome: InterruptOutcome, cx: &mut Context<Self>) {
+        match outcome {
+            InterruptOutcome::Unavailable => {}
+            InterruptOutcome::Rejected => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,
                     "The interrupt request could not be queued.",
                     cx,
                 );
-                return;
             }
-            cx.emit(AgentPaneEvent::Interrupted);
-            cx.notify();
+            InterruptOutcome::Accepted => {
+                cx.emit(AgentPaneEvent::Interrupted);
+                cx.notify();
+            }
         }
     }
 
     pub(crate) fn respond_approval(&mut self, decision: &str, cx: &mut Context<Self>) {
         let accepted = self
             .runtime
-            .backend
-            .as_mut()
+            .backend_mut()
             .is_some_and(|session| session.respond_approval(decision));
         if accepted {
-            if !matches!(self.runtime.backend, Some(Backend::DeepSeek(_))) {
+            if !matches!(self.runtime.backend(), Some(Backend::DeepSeek(_))) {
                 self.prompts.dismiss_approval();
                 self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
             }

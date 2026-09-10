@@ -15,7 +15,7 @@ const MAX_BYTES: usize = 32 * 1024 * 1024;
 
 impl AgentPane {
     pub(super) fn stop_for_output_failure(&mut self, error: String, cx: &mut Context<Self>) {
-        if let Some(mut backend) = self.runtime.backend.take() {
+        if let Some(mut backend) = self.runtime.retire() {
             for event in backend.process_exit() {
                 self.apply_event(event, cx);
             }

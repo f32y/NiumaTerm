@@ -129,8 +129,8 @@ impl Render for AgentPane {
         let approval = self.render_approval_panel(cx);
         let questions = self.render_question_panel(window, cx);
 
-        let running = composer_action(self.runtime.status) == ComposerAction::Stop;
-        let update_suspended = self.runtime.update_suspension.is_some();
+        let running = composer_action(self.runtime.status()) == ComposerAction::Stop;
+        let update_suspended = self.runtime.update_suspension().is_some();
         let update_banner = self.render_update_banner(cx);
         let multi_root_notice = self.render_multi_root_notice(cx);
         let update_overlay = self.render_update_overlay(cx);
@@ -205,7 +205,7 @@ impl Render for AgentPane {
                 } else if this.prompts.questions_open() {
                     this.prompts.collapsed = true;
                     cx.notify();
-                } else if this.runtime.status == Status::Running {
+                } else if this.runtime.status() == Status::Running {
                     this.interrupt_from_ui(window, cx);
                 }
             }))

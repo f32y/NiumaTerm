@@ -392,13 +392,5 @@ pub(super) fn move_palette_selection(
     })
 }
 
-pub(super) fn next_session_epoch(current: u64) -> u64 {
-    current.wrapping_add(1)
-}
-
-pub(super) fn is_current_session_epoch(current: u64, event_epoch: u64) -> bool {
-    current == event_epoch
-}
-
 #[cfg(test)]
 mod tests;
