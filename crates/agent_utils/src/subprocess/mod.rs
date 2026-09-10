@@ -3,12 +3,17 @@
 //! by the chat sessions.
 
 use std::io::{BufRead as _, BufReader, Write as _};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use nmt_platform::process::{KillOnCloseJob, decode_child_output};
+use parking_lot::Mutex;
 use serde_json::Value;
+use tracing::warn;
+
+const INPUT_QUEUE_CAPACITY: usize = 64;
 
 /// A spawned agent CLI with piped stdio, kill-on-close containment, and
 /// newline-delimited JSON output. Stdout lines that parse as JSON are handed
@@ -19,8 +24,8 @@ pub(crate) struct JsonLineProcess {
     child: Child,
     /// Held until the root exits or forced shutdown terminates any remaining
     /// descendants.
-    job: Option<KillOnCloseJob>,
-    stdin: Option<ChildStdin>,
+    job: Arc<Mutex<Option<KillOnCloseJob>>>,
+    stdin: Option<mpsc::SyncSender<Value>>,
     /// Provider display name ("Codex", "Claude") for lifecycle error messages.
     provider: &'static str,
 }
@@ -67,7 +72,7 @@ impl JsonLineProcess {
             .map_err(|err| format!("could not run `{display_command}`: {err}"))?;
         let job = KillOnCloseJob::attach_or_kill(&mut child).map_err(|error| error.to_string())?;
 
-        let stdin = child
+        let mut stdin = child
             .stdin
             .take()
             .ok_or_else(|| format!("{provider} stdin unavailable"))?;
@@ -79,6 +84,24 @@ impl JsonLineProcess {
             .stderr
             .take()
             .ok_or_else(|| format!("{provider} stderr unavailable"))?;
+
+        let job = Arc::new(Mutex::new(Some(job)));
+        let writer_job = Arc::clone(&job);
+        let (input_tx, input_rx) = mpsc::sync_channel::<Value>(INPUT_QUEUE_CAPACITY);
+        thread::Builder::new()
+            .name(format!("{provider}-stdin"))
+            .spawn(move || {
+                for message in input_rx {
+                    if let Err(error) = writeln!(stdin, "{message}").and_then(|_| stdin.flush()) {
+                        warn!(provider, %error, "agent input writer stopped");
+                        // A child can close stdin without closing stdout. Terminating
+                        // its tree makes the existing EOF notification reliable.
+                        writer_job.lock().take();
+                        break;
+                    }
+                }
+            })
+            .map_err(|error| format!("could not start {provider} input writer: {error}"))?;
 
         thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
@@ -99,29 +122,39 @@ impl JsonLineProcess {
 
         Ok(Self {
             child,
-            job: Some(job),
-            stdin: Some(stdin),
+            job,
+            stdin: Some(input_tx),
             provider,
         })
     }
 
-    /// Write one protocol line. Failures are not surfaced here: a dead process
-    /// also closes its stdout, so the reader-side EOF is the single
-    /// exit-detection path.
+    /// Queue one protocol line. Transport failures terminate the process tree
+    /// so reader-side EOF remains the exit-detection path.
     pub(crate) fn write_line(&mut self, message: &Value) {
         let _ = self.try_write_line(message);
     }
 
     pub(crate) fn try_write_line(&mut self, message: &Value) -> Result<(), String> {
-        let stdin = self.stdin.as_mut().ok_or("The agent input is closed")?;
-        writeln!(stdin, "{message}")
-            .and_then(|_| stdin.flush())
-            .map_err(|error| format!("Could not write agent input: {error}"))
+        let stdin = self.stdin.as_ref().ok_or("The agent input is closed")?;
+        match stdin.try_send(message.clone()) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                let reason = match error {
+                    mpsc::TrySendError::Full(_) => "The agent input queue is full",
+                    mpsc::TrySendError::Disconnected(_) => "The agent input writer stopped",
+                };
+                // Losing one ordered request leaves correlated replies and session
+                // settings inconsistent. Fail the transport instead of skipping it.
+                self.stdin.take();
+                self.job.lock().take();
+                Err(reason.to_string())
+            }
+        }
     }
 
     /// False once shutdown has closed the protocol input.
     pub(crate) fn has_stdin(&self) -> bool {
-        self.stdin.is_some()
+        self.stdin.is_some() && self.job.lock().is_some()
     }
 
     /// Close the protocol input (EOF is the CLIs' graceful-shutdown signal)
@@ -134,14 +167,14 @@ impl JsonLineProcess {
         loop {
             match self.child.try_wait() {
                 Ok(Some(_)) => {
-                    self.job.take();
+                    self.job.lock().take();
                     return Ok(());
                 }
                 Ok(None) if started.elapsed() < timeout => {
                     thread::sleep(Duration::from_millis(20));
                 }
                 Ok(None) if force => {
-                    self.job.take();
+                    self.job.lock().take();
                     self.child.wait().map_err(|error| {
                         format!("could not wait for {} to stop: {error}", self.provider)
                     })?;

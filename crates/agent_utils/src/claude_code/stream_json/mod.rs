@@ -19,23 +19,6 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use control::{
-    PendingApproval, PendingControlOperation, PendingQuestions, fail_pending_control_operations,
-    merge_question_answers, parse_questions, resolve_pending_control_operation,
-};
-#[cfg(test)]
-use launch::{ANTHROPIC_MODEL_ENV, FILE_CHECKPOINTING_ENV};
-use launch::{
-    configured_permission_mode, enable_file_checkpointing, file_rewind_request,
-    initial_ready_model, launch_model,
-};
-#[cfg(test)]
-use parse::parse_slash_commands;
-use parse::{
-    approval_description, claude_context_window, claude_result_error, compaction_progress,
-    context_window_usage, initialize_command_catalog, legacy_command_catalog, parse_claude_usage,
-    parse_models, slash_command_text, ui_owns_slash_command, update_claude_output,
-};
 use serde_json::{Value, json};
 
 use crate::LaunchConfig;
@@ -50,6 +33,23 @@ use crate::chat::{
 use crate::claude_code::compaction::{compaction_metadata, parse_compaction};
 use crate::claude_code::sessions::{RestoredTask, load_child_transcript};
 use crate::claude_code::shell_output::shell_items;
+use crate::claude_code::stream_json::control::{
+    PendingApproval, PendingControlOperation, PendingQuestions, fail_pending_control_operations,
+    merge_question_answers, parse_questions, resolve_pending_control_operation,
+};
+#[cfg(test)]
+use crate::claude_code::stream_json::launch::{ANTHROPIC_MODEL_ENV, FILE_CHECKPOINTING_ENV};
+use crate::claude_code::stream_json::launch::{
+    configured_permission_mode, enable_file_checkpointing, file_rewind_request,
+    initial_ready_model, launch_model,
+};
+#[cfg(test)]
+use crate::claude_code::stream_json::parse::parse_slash_commands;
+use crate::claude_code::stream_json::parse::{
+    approval_description, claude_context_window, claude_result_error, compaction_progress,
+    context_window_usage, initialize_command_catalog, legacy_command_catalog, parse_claude_usage,
+    parse_models, slash_command_text, ui_owns_slash_command, update_claude_output,
+};
 use crate::claude_code::tasks::ClaudeTasks;
 use crate::claude_code::tool_items::{complete_tool_item, tool_item};
 #[cfg(test)]
@@ -519,10 +519,16 @@ impl Session {
             })
         }));
 
-        self.send(json!({
-            "type": "user",
-            "message": {"role": "user", "content": content},
-        }));
+        if self
+            .process
+            .try_write_line(&json!({
+                "type": "user",
+                "message": {"role": "user", "content": content},
+            }))
+            .is_err()
+        {
+            return SendOutcome::NotReady;
+        }
 
         if self.turn_active {
             SendOutcome::Steered
@@ -555,10 +561,16 @@ impl Session {
 
         let text = slash_command_text(name, arguments);
 
-        self.send(json!({
-            "type": "user",
-            "message": {"role": "user", "content": [{"type": "text", "text": text}]},
-        }));
+        if self
+            .process
+            .try_write_line(&json!({
+                "type": "user",
+                "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+            }))
+            .is_err()
+        {
+            return SlashCommandOutcome::NotReady;
+        }
         self.turn_active = true;
         self.turn_reported = false;
         self.turn_output_usage.reset();

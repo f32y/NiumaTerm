@@ -1,9 +1,102 @@
+use std::process::Command;
 use std::sync::mpsc::channel;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use nmt_platform::process::hidden_command;
+use serde_json::json;
 
-use crate::subprocess::JsonLineProcess;
+use crate::subprocess::{INPUT_QUEUE_CAPACITY, JsonLineProcess};
+
+fn script(windows: &str, unix: &str) -> Command {
+    #[cfg(windows)]
+    {
+        let _ = unix;
+        let mut command = hidden_command("powershell.exe");
+        command.args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            windows,
+        ]);
+        command
+    }
+    #[cfg(unix)]
+    {
+        let _ = windows;
+        let mut command = hidden_command("/bin/sh");
+        command.args(["-c", unix]);
+        command
+    }
+}
+
+#[test]
+fn stalled_input_is_nonblocking_and_overflow_closes_the_process() {
+    let command = script(
+        "[Console]::Out.WriteLine('{\"ready\":true}'); Start-Sleep -Seconds 30",
+        "echo '{\"ready\":true}'; sleep 30",
+    );
+    let (tx, rx) = channel();
+    let (closed_tx, closed_rx) = channel();
+    let mut process = JsonLineProcess::spawn_with_stdout_closed(
+        command,
+        "stalled-input",
+        "Test",
+        move |value| {
+            let _ = tx.send(value);
+        },
+        |_| {},
+        move || {
+            let _ = closed_tx.send(());
+        },
+    )
+    .unwrap();
+    rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let large = json!({"text": "x".repeat(1024 * 1024)});
+    let started = Instant::now();
+    process.try_write_line(&large).unwrap();
+    assert!(started.elapsed() < Duration::from_secs(1));
+    let mut rejected = false;
+    for _ in 0..INPUT_QUEUE_CAPACITY + 1 {
+        if process.try_write_line(&json!({"next":true})).is_err() {
+            rejected = true;
+            break;
+        }
+    }
+    assert!(rejected);
+    assert!(!process.has_stdin());
+    closed_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    process.shutdown(Duration::from_secs(1), false).unwrap();
+}
+
+#[test]
+fn shutdown_drains_accepted_messages_in_order() {
+    let command = script(
+        "while ($null -ne ($line = [Console]::ReadLine())) { [Console]::Out.WriteLine($line) }",
+        "while IFS= read -r line; do printf '%s\\n' \"$line\"; done",
+    );
+    let (tx, rx) = channel();
+    let mut process = JsonLineProcess::spawn(
+        command,
+        "ordered-input",
+        "Test",
+        move |value| {
+            let _ = tx.send(value);
+        },
+        |_| {},
+    )
+    .unwrap();
+    for index in 0..20 {
+        process.try_write_line(&json!({"index":index})).unwrap();
+    }
+    process.shutdown(Duration::from_secs(5), false).unwrap();
+    for index in 0..20 {
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap()["index"],
+            index
+        );
+    }
+}
 
 #[test]
 fn stdout_close_callback_follows_the_last_json_message() {
