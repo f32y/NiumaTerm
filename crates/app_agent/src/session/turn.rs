@@ -12,6 +12,7 @@ use gpui::{Context, Window};
 use nmt_agent_utils::AgentEventKind;
 
 use crate::composer::{CommandFeedbackKind, restored_input_after_interruption};
+use crate::session::backend::Backend;
 use crate::transcript::LAST_RESPONSE_LIMIT;
 use crate::{AgentPane, AgentPaneEvent};
 
@@ -150,8 +151,10 @@ impl AgentPane {
             .as_mut()
             .is_some_and(|session| session.respond_approval(decision));
         if accepted {
-            self.prompts.dismiss_approval();
-            self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
+            if !matches!(self.runtime.backend, Some(Backend::DeepSeek(_))) {
+                self.prompts.dismiss_approval();
+                self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
+            }
         } else {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,

@@ -13,8 +13,8 @@ use crate::background_task::{
     BackgroundTaskKey, BackgroundTaskRefs, BackgroundTaskTranscriptUpdate,
 };
 use crate::chat::{
-    Event, SlashCommandArguments, SlashCommandInfo, SlashCommandRunPolicy, SlashCommandSource,
-    ThreadSettings,
+    Event, QuestionMode, QuestionRequest as ChatQuestionRequest, SlashCommandArguments,
+    SlashCommandInfo, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
 use crate::deepseek::api::ApiClient;
 use crate::deepseek::events::Downlinks;
@@ -27,8 +27,10 @@ use crate::deepseek::{commands, frames, history, presets, subagents};
 use crate::workspace::AgentWorkspace;
 
 mod actions;
+mod controls;
 mod loads;
 
+use crate::deepseek::session::controls::{COMPLETED_FRAME, Controls, question_id};
 pub(crate) use crate::deepseek::session::loads::queued_prompts;
 pub(super) use crate::deepseek::session::loads::{
     fork_checkpoint_events, history_events, search_events, workflow_transcript_events,
@@ -74,6 +76,7 @@ pub struct Session {
     /// The question batch the harness is currently blocked on, held for the
     /// same reason: the answer is matched against the asked question ids.
     pending_questions: Option<QuestionRequest>,
+    controls: Controls,
     /// Tool calls awaiting their result, so a result can complete the row its
     /// call opened rather than starting a second one.
     tools: ToolTracker,
@@ -296,6 +299,8 @@ impl Session {
         );
 
         Ok(Self {
+            controls: Controls::new(client.clone(), Arc::clone(&deliver))
+                .map_err(HostError::FailedToStart)?,
             client,
             session_id,
             cwd,
@@ -339,6 +344,7 @@ impl Session {
                     }
                 };
                 self.session_id = opened.session_id;
+                self.controls.clear();
                 self._downlinks = downlinks;
                 // Everything below describes the conversation this tab just
                 // left; carrying it over would attribute it to the new one.
@@ -407,11 +413,17 @@ impl Session {
     /// Map one delivered frame into transcript events. Frames for other
     /// sessions and types this build does not know produce nothing.
     pub fn process(&mut self, frame: Value) -> Vec<Event> {
+        if frame["payload"]["type"] == COMPLETED_FRAME {
+            return self.control_completed(&frame["payload"]);
+        }
         // An approval is answerable, so recognizing it means recording what an
         // answer will need. The stream replays a still-pending request when it
         // reconnects, and re-raising the card from the replay is what lets a
         // tab that lost its socket mid-question still be answered.
         if let Some(request) = mapping::approval_request(&frame, &self.session_id) {
+            if self.pending_approval.as_ref() != Some(&request) {
+                self.controls.retire_approval();
+            }
             let description = request.description.clone();
             self.pending_approval = Some(request);
             return vec![Event::ApprovalRequested { description }];
@@ -420,8 +432,21 @@ impl Session {
         // Questions replay on reconnect exactly as approvals do, so the same
         // rule applies: recognizing the frame is what makes it answerable.
         if let Some((request, questions)) = mapping::question_request(&frame, &self.session_id) {
+            let mut events = Vec::new();
+            if self
+                .pending_questions
+                .as_ref()
+                .is_some_and(|old| old != &request)
+            {
+                events.extend(self.expire_questions());
+            }
+            events.push(Event::InputRequested(ChatQuestionRequest {
+                id: question_id(&request),
+                mode: QuestionMode::Blocking,
+                questions,
+            }));
             self.pending_questions = Some(request);
-            return vec![Event::QuestionsRequested { questions }];
+            return events;
         }
 
         // A projection frame carries one unit's whole value, and the snapshots
@@ -432,11 +457,30 @@ impl Session {
         }
 
         let payload = &frame["payload"];
+        let resolved_identity = match payload["type"].as_str() {
+            Some("approval/resolved") => self
+                .pending_approval
+                .as_ref()
+                .map(|request| (&request.client_id, &request.event_id)),
+            Some("question/resolved") => self
+                .pending_questions
+                .as_ref()
+                .map(|request| (&request.client_id, &request.event_id)),
+            _ => None,
+        };
+        if let Some((client_id, event_id)) = resolved_identity
+            && (frame["eventId"].as_str().is_some_and(|id| id != event_id)
+                || frame["clientId"].as_str().is_some_and(|id| id != client_id))
+        {
+            return Vec::new();
+        }
         match payload["type"].as_str() {
             Some("nmt/connection-reset") if self.is_current_session(payload) => {
+                self.controls.clear();
                 self.pending_approval = None;
-                self.pending_questions = None;
-                return vec![Event::ApprovalResolved, Event::QuestionsResolved];
+                let mut events = self.expire_questions();
+                events.push(Event::ApprovalResolved);
+                return events;
             }
             Some(SUBAGENTS_FRAME) => return self.on_subagents(payload),
             Some(SUBAGENT_TRANSCRIPT_FRAME) => return self.on_subagent_transcript(payload),
@@ -481,21 +525,27 @@ impl Session {
             events.push(Event::Workflows(self.workflows.snapshot(&self.session_id)));
         }
 
+        let mut resolved = Vec::new();
         for event in &events {
             match event {
                 Event::TurnStarted => self.running = true,
                 Event::TurnCompleted { .. } => {
                     self.running = false;
+                    self.controls.retire_interrupt();
                     // A turn that ended cannot still be waiting on an answer.
                     self.pending_approval = None;
-                    self.pending_questions = None;
+                    self.controls.retire_approval();
+                    resolved.extend(self.expire_questions());
                 }
-                Event::ApprovalResolved => self.pending_approval = None,
-                Event::QuestionsResolved => self.pending_questions = None,
+                Event::ApprovalResolved => {
+                    self.pending_approval = None;
+                }
+                Event::QuestionsResolved => resolved.extend(self.expire_questions()),
                 _ => {}
             }
         }
 
+        events.extend(resolved);
         events
     }
 

@@ -715,6 +715,7 @@ impl Backend {
     ) -> Result<(), String> {
         match self {
             Backend::Codex(session) => session.respond_input(id, answers, settings),
+            Backend::DeepSeek(session) => session.respond_input(id, answers),
             _ => Err("This session cannot answer that question".to_string()),
         }
     }

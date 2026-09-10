@@ -12,6 +12,7 @@ use crate::deepseek::api::CallError;
 use crate::deepseek::close::{CloseAction, schedule_close_actions};
 use crate::deepseek::commands;
 use crate::deepseek::session::Session;
+use crate::deepseek::session::controls::{Operation, question_id};
 use crate::deepseek::session::loads::{
     load_commands, load_fork_checkpoints, load_search, load_sessions, load_skills,
     load_subagent_transcript, load_subagents, load_workflow_transcript,
@@ -25,96 +26,69 @@ impl Session {
     /// request to allow for the rest of the session cannot be expressed, and a
     /// request to cancel the turn is a refusal plus a stop.
     pub fn respond_approval(&mut self, decision: &str) -> bool {
-        let Some(request) = self.pending_approval.take() else {
+        let Some(request) = self.pending_approval.as_ref() else {
             return false;
         };
-
         let outcome = match decision {
             "accept" | "acceptForSession" => "allowed-once",
             _ => "rejected",
         };
-
-        if let Err(error) = self.client.respond_event(
-            &request.client_id,
-            &request.event_id,
-            json!({ "kind": "result", "value": outcome }),
-        ) {
-            // Nothing else reports this: a refused answer leaves the turn
-            // waiting exactly as an unanswered one does.
-            tracing::warn!(
-                "deepseek approval answer was not accepted: {}",
-                error.message()
-            );
-            self.pending_approval = Some(request);
-            return false;
-        } else {
-            (self.deliver)(
-                json!({ "payload": { "type": "approval/resolved", "sessionId": self.session_id } }),
-            );
-        }
-
-        if decision == "cancel" {
-            self.interrupt();
-        }
-        true
+        self.controls.submit(
+            Operation::Approval(request.clone()),
+            "$events/result",
+            json!({"clientId": request.client_id, "eventId": request.event_id,
+                "outcome": {"kind": "result", "value": outcome}}),
+            (decision == "cancel").then(|| self.session_id.clone()),
+        )
     }
 
-    /// Answer the question batch the harness is blocked on, or dismiss it when
-    /// `answers` is `None`.
-    ///
-    /// The harness validates the batch as a whole against what it asked: one
-    /// answer per question, in ask order, carrying only labels it offered. So a
-    /// batch that does not line up is dropped here rather than sent to be
-    /// rejected, which would leave the turn waiting with the card already gone.
+    /// Admission leaves the original request answerable until its result arrives.
     pub fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) -> bool {
-        let Some(request) = self.pending_questions.take() else {
+        let Some(request) = self.pending_questions.as_ref() else {
             return false;
         };
-
-        let result = match answers {
+        let skipped = answers.is_none();
+        let outcome = match answers {
             Some(answers) if answers.len() == request.ids.len() => {
                 let answers: Vec<Value> = request
                     .ids
                     .iter()
                     .zip(answers)
-                    .map(|(id, selected)| json!({ "id": id, "selected": selected }))
+                    .map(|(id, selected)| json!({"id": id, "selected": selected}))
                     .collect();
-                self.client.respond_event(
-                    &request.client_id,
-                    &request.event_id,
-                    json!({ "kind": "result", "value": { "answers": answers } }),
-                )
+                json!({"kind": "result", "value": {"answers": answers}})
             }
-            Some(answers) => {
-                tracing::warn!(
-                    "deepseek question answers covered {} of {} questions and were dropped",
-                    answers.len(),
-                    request.ids.len(),
-                );
-                self.pending_questions = Some(request);
-                return false;
-            }
-            None => self.client.respond_event(&request.client_id, &request.event_id, json!({
-                "kind": "rejected",
-                "error": { "name": "Error", "code": "cancelled", "message": "the user dismissed the question" },
-            })),
+            Some(_) => return false,
+            None => json!({"kind": "rejected", "error": {
+                "name": "Error", "code": "cancelled", "message": "the user dismissed the question"
+            }}),
         };
+        self.controls.submit(
+            Operation::Questions {
+                request: request.clone(),
+                skipped,
+            },
+            "$events/result",
+            json!({"clientId": request.client_id, "eventId": request.event_id, "outcome": outcome}),
+            None,
+        )
+    }
 
-        if let Err(error) = result {
-            // Nothing else reports this: a refused answer leaves the turn
-            // waiting exactly as an unanswered one does.
-            tracing::warn!(
-                "deepseek question answer was not accepted: {}",
-                error.message()
-            );
-            self.pending_questions = Some(request);
-            false
-        } else {
-            (self.deliver)(
-                json!({ "payload": { "type": "question/resolved", "sessionId": self.session_id } }),
-            );
-            true
+    pub fn respond_input(
+        &mut self,
+        id: &str,
+        answers: Option<Vec<Vec<String>>>,
+    ) -> Result<(), String> {
+        if !self
+            .pending_questions
+            .as_ref()
+            .is_some_and(|request| question_id(request) == id)
+        {
+            return Err("This question is no longer pending.".to_string());
         }
+        self.respond_questions(answers)
+            .then_some(())
+            .ok_or_else(|| "The question response could not be queued.".to_string())
     }
 
     /// Ask for one workflow member's conversation.
@@ -177,16 +151,12 @@ impl Session {
             "mode": "continuable",
         });
 
-        match self.client.call("subagents/interruptByParent", payload) {
-            Ok(_) => true,
-            Err(error) => {
-                tracing::warn!(
-                    "deepseek child agent could not be stopped: {}",
-                    error.message()
-                );
-                false
-            }
-        }
+        self.controls.submit(
+            Operation::InterruptChild(child.to_string()),
+            "subagents/interruptByParent",
+            payload,
+            None,
+        )
     }
 
     /// Point the session at another model, optionally pinning a reasoning
@@ -450,9 +420,12 @@ impl Session {
             return false;
         }
 
-        self.client
-            .request("session/cancel", json!({ "sessionId": &self.session_id }))
-            .is_ok()
+        self.controls.submit(
+            Operation::Interrupt,
+            "session/cancel",
+            json!({"request": {"sessionId": self.session_id}}),
+            None,
+        )
     }
 
     pub fn session_id(&self) -> Option<&str> {
@@ -466,6 +439,7 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
+        self.controls.clear();
         let mut actions: Vec<CloseAction> = self
             .queued_prompt_ids
             .drain(..)

@@ -168,9 +168,11 @@ impl Streams {
                 if let Some(event_id) = value["eventId"].as_str()
                     && let Some(kind) = self.pending.remove(event_id)
                 {
-                    deliver(json!({ "eventId": event_id, "payload": {
+                    deliver(
+                        json!({ "clientId": self.client_id, "eventId": event_id, "payload": {
                         "type": kind, "sessionId": self.session_id,
-                    } }));
+                    } }),
+                    );
                 }
             }
             _ => {}
