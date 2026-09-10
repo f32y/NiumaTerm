@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use chrono::Local;
 use gpui::{Context, FollowMode, Image, ListOffset, px};
-use nmt_agent_utils::chat::Item as SessionItem;
+use nmt_agent::chat::Item as SessionItem;
 use nmt_config::agent::CollapseRows;
 
 use crate::composer::PromptTarget;

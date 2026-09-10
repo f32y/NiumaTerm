@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use nmt_agent_utils::update::{InstallationKey, InstallationSnapshot, ProviderKind, UpdatePhase};
+use nmt_agent::update::{InstallationKey, InstallationSnapshot, ProviderKind, UpdatePhase};
 use nmt_i18n::i18n;
 use semver::Version;
 

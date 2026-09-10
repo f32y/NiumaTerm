@@ -6,7 +6,7 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::progress::ProgressCircle;
 use gpui_component::spinner::Spinner;
 use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
-use nmt_agent_utils::{AgentWorkspace, MultiRootAccess};
+use nmt_agent::{AgentWorkspace, MultiRootAccess};
 use nmt_i18n::i18n;
 
 use crate::context_usage::{ContextUsageIndicator, cache_hit_percent};

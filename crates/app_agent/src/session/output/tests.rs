@@ -1,7 +1,7 @@
 use futures::StreamExt as _;
 use futures::channel::mpsc;
 use futures::executor::block_on;
-use nmt_agent_utils::chat::Event;
+use nmt_agent::chat::Event;
 
 use crate::session::output::{EventBatch, MAX_MESSAGES_PER_BATCH};
 

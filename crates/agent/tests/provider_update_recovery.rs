@@ -6,15 +6,15 @@ use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
 use std::{env, fs, thread};
 
-use nmt_agent_utils::chat::Event;
-use nmt_agent_utils::claude_code::stream_json;
-use nmt_agent_utils::codex::app_server;
-use nmt_agent_utils::launcher::AgentCli;
-use nmt_agent_utils::update::{
+use nmt_agent::chat::Event;
+use nmt_agent::claude_code::stream_json;
+use nmt_agent::codex::app_server;
+use nmt_agent::launcher::AgentCli;
+use nmt_agent::update::{
     ClaudeMaintenance, ClaudeReleaseChannel, CodexMaintenance, InstallationKey, ProviderKind,
     ProviderMaintenance, UpdateCoordinator, UpdateError, UpdatePhase,
 };
-use nmt_agent_utils::{AgentWorkspace, CodexProviderConfig, LaunchConfig};
+use nmt_agent::{AgentWorkspace, CodexProviderConfig, LaunchConfig};
 use parking_lot::Mutex;
 use semver::Version;
 use serde_json::Value;

@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{Context, IntoElement, div};
 use gpui_component::{ActiveTheme as _, Icon, IconName, h_flex};
-use nmt_agent_utils::chat::GoalStatus;
+use nmt_agent::chat::GoalStatus;
 use nmt_i18n::i18n;
 
 use crate::AgentPane;

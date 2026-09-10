@@ -15,7 +15,7 @@ use gpui_component::{Theme as ComponentTheme, init as init_components};
 use gpui_macos::MacPlatform as Platform;
 #[cfg(windows)]
 use gpui_windows::WindowsPlatform as Platform;
-use nmt_agent_utils::{AgentEvent, AgentRoute, agent_process};
+use nmt_agent::{AgentEvent, AgentRoute, agent_process};
 use nmt_config::local_state::{self, LocalState};
 use nmt_config::{Config, enable_testing_mode, get, init};
 use nmt_platform::ipc as platform_ipc;

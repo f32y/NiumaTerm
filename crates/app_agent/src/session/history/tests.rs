@@ -1,6 +1,6 @@
 use std::time::SystemTime;
 
-use nmt_agent_utils::chat::{SessionScope, SessionSummary};
+use nmt_agent::chat::{SessionScope, SessionSummary};
 
 use crate::SessionHistoryUi;
 use crate::session::history::CountPublication;

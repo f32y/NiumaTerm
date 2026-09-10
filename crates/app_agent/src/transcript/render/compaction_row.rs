@@ -11,7 +11,7 @@ use gpui::{AnyElement, Context, ScrollHandle, Window, div, px};
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme as _, IconName, h_flex, v_flex};
-use nmt_agent_utils::chat::Compaction;
+use nmt_agent::chat::Compaction;
 use nmt_i18n::i18n;
 
 use crate::profile::AgentKind;

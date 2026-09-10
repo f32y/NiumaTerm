@@ -5,7 +5,7 @@
 use std::str;
 
 use futures::channel::mpsc::UnboundedSender;
-use nmt_agent_utils::{AgentEvent, RawAgentHookMessage, agent_process};
+use nmt_agent::{AgentEvent, RawAgentHookMessage, agent_process};
 use nmt_platform::ipc::{MAX_MESSAGE_BYTES, spawn_server};
 use serde_json::{Value, from_str, from_value};
 use tracing::warn;

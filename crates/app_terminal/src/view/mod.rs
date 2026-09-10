@@ -22,7 +22,7 @@ use gpui::{
 };
 use gpui_component::WindowExt as _;
 use gpui_component::notification::Notification;
-use nmt_agent_utils::{AgentRoute, agent_process};
+use nmt_agent::{AgentRoute, agent_process};
 use nmt_config::local_state::TabState;
 use nmt_config::{CursorShape, active_colors};
 #[cfg(windows)]

@@ -3,8 +3,8 @@ use std::time::Duration;
 use gpui::prelude::*;
 use gpui::{Context, Window};
 use gpui_component::input::{InputEvent, InputState, TextareaState};
-use nmt_agent_utils::AgentEventKind;
-use nmt_agent_utils::chat::{
+use nmt_agent::AgentEventKind;
+use nmt_agent::chat::{
     Item, Question, QuestionInput, QuestionMode, QuestionRequest, QuestionResolution,
 };
 use nmt_i18n::i18n;

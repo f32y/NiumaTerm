@@ -6,7 +6,7 @@
 //! where the harness does not restore them itself.
 
 use gpui::{App, Context};
-use nmt_agent_utils::chat::ThreadSettings;
+use nmt_agent::chat::ThreadSettings;
 use nmt_config::local_state;
 use nmt_config::profile::AgentProfile;
 use tracing::warn;

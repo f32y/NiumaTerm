@@ -14,8 +14,8 @@ use std::time::Duration;
 use std::{env, process};
 
 use gpui::{App, Global};
-use nmt_agent_utils::launcher::AgentCli;
-use nmt_agent_utils::update::{
+use nmt_agent::launcher::AgentCli;
+use nmt_agent::update::{
     ClaudeMaintenance, CodexMaintenance, HttpClaudeReleaseChannel, InstallationKey,
     InstallationSnapshot, ProviderKind, ProviderMaintenance, UpdateCoordinator,
 };

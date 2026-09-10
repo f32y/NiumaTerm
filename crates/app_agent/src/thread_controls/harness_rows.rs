@@ -7,8 +7,8 @@
 use gpui::prelude::*;
 use gpui::{Context, IntoElement, px};
 use gpui_component::{ActiveTheme as _, IconName, h_flex};
-use nmt_agent_utils::claude_code::stream_json;
-use nmt_agent_utils::codex::app_server;
+use nmt_agent::claude_code::stream_json;
+use nmt_agent::codex::app_server;
 use nmt_i18n::i18n;
 
 use crate::AgentPane;

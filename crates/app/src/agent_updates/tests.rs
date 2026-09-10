@@ -2,8 +2,8 @@ use std::time::Duration;
 use std::{env, process};
 
 use chrono::Utc;
-use nmt_agent_utils::launcher::AgentCli;
-use nmt_agent_utils::update::{
+use nmt_agent::launcher::AgentCli;
+use nmt_agent::update::{
     DiscoverySupport, InstallationKey, InstallationSnapshot, InstallationUpdateState, ProviderKind,
     ProviderMaintenance, UpdateError, UpdateErrorKind, UpdatePhase, UpdateProgress, VersionStatus,
 };

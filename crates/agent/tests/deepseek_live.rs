@@ -2,7 +2,7 @@
 //!
 //! Ignored by default: it starts `dsh`, spends a model call, and therefore
 //! needs both a resolvable installation and a working credential. Run it with
-//! `cargo test -p nmt_agent_utils --test deepseek_live -- --ignored --nocapture`.
+//! `cargo test -p nmt_agent --test deepseek_live -- --ignored --nocapture`.
 
 #![cfg(target_os = "windows")]
 
@@ -11,9 +11,9 @@ use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 use std::{env, fs};
 
-use nmt_agent_utils::chat::{Event, Item, SendOutcome};
-use nmt_agent_utils::deepseek::{Host, Session};
-use nmt_agent_utils::{AgentWorkspace, LaunchConfig};
+use nmt_agent::chat::{Event, Item, SendOutcome};
+use nmt_agent::deepseek::{Host, Session};
+use nmt_agent::{AgentWorkspace, LaunchConfig};
 use uuid::Uuid;
 
 /// A prompt into an idle conversation starts a turn of its own. Steering means
@@ -286,8 +286,8 @@ fn two_sessions_share_one_host_and_do_not_see_each_other() {
 #[test]
 #[ignore = "resolves the installed harness"]
 fn the_installed_release_is_one_this_build_supports() {
-    use nmt_agent_utils::deepseek::{SUPPORTED_VERSIONS, VersionSupport, describe_version};
-    use nmt_agent_utils::launcher::AgentCli;
+    use nmt_agent::deepseek::{SUPPORTED_VERSIONS, VersionSupport, describe_version};
+    use nmt_agent::launcher::AgentCli;
 
     let cli = AgentCli::from_launch(&launch(), "dsh");
 

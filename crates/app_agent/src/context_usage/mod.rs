@@ -5,7 +5,7 @@ use gpui::prelude::*;
 use gpui::{App, FontWeight, IntoElement, RenderOnce, Window, div, px};
 use gpui_component::hover_card::HoverCard;
 use gpui_component::{ActiveTheme as _, Icon, IconName, h_flex, v_flex};
-use nmt_agent_utils::chat::{
+use nmt_agent::chat::{
     ContextComposition, ContextSegment, ContextUsageScope, ContextWindowUsage, SessionStats,
     TokenUsageBreakdown,
 };

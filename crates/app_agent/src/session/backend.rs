@@ -8,18 +8,18 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use nmt_agent_utils::background_task::{BackgroundTaskKey, BackgroundTaskProvider};
-use nmt_agent_utils::chat::{
+use nmt_agent::background_task::{BackgroundTaskKey, BackgroundTaskProvider};
+use nmt_agent::chat::{
     Event as SessionEvent, ForkAnchor, MessageImage, QuestionRequest, SendOutcome, SessionScope,
     SkillReference, SlashCommandInfo, SlashCommandOutcome, ThreadSettings,
 };
-use nmt_agent_utils::claude_code::sessions::RestoredTask;
-use nmt_agent_utils::claude_code::stream_json;
-use nmt_agent_utils::claude_code::workflows::{
+use nmt_agent::claude_code::sessions::RestoredTask;
+use nmt_agent::claude_code::stream_json;
+use nmt_agent::claude_code::workflows::{
     RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
 };
-use nmt_agent_utils::codex::app_server;
-use nmt_agent_utils::{AgentWorkspace, LaunchConfig, deepseek};
+use nmt_agent::codex::app_server;
+use nmt_agent::{AgentWorkspace, LaunchConfig, deepseek};
 use nmt_i18n::i18n;
 use serde_json::Value;
 use tracing::trace;
@@ -46,7 +46,7 @@ impl RecoveryIdentity {
 }
 
 /// The pane's protocol session, one variant per agent kind. Every backend
-/// shares the [`nmt_agent_utils::chat`] event vocabulary and method surface,
+/// shares the [`nmt_agent::chat`] event vocabulary and method surface,
 /// so the pane dispatches here and stays protocol-agnostic.
 pub(crate) enum Backend {
     Codex(app_server::Session),

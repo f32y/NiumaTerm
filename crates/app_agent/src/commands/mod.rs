@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use nmt_agent_utils::chat::{
+use nmt_agent::chat::{
     SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo,
     SlashCommandRunPolicy, SlashCommandSource,
 };

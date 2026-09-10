@@ -8,8 +8,8 @@
 use std::time::Duration;
 
 use gpui::Context;
-use nmt_agent_utils::chat::{SessionScope, SessionSummary};
-use nmt_agent_utils::claude_code::sessions;
+use nmt_agent::chat::{SessionScope, SessionSummary};
+use nmt_agent::claude_code::sessions;
 use nmt_i18n::i18n;
 
 use crate::composer::CommandFeedbackKind;

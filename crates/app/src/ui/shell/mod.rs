@@ -41,8 +41,8 @@ use gpui_component::resizable::{
 use gpui_component::{
     ActiveTheme, Icon, IconName, IconNamed, Root, TitleBar, WindowExt, h_flex, v_flex,
 };
-use nmt_agent_utils::update::{ProviderKind, UpdatePhase};
-use nmt_agent_utils::{
+use nmt_agent::update::{ProviderKind, UpdatePhase};
+use nmt_agent::{
     AgentActivityPolicy, AgentEvent, AgentMonitor, AgentNotification, AgentRoute,
     AgentRuntimeStatus, AgentWorkspace, agent_process, request_native_delivery,
 };

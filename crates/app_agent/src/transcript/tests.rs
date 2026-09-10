@@ -1,6 +1,6 @@
 mod prompt_truncation_tests {
     use gpui::{FontFallbacks, px};
-    use nmt_agent_utils::chat::{Compaction, CompactionTrigger, Item as SessionItem};
+    use nmt_agent::chat::{Compaction, CompactionTrigger, Item as SessionItem};
 
     use crate::composer::{ComposerAction, composer_action, prompt_with_response_annotations};
     use crate::profile::AgentKind;
@@ -352,7 +352,7 @@ mod separate_view_state_tests {
     use std::time::Instant;
 
     use gpui::{AppContext as _, TestAppContext};
-    use nmt_agent_utils::chat::Item as SessionItem;
+    use nmt_agent::chat::Item as SessionItem;
     use nmt_config::agent::CollapseRows;
 
     use crate::profile::AgentKind;
@@ -470,7 +470,7 @@ mod steered_prompt_rows_tests {
     use std::time::Instant;
 
     use gpui::{AppContext as _, TestAppContext};
-    use nmt_agent_utils::chat::Item as SessionItem;
+    use nmt_agent::chat::Item as SessionItem;
     use nmt_config::agent::CollapseRows;
 
     use crate::profile::AgentKind;
@@ -649,7 +649,7 @@ mod steered_prompt_rows_tests {
 /// is the state the setting decides the folding of.
 mod resumed_collapse_tests {
     use gpui::{AppContext as _, TestAppContext};
-    use nmt_agent_utils::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
+    use nmt_agent::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
     use nmt_config::agent::CollapseRows;
 
     use crate::profile::AgentKind;
@@ -738,7 +738,7 @@ mod resumed_collapse_tests {
 /// the backend would, and the two lists are only counted from the newest end.
 mod branch_point_targeting_tests {
     use gpui::{AppContext as _, ListOffset, TestAppContext, px};
-    use nmt_agent_utils::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
+    use nmt_agent::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
     use nmt_config::agent::CollapseRows;
 
     use crate::composer::{PromptTarget, checkpoint_at_depth};
@@ -1051,7 +1051,7 @@ mod row_rhythm_tests {
     use std::time::{Duration, Instant};
 
     use gpui::{AppContext as _, ListOffset, TestAppContext, px};
-    use nmt_agent_utils::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
+    use nmt_agent::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
     use nmt_config::agent::CollapseRows;
 
     use crate::profile::AgentKind;
@@ -1630,7 +1630,7 @@ mod row_rhythm_tests {
 
 mod typed_reply_tests {
     use gpui::{AppContext as _, TestAppContext};
-    use nmt_agent_utils::chat::Item as SessionItem;
+    use nmt_agent::chat::Item as SessionItem;
 
     use crate::profile::AgentKind;
     use crate::transcript::TranscriptView;

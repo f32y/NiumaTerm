@@ -1,10 +1,10 @@
 use std::time::Duration;
 
-use nmt_agent_utils::background_task::{
+use nmt_agent::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRegistry,
     BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskUpdate,
 };
-use nmt_agent_utils::chat::ThreadSettings;
+use nmt_agent::chat::ThreadSettings;
 
 use crate::session::background_tasks::scoped_background_tasks;
 use crate::session::events::resolve_ready_settings;
@@ -205,7 +205,7 @@ fn no_pinned_effort_leaves_the_remembered_pick_in_place() {
 fn a_pending_snapshot_claims_only_the_prompts_it_stopped_naming() {
     use std::collections::VecDeque;
 
-    use nmt_agent_utils::chat::QueuedPrompt;
+    use nmt_agent::chat::QueuedPrompt;
 
     use crate::session::conversation::claimed_prompts;
 
@@ -343,8 +343,8 @@ mod conversation_title_tests {
     use gpui::{
         AppContext as _, Entity, Subscription, TestAppContext, VisualTestContext, WindowHandle,
     };
-    use nmt_agent_utils::AgentWorkspace;
-    use nmt_agent_utils::chat::{SendOutcome, SlashCommandOutcome};
+    use nmt_agent::AgentWorkspace;
+    use nmt_agent::chat::{SendOutcome, SlashCommandOutcome};
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
     use crate::session::lifecycle::StartOutcome;
@@ -489,7 +489,7 @@ mod conversation_title_tests {
 
     #[gpui::test]
     fn rejected_control_replies_keep_interaction_cards(cx: &mut TestAppContext) {
-        use nmt_agent_utils::chat::{Event, Question, QuestionInput};
+        use nmt_agent::chat::{Event, Question, QuestionInput};
 
         let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
@@ -712,8 +712,8 @@ fn a_directory_reads_as_its_last_two_components() {
 /// finished writing, and drawing it twice at once.
 mod queued_prompt_placement_tests {
     use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, WindowHandle};
-    use nmt_agent_utils::AgentWorkspace;
-    use nmt_agent_utils::chat::{
+    use nmt_agent::AgentWorkspace;
+    use nmt_agent::chat::{
         Event as SessionEvent, Item as SessionItem, QueuedPrompt, SendOutcome, SlashCommandOutcome,
     };
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
@@ -953,8 +953,8 @@ mod queued_prompt_placement_tests {
 
 mod turn_error_tests {
     use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, WindowHandle};
-    use nmt_agent_utils::AgentWorkspace;
-    use nmt_agent_utils::chat::{Event as SessionEvent, Item as SessionItem};
+    use nmt_agent::AgentWorkspace;
+    use nmt_agent::chat::{Event as SessionEvent, Item as SessionItem};
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
     use crate::settings::AgentSettings;
@@ -1047,8 +1047,8 @@ mod session_replacement_tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use gpui::{AppContext as _, TestAppContext, VisualTestContext};
-    use nmt_agent_utils::AgentWorkspace;
-    use nmt_agent_utils::chat::{SendOutcome, SlashCommandOutcome};
+    use nmt_agent::AgentWorkspace;
+    use nmt_agent::chat::{SendOutcome, SlashCommandOutcome};
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
     use crate::session::lifecycle::StartOutcome;
@@ -1124,8 +1124,8 @@ mod session_replacement_tests {
 
 mod shared_host_recovery_tests {
     use gpui::{AppContext as _, TestAppContext, VisualTestContext};
-    use nmt_agent_utils::AgentWorkspace;
-    use nmt_agent_utils::chat::{Event as SessionEvent, SendOutcome, SlashCommandOutcome};
+    use nmt_agent::AgentWorkspace;
+    use nmt_agent::chat::{Event as SessionEvent, SendOutcome, SlashCommandOutcome};
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
     use crate::session::lifecycle::StartOutcome;
@@ -1242,8 +1242,8 @@ fn a_replayed_answer_is_read_as_old_as_the_provider_recorded_it() {
 /// has withdrawn and never showing one it has just published.
 mod command_catalog_cache_tests {
     use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, WindowHandle};
-    use nmt_agent_utils::AgentWorkspace;
-    use nmt_agent_utils::chat::{
+    use nmt_agent::AgentWorkspace;
+    use nmt_agent::chat::{
         Event as SessionEvent, SendOutcome, SlashCommandArguments, SlashCommandInfo,
         SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
     };

@@ -3,7 +3,7 @@
 //! Async work carries an epoch. Only this module advances it or admits a
 //! completed start, incoming output, or shutdown result into the live session.
 
-use nmt_agent_utils::chat::{Event, SendOutcome};
+use nmt_agent::chat::{Event, SendOutcome};
 use serde_json::Value;
 
 use crate::session::backend::{Backend, RecoveryIdentity};

@@ -12,7 +12,7 @@ use gpui_component::skeleton::Skeleton;
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex, v_virtual_list,
 };
-use nmt_agent_utils::chat::{QueuedPrompt, SessionScope, SessionSummary};
+use nmt_agent::chat::{QueuedPrompt, SessionScope, SessionSummary};
 use nmt_i18n::i18n;
 
 use crate::composer::visible_prompt;

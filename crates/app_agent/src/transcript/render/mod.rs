@@ -20,7 +20,7 @@ use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::shimmer::ShimmerText;
 use gpui_component::spinner::Spinner;
 use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex};
-use nmt_agent_utils::chat::Item as SessionItem;
+use nmt_agent::chat::Item as SessionItem;
 use nmt_i18n::i18n;
 
 use crate::settings::{AgentSettings, UI_RADIUS};

@@ -6,10 +6,10 @@
 //! conversation reaches nothing.
 
 use gpui::Context;
-use nmt_agent_utils::background_task::{
+use nmt_agent::background_task::{
     BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscript,
 };
-use nmt_agent_utils::claude_code::sessions;
+use nmt_agent::claude_code::sessions;
 
 use crate::AgentPane;
 use crate::profile::AgentKind;

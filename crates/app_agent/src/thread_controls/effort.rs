@@ -10,7 +10,7 @@ use gpui::{Context, FontWeight, IntoElement, MouseButton, div, px, relative};
 use gpui_component::button::Button;
 use gpui_component::popover::Popover;
 use gpui_component::{ActiveTheme as _, Icon, IconName, h_flex, v_flex};
-use nmt_agent_utils::claude_code::stream_json;
+use nmt_agent::claude_code::stream_json;
 use nmt_i18n::i18n;
 
 use crate::AgentPane;

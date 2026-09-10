@@ -4,7 +4,7 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::checkbox::Checkbox;
 use gpui_component::radio::Radio;
 use gpui_component::{ActiveTheme as _, Disableable as _, Sizable as _, h_flex, v_flex};
-use nmt_agent_utils::chat::{QuestionInput, QuestionMode};
+use nmt_agent::chat::{QuestionInput, QuestionMode};
 use nmt_i18n::i18n;
 
 use crate::AgentPane;

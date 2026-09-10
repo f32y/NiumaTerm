@@ -7,7 +7,7 @@ use std::{fs, io, path};
 use gpui::prelude::*;
 use gpui::{Context, Entity, SharedString, Window, div};
 use gpui_component::{ActiveTheme, h_flex};
-use nmt_agent_utils::git::{CheckedOut, current_branch, run_git};
+use nmt_agent::git::{CheckedOut, current_branch, run_git};
 use nmt_i18n::i18n;
 use tracing::warn;
 

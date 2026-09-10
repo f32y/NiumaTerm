@@ -1,4 +1,4 @@
-use nmt_agent_utils::chat::ScopedTokenUsage;
+use nmt_agent::chat::ScopedTokenUsage;
 
 use crate::context_usage::*;
 

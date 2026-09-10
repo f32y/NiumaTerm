@@ -1,4 +1,4 @@
-use nmt_agent_utils::MultiRootAccess;
+use nmt_agent::MultiRootAccess;
 
 use crate::AgentKind;
 

@@ -10,7 +10,7 @@ use std::{env, fs, io, process, thread};
 
 use gpui::{App, Context, Entity, Global, Window};
 use gpui_component::input::TextareaState;
-use nmt_agent_utils::AgentWorkspace;
+use nmt_agent::AgentWorkspace;
 use nmt_platform::filesystem::installation_path_spelling;
 use parking_lot::Mutex;
 use tracing::warn;

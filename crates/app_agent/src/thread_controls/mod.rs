@@ -10,7 +10,7 @@ use gpui::{AnyElement, App, Context, Div, IntoElement, Pixels, SharedString, Sta
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::{ActiveTheme as _, Icon, IconName, IconNamed, Sizable as _, h_flex};
-use nmt_agent_utils::chat::{AgentPreset, ApprovalPreset, ModelInfo, ThreadSettings};
+use nmt_agent::chat::{AgentPreset, ApprovalPreset, ModelInfo, ThreadSettings};
 use nmt_i18n::i18n;
 
 use crate::AgentPane;

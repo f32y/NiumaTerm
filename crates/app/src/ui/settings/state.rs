@@ -4,7 +4,7 @@ use std::path::Path;
 use gpui::Global;
 #[cfg(windows)]
 use gpui::SharedString;
-use nmt_agent_utils::deepseek;
+use nmt_agent::deepseek;
 use nmt_app_agent::AgentKind;
 use nmt_config::agent::AgentConfig;
 pub use nmt_config::agent::{CollapseRows, ModelListStyle};

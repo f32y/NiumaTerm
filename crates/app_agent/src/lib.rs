@@ -31,11 +31,11 @@ use std::rc::Rc;
 use gpui::{Entity, FocusHandle, Pixels, Point, ScrollHandle, SharedString};
 use gpui_component::VirtualListScrollHandle;
 use gpui_component::input::TextareaState;
-use nmt_agent_utils::chat::{
+use nmt_agent::chat::{
     ContextComposition, ContextWindowUsage, ReplayTurn, SessionScope, SessionStats, SessionSummary,
     SkillCatalog, SkillReference, SlashCommandInfo,
 };
-use nmt_agent_utils::{AgentEvent, AgentRoute, AgentWorkspace};
+use nmt_agent::{AgentEvent, AgentRoute, AgentWorkspace};
 use nmt_config::profile::AgentProfile;
 use nmt_i18n::i18n;
 

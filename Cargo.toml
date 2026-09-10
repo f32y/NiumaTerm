@@ -9,7 +9,7 @@ rust-version = "1.96.0"
 [workspace]
 resolver = "3"
 members = [
-    "crates/agent_utils",
+    "crates/agent",
     "crates/agent_hook_cli",
     "crates/app",
     "crates/app_agent",
@@ -77,7 +77,7 @@ suspicious = { level = "warn", priority = -1 }
 disallowed_types = "deny"
 
 [workspace.dependencies]
-nmt_agent_utils = { path = "crates/agent_utils" }
+nmt_agent = { path = "crates/agent" }
 nmt_app_agent = { path = "crates/app_agent" }
 nmt_app_terminal = { path = "crates/app_terminal" }
 nmt_version = { path = "crates/version" }

@@ -7,7 +7,7 @@ use gpui::{App, Entity, Window, div};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogClose, DialogFooter};
 use gpui_component::{ActiveTheme as _, WindowExt as _};
-use nmt_agent_utils::update::{
+use nmt_agent::update::{
     InstallationKey, ProviderKind, UpdateCoordinator, UpdateError, UpdateErrorKind, UpdatePhase,
     UpdateProgress,
 };

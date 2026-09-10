@@ -13,7 +13,7 @@ use gpui::{
     AppContext as _, Context, Entity, ScrollHandle, Subscription, Task, UniformListScrollHandle,
 };
 use gpui_component::text::TextViewState;
-use nmt_agent_utils::chat::Item;
+use nmt_agent::chat::Item;
 
 use crate::transcript::TranscriptView;
 use crate::transcript::code::prepared::PreparedCode;

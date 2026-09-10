@@ -7,9 +7,9 @@ use std::{env, fs, process};
 
 use gpui::{Entity, Image, ImageFormat, TestAppContext, VisualTestContext, WindowHandle};
 use image_rs::{DynamicImage, ImageFormat as EncodedImageFormat, RgbaImage};
-use nmt_agent_utils::AgentWorkspace;
-use nmt_agent_utils::chat::{SendOutcome, SessionSummary, SlashCommandOutcome};
-use nmt_agent_utils::codex::app_server;
+use nmt_agent::AgentWorkspace;
+use nmt_agent::chat::{SendOutcome, SessionSummary, SlashCommandOutcome};
+use nmt_agent::codex::app_server;
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
 use nmt_platform::process::hidden_command;
 use serde_json::{Value, json};

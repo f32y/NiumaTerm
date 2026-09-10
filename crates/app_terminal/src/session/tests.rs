@@ -414,7 +414,7 @@ fn host_events_map_from_terminal_events() {
 fn osc_notification_drains_into_shared_exact_notification_lifecycle() {
     use std::time::Instant;
 
-    use nmt_agent_utils::{
+    use nmt_agent::{
         AgentActivityPolicy, AgentMonitor, AgentRoute, AgentRuntimeStatus, request_native_delivery,
     };
     use nmt_terminal::event::{EventListener, TerminalEvent, WindowId};

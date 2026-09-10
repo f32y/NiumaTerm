@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{Context, Render, SharedString, Window, div, px};
 use gpui_component::{ActiveTheme as _, h_flex, v_flex};
-use nmt_agent_utils::AgentRuntimeStatus;
+use nmt_agent::AgentRuntimeStatus;
 use nmt_config::appearance::TabBarStyle;
 
 use crate::tabs::TabId;

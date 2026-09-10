@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use gpui::{App, Context, Task};
-use nmt_agent_utils::launcher::AgentCli;
-use nmt_agent_utils::update::InstallationKey;
+use nmt_agent::launcher::AgentCli;
+use nmt_agent::update::InstallationKey;
 use nmt_i18n::i18n;
 
 use crate::composer::{ForkState, RewindState};

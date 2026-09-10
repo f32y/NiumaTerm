@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use nmt_agent_utils::chat::{SendOutcome, SlashCommandOutcome};
+use nmt_agent::chat::{SendOutcome, SlashCommandOutcome};
 use serde_json::json;
 
 use crate::session::backend::{Backend, TestBackend};

@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use gpui::{point, px};
 use gpui_component::input::Enter;
-use nmt_agent_utils::chat::QueuedPrompt;
-use nmt_agent_utils::{AgentWorkspace, MultiRootAccess};
+use nmt_agent::chat::QueuedPrompt;
+use nmt_agent::{AgentWorkspace, MultiRootAccess};
 use nmt_config::system::NewlineShortcut;
 
 use crate::composer::prompt_with_response_annotations;

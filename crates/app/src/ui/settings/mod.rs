@@ -48,10 +48,10 @@ use gpui_component::switch::Switch;
 use gpui_component::{
     ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
-use nmt_agent_utils::HookInstallStatus;
-use nmt_agent_utils::claude_code::hook as claude_hook;
-use nmt_agent_utils::codex::hook as codex_hook;
-use nmt_agent_utils::update::{DiscoverySupport, InstallationKey, ProviderKind, UpdatePhase};
+use nmt_agent::HookInstallStatus;
+use nmt_agent::claude_code::hook as claude_hook;
+use nmt_agent::codex::hook as codex_hook;
+use nmt_agent::update::{DiscoverySupport, InstallationKey, ProviderKind, UpdatePhase};
 #[cfg(test)]
 use nmt_config::CursorShape;
 use nmt_config::appearance::SmoothScrollingMode;

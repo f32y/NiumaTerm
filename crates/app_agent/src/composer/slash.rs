@@ -8,12 +8,12 @@
 use std::rc::Rc;
 
 use gpui::{Context, SharedString, Window};
-use nmt_agent_utils::chat::{
+use nmt_agent::chat::{
     SkillInfo, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy,
 };
-use nmt_agent_utils::claude_code::stream_json;
-use nmt_agent_utils::codex::app_server;
-use nmt_agent_utils::deepseek;
+use nmt_agent::claude_code::stream_json;
+use nmt_agent::codex::app_server;
+use nmt_agent::deepseek;
 use nmt_i18n::i18n;
 
 use crate::commands::{

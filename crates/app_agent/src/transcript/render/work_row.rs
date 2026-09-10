@@ -11,7 +11,7 @@ use gpui::{AnyElement, Context, ScrollHandle, Window, div, px};
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme as _, IconName};
-use nmt_agent_utils::chat::Item as SessionItem;
+use nmt_agent::chat::Item as SessionItem;
 use nmt_i18n::i18n;
 
 use crate::transcript::code::is_code_item;

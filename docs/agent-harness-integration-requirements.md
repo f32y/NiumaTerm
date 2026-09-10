@@ -149,7 +149,7 @@ existing queue policy or remain unavailable until the turn completes.
 **Level:** Core
 
 Provider output shall be translated into the shared chat event and transcript
-item types in `agent_utils::chat`. The adapter shall preserve stable IDs and
+item types in `nmt_agent::chat`. The adapter shall preserve stable IDs and
 ordering so streaming updates amend the intended item instead of creating
 duplicates.
 
@@ -380,7 +380,7 @@ storage code:
 
 | Responsibility | Current path |
 | --- | --- |
-| Shared chat events, items, settings, history, and usage | [`crates/agent_utils/src/chat.rs`](../crates/agent_utils/src/chat.rs) |
+| Shared chat events, items, settings, history, and usage | [`crates/agent/src/chat/mod.rs`](../crates/agent/src/chat/mod.rs) |
 | Agent profile launch and restoration | [`crates/app/src/agent_pane/profile.rs`](../crates/app/src/agent_pane/profile.rs) |
 | Backend selection and provider actions | [`crates/app/src/agent_pane/session/backend.rs`](../crates/app/src/agent_pane/session/backend.rs) |
 | Local slash command definitions | [`crates/app/src/agent_pane/commands.rs`](../crates/app/src/agent_pane/commands.rs) |

@@ -10,7 +10,7 @@ use gpui::prelude::*;
 use gpui::{AnyElement, Context, Entity, WeakEntity, div};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
-use nmt_agent_utils::background_task::{
+use nmt_agent::background_task::{
     BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscriptState,
 };
 use nmt_app_agent::transcript::TranscriptView;

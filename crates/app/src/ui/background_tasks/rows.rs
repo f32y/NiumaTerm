@@ -11,7 +11,7 @@ use gpui::prelude::*;
 use gpui::{AnyElement, Context, Hsla, SharedString, div};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
-use nmt_agent_utils::background_task::{
+use nmt_agent::background_task::{
     BackgroundTaskKind, BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskSummary,
 };
 use nmt_i18n::i18n;

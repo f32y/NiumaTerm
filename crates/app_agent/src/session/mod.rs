@@ -1,6 +1,6 @@
 use futures::StreamExt as _;
 use gpui::prelude::*;
-use nmt_agent_utils::AgentEvent;
+use nmt_agent::AgentEvent;
 
 use crate::UnansweredPrompt;
 use crate::pane_state::{ChildAgents, TurnState};
@@ -31,13 +31,13 @@ use std::{env, fs};
 
 use gpui::{App, Context, Image, Window};
 use gpui_component::input::{InputEvent, TextareaState};
-use nmt_agent_utils::chat::{
+use nmt_agent::chat::{
     Event as SessionEvent, Item as SessionItem, QueuedPrompt, SendOutcome, SkillReference,
     ThreadSettings,
 };
-use nmt_agent_utils::claude_code::sessions as claude_sessions;
-use nmt_agent_utils::codex::app_server;
-use nmt_agent_utils::{
+use nmt_agent::claude_code::sessions as claude_sessions;
+use nmt_agent::codex::app_server;
+use nmt_agent::{
     AgentEventKind, AgentRoute, AgentWorkspace, agent_process, git, normalize_body, normalize_title,
 };
 use nmt_config::profile::{AgentProfile, AgentProfileKind};

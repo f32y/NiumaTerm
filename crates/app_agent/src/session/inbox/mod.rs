@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use futures::channel::mpsc;
 use gpui::Context;
-use nmt_agent_utils::chat::Event;
-use nmt_agent_utils::message_memory::{OUTPUT_FAILURE_METHOD, retained_bytes};
+use nmt_agent::chat::Event;
+use nmt_agent::message_memory::{OUTPUT_FAILURE_METHOD, retained_bytes};
 use parking_lot::Mutex;
 use serde_json::Value;
 

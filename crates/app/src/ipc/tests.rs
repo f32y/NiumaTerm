@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use nmt_agent_utils::{
+use nmt_agent::{
     AgentActivityPolicy, AgentEventKind, AgentMonitor, AgentRoute, AgentRuntimeStatus,
     COMPLETION_QUIET_WINDOW,
 };

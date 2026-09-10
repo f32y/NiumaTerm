@@ -1,7 +1,7 @@
 use gpui::{AppContext as _, TestAppContext, VisualTestContext};
 use gpui_component::Root;
-use nmt_agent_utils::AgentWorkspace;
-use nmt_agent_utils::chat::{Question, QuestionInput, QuestionOption};
+use nmt_agent::AgentWorkspace;
+use nmt_agent::chat::{Question, QuestionInput, QuestionOption};
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
 use crate::questions::{QuestionEditorState, QuestionPrompt};

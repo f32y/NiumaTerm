@@ -1,6 +1,6 @@
 //! Approval display and independently addressable question drafts for one pane.
 
-use nmt_agent_utils::chat::QuestionMode;
+use nmt_agent::chat::QuestionMode;
 
 use crate::questions::{QuestionPrompt, QuestionStatus};
 

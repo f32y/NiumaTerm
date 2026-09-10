@@ -13,7 +13,7 @@ name = "NiumaTerm"
 path = "src/main.rs"
 
 [dependencies]
-nmt_agent_utils.workspace = true
+nmt_agent.workspace = true
 nmt_app_agent.workspace = true
 nmt_app_terminal.workspace = true
 nmt_config.workspace = true

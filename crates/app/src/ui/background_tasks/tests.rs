@@ -1,6 +1,6 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use nmt_agent_utils::background_task::{
+use nmt_agent::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRegistry,
     BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskUpdate,
 };
@@ -229,11 +229,11 @@ fn a_failed_restoration_with_no_rows_is_distinguishable_from_an_empty_session() 
 }
 
 mod detail_navigation {
-    use nmt_agent_utils::background_task::{
+    use nmt_agent::background_task::{
         BackgroundTaskKey, BackgroundTaskTranscript, BackgroundTaskTranscriptState,
         BackgroundTaskTranscriptUpdate, MAX_TRANSCRIPT_ITEMS,
     };
-    use nmt_agent_utils::chat::Item;
+    use nmt_agent::chat::Item;
 
     use crate::ui::background_tasks::PanelMode;
 

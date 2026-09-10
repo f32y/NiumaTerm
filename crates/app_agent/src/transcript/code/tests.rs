@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use gpui::{AppContext as _, HighlightStyle, Hsla, TestAppContext, rgb};
 use gpui_component::highlighter::{HighlightTheme, LanguageConfig, LanguageRegistry};
-use nmt_agent_utils::chat::Item;
+use nmt_agent::chat::Item;
 use vte::Parser;
 
 use crate::transcript::code::CodeView;

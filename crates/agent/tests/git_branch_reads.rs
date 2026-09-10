@@ -9,7 +9,7 @@ use std::process::{self, Command};
 use std::time::Duration;
 use std::{env, fs};
 
-use nmt_agent_utils::git::{CheckedOut, current_branch};
+use nmt_agent::git::{CheckedOut, current_branch};
 
 fn git(dir: &Path, args: &[&str]) {
     let status = Command::new("git")

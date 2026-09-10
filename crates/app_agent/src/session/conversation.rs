@@ -5,7 +5,7 @@
 use std::collections::VecDeque;
 
 use gpui::Context;
-use nmt_agent_utils::chat::{QueuedPrompt, SessionSummary};
+use nmt_agent::chat::{QueuedPrompt, SessionSummary};
 use nmt_i18n::i18n;
 
 use crate::composer::CommandFeedbackKind;

@@ -10,7 +10,7 @@ use gpui::{
 use gpui_component::button::Button;
 use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme as _, ElementExt as _, IconName, Sizable as _};
-use nmt_agent_utils::chat::{Item as SessionItem, ReplayTurn};
+use nmt_agent::chat::{Item as SessionItem, ReplayTurn};
 use nmt_config::agent::CollapseRows;
 use nmt_i18n::i18n;
 

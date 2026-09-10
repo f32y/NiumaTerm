@@ -5,7 +5,7 @@
 //!
 use std::{iter, path};
 
-use nmt_agent_utils::AgentRuntimeStatus;
+use nmt_agent::AgentRuntimeStatus;
 use nmt_i18n::i18n;
 
 use crate::tabs::{CommandOutcome, TabId, TabManager};

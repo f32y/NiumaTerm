@@ -1,9 +1,9 @@
 use std::mem::take;
 
 use gpui::Context;
-use nmt_agent_utils::AgentEventKind;
-use nmt_agent_utils::background_task::BackgroundTaskSnapshot;
-use nmt_agent_utils::chat::{
+use nmt_agent::AgentEventKind;
+use nmt_agent::background_task::BackgroundTaskSnapshot;
+use nmt_agent::chat::{
     Event as SessionEvent, Item as SessionItem, QuestionMode, QueuedPrompt, ReplayTurn,
     SessionSummary, SlashCommandOutcome, ThreadSettings, TurnActivity,
 };

@@ -16,7 +16,7 @@ use gpui::{
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::{ActiveTheme as _, IconNamed, Sizable as _, StyledExt as _, h_flex, v_flex};
-use nmt_agent_utils::background_task::{
+use nmt_agent::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskSummary,
 };
 use nmt_app_agent::AgentPane;

@@ -1,7 +1,7 @@
 use std::mem;
 use std::ops::Range;
 
-use nmt_agent_utils::chat::Item;
+use nmt_agent::chat::Item;
 
 use crate::transcript::{detect_output_language, file_extension_lang};
 

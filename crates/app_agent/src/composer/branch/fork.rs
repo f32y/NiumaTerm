@@ -9,7 +9,7 @@
 //! chosen one back so the branch starts where it was cut.
 
 use gpui::{Context, SharedString, Window};
-use nmt_agent_utils::chat::ForkCheckpoint;
+use nmt_agent::chat::ForkCheckpoint;
 use nmt_i18n::i18n;
 
 use crate::composer::branch::rewind::{rewind_prompt_label, rewind_timestamp};

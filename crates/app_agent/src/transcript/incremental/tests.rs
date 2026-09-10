@@ -2,7 +2,7 @@ use std::hint::black_box;
 use std::time::{Duration, Instant};
 
 use gpui::{AppContext as _, TestAppContext};
-use nmt_agent_utils::chat::{Item, ReplayItem, ReplayTurn};
+use nmt_agent::chat::{Item, ReplayItem, ReplayTurn};
 use nmt_config::agent::CollapseRows;
 
 use crate::profile::AgentKind;

@@ -14,11 +14,11 @@
 use std::time::Duration;
 
 use gpui::{Context, Task};
-use nmt_agent_utils::chat::Item as SessionItem;
-use nmt_agent_utils::claude_code::workflows::{
+use nmt_agent::chat::Item as SessionItem;
+use nmt_agent::claude_code::workflows::{
     self, RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
 };
-use nmt_agent_utils::workflow::{WorkflowAgentState, WorkflowRun, WorkflowSnapshot};
+use nmt_agent::workflow::{WorkflowAgentState, WorkflowRun, WorkflowSnapshot};
 
 use crate::session::Backend;
 use crate::{AgentPane, AgentPaneEvent};

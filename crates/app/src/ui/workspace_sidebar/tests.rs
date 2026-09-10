@@ -1,4 +1,4 @@
-use nmt_agent_utils::AgentRuntimeStatus;
+use nmt_agent::AgentRuntimeStatus;
 
 use crate::tabs::CommandOutcome;
 use crate::ui::terminal_status::terminal_presentation;

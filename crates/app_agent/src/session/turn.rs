@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use gpui::{Context, Window};
-use nmt_agent_utils::AgentEventKind;
+use nmt_agent::AgentEventKind;
 
 use crate::composer::{CommandFeedbackKind, restored_input_after_interruption};
 use crate::session::backend::Backend;

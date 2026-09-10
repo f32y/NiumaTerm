@@ -2,7 +2,7 @@ use gpui::prelude::*;
 use gpui::{AnyElement, Context, div};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::{ActiveTheme as _, Sizable as _, v_flex};
-use nmt_agent_utils::chat::Question;
+use nmt_agent::chat::Question;
 use nmt_i18n::i18n;
 
 use crate::settings::UI_RADIUS;

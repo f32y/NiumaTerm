@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use nmt_agent_utils::chat::Event;
+use nmt_agent::chat::Event;
 
 pub(super) const MAX_MESSAGES_PER_BATCH: usize = 64;
 pub(super) const MAX_UPDATE_TIME: Duration = Duration::from_millis(2);

@@ -1,4 +1,4 @@
-use nmt_agent_utils::workflow::{
+use nmt_agent::workflow::{
     WorkflowAgent, WorkflowAgentState, WorkflowPhase, WorkflowRun, WorkflowRunState,
 };
 

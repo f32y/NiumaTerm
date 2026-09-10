@@ -1,8 +1,8 @@
 use chrono::Local;
 use futures::channel::oneshot;
 use gpui::{Context, SharedString, Window};
-use nmt_agent_utils::chat::SlashCommandOutcome;
-use nmt_agent_utils::claude_code::sessions;
+use nmt_agent::chat::SlashCommandOutcome;
+use nmt_agent::claude_code::sessions;
 use nmt_i18n::i18n;
 
 use crate::composer::branch::fork::{PromptTarget, checkpoint_at_depth};

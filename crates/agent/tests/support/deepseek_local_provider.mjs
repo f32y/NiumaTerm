@@ -1,5 +1,5 @@
 // Runs the real installed dsh against a local model; no provider account is used.
-// From the repository root: node crates/agent_utils/tests/support/deepseek_local_provider.mjs
+// From the repository root: node crates/agent/tests/support/deepseek_local_provider.mjs
 // An optional argument selects one test. The default runs the protocol scenarios.
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
@@ -84,7 +84,7 @@ try {
 
     try {
       const code = await new Promise((resolve, reject) => {
-        const child = spawn('cargo', ['test', '-p', 'nmt_agent_utils', '--test', 'deepseek_live', scenario, '--', '--ignored', '--nocapture'], {
+        const child = spawn('cargo', ['test', '-p', 'nmt_agent', '--test', 'deepseek_live', scenario, '--', '--ignored', '--nocapture'], {
           windowsHide: true, stdio: 'inherit',
           env: { ...process.env, DSH_HOME: probeHome, DEEPSEEK_API_KEY: 'local-probe', DEEPSEEK_BASE_URL: `http://127.0.0.1:${server.address().port}` },
         });

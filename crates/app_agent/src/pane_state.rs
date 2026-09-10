@@ -10,10 +10,10 @@ use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 use gpui::Context;
-use nmt_agent_utils::background_task::{
+use nmt_agent::background_task::{
     BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscript,
 };
-use nmt_agent_utils::chat::QueuedPrompt;
+use nmt_agent::chat::QueuedPrompt;
 
 use crate::session::turn::response_age_tick;
 use crate::{AgentPane, UnansweredPrompt};

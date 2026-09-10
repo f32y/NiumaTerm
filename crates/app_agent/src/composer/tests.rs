@@ -1,6 +1,6 @@
-use nmt_agent_utils::chat::SlashCommandRunPolicy;
-use nmt_agent_utils::claude_code::{sessions, stream_json};
-use nmt_agent_utils::codex::app_server;
+use nmt_agent::chat::SlashCommandRunPolicy;
+use nmt_agent::claude_code::{sessions, stream_json};
+use nmt_agent::codex::app_server;
 
 use crate::composer::attachments::spaced_placeholder;
 use crate::composer::branch::BranchFlow;

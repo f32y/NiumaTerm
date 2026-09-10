@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use gpui::{AnyElement, App, Entity, IntoElement as _, Subscription, Window};
 use gpui_component::input::{Input, InputState, Textarea, TextareaState};
-use nmt_agent_utils::chat::{Question, QuestionInput, QuestionMode, QuestionRequest};
+use nmt_agent::chat::{Question, QuestionInput, QuestionMode, QuestionRequest};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum QuestionStatus {

@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use nmt_agent_utils::launcher::AgentCli;
-use nmt_agent_utils::update::{
+use nmt_agent::launcher::AgentCli;
+use nmt_agent::update::{
     DiscoverySupport, ProviderKind, ProviderMaintenance, UpdateError, UpdateErrorKind,
     VendorUpdateResult, VersionStatus,
 };
