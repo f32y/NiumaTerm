@@ -48,5 +48,10 @@ optional = true
 [target.'cfg(target_os = "windows")'.build-dependencies]
 windows-registry.workspace = true
 
+# The test-only window implementation uses GPUI's test-only screenshot API.
+# Dependencies do not inherit this crate's cfg(test), so enable that API for tests.
+[target.'cfg(target_os = "windows")'.dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+
 [package.metadata.cargo-shear]
 ignored = ["scap"]
