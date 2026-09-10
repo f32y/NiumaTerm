@@ -14,6 +14,13 @@
 #[cfg(all(test, windows))]
 use std::fs;
 use std::process::Command;
+use std::sync::Arc;
+
+use parking_lot::Mutex;
+
+use crate::deadline_timer::DeadlineTimer;
+
+const TIMEOUT_METHOD: &str = "nmt/claudeRequestDeadline";
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
@@ -271,7 +278,21 @@ impl Session {
             &initial_model,
         );
 
-        let process = JsonLineProcess::spawn(command, &executable, "Claude", deliver, on_stderr)?;
+        let deliver = Arc::new(Mutex::new(deliver));
+        let timer_delivery = Arc::clone(&deliver);
+        let timer = DeadlineTimer::new(move || {
+            (timer_delivery.lock())(json!({"method": TIMEOUT_METHOD}));
+        })
+        .map_err(|error| format!("could not start Claude deadline timer: {error}"))?;
+        let stop = timer.handle();
+        let process = JsonLineProcess::spawn_with_stdout_closed(
+            command,
+            &executable,
+            "Claude",
+            move |message| (deliver.lock())(message),
+            on_stderr,
+            move || stop.stop(),
+        )?;
 
         let mut session = Self {
             process,
@@ -294,6 +315,7 @@ impl Session {
             workflows: ClaudeWorkflows::default(),
         };
 
+        session.control.set_timer(timer);
         session.try_send(json!({
             "type": "control_request",
             "request_id": INIT_REQUEST_ID,
@@ -331,6 +353,9 @@ impl Session {
     pub fn process(&mut self, message: Value) -> Vec<Event> {
         if self.control.is_closed() {
             return Vec::new();
+        }
+        if message["method"] == TIMEOUT_METHOD {
+            return self.poll_timeouts(Instant::now());
         }
         let mut events = Vec::new();
 

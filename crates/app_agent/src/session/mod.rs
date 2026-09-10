@@ -16,7 +16,6 @@ mod history;
 mod inbox;
 mod output;
 pub(crate) mod prompts;
-mod request_timeouts;
 #[cfg(test)]
 mod tests;
 pub(crate) mod turn;
@@ -759,7 +758,6 @@ impl AgentPane {
         Some(match spawned {
             Ok(session) => {
                 self.runtime.backend = Some(session);
-                self.start_request_watchdog(epoch, cx);
                 true
             }
             Err(err) => {

@@ -39,6 +39,7 @@ impl JsonLineProcess {
     /// Spawn `command` with all three stdio streams piped and start the two
     /// reader threads. `display_command` is the human-readable command line
     /// quoted in the spawn error.
+    #[cfg(test)]
     pub(crate) fn spawn(
         command: Command,
         display_command: &str,

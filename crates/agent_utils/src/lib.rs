@@ -11,6 +11,7 @@ pub mod usage;
 pub mod workflow;
 pub mod workspace;
 
+mod deadline_timer;
 mod hook_store;
 mod request_policy;
 mod subprocess;

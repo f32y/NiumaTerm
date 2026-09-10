@@ -18,6 +18,7 @@ use crate::codex::app_server::host::{
     Delivery, FIRST_HOST_RPC_ID, HOST_EXIT_METHOD, HOST_INIT_RPC_ID, MAX_EARLY_MESSAGES_PER_THREAD,
     MAX_EARLY_THREADS, RegistrationId, message_thread_id,
 };
+use crate::deadline_timer::DeadlineTimer;
 use crate::request_policy::RequestClass;
 use crate::subprocess::InputTicket;
 
@@ -245,6 +246,7 @@ impl RouterState {
 
 pub(super) struct Router {
     state: Mutex<RouterState>,
+    timer: Mutex<Option<DeadlineTimer>>,
     pub(super) alive: AtomicBool,
     pub(super) expected_shutdown: AtomicBool,
 }
@@ -253,6 +255,7 @@ impl Router {
     pub(super) fn new(startup_tx: mpsc::SyncSender<Result<(), String>>) -> Self {
         Self {
             state: Mutex::new(RouterState::new(startup_tx)),
+            timer: Mutex::new(None),
             alive: AtomicBool::new(true),
             expected_shutdown: AtomicBool::new(false),
         }
@@ -264,6 +267,32 @@ impl Router {
         state.next_registration_id = state.next_registration_id.wrapping_add(1).max(1);
         state.sessions.insert(id, delivery);
         id
+    }
+
+    pub(super) fn start_timer(self: &Arc<Self>) -> Result<(), String> {
+        let weak = Arc::downgrade(self);
+        let timer = DeadlineTimer::new(move || {
+            if let Some(router) = weak.upgrade() {
+                router.expire_requests(Instant::now());
+            }
+        })
+        .map_err(|error| format!("could not start Codex deadline timer: {error}"))?;
+        let state = self.state.lock();
+        *self.timer.lock() = Some(timer);
+        self.refresh_timer(&state);
+        Ok(())
+    }
+
+    fn refresh_timer(&self, state: &RouterState) {
+        if let Some(timer) = self.timer.lock().as_ref() {
+            timer.set(
+                state
+                    .pending_requests
+                    .values()
+                    .map(|route| route.deadline)
+                    .min(),
+            );
+        }
     }
 
     pub(super) fn prepare_outgoing(
@@ -316,6 +345,7 @@ impl Router {
                 },
             );
             message["id"] = json!(global_id);
+            self.refresh_timer(&state);
             return Ok(());
         }
 
@@ -331,7 +361,9 @@ impl Router {
     }
 
     pub(super) fn reject_outgoing(&self, id: u64) {
-        self.state.lock().pending_requests.remove(&id);
+        let mut state = self.state.lock();
+        state.pending_requests.remove(&id);
+        self.refresh_timer(&state);
     }
 
     pub(super) fn attach_input(&self, id: u64, ticket: InputTicket) {
@@ -343,10 +375,11 @@ impl Router {
     }
 
     pub(super) fn retain_requests(&self, owner: RegistrationId, ids: &[u64]) {
-        self.state
-            .lock()
+        let mut state = self.state.lock();
+        state
             .pending_requests
             .retain(|_, route| route.owner != owner || ids.contains(&route.purpose.local_id()));
+        self.refresh_timer(&state);
     }
 
     pub(super) fn expire_requests(&self, now: Instant) {
@@ -357,6 +390,7 @@ impl Router {
                 .extract_if(|_, route| route.deadline <= now)
                 .map(|(_, route)| route)
                 .collect();
+            self.refresh_timer(&state);
             expired
                 .into_iter()
                 .filter_map(|route| {
@@ -404,6 +438,7 @@ impl Router {
         let Some(route) = state.pending_requests.remove(&id) else {
             return Vec::new();
         };
+        self.refresh_timer(&state);
         message["id"] = json!(route.purpose.local_id());
         if route.deadline <= Instant::now() {
             message = route.timeout_response();
@@ -531,6 +566,7 @@ impl Router {
             .thread_owners
             .retain(|_, thread_owner| *thread_owner != owner);
         state.root_by_owner.remove(&owner);
+        self.refresh_timer(&state);
         state.sessions.is_empty()
     }
 
@@ -547,6 +583,7 @@ impl Router {
                 state.sessions.values().cloned().collect::<Vec<_>>()
             };
             state.pending_requests.clear();
+            self.refresh_timer(&state);
             state.server_requests.clear();
             state.thread_owners.clear();
             state.root_by_owner.clear();

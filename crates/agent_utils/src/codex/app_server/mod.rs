@@ -8,9 +8,9 @@
 use std::mem::take;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 #[cfg(test)]
 use std::time::UNIX_EPOCH;
-use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -714,13 +714,6 @@ impl Session {
             self.control.track(id, operation);
         }
         Ok(())
-    }
-
-    /// Check deadlines even when the server produces no output.
-    pub fn poll_timeouts(&mut self, now: Instant) {
-        if let Some(host) = &self.host {
-            host.expire_requests(now);
-        }
     }
 
     fn retain_request_routes(&self) {

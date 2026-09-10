@@ -7,6 +7,7 @@ use tracing::debug;
 
 use crate::chat::{ContextComposition, ContextSegment, Event, Question, QuestionOption};
 use crate::claude_code::stream_json::effort::EffortState;
+use crate::deadline_timer::DeadlineTimer;
 use crate::request_policy::RequestClass;
 use crate::subprocess::InputTicket;
 
@@ -25,6 +26,7 @@ pub(super) enum PendingControlOperation {
 }
 
 pub(super) struct ControlState {
+    timer: Option<DeadlineTimer>,
     next_request_id: u64,
     operations: HashMap<String, PendingControlOperation>,
     deadlines: HashMap<String, Deadline>,
@@ -37,6 +39,7 @@ pub(super) struct ControlState {
 impl Default for ControlState {
     fn default() -> Self {
         Self {
+            timer: None,
             next_request_id: 1,
             operations: HashMap::new(),
             deadlines: HashMap::new(),
@@ -49,6 +52,17 @@ impl Default for ControlState {
 }
 
 impl ControlState {
+    pub(super) fn set_timer(&mut self, timer: DeadlineTimer) {
+        self.timer = Some(timer);
+        self.refresh_timer();
+    }
+
+    fn refresh_timer(&self) {
+        if let Some(timer) = &self.timer {
+            timer.set(self.deadlines.values().map(|deadline| deadline.at).min());
+        }
+    }
+
     pub(super) fn check_capacity(&self, class: RequestClass, count: usize) -> Result<(), String> {
         if self.closed {
             return Err("Claude is not connected".into());
@@ -70,6 +84,7 @@ impl ControlState {
                 input: None,
             },
         );
+        self.refresh_timer();
     }
 
     pub(super) fn attach_input(&mut self, id: &str, ticket: InputTicket) {
@@ -80,16 +95,20 @@ impl ControlState {
 
     pub(super) fn complete(&mut self, id: &str) {
         self.deadlines.remove(id);
+        self.refresh_timer();
     }
 
     pub(super) fn expired(
         &mut self,
         now: Instant,
     ) -> Vec<(String, RequestClass, Option<InputTicket>)> {
-        self.deadlines
+        let expired = self
+            .deadlines
             .extract_if(|_, deadline| deadline.at <= now)
             .map(|(id, deadline)| (id, deadline.class, deadline.input))
-            .collect()
+            .collect();
+        self.refresh_timer();
+        expired
     }
 
     pub(super) fn expire_effort(&mut self, id: &str) -> Option<Vec<Event>> {
@@ -166,6 +185,7 @@ impl ControlState {
                 true
             }
         });
+        self.refresh_timer();
     }
 
     pub(super) fn cancel_prompt(&mut self, id: &str) -> Vec<Event> {
@@ -203,6 +223,7 @@ impl ControlState {
     pub(super) fn close(&mut self, message: &str) -> Vec<Event> {
         self.closed = true;
         self.deadlines.clear();
+        self.timer.take();
         let mut events = self.finish_turn();
         events.extend(self.effort.close(message));
         events.extend(fail_pending_control_operations(

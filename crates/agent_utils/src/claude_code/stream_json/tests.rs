@@ -10,6 +10,42 @@ use crate::subprocess::InputTicket;
 use crate::workspace::AgentWorkspace;
 
 #[test]
+fn request_deadlines_wake_without_output_and_release_the_delivery_on_close() {
+    use std::sync::mpsc::{RecvTimeoutError, channel};
+
+    use crate::deadline_timer::DeadlineTimer;
+
+    let (tx, rx) = channel();
+    let mut state = ControlState::default();
+    state.set_timer(
+        DeadlineTimer::new(move || {
+            let _ = tx.send(());
+        })
+        .unwrap(),
+    );
+    state.record_admitted("slow".into(), RequestClass::Mutation, Instant::now());
+    state.record_admitted(
+        "due".into(),
+        RequestClass::Query,
+        Instant::now() - Duration::from_secs(31),
+    );
+    rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    let expired = state.expired(Instant::now());
+    assert_eq!(expired.len(), 1);
+    assert_eq!(expired[0].0, "due");
+    state.complete("slow");
+    assert_eq!(
+        rx.recv_timeout(Duration::from_millis(20)),
+        Err(RecvTimeoutError::Timeout)
+    );
+    state.close("stopped");
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(2)),
+        Err(RecvTimeoutError::Disconnected)
+    );
+}
+
+#[test]
 fn pending_control_capacity_preserves_urgent_slots_and_releases_expired_queries() {
     let now = Instant::now();
     let mut state = ControlState::default();
