@@ -4268,6 +4268,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "smallvec",
  "tracing",
  "tree-sitter-bash",
  "tree-sitter-diff",

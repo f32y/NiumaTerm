@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::mem;
 use std::sync::Arc;
 
 use chrono::Local;
@@ -150,15 +151,12 @@ pub(crate) fn row_gap(items: &[Entry], above: &RowSpec, below: Option<&RowSpec>)
 }
 
 /// Pair every row with its trailing gap, in render order.
-fn spaced_rows(items: &[Entry], specs: &[RowSpec]) -> Vec<TranscriptRow> {
-    specs
-        .iter()
-        .enumerate()
-        .map(|(ix, spec)| TranscriptRow {
-            spec: spec.clone(),
-            gap: row_gap(items, spec, specs.get(ix + 1)),
-        })
-        .collect()
+fn spaced_rows(items: &[Entry], specs: &[RowSpec], rows: &mut Vec<TranscriptRow>) {
+    rows.clear();
+    rows.extend(specs.iter().enumerate().map(|(ix, spec)| TranscriptRow {
+        spec: spec.clone(),
+        gap: row_gap(items, spec, specs.get(ix + 1)),
+    }));
 }
 
 /// Where the reader was before something else began moving the transcript for
@@ -299,7 +297,7 @@ impl TranscriptView {
             self.scroll_to_bottom();
         }
 
-        self.items.push(Entry {
+        self.append_entry(Entry {
             at: Local::now().format("%H:%M").to_string(),
             turn,
             item,
@@ -343,6 +341,7 @@ impl TranscriptView {
     /// Data-only description of every transcript row, in render order. This
     /// is the single source of truth for the transcript's structure; the
     /// virtualized list builds elements only for the visible slice of it.
+    #[cfg(test)]
     pub(crate) fn build_row_specs(&self, collapse: CollapseRows) -> Vec<RowSpec> {
         let mut rows = Vec::new();
         let mut start = 0;
@@ -566,26 +565,33 @@ impl TranscriptView {
     /// changed in place (streaming growth, expansion) and only needs
     /// remeasuring, which preserves the scroll position exactly; a count
     /// change is a real splice.
+    #[cfg(test)]
     pub(crate) fn sync_transcript_list(&mut self, new: Vec<RowSpec>) {
-        let new = spaced_rows(&self.items, &new);
+        self.sync_transcript_tail(0, &new);
+    }
 
-        if self.rows == new {
+    pub(super) fn sync_transcript_tail(&mut self, start: usize, specs: &[RowSpec]) {
+        let mut new = mem::take(&mut self.row_cache.scratch_rows);
+        spaced_rows(&self.items, specs, &mut new);
+
+        if self.rows[start..] == new {
+            new.clear();
+            self.row_cache.scratch_rows = new;
             return;
         }
 
-        let prefix = self
-            .rows
+        let prefix = self.rows[start..]
             .iter()
             .zip(&new)
             .take_while(|(a, b)| a == b)
             .count();
-        let suffix = self.rows[prefix..]
+        let suffix = self.rows[start + prefix..]
             .iter()
             .rev()
             .zip(new[prefix..].iter().rev())
             .take_while(|(a, b)| a == b)
             .count();
-        let old_mid = prefix..self.rows.len() - suffix;
+        let old_mid = start + prefix..self.rows.len() - suffix;
         let new_mid = new.len() - suffix - prefix;
 
         if old_mid.len() == new_mid {
@@ -594,7 +600,9 @@ impl TranscriptView {
             self.transcript_list.splice(old_mid, new_mid);
         }
 
-        self.rows = new;
+        self.rows.truncate(start);
+        self.rows.append(&mut new);
+        self.row_cache.scratch_rows = new;
     }
 }
 

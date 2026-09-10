@@ -19,6 +19,7 @@ use crate::composer::PALETTE_MAX_HEIGHT;
 use crate::fade::Fade;
 use crate::profile::AgentKind;
 use crate::settings::{AgentSettings, UI_RADIUS};
+use crate::transcript::incremental::{ItemIndex, RowCache};
 use crate::transcript::render::TRANSCRIPT_LINE_HEIGHT;
 use crate::transcript::render::image_preview::ZOOM_DURATION;
 use crate::transcript::reveal::Disclosures;
@@ -39,9 +40,11 @@ use crate::transcript::{CodeTranscriptCache, Entry, ReadingPosition, is_work_row
 /// is what keeps their presentation from drifting apart.
 pub struct TranscriptView {
     pub(crate) items: Vec<Entry>,
+    pub(super) item_index: ItemIndex,
+    pub(super) row_cache: RowCache,
     /// Virtualized transcript: only visible rows build elements each frame.
-    /// `rows` mirrors the list's item count; render() diffs freshly built
-    /// rows against it and splices/remeasures just the changed range.
+    /// `rows` mirrors the list's item count; render() rebuilds the changed
+    /// turn suffix and splices/remeasures just the changed range.
     pub(crate) transcript_list: ListState,
     pub(crate) rows: Vec<TranscriptRow>,
     /// Row heights depend on the prose and technical-content fonts, which the
@@ -118,6 +121,8 @@ impl TranscriptView {
 
         Self {
             items: Vec::new(),
+            item_index: ItemIndex::default(),
+            row_cache: RowCache::default(),
             transcript_list: {
                 // Bottom alignment + tail follow give chat-log behavior: pinned
                 // to the newest row until the user scrolls up, re-engaging when
@@ -185,6 +190,11 @@ impl TranscriptView {
                 images: Vec::new(),
             })
             .collect();
+        self.item_index.clear();
+        for (index, entry) in self.items.iter().enumerate() {
+            self.item_index.insert(entry, index);
+        }
+        self.row_cache.invalidate(0);
         if follow {
             self.scroll_to_bottom();
         }
@@ -196,6 +206,9 @@ impl TranscriptView {
     /// conversation's expansion and scroll position cannot leak into another's.
     pub(crate) fn clear(&mut self) {
         self.items.clear();
+        self.item_index.clear();
+        self.row_cache.invalidate(0);
+        self.source_revision = None;
         self.stashed_position = None;
         self.reserve_below = false;
         self.scroll_to_bottom();
@@ -213,8 +226,11 @@ impl TranscriptView {
     /// so a replayed turn usually closes without an elapsed-time line rather
     /// than stating a time the session never reported.
     pub(crate) fn append_replay(&mut self, turn: u64, replay: ReplayTurn, cx: &mut Context<Self>) {
+        if replay.items.is_empty() {
+            self.invalidate_turn_rows(turn);
+        }
         for entry in replay.items {
-            self.items.push(Entry {
+            self.append_entry(Entry {
                 at: entry
                     .at
                     .and_then(|at| DateTime::from_timestamp(at, 0))
@@ -238,7 +254,7 @@ impl TranscriptView {
     /// Append one entry with an explicit stamp, for content this view records
     /// outside the normal push path.
     pub(crate) fn push_stamped(&mut self, turn: u64, item: SessionItem) {
-        self.items.push(Entry {
+        self.append_entry(Entry {
             at: Local::now().format("%H:%M").to_string(),
             turn,
             item,
@@ -247,14 +263,18 @@ impl TranscriptView {
     }
 
     pub(crate) fn contains_item(&self, id: &str) -> bool {
-        self.items.iter().any(|entry| entry.item.id() == Some(id))
+        !self.item_index.positions(id).is_empty()
     }
 
     /// Fold an authoritative completed payload into the entry that streamed it.
     pub(crate) fn merge_completed(&mut self, item: &SessionItem) {
-        for (index, entry) in self.items.iter_mut().enumerate() {
-            if entry.item.merge_completed(item) {
+        let Some(id) = item.id() else {
+            return;
+        };
+        for &index in self.item_index.positions(id) {
+            if self.items[index].item.merge_completed(item) {
                 self.code_transcripts.invalidate(index);
+                self.row_cache.invalidate(index);
                 break;
             }
         }
@@ -268,11 +288,8 @@ impl TranscriptView {
         delta: &str,
         select: fn(&mut SessionItem) -> Option<&mut Option<String>>,
     ) -> bool {
-        for (index, entry) in self.items.iter_mut().enumerate() {
-            if entry.item.id() != Some(item_id) {
-                continue;
-            }
-
+        for &index in self.item_index.positions(item_id) {
+            let entry = &mut self.items[index];
             let is_reply = matches!(entry.item, SessionItem::AgentMessage { .. });
             if let Some(text) = select(&mut entry.item) {
                 let text = text.get_or_insert_default();
@@ -284,6 +301,9 @@ impl TranscriptView {
                     .as_ref()
                     .is_some_and(|typewriter| typewriter.index() == index);
                 if is_reply && !typing {
+                    if let Some(previous) = &self.typewriter {
+                        self.row_cache.invalidate(previous.index());
+                    }
                     self.typewriter = Some(Typewriter::start(
                         index,
                         text.chars().count(),
@@ -292,6 +312,7 @@ impl TranscriptView {
                 }
                 text.push_str(delta);
                 self.code_transcripts.invalidate(index);
+                self.row_cache.invalidate(index);
                 return !text.trim().is_empty();
             }
         }
@@ -319,6 +340,28 @@ impl TranscriptView {
             .as_ref()
             .filter(|typewriter| typewriter.index() == index)
             .map(Typewriter::shown)
+    }
+
+    pub(super) fn finish_typing(&mut self) {
+        if let Some(typewriter) = self.typewriter.take() {
+            self.row_cache.invalidate(typewriter.index());
+        }
+    }
+
+    pub(super) fn advance_typing(&mut self, now: Instant) -> bool {
+        let Some(typewriter) = &mut self.typewriter else {
+            return false;
+        };
+        let index = typewriter.index();
+        let previous = typewriter.shown();
+        let moving = typewriter.advance(reply_chars(&self.items, index), now);
+        if typewriter.shown() != previous {
+            self.row_cache.invalidate(index);
+        }
+        if !moving {
+            self.finish_typing();
+        }
+        moving
     }
 
     /// Latest non-empty assistant reply of `turn`, for notification bodies.
@@ -371,6 +414,7 @@ impl TranscriptView {
 
     pub(crate) fn set_compacting(&mut self, compacting: bool, cx: &mut Context<Self>) {
         self.live_turn.set_compacting(compacting);
+        self.row_cache.invalidate(self.items.len());
         cx.notify();
     }
 
@@ -380,10 +424,12 @@ impl TranscriptView {
 
     pub(crate) fn mark_interrupted(&mut self, turn: u64) {
         self.turn_ledger.mark_interrupted(turn);
+        self.invalidate_turn_rows(turn);
     }
 
     pub(crate) fn start_working(&mut self, cx: &mut Context<Self>) {
         self.live_turn.start();
+        self.row_cache.invalidate(self.items.len());
         cx.notify();
     }
 
@@ -409,6 +455,7 @@ impl TranscriptView {
 
         self.turn_ledger
             .settle(turn, started.elapsed().as_secs(), output_tokens);
+        self.invalidate_turn_rows(turn);
 
         cx.notify();
     }
@@ -418,6 +465,7 @@ impl TranscriptView {
     pub(crate) fn discard_turn(&mut self, turn: u64, cx: &mut Context<Self>) {
         self.live_turn.discard();
         self.turn_ledger.forget(turn);
+        self.invalidate_turn_rows(turn);
         cx.notify();
     }
 }
@@ -468,12 +516,10 @@ impl Render for TranscriptView {
         // frames between chunks are this view's to ask for. Reduced motion
         // shows what has arrived as it arrives.
         let reduce_motion = cx.global::<AgentSettings>().reduce_motion;
-        if let Some(typewriter) = &mut self.typewriter {
-            let total = reply_chars(&self.items, typewriter.index());
-            match !reduce_motion && typewriter.advance(total, now) {
-                true => window.request_animation_frame(),
-                false => self.typewriter = None,
-            }
+        if reduce_motion {
+            self.finish_typing();
+        } else if self.advance_typing(now) {
+            window.request_animation_frame();
         }
 
         let settings = cx.global::<AgentSettings>();
@@ -508,8 +554,7 @@ impl Render for TranscriptView {
         // tagged with a monotonic turn id, so turns are contiguous slices).
         // Only the visible slice becomes elements; the spec diff tells the
         // list which rows changed shape.
-        let specs = self.build_row_specs(collapse);
-        self.sync_transcript_list(specs);
+        self.refresh_rows(collapse);
 
         if self.transcript_font != font {
             self.transcript_font = font;

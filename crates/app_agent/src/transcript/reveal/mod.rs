@@ -495,6 +495,7 @@ impl TranscriptView {
     /// [`Self::settle_shut_disclosures`] takes the content down once there is
     /// no exit left to run.
     pub(crate) fn toggle_disclosure(&mut self, key: RevealKey, cx: &mut Context<Self>) {
+        self.invalidate_disclosure_rows(key);
         if !self.transcript_list.is_following_tail() {
             self.transcript_list.freeze_scroll_position();
         }
@@ -521,6 +522,7 @@ impl TranscriptView {
     /// for it. Splitting this from the click is what gives the exit something
     /// to move; by the time it runs there is nothing left on screen to lose.
     pub(crate) fn take_down_disclosure(&mut self, key: RevealKey) {
+        self.invalidate_disclosure_rows(key);
         // The rows a run or a fold spliced in are measured a row at a time,
         // and those rows leave the list with it. Their heights are read off
         // the rows still standing, which is why they are collected before the
@@ -531,6 +533,15 @@ impl TranscriptView {
         // of a large output resident behind a row showing none of it.
         if let Some(index) = self.disclosures.take_down(key, &parts) {
             self.code_transcripts.drop_row(index);
+        }
+    }
+
+    fn invalidate_disclosure_rows(&mut self, key: RevealKey) {
+        match key {
+            RevealKey::Turn(turn) => self.invalidate_turn_rows(turn),
+            RevealKey::Row(index) | RevealKey::Annotation(index) | RevealKey::Group(index) => {
+                self.row_cache.invalidate(index);
+            }
         }
     }
 
