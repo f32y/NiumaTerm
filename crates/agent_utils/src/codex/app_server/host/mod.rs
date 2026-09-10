@@ -1,3 +1,4 @@
+mod early;
 mod router;
 
 use std::cmp::Reverse;
@@ -18,9 +19,8 @@ use crate::subprocess::{InputClass, JsonLineProcess};
 const HOST_INIT_RPC_ID: u64 = 1;
 const FIRST_HOST_RPC_ID: u64 = 2;
 const START_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_EARLY_THREADS: usize = 64;
-const MAX_EARLY_MESSAGES_PER_THREAD: usize = 32;
 pub(super) const HOST_EXIT_METHOD: &str = "nmt/codexHostExited";
+pub(super) const EARLY_LOSS_METHOD: &str = "nmt/codexEarlyMessagesLost";
 
 pub(super) type RegistrationId = u64;
 

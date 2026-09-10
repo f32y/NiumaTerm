@@ -6,7 +6,7 @@
 //! claimed it is held until the claim arrives, because the two orders are both
 //! legal and dropping the early traffic would lose the opening of a turn.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
@@ -14,9 +14,10 @@ use std::time::Instant;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 
+use crate::codex::app_server::host::early::EarlyMessages;
 use crate::codex::app_server::host::{
-    Delivery, FIRST_HOST_RPC_ID, HOST_EXIT_METHOD, HOST_INIT_RPC_ID, MAX_EARLY_MESSAGES_PER_THREAD,
-    MAX_EARLY_THREADS, RegistrationId, message_thread_id,
+    Delivery, EARLY_LOSS_METHOD, FIRST_HOST_RPC_ID, HOST_EXIT_METHOD, HOST_INIT_RPC_ID,
+    RegistrationId, message_thread_id,
 };
 use crate::deadline_timer::DeadlineTimer;
 use crate::message_memory::OUTPUT_FAILURE_METHOD;
@@ -121,8 +122,7 @@ struct RouterState {
     server_requests: HashMap<u64, ServerRequestRoute>,
     thread_owners: HashMap<String, RegistrationId>,
     root_by_owner: HashMap<RegistrationId, String>,
-    early_messages: HashMap<String, VecDeque<Value>>,
-    early_order: VecDeque<String>,
+    early_messages: EarlyMessages,
     startup_tx: Option<mpsc::SyncSender<Result<(), String>>>,
 }
 
@@ -136,8 +136,7 @@ impl RouterState {
             server_requests: HashMap::new(),
             thread_owners: HashMap::new(),
             root_by_owner: HashMap::new(),
-            early_messages: HashMap::new(),
-            early_order: VecDeque::new(),
+            early_messages: EarlyMessages::default(),
             startup_tx: Some(startup_tx),
         }
     }
@@ -161,22 +160,7 @@ impl RouterState {
     }
 
     fn hold_early(&mut self, thread_id: &str, message: Value) {
-        if !self.early_messages.contains_key(thread_id) {
-            while self.early_order.len() >= MAX_EARLY_THREADS {
-                if let Some(oldest) = self.early_order.pop_front() {
-                    self.early_messages.remove(&oldest);
-                }
-            }
-            self.early_order.push_back(thread_id.to_string());
-        }
-        let messages = self
-            .early_messages
-            .entry(thread_id.to_string())
-            .or_default();
-        if messages.len() == MAX_EARLY_MESSAGES_PER_THREAD {
-            messages.pop_front();
-        }
-        messages.push_back(message);
+        self.early_messages.hold(thread_id, message);
     }
 
     fn claim_thread(
@@ -184,45 +168,51 @@ impl RouterState {
         owner: RegistrationId,
         thread_id: String,
     ) -> Result<Vec<(Delivery, Value)>, String> {
-        if let Some(existing) = self.thread_owners.get(&thread_id)
-            && *existing != owner
-        {
-            return Err(format!(
-                "Codex thread {thread_id} is already attached to another Agent Tab"
-            ));
+        if let Some(existing) = self.thread_owners.get(&thread_id) {
+            return if *existing == owner {
+                Ok(Vec::new())
+            } else {
+                Err(format!(
+                    "Codex thread {thread_id} is already attached to another Agent Tab"
+                ))
+            };
         }
         self.thread_owners.insert(thread_id.clone(), owner);
         let Some(delivery) = self.delivery(owner) else {
             return Ok(Vec::new());
         };
-        self.early_order.retain(|candidate| candidate != &thread_id);
-        let early = self.early_messages.remove(&thread_id).unwrap_or_default();
-        let closed = early.iter().any(|message| {
+        let early = self.early_messages.take(&thread_id);
+        let closed = early.messages.iter().any(|message| {
             matches!(
                 message["method"].as_str(),
                 Some("thread/closed" | "thread/deleted")
             )
         });
-        let deliveries = early
-            .into_iter()
-            .map(|message| {
-                if let (Some(id), Some(_)) = (message["id"].as_u64(), message["method"].as_str()) {
-                    self.server_requests.insert(
-                        id,
-                        ServerRequestRoute {
-                            owner,
-                            thread_id: thread_id.clone(),
-                        },
-                    );
-                }
-                if message["method"].as_str() == Some("serverRequest/resolved")
-                    && let Some(id) = message["params"]["requestId"].as_u64()
-                {
-                    self.server_requests.remove(&id);
-                }
-                (Arc::clone(&delivery), message)
-            })
-            .collect();
+        let mut deliveries = Vec::new();
+        if early.incomplete {
+            deliveries.push((Arc::clone(&delivery), json!({
+                "method": EARLY_LOSS_METHOD,
+                "params": {"threadId": thread_id, "message":
+                    "Codex early activity may be incomplete because the message buffer reached its limit. Reload this conversation before relying on its state."},
+            })));
+        }
+        deliveries.extend(early.messages.into_iter().map(|message| {
+            if let (Some(id), Some(_)) = (message["id"].as_u64(), message["method"].as_str()) {
+                self.server_requests.insert(
+                    id,
+                    ServerRequestRoute {
+                        owner,
+                        thread_id: thread_id.clone(),
+                    },
+                );
+            }
+            if message["method"].as_str() == Some("serverRequest/resolved")
+                && let Some(id) = message["params"]["requestId"].as_u64()
+            {
+                self.server_requests.remove(&id);
+            }
+            (Arc::clone(&delivery), message)
+        }));
         if closed {
             self.remove_thread(&thread_id);
         }
@@ -253,8 +243,7 @@ impl RouterState {
             .retain(|_, route| route.thread_id != thread_id);
         self.thread_owners.remove(thread_id);
         self.root_by_owner.retain(|_, root| root != thread_id);
-        self.early_messages.remove(thread_id);
-        self.early_order.retain(|candidate| candidate != thread_id);
+        self.early_messages.forget(thread_id);
     }
 }
 
@@ -609,6 +598,7 @@ impl Router {
             state.server_requests.clear();
             state.thread_owners.clear();
             state.root_by_owner.clear();
+            state.early_messages.clear();
             (startup_tx, deliveries)
         };
         if let Some(tx) = startup_tx {

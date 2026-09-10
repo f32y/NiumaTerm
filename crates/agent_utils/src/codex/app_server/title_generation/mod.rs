@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 use serde_json::{Map, Value, json};
 
 use crate::chat::Event;
-use crate::codex::app_server::host::{CodexHost, HOST_EXIT_METHOD, RegistrationId};
+use crate::codex::app_server::host::{
+    CodexHost, EARLY_LOSS_METHOD, HOST_EXIT_METHOD, RegistrationId,
+};
 use crate::codex::app_server::protocol::{thread_name_request, thread_start_params};
 use crate::codex::app_server::{Session, ThreadProfile};
 use crate::workspace::AgentWorkspace;
@@ -245,7 +247,10 @@ fn run_title_generation(
                 cancelled = true;
                 break;
             }
-            if message["method"].as_str() == Some(HOST_EXIT_METHOD) {
+            if matches!(
+                message["method"].as_str(),
+                Some(HOST_EXIT_METHOD | EARLY_LOSS_METHOD)
+            ) {
                 break;
             }
             if let Some(id) = message["id"].as_u64() {
