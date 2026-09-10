@@ -12,12 +12,10 @@ mod response_annotations;
 mod slash;
 
 pub(super) use crate::composer::branch::BranchFlow;
+pub(super) use crate::composer::branch::fork::PromptTarget;
 #[cfg(test)]
 pub(super) use crate::composer::branch::fork::checkpoint_at_depth;
-pub(super) use crate::composer::branch::fork::{ForkState, PromptTarget};
-#[cfg(test)]
-use crate::composer::branch::rewind::{FileRestoreNext, file_restore_next};
-pub(super) use crate::composer::branch::rewind::{RewindAction, RewindState};
+pub(super) use crate::composer::branch::rewind::RewindAction;
 pub(super) use crate::composer::palette::{
     PALETTE_MAX_HEIGHT, PaletteAction, PaletteControl, PaletteModel, PaletteRow,
 };

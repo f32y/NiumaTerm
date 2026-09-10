@@ -7,9 +7,10 @@ use nmt_agent::chat::{
     Event as SessionEvent, Item as SessionItem, QuestionMode, QueuedPrompt, ReplayTurn,
     SessionSummary, SlashCommandOutcome, ThreadSettings, TurnActivity,
 };
+use nmt_agent::session::branch::BranchReplay;
 use nmt_agent::session::restore::{ReadyAction, ReplayAction};
 use nmt_i18n::i18n;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::capabilities::AgentCapabilities as _;
 use crate::composer::CommandFeedbackKind;
@@ -238,13 +239,11 @@ impl AgentPane {
                 cx.notify();
             }
             SessionEvent::FileRewindCompleted { error } => {
-                let result = error.map_or(Ok(()), Err);
-
-                if let Some(completion) = self.branch.rewind.file_completion.take() {
-                    let _ = completion.send(result);
-                } else {
-                    warn!("received a Claude file rewind result with no pending UI operation");
-                }
+                let update = self
+                    .branch
+                    .core
+                    .files_completed(self.runtime.epoch(), error.map_or(Ok(()), Err));
+                self.apply_rewind_update(update, cx);
             }
             SessionEvent::Error { message, fatal } => self.on_error(message, fatal, cx),
             SessionEvent::EffortRejected { message, effort } => {
@@ -286,6 +285,11 @@ impl AgentPane {
                 cx.notify();
             }
             SessionEvent::Replay(items) => {
+                match self.branch.core.replayed(self.runtime.epoch()) {
+                    BranchReplay::Ignore => return,
+                    BranchReplay::Unrelated => {}
+                    BranchReplay::Complete(completion) => self.complete_branch(completion, cx),
+                }
                 let resumed = match self.restore.replayed(self.runtime.epoch()) {
                     ReplayAction::Ignore => return,
                     ReplayAction::Append => false,
@@ -298,11 +302,6 @@ impl AgentPane {
                 }
 
                 self.apply_replay(items, cx);
-
-                // A branch is finished once the copy's own history has replaced
-                // the transcript, which is the moment it is a conversation the
-                // user can type into rather than one still being cut.
-                self.finish_conversation_branch(cx);
             }
             SessionEvent::StatusDetail(detail) => self.on_status_detail(detail, cx),
             SessionEvent::ForkCheckpoints(checkpoints) => {
@@ -326,6 +325,9 @@ impl AgentPane {
     /// Handshake finished. Fold the reported thread settings together with
     /// remembered picks, settle status, and rebuild child state from history.
     fn on_ready(&mut self, settings: ThreadSettings, cx: &mut Context<Self>) {
+        if let Some(completion) = self.branch.core.ready(self.runtime.epoch()) {
+            self.complete_branch(completion, cx);
+        }
         match self.restore.ready(self.runtime.epoch()) {
             ReadyAction::Ignore => return,
             ReadyAction::Apply => {}
@@ -553,15 +555,12 @@ impl AgentPane {
     fn on_error(&mut self, message: String, fatal: bool, cx: &mut Context<Self>) {
         self.note_visible_output();
 
+        let branch_failure = self.branch.core.failed(&mut self.runtime, message.clone());
         let resume_failed = self.restore.failed(&mut self.runtime);
         if resume_failed || self.history_ui.mode == RecentSessionsMode::Loading {
             self.history_ui.mode = RecentSessionsMode::Open;
 
-            // A branch that never arrives would otherwise hold the
-            // composer behind a conversation that is not being cut.
-            self.abandon_conversation_branch();
-
-            if !fatal && !resume_failed {
+            if !fatal && !resume_failed && branch_failure.is_none() {
                 self.runtime.conversation_change_rejected(Status::Idle);
             }
 
@@ -570,6 +569,10 @@ impl AgentPane {
                 i18n("agent-session-open-failed").replace("{error}", &message),
                 cx,
             );
+        }
+
+        if let Some(failure) = branch_failure {
+            self.report_branch_failure(failure, cx);
         }
 
         let cancelled_queue = fatal && !self.palette.command_queue.is_empty();

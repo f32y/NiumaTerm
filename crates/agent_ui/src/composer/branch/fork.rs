@@ -10,44 +10,16 @@
 
 use gpui::{Context, SharedString, Window};
 use nmt_agent::chat::ForkCheckpoint;
-use nmt_i18n::i18n;
+pub(crate) use nmt_agent::session::branch::PromptTarget;
+#[cfg(test)]
+pub(crate) use nmt_agent::session::branch::checkpoint_at_depth;
+use nmt_agent::session::branch::{BranchError, BranchUpdate, BranchView};
 
 use crate::composer::branch::rewind::{rewind_prompt_label, rewind_timestamp};
-use crate::composer::{CommandFeedbackKind, PaletteAction, PaletteModel, PaletteRow, RewindState};
-use crate::session::errors::operation_error;
-use crate::session::{Backend, Status};
+use crate::composer::{CommandFeedbackKind, PaletteAction, PaletteModel, PaletteRow};
+use crate::session::Status;
 use crate::settings::AgentSettings;
 use crate::{AgentPane, RecentSessionsMode, translated};
-
-/// One prompt the user pointed at in the transcript, to be found in the list
-/// of branch points once the backend answers with it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PromptTarget {
-    pub(crate) prompt: String,
-    /// How many turn-opening prompts follow it, which is what locates it from
-    /// the newest end of that list.
-    pub(crate) depth: usize,
-}
-
-/// Find the branch point a pointed-at prompt names.
-///
-/// Both the transcript and the backend's list enumerate the prompts that
-/// opened a turn, so the prompt is found by counting back from the newest one:
-/// that is the end the two agree on even where an older stretch of the
-/// conversation was rewritten by a compaction, or where the backend declines
-/// to offer a cut it cannot make. The text is compared as well, because a
-/// count landing on a different prompt means the two lists disagree — and
-/// answering `None` then sends the user to the picker rather than cutting
-/// somewhere they did not point at.
-pub(crate) fn checkpoint_at_depth<'a, T>(
-    checkpoints: &'a [T],
-    target: &PromptTarget,
-    prompt_of: impl Fn(&T) -> &str,
-) -> Option<&'a T> {
-    checkpoints
-        .get(target.depth)
-        .filter(|checkpoint| prompt_of(checkpoint) == target.prompt)
-}
 
 /// Name the prompt one picker row stands for.
 ///
@@ -63,41 +35,6 @@ pub(crate) fn row_prompt_target(row: usize, action: &PaletteAction) -> Option<Pr
     };
 
     Some(PromptTarget { prompt, depth: row })
-}
-
-/// A branch is a local multi-step operation rather than a model turn, so its
-/// progress is tracked apart from the turn state; timers, transcript rows, and
-/// the slash queue must not read cutting a branch as provider output.
-///
-/// One request is outstanding at a time — the composer is held while the
-/// picker is up, so a second `/fork` cannot be sent — which is why the answer
-/// needs no request identity to be matched against.
-pub(crate) enum ForkState {
-    /// Waiting on the backend's list of branch points. A target means the user
-    /// pointed at one prompt rather than asking to be shown the list, so the
-    /// answer is resolved against it instead of opening the picker.
-    Loading(Option<PromptTarget>),
-    Selecting(Vec<ForkCheckpoint>),
-    /// The branch was requested; the tab is waiting on the copy's own replay.
-    Branching,
-}
-
-impl ForkState {
-    /// Whether this state is showing rows, which is what decides if Esc has a
-    /// picker to close and if the composer is blocked behind one.
-    pub(crate) fn is_picker(&self) -> bool {
-        matches!(self, Self::Loading(_) | Self::Selecting(_))
-    }
-}
-
-#[derive(Default)]
-pub(crate) struct ForkFlow {
-    pub(crate) state: Option<ForkState>,
-    /// The prompt the branch was cut in front of, waiting for a frame to put
-    /// it back in the composer. A branch can be settled from the backend's
-    /// answer, which arrives with no window to reach the input through, so the
-    /// text is parked here and the next render spends it.
-    pub(crate) pending_prompt: Option<String>,
 }
 
 impl AgentPane {
@@ -148,40 +85,18 @@ impl AgentPane {
         });
     }
 
-    /// Close whichever picker is open, answering whether there was one. Escape
-    /// reaches both, and only one can be open at a time.
     pub(crate) fn cancel_branch_picker(&mut self, cx: &mut Context<Self>) -> bool {
-        if self
-            .branch
-            .rewind
-            .state
-            .as_ref()
-            .is_some_and(RewindState::is_picker)
-        {
-            self.cancel_rewind_picker(cx);
-            return true;
+        if !self.branch.core.cancel_picker() {
+            return false;
         }
-
-        if self
-            .branch
-            .fork
-            .state
-            .as_ref()
-            .is_some_and(ForkState::is_picker)
-        {
-            self.cancel_fork_picker(cx);
-            return true;
-        }
-
-        false
+        self.branch.draft = None;
+        self.palette.selected = 0;
+        self.palette.feedback = None;
+        self.release_transcript_from_picker(cx);
+        cx.notify();
+        true
     }
 
-    /// Branch in front of one prompt the user pointed at in the transcript.
-    ///
-    /// The branch points still have to be asked for — only the backend can
-    /// name a cut — so this is the same request the picker makes, carrying
-    /// which of the answers to act on. A target the answer does not confirm
-    /// falls back to the picker rather than cutting somewhere else.
     pub(crate) fn fork_from_prompt(
         &mut self,
         target: PromptTarget,
@@ -190,8 +105,6 @@ impl AgentPane {
         self.request_fork_checkpoints(Some(target), cx)
     }
 
-    /// Ask the backend which prompts this conversation can be branched in
-    /// front of, and open the picker on the answer.
     pub(crate) fn open_fork(&mut self, cx: &mut Context<Self>) -> bool {
         self.request_fork_checkpoints(None, cx)
     }
@@ -207,26 +120,18 @@ impl AgentPane {
                 translated("agent-fork-idle-only"),
                 cx,
             );
-
             return false;
         }
-
-        let asked = self
-            .runtime
-            .backend_mut()
-            .is_some_and(Backend::request_fork_checkpoints);
-
-        if !asked {
-            self.palette.set_feedback(
-                CommandFeedbackKind::Error,
-                i18n("agent-session-still-starting").replace("{name}", self.kind.display()),
-                cx,
-            );
-
+        if let Err(error) = self.branch.core.begin_fork(&mut self.runtime, target) {
+            let message = match error {
+                BranchError::Busy => translated("agent-fork-idle-only"),
+                _ => self.branch_error_message(error).into(),
+            };
+            self.palette
+                .set_feedback(CommandFeedbackKind::Error, message, cx);
             return false;
         }
-
-        self.branch.fork.state = Some(ForkState::Loading(target));
+        self.branch.pending_prompt = None;
         self.palette.selected = 0;
         self.palette.dismissed = false;
         self.palette.set_feedback(
@@ -234,101 +139,75 @@ impl AgentPane {
             translated("agent-fork-loading-checkpoints"),
             cx,
         );
-
         true
     }
 
-    /// Take the backend's answer to the open request.
-    ///
-    /// An answer to a request the user has already cancelled is dropped: it
-    /// would otherwise reopen a picker they closed, and a second `/fork` has
-    /// its own answer coming.
     pub(crate) fn show_fork_checkpoints(
         &mut self,
         checkpoints: Result<Vec<ForkCheckpoint>, String>,
         cx: &mut Context<Self>,
     ) {
-        let Some(ForkState::Loading(target)) = self.branch.fork.state.take() else {
-            return;
-        };
+        let update = self
+            .branch
+            .core
+            .fork_checkpoints(&mut self.runtime, checkpoints);
+        self.apply_fork_update(update, cx);
+    }
 
-        match checkpoints {
-            Ok(checkpoints) if checkpoints.is_empty() => {
-                self.palette.set_feedback(
-                    CommandFeedbackKind::Error,
-                    translated("agent-fork-no-prompts"),
-                    cx,
-                );
-            }
-            Ok(checkpoints) => {
-                let pointed_at = target.as_ref().and_then(|target| {
-                    checkpoint_at_depth(&checkpoints, target, |checkpoint| &checkpoint.prompt)
-                        .cloned()
-                });
-
-                self.branch.fork.state = Some(ForkState::Selecting(checkpoints));
+    fn apply_fork_update(&mut self, update: BranchUpdate, cx: &mut Context<Self>) {
+        match update {
+            BranchUpdate::Empty => self.palette.set_feedback(
+                CommandFeedbackKind::Error,
+                translated("agent-fork-no-prompts"),
+                cx,
+            ),
+            BranchUpdate::Picker { unresolved } => {
                 self.palette.feedback = None;
                 self.palette.selected = 0;
-
-                match pointed_at {
-                    Some(checkpoint) => self.start_conversation_branch(checkpoint, cx),
-                    None => {
-                        // A pointed-at prompt the answer did not confirm is
-                        // reported, because the picker opening on its own after
-                        // a menu pick would otherwise look like the pick was
-                        // simply the wrong one.
-                        if target.is_some() {
-                            self.palette.set_feedback(
-                                CommandFeedbackKind::Error,
-                                translated("agent-fork-prompt-not-a-branch-point"),
-                                cx,
-                            );
-                        }
-
-                        self.hold_transcript_for_picker(cx);
-
-                        // The newest prompt is highlighted, and it usually
-                        // sits under the picker that just opened over the
-                        // bottom of the transcript.
-                        self.follow_branch_selection(cx);
-                        cx.notify();
-                    }
+                if unresolved {
+                    self.palette.set_feedback(
+                        CommandFeedbackKind::Error,
+                        translated("agent-fork-prompt-not-a-branch-point"),
+                        cx,
+                    );
                 }
+                self.hold_transcript_for_picker(cx);
+                self.follow_branch_selection(cx);
+                cx.notify();
             }
-            Err(message) => {
+            BranchUpdate::Branching => {
+                self.branch.draft = Some(self.input.read(cx).text().to_string());
+                self.history_ui.mode = RecentSessionsMode::Loading;
+                self.restore.cancel();
+                self.controls.seed_thread_defaults = false;
+                self.controls.seed_approval_reviewer = false;
+                self.palette.set_feedback(
+                    CommandFeedbackKind::Notice,
+                    translated("agent-session-forking"),
+                    cx,
+                );
+                cx.notify();
+            }
+            BranchUpdate::Failed(failure) => {
+                let message = self.branch_error_message(failure.error);
                 self.palette
                     .set_feedback(CommandFeedbackKind::Error, message, cx);
             }
+            _ => {}
         }
     }
 
     pub(crate) fn cancel_fork_picker(&mut self, cx: &mut Context<Self>) {
-        if self
-            .branch
-            .fork
-            .state
-            .as_ref()
-            .is_some_and(ForkState::is_picker)
-        {
-            self.branch.fork.state = None;
-            self.palette.selected = 0;
-            self.release_transcript_from_picker(cx);
-
-            // Cancelling is the user's own no-op, and dropping the message
-            // retires the non-transient "Reading branch points…" status that
-            // would otherwise outlive the picker it described.
-            self.palette.feedback = None;
-            cx.notify();
-        }
+        self.cancel_branch_picker(cx);
     }
 
-    pub(crate) fn fork_palette_model(&self, state: &ForkState) -> Option<PaletteModel> {
+    pub(crate) fn fork_palette_model(&self, state: BranchView<'_>) -> Option<PaletteModel> {
         match state {
-            ForkState::Loading(_) => Some(PaletteModel {
+            BranchView::LoadingFork => Some(PaletteModel {
                 rows: vec![cancel_row()],
                 note: Some(translated("agent-fork-loading-checkpoints")),
             }),
-            ForkState::Selecting(checkpoints) => {
+            BranchView::ForkCheckpoints(checkpoints) => {
                 let mut rows = checkpoints
                     .iter()
                     .cloned()
@@ -349,97 +228,32 @@ impl AgentPane {
                     note: Some(translated("agent-fork-choose-prompt")),
                 })
             }
-            ForkState::Branching => None,
+            _ => None,
         }
     }
 
-    /// Branch in front of the chosen prompt and move the tab into the copy.
-    ///
-    /// The tab moves the same way it moves into a resumed conversation, so the
-    /// presentation waits on the branch's own replay: what is visible stays
-    /// the conversation it branched from until the copy's history arrives to
-    /// replace it, and a refused branch leaves the tab exactly where it was.
     pub(crate) fn start_conversation_branch(
         &mut self,
         checkpoint: ForkCheckpoint,
         cx: &mut Context<Self>,
     ) {
-        let outcome = match self.runtime.backend_mut() {
-            Some(session) => session
-                .fork_conversation(&checkpoint.anchor)
-                .map_err(operation_error),
-            None => {
-                Err(i18n("agent-session-still-starting").replace("{name}", self.kind.display()))
-            }
-        };
-
-        // A refused branch leaves the picker open on the rows it was refused
-        // from, so the reason is read beside the other prompts rather than
-        // after the list it applies to has closed.
-        if let Err(error) = outcome {
-            self.palette
-                .set_feedback(CommandFeedbackKind::Error, error, cx);
-            return;
-        }
-
-        self.branch.fork.state = Some(ForkState::Branching);
-        self.history_ui.mode = RecentSessionsMode::Loading;
-        self.restore.cancel();
-        self.runtime.begin_conversation_change();
-
-        // The branch inherits the parent's controls, so nothing is seeded over
-        // what its own history is about to replay.
-        self.controls.seed_thread_defaults = false;
-        self.controls.seed_approval_reviewer = false;
-
-        // Cutting in front of a prompt leaves that prompt unasked, so it goes
-        // back where it was typed rather than being dropped with the turns
-        // after it.
-        self.branch.fork.pending_prompt = Some(checkpoint.prompt);
-
-        self.palette.set_feedback(
-            CommandFeedbackKind::Notice,
-            translated("agent-session-forking"),
-            cx,
-        );
-        cx.notify();
+        let update = self.branch.core.fork(&mut self.runtime, checkpoint);
+        self.apply_fork_update(update, cx);
     }
 
-    /// Close the branching state once the copy's own history has replaced the
-    /// transcript, which is the moment the branch is something the user can
-    /// type into.
-    pub(crate) fn finish_conversation_branch(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.branch.fork.state, Some(ForkState::Branching)) {
-            self.branch.fork.state = None;
-            self.palette.set_feedback(
-                CommandFeedbackKind::Notice,
-                translated("agent-fork-complete"),
-                cx,
-            );
-        }
-    }
-
-    /// Give up on a branch whose copy never arrived. The failure is reported by
-    /// whatever the backend said went wrong, so this only releases the composer
-    /// the branch was holding.
-    pub(crate) fn abandon_conversation_branch(&mut self) {
-        if matches!(self.branch.fork.state, Some(ForkState::Branching)) {
-            self.branch.fork.state = None;
-        }
-    }
-}
-
-impl AgentPane {
-    /// Put a cut prompt back in the composer, once there is a frame to do it
-    /// in. Spent on the first render after the branch was requested.
+    /// Ready may arrive without a window. The next render applies the prompt
+    /// only if the editor still contains the draft captured for this operation.
     pub(crate) fn fill_branch_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(prompt) = self.branch.fork.pending_prompt.take() else {
+        let Some(pending) = self.branch.pending_prompt.take() else {
             return;
         };
-
+        if *self.input.read(cx).text() != pending.expected_draft {
+            return;
+        }
         self.input.update(cx, |input, cx| {
-            input.set_value(prompt.clone(), window, cx);
-            input.set_selected_range(prompt.len()..prompt.len(), cx);
+            let end = pending.prompt.len();
+            input.set_value(pending.prompt, window, cx);
+            input.set_selected_range(end..end, cx);
         });
     }
 }

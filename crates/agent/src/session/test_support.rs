@@ -2,13 +2,16 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::chat::{SendOutcome, SlashCommandInfo, SlashCommandOutcome};
+use crate::chat::{ForkAnchor, SendOutcome, SlashCommandInfo, SlashCommandOutcome};
 use crate::session::{AgentKind, RecoveryIdentity, RenameOutcome};
 
 pub struct TestBackend {
     pub rename_outcome: RenameOutcome,
     pub interrupt_accepted: bool,
     pub resume_accepted: bool,
+    pub fork_accepted: bool,
+    pub fork_requests: Vec<ForkAnchor>,
+    pub file_restore_requests: Vec<String>,
     pub(super) send_outcomes: VecDeque<SendOutcome>,
     pub(super) slash_outcome: SlashCommandOutcome,
     pub(super) commands: Vec<SlashCommandInfo>,
@@ -29,6 +32,9 @@ impl TestBackend {
             rename_outcome: RenameOutcome::Unsupported,
             interrupt_accepted: false,
             resume_accepted: false,
+            fork_accepted: false,
+            fork_requests: Vec::new(),
+            file_restore_requests: Vec::new(),
             send_outcomes: send_outcomes.into_iter().collect(),
             slash_outcome,
             commands,

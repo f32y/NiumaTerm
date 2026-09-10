@@ -1,72 +1,71 @@
-//! Cutting the conversation at an earlier point.
-//!
-//! A rewind and a fork are two answers to the same question: which earlier
-//! prompt should the conversation continue from. Both open a picker over the
-//! same checkpoint list, both replace the session under the composer once the
-//! user picks, and each cancels the other, so neither can be reasoned about
-//! without the other.
+//! Picker presentation and executor integration for core branch operations.
 
 pub(super) mod fork;
 pub(super) mod rewind;
+#[cfg(test)]
+mod tests;
 
-use crate::AgentPane;
-use crate::composer::branch::fork::{ForkFlow, ForkState};
-use crate::composer::branch::rewind::{RewindFlow, RewindState};
+use gpui::Context;
+use nmt_agent::session::branch::{BranchCompletion, ConversationBranch, FileProgress};
 
-/// The two ways of cutting the conversation, held together because at most one
-/// of them runs at a time and every question the composer asks about either is
-/// really a question about both.
+use crate::composer::CommandFeedbackKind;
+use crate::{AgentPane, RecentSessionsMode, translated};
+
 #[derive(Default)]
 pub(crate) struct BranchFlow {
-    pub(crate) rewind: RewindFlow,
-    pub(crate) fork: ForkFlow,
+    pub(crate) core: ConversationBranch,
+    draft: Option<String>,
+    pending_prompt: Option<PendingBranchPrompt>,
+}
+
+struct PendingBranchPrompt {
+    expected_draft: String,
+    prompt: String,
 }
 
 impl BranchFlow {
-    /// Whether a branch or a rewind is holding the composer.
-    ///
-    /// Both replace the conversation under it, so a prompt sent while either
-    /// is open would reach a session about to be swapped out, and while a
-    /// picker is showing, the keys that would send it are the picker's.
     pub(crate) fn holds_composer(&self) -> bool {
-        self.rewind.state.is_some() || self.fork.state.is_some()
+        self.core.holds_composer()
     }
 
-    /// Whether such a flow is past its picker and working. Until then the
-    /// input still holds text worth editing, so only sending is refused.
     pub(crate) fn is_working(&self) -> bool {
-        self.rewind
-            .state
-            .as_ref()
-            .is_some_and(|state| !state.is_picker())
-            || self
-                .fork
-                .state
-                .as_ref()
-                .is_some_and(|state| !state.is_picker())
+        self.core.is_working()
     }
 
-    /// Whether a list of branch points is on screen, which is what makes the
-    /// palette's highlight something the transcript follows.
     pub(crate) fn picker_is_open(&self) -> bool {
-        self.rewind
-            .state
-            .as_ref()
-            .is_some_and(RewindState::is_picker)
-            || self.fork.state.as_ref().is_some_and(ForkState::is_picker)
+        self.core.picker_is_open()
     }
 
-    /// Drop both flows, as a session replacement does.
     pub(crate) fn clear(&mut self) {
-        self.rewind.state = None;
-        self.rewind.file_completion = None;
-        self.fork.state = None;
+        self.core.clear();
+        self.draft = None;
+        self.pending_prompt = None;
     }
 }
 
 impl AgentPane {
-    /// Whether a branch or a rewind is holding the composer.
     pub(crate) fn branch_flow_holds_composer(&self) -> bool {
         self.branch.holds_composer()
+    }
+
+    pub(crate) fn complete_branch(&mut self, completion: BranchCompletion, cx: &mut Context<Self>) {
+        let message = match (&completion.replay, completion.files) {
+            (_, FileProgress::Restored) => "agent-rewind-complete-with-files",
+            (Some(_), FileProgress::NotConfirmed) => "agent-rewind-complete",
+            (None, FileProgress::NotConfirmed) => "agent-fork-complete",
+        };
+        let draft = self.branch.draft.take();
+        self.clear_conversation_presentation(cx);
+        self.history_ui.mode = RecentSessionsMode::Hidden;
+        self.branch.pending_prompt = draft.map(|expected_draft| PendingBranchPrompt {
+            expected_draft,
+            prompt: completion.prompt,
+        });
+        if let Some(replay) = completion.replay {
+            self.apply_replay(replay, cx);
+        }
+        self.palette
+            .set_feedback(CommandFeedbackKind::Notice, translated(message), cx);
+        cx.notify();
     }
 }

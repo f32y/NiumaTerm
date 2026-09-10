@@ -536,6 +536,9 @@ impl AgentPane {
         // on any more, and this start is what the pane now reports.
         let epoch = self.runtime.begin_start();
         self.restore.starting(epoch, recovery.as_ref());
+        if !self.branch.core.starting(epoch, recovery.as_ref()) {
+            self.branch.clear();
+        }
 
         self.history_ui.invalidate_filesystem_history();
 
@@ -709,6 +712,13 @@ impl AgentPane {
                 }
 
                 cx.emit(AgentPaneEvent::Interrupted);
+                if let Some(failure) = this.branch.core.failed(
+                    &mut this.runtime,
+                    "session exited before branch readiness".into(),
+                ) {
+                    this.history_ui.mode = RecentSessionsMode::Open;
+                    this.report_branch_failure(failure, cx);
+                }
                 if this.restore.failed(&mut this.runtime) {
                     this.history_ui.mode = RecentSessionsMode::Open;
                 }

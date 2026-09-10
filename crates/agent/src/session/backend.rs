@@ -254,7 +254,7 @@ impl Backend {
             // rewind picker is what reads it.
             Backend::Claude(_) => false,
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(_) => false,
+            Backend::Test(session) => session.fork_accepted,
         }
     }
 
@@ -268,7 +268,14 @@ impl Backend {
             }
             Backend::Claude(_) => Err(OperationError::Unsupported(UnsupportedOperation::Fork)),
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(_) => Err(OperationError::Unsupported(UnsupportedOperation::Fork)),
+            Backend::Test(session) => {
+                if session.fork_accepted {
+                    session.fork_requests.push(anchor.clone());
+                    Ok(())
+                } else {
+                    Err(OperationError::Unsupported(UnsupportedOperation::Fork))
+                }
+            }
         }
     }
 
@@ -310,7 +317,12 @@ impl Backend {
                 UnsupportedOperation::FileRewind,
             )),
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(session) => Ok(session.slash_outcome.clone()),
+            Backend::Test(session) => {
+                session
+                    .file_restore_requests
+                    .push(user_message_id.to_owned());
+                Ok(session.slash_outcome.clone())
+            }
         }
     }
 
@@ -467,7 +479,11 @@ impl Backend {
             Backend::DeepSeek(session) => session.session_id(),
             Backend::Codex(_) => None,
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(_) => None,
+            Backend::Test(session) => session
+                .recovery
+                .as_ref()
+                .filter(|identity| identity.kind != AgentKind::Codex)
+                .map(|identity| identity.id.as_str()),
         }
     }
 

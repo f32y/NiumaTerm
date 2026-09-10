@@ -8,6 +8,7 @@ use nmt_agent::chat::{
     SlashCommandSource,
 };
 use nmt_agent::claude_code::sessions;
+use nmt_agent::session::branch::BranchView;
 use nmt_i18n::i18n;
 
 use crate::capabilities::AgentCapabilities as _;
@@ -15,7 +16,7 @@ use crate::commands::{
     PaletteCatalogEntry, PaletteDirection, filter_palette_catalog, filter_skill_catalog,
     move_palette_selection, parse_skill_prefix, parse_slash_command, prepare_skill_selection,
 };
-use crate::composer::{CommandFeedbackKind, ForkState, RewindAction, RewindState};
+use crate::composer::{CommandFeedbackKind, RewindAction};
 use crate::input_history::InputHistoryDirection;
 use crate::session::Status;
 use crate::settings::{AgentSettings, UI_RADIUS};
@@ -160,12 +161,15 @@ impl AgentPane {
     }
 
     pub(crate) fn palette_model(&mut self, cx: &Context<Self>) -> Option<PaletteModel> {
-        if let Some(state) = self.branch.rewind.state.as_ref() {
-            return self.rewind_palette_model(state);
-        }
-
-        if let Some(state) = self.branch.fork.state.as_ref() {
-            return self.fork_palette_model(state);
+        match self.branch.core.view() {
+            view @ (BranchView::LoadingRewind
+            | BranchView::RewindCheckpoints(_)
+            | BranchView::RewindAction(_, _)) => return self.rewind_palette_model(view),
+            view @ (BranchView::LoadingFork | BranchView::ForkCheckpoints(_)) => {
+                return self.fork_palette_model(view);
+            }
+            BranchView::Working => return None,
+            BranchView::Idle => {}
         }
 
         if self.palette.dismissed {
@@ -416,23 +420,7 @@ impl AgentPane {
     }
 
     fn dismiss_command_palette(&mut self, cx: &mut Context<Self>) {
-        if self
-            .branch
-            .rewind
-            .state
-            .as_ref()
-            .is_some_and(RewindState::is_picker)
-        {
-            self.cancel_rewind_picker(cx);
-        } else if self
-            .branch
-            .fork
-            .state
-            .as_ref()
-            .is_some_and(ForkState::is_picker)
-        {
-            self.cancel_fork_picker(cx);
-        } else {
+        if !self.cancel_branch_picker(cx) {
             self.palette.dismissed = true;
             cx.notify();
         }
@@ -585,31 +573,18 @@ impl AgentPane {
                 return;
             }
             PaletteAction::RewindCheckpoint(checkpoint) => {
-                let Some(operation_id) =
-                    self.branch
-                        .rewind
-                        .state
-                        .as_ref()
-                        .and_then(|state| match state {
-                            RewindState::SelectingCheckpoint { operation_id, .. } => {
-                                Some(*operation_id)
-                            }
-                            _ => None,
-                        })
-                else {
-                    return;
-                };
-
-                self.branch.rewind.state = Some(RewindState::SelectingAction {
-                    operation_id,
-                    checkpoint,
-                });
-                self.palette.selected = 0;
-                cx.notify();
+                if self
+                    .branch
+                    .core
+                    .select_checkpoint(self.runtime.epoch(), checkpoint)
+                {
+                    self.palette.selected = 0;
+                    cx.notify();
+                }
                 return;
             }
             PaletteAction::RewindAction(action) => {
-                self.activate_rewind_action(action, window, cx);
+                self.activate_rewind_action(action, cx);
                 return;
             }
             PaletteAction::ForkCheckpoint(checkpoint) => {

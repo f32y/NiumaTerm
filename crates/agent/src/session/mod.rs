@@ -4,6 +4,7 @@ use crate::update::ProviderKind;
 
 mod attachments;
 mod backend;
+pub mod branch;
 pub mod delivery;
 pub mod lifecycle;
 pub mod restore;

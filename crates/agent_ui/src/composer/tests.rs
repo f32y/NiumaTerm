@@ -1,66 +1,12 @@
 use nmt_agent::chat::SlashCommandRunPolicy;
-use nmt_agent::claude_code::{sessions, stream_json};
+use nmt_agent::claude_code::stream_json;
 use nmt_agent::codex::app_server;
 
 use crate::composer::attachments::spaced_placeholder;
-use crate::composer::branch::BranchFlow;
-use crate::composer::branch::fork::ForkState;
 use crate::composer::{
-    CommandFeedbackKind, FileRestoreNext, RewindState, feedback_is_current, feedback_is_transient,
-    file_restore_next, parse_annotated_prompt, prompt_with_response_annotations,
-    restored_input_after_interruption,
+    CommandFeedbackKind, feedback_is_current, feedback_is_transient, parse_annotated_prompt,
+    prompt_with_response_annotations, restored_input_after_interruption,
 };
-
-fn checkpoint() -> sessions::ClaudeCheckpoint {
-    sessions::ClaudeCheckpoint {
-        user_message_id: "00000000-0000-4000-8000-000000000001".into(),
-        parent_message_id: None,
-        prompt: "recover this prompt".into(),
-        timestamp: Some("2026-08-07T01:00:00Z".into()),
-        file_restore_availability: sessions::FileRestoreAvailability::Available,
-    }
-}
-
-#[test]
-fn picker_cancellation_and_processing_phases_are_distinct() {
-    let picker_states = [
-        RewindState::Loading { operation_id: 7 },
-        RewindState::SelectingCheckpoint {
-            operation_id: 7,
-            checkpoints: vec![checkpoint()],
-        },
-        RewindState::SelectingAction {
-            operation_id: 7,
-            checkpoint: checkpoint(),
-        },
-    ];
-
-    for state in &picker_states {
-        assert!(state.is_picker());
-        assert!(state.has_operation(7));
-        assert!(!state.has_operation(6), "stale operations must be ignored");
-    }
-
-    for state in [
-        RewindState::RestoringFiles { operation_id: 7 },
-        RewindState::ForkingConversation { operation_id: 7 },
-    ] {
-        assert!(!state.is_picker());
-    }
-}
-
-#[test]
-fn file_phase_success_and_failure_choose_the_safe_next_step() {
-    assert_eq!(file_restore_next(false, Ok(())), FileRestoreNext::Complete);
-    assert_eq!(
-        file_restore_next(true, Ok(())),
-        FileRestoreNext::ForkConversation
-    );
-    assert_eq!(
-        file_restore_next(true, Err("expired checkpoint".into())),
-        FileRestoreNext::RetryAction("expired checkpoint".into())
-    );
-}
 
 #[test]
 fn rewind_catalog_is_claude_only_and_idle_only() {
@@ -202,45 +148,4 @@ fn an_image_placeholder_is_separated_from_the_prompt_it_is_written_into() {
     assert_eq!(spaced_placeholder(None, "[Image #1]"), "[Image #1] ");
     assert_eq!(spaced_placeholder(Some(' '), "[Image #2]"), "[Image #2] ");
     assert_eq!(spaced_placeholder(Some('\n'), "[Image #2]"), "[Image #2] ");
-}
-
-#[test]
-fn branch_flows_hold_the_composer_until_cleared() {
-    let mut flow = BranchFlow::default();
-
-    assert!(!flow.holds_composer());
-
-    flow.rewind.state = Some(RewindState::Loading { operation_id: 1 });
-
-    assert!(flow.holds_composer());
-    assert!(flow.picker_is_open());
-    assert!(!flow.is_working());
-
-    flow.rewind.state = Some(RewindState::RestoringFiles { operation_id: 1 });
-
-    assert!(flow.holds_composer());
-    assert!(!flow.picker_is_open());
-    assert!(flow.is_working());
-
-    flow.clear();
-
-    assert!(!flow.holds_composer());
-
-    flow.fork.state = Some(ForkState::Selecting(Vec::new()));
-
-    assert!(flow.holds_composer());
-    assert!(flow.picker_is_open());
-    assert!(!flow.is_working());
-
-    flow.fork.state = Some(ForkState::Branching);
-
-    assert!(flow.holds_composer());
-    assert!(!flow.picker_is_open());
-    assert!(flow.is_working());
-
-    flow.clear();
-
-    assert!(!flow.holds_composer());
-    assert!(!flow.picker_is_open());
-    assert!(!flow.is_working());
 }

@@ -261,8 +261,9 @@ impl AgentPane {
             return;
         };
 
-        // Fork also uses the loading presentation while its own operation runs.
-        if self.history_ui.mode == RecentSessionsMode::Loading {
+        // Both operations replace the conversation; a visible history list
+        // must not start a resume while a branch picker or file step owns it.
+        if self.history_ui.mode == RecentSessionsMode::Loading || self.branch.holds_composer() {
             return;
         }
 

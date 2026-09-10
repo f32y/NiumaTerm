@@ -1,104 +1,16 @@
 use chrono::Local;
-use futures::channel::oneshot;
-use gpui::{Context, SharedString, Window};
-use nmt_agent::chat::SlashCommandOutcome;
+use gpui::{Context, SharedString};
 use nmt_agent::claude_code::sessions;
+pub(crate) use nmt_agent::session::branch::RewindAction;
+use nmt_agent::session::branch::{
+    BranchError, BranchFailure, BranchUpdate, BranchView, FailureStage, FileProgress, PromptTarget,
+};
 use nmt_i18n::i18n;
 
-use crate::composer::branch::fork::{PromptTarget, checkpoint_at_depth};
-use crate::session::errors::operation_error;
-
-/// Rewind is a local multi-step operation, not a model turn. Keeping its
-/// state separate prevents timers, transcript rows, and slash queues from
-/// treating file restoration or session forking as provider output.
-#[derive(Default)]
-pub(crate) struct RewindFlow {
-    pub(crate) state: Option<RewindState>,
-    pub(crate) operation_seq: u64,
-    pub(crate) file_completion: Option<oneshot::Sender<Result<(), String>>>,
-}
-
 use crate::composer::{CommandFeedbackKind, PaletteAction, PaletteModel, PaletteRow};
-use crate::profile::AgentKind;
-use crate::session::{Backend, RecoveryIdentity, Status};
+use crate::session::Status;
+use crate::session::errors::operation_error;
 use crate::{AgentPane, RecentSessionsMode, translated};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum RewindAction {
-    Files,
-    Conversation,
-    FilesAndConversation,
-    Cancel,
-}
-
-pub(crate) enum RewindState {
-    Loading {
-        operation_id: u64,
-    },
-    SelectingCheckpoint {
-        operation_id: u64,
-        checkpoints: Vec<sessions::ClaudeCheckpoint>,
-    },
-    SelectingAction {
-        operation_id: u64,
-        checkpoint: sessions::ClaudeCheckpoint,
-    },
-    RestoringFiles {
-        operation_id: u64,
-    },
-    ForkingConversation {
-        operation_id: u64,
-    },
-}
-
-impl RewindState {
-    pub(crate) fn is_picker(&self) -> bool {
-        matches!(
-            self,
-            Self::Loading { .. } | Self::SelectingCheckpoint { .. } | Self::SelectingAction { .. }
-        )
-    }
-
-    pub(crate) fn has_operation(&self, operation_id: u64) -> bool {
-        match self {
-            Self::Loading {
-                operation_id: current,
-            }
-            | Self::SelectingCheckpoint {
-                operation_id: current,
-                ..
-            }
-            | Self::SelectingAction {
-                operation_id: current,
-                ..
-            }
-            | Self::RestoringFiles {
-                operation_id: current,
-            }
-            | Self::ForkingConversation {
-                operation_id: current,
-            } => *current == operation_id,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum FileRestoreNext {
-    Complete,
-    ForkConversation,
-    RetryAction(String),
-}
-
-pub(crate) fn file_restore_next(
-    continue_with_fork: bool,
-    result: Result<(), String>,
-) -> FileRestoreNext {
-    match (continue_with_fork, result) {
-        (true, Ok(())) => FileRestoreNext::ForkConversation,
-        (false, Ok(())) => FileRestoreNext::Complete,
-        (_, Err(message)) => FileRestoreNext::RetryAction(message),
-    }
-}
 
 pub(crate) fn rewind_prompt_label(prompt: &str) -> String {
     let line = prompt
@@ -130,14 +42,6 @@ pub(crate) fn rewind_timestamp(timestamp: Option<&str>) -> Option<String> {
 }
 
 impl AgentPane {
-    /// Rewind to one prompt the user pointed at in the transcript.
-    ///
-    /// The checkpoints still have to be read — only the transcript file
-    /// records what a rewind can be anchored on — so this is the same load the
-    /// picker does, carrying which of its answers to act on. What is skipped is
-    /// only choosing the prompt: the choice between restoring files, the
-    /// conversation, or both is what "rewind" leaves open, and it is still
-    /// offered.
     pub(crate) fn rewind_to_prompt(
         &mut self,
         target: PromptTarget,
@@ -161,30 +65,19 @@ impl AgentPane {
                 translated("agent-rewind-idle-only"),
                 cx,
             );
-
             return false;
         }
-
-        let Some(session_id) = self
-            .runtime
-            .backend()
-            .and_then(Backend::session_id)
-            .map(str::to_owned)
-        else {
-            self.palette.set_feedback(
-                CommandFeedbackKind::Error,
-                translated("agent-rewind-no-session-id"),
-                cx,
-            );
-
-            return false;
+        let cwd = self.cwd();
+        let request = match self.branch.core.begin_rewind(&self.runtime, cwd, target) {
+            Ok(request) => request,
+            Err(error) => {
+                let message = self.branch_error_message(error);
+                self.palette
+                    .set_feedback(CommandFeedbackKind::Error, message, cx);
+                return false;
+            }
         };
-
-        self.branch.rewind.operation_seq = self.branch.rewind.operation_seq.wrapping_add(1);
-
-        let operation_id = self.branch.rewind.operation_seq;
-
-        self.branch.rewind.state = Some(RewindState::Loading { operation_id });
+        self.branch.pending_prompt = None;
         self.palette.selected = 0;
         self.palette.dismissed = false;
         self.palette.set_feedback(
@@ -192,116 +85,33 @@ impl AgentPane {
             translated("agent-rewind-loading-checkpoints"),
             cx,
         );
-
-        let cwd = self.cwd();
-        let load = cx
-            .background_executor()
-            .spawn(async move { sessions::load_checkpoints(cwd.as_deref(), &session_id) });
-
         cx.spawn(async move |this, cx| {
-            let checkpoints = load.await;
-
+            let (request, result) = cx
+                .background_executor()
+                .spawn(async move {
+                    let result = request.load();
+                    (request, result)
+                })
+                .await;
             let _ = this.update(cx, |this, cx| {
-                let is_current = matches!(
-                    &this.branch.rewind.state,
-                    Some(RewindState::Loading {
-                        operation_id: current,
-                    }) if *current == operation_id
-                );
-
-                if !is_current {
-                    return;
-                }
-
-                match checkpoints {
-                    Ok(checkpoints) if checkpoints.is_empty() => {
-                        this.branch.rewind.state = None;
-                        this.palette.set_feedback(
-                            CommandFeedbackKind::Error,
-                            translated("agent-rewind-no-prompts"),
-                            cx,
-                        );
-                    }
-                    Ok(checkpoints) => {
-                        // A pointed-at prompt skips ahead to the actions for
-                        // it; one the checkpoints do not confirm falls back to
-                        // the list, where the user can see why.
-                        let pointed_at = target.as_ref().and_then(|target| {
-                            checkpoint_at_depth(&checkpoints, target, |checkpoint| {
-                                checkpoint.prompt.as_str()
-                            })
-                            .cloned()
-                        });
-
-                        let unresolved = target.is_some() && pointed_at.is_none();
-
-                        this.branch.rewind.state = Some(match pointed_at {
-                            Some(checkpoint) => RewindState::SelectingAction {
-                                operation_id,
-                                checkpoint,
-                            },
-                            None => RewindState::SelectingCheckpoint {
-                                operation_id,
-                                checkpoints,
-                            },
-                        });
-
-                        if unresolved {
-                            this.palette.set_feedback(
-                                CommandFeedbackKind::Error,
-                                translated("agent-rewind-prompt-not-a-checkpoint"),
-                                cx,
-                            );
-                        } else {
-                            this.palette.feedback = None;
-                        }
-
-                        this.palette.selected = 0;
-                        this.hold_transcript_for_picker(cx);
-
-                        // The newest prompt is highlighted, and it usually
-                        // sits under the picker that just opened over the
-                        // bottom of the transcript.
-                        this.follow_branch_selection(cx);
-                        cx.notify();
-                    }
-                    Err(message) => {
-                        this.branch.rewind.state = None;
-                        this.palette
-                            .set_feedback(CommandFeedbackKind::Error, message, cx);
-                    }
-                }
+                let update =
+                    this.branch
+                        .core
+                        .checkpoints_loaded(this.runtime.epoch(), request, result);
+                this.apply_rewind_update(update, cx);
             });
         })
         .detach();
-
         true
     }
 
     pub(crate) fn cancel_rewind_picker(&mut self, cx: &mut Context<Self>) {
-        if self
-            .branch
-            .rewind
-            .state
-            .as_ref()
-            .is_some_and(RewindState::is_picker)
-        {
-            self.branch.rewind.state = None;
-            self.palette.selected = 0;
-            self.release_transcript_from_picker(cx);
-
-            // Cancelling is the user's own no-op, so an acknowledgement tells
-            // them nothing they do not already know. Dropping the message also
-            // retires the non-transient "Loading checkpoints…" status, which
-            // otherwise outlives the picker it described.
-            self.palette.feedback = None;
-            cx.notify();
-        }
+        self.cancel_branch_picker(cx);
     }
 
-    pub(crate) fn rewind_palette_model(&self, state: &RewindState) -> Option<PaletteModel> {
+    pub(crate) fn rewind_palette_model(&self, state: BranchView<'_>) -> Option<PaletteModel> {
         match state {
-            RewindState::Loading { .. } => Some(PaletteModel {
+            BranchView::LoadingRewind => Some(PaletteModel {
                 rows: vec![PaletteRow {
                     label: translated("agent-rewind-cancel"),
                     description: translated("agent-rewind-cancel-description"),
@@ -311,7 +121,7 @@ impl AgentPane {
                 }],
                 note: Some(translated("agent-rewind-loading-active-branch")),
             }),
-            RewindState::SelectingCheckpoint { checkpoints, .. } => {
+            BranchView::RewindCheckpoints(checkpoints) => {
                 let mut rows = checkpoints
                     .iter()
                     .cloned()
@@ -338,7 +148,7 @@ impl AgentPane {
                     note: Some(translated("agent-rewind-choose-prompt")),
                 })
             }
-            RewindState::SelectingAction { checkpoint, .. } => {
+            BranchView::RewindAction(checkpoint, files) => {
                 let file_disabled = match checkpoint.file_restore_availability {
                     sessions::FileRestoreAvailability::Unavailable => {
                         Some(translated("agent-rewind-file-checkpoint-unavailable"))
@@ -357,6 +167,10 @@ impl AgentPane {
                         i18n("agent-rewind-files-description-unavailable")
                     }
                 };
+                let files_only_disabled = match files {
+                    FileProgress::Restored => Some(translated("agent-rewind-files-restored")),
+                    FileProgress::NotConfirmed => file_disabled.clone(),
+                };
 
                 Some(PaletteModel {
                     rows: vec![
@@ -364,7 +178,7 @@ impl AgentPane {
                             label: translated("agent-rewind-restore-files"),
                             description: SharedString::new_static(file_description),
                             hint: Some(translated("agent-rewind-files-only")),
-                            disabled_reason: file_disabled.clone(),
+                            disabled_reason: files_only_disabled,
                             action: PaletteAction::RewindAction(RewindAction::Files),
                         },
                         PaletteRow {
@@ -396,293 +210,153 @@ impl AgentPane {
                     ),
                 })
             }
-            RewindState::RestoringFiles { .. } | RewindState::ForkingConversation { .. } => None,
+            _ => None,
         }
     }
 
-    pub(crate) fn activate_rewind_action(
-        &mut self,
-        action: RewindAction,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn activate_rewind_action(&mut self, action: RewindAction, cx: &mut Context<Self>) {
         if action == RewindAction::Cancel {
             self.cancel_rewind_picker(cx);
             return;
         }
-
-        let Some((operation_id, checkpoint)) =
-            self.branch
-                .rewind
-                .state
-                .as_ref()
-                .and_then(|state| match state {
-                    RewindState::SelectingAction {
-                        operation_id,
-                        checkpoint,
-                    } => Some((*operation_id, checkpoint.clone())),
-                    _ => None,
-                })
-        else {
-            return;
-        };
-
-        match action {
-            RewindAction::Files => {
-                self.start_file_restore(operation_id, checkpoint, false, window, cx)
-            }
-            RewindAction::Conversation => {
-                self.start_conversation_fork(operation_id, checkpoint, false, window, cx)
-            }
-            RewindAction::FilesAndConversation => {
-                self.start_file_restore(operation_id, checkpoint, true, window, cx)
-            }
-            RewindAction::Cancel => unreachable!(),
-        }
+        self.branch.draft = Some(self.input.read(cx).text().to_string());
+        let update = self.branch.core.rewind(&mut self.runtime, action);
+        self.apply_rewind_update(update, cx);
     }
 
-    pub(crate) fn start_file_restore(
-        &mut self,
-        operation_id: u64,
-        checkpoint: sessions::ClaudeCheckpoint,
-        continue_with_fork: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let outcome = self
-            .runtime
-            .backend_mut()
-            .map(|session| {
-                session
-                    .rewind_files(&checkpoint.user_message_id)
-                    .unwrap_or_else(|error| SlashCommandOutcome::Rejected {
-                        message: operation_error(error),
-                    })
-            })
-            .unwrap_or(SlashCommandOutcome::NotReady);
-
-        match outcome {
-            SlashCommandOutcome::Accepted => {}
-            SlashCommandOutcome::Rejected { message } => {
-                self.palette
-                    .set_feedback(CommandFeedbackKind::Error, message, cx);
-                return;
-            }
-            SlashCommandOutcome::NotReady => {
-                self.palette.set_feedback(
-                    CommandFeedbackKind::Error,
-                    translated("agent-rewind-files-not-ready"),
-                    cx,
-                );
-
-                return;
-            }
-            SlashCommandOutcome::Completed { message } => {
-                self.palette.set_feedback(
-                    CommandFeedbackKind::Error,
-                    message.unwrap_or_else(|| i18n("agent-rewind-invalid-file-state").to_string()),
-                    cx,
-                );
-
-                return;
-            }
-        }
-
-        let (completion_tx, completion_rx) = oneshot::channel();
-
-        self.branch.rewind.file_completion = Some(completion_tx);
-        self.branch.rewind.state = Some(RewindState::RestoringFiles { operation_id });
-        self.palette.set_feedback(
-            CommandFeedbackKind::Status,
-            if continue_with_fork {
-                translated("agent-rewind-restoring-before-fork")
-            } else {
-                translated("agent-rewind-restoring-files")
-            },
-            cx,
-        );
-
-        cx.spawn_in(window, async move |this, cx| {
-            let result = completion_rx
-                .await
-                .unwrap_or_else(|_| Err(i18n("agent-rewind-file-restore-cancelled").to_string()));
-
-            let _ = this.update_in(cx, |this, window, cx| {
-                let is_current = this.branch.rewind.state.as_ref().is_some_and(|state| {
-                    state.has_operation(operation_id)
-                        && matches!(state, RewindState::RestoringFiles { .. })
-                });
-
-                if !is_current {
-                    return;
-                }
-
-                match file_restore_next(continue_with_fork, result) {
-                    FileRestoreNext::ForkConversation => {
-                        this.start_conversation_fork(operation_id, checkpoint, true, window, cx)
-                    }
-                    FileRestoreNext::Complete => {
-                        this.branch.rewind.state = None;
-                        this.palette.set_feedback(
-                            CommandFeedbackKind::Notice,
-                            translated("agent-rewind-files-restored"),
-                            cx,
-                        );
-                    }
-                    FileRestoreNext::RetryAction(message) => {
-                        this.branch.rewind.state = Some(RewindState::SelectingAction {
-                            operation_id,
-                            checkpoint,
-                        });
-                        this.palette.selected = 0;
-                        this.palette.set_feedback(
-                            CommandFeedbackKind::Error,
-                            if continue_with_fork {
-                                i18n("agent-rewind-file-failed-no-conversation")
-                                    .replace("{error}", &message)
-                            } else {
-                                i18n("agent-rewind-file-failed").replace("{error}", &message)
-                            },
-                            cx,
-                        );
-                    }
-                }
-            });
-        })
-        .detach();
-    }
-
-    pub(crate) fn start_conversation_fork(
-        &mut self,
-        operation_id: u64,
-        checkpoint: sessions::ClaudeCheckpoint,
-        files_restored: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(source_session_id) = self
-            .runtime
-            .backend()
-            .and_then(Backend::session_id)
-            .map(str::to_owned)
-        else {
-            self.branch.rewind.state = Some(RewindState::SelectingAction {
-                operation_id,
-                checkpoint,
-            });
-            self.palette.set_feedback(
+    pub(crate) fn apply_rewind_update(&mut self, update: BranchUpdate, cx: &mut Context<Self>) {
+        match update {
+            BranchUpdate::Ignored => {}
+            BranchUpdate::Empty => self.palette.set_feedback(
                 CommandFeedbackKind::Error,
-                if files_restored {
-                    translated("agent-rewind-source-id-missing-after-files")
-                } else {
-                    translated("agent-rewind-source-id-missing")
-                },
+                translated("agent-rewind-no-prompts"),
                 cx,
-            );
-
-            return;
-        };
-
-        let cwd = self.cwd();
-        let user_message_id = checkpoint.user_message_id.clone();
-
-        self.branch.rewind.state = Some(RewindState::ForkingConversation { operation_id });
-        self.palette.set_feedback(
-            CommandFeedbackKind::Status,
-            translated("agent-rewind-creating-prefix"),
-            cx,
-        );
-
-        let fork = cx.background_executor().spawn(async move {
-            sessions::fork_session_before(cwd.as_deref(), &source_session_id, &user_message_id)
-        });
-
-        cx.spawn_in(window, async move |this, cx| {
-            let result = fork.await;
-
-            let _ = this.update_in(cx, |this, window, cx| {
-                let is_current = this.branch.rewind.state.as_ref().is_some_and(|state| {
-                    state.has_operation(operation_id)
-                        && matches!(state, RewindState::ForkingConversation { .. })
-                });
-
-                if !is_current {
-                    return;
-                }
-
-                match result {
-                    Ok(fork) => this.replace_with_conversation_fork(
-                        fork,
-                        checkpoint.prompt,
-                        files_restored,
-                        window,
+            ),
+            BranchUpdate::Picker { unresolved } => {
+                self.palette.selected = 0;
+                self.palette.feedback = None;
+                if unresolved {
+                    self.palette.set_feedback(
+                        CommandFeedbackKind::Error,
+                        translated("agent-rewind-prompt-not-a-checkpoint"),
                         cx,
-                    ),
-                    Err(message) => {
-                        this.branch.rewind.state = None;
-                        this.palette.set_feedback(
-                            CommandFeedbackKind::Error,
-                            if files_restored {
-                                i18n("agent-rewind-conversation-failed-after-files")
-                                    .replace("{error}", &message)
-                            } else {
-                                i18n("agent-rewind-conversation-failed")
-                                    .replace("{error}", &message)
-                            },
-                            cx,
-                        );
-                    }
+                    );
                 }
-            });
-        })
-        .detach();
-    }
-
-    pub(crate) fn replace_with_conversation_fork(
-        &mut self,
-        fork: sessions::ClaudeFork,
-        prompt: String,
-        files_restored: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.runtime.retire();
-        self.clear_conversation_presentation(cx);
-        self.palette.skill_catalog = None;
-        self.palette.skill_binding = None;
-        self.prompts.dismiss_approval();
-        self.palette.reset_command_runtime(false);
-        self.history_ui.mode = RecentSessionsMode::Hidden;
-
-        self.apply_replay(fork.replay, cx);
-        self.input.update(cx, |input, cx| {
-            input.set_value(prompt.clone(), window, cx);
-            input.set_selected_range(prompt.len()..prompt.len(), cx);
-        });
-        self.start_session_with_options(
-            fork.session_id
-                .map(|id| RecoveryIdentity::new(AgentKind::Claude, id)),
-            true,
-            move |this, started, cx| {
-                this.palette.set_feedback(
-                    if started {
-                        CommandFeedbackKind::Notice
-                    } else {
-                        CommandFeedbackKind::Error
-                    },
-                    if !started && files_restored {
-                        translated("agent-rewind-start-failed-after-files")
-                    } else if !started {
-                        translated("agent-rewind-start-failed")
-                    } else if files_restored {
-                        translated("agent-rewind-complete-with-files")
-                    } else {
-                        translated("agent-rewind-complete")
+                self.hold_transcript_for_picker(cx);
+                self.follow_branch_selection(cx);
+                cx.notify();
+            }
+            BranchUpdate::RestoringFiles(action) => {
+                self.palette.set_feedback(
+                    CommandFeedbackKind::Status,
+                    match action {
+                        RewindAction::FilesAndConversation => {
+                            translated("agent-rewind-restoring-before-fork")
+                        }
+                        _ => translated("agent-rewind-restoring-files"),
                     },
                     cx,
                 );
-            },
-            cx,
-        );
+            }
+            BranchUpdate::CreateFork(request) => {
+                self.palette.set_feedback(
+                    CommandFeedbackKind::Status,
+                    translated("agent-rewind-creating-prefix"),
+                    cx,
+                );
+                cx.spawn(async move |this, cx| {
+                    let (request, result) = cx
+                        .background_executor()
+                        .spawn(async move {
+                            let result = request.run();
+                            (request, result)
+                        })
+                        .await;
+                    let _ = this.update(cx, |this, cx| {
+                        let update =
+                            this.branch
+                                .core
+                                .fork_created(this.runtime.epoch(), request, result);
+                        this.apply_rewind_update(update, cx);
+                    });
+                })
+                .detach();
+            }
+            BranchUpdate::StartSession(identity) => {
+                self.palette.reset_command_runtime(false);
+                self.history_ui.mode = RecentSessionsMode::Loading;
+                self.start_session_with_options(
+                    identity,
+                    true,
+                    |this, started, cx| {
+                        if !started {
+                            let error = this
+                                .runtime
+                                .start_failure()
+                                .unwrap_or("session did not start")
+                                .to_owned();
+                            if let Some(failure) = this.branch.core.failed(&mut this.runtime, error)
+                            {
+                                this.history_ui.mode = RecentSessionsMode::Open;
+                                this.report_branch_failure(failure, cx);
+                            }
+                        }
+                    },
+                    cx,
+                );
+            }
+            BranchUpdate::FilesRestored => {
+                self.branch.draft = None;
+                self.release_transcript_from_picker(cx);
+                self.palette.set_feedback(
+                    CommandFeedbackKind::Notice,
+                    translated("agent-rewind-files-restored"),
+                    cx,
+                );
+            }
+            BranchUpdate::Failed(failure) => self.report_branch_failure(failure, cx),
+            BranchUpdate::Branching => {}
+        }
+    }
+
+    pub(crate) fn branch_error_message(&self, error: BranchError) -> String {
+        match error {
+            BranchError::Busy => i18n("agent-rewind-idle-only").to_string(),
+            BranchError::NotReady => {
+                i18n("agent-session-still-starting").replace("{name}", self.kind.display())
+            }
+            BranchError::MissingSession => i18n("agent-rewind-no-session-id").to_string(),
+            BranchError::FilesUnavailable => {
+                i18n("agent-rewind-file-checkpoint-unavailable").to_string()
+            }
+            BranchError::InvalidFileResult(message) => {
+                message.unwrap_or_else(|| i18n("agent-rewind-invalid-file-state").to_string())
+            }
+            BranchError::Operation(error) => operation_error(error),
+            BranchError::Failed(message) => message,
+        }
+    }
+
+    pub(crate) fn report_branch_failure(&mut self, failure: BranchFailure, cx: &mut Context<Self>) {
+        let error = self.branch_error_message(failure.error);
+        let message = match (failure.stage, failure.files) {
+            (FailureStage::Checkpoints | FailureStage::ProtocolFork, _) => error,
+            (FailureStage::Files, _) => i18n("agent-rewind-file-failed").replace("{error}", &error),
+            (FailureStage::Conversation, FileProgress::Restored) => {
+                i18n("agent-rewind-conversation-failed-after-files").replace("{error}", &error)
+            }
+            (FailureStage::Conversation, FileProgress::NotConfirmed) => {
+                i18n("agent-rewind-conversation-failed").replace("{error}", &error)
+            }
+            (FailureStage::Startup, FileProgress::Restored) => {
+                i18n("agent-rewind-start-failed-after-files").to_string()
+            }
+            (FailureStage::Startup, FileProgress::NotConfirmed) => {
+                i18n("agent-rewind-start-failed").to_string()
+            }
+        };
+        self.palette.selected = 0;
+        self.palette
+            .set_feedback(CommandFeedbackKind::Error, message, cx);
     }
 }

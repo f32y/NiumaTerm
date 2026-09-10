@@ -5,7 +5,6 @@ use nmt_agent::launcher::AgentCli;
 use nmt_agent::update::InstallationKey;
 use nmt_i18n::i18n;
 
-use crate::composer::{ForkState, RewindState};
 use crate::profile::agent_launch;
 use crate::session::{Backend, RecoverySnapshot, RestorationReadiness, Status, UpdateSuspension};
 use crate::{AgentPane, AgentPaneEvent};
@@ -48,8 +47,7 @@ impl AgentPane {
             || self.palette.awaiting_command_turn
             || !self.palette.command_queue.is_empty()
             || !self.delivery.pending().is_empty()
-            || self.branch.rewind.state.is_some()
-            || self.branch.fork.state.is_some()
+            || self.branch.holds_composer()
             || self.transcript.read(cx).is_compacting()
             || self
                 .runtime
@@ -106,25 +104,7 @@ impl AgentPane {
         self.delivery.stopping_for_update();
         self.publish_queued_user_messages(cx);
 
-        if self
-            .branch
-            .rewind
-            .state
-            .as_ref()
-            .is_some_and(RewindState::is_picker)
-        {
-            self.branch.rewind.state = None;
-        }
-
-        if self
-            .branch
-            .fork
-            .state
-            .as_ref()
-            .is_some_and(ForkState::is_picker)
-        {
-            self.branch.fork.state = None;
-        }
+        self.cancel_branch_picker(cx);
 
         self.transcript
             .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
