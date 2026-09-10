@@ -9,6 +9,7 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+nmt_profiling.workspace = true
 nmt_agent.workspace = true
 nmt_config.workspace = true
 nmt_i18n.workspace = true
@@ -40,3 +41,4 @@ tree-sitter-bash.workspace = true
 tree-sitter-diff.workspace = true
 tree-sitter-powershell.workspace = true
 tree-sitter-rust.workspace = true
+tracing-subscriber.workspace = true

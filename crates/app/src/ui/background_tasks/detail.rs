@@ -15,6 +15,7 @@ use nmt_agent::background_task::{
 };
 use nmt_agent_ui::transcript::TranscriptView;
 use nmt_i18n::i18n;
+use nmt_profiling::transcript::{Operation, Probe};
 
 use crate::ui::background_tasks::BackgroundTasksView;
 use crate::ui::background_tasks::rows::{
@@ -114,6 +115,7 @@ impl BackgroundTasksView {
             .as_ref()
             .and_then(WeakEntity::upgrade)
             .and_then(|pane| {
+                let _profile = Probe::start(Operation::BackgroundSnapshot);
                 let pane = pane.read(cx);
                 let child = pane.background_task_transcript(&key)?;
 

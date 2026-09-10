@@ -77,7 +77,7 @@ mod tests;
 /// against the real render-thread cost.
 ///
 /// ```text
-/// cargo test --release -p nmt_terminal_ui full_frame_profile -- --ignored --nocapture
+/// ./scripts/profiling.ps1 test --release -p nmt_terminal_ui full_frame_profile '--' --ignored --nocapture
 /// ```
 ///
 /// Stages, in pipeline order:
@@ -91,5 +91,5 @@ mod tests;
 ///      repeated output is ~free; novel output pays this per line.
 ///
 /// GPU submission is excluded (GPUI's own bench harness excludes it off-macOS).
-#[cfg(test)]
+#[cfg(all(test, enable_profiling))]
 mod full_frame_profile;

@@ -19,6 +19,7 @@ members = [
     "crates/i18n",
     "crates/input",
     "crates/platform",
+    "crates/profiling",
     "crates/remote_net",
     "crates/remote_session_hub",
     "crates/shell_extension",
@@ -66,7 +67,7 @@ default-members = [
 ]
 
 [workspace.lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(rust_analyzer)"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(rust_analyzer)", "cfg(enable_profiling)"] }
 
 [workspace.lints.clippy]
 # Style/pedantic noise stays off, but blanket-allowing `all` also silenced the
@@ -86,6 +87,7 @@ nmt_i18n = { path = "crates/i18n" }
 nmt_input = { path = "crates/input" }
 libghostty-vt-sys = { path = "third_party/libghostty-vt-sys" }
 nmt_platform = { path = "crates/platform" }
+nmt_profiling = { path = "crates/profiling" }
 nmt_remote_net = { path = "crates/remote_net" }
 nmt_remote_session_hub = { path = "crates/remote_session_hub" }
 nmt_terminal = { path = "crates/terminal" }

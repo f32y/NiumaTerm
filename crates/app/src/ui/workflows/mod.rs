@@ -17,6 +17,7 @@ use nmt_agent::workflow::{WorkflowAgent, WorkflowAgentState, WorkflowRun, Workfl
 use nmt_agent_ui::AgentPane;
 use nmt_agent_ui::transcript::TranscriptView;
 use nmt_i18n::i18n;
+use nmt_profiling::transcript::{Operation, Probe};
 
 use crate::ui::AppSettings;
 use crate::ui::composition::{empty_state, panel_header};
@@ -388,6 +389,7 @@ impl WorkflowsView {
         let transcript = self.detail_transcript.clone()?;
 
         let (label, items, revision, unavailable) = {
+            let _profile = Probe::start(Operation::WorkflowSnapshot);
             let pane = pane.read(cx);
             let open = pane.open_workflow_conversation()?;
 

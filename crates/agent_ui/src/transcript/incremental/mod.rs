@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::mem;
 
 use nmt_config::agent::CollapseRows;
+use nmt_profiling::transcript::{Operation, Probe};
 use smallvec::SmallVec;
 
 use crate::transcript::rows::TranscriptRow;
@@ -48,6 +49,8 @@ impl ItemIndex {
 
 impl TranscriptView {
     pub(super) fn append_entry(&mut self, entry: Entry) {
+        let _profile = Probe::start(Operation::AppendEntry);
+
         // The previous last turn may gain another entry, and its final row's
         // spacing depends on the first row appended below it.
         self.row_cache
@@ -79,6 +82,7 @@ impl TranscriptView {
             return;
         };
 
+        let _profile = Probe::start(Operation::RowsRebuild);
         let keep = self
             .row_cache
             .turns

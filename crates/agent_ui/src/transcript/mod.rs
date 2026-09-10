@@ -2,6 +2,12 @@ mod code;
 mod disclosure_row;
 mod format;
 mod incremental;
+#[cfg(all(test, not(enable_profiling)))]
+#[path = "profiling/disabled_tests.rs"]
+mod profiling_disabled_tests;
+#[cfg(all(test, enable_profiling))]
+#[path = "profiling/tests.rs"]
+mod profiling_tests;
 mod render;
 mod reveal;
 mod rows;

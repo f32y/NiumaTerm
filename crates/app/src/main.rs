@@ -9,7 +9,7 @@ use futures::StreamExt as _;
 use futures::channel::mpsc::unbounded;
 #[cfg(windows)]
 use gpui::Global;
-use gpui::{Anchor, AnyWindowHandle, App, Application, WeakEntity, frame_stats, px};
+use gpui::{Anchor, AnyWindowHandle, App, Application, WeakEntity, px};
 use gpui_component::{Theme as ComponentTheme, init as init_components};
 #[cfg(target_os = "macos")]
 use gpui_macos::MacPlatform as Platform;
@@ -20,6 +20,8 @@ use nmt_config::local_state::{self, LocalState};
 use nmt_config::{Config, enable_testing_mode, get, init};
 use nmt_platform::ipc as platform_ipc;
 use nmt_platform::window::show_error_dialog;
+#[cfg(enable_profiling)]
+use nmt_profiling::allocation::ProfilingAllocator;
 use tracing::warn;
 
 mod agent_updates;
@@ -28,6 +30,7 @@ mod cli;
 mod ipc;
 mod keymap;
 mod logging;
+mod profiling;
 // The menu bar is a macOS surface: on Windows the same commands live in the
 // title bar's menu button and nothing draws a bar above the window.
 #[cfg(target_os = "macos")]
@@ -57,6 +60,10 @@ use crate::ui::{AppAssets, AppSettings};
 use crate::window::{
     AppWindow, LastActiveWindow, ShellRegistry, WindowRegistry, selected_window_appearance,
 };
+
+#[cfg(enable_profiling)]
+#[global_allocator]
+static ALLOCATOR: ProfilingAllocator = ProfilingAllocator;
 
 struct StartupArgs {
     url: Option<String>,
@@ -179,10 +186,9 @@ where
 }
 
 fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
-    // Performance probes across the render chain stay dormant until this is
-    // set, so an ordinary launch pays a single atomic load per recorded event.
-    // Their digest goes to the app log at info level.
-    frame_stats::set_enabled(profiling);
+    // Builds without performance collection accept these switches through
+    // empty hooks and do not install the allocator wrapper.
+    nmt_profiling::set_enabled(profiling);
 
     agent_process().set_testing(testing);
     agent_process().set_hook_executable(
@@ -198,6 +204,10 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
 
     // Hold the appender guard for the whole app lifetime; `main` blocks until exit.
     let _log_guard = logging::init_logging(testing).expect("init logging");
+
+    if profiling && !cfg!(enable_profiling) {
+        warn!("--enable-profiling requires a build with --cfg enable_profiling");
+    }
 
     let startup_files = load_startup_files_or_exit();
 
@@ -261,6 +271,8 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
     app.on_reopen(reopen_after_last_window_closed);
 
     app.run(move |cx: &mut App| {
+        profiling::initialize(cx);
+
         // Initialize gpui-component (theme, root, component globals) before any
         // component renders. Themes without `[colors.ui]` retain the dark default.
         init_components(cx);

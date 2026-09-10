@@ -17,7 +17,7 @@ use crate::metrics;
 use crate::wake::{Wake, WakeSender, WakeSignal};
 
 mod input;
-#[cfg(all(test, windows))]
+#[cfg(all(test, windows, enable_profiling))]
 mod profile_tests;
 mod reads;
 #[cfg(test)]

@@ -13,6 +13,7 @@ use gpui_component::{ActiveTheme as _, ElementExt as _, IconName, Sizable as _};
 use nmt_agent::chat::{Item as SessionItem, ReplayTurn};
 use nmt_config::agent::CollapseRows;
 use nmt_i18n::i18n;
+use nmt_profiling::transcript::{Operation, Probe};
 
 use crate::AgentPane;
 use crate::composer::PALETTE_MAX_HEIGHT;
@@ -181,6 +182,7 @@ impl TranscriptView {
             return;
         }
 
+        let _profile = Probe::start(Operation::MirrorRebuild);
         let follow = self.source_revision.is_none();
 
         self.source_revision = Some(revision);
@@ -234,6 +236,8 @@ impl TranscriptView {
     /// so a replayed turn usually closes without an elapsed-time line rather
     /// than stating a time the session never reported.
     pub(crate) fn append_replay(&mut self, turn: u64, replay: ReplayTurn, cx: &mut Context<Self>) {
+        let _profile = Probe::start(Operation::Replay);
+
         if replay.items.is_empty() {
             self.invalidate_turn_rows(turn);
         }
@@ -277,6 +281,8 @@ impl TranscriptView {
 
     /// Fold an authoritative completed payload into the entry that streamed it.
     pub(crate) fn merge_completed(&mut self, item: &SessionItem) {
+        let _profile = Probe::start(Operation::MergeCompleted);
+
         let Some(id) = item.id() else {
             return;
         };
@@ -298,6 +304,8 @@ impl TranscriptView {
         delta: &str,
         select: fn(&mut SessionItem) -> Option<&mut Option<String>>,
     ) -> bool {
+        let _profile = Probe::start(Operation::AppendDelta);
+
         for &index in self.item_index.positions(item_id) {
             let entry = &mut self.items[index];
             let is_reply = matches!(entry.item, SessionItem::AgentMessage { .. });
@@ -367,6 +375,7 @@ impl TranscriptView {
         let Some(typewriter) = &mut self.typewriter else {
             return false;
         };
+        let _profile = Probe::start(Operation::Typewriter);
         let index = typewriter.index();
         let previous = typewriter.shown();
         let moving = typewriter.advance(reply_chars(&self.items, index), now);

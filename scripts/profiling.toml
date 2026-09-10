@@ -1,0 +1,7 @@
+# Cargo merges this with matching platform flags from .cargo/config.toml.
+[target.'cfg(all())']
+rustflags = ["--cfg", "enable_profiling"]
+
+# An explicit target table takes precedence over matching cfg tables.
+[target.aarch64-apple-darwin]
+rustflags = ["--cfg", "enable_profiling"]
