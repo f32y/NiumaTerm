@@ -2,10 +2,24 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::chat::{ForkAnchor, SendOutcome, SlashCommandInfo, SlashCommandOutcome};
+use crate::chat::{
+    ForkAnchor, QuestionRequest, SendOutcome, SlashCommandInfo, SlashCommandOutcome,
+};
 use crate::session::{AgentKind, RecoveryIdentity, RenameOutcome};
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct InputResponse {
+    pub id: Option<String>,
+    pub answers: Option<Vec<Vec<String>>>,
+}
+
 pub struct TestBackend {
+    pub approval_accepted: bool,
+    pub approval_waits: bool,
+    pub approval_responses: Vec<String>,
+    pub input_result: Result<(), String>,
+    pub input_responses: Vec<InputResponse>,
+    pub restored_questions: Vec<QuestionRequest>,
     pub rename_outcome: RenameOutcome,
     pub interrupt_accepted: bool,
     pub resume_accepted: bool,
@@ -29,6 +43,12 @@ impl TestBackend {
         commands: Vec<SlashCommandInfo>,
     ) -> Self {
         Self {
+            approval_accepted: false,
+            approval_waits: false,
+            approval_responses: Vec::new(),
+            input_result: Ok(()),
+            input_responses: Vec::new(),
+            restored_questions: Vec::new(),
             rename_outcome: RenameOutcome::Unsupported,
             interrupt_accepted: false,
             resume_accepted: false,

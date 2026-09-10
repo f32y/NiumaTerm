@@ -6,6 +6,7 @@ mod attachments;
 mod backend;
 pub mod branch;
 pub mod delivery;
+pub mod input;
 pub mod lifecycle;
 pub mod restore;
 #[cfg(any(test, feature = "test-support"))]

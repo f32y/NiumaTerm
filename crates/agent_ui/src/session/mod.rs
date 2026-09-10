@@ -57,7 +57,6 @@ use crate::composer::{BranchFlow, CommandFeedbackKind, prompt_with_response_anno
 use crate::fade::Fade;
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
 use crate::profile::{AgentKind, agent_launch};
-use crate::questions::QuestionStatus;
 pub use crate::session::update_recovery::RecoveryReadiness;
 use crate::settings::AgentSettings;
 use crate::transcript::TranscriptView;
@@ -535,6 +534,8 @@ impl AgentPane {
         // The previous attempt's reason describes a backend nobody is waiting
         // on any more, and this start is what the pane now reports.
         let epoch = self.runtime.begin_start();
+        self.prompts.core.starting(epoch);
+        self.prompts.release_secret_editors();
         self.restore.starting(epoch, recovery.as_ref());
         if !self.branch.core.starting(epoch, recovery.as_ref()) {
             self.branch.clear();
@@ -735,6 +736,8 @@ impl AgentPane {
                     );
                 }
 
+                this.prompts.core.disconnect();
+                this.prompts.release_secret_editors();
                 this.delivery.exited();
                 this.publish_queued_user_messages(cx);
                 this.finish_working(cx);
@@ -856,12 +859,7 @@ impl AgentPane {
         restore_on_interrupt: Option<(String, Vec<String>)>,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self
-            .prompts
-            .batches
-            .iter()
-            .any(|prompt| prompt.status == QuestionStatus::Submitting)
-        {
+        if self.prompts.core.has_submission() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Notice,
                 i18n("agent-question-send-pending"),

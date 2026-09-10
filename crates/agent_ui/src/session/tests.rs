@@ -454,6 +454,7 @@ mod conversation_title_tests {
                     StartOutcome::Installed
                 ));
 
+                pane.prompts.core.restore(&mut pane.runtime);
                 pane.apply_event(
                     Event::ApprovalRequested {
                         description: "Run a command".into(),
@@ -466,6 +467,10 @@ mod conversation_title_tests {
 
                 pane.apply_event(Event::ApprovalResolved, cx);
                 pane.runtime.ready();
+                pane.restore_question_drafts();
+                if let Some(Backend::Test(backend)) = pane.runtime.backend_mut() {
+                    backend.input_result = Err("The question response could not be queued.".into());
+                }
                 pane.apply_event(
                     Event::QuestionsRequested {
                         questions: vec![Question {
@@ -485,7 +490,7 @@ mod conversation_title_tests {
                     .questions()
                     .expect("rejected answer remains visible");
 
-                assert!(question.error.is_some());
+                assert!(question.error().is_some());
             });
         });
     }

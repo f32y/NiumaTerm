@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use gpui::prelude::*;
 use gpui::{AnyElement, Context, FontWeight, MouseButton, SharedString, Window, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
@@ -5,11 +7,11 @@ use gpui_component::checkbox::Checkbox;
 use gpui_component::radio::Radio;
 use gpui_component::{ActiveTheme as _, Disableable as _, Sizable as _, h_flex, v_flex};
 use nmt_agent::chat::{QuestionInput, QuestionMode};
+use nmt_agent::session::input::QuestionError;
 use nmt_i18n::i18n;
 
 use crate::AgentPane;
 use crate::questions::QuestionStatus;
-use crate::session::Status;
 use crate::settings::UI_RADIUS;
 
 impl AgentPane {
@@ -31,20 +33,14 @@ impl AgentPane {
         let collapsed = self.prompts.collapsed;
         let pending = prompt.pending();
 
-        let enabled = prompt.status == QuestionStatus::Pending
-            && matches!(self.runtime.status(), Status::Idle | Status::Running)
-            && self.runtime.update_suspension().is_none()
+        let enabled = self.prompts.core.can_submit(&self.runtime, prompt.key())
             && !self.branch_flow_holds_composer()
-            && !self.palette.awaiting_command_turn
-            && !self
-                .prompts
-                .batches
-                .iter()
-                .any(|prompt| prompt.status == QuestionStatus::Submitting);
+            && !self.palette.awaiting_command_turn;
+        let presentation = &self.prompts.presentations[active];
 
-        let status = match prompt.status {
+        let status = match prompt.status() {
             QuestionStatus::Pending => {
-                if prompt.mode == QuestionMode::Async {
+                if prompt.mode() == QuestionMode::Async {
                     "agent-question-async"
                 } else {
                     "agent-question-pending"
@@ -74,7 +70,8 @@ impl AgentPane {
 
         let candidates: Vec<usize> = self
             .prompts
-            .batches
+            .core
+            .batches()
             .iter()
             .enumerate()
             .filter_map(|(index, prompt)| (prompt.pending() || index == active).then_some(index))
@@ -167,7 +164,7 @@ impl AgentPane {
 
         let mut rows = Vec::new();
 
-        for (index, question) in prompt.questions.iter().enumerate() {
+        for (index, question) in prompt.questions().iter().enumerate() {
             let group: SharedString = format!("question-{active}-{index}").into();
 
             let mut row = v_flex()
@@ -224,8 +221,8 @@ impl AgentPane {
                         .py_0p5()
                         .rounded(UI_RADIUS)
                         .when(
-                            prompt.is_focused(index, option_index)
-                                && prompt.mode != QuestionMode::Async
+                            presentation.is_focused(index, option_index)
+                                && prompt.mode() != QuestionMode::Async
                                 && enabled,
                             |this| this.bg(cx.theme().list_active),
                         )
@@ -238,17 +235,19 @@ impl AgentPane {
                     row = row.child(
                         Radio::new((group.clone(), question.options.len()))
                             .label(i18n("agent-question-custom"))
-                            .checked(prompt.custom[index])
+                            .checked(prompt.is_custom(index))
                             .disabled(!enabled)
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 if let Some(prompt) = this.prompts.questions_mut() {
-                                    prompt.custom[index] = true;
-                                    prompt.touch();
-
-                                    if let Some(editor) = &prompt.editors[index] {
+                                    if !prompt.choose_custom(index) {
+                                        return;
+                                    }
+                                    if let Some(active) = this.prompts.active
+                                        && let Some(editor) =
+                                            &this.prompts.presentations[active].editors[index]
+                                    {
                                         editor.state.focus(window, cx);
                                     }
-
                                     cx.notify();
                                 }
                             })),
@@ -256,10 +255,10 @@ impl AgentPane {
                 }
 
                 if pending {
-                    if let Some(editor) = &prompt.editors[index] {
+                    if let Some(editor) = &presentation.editors[index] {
                         row = row.child(editor.state.render(!enabled));
                     }
-                } else if prompt.status == QuestionStatus::Submitted && prompt.custom[index] {
+                } else if prompt.status() == QuestionStatus::Submitted && prompt.is_custom(index) {
                     row = row.child(
                         div()
                             .text_sm()
@@ -267,7 +266,7 @@ impl AgentPane {
                             .child(if question.input == QuestionInput::Secret {
                                 i18n("agent-question-secret-submitted").to_string()
                             } else {
-                                prompt.text[index].clone()
+                                prompt.text(index).to_string()
                             }),
                     );
                 }
@@ -286,17 +285,16 @@ impl AgentPane {
                 .children(rows),
         );
 
-        if let Some(error) = &prompt.error {
-            panel = panel.child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().danger)
-                    .child(error.clone()),
-            );
+        if let Some(error) = prompt.error() {
+            let error = match error {
+                QuestionError::Disconnected => i18n("agent-question-disconnected").to_string(),
+                QuestionError::Rejected(message) => message.clone(),
+            };
+            panel = panel.child(div().text_sm().text_color(cx.theme().danger).child(error));
         }
 
         if let Some(remaining) = prompt
-            .auto_resolve_remaining()
+            .auto_resolve_remaining(Instant::now())
             .filter(|remaining| remaining.as_secs() <= 60)
         {
             panel = panel.child(
@@ -324,7 +322,7 @@ impl AgentPane {
                     Button::new("question-skip")
                         .ghost()
                         .disabled(!enabled)
-                        .label(i18n(if prompt.mode == QuestionMode::Async {
+                        .label(i18n(if prompt.mode() == QuestionMode::Async {
                             "agent-question-dismiss"
                         } else {
                             "agent-question-skip"

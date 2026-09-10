@@ -17,7 +17,7 @@ use crate::claude_code::workflows::{
 use crate::codex::app_server;
 use crate::session::attachments::{inline_images, write_attachments};
 #[cfg(any(test, feature = "test-support"))]
-use crate::session::test_support::TestBackend;
+use crate::session::test_support::{InputResponse, TestBackend};
 use crate::session::{AgentKind, ImageAttachment, OperationError, UnsupportedOperation};
 use crate::{AgentWorkspace, LaunchConfig, deepseek};
 
@@ -576,7 +576,12 @@ impl Backend {
             Backend::Claude(session) => session.respond_approval(decision),
             Backend::DeepSeek(session) => session.respond_approval(decision),
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(_) => false,
+            Backend::Test(session) => {
+                if session.approval_accepted {
+                    session.approval_responses.push(decision.to_owned());
+                }
+                session.approval_accepted
+            }
         }
     }
 
@@ -659,8 +664,11 @@ impl Backend {
     }
 
     pub fn restore_question_requests(&mut self, requests: Vec<QuestionRequest>) {
-        if let Backend::Codex(session) = self {
-            session.restore_question_requests(requests);
+        match self {
+            Backend::Codex(session) => session.restore_question_requests(requests),
+            #[cfg(any(test, feature = "test-support"))]
+            Backend::Test(session) => session.restored_questions = requests,
+            _ => {}
         }
     }
 
@@ -673,6 +681,15 @@ impl Backend {
         match self {
             Backend::Codex(session) => session.respond_input(id, answers, settings),
             Backend::DeepSeek(session) => session.respond_input(id, answers),
+            #[cfg(any(test, feature = "test-support"))]
+            Backend::Test(session) => {
+                session.input_result.clone()?;
+                session.input_responses.push(InputResponse {
+                    id: Some(id.to_owned()),
+                    answers,
+                });
+                Ok(())
+            }
             _ => Err("This session cannot answer that question".to_string()),
         }
     }
@@ -684,7 +701,16 @@ impl Backend {
             Backend::DeepSeek(session) => session.respond_questions(answers),
             Backend::Codex(_) => false,
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(_) => false,
+            Backend::Test(session) => {
+                if session.input_result.is_ok() {
+                    session
+                        .input_responses
+                        .push(InputResponse { id: None, answers });
+                    true
+                } else {
+                    false
+                }
+            }
         }
     }
 }

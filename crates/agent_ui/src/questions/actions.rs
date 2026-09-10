@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui::prelude::*;
 use gpui::{Context, Window};
@@ -7,40 +7,28 @@ use nmt_agent::AgentEventKind;
 use nmt_agent::chat::{
     Item, Question, QuestionInput, QuestionMode, QuestionRequest, QuestionResolution,
 };
+use nmt_agent::session::input::{QuestionAction, QuestionKey, Submission};
 use nmt_i18n::i18n;
 
 use crate::AgentPane;
 use crate::composer::PaletteControl;
-use crate::questions::{QuestionEditor, QuestionEditorState, QuestionPrompt, QuestionStatus};
+use crate::questions::{QuestionEditor, QuestionEditorState, QuestionStatus};
 use crate::session::Status;
 
 impl AgentPane {
     pub(crate) fn receive_questions(&mut self, request: QuestionRequest, cx: &mut Context<Self>) {
-        let id = request.id.clone();
-
-        if self.prompts.batches.iter().any(|prompt| {
-            prompt.id.as_deref() == Some(id.as_str()) && prompt.status != QuestionStatus::History
-        }) {
-            return;
-        }
-
         let optional = request.mode == QuestionMode::Optional;
         let waiting = request.mode != QuestionMode::Async;
-
-        let description = request
-            .questions
+        let Some(index) = self.prompts.receive(&self.runtime, request) else {
+            return;
+        };
+        let prompt = &self.prompts.core.batches()[index];
+        let key = prompt.key();
+        let description = prompt
+            .questions()
             .first()
             .map(|question| question.question.clone())
             .unwrap_or_default();
-
-        let mut prompt = QuestionPrompt::from_request(request);
-
-        prompt.thread_id = self
-            .runtime
-            .backend()
-            .and_then(|backend| backend.recovery_identity())
-            .map(|identity| identity.id);
-        self.prompts.ask_questions(prompt);
 
         if waiting {
             self.emit_lifecycle(
@@ -69,22 +57,20 @@ impl AgentPane {
                         return false;
                     }
 
-                    let Some(index) = this
+                    let Some(prompt) = this
                         .prompts
-                        .batches
+                        .core
+                        .batches()
                         .iter()
-                        .position(|prompt| prompt.id.as_deref() == Some(id.as_str()))
+                        .find(|prompt| prompt.key() == key)
                     else {
                         return false;
                     };
-
-                    let Some(remaining) = this.prompts.batches[index].auto_resolve_remaining()
-                    else {
+                    let Some(remaining) = prompt.auto_resolve_remaining(Instant::now()) else {
                         return false;
                     };
-
                     if remaining.is_zero() {
-                        this.submit_question(index, None, cx);
+                        this.submit_question(key, QuestionAction::Timeout, cx);
                         return false;
                     }
 
@@ -107,50 +93,24 @@ impl AgentPane {
         resolution: QuestionResolution,
         cx: &mut Context<Self>,
     ) {
-        let Some(index) = self
+        let Some(completion) = self
             .prompts
-            .batches
-            .iter()
-            .position(|prompt| prompt.id.as_deref() == Some(id))
+            .core
+            .resolve(self.runtime.epoch(), id, resolution)
         else {
             return;
         };
-
-        let waiting = self.prompts.batches[index].mode != QuestionMode::Async;
-
-        let status = match resolution {
-            QuestionResolution::Submitted {
-                message,
-                started_turn,
-            } => {
-                if let Some(text) = message {
-                    if started_turn && self.runtime.status() == Status::Idle {
-                        self.delivery.begin_turn();
-                        self.start_working(cx);
-                        self.runtime.turn_started();
-                        self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
-                    }
-
-                    self.push_item(Item::UserMessage { text: Some(text) }, cx);
-                }
-
-                QuestionStatus::Submitted
+        if let Some(text) = completion.message {
+            if completion.started_turn && self.runtime.status() == Status::Idle {
+                self.delivery.begin_turn();
+                self.start_working(cx);
+                self.runtime.turn_started();
+                self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
             }
-            QuestionResolution::Skipped => QuestionStatus::Skipped,
-            QuestionResolution::Expired => QuestionStatus::Expired,
-        };
-
-        self.prompts.batches[index].settle(status);
+            self.push_item(Item::UserMessage { text: Some(text) }, cx);
+        }
         self.prompts.hide_settled();
-
-        if waiting
-            && !self
-                .prompts
-                .batches
-                .iter()
-                .any(|prompt| prompt.pending() && prompt.mode != QuestionMode::Async)
-            && !self.prompts.approval_open()
-        {
+        if completion.waiting_finished {
             self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
         }
 
@@ -164,18 +124,13 @@ impl AgentPane {
         message: String,
         cx: &mut Context<Self>,
     ) {
-        if let Some(prompt) = self
+        if self
             .prompts
-            .batches
-            .iter_mut()
-            .find(|prompt| prompt.id.as_deref() == Some(id))
+            .core
+            .submission_failed(self.runtime.epoch(), id, message)
         {
-            prompt.status = QuestionStatus::Pending;
-            prompt.error = Some(message);
-            prompt.touch();
+            cx.notify();
         }
-
-        cx.notify();
     }
 
     pub(crate) fn open_message_questions(
@@ -184,33 +139,7 @@ impl AgentPane {
         questions: Vec<Question>,
         cx: &mut Context<Self>,
     ) {
-        let id = format!("message:{item_id}");
-
-        let index = match self
-            .prompts
-            .batches
-            .iter()
-            .position(|prompt| prompt.id.as_deref() == Some(id.as_str()))
-        {
-            Some(index) => index,
-            None => {
-                let mut prompt = QuestionPrompt::from_request(QuestionRequest {
-                    id,
-                    questions,
-                    mode: QuestionMode::Async,
-                });
-
-                prompt.status = QuestionStatus::History;
-                prompt.selected.iter_mut().for_each(Vec::clear);
-                self.prompts.batches.push(prompt);
-
-                self.prompts.batches.len() - 1
-            }
-        };
-
-        self.prompts.active = Some(index);
-        self.prompts.collapsed = false;
-        self.prompts.batches[index].touch();
+        self.prompts.open_history(item_id, questions);
         cx.notify();
     }
 
@@ -222,6 +151,9 @@ impl AgentPane {
     ) {
         if let Some(prompt) = self.prompts.questions_mut() {
             prompt.toggle(question, option);
+            if let Some(active) = self.prompts.active {
+                self.prompts.presentations[active].focus = (question, option);
+            }
             cx.notify();
         }
     }
@@ -235,32 +167,31 @@ impl AgentPane {
             return false;
         }
 
-        let Some(prompt) = self.prompts.questions_mut() else {
+        let Some(index) = self.prompts.active else {
             return false;
         };
-
-        // Async drafts leave the composer's normal keyboard shortcuts available.
-        if prompt.mode == QuestionMode::Async || prompt.status != QuestionStatus::Pending {
+        let key = self.prompts.core.batches()[index].key();
+        let Some(prompt) = self.prompts.core.draft_mut(key) else {
+            return false;
+        };
+        if prompt.mode() == QuestionMode::Async || prompt.status() != QuestionStatus::Pending {
             return false;
         }
-
+        let presentation = &mut self.prompts.presentations[index];
         let handled = match control {
-            PaletteControl::Previous => prompt.move_focus(false),
-            PaletteControl::Next => prompt.move_focus(true),
+            PaletteControl::Previous => presentation.move_focus(prompt, false),
+            PaletteControl::Next => presentation.move_focus(prompt, true),
             PaletteControl::Activate => {
-                let (question, option) = prompt.focus;
-
+                let (question, option) = presentation.focus;
                 if prompt
-                    .questions
+                    .questions()
                     .get(question)
                     .and_then(|question| question.options.get(option))
                     .is_none()
                 {
                     return false;
                 }
-
                 prompt.toggle(question, option);
-
                 true
             }
             PaletteControl::Complete | PaletteControl::Dismiss => false,
@@ -275,133 +206,47 @@ impl AgentPane {
     }
 
     pub(crate) fn submit_current_questions(&mut self, cx: &mut Context<Self>) {
-        let Some(index) = self.prompts.active else {
-            return;
-        };
-        let prompt = &self.prompts.batches[index];
-
-        if prompt.status != QuestionStatus::Pending || !prompt.is_complete() {
-            return;
+        if let Some(prompt) = self.prompts.questions() {
+            self.submit_question(prompt.key(), QuestionAction::Answer, cx);
         }
-
-        let answers = prompt.answers();
-
-        self.submit_question(index, Some(answers), cx);
     }
 
     pub(crate) fn skip_current_questions(&mut self, cx: &mut Context<Self>) {
-        if let Some(index) = self.prompts.active {
-            self.submit_question(index, None, cx);
+        if let Some(prompt) = self.prompts.questions() {
+            self.submit_question(prompt.key(), QuestionAction::Skip, cx);
         }
     }
 
     fn submit_question(
         &mut self,
-        index: usize,
-        answers: Option<Vec<Vec<String>>>,
+        key: QuestionKey,
+        action: QuestionAction,
         cx: &mut Context<Self>,
     ) {
-        if !matches!(self.runtime.status(), Status::Idle | Status::Running)
-            || self.runtime.update_suspension().is_some()
-            || self.branch_flow_holds_composer()
-            || self.palette.awaiting_command_turn
-        {
+        if self.branch_flow_holds_composer() || self.palette.awaiting_command_turn {
             return;
         }
-
-        let prompt = &self.prompts.batches[index];
-
-        if prompt.status != QuestionStatus::Pending
-            || self
-                .prompts
-                .batches
-                .iter()
-                .any(|prompt| prompt.status == QuestionStatus::Submitting)
-        {
-            return;
+        let waiting = self.prompts.core.waiting();
+        match self.prompts.core.submit(
+            &mut self.runtime,
+            key,
+            action,
+            &self.controls.settings,
+            Instant::now(),
+        ) {
+            Submission::Ignored => return,
+            Submission::Settled if waiting && !self.prompts.core.waiting() => {
+                self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
+            }
+            Submission::Settled | Submission::Waiting | Submission::Failed => {}
         }
-
-        let id = prompt.id.clone();
-        let mode = prompt.mode;
-        let skipped = answers.is_none();
-        let Some(backend) = self.runtime.backend_mut() else {
-            return;
-        };
-
-        let result = match id.as_deref() {
-            Some(id) => backend.respond_input(id, answers, &self.controls.settings),
-            None => {
-                if backend.respond_questions(answers) {
-                    Ok(())
-                } else {
-                    Err("The question response could not be queued.".to_string())
-                }
-            }
-        };
-
-        let prompt = &mut self.prompts.batches[index];
-
-        prompt.touch();
-
-        match result {
-            Ok(()) => {
-                prompt.error = None;
-
-                if id.is_none() || (mode == QuestionMode::Async && skipped) {
-                    prompt.settle(if skipped {
-                        QuestionStatus::Skipped
-                    } else {
-                        QuestionStatus::Submitted
-                    });
-
-                    if mode != QuestionMode::Async {
-                        self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
-                    }
-                } else {
-                    prompt.status = QuestionStatus::Submitting;
-                }
-            }
-            Err(message) => {
-                prompt.error = Some(message);
-            }
-        }
-
         self.prompts.hide_settled();
         cx.notify();
     }
 
     pub(crate) fn restore_question_drafts(&mut self) {
-        let Some(backend) = self.runtime.backend_mut() else {
-            return;
-        };
-        let thread_id = backend.recovery_identity().map(|identity| identity.id);
-        let mut requests = Vec::new();
-
-        for prompt in &mut self.prompts.batches {
-            prompt.reset_editors();
-
-            if !prompt.pending() || prompt.id.is_none() {
-                continue;
-            }
-
-            if prompt.thread_id != thread_id || prompt.mode != QuestionMode::Async {
-                prompt.settle(QuestionStatus::Expired);
-                continue;
-            }
-
-            if prompt.status == QuestionStatus::Submitting {
-                prompt.status = QuestionStatus::Pending;
-                prompt.error = Some(i18n("agent-question-disconnected").to_string());
-            }
-
-            requests.push(QuestionRequest {
-                id: prompt.id.clone().unwrap_or_default(),
-                mode: prompt.mode,
-                questions: prompt.questions.clone(),
-            });
-        }
-
-        backend.restore_question_requests(requests);
+        self.prompts.core.restore(&mut self.runtime);
+        self.prompts.reset_editors();
     }
 
     pub(crate) fn prepare_question_editors(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -412,20 +257,21 @@ impl AgentPane {
         let Some(batch) = self.prompts.active else {
             return;
         };
-        let count = self.prompts.batches[batch].questions.len();
+        let count = self.prompts.core.batches()[batch].questions().len();
 
         for index in 0..count {
-            let prompt = &self.prompts.batches[batch];
-            let input = prompt.questions[index].input;
+            let prompt = &self.prompts.core.batches()[batch];
+            let input = prompt.questions()[index].input;
 
             if input == QuestionInput::SelectionOnly
-                || prompt.editors[index].is_some()
+                || self.prompts.presentations[batch].editors[index].is_some()
                 || !prompt.pending()
             {
                 continue;
             }
 
-            let text = prompt.text[index].clone();
+            let text = prompt.text(index).to_string();
+            let key = prompt.key();
             let epoch = self.runtime.epoch();
 
             let on_change = move |this: &mut Self, value: String, cx: &mut Context<Self>| {
@@ -433,21 +279,12 @@ impl AgentPane {
                     return;
                 }
 
-                let Some(prompt) = this.prompts.batches.get_mut(batch) else {
+                let Some(prompt) = this.prompts.core.draft_mut(key) else {
                     return;
                 };
-
-                if prompt.status != QuestionStatus::Pending {
+                if !prompt.set_text(index, value) {
                     return;
                 }
-
-                if prompt.text[index] == value {
-                    return;
-                }
-
-                prompt.text[index] = value;
-                prompt.custom[index] = true;
-                prompt.touch();
                 cx.notify();
             };
 
@@ -483,7 +320,7 @@ impl AgentPane {
                 (QuestionEditorState::Text(state), subscription)
             };
 
-            self.prompts.batches[batch].editors[index] = Some(QuestionEditor {
+            self.prompts.presentations[batch].editors[index] = Some(QuestionEditor {
                 state,
                 _subscription: subscription,
             });

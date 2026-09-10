@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use gpui::{Context, Window};
 use nmt_agent::AgentEventKind;
-use nmt_agent::session::Backend;
+use nmt_agent::session::input::ApprovalOutcome;
 use nmt_agent::session::lifecycle::InterruptOutcome;
 
 use crate::composer::{CommandFeedbackKind, restored_input_after_interruption};
@@ -157,22 +157,23 @@ impl AgentPane {
     }
 
     pub(crate) fn respond_approval(&mut self, decision: &str, cx: &mut Context<Self>) {
-        let accepted = self
-            .runtime
-            .backend_mut()
-            .is_some_and(|session| session.respond_approval(decision));
-
-        if accepted {
-            if !matches!(self.runtime.backend(), Some(Backend::DeepSeek(_))) {
-                self.prompts.dismiss_approval();
+        match self
+            .prompts
+            .core
+            .respond_approval(&mut self.runtime, decision)
+        {
+            ApprovalOutcome::Ignored => return,
+            ApprovalOutcome::Settled => {
                 self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
             }
-        } else {
-            self.palette.set_feedback(
-                CommandFeedbackKind::Error,
-                "The approval response could not be queued.",
-                cx,
-            );
+            ApprovalOutcome::Waiting => {}
+            ApprovalOutcome::Rejected => {
+                self.palette.set_feedback(
+                    CommandFeedbackKind::Error,
+                    "The approval response could not be queued.",
+                    cx,
+                );
+            }
         }
 
         cx.notify();

@@ -4,8 +4,8 @@ use gpui::Context;
 use nmt_agent::AgentEventKind;
 use nmt_agent::background_task::BackgroundTaskSnapshot;
 use nmt_agent::chat::{
-    Event as SessionEvent, Item as SessionItem, QuestionMode, QueuedPrompt, ReplayTurn,
-    SessionSummary, SlashCommandOutcome, ThreadSettings, TurnActivity,
+    Event as SessionEvent, Item as SessionItem, QueuedPrompt, ReplayTurn, SessionSummary,
+    SlashCommandOutcome, ThreadSettings, TurnActivity,
 };
 use nmt_agent::session::branch::BranchReplay;
 use nmt_agent::session::restore::{ReadyAction, ReplayAction};
@@ -14,7 +14,6 @@ use tracing::info;
 
 use crate::capabilities::AgentCapabilities as _;
 use crate::composer::CommandFeedbackKind;
-use crate::questions::{QuestionPrompt, QuestionStatus};
 use crate::session::{Backend, RecoverySnapshot, Status};
 use crate::thread_controls::{launch_effort, launch_model, stored_thread_settings};
 use crate::transcript::hidden;
@@ -184,13 +183,14 @@ impl AgentPane {
                     &description,
                     cx,
                 );
-                self.prompts.ask_approval(description);
+                self.prompts.core.ask_approval(description);
                 cx.notify();
             }
             SessionEvent::ApprovalResolved => {
-                self.prompts.dismiss_approval();
-                self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
-                cx.notify();
+                if self.prompts.core.resolve_approval(self.runtime.epoch()) {
+                    self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
+                    cx.notify();
+                }
             }
             SessionEvent::QuestionsRequested { questions } => {
                 self.note_visible_output();
@@ -205,7 +205,7 @@ impl AgentPane {
                         .map_or("", |question| question.question.as_str()),
                     cx,
                 );
-                self.prompts.ask_questions(QuestionPrompt::new(questions));
+                self.prompts.ask_questions(questions);
                 cx.notify();
             }
             SessionEvent::Workflows(snapshot) => {
@@ -226,17 +226,11 @@ impl AgentPane {
                 self.question_submission_failed(&id, message, cx)
             }
             SessionEvent::QuestionsResolved => {
-                if let Some(prompt) = self
-                    .prompts
-                    .batches
-                    .iter_mut()
-                    .find(|prompt| prompt.id.is_none() && prompt.pending())
-                {
-                    prompt.settle(QuestionStatus::Expired);
+                if self.prompts.core.resolve_legacy(self.runtime.epoch()) {
+                    self.prompts.hide_settled();
+                    self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
+                    cx.notify();
                 }
-
-                self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
-                cx.notify();
             }
             SessionEvent::FileRewindCompleted { error } => {
                 let update = self
@@ -578,14 +572,8 @@ impl AgentPane {
         let cancelled_queue = fatal && !self.palette.command_queue.is_empty();
 
         if fatal {
-            for prompt in &mut self.prompts.batches {
-                if prompt.mode == QuestionMode::Async && prompt.pending() {
-                    prompt.status = QuestionStatus::Pending;
-                    prompt.error = Some(i18n("agent-question-disconnected").to_string());
-                } else if prompt.pending() {
-                    prompt.settle(QuestionStatus::Expired);
-                }
-            }
+            self.prompts.core.disconnect();
+            self.prompts.release_secret_editors();
 
             cx.emit(AgentPaneEvent::Interrupted);
             self.runtime.exited(&message);
