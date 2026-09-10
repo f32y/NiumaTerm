@@ -5,6 +5,7 @@ pub mod codex;
 pub mod deepseek;
 pub mod git;
 pub mod launcher;
+pub mod message_memory;
 pub mod update;
 pub mod usage;
 pub mod workflow;

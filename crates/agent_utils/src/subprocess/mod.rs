@@ -2,7 +2,7 @@
 //! Job Object containment and the newline-delimited-JSON process shape used
 //! by the chat sessions.
 
-use std::io::{BufRead as _, BufReader, Write as _};
+use std::io::{BufReader, Write as _};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::thread;
@@ -10,12 +10,15 @@ use std::time::{Duration, Instant};
 
 use nmt_platform::process::{KillOnCloseJob, decode_child_output};
 use parking_lot::Mutex;
-use serde_json::Value;
+use serde_json::{Value, json};
 use tracing::warn;
 
 mod input;
+mod output;
+use crate::message_memory::OUTPUT_FAILURE_METHOD;
 use crate::subprocess::input::InputQueue;
 pub(crate) use crate::subprocess::input::{InputClass, InputError};
+use crate::subprocess::output::{MAX_STDERR_CHUNK, MAX_STDOUT_LINE, read_piece};
 
 /// A spawned agent CLI with piped stdio, kill-on-close containment, and
 /// newline-delimited JSON output. Stdout lines that parse as JSON are handed
@@ -108,9 +111,26 @@ impl JsonLineProcess {
             })
             .map_err(|error| format!("could not start {provider} input writer: {error}"))?;
 
+        let reader_job = Arc::clone(&job);
         thread::spawn(move || {
-            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                if let Ok(message) = serde_json::from_str::<Value>(&line) {
+            let mut reader = BufReader::new(stdout);
+            loop {
+                let line = match read_piece(&mut reader, MAX_STDOUT_LINE) {
+                    Ok(line) if line.is_empty() => break,
+                    Ok(line) if line.len() < MAX_STDOUT_LINE || line.last() == Some(&b'\n') => line,
+                    result => {
+                        let message = match result {
+                            Err(error) => format!("Agent output read failed: {error}"),
+                            _ => "Agent output line exceeded the 8 MiB limit; the process was stopped.".to_string(),
+                        };
+                        deliver(
+                            json!({"method": OUTPUT_FAILURE_METHOD, "params": {"message": message}}),
+                        );
+                        reader_job.lock().take();
+                        break;
+                    }
+                };
+                if let Ok(message) = serde_json::from_slice::<Value>(&line) {
                     deliver(message);
                 }
             }
@@ -118,9 +138,14 @@ impl JsonLineProcess {
         });
 
         thread::spawn(move || {
-            for line in BufReader::new(stderr).split(b'\n').map_while(Result::ok) {
+            let mut reader = BufReader::new(stderr);
+            while let Ok(line) = read_piece(&mut reader, MAX_STDERR_CHUNK) {
+                if line.is_empty() {
+                    break;
+                }
+                let line = line.strip_suffix(b"\n").unwrap_or(&line);
                 on_stderr(decode_child_output(
-                    line.strip_suffix(b"\r").unwrap_or(&line),
+                    line.strip_suffix(b"\r").unwrap_or(line),
                 ));
             }
         });

@@ -365,6 +365,26 @@ mod conversation_title_tests {
     }
 
     #[gpui::test]
+    fn output_failure_retires_backend_and_marks_session_exited(cx: &mut TestAppContext) {
+        let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.runtime.epoch += 1;
+                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
+                    [],
+                    SlashCommandOutcome::NotReady,
+                    vec![],
+                )));
+                pane.runtime.status = Status::Running;
+                pane.stop_for_output_failure("Output limit reached".into(), cx);
+                assert!(pane.runtime.backend.is_none());
+                assert_eq!(pane.runtime.status, Status::Exited);
+            });
+        });
+    }
+
+    #[gpui::test]
     fn rejected_rename_keeps_latest_name_until_admitted(cx: &mut TestAppContext) {
         use crate::profile::AgentKind;
         use crate::session::backend::RenameOutcome;

@@ -13,6 +13,7 @@ mod background_tasks;
 mod conversation;
 mod events;
 mod history;
+mod inbox;
 mod output;
 pub(crate) mod prompts;
 mod request_timeouts;
@@ -27,7 +28,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{env, fs};
 
-use futures::channel::mpsc;
 use gpui::{App, Context, Image, Window};
 use gpui_component::input::{InputEvent, TextareaState};
 use nmt_agent_utils::chat::{
@@ -41,7 +41,6 @@ use nmt_agent_utils::{
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
 use nmt_i18n::i18n;
 use nmt_platform::filesystem::path_identity;
-use serde_json::Value;
 use tracing::info;
 
 use crate::capabilities::QueuedPromptDelivery;
@@ -563,10 +562,10 @@ impl AgentPane {
         self.palette.skill_binding = None;
         let epoch = self.runtime.epoch;
 
-        let (tx, rx) = mpsc::unbounded::<Value>();
+        let (tx, rx) = inbox::channel();
         let mut batches = rx.ready_chunks(MAX_MESSAGES_PER_BATCH);
         let deliver = move |message| {
-            let _ = tx.unbounded_send(message);
+            tx.send(message);
         };
         let mut launch = agent_launch(&self.profile);
         // A backend that builds its system prompt from the model it resolves at
@@ -655,8 +654,16 @@ impl AgentPane {
                             if !is_current_session_epoch(this.runtime.epoch, epoch) {
                                 return false;
                             }
+                            let mut message = match message {
+                                Ok(message) => message,
+                                Err(error) => {
+                                    events.flush(|event| this.apply_event(event, cx));
+                                    this.stop_for_output_failure(error, cx);
+                                    return false;
+                                }
+                            };
                             let next_events = match this.runtime.backend.as_mut() {
-                                Some(session) => session.process(message),
+                                Some(session) => session.process(message.take()),
                                 None => Vec::new(),
                             };
                             for event in next_events {

@@ -1,9 +1,10 @@
-use std::mem::size_of;
 use std::sync::{Arc, mpsc};
 
 use parking_lot::Mutex;
 use serde_json::Value;
 use thiserror::Error;
+
+use crate::message_memory::retained_bytes as estimated_bytes;
 
 const MAX_MESSAGES: usize = 64;
 const MAX_BYTES: usize = 32 * 1024 * 1024;
@@ -112,27 +113,6 @@ impl InputQueue {
                 mpsc::TrySendError::Disconnected(_) => InputError::Closed,
             })
     }
-}
-
-/// Charge retained string capacity and JSON container overhead without encoding
-/// or copying payloads on the caller thread. This is a memory estimate, not an
-/// encoded line length or an allocator-level limit on process memory.
-fn estimated_bytes(value: &Value) -> usize {
-    let heap = match value {
-        Value::String(text) => text.capacity(),
-        Value::Array(values) => values.iter().fold(
-            values.capacity().saturating_mul(size_of::<Value>()),
-            |total, value| total.saturating_add(estimated_bytes(value)),
-        ),
-        Value::Object(values) => values.iter().fold(0usize, |total, (key, value)| {
-            total
-                .saturating_add(256)
-                .saturating_add(key.capacity())
-                .saturating_add(estimated_bytes(value))
-        }),
-        _ => 0,
-    };
-    size_of::<Value>().saturating_add(heap)
 }
 
 #[cfg(test)]
