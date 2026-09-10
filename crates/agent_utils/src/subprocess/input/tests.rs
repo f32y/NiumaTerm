@@ -1,10 +1,68 @@
 use std::mem::size_of;
+use std::sync::Barrier;
+use std::thread;
 
 use serde_json::{Value, json};
 
 use crate::subprocess::input::{
     InputClass, InputError, InputQueue, MAX_BYTES, MAX_MESSAGES, RESERVED_BYTES, RESERVED_MESSAGES,
 };
+
+#[test]
+fn cancelled_payloads_release_bytes_and_slots_while_a_write_is_active() {
+    let (queue, receiver) = InputQueue::new();
+    queue
+        .submit(vec![json!("active")], InputClass::Normal)
+        .unwrap();
+    let writing = receiver.recv().unwrap();
+    let active_bytes = queue.budget.lock().bytes;
+    for _ in 0..MAX_MESSAGES * 3 {
+        let ticket = queue
+            .submit_tracked(vec![json!("x".repeat(MAX_BYTES / 2))], InputClass::Normal)
+            .unwrap();
+        assert!(matches!(
+            queue.submit(vec![json!("x".repeat(MAX_BYTES / 2))], InputClass::Normal),
+            Err(InputError::ByteLimit)
+        ));
+        assert!(ticket.cancel());
+        assert_eq!(queue.budget.lock().bytes, active_bytes);
+        assert_eq!(queue.budget.lock().messages, 1);
+        assert!(queue.queue.state.lock().pending.is_empty());
+    }
+    drop(writing);
+    assert_eq!(queue.budget.lock().bytes, 0);
+}
+
+#[test]
+fn cancellation_and_writer_start_have_exactly_one_winner() {
+    for _ in 0..128 {
+        let (queue, receiver) = InputQueue::new();
+        let ticket = queue
+            .submit_tracked(vec![json!("message")], InputClass::Normal)
+            .unwrap();
+        let barrier = Barrier::new(2);
+        thread::scope(|scope| {
+            let cancel = scope.spawn(|| {
+                barrier.wait();
+                ticket.cancel()
+            });
+            barrier.wait();
+            let writing = receiver.try_recv().ok();
+            assert_ne!(cancel.join().unwrap(), writing.is_some());
+        });
+        assert_eq!(queue.budget.lock().messages, 0);
+        assert_eq!(queue.budget.lock().bytes, 0);
+    }
+}
+
+#[test]
+fn sender_close_drains_accepted_input_then_wakes_the_receiver() {
+    let (queue, receiver) = InputQueue::new();
+    queue.submit(vec![json!(1)], InputClass::Normal).unwrap();
+    drop(queue);
+    assert_eq!(receiver.recv().unwrap().messages, [json!(1)]);
+    assert!(receiver.recv().is_err());
+}
 
 #[test]
 fn cancellation_wins_before_start_and_cannot_split_a_started_batch() {
@@ -18,9 +76,7 @@ fn cancellation_wins_before_start_and_cannot_split_a_started_batch() {
     assert!(ticket.is_batch());
     assert!(ticket.cancel());
     assert!(ticket.cancel());
-    let cancelled = receiver.recv().unwrap();
-    assert!(!cancelled.ticket.begin());
-    drop(cancelled);
+    assert!(receiver.try_recv().is_err());
     assert_eq!(queue.budget.lock().bytes, 0);
     let ticket = queue
         .submit_tracked(
@@ -29,7 +85,6 @@ fn cancellation_wins_before_start_and_cannot_split_a_started_batch() {
         )
         .unwrap();
     let writing = receiver.recv().unwrap();
-    assert!(writing.ticket.begin());
     assert!(!ticket.cancel());
     assert_eq!(writing.messages.len(), 2);
 }

@@ -98,9 +98,6 @@ impl JsonLineProcess {
             .name(format!("{provider}-stdin"))
             .spawn(move || {
                 for input in input_rx {
-                    if !input.ticket.begin() {
-                        continue;
-                    }
                     let result = input.messages.iter().try_for_each(|message| {
                         writeln!(stdin, "{message}").and_then(|_| stdin.flush())
                     });
