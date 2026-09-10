@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::fs::{self, File};
 use std::io::{self, Write as _};
 use std::path::Path;
+use std::sync::Arc;
 
 use nmt_platform::filesystem::replace_file;
 use serde::{Deserialize, Serialize};
@@ -27,12 +28,12 @@ struct StoredScope {
     /// empty for.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     additional: String,
-    entries: Vec<String>,
+    entries: Arc<VecDeque<String>>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct HistoryStore {
-    scopes: BTreeMap<InputHistoryScope, VecDeque<String>>,
+    scopes: BTreeMap<InputHistoryScope, Arc<VecDeque<String>>>,
 }
 
 impl HistoryStore {
@@ -47,6 +48,7 @@ impl HistoryStore {
             return false;
         }
 
+        let entries = Arc::make_mut(entries);
         entries.push_back(text);
         while entries.len() > MAX_ENTRIES_PER_SCOPE {
             entries.pop_front();
@@ -72,7 +74,7 @@ impl HistoryStore {
                     backend: scope.backend.clone(),
                     cwd: scope.cwd.clone(),
                     additional: scope.additional.clone(),
-                    entries: entries.iter().cloned().collect(),
+                    entries: Arc::clone(entries),
                 })
                 .collect(),
         }
@@ -104,7 +106,7 @@ pub(super) fn load_from_path(path: &Path) -> io::Result<HistoryStore> {
             cwd: scope.cwd,
             additional: scope.additional,
         };
-        for entry in scope.entries {
+        for entry in Arc::unwrap_or_clone(scope.entries) {
             history.record(&key, entry);
         }
     }

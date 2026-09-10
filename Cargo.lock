@@ -4264,6 +4264,7 @@ dependencies = [
  "nmt_config",
  "nmt_i18n",
  "nmt_platform",
+ "parking_lot",
  "ropey",
  "semver",
  "serde",

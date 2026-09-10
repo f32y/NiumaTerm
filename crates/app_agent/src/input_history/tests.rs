@@ -1,8 +1,8 @@
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::SystemTime;
+use std::sync::{Arc, mpsc};
+use std::time::{Duration, SystemTime};
 use std::{env, fs, process};
 
 use gpui::{Entity, TestAppContext, VisualTestContext, WindowHandle};
@@ -244,6 +244,64 @@ fn failed_save_leaves_the_in_memory_entry_available() {
 
     assert!(save_to_path(&path, &history.snapshot()).is_err());
     assert_eq!(history.entries(&scope), ["still available"]);
+}
+
+#[test]
+fn slow_storage_coalesces_saves_and_flush_waits_for_latest_write() {
+    let directory = TestDirectory::new();
+    let path = directory.path().join("history.json");
+    let saved_path = path.clone();
+    let scope = scope("local", AgentKind::Codex, directory.path());
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let writer = HistoryWriter::start(move |snapshot| {
+        started_tx.send(()).unwrap();
+        release_rx.recv().unwrap();
+        save_to_path(&saved_path, snapshot)
+    })
+    .unwrap();
+    let mut store = HistoryStore::default();
+    store.record(&scope, "first".into());
+    writer.save(store.snapshot()).unwrap();
+    started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    for index in 0..50 {
+        store.record(&scope, format!("entry {index}"));
+        writer.save(store.snapshot()).unwrap();
+    }
+    let (flushed_tx, flushed_rx) = mpsc::sync_channel(0);
+    writer.queue(store.snapshot(), Some(flushed_tx)).unwrap();
+    assert!(flushed_rx.try_recv().is_err());
+    release_tx.send(()).unwrap();
+    started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(flushed_rx.try_recv().is_err());
+    release_tx.send(()).unwrap();
+    flushed_rx
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        load_from_path(&path).unwrap().entries(&scope),
+        store.entries(&scope)
+    );
+    drop(writer);
+    assert!(matches!(
+        started_rx.recv_timeout(Duration::from_secs(5)),
+        Err(mpsc::RecvTimeoutError::Disconnected)
+    ));
+}
+
+#[test]
+fn snapshots_keep_entries_from_before_later_edits() {
+    let directory = TestDirectory::new();
+    let path = directory.path().join("history.json");
+    let scope = scope("local", AgentKind::Codex, directory.path());
+    let mut store = HistoryStore::default();
+    store.record(&scope, "original".into());
+    let snapshot = store.snapshot();
+    store.record(&scope, "later".into());
+    save_to_path(&path, &snapshot).unwrap();
+    assert_eq!(load_from_path(&path).unwrap().entries(&scope), ["original"]);
+    assert_eq!(store.entries(&scope), ["original", "later"]);
 }
 
 #[test]

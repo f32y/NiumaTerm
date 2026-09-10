@@ -12,6 +12,7 @@ use gpui::{App, Context, Entity, Global, Window};
 use gpui_component::input::TextareaState;
 use nmt_agent_utils::AgentWorkspace;
 use nmt_platform::filesystem::installation_path_spelling;
+use parking_lot::Mutex;
 use tracing::warn;
 
 use crate::input_history::store::{HistoryStore, StoredHistory, load_from_path, save_to_path};
@@ -156,49 +157,90 @@ fn history_file_path(testing: bool) -> PathBuf {
 }
 
 struct HistoryWriter {
-    sender: mpsc::Sender<WriteRequest>,
+    sender: mpsc::SyncSender<()>,
+    pending: Arc<Mutex<Option<PendingWrite>>>,
 }
 
-enum WriteRequest {
-    Save(StoredHistory),
-    Flush(StoredHistory, mpsc::SyncSender<io::Result<()>>),
+struct PendingWrite {
+    snapshot: StoredHistory,
+    waiters: Vec<mpsc::SyncSender<io::Result<()>>>,
 }
 
 impl HistoryWriter {
     fn spawn(path: PathBuf) -> io::Result<Self> {
-        let (sender, receiver) = mpsc::channel();
-        thread::Builder::new()
-            .name("agent-input-history".to_string())
-            .spawn(move || run_writer(path, receiver))?;
-        Ok(Self { sender })
+        Self::start(move |snapshot| save_to_path(&path, snapshot))
     }
 
-    fn save(&self, snapshot: StoredHistory) -> Result<(), mpsc::SendError<WriteRequest>> {
-        self.sender.send(WriteRequest::Save(snapshot))
+    fn start(
+        save: impl FnMut(&StoredHistory) -> io::Result<()> + Send + 'static,
+    ) -> io::Result<Self> {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let pending = Arc::new(Mutex::new(None));
+        let worker_pending = Arc::clone(&pending);
+        thread::Builder::new()
+            .name("agent-input-history".to_string())
+            .spawn(move || run_writer(receiver, worker_pending, save))?;
+        Ok(Self { sender, pending })
+    }
+
+    fn save(&self, snapshot: StoredHistory) -> io::Result<()> {
+        self.queue(snapshot, None)
     }
 
     fn flush(&self, snapshot: StoredHistory) -> io::Result<()> {
         let (sender, receiver) = mpsc::sync_channel(0);
-        self.sender
-            .send(WriteRequest::Flush(snapshot, sender))
-            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "history writer stopped"))?;
+        self.queue(snapshot, Some(sender))?;
         receiver
             .recv()
             .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "history writer stopped"))?
     }
+
+    fn queue(
+        &self,
+        snapshot: StoredHistory,
+        waiter: Option<mpsc::SyncSender<io::Result<()>>>,
+    ) -> io::Result<()> {
+        let mut pending = self.pending.lock();
+        let mut waiters = pending
+            .take()
+            .map_or_else(Vec::new, |pending| pending.waiters);
+        waiters.extend(waiter);
+        *pending = Some(PendingWrite { snapshot, waiters });
+        // Only the newest snapshot matters. The wake token carries no history,
+        // so a slow disk cannot accumulate a queue of obsolete copies.
+        match self.sender.try_send(()) {
+            Ok(()) | Err(mpsc::TrySendError::Full(())) => Ok(()),
+            Err(mpsc::TrySendError::Disconnected(())) => {
+                pending.take();
+                Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "history writer stopped",
+                ))
+            }
+        }
+    }
 }
 
-fn run_writer(path: PathBuf, receiver: mpsc::Receiver<WriteRequest>) {
-    while let Ok(request) = receiver.recv() {
-        match request {
-            WriteRequest::Save(snapshot) => {
-                if let Err(error) = save_to_path(&path, &snapshot) {
-                    warn!("failed to save Agent input history: {error}");
-                }
-            }
-            WriteRequest::Flush(snapshot, sender) => {
-                let _ = sender.send(save_to_path(&path, &snapshot));
-            }
+fn run_writer(
+    receiver: mpsc::Receiver<()>,
+    pending: Arc<Mutex<Option<PendingWrite>>>,
+    mut save: impl FnMut(&StoredHistory) -> io::Result<()>,
+) {
+    while receiver.recv().is_ok() {
+        let request = pending.lock().take();
+        let Some(request) = request else { continue };
+        let result = save(&request.snapshot);
+        if let Err(error) = &result {
+            warn!("failed to save Agent input history: {error}");
+        }
+        // A flush completes only after its snapshot, or a newer replacement,
+        // has reached storage. Waiters arriving during I/O join the next write.
+        for sender in request.waiters {
+            let result = result
+                .as_ref()
+                .copied()
+                .map_err(|error| io::Error::new(error.kind(), error.to_string()));
+            let _ = sender.send(result);
         }
     }
 }
