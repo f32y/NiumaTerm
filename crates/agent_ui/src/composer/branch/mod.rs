@@ -40,18 +40,24 @@ impl AgentPane {
             (Some(_), FileProgress::NotConfirmed) => "agent-rewind-complete",
             (None, FileProgress::NotConfirmed) => "agent-fork-complete",
         };
+
         let draft = self.branch.draft.take();
+
         self.clear_conversation_presentation(cx);
         self.history_ui.mode = RecentSessionsMode::Hidden;
+
         self.branch.pending_prompt = draft.map(|expected_draft| PendingBranchPrompt {
             expected_draft,
             prompt: completion.prompt,
         });
+
         if let Some(replay) = completion.replay {
             self.apply_replay(replay, cx);
         }
+
         self.palette
             .set_feedback(CommandFeedbackKind::Notice, translated(message), cx);
+
         cx.notify();
     }
 }

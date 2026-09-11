@@ -20,7 +20,9 @@ pub(crate) mod layout;
 pub mod metrics;
 pub(crate) mod paint;
 pub(crate) mod scrollbar;
+
 pub use nmt_terminal::session;
+
 pub(crate) mod frame_source;
 pub(crate) mod pane_model;
 #[cfg(test)]

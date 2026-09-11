@@ -101,10 +101,13 @@ pub(super) fn apply_sniffer_mark(
                         event::BlockEvent::EngineBlocksSync(engine_blocks_live_list(&engine)),
                     ]
                 }
+
                 // Empty command: no block, no segment.
                 Ok(None) => Vec::new(),
+
                 Err(err) => {
                     warn!("finish_block failed: {err:?}");
+
                     Vec::new()
                 }
             };

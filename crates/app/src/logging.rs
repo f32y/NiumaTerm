@@ -46,6 +46,7 @@ fn rotate_logs(log_path: &Path) -> io::Result<()> {
     // app.log -> app-prev1.log
     if current.exists() {
         let prev1 = log_path.join(format!("{LOG_PREFIX}-prev1.log"));
+
         fs::rename(current, prev1)?;
     }
 

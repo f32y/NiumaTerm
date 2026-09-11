@@ -57,6 +57,7 @@ fn parse_message(bytes: &[u8], expected_token: &str) -> Result<IpcAction, String
                 .into_event(expected_token)
                 .map(IpcAction::Agent)
                 .ok_or_else(|| "invalid agent Hook fields".into()),
+
             _ => Err("unsupported IPC action".into()),
         }
     } else {

@@ -7,7 +7,9 @@ mod panes;
 mod pump;
 mod rename;
 mod render;
+
 pub(crate) use crate::ui::shell::render::MIN_SIDEBAR_WIDTH;
+
 mod settings_workspace;
 mod tab_presentation;
 mod tab_surface;
@@ -111,6 +113,7 @@ use crate::workspace::{
 /// legacy `"."` placeholder (shells then start in their default directory).
 pub(super) fn explicit_cwd(cwd: &str) -> Option<String> {
     let cwd = cwd.trim();
+
     (!cwd.is_empty() && cwd != ".").then(|| cwd.to_string())
 }
 
@@ -142,53 +145,71 @@ pub(super) struct PendingAgentResume {
 
 pub(crate) struct Shell {
     pub(crate) workspaces: WorkspaceManager,
+
     /// Monotonic surface-id source shared by tabs and workspaces.
     next_id: u64,
+
     agent_monitor: AgentMonitor,
     agent_timer_generation: u64,
     window_active: bool,
+
     /// Workspace-sidebar view state (collapse/expand + width) and its renderer.
     pub(super) sidebar: Sidebar,
+
     /// Tab-strip view state (scroll + active-tab reveal) and its renderer.
     pub(super) tab_strip: TabStrip,
+
     /// In-flight inline renames: a sidebar item or a tab renders an input in
     /// place of its name. Enter or clicking anywhere else (blur) commits.
     pub(crate) renames: InlineRenameSession,
+
     /// Focus the active pane on the first render (the window root is `Root`, so
     /// initial focus can't be set from the app entry point).
     needs_focus: bool,
+
     /// A conversation from another directory, waiting for a render to open it
     /// in a tab rooted there. Event subscriptions carry no window, and opening
     /// a tab needs one.
     pending_agent_resume: Option<PendingAgentResume>,
+
     /// A tab whose agent asked to be closed, waiting for a render to close it.
     /// Closing a tab needs a window for the same reason opening one does.
     pending_agent_close: Option<TabId>,
+
     /// Whether we've started observing the wrapping `Root` (so dialog open/close
     /// re-renders the shell, which draws the dialog layer). Set on first render.
     root_observed: bool,
+
     settings: SettingsSurface,
     focus: FocusHandle,
+
     /// This shell's window in the `WindowRegistry`; all state writes target
     /// this entry.
     pub(crate) window_id: WindowId,
+
     /// Titlebar daily-token-usage widget; rendered only while the
     /// `show_daily_token_usage` setting is on. Rendered by the sidebar status
     /// cluster; the shell owns it so it outlives a sidebar collapse.
     token_usage: Entity<TokenUsageView>,
+
     /// Compact Codex and Claude rate limits, refreshed independently of terminals.
     agent_usage: Entity<AgentUsageView>,
+
     /// Titlebar `+N -M` indicator (self-gating on its setting).
     git_status: Entity<GitStatusView>,
+
     /// The right-side area and what points it at the active tab.
     panels: RightPanelController,
+
     /// Stable entities let each installation's card replace content in place
     /// without entering the transient Root notification lifecycle.
     /// On-screen provider-update notifications by key. Card entity, source
     /// view, and auto-hide clock live in one record so retiring a key cannot
     /// leave a stale sibling behind.
     update_notifications: UpdateNotificationLayer,
+
     root_availability: RootAvailability,
+
     /// Workspace excluded from session persistence: the user chose Quit in
     /// the close-last-workspace dialog, so it must not be restored on the
     /// next launch. Only set on the quit path — cancelling keeps everything.
@@ -214,6 +235,7 @@ impl Shell {
         // Repaint shell chrome when settings change.
         cx.observe_global_in::<AppSettings>(window, |_this, window, cx| {
             let _ = window;
+
             cx.notify();
         })
         .detach();
@@ -275,6 +297,7 @@ impl Shell {
             }
 
             this.process_native_notifications(cx);
+
             cx.notify();
         })
         .detach();
@@ -305,6 +328,7 @@ impl Shell {
         } else {
             let mut next_id = 1;
             let workspaces = default_session(initial_cwd, default_profile, &mut next_id, cx);
+
             (workspaces, next_id)
         };
 
@@ -437,6 +461,7 @@ impl Shell {
         let Some(pane) = self.try_active_pane() else {
             return;
         };
+
         let title = pane.read(cx).terminal_title();
         let tabs = self.workspaces.active_tabs_mut();
         let tab_id = tabs.active_id();
@@ -477,6 +502,7 @@ impl Shell {
         if let Some(agent) = self.active_agent() {
             agent.update(cx, |pane, cx| pane.focus(window, cx));
             self.acknowledge_visible(window, true, cx);
+
             return;
         }
 

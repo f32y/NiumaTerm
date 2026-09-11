@@ -19,6 +19,7 @@ pub(crate) type Entry = TranscriptEntry<EntryPresentation>;
 #[derive(Default)]
 pub(crate) struct EntryPresentation {
     pub(crate) at: String,
+
     /// Images a user message carried. Held here rather than on the protocol
     /// item because they are this side's own record: a harness reports what a
     /// message said, not the pixels the person attached to it.
@@ -35,10 +36,12 @@ pub(crate) enum RowSpec {
         index: usize,
         fingerprint: u64,
     },
+
     Work {
         index: usize,
         fingerprint: u64,
     },
+
     /// The turn's work disclosure, placed above the rows it hides so the
     /// chevron points at its own content.
     TurnFold {
@@ -46,21 +49,25 @@ pub(crate) enum RowSpec {
         row_count: usize,
         folded: bool,
     },
+
     /// The turn's closing "Worked for Ns" line. Reporting only; the work it
     /// accounts for is disclosed by [`RowSpec::TurnFold`] further up.
     TurnSummary {
         seconds: u64,
         output_tokens: Option<u64>,
     },
+
     Interrupted {
         turn: u64,
         output_tokens: Option<u64>,
     },
+
     RunToggle {
         run_start: usize,
         tool_count: usize,
         expanded: bool,
     },
+
     /// The live progress line. `compacting` is part of the spec because the
     /// compaction form is a different, taller row, so flipping it has to
     /// remeasure rather than only repaint.
@@ -85,11 +92,13 @@ pub(crate) enum RowGap {
     /// Inside one block: between the steps of a run of work, and under the
     /// disclosure that heads them.
     Step,
+
     /// Between a turn's work and the prose it is interleaved with. The two
     /// are one answer being assembled, so they are held apart enough to tell
     /// which is which and no further; a reply that alternates a sentence with
     /// a tool call otherwise spends more of the column on air than on text.
     Work,
+
     /// Between turns: around the prompt that opens one and the line that
     /// closes one. This is the boundary a reader scans for to find where one
     /// exchange ends, so it stays the widest thing in the transcript.
@@ -121,6 +130,7 @@ fn is_turn_edge(items: &[Entry], spec: &RowSpec) -> bool {
         RowSpec::Entry { index, .. } => items
             .get(*index)
             .is_some_and(|entry| matches!(entry.item, SessionItem::UserMessage { .. })),
+
         RowSpec::TurnSummary { .. } | RowSpec::Interrupted { .. } => true,
         _ => false,
     }
@@ -154,6 +164,7 @@ pub(crate) fn row_gap(items: &[Entry], above: &RowSpec, below: Option<&RowSpec>)
 /// Pair every row with its trailing gap, in render order.
 fn spaced_rows(items: &[Entry], specs: &[RowSpec], rows: &mut Vec<TranscriptRow>) {
     rows.clear();
+
     rows.extend(specs.iter().enumerate().map(|(ix, spec)| TranscriptRow {
         spec: spec.clone(),
         gap: row_gap(items, spec, specs.get(ix + 1)),
@@ -206,10 +217,13 @@ pub(crate) fn entry_fingerprint(
             questions.as_ref().map_or(0, Vec::len),
             questions.is_some().into(),
         ),
+
         SessionItem::UserMessage { text } | SessionItem::Reasoning { summary: text, .. } => {
             (text.as_ref().map_or(0, String::len), 0, 0)
         }
+
         SessionItem::Error { text } => (text.len(), 0, 0),
+
         SessionItem::CommandExecution {
             command,
             purpose,
@@ -224,6 +238,7 @@ pub(crate) fn entry_fingerprint(
             status.as_ref().map_or(0, String::len),
             exit_code.map_or(0, |code| (code as u64) ^ (1 << 20)),
         ),
+
         SessionItem::FileChange {
             paths,
             diff,
@@ -234,6 +249,7 @@ pub(crate) fn entry_fingerprint(
             status.as_ref().map_or(0, String::len),
             0,
         ),
+
         SessionItem::Other {
             kind,
             title,
@@ -245,6 +261,7 @@ pub(crate) fn entry_fingerprint(
             status.as_ref().map_or(0, String::len),
             0,
         ),
+
         SessionItem::Compaction { detail, .. } => (
             detail.summary.as_ref().map_or(0, String::len),
             compaction_accounting(detail).len(),
@@ -306,6 +323,7 @@ impl TranscriptView {
                 images,
             },
         });
+
         cx.notify();
     }
 
@@ -392,6 +410,7 @@ impl TranscriptView {
 
         if summary == Some(TurnSummary::Interrupted) {
             self.stream_specs(start, end, &|_| false, collapse, rows);
+
             rows.push(RowSpec::Interrupted {
                 turn,
                 output_tokens: self.turn_ledger.output_tokens(turn),
@@ -406,6 +425,7 @@ impl TranscriptView {
         // folds too — the transcript file carries no timing for it.
         if !self.turn_ledger.is_settled(turn) {
             self.stream_specs(start, end, &|_| false, collapse, rows);
+
             return;
         }
 
@@ -423,6 +443,7 @@ impl TranscriptView {
         // existed, so hoisting it here would show it above output it never
         // saw; it keeps its place in the stream instead.
         let items = self.content.entries();
+
         let opening_user =
             (start..end).find(|&i| matches!(&items[i].item, SessionItem::UserMessage { .. }));
 
@@ -434,6 +455,7 @@ impl TranscriptView {
         // folded one does not. Counting it here keeps the disclosure's label
         // honest and lets a turn with nothing to hide skip the control.
         let shown = |i: usize| !hidden(&items[i].item) && Some(i) != opening_user;
+
         let row_count = (start..end)
             .filter(|&i| shown(i) && !self.survives_fold(i))
             .count();
@@ -454,6 +476,7 @@ impl TranscriptView {
             }
         } else {
             let skip = |i: usize| Some(i) == opening_user;
+
             self.stream_specs(start, end, &skip, collapse, rows);
         }
 
@@ -488,12 +511,14 @@ impl TranscriptView {
 
             if skip(i) || hidden(item) {
                 i += 1;
+
                 continue;
             }
 
             if !is_work_row(item) {
                 rows.push(self.entry_spec(i));
                 i += 1;
+
                 continue;
             }
 
@@ -550,9 +575,11 @@ impl TranscriptView {
             SessionItem::Error { .. }
             | SessionItem::Compaction { .. }
             | SessionItem::UserMessage { .. } => true,
+
             SessionItem::AgentMessage {
                 questions: Some(_), ..
             } => true,
+
             SessionItem::AgentMessage { .. } => {
                 !hidden(&entry.item)
                     && items[index + 1..]
@@ -563,6 +590,7 @@ impl TranscriptView {
                                 || !matches!(later.item, SessionItem::AgentMessage { .. })
                         })
             }
+
             _ => false,
         }
     }
@@ -585,6 +613,7 @@ impl TranscriptView {
         if self.rows[start..] == new {
             new.clear();
             self.row_cache.scratch_rows = new;
+
             return;
         }
 
@@ -660,6 +689,7 @@ impl TranscriptView {
     pub(crate) fn prompt_row(&self, target: &PromptTarget) -> Option<usize> {
         let openings = turn_opening_prompts(self.content.entries());
         let index = *openings.get(openings.len().checked_sub(target.depth + 1)?)?;
+
         let SessionItem::UserMessage { text: Some(prompt) } = &self.content.entries()[index].item
         else {
             return None;
@@ -722,6 +752,7 @@ impl TranscriptView {
         } else {
             ReadingPosition::At(self.transcript_list.logical_scroll_top())
         });
+
         self.transcript_list.freeze_scroll_position();
         self.reserve_below = true;
     }

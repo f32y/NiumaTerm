@@ -220,6 +220,7 @@ fn title_bar_controls_stay_inside_a_narrow_window(cx: &mut TestAppContext) {
 
     let handle = cx.add_window({
         let probe = probe.clone();
+
         move |_, _| TitleBarProbeView(probe, MAX_WIDTH)
     });
 

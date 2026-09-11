@@ -15,6 +15,7 @@ pub fn selection_type_for_click_count(click_count: usize) -> SelectionType {
 pub(super) struct FrozenSelection {
     /// Frozen-region selection: (anchor, head), both inclusive cell points.
     selection: Option<(BlockPoint, BlockPoint)>,
+
     /// Anchor of an in-progress frozen-region drag. The selection itself is
     /// only created on the first mouse-move, so a plain click selects nothing
     /// (matching the engine's empty-selection-dropped-on-up semantics).

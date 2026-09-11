@@ -59,6 +59,7 @@ fn wide_round_trip() {
 
     for w in [Wide::Narrow, Wide::Wide, Wide::Spacer, Wide::LeadingSpacer] {
         s.set_wide(w);
+
         assert_eq!(s.wide(), w);
     }
 }

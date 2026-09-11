@@ -27,14 +27,17 @@ pub(crate) fn terminal_presentation(
             TerminalVisual::Running,
             i18n("terminal-status-command-running"),
         )),
+
         TerminalActivity::Finished(CommandOutcome::Succeeded) => Some((
             TerminalVisual::Succeeded,
             i18n("terminal-status-command-succeeded"),
         )),
+
         TerminalActivity::Finished(CommandOutcome::Failed) => Some((
             TerminalVisual::Failed,
             i18n("terminal-status-command-failed"),
         )),
+
         TerminalActivity::Idle => None,
     }
 }

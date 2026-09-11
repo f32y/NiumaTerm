@@ -27,6 +27,7 @@ fn formats_remaining_codex_windows() {
 #[test]
 fn rejects_missing_windows() {
     let response = json!({ "id": 2, "result": { "rateLimits": {} } });
+
     assert!(parse_rate_limits(&response).is_err());
 }
 

@@ -29,7 +29,9 @@ fn modified<'a>(
     modifiers: ModifiersState,
 ) -> TerminalKey<'a> {
     let mut key = key(name, key_char);
+
     key.modifiers = modifiers;
+
     key
 }
 
@@ -230,6 +232,7 @@ fn ctrl_shift_copy_paste_are_no_longer_app_shortcuts() {
         Some("c"),
         ModifiersState::CONTROL | ModifiersState::SHIFT,
     );
+
     let paste = modified(
         "v",
         Some("v"),

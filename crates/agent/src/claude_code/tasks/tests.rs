@@ -10,7 +10,9 @@ const SESSION: &str = "sess-1";
 
 fn reducer() -> ClaudeTasks {
     let mut tasks = ClaudeTasks::default();
+
     tasks.observe(&json!({"type": "system", "subtype": "init", "session_id": SESSION}));
+
     tasks
 }
 
@@ -428,6 +430,7 @@ fn a_process_boundary_stops_children_the_previous_process_owned() {
     let mut tasks = reducer();
 
     tasks.observe(&launch("toolu_1"));
+
     tasks.observe(&json!({
         "type": "system",
         "subtype": "task_started",
@@ -458,6 +461,7 @@ fn a_child_started_in_this_process_survives_its_own_init() {
     // The launch lands after this process announced itself, so the boundary
     // that created its epoch must not retire it.
     tasks.observe(&launch("toolu_1"));
+
     tasks.observe(&json!({
         "type": "system",
         "subtype": "task_started",
@@ -670,6 +674,7 @@ fn a_child_tool_result_completes_the_call_it_answers() {
     let mut tasks = reducer();
 
     tasks.observe(&launch("toolu_1"));
+
     tasks.observe(&json!({
         "type": "assistant",
         "session_id": SESSION,
@@ -678,6 +683,7 @@ fn a_child_tool_result_completes_the_call_it_answers() {
             {"type": "tool_use", "id": "tu-1", "name": "Read", "input": {"file_path": "src/lib.rs"}},
         ]},
     }));
+
     tasks.take_transcripts();
 
     tasks.observe(&json!({
@@ -725,6 +731,7 @@ fn switching_sessions_drops_pending_child_conversations() {
     let mut tasks = reducer();
 
     tasks.observe(&launch("toolu_1"));
+
     tasks.observe(&json!({
         "type": "assistant",
         "session_id": SESSION,
@@ -876,6 +883,7 @@ fn the_handoff_result_names_the_output_file_a_running_command_writes_to() {
 
     tasks.observe(&bash_launch("toolu_1", "cargo build"));
     tasks.observe(&shell_started(true));
+
     tasks.observe(&json!({
         "type": "user",
         "session_id": SESSION,
@@ -950,6 +958,7 @@ fn the_live_set_does_not_revive_a_shell_that_already_reported_its_outcome() {
 
     tasks.observe(&bash_launch("toolu_1", "cargo build"));
     tasks.observe(&shell_started(true));
+
     tasks.observe(&json!({
         "type": "system",
         "subtype": "task_notification",

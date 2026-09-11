@@ -11,6 +11,7 @@ use gpui_component::{ActiveTheme as _, Sizable as _};
 /// One breath of a pulsing mark, and how far its opacity travels. Slow enough
 /// to read as ongoing work rather than as a blinking alert.
 const PULSE_PERIOD: Duration = Duration::from_millis(1_600);
+
 const PULSE_MIN_OPACITY: f32 = 0.35;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,6 +56,7 @@ impl StatusMark {
 
     pub(crate) fn label(mut self, label: impl Into<SharedString>) -> Self {
         self.label = Some(label.into());
+
         self
     }
 
@@ -63,6 +65,7 @@ impl StatusMark {
     /// where a row has no room for a spinner beside its label.
     pub(crate) fn pulse(mut self) -> Self {
         self.pulse = true;
+
         self
     }
 }
@@ -102,6 +105,7 @@ impl RenderOnce for StatusMark {
                 )
                 .into_any_element()
             }
+
             StatusMarkVisual::Busy => ProgressCircle::new(self.id)
                 .small()
                 .loading(true)

@@ -72,6 +72,7 @@ pub enum TabBarStyle {
     /// A row of tabs across the title bar.
     #[default]
     Horizontal,
+
     /// Tabs nested under their workspace in the sidebar.
     Vertical,
 }
@@ -84,11 +85,14 @@ pub enum WindowBackdrop {
     /// Windows 11 Mica Alt material: the same wallpaper tint as Mica, drawn
     /// stronger for tabbed shells.
     MicaAlt,
+
     /// Windows 11 Mica material: a static tint, no blur of the content behind.
     Mica,
+
     /// Blur the content behind the window (Acrylic).
     #[default]
     Acrylic,
+
     /// No material; translucent content shows the desktop directly.
     Off,
 }
@@ -232,69 +236,86 @@ fn default_transparent_main_view() -> bool {
 pub struct AppearanceConfig {
     #[serde(default, rename = "input-style")]
     pub input_style: InputStyle,
+
     /// Move a scrolled viewport to the latest output after typed input.
     #[serde(
         default = "default_scroll_to_bottom_when_typing",
         rename = "scroll-to-bottom-when-typing"
     )]
     pub scroll_to_bottom_when_typing: bool,
+
     /// Use the terminal theme background for Agent Pane.
     #[serde(default, rename = "agent-pane-use-terminal-background")]
     pub agent_pane_use_terminal_background: bool,
+
     /// Render command blocks in the grid (separators, exit status, gutter;
     /// command-blocks-rendering).
     #[serde(default = "default_command_blocks", rename = "command-blocks")]
     pub command_blocks: bool,
+
     /// Show today's ccusage token totals in the titlebar.
     #[serde(default, rename = "show-daily-token-usage")]
     pub show_daily_token_usage: bool,
+
     /// Show the git `+added -removed` line counts in the titlebar.
     #[serde(default, rename = "show-git-status-on-title-bar")]
     pub show_git_status_on_title_bar: bool,
+
     /// Seconds between git status refreshes (10/15/30/60; clamped on load).
     #[serde(
         default = "default_git_status_refresh_interval",
         rename = "git-status-refresh-interval"
     )]
     pub git_status_refresh_interval: u64,
+
     /// Fixed tab width in pixels (120–360; clamped on load).
     #[serde(default = "default_tab_width", rename = "tab-width")]
     pub tab_width: f64,
+
     /// Shrink tabs toward a minimum as the strip fills, instead of holding
     /// `tab_width`.
     #[serde(default, rename = "tab-auto-size")]
     pub tab_auto_size: bool,
+
     /// Tab strip placement: a horizontal row in the title bar, or vertical
     /// rows nested under each workspace in the sidebar.
     #[serde(default, rename = "tab-bar-style")]
     pub tab_bar_style: TabBarStyle,
+
     /// Font family for the app chrome (titlebar, sidebar, tabs, dialogs).
     #[serde(default = "default_ui_font", rename = "ui-font")]
     pub ui_font: String,
+
     /// Font family used by terminal panes.
     #[serde(
         default = "default_terminal_font_family",
         rename = "terminal-font-family"
     )]
     pub terminal_font_family: String,
+
     /// Font size in pixels used by terminal panes.
     #[serde(default = "default_terminal_font_size", rename = "terminal-font-size")]
     pub terminal_font_size: f64,
+
     /// Terminal line height as a multiplier on font size.
     #[serde(
         default = "default_terminal_line_height",
         rename = "terminal-line-height"
     )]
     pub terminal_line_height: f64,
+
     /// Font family used by agent (chat) tabs.
     #[serde(default = "default_agent_font_family", rename = "agent-font-family")]
     pub agent_font_family: String,
+
     /// Font size in pixels used by agent (chat) tabs.
     #[serde(default = "default_agent_font_size", rename = "agent-font-size")]
     pub agent_font_size: f64,
+
     /// Whether terminal and agent transcript font pickers only show monospace fonts.
     #[serde(default = "default_monospace_only", rename = "monospace-only")]
     pub monospace_only: bool,
+
     /// Window backdrop material. Acrylic is the default so existing opacity
     /// configurations keep working; legacy booleans deserialize as `true` →
     /// Acrylic and `false` → Off.
@@ -304,12 +325,14 @@ pub struct AppearanceConfig {
         deserialize_with = "deserialize_window_backdrop"
     )]
     pub window_backdrop: WindowBackdrop,
+
     /// Allow the Terminal View and Agent Pane background to show content behind it.
     #[serde(
         default = "default_transparent_main_view",
         rename = "transparent-main-view"
     )]
     pub transparent_main_view: bool,
+
     /// Select which scrolling views animate line-based mouse-wheel input.
     #[serde(
         default,
@@ -317,9 +340,11 @@ pub struct AppearanceConfig {
         deserialize_with = "deserialize_smooth_scrolling"
     )]
     pub smooth_scrolling: SmoothScrollingMode,
+
     /// Whole-window background opacity (0.2–1.0; clamped on load).
     #[serde(default = "default_background_opacity", rename = "background-opacity")]
     pub background_opacity: f64,
+
     /// Local image drawn behind all window content.
     #[serde(
         default,
@@ -327,12 +352,14 @@ pub struct AppearanceConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub background_image: Option<String>,
+
     /// How strongly the image shows through the window surfaces (0.0–1.0).
     #[serde(
         default = "default_background_image_opacity",
         rename = "background-image-opacity"
     )]
     pub background_image_opacity: f64,
+
     /// UI display language.
     #[serde(
         default,
@@ -340,22 +367,26 @@ pub struct AppearanceConfig {
         deserialize_with = "deserialize_language"
     )]
     pub language: Language,
+
     /// Font family used by code-oriented agent transcript content.
     #[serde(
         default = "default_agent_transcript_font_family",
         rename = "agent-transcript-font-family"
     )]
     pub agent_transcript_font_family: String,
+
     /// Font size in pixels used by code-oriented agent transcript content.
     #[serde(
         default = "default_agent_transcript_font_size",
         rename = "agent-transcript-font-size"
     )]
     pub agent_transcript_font_size: f64,
+
     /// Put disclosed content on screen at once, skipping the entrance the
     /// transcript otherwise plays for it.
     #[serde(default, rename = "reduce-motion")]
     pub reduce_motion: bool,
+
     /// Hold the agent conversation column at a reading width and centre it.
     /// Off, the column follows the pane width with a fixed margin each side.
     #[serde(

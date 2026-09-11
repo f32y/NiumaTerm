@@ -33,8 +33,10 @@ pub use crate::claude_code::workflows::disk::{
 #[derive(Default)]
 pub(crate) struct ClaudeWorkflows {
     session_id: Option<String>,
+
     /// Runs by `task_id`, in first-seen order via `order`.
     runs: HashMap<String, WorkflowRun>,
+
     order: Vec<String>,
 }
 
@@ -76,6 +78,7 @@ impl ClaudeWorkflows {
         }
 
         let subtype = message["subtype"].as_str().unwrap_or_default();
+
         let Some(task_id) = message["task_id"].as_str().filter(|id| !id.is_empty()) else {
             return false;
         };
@@ -90,6 +93,7 @@ impl ClaudeWorkflows {
 
                 self.start_run(task_id, message)
             }
+
             "task_progress" | "task_updated" | "task_notification" => {
                 // These omit `task_type` entirely; a run must already be known.
                 if !self.runs.contains_key(task_id) {
@@ -98,6 +102,7 @@ impl ClaudeWorkflows {
 
                 self.update_run(task_id, subtype, message)
             }
+
             _ => false,
         }
     }
@@ -108,6 +113,7 @@ impl ClaudeWorkflows {
         }
 
         self.order.push(task_id.to_owned());
+
         self.runs.insert(
             task_id.to_owned(),
             WorkflowRun {
@@ -130,8 +136,10 @@ impl ClaudeWorkflows {
 
     fn update_run(&mut self, task_id: &str, subtype: &str, record: &Value) -> bool {
         let state = run_state(subtype, record);
+
         let progress = (!record["workflow_progress"].is_null())
             .then(|| parse_progress(&record["workflow_progress"]));
+
         let total_tokens = record["usage"]["total_tokens"].as_u64();
         let total_tool_calls = record["usage"]["tool_uses"].as_u64();
         let summary = text_field(record, &["summary"]);
@@ -139,6 +147,7 @@ impl ClaudeWorkflows {
         let Some(run) = self.runs.get_mut(task_id) else {
             return false;
         };
+
         let mut changed = false;
 
         if let Some((phases, agents)) = progress {
@@ -181,6 +190,7 @@ impl ClaudeWorkflows {
         let Some(run) = self.runs.get_mut(task_id) else {
             return false;
         };
+
         let mut changed = false;
 
         if run.refresh_failed != refresh.failed {
@@ -261,9 +271,11 @@ fn run_state(subtype: &str, record: &Value) -> Option<WorkflowRunState> {
     let status = match subtype {
         "task_progress" => return Some(WorkflowRunState::Running),
         "task_notification" => record["status"].as_str()?,
+
         "task_updated" => record["patch"]["status"]
             .as_str()
             .or_else(|| record["status"].as_str())?,
+
         _ => return None,
     };
 
@@ -295,6 +307,7 @@ pub(crate) fn parse_progress(progress: &Value) -> (Vec<WorkflowPhase>, Vec<Workf
                     title: entry["title"].as_str().unwrap_or_default().to_owned(),
                 });
             }
+
             Some("workflow_agent") => {
                 let Some(index) = entry["index"].as_u64() else {
                     continue;
@@ -318,6 +331,7 @@ pub(crate) fn parse_progress(progress: &Value) -> (Vec<WorkflowPhase>, Vec<Workf
                     result_preview: text_field(entry, &["resultPreview"]),
                 });
             }
+
             _ => {}
         }
     }

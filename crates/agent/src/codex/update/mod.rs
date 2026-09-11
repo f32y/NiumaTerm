@@ -21,6 +21,7 @@ impl ProviderMaintenance for CodexMaintenance {
                 Ok(status) => Ok(status),
                 Err(doctor_error) => version_fallback(launcher, doctor_error.message()),
             },
+
             Err(error) => version_fallback(launcher, &error.to_string()),
         }
     }
@@ -52,6 +53,7 @@ pub fn parse_codex_doctor(json: &str) -> Result<VersionStatus, UpdateError> {
 
     let updates = &report["checks"]["updates.status"];
     let details = &updates["details"];
+
     let available = detail_string(details, "latest version")
         .map(|value| parse_strict_version(value, "Codex latest version"))
         .transpose()?;

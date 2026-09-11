@@ -33,6 +33,7 @@ use crate::ui::composition::{empty_state, panel_header};
 /// Rows shown before the section control offers the rest. Running work is the
 /// part a user watches, so the finished list stays shorter per row of interest.
 const COMPACT_RUNNING_ROWS: usize = 4;
+
 const COMPACT_FINISHED_ROWS: usize = 10;
 
 /// Elapsed labels are recomputed from stored times rather than counted, so one
@@ -55,11 +56,14 @@ impl IconNamed for StopTaskIcon {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum PanelMode {
     List,
+
     Detail {
         key: BackgroundTaskKey,
+
         /// Section expansion restored when the user goes back, so returning
         /// lands on what they were reading.
         running_expanded: bool,
+
         finished_expanded: bool,
     },
 }
@@ -103,19 +107,24 @@ impl PanelMode {
 
 pub(crate) struct BackgroundTasksView {
     mode: PanelMode,
+
     /// The open child's conversation, rendered by the same component the Agent
     /// pane uses. Its own instance, so expansion and scroll belong to this
     /// child rather than to the parent conversation.
     detail_transcript: Option<Entity<TranscriptView>>,
+
     /// The Agent pane whose children are shown. Weak because the tab can close
     /// while the panel is still mounted for its closing animation.
     target: Option<WeakEntity<AgentPane>>,
+
     running_expanded: bool,
     finished_expanded: bool,
     scroll: ScrollHandle,
+
     /// Runs only while the view is visible and at least one row has a start
     /// time to count from.
     elapsed_timer: Option<Task<()>>,
+
     visible: bool,
 }
 
@@ -159,6 +168,7 @@ impl BackgroundTasksView {
         self.running_expanded = false;
         self.finished_expanded = false;
         self.scroll = ScrollHandle::new();
+
         cx.notify();
     }
 
@@ -178,6 +188,7 @@ impl BackgroundTasksView {
 
     fn snapshot(&self, cx: &Context<Self>) -> Option<BackgroundTaskSnapshot> {
         let target = self.target.as_ref()?.upgrade()?;
+
         target.read(cx).background_tasks().cloned()
     }
 
@@ -186,6 +197,7 @@ impl BackgroundTasksView {
     fn sync_elapsed_timer(&mut self, needed: bool, cx: &mut Context<Self>) {
         if !needed || !self.visible {
             self.elapsed_timer = None;
+
             return;
         }
 
@@ -199,6 +211,7 @@ impl BackgroundTasksView {
 
                 let alive = this.update(cx, |this, cx| {
                     this.refresh_open_child(cx);
+
                     cx.notify();
                 });
 
@@ -295,10 +308,13 @@ impl BackgroundTasksView {
             self.detail_transcript.clone(),
         ) {
             self.sync_elapsed_timer(false, cx);
+
             return match snapshot {
                 Some(snapshot) => self.render_detail(key, transcript, &snapshot, now, cx),
+
                 None => {
                     self.close_detail(cx);
+
                     div().into_any_element()
                 }
             };
@@ -316,6 +332,7 @@ impl BackgroundTasksView {
                     i18n("tasks-background-loading-detail"),
                     cx,
                 ),
+
                 false => empty_state(
                     i18n("tasks-background-no-session-title"),
                     i18n("tasks-background-no-session-detail"),
@@ -341,11 +358,13 @@ impl BackgroundTasksView {
                         .replace("{message}", message),
                     cx,
                 ),
+
                 BackgroundTaskDiscoveryState::Loading => empty_state(
                     i18n("tasks-background-loading-title"),
                     i18n("tasks-background-loading-detail"),
                     cx,
                 ),
+
                 _ => empty_state(
                     i18n("tasks-background-empty-title"),
                     i18n("tasks-background-empty-detail"),

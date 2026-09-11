@@ -18,8 +18,10 @@ use crate::ui::{UI_RADIUS, default_font_fallbacks};
 
 pub(crate) fn install_terminal_settings(cx: &mut App) {
     cx.set_global(snapshot(cx));
+
     cx.observe_global::<AppSettings>(|cx| {
         let snapshot = snapshot(cx);
+
         cx.set_global(snapshot);
     })
     .detach();
@@ -27,8 +29,10 @@ pub(crate) fn install_terminal_settings(cx: &mut App) {
 
 pub(crate) fn install_agent_settings(cx: &mut App) {
     cx.set_global(agent_snapshot(cx));
+
     cx.observe_global::<AppSettings>(|cx| {
         let snapshot = agent_snapshot(cx);
+
         cx.set_global(snapshot);
     })
     .detach();

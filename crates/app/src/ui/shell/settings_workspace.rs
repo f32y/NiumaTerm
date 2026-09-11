@@ -33,8 +33,10 @@ pub(super) struct SettingsSurface {
     /// element state the component keeps by default would be dropped the frame
     /// the surface stops rendering.
     state: Option<Entity<SettingsState>>,
+
     /// Alive only while this shell's settings entry is open.
     theme_watcher: Option<Task<()>>,
+
     /// Whether the surface was the active tab at the last activation.
     was_active: bool,
 }
@@ -108,6 +110,7 @@ impl Shell {
             {
                 self.workspaces.activate(index);
                 self.focus_active(window, cx);
+
                 cx.notify();
             }
 

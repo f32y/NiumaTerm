@@ -276,6 +276,7 @@ fn pane_navigation_keeps_palette_and_recent_sessions_ahead_of_history(cx: &mut T
 
             pane.input
                 .update(cx, |input, cx| input.set_value("/", window, cx));
+
             pane.palette.dismissed = false;
             pane.handle_palette_control(PaletteControl::Previous, window, cx);
 
@@ -284,7 +285,9 @@ fn pane_navigation_keeps_palette_and_recent_sessions_ahead_of_history(cx: &mut T
 
             pane.input
                 .update(cx, |input, cx| input.set_value("", window, cx));
+
             pane.history_ui.mode = RecentSessionsMode::Open;
+
             pane.history_ui.data.sessions = vec![SessionSummary {
                 id: "session-1".into(),
                 title: "Earlier session".into(),
@@ -293,14 +296,17 @@ fn pane_navigation_keeps_palette_and_recent_sessions_ahead_of_history(cx: &mut T
                 last_active: SystemTime::now(),
                 snippet: None,
             }];
+
             pane.handle_palette_control(PaletteControl::Previous, window, cx);
 
             assert_eq!(pane.input.read(cx).text().len(), 0);
             assert!(pane.input_history_navigation.index.is_none());
 
             pane.history_ui.mode = RecentSessionsMode::Hidden;
+
             pane.input
                 .update(cx, |input, cx| input.set_value("draft", window, cx));
+
             pane.handle_palette_control(PaletteControl::Previous, window, cx);
 
             assert_eq!(pane.input.read(cx).text().to_string(), "draft");
@@ -308,6 +314,7 @@ fn pane_navigation_keeps_palette_and_recent_sessions_ahead_of_history(cx: &mut T
 
             pane.input
                 .update(cx, |input, cx| input.set_value("", window, cx));
+
             pane.handle_palette_control(PaletteControl::Previous, window, cx);
 
             assert_eq!(pane.input.read(cx).text().to_string(), "history entry");
@@ -346,10 +353,13 @@ fn accepted_new_turn_and_steering_record_only_typed_input(cx: &mut TestAppContex
             pane.input.update(cx, |input, cx| {
                 input.set_value("  start the turn  ", window, cx)
             });
+
             pane.send_user_message(window, cx);
+
             pane.input.update(cx, |input, cx| {
                 input.set_value("steer the turn", window, cx)
             });
+
             pane.send_user_message(window, cx);
 
             assert!(pane.send_text("/effort high".into(), cx));
@@ -387,8 +397,10 @@ fn slash_history_requires_a_successful_action(cx: &mut TestAppContext) {
             ));
 
             pane.session.runtime.ready();
+
             pane.input
                 .update(cx, |input, cx| input.set_value("/compact", window, cx));
+
             pane.submit_current_slash(window, cx);
 
             let epoch = pane.session.runtime.begin_start();
@@ -409,20 +421,24 @@ fn slash_history_requires_a_successful_action(cx: &mut TestAppContext) {
 
             pane.session.runtime.ready();
             pane.session.commands.awaiting_turn = false;
+
             pane.input
                 .update(cx, |input, cx| input.set_value("/review", window, cx));
+
             pane.submit_current_slash(window, cx);
 
             assert_eq!(pane.input.read(cx).text().to_string(), "/review");
 
             pane.input
                 .update(cx, |input, cx| input.set_value("/missing", window, cx));
+
             pane.submit_current_slash(window, cx);
 
             assert_eq!(pane.input.read(cx).text().to_string(), "/missing");
 
             pane.input
                 .update(cx, |input, cx| input.set_value("/status", window, cx));
+
             pane.submit_current_slash(window, cx);
 
             assert_eq!(
@@ -467,9 +483,11 @@ fn rejected_submission_preserves_draft_images_and_unnamed_state(cx: &mut TestApp
 
             pane.session.runtime.ready();
             pane.session.naming.named = false;
+
             pane.input.update(cx, |input, cx| {
                 input.set_value("keep this draft", window, cx)
             });
+
             pane.attachments
                 .attach_image(&image, &pane.input, window, cx)
                 .ok()
@@ -501,8 +519,10 @@ fn unavailable_session_keeps_input_without_recording(cx: &mut TestAppContext) {
         pane.update(cx, |pane, cx| {
             pane.session.runtime.retire();
             pane.session.runtime.begin_conversation_change();
+
             pane.input
                 .update(cx, |input, cx| input.set_value("not accepted", window, cx));
+
             pane.send_user_message(window, cx);
 
             assert_eq!(pane.input.read(cx).text().to_string(), "not accepted");
@@ -626,24 +646,31 @@ fn interruption_restores_only_unanswered_input_and_preserves_new_drafts(cx: &mut
         view_cx.update(|window, cx| {
             pane.update(cx, |pane, cx| {
                 let epoch = pane.session.runtime.begin_start();
+
                 let mut backend = TestBackend::new(
                     [SendOutcome::StartedTurn],
                     SlashCommandOutcome::NotReady,
                     Vec::new(),
                 );
+
                 backend.interrupt_accepted = true;
+
                 assert!(matches!(
                     pane.session
                         .runtime
                         .install(epoch, Ok(Backend::Test(backend))),
                     StartOutcome::Installed
                 ));
+
                 pane.session.runtime.ready();
                 pane.attachments.add_annotation("quoted answer".into());
+
                 pane.input.update(cx, |input, cx| {
                     input.set_value("original draft", window, cx)
                 });
+
                 pane.send_user_message(window, cx);
+
                 let turn = pane.session.delivery.turn();
 
                 pane.start_item(
@@ -654,20 +681,25 @@ fn interruption_restores_only_unanswered_input_and_preserves_new_drafts(cx: &mut
                     },
                     cx,
                 );
+
                 if visible {
                     pane.append_delta("answer", "visible response", TextField::Reply, cx);
                 }
 
                 pane.input
                     .update(cx, |input, cx| input.set_value("new draft", window, cx));
+
                 pane.interrupt_from_ui(window, cx);
+
                 let input = pane.input.read(cx).text().to_string();
 
                 if visible {
                     assert_eq!(input, "new draft");
                     assert!(pane.attachments.annotations().is_empty());
                     assert!(pane.session.delivery.is_active());
+
                     pane.apply_event(Event::TurnStarted, cx);
+
                     assert_eq!(pane.session.delivery.turn(), turn);
                 } else {
                     assert!(input.contains("original draft"));
@@ -677,6 +709,7 @@ fn interruption_restores_only_unanswered_input_and_preserves_new_drafts(cx: &mut
                     assert!(!pane.session.delivery.is_active());
 
                     pane.apply_event(Event::TurnStarted, cx);
+
                     assert_eq!(pane.session.delivery.turn(), turn + 1);
                     assert!(pane.transcript.read(cx).is_working());
                 }

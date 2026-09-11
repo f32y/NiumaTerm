@@ -48,6 +48,7 @@ const AGENT_TASK_TYPE: &str = "local_agent";
 pub struct RestoredTask {
     pub id: String,
     pub update: BackgroundTaskUpdate,
+
     /// The child's own conversation, rebuilt from the sidechain records that
     /// link to its launch. Empty when the history holds only the launch.
     pub items: Vec<Item>,
@@ -62,6 +63,7 @@ pub struct RestoredTask {
 pub fn load_task_history(cwd: Option<&str>, session_id: &str) -> Result<Vec<RestoredTask>, String> {
     let project = project_dir(cwd)
         .ok_or_else(|| format!("Claude session {session_id} has no project directory"))?;
+
     load_task_history_at(&project, session_id)
 }
 
@@ -70,7 +72,9 @@ pub(super) fn load_task_history_at(
     session_id: &str,
 ) -> Result<Vec<RestoredTask>, String> {
     let mut tasks = load_launches(project, session_id)?;
+
     attach_child_transcripts(project, session_id, &mut tasks);
+
     Ok(tasks)
 }
 
@@ -87,6 +91,7 @@ pub fn load_child_transcript(
     tool_use_id: &str,
 ) -> Option<Vec<Item>> {
     let project = project_dir(cwd)?;
+
     load_child_transcript_at(&project, session_id, tool_use_id)
 }
 
@@ -98,6 +103,7 @@ pub(super) fn load_child_transcript_at(
     let (_, conversation) = child_conversations(project, session_id)
         .into_iter()
         .find(|(meta, _)| meta["toolUseId"].as_str() == Some(tool_use_id))?;
+
     let file = fs::File::open(&conversation).ok()?;
 
     Some(parse_child_replay(BufReader::new(file)))
@@ -139,6 +145,7 @@ fn attach_child_transcripts(project: &Path, session_id: &str, tasks: &mut [Resto
         let Some(tool_use_id) = meta["toolUseId"].as_str() else {
             continue;
         };
+
         let Some(task) = tasks.iter_mut().find(|task| task.id == tool_use_id) else {
             continue;
         };
@@ -169,6 +176,7 @@ fn load_launches(project: &Path, session_id: &str) -> Result<Vec<RestoredTask>, 
     let file = match fs::File::open(&path) {
         Ok(file) => file,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+
         Err(error) => {
             return Err(format!(
                 "could not read Claude session {session_id}: {error}"
@@ -202,11 +210,13 @@ pub(super) fn parse_task_history(reader: impl BufRead) -> Vec<RestoredTask> {
     for record in &transcript.records {
         if is_process_boundary(record) {
             process_restarted = true;
+
             continue;
         }
 
         if let Some(parent) = linked_parent(record) {
             enrich_from_sidechain(parent, record, &mut tasks, &index, &mut open_tools);
+
             continue;
         }
 
@@ -262,6 +272,7 @@ fn collect_launches(
         let input = &block["input"];
 
         index.insert(tool_use_id.to_owned(), tasks.len());
+
         tasks.push(RestoredTask {
             id: tool_use_id.to_owned(),
             items: Vec::new(),
@@ -302,6 +313,7 @@ fn collect_results(record: &Value, tasks: &mut [RestoredTask], index: &HashMap<S
         let Some(position) = block["tool_use_id"].as_str().and_then(|id| index.get(id)) else {
             continue;
         };
+
         let update = &mut tasks[*position].update;
 
         update.state = Some(if block["is_error"].as_bool().unwrap_or(false) {
@@ -309,6 +321,7 @@ fn collect_results(record: &Value, tasks: &mut [RestoredTask], index: &HashMap<S
         } else {
             BackgroundTaskState::Done
         });
+
         update.completed_at = timestamp(record);
         update.updated_at = timestamp(record).or(update.updated_at);
     }
@@ -324,6 +337,7 @@ fn enrich_from_sidechain(
     let Some(position) = index.get(parent_tool_use_id) else {
         return;
     };
+
     let task = &mut tasks[*position];
 
     task.items.extend(child_items(record, open_tools));
@@ -371,11 +385,14 @@ fn child_items(record: &Value, open_tools: &mut HashMap<String, Item>) -> Vec<It
                     questions: None,
                 })
             }
+
             Some("text") => {}
+
             Some("thinking") => items.push(Item::Reasoning {
                 id,
                 summary: block["thinking"].as_str().map(str::to_owned),
             }),
+
             Some("tool_use") => {
                 let item = tool_item(
                     &id,
@@ -386,11 +403,13 @@ fn child_items(record: &Value, open_tools: &mut HashMap<String, Item>) -> Vec<It
                 open_tools.insert(id, item.clone());
                 items.push(item);
             }
+
             Some("tool_result") => {
                 if let Some(started) = open_tools.remove(&id) {
                     items.push(complete_tool_item(started, block));
                 }
             }
+
             _ => {}
         }
     }
@@ -468,9 +487,11 @@ fn lifecycle_state(kind: &str, record: &Value) -> Option<BackgroundTaskState> {
     let status = match kind {
         "task_started" | "task_progress" => return Some(BackgroundTaskState::Working),
         "task_notification" => record["status"].as_str()?,
+
         "task_updated" => record["patch"]["status"]
             .as_str()
             .or_else(|| record["status"].as_str())?,
+
         _ => return None,
     };
 

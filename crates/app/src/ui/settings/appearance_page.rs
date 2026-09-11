@@ -24,6 +24,7 @@ pub(super) fn appearance_page(
                         ],
                         |cx| {
                             let key: &str = cx.global::<AppSettings>().appearance.language.into();
+
                             key.into()
                         },
                         |value, cx| {
@@ -97,6 +98,7 @@ pub(super) fn appearance_page(
                         |cx| {
                             let key: &str =
                                 cx.global::<AppSettings>().appearance.window_backdrop.into();
+
                             key.into()
                         },
                         |value, cx| {
@@ -164,6 +166,7 @@ pub(super) fn appearance_page(
                                 .appearance
                                 .smooth_scrolling
                                 .into();
+
                             key.into()
                         },
                         |value, cx| {
@@ -318,6 +321,7 @@ pub(super) fn appearance_page(
                             |cx| {
                                 let key: &str =
                                     cx.global::<AppSettings>().appearance.tab_bar_style.into();
+
                                 key.into()
                             },
                             |value, cx| {

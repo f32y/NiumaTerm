@@ -30,10 +30,12 @@ use crate::ghostty::{Error, Result, SnapshotColors, SnapshotCursor};
 pub(super) struct RenderStateReader {
     render_state: VtRenderState,
     row_iter: VtRenderStateRowIterator,
+
     /// Last terminal-content revision for each visible row. Revisions persist
     /// across publications so a frontend that skips a buffer still sees every
     /// row changed since its previous frame.
     row_versions: Vec<u64>,
+
     content_revision: u64,
 }
 
@@ -58,6 +60,7 @@ impl RenderStateReader {
             ghostty_render_state_row_iterator_new(ptr::null(), &mut row_iter)
         }) {
             unsafe { ghostty_render_state_free(render_state) };
+
             return Err(err);
         }
 
@@ -315,6 +318,7 @@ impl RenderStateReader {
                     g: c.g,
                     b: c.b,
                 }),
+
                 _ => None,
             }
         };
@@ -353,6 +357,7 @@ impl RenderStateReader {
                     g: c.g,
                     b: c.b,
                 }),
+
                 _ => None,
             }
         };

@@ -30,7 +30,9 @@ fn inline_images_keep_byte_order_and_media_types() {
 #[test]
 fn disk_images_preserve_positions_skip_failed_writes_and_reuse_paths() {
     let scratch = Scratch::new();
+
     fs::create_dir(scratch.0.join("image-2.png")).unwrap();
+
     let images = [
         ImageAttachment {
             bytes: &[1],
@@ -76,6 +78,7 @@ fn empty_images_do_not_create_a_directory_and_unusable_scratch_returns_no_paths(
     assert!(!unused.exists());
 
     let blocked = scratch.0.join("file");
+
     fs::write(&blocked, b"occupied").unwrap();
 
     assert!(

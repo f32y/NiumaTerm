@@ -24,6 +24,7 @@ use nmt_agent::workflow::WorkflowRun;
 use crate::AgentPane;
 use crate::capabilities::AgentCapabilities as _;
 use crate::session::Backend;
+
 #[derive(Default)]
 pub(crate) struct WorkflowUi {
     visible: bool,
@@ -34,6 +35,7 @@ impl WorkflowUi {
     fn clear(&mut self) {
         self.refresh = None;
     }
+
     /// Show or hide the view, reporting whether that is a change.
     fn set_visible(&mut self, visible: bool) -> bool {
         let changed = self.visible != visible;
@@ -68,6 +70,7 @@ impl AgentPane {
         }
 
         self.sync_workflow_refresh(cx);
+
         cx.notify();
     }
 
@@ -105,11 +108,13 @@ impl AgentPane {
     pub fn open_workflow_agent(&mut self, task_id: &str, agent_id: &str, cx: &mut Context<Self>) {
         self.session.workflows.open_agent(task_id, agent_id);
         self.read_open_workflow_agent(cx);
+
         cx.notify();
     }
 
     pub fn close_workflow_agent(&mut self, cx: &mut Context<Self>) {
         self.session.workflows.close_agent();
+
         cx.notify();
     }
 
@@ -144,6 +149,7 @@ impl AgentPane {
 
         let cwd = self.cwd();
         let epoch = self.session.runtime.epoch();
+
         let read = cx
             .background_executor()
             .spawn(async move { workflows::read_run_snapshots(cwd.as_deref(), &session_id) });
@@ -174,6 +180,7 @@ impl AgentPane {
         // still usable and the next open retries.
         let Ok(restored) = restored else {
             self.session.workflows.forget_restore();
+
             return;
         };
 
@@ -190,6 +197,7 @@ impl AgentPane {
     pub(crate) fn sync_workflow_refresh(&mut self, cx: &mut Context<Self>) {
         if !self.should_refresh_workflows() {
             self.workflows.refresh = None;
+
             return;
         }
 
@@ -204,6 +212,7 @@ impl AgentPane {
                 let Ok(Some(plan)) = this.update(cx, |this, _| this.workflow_refresh_plan()) else {
                     break;
                 };
+
                 let cwd = plan.cwd;
                 let session_id = plan.session_id;
                 let requests = plan.requests;
@@ -319,6 +328,7 @@ impl AgentPane {
 
         let cwd = self.cwd();
         let epoch = self.session.runtime.epoch();
+
         let read = cx
             .background_executor()
             .spawn(async move { workflows::refresh_run(cwd.as_deref(), &session_id, &request) });

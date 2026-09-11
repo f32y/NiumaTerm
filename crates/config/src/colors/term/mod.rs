@@ -120,6 +120,7 @@ impl List {
             self[NamedColor::LightForeground] = color;
         } else {
             let color: ColorRgb = colors.foreground.into();
+
             self[NamedColor::LightForeground] = color.into();
         }
 
@@ -133,6 +134,7 @@ impl List {
             self[NamedColor::DimForeground] = color;
         } else {
             let color: ColorRgb = colors.foreground.into();
+
             self[NamedColor::DimForeground] = (color * DIM_FACTOR).into();
         }
 
@@ -140,6 +142,7 @@ impl List {
             self[NamedColor::DimBlack] = color;
         } else {
             let color: ColorRgb = colors.black.into();
+
             self[NamedColor::DimBlack] = (color * DIM_FACTOR).into();
         }
 
@@ -147,6 +150,7 @@ impl List {
             self[NamedColor::DimRed] = color;
         } else {
             let color: ColorRgb = colors.red.into();
+
             self[NamedColor::DimRed] = (color * DIM_FACTOR).into();
         }
 
@@ -154,6 +158,7 @@ impl List {
             self[NamedColor::DimGreen] = color;
         } else {
             let color: ColorRgb = colors.green.into();
+
             self[NamedColor::DimGreen] = (color * DIM_FACTOR).into();
         }
 
@@ -161,6 +166,7 @@ impl List {
             self[NamedColor::DimYellow] = color;
         } else {
             let color: ColorRgb = colors.yellow.into();
+
             self[NamedColor::DimYellow] = (color * DIM_FACTOR).into();
         }
 
@@ -168,6 +174,7 @@ impl List {
             self[NamedColor::DimBlue] = color;
         } else {
             let color: ColorRgb = colors.blue.into();
+
             self[NamedColor::DimBlue] = (color * DIM_FACTOR).into();
         }
 
@@ -175,6 +182,7 @@ impl List {
             self[NamedColor::DimMagenta] = color;
         } else {
             let color: ColorRgb = colors.magenta.into();
+
             self[NamedColor::DimMagenta] = (color * DIM_FACTOR).into();
         }
 
@@ -182,6 +190,7 @@ impl List {
             self[NamedColor::DimCyan] = color;
         } else {
             let color: ColorRgb = colors.cyan.into();
+
             self[NamedColor::DimCyan] = (color * DIM_FACTOR).into();
         }
 
@@ -189,6 +198,7 @@ impl List {
             self[NamedColor::DimWhite] = color;
         } else {
             let color: ColorRgb = colors.white.into();
+
             self[NamedColor::DimWhite] = (color * DIM_FACTOR).into();
         }
     }

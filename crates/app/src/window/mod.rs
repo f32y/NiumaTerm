@@ -15,6 +15,7 @@ use crate::ui::{self, Shell};
 /// centers them.
 #[cfg(target_os = "macos")]
 const TRAFFIC_LIGHT_HEIGHT: f32 = 14.0;
+
 /// Distance from the window's leading edge to the close button, matching the
 /// inset AppKit uses by default. The drawn title bar reserves room for the
 /// group ahead of its own leading controls.
@@ -51,8 +52,10 @@ fn titlebar_options() -> TitlebarOptions {
 pub(crate) struct AppWindow {
     pub(crate) bounds: Option<WindowState>,
     pub(crate) session: Option<SessionState>,
+
     /// Expanded sidebar width; stashed by the sidebar resize drag.
     pub(crate) sidebar_width: Option<f32>,
+
     /// CLI `new_window` target directory: the shell skips session restore and
     /// seeds one workspace rooted here. Never persisted.
     pub(crate) initial_cwd: Option<String>,
@@ -118,6 +121,7 @@ impl WindowRegistry {
 /// usable number of rows. Enforced by the platform through WM_GETMINMAXINFO,
 /// so it also bounds interactive resize, not just the initial geometry.
 pub(crate) const MIN_WINDOW_WIDTH: f32 = 640.0;
+
 const MIN_WINDOW_HEIGHT: f32 = 400.0;
 
 impl AppWindow {
@@ -167,6 +171,7 @@ impl AppWindow {
                     WindowBounds::Windowed(bounds)
                 }
             }
+
             None => WindowBounds::Windowed(Bounds::centered(None, size(px(960.0), px(620.0)), cx)),
         };
 

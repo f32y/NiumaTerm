@@ -19,10 +19,15 @@ use crate::ui::settings::*;
 #[test]
 fn cursor_shape_dropdown_values_match_config_shapes() {
     let parsed: CursorShape = "block".into();
+
     assert_eq!(parsed, CursorShape::Block);
+
     let parsed: CursorShape = "line".into();
+
     assert_eq!(parsed, CursorShape::Beam);
+
     let parsed: CursorShape = "underline".into();
+
     assert_eq!(parsed, CursorShape::Underline);
 }
 
@@ -157,11 +162,13 @@ fn window_backdrop_value_roundtrip() {
     ] {
         let value: &str = backdrop.into();
         let parsed: WindowBackdrop = value.into();
+
         assert_eq!(parsed, backdrop);
     }
 
     // Unknown values fall back to the opaque mode, which always renders.
     let parsed: WindowBackdrop = "bogus".into();
+
     assert_eq!(parsed, WindowBackdrop::Off);
 }
 
@@ -181,11 +188,13 @@ fn input_style_value_roundtrip() {
     for style in [InputStyle::Waterfall, InputStyle::FixedBottom] {
         let value: &str = style.into();
         let parsed: InputStyle = value.into();
+
         assert_eq!(parsed, style);
     }
 
     // Unknown values fall back to the default style.
     let parsed: InputStyle = "bogus".into();
+
     assert_eq!(parsed, InputStyle::Waterfall);
 }
 
@@ -490,6 +499,7 @@ fn settings_io_failure_preserves_edits_until_the_path_is_repaired() {
 
 fn list_pixel_position(state: &ListState) -> f32 {
     let offset = state.logical_scroll_top();
+
     offset.item_ix as f32 * 20. + offset.offset_in_item.as_f32()
 }
 
@@ -552,6 +562,7 @@ fn smooth_scrolling_mode_updates_an_open_terminal_list(cx: &mut TestAppContext) 
     cx.update_global::<AppSettings, _>(|settings, _| {
         settings.appearance.smooth_scrolling = SmoothScrollingMode::OnlyAgent;
     });
+
     draw_settings_aware_list(cx, &view);
     cx.executor().advance_clock(Duration::from_millis(400));
     draw_settings_aware_list(cx, &view);
@@ -595,9 +606,11 @@ fn every_registered_harness_can_be_named_seeded_and_launched() {
 fn built_in_ui_themes_parse_into_component_config() {
     for builtin in BUILTIN_THEMES {
         let theme: ConfigTheme = toml::from_str(builtin.source).unwrap();
+
         let ui = theme
             .ui_theme()
             .unwrap_or_else(|| panic!("{} has no [colors.ui] section", builtin.name));
+
         let config = ui_theme_config(&ui)
             .unwrap_or_else(|| panic!("{} has an unparsable [colors.ui] section", builtin.name));
 

@@ -36,18 +36,22 @@ pub(super) struct TabStrip {
     /// Scroll position of the tab strip (tabs overflow horizontally once their
     /// fixed widths exceed the bar).
     pub(super) scroll: ScrollHandle,
+
     /// Active tab at the last render; a change scrolls the new active tab into
     /// view (render-time compare-and-set, so every switch path counts).
     last_active: Option<TabId>,
+
     /// True right after the startup reveal request; the request is repeated on
     /// the second render because the scroll handle drops requests made before
     /// its first prepaint.
     reveal_retry: bool,
+
     /// Tab position a tab drag currently hovers: that tab shifts right to open
     /// an insertion gap ("make way"). Only overwritten when the pointer enters
     /// another tab — clearing on exit would oscillate, because opening the gap
     /// moves the hovered tab out from under the pointer.
     drag_over: Option<usize>,
+
     /// Strip width recorded during the previous prepaint, which is what
     /// `Auto Size` divides between the tabs. Held in a cell because the
     /// measurement arrives from a prepaint callback, long after `render` has
@@ -80,8 +84,10 @@ const FULL_TAB_WIDTH: f32 = 100.0;
 enum TabDensity {
     /// Icon, title, and the close control on hover.
     Full,
+
     /// Icon and the close control on hover; the title is dropped.
     Compact,
+
     /// A single glyph slot, shared by the icon and the close control.
     IconOnly,
 }
@@ -100,6 +106,7 @@ fn tab_density(tab_width: f32) -> TabDensity {
 /// strip. `TabVariant::Modern` fixes both at 4px, and the tab widths have to
 /// be reduced by that much to keep the row from overflowing.
 const TAB_GAP: f32 = 4.0;
+
 const TAB_BAR_PADDING: f32 = TAB_GAP * 2.0;
 
 /// Room held back for the trailing new-tab button, which shares the row with
@@ -141,8 +148,10 @@ struct TabItem {
     agent_kind: Option<AgentKind>,
     settings: bool,
     bell: bool,
+
     /// Restored but not yet spawned.
     pending: bool,
+
     exited: bool,
     progress: Option<ProgressReport>,
     terminal: TerminalActivity,
@@ -568,6 +577,7 @@ impl TabStrip {
                     .occlude()
                     .on_scroll_wheel(move |event, window, _| {
                         let delta = event.delta.pixel_delta(window.line_height());
+
                         let step = if delta.x.is_zero() { delta.y } else { delta.x };
 
                         if step.is_zero() {
@@ -578,6 +588,7 @@ impl TabStrip {
 
                         offset.x += step;
                         scroll.set_offset(offset);
+
                         window.refresh();
                     })
                     .w(px(tab_width))
@@ -633,6 +644,7 @@ impl TabStrip {
                                                         id as usize,
                                                     ))
                                                     .into_any_element(),
+
                                                     _ => terminal_dot(visual, TAB_DOT, cx),
                                                 }),
                                         )
@@ -665,6 +677,7 @@ impl TabStrip {
                                                 AgentTabIndicator::Busy => {
                                                     i18n("tabbar-tooltip-agent-busy")
                                                 }
+
                                                 AgentTabIndicator::Ready => {
                                                     i18n("tabbar-tooltip-agent-ready")
                                                 }
@@ -680,6 +693,7 @@ impl TabStrip {
                                                     id as usize,
                                                 ))
                                                 .into_any_element(),
+
                                                 // An agent waiting on the user
                                                 // is the same "this tab is
                                                 // done working" state a
@@ -722,6 +736,7 @@ impl TabStrip {
 
                         if this.tab_strip.drag_over != target {
                             this.tab_strip.drag_over = target;
+
                             cx.notify();
                         }
                     }))

@@ -79,6 +79,7 @@ struct PaneIdentity {
     /// Surface/tab id (same value as this pane's `TabId`); the shell pump uses it
     /// to route host events to the owning tab.
     id: u64,
+
     profile_name: String,
     restorable: TabState,
     agent_route: AgentRoute,
@@ -88,10 +89,12 @@ pub struct TerminalPane {
     pub focus: FocusHandle,
     identity: PaneIdentity,
     pub(crate) model: PaneController,
+
     /// The terminal leaf's laid-out content rect (window coords, padding
     /// excluded), set from the element's paint. Resize and pointer hit-testing use
     /// it so chrome (tab bar) offsets are honored instead of assuming the window.
     pub(super) content_bounds: Option<Bounds<Pixels>>,
+
     wake: wake::WakeSignal,
     image_releases_attached: bool,
     pub(super) block_list: BlockListState,
@@ -110,18 +113,21 @@ impl TerminalPane {
         launch: TerminalLaunch,
     ) -> Result<Entity<Self>, String> {
         let (wake, wake_rx) = wake::wake_channel();
+
         let source = TerminalFrameSource::for_gpui(
             wake.clone(),
             surface_id,
             launch.config,
             active_colors(),
         )?;
+
         let identity = PaneIdentity {
             id: surface_id,
             profile_name: launch.profile_name,
             restorable: launch.restorable,
             agent_route: launch.agent_route,
         };
+
         Ok(cx.new(|cx| Self::from_source(cx, identity, wake, wake_rx, source)))
     }
 
@@ -136,12 +142,14 @@ impl TerminalPane {
     ) -> Result<Entity<Self>, String> {
         let (wake, wake_rx) = wake::wake_channel();
         let source = TerminalFrameSource::attach(wake.clone(), surface_id, connect)?;
+
         let identity = PaneIdentity {
             id: surface_id,
             profile_name,
             restorable: TabState::default(),
             agent_route,
         };
+
         Ok(cx.new(|cx| Self::from_source(cx, identity, wake, wake_rx, source)))
     }
 
@@ -157,6 +165,7 @@ impl TerminalPane {
         cx.observe_global::<TerminalSettings>(|this, cx| {
             let settings: PaneSettings = cx.global::<TerminalSettings>().into();
             let colors = active_colors();
+
             this.block_list
                 .list
                 .set_alignment(block_list_alignment(settings.fixed_bottom));
@@ -186,8 +195,10 @@ impl TerminalPane {
                 if this
                     .update(cx, |this, cx| match wake {
                         wake::Wake::Content(_) => this.invalidate(cx),
+
                         wake::Wake::Chrome(_) => {
                             this.model.invalidate();
+
                             // Background panes cannot clear their dirty bit by rendering, but the
                             // shell observer still needs every chrome wake to refresh tab state.
                             cx.notify();
@@ -250,6 +261,7 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         self.content_bounds = Some(bounds);
+
         if self.model.resize_content(
             bounds.size.width.as_f32(),
             bounds.size.height.as_f32(),
@@ -295,9 +307,11 @@ impl TerminalPane {
 
     pub fn tab_state(&self) -> TabState {
         let mut state = self.identity.restorable.clone();
+
         if let Some(cwd) = self.model.source.session.current_directory() {
             state.cwd = Some(cwd);
         }
+
         state
     }
 
@@ -343,11 +357,13 @@ impl TerminalPane {
 
     fn on_previous_block(&mut self, _: &PreviousBlock, _: &mut Window, cx: &mut Context<Self>) {
         let outcome = self.model.jump_to_block(-1);
+
         self.apply_scroll_outcome(outcome, cx);
     }
 
     fn on_next_block(&mut self, _: &NextBlock, _: &mut Window, cx: &mut Context<Self>) {
         let outcome = self.model.jump_to_block(1);
+
         self.apply_scroll_outcome(outcome, cx);
     }
 
@@ -359,6 +375,7 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let offset = self.block_list.list.logical_scroll_top();
+
         let plan = self.model.prepare_block_list(
             frame,
             cell,
@@ -368,16 +385,21 @@ impl TerminalPane {
                 offset_px: offset.offset_in_item.as_f32(),
             },
         )?;
+
         for op in plan.ops {
             self.block_list.apply(op);
         }
+
         if !self.block_list.scroll_handler_set {
             let pane = cx.entity();
+
             self.block_list.list.set_scroll_handler(move |_, _, cx| {
                 pane.update(cx, |pane, cx| pane.mark_scrollbar_activity(cx));
             });
+
             self.block_list.scroll_handler_set = true;
         }
+
         Some(self.block_list_element(
             frame,
             cell,
@@ -459,11 +481,14 @@ impl TerminalPane {
                                 .py_2(),
                             cx,
                         );
+
                         this.invalidate(cx);
+
                         cx.notify();
                     }
                 });
             }
+
             result => warn!("terminal copy did not complete: {result:?}"),
         })
         .detach();
@@ -474,6 +499,7 @@ impl TerminalPane {
     fn react_to_pty_input(&mut self, cx: &mut Context<Self>) {
         if self.model.settings.scroll_to_bottom_when_typing {
             let outcome = self.model.scroll_to_latest();
+
             self.apply_scroll_outcome(outcome, cx);
         }
     }
@@ -484,13 +510,18 @@ impl TerminalPane {
 
         match self.model.key_down(&terminal_key(&event.keystroke)) {
             KeyOutcome::Ignored => return,
+
             KeyOutcome::Scrolled(outcome) => {
                 self.apply_scroll_outcome(outcome, cx);
+
                 return;
             }
+
             KeyOutcome::Written => self.react_to_pty_input(cx),
+
             KeyOutcome::CopyPending(copy) => {
                 self.begin_copy(copy, window, cx);
+
                 return;
             }
         }
@@ -506,17 +537,22 @@ impl TerminalPane {
     pub(crate) fn feed_terminal_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
         match self.model.send_key(&terminal_key(keystroke)) {
             KeyOutcome::Ignored => return,
+
             KeyOutcome::Scrolled(outcome) => {
                 self.apply_scroll_outcome(outcome, cx);
+
                 return;
             }
+
             KeyOutcome::Written => self.react_to_pty_input(cx),
+
             KeyOutcome::CopyPending(copy) => {
                 cx.spawn(async move |this, cx| {
                     if let Ok(Ok(text)) = copy.request.await {
                         let _ = this.update(cx, |this, cx| {
                             if this.model.finish_copy(text, copy.completion) {
                                 this.invalidate(cx);
+
                                 cx.notify();
                             }
                         });
@@ -582,6 +618,7 @@ impl TerminalPane {
 
     pub(crate) fn local_position(&self, position: Point<Pixels>) -> LocalPoint {
         let origin = self.content_origin();
+
         LocalPoint {
             x: (position.x - origin.x).as_f32(),
             y: (position.y - origin.y).as_f32(),
@@ -613,11 +650,15 @@ impl TerminalPane {
             MouseOutcome::Ignored => {}
             MouseOutcome::OpenUrl(url) => cx.open_url(&url),
             MouseOutcome::SelectionChanged | MouseOutcome::HoverChanged => cx.notify(),
+
             MouseOutcome::FrozenSelectionStarted => {
                 self.invalidate(cx);
+
                 cx.notify();
             }
+
             MouseOutcome::EngineHandled => self.invalidate(cx),
+
             MouseOutcome::Scrolled(outcome) => {
                 self.apply_scroll_outcome(outcome, cx);
             }
@@ -632,23 +673,29 @@ impl TerminalPane {
     ) {
         window.focus(&self.focus, cx);
         self.cell_metrics(window, cx);
+
         let input = self.mouse_input(
             event.position,
             Some(event.button),
             event.modifiers,
             event.click_count,
         );
+
         let outcome = self.model.mouse_down(input);
+
         self.apply_mouse_outcome(outcome, cx);
     }
 
     fn on_mouse_up(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.cell_metrics(window, cx);
+
         let input = self.mouse_input(event.position, Some(event.button), event.modifiers, 1);
         let release = self.model.mouse_up(input);
+
         if release.scrollbar_released {
             self.mark_scrollbar_activity(cx);
         }
+
         self.apply_mouse_outcome(release.outcome, cx);
     }
 
@@ -659,8 +706,10 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         self.cell_metrics(window, cx);
+
         let input = self.mouse_input(event.position, event.pressed_button, event.modifiers, 1);
         let outcome = self.model.mouse_move(input);
+
         self.apply_mouse_outcome(outcome, cx);
     }
 
@@ -671,20 +720,25 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         let cell = self.cell_metrics(window, cx);
+
         let delta = match event.delta {
             ScrollDelta::Lines(point) => WheelDelta::Steps(point.y),
+
             ScrollDelta::Pixels(point) => {
                 WheelDelta::Rows(point.y.as_f32() / cell.height_px.max(1.0))
             }
         };
+
         let outcome = self.model.scroll_wheel(
             self.local_position(event.position),
             delta,
             modifiers_state(event.modifiers),
         );
+
         if outcome.hover_changed {
             cx.notify();
         }
+
         if outcome.handled {
             self.mark_scrollbar_activity(cx);
             self.invalidate(cx);
@@ -693,10 +747,12 @@ impl TerminalPane {
 
     pub(crate) fn mark_scrollbar_activity(&mut self, cx: &mut Context<Self>) {
         let generation = self.model.scrollbar.mark_activity();
+
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(SCROLLBAR_AUTO_HIDE_DELAY)
                 .await;
+
             let _ = this.update(cx, |this, cx| {
                 if this.model.scrollbar.should_fade(generation) {
                     cx.notify();
@@ -704,6 +760,7 @@ impl TerminalPane {
             });
         })
         .detach();
+
         cx.notify();
     }
 
@@ -715,12 +772,16 @@ impl TerminalPane {
         match outcome {
             ScrollOutcome::Ignored => return false,
             ScrollOutcome::GridRequested => self.invalidate(cx),
+
             ScrollOutcome::List(op) => {
                 self.block_list.apply(op);
+
                 cx.notify();
             }
         }
+
         self.mark_scrollbar_activity(cx);
+
         true
     }
 }
@@ -832,8 +893,10 @@ impl Render for TerminalPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.image_releases_attached {
             let queue = self.model.source.images.generations.lock().release_queue();
+
             if let Some(mut releases) = queue.lock().attach() {
                 let handle = window.window_handle();
+
                 // The task owns no pane or generation references. It drains through
                 // the original window until the final generation releases its sender.
                 cx.spawn(async move |_, cx| {
@@ -850,6 +913,7 @@ impl Render for TerminalPane {
                 })
                 .detach();
             }
+
             self.image_releases_attached = true;
         }
 

@@ -12,6 +12,7 @@ use crate::AgentWorkspace;
 use crate::input_history::store::{HistoryStore, StoredHistory, load_from_path, save_to_path};
 use crate::input_history::{AgentInputHistory, HistoryWriter, InputHistoryScope};
 use crate::session::AgentKind;
+
 static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(1);
 
 struct TestDirectory(PathBuf);
@@ -205,6 +206,7 @@ fn history_process_writer() {
     let Some(path) = env::var_os("NMT_HISTORY_TEST_PATH") else {
         return;
     };
+
     let path: PathBuf = path.into();
     let writer = env::var("NMT_HISTORY_TEST_WRITER").unwrap();
     let scope = scope("local", AgentKind::Codex, path.parent().unwrap());
@@ -350,6 +352,7 @@ fn slow_storage_coalesces_saves_and_flush_waits_for_latest_write() {
     let writer = HistoryWriter::start(move |snapshot| {
         started_tx.send(()).unwrap();
         release_rx.recv().unwrap();
+
         save_to_path(&saved_path, snapshot)
     })
     .unwrap();
@@ -377,6 +380,7 @@ fn slow_storage_coalesces_saves_and_flush_waits_for_latest_write() {
     assert!(flushed_rx.try_recv().is_err());
 
     release_tx.send(()).unwrap();
+
     flushed_rx
         .recv_timeout(Duration::from_secs(5))
         .unwrap()

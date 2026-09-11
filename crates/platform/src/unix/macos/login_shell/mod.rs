@@ -37,6 +37,7 @@ fn marker() -> String {
     let clock = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.subsec_nanos());
+
     let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
 
     format!(
@@ -78,6 +79,7 @@ pub(crate) fn missing_variables() -> &'static [(String, String)] {
 
         let Some(captured) = capture(&shell) else {
             warn!("could not read the environment of login shell {shell}");
+
             return Vec::new();
         };
 
@@ -146,10 +148,13 @@ fn capture(shell: &str) -> Option<Vec<(String, String)>> {
 
     let captured = match receiver.recv_timeout(CAPTURE_TIMEOUT) {
         Ok(Ok(output)) => Some(output),
+
         Ok(Err(error)) => {
             warn!("could not read from login shell {shell}: {error}");
+
             None
         }
+
         Err(_) => {
             warn!("login shell {shell} did not finish within {CAPTURE_TIMEOUT:?}");
 
@@ -170,6 +175,7 @@ fn capture(shell: &str) -> Option<Vec<(String, String)>> {
 /// Anything ahead of the marker is startup output and is dropped.
 fn parse(output: &[u8], marker: &str) -> Vec<(String, String)> {
     let text = String::from_utf8_lossy(output);
+
     let Some((_, dump)) = text.split_once(marker) else {
         return Vec::new();
     };

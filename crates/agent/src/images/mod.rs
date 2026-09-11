@@ -1,10 +1,13 @@
 use std::io::Cursor;
+
 #[cfg(test)]
 mod tests;
+
 use std::ops::Range;
 
 use image_rs::GenericImageView as _;
 use image_rs::imageops::FilterType;
+
 /// Images one message may carry. Claude Code's harness takes them inline on a
 /// single stdin line, so a message that gathers many large screenshots is one
 /// the harness would struggle to read.
@@ -24,6 +27,7 @@ pub struct Attachment<T> {
     /// strip asks for it every frame, and the encoded bytes of a screenshot
     /// are megabytes.
     pub image: T,
+
     /// The text this attachment is anchored by, kept alongside it so removal
     /// and renumbering do not have to reconstruct it.
     placeholder: String,
@@ -39,6 +43,7 @@ impl<T> Attachment<T> {
 pub enum AttachError {
     /// The message already carries [`MAX_ATTACHMENTS`].
     Full,
+
     /// The clipboard's bytes could not be read as an image.
     Undecodable,
 }
@@ -89,6 +94,7 @@ impl<T> PendingAttachments<T> {
             Some((to_width, to_height)) => {
                 encode_png(&decoded.resize(to_width, to_height, FilterType::Triangle))?
             }
+
             None => encode_png(&decoded)?,
         };
 
@@ -196,9 +202,11 @@ fn renumber<T>(
 
     for (span, number) in spans {
         let old = placeholder_text(*number);
+
         let Some(position) = items.iter().position(|item| item.placeholder == old) else {
             continue;
         };
+
         let new = placeholder_text(position + 1);
 
         if new == old {
@@ -213,6 +221,7 @@ fn renumber<T>(
 
     changed.then(|| {
         rewritten.push_str(&text[cursor..]);
+
         rewritten
     })
 }
@@ -230,9 +239,11 @@ fn placeholder_spans(text: &str) -> Vec<(Range<usize>, usize)> {
     while let Some(offset) = text[cursor..].find(PLACEHOLDER_PREFIX) {
         let start = cursor + offset;
         let digits_at = start + PLACEHOLDER_PREFIX.len();
+
         let Some(length) = text[digits_at..].find(PLACEHOLDER_SUFFIX) else {
             break;
         };
+
         let digits = &text[digits_at..digits_at + length];
 
         cursor = digits_at + length + PLACEHOLDER_SUFFIX.len_utf8();
@@ -258,8 +269,10 @@ fn scaled_dimensions(width: u32, height: u32) -> Option<(u32, u32)> {
     let max_edge: f64 = MAX_IMAGE_EDGE.into();
     let long_edge: f64 = long_edge.into();
     let scale = max_edge / long_edge;
+
     let scaled = |edge: u32| {
         let edge: f64 = edge.into();
+
         ((edge * scale).round() as u32).max(1)
     };
 

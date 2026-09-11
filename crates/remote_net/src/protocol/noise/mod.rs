@@ -6,6 +6,7 @@ use snow::{Builder, HandshakeState, TransportState};
 /// used for first-contact pairing where both sides learn each other's static
 /// key during the handshake.
 const PATTERN_IK: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
+
 const PATTERN_XX: &str = "Noise_XX_25519_ChaChaPoly_BLAKE2s";
 
 /// Noise caps a single transport message at 65535 bytes (ciphertext incl.
@@ -19,6 +20,7 @@ pub enum NoiseError {
     /// as fatal for the channel.
     #[error("noise protocol failure: {0}")]
     Snow(#[from] snow::Error),
+
     #[error("handshake not finished")]
     HandshakeNotFinished,
 }
@@ -104,7 +106,9 @@ impl Handshake {
     /// Consume a handshake message received from the peer.
     pub fn read_message(&mut self, message: &[u8]) -> Result<(), NoiseError> {
         let mut buf = vec![0u8; MSG_BUF];
+
         self.state.read_message(message, &mut buf)?;
+
         Ok(())
     }
 

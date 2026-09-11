@@ -39,6 +39,7 @@ pub fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, String> {
 #[derive(Clone)]
 pub enum CheckedOut {
     Branch(String),
+
     /// Short commit id of a detached `HEAD`, so the caller never presents an
     /// empty branch label.
     Detached(String),
@@ -47,6 +48,7 @@ pub enum CheckedOut {
 /// One directory's branch as it was last read.
 struct ReadBranch {
     at: Instant,
+
     /// `None` records that the directory is no repository, which is an answer
     /// worth holding: it is the case that runs git twice.
     answer: Option<CheckedOut>,
@@ -97,6 +99,7 @@ pub fn current_branch(cwd: &str, max_age: Duration) -> Option<CheckedOut> {
     let mut entries = cache.lock();
 
     entries.retain(|_, read| read.at.elapsed() < BRANCH_RETENTION);
+
     entries.insert(
         cwd.to_string(),
         ReadBranch {

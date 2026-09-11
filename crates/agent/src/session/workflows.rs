@@ -2,18 +2,22 @@ use crate::chat::Item as SessionItem;
 use crate::claude_code::workflows::{WorkflowRefreshRequest, WorkflowRefreshResult};
 use crate::session::lifecycle::SessionRuntime;
 use crate::workflow::{WorkflowAgentState, WorkflowRun, WorkflowSnapshot};
+
 /// The agent conversation the user has open, and what has been read of it.
 #[derive(Default)]
 pub struct OpenWorkflowAgent {
     pub task_id: String,
     pub agent_id: String,
     pub items: Vec<SessionItem>,
+
     /// Size the transcript had when `items` was parsed, so an unchanged file
     /// is never re-parsed.
     len: Option<u64>,
+
     /// The provider has not persisted this agent's transcript; the row stays
     /// listed and the conversation reports itself unavailable.
     pub unavailable: bool,
+
     /// Bumped whenever `items` changes, so the transcript view rebuilds only
     /// on a real change.
     revision: u64,
@@ -30,6 +34,7 @@ impl OpenWorkflowAgent {
 pub struct WorkflowData {
     pub snapshot: Option<WorkflowSnapshot>,
     pub open: Option<OpenWorkflowAgent>,
+
     /// Session whose completed runs were already read back from disk, so a
     /// resumed conversation restores once rather than on every reopen.
     restored_session: Option<String>,
@@ -193,6 +198,7 @@ impl WorkflowData {
         let Some(transcript) = result.transcript.as_ref() else {
             return;
         };
+
         let Some(open) = self.open.as_mut() else {
             return;
         };
@@ -236,6 +242,7 @@ impl WorkflowData {
         let session = runtime.backend()?;
         let session_id = session.session_id()?.to_owned();
         let requests = self.scope_requests(session.workflow_refresh_requests());
+
         (!requests.is_empty()).then_some(RefreshPlan {
             cwd,
             session_id,

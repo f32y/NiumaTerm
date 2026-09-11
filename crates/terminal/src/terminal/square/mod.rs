@@ -71,10 +71,13 @@ const BG_RGB_B_SHIFT: u64 = 48;
 pub enum Wide {
     /// Normal single-cell character.
     Narrow = 0,
+
     /// First cell of a double-wide character.
     Wide = 1,
+
     /// Second cell of a double-wide character.
     Spacer = 2,
+
     /// Trailing spacer at end of a soft-wrapped line indicating a wide
     /// character continues on the next line.
     LeadingSpacer = 3,
@@ -90,9 +93,11 @@ pub enum Wide {
 pub enum ContentTag {
     /// Standard text cell. Codepoint in bits 0..20, style_id in bits 32..47.
     Codepoint = 0,
+
     /// Bg-only cell with a palette-indexed background.
     /// Palette index in bits 32..39.
     BgPalette = 1,
+
     /// Bg-only cell with an RGB background.
     /// RGB packed in bits 32..55 (R, G, B).
     BgRgb = 2,
@@ -105,8 +110,10 @@ bitflags! {
     pub struct CellFlags: u8 {
  /// Soft-wrap continuation marker on the last cell of a wrapped line.
         const WRAPLINE         = 1 << 0;
+
  /// Cell carries hyperlink metadata. Lookup via extras_id.
         const HYPERLINK        = 1 << 2;
+
  /// Cell carries multi-codepoint grapheme cluster. Lookup via extras_id.
         const GRAPHEME         = 1 << 3;
     }
@@ -123,6 +130,7 @@ pub struct Hyperlink {
 impl Hyperlink {
     pub fn new<T: ToString>(id: Option<T>, uri: T) -> Self {
         let inner = Arc::new(HyperlinkInner::new(id, uri));
+
         Self { inner }
     }
 
@@ -145,6 +153,7 @@ impl HyperlinkInner {
     pub fn new<T: ToString>(id: Option<T>, uri: T) -> Self {
         let id = match id {
             Some(id) => id.to_string(),
+
             None => {
                 let mut id = HYPERLINK_ID_SUFFIX
                     .fetch_add(1, Ordering::Relaxed)
@@ -232,6 +241,7 @@ impl Square {
     #[inline]
     pub fn cell_flags(self) -> CellFlags {
         let bits = ((self.0 & CELL_FLAGS_MASK) >> CELL_FLAGS_SHIFT) as u8;
+
         CellFlags::from_bits_truncate(bits)
     }
 
@@ -346,6 +356,7 @@ impl Square {
     #[inline]
     pub fn with_style_id(mut self, id: StyleId) -> Self {
         self.set_style_id(id);
+
         self
     }
 
@@ -367,6 +378,7 @@ impl Square {
     #[inline]
     pub fn set_wrapline(&mut self, on: bool) {
         let mut flags = self.cell_flags();
+
         flags.set(CellFlags::WRAPLINE, on);
         self.set_cell_flags(flags);
     }
@@ -395,7 +407,9 @@ impl From<char> for Square {
     #[inline]
     fn from(c: char) -> Self {
         let mut s = Square(0);
+
         s.set_c(c);
+
         s
     }
 }

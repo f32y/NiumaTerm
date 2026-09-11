@@ -16,11 +16,14 @@ pub(crate) struct LiveTurn {
     /// When the running turn began, which is what the elapsed reading counts
     /// from. `None` between turns.
     started: Option<Instant>,
+
     /// Output tokens reported so far for the running turn.
     output_tokens: Option<u64>,
+
     /// What the backend last said it was doing, shown beside the elapsed
     /// reading.
     detail: Option<String>,
+
     /// The backend is compacting rather than answering, which the progress
     /// line names instead of the usual reading.
     compacting: bool,
@@ -112,8 +115,10 @@ pub(crate) struct TurnLedger {
     /// view replayed. Folding keys off this rather than off a known duration,
     /// because a replayed turn has no duration to record.
     settled: HashSet<u64>,
+
     seconds: HashMap<u64, u64>,
     output_tokens: HashMap<u64, u64>,
+
     /// Turns the user stopped. An interrupted turn reports no elapsed time,
     /// because the reading would describe how long the user waited before
     /// giving up rather than how long the work took.

@@ -28,6 +28,7 @@ struct LogBuffer(Arc<Mutex<Vec<u8>>>);
 impl Write for LogBuffer {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         self.0.lock().extend_from_slice(bytes);
+
         Ok(bytes.len())
     }
 
@@ -41,6 +42,7 @@ impl Enabled {
         take_totals();
         ALLOCATOR.set_enabled(true);
         frame_stats::set_enabled(true);
+
         Self
     }
 }
@@ -86,7 +88,9 @@ fn history(turns: u64, live: Item) -> TranscriptView {
         item: live,
         metadata: Default::default(),
     });
+
     view.refresh_rows(CollapseRows::WorkAndToolCalls);
+
     view
 }
 
@@ -113,6 +117,7 @@ fn profiles_real_updates_and_mirror_revisions_without_changing_results(cx: &mut 
         entity.update(cx, |view, cx| {
             assert!(view.append_delta("live", " more", TextField::ReasoningSummary));
             assert!(!view.append_delta("missing", "ignored", TextField::ReasoningSummary));
+
             view.refresh_rows(CollapseRows::WorkAndToolCalls);
             view.refresh_rows(CollapseRows::WorkAndToolCalls);
 
@@ -128,6 +133,7 @@ fn profiles_real_updates_and_mirror_revisions_without_changing_results(cx: &mut 
             let growth = "x".repeat(2048);
 
             assert!(view.append_delta("live", &growth, TextField::ReasoningSummary));
+
             let grown = take_totals()[Operation::AppendDelta as usize];
 
             assert_eq!(grown.allocations.reallocations, 1);
@@ -142,6 +148,7 @@ fn profiles_real_updates_and_mirror_revisions_without_changing_results(cx: &mut 
             for operation in [Operation::BackgroundSnapshot, Operation::WorkflowSnapshot] {
                 let snapshot = {
                     let _profile = Probe::start(operation);
+
                     source.to_vec()
                 };
 
@@ -163,11 +170,14 @@ fn profiles_real_updates_and_mirror_revisions_without_changing_results(cx: &mut 
 
             assert!(view.contains_item("mirrored"));
             assert!(!view.contains_item("live"));
+
             view.show_items(&source, 2, cx);
+
             assert_eq!(take_totals()[Operation::MirrorRebuild as usize].calls, 1);
 
             let log = LogBuffer(Arc::default());
             let writer = log.clone();
+
             let subscriber = fmt()
                 .without_time()
                 .with_ansi(false)
@@ -197,6 +207,7 @@ fn profiles_real_updates_and_mirror_revisions_without_changing_results(cx: &mut 
 
     ALLOCATOR.set_enabled(false);
     drop(Probe::start(Operation::AppendDelta));
+
     let unavailable = take_totals()[Operation::AppendDelta as usize];
 
     assert_eq!(unavailable.calls, 1);
@@ -257,6 +268,7 @@ fn measure<C, T>(
     for (operation, total) in OPERATIONS.into_iter().zip(totals) {
         if total.calls > 0 {
             let operation: &str = operation.into();
+
             eprintln!(
                 "  {}: calls={} allocations={:?}",
                 operation, total.calls, total.allocations
@@ -366,6 +378,7 @@ fn long_transcript_profile(cx: &mut TestAppContext) {
 
         for changed in [false, true] {
             let entity = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+
             cx.update(|cx| {
                 entity.update(cx, |_, cx| {
                     measure(
@@ -377,6 +390,7 @@ fn long_transcript_profile(cx: &mut TestAppContext) {
 
                             view.show_items(&source, 1, cx);
                             view.refresh_rows(CollapseRows::WorkAndToolCalls);
+
                             view
                         },
                         |view, index, cx| {
@@ -384,8 +398,10 @@ fn long_transcript_profile(cx: &mut TestAppContext) {
                             // matching the current detail-panel update order.
                             let snapshot = {
                                 let _profile = Probe::start(operation);
+
                                 source.clone()
                             };
+
                             let revision = if changed { index as u64 + 2 } else { 1 };
 
                             view.show_items(&snapshot, revision, cx);

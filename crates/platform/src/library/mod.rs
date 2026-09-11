@@ -26,6 +26,7 @@ impl ResidentLibrary {
     pub unsafe fn load(path: &Path) -> io::Result<Self> {
         // SAFETY: the caller accepts execution of the library's initializers.
         let handle = unsafe { load(path) }?;
+
         Ok(Self { handle })
     }
 

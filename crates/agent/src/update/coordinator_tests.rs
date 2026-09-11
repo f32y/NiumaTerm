@@ -73,9 +73,11 @@ fn test_path(name: &str) -> PathBuf {
 #[test]
 fn fresh_cache_is_reused_and_manual_check_bypasses_it() {
     let path = test_path("cache");
+
     let now = DateTime::parse_from_rfc3339("2026-08-07T00:00:00Z")
         .unwrap()
         .with_timezone(&Utc);
+
     let coordinator = UpdateCoordinator::with_clock(path.clone(), Arc::new(move || now));
 
     let fake = Arc::new(FakeMaintenance {

@@ -14,9 +14,11 @@ pub(super) fn spawn_pane(
 ) -> Result<Entity<TerminalPane>, String> {
     let agent_route = agent_process().allocate_route();
     let environment_overrides = agent_process().environment_for(&agent_route);
+
     let (cursor_shape, manage_process_tree) = cx.read_global(|settings: &TerminalSettings, _| {
         (settings.cursor_shape, settings.manage_subprocess_job)
     });
+
     let config = TerminalSessionConfig {
         shell: state.shell.clone(),
         args: state.args.clone(),
@@ -27,6 +29,7 @@ pub(super) fn spawn_pane(
         manage_process_tree,
         ..TerminalSessionConfig::default()
     };
+
     TerminalPane::spawn(
         cx,
         id,
@@ -46,6 +49,7 @@ pub(super) fn attach_remote(
     remote: nmt_remote_net::RemoteSession,
 ) -> Result<Entity<TerminalPane>, String> {
     let route = agent_process().allocate_route();
+
     TerminalPane::attach(
         cx,
         id,

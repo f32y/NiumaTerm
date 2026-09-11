@@ -30,11 +30,15 @@ impl BackgroundColors {
         match cell.content_tag() {
             ContentTag::BgRgb => {
                 let (r, g, b) = cell.bg_rgb();
+
                 Some((r, g, b).into())
             }
+
             ContentTag::BgPalette => Some(self.indexed(cell.bg_palette_index() as usize)),
+
             ContentTag::Codepoint => {
                 let style = buf.style(cell.style_id());
+
                 if style.flags.contains(StyleFlags::INVERSE) {
                     Some(self.color(&style.fg, style.flags, true))
                 } else {
@@ -79,14 +83,17 @@ impl BackgroundColors {
 
                 self.named(named)
             }
+
             AnsiColor::Spec(rgb) => {
                 if dim {
                     let color: ColorArray = (*rgb * DIM_FACTOR).into();
+
                     color.into()
                 } else {
                     *rgb
                 }
             }
+
             AnsiColor::Indexed(index) => {
                 let index = match (foreground, dim, bold, *index) {
                     (true, true, _, 8..=15) => *index as usize - 8,

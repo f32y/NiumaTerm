@@ -13,6 +13,7 @@ fn sample() -> PairingCode {
 fn roundtrip() {
     let code = sample();
     let encoded: String = (&code).into();
+
     assert_eq!(PairingCode::decode(&encoded).unwrap(), code);
 }
 
@@ -21,6 +22,7 @@ fn tolerates_whitespace_and_case() {
     let code = sample();
     let encoded: String = (&code).into();
     let mangled = format!("  {}  ", encoded.to_lowercase());
+
     assert_eq!(PairingCode::decode(&mangled).unwrap(), code);
 }
 

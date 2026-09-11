@@ -14,6 +14,7 @@ pub struct AuthorizedDevices {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceEntry {
     pub name: String,
+
     /// Hex-encoded X25519 public key (64 chars).
     pub public_key: String,
 }
@@ -41,6 +42,7 @@ impl AuthorizedDevices {
         let entries = match fs::read(&path) {
             Ok(bytes) => serde_json::from_slice(&bytes)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
+
             Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(e),
         };
@@ -50,6 +52,7 @@ impl AuthorizedDevices {
 
     pub fn contains(&self, public_key: &[u8]) -> bool {
         let hex = hex_encode(public_key);
+
         self.entries.iter().any(|d| d.public_key == hex)
     }
 
@@ -58,6 +61,7 @@ impl AuthorizedDevices {
 
         // Re-pairing the same device just refreshes its name.
         self.entries.retain(|d| d.public_key != hex);
+
         self.entries.push(DeviceEntry {
             name: name.to_owned(),
             public_key: hex,

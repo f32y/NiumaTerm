@@ -18,10 +18,13 @@ pub(crate) struct FrozenItemChrome {
     pub top: f32,
     pub bottom: f32,
     pub header_y: f32,
+
     /// 0xRRGGBB, keyed off the exit code (running/success/failure).
     pub accent: u32,
+
     /// "cmd · ✓ 1.2s" / "cmd · ✗ 127"; `None` when no command is known.
     pub header: Option<String>,
+
     pub selected: bool,
 }
 

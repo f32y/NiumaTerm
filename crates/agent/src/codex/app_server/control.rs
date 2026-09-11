@@ -55,12 +55,15 @@ impl ControlState {
 
     pub(super) fn alloc_id(&mut self) -> u64 {
         let id = self.next_id;
+
         self.next_id += 1;
+
         id
     }
 
     pub(super) fn outgoing(message: &Value) -> Option<(u64, ControlOperation)> {
         let method = message["method"].as_str()?;
+
         let id = message["id"]
             .as_u64()
             .filter(|id| *id >= FIRST_TURN_RPC_ID)?;

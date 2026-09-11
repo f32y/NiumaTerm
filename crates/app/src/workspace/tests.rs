@@ -85,6 +85,7 @@ fn workspace_progress_averages_the_tabs_reporting_a_percentage() {
         TabId(2),
         "Tab".to_string(),
     );
+
     tabs.new_tab(
         TabSurface::Pending(Box::default()),
         TabId(3),
@@ -399,6 +400,7 @@ fn a_repeated_entry_in_a_saved_list_is_dropped_once() {
 #[test]
 fn a_nested_directory_is_owned_alongside_its_ancestor() {
     let mut roots = WorkspaceRoots::single("C:/A".into());
+
     assert_eq!(roots.add("C:/A/child".into()), RootChange::Applied);
     assert_eq!(ordered(&roots), ["C:/A", "C:/A/child"]);
 }
@@ -417,6 +419,7 @@ fn making_a_directory_primary_preserves_every_other_position() {
 #[test]
 fn making_the_current_primary_primary_again_changes_nothing() {
     let mut roots = WorkspaceRoots::new("C:/A".into(), vec!["C:/B".into()]);
+
     assert_eq!(roots.make_primary("C:/A"), RootChange::Applied);
     assert_eq!(ordered(&roots), ["C:/A", "C:/B"]);
 }
@@ -433,6 +436,7 @@ fn an_unattached_directory_cannot_be_promoted_or_removed() {
 #[test]
 fn removing_the_primary_promotes_the_first_additional_directory() {
     let mut roots = WorkspaceRoots::new("C:/A".into(), vec!["C:/B".into(), "C:/C".into()]);
+
     assert_eq!(roots.remove("C:/A"), RootChange::Applied);
     assert_eq!(ordered(&roots), ["C:/B", "C:/C"]);
 }
@@ -440,6 +444,7 @@ fn removing_the_primary_promotes_the_first_additional_directory() {
 #[test]
 fn the_last_directory_of_a_normal_workspace_cannot_be_removed() {
     let mut roots = WorkspaceRoots::single("C:/A".into());
+
     assert_eq!(roots.remove("C:/A"), RootChange::WouldBeEmpty);
     assert_eq!(ordered(&roots), ["C:/A"]);
 }
@@ -505,6 +510,7 @@ fn workspace_identity_survives_root_edits() {
     let second = WorkspaceId(2);
 
     manager.set_temporary(second, true);
+
     manager.set_roots(
         second,
         WorkspaceRoots::new("C:/2".into(), vec!["C:/extra".into()]),

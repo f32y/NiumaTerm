@@ -30,14 +30,17 @@ fn live_item_layout_places_chrome_around_history_active_rows_and_padding() {
             has_open_prompt: open_prompt,
             selected_item: Some(4),
         };
+
         for pad_rows in [0.0, 1.0] {
             for history_height in [0.0, 50.0] {
                 let layout = state.layout(history_height, 2, 10.0, pad_rows);
+
                 assert_eq!(
                     (layout.active_top, layout.active_height),
                     (history_height, 20.0)
                 );
                 assert_eq!(layout.chrome.as_ref().map(|chrome| chrome.accent), accent);
+
                 if let Some(chrome) = layout.chrome {
                     assert_eq!(
                         (chrome.top, chrome.bottom, chrome.header_y),
@@ -48,7 +51,9 @@ fn live_item_layout_places_chrome_around_history_active_rows_and_padding() {
                 }
             }
         }
+
         let empty = state.layout(50.0, 0, 10.0, 1.0);
+
         assert!(empty.chrome.is_none());
         assert_eq!(empty.active_height, 0.0);
     }

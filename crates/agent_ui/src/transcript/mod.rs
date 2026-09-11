@@ -44,5 +44,6 @@ pub(super) use crate::transcript::rows::{Entry, ReadingPosition, RowSpec};
 #[cfg(test)]
 pub(super) use crate::transcript::rows::{TurnSummary, turn_summary};
 pub use crate::transcript::view::TranscriptView;
+
 #[cfg(test)]
 mod tests;

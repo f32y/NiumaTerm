@@ -53,6 +53,7 @@ pub(crate) fn open_file_use_prompt(
                                 }),
                         );
                     }
+
                     FileUsePromptReason::CheckFailed => {
                         footer = footer.child(
                             Button::new("app-update-retry-file-use")
@@ -65,6 +66,7 @@ pub(crate) fn open_file_use_prompt(
                                 }),
                         );
                     }
+
                     FileUsePromptReason::RebootRequired => {}
                 }
 
@@ -86,6 +88,7 @@ pub(crate) fn open_file_use_prompt(
                         continue_button.primary()
                     },
                 );
+
                 footer = footer.child(
                     DialogClose::new().child(
                         Button::new("app-update-cancel-file-use")

@@ -24,6 +24,7 @@ impl SessionController {
         let turn = self.delivery.is_active().then_some(self.delivery.turn());
         let prompt = self.delivery.take_interrupted_prompt();
         let outcome = self.runtime.interrupt(turn);
+
         UserInterruption { prompt, outcome }
     }
 
@@ -42,14 +43,17 @@ impl SessionController {
         }
 
         let waiting = self.input.waiting();
+
         match self
             .input
             .submit(&mut self.runtime, key, action, &self.controls.settings, now)
         {
             Submission::Ignored => QuestionSubmission::Ignored,
+
             Submission::Settled => QuestionSubmission::Settled {
                 waiting_finished: waiting && !self.input.waiting(),
             },
+
             Submission::Waiting => QuestionSubmission::Waiting,
             Submission::Failed => QuestionSubmission::Failed,
         }

@@ -119,6 +119,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
             NotificationProgress::None,
             false,
         ),
+
         UpdatePhase::WaitingForIdle => (
             i18n("agent-update-notice-waiting-title").replace("{provider}", provider),
             i18n("agent-update-notice-waiting-message").to_string(),
@@ -127,6 +128,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
             NotificationProgress::Indeterminate,
             false,
         ),
+
         UpdatePhase::Suspending => (
             i18n("agent-update-notice-stopping-title").replace("{provider}", provider),
             i18n("agent-update-notice-stopping-message").to_string(),
@@ -135,6 +137,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
             progress_view(snapshot),
             false,
         ),
+
         UpdatePhase::Updating => (
             i18n("agent-update-notice-updating-title").replace("{provider}", provider),
             i18n("agent-update-notice-updating-message").replace("{target}", &target_text),
@@ -143,6 +146,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
             NotificationProgress::Indeterminate,
             false,
         ),
+
         UpdatePhase::Verifying => (
             i18n("agent-update-notice-verifying-title").replace("{provider}", provider),
             i18n("agent-update-notice-verifying-message").to_string(),
@@ -151,6 +155,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
             NotificationProgress::Indeterminate,
             false,
         ),
+
         UpdatePhase::Restoring => (
             i18n("agent-update-notice-restoring-title").replace("{provider}", provider),
             i18n("agent-update-notice-restoring-message").to_string(),
@@ -159,6 +164,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
             progress_view(snapshot),
             false,
         ),
+
         UpdatePhase::Updated => (
             i18n("agent-update-notice-updated-title").replace("{provider}", provider),
             i18n("agent-update-notice-updated-message").replace("{version}", &current),
@@ -167,6 +173,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
             NotificationProgress::Determinate(100.0),
             true,
         ),
+
         UpdatePhase::Unchanged => (
             i18n("agent-update-notice-unchanged-title").replace("{provider}", provider),
             bounded_error(snapshot, i18n("agent-update-notice-unchanged-message")),
@@ -175,6 +182,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
             NotificationProgress::Determinate(100.0),
             true,
         ),
+
         UpdatePhase::Failed => (
             i18n("agent-update-notice-failed-title").replace("{provider}", provider),
             bounded_error(snapshot, i18n("agent-update-notice-failed-message")),
@@ -183,6 +191,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
             NotificationProgress::None,
             false,
         ),
+
         _ => return None,
     };
 

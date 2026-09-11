@@ -59,22 +59,28 @@ impl BackgroundTaskKey {
 pub enum BackgroundTaskRefs {
     Codex {
         thread_id: String,
+
         /// Immediate parent thread, which can be another descendant rather than
         /// the selected root; retained so a later version can nest rows.
         parent_thread_id: Option<String>,
     },
+
     ClaudeCode {
         /// Task identifier from lifecycle records; absent until one arrives.
         task_id: Option<String>,
+
         /// Assistant Task/Agent tool-use id that launched the child.
         tool_use_id: Option<String>,
+
         /// Agent identifier some notification records carry instead of a task id.
         agent_id: Option<String>,
     },
+
     DeepSeek {
         /// Session the child hangs off. Reading a child's conversation is
         /// addressed by the pair, not by the child alone.
         parent_session_id: String,
+
         /// Whether the child accepts further prompts or was one execution. The
         /// two are read through different transports, so the row carries which
         /// one it is rather than probing.
@@ -100,6 +106,7 @@ impl BackgroundTaskRefs {
                     parent_thread_id.clone_from(incoming);
                 }
             }
+
             (
                 Self::ClaudeCode {
                     task_id,
@@ -124,6 +131,7 @@ impl BackgroundTaskRefs {
                     agent_id.clone_from(incoming_agent);
                 }
             }
+
             // A provider mismatch means the key was reused across providers,
             // which the qualified key already prevents; keep the current value.
             _ => {}
@@ -180,6 +188,7 @@ pub enum BackgroundTaskDiscoveryState {
     NotLoaded,
     Loading,
     Ready,
+
     Unavailable {
         message: String,
     },
@@ -195,22 +204,30 @@ pub struct BackgroundTaskSummary {
     pub kind: BackgroundTaskKind,
     pub display_name: Option<String>,
     pub agent_type: Option<String>,
+
     /// What the child was asked to do, from the launch payload.
     pub objective: Option<String>,
+
     /// Latest short progress line, replaced as activity arrives.
     pub status: Option<String>,
+
     pub state: BackgroundTaskState,
+
     /// Local monotonic order of the last update that touched this row. Used to
     /// stop a delayed restoration result from replacing newer live state.
     pub sequence: u64,
+
     pub started_at: Option<SystemTime>,
     pub updated_at: Option<SystemTime>,
     pub completed_at: Option<SystemTime>,
     pub model: Option<String>,
+
     /// Distance from the selected root; direct children are depth 1.
     pub depth: Option<u32>,
+
     /// Most recent child output excerpt, for later hierarchical presentation.
     pub last_preview: Option<String>,
+
     /// Whether this child can be stopped right now. Only the adapter knows
     /// whether its provider exposes an operation that reaches this child, so the
     /// view renders a Stop control from this rather than inferring one from the
@@ -230,7 +247,9 @@ impl BackgroundTaskSummary {
 
         let id = self.key.id.as_str();
         let tail = id.rsplit(['-', '_', ':']).next().unwrap_or(id);
+
         let tail = if tail.len() >= 4 { tail } else { id };
+
         let start = tail.len().saturating_sub(8);
 
         let noun = match self.kind {
@@ -276,6 +295,7 @@ pub struct BackgroundTaskSnapshot {
     pub parent_session: BackgroundTaskKey,
     pub tasks: Vec<BackgroundTaskSummary>,
     pub discovery: BackgroundTaskDiscoveryState,
+
     /// Advances when a task is created or changes lifecycle state. The title-bar
     /// button compares it against the last ordinal seen for this parent session,
     /// so metadata-only updates never re-raise the unseen indicator.
@@ -384,6 +404,7 @@ impl BackgroundTaskRegistry {
 
                 changed
             }
+
             None => {
                 let refs = update.refs.clone().unwrap_or_else(|| default_refs(&key));
 
@@ -481,11 +502,13 @@ fn default_refs(key: &BackgroundTaskKey) -> BackgroundTaskRefs {
             thread_id: key.id.clone(),
             parent_thread_id: None,
         },
+
         BackgroundTaskProvider::ClaudeCode => BackgroundTaskRefs::ClaudeCode {
             task_id: None,
             tool_use_id: None,
             agent_id: None,
         },
+
         // A child is addressed by the pair, so a reference built without its
         // parent names nothing readable; the snapshot always supplies one.
         BackgroundTaskProvider::DeepSeek => BackgroundTaskRefs::DeepSeek {

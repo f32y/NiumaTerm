@@ -46,6 +46,7 @@ use crate::ui::workspace_sidebar::drag::{
 /// Default expanded width of the workspace sidebar, in pixels; the user can
 /// drag the right edge to resize.
 pub(super) const SIDEBAR_WIDTH: f32 = 180.0;
+
 /// Drag limits: keep the workspace list readable and leave room for the terminal.
 /// Handle id for this column's resize grip. Every resizable column receives
 /// every other column's drag-move events, so this is what distinguishes them.
@@ -59,6 +60,7 @@ pub(crate) const MAX_WIDTH: f32 = 480.0;
 /// is sized as a comfortable pointer target rather than to match the `×` it
 /// replaces.
 const NEW_TAB_BUTTON: f32 = 32.0;
+
 const NEW_TAB_GLYPH: f32 = 18.0;
 
 /// Diameter of a status dot in the sidebar column. Smaller than the agent
@@ -79,10 +81,12 @@ fn agent_presentation(status: AgentRuntimeStatus) -> Option<(AgentVisual, &'stat
             AgentVisual::Running,
             i18n("sidebar-workspace-status-running"),
         )),
+
         AgentRuntimeStatus::NeedsInput => Some((
             AgentVisual::NeedsInput,
             i18n("sidebar-workspace-status-needs-input"),
         )),
+
         AgentRuntimeStatus::Idle => None,
     }
 }
@@ -94,6 +98,7 @@ fn status_column_label(agent: Option<&'static str>, terminal: Option<&'static st
         (Some(agent), Some(terminal)) => i18n("sidebar-workspace-status-pair")
             .replace("{agent}", agent)
             .replace("{terminal}", terminal),
+
         (Some(label), None) | (None, Some(label)) => label.to_string(),
         (None, None) => i18n("sidebar-workspace-status-idle").to_string(),
     }
@@ -120,6 +125,7 @@ fn workspace_status_glyphs(
     let glyphs = agent
         .map(|(visual, label)| match visual {
             AgentVisual::Running => StatusMark::busy(busy_id).into_any_element(),
+
             // Same success color the terminal mark uses when a command
             // finishes: both say the tab has stopped working and is waiting on
             // the user.
@@ -239,8 +245,10 @@ pub(crate) struct SidebarTab {
     pub(crate) bell: bool,
     pub(crate) agent_kind: Option<AgentKind>,
     pub(crate) settings: bool,
+
     /// Restored but not yet spawned.
     pub(crate) pending: bool,
+
     pub(crate) exited: bool,
     pub(crate) progress: Option<ProgressReport>,
     pub(crate) terminal: TerminalActivity,
@@ -257,8 +265,10 @@ const TAB_ROW_DOT: f32 = 7.0;
 
 /// Spacing inside a tab row, between its glyph and its label.
 const TAB_ROW_GAP: f32 = 6.0;
+
 /// Edge of a tab row's type icon, and the size its label is set at.
 const TAB_ROW_ICON: f32 = 14.0;
+
 const TAB_ROW_TEXT: f32 = 13.0;
 
 /// Insets and rhythm of the workspace list. Groups are spaced further apart
@@ -271,27 +281,35 @@ const TAB_ROW_TEXT: f32 = 13.0;
 /// above it, past that control's own button padding, so the window's leading
 /// chrome reads as one edge from the title bar down.
 const SIDEBAR_PADDING_X: f32 = 12.0;
+
 /// How far a row's fill reaches back into that inset on each side, and how
 /// much padding the row then puts back so its content still lands on the
 /// column's edge. Without it the highlight stops exactly where the first
 /// glyph starts and reads as clipped; the leading half of it is also the lane
 /// the selected-row mark stands in.
 const SIDEBAR_ROW_GUTTER: f32 = 6.0;
+
 const SIDEBAR_PADDING_TOP: f32 = 14.0;
 const SIDEBAR_GROUP_GAP: f32 = 14.0;
 const WORKSPACE_LIST_GAP: f32 = 6.0;
+
 /// The list heading. It names the column rather than competing with the
 /// workspaces under it, so it is the smallest run of text in the panel.
 const SIDEBAR_SECTION_TEXT: f32 = 10.5;
+
 const SIDEBAR_SECTION_BUTTON: f32 = 20.0;
+
 /// A workspace heading: its name, and the path that trails it on the same
 /// line. The path is set small enough to read as an annotation on the name.
 const WORKSPACE_NAME_TEXT: f32 = 13.0;
+
 const WORKSPACE_PATH_TEXT: f32 = 10.5;
+
 /// The status cluster along the bottom edge: today's spend over the
 /// subscription gauges. Both report what the agents have consumed, so they
 /// stack as one block under a single rule rather than each carrying an edge.
 const SIDEBAR_STATUS_PADDING_Y: f32 = 8.0;
+
 const SIDEBAR_STATUS_ROW_GAP: f32 = 2.0;
 
 /// Distance from the row box's leading edge. The row is a rounded rectangle,
@@ -331,24 +349,31 @@ pub(crate) struct SidebarUsage {
 pub(super) struct Sidebar {
     /// Collapsed (width animates to 0) vs expanded.
     pub(super) collapsed: bool,
+
     /// False until the first `ToggleSidebar`: the startup render draws the
     /// sidebar at its resting width with no slide-in animation.
     pub(super) animated: bool,
+
     /// Expanded width in pixels; dragging the right edge adjusts it, persisted
     /// per window in `local_state.toml`.
     pub(super) width: f32,
+
     scroll: ScrollHandle,
+
     /// Item position a workspace drag currently hovers: that item shifts down
     /// to open an insertion gap ("make way"). Only overwritten when the
     /// pointer enters another item — clearing on exit would oscillate, because
     /// opening the gap moves the hovered item out from under the pointer.
     drag_over: Option<usize>,
+
     /// Source item hidden with zero opacity during a drag so its layout slot
     /// remains stable while the floating preview follows the pointer.
     dragging: Option<usize>,
+
     /// The same make-way/hide pair for tab rows, keyed by workspace position
     /// and row position so rows of different workspaces cannot collide.
     tab_drag_over: Option<(usize, usize)>,
+
     tab_dragging: Option<(usize, usize)>,
 }
 

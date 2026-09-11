@@ -147,7 +147,9 @@ fn kitty_escape_disambiguate() {
 
 fn released(key: NamedKey) -> KeyInput {
     let mut k = named(key);
+
     k.state = ElementState::Released;
+
     k
 }
 

@@ -33,10 +33,12 @@ const CLI_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const MAX_OUTPUT_BYTES: u64 = 128 * 1024;
 const MAX_CLI_OUTPUT_BYTES: usize = 100 * 1024;
 const MAX_CREDENTIALS_BYTES: u64 = 128 * 1024;
+
 /// The CLI the interactive fallback runs. This fetch belongs to no single tab,
 /// so the launcher a profile configures is out of reach here and the published
 /// name is what the shell is asked to resolve.
 const CLI_EXECUTABLE: &str = "claude";
+
 /// Settings that apply to the probe's own CLI session only. A fresh
 /// interactive session turns Remote Control on at startup unless a setting
 /// says otherwise, and with it on the CLI registers a remote session named
@@ -45,9 +47,11 @@ const CLI_EXECUTABLE: &str = "claude";
 /// entry in Claude's remote-session lists. The override travels with the launch
 /// so the outcome stays the same whatever the user's global settings say.
 const CLI_SETTINGS_OVERRIDE: &str = r#"{"remoteControlAtStartup":false}"#;
+
 const OAUTH_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const OAUTH_BETA_HEADER: &str = "oauth-2025-04-20";
 const CLAUDE_CODE_USER_AGENT: &str = "claude-code/2.1.0";
+
 /// Wording that identifies the folder-trust prompt, with the spaces taken out.
 /// The prompt reaches its layout by moving the cursor between words instead of
 /// printing the spaces between them, so once the control sequences are gone its
@@ -138,6 +142,7 @@ struct OAuthUsageWindow {
 
 fn oauth_credentials_path() -> Option<PathBuf> {
     let config_dir = env::var_os("CLAUDE_CONFIG_DIR");
+
     credentials_path(config_dir.as_deref(), home_dir().as_deref())
 }
 
@@ -167,6 +172,7 @@ fn read_oauth_token() -> Result<String, String> {
     // OAuth usage endpoint rejects them even though they authenticate API calls.
     let path = oauth_credentials_path()
         .ok_or_else(|| "Claude credentials directory unavailable".to_string())?;
+
     let file = File::open(path).map_err(|_| "Claude OAuth credentials unavailable".to_string())?;
     let bytes = read_bounded_bytes(file, MAX_CREDENTIALS_BYTES, "Claude credentials")?;
 
@@ -279,11 +285,13 @@ pub fn fetch_with_cancel(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageF
         Ok(usage) => Ok(supplement_from_cli(usage, cancelled)),
         Err(OAuthFetchError::Cancelled) => Err(UsageFetchError::Cancelled),
         Err(OAuthFetchError::Final(error)) => Err(UsageFetchError::Failed(error)),
+
         Err(OAuthFetchError::Fallback(oauth_error)) => match fetch_via_cli(cancelled) {
             Ok(usage) => Ok(usage),
             // Only the OAuth path's own diagnosis is worth pairing with the CLI
             // fallback's; a cancellation says nothing about either.
             Err(UsageFetchError::Cancelled) => Err(UsageFetchError::Cancelled),
+
             Err(UsageFetchError::Failed(cli_error)) => Err(UsageFetchError::Failed(format!(
                 "Claude OAuth usage unavailable: {oauth_error}; interactive CLI fallback failed: {cli_error}"
             ))),
@@ -413,6 +421,7 @@ fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchErro
                 TRUST_PROMPT_ANSWER,
                 "Claude trust prompt response",
             )?;
+
             trust_accepted = true;
         }
 
@@ -496,6 +505,7 @@ fn append_bounded(output: &mut Vec<u8>, bytes: &[u8], max_bytes: usize) {
     if bytes.len() >= max_bytes {
         output.clear();
         output.extend_from_slice(&bytes[bytes.len() - max_bytes..]);
+
         return;
     }
 
@@ -585,9 +595,11 @@ fn extract_reset_description_after_label(
             }
 
             let lower = candidate.to_ascii_lowercase();
+
             let Some(reset_index) = lower.find("reset") else {
                 continue;
             };
+
             let description = candidate[reset_index..].trim();
 
             if !description.is_empty() {
@@ -666,6 +678,7 @@ fn is_fable_label(line: &str) -> bool {
 
 fn is_section_label(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
+
     is_session_label(&lower) || is_weekly_label(&lower) || is_fable_label(&lower)
 }
 
@@ -676,6 +689,7 @@ fn strip_terminal_sequences(input: &str) -> String {
     while let Some(ch) = chars.next() {
         if ch != '\u{1b}' {
             output.push(ch);
+
             continue;
         }
 
@@ -689,6 +703,7 @@ fn strip_terminal_sequences(input: &str) -> String {
                     }
                 }
             }
+
             Some(']') => {
                 chars.next();
 
@@ -702,9 +717,11 @@ fn strip_terminal_sequences(input: &str) -> String {
                     escaped = next == '\u{1b}';
                 }
             }
+
             Some(_) => {
                 chars.next();
             }
+
             None => {}
         }
     }

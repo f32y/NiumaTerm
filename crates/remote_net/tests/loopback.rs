@@ -101,6 +101,7 @@ fn frames_survive_the_encrypted_channel() {
 
     let request = Frame::control(&HostBound::ListSessions).unwrap();
     let ct = client.seal(&request.encode().unwrap()).unwrap();
+
     let Frame::Control(payload) = Frame::decode(&host.open(&ct).unwrap()).unwrap() else {
         panic!("expected control frame");
     };
@@ -112,6 +113,7 @@ fn frames_survive_the_encrypted_channel() {
 
     let reply = Frame::control(&ClientBound::SessionList(Vec::new())).unwrap();
     let ct = host.seal(&reply.encode().unwrap()).unwrap();
+
     let Frame::Control(payload) = Frame::decode(&client.open(&ct).unwrap()).unwrap() else {
         panic!("expected control frame");
     };

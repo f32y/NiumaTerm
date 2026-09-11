@@ -12,53 +12,68 @@ use crate::transcript::view::TranscriptView;
 /// run and structural break in the conversation is drawn as one card, so these
 /// are the numbers that keep their headers on a single baseline grid.
 pub(super) const AGENT_CARD_RADIUS: f32 = 6.0;
+
 pub(super) const AGENT_CARD_PADDING_X: f32 = 8.0;
 pub(super) const AGENT_CARD_PADDING_Y: f32 = 4.0;
+
 /// Resting height of a card header. A floor rather than a fixed height: the
 /// row keeps one rhythm down a run of steps, and still grows for a label that
 /// wraps at a narrow pane width.
 pub(super) const AGENT_CARD_HEADER_HEIGHT: f32 = 24.0;
+
 /// Vertical inset of a card's body. Looser than the header's, because the
 /// header is one line of labels while the body is a block of output that
 /// needs air between it and the rule above it.
 pub(super) const AGENT_CARD_BODY_PADDING_Y: f32 = 8.0;
+
 pub(super) const AGENT_CARD_GAP: f32 = 9.0;
+
 /// The square that holds a row's type icon, and the icon drawn inside it. A
 /// work-log row draws the icon bare, so the block is only a fixed slot that
 /// keeps every title in a run starting on the same column; a failed step
 /// still fills it, and its radius applies there.
 pub(super) const AGENT_CARD_ICON_BLOCK: f32 = 14.0;
+
 pub(super) const AGENT_CARD_ICON_BLOCK_RADIUS: f32 = 5.0;
 pub(super) const AGENT_CARD_ICON: f32 = 13.0;
+
 /// Leading inside a card header. The transcript sets prose leading for text
 /// read in paragraphs; a header is one line of labels, and inheriting that
 /// leading is what would otherwise decide the card's height.
 pub(super) const AGENT_CARD_LINE_HEIGHT: f32 = 1.2;
+
 /// Where a card's title starts, measured from the card's leading edge. The
 /// expanded body lines up with the title rather than with the icon, so a run
 /// of detail lines reads as belonging to the heading above it.
 pub(super) const AGENT_DISCLOSURE_DETAIL_INSET: f32 =
     AGENT_CARD_PADDING_X + AGENT_CARD_ICON_BLOCK + AGENT_CARD_GAP;
+
 /// Text sizes inside a card: the title, and the quieter runs beside it.
 pub(super) const AGENT_CARD_TITLE_SIZE: f32 = 13.0;
+
 pub(super) const AGENT_CARD_DETAIL_SIZE: f32 = 12.0;
 pub(super) const AGENT_CARD_HINT_SIZE: f32 = 11.0;
+
 /// How far a work-log title is let down from the conversation's own text. The
 /// steps are what the reply was assembled from rather than the reply itself,
 /// so they read one shade quieter than the prose around them.
 const AGENT_CARD_TITLE_FADE: f32 = 0.65;
+
 /// A prompt is the user's own words read back, and it sits in a tinted bubble
 /// against the right edge. Capping it at a share of the transcript column keeps
 /// that block from spanning the pane, so it reads as an aside to the reply
 /// beside it while still growing with the window.
 pub(super) const USER_BUBBLE_WIDTH_FRACTION: f32 = 0.7;
+
 /// The prompt bubble's corners. The trailing bottom corner is nearly square so
 /// the bubble points back at the conversation it was sent into, which is what
 /// separates it from the assistant's bare prose at a glance.
 pub(super) const USER_BUBBLE_RADIUS: f32 = 18.0;
+
 pub(super) const USER_BUBBLE_TAIL_RADIUS: f32 = 4.0;
 pub(super) const USER_BUBBLE_PADDING_X: f32 = 15.0;
 pub(super) const USER_BUBBLE_PADDING_Y: f32 = 9.0;
+
 /// The annotation bubble's header is one line of label rather than a block of
 /// prose, so it is set shallower than the prompt beside it while keeping the
 /// same edge inset.
@@ -95,6 +110,7 @@ impl AgentCardTone {
                 icon: cx.theme().muted_foreground,
                 hover: cx.theme().list_hover,
             },
+
             // A wash rather than an outline: an outlined box would be the one
             // bordered thing in the transcript, and it would be drawn hard
             // against the rule that groups the run it sits in. The wash is
@@ -129,21 +145,27 @@ pub(super) fn agent_card() -> Div {
 pub(crate) struct AgentDisclosureRow {
     id: ElementId,
     expanded: Option<bool>,
+
     /// How far the disclosure has turned, from 0 shut to 1 open. A row whose
     /// content is not arriving passes the resting value, so the chevron is
     /// simply drawn where its state says.
     opening: f32,
+
     type_icon: Option<IconName>,
     label: String,
     preview: Option<String>,
+
     /// The step's outcome, as the mark for it and the colour that mark carries.
     status: Option<(IconName, Hsla)>,
+
     accessible_label: String,
     tone: AgentCardTone,
+
     /// Whether a block of the row's own content follows it inside the same
     /// card. It shares the header's fill, so the header spans the column and
     /// closes only its top corners; the block below closes the bottom ones.
     heads_body: bool,
+
     /// Tint for the label and type icon, replacing the quiet work-log default.
     /// The row sets its own text colors per slot, so a caller cannot override
     /// them from the outside.
@@ -172,21 +194,25 @@ impl AgentDisclosureRow {
     /// Mark the row as a structural break rather than one step of the work log.
     pub(super) fn accent(mut self, color: Hsla) -> Self {
         self.accent = Some(color);
+
         self
     }
 
     pub(super) fn tone(mut self, tone: AgentCardTone) -> Self {
         self.tone = tone;
+
         self
     }
 
     pub(super) fn heads_body(mut self, heads_body: bool) -> Self {
         self.heads_body = heads_body;
+
         self
     }
 
     pub(super) fn expanded(mut self, expanded: bool) -> Self {
         self.expanded = Some(expanded);
+
         self
     }
 
@@ -194,26 +220,31 @@ impl AgentDisclosureRow {
     /// the chevron has turned towards open.
     pub(super) fn opening(mut self, progress: f32) -> Self {
         self.opening = progress;
+
         self
     }
 
     pub(super) fn type_icon(mut self, icon: IconName) -> Self {
         self.type_icon = Some(icon);
+
         self
     }
 
     pub(super) fn preview(mut self, preview: impl Into<String>) -> Self {
         self.preview = Some(preview.into());
+
         self
     }
 
     pub(super) fn status(mut self, icon: IconName, color: Hsla) -> Self {
         self.status = Some((icon, color));
+
         self
     }
 
     pub(super) fn accessible_label(mut self, label: impl Into<String>) -> Self {
         self.accessible_label = label.into();
+
         self
     }
 
@@ -240,6 +271,7 @@ impl AgentDisclosureRow {
         });
 
         let icon_color = self.accent.unwrap_or(colors.icon);
+
         let label_color = self
             .accent
             .unwrap_or_else(|| cx.theme().foreground.opacity(AGENT_CARD_TITLE_FADE));
@@ -260,6 +292,7 @@ impl AgentDisclosureRow {
             // and squares off where the two meet.
             .map(|this| match self.heads_body {
                 true => this.w_full().rounded_t(px(AGENT_CARD_RADIUS)),
+
                 false => this
                     .self_start()
                     .max_w_full()

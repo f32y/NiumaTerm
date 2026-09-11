@@ -43,6 +43,7 @@ pub enum BlockEvent {
     /// the whole frozen history drops with the screen (the PTY side already
     /// cleared the engine blocks).
     HistoryCleared,
+
     /// A trusted `;D` froze the command into a finished engine block. The
     /// store keeps only the handle; rendering reads the block through
     /// `BlockRef`. `rows` is the row count at finish time, cached app-side
@@ -52,6 +53,7 @@ pub enum BlockEvent {
         handle: ghostty::BlockHandle,
         rows: usize,
     },
+
     /// The engine's current live block list, oldest first, with per-block
     /// row counts. Emitted after resize (eager reflow bumps generations and
     /// re-wraps rows) and after each finish (budget eviction may have
@@ -71,6 +73,7 @@ pub struct CommandCapture {
     /// OSC 133 prompt-boundary sequence number of the block's prompt (`;A`),
     /// marrying this metadata to its block item (block-split).
     pub seq: u64,
+
     pub command: String,
     pub exit_code: Option<i32>,
     pub cwd: Option<path::PathBuf>,
@@ -85,6 +88,7 @@ pub struct CommandCapture {
 pub struct CommandStart {
     /// See [`CommandCapture::seq`].
     pub seq: u64,
+
     pub command: String,
     pub cwd: Option<path::PathBuf>,
     pub started_at: time::SystemTime,
@@ -108,10 +112,12 @@ pub enum Msg {
     ScrollTo(u64),
     ScrollToEnd,
     Theme(Box<Colors>),
+
     CursorShape {
         shape: CursorShape,
         reply: Reply<()>,
     },
+
     Query(Query),
     Checkpoint(CheckpointRequest),
 }
@@ -150,18 +156,23 @@ pub enum TerminalEvent {
     PrepareRender(u64),
     PrepareRenderOnRoute(u64, usize),
     PrepareUpdateConfig,
+
     /// New terminal content available.
     Render,
+
     /// New terminal content available per route.
     RenderRoute(usize),
+
     /// Terminal content changed — lightweight notification (no damage payload).
     /// Damage versions travel in the published frame.
     TerminalDamaged(usize),
+
     /// Graphics update available from terminal.
     UpdateGraphics {
         route_id: usize,
         queues: UpdateQueues,
     },
+
     Paste,
     Copy(String),
     UpdateFontSize(u8),
@@ -204,6 +215,7 @@ pub enum TerminalEvent {
 
     /// A trusted OSC 133 prompt-start (`;A`) opened an active prompt region.
     PromptStarted,
+
     /// A batch of block events from the PTY thread:
     /// finished-block handles and lifecycle changes, in stream order.
     BlockBatch(Vec<BlockEvent>),
@@ -221,6 +233,7 @@ pub enum TerminalEvent {
 
     /// Reset to the default window title.
     ResetTitle,
+
     Cwd(String),
     ReadReady,
 
@@ -314,26 +327,34 @@ impl Debug for TerminalEvent {
             TerminalEvent::ClipboardStore(ty, text) => {
                 write!(f, "ClipboardStore({ty:?}, {text})")
             }
+
             TerminalEvent::ClipboardLoad(route_id, ty, _) => {
                 write!(f, "ClipboardLoad(route={route_id}, {ty:?})")
             }
+
             TerminalEvent::TextAreaSizeRequest(route_id, _) => {
                 write!(f, "TextAreaSizeRequest(route={route_id})")
             }
+
             TerminalEvent::ColorRequest(route_id, index, _) => {
                 write!(f, "ColorRequest(route={route_id}, idx={index})")
             }
+
             TerminalEvent::PtyWrite(route_id, text) => {
                 write!(f, "PtyWrite(route={route_id}, {text})")
             }
+
             TerminalEvent::Title(title) => write!(f, "Title({title})"),
+
             TerminalEvent::TitleWithSubtitle(title, subtitle) => {
                 write!(f, "TitleWithSubtitle({title}, {subtitle})")
             }
+
             TerminalEvent::InteractiveState(on) => write!(f, "InteractiveState({on})"),
             TerminalEvent::AltScreen(on) => write!(f, "AltScreen({on})"),
             TerminalEvent::PromptBoundaryTrusted(on) => write!(f, "PromptBoundaryTrusted({on})"),
             TerminalEvent::PromptStarted => write!(f, "PromptStarted"),
+
             TerminalEvent::CommandFinished(cmd) => {
                 write!(
                     f,
@@ -341,49 +362,63 @@ impl Debug for TerminalEvent {
                     cmd.command, cmd.exit_code
                 )
             }
+
             TerminalEvent::CommandStarted(cmd) => {
                 write!(f, "CommandStarted({})", cmd.command)
             }
+
             TerminalEvent::BlockBatch(events) => {
                 write!(f, "BlockBatch({} events)", events.len())
             }
+
             TerminalEvent::Minimize(cond) => write!(f, "Minimize({cond})"),
             TerminalEvent::Hide => write!(f, "Hide"),
             TerminalEvent::HideOtherApplications => write!(f, "HideOtherApplications"),
             TerminalEvent::CursorBlinkingChange => write!(f, "CursorBlinkingChange"),
+
             TerminalEvent::CursorBlinkingChangeOnRoute(route_id) => {
                 write!(f, "CursorBlinkingChangeOnRoute {route_id}")
             }
+
             TerminalEvent::ProgressReport(report) => {
                 write!(f, "ProgressReport({:?})", report)
             }
+
             TerminalEvent::MouseCursorDirty => write!(f, "MouseCursorDirty"),
             TerminalEvent::ResetTitle => write!(f, "ResetTitle"),
             TerminalEvent::ReadReady => f.write_str("ReadReady"),
             TerminalEvent::Cwd(cwd) => f.debug_tuple("Cwd").field(cwd).finish(),
             TerminalEvent::PrepareUpdateConfig => write!(f, "PrepareUpdateConfig"),
             TerminalEvent::PrepareRender(millis) => write!(f, "PrepareRender({millis})"),
+
             TerminalEvent::PrepareRenderOnRoute(millis, route) => {
                 write!(f, "PrepareRender({millis} on route {route})")
             }
+
             TerminalEvent::Render => write!(f, "Render"),
             TerminalEvent::RenderRoute(route) => write!(f, "Render route {route}"),
+
             TerminalEvent::TerminalDamaged(route_id) => {
                 write!(f, "TerminalDamaged route {route_id}")
             }
+
             TerminalEvent::Bell => write!(f, "Bell"),
+
             TerminalEvent::DesktopNotification { title, body } => {
                 write!(f, "DesktopNotification({title}, {body})")
             }
+
             TerminalEvent::Exit => write!(f, "Exit"),
             TerminalEvent::Quit => write!(f, "Quit"),
             TerminalEvent::CloseTerminal(route) => write!(f, "CloseTerminal {route}"),
             TerminalEvent::CreateWindow => write!(f, "CreateWindow"),
             TerminalEvent::CloseWindow => write!(f, "CloseWindow"),
             TerminalEvent::CreateNativeTab(_) => write!(f, "CreateNativeTab"),
+
             TerminalEvent::SelectNativeTabByIndex(tab_index) => {
                 write!(f, "SelectNativeTabByIndex({tab_index})")
             }
+
             TerminalEvent::SelectNativeTabLast => write!(f, "SelectNativeTabLast"),
             TerminalEvent::SelectNativeTabNext => write!(f, "SelectNativeTabNext"),
             TerminalEvent::SelectNativeTabPrev => write!(f, "SelectNativeTabPrev"),
@@ -391,18 +426,22 @@ impl Debug for TerminalEvent {
             TerminalEvent::UpdateConfig => write!(f, "ReloadConfiguration"),
             TerminalEvent::ToggleFullScreen => write!(f, "FullScreen"),
             TerminalEvent::ToggleAppearanceTheme => write!(f, "ToggleAppearanceTheme"),
+
             TerminalEvent::BlinkCursor(timeout, route_id) => {
                 write!(f, "BlinkCursor {timeout} {route_id}")
             }
+
             TerminalEvent::SelectionScrollTick => write!(f, "SelectionScrollTick"),
             TerminalEvent::UpdateTitles => write!(f, "UpdateTitles"),
             TerminalEvent::Noop => write!(f, "Noop"),
             TerminalEvent::Copy(_) => write!(f, "Copy"),
             TerminalEvent::Paste => write!(f, "Paste"),
             TerminalEvent::UpdateFontSize(action) => write!(f, "UpdateFontSize({action:?})"),
+
             TerminalEvent::UpdateGraphics { route_id, .. } => {
                 write!(f, "UpdateGraphics({route_id})")
             }
+
             TerminalEvent::ColorChange(route_id, color, rgb) => {
                 write!(f, "ColorChange({route_id}, {color:?}, {rgb:?})")
             }
@@ -499,12 +538,16 @@ impl Default for SearchState {
 pub enum ProgressState {
     /// Remove/hide the progress bar (state 0)
     Remove,
+
     /// Set progress with a specific percentage (state 1)
     Set,
+
     /// Show error state (state 2)
     Error,
+
     /// Indeterminate/pulsing progress (state 3)
     Indeterminate,
+
     /// Paused progress (state 4)
     Pause,
 }
@@ -514,6 +557,7 @@ pub enum ProgressState {
 pub struct ProgressReport {
     /// The progress bar state
     pub state: ProgressState,
+
     /// Optional progress percentage (0-100), only used with Set, Error, and Pause states
     pub progress: Option<u8>,
 }

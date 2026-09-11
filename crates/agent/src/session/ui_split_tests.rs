@@ -21,16 +21,20 @@ use crate::session::{AgentKind, Backend, RenameOutcome};
 fn queued_commands_wait_for_real_turn_and_exit_discards_pending_work() {
     let mut commands = CommandQueue::default();
     let command = PendingSlashCommand::new("compact", String::new());
+
     assert!(matches!(
         commands.while_busy(command, SlashCommandRunPolicy::QueueUntilIdle),
         CommandAdmission::Queued { count: 1, .. }
     ));
+
     let command = commands.queue.pop_front().unwrap();
+
     let mut backend = Backend::Test(TestBackend::new(
         [],
         SlashCommandOutcome::Accepted,
         Vec::new(),
     ));
+
     assert!(matches!(
         commands.execute(Some(&mut backend), &command),
         SlashCommandOutcome::Accepted
@@ -41,7 +45,9 @@ fn queued_commands_wait_for_real_turn_and_exit_discards_pending_work() {
     ));
     assert!(commands.turn_started());
     assert!(!commands.turn_started());
+
     commands.while_busy(command, SlashCommandRunPolicy::QueueUntilIdle);
+
     assert!(commands.clear());
     assert!(commands.queue.is_empty());
     assert!(!commands.awaiting_turn);
@@ -53,11 +59,13 @@ fn ready_priority_keeps_profile_then_current_then_branch_settings() {
         seed_thread_defaults: true,
         ..Default::default()
     };
+
     let stored = ThreadSettings {
         model: Some("remembered".into()),
         effort: Some("high".into()),
         ..Default::default()
     };
+
     settings.ready(
         AgentKind::Claude,
         ThreadSettings::default(),
@@ -65,7 +73,9 @@ fn ready_priority_keeps_profile_then_current_then_branch_settings() {
         Some("profile"),
         None,
     );
+
     assert_eq!(settings.settings.model.as_deref(), Some("profile"));
+
     settings.ready(
         AgentKind::Claude,
         ThreadSettings {
@@ -76,12 +86,15 @@ fn ready_priority_keeps_profile_then_current_then_branch_settings() {
         None,
         None,
     );
+
     assert_eq!(settings.settings.model.as_deref(), Some("profile"));
     assert_eq!(settings.settings.effort.as_deref(), Some("high"));
+
     settings.restore_on_ready = Some(ThreadSettings {
         model: Some("branch".into()),
         ..Default::default()
     });
+
     settings.ready(
         AgentKind::Claude,
         ThreadSettings::default(),
@@ -89,6 +102,7 @@ fn ready_priority_keeps_profile_then_current_then_branch_settings() {
         None,
         None,
     );
+
     assert_eq!(settings.settings.model.as_deref(), Some("branch"));
     assert!(settings.restore_on_ready.is_none());
 }
@@ -96,6 +110,7 @@ fn ready_priority_keeps_profile_then_current_then_branch_settings() {
 #[test]
 fn remembered_profiles_fall_back_to_legacy_provider_without_crossing_named_profiles() {
     let mut settings = RememberedSettings::default();
+
     settings.remember(
         AgentKind::Codex,
         "",
@@ -104,6 +119,7 @@ fn remembered_profiles_fall_back_to_legacy_provider_without_crossing_named_profi
             ..Default::default()
         },
     );
+
     settings.remember(
         AgentKind::Codex,
         "work",
@@ -112,6 +128,7 @@ fn remembered_profiles_fall_back_to_legacy_provider_without_crossing_named_profi
             ..Default::default()
         },
     );
+
     assert_eq!(
         settings
             .get(AgentKind::Codex, "work")
@@ -146,13 +163,16 @@ fn summary(id: &str) -> SessionSummary {
 fn search_retires_disk_reads_and_next_history_page_replaces_matches() {
     let mut history = SessionHistory::default();
     let request = history.begin_filesystem_history(None, 1);
+
     assert!(history.search_results(vec![summary("match")]));
     assert!(matches!(
         history.publish_filesystem_count(&request, None, 1, 8),
         CountPublication::Stale
     ));
     assert!(!history.publish_filesystem_rows(&request, None, 1, vec![summary("old")]));
+
     history.append_page(vec![summary("recent"), summary("recent")]);
+
     assert_eq!(history.sessions, vec![summary("recent")]);
     assert!(!history.showing_search);
     assert!(!history.search_results(Vec::new()));
@@ -162,12 +182,16 @@ fn search_retires_disk_reads_and_next_history_page_replaces_matches() {
 #[test]
 fn workflow_member_switch_rejects_old_content_and_preserves_file_length_cache() {
     let mut workflows = WorkflowData::default();
+
     assert!(workflows.claim_restore("session"));
     assert!(!workflows.claim_restore("session"));
+
     workflows.open_agent("run", "first");
     workflows.open_agent("run", "second");
+
     assert!(!workflows.apply_transcript("run", "first", vec![Item::Error { text: "old".into() }]));
     assert!(workflows.apply_transcript("run", "second", vec![Item::Error { text: "new".into() }]));
+
     workflows.note_open_len(&WorkflowRefreshResult {
         task_id: "run".into(),
         transcript: Some(WorkflowTranscriptRead {
@@ -177,16 +201,20 @@ fn workflow_member_switch_rejects_old_content_and_preserves_file_length_cache() 
         }),
         ..Default::default()
     });
+
     let requests = workflows.scope_requests(vec![WorkflowRefreshRequest {
         task_id: "run".into(),
         agent_ids: vec![],
         open_agent: None,
         open_agent_len: None,
     }]);
+
     assert_eq!(requests[0].open_agent.as_deref(), Some("second"));
     assert_eq!(requests[0].open_agent_len, Some(128));
     assert_eq!(workflows.open_conversation().unwrap().revision(), 1);
+
     workflows.clear();
+
     assert!(workflows.open_conversation().is_none());
     assert!(workflows.claim_restore("session"));
 }
@@ -194,20 +222,30 @@ fn workflow_member_switch_rejects_old_content_and_preserves_file_length_cache() 
 #[test]
 fn rename_waits_for_identity_and_retries_rejection_without_losing_latest_title() {
     let mut naming = ConversationNaming::default();
+
     naming.rename("first");
     naming.rename("latest");
     naming.sync(None);
+
     assert_eq!(naming.pending.as_deref(), Some("latest"));
+
     let mut session = TestBackend::new([], SlashCommandOutcome::NotReady, vec![])
         .with_recovery(AgentKind::Codex, "thread");
+
     session.rename_outcome = RenameOutcome::Rejected;
+
     let mut backend = Backend::Test(session);
+
     naming.sync(Some(&mut backend));
+
     assert_eq!(naming.pending.as_deref(), Some("latest"));
+
     if let Backend::Test(session) = &mut backend {
         session.rename_outcome = RenameOutcome::Accepted;
     }
+
     naming.sync(Some(&mut backend));
+
     assert!(naming.pending.is_none());
     assert!(naming.named);
 }
@@ -217,27 +255,35 @@ fn update_requires_idle_work_and_identity_only_for_nonempty_conversations() {
     let mut runtime = SessionRuntime::default();
     let commands = CommandQueue::default();
     let delivery = MessageDelivery::new(AgentKind::Codex);
+
     let mut work = ConversationWork {
         approval_open: false,
         branch_pending: false,
         compacting: false,
         empty: true,
     };
+
     assert!(matches!(
         work.readiness(&runtime, &commands, &delivery),
         Readiness::ActiveWork
     ));
+
     runtime.ready();
+
     assert!(matches!(
         work.readiness(&runtime, &commands, &delivery),
         Readiness::Ready(None)
     ));
+
     work.empty = false;
+
     assert!(matches!(
         work.readiness(&runtime, &commands, &delivery),
         Readiness::MissingIdentity
     ));
+
     work.approval_open = true;
+
     assert!(matches!(
         work.readiness(&runtime, &commands, &delivery),
         Readiness::ActiveWork

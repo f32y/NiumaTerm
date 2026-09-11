@@ -48,13 +48,17 @@ pub enum PaneNode<L, S> {
         id: PaneId,
         pane: L,
     },
+
     Split {
         /// Stable id for the GPUI element / keyed state of this group.
         id: u64,
+
         axis: Axis,
         children: Vec<PaneNode<L, S>>,
+
         /// The resizable group's size/drag state handle.
         state: S,
+
         /// Saved size ratios awaiting application once the group has real
         /// bounds (session restore); cleared after applying.
         pending_ratios: Option<Vec<f32>>,
@@ -87,6 +91,7 @@ pub enum SplitOutcome<S> {
         index: usize,
         before: bool,
     },
+
     /// The focused leaf was wrapped in a fresh two-child split; the fresh
     /// state lays out 50/50 on its own.
     Wrapped,
@@ -97,6 +102,7 @@ pub enum RemoveOutcome<S> {
     /// Removed from a split that still has 2+ children: call
     /// `ResizableState::remove_panel(index)` on `state`.
     RemovedFromSplit { state: S, index: usize },
+
     /// The parent split collapsed into its surviving child; its state handle
     /// was dropped with it — nothing to fix up.
     Collapsed,
@@ -151,6 +157,7 @@ impl<L, S: Clone> PaneTree<L, S> {
         fn walk<'a, L, S>(node: &'a PaneNode<L, S>, out: &mut Vec<(PaneId, &'a L)>) {
             match node {
                 PaneNode::Leaf { id, pane, .. } => out.push((*id, pane)),
+
                 PaneNode::Split { children, .. } => {
                     children.iter().for_each(|c| walk(c, out));
                 }
@@ -268,7 +275,9 @@ impl<L, S: Clone> PaneTree<L, S> {
 
                 Some(SplitOutcome::Wrapped)
             }
+
             PaneNode::Leaf { .. } => None,
+
             PaneNode::Split { children, .. } => {
                 let mut new_pane = Some(new_pane);
                 let mut make_state = Some(make_state);
@@ -446,6 +455,7 @@ impl<L, S> From<PaneNode<L, S>> for PaneTree<L, S> {
     /// Build from a restored root; focus falls to the first leaf.
     fn from(root: PaneNode<L, S>) -> Self {
         let focused = root.first_leaf_id();
+
         Self { root, focused }
     }
 }

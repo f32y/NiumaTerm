@@ -60,6 +60,7 @@ impl ConversationState {
 
                 vec![Event::TurnStarted]
             }
+
             "turn/completed" => {
                 let mut events = self
                     .questions
@@ -79,6 +80,7 @@ impl ConversationState {
 
                 events
             }
+
             "thread/tokenUsage/updated" => {
                 let Some(usage) = parse_context_window_usage(&params["tokenUsage"]) else {
                     return Vec::new();
@@ -104,6 +106,7 @@ impl ConversationState {
 
                 events
             }
+
             "item/started" => {
                 let item = &params["item"];
 
@@ -116,6 +119,7 @@ impl ConversationState {
                     .into_iter()
                     .collect()
             }
+
             "item/completed" => {
                 let item = &params["item"];
 
@@ -132,12 +136,15 @@ impl ConversationState {
 
                 events
             }
+
             "item/agentMessage/delta" => delta_event(params, |item_id, delta| {
                 Event::AgentMessageDelta { item_id, delta }
             }),
+
             "item/reasoning/summaryTextDelta" => delta_event(params, |item_id, delta| {
                 Event::ReasoningSummaryDelta { item_id, delta }
             }),
+
             // Raw reasoning tokens stream under their own method and append to
             // the same text as the summary deltas, because a model that emits
             // raw tokens is the one that emits no summary. A model that sent
@@ -147,9 +154,11 @@ impl ConversationState {
             "item/reasoning/textDelta" => delta_event(params, |item_id, delta| {
                 Event::ReasoningSummaryDelta { item_id, delta }
             }),
+
             "item/commandExecution/outputDelta" => delta_event(params, |item_id, delta| {
                 Event::CommandOutputDelta { item_id, delta }
             }),
+
             "serverRequest/resolved" => {
                 if params["threadId"].as_str() != self.thread_id.as_deref() {
                     return Vec::new();
@@ -174,6 +183,7 @@ impl ConversationState {
 
                 Vec::new()
             }
+
             "error" => {
                 let message = params["error"]["message"]
                     .as_str()
@@ -186,6 +196,7 @@ impl ConversationState {
                     fatal: false,
                 }]
             }
+
             // The status carries a protocol token rather than a sentence, and
             // the working row it would reach shows text to the user. Child-agent
             // rows read the same notification through their own reducer, which

@@ -18,19 +18,24 @@ impl SessionController {
     pub(super) fn turn_started(&mut self) -> bool {
         let opened = if self.commands.turn_started() {
             self.delivery.begin_turn();
+
             true
         } else {
             self.delivery.provider_started()
         };
+
         self.runtime.turn_started();
+
         opened
     }
 
     /// Completion consumes the matching interrupt and releases both work queues.
     pub(super) fn turn_completed(&mut self) -> bool {
         let interrupted = self.runtime.turn_completed(self.delivery.turn());
+
         self.commands.turn_completed();
         self.delivery.completed();
+
         interrupted
     }
 
@@ -60,11 +65,16 @@ impl SessionController {
             &mut self.runtime,
             "session exited before branch readiness".into(),
         );
+
         let resume_failed = self.restore.failed(&mut self.runtime);
+
         self.runtime.exited(message);
+
         let cancelled_commands = self.commands.clear();
+
         self.input.disconnect();
         self.delivery.exited();
+
         SessionFailure {
             branch,
             resume_failed,

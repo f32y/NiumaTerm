@@ -36,6 +36,7 @@ fn command_item(detail: &ShellDetail) -> (String, Option<String>, Option<String>
             status,
             ..
         } => (command, aggregated_output, status),
+
         other => panic!("a shell renders as a command card, got {other:?}"),
     }
 }

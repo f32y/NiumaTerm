@@ -24,10 +24,12 @@ pub enum RelayControlMessage {
     Sync {
         connections: Vec<String>,
     },
+
     Connected {
         #[serde(rename = "connectionId")]
         connection_id: String,
     },
+
     Disconnected {
         #[serde(rename = "connectionId")]
         connection_id: String,
@@ -38,23 +40,29 @@ pub enum RelayControlMessage {
 pub enum NetError {
     #[error("websocket failure: {0}")]
     Ws(#[from] WsError),
+
     #[error("{0}")]
     Noise(#[from] NoiseError),
+
     #[error("{0}")]
     Frame(#[from] FrameError),
+
     #[error("peer closed the connection")]
     Closed,
+
     /// The peer (host or relay) violated the protocol or rejected us. Callers
     /// treat this as permanent: the peer made a decision (bad handshake,
     /// revoked device, killed session) that a retry cannot change.
     #[error("protocol violation: {0}")]
     Protocol(String),
+
     /// A failure local to this machine (runtime or thread construction,
     /// request building) that says nothing about the peer's state. Kept
     /// distinct from [`NetError::Protocol`] so reconnect logic keeps retrying:
     /// a transient local failure must not kill a resumable session.
     #[error("local failure: {0}")]
     Internal(String),
+
     #[error("timed out waiting for the remote peer")]
     Timeout,
 }
@@ -140,12 +148,15 @@ pub struct FrameChannel {
 impl FrameChannel {
     pub async fn send(&mut self, frame: &Frame) -> Result<(), NetError> {
         let ciphertext = self.chan.seal(&frame.encode()?)?;
+
         self.ws.send(Message::Binary(ciphertext.into())).await?;
+
         Ok(())
     }
 
     pub async fn recv(&mut self) -> Result<Frame, NetError> {
         let ciphertext = next_binary(&mut self.ws).await?;
+
         Ok(Frame::decode(&self.chan.open(&ciphertext)?)?)
     }
 
@@ -254,6 +265,7 @@ async fn connect_pair(
     match channel.recv_control::<ClientBound>().await? {
         ClientBound::Paired => Ok(channel),
         ClientBound::Error { message, .. } => Err(NetError::Protocol(message)),
+
         other => Err(NetError::Protocol(format!(
             "unexpected pairing reply: {other:?}"
         ))),

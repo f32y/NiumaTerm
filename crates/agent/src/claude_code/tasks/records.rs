@@ -49,6 +49,7 @@ pub(super) fn stop_target(refs: &BackgroundTaskRefs) -> Option<&str> {
         BackgroundTaskRefs::ClaudeCode {
             task_id, agent_id, ..
         } => task_id.as_deref().or(agent_id.as_deref()),
+
         BackgroundTaskRefs::Codex { .. } | BackgroundTaskRefs::DeepSeek { .. } => None,
     }
 }
@@ -69,9 +70,11 @@ pub(super) fn lifecycle_state(kind: &str, record: &Value) -> Option<BackgroundTa
         "task_started" => return Some(BackgroundTaskState::Working),
         "task_progress" => return Some(BackgroundTaskState::Working),
         "task_notification" => record["status"].as_str()?,
+
         "task_updated" => record["patch"]["status"]
             .as_str()
             .or_else(|| record["status"].as_str())?,
+
         _ => return None,
     };
 

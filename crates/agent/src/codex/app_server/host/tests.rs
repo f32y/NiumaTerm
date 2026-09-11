@@ -92,11 +92,13 @@ fn expired_queued_requests_report_not_sent_and_ignore_late_success() {
 
 fn router() -> Router {
     let (startup_tx, _startup_rx) = sync_channel(1);
+
     Router::new(startup_tx)
 }
 
 fn register(router: &Router) -> (u64, Receiver<Value>) {
     let (tx, rx) = channel();
+
     let owner = router.register(Arc::new(move |message| {
         let _ = tx.send(message);
     }));
@@ -156,6 +158,7 @@ fn large_request_bursts_keep_independent_deadlines() {
     router
         .prepare_outgoing(owner, &mut json!({"id": 129, "method": "thread/read"}))
         .unwrap();
+
     router.expire_requests(now + RequestClass::Mutation.timeout() + Duration::from_secs(1));
 
     assert!(
@@ -313,6 +316,7 @@ fn responses_return_to_their_owner_with_local_ids() {
     router
         .prepare_outgoing(first, &mut first_request)
         .expect("first request should route");
+
     router
         .prepare_outgoing(second, &mut second_request)
         .expect("second request should route");
@@ -340,13 +344,16 @@ fn server_requests_are_checked_against_thread_ownership() {
     let mut second_request = start_request(2);
 
     router.prepare_outgoing(first, &mut first_request).unwrap();
+
     router
         .prepare_outgoing(second, &mut second_request)
         .unwrap();
+
     router.handle_message(start_response(
         first_request["id"].as_u64().unwrap(),
         "thread-a",
     ));
+
     router.handle_message(start_response(
         second_request["id"].as_u64().unwrap(),
         "thread-b",
@@ -360,6 +367,7 @@ fn server_requests_are_checked_against_thread_ownership() {
         "method": "item/commandExecution/requestApproval",
         "params": {"threadId": "thread-a", "turnId": "turn-a"},
     }));
+
     router.handle_message(json!({
         "id": 901,
         "method": "item/commandExecution/requestApproval",
@@ -387,13 +395,16 @@ fn root_notifications_are_isolated_and_process_notifications_are_shared() {
     let mut second_request = start_request(2);
 
     router.prepare_outgoing(first, &mut first_request).unwrap();
+
     router
         .prepare_outgoing(second, &mut second_request)
         .unwrap();
+
     router.handle_message(start_response(
         first_request["id"].as_u64().unwrap(),
         "thread-a",
     ));
+
     router.handle_message(start_response(
         second_request["id"].as_u64().unwrap(),
         "thread-b",
@@ -461,13 +472,16 @@ fn auxiliary_title_thread_activity_never_reaches_the_primary_registration() {
     router
         .prepare_outgoing(primary, &mut primary_request)
         .unwrap();
+
     router
         .prepare_outgoing(title_worker, &mut title_request)
         .unwrap();
+
     router.handle_message(start_response(
         primary_request["id"].as_u64().unwrap(),
         "thread-primary",
     ));
+
     router.handle_message(start_response(
         title_request["id"].as_u64().unwrap(),
         "thread-title",
@@ -499,6 +513,7 @@ fn early_descendant_activity_waits_for_a_proven_owner() {
     let mut root_request = start_request(2);
 
     router.prepare_outgoing(owner, &mut root_request).unwrap();
+
     router.handle_message(start_response(
         root_request["id"].as_u64().unwrap(),
         "root-a",
@@ -581,13 +596,16 @@ fn thread_started_inherits_the_known_parent_owner() {
     let mut second_request = start_request(2);
 
     router.prepare_outgoing(first, &mut first_request).unwrap();
+
     router
         .prepare_outgoing(second, &mut second_request)
         .unwrap();
+
     router.handle_message(start_response(
         first_request["id"].as_u64().unwrap(),
         "root-a",
     ));
+
     router.handle_message(start_response(
         second_request["id"].as_u64().unwrap(),
         "root-b",
@@ -635,13 +653,16 @@ fn a_root_conflict_keeps_the_requesting_sessions_previous_root() {
     let mut second_request = start_request(2);
 
     router.prepare_outgoing(first, &mut first_request).unwrap();
+
     router
         .prepare_outgoing(second, &mut second_request)
         .unwrap();
+
     router.handle_message(start_response(
         first_request["id"].as_u64().unwrap(),
         "root-a",
     ));
+
     router.handle_message(start_response(
         second_request["id"].as_u64().unwrap(),
         "root-b",
@@ -659,6 +680,7 @@ fn a_root_conflict_keeps_the_requesting_sessions_previous_root() {
     router
         .prepare_outgoing(second, &mut conflicting_resume)
         .unwrap();
+
     router.handle_message(start_response(
         conflicting_resume["id"].as_u64().unwrap(),
         "root-a",
@@ -686,6 +708,7 @@ fn an_early_closed_thread_is_not_retained_after_owner_discovery() {
     let mut root_request = start_request(2);
 
     router.prepare_outgoing(owner, &mut root_request).unwrap();
+
     router.handle_message(start_response(
         root_request["id"].as_u64().unwrap(),
         "root-a",
@@ -697,6 +720,7 @@ fn an_early_closed_thread_is_not_retained_after_owner_discovery() {
         "method": "thread/closed",
         "params": {"threadId": "child-a"},
     }));
+
     router.claim_descendants(owner, ["child-a".to_string()]);
 
     assert_eq!(rx.recv().unwrap()["method"], "thread/closed");
@@ -753,8 +777,10 @@ fn custom_launch(
 fn gateway_credentials_do_not_change_host_identity() {
     let first = custom_launch("codex", "provider-a", "NMT_CODEX_A", "secret-a");
     let second = custom_launch("codex", "provider-b", "NMT_CODEX_B", "secret-b");
+
     let bootstrap = HostBootstrap::from_launches(&first, &[first.clone(), second.clone()])
         .expect("compatible providers should merge");
+
     let credential_names = ["NMT_CODEX_A".to_string(), "NMT_CODEX_B".to_string()]
         .into_iter()
         .collect();
@@ -767,6 +793,7 @@ fn gateway_credentials_do_not_change_host_identity() {
 fn conflicting_credential_values_are_rejected() {
     let first = custom_launch("codex", "provider-a", "NMT_CODEX_SHARED", "secret-a");
     let second = custom_launch("codex", "provider-b", "NMT_CODEX_SHARED", "secret-b");
+
     let error = HostBootstrap::from_launches(&first, &[first.clone(), second])
         .err()
         .expect("credential collision should fail");

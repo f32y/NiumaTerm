@@ -11,6 +11,7 @@ use tracing::info;
 use crate::allocation::{AllocationCounts, AllocationScope};
 
 mod operation;
+
 pub use crate::transcript::operation::Operation;
 
 /// Operations in the same order as the drained totals array.
@@ -100,6 +101,7 @@ pub fn flush() {
         }
 
         let operation: &str = operation.into();
+
         info!(
             target: "transcript_perf",
             operation,

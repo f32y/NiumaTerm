@@ -18,6 +18,7 @@ pub(crate) fn answer_query(
             if reply.is_canceled() {
                 return;
             }
+
             let result = engine
                 .block_acquire(handle)
                 .and_then(|block| {
@@ -26,8 +27,10 @@ pub(crate) fn answer_query(
                         .flatten()
                 })
                 .ok_or(RequestError::Unavailable);
+
             let _ = reply.send(result);
         }
+
         Query::Rows {
             source,
             start,
@@ -36,21 +39,27 @@ pub(crate) fn answer_query(
             if reply.is_canceled() {
                 return;
             }
+
             let result = match source {
                 PageSource::Screen { revision } if revision != current_revision => {
                     Err(RequestError::Stale)
                 }
+
                 PageSource::Block { theme, .. } if theme != theme_revision => {
                     Err(RequestError::Stale)
                 }
+
                 _ => read_page(engine, source, start),
             };
+
             let _ = reply.send(result);
         }
+
         Query::Text { source, reply } => {
             if reply.is_canceled() {
                 return;
             }
+
             let result = match source {
                 TextSource::BlockSelection {
                     handle,
@@ -62,6 +71,7 @@ pub(crate) fn answer_query(
                         if block.handle().generation != handle.generation {
                             return None;
                         }
+
                         let (start, end) = block_selection_range(
                             &block,
                             &engine.color_palette(),
@@ -69,10 +79,13 @@ pub(crate) fn answer_query(
                             col,
                             kind,
                         )?;
+
                         block.format_range_clamped(Some(start), Some(end), true, true)
                     });
+
                     result.ok_or(RequestError::Unavailable)
                 }
+
                 TextSource::Screen {
                     revision,
                     start,
@@ -87,8 +100,10 @@ pub(crate) fn answer_query(
                             .map_err(|error| RequestError::Engine(error.to_string()))
                     }
                 }
+
                 TextSource::Blocks(pieces) => {
                     let mut text = String::new();
+
                     let result = pieces
                         .into_iter()
                         .enumerate()
@@ -96,23 +111,31 @@ pub(crate) fn answer_query(
                             let block = engine
                                 .block_acquire(piece.handle)
                                 .ok_or(RequestError::Unavailable)?;
+
                             if block.handle().generation != piece.handle.generation {
                                 return Err(RequestError::Stale);
                             }
+
                             let part = block
                                 .format_range_clamped(piece.start, piece.end, true, true)
                                 .ok_or(RequestError::Unavailable)?;
+
                             if index > 0 {
                                 text.push('\n');
                             }
+
                             text.push_str(&part);
+
                             Ok(())
                         });
+
                     result.map(|()| text)
                 }
             };
+
             let _ = reply.send(result);
         }
+
         Query::ExpandSelection {
             handle,
             line,
@@ -123,6 +146,7 @@ pub(crate) fn answer_query(
             if reply.is_canceled() {
                 return;
             }
+
             let result = engine
                 .block_acquire(handle)
                 .and_then(|block| {
@@ -133,10 +157,12 @@ pub(crate) fn answer_query(
                         .flatten()
                 })
                 .ok_or(RequestError::Unavailable);
+
             let _ = reply.send(result);
         }
     }
 }
+
 fn read_page(
     engine: &mut GhosttyTerminal,
     source: PageSource,
@@ -149,6 +175,7 @@ fn read_page(
         rows: Vec::new(),
         placements: Vec::new(),
     };
+
     match source {
         PageSource::Screen { .. } => {
             for row in start..start.saturating_add(PAGE_ROWS) {
@@ -158,37 +185,48 @@ fn read_page(
                 else {
                     break;
                 };
+
                 page.rows.push(row);
             }
         }
+
         PageSource::Block { id, generation, .. } => {
             let handle = BlockHandle { id, generation };
+
             let acquired = engine
                 .acquire_block_snapshot(handle)
                 .ok_or(RequestError::Unavailable)?;
+
             if acquired.block.handle().generation != generation {
                 return Err(RequestError::Stale);
             }
+
             page.cols = acquired.block.cols();
+
             let end = start
                 .saturating_add(PAGE_ROWS)
                 .min(acquired.block.row_count());
+
             for row in start..end {
                 let row = engine
                     .read_block_row(handle, row)
                     .map_err(|error| RequestError::Engine(error.to_string()))?
                     .ok_or(RequestError::Unavailable)?;
+
                 page.rows.push(row);
             }
+
             page.placements = acquired
                 .placements
                 .into_iter()
                 .filter(|placement| {
                     let first = placement.screen_row as usize;
+
                     first < end && first.saturating_add(placement.grid_rows as usize) > start
                 })
                 .collect();
         }
     }
+
     Ok(page)
 }

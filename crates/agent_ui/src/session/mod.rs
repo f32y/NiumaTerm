@@ -13,6 +13,7 @@ use crate::profile::AgentKindExt as _;
 use crate::session::prompts::PendingPrompts;
 use crate::thread_controls::ThreadControls;
 use crate::view::session_state::SessionStateBadge;
+
 mod background_tasks;
 mod conversation;
 pub(crate) mod errors;
@@ -74,6 +75,7 @@ impl Drop for AgentPane {
 fn branch_label(cwd: &str, max_age: Duration) -> Option<String> {
     Some(match git::current_branch(cwd, max_age)? {
         git::CheckedOut::Branch(branch) => branch,
+
         git::CheckedOut::Detached(commit) => {
             i18n("git-status-detached").replace("{commit}", &commit)
         }
@@ -194,7 +196,9 @@ impl AgentPane {
 
         let transcript = cx.new(|_| {
             let mut transcript = TranscriptView::new(kind, cwd.clone());
+
             transcript.set_owner(owner);
+
             transcript
         });
 
@@ -335,6 +339,7 @@ impl AgentPane {
 
         self.transcript
             .update(cx, |transcript, cx| transcript.push(turn, item, images, cx));
+
         cx.notify();
     }
 
@@ -349,6 +354,7 @@ impl AgentPane {
                 .map(|path| path.to_string_lossy().to_string())
         }) else {
             self.git_branch_poll.complete(generation, None);
+
             return;
         };
 
@@ -369,6 +375,7 @@ impl AgentPane {
 
             this.update(cx, |this, cx| {
                 this.git_branch_poll.complete(generation, branch);
+
                 cx.notify();
             })
             .ok();
@@ -384,6 +391,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         let agent: &str = self.kind.into();
+
         cx.emit(AgentPaneEvent::Lifecycle(AgentEvent {
             route: self.agent_route.clone(),
             agent: agent.into(),
@@ -444,6 +452,7 @@ impl AgentPane {
     ) -> bool {
         let response_annotations = self.attachments.annotations().to_vec();
         let submitted = prompt_with_response_annotations(&text, &response_annotations);
+
         self.send_text_inner(submitted, skill, Some((text, response_annotations)), cx)
     }
 
@@ -467,6 +476,7 @@ impl AgentPane {
         let scratch = scratch_dir(self.agent_route.as_str());
 
         let restores_annotations = restore_on_interrupt.is_some();
+
         let outcome = self.session.submit(
             text,
             |session, text| {
@@ -483,6 +493,7 @@ impl AgentPane {
                     Some(title) => session.send_user_message_with_title(
                         text, &settings, skill, images, &scratch, title,
                     ),
+
                     None => session.send_user_message(text, &settings, skill, images, &scratch),
                 }
             },
@@ -498,6 +509,7 @@ impl AgentPane {
         let started_text = match outcome {
             Ok(Submission::Started { text }) => Some(text),
             Ok(Submission::Queued) => None,
+
             Ok(Submission::NotReady) => {
                 self.push_item(
                     SessionItem::Error {
@@ -506,26 +518,34 @@ impl AgentPane {
                     },
                     cx,
                 );
+
                 return false;
             }
+
             Ok(Submission::Rejected { message }) => {
                 self.push_item(SessionItem::Error { text: message }, cx);
+
                 return false;
             }
+
             Err(reason) => {
                 let (kind, message) = match reason {
                     SubmissionBlock::QuestionResponse => {
                         (CommandFeedbackKind::Notice, "agent-question-send-pending")
                     }
+
                     SubmissionBlock::ConversationChange => (
                         CommandFeedbackKind::Error,
                         "agent-session-rewind-blocks-send",
                     ),
+
                     SubmissionBlock::CommandStarting => {
                         (CommandFeedbackKind::Error, "agent-session-command-starting")
                     }
                 };
+
                 self.palette.set_feedback(kind, i18n(message), cx);
+
                 return false;
             }
         };
@@ -537,6 +557,7 @@ impl AgentPane {
             && let Some(title) = title_request
         {
             self.session.naming.named = true;
+
             cx.emit(AgentPaneEvent::TitleSuggested(title.provisional_title));
         }
 
@@ -567,8 +588,10 @@ impl AgentPane {
                     sent_images,
                     cx,
                 );
+
                 self.start_working(cx);
             }
+
             None => cx.notify(),
         }
 
@@ -578,6 +601,7 @@ impl AgentPane {
     pub(super) fn clear_conversation_presentation(&mut self, cx: &mut Context<Self>) {
         self.transcript
             .update(cx, |transcript, _| transcript.clear());
+
         self.turn.submitted_at = None;
         self.turn.first_output_latency = None;
 
@@ -627,8 +651,10 @@ impl AgentPane {
         self.session.controls.models.clear();
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
+
         self.palette
             .reset_discovery(!self.kind.caps().async_command_discovery);
+
         self.session.commands.clear();
         self.palette.feedback = None;
         self.history_ui.mode = RecentSessionsMode::Hidden;

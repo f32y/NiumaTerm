@@ -15,6 +15,7 @@ use crate::transcript::{detect_output_language, entry_copy_text};
 
 fn register_languages() {
     static INIT: Once = Once::new();
+
     INIT.call_once(|| {
         for (name, language, query) in [
             (
@@ -316,15 +317,18 @@ fn latest_stream_revision_replaces_same_length_content_and_finishes_pending_ansi
             cx,
         )
     });
+
     view.update(cx, |view, cx| {
         view.set_source(
             CodeSource::from_item(&command("echo", "new\x1b[31m red")).unwrap(),
             cx,
         )
     });
+
     cx.run_until_parked();
     cx.executor().advance_clock(Duration::from_millis(30));
     cx.run_until_parked();
+
     view.read_with(cx, |view, _| {
         assert_eq!(
             view.prepared.as_ref().unwrap().text.as_str(),

@@ -80,6 +80,7 @@ impl NetPty {
 
                             if dropped && !overflowed {
                                 overflowed = true;
+
                                 warn!(
                                     "remote output outran the terminal engine; \
                                      dropping the oldest buffered bytes"
@@ -88,6 +89,7 @@ impl NetPty {
 
                             drain_read_ready.set_ready();
                         }
+
                         SessionByteEvent::Exited => break,
                     }
                 }
@@ -145,6 +147,7 @@ impl Read for NetReader {
             // drain thread signals more data. `Ok(0)` means "no more readable",
             // matching how the event loop treats a caught-up PTY.
             self.read_ready.clear();
+
             return Ok(0);
         }
 
@@ -182,6 +185,7 @@ impl Write for NetWriter {
 
 impl ProcessReadWrite for NetPty {
     type Reader = NetReader;
+
     type Writer = NetWriter;
 
     fn register(
@@ -254,6 +258,7 @@ impl ProcessReadWrite for NetPty {
 
     fn set_winsize(&mut self, size: WinsizeBuilder) -> io::Result<()> {
         self.input.send_resize(size.cols, size.rows);
+
         Ok(())
     }
 }
@@ -286,6 +291,7 @@ pub fn terminal_session(
 ) -> Result<TerminalSession, EngineError> {
     let cols = remote.snapshot().cols.max(1);
     let rows = remote.snapshot().rows.max(1);
+
     TerminalSession::from_pty(
         NetPty::new(remote),
         None,

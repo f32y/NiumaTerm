@@ -29,10 +29,12 @@ pub struct TestBackend {
     pub(super) send_outcomes: VecDeque<SendOutcome>,
     pub(super) slash_outcome: SlashCommandOutcome,
     pub(super) commands: Vec<SlashCommandInfo>,
+
     /// Raised from `Drop` when a test needs to observe the moment the pane
     /// lets go of the session. A DeepSeek session's release is what can stop
     /// the shared host process, so when it happens is behavior of its own.
     released: Option<Arc<AtomicBool>>,
+
     pub(super) recovery: Option<RecoveryIdentity>,
 }
 
@@ -65,11 +67,13 @@ impl TestBackend {
 
     pub fn watch_release(mut self, released: Arc<AtomicBool>) -> Self {
         self.released = Some(released);
+
         self
     }
 
     pub fn with_recovery(mut self, kind: AgentKind, id: impl Into<String>) -> Self {
         self.recovery = Some(RecoveryIdentity::new(kind, id));
+
         self
     }
 }

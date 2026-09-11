@@ -113,6 +113,7 @@ fn reducer_stacks_installations_and_never_fabricates_provider_progress() {
 
     second.identity =
         InstallationKey::derive(ProviderKind::Codex, &AgentCli::new("another-codex", []));
+
     second.state.versions.as_mut().unwrap().can_update = false;
 
     let first_view = notification_view(&first).unwrap();
@@ -168,6 +169,7 @@ fn testing_mode_uses_only_fake_maintenance_and_a_process_local_cache() {
 fn mixed_installations_select_only_tabs_for_the_target_transaction() {
     let shared =
         InstallationKey::derive(ProviderKind::Claude, &AgentCli::new("shared-claude", [])).key;
+
     let unrelated =
         InstallationKey::derive(ProviderKind::Claude, &AgentCli::new("other-claude", [])).key;
 
@@ -190,6 +192,7 @@ fn mixed_installations_select_only_tabs_for_the_target_transaction() {
 fn settings_installation_rows_deduplicate_profiles_in_first_seen_order() {
     let claude =
         InstallationKey::derive(ProviderKind::Claude, &AgentCli::new("shared-claude", [])).key;
+
     let codex =
         InstallationKey::derive(ProviderKind::Codex, &AgentCli::new("shared-codex", [])).key;
 

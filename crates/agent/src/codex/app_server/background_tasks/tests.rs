@@ -223,7 +223,9 @@ fn codex_states_map_onto_the_shared_lifecycle() {
         ("notFound", BackgroundTaskState::Failed),
     ] {
         let mut tasks = rooted();
+
         tasks.observe_parent_item(&spawn_item_with_status("thr_child", reported));
+
         assert_eq!(state_of(&tasks, "thr_child"), Some(expected), "{reported}");
     }
 
@@ -231,6 +233,7 @@ fn codex_states_map_onto_the_shared_lifecycle() {
     let mut tasks = rooted();
 
     tasks.observe_parent_item(&spawn_item("thr_child"));
+
     tasks.observe_parent_item(&agent_status_item(
         "thr_child",
         "errored",
@@ -383,6 +386,7 @@ fn an_idle_child_keeps_its_state_and_loses_its_stop_control() {
     let mut tasks = rooted();
 
     tasks.observe_parent_item(&spawn_item("thr_child"));
+
     tasks.apply_descendant_notification(
         "thr_child",
         "turn/started",
@@ -576,6 +580,7 @@ fn rows_outside_the_selected_root_and_cycles_are_rejected() {
     let mut tasks = rooted();
 
     tasks.descendant_request(7, None);
+
     tasks.apply_descendants(
         7,
         &json!({

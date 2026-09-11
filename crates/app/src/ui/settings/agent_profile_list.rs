@@ -26,6 +26,7 @@ use crate::ui::settings::table::{
 /// Column widths shared by the header and the rows, so the two line up
 /// without either having to measure the other.
 const TYPE_COLUMN: Pixels = px(56.0);
+
 const OPERATION_COLUMN: Pixels = px(80.0);
 
 /// Thickness of the line marking where a dragged profile would be dropped.
@@ -88,6 +89,7 @@ fn delete_profile(ix: usize, window: &mut Window, cx: &mut App) {
             .description(description.clone())
             .on_ok(move |_, _, cx| {
                 cx.global_mut::<AppSettings>().remove_agent_profile(ix);
+
                 true
             })
     });
@@ -99,6 +101,7 @@ fn delete_profile(ix: usize, window: &mut Window, cx: &mut App) {
 /// rather than at the end.
 fn duplicate_profile(ix: usize, cx: &mut App) {
     let settings = cx.global_mut::<AppSettings>();
+
     let Some(mut profile) = settings.agent_profiles.get(ix).cloned() else {
         return;
     };
@@ -143,6 +146,7 @@ impl Render for ProfileDragPreview {
 /// or a delete.
 pub(super) struct AgentProfileList {
     profiles: Vec<AgentProfile>,
+
     /// Gap a profile drag currently hovers, counted in row edges: `0` is above
     /// the first row and `profiles.len()` below the last. It is marked with a
     /// line rather than a highlighted row because the row under the pointer
@@ -228,6 +232,7 @@ impl ListDelegate for AgentProfileList {
 
                                 if this.delegate().drop_gap != Some(gap) {
                                     this.delegate_mut().drop_gap = Some(gap);
+
                                     cx.notify();
                                 }
                             },
@@ -251,6 +256,7 @@ impl ListDelegate for AgentProfileList {
                                 && to < profiles.len()
                             {
                                 let profile = profiles.remove(from);
+
                                 profiles.insert(to, profile);
                             }
 
@@ -259,6 +265,7 @@ impl ListDelegate for AgentProfileList {
                             // push the reordered profiles back in.
                             this.delegate_mut().profiles =
                                 cx.global::<AppSettings>().agent_profiles.clone();
+
                             cx.notify();
                         }))
                         // The same operations as the row's own controls, plus
@@ -382,11 +389,13 @@ pub(super) fn agent_profile_list(window: &mut Window, cx: &mut App) -> AnyElemen
         // itself refreshes the window, so this always gets a chance to run.
         if state.delegate().drop_gap.is_some() && !cx.has_active_drag() {
             state.delegate_mut().drop_gap = None;
+
             cx.notify();
         }
 
         if state.delegate().profiles != profiles {
             state.delegate_mut().profiles = profiles;
+
             cx.notify();
         }
     });

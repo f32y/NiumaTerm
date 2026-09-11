@@ -47,11 +47,13 @@ fn effective_environment_matches_child_case_rules_and_last_override() {
 /// script differs; every case tests the same runner behaviour.
 #[cfg(windows)]
 const SHELL: &str = "cmd.exe";
+
 #[cfg(unix)]
 const SHELL: &str = "/bin/sh";
 
 #[cfg(windows)]
 const SHELL_FLAGS: [&str; 2] = ["/D", "/C"];
+
 #[cfg(unix)]
 const SHELL_FLAGS: [&str; 1] = ["-c"];
 

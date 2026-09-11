@@ -86,6 +86,7 @@ fn a_failed_refresh_reports_unavailable_without_dropping_known_rows() {
         BackgroundTaskKey::codex("child-1"),
         BackgroundTaskUpdate::state(BackgroundTaskState::Working),
     );
+
     registry.set_discovery(BackgroundTaskDiscoveryState::Unavailable {
         message: "thread/list failed".into(),
     });
@@ -271,6 +272,7 @@ fn claude_provisional_titles_match_the_desktop_projection() {
     );
 
     let long_word = "界".repeat(80);
+
     let title = conversation_title_request(crate::AgentKind::Claude, &long_word)
         .unwrap()
         .provisional_title;
@@ -457,12 +459,14 @@ mod conversation_title_tests {
                 ));
 
                 pane.session.input.restore(&mut pane.session.runtime);
+
                 pane.apply_event(
                     Event::ApprovalRequested {
                         description: "Run a command".into(),
                     },
                     cx,
                 );
+
                 pane.respond_approval("accept", cx);
 
                 assert!(pane.session.input.approval().is_some());
@@ -470,9 +474,11 @@ mod conversation_title_tests {
                 pane.apply_event(Event::ApprovalResolved, cx);
                 pane.session.runtime.ready();
                 pane.restore_question_drafts();
+
                 if let Some(Backend::Test(backend)) = pane.session.runtime.backend_mut() {
                     backend.input_result = Err("The question response could not be queued.".into());
                 }
+
                 pane.apply_event(
                     Event::QuestionsRequested {
                         questions: vec![Question {
@@ -485,6 +491,7 @@ mod conversation_title_tests {
                     },
                     cx,
                 );
+
                 pane.skip_current_questions(cx);
 
                 let question = pane
@@ -527,6 +534,7 @@ mod conversation_title_tests {
                 assert!(pane.session.naming.named);
             });
         });
+
         cx.run_until_parked();
 
         assert_eq!(
@@ -568,6 +576,7 @@ mod conversation_title_tests {
                 assert!(pane.send_text("a later prompt cannot rename this".into(), cx));
             });
         });
+
         cx.run_until_parked();
 
         assert_eq!(*titles.borrow(), vec!["one two three four five six"]);
@@ -612,6 +621,7 @@ mod conversation_title_tests {
                 assert!(pane.send_text("follow up on the restored session".into(), cx));
             });
         });
+
         cx.run_until_parked();
 
         assert!(titles.borrow().is_empty());
@@ -718,6 +728,7 @@ mod queued_prompt_placement_tests {
                 SessionItem::UserMessage { text } => {
                     Some((entry.turn, text.clone().unwrap_or_default()))
                 }
+
                 _ => None,
             })
             .collect()
@@ -810,6 +821,7 @@ mod queued_prompt_placement_tests {
                     }),
                     cx,
                 );
+
                 pane.apply_event(SessionEvent::TurnCompleted { error: None }, cx);
 
                 assert_eq!(
@@ -889,6 +901,7 @@ mod queued_prompt_placement_tests {
 
                 pane.apply_event(SessionEvent::TurnStarted, cx);
                 pane.apply_event(SessionEvent::QueuedPrompts(Vec::new()), cx);
+
                 pane.apply_event(
                     SessionEvent::ItemStarted(SessionItem::UserMessage {
                         text: Some(text.clone()),
@@ -955,6 +968,7 @@ mod turn_error_tests {
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
                 pane.apply_event(SessionEvent::TurnStarted, cx);
+
                 pane.apply_event(
                     SessionEvent::ItemStarted(SessionItem::AgentMessage {
                         id: "message".into(),
@@ -963,6 +977,7 @@ mod turn_error_tests {
                     }),
                     cx,
                 );
+
                 pane.apply_event(
                     SessionEvent::Error {
                         message: "model unavailable".into(),
@@ -970,6 +985,7 @@ mod turn_error_tests {
                     },
                     cx,
                 );
+
                 pane.apply_event(
                     SessionEvent::TurnCompleted {
                         error: Some("model unavailable".into()),
@@ -1289,6 +1305,7 @@ mod command_catalog_cache_tests {
                 ));
             });
         });
+
         cx.run_until_parked();
 
         cx.update(|_, cx| {
@@ -1306,6 +1323,7 @@ mod command_catalog_cache_tests {
                 assert!(!offers(pane, "deploy"), "a withdrawn command must go");
             });
         });
+
         cx.run_until_parked();
     }
 }

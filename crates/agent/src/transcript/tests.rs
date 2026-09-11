@@ -36,6 +36,7 @@ fn indexed_deltas_select_the_first_compatible_duplicate_without_changing_other_e
         content.append(entry(1, reply("shared", Some("hello 世界")))),
         1
     );
+
     content.append(entry(2, reply("shared", Some("later"))));
 
     let update = content
@@ -80,6 +81,7 @@ fn indexed_deltas_select_the_first_compatible_duplicate_without_changing_other_e
 #[test]
 fn empty_and_whitespace_deltas_are_accepted_without_claiming_non_blank_content() {
     let mut content = TranscriptContent::default();
+
     content.append(entry(1, reply("answer", None)));
 
     for delta in ["", " \n", "\u{3000}"] {
@@ -103,6 +105,7 @@ fn empty_and_whitespace_deltas_are_accepted_without_claiming_non_blank_content()
 #[test]
 fn completions_keep_streamed_fields_and_report_the_matching_entry() {
     let mut content = TranscriptContent::default();
+
     content.append(entry(1, reasoning("shared", Some("keep this"))));
     content.append(entry(1, reply("shared", Some("streamed answer"))));
     content.append(entry(2, reply("shared", Some("later"))));
@@ -176,7 +179,9 @@ fn completions_keep_streamed_fields_and_report_the_matching_entry() {
 #[test]
 fn replacement_and_clear_retire_old_ids_and_preserve_incoming_order() {
     let mut content = TranscriptContent::default();
+
     content.append(entry(1, reply("old", Some("old"))));
+
     content.replace(vec![
         entry(5, reasoning("new", None)),
         entry(6, reply("new", None)),
@@ -202,7 +207,9 @@ fn replacement_and_clear_retire_old_ids_and_preserve_incoming_order() {
 
     assert!(content.entries().is_empty());
     assert!(!content.contains_item("new"));
+
     content.append(entry(1, reply("new", None)));
+
     assert_eq!(
         content
             .append_delta("new", "fresh", TextField::Reply)
@@ -215,13 +222,16 @@ fn replacement_and_clear_retire_old_ids_and_preserve_incoming_order() {
 #[test]
 fn content_queries_respect_turns_blank_replies_and_latest_task_lists() {
     let mut content = TranscriptContent::default();
+
     content.append(entry(
         1,
         Item::UserMessage {
             text: Some("question".into()),
         },
     ));
+
     content.append(entry(1, reasoning("reason", None)));
+
     content.append(entry(
         1,
         Item::FileChange {
@@ -231,6 +241,7 @@ fn content_queries_respect_turns_blank_replies_and_latest_task_lists() {
             status: None,
         },
     ));
+
     content.append(entry(
         1,
         Item::Other {
@@ -241,6 +252,7 @@ fn content_queries_respect_turns_blank_replies_and_latest_task_lists() {
             status: None,
         },
     ));
+
     content.append(entry(
         1,
         Item::Compaction {
@@ -248,12 +260,14 @@ fn content_queries_respect_turns_blank_replies_and_latest_task_lists() {
             detail: Compaction::default(),
         },
     ));
+
     content.append(entry(
         1,
         Item::Error {
             text: "failure".into(),
         },
     ));
+
     content.append(entry(1, reply("first", Some("answer"))));
     content.append(entry(1, reply("blank", Some(" \n"))));
     content.append(entry(2, reply("second", Some("other turn"))));
@@ -277,6 +291,7 @@ fn content_queries_respect_turns_blank_replies_and_latest_task_lists() {
             status: None,
         },
     ));
+
     assert_eq!(content.task_tally(), Some((1, 1)));
 }
 
@@ -285,7 +300,9 @@ fn appends_move_content_and_metadata_without_cloning_them() {
     struct Metadata(String);
 
     let mut text = String::with_capacity(1024);
+
     text.push_str("existing");
+
     let original_text = text.as_ptr();
     let metadata = Metadata("local display data".into());
     let original_metadata = metadata.0.as_ptr();
@@ -300,6 +317,7 @@ fn appends_move_content_and_metadata_without_cloning_them() {
         },
         metadata,
     });
+
     content
         .append_delta("answer", " suffix", TextField::Reply)
         .unwrap();

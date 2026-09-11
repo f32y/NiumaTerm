@@ -60,6 +60,7 @@ impl ThreadControls {
             model_options,
             |this, value, cx| {
                 this.session.controls.settings.model = Some(value);
+
                 this.controls.remember_defaults(
                     &this.session.controls,
                     this.kind,
@@ -107,6 +108,7 @@ impl ThreadControls {
                 effort_levels(kind),
                 |this, value, cx| {
                     this.session.controls.settings.effort = Some(value);
+
                     this.controls.remember_defaults(
                         &this.session.controls,
                         this.kind,
@@ -160,12 +162,14 @@ impl ThreadControls {
             model_options,
             |this, value, cx| {
                 this.session.controls.settings.model = Some(value);
+
                 this.controls.remember_defaults(
                     &this.session.controls,
                     this.kind,
                     &this.profile,
                     cx,
                 );
+
                 this.apply_model_selection(cx);
             },
         )
@@ -222,12 +226,14 @@ impl ThreadControls {
                 effort_levels(kind),
                 |this, value, cx| {
                     this.session.controls.settings.effort = Some(value);
+
                     this.controls.remember_defaults(
                         &this.session.controls,
                         this.kind,
                         &this.profile,
                         cx,
                     );
+
                     this.apply_model_selection(cx);
                 },
             )
@@ -312,6 +318,7 @@ impl ThreadControls {
                 }
 
                 this.session.controls.settings.model = Some(value);
+
                 this.controls.remember_defaults(
                     &this.session.controls,
                     this.kind,
@@ -391,6 +398,7 @@ impl ThreadControls {
             effort_levels(kind),
             |this, value, cx| {
                 this.session.controls.settings.effort = Some(value);
+
                 this.controls.remember_defaults(
                     &this.session.controls,
                     this.kind,

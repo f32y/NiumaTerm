@@ -28,6 +28,7 @@ pub fn load_replay(cwd: Option<&str>, session_id: &str) -> Vec<ReplayTurn> {
 pub fn try_load_replay(cwd: Option<&str>, session_id: &str) -> Result<Vec<ReplayTurn>, String> {
     let path = session_path(cwd, session_id)
         .ok_or_else(|| format!("Claude session {session_id} has no project directory"))?;
+
     let file = fs::File::open(path)
         .map_err(|error| format!("could not read Claude session {session_id}: {error}"))?;
 
@@ -43,8 +44,10 @@ pub fn load_checkpoints(
 ) -> Result<Vec<ClaudeCheckpoint>, String> {
     let path = session_path(cwd, session_id)
         .ok_or_else(|| format!("Claude session {session_id} has no project directory"))?;
+
     let file = fs::File::open(&path)
         .map_err(|error| format!("could not read Claude session {session_id}: {error}"))?;
+
     let transcript = TranscriptIndex::read(BufReader::new(file));
 
     if let Some(parent) = &transcript.broken_parent {
@@ -145,9 +148,11 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                             item: Item::Compaction { detail, .. },
                             ..
                         }) => detail.summary = Some(summary),
+
                         _ => {
                             compaction_seq += 1;
                             summary_awaiting_boundary = Some(items.len());
+
                             items.push(ReplayItem {
                                 at,
                                 item: Item::Compaction {
@@ -188,6 +193,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                     }
                 }
             }
+
             Some("system") if record["subtype"].as_str() == Some("compact_boundary") => {
                 let detail = parse_compaction(compaction_metadata(record));
 
@@ -201,11 +207,13 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                         // reports, so adopting its identity keeps a resumed row
                         // and a live one from being two separate entries.
                         *id = replayed_compaction_id(record, compaction_seq);
+
                         *opened = Compaction {
                             summary: opened.summary.take(),
                             ..detail
                         };
                     }
+
                     // Either the summary turn follows the marker, or this
                     // compaction preserved a message segment instead of writing
                     // one at all; the boundary belongs in the transcript now and
@@ -213,6 +221,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                     _ => {
                         compaction_seq += 1;
                         boundary_awaiting_summary = Some(items.len());
+
                         items.push(ReplayItem {
                             at,
                             item: Item::Compaction {
@@ -223,10 +232,12 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                     }
                 }
             }
+
             Some("assistant") => {
                 let Some(blocks) = record["message"]["content"].as_array() else {
                     continue;
                 };
+
                 let is_api_error = record["isApiErrorMessage"].as_bool() == Some(true);
 
                 for block in blocks {
@@ -254,6 +265,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                                 items.push(ReplayItem { item, at });
                             }
                         }
+
                         Some("thinking") => {
                             let summary = block["thinking"].as_str().unwrap_or_default().trim();
 
@@ -263,7 +275,9 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
 
                             let id = block["id"].as_str().map(str::to_owned).unwrap_or_else(|| {
                                 let id = format!("replay-thinking-{thinking_seq}");
+
                                 thinking_seq += 1;
+
                                 id
                             });
 
@@ -275,6 +289,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                                 },
                             });
                         }
+
                         Some("tool_use") | Some("server_tool_use") | Some("mcp_tool_use") => {
                             let Some(id) = block["id"].as_str() else {
                                 continue;
@@ -289,10 +304,12 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                             pending_tools.insert(id.to_string(), items.len());
                             items.push(ReplayItem { item, at });
                         }
+
                         _ => {}
                     }
                 }
             }
+
             _ => {}
         }
     }
@@ -319,9 +336,11 @@ fn slice_turns(items: Vec<ReplayItem>, turns: Vec<TurnBuilder>) -> Vec<ReplayTur
         let end = turns
             .get(index + 1)
             .map_or(items.len(), |next| next.start.min(items.len()));
+
         let Some(range) = items.get_mut(turn.start..end) else {
             continue;
         };
+
         let items: Vec<ReplayItem> = range.iter_mut().filter_map(Option::take).collect();
 
         if items.is_empty() {
@@ -350,6 +369,7 @@ fn turn_durations(records: &[Value]) -> HashMap<String, u64> {
         })
         .filter_map(|record| {
             let parent = record["parentUuid"].as_str()?.to_string();
+
             Some((parent, record["durationMs"].as_u64()?))
         })
         .collect()
@@ -402,9 +422,11 @@ fn complete_replayed_tools(
         let Some(id) = block["tool_use_id"].as_str() else {
             continue;
         };
+
         let Some(index) = pending_tools.remove(id) else {
             continue;
         };
+
         let Some(entry) = items.get_mut(index) else {
             continue;
         };

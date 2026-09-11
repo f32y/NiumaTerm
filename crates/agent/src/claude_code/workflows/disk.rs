@@ -47,6 +47,7 @@ pub fn resolve_run_directory(
     agent_ids: &[String],
 ) -> Option<PathBuf> {
     let project = project_dir(cwd)?;
+
     resolve_run_directory_at(&project, session_id, task_id, agent_ids)
 }
 
@@ -125,6 +126,7 @@ pub fn read_journal(dir: &Path) -> Result<Vec<WorkflowJournalEntry>, String> {
         let Ok(record) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
+
         let Some(agent_id) = text_field(&record, &["agentId"]) else {
             continue;
         };
@@ -143,6 +145,7 @@ pub fn read_journal(dir: &Path) -> Result<Vec<WorkflowJournalEntry>, String> {
                     entry.result = result;
                 }
             }
+
             None => entries.push(WorkflowJournalEntry { agent_id, result }),
         }
     }
@@ -170,11 +173,14 @@ pub fn agent_transcript_len(dir: &Path, agent_id: &str) -> Option<u64> {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WorkflowRefreshRequest {
     pub task_id: String,
+
     /// Agent ids the run has reported, used to find its directory while the
     /// run is still live.
     pub agent_ids: Vec<String>,
+
     /// The agent whose conversation is open, when it belongs to this run.
     pub open_agent: Option<String>,
+
     /// Size that transcript had when it was last parsed, so an unchanged file
     /// costs a stat rather than a parse.
     pub open_agent_len: Option<u64>,
@@ -255,6 +261,7 @@ pub fn read_run_snapshots(
 ) -> Result<Vec<RestoredWorkflowRun>, String> {
     let project =
         project_dir(cwd).ok_or_else(|| format!("session {session_id} has no project directory"))?;
+
     read_run_snapshots_at(&project, session_id)
 }
 
@@ -282,6 +289,7 @@ pub(crate) fn read_run_snapshots_at(
         let Some(snapshot) = read_json(&path) else {
             continue;
         };
+
         let Some(run) = restore_run(&snapshot) else {
             continue;
         };
@@ -463,6 +471,7 @@ fn agent_prompt_label(path: &Path) -> Option<String> {
     /// The prompt is the first user record; scanning a few lines covers a
     /// file that opens with attachments instead.
     const SCAN_LINES: usize = 8;
+
     const MAX_LABEL_CHARS: usize = 80;
 
     let file = fs::File::open(path).ok()?;

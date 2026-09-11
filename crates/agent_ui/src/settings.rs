@@ -20,36 +20,47 @@ pub struct AgentSettings {
     /// Paint the pane over the terminal theme's background color instead of
     /// the chrome surface color.
     pub pane_background_follows_terminal: bool,
+
     pub font_family: SharedString,
     pub font_size: f32,
     pub transcript_font_family: SharedString,
     pub transcript_font_size: f32,
     pub newline_shortcut: NewlineShortcut,
     pub collapse_tool_calls: CollapseRows,
+
     /// Offer `$skill` references through the composer even where the harness
     /// resolves them by prompt text.
     pub codex_skill_command_compat: bool,
+
     /// How the composer's model picker spells each model it offers.
     pub model_list_style: ModelListStyle,
+
     pub smooth_wheel: bool,
+
     /// Put disclosed content on screen at once, skipping the entrance the
     /// transcript otherwise plays for it.
     pub reduce_motion: bool,
+
     /// Seconds between branch-label refreshes of the pane's working
     /// directory.
     pub git_status_refresh_interval: u64,
+
     /// The configured launch profiles, so a restart picks up edits made since
     /// the pane opened.
     pub profiles: Vec<AgentProfile>,
+
     /// Tint opacity of the pane background; the window-backdrop arithmetic
     /// stays with the chrome settings that own it.
     pub background_opacity: f32,
+
     /// Fallback chain matching the CJK preference the rest of the
     /// application text uses.
     pub font_fallbacks: FontFallbacks,
+
     /// Hold the conversation column at a reading width and centre it in the
     /// pane; off, the column follows the pane width with a fixed margin.
     pub human_friendly_layout: bool,
+
     /// Opaque terminal palette background, resolved by the application when
     /// settings or the selected theme change. Pane opacity is applied at paint.
     pub terminal_background: Hsla,
@@ -61,7 +72,9 @@ impl AgentSettings {
     /// `family` with the shared fallback chain applied.
     pub fn font_with_fallbacks(&self, family: SharedString) -> Font {
         let mut font = font(family);
+
         font.fallbacks = Some(self.font_fallbacks.clone());
+
         font
     }
 

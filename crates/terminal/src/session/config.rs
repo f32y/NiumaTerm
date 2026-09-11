@@ -15,20 +15,26 @@ pub struct TerminalSessionConfig {
     pub starting_title: Option<String>,
     pub cols: u16,
     pub rows: u16,
+
     /// Default cursor shape until the running program selects one with DECSCUSR.
     pub cursor_shape: CursorShape,
+
     /// Scrollback budget in lines; converted to the engine's byte budget.
     pub scrollback_lines: usize,
+
     /// Engine-blocks mode is the default because completed commands can freeze
     /// into engine-side blocks at each trusted `;D`; rendering reads
     /// them through `BlockRef` handles. `false` is the internal classic-grid
     /// fallback: no freezing, no boundary clears, no block events, intact
     /// scrollback. The GPUI app keeps this enabled and toggles block chrome only.
     pub engine_blocks: bool,
+
     /// Child-only values merged into the shell's inherited environment.
     /// Runtime metadata is deliberately excluded from persisted tab state.
     pub environment_overrides: Vec<(String, String)>,
+
     pub manage_process_tree: bool,
+
     /// Bytes the launch places in the terminal's input queue before the shell
     /// starts, for a platform whose shell integration is typed at the shell
     /// rather than found by it. Not part of the restorable tab state: it is a

@@ -50,6 +50,7 @@ impl Session {
         let Some(request) = self.pending_questions.as_ref() else {
             return false;
         };
+
         let skipped = answers.is_none();
 
         let outcome = match answers {
@@ -63,7 +64,9 @@ impl Session {
 
                 json!({"kind": "result", "value": {"answers": answers}})
             }
+
             Some(_) => return false,
+
             None => json!({"kind": "rejected", "error": {
                 "name": "Error", "code": "cancelled", "message": "the user dismissed the question"
             }}),
@@ -119,6 +122,7 @@ impl Session {
     /// answer from replacing a newer one.
     pub fn refresh_background_tasks(&mut self) {
         self.subagent_activity += 1;
+
         load_subagents(
             self.client.clone(),
             self.session_id.clone(),
@@ -232,6 +236,7 @@ impl Session {
             self.session_id.clone(),
             Arc::clone(&self.deliver),
         );
+
         load_skills(
             self.client.clone(),
             self.session_id.clone(),
@@ -250,11 +255,13 @@ impl Session {
     /// the message pending and the reply is reported as steered either way.
     pub fn send_user_message(&mut self, text: &str, images: &[MessageImage]) -> SendOutcome {
         let steering = self.running;
+
         let mode = if steering { "steer" } else { "queue" };
 
         match self.prompt(text, mode, images) {
             Ok(_) if steering => SendOutcome::Steered,
             Ok(_) => SendOutcome::StartedTurn,
+
             Err(error) => SendOutcome::Rejected {
                 message: error.message().to_string(),
             },
@@ -276,8 +283,10 @@ impl Session {
         match self.client.request("session/updateQueue", payload) {
             Ok(_) => {
                 self.queued_prompt_ids.retain(|queued| queued != item_id);
+
                 true
             }
+
             Err(error) => {
                 tracing::warn!(
                     "deepseek queued prompt could not be removed: {}",
@@ -390,6 +399,7 @@ impl Session {
 
         match answer {
             Ok(value) => commands::outcome(name, &value),
+
             Err(error) => SlashCommandOutcome::Rejected {
                 message: error.message().to_string(),
             },
@@ -497,6 +507,7 @@ pub(in crate::deepseek) fn run_close_actions(
                     "action": { "kind": "remove" },
                 }),
             ),
+
             CloseAction::CancelTurn => ("session/cancel", json!({ "sessionId": session_id })),
         };
 

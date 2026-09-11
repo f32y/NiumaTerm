@@ -1,6 +1,7 @@
 mod store;
 #[cfg(test)]
 mod tests;
+
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, mpsc};
 use std::{env, fs, io, thread};
@@ -20,6 +21,7 @@ pub struct InputHistoryScope {
     target: String,
     backend: String,
     cwd: String,
+
     /// Signature of the additional workspace directories, empty for a
     /// single-directory workspace. Two workspaces that share a primary
     /// directory but attach different ones are different working contexts, so
@@ -35,6 +37,7 @@ impl InputHistoryScope {
 
     fn new(target: impl Into<String>, kind: AgentKind, workspace: &AgentWorkspace) -> Self {
         let backend: &str = kind.into();
+
         Self {
             target: target.into(),
             backend: backend.into(),
@@ -60,6 +63,7 @@ fn normalize_working_directory(cwd: Option<&str>) -> String {
 
     let normalized =
         fs::canonicalize(&absolute).unwrap_or_else(|_| normalize_path_components(&absolute));
+
     let spelling = installation_path_spelling(&normalized);
 
     // Windows keeps its persisted slash spelling. On Unix both case and a
@@ -76,9 +80,11 @@ fn normalize_path_components(path: &Path) -> PathBuf {
     for component in path.components() {
         match component {
             Component::CurDir => {}
+
             Component::ParentDir => {
                 normalized.pop();
             }
+
             component => normalized.push(component.as_os_str()),
         }
     }
@@ -128,13 +134,16 @@ impl AgentInputHistory {
     pub fn open(path: PathBuf) -> Self {
         let store = load_from_path(&path).unwrap_or_else(|error| {
             warn!("failed to load Agent input history: {error}");
+
             HistoryStore::default()
         });
 
         let writer = match HistoryWriter::spawn(path.clone()) {
             Ok(writer) => Some(writer),
+
             Err(error) => {
                 warn!("failed to start Agent input history writer: {error}");
+
                 None
             }
         };
@@ -146,6 +155,7 @@ impl AgentInputHistory {
         }
     }
 }
+
 struct HistoryWriter {
     sender: mpsc::SyncSender<()>,
     pending: Arc<Mutex<Option<PendingWrite>>>,
@@ -195,6 +205,7 @@ impl HistoryWriter {
         waiter: Option<mpsc::SyncSender<io::Result<()>>>,
     ) -> io::Result<()> {
         let mut pending = self.pending.lock();
+
         let mut waiters = pending
             .take()
             .map_or_else(Vec::new, |pending| pending.waiters);
@@ -206,6 +217,7 @@ impl HistoryWriter {
         // so a slow disk cannot accumulate a queue of obsolete copies.
         match self.sender.try_send(()) {
             Ok(()) | Err(mpsc::TrySendError::Full(())) => Ok(()),
+
             Err(mpsc::TrySendError::Disconnected(())) => {
                 pending.take();
 
@@ -225,7 +237,9 @@ fn run_writer(
 ) {
     while receiver.recv().is_ok() {
         let request = pending.lock().take();
+
         let Some(request) = request else { continue };
+
         let result = save(&request.snapshot);
 
         if let Err(error) = &result {

@@ -66,6 +66,7 @@ impl TranscriptView {
                         cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
                     })
                     .icon(IconName::Copy),
+
                 None => menu,
             }
         }
@@ -98,6 +99,7 @@ impl TranscriptView {
 
         move |menu, window, cx| {
             let menu = copy(menu, window, cx);
+
             let Some((pane, target)) = target.clone() else {
                 return menu;
             };
@@ -106,6 +108,7 @@ impl TranscriptView {
                 menu.separator()
                     .item(i18n("agent-transcript-fork-from-here"), move |_, cx| {
                         let target = target.clone();
+
                         pane.update(cx, |pane, cx| pane.fork_from_prompt(target, cx))
                             .ok();
                     })
@@ -114,6 +117,7 @@ impl TranscriptView {
                 menu.separator()
                     .item(i18n("agent-transcript-rewind-to-here"), move |_, cx| {
                         let target = target.clone();
+
                         pane.update(cx, |pane, cx| pane.rewind_to_prompt(target, cx))
                             .ok();
                     })
@@ -185,6 +189,7 @@ impl TranscriptView {
         // they are on screen and the wording answers the click at once.
         let annotations_shown =
             self.disclosures.annotation_expanded(index) && annotations_reveal > 0.0;
+
         let annotations_disclosing = self.disclosures.is_disclosing(RevealKey::Annotation(index));
 
         let annotations = parsed.as_ref().and_then(|parsed| {
@@ -395,6 +400,7 @@ impl TranscriptView {
                         .aria_label(i18n("agent-transcript-image-open"))
                         .on_prepaint({
                             let placed = placed.clone();
+
                             move |bounds, _, _| placed.set(bounds)
                         })
                         .on_click(cx.listener({

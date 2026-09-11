@@ -257,6 +257,7 @@ fn public_ingress_replay_closed_route_and_replaced_id_fail_closed() {
         &raw_codex_line(route.as_str(), "Stop", "session", Some("turn")),
         now,
     );
+
     monitor.process_due(now + COMPLETION_QUIET_WINDOW);
 
     assert!(monitor.notification(&route).is_none());
@@ -270,11 +271,13 @@ fn public_ingress_replay_closed_route_and_replaced_id_fail_closed() {
     assert!(!monitor.acknowledge(&route, &replaced_id).visible_changed);
 
     monitor.remove_route(&route);
+
     apply_raw(
         &mut monitor,
         &raw_codex_line(route.as_str(), "UserPromptSubmit", "session", Some("turn")),
         now,
     );
+
     monitor.process_due(now + COMPLETION_QUIET_WINDOW);
 
     assert!(monitor.notification(&route).is_none());

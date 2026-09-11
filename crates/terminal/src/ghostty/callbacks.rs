@@ -16,8 +16,10 @@ use crate::clipboard;
 pub(super) struct Callbacks {
     /// Bytes the terminal wants written back to the PTY (DSR/DA/etc.).
     pub(super) pty_writes: Vec<u8>,
+
     /// Number of BEL characters received since last drained.
     pub(super) bell_count: u32,
+
     /// Owned text copied from clipboard requests before the FFI callback returns.
     pub(super) clipboard_writes: Vec<(clipboard::ClipboardType, String)>,
 }

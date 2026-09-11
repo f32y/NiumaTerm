@@ -100,6 +100,7 @@ impl<L> TerminalLayout<L> {
             } => {
                 state.update(cx, |state, cx| state.split_panel(index, before, cx));
             }
+
             SplitOutcome::Wrapped => {}
         }
 
@@ -119,6 +120,7 @@ impl<L> TerminalLayout<L> {
                     }
                 });
             }
+
             RemoveOutcome::Collapsed => {}
         }
 
@@ -135,10 +137,13 @@ impl<L> TerminalLayout<L> {
         let Some((state, index, count)) = self.tree.resize_split(direction.into()) else {
             return false;
         };
+
         let Some(current) = state.read(cx).sizes().get(index).copied() else {
             return false;
         };
+
         let grow = direction.positive() == (index + 1 < count);
+
         let target = if grow { current + step } else { current - step };
 
         state.update(cx, |state, cx| {

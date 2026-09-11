@@ -26,6 +26,7 @@ impl TimerHandle {
 
     pub(crate) fn stop(&self) {
         let (state, wake) = &*self.0;
+
         state.lock().stopped = true;
         wake.notify_one();
     }
@@ -53,9 +54,11 @@ impl DeadlineTimer {
 
                     match state.next {
                         None => wake.wait(&mut state),
+
                         Some(next) if next > Instant::now() => {
                             wake.wait_until(&mut state, next);
                         }
+
                         Some(_) => {
                             state.next = None;
 

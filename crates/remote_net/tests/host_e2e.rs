@@ -52,8 +52,10 @@ async fn pair_open_shell_reconnect() {
         match client_connect_pair(&code, &device, "e2e-device").await {
             Ok(c) => {
                 channel = Some(c);
+
                 break;
             }
+
             Err(_) => time::sleep(Duration::from_millis(500)).await,
         }
     }
@@ -136,6 +138,7 @@ async fn pair_open_shell_reconnect() {
     let ClientBound::Attached(snapshot) = channel.recv_control().await.unwrap() else {
         panic!("expected Attached after reconnect");
     };
+
     let vt = String::from_utf8_lossy(&snapshot.vt);
 
     assert!(
@@ -148,6 +151,7 @@ async fn pair_open_shell_reconnect() {
         .send_control(&HostBound::Kill { session_id })
         .await
         .unwrap();
+
     host.shutdown();
     fs::remove_dir_all(&data_dir).ok();
 }
@@ -209,6 +213,7 @@ async fn client_runtime_byte_stream() {
     .expect("client runtime attaches");
 
     let input: RemoteInput = (&session).into();
+
     input.send_input(format!("echo {MARKER}\r").into_bytes());
 
     let seen = task::spawn_blocking(move || {
@@ -223,6 +228,7 @@ async fn client_runtime_byte_stream() {
                         return buf;
                     }
                 }
+
                 Ok(SessionByteEvent::Exited) => return buf,
                 Err(_) => return buf,
             }
@@ -271,6 +277,7 @@ async fn client_runtime_byte_stream() {
 async fn client_runtime_resumes_after_transport_loss() {
     if env::var("NMT_RELAY_BOUNCE").is_err() {
         println!("skipped: set NMT_RELAY_BOUNCE=1 and bounce the relay during the pause");
+
         return;
     }
 
@@ -327,6 +334,7 @@ async fn client_runtime_resumes_after_transport_loss() {
 
     // Input after the restart can only arrive if the runtime re-attached.
     let input: RemoteInput = (&session).into();
+
     input.send_input(format!("echo {MARKER}\r").into_bytes());
 
     let seen = task::spawn_blocking(move || {
@@ -341,6 +349,7 @@ async fn client_runtime_resumes_after_transport_loss() {
                         return buf;
                     }
                 }
+
                 Ok(SessionByteEvent::Exited) => panic!("session died instead of resuming"),
                 Err(_) => return buf,
             }

@@ -15,10 +15,13 @@ use crate::transcript::{RowSpec, TranscriptView};
 pub(crate) enum RevealKey {
     /// A work-log row's detail body, keyed by transcript index.
     Row(usize),
+
     /// A user message's annotation card, keyed by transcript index.
     Annotation(usize),
+
     /// A collapsed run of work steps, keyed by the run's first entry.
     Group(usize),
+
     /// A settled turn's work, folded behind its "Show work" row, keyed by
     /// turn id.
     Turn(u64),
@@ -34,10 +37,12 @@ pub(crate) enum RevealKey {
 pub(crate) enum RevealedPart {
     /// A disclosure's block, opened under its own header.
     Block(RevealKey),
+
     /// One list row drawn from one entry: a step of a run, or a reply
     /// written between steps. An entry draws at most one row, so the index
     /// names the row.
     Entry(usize),
+
     /// A run's toggle, keyed by the run's first entry. Inside a folded turn
     /// the toggle is one of the rows the fold hides; it is keyed apart from
     /// the step drawn for that same entry once the run opens.
@@ -51,6 +56,7 @@ pub(crate) fn revealed_part(spec: &RowSpec) -> Option<RevealedPart> {
         RowSpec::Work { index, .. } | RowSpec::Entry { index, .. } => {
             Some(RevealedPart::Entry(*index))
         }
+
         RowSpec::RunToggle { run_start, .. } => Some(RevealedPart::Toggle(*run_start)),
         _ => None,
     }
@@ -132,6 +138,7 @@ impl Reveals {
 
                 REVEAL_DURATION.mul_f32(ease_out_inverse(covered))
             }
+
             _ => Duration::ZERO,
         };
 
@@ -162,6 +169,7 @@ impl Reveals {
         let Some(reveal) = self.active.get(&key) else {
             return 1.0;
         };
+
         let elapsed = now.saturating_duration_since(reveal.started);
         let ramp = ease_out(elapsed.as_secs_f32() / REVEAL_DURATION.as_secs_f32());
 
@@ -251,11 +259,14 @@ pub(crate) struct Disclosures {
     /// Work-log rows whose detail (command output, reasoning text) is
     /// expanded, keyed by transcript index.
     expanded_rows: HashSet<usize>,
+
     /// Collapsed work-log runs the user has expanded, keyed by the index of
     /// the run's first transcript entry (stable, the list only appends).
     expanded_groups: HashSet<usize>,
+
     /// User-message annotation cards expanded to show their complete text.
     expanded_annotations: HashSet<usize>,
+
     /// Settled turns the user has flipped away from what the collapse setting
     /// does by default: unfolded where it folds a turn's work behind the
     /// "Show work" row, folded where it leaves the work on screen. Recorded
@@ -263,12 +274,15 @@ pub(crate) struct Disclosures {
     /// settling after the setting was read, and each new one has to take the
     /// default.
     toggled_turns: HashSet<u64>,
+
     /// Which way that default points, so a turn's disclosure can answer
     /// whether it is open without being handed the setting on every call.
     turns_fold_by_default: bool,
+
     /// When each moving disclosure started, and which way it is going. This
     /// is what the content it discloses fades and grows against.
     reveals: Reveals,
+
     /// Full height of each piece of the transcript a disclosure opens,
     /// measured while that piece is on screen. A piece being opened or shut is
     /// drawn inside a box ramped towards this, so the height comes from what
@@ -344,12 +358,15 @@ impl Disclosures {
             RevealKey::Row(index) => {
                 self.expanded_rows.insert(index);
             }
+
             RevealKey::Annotation(index) => {
                 self.expanded_annotations.insert(index);
             }
+
             RevealKey::Group(run_start) => {
                 self.expanded_groups.insert(run_start);
             }
+
             RevealKey::Turn(turn) => self.set_turn_unfolded(turn, true),
         }
 
@@ -383,16 +400,19 @@ impl Disclosures {
 
                 Some(index)
             }
+
             RevealKey::Annotation(index) => {
                 self.expanded_annotations.remove(&index);
 
                 None
             }
+
             RevealKey::Group(run_start) => {
                 self.expanded_groups.remove(&run_start);
 
                 None
             }
+
             RevealKey::Turn(turn) => {
                 self.set_turn_unfolded(turn, false);
 
@@ -543,6 +563,7 @@ impl TranscriptView {
     fn invalidate_disclosure_rows(&mut self, key: RevealKey) {
         match key {
             RevealKey::Turn(turn) => self.invalidate_turn_rows(turn),
+
             RevealKey::Row(index) | RevealKey::Annotation(index) | RevealKey::Group(index) => {
                 self.row_cache.invalidate(index);
             }
@@ -615,11 +636,13 @@ impl TranscriptView {
         for cursor in (0..ix).rev() {
             match self.rows[cursor].spec {
                 RowSpec::Work { .. } => continue,
+
                 RowSpec::RunToggle {
                     run_start,
                     expanded: true,
                     ..
                 } => return Some(run_start),
+
                 _ => break,
             }
         }
@@ -649,6 +672,7 @@ impl TranscriptView {
                     folded: false,
                     ..
                 } if heads == turn => return Some(turn),
+
                 _ if self.row_turn(cursor) == Some(turn) => continue,
                 _ => break,
             }
@@ -672,6 +696,7 @@ impl TranscriptView {
             RowSpec::Entry { index, .. } | RowSpec::Work { index, .. } => {
                 Some(self.content.entries()[index].turn)
             }
+
             RowSpec::RunToggle { run_start, .. } => Some(self.content.entries()[run_start].turn),
             RowSpec::TurnFold { turn, .. } | RowSpec::Interrupted { turn, .. } => Some(turn),
             RowSpec::TurnSummary { .. } | RowSpec::Working { .. } => None,

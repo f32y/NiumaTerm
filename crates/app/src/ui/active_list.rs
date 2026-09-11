@@ -6,6 +6,7 @@
 /// Stable identity for elements of an [`ActiveList`].
 pub trait HasId {
     type Id: Copy + PartialEq;
+
     fn id(&self) -> Self::Id;
 }
 
@@ -66,6 +67,7 @@ impl<T: HasId> ActiveList<T> {
 
     pub fn focus_prev(&mut self) {
         let n = self.items.len();
+
         self.active = (self.active + n - 1) % n;
     }
 
@@ -80,6 +82,7 @@ impl<T: HasId> ActiveList<T> {
 
         self.edit_preserving_active(|items| {
             let item = items.remove(from);
+
             items.insert(to, item);
         });
     }
@@ -89,6 +92,7 @@ impl<T: HasId> ActiveList<T> {
     /// non-empty and must not remove the active element.
     pub fn edit_preserving_active(&mut self, edit: impl FnOnce(&mut Vec<T>)) {
         let active_id = self.items[self.active].id();
+
         edit(&mut self.items);
         self.active = self.index_of(active_id).unwrap_or(self.active);
     }

@@ -60,6 +60,7 @@ fn soft_ready_stays_set_until_ring_fully_drained() {
                     break;
                 }
             }
+
             Ok(n) => drained += n,
             Err(e) => panic!("drain read failed: {e}"),
         }

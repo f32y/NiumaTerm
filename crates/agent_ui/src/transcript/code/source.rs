@@ -26,12 +26,14 @@ impl CodeSource {
                 read_command_language(command),
                 false,
             ),
+
             Item::FileChange { diff, .. } => (
                 None,
                 diff.clone().unwrap_or_default(),
                 Some("diff".into()),
                 false,
             ),
+
             Item::Other {
                 kind,
                 title,
@@ -39,14 +41,17 @@ impl CodeSource {
                 ..
             } => match kind.as_str() {
                 "TodoWrite" | "ExitPlanMode" | "Task" => return None,
+
                 "Read" => (
                     None,
                     output.clone().unwrap_or_default(),
                     Some(file_extension_lang(title)),
                     true,
                 ),
+
                 _ => (None, output.clone().unwrap_or_default(), None, false),
             },
+
             _ => return None,
         };
 
@@ -123,6 +128,7 @@ pub(super) fn command_syntax(command: &str) -> (&'static str, Range<usize>) {
     let powershell = command.contains("$env:")
         || command.split(['\n', ';', '|']).any(|part| {
             let word = part.split_whitespace().next().unwrap_or("");
+
             let Some((verb, noun)) = word.split_once('-') else {
                 return false;
             };
@@ -178,6 +184,7 @@ fn read_command_language(command: &str) -> Option<String> {
                 first
             }
         }
+
         "get-content" => {
             let mut path = None;
 
@@ -192,6 +199,7 @@ fn read_command_language(command: &str) -> Option<String> {
 
             path?
         }
+
         _ => return None,
     };
 
@@ -217,14 +225,17 @@ fn literal_words(text: &str) -> Option<Vec<String>> {
         match quote {
             Some(delimiter) if ch == delimiter => quote = None,
             Some(_) => word.push(ch),
+
             None => match ch {
                 '\'' | '"' => quote = Some(ch),
                 '|' | '&' | ';' | '<' | '>' | '(' | ')' | '*' | '?' | '[' => return None,
+
                 ch if ch.is_whitespace() => {
                     if !word.is_empty() {
                         words.push(mem::take(&mut word));
                     }
                 }
+
                 _ => word.push(ch),
             },
         }

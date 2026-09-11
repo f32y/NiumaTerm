@@ -48,6 +48,7 @@ fn marks(stream: &[u8]) -> Vec<String> {
 struct Session {
     pty: Pty,
     home: PathBuf,
+
     /// Everything read so far, so a wait can be expressed against the whole
     /// session rather than against one read's worth of bytes.
     stream: Vec<u8>,
@@ -62,6 +63,7 @@ impl Session {
         while Instant::now() < deadline {
             match self.pty.read(&mut buf) {
                 Ok(0) => break,
+
                 Ok(n) => {
                     self.stream.extend_from_slice(&buf[..n]);
 
@@ -71,6 +73,7 @@ impl Session {
                         return seen;
                     }
                 }
+
                 // The PTY is non-blocking, so "nothing yet" arrives as an
                 // error rather than a short read.
                 Err(_) => thread::sleep(Duration::from_millis(20)),
@@ -125,6 +128,7 @@ fn start_with_startup_files(
 ) -> Option<Session> {
     let Some(program) = shell_path(shell) else {
         eprintln!("skipping: no {shell} on this host");
+
         return None;
     };
 
@@ -175,9 +179,12 @@ fn start_with_startup_files(
             home,
             stream: Vec::new(),
         }),
+
         Err(error) => {
             eprintln!("skipping: could not spawn {shell}: {error:?}");
+
             let _ = fs::remove_dir_all(&home);
+
             None
         }
     }
@@ -300,6 +307,7 @@ fn zsh_still_reads_the_users_startup_files() {
     };
 
     session.read_until(|seen| seen.len() >= 6);
+
     session
         .pty
         .write_all(b"printf 'marker=[%s]\\n' \"$NMT_TEST_STARTUP\"\n")
@@ -311,6 +319,7 @@ fn zsh_still_reads_the_users_startup_files() {
     while Instant::now() < deadline {
         match session.pty.read(&mut buf) {
             Ok(0) => break,
+
             Ok(n) => {
                 session.stream.extend_from_slice(&buf[..n]);
 
@@ -318,6 +327,7 @@ fn zsh_still_reads_the_users_startup_files() {
                     return;
                 }
             }
+
             Err(_) => thread::sleep(Duration::from_millis(20)),
         }
     }
@@ -335,6 +345,7 @@ fn zsh_still_reads_the_users_startup_files() {
 fn bash_bootstrap_in_temp_home(label: &str, files: &[(&str, &str)], probe: &str) -> String {
     let Some(bash) = shell_path("bash") else {
         eprintln!("skipping: no bash on this host");
+
         return "<skipped>".into();
     };
 
@@ -510,6 +521,7 @@ fn assert_the_bootstrap_line_leaves_no_history(shell: &str, write_history: &[u8]
     let Some(mut session) = start(shell, "history") else {
         return;
     };
+
     let history_file = session.home.join("history");
 
     session.read_until(|seen| seen.len() >= 6);
@@ -517,10 +529,12 @@ fn assert_the_bootstrap_line_leaves_no_history(shell: &str, write_history: &[u8]
     // The entry lingers until a later command is entered, so one has to be.
     session.pty.write_all(b"true\n").expect("write command");
     session.read_until(|seen| seen.len() >= 10);
+
     session
         .pty
         .write_all(write_history)
         .expect("write history flush");
+
     session.read_until(|seen| seen.len() >= 14);
 
     let written = fs::read_to_string(&history_file)

@@ -34,14 +34,19 @@ use crate::frame::TerminalLine;
 pub(crate) struct FrozenRow {
     pub y: f32,
     pub line: TerminalLine,
+
     /// Source position: store item / physical block row. Engine blocks are
     /// already wrapped at the current width, so a row IS a visual row.
     pub item: usize,
+
     pub row: usize,
+
     /// Source row width, for hit-testing column clamps.
     pub cell_count: u32,
+
     /// Selected column span (row-local, end exclusive).
     pub selected: Option<(u16, u16)>,
+
     /// Shaped-line cache key: `(block_id, generation, row)` for block rows
     /// (immutable per generation, so the layout caches across frames without
     /// hashing row text). `None` → hash the text (live history rows).
@@ -53,12 +58,16 @@ pub(crate) struct FrozenRow {
 #[derive(Default)]
 pub(crate) struct FrozenView {
     pub rows: Vec<FrozenRow>,
+
     /// Chrome for each visible non-empty item.
     pub items_chrome: Vec<FrozenItemChrome>,
+
     /// Separator rule positions (item boundaries inside the visible window).
     pub separators: Vec<f32>,
+
     /// Frozen Kitty image bands in this item.
     pub images: Vec<FrozenImage>,
+
     /// Where the active region (live engine viewport) starts.
     pub active_top: f32,
 }

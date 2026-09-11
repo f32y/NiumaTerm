@@ -5,6 +5,7 @@ use crate::ui::settings::*;
 pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
     let when_child_processes_running_key: &str =
         WarnBeforeTerminatingShell::WhenChildProcessesRunning.into();
+
     let ctrl_enter_key: &str = NewlineShortcut::CtrlEnter.into();
 
     SettingPage::new(i18n("settings-system-title"))
@@ -62,6 +63,7 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                                 .system
                                 .warn_before_terminating_shell
                                 .into();
+
                             key.into()
                         },
                         |value, cx| {
@@ -166,6 +168,7 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                         |cx| {
                             let key: &str =
                                 cx.global::<AppSettings>().system.newline_shortcut.into();
+
                             key.into()
                         },
                         |value, cx| {

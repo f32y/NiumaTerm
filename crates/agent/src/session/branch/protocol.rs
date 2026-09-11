@@ -17,15 +17,19 @@ impl ConversationBranch {
         {
             return Err(BranchError::Busy);
         }
+
         let operation = self.next_operation(runtime)?;
+
         if !runtime
             .backend_mut()
             .is_some_and(Backend::request_fork_checkpoints)
         {
             return Err(BranchError::NotReady);
         }
+
         self.protocol_read = Some(operation);
         self.state = Some(State::LoadingFork { operation, target });
+
         Ok(())
     }
 
@@ -37,34 +41,44 @@ impl ConversationBranch {
         let Some(request) = self.protocol_read else {
             return BranchUpdate::Ignored;
         };
+
         if request.epoch != runtime.epoch() {
             return BranchUpdate::Ignored;
         }
+
         self.protocol_read = None;
+
         if !matches!(&self.state, Some(State::LoadingFork { operation, .. }) if *operation == request)
         {
             return BranchUpdate::Ignored;
         }
+
         let Some(State::LoadingFork { operation, target }) = self.state.take() else {
             unreachable!()
         };
+
         match result {
             Ok(checkpoints) if checkpoints.is_empty() => BranchUpdate::Empty,
+
             Ok(checkpoints) => {
                 let selected = target
                     .as_ref()
                     .and_then(|target| checkpoint_at_depth(&checkpoints, target, |row| &row.prompt))
                     .cloned();
+
                 let unresolved = target.is_some() && selected.is_none();
+
                 self.state = Some(State::ForkPicker {
                     operation,
                     checkpoints,
                 });
+
                 match selected {
                     Some(checkpoint) => self.fork(runtime, checkpoint),
                     None => BranchUpdate::Picker { unresolved },
                 }
             }
+
             Err(error) => BranchUpdate::Failed(BranchFailure {
                 stage: FailureStage::Checkpoints,
                 files: FileProgress::NotConfirmed,
@@ -85,9 +99,11 @@ impl ConversationBranch {
         else {
             return BranchUpdate::Ignored;
         };
+
         if operation.epoch != runtime.epoch() || !checkpoints.contains(&checkpoint) {
             return BranchUpdate::Ignored;
         }
+
         let result = runtime
             .backend_mut()
             .ok_or(BranchError::NotReady)
@@ -96,16 +112,20 @@ impl ConversationBranch {
                     .fork_conversation(&checkpoint.anchor)
                     .map_err(BranchError::Operation)
             });
+
         match result {
             Ok(()) => {
                 let previous = runtime.begin_conversation_change();
+
                 self.state = Some(State::Branching {
                     operation: *operation,
                     previous,
                     prompt: checkpoint.prompt,
                 });
+
                 BranchUpdate::Branching
             }
+
             Err(error) => BranchUpdate::Failed(BranchFailure {
                 stage: FailureStage::Conversation,
                 files: FileProgress::NotConfirmed,

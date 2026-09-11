@@ -108,6 +108,7 @@ fn create_pty_with_management(
     manage_process_tree: bool,
 ) -> Result<Pty, io::Error> {
     let exec = command_line(options.shell, options.args);
+
     conpty::new(&exec, options, manage_process_tree)
 }
 
@@ -136,6 +137,7 @@ impl Pty {
 
 impl ProcessReadWrite for Pty {
     type Reader = ReadPipe;
+
     type Writer = WritePipe;
 
     #[inline]
@@ -227,7 +229,9 @@ impl ProcessReadWrite for Pty {
     #[inline]
     fn set_winsize(&mut self, winsize_builder: WinsizeBuilder) -> Result<(), io::Error> {
         let winsize: Winsize = (&winsize_builder).into();
+
         self.backend.on_resize(winsize);
+
         Ok(())
     }
 }
@@ -281,11 +285,13 @@ fn quote_command_arg(arg: &str) -> String {
     for ch in arg.chars() {
         match ch {
             '\\' => backslashes += 1,
+
             '"' => {
                 out.extend(iter::repeat_n('\\', backslashes * 2 + 1));
                 out.push('"');
                 backslashes = 0;
             }
+
             _ => {
                 out.extend(iter::repeat_n('\\', backslashes));
                 out.push(ch);

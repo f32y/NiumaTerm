@@ -159,7 +159,9 @@ fn keeps_cli_reset_descriptions_with_their_windows() {
 #[test]
 fn keeps_cli_output_bounded_to_the_newest_bytes() {
     let mut output = b"old".to_vec();
+
     append_bounded(&mut output, b"-new-data", 8);
+
     assert_eq!(output, b"new-data");
 }
 

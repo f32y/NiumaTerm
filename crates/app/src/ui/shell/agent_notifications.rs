@@ -13,6 +13,7 @@ enum AgentRouteTarget {
         pane_id: PaneId,
         pane: Entity<TerminalPane>,
     },
+
     Agent(Entity<AgentPane>),
 }
 
@@ -257,6 +258,7 @@ impl Shell {
 
                 window.focus(&handle, cx);
             }
+
             AgentRouteTarget::Agent(pane) => {
                 pane.update(cx, |pane, cx| pane.focus(window, cx));
             }
@@ -339,15 +341,20 @@ impl Shell {
                 AgentPaneEvent::Lifecycle(event) if event.route == route => this
                     .agent_monitor
                     .apply(event.clone(), time::Instant::now()),
+
                 AgentPaneEvent::Lifecycle(_) => return,
+
                 AgentPaneEvent::WorkflowActivity => {
                     // Sticky: a finished run stays reachable, so the control
                     // never goes away once it has appeared. The running count
                     // is read at render time, so this only has to repaint.
                     this.panels.note_workflow_seen();
+
                     cx.notify();
+
                     return;
                 }
+
                 AgentPaneEvent::BackgroundTaskActivity => {
                     // Sticky: a finished child stays reachable, so the control
                     // never goes away once it has appeared. The running count
@@ -355,9 +362,12 @@ impl Shell {
                     // title bar.
                     this.panels
                         .note_background_task_seen(pane.read(cx).background_task_count() > 0);
+
                     cx.notify();
+
                     return;
                 }
+
                 AgentPaneEvent::ResumeElsewhere { cwd, session_id } => {
                     // Opening a tab needs a window, which an event
                     // subscription has none of; the next render has one.
@@ -366,9 +376,12 @@ impl Shell {
                         cwd: cwd.clone(),
                         session_id: session_id.clone(),
                     });
+
                     cx.notify();
+
                     return;
                 }
+
                 AgentPaneEvent::TitleSuggested(title) => {
                     // A user-authored rename outranks this, so a tab the user
                     // has named keeps its name.
@@ -381,13 +394,17 @@ impl Shell {
 
                     return;
                 }
+
                 AgentPaneEvent::CloseRequested => {
                     // Same reason as the resume above: closing a tab needs a
                     // window, and the next render has one.
                     this.pending_agent_close = this.tab_for_agent_pane(&pane);
+
                     cx.notify();
+
                     return;
                 }
+
                 AgentPaneEvent::Interrupted => {
                     this.agent_monitor.interrupt(&route, time::Instant::now())
                 }

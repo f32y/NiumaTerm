@@ -20,6 +20,7 @@ pub enum Status {
 pub struct RecoverySnapshot {
     /// An untouched conversation has nothing to resume.
     pub identity: Option<RecoveryIdentity>,
+
     pub profile_name: String,
 }
 
@@ -132,11 +133,14 @@ impl SessionRuntime {
         match spawned {
             Ok(backend) => {
                 self.backend = Some(backend);
+
                 StartOutcome::Installed
             }
+
             Err(message) => {
                 self.status = Status::Exited;
                 self.start_failure = Some(message.clone());
+
                 StartOutcome::Failed(message)
             }
         }
@@ -168,6 +172,7 @@ impl SessionRuntime {
 
     pub fn retire(&mut self) -> Option<Backend> {
         self.begin_start();
+
         self.backend.take()
     }
 
@@ -206,6 +211,7 @@ impl SessionRuntime {
 
         match self.backend.as_mut() {
             None => InterruptOutcome::Unavailable,
+
             Some(backend) => {
                 if backend.interrupt() {
                     InterruptOutcome::Accepted
@@ -240,7 +246,9 @@ impl SessionRuntime {
 
     pub fn begin_conversation_change(&mut self) -> Status {
         let previous = self.status;
+
         self.status = Status::Starting;
+
         previous
     }
 
@@ -264,7 +272,9 @@ impl SessionRuntime {
 
     pub fn suspend_for_update(&mut self) -> (u64, Option<Backend>) {
         let backend = self.retire();
+
         self.update_suspension = Some(UpdateSuspension::Stopping);
+
         (self.epoch, backend)
     }
 
@@ -299,9 +309,11 @@ impl SessionRuntime {
     pub fn restoration_readiness(&self) -> RestorationReadiness {
         match self.update_suspension.as_ref() {
             None if self.status == Status::Idle => RestorationReadiness::Ready,
+
             Some(UpdateSuspension::Failed(message)) => {
                 RestorationReadiness::Failed(message.clone())
             }
+
             _ => RestorationReadiness::Pending,
         }
     }

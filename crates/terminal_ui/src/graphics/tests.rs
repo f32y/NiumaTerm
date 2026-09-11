@@ -62,15 +62,20 @@ fn frozen_image_cache_prunes_with_block_lifecycle() {
 #[test]
 fn uploaded_images_release_after_store_and_pane_owners_are_gone() {
     let mut store = GenerationStore::default();
+
     let generation = store
         .install(1, data(1, 1, 1, ColorType::Rgba, vec![0; 4]))
         .unwrap();
+
     generation.mark_uploaded();
 
     let queue = store.release_queue();
     let mut receiver = queue.lock().attach().unwrap();
+
     assert!(queue.lock().attach().is_none());
+
     store.remove(1);
+
     assert!(store.is_empty());
     assert!(receiver.try_recv().is_err());
 
@@ -78,6 +83,7 @@ fn uploaded_images_release_after_store_and_pane_owners_are_gone() {
     drop(store);
     drop(queue);
     drop(generation);
+
     assert!(receiver.try_recv().is_ok());
     assert!(receiver.try_recv().is_err());
 }
@@ -87,13 +93,18 @@ fn frozen_eviction_releases_without_any_live_images_or_repaint() {
     let store = GenerationStore::default();
     let queue = store.release_queue();
     let mut receiver = queue.lock().attach().unwrap();
+
     let generation =
         graphic_to_generation(data(2, 1, 1, ColorType::Rgba, vec![0; 4]), &queue).unwrap();
+
     generation.mark_uploaded();
+
     let cache: FrozenImageCache = Default::default();
+
     cache.lock().insert((10, 2), generation);
 
     prune_frozen_images(&cache, &[BlockEvent::HistoryCleared]);
+
     assert!(store.is_empty());
     assert!(receiver.try_recv().is_ok());
     assert!(receiver.try_recv().is_err());
@@ -137,6 +148,7 @@ fn expanded_bounds_rejects_degenerate_and_non_finite() {
 fn rgba_reuses_buffer_and_swaps_channels() {
     // One RGBA pixel R=1 G=2 B=3 A=4 -> BGRA 3 2 1 4.
     let out = graphic_to_bgra(1, 1, ColorType::Rgba, vec![1, 2, 3, 4]).unwrap();
+
     assert_eq!(out, vec![3, 2, 1, 4]);
 }
 
@@ -144,6 +156,7 @@ fn rgba_reuses_buffer_and_swaps_channels() {
 fn rgb_expands_with_opaque_alpha() {
     // One RGB pixel R=1 G=2 B=3 -> BGRA 3 2 1 255.
     let out = graphic_to_bgra(1, 1, ColorType::Rgb, vec![1, 2, 3]).unwrap();
+
     assert_eq!(out, vec![3, 2, 1, 255]);
 }
 
@@ -163,9 +176,11 @@ fn rejects_invalid_dimensions_and_lengths() {
 #[test]
 fn install_replaces_under_same_id() {
     let mut store = GenerationStore::default();
+
     let a = store
         .install(7, data(7, 1, 1, ColorType::Rgba, vec![255, 0, 0, 255]))
         .unwrap();
+
     let b = store
         .install(7, data(7, 1, 1, ColorType::Rgba, vec![0, 0, 255, 255]))
         .unwrap();
@@ -179,6 +194,7 @@ fn install_replaces_under_same_id() {
 #[test]
 fn invalid_pixels_leave_previous_cached() {
     let mut store = GenerationStore::default();
+
     let good = store
         .install(1, data(1, 1, 1, ColorType::Rgba, vec![1, 2, 3, 4]))
         .unwrap();
@@ -250,6 +266,7 @@ fn uploaded_generation_releases_exactly_once() {
 #[test]
 fn replacement_releases_old_when_uploaded_and_unreferenced() {
     let mut store = GenerationStore::default();
+
     let old = store
         .install(9, data(9, 1, 1, ColorType::Rgba, vec![0; 4]))
         .unwrap();

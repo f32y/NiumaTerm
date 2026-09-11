@@ -411,6 +411,7 @@ pub struct IncompletePlacement {
     pub placement_id: u32,
     pub row: Option<u32>,
     pub col: Option<u32>,
+
     /// Run width in cells. `from_cell` returns 1; `append` increments.
     pub width: u32,
 }
@@ -472,10 +473,13 @@ impl IncompletePlacement {
 pub struct PlaceholderRun {
     pub image_id: u32,
     pub placement_id: u32,
+
     /// Image row (0-indexed) — within the placement's `rows` grid.
     pub row: u32,
+
     /// Leftmost image column (0-indexed) — within the placement's `cols` grid.
     pub col: u32,
+
     /// Number of cells in this run (each cell = one column).
     pub width: u32,
 }
@@ -487,10 +491,14 @@ pub struct PlaceholderRun {
 pub struct RunGeometry {
     /// Top-left of the rendered image slice.
     pub x: f32,
+
     pub y: f32,
+
     /// Pixel size of the rendered slice.
     pub width: f32,
+
     pub height: f32,
+
     /// Source rect on the image, normalised `[u0, v0, u1, v1]`.
     pub source_rect: [f32; 4],
 }

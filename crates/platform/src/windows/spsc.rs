@@ -100,6 +100,7 @@ impl SpscBufferReader {
                 read_size,
             );
         }
+
         self.start = (self.start + read_size) % ringbuf_capacity;
         self.buffer.len.fetch_sub(read_size, Ordering::SeqCst);
 
@@ -165,6 +166,7 @@ impl SpscBufferWriter {
                 write_size,
             );
         }
+
         self.end = (self.end + write_size) % ringbuf_capacity;
         self.buffer.len.fetch_add(write_size, Ordering::SeqCst);
 

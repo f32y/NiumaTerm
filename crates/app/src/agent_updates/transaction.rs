@@ -110,6 +110,7 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
 
     if busy == 0 {
         start_transaction(key, UpdateMode::WhenIdle, panes, cx);
+
         return;
     }
 
@@ -158,7 +159,9 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
                             .label(i18n("agent-update-dialog-stop-now"))
                             .on_click(move |_, window, cx| {
                                 window.close_dialog(cx);
+
                                 let panes = matching_panes(&stop_key, cx);
+
                                 start_transaction(stop_key.clone(), UpdateMode::StopNow, panes, cx);
                             }),
                     )
@@ -226,6 +229,7 @@ fn start_transaction(
 
     if coordinator.begin_update(&key).is_err() {
         cx.refresh_windows();
+
         return;
     }
 
@@ -244,7 +248,9 @@ fn start_transaction(
             Some(UpdateError::new(UpdateErrorKind::Recovery, message)),
             0,
         );
+
         cx.refresh_windows();
+
         return;
     }
 
@@ -277,10 +283,13 @@ fn start_transaction(
                 wait_started.elapsed() >= Duration::from_secs(15),
             ) {
                 PreflightResolution::Ready(snapshots) => break snapshots,
+
                 PreflightResolution::Failed(message) => {
                     finish_preflight_failure(&coordinator, &key, &panes, message, cx);
+
                     return;
                 }
+
                 PreflightResolution::Wait => {}
             }
 
@@ -326,10 +335,12 @@ fn start_transaction(
             restore_tabs(&coordinator, &key, &panes, &snapshots, &suspended, cx).await;
             coordinator.finish_update(&key, None, Some(error), 0);
             cx.update(|cx| cx.refresh_windows());
+
             return;
         }
 
         coordinator.transition(&key, UpdatePhase::Updating, None);
+
         cx.update(|cx| {
             for pane in &panes {
                 pane.update(cx, |pane, cx| pane.mark_provider_updating(cx));
@@ -387,6 +398,7 @@ fn finish_preflight_failure(
         Some(UpdateError::new(UpdateErrorKind::Recovery, message)),
         0,
     );
+
     cx.update(|cx| {
         for pane in panes {
             pane.update(cx, |pane, cx| pane.cancel_update_wait(cx));
@@ -447,6 +459,7 @@ async fn restore_tabs(
             .count();
 
         failures = failures.max(reported_failures);
+
         coordinator.transition(
             key,
             UpdatePhase::Restoring,
@@ -455,6 +468,7 @@ async fn restore_tabs(
                 total: suspended.len(),
             }),
         );
+
         cx.update(|cx| cx.refresh_windows());
 
         if pending == 0 {
@@ -476,7 +490,9 @@ async fn restore_tabs(
                     }
                 }
             });
+
             failures += pending;
+
             coordinator.transition(
                 key,
                 UpdatePhase::Restoring,

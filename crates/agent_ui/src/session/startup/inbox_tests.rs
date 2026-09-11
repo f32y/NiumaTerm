@@ -8,6 +8,7 @@ use crate::session::startup::channel;
 #[test]
 fn large_history_and_message_burst_preserve_later_events() {
     let (sender, mut receiver) = channel();
+
     sender.send(json!({"history":"x".repeat(33 * 1024 * 1024)}));
 
     for index in 0..2048 {
@@ -15,7 +16,9 @@ fn large_history_and_message_burst_preserve_later_events() {
     }
 
     drop(sender);
+
     let mut history = block_on(receiver.next()).unwrap().unwrap();
+
     assert_eq!(
         history.take()["history"].as_str().unwrap().len(),
         33 * 1024 * 1024
@@ -23,6 +26,7 @@ fn large_history_and_message_burst_preserve_later_events() {
 
     for index in 0..2048 {
         let mut message = block_on(receiver.next()).unwrap().unwrap();
+
         assert_eq!(message.take(), json!({"index":index}));
     }
 
@@ -42,6 +46,7 @@ fn protocol_failure_keeps_accepted_messages_then_ends_with_one_error() {
 
     for index in 0..4 {
         let mut message = block_on(receiver.next()).unwrap().unwrap();
+
         assert_eq!(message.take(), json!(index));
     }
 

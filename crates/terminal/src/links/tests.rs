@@ -49,8 +49,10 @@ fn url_at_col_finds_and_trims_urls() {
 #[test]
 fn wrapped_url_resolution_returns_row_segments_and_prefers_osc8() {
     let rows = ["https://exam", "ple.com/abc "];
+
     let resolved = links::resolve_link(4, |delta| {
         let index = usize::try_from(1 + delta).ok()?;
+
         Some(RowText {
             text: rows.get(index)?.to_string(),
             wrapped: index == 0,
@@ -58,6 +60,7 @@ fn wrapped_url_resolution_returns_row_segments_and_prefers_osc8() {
         })
     })
     .unwrap();
+
     assert_eq!(resolved.url, "https://example.com/abc");
     assert_eq!(
         resolved.segments,
@@ -74,6 +77,7 @@ fn wrapped_url_resolution_returns_row_segments_and_prefers_osc8() {
             },
         ]
     );
+
     let resolved = links::resolve_link(3, |delta| {
         (delta == 0).then(|| RowText {
             text: "https://text".into(),
@@ -82,6 +86,7 @@ fn wrapped_url_resolution_returns_row_segments_and_prefers_osc8() {
         })
     })
     .unwrap();
+
     assert_eq!(resolved.url, "https://target");
     assert!(
         links::resolve_link(3, |delta| (delta == 0).then(|| RowText {

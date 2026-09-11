@@ -30,6 +30,7 @@ use crate::transcript::render::text_style::{markdown_view, transcript_text_style
 use crate::transcript::reveal::{Disclosures, RevealKey, revealed_block, revealed_part};
 use crate::transcript::rows::{RowGap, TranscriptRow, is_run_row, row_gap};
 use crate::transcript::{RowSpec, TranscriptView, is_work_row, working_label};
+
 mod questions;
 mod user_row;
 mod work_row;
@@ -56,6 +57,7 @@ fn transcript_column_margin() -> f32 {
 /// the root size the rest of the UI scales with rather than pinning a
 /// physical width.
 const TRANSCRIPT_COLUMN_MAX_REMS: f32 = 55.0;
+
 /// Margin each side of the column when the reading measure is turned off and
 /// the column follows the pane width instead.
 const TRANSCRIPT_LOOSE_MARGIN: f32 = 40.0;
@@ -94,6 +96,7 @@ pub(crate) fn transcript_column(body: impl IntoElement, cx: &App) -> Div {
 /// interleaved with, close enough that the two still read as one answer; the
 /// tightest keeps the steps of a single run together.
 const TRANSCRIPT_GROUP_GAP: f32 = 24.0;
+
 const TRANSCRIPT_WORK_TEXT_GAP: f32 = 12.0;
 const TRANSCRIPT_STEP_GAP: f32 = 8.0;
 
@@ -112,11 +115,13 @@ fn gap_px(gap: RowGap) -> f32 {
 /// would indent the run's labels away from the column the conversation is
 /// read in, and the rule already separates them from it.
 const TRANSCRIPT_RUN_RULE: f32 = 2.0;
+
 /// Where the conversation's own text starts inside the reading column, which
 /// every prose row and status line sets on itself. The run rule stands on
 /// that edge rather than left of it, so a run reads as part of the column
 /// instead of hanging off it.
 const TRANSCRIPT_TEXT_INSET: f32 = 4.0;
+
 /// Leading for transcript text, as a multiple of the font size. Conversation
 /// prose is read in paragraphs rather than scanned line by line the way
 /// terminal output is, so it is set looser than the chrome around it.
@@ -155,21 +160,26 @@ impl TranscriptView {
         let row = match spec {
             RowSpec::Entry { index, .. } => self.render_entry_row(index, window, cx),
             RowSpec::Work { index, .. } => self.render_work_row(index, window, cx),
+
             RowSpec::TurnFold {
                 turn,
                 row_count,
                 folded,
             } => render_turn_fold(&self.disclosures, turn, row_count, folded, cx),
+
             RowSpec::TurnSummary {
                 seconds,
                 output_tokens,
             } => render_turn_summary(seconds, output_tokens, cx),
+
             RowSpec::Interrupted { output_tokens, .. } => render_interrupted_row(output_tokens, cx),
+
             RowSpec::RunToggle {
                 run_start,
                 tool_count,
                 expanded,
             } => render_run_toggle(&self.disclosures, run_start, tool_count, expanded, cx),
+
             RowSpec::Working { compacting } => self.render_working_row(compacting, cx),
         };
 
@@ -196,6 +206,7 @@ impl TranscriptView {
                     .pl(px(TRANSCRIPT_TEXT_INSET))
                     .child(body)
                     .into_any_element(),
+
                 false => body.into_any_element(),
             },
             cx,
@@ -219,6 +230,7 @@ impl TranscriptView {
                 cx.entity().downgrade(),
             )
             .into_any_element(),
+
             _ => row.into_any_element(),
         }
     }
@@ -248,6 +260,7 @@ impl TranscriptView {
         let Some(above) = first.checked_sub(1).map(|above| &self.rows[above]) else {
             return px(0.);
         };
+
         let below = self.rows.get(ix + 1).map(|row| &row.spec);
         let merged = row_gap(self.content.entries(), &above.spec, below);
 
@@ -368,6 +381,7 @@ impl TranscriptView {
 
         match &entry.item {
             SessionItem::UserMessage { text: Some(text) } => self.render_user_row(index, text, cx),
+
             SessionItem::AgentMessage {
                 id,
                 text: Some(text),
@@ -375,10 +389,13 @@ impl TranscriptView {
             } => {
                 self.render_question_message(index, id.clone(), text.clone(), questions.clone(), cx)
             }
+
             SessionItem::AgentMessage {
                 text: Some(text), ..
             } => self.render_agent_row(index, self.shown_reply(index, text).to_string(), cx),
+
             SessionItem::Error { text } => self.render_error_row(index, text.clone(), cx),
+
             SessionItem::Compaction { detail, .. } => {
                 let detail = detail.clone();
 
@@ -392,6 +409,7 @@ impl TranscriptView {
                     cx,
                 )
             }
+
             item if is_work_row(item) => self.render_work_row(index, window, cx),
             _ => div().into_any_element(),
         }
@@ -593,12 +611,14 @@ fn render_run_toggle(
 const DOT_COUNT: usize = 3;
 const CYCLE_DURATION: Duration = Duration::from_millis(1_100);
 const DOT_CELL_SIZE: f32 = 4.0;
+
 /// Spacing that makes the cluster measure a card's icon block exactly. The
 /// live line stands in the slot a step gives its type icon, so a cluster wider
 /// than the slot would either push the label off the column a tool call's
 /// title starts on or bleed into the pane's own edge inset.
 const DOT_GAP: f32 =
     (AGENT_CARD_ICON_BLOCK - DOT_COUNT as f32 * DOT_CELL_SIZE) / (DOT_COUNT as f32 - 1.0);
+
 // Dots wide enough to fill the slot on their own would run together into a
 // bar, and a negative gap would overlap them; either way the indicator stops
 // reading as three of anything.
@@ -639,6 +659,7 @@ impl RenderOnce for WorkingIndicator {
                         move |dot, delta| {
                             let pulse = dot_pulse(delta, index);
                             let size = DOT_MIN_SIZE + (DOT_CELL_SIZE - DOT_MIN_SIZE) * pulse;
+
                             let opacity =
                                 DOT_MIN_OPACITY + (DOT_MAX_OPACITY - DOT_MIN_OPACITY) * pulse;
 

@@ -10,9 +10,11 @@ use crate::transcript::{Entry, RowSpec, TranscriptView};
 pub(super) struct RowCache {
     /// Only the suffix starting at the earliest changed turn needs rebuilding.
     dirty_from: Option<usize>,
+
     /// Exclusive entry and row ends for each contiguous turn, excluding the
     /// live progress row. Both offsets stay valid throughout an unchanged prefix.
     turns: Vec<(usize, usize)>,
+
     mode: Option<CollapseRows>,
     specs: Vec<RowSpec>,
     pub(super) scratch_rows: Vec<TranscriptRow>,
@@ -33,6 +35,7 @@ impl TranscriptView {
         // The previous last turn may gain another entry, and its final row's
         // spacing depends on the first row appended below it.
         let index = self.content.append(entry);
+
         self.row_cache.invalidate(index.saturating_sub(1));
     }
 
@@ -66,6 +69,7 @@ impl TranscriptView {
 
         let _profile = Probe::start(Operation::RowsRebuild);
         let items = self.content.entries();
+
         let keep = self
             .row_cache
             .turns

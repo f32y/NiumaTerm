@@ -26,6 +26,7 @@ pub(crate) fn pty_bytes_for_key(
 ) -> Option<Vec<u8>> {
     match key_action(event, newline_shortcut) {
         TerminalKeyAction::Write(bytes) => Some(bytes),
+
         TerminalKeyAction::CopyOrWrite(_)
         | TerminalKeyAction::Paste
         | TerminalKeyAction::Ignore => None,
@@ -235,6 +236,7 @@ impl WheelDelta {
             Self::Steps(steps) => steps * 3.0,
             Self::Rows(rows) => rows,
         };
+
         if raw.abs() < 0.5 {
             0
         } else {

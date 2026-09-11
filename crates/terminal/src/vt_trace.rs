@@ -24,6 +24,7 @@ static SEQ: AtomicU64 = AtomicU64::new(0);
 /// `true` when `NMT_VT_TRACE` is set in the environment (checked once).
 pub fn enabled() -> bool {
     static EN: sync::OnceLock<bool> = sync::OnceLock::new();
+
     *EN.get_or_init(|| env::var_os("NMT_VT_TRACE").is_some())
 }
 
@@ -32,6 +33,7 @@ fn log_dir() -> PathBuf {
         dir.into()
     } else {
         let target: PathBuf = "target".into();
+
         target.join("logs")
     }
 }
@@ -68,6 +70,7 @@ fn viewport_geometry(s: &RenderBuffer) -> (i32, i32, i32) {
     for y in 0..s.rows() {
         if (0..s.cols()).any(|x| {
             let c = s.cell(x, y).c();
+
             c != '\0' && !c.is_whitespace()
         }) {
             last_nonblank = y as i32;
@@ -92,6 +95,7 @@ fn trailing_pad_report(s: &RenderBuffer) -> String {
         let row: Vec<_> = (0..s.cols())
             .filter_map(|x| {
                 let cell = s.cell(x, y);
+
                 (cell.c() != '\0').then_some((x, cell))
             })
             .collect();
@@ -173,6 +177,7 @@ pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
     let _ = fs::create_dir_all(&dir);
 
     let snapshot = engine.snapshot();
+
     let full = engine
         .format_text(None, false, false)
         .unwrap_or_else(|e| format!("<format_text err: {e:?}>"));
@@ -196,6 +201,7 @@ pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
                 s.scrollbar().len,
             )
         }
+
         Err(e) => format!("[vt-trace] #{seq:06} ts={ts} {label} | {detail} | snapshot_err={e:?}\n"),
     };
 

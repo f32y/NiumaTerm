@@ -35,10 +35,13 @@ const MAX_PENDING_THREADS: usize = 64;
 pub(super) enum ThreadScope {
     /// The selected parent thread; existing parent handling applies.
     Parent,
+
     /// A thread confirmed to descend from the parent.
     Descendant,
+
     /// Some other thread id, or one whose relationship is not yet known.
     Unrelated,
+
     /// The notification is not scoped to a thread at all.
     Unscoped,
 }
@@ -54,27 +57,35 @@ struct DescendantQuery {
 #[derive(Default)]
 pub(super) struct CodexTasks {
     registry: Option<BackgroundTaskRegistry>,
+
     /// Thread ids proven to descend from the selected root, either by a
     /// collaboration item or by a descendant query row.
     confirmed: HashSet<String>,
+
     /// Immediate parent of each confirmed descendant, used to validate that a
     /// later row still reaches the selected root.
     parents: HashMap<String, String>,
+
     /// Latest state seen for a thread whose relationship is still unknown.
     /// Only the newest candidate per thread is kept: a child update can arrive
     /// before its spawn item, but unrelated thread content must never reach the
     /// parent conversation.
     pending: HashMap<String, BackgroundTaskUpdate>,
+
     /// Insertion order of `pending`, so the oldest candidate can be evicted.
     pending_order: Vec<String>,
+
     launch_messages: LaunchMessages,
     queries: HashMap<u64, DescendantQuery>,
+
     /// Turn each descendant is currently running, by thread id. `turn/interrupt`
     /// names both the thread and the turn and refuses a turn id that is not the
     /// active one, so stopping a child is only possible while this is known.
     active_turns: HashMap<String, String>,
+
     /// Pagination cursors already requested for the current root.
     seen_cursors: HashSet<String>,
+
     /// In-flight `thread/read` requests, by the descendant they will deliver.
     /// One per child at a time: a second read would return the same stored
     /// conversation and only cost another round trip.
@@ -93,6 +104,7 @@ impl CodexTasks {
         self.registry = Some(BackgroundTaskRegistry::new(BackgroundTaskKey::codex(
             thread_id,
         )));
+
         self.confirmed.clear();
         self.parents.clear();
         self.pending.clear();
@@ -246,10 +258,12 @@ impl CodexTasks {
     ) -> bool {
         if !confirmed_now && !self.confirmed.contains(thread_id) {
             self.hold_pending(thread_id, update);
+
             return false;
         }
 
         let depth = self.depth_of(thread_id);
+
         let Some(registry) = self.registry.as_mut() else {
             return false;
         };
@@ -266,6 +280,7 @@ impl CodexTasks {
         if !self.pending.contains_key(thread_id) {
             if self.pending_order.len() >= MAX_PENDING_THREADS {
                 let oldest = self.pending_order.remove(0);
+
                 self.pending.remove(&oldest);
             }
 
@@ -444,6 +459,7 @@ impl CodexTasks {
                 updated_at: Some(SystemTime::now()),
                 ..BackgroundTaskUpdate::default()
             },
+
             "turn/completed" => {
                 let state = match params["turn"]["status"].as_str() {
                     Some("failed") => BackgroundTaskState::Failed,
@@ -461,8 +477,10 @@ impl CodexTasks {
                     ..BackgroundTaskUpdate::default()
                 }
             }
+
             "thread/status/changed" => {
                 let status = &params["status"];
+
                 let Some(state) = thread_status_state(status) else {
                     return turn_changed;
                 };
@@ -474,6 +492,7 @@ impl CodexTasks {
                     ..BackgroundTaskUpdate::default()
                 }
             }
+
             "item/started" | "item/completed" => {
                 // Child transcript content stays out of the parent conversation;
                 // only the row's latest-status preview reflects it.
@@ -485,6 +504,7 @@ impl CodexTasks {
                     ..BackgroundTaskUpdate::default()
                 }
             }
+
             "error" => BackgroundTaskUpdate {
                 state: Some(BackgroundTaskState::Failed),
                 status: params["error"]["message"]
@@ -495,6 +515,7 @@ impl CodexTasks {
                 updated_at: Some(SystemTime::now()),
                 ..BackgroundTaskUpdate::default()
             },
+
             _ => return turn_changed,
         };
 
@@ -516,6 +537,7 @@ impl CodexTasks {
                     .as_deref()
                     != Some(turn_id);
             }
+
             "turn/completed" | "error" => true,
             // `active` is the only status with a turn behind it; a child that
             // went idle, unloaded, or errored has nothing left to interrupt. A
@@ -537,11 +559,13 @@ impl CodexTasks {
     ) {
         let state = match method {
             "turn/started" => Some(BackgroundTaskState::Working),
+
             "turn/completed" => Some(match params["turn"]["status"].as_str() {
                 Some("failed") => BackgroundTaskState::Failed,
                 Some("interrupted") => BackgroundTaskState::Interrupted,
                 _ => BackgroundTaskState::Done,
             }),
+
             "thread/status/changed" => thread_status_state(&params["status"]),
             _ => None,
         };
@@ -619,6 +643,7 @@ impl CodexTasks {
         let Some(query) = self.queries.remove(&rpc_id) else {
             return (false, None);
         };
+
         let Some(root) = self.root().map(str::to_owned) else {
             return (false, None);
         };
@@ -629,6 +654,7 @@ impl CodexTasks {
             let Some(id) = thread["id"].as_str().filter(|id| *id != root) else {
                 continue;
             };
+
             let parent = descendant_parent_id(thread);
 
             // Rows that do not chain back to the selected root belong to
@@ -653,6 +679,7 @@ impl CodexTasks {
 
             let state = thread_status_state(&thread["status"])
                 .or((!known).then_some(BackgroundTaskState::Stopped));
+
             let last_active = unix_seconds(thread, &["recencyAt", "updatedAt"]);
 
             let update = BackgroundTaskUpdate {

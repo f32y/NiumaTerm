@@ -25,6 +25,7 @@ use crate::utils::get_data_dir;
 
 struct RemoteHostState {
     handle: Option<HostHandle>,
+
     /// The (relay_url, access_token) the running handle was started with, so
     /// reconcile can detect a config change without restarting needlessly.
     started_with: Option<(String, String)>,
@@ -49,6 +50,7 @@ pub fn reconcile(config: &RemoteSessionConfig) {
         }
 
         state.started_with = None;
+
         return;
     }
 
@@ -71,6 +73,7 @@ pub fn reconcile(config: &RemoteSessionConfig) {
             state.handle = Some(handle);
             state.started_with = Some(desired);
         }
+
         Err(e) => {
             warn!("failed to start remote host service: {e}");
             state.started_with = None;
@@ -118,6 +121,7 @@ pub struct KnownHost {
     pub name: String,
     pub relay_url: String,
     pub host_id: String,
+
     /// Hex-encoded X25519 public key.
     pub host_public_key: String,
 }
@@ -139,6 +143,7 @@ pub fn known_hosts() -> Vec<KnownHost> {
 
             Vec::new()
         }),
+
         Err(_) => Vec::new(),
     }
 }
@@ -154,6 +159,7 @@ fn save_known_hosts(hosts: &[KnownHost]) {
 
 pub fn forget_host(host_id: &str) {
     let mut hosts = known_hosts();
+
     hosts.retain(|h| h.host_id != host_id);
     save_known_hosts(&hosts);
 }
@@ -185,6 +191,7 @@ pub fn pair_with_code(code_text: &str, name: &str) -> Result<KnownHost, String> 
 /// Open (and attach to) a fresh session on a known host. Blocking.
 pub fn connect_new_session(host: &KnownHost) -> Result<RemoteSession, String> {
     let device = load_or_create_keypair(&device_key_path()).map_err(|e| e.to_string())?;
+
     let host_public_key =
         hex_decode(&host.host_public_key).ok_or("stored host public key is not valid hex")?;
 

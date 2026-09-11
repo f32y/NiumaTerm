@@ -27,6 +27,7 @@ fn readiness_waits_for_all_subscriptions_and_delivers_the_opening_history() {
             &deliver,
         )
         .unwrap();
+
     streams
         .process(
             item(
@@ -95,6 +96,7 @@ fn interactions_retain_the_generation_and_cancel_the_matching_card() {
             &deliver,
         )
         .unwrap();
+
     streams.process(item("events", json!({
         "type": "waterfall", "event": "approval/request", "eventId": "approval-1", "agentId": "session-1",
         "request": { "toolName": "pwsh", "reason": "Write outside the workspace" },

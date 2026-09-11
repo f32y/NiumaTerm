@@ -31,6 +31,7 @@ pub(super) fn load_sessions(
             Ok(listed) => deliver(json!({
                 "payload": { "type": HISTORY_FRAME, "sessions": listed, "cwd": cwd },
             })),
+
             Err(error) => tracing::warn!(
                 "deepseek recent conversations could not be read: {}",
                 error.message()
@@ -148,8 +149,10 @@ pub(super) fn load_search(
                     "sessions": listed,
                     "cwd": cwd,
                 }),
+
                 Err(error) => json!({ "type": SEARCH_FRAME, "error": error.message() }),
             },
+
             Err(error) => json!({ "type": SEARCH_FRAME, "error": error.message() }),
         };
 
@@ -175,6 +178,7 @@ pub(super) fn load_commands(
             Ok(listed) => deliver(json!({
                 "payload": { "type": COMMANDS_FRAME, "sessionId": session_id, "commands": listed },
             })),
+
             Err(error) => {
                 tracing::warn!("deepseek commands could not be listed: {}", error.message())
             }
@@ -193,6 +197,7 @@ pub(super) fn load_skills(
             Ok(listed) => deliver(json!({
                 "payload": { "type": SKILLS_FRAME, "sessionId": session_id, "skills": listed },
             })),
+
             Err(error) => {
                 tracing::warn!("deepseek skills could not be listed: {}", error.message())
             }
@@ -221,6 +226,7 @@ pub(super) fn load_agent_presets(
                 "current": current,
             },
         })),
+
         Err(error) => {
             tracing::warn!(
                 "deepseek agent presets could not be listed: {}",
@@ -249,6 +255,7 @@ pub(super) fn load_subagents(
                     "activity": activity,
                 },
             })),
+
             Err(error) => tracing::warn!(
                 "deepseek child agents could not be listed: {}",
                 error.message()
@@ -282,6 +289,7 @@ pub(super) fn load_subagent_transcript(
                     "page": page,
                 },
             })),
+
             Err(error) => tracing::warn!(
                 "deepseek child conversation could not be read: {}",
                 error.message()
@@ -313,6 +321,7 @@ pub(super) fn load_workflow_transcript(
                     "page": page,
                 },
             })),
+
             Err(error) => tracing::warn!(
                 "deepseek workflow member conversation could not be read: {}",
                 error.message()
@@ -343,6 +352,7 @@ pub(super) fn load_fork_checkpoints(
             FORK_CHECKPOINT_MESSAGES,
         ) {
             Ok(page) => json!({ "type": FORK_CHECKPOINTS_FRAME, "page": page }),
+
             Err(error) => json!({
                 "type": FORK_CHECKPOINTS_FRAME,
                 "error": error.message(),
@@ -386,6 +396,7 @@ pub(super) fn load_models(
 
         let mut catalog = match read_catalog() {
             Ok(catalog) => catalog,
+
             Err(error) => {
                 tracing::warn!(
                     "deepseek model directory could not be read: {}",
@@ -419,7 +430,9 @@ pub(super) fn load_models(
                             directory = ModelDirectory::parse(&catalog);
                         }
                     }
+
                     Ok(false) => {}
+
                     // Reported beside the picker rather than only logged: the
                     // alternative is a switch that looks applied while the
                     // first message carrying an image is refused for a reason
@@ -428,6 +441,7 @@ pub(super) fn load_models(
                         tracing::warn!(
                             "deepseek could not declare {id} as image-capable: {message}"
                         );
+
                         refusal = Some(message);
                     }
                 }

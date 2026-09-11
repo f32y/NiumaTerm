@@ -27,6 +27,7 @@ mod platform {
         }
 
         static INIT: Once = Once::new();
+
         INIT.call_once(|| {
             let center = UNUserNotificationCenter::currentNotificationCenter();
 

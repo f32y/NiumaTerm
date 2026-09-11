@@ -12,6 +12,7 @@ struct LayoutView(TerminalLayout<u32>);
 fn render_node(node: &PaneNode<u32, Entity<ResizableState>>) -> AnyElement {
     match node {
         PaneNode::Leaf { .. } => div().size_full().into_any_element(),
+
         PaneNode::Split {
             id,
             axis,
@@ -46,7 +47,9 @@ fn harness(cx: &mut TestAppContext) -> (Entity<LayoutView>, &mut VisualTestConte
 
     let (view, cx) = cx.add_window_view(|_, cx| {
         let mut layout = TerminalLayout::new_leaf(PaneId(1), 1);
+
         assert!(layout.split(PaneId(2), 2, SplitDirection::Right, cx));
+
         LayoutView(layout)
     });
 
@@ -143,11 +146,14 @@ fn nested_split_collapse_preserves_outer_sizes_and_identity(cx: &mut TestAppCont
 
     let outer = view.update(cx, |view, cx| {
         let state = root_state(&view.0);
+
         assert!(view.0.split(PaneId(3), 3, SplitDirection::Down, cx));
+
         state
     });
 
     draw(cx);
+
     view.update(cx, |view, cx| {
         let layout = &mut view.0;
         let before = outer.read(cx).sizes().clone();

@@ -12,62 +12,77 @@ pub struct Capabilities {
     /// Skills are named in the composer with a `$name` prefix and validated
     /// against a discovered catalog before the turn is sent.
     pub skill_references: bool,
+
     /// Files written since a chosen user message can be restored, which is
     /// what the `/rewind` command offers.
     pub file_rewind: bool,
+
     /// The harness reports workflow runs the pane can scope to its session.
     pub workflows: bool,
+
     /// A run's record lives on disk and is polled while the view is open,
     /// because the harness reports nothing about it once it has started. Where
     /// a run instead reports itself as it goes, polling would only re-read what
     /// the events already said, and a member's conversation is read once when
     /// the user opens it.
     pub workflows_read_from_disk: bool,
+
     /// Provider commands are discovered after startup rather than known at
     /// once, so an empty palette means "still loading" and says so instead of
     /// looking broken.
     pub async_command_discovery: bool,
+
     /// Another `Ready` arrives while the first turn initializes. A later one
     /// must keep the controls currently in use rather than restore the ones
     /// the CLI reports at startup.
     pub repeats_ready_during_init: bool,
+
     /// Recent conversations are read from the CLI's transcript directory
     /// instead of arriving over the protocol.
     pub filesystem_session_history: bool,
+
     /// A message can carry images beside its text. A harness without this
     /// refuses a pasted image rather than attaching one it cannot deliver.
     pub image_input: bool,
+
     /// The launch fixes the model for the whole session because the system
     /// prompt is built from it, so a pick has to be resolved before spawning
     /// rather than sent as a later setting change.
     pub model_baked_into_launch: bool,
+
     /// An approval can be granted for the rest of the session, not just for the
     /// one call that asked. A harness whose answer vocabulary has no such
     /// outcome offers no button for it, because a button that silently degrades
     /// to allow-once would misreport what the user just agreed to.
     pub session_scoped_approval: bool,
+
     /// A skill is invoked by writing `/name` into an ordinary prompt, which the
     /// harness recognizes before the step runs. There is no invocation request,
     /// so a slash line naming a skill is a message rather than a command, and
     /// rejecting it as an unknown command would block the only way to use one.
     pub slash_skills_are_prompts: bool,
+
     /// The conversation can be branched in front of a chosen prompt over the
     /// backend's own connection, which is what the `/fork` picker offers.
     /// Where the conversation is instead a file this side rewrites, `/fork`
     /// reaches the rewind picker that already cuts the same branch.
     pub session_fork: bool,
+
     /// A title can be pinned on the conversation, which is what `/rename`
     /// offers. Where titles are derived from the transcript and regenerated,
     /// there is nothing to pin them against.
     pub session_rename: bool,
+
     /// The harness indexes its own conversations and can be asked which of
     /// them mention a phrase, which is what `/find` offers.
     pub session_search: bool,
+
     /// The model pick is its own request the harness answers immediately, so a
     /// remembered pick seeded into the picker has to be pushed to reach the
     /// session at all. Where the pick instead rides the launch or the next
     /// turn, seeding the picker is the whole of applying it.
     pub model_selection_is_a_request: bool,
+
     /// Whether the harness can use every workspace directory or only the
     /// primary one. A harness that cannot take the whole set must say so in
     /// the tab rather than quietly working against one directory, and must

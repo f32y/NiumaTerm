@@ -8,6 +8,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 pub fn is_foreground_and_not_minimized(hwnd: NonZeroIsize) -> bool {
     let hwnd = hwnd.get() as HWND;
+
     unsafe { GetForegroundWindow() == hwnd && IsIconic(hwnd) == 0 }
 }
 

@@ -85,6 +85,7 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                     ],
                     |cx| {
                         let key: &str = cx.global::<AppSettings>().agent.collapse_tool_calls.into();
+
                         key.into()
                     },
                     |value, cx| {
@@ -133,6 +134,7 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                     ],
                     |cx| {
                         let key: &str = cx.global::<AppSettings>().agent.model_list_style.into();
+
                         key.into()
                     },
                     |value, cx| {
@@ -341,6 +343,7 @@ fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> S
 
                 let can_update =
                     versions.is_some_and(|status| status.can_update && status.update_available());
+
                 let version = installation_version_text(snapshot.state.phase, &current, &available);
 
                 let detail = if snapshot.state.phase == UpdatePhase::Unknown {

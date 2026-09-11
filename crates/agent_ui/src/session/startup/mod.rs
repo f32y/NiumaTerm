@@ -106,7 +106,9 @@ impl AgentPane {
         } else {
             SettingsSeed::Defaults
         };
+
         self.seed_restored_settings(seed);
+
         self.session.controls.restore_on_ready =
             preserve_thread_settings.then(|| self.session.controls.settings.clone());
 
@@ -118,7 +120,9 @@ impl AgentPane {
         // on any more, and this start is what the pane now reports.
         let start = self.session.starting(recovery.as_ref());
         let epoch = start.epoch;
+
         self.prompts.release_secret_editors(&self.session.input);
+
         if start.reset_branch {
             self.branch.clear();
         }
@@ -130,9 +134,11 @@ impl AgentPane {
 
         let (tx, rx) = channel();
         let mut batches = rx.ready_chunks(MAX_MESSAGES_PER_BATCH);
+
         let deliver = move |message| {
             tx.send(message);
         };
+
         let mut launch = agent_launch(&self.profile);
 
         // A backend that builds its system prompt from the model it resolves at
@@ -201,9 +207,12 @@ impl AgentPane {
                     match this.install_started_session(spawned, epoch, name, cx) {
                         Some(started) => {
                             on_result(this, started, cx);
+
                             cx.notify();
+
                             started
                         }
+
                         None => false,
                     }
                 })
@@ -230,6 +239,7 @@ impl AgentPane {
 
                             let mut message = match message {
                                 Ok(message) => message,
+
                                 Err(error) => {
                                     events
                                         .flush(|event| this.apply_session_event(epoch, event, cx));
@@ -292,16 +302,20 @@ impl AgentPane {
                 }
 
                 cx.emit(AgentPaneEvent::Interrupted);
+
                 let failure = this.session.disconnected(
                     &i18n("agent-session-exited-before-restored").replace("{name}", name),
                 );
+
                 if let Some(failure) = failure.branch {
                     this.history_ui.mode = RecentSessionsMode::Open;
                     this.report_branch_failure(failure, cx);
                 }
+
                 if failure.resume_failed {
                     this.history_ui.mode = RecentSessionsMode::Open;
                 }
+
                 if failure.cancelled_commands {
                     this.palette.set_feedback(
                         CommandFeedbackKind::Error,
@@ -313,6 +327,7 @@ impl AgentPane {
                 this.prompts.release_secret_editors(&this.session.input);
                 this.publish_queued_user_messages(cx);
                 this.finish_working(cx);
+
                 this.push_item(
                     SessionItem::Error {
                         text: i18n("agent-session-exited").replace("{name}", name),
@@ -329,6 +344,7 @@ impl AgentPane {
     /// session that produced that batch.
     fn apply_session_event(&mut self, epoch: u64, event: SessionEvent, cx: &mut Context<Self>) {
         let effect = self.session.apply_event(epoch, event);
+
         self.present_session_effect(effect, cx);
     }
 
@@ -351,6 +367,7 @@ impl AgentPane {
 
         match self.session.install(epoch, spawned) {
             StartOutcome::Installed => Some(true),
+
             StartOutcome::Superseded(orphan) => {
                 if let Some(mut orphan) = orphan {
                     cx.background_executor()
@@ -362,6 +379,7 @@ impl AgentPane {
 
                 None
             }
+
             StartOutcome::Failed(text) => {
                 cx.emit(AgentPaneEvent::Interrupted);
 
@@ -398,6 +416,7 @@ impl AgentPane {
             },
             cx,
         );
+
         cx.notify();
     }
 }
@@ -432,7 +451,9 @@ impl Sender {
         // Serialize admission and terminal failure so no later producer can
         // publish a message after the stream has become incomplete.
         let mut sender = self.sender.lock();
+
         let Some(tx) = sender.as_ref() else { return };
+
         if value["method"] == OUTPUT_FAILURE_METHOD {
             let error = value["params"]["message"]
                 .as_str()
@@ -442,6 +463,7 @@ impl Sender {
             let _ = tx.unbounded_send(Err(error));
 
             sender.take();
+
             return;
         }
 
@@ -491,6 +513,7 @@ impl EventBatch {
                     delta: next,
                 },
             ) if *item_id == next_id => delta.push_str(&next),
+
             (_, event) => {
                 self.flush(&mut apply);
 
@@ -498,6 +521,7 @@ impl EventBatch {
                     Event::AgentMessageDelta { .. }
                     | Event::ReasoningSummaryDelta { .. }
                     | Event::CommandOutputDelta { .. } => self.pending = Some(event),
+
                     event => apply(event),
                 }
             }

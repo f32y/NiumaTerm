@@ -13,7 +13,9 @@ use crate::session::test_support::TestBackend;
 
 fn backend() -> Backend {
     let mut backend = TestBackend::new([], SlashCommandOutcome::NotReady, Vec::new());
+
     backend.interrupt_accepted = true;
+
     Backend::Test(backend)
 }
 

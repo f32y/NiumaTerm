@@ -42,6 +42,7 @@ pub(crate) fn measure_cell(window: &mut Window, cx: &App) -> CellMetrics {
     style.font_fallbacks = Some(cx.global::<TerminalSettings>().font_fallbacks.clone());
     style.font_size = px(size).into();
     style.line_height = px(size * cx.global::<TerminalSettings>().line_height).into();
+
     let font_size = style.font_size.to_pixels(window.rem_size());
     let run = style.to_run(1);
 

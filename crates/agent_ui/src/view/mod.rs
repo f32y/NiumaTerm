@@ -36,17 +36,21 @@ mod tests;
 /// The composer is the one surface the user types into, so it carries a softer
 /// corner than the cards inside the conversation.
 const COMPOSER_RADIUS: f32 = 16.0;
+
 /// Diameter of the send/stop control that closes the input line.
 const COMPOSER_SEND_BUTTON: f32 = 32.0;
+
 /// Where the card's content starts. The prompt and the settings row under it
 /// are the two things read down the card's leading edge, so they stand on the
 /// same one: the first glyph of the prompt lines up with the outline of the
 /// first pill.
 const COMPOSER_EDGE_INSET: f32 = 10.0;
+
 /// The status footer along the bottom edge of the composer card. It reports
 /// rather than invites input, so it is set below the chrome size to keep the
 /// prompt above it the loudest thing on the card.
 pub(super) const COMPOSER_STATUS_PADDING_X: f32 = 14.0;
+
 pub(super) const COMPOSER_STATUS_PADDING_Y: f32 = 6.0;
 pub(super) const COMPOSER_STATUS_TEXT_SIZE: f32 = 11.5;
 
@@ -65,12 +69,15 @@ pub(super) fn composer_enter_behavior(
 ) -> ComposerEnterBehavior {
     match (action.secondary, action.shift) {
         (false, false) => ComposerEnterBehavior::ActivateOrSubmit,
+
         (true, false) if shortcut == NewlineShortcut::CtrlEnter => {
             ComposerEnterBehavior::InsertNewline
         }
+
         (false, true) if shortcut == NewlineShortcut::ShiftEnter => {
             ComposerEnterBehavior::InsertNewline
         }
+
         _ => ComposerEnterBehavior::Submit,
     }
 }
@@ -101,12 +108,15 @@ impl Render for AgentPane {
                         CommandFeedbackKind::Notice => {
                             (cx.theme().primary, i18n("agent-feedback-notice"))
                         }
+
                         CommandFeedbackKind::Status => {
                             (cx.theme().muted_foreground, i18n("agent-feedback-status"))
                         }
+
                         CommandFeedbackKind::Error => {
                             (cx.theme().danger, i18n("agent-feedback-error"))
                         }
+
                         CommandFeedbackKind::Queued => {
                             (cx.theme().warning, i18n("agent-feedback-queued"))
                         }
@@ -197,6 +207,7 @@ impl Render for AgentPane {
         // One layer holds the pane for both the update and the start; a start
         // over an update is the more recent thing to say.
         let blocking_body = start_overlay.or(update_overlay);
+
         let blocking_frost = self
             .overlay_fade
             .drive(blocking_body.is_some(), now, window, cx);
@@ -223,6 +234,7 @@ impl Render for AgentPane {
                     this.respond_approval("cancel", cx);
                 } else if this.prompts.questions_open(&this.session.input) {
                     this.prompts.collapsed = true;
+
                     cx.notify();
                 } else if this.session.runtime.status() == Status::Running {
                     this.interrupt_from_ui(window, cx);
@@ -257,6 +269,7 @@ impl Render for AgentPane {
                             window.on_next_frame(move |window, cx| {
                                 Self::show_selected_text_menu(pane, released_at, window, cx);
                             });
+
                             cx.notify();
                         }),
                     )
@@ -356,12 +369,15 @@ impl Render for AgentPane {
                                                         this.input.update(cx, |input, cx| {
                                                             input.replace("\n", window, cx);
                                                         });
+
                                                         cx.stop_propagation();
                                                     }
+
                                                     ComposerEnterBehavior::Submit => {
                                                         this.send_user_message(window, cx);
                                                         cx.stop_propagation();
                                                     }
+
                                                     ComposerEnterBehavior::ActivateOrSubmit => this
                                                         .handle_palette_control(
                                                             PaletteControl::Activate,
@@ -528,6 +544,7 @@ impl AgentPane {
                 .icon(IconName::Copy)
                 .item(i18n("agent-transcript-quote"), move |window, cx| {
                     let selected_text = selected_text.clone();
+
                     let _ = pane.update(cx, |pane, cx| {
                         pane.add_response_annotation(selected_text, window, cx);
                     });
@@ -548,6 +565,7 @@ const LAST_RESPONSE_MARK: f32 = 12.0;
 /// says the next message is going to start costing more than the last one did,
 /// and the second says it is about to cost a full re-read of the context.
 const LAST_RESPONSE_WARNING: f32 = 0.5;
+
 const LAST_RESPONSE_DANGER: f32 = 0.9;
 
 /// How loudly the composer marks a conversation that has been sitting.

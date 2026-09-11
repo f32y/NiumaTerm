@@ -29,6 +29,7 @@ impl PendingCopy {
     pub fn ready(text: String) -> Self {
         let (reply, request) = oneshot::channel();
         let _ = reply.send(Ok(text));
+
         request.into()
     }
 }

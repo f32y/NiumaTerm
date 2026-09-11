@@ -15,6 +15,7 @@ pub use crate::session::branch::local::{CheckpointRead, ForkRequest};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PromptTarget {
     pub prompt: String,
+
     /// Distance from the newest turn-opening prompt.
     pub depth: usize,
 }
@@ -74,6 +75,7 @@ pub struct BranchFailure {
 pub struct BranchCompletion {
     /// Protocol branches already carry their replay in the incoming event.
     pub replay: Option<Vec<ReplayTurn>>,
+
     pub prompt: String,
     pub files: FileProgress,
 }
@@ -128,24 +130,29 @@ struct LocalOperation {
 enum LocalPhase {
     Loading(Option<PromptTarget>),
     Checkpoints(Vec<ClaudeCheckpoint>),
+
     Selecting {
         checkpoint: ClaudeCheckpoint,
         files: FileProgress,
     },
+
     Restoring {
         checkpoint: ClaudeCheckpoint,
         action: RewindAction,
     },
+
     Forking {
         checkpoint: ClaudeCheckpoint,
         files: FileProgress,
     },
+
     Prepared {
         identity: Option<RecoveryIdentity>,
         fork: ClaudeFork,
         prompt: String,
         files: FileProgress,
     },
+
     Starting {
         fork: ClaudeFork,
         prompt: String,
@@ -155,14 +162,17 @@ enum LocalPhase {
 
 enum State {
     Local(LocalOperation),
+
     LoadingFork {
         operation: Operation,
         target: Option<PromptTarget>,
     },
+
     ForkPicker {
         operation: Operation,
         checkpoints: Vec<ForkCheckpoint>,
     },
+
     Branching {
         operation: Operation,
         previous: Status,
@@ -204,7 +214,9 @@ impl ConversationBranch {
         if !self.picker_is_open() {
             return false;
         }
+
         self.state = None;
+
         true
     }
 
@@ -217,10 +229,12 @@ impl ConversationBranch {
         if self.state.is_some() || runtime.status() != Status::Idle {
             return Err(BranchError::Busy);
         }
+
         self.sequence = self
             .sequence
             .checked_add(1)
             .expect("branch operation id exhausted");
+
         Ok(Operation {
             id: self.sequence,
             epoch: runtime.epoch(),
@@ -231,6 +245,7 @@ impl ConversationBranch {
     pub fn starting(&mut self, epoch: u64, identity: Option<&RecoveryIdentity>) -> bool {
         self.protocol_read = None;
         self.file_request = None;
+
         self.state = match self.state.take() {
             Some(State::Local(mut local)) => match local.phase {
                 LocalPhase::Prepared {
@@ -240,17 +255,22 @@ impl ConversationBranch {
                     files,
                 } if identity == expected.as_ref() => {
                     local.operation.epoch = epoch;
+
                     local.phase = LocalPhase::Starting {
                         fork,
                         prompt,
                         files,
                     };
+
                     Some(State::Local(local))
                 }
+
                 _ => None,
             },
+
             _ => None,
         };
+
         self.state.is_some()
     }
 
@@ -260,9 +280,11 @@ impl ConversationBranch {
         {
             return None;
         }
+
         let Some(State::Local(local)) = self.state.take() else {
             unreachable!()
         };
+
         let LocalPhase::Starting {
             fork,
             prompt,
@@ -271,6 +293,7 @@ impl ConversationBranch {
         else {
             unreachable!()
         };
+
         Some(BranchCompletion {
             replay: Some(fork.replay),
             prompt,
@@ -284,12 +307,14 @@ impl ConversationBranch {
                 let Some(State::Branching { prompt, .. }) = self.state.take() else {
                     unreachable!()
                 };
+
                 BranchReplay::Complete(BranchCompletion {
                     replay: None,
                     prompt,
                     files: FileProgress::NotConfirmed,
                 })
             }
+
             Some(State::Local(_)) | Some(State::Branching { .. }) => BranchReplay::Ignore,
             _ => BranchReplay::Unrelated,
         }
@@ -298,14 +323,17 @@ impl ConversationBranch {
     pub fn failed(&mut self, runtime: &mut SessionRuntime, error: String) -> Option<BranchFailure> {
         let stage = match &self.state {
             Some(State::Branching { .. }) => FailureStage::ProtocolFork,
+
             Some(State::Local(local)) => match local.phase {
                 LocalPhase::Restoring { .. } => FailureStage::Files,
                 LocalPhase::Forking { .. } => FailureStage::Conversation,
                 LocalPhase::Prepared { .. } | LocalPhase::Starting { .. } => FailureStage::Startup,
                 _ => return None,
             },
+
             _ => return None,
         };
+
         let files = match self.state.take() {
             Some(State::Branching {
                 operation,
@@ -315,16 +343,21 @@ impl ConversationBranch {
                 if runtime.is_current(operation.epoch) {
                     runtime.conversation_change_rejected(previous);
                 }
+
                 FileProgress::NotConfirmed
             }
+
             Some(State::Local(local)) => match local.phase {
                 LocalPhase::Forking { files, .. }
                 | LocalPhase::Prepared { files, .. }
                 | LocalPhase::Starting { files, .. } => files,
+
                 _ => FileProgress::NotConfirmed,
             },
+
             _ => FileProgress::NotConfirmed,
         };
+
         Some(BranchFailure {
             stage,
             files,
@@ -340,12 +373,15 @@ impl<'a> From<&'a ConversationBranch> for BranchView<'a> {
             Some(State::LoadingFork { .. }) => BranchView::LoadingFork,
             Some(State::ForkPicker { checkpoints, .. }) => BranchView::ForkCheckpoints(checkpoints),
             Some(State::Branching { .. }) => BranchView::Working,
+
             Some(State::Local(local)) => match &local.phase {
                 LocalPhase::Loading(_) => BranchView::LoadingRewind,
                 LocalPhase::Checkpoints(checkpoints) => BranchView::RewindCheckpoints(checkpoints),
+
                 LocalPhase::Selecting { checkpoint, files } => {
                     BranchView::RewindAction(checkpoint, *files)
                 }
+
                 _ => BranchView::Working,
             },
         }

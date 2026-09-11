@@ -14,10 +14,13 @@ pub(crate) enum CliAction {
     NewTab {
         path: PathBuf,
     },
+
     NewWindow {
         path: PathBuf,
     },
+
     Activate,
+
     FocusNotification {
         route: AgentRoute,
         notification_id: String,
@@ -43,10 +46,12 @@ pub(crate) fn parse_nmt_url(url: &str) -> Result<CliAction, String> {
     let rest = url
         .strip_prefix("nmt://action/")
         .ok_or_else(|| format!("not an nmt://action/ url: {url}"))?;
+
     let (verb, query) = rest.split_once('?').unwrap_or((rest, ""));
 
     match verb {
         "activate" => Ok(CliAction::Activate),
+
         "focus_notification" => {
             let value = |name: &str| {
                 query
@@ -76,6 +81,7 @@ pub(crate) fn parse_nmt_url(url: &str) -> Result<CliAction, String> {
                 notification_id,
             })
         }
+
         "new_tab" | "new_window" => {
             let encoded = query
                 .split('&')
@@ -96,6 +102,7 @@ pub(crate) fn parse_nmt_url(url: &str) -> Result<CliAction, String> {
                 CliAction::NewWindow { path }
             })
         }
+
         other => Err(format!("unknown action {other:?} in {url}")),
     }
 }
@@ -110,12 +117,15 @@ impl From<&CliAction> for String {
     fn from(value: &CliAction) -> Self {
         match value {
             CliAction::Activate => "nmt://action/activate".to_string(),
+
             CliAction::NewTab { path } => {
                 format!("nmt://action/new_tab?path={}", encode_path(path))
             }
+
             CliAction::NewWindow { path } => {
                 format!("nmt://action/new_window?path={}", encode_path(path))
             }
+
             CliAction::FocusNotification {
                 route,
                 notification_id,

@@ -101,13 +101,16 @@ fn screen_text(session: &TerminalSession) -> String {
 
 fn block_texts(session: &TerminalSession) -> Vec<(Option<String>, String)> {
     let count = session.block_store().lock().items().len();
+
     (0..count)
         .map(|item| {
             let command = session.block_command(item);
+
             let text = session
                 .block_text(item)
                 .and_then(|request| block_on(request).ok()?.ok())
                 .unwrap_or_default();
+
             (command, text)
         })
         .collect()
@@ -151,8 +154,10 @@ fn run_command(session: &TerminalSession, all: &mut Vec<HostEvent>, cmd: &str) -
 fn trusted_session() -> Option<(TerminalSession, Vec<HostEvent>)> {
     let session = match TerminalSession::new(&integration_config(), 1, active_colors(), None) {
         Ok(s) => s,
+
         Err(e) => {
             eprintln!("skipping: could not spawn powershell.exe: {e:?}");
+
             return None;
         }
     };
@@ -295,8 +300,10 @@ fn engine_blocks_bridge_freezes_command_output() {
 
     let session = match TerminalSession::new(&config, 1, active_colors(), None) {
         Ok(s) => s,
+
         Err(e) => {
             eprintln!("skipping: could not spawn powershell.exe: {e:?}");
+
             return;
         }
     };
@@ -337,6 +344,7 @@ fn engine_blocks_bridge_freezes_command_output() {
     );
 
     let blocks = block_texts(&session);
+
     let hit = blocks.iter().any(|(_, text)| {
         text.contains("ENGINE_BLOCK_ROW_1") && text.contains("ENGINE_BLOCK_ROW_5")
     });
@@ -374,9 +382,11 @@ fn output_after_ris_survives_into_the_block() {
 
     let blocks = block_texts(&session);
     let screen = screen_text(&session);
+
     let in_blocks = blocks
         .iter()
         .any(|(_, text)| text.contains("RESULTS_MARKER_XYZ"));
+
     let on_screen = screen.contains("RESULTS_MARKER_XYZ");
 
     eprintln!(

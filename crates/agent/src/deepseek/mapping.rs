@@ -15,6 +15,7 @@ use crate::chat::{
 /// The status vocabulary the transcript renders: anything else reads as still
 /// running, and `failed` is what turns a row red.
 const IN_PROGRESS: &str = "inProgress";
+
 const COMPLETED: &str = "completed";
 const FAILED: &str = "failed";
 
@@ -102,6 +103,7 @@ pub(crate) fn question_request(
         let id = item["id"].as_str()?;
 
         ids.push(id.to_string());
+
         questions.push(Question {
             input: Default::default(),
             header: item["header"].as_str().map(str::to_string),
@@ -115,6 +117,7 @@ pub(crate) fn question_request(
                         item["question"].as_str().unwrap_or_default()
                     )
                 }
+
                 _ => item["question"].as_str().unwrap_or_default().to_string(),
             },
             multi_select: item["multiSelect"].as_bool().unwrap_or(false),
@@ -160,28 +163,35 @@ pub(crate) fn map_frame(frame: &Value, session_id: &str, tools: &mut ToolTracker
 
             map_session_event(&payload["event"], &payload["view"], tools)
         }
+
         Some("host/agent-error") if payload["sessionId"].as_str() == Some(session_id) => {
             match payload["message"].as_str() {
                 Some(message) => vec![Event::ItemStarted(Item::Error {
                     text: message.to_string(),
                 })],
+
                 None => Vec::new(),
             }
         }
+
         // Whoever answered, the card comes down: the same approval can be
         // resolved by another client, or by the turn ending under it.
         Some("approval/resolved") if payload["sessionId"].as_str() == Some(session_id) => {
             vec![Event::ApprovalResolved]
         }
+
         Some("question/resolved") if payload["sessionId"].as_str() == Some(session_id) => {
             vec![Event::QuestionsResolved]
         }
+
         Some("stream/error") => match payload["error"]["message"].as_str() {
             Some(message) => vec![Event::ItemStarted(Item::Error {
                 text: message.to_string(),
             })],
+
             None => Vec::new(),
         },
+
         _ => Vec::new(),
     }
 }
@@ -206,12 +216,14 @@ fn call_view(call: &Value) -> Value {
         Some("bash" | "pwsh") if args["command"].is_string() => json!({
             "card": "terminal", "title": args["command"], "description": args["description"],
         }),
+
         Some(name @ ("edit" | "write")) if args["file_path"].is_string() => json!({
             "card": "diff", "diffs": [{"path": args["file_path"],
                 "oldText": if name == "edit" { &args["old_string"] } else { &Value::Null },
                 "newText": if name == "edit" { &args["new_string"] } else { &args["content"] },
             }],
         }),
+
         _ => json!({"rawInput": arguments}),
     }
 }
@@ -232,12 +244,14 @@ fn started_tool_item(call: &Value, view: &Value) -> Item {
             status: Some(IN_PROGRESS.to_string()),
             exit_code: None,
         },
+
         "diff" => Item::FileChange {
             id,
             paths: diff_paths(&view["diffs"]),
             diff: render_diffs(&view["diffs"]),
             status: Some(IN_PROGRESS.to_string()),
         },
+
         _ => Item::Other {
             id,
             kind: name,
@@ -288,6 +302,7 @@ fn completed_tool_item(started: &Item, view: &Value, message: &Value, failed: bo
                 exit_code,
             }
         }
+
         Item::FileChange {
             id, paths, diff, ..
         } => Item::FileChange {
@@ -302,6 +317,7 @@ fn completed_tool_item(started: &Item, view: &Value, message: &Value, failed: bo
             },
             status,
         },
+
         _ => Item::Other {
             id: started.id().unwrap_or_default().to_string(),
             kind: String::new(),
@@ -398,6 +414,7 @@ fn map_tool_call(data: &Value, view: &Value, tools: &mut ToolTracker) -> Vec<Eve
 
     let view = if view.is_null() {
         derived = call_view(data);
+
         &derived
     } else {
         view
@@ -412,9 +429,11 @@ fn map_tool_call(data: &Value, view: &Value, tools: &mut ToolTracker) -> Vec<Eve
 
 fn map_tool_result(data: &Value, view: &Value, tools: &mut ToolTracker) -> Vec<Event> {
     let message = &data["message"];
+
     let call_id = message["source"]["callId"]
         .as_str()
         .or_else(|| message["content"][0]["toolCallId"].as_str());
+
     let Some(call_id) = call_id else {
         return Vec::new();
     };
@@ -445,10 +464,13 @@ pub(crate) fn map_session_event(
         Some("tool/call") => map_tool_call(data, &view["view"], tools),
         Some("tool/result") => map_tool_result(data, &view["view"], tools),
         Some("turn/start") => vec![Event::TurnStarted],
+
         Some("turn/end") => vec![Event::TurnCompleted {
             error: turn_failure(&data["reason"]),
         }],
+
         Some("assistant/chunk") => map_chunk(data),
+
         Some(kind @ ("chunkrow/text-chunks" | "chunkrow/reasoning-chunks")) => {
             let delta: String = data["texts"]
                 .as_array()
@@ -465,13 +487,16 @@ pub(crate) fn map_session_event(
                 vec![Event::ReasoningSummaryDelta { item_id, delta }]
             }
         }
+
         Some("assistant/message") => map_completed_message(data),
         Some("user/message") => map_user_message(data),
         Some("compaction/start") => vec![Event::CompactionStarted],
         Some("compaction/summary") => map_compaction_summary(data),
+
         Some("compaction/end") => vec![Event::CompactionFinished {
             error: data["error"].as_str().map(str::to_string),
         }],
+
         Some("todo/write") => map_todo_write(event, data),
         Some("llm/retry") => map_retry(data),
         // The wait is over and the next attempt is starting, which looks like
@@ -614,9 +639,11 @@ fn block_id(data: &Value, index: u64) -> String {
 
 fn map_chunk(data: &Value) -> Vec<Event> {
     let chunk = &data["chunk"];
+
     let Some(index) = chunk["index"].as_u64() else {
         return Vec::new();
     };
+
     let item_id = block_id(data, index);
 
     match chunk["type"].as_str() {
@@ -627,27 +654,34 @@ fn map_chunk(data: &Value) -> Vec<Event> {
                 id: item_id,
                 summary: None,
             })],
+
             Some("text") => vec![Event::ItemStarted(Item::AgentMessage {
                 id: item_id,
                 text: None,
                 questions: None,
             })],
+
             _ => Vec::new(),
         },
+
         Some("reasoning-delta") => match chunk["text"].as_str() {
             Some(delta) => vec![Event::ReasoningSummaryDelta {
                 item_id,
                 delta: delta.to_string(),
             }],
+
             None => Vec::new(),
         },
+
         Some("text-delta") => match chunk["text"].as_str() {
             Some(delta) => vec![Event::AgentMessageDelta {
                 item_id,
                 delta: delta.to_string(),
             }],
+
             None => Vec::new(),
         },
+
         _ => Vec::new(),
     }
 }
@@ -674,11 +708,13 @@ fn map_completed_message(data: &Value) -> Vec<Event> {
                     id,
                     summary: block["text"].as_str().map(str::to_string),
                 })),
+
                 "text" => Some(Event::ItemCompleted(Item::AgentMessage {
                     id,
                     text: block["text"].as_str().map(str::to_string),
                     questions: None,
                 })),
+
                 // Tool calls are part of the same message. They are not
                 // transcript rows in this integration yet, and rendering them
                 // as assistant text would be worse than omitting them.

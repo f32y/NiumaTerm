@@ -42,11 +42,14 @@ pub(super) struct ShellIndex {
     /// including foreground ones, because a command the CLI moves to the
     /// background later announces only its task id when it does.
     shell_meta: HashMap<String, ShellMeta>,
+
     shell_meta_order: VecDeque<String>,
+
     /// Command text of recent `Bash` tool calls, keyed by tool-use id. The
     /// task records name the shell's description but never its command, so the
     /// launching block is where a row's command comes from.
     bash_commands: HashMap<String, String>,
+
     bash_command_order: VecDeque<String>,
 }
 
@@ -113,6 +116,7 @@ impl ShellIndex {
         let Some(text) = result_content(block) else {
             return;
         };
+
         let Some(path) = handoff_output_file(&text, canonical) else {
             return;
         };
@@ -129,6 +133,7 @@ impl ShellIndex {
         let Some(output_file) = text_field(record, &["output_file"]) else {
             return;
         };
+
         let Some(task_id) = record["task_id"].as_str().filter(|id| !id.is_empty()) else {
             return;
         };

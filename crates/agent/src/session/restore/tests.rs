@@ -34,7 +34,9 @@ fn read(restore: &mut ConversationRestore, runtime: &mut SessionRuntime) -> Repl
 
 fn ready_runtime() -> SessionRuntime {
     let mut runtime = SessionRuntime::default();
+
     runtime.ready();
+
     runtime
 }
 
@@ -62,6 +64,7 @@ fn another_directory_routes_without_changing_the_current_session() {
 fn rejected_protocol_resume_preserves_status_and_accepts_a_later_attempt() {
     let mut runtime = ready_runtime();
     let mut restore = ConversationRestore::default();
+
     runtime.turn_started();
 
     for kind in [AgentKind::Codex, AgentKind::DeepSeek] {
@@ -89,12 +92,16 @@ fn accepted_protocol_resume_is_busy_until_replay_and_failure_restores_old_status
         let mut runtime = SessionRuntime::default();
         let mut restore = ConversationRestore::default();
         let mut backend = TestBackend::new([], SlashCommandOutcome::NotReady, Vec::new());
+
         backend.resume_accepted = true;
+
         let epoch = runtime.begin_start();
+
         assert!(matches!(
             runtime.install(epoch, Ok(Backend::Test(backend))),
             StartOutcome::Installed
         ));
+
         runtime.turn_started();
 
         assert!(matches!(
@@ -123,7 +130,9 @@ fn an_old_read_cannot_replace_a_new_selection_even_for_the_same_session_id() {
     let mut runtime = ready_runtime();
     let mut restore = ConversationRestore::default();
     let old = read(&mut restore, &mut runtime);
+
     restore.failed(&mut runtime);
+
     let current = read(&mut restore, &mut runtime);
 
     assert!(matches!(
@@ -140,6 +149,7 @@ fn a_read_from_an_old_epoch_cannot_restart_or_change_the_new_status() {
     let mut runtime = ready_runtime();
     let mut restore = ConversationRestore::default();
     let request = read(&mut restore, &mut runtime);
+
     runtime.begin_start();
     runtime.turn_started();
 
@@ -177,6 +187,7 @@ fn failed_disk_read_does_not_start_a_replacement() {
     assert_eq!(runtime.epoch(), 0);
     assert_eq!(runtime.status(), Status::Idle);
     assert!(!matches!(restore.ready(0), ReadyAction::Replay(_)));
+
     read(&mut restore, &mut runtime);
 }
 
@@ -185,10 +196,12 @@ fn local_replay_moves_once_after_the_matching_restart_becomes_ready() {
     let mut runtime = ready_runtime();
     let mut restore = ConversationRestore::default();
     let request = read(&mut restore, &mut runtime);
+
     let replay = vec![ReplayTurn {
         seconds: Some(12),
         ..ReplayTurn::default()
     }];
+
     let buffer = replay.as_ptr();
 
     let ReplayLoaded::Restart(identity) =
@@ -196,17 +209,22 @@ fn local_replay_moves_once_after_the_matching_restart_becomes_ready() {
     else {
         panic!("read must prepare a restart");
     };
+
     assert!(!matches!(
         restore.ready(runtime.epoch()),
         ReadyAction::Replay(_)
     ));
 
     let epoch = runtime.begin_start();
+
     restore.starting(epoch, Some(&identity));
+
     assert!(!matches!(restore.ready(epoch - 1), ReadyAction::Replay(_)));
+
     let ReadyAction::Replay(replay) = restore.ready(epoch) else {
         panic!("matching ready must publish history");
     };
+
     assert_eq!(
         replay.as_ptr(),
         buffer,
@@ -226,27 +244,35 @@ fn unrelated_starts_and_startup_failures_drop_unpublished_replay() {
         let mut runtime = ready_runtime();
         let mut restore = ConversationRestore::default();
         let request = read(&mut restore, &mut runtime);
+
         restore.loaded(
             &mut runtime,
             request,
             Some("project"),
             Ok(vec![ReplayTurn::default()]),
         );
+
         let epoch = runtime.begin_start();
+
         restore.starting(epoch, recovery.as_ref());
+
         assert!(!matches!(restore.ready(epoch), ReadyAction::Replay(_)));
     }
 
     let mut runtime = ready_runtime();
     let mut restore = ConversationRestore::default();
     let request = read(&mut restore, &mut runtime);
+
     let ReplayLoaded::Restart(identity) =
         restore.loaded(&mut runtime, request, Some("project"), Ok(Vec::new()))
     else {
         panic!("read must prepare a restart");
     };
+
     let epoch = runtime.begin_start();
+
     restore.starting(epoch, Some(&identity));
+
     assert!(matches!(
         runtime.install(epoch, Err("cannot spawn".into())),
         StartOutcome::Failed(_)
@@ -278,7 +304,9 @@ fn missing_history_is_an_error_instead_of_an_empty_replay() {
     let mut runtime = ready_runtime();
     let mut restore = ConversationRestore::default();
     let mut selected = summary("missing");
+
     selected.id = uuid::Uuid::new_v4().to_string();
+
     let ResumeStart::ReadReplay(request) =
         restore.begin(&mut runtime, AgentKind::Claude, &selected, Some("project"))
     else {

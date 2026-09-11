@@ -22,28 +22,36 @@ pub(super) const TAB_STRIP_MIN_WIDTH: f32 = 120.0;
 /// reads it to re-anchor the macOS close/minimize/zoom buttons, which AppKit
 /// would otherwise center in its own, shorter strip.
 pub(crate) const TITLE_BAR_HEIGHT: f32 = 44.0;
+
 const TITLE_BAR_LEADING_INSET: f32 = 80.0;
+
 /// A leading-zone control: square, and spaced tightly enough that the group
 /// reads as one cluster rather than as separate buttons.
 const TITLE_BAR_BUTTON: f32 = 26.0;
+
 const TITLE_BAR_BUTTON_GAP: f32 = 4.0;
+
 // Four controls, the divider, four internal gaps, and a trailing gap must
 // stay visible before the first tab, including at the sidebar's drag limit.
 const TITLE_BAR_CONTROLS_WIDTH: f32 = 4.0 * TITLE_BAR_BUTTON + 1.0 + 5.0 * TITLE_BAR_BUTTON_GAP;
+
 pub(crate) const MIN_SIDEBAR_WIDTH: f32 = if cfg!(target_os = "macos") {
     TITLE_BAR_LEADING_INSET + TITLE_BAR_CONTROLS_WIDTH - FLOATING_SURFACE_SIDE_INSET
 } else {
     140.0
 };
+
 /// A hairline between the application menu and the layout controls beside it.
 /// At 26px the two icon clusters would otherwise read as one undifferentiated
 /// row, and the menu opens application-wide commands while its neighbours only
 /// move the view around.
 const TITLE_BAR_DIVIDER_HEIGHT: f32 = 18.0;
+
 /// The session heading in the middle of the bar, and the branch chip beside
 /// it. The chip is set smaller than the title because it qualifies the title
 /// rather than competing with it.
 const TITLE_BAR_HEADING_TEXT: f32 = 13.0;
+
 const TITLE_BAR_HEADING_GAP: f32 = 10.0;
 const TITLE_BAR_CHIP_TEXT: f32 = 12.0;
 const TITLE_BAR_CHIP_RADIUS: f32 = 6.0;
@@ -548,12 +556,14 @@ impl Render for Shell {
 
         let sidebar_tabs: Vec<Vec<SidebarTab>> = match vertical_tabs {
             false => Vec::new(),
+
             true => summaries
                 .iter()
                 .map(|ws| {
                     let Some(tabs) = self.workspaces.tabs_of(ws.id) else {
                         return Vec::new();
                     };
+
                     let active_id = tabs.active_id();
 
                     tabs.tabs()
@@ -618,6 +628,7 @@ impl Render for Shell {
 
         let tab_bar = match vertical_tabs {
             true => div().into_any_element(),
+
             false => self.tab_strip.render(
                 self.workspaces.active_tabs(),
                 &unread_tabs,
@@ -638,6 +649,7 @@ impl Render for Shell {
             .clone()
             .map(|path| {
                 let path: PathBuf = path.into();
+
                 img(path)
                     .absolute()
                     .inset_0()

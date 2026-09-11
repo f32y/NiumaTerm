@@ -14,10 +14,12 @@ pub(crate) type TerminalPaneTree = TerminalLayout<Entity<TerminalPane>>;
 pub(crate) enum TabSurface {
     Pending(Box<TabState>),
     Live(TerminalPaneTree),
+
     /// An agent conversation rendered as chat bubbles instead of a terminal
     /// grid. It owns an agent route but no terminal panes or child-process
     /// accounting exposed through `tree()`.
     Agent(Entity<AgentPane>),
+
     /// The settings UI filling the main area. It is rebuilt from the settings
     /// global on every render, so the variant carries no state of its own.
     Settings,
@@ -35,11 +37,13 @@ impl TabSurface {
     pub(super) fn is_agent(&self) -> bool {
         match self {
             Self::Agent(_) => true,
+
             Self::Pending(state) => state
                 .agent
                 .as_deref()
                 .and_then(AgentKind::from_id)
                 .is_some(),
+
             Self::Live(_) | Self::Settings => false,
         }
     }

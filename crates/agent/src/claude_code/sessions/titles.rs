@@ -17,6 +17,7 @@ const TITLE_SCAN_BYTES: u64 = 64 * 1024;
 /// near the end; one enormous tool result can still push them past this window,
 /// and the listing then falls back to the prompt the session opened with.
 const RECORDED_TITLE_SCAN_BYTES: u64 = 64 * 1024;
+
 const PROVISIONAL_TITLE_CHARS: usize = 60;
 const PROVISIONAL_TITLE_WORDS: usize = 6;
 
@@ -51,6 +52,7 @@ fn project_dirs() -> Vec<PathBuf> {
     let Some(root) = projects_root() else {
         return Vec::new();
     };
+
     let Ok(entries) = fs::read_dir(root) else {
         return Vec::new();
     };
@@ -58,6 +60,7 @@ fn project_dirs() -> Vec<PathBuf> {
     entries
         .filter_map(|entry| {
             let path = entry.ok()?.path();
+
             path.is_dir().then_some(path)
         })
         .collect()
@@ -219,6 +222,7 @@ fn head_summary(path: &Path) -> HeadSummary {
         let Some(text) = user_prompt_text(&record) else {
             continue;
         };
+
         let Some(title) = title_line(&text) else {
             continue;
         };
@@ -227,6 +231,7 @@ fn head_summary(path: &Path) -> HeadSummary {
             .as_str()
             .filter(|branch| !branch.is_empty())
             .map(str::to_owned);
+
         summary.title = Some(title);
 
         return summary;
@@ -281,6 +286,7 @@ pub(super) fn is_interruption(record: &Value) -> bool {
 fn is_task_notification(record: &Value) -> bool {
     match record["origin"]["kind"].as_str() {
         Some(kind) => kind == "task-notification",
+
         // Older CLI versions recorded no origin, leaving the notification
         // block itself as the only marker.
         None => record_text(record)
@@ -307,6 +313,7 @@ pub(super) fn compaction_summary_text(record: &Value) -> Option<String> {
 fn record_text(record: &Value) -> Option<String> {
     let text = match &record["message"]["content"] {
         Value::String(text) => text.clone(),
+
         Value::Array(blocks) => {
             let parts: Vec<&str> = blocks
                 .iter()
@@ -316,6 +323,7 @@ fn record_text(record: &Value) -> Option<String> {
 
             parts.join("\n")
         }
+
         _ => return None,
     };
 

@@ -52,12 +52,14 @@ fn classifies_full_prompt_command_output_cycle() {
 #[test]
 fn marks_are_forwarded_to_engine() {
     let stream = b"\x1b]133;A\x07PS> \x1b]133;B\x07ls\x1b]133;C\x07out\x1b]133;D\x07";
+
     assert_eq!(engine_stream(&[stream]), stream);
 }
 
 #[test]
 fn bytes_before_first_mark_pass_through_as_none() {
     let segs = run(&[b"banner\x1b]133;A\x07prompt"]);
+
     assert_eq!(segs[0], (PromptRegion::None, b"banner".to_vec()));
     assert_eq!(segs[1], (PromptRegion::Prompt, b"prompt".to_vec()));
 }
@@ -66,6 +68,7 @@ fn bytes_before_first_mark_pass_through_as_none() {
 fn accepts_st_terminator() {
     // ST = ESC \ instead of BEL.
     let segs = run(&[b"\x1b]133;A\x1b\\done"]);
+
     assert_eq!(segs, vec![(PromptRegion::Prompt, b"done".to_vec())]);
 }
 
@@ -130,6 +133,7 @@ fn run_with_trust(chunks: &[&[u8]]) -> Vec<(PromptRegion, bool, Vec<u8>)> {
 fn boundary_trust_follows_ordered_prompt_command_output_cycle() {
     let stream =
         b"\x1b]133;A\x07PS1> \x1b]133;B\x07first\r\n\x1b]133;C\x07out1\r\n\x1b]133;D;0\x07\x1b]133;A\x07PS2> \x1b]133;B\x07second\r\n\x1b]133;C\x07out2\r\n\x1b]133;D;0\x07";
+
     let segs = run_with_trust(&[stream]);
 
     assert_eq!(
@@ -183,12 +187,14 @@ fn prompt_without_completed_lifecycle_is_not_trusted() {
 #[test]
 fn malformed_lifecycle_forwards_everything_until_completed_lifecycle() {
     let bad_then_good = b"banner\x1b]133;B\x07visible\x1b]133;C\x07output\x1b]133;D\x07\x1b]133;A\x07PS> \x1b]133;B\x07cmd\x1b]133;C\x07ok";
+
     assert_eq!(engine_stream(&[bad_then_good]), bad_then_good);
 }
 
 #[test]
 fn untrusted_stream_forwards_prompt_and_command() {
     let stream = b"\x1b]133;B\x07PS> cmd\x1b]133;C\x07out";
+
     assert_eq!(engine_stream(&[stream]), stream);
 }
 
@@ -242,6 +248,7 @@ fn malformed_carried_mark_clears_trust_before_forwarding() {
             out.extend_from_slice(b);
         }
     });
+
     s.feed(b"this-is-too-long-for-a-valid-mark", |r, trusted, b| {
         if !trusted || matches!(r, PromptRegion::Output | PromptRegion::None) {
             out.extend_from_slice(b);

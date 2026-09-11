@@ -426,6 +426,7 @@ active_tab = 0
 
     multi.windows[0].session.as_mut().unwrap().workspaces[0].additional_cwds =
         vec!["C:/Projects/library".into(), "D:/Docs".into()];
+
     save_to(&path, &multi).unwrap();
 
     assert_eq!(load_from(&path), multi);
@@ -454,6 +455,7 @@ active_tab = 0
 
     let legacy: LegacyState =
         toml::from_str(&fs::read_to_string(&path).unwrap()).expect("older build parses");
+
     let workspace = &legacy.windows[0].session.workspaces[0];
 
     assert_eq!(workspace.cwd.as_deref(), Some("C:/Projects/example"));

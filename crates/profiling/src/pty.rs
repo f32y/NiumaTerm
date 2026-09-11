@@ -88,10 +88,14 @@ impl PtyProfiler {
             if self.started.take().is_some() {
                 self.totals = Totals::default();
             }
+
             return None;
         }
+
         let now = Instant::now();
+
         self.started.get_or_insert(now);
+
         Some(now)
     }
 
@@ -99,8 +103,10 @@ impl PtyProfiler {
         let Some(started) = started else {
             return;
         };
+
         let elapsed = started.elapsed();
         let series = &mut self.totals.stages[stage as usize];
+
         series.calls += 1;
         series.elapsed += elapsed;
         series.max_elapsed = series.max_elapsed.max(elapsed);
@@ -108,6 +114,7 @@ impl PtyProfiler {
 
     pub fn read(&mut self, started: Option<Instant>, bytes: usize) {
         self.record(Stage::Read, started);
+
         if started.is_some() {
             self.totals.bytes += bytes as u64;
         }
@@ -117,10 +124,12 @@ impl PtyProfiler {
         if self.started.is_none() {
             return;
         }
+
         match end {
             BatchEnd::Drained => self.totals.drained_batches += 1,
             BatchEnd::Saturated => self.totals.saturated_batches += 1,
         }
+
         if bytes == 0 {
             self.totals.empty_batches += 1;
         }
@@ -155,13 +164,18 @@ impl PtyProfiler {
         let Some(started) = self.started.take() else {
             return;
         };
+
         let elapsed = started.elapsed();
         let totals = mem::take(&mut self.totals);
+
         if !enabled() || totals.stages.iter().all(|stage| stage.calls == 0) {
             return;
         }
+
         self.interval += 1;
+
         let mib = totals.bytes as f64 / 1_048_576.0;
+
         let captures = [
             Stage::CaptureEager,
             Stage::CaptureSaturated,
@@ -170,6 +184,7 @@ impl PtyProfiler {
         .into_iter()
         .map(|stage| totals.stages[stage as usize].calls)
         .sum::<u64>();
+
         let captures_per_mib = (totals.bytes != 0).then(|| captures as f64 / mib);
 
         info!(
@@ -184,13 +199,17 @@ impl PtyProfiler {
             captures, captures_per_mib,
             "pty interval"
         );
+
         for (stage, label) in STAGES {
             let series = totals.stages[stage as usize];
+
             if series.calls == 0 {
                 continue;
             }
+
             let total_ms = series.elapsed.as_secs_f64() * 1000.0;
             let ms_per_mib = (totals.bytes != 0).then(|| total_ms / mib);
+
             info!(
                 target: "terminal_perf",
                 window = self.window, route = self.route, interval = self.interval,

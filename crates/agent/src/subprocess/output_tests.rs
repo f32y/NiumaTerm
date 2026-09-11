@@ -7,10 +7,12 @@ use crate::subprocess::read_messages;
 #[test]
 fn large_history_reply_preserves_following_messages() {
     let history = "x".repeat(9 * 1024 * 1024);
+
     let input = format!(
         "{}\n{{\"next\":true}}\n",
         json!({"result":{"history":history}})
     );
+
     let mut reader = BufReader::new(Cursor::new(input));
     let mut messages = Vec::new();
 
@@ -35,6 +37,7 @@ fn startup_notices_bom_and_blank_lines_preserve_protocol_objects() {
 fn malformed_protocol_stops_before_later_messages_without_exposing_input() {
     let mut reader =
         Cursor::new(b"{\"ready\":true}\n{\"token\":\"private-value\",\n{\"late\":true}\n");
+
     let mut messages = Vec::new();
     let error = read_messages(&mut reader, "Test", |message| messages.push(message)).unwrap_err();
 
@@ -67,10 +70,13 @@ fn long_startup_notices_preserve_the_first_protocol_message() {
         "notice\n".repeat(32),
         "n".repeat(128 * 1024)
     );
+
     let mut messages = Vec::new();
+
     read_messages(&mut Cursor::new(input), "Test", |message| {
         messages.push(message)
     })
     .unwrap();
+
     assert_eq!(messages, [json!({"ready":true})]);
 }

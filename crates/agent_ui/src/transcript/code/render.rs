@@ -49,6 +49,7 @@ impl Render for CodeView {
                     uniform_list("code-lines", prepared.segments.len(), move |rows, _, _| {
                         rows.filter_map(|row| {
                             let range = source.segments.get(row)?.clone();
+
                             let styles =
                                 source.styles(range.clone(), &theme, foreground, background);
 

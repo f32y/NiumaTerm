@@ -50,6 +50,7 @@ fn version_fallback_uses_the_same_configured_launcher() {
 
     #[cfg(unix)]
     let script = "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'configured-cli 9.8.7'; exit 0; fi\nexit 7\n";
+
     let (root, executable) = fake_launcher("version fallback", script);
     let launcher = AgentCli::new(executable.display().to_string(), []);
 
@@ -82,6 +83,7 @@ fn fake_launcher(name: &str, body: &str) -> (PathBuf, PathBuf) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
+
         fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
     }
 

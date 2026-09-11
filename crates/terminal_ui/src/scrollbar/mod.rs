@@ -3,7 +3,9 @@ use gpui::{
     Context, Div, DragMoveEvent, Empty, MouseButton, MouseDownEvent, Stateful, div, px, relative,
 };
 use gpui_component::ActiveTheme;
+
 pub(crate) mod geometry;
+
 use nmt_terminal::ghostty::ScrollbarInfo;
 
 use crate::scrollbar::geometry::scrollbar_thumb_geometry;
@@ -39,6 +41,7 @@ pub(super) fn scrollbar_element(
                         thumb_top,
                         thumb_height,
                     );
+
                     if !this.apply_scroll_outcome(outcome, cx) {
                         this.mark_scrollbar_activity(cx);
                     }
@@ -46,6 +49,7 @@ pub(super) fn scrollbar_element(
             )
             .on_drag(ScrollbarDrag, |_, _, _, cx| {
                 cx.stop_propagation();
+
                 cx.new(|_| Empty)
             })
             .on_drag_move(

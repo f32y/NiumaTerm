@@ -21,7 +21,9 @@ fn split_right_wraps_root_leaf_and_focuses_new() {
 #[test]
 fn split_left_puts_new_leaf_first() {
     let mut tree = Tree::new_leaf(PaneId(1), 1);
+
     tree.split(PaneId(2), 2, SplitDirection::Left, || 10);
+
     assert_eq!(leaf_ids(&tree), vec![2, 1]);
 }
 
@@ -78,6 +80,7 @@ fn cross_axis_split_wraps_the_leaf() {
 #[test]
 fn remove_refuses_last_leaf() {
     let mut tree = Tree::new_leaf(PaneId(1), 1);
+
     assert!(tree.remove(PaneId(1)).is_none());
 }
 
@@ -104,6 +107,7 @@ fn remove_from_wider_split_reports_index() {
 
     // Row is [1, 2, 3]; remove the middle.
     let (_, outcome) = tree.remove(PaneId(2)).expect("removable");
+
     let RemoveOutcome::RemovedFromSplit { state, index } = outcome else {
         panic!("split still has two children");
     };

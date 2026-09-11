@@ -15,6 +15,7 @@ use crate::wake::wake_channel;
 
 fn pane(cx: &mut VisualTestContext) -> Entity<TerminalPane> {
     let (model, _) = controller(b"", true);
+
     cx.new(|cx| TerminalPane {
         focus: cx.focus_handle(),
         identity: PaneIdentity {
@@ -39,11 +40,13 @@ fn accepted_plain_escape_emits_interrupt_but_modified_or_rejected_escape_does_no
     let pane = pane(cx);
     let interrupts = Rc::new(Cell::new(0));
     let observed = interrupts.clone();
+
     let _subscription = cx.update(|_, cx| {
         cx.subscribe(&pane, move |_, _: &AgentInterrupted, _| {
             observed.set(observed.get() + 1);
         })
     });
+
     for (modifiers, read_only, expected) in [
         (Modifiers::none(), false, 1),
         (Modifiers::shift(), false, 1),
@@ -62,6 +65,7 @@ fn accepted_plain_escape_emits_interrupt_but_modified_or_rejected_escape_does_no
                 if read_only {
                     pane.model.source.session.mark_read_only();
                 }
+
                 pane.on_key_down(
                     &KeyDownEvent {
                         keystroke: Keystroke {
@@ -77,6 +81,7 @@ fn accepted_plain_escape_emits_interrupt_but_modified_or_rejected_escape_does_no
                 );
             })
         });
+
         assert_eq!(interrupts.get(), expected);
     }
 }
@@ -85,6 +90,7 @@ fn accepted_plain_escape_emits_interrupt_but_modified_or_rejected_escape_does_no
 fn typing_respects_scroll_setting_for_key_and_ime_input(cx: &mut TestAppContext) {
     let cx = cx.add_empty_window();
     let pane = pane(cx);
+
     for scroll_when_typing in [false, true] {
         for ime in [false, true] {
             cx.update(|window, cx| {
@@ -92,6 +98,7 @@ fn typing_respects_scroll_setting_for_key_and_ime_input(cx: &mut TestAppContext)
                     pane.model.settings.scroll_to_bottom_when_typing = scroll_when_typing;
                     pane.model.block_list.scrollbar = (24.0, 120.0);
                     pane.model.update_viewport();
+
                     if ime {
                         pane.replace_text_in_range(None, "text", window, cx);
                     } else {
@@ -109,17 +116,20 @@ fn typing_respects_scroll_setting_for_key_and_ime_input(cx: &mut TestAppContext)
                             cx,
                         );
                     }
+
                     assert_eq!(pane.model.viewport.is_scrolled(), !scroll_when_typing);
                 })
             });
         }
     }
+
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
             pane.model.source.session.mark_read_only();
             pane.model.block_list.scrollbar = (24.0, 120.0);
             pane.model.update_viewport();
             pane.replace_text_in_range(None, "rejected", window, cx);
+
             assert!(pane.model.viewport.is_scrolled());
         })
     });

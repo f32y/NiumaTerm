@@ -155,10 +155,13 @@ pub(super) fn duration_label(now: SystemTime, past: SystemTime) -> String {
 
     match seconds {
         0..60 => i18n("tasks-background-duration-seconds").replace("{count}", &seconds.to_string()),
+
         60..3600 => i18n("tasks-background-duration-minutes")
             .replace("{count}", &(seconds / 60).to_string()),
+
         3600..86400 => i18n("tasks-background-duration-hours")
             .replace("{count}", &(seconds / 3600).to_string()),
+
         _ => i18n("tasks-background-duration-days")
             .replace("{count}", &(seconds / 86400).to_string()),
     }

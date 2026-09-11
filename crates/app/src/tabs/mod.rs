@@ -27,15 +27,18 @@ pub struct Tab<S> {
     user_title: Option<String>,
     terminal_title: Option<String>,
     exited: bool,
+
     /// A background tab rang the bell. Cleared when the tab is focused, which
     /// is the acknowledgement — a bell on the tab you are already looking at
     /// never sets this, so no timer is needed to expire it.
     bell: bool,
+
     /// Result of the last command that finished while this tab sat in the
     /// background. Cleared on activation, on the same acknowledgement grounds
     /// as `bell`: a command that ends in front of the user already shows its
     /// own output and exit code.
     last_outcome: Option<CommandOutcome>,
+
     /// Latest OSC 9;4 report from any pane in the tab; `None` once the command
     /// clears it (state 0).
     progress: Option<ProgressReport>,

@@ -115,19 +115,25 @@ pub struct Session {
     control: ControlState,
     next_title_generation_id: u64,
     title_generation: Option<TitleGenerationHandle>,
+
     /// Cursor for the next history page; `None` once the final page arrived.
     history_cursor: Option<String>,
+
     history_scope: SessionScope,
     skill_refresh: SkillRefreshState,
+
     /// Profile-level model/provider overrides reused for thread start, history
     /// filtering, and resume. Provider credentials remain only in process env.
     thread_profile: ThreadProfile,
+
     /// The directories this conversation was started with. Held for the life
     /// of the session so every turn declares the same writable roots the
     /// thread was opened with.
     workspace: AgentWorkspace,
+
     initial_resume: Option<String>,
     suppress_resume_replay: bool,
+
     /// Descendant-thread tracking for the `Background Tasks` view.
     background: CodexTasks,
 }
@@ -570,12 +576,15 @@ impl Session {
         let ForkAnchor::CodexThrough(last_turn_id) = anchor else {
             return Err("that branch point belongs to another agent".to_string());
         };
+
         let Some(thread_id) = self.conversation.thread_id.clone() else {
             return Err("this conversation has no thread to branch".to_string());
         };
+
         let mut params = thread_resume_params(&thread_id, &self.thread_profile);
 
         params["lastTurnId"] = json!(last_turn_id);
+
         self.try_send_query(
             QueryKind::Fork,
             json!({
@@ -584,6 +593,7 @@ impl Session {
                 "params": params,
             }),
         )?;
+
         self.cancel_title_generation();
 
         Ok(())
@@ -644,6 +654,7 @@ impl Session {
     /// pretending the child was stopped.
     pub fn interrupt_background_task(&mut self, thread_id: &str) -> bool {
         let rpc_id = self.alloc_rpc_id();
+
         let Some(request) = self.background.interrupt_request(rpc_id, thread_id) else {
             return false;
         };
@@ -657,6 +668,7 @@ impl Session {
     /// the same child is left to finish, and an unknown thread is ignored.
     pub fn load_background_task_transcript(&mut self, thread_id: &str) -> Vec<Event> {
         let rpc_id = self.alloc_rpc_id();
+
         let Some(request) = self.background.transcript_request(rpc_id, thread_id) else {
             return Vec::new();
         };
@@ -817,6 +829,7 @@ impl Session {
             "item/tool/requestUserInput" => {
                 self.process_question_request(rpc_id, &message["params"])
             }
+
             "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
                 let params = &message["params"];
 
@@ -833,6 +846,7 @@ impl Session {
 
                 vec![Event::ApprovalRequested { description }]
             }
+
             // Any other server→client request is unsupported by this client;
             // an error reply keeps the turn from hanging (the same strategy
             // `codex exec` uses for approvals).
@@ -853,11 +867,13 @@ impl Session {
             Some(ControlOperation::Command(command)) => (Some(command), None),
             Some(ControlOperation::Query(kind)) => (None, Some(kind)),
             Some(ControlOperation::Other | ControlOperation::ThreadRequest) => (None, None),
+
             Some(ControlOperation::ThreadName)
                 if message["error"]["data"]["requestTimedOut"].as_bool() == Some(true) =>
             {
                 (None, None)
             }
+
             Some(ControlOperation::ThreadName) | None => return Vec::new(),
         };
 
@@ -882,6 +898,7 @@ impl Session {
             let Some(thread_id) = self.background.finish_transcript_read(rpc_id) else {
                 return Vec::new();
             };
+
             let key = BackgroundTaskKey::codex(&thread_id);
 
             let update = match message["error"]["message"].as_str() {
@@ -890,6 +907,7 @@ impl Session {
                         message: error.to_owned(),
                     },
                 ),
+
                 // The same parser the parent transcript uses, so a child's
                 // tool cards cannot lose output or status relative to it. A
                 // child's conversation is presented as one stream, so its turn
@@ -914,6 +932,7 @@ impl Session {
         if self.background.is_query(rpc_id) {
             if let Some(error) = message["error"]["message"].as_str() {
                 let changed = self.background.fail_query(rpc_id, error);
+
                 return self.background_events(changed);
             }
 
@@ -1007,6 +1026,7 @@ impl Session {
 
                 vec![Event::Ready(parse_thread_settings(result))]
             }
+
             Some(QueryKind::Models) => {
                 let models = if self.thread_profile.provider.is_some() {
                     parse_models(&json!({"data": []}), self.thread_profile.model.as_deref())
@@ -1016,6 +1036,7 @@ impl Session {
 
                 vec![Event::Models(models)]
             }
+
             Some(QueryKind::History) => {
                 let result = &message["result"];
 
@@ -1030,9 +1051,11 @@ impl Session {
                     self.conversation.thread_id.as_deref(),
                 ))]
             }
+
             Some(QueryKind::Checkpoints) => vec![Event::ForkCheckpoints(Ok(
                 parse_fork_checkpoints(&message["result"]["thread"]["turns"]),
             ))],
+
             // A branch answers with the same payload a resume answers with,
             // down to the settings block, so both switch this session onto the
             // thread the reply names.
@@ -1055,6 +1078,7 @@ impl Session {
 
                 resumed_thread_events(result, take(&mut self.suppress_resume_replay))
             }
+
             _ => Vec::new(),
         }
     }
@@ -1068,6 +1092,7 @@ impl Session {
             self.control.close();
             self.skill_refresh = SkillRefreshState::default();
             self.conversation.compaction.reset_thread();
+
             return vec![Event::HostExited {
                 message: params["message"]
                     .as_str()
@@ -1101,12 +1126,14 @@ impl Session {
             match self.background.scope(thread_id.as_deref()) {
                 ThreadScope::Descendant => {
                     let thread_id = thread_id.unwrap_or_default();
+
                     let changed = self
                         .background
                         .apply_descendant_notification(&thread_id, method, params);
 
                     return self.background_events(changed);
                 }
+
                 ThreadScope::Unrelated => {
                     let thread_id = thread_id.unwrap_or_default();
 
@@ -1115,6 +1142,7 @@ impl Session {
 
                     return Vec::new();
                 }
+
                 // A thread-scoped notification that carries no usable thread id
                 // keeps parent handling: the parent's running state is the only
                 // conversation this session can be describing.
@@ -1124,6 +1152,7 @@ impl Session {
 
         if method == "skills/changed" {
             self.request_skills(true);
+
             return Vec::new();
         }
 
@@ -1132,6 +1161,7 @@ impl Session {
         let children_changed = matches!(method, "item/started" | "item/completed")
             && params["item"]["type"].as_str() != Some("contextCompaction")
             && self.background.observe_parent_item(&params["item"]);
+
         let mut events = self.conversation.process_notification(method, params);
 
         events.extend(self.background_events(children_changed));

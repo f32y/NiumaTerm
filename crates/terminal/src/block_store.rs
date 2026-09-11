@@ -39,10 +39,12 @@ pub struct SegmentMeta {
 pub struct BlockItem {
     pub seq: Option<u64>,
     pub meta: SegmentMeta,
+
     /// The finished engine block. Rendering acquires a `BlockRef` through
     /// it; `rows` caches the engine's current row count (refreshed by
     /// `EngineBlocksSync`) so layout never takes the engine lock.
     handle: BlockHandle,
+
     rows: usize,
 }
 
@@ -63,9 +65,11 @@ impl BlockItem {
 #[derive(Debug, Default)]
 pub struct BlockStore {
     items: Vec<BlockItem>,
+
     /// Metadata that arrived before its block finished (the normal order:
     /// marks fire at write time, the block at `;D`).
     pending_meta: HashMap<u64, SegmentMeta>,
+
     /// Items dropped from the front (engine budget eviction), so a list UI
     /// can splice instead of resetting scroll state.
     pub evicted_items: u64,
@@ -96,6 +100,7 @@ impl BlockStore {
 
                     self.items.push(item);
                 }
+
                 // Prune items whose engine block is gone (byte-budget
                 // eviction is oldest-first, so removals are a prefix — the
                 // eviction counter keeps list splicing aligned) and refresh
@@ -111,14 +116,18 @@ impl BlockStore {
                             Some(&(fresh, rows)) => {
                                 item.handle = fresh;
                                 item.rows = rows;
+
                                 true
                             }
+
                             None => {
                                 *evicted += 1;
+
                                 false
                             }
                         });
                 }
+
                 // The user cleared the terminal (`;K` in-band mark): the
                 // whole frozen history drops with the screen (the PTY side
                 // already cleared the engine blocks).

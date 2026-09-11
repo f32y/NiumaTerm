@@ -20,8 +20,10 @@ const MAX_DIFF_LINES: usize = 100_000;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FileEntry {
     pub(crate) path: String,
+
     /// The two-letter porcelain XY code (`??` for untracked).
     pub(crate) status: String,
+
     pub(crate) added: u64,
     pub(crate) removed: u64,
 }
@@ -29,10 +31,12 @@ pub(crate) struct FileEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GitSnapshot {
     pub(crate) repo_root: String,
+
     /// What `HEAD` points at, for the chrome that names it. `None` on a
     /// repository whose `HEAD` cannot be resolved at all, such as one with no
     /// commits yet.
     pub(crate) branch: Option<String>,
+
     pub(crate) files: Vec<FileEntry>,
     pub(crate) total_added: u64,
     pub(crate) total_removed: u64,
@@ -57,6 +61,7 @@ pub(crate) struct DiffLine {
 pub(crate) fn resolve_repo_root(cwd: &str) -> Option<String> {
     let out = run_git(cwd, &["rev-parse", "--show-toplevel"]).ok()?;
     let root = String::from_utf8_lossy(&out).trim().to_string();
+
     (!root.is_empty()).then_some(root)
 }
 
@@ -78,6 +83,7 @@ pub(crate) fn fetch_snapshot(root: &str, branch_max_age: Duration) -> Result<Git
         if let Ok(out) = run_git(root, args) {
             for (path, added, removed) in parse_numstat_z(&out) {
                 let entry = counts.entry(path).or_default();
+
                 entry.0 += added;
                 entry.1 += removed;
             }
@@ -136,6 +142,7 @@ fn count_file_lines(root: &str, path: &str) -> u64 {
     loop {
         match reader.read(&mut buf) {
             Ok(0) => break,
+
             Ok(n) => {
                 let chunk = &buf[..n];
 
@@ -146,6 +153,7 @@ fn count_file_lines(root: &str, path: &str) -> u64 {
                 newlines += chunk.iter().filter(|b| **b == b'\n').count() as u64;
                 last = chunk[n - 1];
             }
+
             Err(_) => return 0,
         }
     }
@@ -153,6 +161,7 @@ fn count_file_lines(root: &str, path: &str) -> u64 {
     // A trailing fragment without a newline is still a line (matches numstat);
     // `last` starts as '\n' so an empty file counts zero.
     let trailing_line: u64 = (last != b'\n').into();
+
     newlines + trailing_line
 }
 
@@ -185,8 +194,10 @@ pub(crate) fn fetch_file_diff(root: &str, path: &str, untracked: bool) -> Vec<Di
     match run_git(root, &["diff", "HEAD", "--", path]) {
         Ok(out) => {
             let text = String::from_utf8_lossy(&out);
+
             parse_diff(&text)
         }
+
         Err(err) => vec![line(DiffLineKind::FileHeader, err)],
     }
 }
@@ -265,6 +276,7 @@ pub(crate) fn parse_numstat_z(raw: &[u8]) -> Vec<(String, u64, u64)> {
                     None => continue,
                 }
             }
+
             Some(path) => path.to_string(),
         };
 
@@ -301,12 +313,15 @@ pub(crate) fn parse_diff(text: &str) -> Vec<DiffLine> {
 pub(crate) struct GitStatusModel {
     target_cwd: Option<String>,
     pub(crate) snapshot: Option<GitSnapshot>,
+
     /// Bumped each time a snapshot lands, so observers can tell data changes
     /// apart from `refreshing` flag flips.
     pub(crate) snapshot_seq: u64,
+
     /// Bumped on target change; in-flight results from older generations are
     /// discarded on arrival.
     generation: u64,
+
     refreshing: bool,
     enabled: bool,
     pub(crate) sidebar_open: bool,
@@ -437,7 +452,9 @@ impl GitStatusModel {
                     if this.generation != generation {
                         // Retargeted mid-flight: restart for the new target.
                         this.refreshing = false;
+
                         this.refresh(cx);
+
                         return None;
                     }
 
@@ -454,12 +471,14 @@ impl GitStatusModel {
 
                             None
                         }
+
                         Some(root) => {
                             // Different repo: drop the stale snapshot now so
                             // the old repo's data never shows for the new one.
                             if this.snapshot.as_ref().is_some_and(|s| s.repo_root != root) {
                                 this.snapshot = None;
                                 this.snapshot_seq += 1;
+
                                 cx.notify();
                             }
 
@@ -484,6 +503,7 @@ impl GitStatusModel {
 
                 if this.generation != generation {
                     this.refresh(cx);
+
                     return;
                 }
 
@@ -492,6 +512,7 @@ impl GitStatusModel {
                         this.snapshot = Some(snapshot);
                         this.snapshot_seq += 1;
                     }
+
                     Err(err) => warn!("git status refresh failed: {err}"),
                 }
 

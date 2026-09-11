@@ -8,6 +8,7 @@ use crate::codex::hook::*;
 fn fixture_events() -> Vec<Value> {
     let fixture: Value =
         from_str(include_str!("../../../tests/fixtures/codex-0.144.1.json")).unwrap();
+
     fixture["events"].as_array().unwrap().clone()
 }
 
@@ -157,6 +158,7 @@ fn missing_event_is_stale() {
     let mut settings = json!({});
 
     install_into(&mut settings, CURRENT_COMMAND).unwrap();
+
     settings["hooks"]
         .as_object_mut()
         .unwrap()

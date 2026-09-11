@@ -21,14 +21,18 @@ use crate::terminal::Mode;
 #[test]
 fn path_paste_and_block_replay_obey_session_input_rules() {
     let (session, messages) = test_session();
+
     session
         .vt_modes
         .store(Mode::BRACKETED_PASTE.bits(), Ordering::Release);
+
     let paths = [r"C:\src\main.rs".into(), r"C:\My Project\notes.txt".into()];
+
     assert!(!session.paste_paths(&[]));
     assert!(session.paste_paths(&paths));
     assert!(matches!(messages.try_recv().unwrap(), Msg::Input(bytes)
         if bytes.as_ref() == b"\x1b[200~C:\\src\\main.rs \"C:\\My Project\\notes.txt\"\x1b[201~"));
+
     session
         .block_store()
         .lock()
@@ -40,16 +44,20 @@ fn path_paste_and_block_replay_obey_session_input_rules() {
             },
             rows: 1,
         }]);
+
     session
         .block_store()
         .lock()
         .update_meta(1, |meta| meta.command = Some("echo hello".into()));
+
     assert!(session.rerun_block(0));
     assert!(
         matches!(messages.try_recv().unwrap(), Msg::Input(bytes) if bytes.as_ref() == b"echo hello\r")
     );
     assert!(!session.rerun_block(99));
+
     session.mark_read_only();
+
     assert!(!session.paste_paths(&paths));
     assert!(!session.rerun_block(0));
     assert!(messages.try_recv().is_err());
@@ -57,7 +65,9 @@ fn path_paste_and_block_replay_obey_session_input_rules() {
 
 pub(super) fn test_session() -> (TerminalSession, mpsc::Receiver<Msg>) {
     let mut engine = GhosttyTerminal::new(24, 4, 100).unwrap();
+
     engine.write_vt(b"hello world");
+
     session_from_engine(&mut engine)
 }
 
@@ -68,7 +78,9 @@ pub(super) fn session_from_engine(
     let poll = Poll::new().unwrap();
     let waker = Arc::new(Waker::new(poll.registry(), Token(0)).unwrap());
     let mut buffer = RenderBuffer::new(engine.cols() as usize, engine.rows() as usize);
+
     engine.snapshot_into(&mut buffer).unwrap();
+
     (
         TerminalSession {
             pages: Mutex::new(PageCache::default()),
@@ -92,12 +104,15 @@ fn writes_report_queue_acceptance_and_reject_closed_or_read_only_sessions() {
     assert!(matches!(rx.try_recv().unwrap(), Msg::Input(bytes) if bytes.as_ref() == b"hello"));
 
     session.mark_read_only();
+
     assert!(!session.write_text("ignored"));
     assert!(!session.paste_text("ignored"));
     assert!(rx.try_recv().is_err());
 
     let (closed, receiver) = test_session();
+
     drop(receiver);
+
     assert!(!closed.write_text("undeliverable"));
     assert!(!closed.resize(80, 24, 800, 480));
 }
@@ -109,8 +124,11 @@ fn runtime_transitions_do_not_require_host_event_consumption() {
     let window = WindowId::dummy();
 
     proxy.send_event(TerminalEvent::AltScreen(true), window);
+
     assert!(session.alt_screen());
+
     proxy.send_event(TerminalEvent::AltScreen(false), window);
+
     assert!(!session.alt_screen());
 
     session.apply_screen_selection(
@@ -119,9 +137,11 @@ fn runtime_transitions_do_not_require_host_event_consumption() {
         SurfaceMouseEventKind::Down,
         SelectionType::Semantic,
     );
+
     assert!(session.selection_range().is_some());
 
     let now = SystemTime::now();
+
     proxy.send_event(
         TerminalEvent::CommandFinished(CommandCapture {
             seq: 1,
@@ -133,9 +153,11 @@ fn runtime_transitions_do_not_require_host_event_consumption() {
         }),
         window,
     );
+
     assert!(session.selection_range().is_none());
 
     proxy.send_event(TerminalEvent::CloseTerminal(0), window);
+
     assert!(session.exited());
     assert!(!session.write_text("after exit"));
     assert!(!session.resize(80, 24, 800, 480));
@@ -146,6 +168,7 @@ fn runtime_transitions_do_not_require_host_event_consumption() {
 #[test]
 fn current_directory_is_available_before_event_drain() {
     let (session, _) = test_session();
+
     for (reported, expected) in [
         ("file:///C:/Projects/example", "C:/Projects/example"),
         ("file://host/home/u", "/home/u"),
@@ -153,10 +176,14 @@ fn current_directory_is_available_before_event_drain() {
         ("/unix/path", "/unix/path"),
     ] {
         let mut engine = GhosttyTerminal::new(24, 4, 100).unwrap();
+
         engine.write_vt(format!("\x1b]7;{reported}\x07").as_bytes());
         engine.poll_pwd();
+
         let mut snapshot = engine.snapshot().unwrap();
+
         session.render_buffer.publish(&mut snapshot);
+
         assert_eq!(session.current_directory().as_deref(), Some(expected));
     }
 }

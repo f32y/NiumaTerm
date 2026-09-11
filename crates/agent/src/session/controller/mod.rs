@@ -76,15 +76,19 @@ impl SessionController {
         if self.input.has_submission() {
             return Err(SubmissionBlock::QuestionResponse);
         }
+
         if self.branch.holds_composer() {
             return Err(SubmissionBlock::ConversationChange);
         }
+
         if self.commands.awaiting_turn {
             return Err(SubmissionBlock::CommandStarting);
         }
 
         self.naming.sync(self.runtime.backend_mut());
+
         let outcome = self.runtime.send(|backend| send(backend, &text));
+
         Ok(self.delivery.submit(outcome, text, recovery))
     }
 
@@ -99,22 +103,29 @@ impl SessionController {
     /// Installation failure must retire accepted work from the failed start too.
     pub fn install(&mut self, epoch: u64, spawned: Result<Backend, String>) -> StartOutcome {
         let outcome = self.runtime.install(epoch, spawned);
+
         if matches!(outcome, StartOutcome::Failed(_)) {
             self.commands.clear();
             self.delivery.start_failed();
         }
+
         outcome
     }
 
     pub fn starting(&mut self, recovery: Option<&RecoveryIdentity>) -> SessionStart {
         let epoch = self.runtime.begin_start();
+
         self.input.starting(epoch);
         self.restore.starting(epoch, recovery);
+
         let reset_branch = !self.branch.starting(epoch, recovery);
+
         if reset_branch {
             self.branch.clear();
         }
+
         self.naming.named = recovery.is_some();
+
         SessionStart {
             epoch,
             reset_branch,

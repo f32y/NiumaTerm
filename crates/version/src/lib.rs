@@ -30,6 +30,7 @@ pub use crate::build::{crate_revision, emit, emit_internal};
 pub enum Version {
     /// `v1.2.0`, ordered by its three numbers.
     Release { major: u32, minor: u32, patch: u32 },
+
     /// `nightly-20260821-7567b41`. The date is the committer date as
     /// `yyyymmdd`, which orders numerically because it is zero-padded.
     Nightly { date: u32, commit: String },

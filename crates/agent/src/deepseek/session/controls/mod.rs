@@ -22,10 +22,12 @@ const CALL_DEADLINE: Duration = Duration::from_secs(15);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Operation {
     Approval(ApprovalRequest),
+
     Questions {
         request: QuestionRequest,
         skipped: bool,
     },
+
     Interrupt,
     InterruptChild(String),
 }
@@ -79,6 +81,7 @@ impl Controls {
                                 "DeepSeek control failed; a transport failure may have an unknown outcome: {}",
                                 error.message()
                             )),
+
                         None => Err("DeepSeek control expired before sending; please retry.".to_string()),
                     };
 
@@ -93,6 +96,7 @@ impl Controls {
                             Some(timeout) => client.call_with_timeout(
                                 "session/cancel", json!({"request": {"sessionId": session_id}}), timeout,
                             ).err().map(|error| error.message().to_string()),
+
                             None => Some("The approval was refused, but the stop expired before sending.".to_string()),
                         }
                     } else { None };
@@ -129,6 +133,7 @@ impl Controls {
                     Operation::Questions { request: left, .. },
                     Operation::Questions { request: right, .. },
                 ) => left == right,
+
                 _ => pending.operation == operation,
             })
         {

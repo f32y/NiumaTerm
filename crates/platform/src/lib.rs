@@ -18,6 +18,7 @@ pub mod library;
 
 #[cfg(not(windows))]
 mod unix;
+
 #[cfg(not(windows))]
 use crate::unix as platform;
 #[cfg(not(windows))]
@@ -25,6 +26,7 @@ pub use crate::unix::*;
 
 #[cfg(windows)]
 pub mod windows;
+
 use std::{io, sync};
 
 #[cfg(windows)]
@@ -58,11 +60,17 @@ pub struct Winsize {
 
 pub trait ProcessReadWrite {
     type Reader: io::Read;
+
     type Writer: io::Write;
+
     fn reader(&mut self) -> &mut Self::Reader;
+
     fn read_token(&self) -> Token;
+
     fn writer(&mut self) -> &mut Self::Writer;
+
     fn write_token(&self) -> Token;
+
     fn set_winsize(&mut self, _: WinsizeBuilder) -> Result<(), io::Error>;
 
     /// Register the PTY's sources with the event loop's `Poll`, pulling tokens from
@@ -76,7 +84,9 @@ pub trait ProcessReadWrite {
         _: Interest,
         _: &sync::Arc<Waker>,
     ) -> io::Result<()>;
+
     fn reregister(&mut self, _: &Poll, _: Interest) -> io::Result<()>;
+
     fn deregister(&mut self, _: &Poll) -> io::Result<()>;
 
     /// Tokens whose soft-ready flag is currently set (Windows ConPTY worker-thread
@@ -176,6 +186,7 @@ pub fn default_shell() -> String {
 pub struct PromptIntegration {
     pub args: Vec<String>,
     pub environment: Vec<(String, String)>,
+
     /// Bytes to place in the terminal's input queue before the shell starts,
     /// for a platform that hands the shell its integration by typing at it
     /// rather than through a startup file the shell would discover. The PTY

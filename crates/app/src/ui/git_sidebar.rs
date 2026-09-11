@@ -18,11 +18,14 @@ pub(crate) struct GitSidebar {
     model: Entity<GitStatusModel>,
     selected: Option<String>,
     diff: Vec<DiffLine>,
+
     /// Guards a slow diff fetch from overwriting a newer selection's diff.
     diff_seq: u64,
+
     /// Last `snapshot_seq` reacted to, so `refreshing` flag flips don't
     /// re-fetch the diff.
     seen_snapshot_seq: u64,
+
     files_scroll: UniformListScrollHandle,
     diff_scroll: UniformListScrollHandle,
 }
@@ -113,6 +116,7 @@ impl GitSidebar {
             this.update(cx, |this, cx| {
                 if this.diff_seq == seq {
                     this.diff = lines;
+
                     cx.notify();
                 }
             })
@@ -241,9 +245,11 @@ impl GitSidebar {
                                 DiffLineKind::Added => theme.green,
                                 DiffLineKind::Removed => theme.red,
                                 DiffLineKind::Hunk => theme.cyan,
+
                                 DiffLineKind::FileHeader | DiffLineKind::Truncated => {
                                     theme.muted_foreground
                                 }
+
                                 DiffLineKind::Context => theme.foreground,
                             };
 

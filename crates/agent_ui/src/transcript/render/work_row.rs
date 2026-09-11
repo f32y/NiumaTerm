@@ -50,9 +50,12 @@ impl TranscriptView {
                 // Belt and braces: a non-zero exit code is a failure even if
                 // the provider reported the execution as completed.
                 let state = status.as_deref().unwrap_or("inProgress");
+
                 let failed = matches!(state, "failed" | "declined")
                     || exit_code.is_some_and(|code| code != 0);
+
                 let state = if failed { "failed" } else { state };
+
                 let detail = aggregated_output.as_deref().unwrap_or("");
 
                 (
@@ -65,6 +68,7 @@ impl TranscriptView {
                     Some(detail),
                 )
             }
+
             SessionItem::FileChange {
                 paths,
                 diff,
@@ -77,6 +81,7 @@ impl TranscriptView {
                 Some(status.as_deref().unwrap_or("inProgress").to_string()),
                 diff.as_deref().filter(|diff| !diff.trim().is_empty()),
             ),
+
             SessionItem::Other {
                 kind,
                 title,
@@ -98,6 +103,7 @@ impl TranscriptView {
                 Some(status.as_deref().unwrap_or("inProgress").to_string()),
                 output.as_deref().filter(|output| !output.trim().is_empty()),
             ),
+
             SessionItem::Reasoning { summary, .. } => (
                 IconName::Bot,
                 i18n("agent-transcript-thinking").to_string(),
@@ -105,14 +111,17 @@ impl TranscriptView {
                 None,
                 summary.as_deref().filter(|text| !text.trim().is_empty()),
             ),
+
             _ => return div().into_any_element(),
         };
 
         let expandable = detail.is_some();
         let expanded = expandable && self.disclosures.row_expanded(index);
+
         let detail_reveal = self
             .disclosures
             .progress(RevealKey::Row(index), Instant::now());
+
         let detail_part = RevealedPart::Block(RevealKey::Row(index));
         let detail_height = self.disclosures.height(detail_part);
         let detail_view = cx.entity().downgrade();

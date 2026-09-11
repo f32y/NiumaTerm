@@ -88,8 +88,10 @@ fn long_stderr_lines_remain_complete_and_separate_from_protocol_output() {
         "[Console]::Error.WriteLine(('x' * 131072)); [Console]::Error.WriteLine('next'); [Console]::Out.WriteLine('{\"ready\":true}')",
         "head -c 131072 /dev/zero | tr '\\000' x >&2; printf '\\nnext\\n' >&2; echo '{\"ready\":true}'",
     );
+
     let (output_tx, output_rx) = channel();
     let (stderr_tx, stderr_rx) = channel();
+
     let mut process = JsonLineProcess::spawn(
         command,
         "long-stderr",
@@ -155,6 +157,7 @@ fn stalled_input_accepts_a_message_burst_without_closing_the_process() {
     for _ in 0..2048 {
         process.try_write_line(json!({"next":true})).unwrap();
     }
+
     assert!(process.has_stdin());
     assert!(closed_rx.try_recv().is_err());
 
@@ -221,7 +224,9 @@ fn stdout_close_callback_follows_the_last_json_message() {
     #[cfg(unix)]
     let command = {
         let mut command = hidden_command("/bin/sh");
+
         command.args(["-c", "echo '{\"ready\":true}'"]);
+
         command
     };
 
@@ -252,6 +257,7 @@ fn stdout_close_callback_follows_the_last_json_message() {
     closed_rx
         .recv_timeout(Duration::from_secs(5))
         .expect("stdout close callback");
+
     process
         .shutdown(Duration::from_secs(1), false)
         .expect("exited process should be observable");

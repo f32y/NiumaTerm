@@ -25,6 +25,7 @@ fn main() {
 
     let Some(profile_dir) = out_dir.ancestors().nth(3) else {
         println!("cargo:warning=could not derive target profile dir from OUT_DIR");
+
         return;
     };
 

@@ -54,6 +54,7 @@ impl EngineRowBuilder {
         while self.col < x {
             self.line
                 .push_segment(iter::once('\u{00a0}'), default_style, false);
+
             self.col += 1;
         }
 
@@ -107,6 +108,7 @@ impl EngineRowBuilder {
 pub(crate) struct HandleItemInfo {
     /// Cached engine row count — the layout height source.
     pub rows: usize,
+
     pub accent: u32,
     pub header: Option<String>,
 }
@@ -157,6 +159,7 @@ pub(crate) fn frozen_block_view(
     // Every block opens with a rule on its top edge; the neighbors' pad rows
     // give it a blank line on each side.
     view.separators.push(0.0);
+
     view.items_chrome.push(FrozenItemChrome {
         item: item_idx,
         top: 0.0,
@@ -179,6 +182,7 @@ pub(crate) fn frozen_block_view(
     else {
         return view;
     };
+
     let handle = BlockHandle { id, generation };
     let cols: u32 = first.cols.into();
 
@@ -192,6 +196,7 @@ pub(crate) fn frozen_block_view(
         let Some(data) = pages.iter().find_map(|page| page.row(row)) else {
             continue;
         };
+
         for cell in &data.cells {
             builder.push(
                 cell.x,
@@ -203,6 +208,7 @@ pub(crate) fn frozen_block_view(
         }
 
         let line: TerminalLine = builder.into();
+
         let selected = block_selection_span(selection, item_idx, row, cols)
             .map(|span| expand_wide_span(&line, span));
 

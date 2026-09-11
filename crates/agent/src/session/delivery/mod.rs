@@ -12,11 +12,13 @@ enum QueuedPromptDelivery {
     /// nothing about it, so assistant output arriving after the submit is the
     /// only sign it landed, and the turn's end is the last chance to say so.
     RunningTurn,
+
     /// The harness holds the prompt until the running turn ends and then opens
     /// a turn of its own for it. The prompt therefore heads that next turn,
     /// and drawing it into the finished one would put it above output written
     /// before it was ever submitted.
     FollowingTurn,
+
     /// The backend republishes its own pending inbox, so a prompt waiting
     /// behind the running turn is known rather than guessed at. Guessing
     /// beside it would show a message as sent while the snapshot still lists
@@ -97,16 +99,22 @@ impl MessageDelivery {
         match outcome {
             SendOutcome::NotReady => Submission::NotReady,
             SendOutcome::Rejected { message } => Submission::Rejected { message },
+
             SendOutcome::Steered => {
                 self.pending.push_back(QueuedPrompt::local(text));
+
                 Submission::Queued
             }
+
             SendOutcome::StartedTurn => {
                 self.begin_turn();
+
                 if self.policy == QueuedPromptDelivery::PendingInbox {
                     self.published_prompt = Some(text.clone());
                 }
+
                 self.unanswered = recovery().map(|prompt| (self.turn, prompt));
+
                 Submission::Started { text }
             }
         }
@@ -116,6 +124,7 @@ impl MessageDelivery {
     pub fn begin_turn(&mut self) -> u64 {
         self.turn += 1;
         self.active = true;
+
         self.turn
     }
 
@@ -126,15 +135,18 @@ impl MessageDelivery {
         }
 
         self.begin_turn();
+
         if self.policy == QueuedPromptDelivery::FollowingTurn {
             self.confirmed = self.pending.len();
         }
+
         true
     }
 
     /// Restored turns reserve numbers without starting live work.
     pub fn replay_turn(&mut self) -> u64 {
         self.turn += 1;
+
         self.turn
     }
 
@@ -160,6 +172,7 @@ impl MessageDelivery {
         // Recovering an unanswered submission discards its provisional turn.
         // A provider that continues anyway opens a new turn on its next start.
         self.active = false;
+
         Some(prompt)
     }
 
@@ -202,7 +215,9 @@ impl MessageDelivery {
         if self.confirmed == 0 {
             return None;
         }
+
         self.confirmed -= 1;
+
         self.pending.pop_front().map(|prompt| prompt.text)
     }
 
@@ -216,7 +231,9 @@ impl MessageDelivery {
         {
             return None;
         }
+
         self.confirmed = self.confirmed.saturating_sub(1);
+
         self.pending.pop_front().map(|prompt| prompt.text)
     }
 
@@ -225,7 +242,9 @@ impl MessageDelivery {
     pub fn snapshot(&mut self, mut prompts: Vec<QueuedPrompt>) -> Vec<String> {
         if let Some(drawn) = self.published_prompt.take() {
             let before = prompts.len();
+
             prompts.retain(|prompt| prompt.text != drawn);
+
             if prompts.len() != before {
                 self.published_prompt = Some(drawn);
             }
@@ -237,8 +256,10 @@ impl MessageDelivery {
             .filter(|held| !prompts.iter().any(|pending| pending.text == held.text))
             .map(|held| held.text)
             .collect();
+
         self.pending = prompts.into();
         self.confirmed = 0;
+
         claimed
     }
 

@@ -20,12 +20,15 @@ use crate::ui::shell::actions::{ToggleBackgroundTasks, ToggleGitSidebar, ToggleW
 pub(super) struct RightPanelController {
     /// Always mounted so close can animate.
     panel: Entity<RightPanel>,
+
     /// Shared git status poller feeding the titlebar indicator and sidebar.
     git_model: Entity<GitStatusModel>,
+
     /// Whether any tab has run a workflow. Sticky: the title-bar control
     /// appears the first time one runs and stays, so a finished run remains
     /// reachable after its rows have settled.
     workflows_seen: bool,
+
     /// Whether any tab has spawned a background task. Sticky for the same
     /// reason as `workflows_seen`: a child that has finished is still worth
     /// opening the view for.
@@ -89,6 +92,7 @@ impl RightPanelController {
         let handle = active
             .filter(|pane| pane.read(cx).workflow_session_id().is_some())
             .map(|pane| pane.downgrade());
+
         let workflows = self.panel.read(cx).workflows().clone();
 
         workflows.update(cx, |view, cx| view.set_target(handle, cx));
@@ -106,6 +110,7 @@ impl RightPanelController {
         let handle = active
             .filter(|pane| pane.read(cx).background_task_parent().is_some())
             .map(|pane| pane.downgrade());
+
         let tasks = self.panel.read(cx).tasks().clone();
 
         tasks.update(cx, |view, cx| view.set_target(handle, cx));

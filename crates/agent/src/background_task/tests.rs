@@ -17,6 +17,7 @@ fn same_local_id_from_two_providers_stays_distinct() {
         BackgroundTaskKey::codex("shared-id"),
         BackgroundTaskUpdate::state(BackgroundTaskState::Working),
     );
+
     registry.apply(
         BackgroundTaskKey::claude_code("shared-id"),
         BackgroundTaskUpdate::state(BackgroundTaskState::Done),
@@ -178,6 +179,7 @@ fn a_delayed_restored_row_cannot_replace_a_newer_live_state() {
         key.clone(),
         BackgroundTaskUpdate::state(BackgroundTaskState::Done),
     );
+
     registry.merge_restored(
         key.clone(),
         BackgroundTaskUpdate {
@@ -239,6 +241,7 @@ fn the_earliest_known_start_time_wins() {
             ..BackgroundTaskUpdate::default()
         },
     );
+
     registry.apply(
         key.clone(),
         BackgroundTaskUpdate {
@@ -293,6 +296,7 @@ mod child_transcript {
             status: Some("inProgress".into()),
             exit_code: None,
         });
+
         transcript.push(Item::CommandExecution {
             id: "cmd-1".into(),
             command: "cargo test".into(),

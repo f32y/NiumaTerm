@@ -30,6 +30,7 @@ use web_time::Instant;
 
 const REPORT_INTERVAL: Duration = Duration::from_secs(1);
 const DEFAULT_VSYNC_INTERVAL_US: u64 = 16_667;
+
 /// A frame interval past this multiple of the display's is visible as a stutter.
 const LONG_FRAME_FACTOR: u32 = 3;
 
@@ -50,6 +51,7 @@ impl Series {
 
     fn add(&mut self, duration: Duration) {
         let us = duration.as_micros() as u64;
+
         self.count += 1;
         self.total_us += us;
         self.max_us = self.max_us.max(us);
@@ -71,8 +73,10 @@ impl Series {
 struct Stats {
     window_started: Option<Instant>,
     last_present: Option<Instant>,
+
     /// When the pending frame request was armed, if one is still unserviced.
     armed_at: Option<Instant>,
+
     frames: u64,
     throttled: u64,
     long_frames: u64,
@@ -120,6 +124,7 @@ impl Stats {
     fn restart(&mut self, now: Instant) {
         let last_present = self.last_present;
         let armed_at = self.armed_at;
+
         *self = Self::new();
         self.window_started = Some(now);
         self.last_present = last_present;
@@ -129,6 +134,7 @@ impl Stats {
 
 static STATS: Mutex<Stats> = Mutex::new(Stats::new());
 static ENABLED: AtomicBool = AtomicBool::new(false);
+
 /// Display refresh interval, published by the platform's vsync provider.
 static VSYNC_INTERVAL_US: AtomicU64 = AtomicU64::new(DEFAULT_VSYNC_INTERVAL_US);
 
@@ -139,6 +145,7 @@ pub fn set_enabled(enabled: bool) {
     if ENABLED.swap(enabled, Ordering::Release) == enabled {
         return;
     }
+
     *STATS.lock() = Stats::new();
 }
 
@@ -171,7 +178,9 @@ pub fn record_frame_armed() {
     if !enabled() {
         return;
     }
+
     let now = Instant::now();
+
     STATS.lock().armed_at.get_or_insert(now);
 }
 
@@ -183,8 +192,10 @@ pub fn record_request_serviced() {
     if !enabled() {
         return;
     }
+
     let now = Instant::now();
     let mut stats = STATS.lock();
+
     if let Some(armed_at) = stats.armed_at.take() {
         stats.arm_lag.add(now.saturating_duration_since(armed_at));
     }
@@ -197,6 +208,7 @@ pub fn record_main_thread_task(duration: Duration) {
     if !enabled() {
         return;
     }
+
     STATS.lock().main_tasks.add(duration);
 }
 
@@ -206,6 +218,7 @@ pub fn record_window_message(duration: Duration) {
     if !enabled() {
         return;
     }
+
     STATS.lock().window_msgs.add(duration);
 }
 
@@ -214,7 +227,9 @@ pub fn record_draw(duration: Duration, dirty_views: usize) {
     if !enabled() {
         return;
     }
+
     let mut stats = STATS.lock();
+
     stats.draw.add(duration);
     stats.dirty_views += dirty_views as u64;
 }
@@ -225,19 +240,26 @@ pub fn record_present(duration: Duration, primitives: usize) {
     if !enabled() {
         return;
     }
+
     let now = Instant::now();
     let mut stats = STATS.lock();
+
     stats.present.add(duration);
     stats.frames += 1;
     stats.primitives += primitives as u64;
+
     if let Some(last) = stats.last_present.replace(now) {
         let interval = now.duration_since(last);
+
         stats.interval.add(interval);
+
         let vsync_us = VSYNC_INTERVAL_US.load(Ordering::Relaxed);
+
         if interval.as_micros() as u64 > vsync_us * LONG_FRAME_FACTOR as u64 {
             stats.long_frames += 1;
         }
     }
+
     report_if_due(&mut stats, now);
 }
 
@@ -246,6 +268,7 @@ pub fn record_throttled() {
     if !enabled() {
         return;
     }
+
     STATS.lock().throttled += 1;
 }
 
@@ -255,6 +278,7 @@ pub fn record_gpu_wait(duration: Duration) {
     if !enabled() {
         return;
     }
+
     STATS.lock().gpu_wait.add(duration);
 }
 
@@ -265,12 +289,16 @@ pub fn record_vsync_tick(short_wait: bool) {
     if !enabled() {
         return;
     }
+
     let now = Instant::now();
     let mut stats = STATS.lock();
+
     stats.vsync_ticks += 1;
+
     if short_wait {
         stats.vsync_short_waits += 1;
     }
+
     report_if_due(&mut stats, now);
 }
 
@@ -279,21 +307,26 @@ pub fn record_redraws_requested(count: usize) {
     if !enabled() {
         return;
     }
+
     STATS.lock().redraws_requested += count as u64;
 }
 
 fn report_if_due(stats: &mut Stats, now: Instant) {
     let Some(started) = stats.window_started else {
         stats.window_started = Some(now);
+
         return;
     };
+
     let elapsed = now.duration_since(started);
+
     if elapsed < REPORT_INTERVAL {
         return;
     }
 
     let seconds = elapsed.as_secs_f64();
     let vsync_hz = 1_000_000.0 / VSYNC_INTERVAL_US.load(Ordering::Relaxed) as f64;
+
     log::info!(
         target: "frame_stats",
         "frames {:.1}/s (display {:.1}Hz) | vsync {:.1}/s (short {}) | req {:.1}/s | \

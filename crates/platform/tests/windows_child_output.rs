@@ -12,6 +12,7 @@ use nmt_platform::process::{decode_child_output, hidden_cmd_command};
 #[test]
 fn cmd_diagnostic_round_trips_non_ascii_text() {
     let name = "\u{4e0d}\u{5b58}\u{5728}\u{7684}\u{547d}\u{4ee4}";
+
     let output = hidden_cmd_command(name)
         .output()
         .expect("cmd.exe should start");
@@ -31,5 +32,6 @@ fn cmd_diagnostic_round_trips_non_ascii_text() {
 #[test]
 fn utf8_input_is_returned_unchanged() {
     let text = "caf\u{e9} \u{4e2d}\u{6587}";
+
     assert_eq!(decode_child_output(text.as_bytes()), text);
 }

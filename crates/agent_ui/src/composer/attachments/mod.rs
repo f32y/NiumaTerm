@@ -43,6 +43,7 @@ pub(crate) fn spaced_placeholder(preceding: Option<char>, placeholder: &str) -> 
 #[derive(Default)]
 pub(crate) struct ComposerAttachments {
     images: PendingAttachments,
+
     /// Earlier agent response text attached to the pending message.
     annotations: Vec<String>,
 }
@@ -111,6 +112,7 @@ impl ComposerAttachments {
 
         input.update(cx, |input, cx| {
             let preceding = input.text().chars_at(input.cursor()).prev();
+
             input.insert(spaced_placeholder(preceding, &placeholder), window, cx);
         });
 
@@ -152,6 +154,7 @@ impl ComposerAttachments {
     ) -> bool {
         if self.images.is_empty() {
             input.update(cx, |input, cx| input.set_links(Vec::new(), cx));
+
             return false;
         }
 
@@ -176,6 +179,7 @@ impl ComposerAttachments {
 
                 renumbered
             }
+
             None => text.to_string(),
         };
 
@@ -192,6 +196,7 @@ pub(crate) use nmt_agent::images::{AttachError, MAX_ATTACHMENTS};
 use nmt_agent::images::{MAX_IMAGE_EDGE, placeholder_text};
 
 pub(crate) struct Attachment<'a>(&'a CoreAttachment<Arc<Image>>);
+
 impl<'a> Attachment<'a> {
     pub(crate) fn bytes(&self) -> &'a [u8] {
         self.0.image.bytes()
@@ -212,6 +217,7 @@ impl<'a> Attachment<'a> {
 
 #[derive(Default)]
 pub(crate) struct PendingAttachments(CorePendingAttachments<Arc<Image>>);
+
 impl PendingAttachments {
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()

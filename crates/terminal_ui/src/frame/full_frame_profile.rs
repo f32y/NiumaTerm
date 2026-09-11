@@ -75,6 +75,7 @@ fn profile_full_frame_pipeline() -> Result<(), &'static str> {
         capture_total += s.elapsed();
 
         let e = Instant::now();
+
         let frame =
             TerminalFrame::from_render_buffer_reusing(&render_buf, None, &gens, None, &theme);
 
@@ -89,6 +90,7 @@ fn profile_full_frame_pipeline() -> Result<(), &'static str> {
 
     let mut previous =
         TerminalFrame::from_render_buffer_reusing(&render_buf, None, &gens, None, &theme);
+
     let mut incremental_total = Duration::ZERO;
 
     const WARMUP_FRAMES: usize = 256;
@@ -98,6 +100,7 @@ fn profile_full_frame_pipeline() -> Result<(), &'static str> {
         engine.snapshot_into(&mut render_buf).unwrap();
 
         let e = Instant::now();
+
         let frame = hint::black_box(TerminalFrame::from_render_buffer_reusing(
             hint::black_box(&render_buf),
             None,
@@ -133,6 +136,7 @@ fn profile_full_frame_pipeline() -> Result<(), &'static str> {
 
     #[cfg(target_os = "macos")]
     let platform = MacPlatform::new(false);
+
     let pts = platform.text_system();
     let font_id = pts.font_id(&font("Consolas")).expect("Consolas font id");
     let font_size = px(14.0);

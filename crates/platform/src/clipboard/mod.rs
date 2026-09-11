@@ -35,8 +35,10 @@ impl Clipboard {
 
         match clipboard.set_contents(text.into()) {
             Ok(()) => true,
+
             Err(err) => {
                 warn!("Unable to store text in clipboard: {err}");
+
                 false
             }
         }
@@ -51,8 +53,10 @@ impl Clipboard {
         match clipboard.get_contents() {
             Err(err) => {
                 warn!("Unable to load text from clipboard: {}", err);
+
                 String::new()
             }
+
             Ok(text) => text,
         }
     }

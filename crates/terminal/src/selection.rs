@@ -38,8 +38,10 @@ impl Anchor {
 pub struct SelectionRange {
     /// Start point, top left of the selection.
     pub start: Pos,
+
     /// End point, bottom right of the selection.
     pub end: Pos,
+
     /// Whether this selection is a block selection.
     pub is_block: bool,
 }
@@ -204,6 +206,7 @@ impl Selection {
                         && (start.point.row == end.point.row)
                         && start.point.col + 1 == end.point.col)
             }
+
             SelectionType::Block => {
                 let (start, end) = (self.region.start, self.region.end);
 
@@ -218,6 +221,7 @@ impl Selection {
                         && start.side == Side::Left
                         && end.side == Side::Right)
             }
+
             SelectionType::Semantic | SelectionType::Lines => false,
         }
     }
@@ -274,6 +278,7 @@ impl Selection {
             SelectionType::Simple => self.range_simple(start, end, columns),
             SelectionType::Block => self.range_block(start, end),
             SelectionType::Lines => Some(Self::range_lines_engine(&grid, start.point, end.point)),
+
             SelectionType::Semantic => Some(Self::range_semantic_engine(
                 &grid,
                 start.point,

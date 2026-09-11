@@ -19,9 +19,11 @@ impl Default for Clipboard {
                 clipboard: Box::new(clipboard),
                 selection: None,
             },
+
             Err(err) => {
                 // Clipboard access can be unavailable while the terminal remains usable.
                 warn!("Unable to initialize clipboard, falling back to no-op: {err}");
+
                 Self::new_nop()
             }
         }

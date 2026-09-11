@@ -30,6 +30,7 @@ pub(super) struct KittyState {
     /// `ghostty_kitty_graphics_get(PLACEMENT_ITERATOR)` re-points it at the live
     /// storage with no allocation, so a no-graphics batch costs ~3 FFI calls.
     placement_iter: VtKittyGraphicsPlacementIterator,
+
     /// Kitty image-delta cache: `image_id -> (width, height, data_len)`
     /// of every image already shipped to the frontend. Owned by the PTY reader
     /// thread (only `take_image_deltas` mutates it). A key change (re-transmit
@@ -96,6 +97,7 @@ impl KittyState {
         while unsafe { ghostty_kitty_graphics_placement_next(self.placement_iter) } {
             let iter = self.placement_iter;
             let image_id = placement_scalar::<u32>(iter, VtKittyGraphicsPlacementData::IMAGE_ID);
+
             let placement_id =
                 placement_scalar::<u32>(iter, VtKittyGraphicsPlacementData::PLACEMENT_ID);
 
@@ -239,6 +241,7 @@ impl KittyState {
             }
 
             let image_id = placement_scalar::<u32>(iter, VtKittyGraphicsPlacementData::IMAGE_ID);
+
             let image = unsafe { ghostty_kitty_graphics_image(graphics, image_id) };
 
             if image.is_null() {
@@ -454,6 +457,7 @@ pub(super) unsafe fn kitty_image_graphic_data(
     let (pixels, color_type) = match format {
         VtKittyImageFormat::RGB => (raw.to_vec(), ColorType::Rgb),
         VtKittyImageFormat::RGBA => (raw.to_vec(), ColorType::Rgba),
+
         VtKittyImageFormat::GRAY => {
             let mut px = Vec::with_capacity(raw.len() * 4);
 
@@ -463,6 +467,7 @@ pub(super) unsafe fn kitty_image_graphic_data(
 
             (px, ColorType::Rgba)
         }
+
         VtKittyImageFormat::GRAY_ALPHA => {
             let mut px = Vec::with_capacity(raw.len() * 2);
 
@@ -472,6 +477,7 @@ pub(super) unsafe fn kitty_image_graphic_data(
 
             (px, ColorType::Rgba)
         }
+
         _ => return None, // PNG/unknown shouldn't reach here post-decode
     };
 

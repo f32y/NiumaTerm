@@ -38,13 +38,16 @@ pub use crate::pty_pipe::write_queue::PtyState;
 const WAKER_TOKEN: Token = Token(0);
 
 const READ_BUFFER_SIZE: usize = 0x10_0000;
+
 /// Yield to queued commands after each bounded PTY read batch.
 const MAX_READ_BATCH: usize = u16::MAX as usize;
+
 /// Coalesce viewport captures across PTY batches, including short bursts that
 /// temporarily drain the pipe. Five milliseconds fits within a 144 Hz frame;
 /// the poll deadline publishes the final burst even when no more bytes arrive.
 /// Output after an idle interval is captured immediately.
 const SNAPSHOT_MIN_INTERVAL: time::Duration = time::Duration::from_millis(5);
+
 /// Match Windows Terminal's upper bound so a missing DEC 2026 reset cannot
 /// leave the last committed frame visible indefinitely.
 const SYNC_OUTPUT_TIMEOUT: time::Duration = time::Duration::from_millis(100);
@@ -67,6 +70,7 @@ fn escape_bytes(bytes: &[u8]) -> String {
             b'\r' => out.push_str("<CR>"),
             b'\n' => out.push_str("<LF>"),
             0x20..=0x7e => out.push(b as char),
+
             _ => {
                 let _ = fmt::Write::write_fmt(&mut out, format_args!("\\x{b:02x}"));
             }
@@ -81,31 +85,40 @@ pub struct PtyPipe<T: EventedPty, U: EventListener> {
     receiver: mpsc::Receiver<Msg>,
     pty: T,
     poll: Poll,
+
     /// The loop's `Waker`. On Windows the ConPTY worker threads and the child-exit
     /// callback signal readiness through it; the `MsgSender` wakes it after each send
     /// (mio 1.2 has no pollable channel / user-space readiness).
     waker: Arc<Waker>,
+
     /// The event loop exclusively owns the parser and all mutable engine state.
     /// Other threads submit commands and retain published data independently.
     ghostty: GhosttyTerminal,
+
     theme_revision: u64,
+
     /// Publication exchanges immutable frame ownership without exposing the
     /// engine. Readers release the short publication lock before extraction.
     render_buffer: Arc<FrameStore>,
+
     /// PTY-thread-private target for direct Ghostty capture. A completed frame
     /// swaps with `render_buffer`, so the shared lock covers only publication.
     back_buffer: RenderBuffer,
+
     /// VT modes published to the frontend. This `PtyPipe` is the sole writer;
     /// the input path reads it lock-free. `Mode` is `u32`.
     vt_modes: Arc<AtomicU32>,
+
     /// Monotonic content version, bumped once per PTY batch / resize (the engine
     /// exposes no generation signal). The frontend's deep-search corpus cache
     /// compares it to detect content changes and invalidate cached views.
     content_version: Arc<AtomicU64>,
+
     /// Optional observer for the exact VT stream accepted by the engine. It runs
     /// on the owner thread before another command or byte batch can run,
     /// preserving checkpoint ordering. Observers must return promptly.
     output_sink: Option<OutputSink>,
+
     terminal_responses_enabled: bool,
     event_proxy: U,
     window_id: WindowId,
@@ -113,26 +126,32 @@ pub struct PtyPipe<T: EventedPty, U: EventListener> {
     conpty_resize_echo_realign: bool,
     conpty_resize_echo_pending: bool,
     conpty_resize_repaint_reads_remaining: u8,
+
     /// When the last resize happened. The `conpty_resize_echo_realign` input
     /// gate only fires for a brief window after a resize — input typed *during*
     /// the resize repaint, whose ConPTY echo lands at a stale CUP. Without a time
     /// bound, ordinary typing long after a resize keeps tripping the gate and
     /// accumulates (the "type 120 x's after a resize and the prompt repeats" bug).
     conpty_resize_at: Option<time::Instant>,
+
     /// SU-realign latch. `active_cursor_row()` is captured at resize time
     /// (it flips within one frame during the ConPTY repaint storm, so it can't be read
     /// live). `*_cols/_rows` let the first repaint sanity-check it answers this resize.
     conpty_resize_prompt_row: u16,
+
     conpty_resize_cols: u16,
     conpty_resize_rows: u16,
     su_realign_armed: bool,
+
     /// OSC 133 region state; only touched on the PTY thread.
     sniffer: PromptSniffer,
+
     /// Launch cwd of the currently-running command, latched at its `;C`: the cwd MUST
     /// NOT be read at `;D`, by which point the ps1 has already reported the NEXT
     /// prompt's OSC 7 directory (which would mislabel every `cd`). Attached to the
     /// CommandFinished event. PTY-thread-private.
     launch_cwd: Option<Option<path::PathBuf>>,
+
     /// Engine-blocks mode is the default: at
     /// each trusted `;D` the engine freezes the command into a finished
     /// block (`finish_block`, O(1)) whose handle is shipped to the app's
@@ -140,21 +159,28 @@ pub struct PtyPipe<T: EventedPty, U: EventListener> {
     /// the classic single-grid fallback: no finish, no boundary
     /// clear, no block events — plain terminal behavior.
     engine_blocks: bool,
+
     /// OSC 133 prompt-boundary sequence number; incremented at each trusted
     /// `;A` and stamped onto Command* events for segment/metadata marriage.
     mark_seq: u64,
+
     /// Last-seen alt-screen state, for edge-triggered interactive-state events.
     prev_alt_screen: bool,
+
     /// Last value sent by both alt-screen notifications, which share one edge.
     prev_alt_screen_sent: bool,
+
     /// The last capture time; absent until the first PTY output is captured.
     last_snapshot_at: Option<time::Instant>,
+
     /// True when a recent capture or synchronized update deferred its readback.
     /// Makes the event loop run `pty_read` without requiring new PTY bytes.
     snapshot_pending: bool,
+
     /// Start of the current DEC 2026 transaction. The event-loop poll uses this
     /// deadline to recover when an application omits the matching reset.
     sync_output_started_at: Option<time::Instant>,
+
     #[cfg(enable_profiling)]
     profile: PtyProfiler,
 }
@@ -248,6 +274,7 @@ where
         // resize cannot diverge from a zero-sized construction.
         let (cols, rows) = {
             let rb = render_buffer.load();
+
             (rb.cols() as u16, rb.rows() as u16)
         };
 
@@ -316,8 +343,10 @@ where
 
         if on != self.prev_alt_screen_sent {
             self.prev_alt_screen_sent = on;
+
             self.event_proxy
                 .send_event(TerminalEvent::InteractiveState(on), self.window_id);
+
             self.event_proxy
                 .send_event(TerminalEvent::AltScreen(on), self.window_id);
         }
@@ -348,25 +377,33 @@ where
             // Read from the PTY.
             #[cfg(enable_profiling)]
             let read_started = self.profile.start();
+
             let read = self.pty.reader().read(&mut buf[unprocessed..]);
+
             #[cfg(enable_profiling)]
             self.profile
                 .read(read_started, read.as_ref().copied().unwrap_or(0));
+
             match read {
                 // This is received on Windows/macOS when no more data is readable from the PTY.
                 Ok(0) if unprocessed == 0 => {
                     caught_up = true;
+
                     break;
                 }
+
                 Ok(got) => unprocessed += got,
+
                 Err(err) => match err.kind() {
                     ErrorKind::Interrupted | ErrorKind::WouldBlock => {
                         // Go back to mio if we're caught up on parsing and the PTY would block.
                         if unprocessed == 0 {
                             caught_up = true;
+
                             break;
                         }
                     }
+
                     _ => return Err(err),
                 },
             }
@@ -400,15 +437,19 @@ where
                 },
                 processed,
             );
+
             self.profile.start()
         };
+
         let result = self.flush_engine_state(if caught_up {
             FlushReason::Drained
         } else {
             FlushReason::Saturated
         });
+
         #[cfg(enable_profiling)]
         self.profile.record(Stage::Flush, flush_started);
+
         result
     }
 
@@ -416,6 +457,7 @@ where
     fn process_pty_chunk(&mut self, input: &[u8]) {
         #[cfg(enable_profiling)]
         let ingest_started = self.profile.start();
+
         let input_len = input.len();
 
         // The owner parses into private engine state while the UI retains its
@@ -516,6 +558,7 @@ where
 
                 prefix.into()
             }
+
             None => bytes.into(),
         });
 
@@ -621,6 +664,7 @@ where
         if let (Some(sink), Some(output)) = (&output_sink, observed_output) {
             sink(output);
         }
+
         #[cfg(enable_profiling)]
         self.profile.record(Stage::Ingest, ingest_started);
     }
@@ -632,6 +676,7 @@ where
         // Explicit view commands and shutdown still publish immediately.
         let capture_due = match reason {
             FlushReason::Command | FlushReason::Exit => true,
+
             FlushReason::Drained | FlushReason::Saturated => self
                 .last_snapshot_at
                 .is_none_or(|at| at.elapsed() >= SNAPSHOT_MIN_INTERVAL),
@@ -640,6 +685,7 @@ where
         // Collect one batch's protocol responses, metadata, image changes,
         // and frame before delivering events that announce the publication.
         let pwd = self.ghostty.poll_pwd();
+
         let (responses, bell, clipboard_writes, title, vt_modes, sync_output, capture, image_delta) = {
             let engine = &mut self.ghostty;
 
@@ -648,6 +694,7 @@ where
             let clipboard_writes = engine.take_clipboard_writes();
             let title = engine.poll_title();
             let vt_modes = ghostty_vt_modes(engine);
+
             let sync_output_timed_out = self
                 .sync_output_started_at
                 .is_some_and(|started| started.elapsed() >= SYNC_OUTPUT_TIMEOUT);
@@ -661,10 +708,13 @@ where
             // Finishing a synchronized update commits its complete frame even
             // when the preceding publication was recent.
             let sync_finished = self.sync_output_started_at.is_some() && !sync_output;
+
             let (capture, image_delta) = if (capture_due || sync_finished) && !sync_output {
                 #[cfg(enable_profiling)]
                 let capture_started = self.profile.start();
+
                 let capture = engine.snapshot_into(&mut self.back_buffer);
+
                 #[cfg(enable_profiling)]
                 self.profile.record(
                     match reason {
@@ -702,6 +752,7 @@ where
             self.event_proxy
                 .send_event(TerminalEvent::Cwd(cwd), self.window_id);
         }
+
         self.back_buffer.revision = self.content_version.load(sync::atomic::Ordering::Relaxed);
         self.back_buffer.theme_revision = self.theme_revision;
 
@@ -765,6 +816,7 @@ where
 
         let Some(capture) = capture else {
             self.snapshot_pending = true;
+
             // The poll deadline retries a deferred capture without requiring
             // another byte or spinning on self-generated wakeups.
             return Ok(());
@@ -775,14 +827,17 @@ where
 
         #[cfg(enable_profiling)]
         let publish_started = self.profile.start();
+
         let published = publish_render_buffer(
             &self.render_buffer,
             &mut self.back_buffer,
             capture,
             self.sniffer.progress_active(),
         );
+
         #[cfg(enable_profiling)]
         self.profile.record(Stage::Publish, publish_started);
+
         if published {
             self.event_proxy.send_event(
                 TerminalEvent::TerminalDamaged(self.route_id),
@@ -800,6 +855,7 @@ where
 
         Some(match self.sync_output_started_at {
             Some(started) => SYNC_OUTPUT_TIMEOUT.saturating_sub(started.elapsed()),
+
             None => self.last_snapshot_at.map_or(time::Duration::ZERO, |at| {
                 SNAPSHOT_MIN_INTERVAL.saturating_sub(at.elapsed())
             }),
@@ -816,6 +872,7 @@ where
         if self.ghostty.mode(mode::SYNC_OUTPUT) {
             self.ghostty.write_vt(b"\x1b[?2026l");
         }
+
         if let Err(error) = self.flush_engine_state(FlushReason::Exit) {
             warn!("failed to publish final terminal frame: {error}");
         }
@@ -829,6 +886,7 @@ where
             let Ok(msg) = self.receiver.try_recv() else {
                 return true;
             };
+
             match msg {
                 Msg::Input(input) => {
                     // Only treat input as a resize echo for a brief window after a
@@ -852,6 +910,7 @@ where
 
                     state.write_list.push_back(input)
                 }
+
                 Msg::Resize(window_size) => {
                     // Keep the Ghostty engine sized to match the PTY/Crosswords.
                     let cols = window_size.cols.max(1);
@@ -882,6 +941,7 @@ where
                         if let Err(err) = engine.resize(cols, rows, cell_w, cell_h) {
                             warn!("engine resize failed: {err:?}");
                         }
+
                         #[cfg(enable_profiling)]
                         self.profile.set_grid(engine.cols(), engine.rows());
 
@@ -905,7 +965,9 @@ where
 
                         #[cfg(enable_profiling)]
                         let capture_started = self.profile.start();
+
                         let capture = engine.snapshot_into(&mut self.back_buffer);
+
                         #[cfg(enable_profiling)]
                         self.profile.record(Stage::CaptureResize, capture_started);
 
@@ -925,18 +987,23 @@ where
                         .content_version
                         .fetch_add(1, sync::atomic::Ordering::Relaxed)
                         + 1;
+
                     self.back_buffer.theme_revision = self.theme_revision;
                     self.last_snapshot_at = Some(time::Instant::now());
+
                     #[cfg(enable_profiling)]
                     let publish_started = self.profile.start();
+
                     let published = publish_render_buffer(
                         &self.render_buffer,
                         &mut self.back_buffer,
                         snapshot,
                         self.sniffer.progress_active(),
                     );
+
                     #[cfg(enable_profiling)]
                     self.profile.record(Stage::Publish, publish_started);
+
                     if published {
                         // VT modes do not change on resize, so the lock-free
                         // atomic remains valid from the last PTY read.
@@ -966,6 +1033,7 @@ where
                         warn!("pty set_winsize failed: {err}");
                     }
                 }
+
                 Msg::Shutdown => return false,
                 request => self.handle_request(request),
             }
@@ -973,6 +1041,7 @@ where
 
         // A bounded drain must re-arm its wake even when no new sender arrives.
         let _ = self.waker.wake();
+
         true
     }
 
@@ -988,6 +1057,7 @@ where
 
                         break 'write_many;
                     }
+
                     Ok(n) => {
                         current.advance(n);
 
@@ -997,6 +1067,7 @@ where
                             break 'write_one;
                         }
                     }
+
                     Err(err) => {
                         state.set_current(Some(current));
 
@@ -1050,6 +1121,7 @@ where
         'event_loop: loop {
             #[cfg(enable_profiling)]
             self.profile.report_due();
+
             // Windows soft-ready is level-like but lives outside the OS poll set,
             // and its worker only wakes on the clear→set edge. A `pty_read` capped
             // by MAX_READ_BATCH can return with data still in the ring (flag left
@@ -1067,14 +1139,19 @@ where
 
             #[cfg(enable_profiling)]
             let poll_started = self.profile.start();
+
             let polled = self.poll.poll(&mut events, timeout);
+
             #[cfg(enable_profiling)]
             self.profile.record(Stage::Poll, poll_started);
+
             if let Err(err) = polled {
                 match err.kind() {
                     ErrorKind::Interrupted => continue,
+
                     _ => {
                         error!("Event loop polling error: {err}");
+
                         break 'event_loop;
                     }
                 }
@@ -1131,6 +1208,7 @@ where
 
             if child_exited && let Some(ChildEvent::Exited) = self.pty.next_child_event() {
                 self.flush_pending_on_exit();
+
                 // Emit `CloseTerminal` directly; PtyPipe owns the event proxy and route id.
                 self.event_proxy
                     .send_event(TerminalEvent::CloseTerminal(self.route_id), self.window_id);
@@ -1163,11 +1241,13 @@ where
                     }
 
                     error!("Error reading from PTY in event loop: {}", err);
+
                     break 'event_loop;
                 }
 
                 if do_write && let Err(err) = self.pty_write(&mut state) {
                     error!("Error writing to PTY in event loop: {}", err);
+
                     break 'event_loop;
                 }
             }
@@ -1199,6 +1279,7 @@ where
 
         // The PTY sources are not dropped here, so deregister them explicitly.
         let _ = self.pty.deregister(&self.poll);
+
         #[cfg(enable_profiling)]
         self.profile.flush();
 
@@ -1218,52 +1299,66 @@ where
                 self.ghostty.scroll_viewport_delta(delta);
                 self.publish_command();
             }
+
             Msg::ScrollTo(target) => {
                 let scrollbar = self.ghostty.scrollbar();
                 let target = target.min(scrollbar.total.saturating_sub(scrollbar.len));
                 let target: i128 = target.into();
                 let offset: i128 = scrollbar.offset.into();
+
                 let delta =
                     (target - offset).clamp(isize::MIN as i128, isize::MAX as i128) as isize;
+
                 self.ghostty.scroll_viewport_delta(delta);
                 self.publish_command();
             }
+
             Msg::ScrollToEnd => {
                 self.ghostty.scroll_viewport_bottom();
                 self.publish_command();
             }
+
             Msg::Theme(colors) => {
                 self.ghostty.set_theme_colors(&colors);
                 self.theme_revision = self.theme_revision.wrapping_add(1);
                 self.publish_command();
             }
+
             Msg::CursorShape { shape, reply } => {
                 let result = self
                     .ghostty
                     .set_default_cursor_shape(shape)
                     .map_err(|error| RequestError::Engine(error.to_string()));
+
                 if result.is_ok() {
                     self.publish_command();
                 }
+
                 let _ = reply.send(result);
             }
+
             Msg::Query(query) => {
                 #[cfg(enable_profiling)]
                 let query_started = self.profile.start();
+
                 answer_query(
                     &mut self.ghostty,
                     self.content_version.load(Ordering::Relaxed),
                     self.theme_revision,
                     query,
                 );
+
                 #[cfg(enable_profiling)]
                 self.profile.record(Stage::Query, query_started);
+
                 self.event_proxy
                     .send_event(TerminalEvent::ReadReady, self.window_id);
             }
+
             Msg::Checkpoint(request) => {
                 #[cfg(enable_profiling)]
                 let checkpoint_started = self.profile.start();
+
                 let result = self
                     .ghostty
                     .format_vt_state()
@@ -1273,10 +1368,13 @@ where
                         rows: self.ghostty.rows(),
                     })
                     .map_err(|error| RequestError::Engine(error.to_string()));
+
                 (request.0)(result);
+
                 #[cfg(enable_profiling)]
                 self.profile.record(Stage::Checkpoint, checkpoint_started);
             }
+
             Msg::Input(_) | Msg::Resize(_) | Msg::Shutdown => {
                 unreachable!("handled by the PTY loop")
             }
@@ -1286,15 +1384,21 @@ where
     fn publish_command(&mut self) {
         self.content_version.fetch_add(1, Ordering::Relaxed);
         self.snapshot_pending = true;
+
         #[cfg(enable_profiling)]
         let flush_started = {
             let started = self.profile.start();
+
             self.profile.command();
+
             started
         };
+
         let result = self.flush_engine_state(FlushReason::Command);
+
         #[cfg(enable_profiling)]
         self.profile.record(Stage::Flush, flush_started);
+
         if let Err(error) = result {
             warn!("failed to publish terminal update: {error}");
         }

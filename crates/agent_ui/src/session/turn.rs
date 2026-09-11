@@ -32,6 +32,7 @@ use crate::{AgentPane, AgentPaneEvent};
 /// machine's clock is idle time that has not happened.
 pub(super) fn replayed_response_age(at_unix: i64, now_unix: i64) -> Duration {
     let seconds = u64::try_from(now_unix.saturating_sub(at_unix)).unwrap_or(0);
+
     Duration::from_secs(seconds).min(LAST_RESPONSE_LIMIT)
 }
 
@@ -55,8 +56,10 @@ impl AgentPane {
     /// progress row; the ticker stops itself once `finish_working` clears it.
     pub(crate) fn start_working(&mut self, cx: &mut Context<Self>) {
         self.turn.submitted_at = Some(Instant::now());
+
         self.transcript
             .update(cx, |transcript, cx| transcript.start_working(cx));
+
         cx.notify();
 
         cx.spawn(async move |this, cx| {
@@ -66,6 +69,7 @@ impl AgentPane {
                 let ticking = this.update(cx, |this, cx| {
                     if this.transcript.read(cx).is_working() {
                         cx.notify();
+
                         true
                     } else {
                         false
@@ -88,7 +92,9 @@ impl AgentPane {
 
         self.transcript
             .update(cx, |transcript, cx| transcript.settle_turn(turn, cx));
+
         self.turn.note_response_settled(Instant::now(), cx);
+
         cx.notify();
     }
 
@@ -121,9 +127,12 @@ impl AgentPane {
                 input.set_value(restored, window, cx);
                 input.set_selected_range(cursor..cursor, cx);
             });
+
             self.palette.skill_binding = prompt.skill;
+
             self.attachments
                 .restore_annotations(prompt.response_annotations);
+
             cx.notify();
         }
 
@@ -132,12 +141,14 @@ impl AgentPane {
 
     pub(super) fn interrupt(&mut self, cx: &mut Context<Self>) {
         let outcome = self.session.runtime.interrupt(None);
+
         self.present_interrupt_result(outcome, cx);
     }
 
     fn present_interrupt_result(&mut self, outcome: InterruptOutcome, cx: &mut Context<Self>) {
         match outcome {
             InterruptOutcome::Unavailable => {}
+
             InterruptOutcome::Rejected => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,
@@ -145,6 +156,7 @@ impl AgentPane {
                     cx,
                 );
             }
+
             InterruptOutcome::Accepted => {
                 cx.emit(AgentPaneEvent::Interrupted);
                 cx.notify();
@@ -155,10 +167,13 @@ impl AgentPane {
     pub(crate) fn respond_approval(&mut self, decision: &str, cx: &mut Context<Self>) {
         match self.session.respond_approval(decision) {
             ApprovalOutcome::Ignored => return,
+
             ApprovalOutcome::Settled => {
                 self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
             }
+
             ApprovalOutcome::Waiting => {}
+
             ApprovalOutcome::Rejected => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,

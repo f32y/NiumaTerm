@@ -16,6 +16,7 @@ pub enum PageSource {
     Screen {
         revision: u64,
     },
+
     Block {
         id: u64,
         generation: u64,
@@ -67,20 +68,28 @@ impl PageCache {
         sender: &MsgSender,
     ) -> Option<GraphicData> {
         let key = (handle.id, handle.generation, image_id);
+
         self.clock = self.clock.wrapping_add(1);
+
         if let Some(entry) = self.images.get_mut(&key) {
             entry.used = self.clock;
+
             let request = entry.pending.as_mut()?;
+
             match request.try_recv() {
                 Ok(Some(Ok(data))) => {
                     self.images.remove(&key);
+
                     return Some(data);
                 }
+
                 Ok(None) => {}
                 _ => entry.pending = None,
             }
+
             return None;
         }
+
         if self.images.len() >= CACHED_PAGES
             && let Some(oldest) = self
                 .images
@@ -90,7 +99,9 @@ impl PageCache {
         {
             self.images.remove(&oldest);
         }
+
         let (reply, request) = oneshot::channel();
+
         if sender
             .send(Msg::Query(Query::Image {
                 handle,
@@ -107,6 +118,7 @@ impl PageCache {
                 },
             );
         }
+
         None
     }
 
@@ -118,9 +130,12 @@ impl PageCache {
     ) -> Option<Arc<RowPage>> {
         let start = row / PAGE_ROWS * PAGE_ROWS;
         let key = (source, start);
+
         self.clock = self.clock.wrapping_add(1);
+
         if let Some((used, entry)) = self.pages.get_mut(&key) {
             *used = self.clock;
+
             if let Entry::Pending(request) = entry {
                 match request.try_recv() {
                     Ok(Some(result)) => *entry = Entry::Ready(result.ok().map(Arc::new)),
@@ -128,11 +143,13 @@ impl PageCache {
                     Ok(None) => return None,
                 }
             }
+
             return match entry {
                 Entry::Ready(page) => page.clone(),
                 Entry::Pending(_) => None,
             };
         }
+
         if self.pages.len() >= CACHED_PAGES
             && let Some(oldest) = self
                 .pages
@@ -142,7 +159,9 @@ impl PageCache {
         {
             self.pages.remove(&oldest);
         }
+
         let (reply, request) = oneshot::channel();
+
         if sender
             .send(Msg::Query(Query::Rows {
                 source,
@@ -154,6 +173,7 @@ impl PageCache {
             self.pages
                 .insert(key, (self.clock, Entry::Pending(request)));
         }
+
         None
     }
 }

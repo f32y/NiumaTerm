@@ -13,7 +13,10 @@ pub enum SessionChange {
 /// parse batch, and waiting for an enqueued command would stall its owner.
 pub trait SessionObserver: Send + Sync {
     fn graphics(&self, _updates: UpdateQueues) {}
+
     fn blocks(&self, _events: &[BlockEvent]) {}
+
     fn clipboard(&self, _kind: ClipboardType, _text: String) {}
+
     fn changed(&self, _change: SessionChange) {}
 }

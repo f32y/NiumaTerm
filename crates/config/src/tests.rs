@@ -500,6 +500,7 @@ fn invalid_encrypted_credentials_fail_without_legacy_fallback() {
 #[test]
 fn testing_mode_uses_test_subdirectory() {
     let base: PathBuf = "NiumaTerm".into();
+
     assert_eq!(config_dir_for_mode(base.clone(), false), base);
     assert_eq!(config_dir_for_mode(base.clone(), true), base.join("Test"));
 }
@@ -625,6 +626,7 @@ fn test_change_theme_with_colors() {
     let themes = dir.path().join("themes");
 
     fs::create_dir(&themes).unwrap();
+
     fs::write(
         themes.join("lucario-with-colors.toml"),
         r#"
@@ -683,11 +685,13 @@ fn theme_list_loads_valid_toml_files_in_name_order() {
         "[colors.terminal]\nbackground = '#111111'\n",
     )
     .unwrap();
+
     fs::write(
         dir.join("alpha.toml"),
         "[colors.terminal]\nbackground = '#222222'\n",
     )
     .unwrap();
+
     fs::write(dir.join("invalid.toml"), "[colors\n").unwrap();
     fs::write(dir.join("ignored.txt"), "[colors.terminal]\n").unwrap();
 
@@ -712,6 +716,7 @@ fn built_in_themes_load_without_user_files() {
     for builtin in BUILTIN_THEMES {
         let path = dir.path().join(builtin.name).with_extension("toml");
         let theme = Config::load_theme(&path).unwrap();
+
         assert!(!theme.name.is_empty());
     }
 }
@@ -783,6 +788,7 @@ const EXAMPLE_CONFIG_PATH: &str = "../../assets/config-example.toml";
 #[test]
 fn example_config_matches_the_serialized_defaults() {
     let generated = toml::to_string_pretty(&Config::default()).expect("defaults serialize");
+
     let shipped =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(EXAMPLE_CONFIG_PATH))
             .expect("example config is readable");

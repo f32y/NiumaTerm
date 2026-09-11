@@ -21,8 +21,10 @@ pub struct PairingCode {
 pub enum PairingCodeError {
     #[error("pairing code must start with {CODE_PREFIX}")]
     MissingPrefix,
+
     #[error("pairing code is not valid base32")]
     InvalidBase32,
+
     #[error("pairing code payload is malformed")]
     Malformed,
 }
@@ -52,12 +54,15 @@ impl PairingCode {
 /// cannot claim an id it doesn't own the key for (verifiable by clients).
 pub fn derive_host_id(host_public_key: &[u8]) -> String {
     let digest = Sha256::digest(host_public_key);
+
     digest[..8].iter().map(|b| format!("{b:02x}")).collect()
 }
 
 pub fn new_pairing_token() -> [u8; 16] {
     let mut token = [0u8; 16];
+
     rand::rng().fill_bytes(&mut token);
+
     token
 }
 
@@ -68,6 +73,7 @@ impl From<&PairingCode> for String {
     fn from(value: &PairingCode) -> Self {
         let payload = postcard::to_stdvec(value).expect("in-memory serialization cannot fail");
         let encoded = base32::encode(base32::Alphabet::Rfc4648 { padding: false }, &payload);
+
         format!("{CODE_PREFIX}{encoded}")
     }
 }

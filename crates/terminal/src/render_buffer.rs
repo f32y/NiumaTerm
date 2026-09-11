@@ -34,43 +34,58 @@ pub struct RenderBuffer {
     pub current_directory: Option<String>,
     cols: usize,
     rows: usize,
+
     /// One `Row<Square>` per visible line. The GPUI app extracts terminal frames
     /// from these rows.
     grid: Vec<Row<Square>>,
+
     /// Persistent interner; `styles()` is the `style_table` indexed by style id.
     styles: StyleSet,
+
     /// Grapheme clusters: a cell's trailing (combining/ZWJ) codepoints, keyed by
     /// the cell's `extras_id`.
     extras: FxHashMap<u16, Extras>,
+
     /// Buffer-local `extras_id` allocator (1-based; 0 means "no extras").
     next_extras_id: u16,
+
     /// Per row: `true` when the row soft-wraps into the next. Used by line
     /// selection (`row_search`) to span a wrapped logical line. Length == `rows`.
     row_wrapped: Vec<bool>,
+
     /// Link ranges accompany the grid; pointer text is derived only when read.
     row_hyperlinks: Vec<Vec<(u16, u16, String)>>,
+
     /// Monotonic engine content version for each visible row. Unlike transient
     /// dirty flags, these survive skipped publications until the UI observes them.
     row_versions: Vec<u64>,
+
     cursor: Pos,
     cursor_visible: bool,
+
     /// DECSCUSR shape + modes-based blink captured from the engine render-state.
     cursor_shape: ansi::CursorShape,
+
     cursor_blinking: bool,
+
     /// Effective default colors captured from the render-state: the
     /// `term_colors` OSC-override layer (Foreground/Background/Cursor) over the
     /// renderer's config palette. Other slots stay `None` (config fallback).
     colors: TermColors,
+
     /// OSC 11 window-background override: `Some` only when a program
     /// explicitly set it, so the renderer falls back to the config window bg /
     /// opacity otherwise.
     window_bg_override: Option<ColorRgb>,
+
     /// Engine scrollbar geometry captured with this snapshot. The frontend
     /// draws the scrollbar from here, avoiding a per-frame engine read.
     scrollbar: ScrollbarInfo,
+
     /// Kitty-graphics placements captured from the engine. The current GPUI
     /// frontend keeps this metadata available but does not paint inline images yet.
     placements: Vec<SnapshotPlacement>,
+
     /// New PTY/render content since the frontend last consumed it. Set by every
     /// capture, cleared by `take_content_changed()`. Starts true so the first
     /// frame builds from the freshly initialized buffer.
@@ -269,6 +284,7 @@ impl RenderBuffer {
 
         sq.set_c(base);
         sq.set_style_id(id);
+
         sq.set_wide(match wide {
             CellWide::Narrow => Wide::Narrow,
             CellWide::Wide => Wide::Wide,

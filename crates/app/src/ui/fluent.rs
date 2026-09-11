@@ -24,5 +24,6 @@ pub(crate) const BUTTON_PADDING_X: Pixels = px(12.0);
 /// fixed at every row height, so rows of different heights carry the same mark
 /// and line up as one column of selection cues.
 pub(crate) const SELECTION_BAR_WIDTH: f32 = 3.0;
+
 pub(crate) const SELECTION_BAR_HEIGHT: f32 = 16.0;
 pub(crate) const SELECTION_BAR_RADIUS: f32 = 2.0;

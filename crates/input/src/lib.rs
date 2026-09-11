@@ -42,16 +42,21 @@ bitflags! {
 pub struct KeyInput {
     /// Logical key affected by all modifiers except Ctrl (`KeyEvent::logical_key`).
     pub logical_key: Key,
+
     /// Logical key ignoring all modifiers (`key_without_modifiers()`), used for the
     /// kitty alternate-key base.
     pub key_without_modifiers: Key,
+
     /// Text produced with all modifiers applied (`text_with_all_modifiers()`), used
     /// for the kitty associated-text report.
     pub text_with_all_modifiers: Option<SmolStr>,
+
     /// Physical location (distinguishes the numpad for kitty numpad codes).
     pub location: KeyLocation,
+
     /// Pressed / released.
     pub state: ElementState,
+
     /// Whether this is an auto-repeat event.
     pub repeat: bool,
 }
@@ -112,6 +117,7 @@ pub fn build_key_sequence(key: &KeyInput, mods: ModifiersState, flags: KeyEncode
             payload,
             terminator,
         }) => (payload, terminator),
+
         _ => return Vec::new(),
     };
 
@@ -120,6 +126,7 @@ pub fn build_key_sequence(key: &KeyInput, mods: ModifiersState, flags: KeyEncode
     // Add modifiers information.
     if kitty_event_type || !modifiers.is_empty() || associated_text.is_some() {
         let encoded: u8 = modifiers.into();
+
         payload.push_str(&format!(";{encoded}"));
     }
 
@@ -177,6 +184,7 @@ pub fn encode_terminal_key(
 
     if should_build_sequence(input, text, mods, flags) {
         let seq = build_key_sequence(input, mods, flags);
+
         return (!seq.is_empty()).then_some(seq);
     }
 
@@ -200,6 +208,7 @@ pub fn encode_terminal_input(
                 Vec::new()
             }
         }
+
         ElementState::Pressed => {
             if let Some(bytes) = encode_terminal_key(input, modifiers, flags) {
                 bytes
@@ -240,6 +249,7 @@ pub fn encode_mouse_report(
 ) -> Option<Vec<u8>> {
     if sgr {
         let c = if pressed { 'M' } else { 'm' };
+
         Some(format!("\x1b[<{};{};{}{}", button + mods, col + 1, row + 1, c).into_bytes())
     } else {
         let b = if pressed { button + mods } else { 3 + mods };
@@ -394,12 +404,16 @@ fn should_build_sequence(
 /// Helper to build escape sequence payloads from [`KeyInput`].
 struct SequenceBuilder {
     flags: KeyEncodeFlags,
+
     /// The emitted sequence should follow the kitty keyboard protocol.
     kitty_seq: bool,
+
     /// Encode all the keys according to the protocol.
     kitty_encode_all: bool,
+
     /// Report event types.
     kitty_event_type: bool,
+
     modifiers: SequenceModifiers,
 }
 
@@ -483,6 +497,7 @@ impl SequenceBuilder {
             Key::Character("-") => "57412",
             Key::Character("+") => "57413",
             Key::Character("=") => "57415",
+
             Key::Named(named) => match named {
                 NamedKey::Enter => "57414",
                 NamedKey::ArrowLeft => "57417",
@@ -497,6 +512,7 @@ impl SequenceBuilder {
                 NamedKey::Delete => "57426",
                 _ => return None,
             },
+
             _ => return None,
         };
 
@@ -688,6 +704,7 @@ impl SequenceBuilder {
 struct SequenceBase {
     /// The payload base: `number` with an optional Kitty alternate-key base.
     payload: Cow<'static, str>,
+
     terminator: SequenceTerminator,
 }
 
@@ -704,6 +721,7 @@ impl SequenceBase {
 enum SequenceTerminator {
     /// The normal key esc sequence terminator defined by xterm/dec.
     Normal(char),
+
     /// The terminator is for kitty escape sequence.
     Kitty,
 }

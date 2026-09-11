@@ -80,6 +80,7 @@ fn folded_text(events: &[Event]) -> String {
             Event::AgentMessageDelta { delta, .. } | Event::ReasoningSummaryDelta { delta, .. } => {
                 Some(delta.as_str())
             }
+
             _ => None,
         })
         .collect()
@@ -435,6 +436,7 @@ fn a_real_turn_shows_its_commands_and_file_changes() {
 
         if done && !asked {
             ended = true;
+
             break;
         }
 
@@ -569,6 +571,7 @@ fn the_agent_preset_roster_reaches_the_picker() {
     // is no current one either: the two have to agree.
     if presets.is_empty() {
         assert_eq!(current.as_deref(), None);
+
         return;
     }
 
@@ -661,6 +664,7 @@ fn a_profile_can_declare_and_select_an_image_model() {
 #[ignore = "starts an isolated harness host without sending a prompt"]
 fn permission_commands_update_the_session_preset() {
     let isolated = TempDir::new().unwrap();
+
     let launch = LaunchConfig {
         env: vec![
             ("DSH_HOME".into(), isolated.path().display().to_string()),
@@ -668,7 +672,9 @@ fn permission_commands_update_the_session_preset() {
         ],
         ..launch()
     };
+
     let (tx, frames) = channel();
+
     let mut session = Session::create(&launch, &AgentWorkspace::default(), move |frame| {
         let _ = tx.send(frame);
     })
@@ -683,7 +689,9 @@ fn permission_commands_update_the_session_preset() {
             }
         )
     });
+
     assert!(received, "no initial permission preset arrived: {seen:?}");
+
     let initial = seen
         .iter()
         .find_map(|event| match event {
@@ -691,10 +699,12 @@ fn permission_commands_update_the_session_preset() {
             _ => None,
         })
         .unwrap();
+
     assert_ne!(initial, "danger-full-access");
 
     for preset in ["danger-full-access", initial.as_str()] {
         let outcome = session.execute_slash_command("permission", preset);
+
         assert!(
             matches!(outcome, SlashCommandOutcome::Completed { .. }),
             "switching to {preset} failed: {outcome:?}"
@@ -706,6 +716,7 @@ fn permission_commands_update_the_session_preset() {
             Duration::from_secs(15),
             |event| matches!(event, Event::ApprovalPresets { current: Some(current), .. } if current == preset),
         );
+
         assert!(updated, "the host did not publish {preset}: {seen:?}");
         assert!(!session.has_active_operation());
     }

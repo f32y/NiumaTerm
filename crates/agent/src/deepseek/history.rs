@@ -94,7 +94,9 @@ pub(crate) fn search_results(
         .filter_map(|item| item["sessionId"].as_str())
         .filter_map(|id| {
             let mut row = rows.iter().find(|row| row.id == id)?.clone();
+
             row.snippet = excerpts.get(id).map(|snippet| snippet.to_string());
+
             Some(row)
         })
         .collect()
@@ -122,15 +124,20 @@ pub(crate) fn replay(value: &Value) -> Vec<ReplayTurn> {
 
                 started_at = time;
             }
+
             Some("turn/end") => {
                 current.interrupted = event["data"]["reason"]["kind"].as_str() == Some("aborted");
+
                 current.seconds = started_at
                     .zip(time)
                     .map(|(start, end)| end.saturating_sub(start) / 1000);
+
                 turns.push(take(&mut current));
                 started_at = None;
+
                 continue;
             }
+
             _ => {}
         }
 
@@ -140,6 +147,7 @@ pub(crate) fn replay(value: &Value) -> Vec<ReplayTurn> {
                     item,
                     at: time.map(|millis| (millis / 1000) as i64),
                 }),
+
                 // A completed payload finishes the row its streamed half
                 // opened; only an item with no such half is a row of its own.
                 Event::ItemCompleted(item) => {
@@ -156,6 +164,7 @@ pub(crate) fn replay(value: &Value) -> Vec<ReplayTurn> {
                         });
                     }
                 }
+
                 Event::AgentMessageDelta { item_id, delta } => {
                     if let Some(Item::AgentMessage { text, .. }) = current
                         .items
@@ -176,6 +185,7 @@ pub(crate) fn replay(value: &Value) -> Vec<ReplayTurn> {
                         });
                     }
                 }
+
                 Event::ReasoningSummaryDelta { item_id, delta } => {
                     if let Some(Item::Reasoning { summary, .. }) = current
                         .items
@@ -195,6 +205,7 @@ pub(crate) fn replay(value: &Value) -> Vec<ReplayTurn> {
                         });
                     }
                 }
+
                 // Turn boundaries are read from the raw events above, and the
                 // rest of the vocabulary describes live state a replay has no
                 // moment to apply it to.

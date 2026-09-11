@@ -24,6 +24,7 @@ impl TurnOutputUsage {
         self.completed_responses = self
             .completed_responses
             .saturating_add(self.current_response.take().unwrap_or(0));
+
         self.current_response = Some(output_tokens);
 
         self.total()
@@ -31,6 +32,7 @@ impl TurnOutputUsage {
 
     pub(super) fn update_response(&mut self, output_tokens: u64) -> u64 {
         self.current_response = Some(output_tokens);
+
         self.total()
     }
 
@@ -45,19 +47,25 @@ pub(super) struct TranscriptState {
     /// Streamed content blocks of the in-flight assistant message, keyed by
     /// their stream index, so text/thinking deltas route to transcript items.
     open_blocks: HashMap<u64, String>,
+
     /// Streamed text/thinking items not yet finalized by an `assistant`
     /// snapshot. Snapshots arrive per completed block in stream order, so
     /// FIFO matching by kind pairs each snapshot with its streamed item.
     open_texts: VecDeque<String>,
+
     open_thinkings: VecDeque<String>,
+
     /// Started tool items by `tool_use_id`; the matching `tool_result` block
     /// completes them with output and status.
     pending_tools: HashMap<String, Item>,
+
     item_seq: u64,
+
     /// The most recent assistant message's input/output accounting represents
     /// the live context, unlike result-level totals which may sum retries and
     /// tool-loop iterations.
     context_usage: Option<TokenUsageBreakdown>,
+
     last_turn_usage: Option<TokenUsageBreakdown>,
     context_window: Option<u64>,
     turn_output_usage: TurnOutputUsage,
@@ -173,12 +181,14 @@ impl TranscriptState {
 
                 events
             }
+
             Some("message_delta") => {
                 let turn_output_tokens =
                     event["usage"]["output_tokens"]
                         .as_u64()
                         .map(|output_tokens| {
                             update_claude_output(&mut self.context_usage, output_tokens);
+
                             self.turn_output_usage.update_response(output_tokens)
                         });
 
@@ -194,6 +204,7 @@ impl TranscriptState {
 
                 events
             }
+
             Some("content_block_start") => {
                 let Some(index) = index else {
                     return Vec::new();
@@ -212,6 +223,7 @@ impl TranscriptState {
                             questions: None,
                         })]
                     }
+
                     Some("thinking") => {
                         let id = self.alloc_item_id("thinking");
 
@@ -220,16 +232,19 @@ impl TranscriptState {
 
                         vec![Event::ItemStarted(Item::Reasoning { id, summary: None })]
                     }
+
                     // Tool-use blocks stream their input as JSON fragments;
                     // the item is emitted from the `assistant` snapshot where
                     // the input is complete.
                     _ => Vec::new(),
                 }
             }
+
             Some("content_block_delta") => {
                 let Some(item_id) = index.and_then(|i| self.open_blocks.get(&i)).cloned() else {
                     return Vec::new();
                 };
+
                 let delta = &event["delta"];
 
                 match delta["type"].as_str() {
@@ -241,6 +256,7 @@ impl TranscriptState {
                         })
                         .into_iter()
                         .collect(),
+
                     Some("thinking_delta") => delta["thinking"]
                         .as_str()
                         .map(|text| Event::ReasoningSummaryDelta {
@@ -249,9 +265,11 @@ impl TranscriptState {
                         })
                         .into_iter()
                         .collect(),
+
                     _ => Vec::new(),
                 }
             }
+
             _ => Vec::new(),
         }
     }
@@ -268,6 +286,7 @@ impl TranscriptState {
         let Some(blocks) = message["message"]["content"].as_array() else {
             return Vec::new();
         };
+
         let mut events = Vec::new();
 
         if let Some(usage) = parse_claude_usage(&message["message"]["usage"]) {
@@ -298,6 +317,7 @@ impl TranscriptState {
                         questions: None,
                     }));
                 }
+
                 Some("thinking") => {
                     let id = self
                         .open_thinkings
@@ -309,6 +329,7 @@ impl TranscriptState {
                         summary: block["thinking"].as_str().map(str::to_owned),
                     }));
                 }
+
                 Some("tool_use") | Some("server_tool_use") | Some("mcp_tool_use") => {
                     let Some(id) = block["id"].as_str() else {
                         continue;
@@ -323,6 +344,7 @@ impl TranscriptState {
                     self.pending_tools.insert(id.to_string(), item.clone());
                     events.push(Event::ItemStarted(item));
                 }
+
                 _ => {}
             }
         }
@@ -336,6 +358,7 @@ impl TranscriptState {
         let Some(blocks) = message["message"]["content"].as_array() else {
             return Vec::new();
         };
+
         let mut events = Vec::new();
 
         for block in blocks {
@@ -346,6 +369,7 @@ impl TranscriptState {
             let Some(id) = block["tool_use_id"].as_str() else {
                 continue;
             };
+
             let Some(started) = self.pending_tools.remove(id) else {
                 continue;
             };

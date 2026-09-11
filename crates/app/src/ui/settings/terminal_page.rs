@@ -27,6 +27,7 @@ pub(super) fn terminal_page() -> SettingPage {
                         |cx| {
                             let key: &str =
                                 cx.global::<AppSettings>().appearance.input_style.into();
+
                             key.into()
                         },
                         |value, cx| {
@@ -52,6 +53,7 @@ pub(super) fn terminal_page() -> SettingPage {
                         ],
                         |cx| {
                             let key: &str = cx.global::<AppSettings>().cursor_shape.into();
+
                             key.into()
                         },
                         |value, cx| {

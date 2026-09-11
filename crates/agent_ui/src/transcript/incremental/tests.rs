@@ -21,6 +21,7 @@ fn history(turns: u64) -> TranscriptView {
                 text: Some("question".into()),
             },
         );
+
         view.push_stamped(
             turn,
             Item::AgentMessage {
@@ -29,6 +30,7 @@ fn history(turns: u64) -> TranscriptView {
                 questions: None,
             },
         );
+
         view.turn_ledger.settle_replayed(turn, None);
     }
 
@@ -63,7 +65,9 @@ fn streaming_rebuilds_only_the_changed_turn() {
 
     for _ in 0..20 {
         assert!(view.append_delta("live", "more", TextField::ReasoningSummary));
+
         assert_rows_match_rebuild(&mut view, mode);
+
         assert_eq!(view.row_cache.rebuilt_entries, 1);
     }
 
@@ -77,6 +81,7 @@ fn streaming_rebuilds_only_the_changed_turn() {
             text: Some("next".into()),
         },
     );
+
     assert_rows_match_rebuild(&mut view, mode);
 
     assert_eq!(view.row_cache.rebuilt_entries, 2);
@@ -86,6 +91,7 @@ fn streaming_rebuilds_only_the_changed_turn() {
         text: Some("updated answer".into()),
         questions: None,
     });
+
     assert_rows_match_rebuild(&mut view, mode);
 
     assert_eq!(view.row_cache.rebuilt_entries, 1_002);
@@ -96,6 +102,7 @@ fn streaming_rebuilds_only_the_changed_turn() {
     assert!(!view.append_delta("live", "stale", TextField::ReasoningSummary));
 
     assert_rows_match_rebuild(&mut view, mode);
+
     view.push_stamped(
         0,
         Item::Reasoning {
@@ -168,6 +175,7 @@ fn cached_rows_follow_disclosures_turns_and_mirrored_revisions(cx: &mut TestAppC
                     summary: Some("more work".into()),
                 },
             );
+
             view.start_working(cx);
             assert_rows_match_rebuild(view, mode);
             view.set_compacting(true, cx);
@@ -294,6 +302,7 @@ fn long_transcript_timing() {
 
     for _ in 0..200 {
         assert!(view.append_delta("live", "x", TextField::ReasoningSummary));
+
         view.refresh_rows(CollapseRows::WorkAndToolCalls);
         black_box(&view.rows);
     }

@@ -56,6 +56,7 @@ fn block_cursor_uses_terminal_background_for_glyph() {
     let gray = |value: u8| -> ColorArray {
         let value: f32 = value.into();
         let value = value / 255.;
+
         [value, value, value, 1.]
     };
 
@@ -160,6 +161,7 @@ fn incremental_extraction_reuses_only_clean_rows() {
     engine.snapshot_into(&mut buf).unwrap();
 
     let generations = GenerationMap::new();
+
     let first = TerminalFrame::from_render_buffer_reusing(
         &buf,
         None,
@@ -223,22 +225,32 @@ fn incremental_extraction_reuses_only_clean_rows() {
 #[test]
 fn supplied_theme_controls_selection_without_installed_globals() {
     let mut engine = GhosttyTerminal::new(8, 2, 100).unwrap();
+
     engine.write_vt(b"theme\x1b[?25l");
+
     let mut buffer = RenderBuffer::new(8, 2);
+
     engine.snapshot_into(&mut buffer).unwrap();
+
     let generations = GenerationMap::new();
     let mut theme = FrameTheme::default();
+
     let selection = Some(SelectionRange::new(
         Pos::new(Line(0), Column(0)),
         Pos::new(Line(0), Column(4)),
         false,
     ));
+
     let first =
         TerminalFrame::from_render_buffer_reusing(&buffer, selection, &generations, None, &theme);
+
     theme.selection_background = (0x12, 0x34, 0x56).into();
+
     let mut cache = TerminalFrameCache::default();
+
     cache.rebuild(first.clone());
     cache.invalidate_full();
+
     let next = TerminalFrame::from_render_buffer_reusing(
         &buffer,
         selection,
@@ -246,6 +258,7 @@ fn supplied_theme_controls_selection_without_installed_globals() {
         cache.reusable_frame().as_ref(),
         &theme,
     );
+
     assert_eq!(
         next.lines()[0].cells()[0].background,
         Some(theme.selection_background)
@@ -262,6 +275,7 @@ fn cursor_only_change_rebuilds_affected_row() {
     engine.snapshot_into(&mut buf).unwrap();
 
     let generations = GenerationMap::new();
+
     let first = TerminalFrame::from_render_buffer_reusing(
         &buf,
         None,
@@ -269,6 +283,7 @@ fn cursor_only_change_rebuilds_affected_row() {
         None,
         &FrameTheme::default(),
     );
+
     let versions = buf.row_versions().to_vec();
 
     engine.write_vt(b"\r");
@@ -297,6 +312,7 @@ fn selection_changes_rebuild_only_affected_rows() {
     engine.snapshot_into(&mut buf).unwrap();
 
     let generations = GenerationMap::new();
+
     let plain = TerminalFrame::from_render_buffer_reusing(
         &buf,
         None,
@@ -613,6 +629,7 @@ fn buf_and_generations(cols: u16, rows: u16, vt: &[u8]) -> (RenderBuffer, Genera
 fn extracts_ordinary_placement_with_source_and_z() {
     let (buf, generations) =
         buf_and_generations(20, 5, b"\x1b_Ga=T,f=32,s=1,v=1,i=1,p=9;/wAA/w==\x1b\\");
+
     let images = extract_frame_images(&buf, &generations);
 
     assert_eq!(images.len(), 1, "one ordinary image");
@@ -631,6 +648,7 @@ fn extracts_ordinary_placement_with_source_and_z() {
             assert_eq!((viewport_col, viewport_row), (0, 0));
             assert_eq!(source, [0.0, 0.0, 1.0, 1.0], "full-image source");
         }
+
         _ => panic!("expected ordinary"),
     }
 }
@@ -639,6 +657,7 @@ fn extracts_ordinary_placement_with_source_and_z() {
 fn ordinary_destination_maps_cells_to_pixels() {
     let (buf, generations) =
         buf_and_generations(20, 5, b"\x1b_Ga=T,f=32,s=1,v=1,i=1;/wAA/w==\x1b\\");
+
     let img = &extract_frame_images(&buf, &generations)[0];
 
     // cell 10x20, viewport (0,0), no offsets: dest = one cell, full source.
@@ -659,6 +678,7 @@ fn destination_maps_negative_viewport_row_above_origin() {
     // clips it to the content mask).
     let (buf, generations) =
         buf_and_generations(20, 5, b"\x1b_Ga=T,f=32,s=1,v=1,i=1;/wAA/w==\x1b\\");
+
     let mut img = extract_frame_images(&buf, &generations).remove(0);
 
     if let FrameImageKind::Ordinary { viewport_row, .. } = &mut img.kind {
@@ -723,6 +743,7 @@ fn extracts_contiguous_virtual_run() {
             assert_eq!(placement_cols, 2);
             assert_eq!((screen_line, screen_col), (0, 0));
         }
+
         _ => panic!("expected virtual"),
     }
 }
@@ -765,6 +786,7 @@ fn z_layer_buckets_by_protocol_thresholds() {
     // Pure classifier check across the three protocol layers.
     let (buf, generations) =
         buf_and_generations(20, 5, b"\x1b_Ga=T,f=32,s=1,v=1,i=1;/wAA/w==\x1b\\");
+
     let mut img = extract_frame_images(&buf, &generations).remove(0);
 
     img.z = i32::MIN;

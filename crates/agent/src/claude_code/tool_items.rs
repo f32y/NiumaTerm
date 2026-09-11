@@ -25,6 +25,7 @@ pub(crate) fn tool_item(id: &str, name: &str, input: &Value) -> Item {
             status,
             exit_code: None,
         },
+
         "Edit" | "Write" | "NotebookEdit" => Item::FileChange {
             id,
             paths: input["file_path"]
@@ -34,6 +35,7 @@ pub(crate) fn tool_item(id: &str, name: &str, input: &Value) -> Item {
             diff: edit_diff(name, input),
             status,
         },
+
         _ => Item::Other {
             id,
             kind: name.to_string(),
@@ -66,6 +68,7 @@ pub(crate) fn complete_tool_item(started: Item, result: &Value) -> Item {
             status,
             exit_code: None,
         },
+
         Item::FileChange {
             id, paths, diff, ..
         } => Item::FileChange {
@@ -74,6 +77,7 @@ pub(crate) fn complete_tool_item(started: Item, result: &Value) -> Item {
             diff,
             status,
         },
+
         Item::Other {
             id,
             kind,
@@ -87,6 +91,7 @@ pub(crate) fn complete_tool_item(started: Item, result: &Value) -> Item {
             output: seeded.or(Some(output)),
             status,
         },
+
         other => other,
     }
 }
@@ -112,6 +117,7 @@ pub(super) fn input_detail(name: &str, input: &Value) -> Option<String> {
                 .collect::<Vec<_>>()
                 .join("\n")
         }),
+
         "ExitPlanMode" => input["plan"].as_str().map(str::to_owned),
         _ => None,
     }
@@ -124,6 +130,7 @@ pub(super) fn edit_diff(name: &str, input: &Value) -> Option<String> {
             input["old_string"].as_str().unwrap_or_default(),
             input["new_string"].as_str().unwrap_or_default(),
         ),
+
         "Write" => ("", input["content"].as_str().unwrap_or_default()),
         "NotebookEdit" => ("", input["new_source"].as_str().unwrap_or_default()),
         _ => return None,
@@ -176,11 +183,13 @@ pub(super) fn tool_title(input: &Value) -> String {
 fn tool_result_text(content: &Value) -> String {
     match content {
         Value::String(s) => s.clone(),
+
         Value::Array(blocks) => blocks
             .iter()
             .filter_map(|block| block["text"].as_str())
             .collect::<Vec<_>>()
             .join("\n"),
+
         _ => String::new(),
     }
 }

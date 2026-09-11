@@ -34,6 +34,7 @@ extern "system" fn child_exit_callback(ctx: *mut c_void, timed_out: bool) {
     // ownership here would leak the box whenever the child outlives the
     // watcher (the callback never fires, nobody frees the allocation).
     let ctx = unsafe { &*(ctx as *const CallbackCtx) };
+
     let _ = ctx.event_tx.send(ChildEvent::Exited);
 
     ctx.soft.set_ready();
@@ -126,6 +127,7 @@ impl Drop for ChildExitWatcher {
                 self.wait_handle.load(Ordering::Relaxed) as HANDLE,
                 INVALID_HANDLE_VALUE,
             );
+
             drop(Box::from_raw(self.ctx));
             CloseHandle(self.child_handle);
         }

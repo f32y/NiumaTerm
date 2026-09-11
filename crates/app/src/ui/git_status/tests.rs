@@ -82,6 +82,7 @@ fn count_lines_handles_trailing_newline_and_binary() {
 
     let check = |name: &str, bytes: &[u8], expected: u64| {
         fs::write(dir.join(name), bytes).unwrap();
+
         assert_eq!(count_file_lines(&root, name), expected, "{name}");
     };
 

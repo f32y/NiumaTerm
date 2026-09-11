@@ -38,11 +38,13 @@ fn process_writer() {
     let Some(path) = env::var_os("NMT_CONFIG_TEST_UPDATE_PATH") else {
         return;
     };
+
     let path: PathBuf = path.into();
 
     for _ in 0..25 {
         update(&path, |content| {
             let count: usize = content.unwrap_or("0").parse().unwrap();
+
             Ok((count + 1).to_string())
         })
         .unwrap();

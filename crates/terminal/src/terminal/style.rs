@@ -35,17 +35,20 @@ bitflags! {
         const DIM              = 1 << 3;
         const HIDDEN           = 1 << 4;
         const STRIKEOUT        = 1 << 5;
+
         // 3-bit underline kind packed into bits 6-8.
         const UNDERLINE        = 1 << 6;
         const DOUBLE_UNDERLINE = 1 << 7;
         const UNDERCURL        = 1 << 8;
         const DOTTED_UNDERLINE = 1 << 9;
         const DASHED_UNDERLINE = 1 << 10;
+
         const ALL_UNDERLINES   = Self::UNDERLINE.bits()
                                | Self::DOUBLE_UNDERLINE.bits()
                                | Self::UNDERCURL.bits()
                                | Self::DOTTED_UNDERLINE.bits()
                                | Self::DASHED_UNDERLINE.bits();
+
         // Combined intensity for shaping decisions.
         const DIM_BOLD         = Self::DIM.bits() | Self::BOLD.bits();
     }
@@ -216,6 +219,7 @@ impl From<&SnapshotStyle> for Style {
         flags.set(StyleFlags::INVERSE, s.inverse);
         flags.set(StyleFlags::HIDDEN, s.invisible);
         flags.set(StyleFlags::STRIKEOUT, s.strikethrough);
+
         flags |= match s.underline {
             Underline::None => StyleFlags::empty(),
             Underline::Single => StyleFlags::UNDERLINE,

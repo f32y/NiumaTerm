@@ -59,6 +59,7 @@ pub enum CharsetIndex {
     /// Default set, is designated as ASCII at startup.
     #[default]
     G0,
+
     G1,
     G2,
     G3,
@@ -85,6 +86,7 @@ impl StandardCharset {
     pub fn map(self, c: char) -> char {
         match self {
             StandardCharset::Ascii => c,
+
             StandardCharset::SpecialCharacterAndLineDrawing => match c {
                 '_' => ' ',
                 '`' => '◆',
@@ -191,13 +193,17 @@ impl Pos {
         match boundary {
             Boundary::Cursor if self.row < 0 => Pos::new(Line(0), Column(0)),
             Boundary::Grid if self.row < topmost_line => Pos::new(topmost_line, Column(0)),
+
             Boundary::Cursor | Boundary::Grid if self.row > bottommost_line => {
                 Pos::new(bottommost_line, last_column)
             }
+
             Boundary::None => {
                 self.row = self.row.grid_clamp(dimensions, boundary);
+
                 self
             }
+
             _ => self,
         }
     }
@@ -215,12 +221,14 @@ impl Line {
     pub fn grid_clamp<D: Dimensions>(self, dimensions: &D, boundary: Boundary) -> Self {
         match boundary {
             Boundary::Cursor => max(Line(0), min(dimensions.bottommost_line(), self)),
+
             Boundary::Grid => {
                 let bottommost_line = dimensions.bottommost_line();
                 let topmost_line = dimensions.topmost_line();
 
                 max(topmost_line, min(bottommost_line, self))
             }
+
             Boundary::None => {
                 let screen_lines = dimensions.screen_lines() as i32;
                 let total_lines = dimensions.total_lines() as i32;
@@ -424,6 +432,7 @@ macro_rules! ops {
 }
 
 ops!(Column, Column, usize);
+
 ops!(Line, Line, i32);
 
 impl From<char> for CursorState {

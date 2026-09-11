@@ -104,6 +104,7 @@ impl InputReceiver {
         loop {
             if let Some(input) = state.pending.pop_front() {
                 input.ticket.state.store(1, Ordering::Release);
+
                 return Ok(input);
             }
 
@@ -121,6 +122,7 @@ impl InputReceiver {
 
         if let Some(input) = state.pending.pop_front() {
             input.ticket.state.store(1, Ordering::Release);
+
             Ok(input)
         } else if state.sender_open {
             Err(mpsc::TryRecvError::Empty)
@@ -202,6 +204,7 @@ impl InputQueue {
             messages,
             ticket: ticket.clone(),
         });
+
         self.queue.ready.notify_one();
 
         Ok(ticket)

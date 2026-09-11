@@ -29,15 +29,18 @@ use crate::transcript::TranscriptView;
 /// moving edges give the eye enough to follow even over a short span. Kept
 /// as its own setting so the travel can be tuned apart from the fades.
 pub(crate) const ZOOM_DURATION: Duration = Duration::from_millis(150);
+
 /// Share of the message stream an enlarged image may take. Short of the whole
 /// area so the blurred conversation stays visible around it, which is what
 /// makes the image read as a layer over the transcript rather than as another
 /// screen.
 const PREVIEW_FRACTION: f32 = 0.8;
+
 /// Edge of the round close control, and how far it hangs past the image's
 /// corner. Straddling the corner keeps it clear of the image's own content,
 /// which is what the reader opened the image to see.
 const PREVIEW_CLOSE_EDGE: f32 = 28.0;
+
 const PREVIEW_CLOSE_OFFSET: f32 = 10.0;
 
 impl TranscriptView {
@@ -54,12 +57,14 @@ impl TranscriptView {
         self.zoomed_image = Some(image);
         self.zoom_origin = origin;
         self.zoom_open = true;
+
         cx.notify();
     }
 
     pub(crate) fn close_zoomed_image(&mut self, cx: &mut Context<Self>) {
         if self.zoom_open {
             self.zoom_open = false;
+
             cx.notify();
         }
     }

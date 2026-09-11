@@ -52,8 +52,10 @@ impl BlockListMirror {
     ) -> Vec<ListOp> {
         let mut ops = Vec::new();
         let evicted = metrics.evicted_items.saturating_sub(self.evicted_items) as usize;
+
         match plan_list_reconcile(self.item_count, evicted, metrics.item_count) {
             ListReconcile::Reset => ops.push(ListOp::Reset(metrics.item_count)),
+
             ListReconcile::Patch {
                 front_evict,
                 tail_splice,
@@ -61,11 +63,13 @@ impl BlockListMirror {
                 if front_evict > 0 {
                     ops.push(ListOp::Splice(0..front_evict, 0));
                 }
+
                 if let Some((range, count)) = tail_splice {
                     ops.push(ListOp::Splice(range, count));
                 }
             }
         }
+
         let key = BlockListMeasureKey {
             layout,
             store_len: metrics.store_len,
@@ -74,16 +78,21 @@ impl BlockListMirror {
             tail_px: metrics.tail_px,
             live_rows,
         };
+
         match plan_remeasure(self.last_measure_key, key) {
             RemeasureScope::All => ops.push(ListOp::RemeasureAll),
+
             RemeasureScope::Tail => ops.push(ListOp::Remeasure(
                 metrics.store_len.saturating_sub(1)..metrics.item_count,
             )),
+
             RemeasureScope::None => {}
         }
+
         self.last_measure_key = Some(key);
         self.item_count = metrics.item_count;
         self.evicted_items = metrics.evicted_items;
+
         ops
     }
 
@@ -96,16 +105,20 @@ impl BlockListMirror {
     ) -> ListOp {
         let (cols, cell_h, pad_rows) = layout;
         let mut y = 0.0;
+
         for (ix, item) in store.items().iter().enumerate() {
             let h = item_px(item, cols, cell_h, pad_rows);
+
             if target < y + h {
                 return ListOp::ScrollTo(ListPosition {
                     item_ix: ix,
                     offset_px: (target - y).max(0.0),
                 });
             }
+
             y += h;
         }
+
         if target < y + live_item_px(history_rows, live_rows, cell_h, pad_rows) {
             ListOp::ScrollTo(ListPosition {
                 item_ix: store.items().len(),

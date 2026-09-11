@@ -19,7 +19,9 @@ use crate::unix::macos::process_group_count;
 /// [`KillOnCloseJob`] relies on.
 pub fn hidden_command(program: impl AsRef<OsStr>) -> Command {
     let mut command = Command::new(program);
+
     command.process_group(0);
+
     command
 }
 
@@ -187,6 +189,7 @@ fn group_process_count(pgid: libc::pid_t) -> usize {
             let Ok(status) = fs::read_to_string(entry.path().join("stat")) else {
                 return false;
             };
+
             let Some((_, after_comm)) = status.rsplit_once(')') else {
                 return false;
             };

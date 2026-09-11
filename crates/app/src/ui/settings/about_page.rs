@@ -62,6 +62,7 @@ pub(super) fn about_page() -> SettingPage {
                 ],
                 |cx| {
                     let key: &str = cx.global::<AppSettings>().update.channel.into();
+
                     key.into()
                 },
                 |value, cx| {
@@ -171,29 +172,38 @@ fn status_text(status: &Status) -> String {
         Status::Checking => i18n("settings-about-checking").to_string(),
         Status::NothingPublished => i18n("settings-about-nothing-published").to_string(),
         Status::UpToDate => i18n("settings-about-up-to-date").replace("{version}", APP_VERSION),
+
         Status::Available(release) => {
             i18n("settings-about-update-available").replace("{version}", &release.label)
         }
+
         Status::Installing(release) => {
             i18n("settings-about-installing").replace("{version}", &release.label)
         }
+
         Status::InspectingFileUse(release) => {
             i18n("settings-about-file-use-checking").replace("{version}", &release.label)
         }
+
         Status::AwaitingFileUse(release) => {
             i18n("settings-about-file-use-waiting").replace("{version}", &release.label)
         }
+
         Status::ClosingFileUsers(release) => {
             i18n("settings-about-file-use-closing").replace("{version}", &release.label)
         }
+
         Status::RecoveryWarning { applications, .. } => {
             i18n("settings-about-recovery-warning-status")
                 .replace("{applications}", &applications.join(", "))
         }
+
         Status::InstallFailed(error) => install_error_text(error),
+
         Status::Failed(CheckError::Unreachable) => {
             i18n("settings-about-check-unreachable").to_string()
         }
+
         Status::Failed(CheckError::Unreadable) => {
             i18n("settings-about-check-unreadable").to_string()
         }

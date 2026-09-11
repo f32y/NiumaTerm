@@ -27,6 +27,7 @@ fn newline_shortcut_accepts_supported_values() {
     ] {
         let config: Config =
             from_str(&format!("[system]\nnewline-shortcut = \"{value}\"")).unwrap();
+
         assert_eq!(config.system.newline_shortcut, expected);
     }
 }

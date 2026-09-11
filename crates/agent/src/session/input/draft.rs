@@ -73,8 +73,10 @@ impl QuestionDraft {
         {
             return false;
         }
+
         self.custom[question] = true;
         self.touch();
+
         true
     }
 
@@ -82,7 +84,9 @@ impl QuestionDraft {
         if self.text.get(question) == Some(&value) || !self.choose_custom(question) {
             return false;
         }
+
         self.text[question] = value;
+
         true
     }
 
@@ -159,6 +163,7 @@ impl QuestionDraft {
                 Some(index) => {
                     picks.remove(index);
                 }
+
                 None => {
                     picks.push(option);
                     picks.sort_unstable();

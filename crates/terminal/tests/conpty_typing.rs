@@ -55,8 +55,10 @@ fn typing_past_right_edge_does_not_duplicate() {
 
     let pty = match create_pty("powershell.exe", vec![], &None, cols, rows) {
         Ok(p) => p,
+
         Err(e) => {
             eprintln!("skipping: could not spawn powershell.exe: {e:?}");
+
             return;
         }
     };
@@ -72,6 +74,7 @@ fn typing_past_right_edge_does_not_duplicate() {
     sender
         .send(Msg::Input(vec![b'x'; 120].into()))
         .expect("send input");
+
     thread::sleep(Duration::from_millis(2000));
 
     let text = snapshot_text(&frames);
@@ -93,8 +96,10 @@ fn typing_past_right_edge_does_not_duplicate() {
 fn typing_after_resize_does_not_duplicate() {
     let pty = match create_pty("powershell.exe", vec![], &None, 80, 24) {
         Ok(p) => p,
+
         Err(e) => {
             eprintln!("skipping: could not spawn powershell.exe: {e:?}");
+
             return;
         }
     };
@@ -114,11 +119,13 @@ fn typing_after_resize_does_not_duplicate() {
             height: 480,
         }))
         .expect("send resize");
+
     thread::sleep(Duration::from_millis(1000));
 
     sender
         .send(Msg::Input(vec![b'x'; 120].into()))
         .expect("send input");
+
     thread::sleep(Duration::from_millis(2000));
 
     let text = snapshot_text(&frames);
@@ -139,8 +146,10 @@ fn typing_after_resize_does_not_duplicate() {
 fn per_keystroke_typing_does_not_duplicate() {
     let pty = match create_pty("powershell.exe", vec![], &None, 80, 24) {
         Ok(p) => p,
+
         Err(e) => {
             eprintln!("skipping: could not spawn powershell.exe: {e:?}");
+
             return;
         }
     };
@@ -155,6 +164,7 @@ fn per_keystroke_typing_does_not_duplicate() {
     for _ in 0..120 {
         let scrolled_up = {
             let sb = rb.load().scrollbar();
+
             sb.offset < sb.total.saturating_sub(sb.len)
         };
 
@@ -203,8 +213,10 @@ fn per_keystroke_typing_does_not_duplicate() {
 fn resize_then_fast_per_keystroke_does_not_duplicate() {
     let pty = match create_pty("powershell.exe", vec![], &None, 80, 24) {
         Ok(p) => p,
+
         Err(e) => {
             eprintln!("skipping: could not spawn powershell.exe: {e:?}");
+
             return;
         }
     };
@@ -224,6 +236,7 @@ fn resize_then_fast_per_keystroke_does_not_duplicate() {
             height: 42 * 24,
         }))
         .expect("resize");
+
     thread::sleep(Duration::from_millis(800));
 
     // Fast individual keystrokes (no sleep), like SendKeys.

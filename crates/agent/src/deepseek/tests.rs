@@ -60,6 +60,7 @@ fn api_server(request_count: usize) -> (String, mpsc::Receiver<Value>, thread::J
             let mut body = vec![0; content_length];
 
             reader.read_exact(&mut body).expect("read request body");
+
             request_tx
                 .send(serde_json::from_slice(&body).expect("parse request body"))
                 .unwrap();
@@ -101,12 +102,14 @@ fn a_dropped_downlink_does_not_wait_for_the_next_frame() {
 
     thread::spawn(move || {
         pump_for_test(socket, &|_| {}, &pump_stopped, &read_tx);
+
         let _ = done_tx.send(());
     });
 
     read_rx
         .recv_timeout(Duration::from_secs(1))
         .expect("reader should enter the blocking receive");
+
     stopped.store(true, Ordering::Relaxed);
 
     let stopped_before_frame = done_rx.recv_timeout(Duration::from_millis(400)).is_ok();
@@ -1020,6 +1023,7 @@ fn a_todo_write_renders_as_the_shared_checklist_shape() {
     }));
 
     let events = map_frame(&frame, SESSION, &mut ToolTracker::default());
+
     let [Event::ItemCompleted(item)] = events.as_slice() else {
         panic!("expected one todo row, got {events:?}");
     };
@@ -2139,9 +2143,11 @@ fn a_frame_missing_a_required_field_is_dropped_not_emptied() {
 #[test]
 fn raw_tool_events_keep_commands_output_and_applied_diffs() {
     let mut tools = ToolTracker::default();
+
     let call = json!({"type":"tool/call","data":{
         "callId":"raw-shell","name":"bash","arguments":"{\"command\":\"echo ok\",\"description\":\"Print a marker\"}"
     }});
+
     let started = mapping::map_session_event(&call, &Value::Null, &mut tools);
 
     assert!(
@@ -2151,6 +2157,7 @@ fn raw_tool_events_keep_commands_output_and_applied_diffs() {
     let result = json!({"type":"tool/result","data":{"message":{
         "source":{"callId":"raw-shell"},"content":[{"type":"tool-result","content":[{"type":"text","text":"ok\n"}]}]
     }}});
+
     let completed = mapping::map_session_event(&result, &Value::Null, &mut tools);
 
     assert!(

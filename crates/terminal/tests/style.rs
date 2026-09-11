@@ -4,6 +4,7 @@ use nmt_terminal::terminal::style::*;
 #[test]
 fn default_style_at_id_zero() {
     let set = StyleSet::new();
+
     assert_eq!(set.get(DEFAULT_STYLE_ID), Style::default());
     assert_eq!(set.len(), 1);
 }

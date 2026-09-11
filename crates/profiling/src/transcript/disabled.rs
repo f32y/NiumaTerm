@@ -2,6 +2,7 @@
 
 #[path = "operation.rs"]
 mod operation;
+
 pub use crate::transcript::operation::Operation;
 
 /// No measurement state is carried by ordinary builds.

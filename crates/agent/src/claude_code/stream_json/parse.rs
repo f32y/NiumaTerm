@@ -46,6 +46,7 @@ pub(super) fn update_claude_output(usage: &mut Option<TokenUsageBreakdown>, outp
     };
 
     usage.output_tokens = Some(output_tokens);
+
     usage.total_tokens = usage
         .input_tokens
         .unwrap_or(0)
@@ -110,6 +111,7 @@ pub(super) fn slash_command_text(name: &str, arguments: &str) -> String {
 
 pub(super) fn ui_owns_slash_command(name: &str) -> bool {
     let name = name.trim().trim_start_matches('/');
+
     name.eq_ignore_ascii_case("resume") || name.eq_ignore_ascii_case("rewind")
 }
 
@@ -267,14 +269,17 @@ pub(super) fn approval_description(tool_name: &str, input: &Value) -> String {
             "Run command: `{}`",
             input["command"].as_str().unwrap_or_default()
         ),
+
         "Edit" | "Write" | "NotebookEdit" => format!(
             "Edit file: {}",
             input["file_path"].as_str().unwrap_or("(unknown file)")
         ),
+
         "ExitPlanMode" => format!(
             "Approve Claude's plan:\n\n{}",
             input["plan"].as_str().unwrap_or_default()
         ),
+
         _ => {
             let detail = tool_title(input);
 

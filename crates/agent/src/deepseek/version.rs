@@ -16,6 +16,7 @@ pub const SUPPORTED_VERSIONS: &str = "=0.1.5-rc.1";
 /// `dsh --version` only has to start Node and print, but a first run on a cold
 /// machine still pays for module resolution.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(20);
+
 const VERSION_OUTPUT_LIMIT: usize = 8 * 1024;
 
 /// What the installed harness is, relative to what this build supports. An
@@ -25,11 +26,13 @@ const VERSION_OUTPUT_LIMIT: usize = 8 * 1024;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum VersionSupport {
     Supported,
+
     /// Installed and readable, but outside the tested range.
     Unsupported {
         installed: String,
         supported: String,
     },
+
     /// The version could not be read at all. Reported, but not treated as a
     /// reason to refuse: a harness that answers its interface works whether or
     /// not it can describe itself.

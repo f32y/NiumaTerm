@@ -9,6 +9,7 @@ import { join } from 'node:path';
 
 const server = createServer(async (request, response) => {
   let body = '';
+
   for await (const chunk of request) body += chunk;
 
   const input = JSON.parse(body || '{}');
@@ -16,6 +17,7 @@ const server = createServer(async (request, response) => {
   if (request.url.endsWith('/models')) {
     response.setHeader('content-type', 'application/json');
     response.end(JSON.stringify({ object: 'list', data: [{ id: 'deepseek-chat', object: 'model' }] }));
+
     return;
   }
 
@@ -26,7 +28,9 @@ const server = createServer(async (request, response) => {
   console.log('MODEL', request.url, 'tool results', completed.length);
 
   response.setHeader('content-type', 'text/event-stream');
+
   const emit = (delta, finish_reason = null) => response.write(`data: ${JSON.stringify({ id: 'probe', object: 'chat.completion.chunk', model: input.model, choices: [{ index: 0, delta, finish_reason }] })}\n\n`);
+
   emit({ role: 'assistant', content: '' });
 
   if (input.tools && prompt.includes('protocol-probe question') && completed.length === 0) {
@@ -38,6 +42,7 @@ const server = createServer(async (request, response) => {
   } else if (input.tools && prompt.includes('approval-probe-ok') && completed.length < 2) {
     const path = prompt.match(/approval-probe-ok to (.+?) using/)?.[1];
     const args = { command: `Set-Content -LiteralPath '${path}' -Value 'approval-probe-ok'`, description: 'Write the isolated approval marker' };
+
     if (completed.length) Object.assign(args, { sandbox_permissions: 'danger-full-access', justification: 'Allow writing the isolated approval marker outside the test workspace.' });
 
     emit({ tool_calls: [{ index: 0, id: `approval-${completed.length}`, type: 'function', function: { name: 'pwsh', arguments: JSON.stringify(args) } }] });
@@ -50,6 +55,7 @@ const server = createServer(async (request, response) => {
       ['read', { file_path: path }],
       ['edit', { file_path: path, old_string: 'before', new_string: 'after' }],
     ];
+
     const [name, args] = calls[completed.length];
 
     emit({ tool_calls: [{ index: 0, id: `probe-${completed.length}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }] });
@@ -58,6 +64,7 @@ const server = createServer(async (request, response) => {
   } else if (input.tools && prompt.includes('Count from') && !prompt.includes('Abandon the counting')) {
     let count = 0;
     const timer = setInterval(() => emit({ content: `${++count}: local streamed output\n` }), 100);
+
     response.on('close', () => clearInterval(timer));
   } else {
     emit({ content: 'ok' });

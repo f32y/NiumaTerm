@@ -224,6 +224,7 @@ fn control_responses_complete_once_and_ignore_unknown_ids() {
     session
         .control
         .track(id, ControlOperation::Command("compact".into()));
+
     session.conversation.compaction.request_manual();
 
     let response = json!({"id": id, "error": {"message": "busy"}});
@@ -254,6 +255,7 @@ fn thread_switch_retires_commands_but_keeps_catalog_responses() {
         session
             .control
             .track(command, ControlOperation::Command("compact".into()));
+
         session.conversation.compaction.request_manual();
 
         let catalog = session.alloc_rpc_id();
@@ -273,6 +275,7 @@ fn thread_switch_retires_commands_but_keeps_catalog_responses() {
         let transition = session.alloc_rpc_id();
 
         session.control.track_query(transition, kind);
+
         session
             .process(json!({"id": transition, "result": {"thread": {"id": "new", "turns": []}}}));
 
@@ -383,6 +386,7 @@ fn rejected_background_requests_settle_their_pending_state() {
     session.deliver = Arc::new(move |message| {
         let _ = tx.send(message);
     });
+
     session.request_skills(false);
 
     assert!(session.skill_refresh.in_flight.is_some());
@@ -441,6 +445,7 @@ fn routed_child_completion_does_not_finish_the_parent_turn() {
 
     session.conversation.thread_id = Some("parent".into());
     session.background.set_root("parent");
+
     session.process_notification(
         "turn/started",
         &json!({"threadId":"parent","turn":{"id":"parent-turn"}}),
@@ -1327,10 +1332,12 @@ fn compaction_omits_a_post_count_without_an_observed_drop() {
     let mut state = CompactionState::default();
 
     state.update_usage(context_usage(90_000, None));
+
     compaction_started(
         &mut state,
         &json!({"id": "compact-1", "type": "contextCompaction"}),
     );
+
     state.update_usage(context_usage(95_000, None));
 
     let events = compaction_completed(
@@ -1388,12 +1395,14 @@ fn incomplete_manual_compaction_cannot_mark_a_later_auto_run_manual() {
     let mut state = CompactionState::default();
 
     state.request_manual();
+
     compaction_started(
         &mut state,
         &json!({"id": "aborted", "type": "contextCompaction"}),
     );
 
     state.clear_incomplete();
+
     compaction_started(
         &mut state,
         &json!({"id": "automatic", "type": "contextCompaction"}),
@@ -1420,6 +1429,7 @@ fn incomplete_manual_compaction_cannot_mark_a_later_auto_run_manual() {
 
     rejected.request_manual();
     rejected.reject_manual_request();
+
     compaction_started(
         &mut rejected,
         &json!({"id": "after-rejection", "type": "contextCompaction"}),

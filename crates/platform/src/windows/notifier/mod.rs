@@ -25,6 +25,7 @@ pub(crate) fn show(notification: &NativeNotification) -> Result<(), String> {
     use windows::core::HSTRING;
 
     let app_id: HSTRING = APP_ID.into();
+
     unsafe { SetCurrentProcessExplicitAppUserModelID(&app_id) }
         .map_err(|error| error.to_string())?;
 
@@ -107,6 +108,7 @@ pub(crate) fn register_identity(exe_path: &Path) -> Result<(), String> {
         let persist: IPersistFile = link.cast()?;
 
         let shortcut: HSTRING = shortcut.to_string_lossy().as_ref().into();
+
         persist.Save(&shortcut, true)
     })()
     .map_err(|error: WindowsError| error.to_string());

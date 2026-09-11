@@ -43,6 +43,7 @@ impl HttpClaudeReleaseChannel {
     fn with_base_url(base_url: impl Into<String>) -> Result<Self, UpdateError> {
         Self::new().map(|mut client| {
             client.base_url = base_url.into();
+
             client
         })
     }
@@ -127,6 +128,7 @@ where
                     }
                 })
             }
+
             Err(error) => VersionStatus {
                 provider: ProviderKind::Claude,
                 current: None,
@@ -153,7 +155,9 @@ where
             status.support = DiscoverySupport::Unsupported {
                 reason: format!("Claude release channel `{channel}` is not supported"),
             };
+
             status.can_update = false;
+
             return Ok(status);
         }
 
@@ -161,8 +165,10 @@ where
             Ok(version) => {
                 status.available = Some(version);
                 status.support = DiscoverySupport::Supported;
+
                 Ok(status)
             }
+
             Err(error) => {
                 status.support = DiscoverySupport::Unsupported {
                     reason: error.message().to_string(),
@@ -195,6 +201,7 @@ pub fn parse_claude_doctor(output: &str) -> Result<VersionStatus, UpdateError> {
                 && open < close
             {
                 running_method = nonempty_label(&value[..open]);
+
                 current = Some(parse_strict_version(
                     value[open + 1..close].trim(),
                     "Claude version",
@@ -242,6 +249,7 @@ pub fn parse_claude_doctor(output: &str) -> Result<VersionStatus, UpdateError> {
 
 fn nonempty_label(value: &str) -> Option<String> {
     let value = bounded_label(value, MAX_LABEL_CHARS);
+
     (!value.is_empty()).then_some(value)
 }
 

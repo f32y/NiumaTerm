@@ -63,6 +63,7 @@ pub(crate) struct TerminalPrepaint {
 
 impl Element for TerminalView {
     type RequestLayoutState = Style;
+
     type PrepaintState = TerminalPrepaint;
 
     fn id(&self) -> Option<ElementId> {
@@ -105,6 +106,7 @@ impl Element for TerminalView {
 
         let row_offsets = self.pane.update(cx, |pane, cx| {
             pane.set_content_bounds(bounds, cell, cx);
+
             pane.model.viewport.row_offsets()
         });
 
@@ -164,6 +166,7 @@ impl IntoElement for BlockListView {
 
 impl Element for BlockListView {
     type RequestLayoutState = Style;
+
     type PrepaintState = ();
 
     fn id(&self) -> Option<ElementId> {
@@ -252,6 +255,7 @@ impl Element for BlockListView {
 fn paint_frozen_separators(bounds: Bounds<Pixels>, separators: &[f32], window: &mut Window) {
     let left = bounds.left() - px(metrics::PADDING_PX);
     let right = bounds.right() + px(metrics::PADDING_PX);
+
     for y in separators {
         window.paint_quad(fill(
             Bounds::new(
@@ -277,6 +281,7 @@ fn paint_frozen_chrome(
     for chrome in items_chrome {
         let top = bounds.top() + px(chrome.top);
         let height = px(chrome.bottom - chrome.top);
+
         let gutter_alpha = if chrome.selected { 0xe6 } else { 0x59 };
 
         window.paint_quad(fill(

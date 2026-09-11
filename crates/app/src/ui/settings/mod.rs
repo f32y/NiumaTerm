@@ -142,10 +142,13 @@ pub(crate) fn save_settings(window: &mut Window, cx: &mut App) -> bool {
     match cx.global_mut::<AppSettings>().save() {
         Ok(()) => {
             window.remove_notification::<SettingsSaveFailure>(cx);
+
             true
         }
+
         Err(error) => {
             warn!("failed to save settings: {error}");
+
             window.push_notification(
                 Notification::new()
                     .id::<SettingsSaveFailure>()

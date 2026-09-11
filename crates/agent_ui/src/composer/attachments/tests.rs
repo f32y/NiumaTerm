@@ -24,6 +24,7 @@ fn attach_three() -> (PendingAttachments, String) {
 
     for _ in 0..3 {
         let placeholder = pending.attach(&png(4, 4)).ok().expect("attach");
+
         text.push_str(&placeholder);
     }
 
@@ -124,6 +125,7 @@ fn a_link_resolves_to_the_image_its_placeholder_names() {
     let second = pending.iter().nth(1).expect("second").bytes().to_vec();
 
     let links = pending.placeholder_links(&text);
+
     let image = pending
         .linked_image(&text, links[1].clone())
         .expect("linked image");
@@ -164,6 +166,7 @@ fn attaching_shrinks_an_oversized_image() {
 
     let attached = image_rs::load_from_memory(pending.iter().next().expect("attached").bytes())
         .expect("decode attached");
+
     let (width, height) = (attached.width(), attached.height());
 
     // Onto the cap, not past it, with the shape kept. The resize fits the

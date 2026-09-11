@@ -39,6 +39,7 @@ impl OpacityTarget {
             Self::Window => {
                 settings.appearance.background_opacity = clamp_background_opacity(value)
             }
+
             Self::Image => {
                 settings.appearance.background_image_opacity = clamp_background_image_opacity(value)
             }
@@ -72,6 +73,7 @@ fn opacity_slider_field(target: OpacityTarget) -> SettingField<SharedString> {
 
                 let subscription = cx.subscribe(&slider, move |_, event: &SliderEvent, cx| {
                     let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
+
                     target.set(value.end() as f64, cx.global_mut::<AppSettings>());
                 });
 
@@ -191,6 +193,7 @@ pub(super) fn background_image_field() -> SettingField<SharedString> {
                                     && let Some(path) = paths.first()
                                 {
                                     let path = path.display().to_string();
+
                                     let _ = cx.update_global(|settings: &mut AppSettings, _, _| {
                                         settings.appearance.background_image = Some(path);
                                     });

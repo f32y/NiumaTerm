@@ -59,10 +59,13 @@ impl ImageReleases {
         }
 
         let (sender, receiver) = unbounded();
+
         for image in self.pending.drain(..) {
             let _ = sender.unbounded_send(image);
         }
+
         self.sender = Some(sender);
+
         Some(receiver)
     }
 }
@@ -177,6 +180,7 @@ pub fn graphic_to_bgra(
 
             Some(pixels)
         }
+
         ColorType::Rgb => {
             if pixels.len() != pixel_count.checked_mul(3)? {
                 return None;
@@ -233,6 +237,7 @@ pub(crate) fn prune_frozen_images(cache: &FrozenImageCache, events: &[BlockEvent
                     .lock()
                     .retain(|(block_id, _), _| alive.contains(block_id));
             }
+
             BlockEvent::HistoryCleared => cache.lock().clear(),
             BlockEvent::EngineBlock { .. } => {}
         }

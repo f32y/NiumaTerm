@@ -242,6 +242,7 @@ impl Shell {
                     .child(pane.clone())
                     .into_any_element()
             }
+
             PaneNode::Split {
                 id,
                 axis,

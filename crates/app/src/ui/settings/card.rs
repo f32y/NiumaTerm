@@ -41,6 +41,7 @@ pub(super) fn card_text_input(
             let _subscription = cx.subscribe(&input, move |_, input, event, cx| {
                 if matches!(event, InputEvent::Change) {
                     let value = input.read(cx).value().to_string();
+
                     apply(value, cx);
                 }
             });

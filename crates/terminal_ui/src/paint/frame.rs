@@ -247,6 +247,7 @@ pub(crate) fn cursor_bounds(
 ) -> Option<Bounds<Pixels>> {
     let x = bounds.left() + px(cursor.col as f32 * cell.width_px);
     let y = bounds.top() + px(cursor.row as f32 * cell.height_px + y_offset);
+
     let thickness = px((cell.width_px.min(cell.height_px) / 8.0)
         .round()
         .clamp(1.0, 2.0));
@@ -254,10 +255,12 @@ pub(crate) fn cursor_bounds(
     Some(match cursor.shape {
         CursorShape::Block => Bounds::new(point(x, y), size(px(cell.width_px), px(cell.height_px))),
         CursorShape::Beam => Bounds::new(point(x, y), size(thickness, px(cell.height_px))),
+
         CursorShape::Underline => Bounds::new(
             point(x, y + px(cell.height_px) - thickness),
             size(px(cell.width_px), thickness),
         ),
+
         CursorShape::Hidden => return None,
     })
 }

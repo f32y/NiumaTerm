@@ -44,29 +44,38 @@ impl SessionInput {
         if self.epoch != runtime.epoch() || self.disconnected {
             return ApprovalOutcome::Ignored;
         }
+
         let Some(approval) = &mut self.approval else {
             return ApprovalOutcome::Ignored;
         };
+
         if approval.submitted {
             return ApprovalOutcome::Ignored;
         }
+
         let Some(backend) = runtime.backend_mut() else {
             return ApprovalOutcome::Rejected;
         };
+
         let waits = match backend {
             Backend::DeepSeek(_) => true,
             Backend::Codex(_) | Backend::Claude(_) => false,
+
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => session.approval_waits,
         };
+
         if !backend.respond_approval(decision) {
             return ApprovalOutcome::Rejected;
         }
+
         if waits {
             approval.submitted = true;
+
             ApprovalOutcome::Waiting
         } else {
             self.approval = None;
+
             ApprovalOutcome::Settled
         }
     }

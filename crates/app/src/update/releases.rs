@@ -55,6 +55,7 @@ const MAX_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 pub(crate) enum CheckError {
     /// The request never produced a response to read.
     Unreachable,
+
     /// A response arrived but was not the releases list.
     Unreadable,
 }
@@ -64,6 +65,7 @@ pub(crate) struct Release {
     pub(crate) label: String,
     pub(crate) page_url: String,
     pub(crate) assets: Vec<Asset>,
+
     /// When the channel published it, as `yyyymmdd`, which is the only thing a
     /// release tag and a nightly label can be ordered by across channels. Left
     /// unset for a response that carried no timestamp this could read.
@@ -86,10 +88,12 @@ struct ReleaseEntry {
     draft: bool,
     #[serde(default)]
     prerelease: bool,
+
     /// Absent from the recorded responses the selection is tested against, and
     /// from a release published before anything was attached to it.
     #[serde(default)]
     assets: Vec<Asset>,
+
     /// `2026-08-14T09:12:33Z`. Null for a draft, which never reaches a
     /// comparison, and absent from the recorded responses.
     #[serde(default)]
@@ -219,6 +223,7 @@ pub(crate) fn supersedes(current: &Version, candidate: &Release) -> bool {
                 patch,
             },
         ) => (major, minor, patch) > (current_major, current_minor, current_patch),
+
         (
             Version::Nightly {
                 date: current_date,
@@ -232,6 +237,7 @@ pub(crate) fn supersedes(current: &Version, candidate: &Release) -> bool {
             // at all means it is the newest the channel has.
             date > current_date || (date == current_date && commit != current_commit)
         }
+
         // A nightly is cut from the tip of the development line, so a release
         // published before that build existed is behind it however its number
         // reads, and installing it would move the installation backwards. One
@@ -247,6 +253,7 @@ pub(crate) fn supersedes(current: &Version, candidate: &Release) -> bool {
         (Version::Nightly { date, .. }, Version::Release { .. }) => candidate
             .published
             .is_some_and(|published| published > *date),
+
         // The other direction needs no such evidence: the nightly channel is
         // only ever cut from the tip, so what it publishes is never behind a
         // release.

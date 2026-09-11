@@ -22,6 +22,7 @@ pub enum AgentActivityPolicy {
     /// External Hook delivery can end without a final event, so an inactive
     /// route eventually returns to idle instead of remaining active forever.
     ExpireAfterInactivity,
+
     /// An in-process backend reports completion and interruption explicitly,
     /// so quiet work remains active until one of those events arrives.
     ExplicitLifecycle,
@@ -80,6 +81,7 @@ impl AgentPaneState {
             AgentActivityPolicy::ExpireAfterInactivity => {
                 Some(self.updated_at + ACTIVE_STATE_STALE_AFTER)
             }
+
             AgentActivityPolicy::ExplicitLifecycle => None,
         }
     }
@@ -145,6 +147,7 @@ impl AgentMonitor {
     ) -> bool {
         if let Entry::Vacant(entry) = self.panes.entry(route) {
             entry.insert(AgentPaneState::new(now, activity_policy));
+
             true
         } else {
             false
@@ -206,6 +209,7 @@ impl AgentMonitor {
 
                 MonitorMutation::default()
             }
+
             AgentEventKind::PromptSubmitted => {
                 let owner = event.owner().expect("validated prompt has turn id");
                 let state = self.panes.get_mut(&route).expect("live route");
@@ -228,6 +232,7 @@ impl AgentMonitor {
 
                 mutation
             }
+
             AgentEventKind::ToolStarted | AgentEventKind::ToolFinished => {
                 let Some(owner) = event.owner() else {
                     return MonitorMutation::default();
@@ -249,6 +254,7 @@ impl AgentMonitor {
                     ..MonitorMutation::default()
                 }
             }
+
             AgentEventKind::PermissionRequested => {
                 let Some(owner) = event.owner() else {
                     return MonitorMutation::default();
@@ -269,6 +275,7 @@ impl AgentMonitor {
 
                 mutation
             }
+
             AgentEventKind::Stopped => {
                 let Some(owner) = event.owner() else {
                     return MonitorMutation::default();
@@ -395,6 +402,7 @@ impl AgentMonitor {
             .flat_map(|state| {
                 let completion = state.pending_completion.as_ref().map(|p| p.deadline);
                 let stale = state.active_state_deadline();
+
                 completion.into_iter().chain(stale)
             })
             .min()

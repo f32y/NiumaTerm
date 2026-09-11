@@ -12,6 +12,7 @@ pub(crate) fn frame_content_rows(frame: &TerminalFrame) -> usize {
             .any(|c| !matches!(c.ch, '\0' | ' ' | '\u{00a0}'))
         {
             content_end = row + 1;
+
             break;
         }
     }
@@ -91,6 +92,7 @@ pub(crate) fn truncate_command(command: &str, max: usize) -> String {
         command.to_string()
     } else {
         let head: String = command.chars().take(max.saturating_sub(1)).collect();
+
         format!("{head}…")
     }
 }

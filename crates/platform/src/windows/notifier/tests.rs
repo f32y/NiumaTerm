@@ -45,6 +45,7 @@ fn windows_toast_smoke() {
     };
 
     show(&notification).expect("Windows should accept the Toast");
+
     remove(&notification.tag, &notification.group)
         .expect("Windows should remove the Toast by tag and group");
 }
@@ -54,6 +55,7 @@ fn windows_toast_smoke() {
 fn windows_toast_visual_smoke() {
     register_identity(&env::current_exe().unwrap())
         .expect("smoke executable should register its native identity");
+
     show(&NativeNotification {
         title: "NiumaTerm visual smoke test".into(),
         body: "This notification is intentionally not removed.".into(),

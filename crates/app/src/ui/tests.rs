@@ -3,6 +3,7 @@ use crate::ui::{DEFAULT_CJK_FONT_FAMILY, font_with_default_fallback};
 #[test]
 fn default_font_prefers_one_chinese_face_for_missing_glyphs() {
     let font = font_with_default_fallback("Menlo");
+
     let fallbacks = font
         .fallbacks
         .expect("default fallback should be configured");

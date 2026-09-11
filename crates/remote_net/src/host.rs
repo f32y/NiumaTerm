@@ -35,7 +35,9 @@ const RECONNECT_CAP: Duration = Duration::from_secs(30);
 pub struct HostConfig {
     /// Relay endpoint, e.g. `wss://relay.example.com/ws`.
     pub relay_url: String,
+
     pub access_token: String,
+
     /// Directory for `host-key.json` and `authorized_devices.json`.
     pub data_dir: PathBuf,
 }
@@ -44,8 +46,10 @@ pub struct HostConfig {
 pub enum HostStartError {
     #[error(transparent)]
     Key(#[from] KeyStoreError),
+
     #[error("device list unavailable: {0}")]
     Devices(io::Error),
+
     #[error("tokio runtime: {0}")]
     Runtime(io::Error),
 }
@@ -60,6 +64,7 @@ struct ActiveConnection {
     /// registered before that so relay bookkeeping can't spawn a second
     /// connection for the same client mid-handshake.
     device_public_key: Option<Vec<u8>>,
+
     cancel: watch::Sender<bool>,
 }
 
@@ -86,8 +91,10 @@ impl HostHandle {
     /// own tokio runtime thread, keeping the GPUI main thread untouched.
     pub fn start(config: HostConfig) -> Result<HostHandle, HostStartError> {
         let keys = load_or_create_keypair(&config.data_dir.join("host-key.json"))?;
+
         let devices = AuthorizedDevices::load(config.data_dir.join("authorized_devices.json"))
             .map_err(HostStartError::Devices)?;
+
         let host_id = derive_host_id(&keys.public);
 
         info!(host_id, "starting remote session host");
@@ -205,6 +212,7 @@ async fn control_loop(shared: Arc<Shared>) {
                 run_control(&shared, ws).await;
                 warn!("relay control socket lost");
             }
+
             Err(e) => warn!("relay control connect failed: {e}"),
         }
 
@@ -230,6 +238,7 @@ async fn run_control(shared: &Arc<Shared>, mut ws: WsStream) {
                     return;
                 }
             }
+
             msg = ws.next() => {
                 let text = match msg {
                     Some(Ok(Message::Text(text))) => text,
@@ -237,33 +246,42 @@ async fn run_control(shared: &Arc<Shared>, mut ws: WsStream) {
                     Some(Ok(_)) => continue,
                     Some(Err(e)) => { warn!("control socket error: {e}"); return }
                 };
+
                 let Ok(control) = serde_json::from_str::<RelayControlMessage>(&text) else {
                     warn!("unparseable relay control message: {text}");
+
                     continue;
                 };
+
                 match control {
                     RelayControlMessage::Connected { connection_id } => {
                         spawn_connection(shared, connection_id);
                     }
+
                     RelayControlMessage::Sync { connections } => {
                         // Reconciliation after (re)registering: open data
                         // sockets for clients we don't serve yet, drop ones
                         // the relay no longer knows.
                         let active = shared.active.lock();
+
                         for (cid, conn) in active.iter() {
                             if !connections.contains(cid) {
                                 let _ = conn.cancel.send(true);
                             }
                         }
+
                         let missing: Vec<String> = connections
                             .into_iter()
                             .filter(|cid| !active.contains_key(cid))
                             .collect();
+
                         drop(active);
+
                         for cid in missing {
                             spawn_connection(shared, cid);
                         }
                     }
+
                     RelayControlMessage::Disconnected { connection_id } => {
                         if let Some(conn) =
                             shared.active.lock().remove(&connection_id)
@@ -322,6 +340,7 @@ async fn serve_connection(
 
     // First client message: mode prefix + Noise message 1.
     let first = next_binary(&mut ws).await?;
+
     let (&mode, msg1) = first
         .split_first()
         .ok_or_else(|| NetError::Protocol("empty first message".into()))?;
@@ -341,6 +360,7 @@ async fn serve_connection(
             // so no session data (not even a handshake completion) leaks.
             if !shared.devices.lock().contains(&remote) {
                 let _ = ws.close(None).await;
+
                 return Err(NetError::Protocol("unauthorized device".into()));
             }
 
@@ -350,6 +370,7 @@ async fn serve_connection(
 
             (handshake.into_transport()?, remote)
         }
+
         CONNECT_MODE_PAIR => {
             let mut handshake = Handshake::responder_xx(&shared.keys.private)?;
 
@@ -372,9 +393,11 @@ async fn serve_connection(
             // Pair.
             let ciphertext = next_binary(&mut ws).await?;
             let frame = Frame::decode(&chan.open(&ciphertext)?)?;
+
             let Frame::Control(payload) = frame else {
                 return Err(NetError::Protocol("expected Pair control frame".into()));
             };
+
             let HostBound::Pair { token, device_name } = Frame::parse_control(&payload)? else {
                 return Err(NetError::Protocol("expected Pair control frame".into()));
             };
@@ -400,11 +423,13 @@ async fn serve_connection(
                 .lock()
                 .add(&device_name, &remote)
                 .map_err(|e| NetError::Protocol(format!("persisting device failed: {e}")))?;
+
             info!(device = %device_name, "device paired");
             send_frame(&mut ws, &mut chan, &Frame::control(&ClientBound::Paired)?).await?;
 
             (chan, remote)
         }
+
         other => {
             return Err(NetError::Protocol(format!(
                 "unknown connect mode {other:#04x}"
@@ -426,7 +451,9 @@ async fn send_frame(
     frame: &Frame,
 ) -> Result<(), NetError> {
     let ciphertext = chan.seal(&frame.encode()?)?;
+
     ws.send(Message::Binary(ciphertext.into())).await?;
+
     Ok(())
 }
 
@@ -457,6 +484,7 @@ impl SubscriptionBridge {
                             break;
                         }
                     }
+
                     Err(RecvTimeoutError::Timeout) => continue,
                     Err(RecvTimeoutError::Disconnected) => break,
                 }
@@ -493,12 +521,15 @@ async fn serve_session(
                 // just like an explicit `send(true)`.
                 if changed.is_err() || *cancel.borrow() {
                     let _ = sink.close().await;
+
                     return Ok(());
                 }
             }
+
             event = event_rx.recv() => {
                 // Sender lives in this scope, so the channel can't close.
                 let Some((session_id, event)) = event else { return Ok(()) };
+
                 match event {
                     SessionEvent::Output { seq, data } => {
                         // Chunk to respect the Noise message cap; chunks keep
@@ -509,16 +540,20 @@ async fn serve_session(
                                 seq,
                                 data: piece.to_vec(),
                             };
+
                             send_split(&mut sink, &mut chan, &frame).await?;
                         }
                     }
+
                     SessionEvent::Exited { seq } => {
                         bridges.remove(&session_id);
+
                         send_split(&mut sink, &mut chan, &Frame::Exited { session_id, seq })
                             .await?;
                     }
                 }
             }
+
             msg = stream.next() => {
                 let data = match msg {
                     Some(Ok(Message::Binary(data))) => data,
@@ -526,7 +561,9 @@ async fn serve_session(
                     Some(Ok(_)) => continue,
                     Some(Err(e)) => return Err(e.into()),
                 };
+
                 let frame = Frame::decode(&chan.open(&data)?)?;
+
                 if let Some(reply) =
                     handle_frame(shared, frame, &event_tx, &mut bridges)
                 {
@@ -543,7 +580,9 @@ async fn send_split(
     frame: &Frame,
 ) -> Result<(), NetError> {
     let ciphertext = chan.seal(&frame.encode()?)?;
+
     sink.send(Message::Binary(ciphertext.into())).await?;
+
     Ok(())
 }
 
@@ -582,10 +621,12 @@ fn handle_frame(
 
                     reply(&ClientBound::SessionList(sessions))
                 }
+
                 HostBound::Open(options) => match shared.hub.open(options.into()) {
                     Ok(id) => reply(&ClientBound::Opened { session_id: id.0 }),
                     Err(e) => error(None, &e),
                 },
+
                 HostBound::Attach { session_id } => {
                     match shared.hub.attach(SessionId(session_id)) {
                         Ok(subscription) => {
@@ -602,29 +643,36 @@ fn handle_frame(
 
                             reply(&ClientBound::Attached(snapshot))
                         }
+
                         Err(e) => error(Some(session_id), &e),
                     }
                 }
+
                 HostBound::Detach { session_id } => {
                     bridges.remove(&session_id);
+
                     None
                 }
+
                 HostBound::Kill { session_id } => match shared.hub.kill(SessionId(session_id)) {
                     Ok(()) => None,
                     Err(e) => error(Some(session_id), &e),
                 },
+
                 HostBound::Pair { .. } => error(
                     None,
                     &"pairing is only accepted as the first frame of a pairing connection",
                 ),
             }
         }
+
         Frame::Input { session_id, data } => {
             match shared.hub.write_input(SessionId(session_id), &data) {
                 Ok(()) => None,
                 Err(e) => error(Some(session_id), &e),
             }
         }
+
         Frame::Resize {
             session_id,
             cols,
@@ -633,6 +681,7 @@ fn handle_frame(
             Ok(()) => None,
             Err(e) => error(Some(session_id), &e),
         },
+
         // Output/Exited only flow host → client.
         Frame::Output { session_id, .. } | Frame::Exited { session_id, .. } => {
             error(Some(session_id), &"unexpected server-bound data frame")

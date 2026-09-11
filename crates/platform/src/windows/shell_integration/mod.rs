@@ -85,6 +85,7 @@ pub fn set_system_notification_enabled(enabled: bool) -> Result<()> {
         protocol.set_string("", "URL:NiumaTerm Protocol")?;
         protocol.set_string("URL Protocol", "")?;
         protocol.create("DefaultIcon")?.set_string("", &icon)?;
+
         protocol
             .create(r"shell\open\command")?
             .set_string("", protocol_command(&exe_path))?;

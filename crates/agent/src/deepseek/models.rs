@@ -13,9 +13,11 @@ use crate::chat::ModelInfo;
 struct ModelRoute {
     /// What the picker submits and displays as its value.
     key: String,
+
     provider: String,
     model: String,
     display: String,
+
     /// Reasoning-effort ids this exact model route advertises. Empty when the
     /// adapter exposes no effort control for it.
     efforts: Vec<String>,
@@ -25,11 +27,14 @@ struct ModelRoute {
 #[derive(Default)]
 pub(crate) struct ModelDirectory {
     routes: Vec<ModelRoute>,
+
     /// Route the session is currently on. An id the catalog never listed is
     /// addressed to this provider, because a bare id names no route of its own.
     current_provider: String,
+
     /// Key of the current selection, absent only before the first catalog.
     selected: Option<String>,
+
     effort: Option<String>,
 }
 
@@ -98,6 +103,7 @@ impl ModelDirectory {
             .find(|route| route.provider == provider && route.model == model)
         {
             Some(route) => Some(route.key.clone()),
+
             None if !model.is_empty() => {
                 routes.push(ModelRoute {
                     key: model.to_string(),
@@ -109,6 +115,7 @@ impl ModelDirectory {
 
                 Some(model.to_string())
             }
+
             None => None,
         };
 
@@ -164,6 +171,7 @@ impl ModelDirectory {
             {
                 (provider, model)
             }
+
             _ => (self.current_provider.as_str(), key),
         }
     }

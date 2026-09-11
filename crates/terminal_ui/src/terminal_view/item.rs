@@ -31,11 +31,14 @@ pub(crate) enum BlockListItem {
         selected_item: Option<usize>,
         pane: Entity<TerminalPane>,
     },
+
     Live {
         frame: TerminalFrame,
+
         /// Active-grid scrollback rows rendered above the live grid
         /// when scrolling into a running command.
         history_rows: u64,
+
         state: LiveItemState,
         cols: u32,
         cell: metrics::CellMetrics,
@@ -56,6 +59,7 @@ pub(crate) enum BlockListItemPrepaint {
         view: block_list::FrozenView,
         shaped: Vec<ShapedLine>,
     },
+
     Live {
         tail_view: block_list::FrozenView,
         tail_shaped: Vec<ShapedLine>,
@@ -66,6 +70,7 @@ pub(crate) enum BlockListItemPrepaint {
 
 impl Element for BlockListItem {
     type RequestLayoutState = Style;
+
     type PrepaintState = BlockListItemPrepaint;
 
     fn id(&self) -> Option<ElementId> {
@@ -105,6 +110,7 @@ impl Element for BlockListItem {
                     .map(|item| block_list::item_px(item, *cols, cell.height_px, pad_rows))
                     .unwrap_or(0.0)
             }
+
             BlockListItem::Live {
                 frame,
                 history_rows,
@@ -139,6 +145,7 @@ impl Element for BlockListItem {
         let origin_y = self.pane().read(cx).content_origin().y;
         let item_top = (bounds.top() - origin_y).as_f32();
         let pad_rows = self.pane().read(cx).model.settings.pad_rows;
+
         let viewport = ItemViewport {
             top: bounds.top().as_f32(),
             height: window.viewport_size().height.as_f32(),
@@ -157,6 +164,7 @@ impl Element for BlockListItem {
                 pane,
             } => {
                 let model = &pane.read(cx).model;
+
                 let mut view = model.source.frozen_block_view(
                     *item_idx,
                     &viewport,
@@ -167,6 +175,7 @@ impl Element for BlockListItem {
                 );
 
                 let record = FrameRecord::from_view(&view, item_top);
+
                 pane.update(cx, |pane, _| pane.model.record_frame(record));
 
                 view.items_chrome.clear();
@@ -175,6 +184,7 @@ impl Element for BlockListItem {
 
                 BlockListItemPrepaint::Frozen { view, shaped }
             }
+
             BlockListItem::Live {
                 frame,
                 history_rows,
@@ -194,7 +204,9 @@ impl Element for BlockListItem {
 
                 let layout =
                     state.layout(tail_view.active_top, live_rows, cell.height_px, pad_rows);
+
                 let record = FrameRecord::from_live_view(&tail_view, &layout, item_top);
+
                 pane.update(cx, |pane, _| pane.model.record_frame(record));
 
                 let tail_shaped = shape_frozen_rows(&tail_view.rows, cell.width_px, window);
@@ -227,6 +239,7 @@ impl Element for BlockListItem {
         cx: &mut App,
     ) {
         let selection_bg = self.pane().read(cx).model.theme.selection_background;
+
         match (self, prepaint) {
             (
                 BlockListItem::Frozen { cell, .. },
@@ -238,6 +251,7 @@ impl Element for BlockListItem {
 
                 paint_frozen_images(bounds, view, *cell, window, true);
             }
+
             (
                 BlockListItem::Live { frame, cell, .. },
                 BlockListItemPrepaint::Live {
@@ -267,6 +281,7 @@ impl Element for BlockListItem {
                     cx,
                 );
             }
+
             _ => {}
         }
     }

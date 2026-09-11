@@ -76,6 +76,7 @@ impl<M> TranscriptContent<M> {
         }
 
         self.entries.push(entry);
+
         index
     }
 
@@ -133,14 +134,17 @@ impl<M> TranscriptContent<M> {
             let text = match (field, &mut self.entries[index].item) {
                 (TextField::Reply, Item::AgentMessage { text, .. }) => text,
                 (TextField::ReasoningSummary, Item::Reasoning { summary, .. }) => summary,
+
                 (
                     TextField::CommandOutput,
                     Item::CommandExecution {
                         aggregated_output, ..
                     },
                 ) => aggregated_output,
+
                 _ => continue,
             };
+
             let text = text.get_or_insert_default();
             let previous_bytes = text.len();
 
@@ -165,6 +169,7 @@ impl<M> TranscriptContent<M> {
                 Item::AgentMessage {
                     text: Some(text), ..
                 } if entry.turn == turn && !text.trim().is_empty() => Some(text.as_str()),
+
                 _ => None,
             })
     }

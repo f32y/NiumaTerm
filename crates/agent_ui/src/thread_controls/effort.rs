@@ -231,6 +231,7 @@ pub(super) fn effort_panel(
                                         move |_, _, cx| {
                                             pane.update(cx, |this, cx| {
                                                 this.controls.effort_drag = Some(index);
+
                                                 cx.notify();
                                             });
                                         }
@@ -257,6 +258,7 @@ pub(super) fn effort_panel(
                                                 }
 
                                                 this.controls.effort_drag = Some(index);
+
                                                 cx.notify();
                                             });
                                         }
@@ -270,6 +272,7 @@ pub(super) fn effort_panel(
                                         pane.update(cx, |this, cx| {
                                             this.controls.effort_drag = None;
                                             set(this, value.clone(), cx);
+
                                             cx.notify();
                                         });
                                     })

@@ -30,11 +30,13 @@ fn b64(input: &[u8]) -> String {
 
         out.push(T[((n >> 18) & 63) as usize] as char);
         out.push(T[((n >> 12) & 63) as usize] as char);
+
         out.push(if chunk.len() > 1 {
             T[((n >> 6) & 63) as usize] as char
         } else {
             '='
         });
+
         out.push(if chunk.len() > 2 {
             T[(n & 63) as usize] as char
         } else {
@@ -87,6 +89,7 @@ fn drive_conpty_with_title(script: &str, title: Option<&str>) -> Vec<u8> {
 
         match pty.reader().read(&mut buf) {
             Ok(0) => thread::sleep(Duration::from_millis(20)),
+
             Ok(n) => {
                 collected.extend_from_slice(&buf[..n]);
 
@@ -100,6 +103,7 @@ fn drive_conpty_with_title(script: &str, title: Option<&str>) -> Vec<u8> {
                     break;
                 }
             }
+
             Err(_) => break,
         }
     }

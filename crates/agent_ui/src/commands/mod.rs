@@ -20,18 +20,22 @@ pub(super) fn validate_skill_binding(
 ) -> Result<Option<SkillReference>, String> {
     validate_core_skill_binding(input, binding, catalog).map_err(|error| match error {
         SkillError::Loading => i18n("agent-command-skill-loading").to_owned(),
+
         SkillError::Unavailable(name) => {
             i18n("agent-command-skill-unavailable").replace("{name}", &name)
         }
+
         SkillError::Disabled(name) => i18n("agent-command-skill-disabled").replace("{name}", &name),
     })
 }
+
 pub(super) fn prepare_skill_selection(
     skill: &SkillInfo,
 ) -> Result<(String, SkillReference), String> {
     prepare_core_skill_selection(skill)
         .map_err(|_| i18n("agent-command-skill-disabled-by-codex").replace("{name}", &skill.name))
 }
+
 pub(super) fn resolve_choice(input: &str, choices: &[(String, String)]) -> Result<String, String> {
     resolve_core_choice(input, choices).map_err(|error| {
         i18n(match error {

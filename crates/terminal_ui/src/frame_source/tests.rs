@@ -70,18 +70,23 @@ fn frozen_item_loads_rows_and_reuses_images_without_a_window() {
         \x1b]133;A\x07> \x1b]133;B\x07echo hi\r\n\x1b]133;C\x07hi\r\n\
         \x1b_Ga=T,f=32,s=1,v=1,i=1,p=9,c=1,r=2;/wAA/w==\x1b\\\r\n\
         \x1b]133;D;0\x07\x1b]133;A\x07> \x1b]133;B\x07";
+
     let (mut model, input) = controller(stream, true);
     let count = model.source.session.block_store().lock().items().len();
+
     let item = (0..count)
         .find(|&item| model.source.session.block_command(item).as_deref() == Some("echo hi"))
         .expect("the completed command has a frozen item");
+
     let viewport = ItemViewport {
         top: 0.0,
         height: 108.0,
         cell_height: 18.0,
         pad_rows: 1.0,
     };
+
     let deadline = Instant::now() + Duration::from_secs(2);
+
     let view = loop {
         let view = model.source.frozen_block_view(
             item,
@@ -91,21 +96,26 @@ fn frozen_item_loads_rows_and_reuses_images_without_a_window() {
             &model.duration_labels,
             model.theme.foreground,
         );
+
         if !view.rows.is_empty() && !view.images.is_empty() {
             break view;
         }
+
         assert!(
             Instant::now() < deadline,
             "frozen rows and images did not load"
         );
+
         thread::sleep(Duration::from_millis(1));
     };
+
     assert!(view.rows.iter().any(|row| row.line.text().contains("hi")));
     assert!(
         view.items_chrome
             .iter()
             .any(|chrome| chrome.item == item && chrome.selected)
     );
+
     let second = model.source.frozen_block_view(
         item,
         &viewport,
@@ -114,6 +124,7 @@ fn frozen_item_loads_rows_and_reuses_images_without_a_window() {
         &model.duration_labels,
         model.theme.foreground,
     );
+
     assert_eq!(view.images.len(), second.images.len());
     assert!(Arc::ptr_eq(
         &view.images[0].generation,
@@ -133,10 +144,14 @@ fn frozen_item_loads_rows_and_reuses_images_without_a_window() {
             .rows
             .is_empty()
     );
+
     input.lock().clear();
     model.gutter.select(item);
+
     assert!(model.write_text_input(TextInput::RerunSelectedBlock));
+
     assert_input(&input, b"echo hi\r");
     model.source.session.mark_read_only();
+
     assert!(!model.write_text_input(TextInput::RerunSelectedBlock));
 }

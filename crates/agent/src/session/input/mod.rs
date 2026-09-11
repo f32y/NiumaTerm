@@ -88,6 +88,7 @@ impl SessionInput {
 
     fn next_key(&mut self, index: usize) -> QuestionKey {
         self.sequence += 1;
+
         QuestionKey {
             index,
             generation: self.sequence,
@@ -99,6 +100,7 @@ impl SessionInput {
             .batches
             .iter()
             .position(|draft| draft.id.as_deref() == Some(request.id.as_str()));
+
         if let Some(index) = existing
             && self.batches[index].status != QuestionStatus::History
         {
@@ -106,31 +108,38 @@ impl SessionInput {
         }
 
         let mut draft: QuestionDraft = request.into();
+
         draft.identity = runtime
             .backend()
             .and_then(|backend| backend.recovery_identity());
+
         Some(self.insert(draft, existing))
     }
 
     /// Legacy requests have no provider ID; only the latest can be answered.
     pub fn receive_legacy(&mut self, questions: Vec<Question>) -> usize {
         let existing = self.batches.iter().position(|draft| draft.id.is_none());
+
         self.insert(QuestionDraft::new(questions), existing)
     }
 
     fn insert(&mut self, mut draft: QuestionDraft, existing: Option<usize>) -> usize {
         draft.key = self.next_key(existing.unwrap_or(self.batches.len()));
+
         if let Some(index) = existing {
             self.batches[index] = draft;
+
             index
         } else {
             self.batches.push(draft);
+
             self.batches.len() - 1
         }
     }
 
     pub fn history(&mut self, item_id: &str, questions: Vec<Question>) -> usize {
         let id = format!("message:{item_id}");
+
         if let Some(index) = self
             .batches
             .iter()
@@ -140,11 +149,13 @@ impl SessionInput {
         }
 
         let mut draft = QuestionDraft::new(questions);
+
         draft.id = Some(id);
         draft.mode = QuestionMode::Async;
         draft.status = QuestionStatus::History;
         draft.key = self.next_key(self.batches.len());
         self.batches.push(draft);
+
         self.batches.len() - 1
     }
 
@@ -175,10 +186,12 @@ impl SessionInput {
         let Some(draft) = self.draft_mut(key) else {
             return Submission::Ignored;
         };
+
         let answers = match action {
             QuestionAction::Answer if draft.is_complete() => Some(draft.answers()),
             QuestionAction::Answer => return Submission::Ignored,
             QuestionAction::Skip => None,
+
             QuestionAction::Timeout
                 if draft
                     .auto_resolve_remaining(now)
@@ -186,13 +199,17 @@ impl SessionInput {
             {
                 None
             }
+
             QuestionAction::Timeout => return Submission::Ignored,
         };
+
         let Some(backend) = runtime.backend_mut() else {
             return Submission::Ignored;
         };
+
         let result = match draft.id.as_deref() {
             Some(id) => backend.respond_input(id, answers, settings),
+
             None => backend
                 .respond_questions(answers)
                 .then_some(())
@@ -200,9 +217,11 @@ impl SessionInput {
         };
 
         draft.touch();
+
         match result {
             Ok(()) => {
                 draft.error = None;
+
                 // Legacy replies and async dismissals have no later submission acknowledgement.
                 if draft.id.is_none()
                     || (draft.mode == QuestionMode::Async && action != QuestionAction::Answer)
@@ -212,14 +231,18 @@ impl SessionInput {
                     } else {
                         QuestionStatus::Skipped
                     });
+
                     Submission::Settled
                 } else {
                     draft.status = QuestionStatus::Submitting;
+
                     Submission::Waiting
                 }
             }
+
             Err(message) => {
                 draft.error = Some(QuestionError::Rejected(message));
+
                 Submission::Failed
             }
         }
@@ -234,20 +257,26 @@ impl SessionInput {
         if epoch != self.epoch || self.disconnected {
             return None;
         }
+
         let draft = self
             .batches
             .iter_mut()
             .find(|draft| draft.id.as_deref() == Some(id) && draft.pending())?;
+
         let waiting = draft.mode != QuestionMode::Async;
+
         let (status, message, started_turn) = match resolution {
             QuestionResolution::Submitted {
                 message,
                 started_turn,
             } => (QuestionStatus::Submitted, message, started_turn),
+
             QuestionResolution::Skipped => (QuestionStatus::Skipped, None, false),
             QuestionResolution::Expired => (QuestionStatus::Expired, None, false),
         };
+
         draft.settle(status);
+
         Some(QuestionCompletion {
             message,
             started_turn,
@@ -259,14 +288,17 @@ impl SessionInput {
         if epoch != self.epoch || self.disconnected {
             return false;
         }
+
         let Some(draft) = self.batches.iter_mut().find(|draft| {
             draft.id.as_deref() == Some(id) && draft.status == QuestionStatus::Submitting
         }) else {
             return false;
         };
+
         draft.status = QuestionStatus::Pending;
         draft.error = Some(QuestionError::Rejected(message));
         draft.touch();
+
         true
     }
 
@@ -274,14 +306,17 @@ impl SessionInput {
         if epoch != self.epoch || self.disconnected {
             return false;
         }
+
         if let Some(draft) = self
             .batches
             .iter_mut()
             .find(|draft| draft.id.is_none() && draft.pending())
         {
             draft.settle(QuestionStatus::Expired);
+
             return true;
         }
+
         false
     }
 
@@ -293,10 +328,12 @@ impl SessionInput {
     pub fn disconnect(&mut self) {
         self.disconnected = true;
         self.approval = None;
+
         for draft in &mut self.batches {
             if !draft.pending() {
                 continue;
             }
+
             if draft.mode == QuestionMode::Async && draft.id.is_some() {
                 draft.status = QuestionStatus::Pending;
                 draft.error = Some(QuestionError::Disconnected);
@@ -310,6 +347,7 @@ impl SessionInput {
         let Some(backend) = runtime.backend_mut() else {
             return;
         };
+
         let identity = backend.recovery_identity();
         let mut requests = Vec::new();
 
@@ -322,18 +360,22 @@ impl SessionInput {
             if identity.is_none() || draft.identity != identity || draft.mode != QuestionMode::Async
             {
                 draft.settle(QuestionStatus::Expired);
+
                 continue;
             }
+
             if draft.status == QuestionStatus::Submitting {
                 draft.status = QuestionStatus::Pending;
                 draft.error = Some(QuestionError::Disconnected);
             }
+
             requests.push(QuestionRequest {
                 id: draft.id.clone().unwrap_or_default(),
                 mode: draft.mode,
                 questions: draft.questions.clone(),
             });
         }
+
         backend.restore_question_requests(requests);
         self.epoch = runtime.epoch();
         self.disconnected = false;

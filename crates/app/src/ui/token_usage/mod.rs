@@ -33,6 +33,7 @@ const PLACEHOLDER: &str = "-";
 /// Height of the status row, matched to the quota row under it so the two
 /// stack as one cluster.
 const STATUS_ROW_HEIGHT: f32 = 24.0;
+
 /// The glyph sits well below the value it introduces: the number is the
 /// readout, and the coin only says which number it is.
 const STATUS_ICON_OPACITY: f32 = 0.45;
@@ -255,6 +256,7 @@ fn model_usage_rows(usage: &DailyTokenUsage) -> Vec<ModelUsageRow> {
         price_usd: usage.price_usd,
         is_daily_total: true,
     });
+
     rows.extend(usage.model_breakdowns.iter().map(|model| ModelUsageRow {
         label: model.model_name.clone(),
         counts: model.counts,
@@ -449,6 +451,7 @@ fn render_model_usage_list(
     state.update(cx, |state, cx| {
         if state.delegate().rows != rows {
             state.delegate_mut().rows = rows;
+
             cx.notify();
         }
     });
@@ -575,10 +578,12 @@ mod tests;
 #[derive(Default)]
 struct RefreshState {
     refreshing: bool,
+
     /// Whether the in-flight fetch was started by the user. A widget shows a
     /// spinner only for those: one appearing on its own every interval draws
     /// the eye to a background task nobody asked about.
     user_requested: bool,
+
     /// Previous toggle value, so unrelated settings edits cannot start a fetch.
     enabled: bool,
 }
@@ -655,6 +660,7 @@ fn refresh<V: AutoRefresh>(view: &mut V, cx: &mut Context<V>) {
             this.state().refreshing = false;
             this.state().user_requested = false;
             this.apply(output);
+
             cx.notify();
         })
         .ok();

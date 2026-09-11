@@ -23,6 +23,7 @@ impl Sidebar {
         // the workspace's aggregate of them would say the same thing twice.
         let vertical_tabs =
             cx.global::<AppSettings>().appearance.tab_bar_style == TabBarStyle::Vertical;
+
         let highlight_active = ws.active && !vertical_tabs;
 
         let (glyphs, status_label) = workspace_status_glyphs(
@@ -88,6 +89,7 @@ impl Sidebar {
                 this.workspaces.activate(idx);
                 this.focus_active(window, cx);
                 this.sync_session_memory(cx);
+
                 cx.notify();
             }))
             .into_any_element()
@@ -311,6 +313,7 @@ impl Sidebar {
                 this.workspaces.activate(idx);
                 this.focus_active(window, cx);
                 this.sync_session_memory(cx);
+
                 cx.notify();
             }));
 
@@ -348,6 +351,7 @@ impl Sidebar {
             .on_drag(WorkspaceDrag { from: idx }, move |_, _, _, cx| {
                 drag_shell.update(cx, |this, cx| {
                     this.sidebar.dragging = Some(idx);
+
                     cx.notify();
                 });
 
@@ -371,6 +375,7 @@ impl Sidebar {
 
                     if this.sidebar.drag_over != target {
                         this.sidebar.drag_over = target;
+
                         cx.notify();
                     }
                 }),
@@ -502,6 +507,7 @@ impl Sidebar {
                 .label(i18n("sidebar-workspace-status-running"))
                 .into_any_element(),
             ),
+
             _ => terminal_presentation(tab.terminal)
                 .map(|(visual, aria)| {
                     div()
@@ -545,6 +551,7 @@ impl Sidebar {
                 )
                 .into_any_element()
             }
+
             None => div()
                 .flex_1()
                 .overflow_hidden()
@@ -614,9 +621,11 @@ impl Sidebar {
                     .justify_center()
                     .child(match (status_mark, tab.pending) {
                         (Some(mark), _) => mark,
+
                         (None, true) => {
                             pending_tab_icon(("sidebar-tab-pending", key)).into_any_element()
                         }
+
                         (None, false) => tab_icon(tab.agent_kind, tab.settings).into_any_element(),
                     }),
             )
@@ -653,6 +662,7 @@ impl Sidebar {
                 this.workspaces.active_tabs_mut().activate(tab_idx);
                 this.focus_active(window, cx);
                 this.sync_session_memory(cx);
+
                 cx.notify();
             }));
 
@@ -676,6 +686,7 @@ impl Sidebar {
                 move |_, _, _, cx| {
                     drag_shell.update(cx, |this, cx| {
                         this.sidebar.tab_dragging = Some((ws_idx, tab_idx));
+
                         cx.notify();
                     });
 
@@ -700,6 +711,7 @@ impl Sidebar {
 
                     if this.sidebar.tab_drag_over != target {
                         this.sidebar.tab_drag_over = target;
+
                         cx.notify();
                     }
                 }),

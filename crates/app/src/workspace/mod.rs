@@ -22,8 +22,10 @@ pub use crate::workspace::roots::{RootChange, WorkspaceRoots, root_identity};
 pub enum TerminalActivity {
     #[default]
     Idle,
+
     /// A command is executing right now.
     Running,
+
     /// A command ended in a background tab and the user has not looked yet.
     Finished(CommandOutcome),
 }
@@ -110,15 +112,19 @@ pub enum WorkspaceKind {
 pub struct Workspace {
     id: WorkspaceId,
     name: String,
+
     /// Where the workspace lives. `None` only for the Settings pseudo
     /// workspace, which is a view of the configuration file and has no
     /// filesystem location at all.
     roots: Option<WorkspaceRoots>,
+
     pinned: bool,
+
     /// A workspace the user has not adopted yet: it stays out of the saved
     /// session, so opening a directory to run one command leaves nothing
     /// behind. Clearing the flag is what promotes it to saved work.
     temporary: bool,
+
     kind: WorkspaceKind,
     tabs: TabManager<TabSurface>,
 }
@@ -210,23 +216,31 @@ pub fn best_match(summaries: &[WorkspaceSummary], target: &path::Path) -> Option
 pub struct WorkspaceSummary {
     pub id: WorkspaceId,
     pub name: String,
+
     /// The primary directory, or `""` for the location-free Settings entry.
     pub cwd: String,
+
     /// Directories owned beyond `cwd`, in workspace order.
     pub additional_cwds: Vec<String>,
+
     pub active: bool,
     pub agent_status: AgentRuntimeStatus,
+
     /// Terminal activity across this workspace's tabs. The manager cannot see
     /// pane state, so the shell fills this in when it projects the summaries
     /// for the chrome.
     pub terminal_activity: TerminalActivity,
+
     pub unread_count: usize,
     pub latest_unread_text: Option<String>,
     pub pinned: bool,
     pub closeable: bool,
+
     /// Not part of the saved session until the user activates it.
     pub temporary: bool,
+
     pub kind: WorkspaceKind,
+
     /// Work reported inside this workspace. The manager can only see what its
     /// tabs report over OSC 9;4; the shell folds in the agent panes' task
     /// lists, which live behind entities the manager cannot read.
@@ -366,7 +380,9 @@ impl WorkspaceManager {
         pinned: bool,
     ) -> WorkspaceId {
         let id = self.new_workspace(tabs, id, name, roots);
+
         self.set_pinned(id, pinned);
+
         id
     }
 

@@ -33,6 +33,7 @@ impl BackgroundTasksView {
         let Some(key) = self.mode.detail_key().cloned() else {
             return;
         };
+
         let Some(pane) = self.target.as_ref().and_then(WeakEntity::upgrade) else {
             return;
         };
@@ -51,10 +52,12 @@ impl BackgroundTasksView {
 
         let (kind, cwd) = {
             let pane = pane.read(cx);
+
             (pane.agent_kind(), pane.working_directory())
         };
 
         self.detail_transcript = Some(cx.new(|_| TranscriptView::new(kind, cwd)));
+
         self.mode
             .open(key.clone(), self.running_expanded, self.finished_expanded);
 
@@ -64,6 +67,7 @@ impl BackgroundTasksView {
         pane.update(cx, |pane, cx| {
             pane.load_background_task_transcript(&key, cx);
         });
+
         cx.notify();
     }
 
@@ -86,6 +90,7 @@ impl BackgroundTasksView {
         self.running_expanded = running_expanded;
         self.finished_expanded = finished_expanded;
         self.detail_transcript = None;
+
         cx.notify();
     }
 
@@ -101,6 +106,7 @@ impl BackgroundTasksView {
             // The child left this session's snapshot, so there is nothing to
             // show; the list is the honest place to be.
             self.close_detail(cx);
+
             return div().into_any_element();
         };
 
@@ -133,6 +139,7 @@ impl BackgroundTasksView {
         let theme = cx.theme();
 
         let provider: &str = task.key.provider.into();
+
         let header = v_flex()
             .px_2()
             .py_1()
@@ -189,16 +196,19 @@ impl BackgroundTasksView {
                     .replace("{message}", message),
                 cx,
             ),
+
             (BackgroundTaskTranscriptState::Loading, true) => empty_state(
                 i18n("tasks-background-loading-title"),
                 i18n("tasks-background-transcript-loading-detail"),
                 cx,
             ),
+
             (_, true) => empty_state(
                 i18n("tasks-background-transcript-empty-title"),
                 i18n("tasks-background-transcript-empty-detail"),
                 cx,
             ),
+
             _ => v_flex()
                 .flex_1()
                 .min_h_0()

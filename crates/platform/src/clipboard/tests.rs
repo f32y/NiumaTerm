@@ -14,6 +14,7 @@ impl ClipboardProvider for MemoryClipboard {
 
     fn set_contents(&mut self, value: String) -> Result<(), Box<dyn Error + Send + Sync>> {
         self.0 = value;
+
         Ok(())
     }
 }

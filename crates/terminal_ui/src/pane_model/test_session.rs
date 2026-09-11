@@ -31,9 +31,11 @@ struct TestPty {
 impl Read for TestPty {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         let count = buffer.len().min(self.output.len());
+
         for slot in &mut buffer[..count] {
             *slot = self.output.pop_front().unwrap();
         }
+
         Ok(count)
     }
 }
@@ -41,8 +43,10 @@ impl Read for TestPty {
 impl Write for TestPty {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         self.input.lock().extend_from_slice(bytes);
+
         Ok(bytes.len())
     }
+
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
@@ -50,22 +54,29 @@ impl Write for TestPty {
 
 impl ProcessReadWrite for TestPty {
     type Reader = Self;
+
     type Writer = Self;
+
     fn reader(&mut self) -> &mut Self {
         self
     }
+
     fn writer(&mut self) -> &mut Self {
         self
     }
+
     fn read_token(&self) -> Token {
         self.read_token
     }
+
     fn write_token(&self) -> Token {
         self.write_token
     }
+
     fn set_winsize(&mut self, _: WinsizeBuilder) -> io::Result<()> {
         Ok(())
     }
+
     fn register(
         &mut self,
         _: &Poll,
@@ -76,21 +87,28 @@ impl ProcessReadWrite for TestPty {
         self.read_token = tokens.next().unwrap();
         self.write_token = tokens.next().unwrap();
         self.child_token = tokens.next().unwrap();
+
         Ok(())
     }
+
     fn reregister(&mut self, _: &Poll, _: Interest) -> io::Result<()> {
         Ok(())
     }
+
     fn deregister(&mut self, _: &Poll) -> io::Result<()> {
         Ok(())
     }
+
     fn drain_ready(&self) -> Vec<Token> {
         let mut tokens = vec![self.write_token];
+
         if !self.output.is_empty() {
             tokens.push(self.read_token);
         }
+
         tokens
     }
+
     fn has_ready(&self) -> bool {
         !self.output.is_empty()
     }
@@ -100,6 +118,7 @@ impl EventedPty for TestPty {
     fn child_event_token(&self) -> Token {
         self.child_token
     }
+
     fn next_child_event(&mut self) -> Option<ChildEvent> {
         None
     }
@@ -108,7 +127,9 @@ impl EventedPty for TestPty {
 pub(crate) fn controller(vt: &[u8], engine_blocks: bool) -> (PaneController, Arc<Mutex<Vec<u8>>>) {
     let input = Arc::new(Mutex::new(Vec::new()));
     let mut output = vt.to_vec();
+
     output.extend_from_slice(b"\x1b]0;controller-ready\x07");
+
     let pty = TestPty {
         output: output.into(),
         input: input.clone(),
@@ -116,6 +137,7 @@ pub(crate) fn controller(vt: &[u8], engine_blocks: bool) -> (PaneController, Arc
         write_token: Token(0),
         child_token: Token(0),
     };
+
     let source = TerminalFrameSource::attach(wake_channel().0, 1, |observer| {
         TerminalSession::from_pty(
             pty,
@@ -135,14 +157,18 @@ pub(crate) fn controller(vt: &[u8], engine_blocks: bool) -> (PaneController, Arc
         )
     })
     .unwrap();
+
     let deadline = Instant::now() + Duration::from_secs(2);
+
     while source.session.title() != "controller-ready" {
         assert!(
             Instant::now() < deadline,
             "the test output must reach the engine"
         );
+
         thread::sleep(Duration::from_millis(1));
     }
+
     let settings = PaneSettings {
         fixed_bottom: false,
         pad_rows: 1.0,
@@ -152,29 +178,36 @@ pub(crate) fn controller(vt: &[u8], engine_blocks: bool) -> (PaneController, Arc
         newline_shortcut: NewlineShortcut::ShiftEnter,
         cursor_shape: CursorShape::Block,
     };
+
     let mut controller = PaneController::new(
         source,
         settings,
         FrameTheme::default(),
         DurationLabels::default(),
     );
+
     controller.cell_metrics = Some(CellMetrics {
         width_px: 8.0,
         height_px: 18.0,
     });
+
     controller.content_size = (320.0, 108.0);
     controller.refresh_frame();
+
     (controller, input)
 }
 
 pub(crate) fn assert_input(input: &Mutex<Vec<u8>>, expected: &[u8]) {
     let deadline = Instant::now() + Duration::from_secs(2);
+
     while input.lock().len() < expected.len() {
         assert!(
             Instant::now() < deadline,
             "terminal input did not reach the PTY"
         );
+
         thread::sleep(Duration::from_millis(1));
     }
+
     assert_eq!(*input.lock(), expected);
 }

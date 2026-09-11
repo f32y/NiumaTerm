@@ -59,8 +59,10 @@ pub enum FontTarget {
 struct FontPicker {
     select: Entity<FontSelectState>,
     fonts: Vec<(SharedString, bool)>,
+
     /// The `monospace_only` value the current item set was built with.
     applied_monospace_only: bool,
+
     _confirm: Subscription,
 }
 
@@ -82,6 +84,7 @@ fn current_family(target: FontTarget, cx: &App) -> SharedString {
         FontTarget::Terminal => settings.appearance.terminal_font_family.clone().into(),
         FontTarget::Ui => settings.appearance.ui_font.clone().into(),
         FontTarget::Agent => settings.appearance.agent_font_family.clone().into(),
+
         FontTarget::AgentTranscript => settings
             .appearance
             .agent_transcript_font_family
@@ -153,8 +156,10 @@ fn ensure_picker(target: FontTarget, window: &mut Window, cx: &mut App) -> Entit
                     FontTarget::Terminal => {
                         settings.appearance.terminal_font_family = name.to_string()
                     }
+
                     FontTarget::Ui => settings.appearance.ui_font = name.to_string(),
                     FontTarget::Agent => settings.appearance.agent_font_family = name.to_string(),
+
                     FontTarget::AgentTranscript => {
                         settings.appearance.agent_transcript_font_family = name.to_string()
                     }
@@ -207,6 +212,7 @@ fn scan_fonts(window: &mut Window) -> Vec<(SharedString, bool)> {
         .into_iter()
         .map(|name| {
             let mono = is_monospace(&name, window);
+
             (name.into(), mono)
         })
         .collect()

@@ -82,6 +82,7 @@ fn selected_names_are_exposed_before_the_swap() {
 fn applying_a_plan_reports_a_missing_staged_file() {
     let staging = scratch("staging");
     let install = scratch("install");
+
     let plan = InstallPlan {
         names: vec!["NmtShellExtension.dll".to_owned()],
     };
@@ -122,6 +123,7 @@ fn versioned_binary() -> PathBuf {
     let root: PathBuf = env::var_os("SystemRoot")
         .expect("SystemRoot is set on Windows")
         .into();
+
     root.join("System32").join("kernel32.dll")
 }
 

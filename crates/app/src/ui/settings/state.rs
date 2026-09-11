@@ -36,18 +36,24 @@ pub fn default_shell_for_tests() -> String {
 /// token rather than by family.
 #[cfg(target_os = "windows")]
 pub const DEFAULT_FONT_FAMILY: &str = "Consolas";
+
 #[cfg(target_os = "macos")]
 pub const DEFAULT_FONT_FAMILY: &str = "Menlo";
+
 #[cfg(all(unix, not(target_os = "macos")))]
 pub const DEFAULT_FONT_FAMILY: &str = "monospace";
+
 pub const DEFAULT_FONT_SIZE: f64 = 14.0;
 pub const DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE: f64 = 13.0;
 pub const DEFAULT_LINE_HEIGHT: f64 = 1.0;
 pub(super) const DEFAULT_BACKGROUND_IMAGE_OPACITY: f64 = 0.3;
+
 #[cfg(target_os = "windows")]
 pub const DEFAULT_UI_FONT: &str = "Segoe UI";
+
 #[cfg(not(target_os = "windows"))]
 pub const DEFAULT_UI_FONT: &str = ".SystemUIFont";
+
 pub const MIN_TAB_WIDTH: f64 = 120.0;
 pub const DEFAULT_TAB_WIDTH: f64 = 220.0;
 
@@ -56,6 +62,7 @@ pub const DEFAULT_TAB_WIDTH: f64 = 220.0;
 pub struct AppSettings {
     /// File stem selected from the per-user themes directory.
     pub theme: String,
+
     pub appearance: AppearanceConfig,
     pub agent: AgentConfig,
     pub system: SystemConfig,
@@ -63,23 +70,31 @@ pub struct AppSettings {
     pub update: UpdateConfig,
     pub cursor_shape: CursorShape,
     pub profiles: Vec<Profile>,
+
     /// Resolves by name; loading and profile edits repair dangling references.
     pub default_profile: String,
+
     pub agent_profiles: Vec<AgentProfile>,
+
     /// Empty when the user has deliberately removed every agent profile.
     pub default_agent_profile: String,
+
     pub editing: SettingsEditing,
 }
 
 #[derive(Default)]
 pub struct SettingsEditing {
     pub theme_filter: String,
+
     /// Parsed theme files refreshed by the settings surface's watcher.
     pub themes: Vec<(String, Theme)>,
+
     /// Cleared only after another save succeeds.
     pub save_error: Option<String>,
+
     /// The last window's explicit choice must also bypass the final quit hook.
     pub discard_on_exit: bool,
+
     #[cfg(windows)]
     pub remote_pairing_code: Option<String>,
     #[cfg(windows)]
@@ -306,22 +321,32 @@ impl AppSettings {
 
         appearance.git_status_refresh_interval =
             clamp_git_interval(appearance.git_status_refresh_interval);
+
         appearance.ui_font = ui_font_or_default(&appearance.ui_font);
+
         appearance.terminal_font_family =
             terminal_font_or_default(&appearance.terminal_font_family);
+
         appearance.agent_font_family = ui_font_or_default(&appearance.agent_font_family);
+
         appearance.agent_transcript_font_family =
             terminal_font_or_default(&appearance.agent_transcript_font_family);
+
         appearance.terminal_font_size = clamp_terminal_font_size(appearance.terminal_font_size);
         appearance.agent_font_size = clamp_terminal_font_size(appearance.agent_font_size);
+
         appearance.agent_transcript_font_size =
             clamp_agent_transcript_font_size(appearance.agent_transcript_font_size);
+
         appearance.terminal_line_height =
             clamp_terminal_line_height(appearance.terminal_line_height);
+
         appearance.tab_width = clamp_tab_width(appearance.tab_width);
         appearance.background_opacity = clamp_background_opacity(appearance.background_opacity);
+
         appearance.background_image_opacity =
             clamp_background_image_opacity(appearance.background_image_opacity);
+
         appearance.background_image = appearance
             .background_image
             .filter(|path| !path.trim().is_empty());
@@ -494,6 +519,7 @@ impl AppSettings {
                 Some(p.shell.trim().to_string()),
                 p.args.split_whitespace().map(str::to_string).collect(),
             ),
+
             _ => (None, Vec::new()),
         }
     }

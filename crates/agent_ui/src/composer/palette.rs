@@ -99,6 +99,7 @@ impl AgentPane {
 
         if rows == 0 {
             self.history_ui.mode = RecentSessionsMode::Hidden;
+
             self.palette.set_feedback(
                 CommandFeedbackKind::Notice,
                 translated("agent-composer-no-recent-sessions"),
@@ -117,6 +118,7 @@ impl AgentPane {
         self.history_ui.pointer_inside = false;
         self.history_ui.pointer = None;
         self.palette.feedback = None;
+
         cx.notify();
 
         true
@@ -166,9 +168,11 @@ impl AgentPane {
             view @ (BranchView::LoadingRewind
             | BranchView::RewindCheckpoints(_)
             | BranchView::RewindAction(_, _)) => return self.rewind_palette_model(view),
+
             view @ (BranchView::LoadingFork | BranchView::ForkCheckpoints(_)) => {
                 return self.fork_palette_model(view);
             }
+
             BranchView::Working => return None,
             BranchView::Idle => {}
         }
@@ -207,6 +211,7 @@ impl AgentPane {
         // `/name` is instead the only way to reach a skill, the listing is not
         // a convenience and follows nothing.
         let caps = self.kind.caps();
+
         let slash_skills = caps.slash_skills_are_prompts
             || (caps.skill_references && cx.global::<AgentSettings>().codex_skill_command_compat);
 
@@ -298,6 +303,7 @@ impl AgentPane {
                         action: PaletteAction::Command(command.clone()),
                     }
                 }
+
                 PaletteCatalogEntry::Skill(skill) => PaletteRow {
                     label: format!("/{}", skill.name).into(),
                     description: SharedString::new(&skill.description),
@@ -375,6 +381,7 @@ impl AgentPane {
             let direction = match control {
                 PaletteControl::Previous => Some(InputHistoryDirection::Older),
                 PaletteControl::Next => Some(InputHistoryDirection::Newer),
+
                 PaletteControl::Activate | PaletteControl::Complete | PaletteControl::Dismiss => {
                     None
                 }
@@ -387,6 +394,7 @@ impl AgentPane {
             }
 
             cx.propagate();
+
             return;
         };
 
@@ -401,9 +409,11 @@ impl AgentPane {
                     self.palette.selected = selected;
                     self.palette.scroll.scroll_to_item(self.palette.selected);
                     self.follow_branch_selection(cx);
+
                     cx.notify();
                 }
             }
+
             PaletteControl::Activate => {
                 if model.rows.is_empty() {
                     self.submit_current_slash(window, cx);
@@ -411,9 +421,11 @@ impl AgentPane {
                     self.activate_palette_index(self.palette.selected, true, window, cx);
                 }
             }
+
             PaletteControl::Complete => {
                 self.activate_palette_index(self.palette.selected, false, window, cx);
             }
+
             PaletteControl::Dismiss => {
                 self.dismiss_command_palette(cx);
             }
@@ -423,6 +435,7 @@ impl AgentPane {
     fn dismiss_command_palette(&mut self, cx: &mut Context<Self>) {
         if !self.cancel_branch_picker(cx) {
             self.palette.dismissed = true;
+
             cx.notify();
         }
     }
@@ -464,19 +477,25 @@ impl AgentPane {
                     )
                 {
                     self.history_ui.selected = selected;
+
                     self.history_ui
                         .scroll
                         .scroll_to_item(selected, ScrollStrategy::Nearest);
+
                     cx.notify();
                 }
             }
+
             PaletteControl::Activate => {
                 self.resume_session(self.history_ui.selected, cx);
             }
+
             PaletteControl::Dismiss => {
                 self.history_ui.mode = RecentSessionsMode::Hidden;
+
                 cx.notify();
             }
+
             // Completion belongs to the command palette. The guard above hands
             // it back before the list claims the keys, so there is nothing left
             // for it to do here.
@@ -500,6 +519,7 @@ impl AgentPane {
 
         self.palette.selected = index;
         self.follow_branch_selection(cx);
+
         cx.notify();
     }
 
@@ -520,6 +540,7 @@ impl AgentPane {
         if let Some(reason) = row.disabled_reason {
             self.palette
                 .set_feedback(CommandFeedbackKind::Error, reason, cx);
+
             return;
         }
 
@@ -536,7 +557,9 @@ impl AgentPane {
                     !needs_arguments,
                 )
             }
+
             PaletteAction::Choice { command, value } => (format!("/{command} {value}"), true),
+
             // Where a skill is written into the prompt, picking one lands the
             // token the harness will recognize and leaves the caret after it,
             // because what follows is the request the skill serves.
@@ -547,11 +570,15 @@ impl AgentPane {
                     input.set_value(text.clone(), window, cx);
                     input.set_selected_range(text.len()..text.len(), cx);
                 });
+
                 self.palette.selected = 0;
                 self.palette.dismissed = true;
+
                 cx.notify();
+
                 return;
             }
+
             PaletteAction::Skill(skill) => {
                 let Ok((text, binding)) = prepare_skill_selection(&skill) else {
                     self.palette.set_feedback(
@@ -568,12 +595,16 @@ impl AgentPane {
                     input.set_value(text.clone(), window, cx);
                     input.set_selected_range(text.len()..text.len(), cx);
                 });
+
                 self.palette.skill_binding = Some(binding);
                 self.palette.selected = 0;
                 self.palette.dismissed = true;
+
                 cx.notify();
+
                 return;
             }
+
             PaletteAction::RewindCheckpoint(checkpoint) => {
                 if self
                     .session
@@ -581,20 +612,28 @@ impl AgentPane {
                     .select_checkpoint(self.session.runtime.epoch(), checkpoint)
                 {
                     self.palette.selected = 0;
+
                     cx.notify();
                 }
+
                 return;
             }
+
             PaletteAction::RewindAction(action) => {
                 self.activate_rewind_action(action, cx);
+
                 return;
             }
+
             PaletteAction::ForkCheckpoint(checkpoint) => {
                 self.start_conversation_branch(checkpoint, cx);
+
                 return;
             }
+
             PaletteAction::ForkCancel => {
                 self.cancel_fork_picker(cx);
+
                 return;
             }
         };
@@ -603,6 +642,7 @@ impl AgentPane {
             input.set_value(text.clone(), window, cx);
             input.set_selected_range(text.len()..text.len(), cx);
         });
+
         self.palette.selected = 0;
 
         if execute && can_execute {

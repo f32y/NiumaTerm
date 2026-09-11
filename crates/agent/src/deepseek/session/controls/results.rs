@@ -47,6 +47,7 @@ impl Session {
                             message,
                             fatal: false,
                         }),
+
                         None => {
                             self.pending_approval = None;
                             events.push(Event::ApprovalResolved);
@@ -54,14 +55,17 @@ impl Session {
                     }
                 }
             }
+
             Operation::Questions { request, skipped } => {
                 if self.pending_questions.as_ref() == Some(&request) {
                     let id = question_id(&request);
 
                     match error {
                         Some(message) => events.push(Event::InputSubmissionFailed { id, message }),
+
                         None => {
                             self.pending_questions = None;
+
                             events.push(Event::InputResolved {
                                 id,
                                 resolution: if skipped {
@@ -77,6 +81,7 @@ impl Session {
                     }
                 }
             }
+
             Operation::Interrupt | Operation::InterruptChild(_) => {
                 if let Some(message) = error {
                     events.push(Event::Error {

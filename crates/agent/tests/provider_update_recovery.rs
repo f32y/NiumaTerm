@@ -186,6 +186,7 @@ impl FakeAgentFixture {
         let executable = root.join("fake agent.cmd");
 
         fs::write(&script, FAKE_AGENT).unwrap();
+
         fs::write(
             &executable,
             "@echo off\r\npwsh.exe -NoProfile -ExecutionPolicy Bypass -File \"%~dp0fake-agent.ps1\" %*\r\nexit /b %ERRORLEVEL%\r\n",
@@ -343,6 +344,7 @@ fn next_message(receiver: &Receiver<Value>, deadline: Instant) -> Option<Value> 
         match receiver.recv_timeout(remaining.min(Duration::from_millis(250))) {
             Ok(message) => return Some(message),
             Err(RecvTimeoutError::Timeout) => continue,
+
             // The sender lives with the reader thread feeding it, so a closed
             // channel means the agent exited and no later message can arrive.
             // Waiting out the deadline would only delay the same failure and
@@ -469,6 +471,7 @@ fn one_claude_update_restores_multiple_sessions_in_place() {
 
     let maintenance: Arc<dyn ProviderMaintenance> =
         Arc::new(ClaudeMaintenance::new(FixedClaudeRelease));
+
     let (coordinator, key) =
         register_available(&fixture, ProviderKind::Claude, &launches[0], maintenance);
 
@@ -569,6 +572,7 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
     );
 
     let maintenance: Arc<dyn ProviderMaintenance> = Arc::new(CodexMaintenance);
+
     let (coordinator, key) =
         register_available(&fixture, ProviderKind::Codex, &launches[0], maintenance);
 
@@ -674,6 +678,7 @@ fn failed_and_unchanged_codex_updates_still_restore_all_threads() {
         }
 
         let maintenance: Arc<dyn ProviderMaintenance> = Arc::new(CodexMaintenance);
+
         let (coordinator, key) =
             register_available(&fixture, ProviderKind::Codex, &launches[0], maintenance);
 
@@ -753,6 +758,7 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
         base_url: "https://gateway-a.example/v1".into(),
         api_key_env: Some("NMT_CODEX_KEY_A".into()),
     });
+
     first
         .env
         .push(("NMT_CODEX_KEY_A".into(), "secret-a".into()));
@@ -765,6 +771,7 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
         base_url: "https://gateway-b.example/v1".into(),
         api_key_env: Some("NMT_CODEX_KEY_B".into()),
     });
+
     second
         .env
         .push(("NMT_CODEX_KEY_B".into(), "secret-b".into()));

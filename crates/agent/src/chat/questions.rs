@@ -26,8 +26,10 @@ pub struct Question {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QuestionMode {
     Blocking,
+
     /// The request can be skipped after a visible countdown until the user interacts.
     Optional,
+
     /// Answers arrive as new user messages and remain valid after the asking turn ends.
     Async,
 }
@@ -45,6 +47,7 @@ pub enum QuestionResolution {
         message: Option<String>,
         started_turn: bool,
     },
+
     Skipped,
     Expired,
 }

@@ -21,6 +21,7 @@ fn ask_for_channels(delegate: &UpdaterDelegate) -> Retained<NSSet<NSString>> {
 #[test]
 fn stable_allows_only_the_default_channel() {
     let delegate = UpdaterDelegate::new(Channel::Stable);
+
     assert!(ask_for_channels(&delegate).is_empty());
 }
 

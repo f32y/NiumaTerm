@@ -43,6 +43,7 @@ impl AgentProcess {
 
     pub fn allocate_route(&self) -> AgentRoute {
         let counter = self.next_route.fetch_add(1, Ordering::Relaxed);
+
         AgentRoute(format!("{}-{counter:x}", self.nonce))
     }
 

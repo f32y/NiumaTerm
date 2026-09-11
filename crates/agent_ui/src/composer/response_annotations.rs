@@ -29,6 +29,7 @@ impl AgentPane {
 
         TextSelection::clear(window, cx);
         self.focus(window, cx);
+
         cx.notify();
     }
 

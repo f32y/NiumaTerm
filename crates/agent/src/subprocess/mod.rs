@@ -27,10 +27,13 @@ mod input;
 /// and dropped when the pipe closes.
 pub(crate) struct JsonLineProcess {
     child: Child,
+
     /// Held until the root exits or forced shutdown terminates any remaining
     /// descendants.
     job: Arc<Mutex<Option<KillOnCloseJob>>>,
+
     stdin: Option<InputQueue>,
+
     /// Provider display name ("Codex", "Claude") for lifecycle error messages.
     provider: &'static str,
 }
@@ -76,6 +79,7 @@ impl JsonLineProcess {
         let mut child = command
             .spawn()
             .map_err(|err| format!("could not run `{display_command}`: {err}"))?;
+
         let job = KillOnCloseJob::attach_or_kill(&mut child).map_err(|error| error.to_string())?;
 
         let mut stdin = child
@@ -111,6 +115,7 @@ impl JsonLineProcess {
                         // A child can close stdin without closing stdout. Terminating
                         // its tree makes the existing EOF notification reliable.
                         writer_job.lock().take();
+
                         break;
                     }
                 }
@@ -219,25 +224,31 @@ impl JsonLineProcess {
             match self.child.try_wait() {
                 Ok(Some(_)) => {
                     self.job.lock().take();
+
                     return Ok(());
                 }
+
                 Ok(None) if started.elapsed() < timeout => {
                     thread::sleep(Duration::from_millis(20));
                 }
+
                 Ok(None) if force => {
                     self.job.lock().take();
+
                     self.child.wait().map_err(|error| {
                         format!("could not wait for {} to stop: {error}", self.provider)
                     })?;
 
                     return Ok(());
                 }
+
                 Ok(None) => {
                     return Err(format!(
                         "{} did not stop before the update timeout",
                         self.provider
                     ));
                 }
+
                 Err(error) => {
                     return Err(format!(
                         "could not observe {} process exit: {error}",
@@ -277,6 +288,7 @@ fn read_messages(
 
     loop {
         line.clear();
+
         reader
             .read_until(b'\n', &mut line)
             .map_err(|error| format!("Agent output read failed: {error}"))?;
@@ -304,11 +316,13 @@ fn read_messages(
                 started = true;
                 deliver(message);
             }
+
             Ok(_) => {
                 return Err(
                     "Agent protocol output must be a JSON object; the process was stopped.".into(),
                 );
             }
+
             Err(error) => {
                 let bracketed_notice =
                     [b"[warn]".as_slice(), b"[warning]", b"[info]"]
@@ -337,6 +351,7 @@ fn read_messages(
 
                 if !startup_notice_seen {
                     startup_notice_seen = true;
+
                     warn!(
                         provider,
                         "agent launcher produced non-protocol startup output; content omitted"

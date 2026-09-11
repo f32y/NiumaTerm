@@ -215,11 +215,13 @@ impl AgentPane {
                     i18n("agent-update-waiting-detail"),
                     false,
                 ),
+
                 UpdateSuspension::Failed(message) => (
                     i18n("agent-update-reconnect-failed-label"),
                     message.as_str(),
                     true,
                 ),
+
                 UpdateSuspension::Stopping
                 | UpdateSuspension::Updating
                 | UpdateSuspension::Reconnecting => return None,
@@ -352,6 +354,7 @@ impl AgentPane {
                                 })),
                         ),
                 ),
+
             None => v_flex()
                 .items_center()
                 .gap_3()

@@ -67,31 +67,42 @@ type SessionBuffer = Arc<FrameStore>;
 pub enum HostEvent {
     /// Terminal title changed (OSC 0/2).
     Title(String),
+
     /// Bell (BEL).
     Bell,
+
     /// Progress report (OSC 9;4) from a long-running command.
     Progress(ProgressReport),
+
     /// The shell process exited.
     Exit,
+
     /// Working directory changed (OSC 7).
     Cwd(String),
+
     /// Desktop notification (OSC 9 / OSC 777).
     Notification { title: String, body: String },
+
     /// Entered (`true`) or left (`false`) an interactive full-screen program.
     InteractiveState(bool),
+
     /// A full-screen program entered (`true`) or left (`false`) the alt-screen — a
     /// subset of [`Self::InteractiveState`] that gates command-block chrome.
     AltScreen(bool),
+
     /// The integrated shell boundary lifecycle is trusted for fixed-bottom
     /// prompt ownership.
     PromptBoundaryTrusted(bool),
+
     /// A trusted integrated-shell prompt region is open.
     PromptStarted,
+
     /// Integrated-shell command metadata changed in the block store. The exit
     /// code rides along so the chrome can grade the result without reaching
     /// back into the block store for the entry that just landed; a shell that
     /// reports no code yields `None`.
     CommandFinished { exit_code: Option<i32> },
+
     /// An integrated-shell command began executing; read `in_flight_block`.
     CommandStarted,
 }
@@ -112,6 +123,7 @@ pub struct TerminalSession {
     messenger: MsgSender,
     shared: Arc<SessionSharedState>,
     process_tree: Option<ProcessTree>,
+
     /// Engine-blocks mode is active: frozen history lives in
     /// finished engine blocks, read through owned pages. Mirrors the flag the
     /// PTY event loop runs with.
@@ -124,15 +136,19 @@ pub struct TerminalSession {
 #[derive(Default)]
 struct SessionSharedState {
     events: Mutex<VecDeque<HostEvent>>,
+
     /// Frozen block-split history; read side of the block-event pipeline.
     block_store: Arc<Mutex<BlockStore>>,
+
     /// The in-flight command, if one is executing.
     in_flight: Mutex<Option<InFlightBlock>>,
+
     open_prompt: Mutex<bool>,
     read_only: AtomicBool,
     exited: AtomicBool,
     alt_screen: AtomicBool,
     selection: SurfaceSelection,
+
     /// Block events wait for the read-cycle damage notification so image
     /// generations are installed before frozen rows become visible.
     staged_blocks: Mutex<Vec<BlockEvent>>,
@@ -206,8 +222,10 @@ impl TerminalSession {
         let shared = Arc::new(SessionSharedState::default());
         let proxy = TerminalEventProxy::new(Arc::clone(&shared), options.route_id as u64, observer);
         let engine_blocks = options.engine_blocks;
+
         let handles = start_session(pty, proxy, options).map_err(|error| {
             error!("session start failed: {error:?}");
+
             EngineError::new(
                 EngineErrorCode::EngineInit,
                 format!("libghostty-vt engine init failed: {error}"),
@@ -253,6 +271,7 @@ impl TerminalSession {
         {
             return false;
         }
+
         self.messenger
             .send(Msg::Input(data.to_vec().into()))
             .is_ok()
@@ -262,6 +281,7 @@ impl TerminalSession {
         if self.shared.exited.load(Ordering::Acquire) {
             return false;
         }
+
         self.messenger
             .send(Msg::Resize(WinsizeBuilder {
                 cols,
@@ -332,11 +352,15 @@ impl TerminalSession {
 
     pub fn block_command(&self, item: usize) -> Option<String> {
         let store = self.shared.block_store.lock();
+
         if let Some(item) = store.items().get(item) {
             return item.meta.command.clone();
         }
+
         let live = item == store.items().len();
+
         drop(store);
+
         live.then(|| self.in_flight_block())
             .flatten()
             .map(|block| block.command)
@@ -344,6 +368,7 @@ impl TerminalSession {
 
     pub fn block_text(&self, item: usize) -> Option<Request<String>> {
         let handle = self.block_handle(item)?;
+
         Some(self.request_text(TextSource::Blocks(vec![TextPiece {
             handle,
             start: None,
@@ -358,6 +383,7 @@ impl TerminalSession {
     ) -> Option<Request<BlockRange>> {
         let handle = self.block_handle(at.item)?;
         let (reply, request) = oneshot::channel();
+
         let _ = self.messenger.send(Msg::Query(Query::ExpandSelection {
             handle,
             line: at.line,
@@ -365,11 +391,13 @@ impl TerminalSession {
             kind,
             reply,
         }));
+
         Some(request)
     }
 
     pub fn frozen_selection_text(&self, a: BlockPoint, b: BlockPoint) -> Request<String> {
         let pieces = frozen_selection_pieces(&self.shared.block_store.lock(), a, b);
+
         self.request_text(TextSource::Blocks(
             pieces
                 .into_iter()
@@ -384,9 +412,11 @@ impl TerminalSession {
 
     fn request_text(&self, source: TextSource) -> Request<String> {
         let (reply, request) = oneshot::channel();
+
         let _ = self
             .messenger
             .send(Msg::Query(Query::Text { source, reply }));
+
         request
     }
 
@@ -399,6 +429,7 @@ impl TerminalSession {
             .iter()
             .map(|path| {
                 let path = path.to_string_lossy();
+
                 if path.contains(' ') {
                     format!("\"{path}\"")
                 } else {
@@ -407,6 +438,7 @@ impl TerminalSession {
             })
             .collect::<Vec<_>>()
             .join(" ");
+
         self.paste_text(&text)
     }
 
@@ -452,6 +484,7 @@ impl TerminalSession {
                         modifiers,
                     )
                 }
+
                 SurfaceMouseEventKind::Move => {
                     let Some(code) = mouse_motion_code(mode, button) else {
                         return false;
@@ -471,6 +504,7 @@ impl TerminalSession {
             .viewport_top
             .unwrap_or(0)
             .min(i32::MAX as u32) as i32;
+
         let pos = Pos::new(
             Line((cell.row as i32).saturating_add(viewport_top)),
             Column(cell.col as usize),
@@ -536,6 +570,7 @@ impl TerminalSession {
     pub fn set_cursor_shape(&self, shape: CursorShape) -> Request<()> {
         let (reply, request) = oneshot::channel();
         let _ = self.messenger.send(Msg::CursorShape { shape, reply });
+
         request
     }
 
@@ -577,6 +612,7 @@ impl TerminalSession {
             generation: handle.generation,
             theme: self.snapshot().theme_revision,
         };
+
         self.pages.lock().read(source, row, &self.messenger)
     }
 
@@ -601,12 +637,15 @@ impl TerminalSession {
                 hyperlinks: snapshot.row_hyperlinks(index as usize).to_vec(),
             });
         }
+
         let page = self.screen_page_at(snapshot.revision, row as usize)?;
+
         Some(materialized_pointer_row(page.row(row as usize)?, page.cols))
     }
 
     pub fn block_row_text(&self, item: usize, row: usize) -> Option<RowText> {
         let page = self.block_page(self.block_handle(item)?, row)?;
+
         Some(materialized_pointer_row(page.row(row)?, page.cols))
     }
 
@@ -622,17 +661,23 @@ impl TerminalSession {
         if lines == 0 {
             return false;
         }
+
         if let Some(mode) = self.mouse_mode() {
             let button = if lines > 0 { 64 } else { 65 };
+
             return self.report_mouse(mode, button, true, cell.col, cell.row, modifiers);
         }
+
         if self.exited() {
             return false;
         }
+
         let before = self.snapshot().scrollbar();
+
         if before.total <= before.len {
             return false;
         }
+
         // Queue acceptance precedes the published position and history-edge clamping.
         self.messenger.send(Msg::Scroll(-(lines as isize))).is_ok()
     }
@@ -643,19 +688,23 @@ impl TerminalSession {
 
     pub fn selected_text_in(&self, snapshot: &RenderBuffer) -> Option<Request<String>> {
         let selection = self.shared.selection.selection.lock();
+
         let range = selection_screen_range(
             selection.as_ref()?,
             snapshot,
             snapshot.viewport_top.unwrap_or(0) as i32,
         )?;
+
         let start = (
             u16::try_from(range.start.col.0).ok()?,
             u32::try_from(range.start.row.0).ok()?,
         );
+
         let end = (
             u16::try_from(range.end.col.0).ok()?,
             u32::try_from(range.end.row.0).ok()?,
         );
+
         Some(self.request_text(TextSource::Screen {
             revision: snapshot.revision,
             start,
@@ -670,6 +719,7 @@ impl TerminalSession {
 
     pub fn selection_range_in(&self, snapshot: &RenderBuffer) -> Option<SelectionRange> {
         let selection = self.shared.selection.selection.lock();
+
         selection.as_ref()?.to_range_engine(
             snapshot,
             snapshot.viewport_top.unwrap_or(0) as i32,
@@ -691,11 +741,13 @@ impl TerminalSession {
 
     pub fn selection_screen_range(&self) -> Option<SelectionRange> {
         let snapshot = self.snapshot();
+
         self.selection_screen_range_in(&snapshot)
     }
 
     pub fn selection_screen_range_in(&self, snapshot: &RenderBuffer) -> Option<SelectionRange> {
         let selection = self.shared.selection.selection.lock();
+
         selection_screen_range(
             selection.as_ref()?,
             snapshot,

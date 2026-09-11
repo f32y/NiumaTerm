@@ -23,6 +23,7 @@ pub(crate) use crate::composer::response_annotations::{
     annotation_count_label, parse_annotated_prompt, prompt_with_response_annotations,
     visible_prompt,
 };
+
 #[cfg(test)]
 mod tests;
 
@@ -44,10 +45,12 @@ use crate::{AgentPane, RecentSessionsMode, SlashPalette};
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum CommandFeedbackKind {
     Notice,
+
     /// Information the user asked to see, or work still under way. Neither is
     /// an acknowledgement of something already done, so both hold until a
     /// newer message replaces them.
     Status,
+
     Error,
     Queued,
 }
@@ -72,6 +75,7 @@ fn feedback_is_current(kind: CommandFeedbackKind, queue_is_empty: bool) -> bool 
 fn feedback_is_transient(kind: CommandFeedbackKind) -> bool {
     match kind {
         CommandFeedbackKind::Notice => true,
+
         CommandFeedbackKind::Status | CommandFeedbackKind::Error | CommandFeedbackKind::Queued => {
             false
         }
@@ -81,6 +85,7 @@ fn feedback_is_transient(kind: CommandFeedbackKind) -> bool {
 #[derive(Clone)]
 pub(super) struct CommandFeedback {
     pub(super) kind: CommandFeedbackKind,
+
     /// Redrawn on every frame the composer paints while the message is up, so
     /// it is stored in the form the view hands to `child` rather than copied
     /// into one each time.
@@ -137,6 +142,7 @@ impl SlashPalette {
             kind,
             message: message.into(),
         });
+
         cx.notify();
 
         if !feedback_is_transient(kind) {
@@ -153,6 +159,7 @@ impl SlashPalette {
             let _ = this.update(cx, |this, cx| {
                 if this.palette.feedback_seq == seq {
                     this.palette.feedback = None;
+
                     cx.notify();
                 }
             });
@@ -182,6 +189,7 @@ impl AgentPane {
             && self.prompt_cache_may_have_expired(cx)
         {
             self.confirm_send_after_cache_expiry(window, cx);
+
             return;
         }
 
@@ -238,6 +246,7 @@ impl AgentPane {
                                 .label(i18n("agent-cache-warning-send"))
                                 .on_click(move |_, window, cx| {
                                     window.close_dialog(cx);
+
                                     pane.update(cx, |pane, cx| {
                                         pane.send_user_message_now(window, cx)
                                     });
@@ -270,6 +279,7 @@ impl AgentPane {
 
         if parse_slash_command(&text).is_some() {
             self.submit_current_slash(window, cx);
+
             return;
         }
 
@@ -288,9 +298,11 @@ impl AgentPane {
                 self.palette.skill_catalog.as_ref(),
             ) {
                 Ok(skill) => skill,
+
                 Err(message) => {
                     self.palette
                         .set_feedback(CommandFeedbackKind::Error, message, cx);
+
                     return;
                 }
             }
@@ -301,6 +313,7 @@ impl AgentPane {
         if self.send_text_with_skill(text.clone(), skill.as_ref(), cx) {
             self.record_input_history(&text, cx);
             self.palette.skill_binding = None;
+
             self.input
                 .update(cx, |input, cx| input.set_value("", window, cx));
         }

@@ -23,6 +23,7 @@ fn a_large_ready_stream_preserves_text_with_fewer_updates() {
     sender
         .unbounded_send(Event::TurnCompleted { error: None })
         .unwrap();
+
     drop(sender);
 
     let mut applied = Vec::new();
@@ -79,6 +80,7 @@ fn approvals_completion_and_errors_flush_prior_text_immediately() {
     batch.push(text("answer", "after approval"), |event| {
         applied.push(event)
     });
+
     batch.push(Event::TurnCompleted { error: None }, |event| {
         applied.push(event)
     });
@@ -154,6 +156,7 @@ fn a_partial_batch_delivers_its_last_delta_before_eof() {
     sender
         .unbounded_send(text("answer", "last fragment"))
         .unwrap();
+
     drop(sender);
 
     let mut batches = receiver.ready_chunks(MAX_MESSAGES_PER_BATCH);

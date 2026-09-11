@@ -62,6 +62,7 @@ impl Render for Preview {
                                 };
 
                                 Theme::change(mode, Some(window), cx);
+
                                 window.refresh();
                             }),
                     ),
@@ -122,10 +123,13 @@ fn main() {
                 }
             })
             .detach();
+
             gpui_component::init(cx);
             Theme::change(ThemeMode::Dark, None, cx);
+
             syntax::register_languages()
                 .expect("place the preview beside the built syntax library");
+
             cx.set_global(AgentSettings {
                 font_family: ".SystemUIFont".into(),
                 transcript_font_family: if cfg!(windows) {
@@ -153,7 +157,9 @@ fn main() {
                 |window, cx| {
                     let transcript = cx.new(|cx| {
                         let mut transcript = TranscriptView::new(AgentKind::Codex, None);
+
                         transcript.show_items(&samples(), 1, cx);
+
                         transcript
                     });
 
@@ -163,6 +169,7 @@ fn main() {
                 },
             )
             .expect("open highlight preview");
+
             cx.activate(true);
         });
 }

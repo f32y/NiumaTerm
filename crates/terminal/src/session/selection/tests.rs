@@ -33,6 +33,7 @@ fn click_replacing_a_highlight_needs_a_repaint() {
         SurfaceMouseEventKind::Down,
         SelectionType::Simple,
     );
+
     selection.apply_at(
         pos(3, 9),
         SurfaceCellSide::Right,
@@ -88,6 +89,7 @@ fn releasing_an_empty_click_drops_the_selection() {
         SurfaceMouseEventKind::Down,
         SelectionType::Simple,
     );
+
     selection.apply_at(
         pos(3, 4),
         SurfaceCellSide::Left,
@@ -115,6 +117,7 @@ fn clearing_removes_the_anchor() {
         SurfaceMouseEventKind::Down,
         SelectionType::Simple,
     );
+
     selection.clear();
 
     assert!(!selection.apply_at(

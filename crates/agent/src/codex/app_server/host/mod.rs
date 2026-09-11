@@ -93,6 +93,7 @@ impl CodexHost {
                 && host.router.alive.load(Ordering::Acquire)
             {
                 host.ensure_compatible(launch, &bootstrap)?;
+
                 return Ok(host);
             }
 
@@ -135,6 +136,7 @@ impl CodexHost {
 
             match &started {
                 Ok(host) => shared.host = Arc::downgrade(host),
+
                 Err(error) => {
                     shared.failed_attempts.push_back((attempt, error.clone()));
 
@@ -145,6 +147,7 @@ impl CodexHost {
             }
 
             SHARED_HOST.ready.notify_all();
+
             return started;
         }
     }
@@ -167,11 +170,13 @@ impl CodexHost {
             "Codex",
             {
                 let router = Arc::clone(&router);
+
                 move |message| router.handle_message(message)
             },
             move |line| on_stderr(redact(&line, &stderr_credentials)),
             {
                 let router = Arc::clone(&router);
+
                 move || router.handle_stdout_closed()
             },
         )?;
@@ -184,6 +189,7 @@ impl CodexHost {
         };
 
         host.router.start_timer()?;
+
         host.process
             .lock()
             .write_line(initialize_request())
@@ -194,6 +200,7 @@ impl CodexHost {
             .map_err(|_| "Codex app-server did not initialize in time".to_string())?;
 
         initialized.map_err(|error| redact(&error, &credential_values))?;
+
         host.process
             .lock()
             .write_line(json!({
@@ -254,6 +261,7 @@ impl CodexHost {
 
         let result = match message["method"].as_str() {
             None => self.process.lock().write_line(message).map(|_| None),
+
             Some("turn/interrupt" | "thread/unsubscribe") => {
                 let mut process = self.process.lock();
                 let result = process.write_tracked(vec![message]);
@@ -264,6 +272,7 @@ impl CodexHost {
 
                 result.map(Some)
             }
+
             _ => self.process.lock().write_tracked(vec![message]).map(Some),
         };
 
@@ -283,6 +292,7 @@ impl CodexHost {
 
                 Ok(())
             }
+
             Err(error) => Err(error.to_string()),
         }
     }
@@ -301,6 +311,7 @@ impl CodexHost {
 
     pub(super) fn shutdown(&self, timeout: Duration, force: bool) -> Result<(), String> {
         self.router.expected_shutdown.store(true, Ordering::Release);
+
         self.process.lock().shutdown(timeout, force)
     }
 }
@@ -346,12 +357,15 @@ impl HostBootstrap {
             let Some(provider) = launch.provider.as_ref() else {
                 continue;
             };
+
             let Some(name) = provider.api_key_env.as_deref() else {
                 continue;
             };
+
             let Some(value) = effective_env(launch, name) else {
                 continue;
             };
+
             let normalized = normalize_env_name(name);
             let provider_identity = (provider.id.clone(), provider.base_url.clone());
 
@@ -381,6 +395,7 @@ impl HostBootstrap {
         launch.env = effective_process_env(selected, &credential_names)
             .into_values()
             .collect();
+
         launch.env.extend(credentials.values().cloned());
 
         let credential_values = credentials

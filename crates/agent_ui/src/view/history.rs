@@ -242,6 +242,7 @@ impl AgentPane {
             .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                 if this.history_ui.mode.dismisses_on_outside_click() {
                     this.history_ui.mode = RecentSessionsMode::Hidden;
+
                     cx.notify();
                 }
             }))

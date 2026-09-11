@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 pub enum Key<Str = SmolStr> {
     /// A key with a well-known name (no text).
     Named(NamedKey),
+
     /// A key that produces character(s).
     Character(Str),
 }

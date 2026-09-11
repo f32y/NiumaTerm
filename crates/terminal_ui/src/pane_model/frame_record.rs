@@ -35,12 +35,15 @@ impl FrameRecord {
         item_top: f32,
     ) -> Self {
         let mut record = Self::from_view(view, item_top);
+
         record.active_top = Some(item_top + layout.active_top);
+
         if let Some(chrome) = &layout.chrome {
             record
                 .chrome
                 .push(offset_frozen_chrome(chrome.clone(), item_top));
         }
+
         record
     }
 }

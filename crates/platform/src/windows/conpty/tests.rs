@@ -122,6 +122,7 @@ fn create_process_receives_exact_agent_overrides() {
     );
 
     let mut command: Vec<u16> = command.encode_utf16().chain([0]).collect();
+
     let mut startup: STARTUPINFOW = unsafe { mem::zeroed() };
 
     startup.cb = mem::size_of::<STARTUPINFOW>() as u32;

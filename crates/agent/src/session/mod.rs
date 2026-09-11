@@ -81,6 +81,7 @@ impl AgentKind {
     pub fn from_id(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|kind| {
             let candidate: &str = (*kind).into();
+
             candidate == id
         })
     }

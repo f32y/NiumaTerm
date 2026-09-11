@@ -23,14 +23,19 @@ pub enum SessionScope {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SessionSummary {
     pub id: String,
+
     /// First user prompt of the session (or an id prefix when none exists).
     pub title: String,
+
     pub branch: Option<String>,
+
     /// Working directory the session ran in. Carried because a list can span
     /// directories, and resuming a session outside the current one has to
     /// happen where it worked. `None` for a source that does not record it.
     pub cwd: Option<String>,
+
     pub last_active: SystemTime,
+
     /// Why a search returned this row. Present only in a list produced by a
     /// content search, because the excerpt describes the query rather than the
     /// session, and an ordinary list has no query to describe.
@@ -46,10 +51,13 @@ pub struct SessionSummary {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ReplayTurn {
     pub items: Vec<ReplayItem>,
+
     /// Wall time the turn took.
     pub seconds: Option<u64>,
+
     /// Output tokens the turn produced.
     pub output_tokens: Option<u64>,
+
     /// The user stopped the turn before it finished.
     pub interrupted: bool,
 }
@@ -79,8 +87,10 @@ pub struct ReplayItem {
 pub enum ForkAnchor {
     /// The Claude transcript record the copied prefix stops before.
     ClaudeBefore(String),
+
     /// The last Codex turn the copy keeps, inclusive.
     CodexThrough(String),
+
     /// A DeepSeek event seq lying inside the last turn the copy keeps.
     DeepSeekThrough(u64),
 }
@@ -91,7 +101,9 @@ pub struct ForkCheckpoint {
     /// The prompt the branch stops in front of, shown as the row's label and
     /// handed back to the composer so the branch starts where it was cut.
     pub prompt: String,
+
     /// RFC 3339 as the provider recorded it; the UI owns the viewer's zone.
     pub timestamp: Option<String>,
+
     pub anchor: ForkAnchor,
 }

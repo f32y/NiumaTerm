@@ -75,18 +75,22 @@ impl ScriptedApi {
 impl Api for ScriptedApi {
     fn start_session(&self, handle: *mut u32, _key: *mut u16) -> u32 {
         let state = self.state.lock();
+
         unsafe { *handle = 42 };
+
         state.start_code
     }
 
     fn end_session(&self, _handle: u32) -> u32 {
         self.state.lock().ended += 1;
+
         ERROR_SUCCESS
     }
 
     fn register_files(&self, _handle: u32, paths: &[*const u16]) -> u32 {
         assert!(!paths.is_empty());
         assert!(paths.iter().all(|path| !path.is_null()));
+
         self.state.lock().register_code
     }
 
@@ -118,13 +122,17 @@ impl Api for ScriptedApi {
 
     fn shutdown(&self, _handle: u32, flags: u32, _callback: RM_WRITE_STATUS_CALLBACK) -> u32 {
         let mut state = self.state.lock();
+
         state.shutdown_flags.push(flags);
+
         state.shutdown_code
     }
 
     fn restart(&self, _handle: u32, flags: u32, _callback: RM_WRITE_STATUS_CALLBACK) -> u32 {
         let mut state = self.state.lock();
+
         state.restart_flags.push(flags);
+
         state.restart_code
     }
 }
@@ -189,6 +197,7 @@ fn growing_process_list_is_retried_and_decoded() {
     };
 
     let (api, shared) = ScriptedApi::new(state);
+
     let session =
         Session::for_files(api, &[Path::new(r"C:\NiumaTerm\NmtShellExtension.dll")]).unwrap();
 
@@ -244,6 +253,7 @@ fn shutdown_and_restart_use_normal_action_flags() {
     };
 
     let (api, shared) = ScriptedApi::new(state);
+
     let session =
         Session::for_files(api, &[Path::new(r"C:\NiumaTerm\NmtShellExtension.dll")]).unwrap();
 
@@ -269,6 +279,7 @@ fn shutdown_error_preserves_its_operation_and_code() {
     };
 
     let (api, _) = ScriptedApi::new(state);
+
     let session =
         Session::for_files(api, &[Path::new(r"C:\NiumaTerm\NmtShellExtension.dll")]).unwrap();
 
@@ -336,6 +347,7 @@ fn a_loaded_dll_is_reported_and_old_copy_cleans_up_after_exit() {
     while output.read_line(&mut line).unwrap() != 0 {
         if line.contains("NMT_DLL_READY") {
             ready = true;
+
             break;
         }
 

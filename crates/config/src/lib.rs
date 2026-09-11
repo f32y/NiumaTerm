@@ -58,27 +58,35 @@ pub struct Config {
     pub editor: Shell,
     #[serde(skip)]
     pub colors: Colors,
+
     /// UI theme loaded from the selected file in `themes/`.
     #[serde(skip)]
     pub ui_theme: Option<UiTheme>,
+
     /// Visual settings (settings dialog, Terminal/Appearance pages).
     #[serde(default = "appearance::AppearanceConfig::default")]
     pub appearance: appearance::AppearanceConfig,
+
     /// The `[profiles]` section: default-profile name + profile entries.
     #[serde(default)]
     pub profiles: profile::ProfilesConfig,
+
     /// The `[agent-profiles]` section: default agent-profile name + entries.
     #[serde(default, rename = "agent-profiles")]
     pub agent_profiles: profile::AgentProfilesConfig,
+
     /// Agent integration settings (settings dialog, Agent page).
     #[serde(default = "agent::AgentConfig::default")]
     pub agent: agent::AgentConfig,
+
     /// System-behavior settings (settings dialog, System page).
     #[serde(default = "system::SystemConfig::default")]
     pub system: system::SystemConfig,
+
     /// Remote-session connection settings (settings dialog, Remote Session page).
     #[serde(default, rename = "remote-session")]
     pub remote_session: remote_session::RemoteSessionConfig,
+
     /// Update checking settings (settings dialog, About page).
     #[serde(default = "update::UpdateConfig::default")]
     pub update: update::UpdateConfig,
@@ -173,8 +181,10 @@ impl Config {
             .iter()
             .filter_map(|builtin| match parse_toml::<Theme>(builtin.source) {
                 Ok(theme) => Some((builtin.name.to_string(), theme)),
+
                 Err(err) => {
                     warn!("ignored invalid built-in theme {}: {err}", builtin.name);
+
                     None
                 }
             })
@@ -203,8 +213,10 @@ impl Config {
 
                 match Self::load_theme(&path) {
                     Ok(theme) => Some((name, theme)),
+
                     Err(err) => {
                         warn!("ignored invalid theme {}: {err}", path.display());
+
                         None
                     }
                 }
@@ -224,6 +236,7 @@ impl Config {
         let Some(content) = fs::read_to_string(path).ok() else {
             return Ok(Config::default());
         };
+
         let mut decoded = parse_toml::<Config>(&content)?;
         let theme = &decoded.theme;
 
@@ -292,12 +305,15 @@ pub enum CursorShape {
     #[default]
     #[serde(alias = "block")]
     Block,
+
     /// Cursor is an underscore like `_`.
     #[serde(alias = "underline")]
     Underline,
+
     /// Cursor is a vertical bar `⎸`.
     #[serde(alias = "beam", alias = "line", alias = "Line")]
     Beam,
+
     /// Cursor is hidden.
     #[serde(alias = "hidden")]
     Hidden,
@@ -318,6 +334,7 @@ static ACTIVE_COLORS: OnceLock<RwLock<Colors>> = OnceLock::new();
 
 pub fn init(config: Config) {
     set_active_colors(config.colors);
+
     let _ = CONFIG.set(config);
 }
 
@@ -380,6 +397,7 @@ pub fn save_settings_to(path: &Path, patch: &SettingsPatch<'_>) -> io::Result<()
                     format!("config.toml is not valid TOML, not saving settings: {err}"),
                 )
             })?,
+
             None => DocumentMut::new(),
         };
 
@@ -438,6 +456,7 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> 
 /// Updating individual entries retains keys this build does not recognize.
 fn patch_group(doc: &mut DocumentMut, key: &str, settings: &impl Serialize) -> Result<(), String> {
     let serialized = toml::to_string(settings).map_err(|error| error.to_string())?;
+
     let values = serialized
         .parse::<DocumentMut>()
         .map_err(|error| error.to_string())?;
@@ -467,6 +486,7 @@ pub(crate) fn ensure_explicit_table(doc: &mut DocumentMut, key: &str) {
 
     if !item.is_table() {
         let previous = mem::replace(item, Item::None);
+
         *item = Item::Table(previous.into_table().unwrap_or_default());
     }
 }

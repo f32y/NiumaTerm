@@ -142,9 +142,11 @@ impl io::Read for EventedAnonRead {
 
                 return Err(io::Error::new(io::ErrorKind::BrokenPipe, err));
             }
+
             Err(TryRecvError::Disconnected) => {
                 return Err(io::Error::new(io::ErrorKind::BrokenPipe, ""));
             }
+
             Err(TryRecvError::Empty) => {}
         }
 
@@ -327,9 +329,11 @@ impl io::Write for EventedAnonWrite {
 
                 return Err(io::Error::new(io::ErrorKind::BrokenPipe, err));
             }
+
             Err(TryRecvError::Disconnected) => {
                 return Err(io::Error::new(io::ErrorKind::BrokenPipe, ""));
             }
+
             Err(TryRecvError::Empty) => {}
         }
 

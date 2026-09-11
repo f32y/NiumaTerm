@@ -86,6 +86,7 @@ impl Session {
         let Some(thread_id) = self.conversation.thread_id.clone() else {
             return false;
         };
+
         let name = name.trim();
 
         if name.is_empty() {
@@ -111,6 +112,7 @@ impl Session {
             (self.host.as_ref(), self.conversation.thread_id.clone())
         else {
             self.queue_thread_name(provisional_title);
+
             return;
         };
 
@@ -180,9 +182,11 @@ fn start_title_generation(
 ) -> Result<TitleGenerationHandle, String> {
     let (tx, rx) = mpsc::channel();
     let callback_tx = tx.clone();
+
     let registration_id = host.register(move |message| {
         let _ = callback_tx.send(message);
     });
+
     let worker_host = Arc::clone(&host);
     let generation_id = request.generation_id;
     let root_thread_id = request.root_thread_id.clone();
@@ -196,6 +200,7 @@ fn start_title_generation(
 
     if let Err(error) = spawn {
         host.detach(registration_id);
+
         return Err(format!("Could not start Codex title generation: {error}"));
     }
 
@@ -261,6 +266,7 @@ fn run_title_generation(
 
             if message["method"].as_str() == Some(TITLE_GENERATION_CANCEL_METHOD) {
                 cancelled = true;
+
                 break;
             }
 
@@ -271,6 +277,7 @@ fn run_title_generation(
             if let Some(id) = message["id"].as_u64() {
                 if message["method"].is_string() {
                     answer_unsupported_server_request(&host, registration_id, id);
+
                     continue;
                 }
 
@@ -312,21 +319,26 @@ fn run_title_generation(
                 "turn/started" => {
                     title_turn_id = params["turn"]["id"].as_str().map(str::to_owned);
                 }
+
                 "item/agentMessage/delta" => {
                     if let Some(delta) = params["delta"].as_str() {
                         output.push_str(delta);
                     }
                 }
+
                 "item/completed" if params["item"]["type"].as_str() == Some("agentMessage") => {
                     if let Some(text) = params["item"]["text"].as_str() {
                         output.clear();
                         output.push_str(text);
                     }
                 }
+
                 "turn/completed" => {
                     completed = params["turn"]["status"].as_str() == Some("completed");
+
                     break;
                 }
+
                 "error" => break,
                 _ => {}
             }

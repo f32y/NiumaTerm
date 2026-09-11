@@ -83,6 +83,7 @@ fn empty_count_finishes_loading_and_removes_previous_rows() {
         selected: 8,
         ..Default::default()
     };
+
     history.data.sessions = rows("previous");
 
     let request = history.begin_filesystem_history(None, 1);

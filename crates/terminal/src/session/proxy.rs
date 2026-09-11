@@ -13,8 +13,10 @@ use crate::session::{
 #[derive(Clone)]
 pub(super) struct TerminalEventProxy {
     shared: Arc<SessionSharedState>,
+
     /// Source surface id, stamped onto every wake so the shell can route by tab.
     id: u64,
+
     /// Render-wakeup sender; `None` for sessions/tests without a live shell.
     observer: Option<Arc<dyn SessionObserver>>,
 }
@@ -51,6 +53,7 @@ impl TerminalEventProxy {
         if let Some(observer) = &self.observer {
             observer.blocks(&batch);
         }
+
         self.shared.block_store.lock().apply(batch);
     }
 }
@@ -63,6 +66,7 @@ impl EventListener for TerminalEventProxy {
     fn send_event(&self, event: TerminalEvent, _id: WindowId) {
         if matches!(event, TerminalEvent::ReadReady) {
             self.signal(SessionChange::Content);
+
             return;
         }
 
@@ -103,6 +107,7 @@ impl EventListener for TerminalEventProxy {
             TerminalEvent::Bell => HostEvent::Bell,
             TerminalEvent::Cwd(cwd) => HostEvent::Cwd(cwd),
             TerminalEvent::ProgressReport(report) => HostEvent::Progress(report),
+
             TerminalEvent::ClipboardStore(ty, text) => {
                 if let Some(observer) = &self.observer {
                     observer.clipboard(ty, text);
@@ -110,6 +115,7 @@ impl EventListener for TerminalEventProxy {
 
                 return;
             }
+
             TerminalEvent::CloseTerminal(_) => {
                 self.shared.exited.store(true, Ordering::Release);
                 self.shared.selection.clear();
@@ -123,14 +129,19 @@ impl EventListener for TerminalEventProxy {
 
                 HostEvent::Exit
             }
+
             TerminalEvent::DesktopNotification { title, body } => {
                 HostEvent::Notification { title, body }
             }
+
             TerminalEvent::InteractiveState(on) => HostEvent::InteractiveState(on),
+
             TerminalEvent::AltScreen(on) => {
                 self.shared.alt_screen.store(on, Ordering::Release);
+
                 HostEvent::AltScreen(on)
             }
+
             TerminalEvent::PromptBoundaryTrusted(on) => {
                 if !on {
                     // Trust lost mid-command (nested shell, malformed stream): the
@@ -141,11 +152,13 @@ impl EventListener for TerminalEventProxy {
 
                 HostEvent::PromptBoundaryTrusted(on)
             }
+
             TerminalEvent::PromptStarted => {
                 *self.shared.open_prompt.lock() = true;
 
                 HostEvent::PromptStarted
             }
+
             TerminalEvent::BlockBatch(batch) => {
                 // Stage this read's block events; they flush to the store on the
                 // read's damage wake, after `UpdateGraphics` installs the generations
@@ -154,6 +167,7 @@ impl EventListener for TerminalEventProxy {
 
                 return;
             }
+
             TerminalEvent::CommandStarted(cmd) => {
                 *self.shared.open_prompt.lock() = false;
 
@@ -177,6 +191,7 @@ impl EventListener for TerminalEventProxy {
 
                 HostEvent::CommandStarted
             }
+
             TerminalEvent::CommandFinished(cmd) => {
                 self.shared.selection.clear();
                 *self.shared.in_flight.lock() = None;
@@ -199,6 +214,7 @@ impl EventListener for TerminalEventProxy {
                     exit_code: cmd.exit_code,
                 }
             }
+
             _ => return,
         };
 

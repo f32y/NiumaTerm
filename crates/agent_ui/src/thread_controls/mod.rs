@@ -1,9 +1,12 @@
 use nmt_agent::session::settings::ConversationSettings;
+
 mod defaults;
 pub(crate) mod effort;
+
 pub(crate) use crate::thread_controls::defaults::{
     launch_effort, launch_model, stored_thread_settings,
 };
+
 mod harness_rows;
 
 use gpui::prelude::*;
@@ -29,10 +32,12 @@ pub(crate) struct ThreadControls {
 /// around several of them reads as a segmented control whose parts move
 /// together, which is the opposite of what these do.
 const SETTINGS_PILL_RADIUS: f32 = 8.0;
+
 const SETTINGS_PILL_PADDING_X: f32 = 9.0;
 const SETTINGS_PILL_GAP: f32 = 6.0;
 const SETTINGS_PILL_TEXT: f32 = 13.0;
 const SETTINGS_PILL_ICON: f32 = 12.0;
+
 /// The disclosure mark is the quietest thing on a pill: it says the value can
 /// be changed, while the value itself is what the user came to read.
 const SETTINGS_PILL_CHEVRON: f32 = 10.0;
@@ -74,6 +79,7 @@ pub(super) const EFFORT_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "
 /// Height of the effort track, and the inset its thumb keeps from the
 /// track's edge.
 pub(super) const EFFORT_TRACK_HEIGHT: Pixels = px(26.0);
+
 pub(super) const EFFORT_THUMB_INSET: Pixels = px(3.0);
 
 impl ThreadControls {
@@ -172,6 +178,7 @@ pub(super) fn folded_settings_pill(
                 let label = i18n("agent-settings-folded-entry")
                     .replace("{name}", setting.name)
                     .replace("{value}", &value);
+
                 let pane = pane.clone();
 
                 menu = menu.submenu_with_icon(
@@ -192,6 +199,7 @@ pub(super) fn folded_settings_pill(
                                     move |_, _, cx| {
                                         pane.update(cx, |this, cx| {
                                             set(this, value.clone(), cx);
+
                                             cx.notify();
                                         });
                                     },
@@ -314,6 +322,7 @@ pub(super) fn setting_picker(
                 menu = menu.item(PopupMenuItem::new(label).on_click(move |_, _, cx| {
                     pane.update(cx, |this, cx| {
                         set(this, value.clone(), cx);
+
                         cx.notify();
                     });
                 }));

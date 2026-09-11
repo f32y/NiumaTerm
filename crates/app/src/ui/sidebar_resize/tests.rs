@@ -11,6 +11,7 @@ fn a_gesture_is_claimed_only_by_the_handle_that_started_it() {
     let left = ResizeDrag {
         handle: "workspace-sidebar-resize",
     };
+
     let right = ResizeDrag {
         handle: "right-panel-resize",
     };

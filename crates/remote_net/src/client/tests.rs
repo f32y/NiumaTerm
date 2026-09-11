@@ -59,6 +59,7 @@ fn splitting_session_moves_snapshot_and_preserves_both_stream_directions() {
     output_tx
         .send(SessionByteEvent::Output(b"tail".to_vec()))
         .unwrap();
+
     output_tx.send(SessionByteEvent::Exited).unwrap();
 
     assert!(matches!(output.recv().unwrap(), SessionByteEvent::Output(bytes) if bytes == b"tail"));

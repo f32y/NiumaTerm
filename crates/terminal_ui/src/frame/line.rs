@@ -153,6 +153,7 @@ impl LineBuilder {
             {
                 last.len += seg_len
             }
+
             _ => self.runs.push(StyleRun {
                 len: seg_len,
                 ..style

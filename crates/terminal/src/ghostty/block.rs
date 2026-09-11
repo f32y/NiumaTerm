@@ -93,8 +93,10 @@ impl BlockRef {
         match unsafe { ghostty_block_ref_grid_ref(self.raw, row, &mut grid_ref) } {
             VtResult::SUCCESS => {}
             VtResult::INVALID_VALUE => return Ok(None),
+
             other => {
                 Error::from_code(other)?;
+
                 return Ok(None);
             }
         }

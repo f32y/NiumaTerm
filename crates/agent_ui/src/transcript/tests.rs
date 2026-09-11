@@ -48,10 +48,12 @@ mod prompt_truncation_tests {
     #[test]
     fn composer_replaces_send_with_stop_only_while_running() {
         let action: ComposerAction = Status::Running.into();
+
         assert_eq!(action, ComposerAction::Stop);
 
         for status in [Status::Starting, Status::Idle, Status::Exited] {
             let action: ComposerAction = status.into();
+
             assert_eq!(action, ComposerAction::Send);
         }
     }
@@ -60,6 +62,7 @@ mod prompt_truncation_tests {
     fn copying_an_annotated_user_message_omits_hidden_context() {
         let submitted =
             prompt_with_response_annotations("Explain this", &["selected response text".into()]);
+
         let item = SessionItem::UserMessage {
             text: Some(submitted),
         };
@@ -377,18 +380,23 @@ mod separate_view_state_tests {
 
             parent.update(cx, |transcript, cx| {
                 transcript.push(1, message("a", "parent reply"), Vec::new(), cx);
+
                 transcript
                     .disclosures
                     .open(RevealKey::Row(0), Instant::now(), false);
+
                 transcript
                     .disclosures
                     .open(RevealKey::Annotation(0), Instant::now(), false);
+
                 transcript
                     .disclosures
                     .open(RevealKey::Turn(1), Instant::now(), false);
+
                 transcript
                     .disclosures
                     .open(RevealKey::Group(0), Instant::now(), false);
+
                 transcript.mark_interrupted(1);
             });
 
@@ -431,6 +439,7 @@ mod separate_view_state_tests {
 
                 transcript.sync_transcript_list(transcript.build_row_specs(CollapseRows::Off));
             });
+
             child.update(cx, |transcript, cx| {
                 transcript.push(1, message("c0", "row"), Vec::new(), cx);
                 transcript.sync_transcript_list(transcript.build_row_specs(CollapseRows::Off));
@@ -452,6 +461,7 @@ mod separate_view_state_tests {
             parent.update(cx, |transcript, cx| {
                 transcript.push(1, message("a", "parent"), Vec::new(), cx)
             });
+
             child.update(cx, |transcript, cx| {
                 transcript.push(1, message("b", "child"), Vec::new(), cx)
             });
@@ -568,6 +578,7 @@ mod steered_prompt_rows_tests {
 
             transcript.update(cx, |transcript, cx| {
                 transcript.push(1, prompt("ask"), Vec::new(), cx);
+
                 transcript.push(
                     1,
                     SessionItem::Reasoning {
@@ -577,7 +588,9 @@ mod steered_prompt_rows_tests {
                     Vec::new(),
                     cx,
                 );
+
                 transcript.push(1, reply("answer"), Vec::new(), cx);
+
                 transcript.push(
                     1,
                     SessionItem::Error {
@@ -586,6 +599,7 @@ mod steered_prompt_rows_tests {
                     Vec::new(),
                     cx,
                 );
+
                 settle(transcript, 1, 3);
 
                 assert_eq!(order(transcript), vec!["0", "fold(1)", "2", "3", "summary"]);
@@ -1006,6 +1020,7 @@ mod branch_point_targeting_tests {
                     item_ix: 3,
                     offset_in_item: px(0.),
                 });
+
                 view.hold_for_picker();
                 view.scroll_to_prompt(&first, false, cx);
 
@@ -1248,6 +1263,7 @@ mod row_rhythm_tests {
                     item_ix: 1,
                     offset_in_item: px(0.),
                 });
+
                 view.toggle_disclosure(RevealKey::Row(3), cx);
 
                 assert!(
@@ -1392,8 +1408,10 @@ mod row_rhythm_tests {
 
                 view.disclosures
                     .record_height(RevealedPart::Entry(2), px(40.));
+
                 view.disclosures
                     .record_height(RevealedPart::Entry(3), px(40.));
+
                 view.disclosures.record_height(elsewhere, px(80.));
 
                 view.toggle_disclosure(RevealKey::Group(2), cx);
@@ -1542,6 +1560,7 @@ mod row_rhythm_tests {
             view.update(cx, |view, cx| {
                 view.disclosures
                     .open(RevealKey::Turn(1), Instant::now(), false);
+
                 view.toggle_disclosure(RevealKey::Group(2), cx);
 
                 let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
@@ -1656,6 +1675,7 @@ mod typed_reply_tests {
                     Vec::new(),
                     cx,
                 );
+
                 transcript.append_delta("a", " world", TextField::Reply);
 
                 assert_eq!(transcript.shown_reply(0, "Hello 世界 world"), "Hello 世界");
@@ -1691,6 +1711,7 @@ mod typed_reply_tests {
                     Vec::new(),
                     cx,
                 );
+
                 transcript.append_delta("r", "thinking", TextField::ReasoningSummary);
 
                 assert_eq!(transcript.typed_edge(0), None);
@@ -1835,6 +1856,7 @@ mod reading_column_tests {
         let cx: &mut VisualTestContext = cx;
 
         cx.run_until_parked();
+
         cx.update(|window, cx| {
             let _ = window.draw(cx);
         });

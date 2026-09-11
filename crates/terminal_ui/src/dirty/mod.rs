@@ -9,7 +9,9 @@ pub(crate) struct DirtyState {
 impl DirtyState {
     pub(crate) fn mark(&mut self) -> bool {
         let was_clean = !self.pending;
+
         self.pending = true;
+
         was_clean
     }
 

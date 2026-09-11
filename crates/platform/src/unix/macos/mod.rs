@@ -37,9 +37,11 @@ impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Error::InvalidSize => write!(f, "Invalid proc_pidinfo return size"),
+
             Error::Io(err) => {
                 write!(f, "Error getting current working directory: {err}")
             }
+
             Error::IntoString(err) => {
                 write!(f, "Error when parsing current working directory: {err}")
             }
@@ -67,8 +69,11 @@ mod sys {
     pub const PROC_PIDVNODEPATHINFO: c_int = 9;
 
     type gid_t = c_int;
+
     type off_t = c_longlong;
+
     type uid_t = c_int;
+
     type fsid_t = fsid;
 
     #[repr(C)]
@@ -180,6 +185,7 @@ fn get_proc_path(pid: i32) -> String {
 
     #[allow(unused)]
     let mut ret: i32 = 0;
+
     let mut out = String::new();
 
     unsafe {
@@ -218,6 +224,7 @@ pub fn macos_cwd(pid: c_int) -> Result<PathBuf, Error> {
     };
 
     let c_string: CString = c_str.into();
+
     Ok(c_string.into_string().map(Into::into)?)
 }
 

@@ -60,6 +60,7 @@ fn remote_session_renders_through_net_pty() {
             .is_ok()
         {
             paired = true;
+
             break;
         }
 
@@ -99,6 +100,7 @@ fn remote_session_renders_through_net_pty() {
 
         if vt.contains(MARKER) {
             rendered = true;
+
             break;
         }
 

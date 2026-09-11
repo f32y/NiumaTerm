@@ -9,9 +9,11 @@ pub struct AgentConfig {
     /// Accept lifecycle events delivered by installed Agent hooks.
     #[serde(default = "default_bool_true", rename = "enable-agent-hooks")]
     pub enable_agent_hooks: bool,
+
     /// Show Agent account usage in the workspace sidebar.
     #[serde(default = "default_bool_true", rename = "show-agent-usage")]
     pub show_agent_usage: bool,
+
     /// How much of an agent tab's transcript arrives folded.
     #[serde(
         default,
@@ -19,15 +21,18 @@ pub struct AgentConfig {
         deserialize_with = "deserialize_collapse_rows"
     )]
     pub collapse_tool_calls: CollapseRows,
+
     /// Probe each Agent installation for a newer provider version in the
     /// background. Manual checks stay available while this is off.
     #[serde(default = "default_bool_true", rename = "check-agent-updates")]
     pub check_agent_updates: bool,
+
     /// List Codex skills in the `/` command palette and rewrite a chosen one
     /// to its `$name` form. With this off the `/` palette carries commands
     /// only and `$` is the sole skill trigger.
     #[serde(default = "default_bool_true", rename = "codex-skill-command-compat")]
     pub codex_skill_command_compat: bool,
+
     /// How the composer's model picker spells each model it offers.
     #[serde(default, rename = "model-list-style")]
     pub model_list_style: ModelListStyle,
@@ -92,8 +97,10 @@ pub enum CollapseRows {
     /// of tool calls collapse to their newest.
     #[default]
     WorkAndToolCalls,
+
     /// Runs of tool calls only; a finished turn shows the work it did.
     ToolCalls,
+
     /// Neither; every row arrives on screen.
     Off,
 }

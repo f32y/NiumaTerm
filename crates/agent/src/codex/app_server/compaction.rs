@@ -62,6 +62,7 @@ impl CompactionState {
 
         let (trigger, pre_tokens) = match active {
             Some(active) => (active.trigger, active.pre_tokens),
+
             None => {
                 let trigger = if take(&mut self.manual_pending) {
                     CompactionTrigger::Manual
@@ -120,6 +121,7 @@ pub(super) fn compaction_completed(state: &mut CompactionState, item: &Value) ->
     let Some(id) = item["id"].as_str().filter(|id| !id.is_empty()) else {
         return Vec::new();
     };
+
     let detail = state.finish(id);
     let manual = detail.trigger == Some(CompactionTrigger::Manual);
 

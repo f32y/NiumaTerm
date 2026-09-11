@@ -133,12 +133,14 @@ impl fmt::Display for HubError {
         match self {
             Self::SessionNotFound(id) => write!(formatter, "terminal session {id} was not found"),
             Self::SessionExited(id) => write!(formatter, "terminal session {id} has exited"),
+
             Self::InvalidSize { cols, rows } => {
                 write!(
                     formatter,
                     "terminal size must be non-zero, got {cols}x{rows}"
                 )
             }
+
             Self::Spawn(error) => write!(formatter, "failed to start ConPTY session: {error}"),
             Self::Engine(error) => write!(formatter, "terminal engine failed: {error}"),
             Self::ChannelClosed(id) => write!(formatter, "terminal session {id} is unavailable"),
@@ -222,6 +224,7 @@ impl StreamState {
 
                     true
                 }
+
                 Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => false,
             },
         );
@@ -366,18 +369,24 @@ impl RemoteSessionHub {
 
         let stream = Arc::clone(&session.stream);
         let (completed, completion) = sync_channel(1);
+
         session.send(Msg::Checkpoint(CheckpointRequest(Box::new(
             move |result| {
                 let result = result
                     .map_err(|error| HubError::Engine(format!("{error:?}")))
                     .and_then(|checkpoint| {
                         let mut state = stream.lock();
+
                         if state.exited {
                             return Err(HubError::SessionExited(id));
                         }
+
                         let subscriber_id = state.next_subscriber_id;
+
                         state.next_subscriber_id = state.next_subscriber_id.saturating_add(1);
+
                         let base_seq = state.next_seq.saturating_sub(1);
+
                         state.subscribers.insert(
                             subscriber_id,
                             Subscriber {
@@ -385,7 +394,9 @@ impl RemoteSessionHub {
                                 wake_thread: None,
                             },
                         );
+
                         drop(state);
+
                         Ok(SessionSubscription {
                             snapshot: SessionSnapshot {
                                 session_id: id,
@@ -399,9 +410,11 @@ impl RemoteSessionHub {
                             stream,
                         })
                     });
+
                 let _ = completed.send(result);
             },
         ))))?;
+
         completion.recv().map_err(|_| HubError::ChannelClosed(id))?
     }
 

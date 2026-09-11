@@ -34,14 +34,17 @@ impl ClaudeTasks {
 
         match message["type"].as_str() {
             Some("system") => self.observe_system(message),
+
             Some("assistant") | Some("stream_event") => match linked_parent {
                 Some(parent) => self.observe_sidechain(parent, message),
                 None => self.observe_parent_assistant(message),
             },
+
             Some("user") => match linked_parent {
                 Some(parent) => self.observe_sidechain(parent, message),
                 None => self.observe_parent_user(message),
             },
+
             _ => false,
         }
     }
@@ -65,6 +68,7 @@ impl ClaudeTasks {
         self.epoch += 1;
 
         let epoch = self.epoch;
+
         let Some(snapshot) = self.snapshot() else {
             return false;
         };
@@ -131,6 +135,7 @@ impl ClaudeTasks {
             let Some(name) = block["name"].as_str() else {
                 continue;
             };
+
             let Some(tool_use_id) = block["id"].as_str() else {
                 continue;
             };
@@ -172,6 +177,7 @@ impl ClaudeTasks {
                     ..BackgroundTaskUpdate::default()
                 },
             );
+
             changed |= self.open_child_conversation(tool_use_id, objective);
         }
 
@@ -222,6 +228,7 @@ impl ClaudeTasks {
                 // as the task records that own the row.
                 if self.is_shell(&canonical) {
                     self.shells.remember_handoff_output_file(&canonical, block);
+
                     continue;
                 }
 
@@ -329,11 +336,14 @@ impl ClaudeTasks {
                         questions: None,
                     })
                 }
+
                 Some("text") => {}
+
                 Some("thinking") => items.push(Item::Reasoning {
                     id,
                     summary: block["thinking"].as_str().map(str::to_owned),
                 }),
+
                 Some("tool_use") => {
                     let item = tool_item(
                         &id,
@@ -344,11 +354,13 @@ impl ClaudeTasks {
                     self.children.open_tool(id, item.clone());
                     items.push(item);
                 }
+
                 Some("tool_result") => {
                     if let Some(started) = self.children.close_tool(&id) {
                         items.push(complete_tool_item(started, block));
                     }
                 }
+
                 _ => {}
             }
         }

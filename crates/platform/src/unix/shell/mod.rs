@@ -145,8 +145,10 @@ fn bash_directory() -> Option<&'static Path> {
 fn installed(shell: &str, files: &[(&str, &str)]) -> Option<PathBuf> {
     match install_files(shell, files) {
         Ok(dir) => Some(dir),
+
         Err(error) => {
             warn!("{shell} shell integration unavailable ({error})");
+
             None
         }
     }

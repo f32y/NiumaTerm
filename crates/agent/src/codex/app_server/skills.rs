@@ -23,6 +23,7 @@ pub(super) fn parse_skill_catalog(result: &Value) -> SkillCatalog {
             let message = error["message"]
                 .as_str()
                 .unwrap_or("unknown skill loading error");
+
             let path = error["path"].as_str().unwrap_or_default();
 
             catalog.errors.push(if path.is_empty() {
@@ -85,6 +86,7 @@ impl SkillRefreshState {
 
     pub(super) fn start(&mut self, rpc_id: u64) {
         debug_assert!(self.in_flight.is_none());
+
         self.in_flight = Some(rpc_id);
     }
 

@@ -27,6 +27,7 @@ const CLSID_NIUMATERM_NEW_TAB: GUID = GUID::from_u128(0xF1D94FEB_1AA5_4B27_9440_
 // calls on arbitrary threads; the atomic removes the unsynchronized
 // shared-mutable-static access without changing behavior.
 static DLL_INSTANCE: AtomicPtr<ffi::c_void> = AtomicPtr::new(ptr::null_mut());
+
 /// Combined LockServer count + live COM object count (the classic ATL
 /// module count). DllCanUnloadNow must stay S_FALSE while any command or
 /// factory object is alive, or Explorer can unload the DLL under an object
@@ -105,6 +106,7 @@ struct NiumaTermNewTabCommand;
 impl NiumaTermNewTabCommand {
     fn new() -> Self {
         dll_add_ref();
+
         Self
     }
 }
@@ -122,6 +124,7 @@ impl IExplorerCommand_Impl for NiumaTermNewTabCommand_Impl {
 
     fn GetIcon(&self, _items: Ref<'_, IShellItemArray>) -> Result<PWSTR> {
         let icon = format!("{},0", get_exe_path());
+
         Ok(alloc_co_task_str(&icon))
     }
 
@@ -167,6 +170,7 @@ struct NiumaTermClassFactory;
 impl NiumaTermClassFactory {
     fn new() -> Self {
         dll_add_ref();
+
         Self
     }
 }

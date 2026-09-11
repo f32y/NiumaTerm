@@ -89,11 +89,14 @@ impl AgentPane {
         if !self.session.branch.cancel_picker() {
             return false;
         }
+
         self.branch.draft = None;
         self.palette.selected = 0;
         self.palette.feedback = None;
         self.release_transcript_from_picker(cx);
+
         cx.notify();
+
         true
     }
 
@@ -120,8 +123,10 @@ impl AgentPane {
                 translated("agent-fork-idle-only"),
                 cx,
             );
+
             return false;
         }
+
         if let Err(error) = self
             .session
             .branch
@@ -131,18 +136,23 @@ impl AgentPane {
                 BranchError::Busy => translated("agent-fork-idle-only"),
                 _ => self.branch_error_message(error).into(),
             };
+
             self.palette
                 .set_feedback(CommandFeedbackKind::Error, message, cx);
+
             return false;
         }
+
         self.branch.pending_prompt = None;
         self.palette.selected = 0;
         self.palette.dismissed = false;
+
         self.palette.set_feedback(
             CommandFeedbackKind::Status,
             translated("agent-fork-loading-checkpoints"),
             cx,
         );
+
         true
     }
 
@@ -155,6 +165,7 @@ impl AgentPane {
             .session
             .branch
             .fork_checkpoints(&mut self.session.runtime, checkpoints);
+
         self.apply_fork_update(update, cx);
     }
 
@@ -165,9 +176,11 @@ impl AgentPane {
                 translated("agent-fork-no-prompts"),
                 cx,
             ),
+
             BranchUpdate::Picker { unresolved } => {
                 self.palette.feedback = None;
                 self.palette.selected = 0;
+
                 if unresolved {
                     self.palette.set_feedback(
                         CommandFeedbackKind::Error,
@@ -175,28 +188,36 @@ impl AgentPane {
                         cx,
                     );
                 }
+
                 self.hold_transcript_for_picker(cx);
                 self.follow_branch_selection(cx);
+
                 cx.notify();
             }
+
             BranchUpdate::Branching => {
                 self.branch.draft = Some(self.input.read(cx).text().to_string());
                 self.history_ui.mode = RecentSessionsMode::Loading;
                 self.session.restore.cancel();
                 self.session.controls.seed_thread_defaults = false;
                 self.session.controls.seed_approval_reviewer = false;
+
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
                     translated("agent-session-forking"),
                     cx,
                 );
+
                 cx.notify();
             }
+
             BranchUpdate::Failed(failure) => {
                 let message = self.branch_error_message(failure.error);
+
                 self.palette
                     .set_feedback(CommandFeedbackKind::Error, message, cx);
             }
+
             _ => {}
         }
     }
@@ -211,6 +232,7 @@ impl AgentPane {
                 rows: vec![cancel_row()],
                 note: Some(translated("agent-fork-loading-checkpoints")),
             }),
+
             BranchView::ForkCheckpoints(checkpoints) => {
                 let mut rows = checkpoints
                     .iter()
@@ -231,6 +253,7 @@ impl AgentPane {
                     note: Some(translated("agent-fork-choose-prompt")),
                 })
             }
+
             _ => None,
         }
     }
@@ -244,6 +267,7 @@ impl AgentPane {
             .session
             .branch
             .fork(&mut self.session.runtime, checkpoint);
+
         self.apply_fork_update(update, cx);
     }
 
@@ -253,11 +277,14 @@ impl AgentPane {
         let Some(pending) = self.branch.pending_prompt.take() else {
             return;
         };
+
         if *self.input.read(cx).text() != pending.expected_draft {
             return;
         }
+
         self.input.update(cx, |input, cx| {
             let end = pending.prompt.len();
+
             input.set_value(pending.prompt, window, cx);
             input.set_selected_range(end..end, cx);
         });

@@ -66,6 +66,7 @@ impl UsageSnapshot {
 
     pub fn with_updated_now(mut self) -> Self {
         self.updated_at = Some(now_unix_millis());
+
         self
     }
 

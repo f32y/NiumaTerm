@@ -16,6 +16,7 @@ fn replayed_items(reader: impl BufRead) -> Vec<Item> {
 
 const ACTIVE_CHAIN_FIXTURE: &str =
     include_str!("../../../tests/fixtures/claude/active-chain.jsonl");
+
 const MISSING_PARENT_FIXTURE: &str =
     include_str!("../../../tests/fixtures/claude/missing-parent.jsonl");
 
@@ -1058,6 +1059,7 @@ fn a_child_conversation_is_read_from_its_own_file_and_linked_by_metadata() {
         ]),
     )
     .unwrap();
+
     fs::write(
         subagents.join("agent-abc123.meta.json"),
         serde_json::json!({
@@ -1140,6 +1142,7 @@ fn one_childs_conversation_is_readable_without_rebuilding_the_session() {
         serde_json::json!({"toolUseId": "toolu_1"}).to_string(),
     )
     .unwrap();
+
     fs::write(
         subagents.join("agent-abc123.jsonl"),
         task_history_lines(&[serde_json::json!({
@@ -1190,6 +1193,7 @@ fn a_child_conversation_with_no_matching_launch_is_left_alone() {
         task_history_lines(&[assistant_launch("a1", None, "toolu_1")]),
     )
     .unwrap();
+
     fs::write(
         subagents.join("agent-other.meta.json"),
         serde_json::json!({"toolUseId": "toolu_from_another_branch"}).to_string(),

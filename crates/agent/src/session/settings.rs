@@ -11,30 +11,37 @@ pub struct ConversationSettings {
     /// changed via the dropdowns under the input; sent as overrides on every
     /// turn start (idempotent when unchanged).
     pub settings: ThreadSettings,
+
     /// Whether the next `Ready` should overlay all remembered settings. True
     /// for fresh conversations and resumed Claude conversations; later Claude
     /// confirmations keep the values currently selected under the input.
     pub seed_thread_defaults: bool,
+
     /// Whether the next resumed Codex thread should take the locally
     /// remembered approval reviewer while preserving its other stored
     /// settings.
     pub seed_approval_reviewer: bool,
+
     /// A rewind starts a new backend identity but keeps the user's current
     /// thread controls. The first Ready payload describes process defaults,
     /// so these values are overlaid once instead of being replaced by them.
     pub restore_on_ready: Option<ThreadSettings>,
+
     /// Model catalog; service tiers are per model, so the tier dropdown lists
     /// the selected model's tiers.
     pub models: Vec<ModelInfo>,
+
     /// Execution-permission presets, for a harness whose preset table belongs
     /// to its deployment. Empty for one whose presets this UI can name
     /// itself.
     pub approval_presets: Vec<ApprovalPreset>,
+
     /// Agent compositions this deployment offers, and the one this
     /// conversation was built from. Empty where the deployment composes none,
     /// which is a picker with nothing to choose between rather than an
     /// unsupported one.
     pub agent_presets: Vec<AgentPreset>,
+
     pub agent_preset: Option<String>,
 }
 
@@ -127,22 +134,28 @@ impl ConversationSettings {
 
     pub fn apply_model(&mut self, session: &mut Backend) -> Option<Result<(), String>> {
         let model = self.settings.model.as_deref()?;
+
         let effort = (session.selection().0 == Some(model))
             .then_some(self.settings.effort.as_deref())
             .flatten();
+
         if session.selection() == (Some(model), effort) {
             return None;
         }
+
         let outcome = session.select_model(model, effort);
         let (model, effort) = session.selection();
+
         self.settings.model = model.map(str::to_owned);
         self.settings.effort = effort.map(str::to_owned);
+
         Some(outcome)
     }
 }
 
 #[derive(Default)]
 pub struct RememberedSettings(HashMap<String, ThreadSettings>);
+
 impl RememberedSettings {
     pub fn from_entries(entries: impl IntoIterator<Item = (String, ThreadSettings)>) -> Self {
         Self(entries.into_iter().collect())
@@ -165,7 +178,9 @@ impl RememberedSettings {
         settings: ThreadSettings,
     ) -> String {
         let key = Self::key(kind, profile_name).to_owned();
+
         self.0.insert(key.clone(), settings);
+
         key
     }
 

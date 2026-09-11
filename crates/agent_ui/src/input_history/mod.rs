@@ -1,6 +1,8 @@
 use nmt_agent::input_history::AgentInputHistory as InputHistoryService;
+
 #[cfg(test)]
 mod tests;
+
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,7 +15,9 @@ pub(crate) use nmt_agent::input_history::InputHistoryScope;
 use crate::AgentPane;
 
 pub(crate) struct AgentInputHistory(InputHistoryService);
+
 impl Global for AgentInputHistory {}
+
 impl AgentInputHistory {
     fn entries(&self, scope: &InputHistoryScope) -> Arc<[String]> {
         self.0.entries(scope)
@@ -82,6 +86,7 @@ impl InputHistoryNavigation {
         if let Some(index) = self.index {
             let Some(recalled) = self.entries.get(index) else {
                 self.reset();
+
                 return InputHistoryAction::Declined;
             };
 
@@ -95,17 +100,25 @@ impl InputHistoryNavigation {
                 return match direction {
                     InputHistoryDirection::Older if index > 0 => {
                         let index = index - 1;
+
                         self.index = Some(index);
+
                         InputHistoryAction::Replace(self.entries[index].clone())
                     }
+
                     InputHistoryDirection::Older => InputHistoryAction::Keep,
+
                     InputHistoryDirection::Newer if index + 1 < self.entries.len() => {
                         let index = index + 1;
+
                         self.index = Some(index);
+
                         InputHistoryAction::Replace(self.entries[index].clone())
                     }
+
                     InputHistoryDirection::Newer => {
                         self.reset();
+
                         InputHistoryAction::Clear
                     }
                 };
@@ -119,6 +132,7 @@ impl InputHistoryNavigation {
         let Some(index) = available.len().checked_sub(1) else {
             return InputHistoryAction::Declined;
         };
+
         let text = available[index].clone();
 
         self.entries = available;
@@ -148,28 +162,36 @@ impl AgentPane {
         let available = cx
             .global::<AgentInputHistory>()
             .entries(&self.input_history_scope);
+
         let action = self
             .input_history_navigation
             .navigate(direction, &text, selection, cursor, available);
 
         match action {
             InputHistoryAction::Declined => false,
+
             InputHistoryAction::Keep => {
                 cx.stop_propagation();
+
                 true
             }
+
             InputHistoryAction::Replace(text) => {
                 self.palette.reset_for_recall();
                 replace_input_with_history(&self.input, text, window, cx);
                 cx.stop_propagation();
+
                 cx.notify();
 
                 true
             }
+
             InputHistoryAction::Clear => {
                 self.input
                     .update(cx, |input, cx| input.set_value("", window, cx));
+
                 cx.stop_propagation();
+
                 cx.notify();
 
                 true
@@ -186,6 +208,7 @@ impl AgentPane {
 
         cx.global_mut::<AgentInputHistory>()
             .record(&self.input_history_scope, text.to_string());
+
         self.input_history_navigation.reset();
     }
 }

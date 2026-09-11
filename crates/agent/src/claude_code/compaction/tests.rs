@@ -39,6 +39,7 @@ fn unknown_trigger_and_blank_context_degrade_to_none() {
 fn manual_compaction_keeps_its_user_context() {
     let metadata = serde_json::json!({"trigger": "manual",
         "user_context": "keep the API design decisions"});
+
     let parsed = parse_compaction(&metadata);
 
     assert_eq!(parsed.trigger, Some(CompactionTrigger::Manual));

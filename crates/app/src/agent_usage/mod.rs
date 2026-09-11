@@ -21,10 +21,12 @@ const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
 /// Height of the quota row, matched to the daily-total row above it so the two
 /// stack as one cluster.
 const QUOTA_ROW_HEIGHT: f32 = 24.0;
+
 /// The gauge track. A bar states how much of a subscription window is left
 /// without the reader having to compare two numbers, and a percentage beside
 /// it keeps the exact value available.
 const QUOTA_TRACK_HEIGHT: f32 = 4.0;
+
 const QUOTA_ICON: f32 = 12.0;
 const QUOTA_FILL_OPACITY: f32 = 0.7;
 
@@ -84,10 +86,12 @@ pub(crate) struct AgentUsageView {
     claude: UsageSnapshot,
     codex_refresh: ProviderRefresh,
     claude_refresh: ProviderRefresh,
+
     /// Abandons the in-flight Claude fetch. Only Claude has one: it drives an
     /// interactive CLI session for up to 25 seconds, while the Codex fetch
     /// reads local state and returns before a cancellation could reach it.
     claude_cancel: Arc<AtomicBool>,
+
     enabled: bool,
 }
 
@@ -159,6 +163,7 @@ impl AgentUsageView {
         }
 
         self.codex_refresh.refreshing = true;
+
         cx.notify();
 
         let fetch = cx
@@ -177,6 +182,7 @@ impl AgentUsageView {
                             this.codex = usage;
                             this.codex_refresh.failed = false;
                         }
+
                         Err(err) => {
                             this.codex_refresh.failed = true;
                             warn!("Codex usage refresh failed: {err}");
@@ -220,6 +226,7 @@ impl AgentUsageView {
                             this.claude = usage;
                             this.claude_refresh.failed = false;
                         }
+
                         // A cancelled fetch was abandoned because the view was
                         // switched off mid-flight; if it has since been switched
                         // back on, nothing else will start the fetch it skipped.
@@ -230,6 +237,7 @@ impl AgentUsageView {
                                 this.refresh_claude(cx);
                             }
                         }
+
                         Err(UsageFetchError::Failed(message)) => {
                             this.claude_refresh.failed = true;
                             warn!("Claude usage refresh failed: {message}");
@@ -362,6 +370,7 @@ fn format_reset_label(window: &UsageWindow, now: i64) -> Option<String> {
             duration if duration == i18n("agent-usage-duration-now") => {
                 i18n("agent-usage-resets-now").to_string()
             }
+
             duration => i18n("agent-usage-resets-in").replace("{duration}", &duration),
         })
         .or_else(|| window.reset_description.clone())
@@ -379,6 +388,7 @@ fn format_updated_label(usage: &UsageSnapshot, refreshing: bool, failed: bool, n
     let Some(updated_at) = usage.updated_at else {
         return i18n("agent-usage-waiting").to_string();
     };
+
     let elapsed = now.saturating_sub(updated_at);
 
     let age = if elapsed < 60_000 {
@@ -409,10 +419,12 @@ fn reset_credit_label(usage: &UsageSnapshot, now: i64) -> Option<String> {
             duration if duration == i18n("agent-usage-duration-now") => {
                 i18n("agent-usage-next-expires-now").replace("{count}", &count_label)
             }
+
             duration => i18n("agent-usage-next-expires-in")
                 .replace("{count}", &count_label)
                 .replace("{duration}", &duration),
         },
+
         None => count_label,
     })
 }

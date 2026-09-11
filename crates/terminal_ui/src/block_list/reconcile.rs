@@ -10,6 +10,7 @@ pub(crate) struct BlockListMeasureKey {
     /// (cols, cell height, pad rows) — pad rows toggling (Command Blocks
     /// on/off) changes every item height, so it must force a full remeasure.
     pub(crate) layout: (u32, f32, f32),
+
     pub(crate) store_len: usize,
     pub(crate) evicted_items: u64,
     pub(crate) last_item_px: f32,
@@ -22,9 +23,11 @@ pub(crate) struct BlockListRenderMetrics {
     pub(crate) evicted_items: u64,
     pub(crate) item_count: usize,
     pub(crate) frozen_px: f32,
+
     /// The live item's history rows in pixels (active-grid scrollback above
     /// the live grid) — the "tail" position in scroll/active-top math.
     pub(crate) tail_px: f32,
+
     pub(crate) total_px: f32,
     pub(crate) offset_px: f32,
     pub(crate) last_item_px: f32,
@@ -92,6 +95,7 @@ pub(crate) fn shift_selected_item_for_eviction(
         None
     } else {
         let shifted = selected - evicted_delta;
+
         (shifted <= store_len).then_some(shifted)
     }
 }
@@ -103,6 +107,7 @@ pub(crate) fn shift_selected_item_for_eviction(
 pub(crate) enum ListReconcile {
     /// Replace the mirror wholesale with the new item count.
     Reset,
+
     /// Drop `front_evict` items from the front, then replace the
     /// `tail_splice` range with that many new items.
     Patch {
@@ -156,8 +161,10 @@ pub(crate) fn plan_list_reconcile(
 pub(crate) enum RemeasureScope {
     /// Layout inputs (cols/cell/pad) changed: every item height is stale.
     All,
+
     /// Content changed: only the last frozen item and the live tail moved.
     Tail,
+
     None,
 }
 

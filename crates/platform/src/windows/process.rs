@@ -17,7 +17,9 @@ use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 pub fn hidden_command(program: impl AsRef<OsStr>) -> Command {
     let mut command = Command::new(program);
+
     command.creation_flags(CREATE_NO_WINDOW);
+
     command
 }
 
@@ -149,13 +151,17 @@ impl KillOnCloseJob {
             ) == 0
             {
                 let error = io::Error::last_os_error();
+
                 CloseHandle(job);
+
                 return Err(error);
             }
 
             if AssignProcessToJobObject(job, process) == 0 {
                 let error = io::Error::last_os_error();
+
                 CloseHandle(job);
+
                 return Err(error);
             }
 

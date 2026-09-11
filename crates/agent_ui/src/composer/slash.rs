@@ -32,8 +32,10 @@ impl AgentPane {
 
         if self.submit_slash_input(&input, cx) {
             self.record_input_history(&input, cx);
+
             self.input
                 .update(cx, |input, cx| input.set_value("", window, cx));
+
             self.palette.dismissed = false;
             self.palette.selected = 0;
         }
@@ -95,12 +97,15 @@ impl AgentPane {
         if command.arguments == SlashCommandArguments::Skills {
             let message = match self.palette.skill_catalog.as_ref() {
                 None => i18n("agent-composer-skill-discovery-loading-period").to_string(),
+
                 Some(catalog) if catalog.skills.is_empty() && !catalog.errors.is_empty() => {
                     catalog.errors[0].clone()
                 }
+
                 Some(catalog) if catalog.skills.is_empty() => {
                     i18n("agent-composer-no-skills-period").to_string()
                 }
+
                 Some(_) => i18n("agent-composer-choose-skill").to_string(),
             };
 
@@ -136,12 +141,14 @@ impl AgentPane {
             match resolve_choice(&parsed.arguments, &choices) {
                 Ok(value) if command.name == "model" => {
                     self.session.controls.settings.model = Some(value.clone());
+
                     self.controls.remember_defaults(
                         &self.session.controls,
                         self.kind,
                         &self.profile,
                         cx,
                     );
+
                     self.palette.set_feedback(
                         CommandFeedbackKind::Notice,
                         i18n("agent-composer-model-set").replace("{value}", &value),
@@ -158,14 +165,17 @@ impl AgentPane {
 
                     return true;
                 }
+
                 Ok(value) if command.name == "permissions" => {
                     self.session.controls.settings.approval = Some(value.clone());
+
                     self.controls.remember_defaults(
                         &self.session.controls,
                         self.kind,
                         &self.profile,
                         cx,
                     );
+
                     self.palette.set_feedback(
                         CommandFeedbackKind::Notice,
                         i18n("agent-composer-permissions-set")
@@ -175,10 +185,13 @@ impl AgentPane {
 
                     return true;
                 }
+
                 Ok(_) => {}
+
                 Err(message) => {
                     self.palette
                         .set_feedback(CommandFeedbackKind::Error, message, cx);
+
                     return false;
                 }
             }
@@ -196,18 +209,25 @@ impl AgentPane {
                     false
                 } else {
                     self.reset_conversation(cx);
+
                     true
                 }
             }
+
             "resume" => self.open_recent_sessions(cx),
+
             "status" => {
                 self.show_status(cx);
+
                 true
             }
+
             "rewind" if self.kind.caps().file_rewind => self.open_rewind(cx),
+
             "rename" if self.kind.caps().session_rename => {
                 self.rename_conversation(&parsed.arguments, cx)
             }
+
             "fork" if self.kind.caps().session_fork => self.open_fork(cx),
             // Where the conversation is a file this side rewrites, the rewind
             // picker cuts the same branch and offers restoring the files that
@@ -215,10 +235,13 @@ impl AgentPane {
             // smaller half of what one command already does would only hide
             // the choice behind the name it was reached by.
             "fork" if self.kind.caps().file_rewind => self.open_rewind(cx),
+
             "find" if self.kind.caps().session_search => {
                 self.search_conversations(&parsed.arguments, cx)
             }
+
             "model" | "permissions" => false,
+
             _ => self.route_backend_command(
                 PendingSlashCommand {
                     name: command.name,
@@ -253,6 +276,7 @@ impl AgentPane {
 
                     true
                 }
+
                 CommandAdmission::Busy { name } => {
                     self.palette.set_feedback(
                         CommandFeedbackKind::Error,
@@ -262,6 +286,7 @@ impl AgentPane {
 
                     false
                 }
+
                 CommandAdmission::Execute(command) => self.execute_backend_command(command, cx),
             };
         }
@@ -279,6 +304,7 @@ impl AgentPane {
         match outcome {
             SlashCommandOutcome::Accepted => {
                 self.history_ui.mode = RecentSessionsMode::Hidden;
+
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
                     i18n("agent-composer-command-starting").replace("{name}", &command.name),
@@ -287,6 +313,7 @@ impl AgentPane {
 
                 true
             }
+
             SlashCommandOutcome::Completed { message } => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
@@ -298,11 +325,14 @@ impl AgentPane {
 
                 true
             }
+
             SlashCommandOutcome::Rejected { message } => {
                 self.palette
                     .set_feedback(CommandFeedbackKind::Error, message, cx);
+
                 false
             }
+
             SlashCommandOutcome::NotReady => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,
@@ -448,19 +478,23 @@ impl AgentPane {
                 .iter()
                 .map(|model| (model.model.clone(), model.display.clone()))
                 .collect(),
+
             "permissions" => match self.kind {
                 AgentKind::Codex => app_server::APPROVAL_OPTIONS
                     .iter()
                     .map(|value| (value.to_string(), setting_value_label(value)))
                     .collect(),
+
                 AgentKind::Claude => stream_json::PERMISSION_OPTIONS
                     .iter()
                     .map(|value| (value.to_string(), setting_value_label(value)))
                     .collect(),
+
                 // Changing the DeepSeek sandbox preset mid-session is part of
                 // the approval work, so the command offers no choices yet.
                 AgentKind::DeepSeek => Vec::new(),
             },
+
             _ => Vec::new(),
         }
     }

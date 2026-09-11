@@ -73,6 +73,7 @@ impl QuestionPresentation {
 
         let Some(current) = order.iter().position(|entry| *entry == self.focus) else {
             self.focus = order[0];
+
             return true;
         };
 

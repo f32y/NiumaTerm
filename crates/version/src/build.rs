@@ -22,6 +22,7 @@ pub fn emit() -> String {
         // tagging the revision already checked out, which is how a release is
         // cut.
         println!("cargo:rerun-if-changed={}", git_dir.join("HEAD").display());
+
         println!(
             "cargo:rerun-if-changed={}",
             git_dir.join("refs").join("tags").display()
@@ -42,6 +43,7 @@ pub fn emit() -> String {
 
             label
         }
+
         None => derive_from_git(),
     };
 

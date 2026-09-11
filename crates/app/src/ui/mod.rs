@@ -6,11 +6,13 @@ use gpui_component::modern_menu::{prewarm_modern_menu, set_default_font};
 
 pub(crate) const UI_RADIUS: Pixels = px(8.0);
 pub(crate) const UI_BORDER_OPACITY: f32 = 0.5;
+
 /// The Chinese face preferred ahead of the system's own list, chosen per
 /// platform because neither ships the other's: `Microsoft YaHei` resolves to
 /// Helvetica on macOS, which supplies no CJK glyphs at all.
 #[cfg(target_os = "windows")]
 const DEFAULT_CJK_FONT_FAMILY: &str = "Microsoft YaHei";
+
 #[cfg(not(target_os = "windows"))]
 const DEFAULT_CJK_FONT_FAMILY: &str = "PingFang SC";
 

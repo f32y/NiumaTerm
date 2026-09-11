@@ -8,14 +8,19 @@ use crate::frame_stats::{
 #[test]
 fn enabled_collection_records_samples_and_disabling_clears_them() {
     let _lock = crate::TEST_LOCK.lock();
+
     set_enabled(true);
+
     assert!(enabled());
     assert!(start_timer().is_some());
+
     record_draw(Duration::from_millis(2), 3);
     record_main_thread_task(Duration::from_millis(5));
     record_redraws_requested(2);
+
     {
         let stats = STATS.lock();
+
         assert_eq!(stats.draw.count, 1);
         assert_eq!(stats.draw.total_us, 2_000);
         assert_eq!(stats.dirty_views, 3);
@@ -24,9 +29,13 @@ fn enabled_collection_records_samples_and_disabling_clears_them() {
     }
 
     set_enabled(false);
+
     assert!(start_timer().is_none());
+
     record_draw(Duration::from_millis(10), 9);
+
     let stats = STATS.lock();
+
     assert_eq!(stats.draw.count, 0);
     assert_eq!(stats.dirty_views, 0);
 }

@@ -13,6 +13,7 @@ fn main() {
         let icon = manifest_dir.join("../../assets/windows/app.ico");
 
         println!("cargo:rerun-if-changed={}", icon.display());
+
         WindowsResource::new()
             .set_icon(icon.to_str().unwrap())
             .set("FileDescription", "NiumaTerm")

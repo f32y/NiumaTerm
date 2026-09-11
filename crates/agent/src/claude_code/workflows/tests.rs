@@ -22,14 +22,18 @@ const AGENT_TWO: &str = "a5a25521c354f9bd7";
 /// content is blanked while the record itself stays: dropping it would break
 /// the `parentUuid` chain the replay parser walks.
 const JOURNAL: &str = include_str!("../../../tests/fixtures/claude/workflow/journal.jsonl");
+
 const TRANSCRIPT: &str =
     include_str!("../../../tests/fixtures/claude/workflow/agent-transcript.jsonl");
+
 const RUN_SNAPSHOT: &str =
     include_str!("../../../tests/fixtures/claude/workflow/run-snapshot.json");
 
 fn reducer() -> ClaudeWorkflows {
     let mut workflows = ClaudeWorkflows::default();
+
     workflows.set_session(SESSION);
+
     workflows
 }
 
@@ -89,7 +93,9 @@ fn merge(target: &mut Value, extra: Value) {
 
 fn only_run(workflows: &ClaudeWorkflows) -> WorkflowRun {
     let snapshot = workflows.snapshot().expect("session is known");
+
     assert_eq!(snapshot.runs.len(), 1, "expected exactly one run");
+
     snapshot.runs.into_iter().next().expect("one run")
 }
 
@@ -118,6 +124,7 @@ fn only_the_workflow_task_type_opens_a_run() {
         "in_process_teammate",
     ] {
         let mut workflows = reducer();
+
         assert!(!workflows.observe(&started(json!({"task_type": task_type}))));
         assert!(workflows.snapshot().expect("session").runs.is_empty());
     }
@@ -169,6 +176,7 @@ fn a_queued_agent_is_distinguished_from_a_running_one() {
     let mut workflows = reducer();
 
     workflows.observe(&started(json!({})));
+
     workflows.observe(&progress(json!([
         agent_entry(1, AGENT_ONE, "start", json!({})),
         agent_entry(
@@ -190,6 +198,7 @@ fn a_failed_agent_keeps_its_error_and_a_reused_one_is_marked() {
     let mut workflows = reducer();
 
     workflows.observe(&started(json!({})));
+
     workflows.observe(&progress(json!([
         agent_entry(1, AGENT_ONE, "error", json!({"error": "spawn refused"})),
         agent_entry(2, AGENT_TWO, "done", json!({"cached": true})),
@@ -460,6 +469,7 @@ fn a_journal_refresh_advances_agents_the_stream_has_not_settled() {
     let mut workflows = reducer();
 
     workflows.observe(&started(json!({})));
+
     workflows.observe(&progress(json!([
         agent_entry(
             1,
@@ -503,6 +513,7 @@ fn a_failed_refresh_is_reported_without_touching_known_state() {
     let mut workflows = reducer();
 
     workflows.observe(&started(json!({})));
+
     workflows.observe(&progress(json!([agent_entry(
         1,
         AGENT_ONE,
@@ -556,6 +567,7 @@ fn a_run_whose_snapshot_never_landed_still_restores() {
     let scripts = root.join(SESSION).join("workflows").join("scripts");
 
     fs::create_dir_all(&scripts).expect("create scripts dir");
+
     fs::write(
         scripts.join(format!("deep-research-{RUN_ID}.js")),
         "// script",
@@ -611,6 +623,7 @@ fn a_run_whose_snapshot_never_landed_still_restores() {
     // Both are labelled from the opening line of the prompt they were given.
     for agent in &run.agents {
         let label = agent.label.as_deref().expect("agent carries a label");
+
         assert!(!label.is_empty());
         assert!(!label.starts_with('#'), "{label}");
     }

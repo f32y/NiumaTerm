@@ -109,6 +109,7 @@ impl Shell {
 
         let Some(host) = hosts.into_iter().next() else {
             window.push_notification(i18n("shell-remote-no-hosts"), cx);
+
             return;
         };
 
@@ -127,14 +128,18 @@ impl Shell {
                     Ok(pane) => {
                         this.leave_settings_workspace();
                         this.register_agent_pane(&pane, cx);
+
                         this.workspaces.active_tabs_mut().new_tab(
                             TabSurface::Live(TerminalLayout::new_leaf(PaneId(id), pane)),
                             TabId(id),
                             i18n("shell-remote-tab-title").to_string(),
                         );
+
                         this.focus_active(window, cx);
+
                         cx.notify();
                     }
+
                     Err(e) => {
                         window.push_notification(
                             i18n("shell-remote-session-failed")
@@ -144,6 +149,7 @@ impl Shell {
                         );
                     }
                 },
+
                 Err(e) => {
                     window.push_notification(
                         i18n("shell-remote-connect-failed")
@@ -218,6 +224,7 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         let profile = cx.global::<AppSettings>().default_agent_profile_entry();
+
         self.open_agent_tab(profile, window, cx);
     }
 
@@ -244,7 +251,9 @@ impl Shell {
             window.activate_window();
             self.focus_active(window, cx);
             self.sync_session_memory(cx);
+
             cx.notify();
+
             return;
         }
 

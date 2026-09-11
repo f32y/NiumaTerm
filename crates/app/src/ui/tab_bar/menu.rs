@@ -41,6 +41,7 @@ pub(in crate::ui) struct ProfileRootChoice {
     pub label: String,
     pub launch: LaunchCommand,
     pub cwd: String,
+
     /// A restored directory the filesystem cannot currently reach stays listed
     /// and disabled, so its absence is visible rather than silent.
     pub enabled: bool,
@@ -111,6 +112,7 @@ pub(in crate::ui) fn new_tab_menu(
     // rather than making this one wait on the filesystem.
     let roots = shell.update(cx, |this, cx| {
         this.refresh_root_availability(cx);
+
         this.active_root_availability()
     });
 
@@ -118,6 +120,7 @@ pub(in crate::ui) fn new_tab_menu(
         let Some(launch) = launch_command(&profile) else {
             continue;
         };
+
         let item_shell = shell.clone();
 
         if roots.len() > 1 {
@@ -175,6 +178,7 @@ pub(in crate::ui) fn new_tab_menu(
         menu = menu
             .item(label, move |window, cx| {
                 let profile = profile.clone();
+
                 item_shell.update(cx, |this, cx| this.open_agent_tab(profile, window, cx));
             })
             .icon(icon);

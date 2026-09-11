@@ -126,9 +126,11 @@ impl AgentEvent {
 
         match (input.kind, input.turn_id) {
             (AgentEventKind::SessionStarted, None) => {}
+
             (AgentEventKind::SessionStarted, Some(_)) | (_, None) => {
                 return Err(AgentValidationError::InvalidTurnId);
             }
+
             (_, Some(turn_id)) => validate_identity(
                 turn_id,
                 MAX_PROVIDER_ID_BYTES,
@@ -179,6 +181,7 @@ fn constant_time_eq(left: &str, right: &str) -> bool {
     for index in 0..length {
         let byte_diff: usize =
             (*left.get(index).unwrap_or(&0) ^ *right.get(index).unwrap_or(&0)).into();
+
         different |= byte_diff;
     }
 

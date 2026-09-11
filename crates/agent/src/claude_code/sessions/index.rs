@@ -39,6 +39,7 @@ impl TranscriptIndex {
                 Some(message_id) => {
                     snapshot_message_ids.insert(message_id.to_string());
                 }
+
                 None => malformed_snapshot = true,
             }
         }
@@ -146,6 +147,7 @@ pub(super) fn active_chain_indices(records: &[Value]) -> (Vec<usize>, Option<Str
 
         while let Some(index) = current {
             let record = &records[index];
+
             let Some(uuid) = record["uuid"].as_str() else {
                 break;
             };
@@ -156,6 +158,7 @@ pub(super) fn active_chain_indices(records: &[Value]) -> (Vec<usize>, Option<Str
 
             if matches!(record["type"].as_str(), Some("user" | "assistant")) {
                 leaves.push(index);
+
                 break;
             }
 
@@ -174,6 +177,7 @@ pub(super) fn active_chain_indices(records: &[Value]) -> (Vec<usize>, Option<Str
     });
 
     let leaf = main_leaves.max().or_else(|| leaves.into_iter().max());
+
     let Some(mut current) = leaf else {
         return (Vec::new(), None);
     };
@@ -184,6 +188,7 @@ pub(super) fn active_chain_indices(records: &[Value]) -> (Vec<usize>, Option<Str
 
     loop {
         let record = &records[current];
+
         let Some(uuid) = record["uuid"].as_str() else {
             break;
         };
@@ -200,6 +205,7 @@ pub(super) fn active_chain_indices(records: &[Value]) -> (Vec<usize>, Option<Str
 
         let Some(parent_index) = by_uuid.get(parent).copied() else {
             broken_parent = Some(parent.to_string());
+
             break;
         };
 

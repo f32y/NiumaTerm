@@ -32,7 +32,9 @@ impl Shell {
         // straight to the tab-close path.
         let Some(tree) = self.workspaces.active_tabs().active().tree() else {
             let id = self.workspaces.active_tabs().active_id();
+
             self.request_close_tab(id, window, cx);
+
             return;
         };
 
@@ -40,6 +42,7 @@ impl Shell {
         // last remaining pane falls through to the tab-close cascade.
         if !tree.is_single_leaf() {
             self.request_close_pane(window, cx);
+
             return;
         }
 
@@ -69,6 +72,7 @@ impl Shell {
             .should_warn(count)
         {
             self.close_pane_now(id, window, cx);
+
             return;
         }
 
@@ -135,6 +139,7 @@ impl Shell {
         match count {
             0 => None,
             1 => Some(i18n("shell-close-one-temporary-workspace").into()),
+
             _ => Some(
                 i18n("shell-close-many-temporary-workspaces")
                     .replace("{count}", &count.to_string())
@@ -185,7 +190,9 @@ impl Shell {
                 )
                 .on_ok(move |_, window, cx| {
                     let on_confirm = Rc::clone(&on_confirm);
+
                     shell.update(cx, |this, cx| on_confirm(this, window, cx));
+
                     true
                 })
         });
@@ -257,6 +264,7 @@ impl Shell {
         if last_tab {
             if self.workspaces.real_len() == 1 {
                 self.confirm_close_last_workspace(ws_id, window, cx);
+
                 return;
             }
 
@@ -291,6 +299,7 @@ impl Shell {
             count,
         ) {
             self.close_tab_now(id, window, cx);
+
             return;
         }
 
@@ -354,11 +363,13 @@ impl Shell {
         // it closes on the first click whatever the confirmation settings say.
         if self.workspaces.kind_of(id) == Some(WorkspaceKind::Settings) {
             self.close_workspace_now(id, window, cx);
+
             return;
         }
 
         if self.workspaces.real_len() == 1 {
             self.confirm_close_last_workspace(id, window, cx);
+
             return;
         }
 
@@ -376,6 +387,7 @@ impl Shell {
 
         if !confirm && !warn.should_warn(count) {
             self.close_workspace_now(id, window, cx);
+
             return;
         }
 
@@ -421,6 +433,7 @@ impl Shell {
 
         if !should_confirm_close(confirm, warn, process_count) {
             self.close_temporary_workspaces_now(&ids, window, cx);
+
             return;
         }
 
@@ -516,6 +529,7 @@ impl Shell {
                                 .primary()
                                 .on_click(move |_, window, cx| {
                                     window.close_dialog(cx);
+
                                     replace_shell.update(cx, |this, cx| {
                                         this.replace_last_workspace(id, window, cx)
                                     });
@@ -529,6 +543,7 @@ impl Shell {
                                 .on_click(move |_, window, cx| {
                                     if !ui::settings::save_settings(window, cx) {
                                         window.close_dialog(cx);
+
                                         return;
                                     }
 

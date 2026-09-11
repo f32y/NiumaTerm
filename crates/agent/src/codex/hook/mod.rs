@@ -40,6 +40,7 @@ pub(crate) fn normalize(
         "SessionStart" => (AgentEventKind::SessionStarted, "", ""),
         "UserPromptSubmit" => (AgentEventKind::PromptSubmitted, "", ""),
         "PreToolUse" => (AgentEventKind::ToolStarted, "", ""),
+
         "PermissionRequest" => (
             AgentEventKind::PermissionRequested,
             "Codex needs input",
@@ -49,7 +50,9 @@ pub(crate) fn normalize(
                 .or_else(|| payload.get("tool_name").and_then(Value::as_str))
                 .unwrap_or("Codex is waiting for permission"),
         ),
+
         "PostToolUse" => (AgentEventKind::ToolFinished, "", ""),
+
         "Stop" => (
             AgentEventKind::Stopped,
             "Codex finished",
@@ -58,6 +61,7 @@ pub(crate) fn normalize(
                 .and_then(Value::as_str)
                 .unwrap_or("Codex completed the turn"),
         ),
+
         _ => return None,
     };
 
@@ -123,6 +127,7 @@ pub fn hooks_status(hooks_path: &Path) -> HookInstallStatus {
 
     match hook_command() {
         Ok(command) => status_of(&settings, &command),
+
         Err(_)
             if HOOK_EVENTS
                 .iter()
@@ -131,6 +136,7 @@ pub fn hooks_status(hooks_path: &Path) -> HookInstallStatus {
         {
             HookInstallStatus::Stale
         }
+
         Err(_) => HookInstallStatus::NotInstalled,
     }
 }

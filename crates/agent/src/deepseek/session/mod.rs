@@ -46,59 +46,77 @@ use crate::deepseek::session::loads::{
 pub struct Session {
     client: ApiClient,
     session_id: String,
+
     /// The project directory this tab works in. Held because it decides which
     /// persisted conversations the tab can continue, and because reattaching to
     /// one requires naming the same directory it was rooted in.
     cwd: Option<String>,
+
     /// Every open session holds the shared host, which stops when the last one
     /// drops. This is what makes the host outlive individual tabs without
     /// outliving all of them.
     host: Arc<Host>,
+
     /// Reader threads for both downlinks; dropping them ends the delivery.
     _downlinks: Downlinks,
+
     /// The pane's delivery channel, for results of unary calls. Whatever a
     /// background read produces has to arrive the same way a pushed frame does,
     /// because that is the only path that wakes the tab.
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
+
     /// The profile's model and effort, reapplied to a conversation this tab
     /// continues later: the directory belongs to the session, not to the tab.
     model: Option<String>,
+
     effort: Option<String>,
+
     /// Whether that model is declared image-capable in the provider's
     /// configured catalog when a conversation starts. Kept for the same reason
     /// the model is: a resumed conversation reads its directory afresh.
     declares_image_input: bool,
+
     /// The turn state this side knows about, so a stop is only offered while a
     /// turn is actually running.
     running: bool,
+
     /// Pending prompt identities from the Harness's latest whole-inbox
     /// snapshot. Closing removes them before cancelling the current turn.
     queued_prompt_ids: Vec<String>,
+
     /// The approval the harness is currently blocked on. Held because the
     /// answer has to carry identities the transcript vocabulary does not.
     pending_approval: Option<ApprovalRequest>,
+
     /// The question batch the harness is currently blocked on, held for the
     /// same reason: the answer is matched against the asked question ids.
     pending_questions: Option<QuestionRequest>,
+
     controls: Controls,
+
     /// Tool calls awaiting their result, so a result can complete the row its
     /// call opened rather than starting a second one.
     tools: ToolTracker,
+
     /// The usage projections seen so far. Each arrives as its own frame, and
     /// the pane's snapshot is assembled from more than one of them.
     usage: ProjectionTracker,
+
     /// What the picker offers, and what a pick from it addresses. Empty until
     /// the catalog arrives, which is a background call rather than part of
     /// opening the conversation.
     models: ModelDirectory,
+
     /// Counter carried by each child-agent catalog read. The catalog is a call
     /// and several can be in flight, so this is what tells a stale answer from
     /// the newest one.
     subagent_activity: u64,
+
     /// Which of the harness's two child kinds each known child is. Reading a
     /// child's conversation addresses it by that kind, and only the catalog
     /// reports it, so the answer is kept from the catalog that named the child.
     subagent_modes: HashMap<String, bool>,
+
     /// Workflow runs accumulated from the log. Each event carries only its own
     /// increment, so the run is what they add up to rather than a value any one
     /// of them reports.
@@ -112,6 +130,7 @@ pub struct Session {
 /// would sit unread until some unrelated frame happened to wake the tab. The
 /// `nmt/` prefix keeps it out of the harness's own type space.
 const MODELS_FRAME: &str = "nmt/models";
+
 const HISTORY_FRAME: &str = "nmt/history";
 const SEARCH_FRAME: &str = "nmt/search";
 const REPLAY_FRAME: &str = "nmt/replay";
@@ -122,6 +141,7 @@ const SKILLS_FRAME: &str = "nmt/skills";
 const PRESETS_FRAME: &str = "nmt/agent-presets";
 const WORKFLOW_TRANSCRIPT_FRAME: &str = "nmt/workflow-transcript";
 const FORK_CHECKPOINTS_FRAME: &str = "nmt/fork-checkpoints";
+
 /// The pending-inbox snapshot is the one frame type the harness itself
 /// publishes under its own name rather than through the nmt bridge.
 const QUEUE_FRAME: &str = "session/queue";
@@ -153,6 +173,7 @@ pub(crate) fn ready_settings(
 /// A conversation this tab has just opened or reattached to.
 struct OpenedConversation {
     session_id: String,
+
     /// The composition it was built from, absent when the deployment composes
     /// no presets at all and every conversation shares the host's own.
     agent_preset: Option<String>,
@@ -303,6 +324,7 @@ impl Session {
         load_sessions(client.clone(), cwd.clone(), Arc::clone(&deliver));
         load_commands(client.clone(), session_id.clone(), Arc::clone(&deliver));
         load_skills(client.clone(), session_id.clone(), Arc::clone(&deliver));
+
         load_agent_presets(
             client.clone(),
             session_id.clone(),
@@ -350,8 +372,10 @@ impl Session {
                     Arc::clone(&self.deliver),
                 ) {
                     Ok(opened) => opened,
+
                     Err(message) => {
                         tracing::warn!("deepseek could not follow {thread_id}: {message}");
+
                         return false;
                     }
                 };
@@ -384,6 +408,7 @@ impl Session {
                     self.declares_image_input,
                     Arc::clone(&self.deliver),
                 );
+
                 load_sessions(
                     self.client.clone(),
                     self.cwd.clone(),
@@ -398,11 +423,13 @@ impl Session {
                     self.session_id.clone(),
                     Arc::clone(&self.deliver),
                 );
+
                 load_skills(
                     self.client.clone(),
                     self.session_id.clone(),
                     Arc::clone(&self.deliver),
                 );
+
                 load_agent_presets(
                     self.client.clone(),
                     self.session_id.clone(),
@@ -412,8 +439,10 @@ impl Session {
 
                 true
             }
+
             Err(error) => {
                 tracing::warn!("deepseek could not continue {thread_id}: {error}");
+
                 false
             }
         }
@@ -445,6 +474,7 @@ impl Session {
             let description = request.description.clone();
 
             self.pending_approval = Some(request);
+
             return vec![Event::ApprovalRequested { description }];
         }
 
@@ -466,7 +496,9 @@ impl Session {
                 mode: QuestionMode::Blocking,
                 questions,
             }));
+
             self.pending_questions = Some(request);
+
             return events;
         }
 
@@ -484,10 +516,12 @@ impl Session {
                 .pending_approval
                 .as_ref()
                 .map(|request| (&request.client_id, &request.event_id)),
+
             Some("question/resolved") => self
                 .pending_questions
                 .as_ref()
                 .map(|request| (&request.client_id, &request.event_id)),
+
             _ => None,
         };
 
@@ -506,8 +540,10 @@ impl Session {
                 let mut events = self.expire_questions();
 
                 events.push(Event::ApprovalResolved);
+
                 return events;
             }
+
             Some(SUBAGENTS_FRAME) => return self.on_subagents(payload),
             Some(SUBAGENT_TRANSCRIPT_FRAME) => return self.on_subagent_transcript(payload),
             Some(WORKFLOW_TRANSCRIPT_FRAME) => return workflow_transcript_events(payload),
@@ -516,6 +552,7 @@ impl Session {
             Some(COMMANDS_FRAME) => return self.on_commands(payload),
             Some(HISTORY_FRAME) => return history_events(payload),
             Some(SEARCH_FRAME) => return search_events(payload),
+
             // A queue snapshot for a conversation this tab has since left is
             // not this tab's inbox, but the frame still carries ordinary log
             // events, so it falls through to the mapping below instead of
@@ -523,6 +560,7 @@ impl Session {
             Some(QUEUE_FRAME) if self.is_current_session(payload) => {
                 return self.on_queue(payload);
             }
+
             Some(REPLAY_FRAME) => return self.on_replay(payload),
             Some(FORK_CHECKPOINTS_FRAME) => return fork_checkpoint_events(payload),
             Some(MODELS_FRAME) => return self.on_models(payload),
@@ -557,6 +595,7 @@ impl Session {
         for event in &events {
             match event {
                 Event::TurnStarted => self.running = true,
+
                 Event::TurnCompleted { .. } => {
                     self.running = false;
                     self.controls.retire_interrupt();
@@ -566,9 +605,11 @@ impl Session {
                     self.controls.retire_approval();
                     resolved.extend(self.expire_questions());
                 }
+
                 Event::ApprovalResolved => {
                     self.pending_approval = None;
                 }
+
                 Event::QuestionsResolved => resolved.extend(self.expire_questions()),
                 _ => {}
             }
@@ -606,6 +647,7 @@ impl Session {
                 BackgroundTaskRefs::DeepSeek { continuable, .. } => {
                     Some((task.key.id.clone(), *continuable))
                 }
+
                 _ => None,
             })
             .collect();
@@ -676,6 +718,7 @@ impl Session {
         let Some(frame) = frames::parse::<frames::QueueFrame>(QUEUE_FRAME, payload) else {
             return Vec::new();
         };
+
         let prompts = queued_prompts(&frame.items);
 
         self.queued_prompt_ids = prompts

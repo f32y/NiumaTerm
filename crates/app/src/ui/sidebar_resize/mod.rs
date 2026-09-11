@@ -49,6 +49,7 @@ pub(crate) fn resize_handle(id: &'static str, pin_left: bool, cx: &App) -> impl 
         .hover(|this| this.bg(cx.theme().drag_border))
         .on_drag(ResizeDrag { handle: id }, |drag, _, _, cx| {
             cx.stop_propagation();
+
             cx.new(|_| drag.clone())
         });
 
@@ -73,6 +74,7 @@ pub(crate) fn slide_width<E: IntoElement + Styled + 'static>(
 ) -> AnyElement {
     if !animated {
         let width = if open { width } else { px(0.0) };
+
         return wrapper.w(width).into_any_element();
     }
 

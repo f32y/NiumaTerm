@@ -20,6 +20,7 @@ pub fn wait_for_exit(pid: u32, timeout: Duration) -> bool {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return true;
     };
+
     let deadline = Instant::now() + timeout;
 
     loop {

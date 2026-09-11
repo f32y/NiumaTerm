@@ -24,9 +24,11 @@ pub(crate) struct WorkflowsView {
     /// The Agent pane whose runs are shown. Weak because the tab can close
     /// while the panel is still mounted for its closing animation.
     target: Option<WeakEntity<AgentPane>>,
+
     /// Renders an open agent conversation with the parent conversation's own
     /// presentation, so a reader does not learn a second layout.
     detail_transcript: Option<Entity<TranscriptView>>,
+
     scroll: ScrollHandle,
     visible: bool,
 }
@@ -65,6 +67,7 @@ impl WorkflowsView {
         self.detail_transcript = None;
         self.scroll = ScrollHandle::new();
         self.report_visibility(self.visible, cx);
+
         cx.notify();
     }
 
@@ -76,6 +79,7 @@ impl WorkflowsView {
 
         self.visible = visible;
         self.report_visibility(visible, cx);
+
         cx.notify();
     }
 
@@ -102,13 +106,16 @@ impl WorkflowsView {
 
         let (kind, cwd) = {
             let pane = pane.read(cx);
+
             (pane.agent_kind(), pane.working_directory())
         };
 
         self.detail_transcript = Some(cx.new(|_| TranscriptView::new(kind, cwd)));
+
         pane.update(cx, |pane, cx| {
             pane.open_workflow_agent(task_id, agent_id, cx);
         });
+
         cx.notify();
     }
 
@@ -375,6 +382,7 @@ impl WorkflowsView {
                     this.open_agent(&task_id, &agent_id, cx);
                 }))
                 .into_any_element(),
+
             None => row.into_any_element(),
         }
     }

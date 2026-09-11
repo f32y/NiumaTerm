@@ -61,10 +61,13 @@ use crate::{
 
 #[cfg(all(target_os = "linux", not(target_env = "musl")))]
 const TIOCSWINSZ: libc::c_ulong = 0x5414;
+
 #[cfg(all(target_os = "linux", target_env = "musl"))]
 const TIOCSWINSZ: libc::c_int = 0x5414;
+
 #[cfg(target_os = "freebsd")]
 const TIOCSWINSZ: libc::c_ulong = 0x80087467;
+
 #[cfg(target_os = "macos")]
 const TIOCSWINSZ: libc::c_ulong = 2148037735;
 
@@ -118,6 +121,7 @@ pub struct Pty {
     token: Token,
     signals_token: Token,
     signals: Signals,
+
     /// Present only for a managed PTY. Dropping it signals the shell's
     /// process group, which ends the descendants a bare `SIGHUP` to the shell
     /// would leave running.
@@ -176,6 +180,7 @@ impl io::Read for Pty {
 
 impl ProcessReadWrite for Pty {
     type Reader = File;
+
     type Writer = File;
 
     #[inline]
@@ -213,6 +218,7 @@ impl ProcessReadWrite for Pty {
     ) -> io::Result<()> {
         // The pty fd is a real OS readiness source; no `Waker` needed on Unix.
         self.token = token.next().unwrap();
+
         poll.registry()
             .register(&mut SourceFd(&self.file.as_raw_fd()), self.token, interest)?;
 
@@ -233,6 +239,7 @@ impl ProcessReadWrite for Pty {
     fn deregister(&mut self, poll: &Poll) -> io::Result<()> {
         poll.registry()
             .deregister(&mut SourceFd(&self.file.as_raw_fd()))?;
+
         poll.registry().deregister(&mut self.signals)
     }
 
@@ -412,6 +419,7 @@ impl ShellUser {
         // failed read is reported only when something is actually missing.
         let (user, home, shell) = match (env::var("USER"), env::var("HOME"), env::var("SHELL")) {
             (Ok(user), Ok(home), Ok(shell)) => (user, home, shell),
+
             (user, home, shell) => {
                 let pw = pw?;
 
@@ -569,6 +577,7 @@ fn create_pty_with_management(
 
     let user = match ShellUser::from_env() {
         Ok(data) => data,
+
         Err(..) => ShellUser {
             shell: shell.to_string(),
             ..Default::default()
@@ -631,7 +640,9 @@ fn create_pty_with_management(
         #[cfg(not(target_os = "macos"))]
         {
             let mut cmd = Command::new(shell_program);
+
             cmd.args(args);
+
             cmd
         }
     };
@@ -641,6 +652,7 @@ fn create_pty_with_management(
         // If running inside a flatpak sandbox.
         // Must retrieve $SHELL from outside the sandbox, so ask the host.
         let flatpak_info: PathBuf = "/.flatpak-info".into();
+
         if flatpak_info.exists() {
             builder = Command::new("flatpak-spawn");
 
@@ -661,6 +673,7 @@ fn create_pty_with_management(
             let output = Command::new("flatpak-spawn")
                 .args(["--host", "sh", "-c", "echo $SHELL"])
                 .output()?;
+
             let shell = String::from_utf8_lossy(&output.stdout);
 
             with_args.push(shell.trim().to_string());
@@ -766,6 +779,7 @@ fn create_pty_with_management(
                 job,
             })
         }
+
         Err(err) => Err(Error::new(
             err.kind(),
             format!(
@@ -808,6 +822,7 @@ pub fn create_pty_with_fork(
 
     let user = match ShellUser::from_env() {
         Ok(data) => data,
+
         Err(..) => ShellUser {
             shell: shell.to_string(),
             ..Default::default()
@@ -836,6 +851,7 @@ pub fn create_pty_with_fork(
                 "forkpty has reach unreachable with {shell_program}"
             )))
         }
+
         id if id > 0 => {
             // TODO: Currently we fork the process and don't wait to know if led to failure
             // Whenever it happens it will just simply shut down the teletyperwriter
@@ -867,6 +883,7 @@ pub fn create_pty_with_fork(
                 job: None,
             })
         }
+
         _ => Err(Error::other(format!(
             "forkpty failed using {shell_program}"
         ))),
@@ -1008,6 +1025,7 @@ impl EventedPty for Pty {
                     // std::process::exit(1);
                     None
                 }
+
                 Ok(None) => None,
                 Ok(Some(..)) => Some(ChildEvent::Exited),
             }
@@ -1082,6 +1100,7 @@ fn get_pw_entry(buf: &mut [i8; 1024]) -> Result<Passwd<'_>, Error> {
 pub fn tty_ptsname(fd: libc::c_int) -> Result<String, String> {
     let c_str: &CStr = unsafe {
         let name_ptr = ptsname(fd as *mut _);
+
         CStr::from_ptr(name_ptr)
     };
 
@@ -1110,6 +1129,7 @@ pub fn foreground_process_name(main_fd: RawFd, shell_pid: u32) -> String {
             .trim_end()
             .parse()
             .unwrap_or_default(),
+
         Err(..) => "".into(),
     };
 

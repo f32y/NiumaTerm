@@ -11,6 +11,7 @@ use std::{error, fmt};
 pub enum EngineErrorCode {
     /// ConPTY spawn failed (bad shell, working dir, …).
     PtySpawn,
+
     /// libghostty-vt engine init failed.
     EngineInit,
 }

@@ -21,6 +21,7 @@ impl RequestClass {
     pub(crate) fn timeout_message(self, provider: &str) -> String {
         match self {
             Self::Query => format!("{provider} query timed out. You can retry the query."),
+
             Self::Mutation | Self::Control => format!(
                 "{provider} request timed out. The operation may still complete; its result is unknown. Check its state before retrying."
             ),

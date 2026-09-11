@@ -40,8 +40,10 @@ pub fn parse_annotated_prompt(text: &str) -> Option<ParsedAnnotatedPrompt<'_>> {
     let text = text.strip_prefix('\n').unwrap_or(text);
     let prefix = format!("{RESPONSE_ANNOTATIONS_HEADING}\n");
     let after_heading = text.strip_prefix(&prefix)?;
+
     let json_start =
         after_heading.find(RESPONSE_ANNOTATIONS_START)? + RESPONSE_ANNOTATIONS_START.len();
+
     let after_start = after_heading.get(json_start..)?.strip_prefix('\n')?;
     let json_end = after_start.find(&format!("\n{RESPONSE_ANNOTATIONS_END}\n"))?;
     let annotations = serde_json::from_str(after_start.get(..json_end)?).ok()?;

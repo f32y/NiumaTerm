@@ -12,8 +12,10 @@ use crate::utils::get_exe_dir;
 
 #[cfg(windows)]
 const BUNDLE_FILE: &str = "tree_sitter.dll";
+
 #[cfg(target_os = "macos")]
 const BUNDLE_FILE: &str = "libtree_sitter.dylib";
+
 #[cfg(all(unix, not(target_os = "macos")))]
 const BUNDLE_FILE: &str = "libtree_sitter.so";
 
@@ -21,8 +23,11 @@ const ABI_VERSION: u32 = 1;
 const MAX_LANGUAGES: u32 = 128;
 
 type LanguageBuilder = unsafe extern "C" fn() -> *const ();
+
 type AbiVersionFn = unsafe extern "system" fn() -> u32;
+
 type LanguageCountFn = unsafe extern "system" fn() -> u32;
+
 type LanguageAtFn = unsafe extern "system" fn(u32, *mut RawLanguageDescriptor) -> u32;
 
 #[derive(Clone, Copy)]

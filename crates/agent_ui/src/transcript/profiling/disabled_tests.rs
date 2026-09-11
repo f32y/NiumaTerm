@@ -12,10 +12,12 @@ use crate::transcript::{Entry, TranscriptView};
 #[gpui::test]
 fn disabled_hooks_leave_transcript_updates_available(_cx: &mut TestAppContext) {
     frame_stats::set_enabled(true);
+
     assert_eq!(size_of::<Option<Probe>>(), 0);
     assert!(Probe::start(Operation::AppendEntry).is_none());
 
     let mut view = TranscriptView::new(AgentKind::Codex, None);
+
     view.append_entry(Entry {
         turn: 1,
         metadata: Default::default(),
@@ -24,13 +26,19 @@ fn disabled_hooks_leave_transcript_updates_available(_cx: &mut TestAppContext) {
             summary: Some("before".into()),
         },
     });
+
     assert!(view.append_delta("reasoning", "-after", TextField::ReasoningSummary));
+
     view.refresh_rows(CollapseRows::WorkAndToolCalls);
+
     assert!(matches!(
         &view.content.entries()[0].item,
         Item::Reasoning { summary: Some(text), .. } if text == "before-after"
     ));
+
     flush();
+
     assert!(Probe::start(Operation::AppendDelta).is_none());
+
     frame_stats::set_enabled(false);
 }

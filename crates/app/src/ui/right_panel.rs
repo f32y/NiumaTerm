@@ -18,8 +18,10 @@ use crate::ui::workflows::WorkflowsView;
 pub(super) const RESIZE_HANDLE: &str = "right-panel-resize";
 
 const PANEL_WIDTH: f32 = 360.0;
+
 /// Drag limits: keep the panel usable and leave room for the terminal.
 const MIN_WIDTH: f32 = 240.0;
+
 const MAX_WIDTH: f32 = 900.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,8 +68,10 @@ impl RightPanelSelection {
 pub(crate) struct RightPanel {
     selection: RightPanelSelection,
     width: Pixels,
+
     /// False on startup and during a live drag so only explicit toggles slide.
     animated: bool,
+
     git: Entity<GitSidebar>,
     tasks: Entity<BackgroundTasksView>,
     workflows: Entity<WorkflowsView>,
@@ -110,6 +114,7 @@ impl RightPanel {
 
         self.animated = true;
         self.sync_task_visibility(cx);
+
         cx.notify();
 
         open
@@ -133,6 +138,7 @@ impl RightPanel {
 impl Render for RightPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let width = self.width;
+
         let open = self.selection.shows(RightPanelKind::Git)
             || self.selection.shows(RightPanelKind::BackgroundTasks)
             || self.selection.shows(RightPanelKind::Workflows);
@@ -191,6 +197,7 @@ impl Render for RightPanel {
                     // Render at the live drag width; the next toggle re-arms
                     // the slide animation.
                     this.animated = false;
+
                     cx.notify();
                 }
             }))

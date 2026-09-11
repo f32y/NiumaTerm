@@ -16,6 +16,7 @@ pub struct ThreadSettings {
     pub approvals_reviewer: Option<String>,
     pub sandbox: Option<String>,
     pub effort: Option<String>,
+
     /// `None` is the normal tier: the model catalog only lists additional
     /// tiers, so normal is expressed as an explicit `serviceTier: null`
     /// (double-optional in the serialized payload — null resets, absent keeps).
@@ -32,6 +33,7 @@ pub struct ThreadSettings {
 pub struct ApprovalPreset {
     /// Submitted back verbatim when the user picks it.
     pub value: String,
+
     pub label: String,
     pub description: Option<String>,
 }
@@ -46,6 +48,7 @@ pub struct ApprovalPreset {
 pub struct AgentPreset {
     /// Submitted back verbatim when the user picks it.
     pub value: String,
+
     pub label: String,
     pub description: Option<String>,
 }
@@ -55,9 +58,12 @@ pub struct AgentPreset {
 pub struct ModelInfo {
     pub model: String,
     pub display: String,
+
     /// `(tier id, tier name)` of the model's additional service tiers.
     pub tiers: Vec<(String, String)>,
+
     pub default_tier: Option<String>,
+
     /// Reasoning-effort levels the model supports; empty when the model has
     /// no effort control (or the backend keeps a global effort list instead).
     pub efforts: Vec<String>,

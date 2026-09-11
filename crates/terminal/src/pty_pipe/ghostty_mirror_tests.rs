@@ -45,6 +45,7 @@ fn render_buffer_row_text(buffer: &RenderBuffer, y: usize) -> String {
     (0..buffer.cols())
         .map(|x| {
             let c = buffer.cell(x, y).c();
+
             if c == '\0' { ' ' } else { c }
         })
         .collect::<String>()
@@ -56,6 +57,7 @@ fn render_buffer_row_text(buffer: &RenderBuffer, y: usize) -> String {
 fn conpty_resize_echo_rewrites_cup_to_engine_cursor_row() {
     let rewritten = rewrite_conpty_resize_echo_cup_rows(b"\x1b[10;18Hx\x1b[10;19H", 42)
         .expect("CUP row should be rewritten");
+
     assert_eq!(rewritten, b"\x1b[42;18Hx\x1b[42;19H");
 }
 
@@ -85,6 +87,7 @@ fn su_realign_count_uses_last_cup_for_multirow_prompt() {
 fn su_realign_count_none_when_already_aligned() {
     // R_ghostty == R_conpty means no divergence and no SU; the legacy CUP rewrite handles it.
     let repaint = b"\x1b[2;18Hdir\x1b[2;21H";
+
     assert_eq!(su_realign_count(repaint, 1, 80, 24, 80, 24), None);
 }
 
@@ -162,6 +165,7 @@ struct FakeWriter {
 impl io::Write for FakeWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.data.extend_from_slice(buf);
+
         Ok(buf.len())
     }
 
@@ -177,6 +181,7 @@ struct FakePty {
 
 impl ProcessReadWrite for FakePty {
     type Reader = FakeReader;
+
     type Writer = FakeWriter;
 
     fn reader(&mut self) -> &mut Self::Reader {
@@ -309,6 +314,7 @@ fn resize_message_publishes_snapshot_to_render_buffer() {
 
     {
         let engine = &mut machine.ghostty;
+
         engine.write_vt(b"resize-ok");
     }
 
@@ -375,7 +381,9 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
         .reader
         .data
         .extend_from_slice(b"\x1b[?2026h\x1b[1;1HWorking");
+
     machine.pty_read(&mut state, &mut buf).unwrap();
+
     {
         let buffer = render_buffer.load();
 
@@ -395,9 +403,12 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
         .reader
         .data
         .extend_from_slice(b"\x1b[3;3H\x1b[?2026l");
+
     machine.pty_read(&mut state, &mut buf).unwrap();
+
     {
         let buffer = render_buffer.load();
+
         assert_eq!(buffer.cursor().row.0, 2);
         assert_eq!(render_buffer_row_text(&buffer, 0), "Working");
     }
@@ -407,12 +418,14 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
         .reader
         .data
         .extend_from_slice(b"\x1b[?2026h\x1b[2;1HStuck");
+
     machine.pty_read(&mut state, &mut buf).unwrap();
     machine.sync_output_started_at = Some(time::Instant::now() - SYNC_OUTPUT_TIMEOUT);
     machine.pty_read(&mut state, &mut buf).unwrap();
 
     {
         let buffer = render_buffer.load();
+
         assert_eq!(buffer.cursor().row.0, 1);
         assert_eq!(render_buffer_row_text(&buffer, 1), "Stuck");
     }
@@ -460,15 +473,19 @@ fn osc_progress_hides_published_cursor_until_removed() {
     let mut buf = [0u8; READ_BUFFER_SIZE];
 
     machine.pty_read(&mut state, &mut buf).unwrap();
+
     machine
         .pty
         .reader
         .data
         .extend_from_slice(b";42\x1b\\    Building [====>     ] 4/10\r");
+
     machine.last_snapshot_at = Some(time::Instant::now() - SNAPSHOT_MIN_INTERVAL);
     machine.pty_read(&mut state, &mut buf).unwrap();
+
     {
         let buffer = render_buffer.load();
+
         assert_eq!(buffer.cursor_shape(), ansi::CursorShape::Beam);
         assert!(!buffer.cursor_visible(), "active progress hides the cursor");
     }
@@ -478,6 +495,7 @@ fn osc_progress_hides_published_cursor_until_removed() {
         .reader
         .data
         .extend_from_slice(b"\x1b]9;4;0;\x1b\\");
+
     machine.last_snapshot_at = Some(time::Instant::now() - SNAPSHOT_MIN_INTERVAL);
     machine.pty_read(&mut state, &mut buf).unwrap();
 
@@ -525,8 +543,10 @@ fn conpty_resize_echo_realigns_machine_pty_read_to_cursor_row() {
 
     {
         let engine = &mut machine.ghostty;
+
         engine.write_vt(b"\x1b[2J\x1b[10;1HHISTORY\x1b[42;1HC:\\Workspace\\NiumaTerm>");
     }
+
     machine.conpty_resize_echo_realign = true;
     machine.conpty_resize_echo_pending = true;
 
@@ -582,8 +602,10 @@ fn conpty_resize_repaint_realigns_clear_without_new_input() {
 
     {
         let engine = &mut machine.ghostty;
+
         engine.write_vt(b"\x1b[2J\x1b[10;1HHISTORY\x1b[42;1HC:\\Workspace\\NiumaTerm>");
     }
+
     machine.conpty_resize_echo_realign = true;
     machine.conpty_resize_repaint_reads_remaining = 1;
 
@@ -656,6 +678,7 @@ fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
             "precondition: viewport must be scrolled away from the bottom"
         );
     }
+
     machine.conpty_resize_echo_realign = true;
     machine.conpty_resize_repaint_reads_remaining = 1;
 
@@ -754,7 +777,9 @@ fn conpty_resize_echo_routes_to_active_cursor_when_scrolled_typing() {
     // to the bottom to observe where it landed.
     let snapshot = {
         let engine = &mut machine.ghostty;
+
         engine.scroll_viewport_bottom();
+
         engine.snapshot().unwrap()
     };
 
@@ -929,10 +954,13 @@ echo hi\r\n\x1b]133;C\x07hi\r\n\
             for event in batch {
                 match event {
                     BlockEvent::HistoryCleared => shape.push("cleared".into()),
+
                     BlockEvent::EngineBlock { seq, rows, handle } => {
                         handles.push(*handle);
+
                         shape.push(format!("block{seq}:{rows}"))
                     }
+
                     BlockEvent::EngineBlocksSync(live) => {
                         shape.push(format!("sync:{}", live.len()))
                     }
@@ -1003,6 +1031,7 @@ fn pty_read_boundary_protocol_does_not_clear_alt_screen() {
     let stream = b"\x1b]133;A\x07\x1b]133;B\x07\x1b]133;C\x07\
 \x1b]133;D;0\x07\x1b]133;A\x07PS> \x1b]133;B\x07\
 vim\r\n\x1b]133;C\x07\x1b[?1049hTUI\x1b]133;D;0\x07";
+
     let (_events, mut machine) = pty_read_events(stream);
 
     let engine = &mut machine.ghostty;
@@ -1010,6 +1039,7 @@ vim\r\n\x1b]133;C\x07\x1b[?1049hTUI\x1b]133;D;0\x07";
     assert!(engine.mode(ghostty::mode::ALT_SCREEN));
 
     let snapshot = engine.snapshot().unwrap();
+
     let rows: Vec<_> = (0..snapshot.rows() as u16)
         .map(|y| snapshot_row_text(&snapshot, y))
         .collect();
@@ -1024,6 +1054,7 @@ vim\r\n\x1b]133;C\x07\x1b[?1049hTUI\x1b]133;D;0\x07";
 fn pty_read_emits_no_command_for_untrusted_stream() {
     // Out-of-order lifecycle (starts at ;B): untrusted, nothing recorded.
     let blocks = command_finished_events(b"\x1b]133;B\x07evil\x1b]133;C\x07out\x1b]133;D;0\x07");
+
     assert!(blocks.is_empty());
 }
 

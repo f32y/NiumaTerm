@@ -20,10 +20,12 @@ pub(crate) struct TurnPresentation {
     /// the backend's turn-started event, so the reading covers the whole wait
     /// the user sat through, CLI and RPC latency included.
     pub(crate) submitted_at: Option<Instant>,
+
     /// How long the last turn took to produce anything visible. Survives the
     /// turn so the composer keeps reporting it while the conversation is
     /// idle.
     pub(crate) first_output_latency: Option<Duration>,
+
     /// When the agent last finished answering, for the composer's idle reading
     /// of how long the conversation has been waiting on the user. `None` until
     /// the first turn settles.

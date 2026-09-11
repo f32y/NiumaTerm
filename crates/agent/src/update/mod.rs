@@ -22,6 +22,7 @@ use crate::launcher::{AgentCli, ProcessError, ProcessLimits, ProcessOutput, run_
 
 pub(crate) const PROBE_LIMITS: ProcessLimits =
     ProcessLimits::new(Duration::from_secs(30), 256 * 1024);
+
 const UPDATE_LIMITS: ProcessLimits = ProcessLimits::new(Duration::from_secs(15 * 60), 256 * 1024);
 pub(crate) const MAX_LABEL_CHARS: usize = 160;
 const MAX_DIAGNOSTIC_CHARS: usize = 4_096;
@@ -77,6 +78,7 @@ impl InstallationKey {
             ProviderKind::Claude => b"claude\0".as_slice(),
             ProviderKind::Codex => b"codex\0".as_slice(),
         });
+
         digest.update(installation_path_spelling(&resolved_launcher).as_bytes());
         digest.update([0]);
 
@@ -154,6 +156,7 @@ pub struct VersionStatus {
     pub channel: Option<String>,
     pub can_update: bool,
     pub support: DiscoverySupport,
+
     /// Vendor remediation is presentation-only and is never interpreted as a
     /// shell command.
     pub remediation: Option<String>,
@@ -256,7 +259,9 @@ pub struct VendorUpdateResult {
 
 pub trait ProviderMaintenance: Send + Sync {
     fn provider(&self) -> ProviderKind;
+
     fn probe(&self, launcher: &AgentCli) -> Result<VersionStatus, UpdateError>;
+
     fn update(&self, launcher: &AgentCli) -> Result<VendorUpdateResult, UpdateError>;
 }
 
@@ -558,6 +563,7 @@ impl UpdateCoordinator {
                     write_cache(&self.cache_path, &inner.cache);
                 }
             }
+
             Err(error) => {
                 record.state.phase = UpdatePhase::Failed;
                 record.state.error = Some(error.clone());
@@ -624,11 +630,13 @@ impl UpdateCoordinator {
         key: &InstallationKey,
     ) -> Result<VendorUpdateResult, UpdateError> {
         let (launcher, maintenance) = self.operation_parts(key)?;
+
         maintenance.update(&launcher)
     }
 
     pub fn verify(&self, key: &InstallationKey) -> Result<VersionStatus, UpdateError> {
         let (launcher, maintenance) = self.operation_parts(key)?;
+
         maintenance.probe(&launcher)
     }
 
@@ -640,6 +648,7 @@ impl UpdateCoordinator {
         restore_failures: usize,
     ) {
         let mut inner = self.inner.lock();
+
         let Some(record) = inner.records.get_mut(key) else {
             return;
         };
@@ -655,11 +664,13 @@ impl UpdateCoordinator {
         if let Some(error) = error {
             record.state.phase = UpdatePhase::Failed;
             record.state.error = Some(error);
+
             return;
         }
 
         if restore_failures > 0 {
             record.state.phase = UpdatePhase::Failed;
+
             record.state.error = Some(UpdateError::new(
                 UpdateErrorKind::Recovery,
                 format!("{restore_failures} agent tab(s) could not reconnect"),
@@ -679,21 +690,27 @@ impl UpdateCoordinator {
 
             if let DiscoverySupport::Unsupported { reason } = &status.support {
                 record.state.phase = UpdatePhase::Failed;
+
                 record.state.error = Some(UpdateError::new(
                     UpdateErrorKind::InvalidResponse,
                     format!("could not verify the installed version: {reason}"),
                 ));
+
                 record.state.versions = Some(status);
+
                 return;
             }
 
             if status.current.is_none() {
                 record.state.phase = UpdatePhase::Failed;
+
                 record.state.error = Some(UpdateError::new(
                     UpdateErrorKind::InvalidResponse,
                     "the provider did not publish an installed version after updating",
                 ));
+
                 record.state.versions = Some(status);
+
                 return;
             }
 
@@ -702,12 +719,14 @@ impl UpdateCoordinator {
             } else {
                 UpdatePhase::Updated
             };
+
             record.state.error = (record.state.phase == UpdatePhase::Unchanged).then(|| {
                 UpdateError::new(
                     UpdateErrorKind::ProviderFailed,
                     "the provider finished updating but the installed version did not change",
                 )
             });
+
             record.state.versions = Some(status.clone());
 
             let dismissed_target = record.dismissed_target.clone();
@@ -720,12 +739,14 @@ impl UpdateCoordinator {
                     dismissed_target,
                 },
             );
+
             write_cache(&self.cache_path, &inner.cache);
         }
     }
 
     pub fn dismiss_available(&self, key: &InstallationKey, target: &Version) {
         let mut inner = self.inner.lock();
+
         let Some(record) = inner.records.get_mut(key) else {
             return;
         };
@@ -802,6 +823,7 @@ fn write_cache(path: &Path, cache: &CacheFile) {
     let Ok(bytes) = serde_json::to_vec(cache) else {
         return;
     };
+
     let temporary = path.with_extension("tmp");
 
     if fs::write(&temporary, bytes).is_ok() && fs::rename(&temporary, path).is_err() {

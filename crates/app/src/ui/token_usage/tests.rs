@@ -123,6 +123,7 @@ fn parse_usage_uses_report_totals_when_day_details_are_absent() {
 #[test]
 fn parse_usage_rejects_invalid_json() {
     let error = parse_usage(b"not json", "2026-08-12").unwrap_err();
+
     assert!(error.starts_with("ccusage output is not valid JSON:"));
 }
 

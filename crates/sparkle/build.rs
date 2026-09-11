@@ -15,6 +15,7 @@ use std::{env, fs};
 /// release job signs and notarizes, and checksummed because the archive is
 /// fetched over the network from a third party.
 const SPARKLE_VERSION: &str = "2.9.6";
+
 const SPARKLE_SHA256: &str = "52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192";
 
 /// Names a directory that already holds `Sparkle.framework`, for a build with
@@ -61,6 +62,7 @@ fn main() {
         "cargo:rustc-link-search=framework={}",
         profile_dir.display()
     );
+
     println!("cargo:rustc-link-lib=framework=Sparkle");
 
     // The application crate emits the rpaths a packaged app needs, since it is
@@ -83,6 +85,7 @@ fn fetch_framework(out_dir: &Path) -> PathBuf {
         let url = format!(
             "https://github.com/sparkle-project/Sparkle/releases/download/{SPARKLE_VERSION}/Sparkle-{SPARKLE_VERSION}.tar.xz"
         );
+
         let mut curl = Command::new("curl");
 
         curl.args(["-fsSL", "-o"]).arg(&archive).arg(&url);
@@ -125,6 +128,7 @@ fn verify_checksum(archive: &Path) {
 
     if digest != SPARKLE_SHA256 {
         let _ = fs::remove_file(archive);
+
         panic!("Sparkle {SPARKLE_VERSION} archive is {digest}, expected {SPARKLE_SHA256}");
     }
 }
@@ -137,6 +141,7 @@ fn verify_checksum(archive: &Path) {
 fn install(framework: &Path, dir: &Path) {
     if let Err(e) = fs::create_dir_all(dir) {
         println!("cargo:warning=could not create {}: {e}", dir.display());
+
         return;
     }
 
@@ -147,12 +152,14 @@ fn install(framework: &Path, dir: &Path) {
 
     match ditto.status() {
         Ok(status) if status.success() => {}
+
         // A running application can hold the framework open. Warn rather than
         // fail: the copy already in place is the same pinned version.
         Ok(status) => println!(
             "cargo:warning=ditto into {} exited with {status}",
             destination.display()
         ),
+
         Err(e) => println!(
             "cargo:warning=could not run ditto into {}: {e}",
             destination.display()

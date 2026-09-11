@@ -169,16 +169,19 @@ impl ApiClient {
         let body = response.text().map_err(|error| {
             CallError::Transport(format!("{method} returned an unreadable response: {error}"))
         })?;
+
         let answer = serde_json::from_str::<ResponseMessage>(&body).map_err(|error| {
             CallError::Transport(format!("{method} returned an unreadable response: {error}"))
         })?;
 
         match (answer.result.ok, answer.result.value, answer.result.error) {
             (true, value, _) => Ok(value.unwrap_or(Value::Null)),
+
             (false, _, Some(error)) => Err(CallError::Business {
                 code: error.code,
                 message: error.message,
             }),
+
             _ => Err(CallError::Transport(format!(
                 "{method} returned a result that was neither a value nor an error"
             ))),
@@ -202,10 +205,12 @@ impl ApiClient {
 
     pub(crate) fn stream_request(&self) -> Result<Request, String> {
         let mut url = Url::parse(&self.base).map_err(|error| error.to_string())?;
+
         let scheme = if url.scheme() == "https" { "wss" } else { "ws" };
 
         url.set_scheme(scheme)
             .map_err(|_| "the harness URL has no WebSocket scheme".to_string())?;
+
         url.set_path("/api/remote.mux");
 
         let mut request = url

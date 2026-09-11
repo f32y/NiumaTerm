@@ -26,6 +26,7 @@ impl LaunchMessages {
         };
 
         self.pending_order.retain(|held| held != thread_id);
+
         self.confirmed
             .entry(thread_id.to_owned())
             .or_insert(message);
@@ -73,6 +74,7 @@ impl LaunchMessages {
             }
 
             self.confirmed.insert(thread_id.to_owned(), message);
+
             return true;
         }
 
@@ -85,6 +87,7 @@ impl LaunchMessages {
 
         while self.pending_order.len() > MAX_PENDING_MESSAGES {
             let oldest = self.pending_order.remove(0);
+
             self.pending.remove(&oldest);
         }
 
@@ -97,6 +100,7 @@ impl LaunchMessages {
         let Some(message) = self.confirmed.get(thread_id) else {
             return items;
         };
+
         let included = items.iter().any(|item| {
             matches!(item, Item::UserMessage { text: Some(text) } if text.trim() == message.trim())
         });

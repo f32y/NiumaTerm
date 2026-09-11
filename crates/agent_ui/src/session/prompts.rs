@@ -22,6 +22,7 @@ impl PendingPrompts {
         input: &'a mut SessionInput,
     ) -> Option<&'a mut QuestionDraft> {
         let key = self.questions(input)?.key();
+
         input.draft_mut(key)
     }
 
@@ -31,18 +32,22 @@ impl PendingPrompts {
 
     pub(crate) fn reveal(&mut self, input: &SessionInput, index: usize) {
         let prompt = &input.batches()[index];
+
         let reveal = index < self.presentations.len()
             || self.questions(input).is_none_or(|question| {
                 !question.pending()
                     || (prompt.mode() != QuestionMode::Async
                         && question.mode() == QuestionMode::Async)
             });
+
         let presentation = QuestionPresentation::new(prompt);
+
         if index < self.presentations.len() {
             self.presentations[index] = presentation;
         } else {
             self.presentations.push(presentation);
         }
+
         if reveal {
             self.active = Some(index);
             self.collapsed = false;
@@ -56,10 +61,12 @@ impl PendingPrompts {
         questions: Vec<Question>,
     ) {
         let index = input.history(item_id, questions);
+
         if index == self.presentations.len() {
             self.presentations
                 .push(QuestionPresentation::new(&input.batches()[index]));
         }
+
         self.active = Some(index);
         self.collapsed = false;
     }
@@ -69,9 +76,11 @@ impl PendingPrompts {
         let settled = self
             .questions(input)
             .is_some_and(|prompt| !prompt.pending() && prompt.status() != QuestionStatus::History);
+
         if settled {
             self.active = input.batches().iter().position(QuestionDraft::pending);
         }
+
         self.release_secret_editors(input);
     }
 
@@ -80,6 +89,7 @@ impl PendingPrompts {
             if draft.pending() {
                 continue;
             }
+
             for (question, editor) in draft.questions().iter().zip(&mut presentation.editors) {
                 if question.input == QuestionInput::Secret {
                     *editor = None;

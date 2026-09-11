@@ -71,6 +71,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             tree_sitter_astro_next::INJECTIONS_QUERY,
             ""
         ),
+
         1 => language!(
             "bash",
             "sh",
@@ -80,6 +81,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             ""
         ),
+
         2 => language!(
             "c",
             "",
@@ -89,7 +91,9 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             ""
         ),
+
         3 => language!("cmake", "", "", tree_sitter_cmake::LANGUAGE, "", "", ""),
+
         4 => language!(
             "csharp",
             "cs",
@@ -99,6 +103,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             ""
         ),
+
         5 => language!(
             "cpp",
             "c++",
@@ -108,6 +113,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             ""
         ),
+
         6 => language!(
             "css",
             "scss",
@@ -117,6 +123,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             ""
         ),
+
         7 => language!(
             "diff",
             "",
@@ -126,6 +133,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             ""
         ),
+
         8 => language!(
             "ejs",
             "",
@@ -135,6 +143,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             tree_sitter_embedded_template::INJECTIONS_EJS_QUERY,
             ""
         ),
+
         9 => language!(
             "elixir",
             "ex",
@@ -144,6 +153,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             tree_sitter_elixir::INJECTIONS_QUERY,
             ""
         ),
+
         10 => language!(
             "erb",
             "",
@@ -153,6 +163,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             tree_sitter_embedded_template::INJECTIONS_EJS_QUERY,
             ""
         ),
+
         11 => language!(
             "go",
             "",
@@ -164,7 +175,9 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             ""
         ),
+
         12 => language!("graphql", "", "", tree_sitter_graphql::LANGUAGE, "", "", ""),
+
         13 => language!(
             "html",
             "",
@@ -178,6 +191,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             ),
             ""
         ),
+
         14 => language!(
             "java",
             "",
@@ -187,6 +201,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             ""
         ),
+
         15 => language!(
             "javascript",
             "js",
@@ -200,6 +215,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             ),
             tree_sitter_javascript::LOCALS_QUERY
         ),
+
         16 => language!(
             "jsdoc",
             "",
@@ -209,6 +225,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             ""
         ),
+
         17 => language!(
             "kotlin",
             "kt\0kts\0ktm",
@@ -220,6 +237,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             ""
         ),
+
         18 => language!(
             "lua",
             "",
@@ -231,6 +249,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             tree_sitter_lua::INJECTIONS_QUERY,
             tree_sitter_lua::LOCALS_QUERY
         ),
+
         19 => language!(
             "make",
             "makefile",
@@ -240,6 +259,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             ""
         ),
+
         20 => language!(
             "markdown",
             "md\0mdx",
@@ -253,6 +273,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             ),
             ""
         ),
+
         21 => language!(
             "markdown_inline",
             "markdown-inline",
@@ -264,6 +285,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             ""
         ),
+
         22 => language!(
             "php",
             "php3\0php4\0php5\0phtml",
@@ -275,6 +297,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             ),
             ""
         ),
+
         23 => language!(
             "proto",
             "protobuf",
@@ -284,6 +307,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             ""
         ),
+
         24 => language!(
             "python",
             "py",
@@ -293,6 +317,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             ""
         ),
+
         25 => language!(
             "ruby",
             "rb",
@@ -302,6 +327,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             tree_sitter_ruby::LOCALS_QUERY
         ),
+
         26 => language!(
             "rust",
             "rs",
@@ -315,6 +341,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             ),
             ""
         ),
+
         27 => language!(
             "scala",
             "",
@@ -324,6 +351,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             tree_sitter_scala::LOCALS_QUERY
         ),
+
         28 => language!(
             "sql",
             "",
@@ -333,6 +361,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             ""
         ),
+
         29 => language!(
             "svelte",
             "",
@@ -342,7 +371,9 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             tree_sitter_svelte_next::INJECTIONS_QUERY,
             tree_sitter_svelte_next::LOCALS_QUERY
         ),
+
         30 => language!("swift", "", "", tree_sitter_swift::LANGUAGE, "", "", ""),
+
         31 => language!(
             "toml",
             "",
@@ -352,6 +383,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             ""
         ),
+
         32 => language!(
             "tsx",
             "",
@@ -361,6 +393,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             tree_sitter_typescript::LOCALS_QUERY
         ),
+
         33 => language!(
             "typescript",
             "ts",
@@ -374,6 +407,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             ),
             tree_sitter_typescript::LOCALS_QUERY
         ),
+
         34 => language!(
             "yaml",
             "yml",
@@ -383,6 +417,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             ""
         ),
+
         35 => language!(
             "zig",
             "",
@@ -396,6 +431,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             ),
             ""
         ),
+
         36 => language!(
             "powershell",
             "ps1\0psm1\0psd1\0pwsh",
@@ -405,6 +441,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             ""
         ),
+
         _ => return None,
     };
 

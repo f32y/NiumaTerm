@@ -54,6 +54,7 @@ pub(super) fn working_status_label(
         Some(detail) => i18n("agent-transcript-status-detail")
             .replace("{detail}", detail)
             .replace("{status}", &status),
+
         None => status,
     }
 }
@@ -82,6 +83,7 @@ pub(super) fn interrupted_status_label(output_tokens: Option<u64>) -> String {
     match output_tokens {
         Some(tokens) => i18n("agent-transcript-interrupted-tokens")
             .replace("{tokens}", &compact_token_count(tokens)),
+
         None => i18n("agent-transcript-interrupted").to_string(),
     }
 }
@@ -95,6 +97,7 @@ pub(super) fn timed_token_label(verb: &str, seconds: u64, output_tokens: Option<
         Some(tokens) => i18n("agent-transcript-status-tokens")
             .replace("{status}", &duration)
             .replace("{tokens}", &compact_token_count(tokens)),
+
         None => duration,
     }
 }
@@ -148,6 +151,7 @@ pub(crate) fn hidden(item: &SessionItem) -> bool {
         | SessionItem::Reasoning { summary: text, .. } => {
             text.as_deref().is_none_or(|text| text.trim().is_empty())
         }
+
         _ => false,
     }
 }
@@ -272,6 +276,7 @@ pub(crate) fn command_failure_reason(aggregated_output: Option<&str>) -> Option<
     aggregated_output?.lines().find_map(|line| {
         let line = clean_output(line);
         let line = line.trim();
+
         (!line.is_empty()).then(|| line.to_owned())
     })
 }
@@ -285,15 +290,19 @@ pub(crate) fn entry_copy_text(item: &SessionItem) -> String {
             .map(visible_prompt)
             .unwrap_or_default()
             .to_string(),
+
         SessionItem::AgentMessage { text, .. } | SessionItem::Reasoning { summary: text, .. } => {
             text.clone().unwrap_or_default()
         }
+
         SessionItem::Error { text } => text.clone(),
+
         SessionItem::CommandExecution {
             command,
             aggregated_output,
             ..
         } => command_execution_detail(command, aggregated_output.as_deref()),
+
         SessionItem::FileChange {
             paths,
             diff,
@@ -304,10 +313,12 @@ pub(crate) fn entry_copy_text(item: &SessionItem) -> String {
                 .replace("{paths}", paths)
                 .replace("{status}", status.as_deref().unwrap_or("inProgress"))
                 .replace("{diff}", &clean_output(diff)),
+
             None => i18n("agent-transcript-file-edit")
                 .replace("{paths}", paths)
                 .replace("{status}", status.as_deref().unwrap_or("inProgress")),
         },
+
         SessionItem::Other {
             kind,
             title,
@@ -320,11 +331,13 @@ pub(crate) fn entry_copy_text(item: &SessionItem) -> String {
                 status.as_deref().unwrap_or("inProgress"),
                 clean_output(output)
             ),
+
             None => format!(
                 "{kind} {title} — {}",
                 status.as_deref().unwrap_or("inProgress")
             ),
         },
+
         SessionItem::Compaction { detail, .. } => {
             let head = format!(
                 "{}\n{}",
@@ -372,12 +385,15 @@ pub(crate) fn compaction_accounting(detail: &Compaction) -> Vec<String> {
             compact_token_count(pre),
             compact_token_count(post)
         )),
+
         (Some(pre), None) => parts.push(
             i18n("agent-transcript-compaction-from").replace("{tokens}", &compact_token_count(pre)),
         ),
+
         (None, Some(post)) => parts.push(
             i18n("agent-transcript-compaction-to").replace("{tokens}", &compact_token_count(post)),
         ),
+
         (None, None) => {}
     }
 
@@ -411,9 +427,11 @@ pub(crate) fn relative_time(at: SystemTime) -> String {
     match seconds {
         0..60 => i18n("agent-history-now").to_string(),
         60..3600 => i18n("agent-history-minutes").replace("{count}", &(seconds / 60).to_string()),
+
         3600..86400 => {
             i18n("agent-history-hours").replace("{count}", &(seconds / 3600).to_string())
         }
+
         _ => i18n("agent-history-days").replace("{count}", &(seconds / 86400).to_string()),
     }
 }

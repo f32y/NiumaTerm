@@ -20,6 +20,7 @@ impl SessionController {
         key: &BackgroundTaskKey,
     ) -> Option<&BackgroundTaskTranscript> {
         self.background_tasks()?;
+
         self.children.transcripts.get(key)
     }
 
@@ -30,7 +31,9 @@ impl SessionController {
 
     pub(super) fn set_background_tasks(&mut self, snapshot: BackgroundTaskSnapshot) -> bool {
         let before = self.background_activity();
+
         self.children.background_tasks = Some(snapshot);
+
         self.background_activity() != before
     }
 

@@ -49,6 +49,7 @@ pub enum HostError {
     /// `dsh` could not be resolved. It is a user-installed dependency, so this
     /// is not something the application offers to fix.
     NotInstalled(String),
+
     /// The executable resolved but no serving host came out of it.
     FailedToStart(String),
 }
@@ -70,9 +71,11 @@ impl HostError {
 /// observed not to end a process that had already run a turn.
 pub struct Host {
     client: ApiClient,
+
     /// Held for its Drop: releasing the job terminates the host and every
     /// descendant it spawned.
     _job: KillOnCloseJob,
+
     child: Mutex<Child>,
 }
 
@@ -150,6 +153,7 @@ impl Host {
             Err(HostError::FailedToStart(detail)) if detail.contains(NO_BROWSER_FLAG) => {
                 Self::start_with(launch, &["web", "--port", "0"])
             }
+
             outcome => outcome,
         }
     }
@@ -175,6 +179,7 @@ impl Host {
         let mut child = command
             .spawn()
             .map_err(|error| HostError::FailedToStart(error.to_string()))?;
+
         let job = KillOnCloseJob::attach_or_kill(&mut child)
             .map_err(|error| HostError::FailedToStart(error.to_string()))?;
 
@@ -225,9 +230,11 @@ impl Host {
 
         let base = match address_rx.recv_timeout(start_timeout) {
             Ok(address) => address,
+
             Err(reason) => {
                 let _ = child.kill();
                 let _ = child.wait();
+
                 return Err(HostError::FailedToStart(start_failure(reason, &retained)));
             }
         };
@@ -266,6 +273,7 @@ pub const DEFAULT_EXECUTABLE: &str = "dsh";
 /// without an adapter update. It also prevents npx from selecting a different
 /// globally installed release when resolving the command.
 pub const NPX_EXECUTABLE: &str = "npx";
+
 pub const NPX_ARGUMENTS: [&str; 2] = ["-y", "@deepseek-ai/dsh@0.1.5-rc.1"];
 
 /// pnpm's one-shot package launcher. Unlike npm's dependency resolver, pnpm
@@ -277,6 +285,7 @@ pub const NPX_ARGUMENTS: [&str; 2] = ["-y", "@deepseek-ai/dsh@0.1.5-rc.1"];
 /// by tens of seconds. The exact package release keeps later launches on the
 /// same Remote API until the adapter changes its supported release.
 pub const PNPM_DLX_EXECUTABLE: &str = "pnpm";
+
 pub const PNPM_DLX_ARGUMENTS: [&str; 3] = [
     "dlx",
     "--config.dlx-cache-max-age=Infinity",

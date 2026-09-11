@@ -40,7 +40,9 @@ pub use nmt_agent::session::AgentKind;
 /// Application configuration and presentation for an agent kind.
 pub trait AgentKindExt {
     fn from_profile(kind: AgentProfileKind) -> Self;
+
     fn profile_kind(self) -> AgentProfileKind;
+
     fn icon(self) -> Icon;
 }
 
@@ -97,6 +99,7 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
         replace_sub_models: profile.replace_sub_models,
         vision_model: profile.vision_model,
     };
+
     build_launch(
         &source,
         profile

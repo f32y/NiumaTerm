@@ -98,6 +98,7 @@ fn startup_token_authenticates_rpc_and_stream_without_corrupting_the_path() {
         let mut socket = accept_hdr(socket, |request: &Request, response| {
             assert_eq!(request.uri(), "/api/remote.mux");
             assert_eq!(request.headers()["cookie"], "dsh-auth=session-cookie");
+
             Ok(response)
         })
         .unwrap();
@@ -156,21 +157,25 @@ fn event_reply_keeps_the_generation_and_event_ids() {
             json!({ "kind": "result", "value": "allowed-once" }),
         )
         .unwrap();
+
     server.join().unwrap();
 }
 
 fn command_server(replies: Vec<(Value, Value)>) -> (ApiClient, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
+
     let server = thread::spawn(move || {
         for (arguments, answer) in replies {
             let (mut stream, _) = listener.accept().unwrap();
             let (line, _, body) = read_request(&stream);
+
             assert_eq!(line, "POST /api/commands/execute HTTP/1.1\r\n");
             assert_eq!(body["method"], "commands/execute");
             assert_eq!(body["payload"]["args"], arguments);
 
             let answer = answer.to_string();
+
             write!(
                 stream,
                 "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
@@ -179,6 +184,7 @@ fn command_server(replies: Vec<(Value, Value)>) -> (ApiClient, thread::JoinHandl
             .unwrap();
         }
     });
+
     (ApiClient::new(format!("http://{address}")).unwrap(), server)
 }
 
@@ -189,7 +195,9 @@ fn commands_submit_an_empty_attachment_list_for_every_command_line() {
         "/permission",
         "/compact keep the design",
     ];
+
     let value = json!({"commandId": "command-1", "result": {"kind": "success"}});
+
     let (client, server) = command_server(
         lines
             .iter()
@@ -201,12 +209,14 @@ fn commands_submit_an_empty_attachment_list_for_every_command_line() {
             })
             .collect(),
     );
+
     for line in lines {
         assert_eq!(
             commands::execute(&client, "session-1", line).unwrap(),
             value
         );
     }
+
     server.join().unwrap();
 }
 
@@ -216,6 +226,7 @@ const LEGACY_ARGUMENT_ERROR: &str = "typert gateway: commands/execute: args fiel
 fn commands_retry_the_older_attachment_name_after_argument_rejection() {
     let line = "/permission dangerously";
     let value = json!({"commandId": "command-1", "result": {"kind": "success"}});
+
     let (client, server) = command_server(vec![
         (
             json!({"agentId": "session-1", "line": line, "submittedAttachments": []}),
@@ -228,10 +239,12 @@ fn commands_retry_the_older_attachment_name_after_argument_rejection() {
             json!({"result": {"ok": true, "value": value}}),
         ),
     ]);
+
     assert_eq!(
         commands::execute(&client, "session-1", line).unwrap(),
         value
     );
+
     server.join().unwrap();
 }
 
@@ -246,6 +259,7 @@ fn commands_return_unrelated_failures_without_retrying() {
             json!({"agentId": "session-1", "line": "/permission dangerously", "submittedAttachments": []}),
             json!({"result": {"ok": false, "error": {"code": code, "message": message}}}),
         )]);
+
         assert_eq!(
             commands::execute(&client, "session-1", "/permission dangerously"),
             Err(CallError::Business {
@@ -253,6 +267,7 @@ fn commands_return_unrelated_failures_without_retrying() {
                 message: message.into()
             })
         );
+
         server.join().unwrap();
     }
 }

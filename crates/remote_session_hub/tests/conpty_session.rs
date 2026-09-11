@@ -21,11 +21,13 @@ fn session_survives_detach_and_reconnects_from_a_vt_checkpoint() {
 
     hub.write_input(id, b"Write-Output NMT_REMOTE_FIRST\r")
         .expect("write first command");
+
     wait_for_live_output(&first, b"NMT_REMOTE_FIRST");
     drop(first);
 
     hub.write_input(id, b"Write-Output NMT_REMOTE_DETACHED\r")
         .expect("write while detached");
+
     hub.resize(id, 100, 30).expect("resize detached session");
 
     let deadline = Instant::now() + Duration::from_secs(10);

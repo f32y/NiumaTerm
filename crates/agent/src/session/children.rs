@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::background_task::{BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscript};
 use crate::session::{AgentKind, RecoveryIdentity};
+
 /// Child-agent activity the provider adapter reports for this conversation.
 #[derive(Default)]
 pub struct ChildAgents {
@@ -9,10 +10,12 @@ pub struct ChildAgents {
     /// adapter owns child lifecycle; the pane keeps only this replacement
     /// copy so the right-side view never maintains a second mutable registry.
     pub background_tasks: Option<BackgroundTaskSnapshot>,
+
     /// Each child's own conversation, accumulated here rather than in the
     /// adapter so live activity is retained once and the retention bound
     /// applies to what is actually shown.
     pub transcripts: HashMap<BackgroundTaskKey, BackgroundTaskTranscript>,
+
     /// Claude session id whose child agents were already restored from
     /// history. Ready fires again during first-turn initialization, so the
     /// read happens once per conversation rather than once per confirmation.
@@ -30,6 +33,7 @@ pub fn scoped_background_tasks<'a>(
 ) -> Option<&'a BackgroundTaskSnapshot> {
     let parent = parent?;
     let snapshot = snapshot?;
+
     (&snapshot.parent_session == parent).then_some(snapshot)
 }
 
@@ -38,7 +42,9 @@ impl ChildAgents {
         if self.restored_session.as_deref() == Some(session_id) {
             return false;
         }
+
         self.restored_session = Some(session_id.to_owned());
+
         true
     }
 

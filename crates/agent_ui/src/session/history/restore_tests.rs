@@ -23,7 +23,9 @@ fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>)
         executable: "missing-agent.exe".into(),
         ..AgentProfile::default()
     };
+
     let mut pane = None;
+
     let window = cx.update(|cx| {
         gpui_component::init(cx);
         cx.set_global(AgentSettings::default());
@@ -31,7 +33,9 @@ fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>)
 
         cx.open_window(Default::default(), |window, cx| {
             let agent = cx.new(|cx| AgentPane::new(profile, AgentWorkspace::default(), window, cx));
+
             pane = Some(agent.clone());
+
             cx.new(|cx| Root::new(agent, window, cx))
         })
         .expect("open restore test window")
@@ -78,20 +82,26 @@ fn user_rows(pane: &AgentPane, cx: &App) -> Vec<String> {
 
 fn install_backend(pane: &mut AgentPane) {
     let epoch = pane.session.runtime.begin_start();
+
     pane.session.restore.starting(epoch, None);
+
     let mut backend = TestBackend::new([], SlashCommandOutcome::NotReady, Vec::new());
+
     backend.resume_accepted = true;
+
     assert!(matches!(
         pane.session
             .runtime
             .install(epoch, Ok(Backend::Test(backend))),
         StartOutcome::Installed
     ));
+
     pane.session.runtime.ready();
 }
 
 fn prepare_local_replay(pane: &mut AgentPane) -> RecoveryIdentity {
     let cwd = pane.cwd();
+
     let ResumeStart::ReadReplay(request) = pane.session.restore.begin(
         &mut pane.session.runtime,
         AgentKind::Claude,
@@ -100,6 +110,7 @@ fn prepare_local_replay(pane: &mut AgentPane) -> RecoveryIdentity {
     ) else {
         panic!("Claude restoration must read history");
     };
+
     let ReplayLoaded::Restart(identity) = pane.session.restore.loaded(
         &mut pane.session.runtime,
         request,
@@ -108,7 +119,9 @@ fn prepare_local_replay(pane: &mut AgentPane) -> RecoveryIdentity {
     ) else {
         panic!("loaded history must prepare a restart");
     };
+
     pane.history_ui.mode = RecentSessionsMode::Loading;
+
     identity
 }
 
@@ -122,13 +135,17 @@ fn failed_resume_keeps_the_transcript_and_current_controls(cx: &mut TestAppConte
             install_backend(pane);
             pane.apply_replay(replay("current"), cx);
             pane.session.controls.settings.model = Some("current-model".into());
+
             let settings = pane.session.controls.settings.clone();
+
             pane.history_ui.data.sessions = vec![summary()];
             pane.history_ui.mode = RecentSessionsMode::Open;
 
             pane.resume_session(0, cx);
+
             assert_eq!(pane.history_ui.mode, RecentSessionsMode::Loading);
             assert_eq!(user_rows(pane, cx), ["current"]);
+
             pane.apply_event(
                 Event::Error {
                     message: "resume rejected".into(),
@@ -154,15 +171,19 @@ fn failed_replacement_keeps_old_rows_and_never_publishes_pending_history(cx: &mu
         pane.update(cx, |pane, cx| {
             install_backend(pane);
             pane.apply_replay(replay("current"), cx);
+
             let identity = prepare_local_replay(pane);
             let epoch = pane.session.runtime.begin_start();
+
             pane.session.restore.starting(epoch, Some(&identity));
 
             assert_eq!(
                 pane.install_started_session(Err("cannot spawn".into()), epoch, "Claude", cx),
                 Some(false)
             );
+
             pane.session.restore.failed(&mut pane.session.runtime);
+
             assert_eq!(pane.session.runtime.status(), Status::Exited);
             assert_eq!(user_rows(pane, cx), ["current"]);
             assert!(!matches!(
@@ -184,14 +205,19 @@ fn local_history_waits_for_ready_and_repeated_ready_does_not_erase_new_rows(
         pane.update(cx, |pane, cx| {
             install_backend(pane);
             pane.apply_replay(replay("current"), cx);
+
             let identity = prepare_local_replay(pane);
             let epoch = pane.session.runtime.begin_start();
+
             pane.session.restore.starting(epoch, Some(&identity));
+
             assert_eq!(user_rows(pane, cx), ["current"]);
 
             pane.apply_event(Event::Ready(ThreadSettings::default()), cx);
+
             assert_eq!(user_rows(pane, cx), ["restored"]);
             assert_eq!(pane.history_ui.mode, RecentSessionsMode::Hidden);
+
             pane.apply_replay(replay("new prompt"), cx);
             pane.apply_event(Event::Ready(ThreadSettings::default()), cx);
 
@@ -212,6 +238,7 @@ fn resumed_codex_controls_keep_provider_values_instead_of_local_defaults(cx: &mu
             pane.history_ui.mode = RecentSessionsMode::Open;
             pane.session.controls.settings.model = Some("old-model".into());
             pane.resume_session(0, cx);
+
             assert!(!pane.session.controls.seed_thread_defaults);
             assert!(pane.session.controls.seed_approval_reviewer);
 
@@ -219,8 +246,10 @@ fn resumed_codex_controls_keep_provider_values_instead_of_local_defaults(cx: &mu
                 model: Some("resumed-model".into()),
                 ..ThreadSettings::default()
             };
+
             pane.apply_event(Event::Ready(settings), cx);
             pane.apply_event(Event::Replay(replay("restored")), cx);
+
             assert_eq!(
                 pane.session.controls.settings.model.as_deref(),
                 Some("resumed-model")
@@ -228,6 +257,7 @@ fn resumed_codex_controls_keep_provider_values_instead_of_local_defaults(cx: &mu
             assert_eq!(user_rows(pane, cx), ["restored"]);
 
             pane.seed_restored_settings(SettingsSeed::None);
+
             assert!(!pane.session.controls.seed_thread_defaults);
             assert!(!pane.session.controls.seed_approval_reviewer);
         })
@@ -246,8 +276,10 @@ fn old_backend_events_during_disk_read_leave_visible_rows_and_settings_untouched
             install_backend(pane);
             pane.apply_replay(replay("current"), cx);
             pane.session.controls.settings.model = Some("current-model".into());
+
             let settings = pane.session.controls.settings.clone();
             let cwd = pane.cwd();
+
             let ResumeStart::ReadReplay(request) = pane.session.restore.begin(
                 &mut pane.session.runtime,
                 AgentKind::Claude,
@@ -256,6 +288,7 @@ fn old_backend_events_during_disk_read_leave_visible_rows_and_settings_untouched
             ) else {
                 panic!("Claude restoration must read history");
             };
+
             pane.history_ui.mode = RecentSessionsMode::Loading;
 
             pane.apply_event(
@@ -265,6 +298,7 @@ fn old_backend_events_during_disk_read_leave_visible_rows_and_settings_untouched
                 }),
                 cx,
             );
+
             pane.apply_event(Event::Replay(replay("old-handshake")), cx);
 
             assert_eq!(pane.session.runtime.status(), Status::Starting);

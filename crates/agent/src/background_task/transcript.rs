@@ -19,6 +19,7 @@ pub enum BackgroundTaskTranscriptState {
     NotLoaded,
     Loading,
     Ready,
+
     Unavailable {
         message: String,
     },
@@ -29,10 +30,12 @@ pub enum BackgroundTaskTranscriptState {
 pub struct BackgroundTaskTranscript {
     items: Vec<Item>,
     state: BackgroundTaskTranscriptState,
+
     /// Items dropped from the front to stay within the retention bound. The
     /// view reports this rather than presenting a truncated conversation as
     /// though it were complete.
     dropped: usize,
+
     /// Bumped by every change. A view syncing from this compares one integer
     /// instead of the whole conversation, which matters because the comparison
     /// would otherwise run per frame over long outputs.
@@ -86,6 +89,7 @@ impl BackgroundTaskTranscript {
                 .find(|existing| existing.id() == Some(id))
         {
             existing.merge_completed(&item);
+
             return;
         }
 
@@ -93,6 +97,7 @@ impl BackgroundTaskTranscript {
 
         if self.items.len() > MAX_TRANSCRIPT_ITEMS {
             let excess = self.items.len() - MAX_TRANSCRIPT_ITEMS;
+
             self.items.drain(..excess);
             self.dropped += excess;
         }
@@ -134,9 +139,11 @@ pub struct BackgroundTaskTranscriptUpdate {
     /// Whether `items` is the provider's complete read rather than new
     /// activity to append.
     pub replace: bool,
+
     /// Whether `items` come from persisted history, which only fills a child
     /// whose conversation has not been seen live.
     pub restore: bool,
+
     pub items: Vec<Item>,
     pub state: Option<BackgroundTaskTranscriptState>,
 }

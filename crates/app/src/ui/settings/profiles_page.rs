@@ -202,6 +202,7 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
                         )
                         .on_ok(move |_, _, cx| {
                             cx.global_mut::<AppSettings>().remove_profile(ix);
+
                             true
                         })
                 });

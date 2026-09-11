@@ -86,6 +86,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         let cwd = self.cwd();
+
         let Some(session) = self.session.runtime.backend_mut() else {
             return;
         };

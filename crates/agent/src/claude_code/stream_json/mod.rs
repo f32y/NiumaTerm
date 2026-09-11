@@ -21,6 +21,7 @@ use parking_lot::Mutex;
 use crate::deadline_timer::DeadlineTimer;
 
 const TIMEOUT_METHOD: &str = "nmt/claudeRequestDeadline";
+
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
@@ -115,29 +116,38 @@ pub struct Session {
     transcript: TranscriptState,
     control: ControlState,
     ready: bool,
+
     /// The CLI's session id from the `init` message; the handle a future tab
     /// needs to `--resume` this conversation.
     session_id: Option<String>,
+
     turn_active: bool,
+
     /// The turn was started locally but no output has arrived yet; the first
     /// message after a send emits `TurnStarted` (the protocol has no explicit
     /// turn-started notification — `result` is the only turn boundary).
     turn_reported: bool,
+
     /// Model and permission selections sent to the backend. Effort changes
     /// additionally need ordered confirmation and are owned by control state.
     applied_model: Option<String>,
+
     applied_permission: Option<String>,
     active_slash_command: Option<String>,
+
     /// A structured initialize catalog carries richer metadata than the
     /// string-only first-turn fallback and must remain authoritative.
     structured_commands_published: bool,
+
     /// A compaction is running. Tracked because the CLI re-announces it every
     /// 30 seconds while a long compaction proceeds, and the UI only needs the
     /// state transitions.
     compacting: bool,
+
     /// Child-agent state reduced from Task launches, lifecycle records, and
     /// linked sidechain traffic for the `Background Tasks` view.
     tasks: ClaudeTasks,
+
     /// Workflow runs, reduced from the same records the child-agent reducer
     /// rejects. The two views never share a row.
     workflows: ClaudeWorkflows,
@@ -319,6 +329,7 @@ impl Session {
         };
 
         session.control.set_timer(timer);
+
         session.try_send(json!({
             "type": "control_request",
             "request_id": INIT_REQUEST_ID,
@@ -331,6 +342,7 @@ impl Session {
                 "forwardSubagentText": true,
             },
         }))?;
+
         session.control.record_admitted(
             INIT_REQUEST_ID.to_string(),
             RequestClass::Query,
@@ -401,11 +413,13 @@ impl Session {
             Some("result") => events.extend(self.process_result(&message)),
             Some("control_request") => events.extend(self.process_control_request(&message)),
             Some("control_response") => events.extend(self.process_control_response(&message)),
+
             Some("control_cancel_request") => {
                 if let Some(id) = message["request_id"].as_str() {
                     events.extend(self.control.cancel_prompt(id));
                 }
             }
+
             _ => {}
         }
 
@@ -468,6 +482,7 @@ impl Session {
         if settings.effort.is_some() && settings.effort.as_deref() != self.control.effort() {
             let effort = settings.effort.clone().unwrap_or_default();
             let ultracode = effort == ULTRACODE_EFFORT;
+
             let level = if ultracode { "xhigh" } else { effort.as_str() };
 
             // A refusal must restore the previous effort selection, unlike
@@ -510,6 +525,7 @@ impl Session {
 
         let ticket = match self.process.write_tracked(messages) {
             Ok(ticket) => ticket,
+
             Err(error) => {
                 return SendOutcome::Rejected {
                     message: error.to_string(),
@@ -520,6 +536,7 @@ impl Session {
         for id in control_ids {
             self.control
                 .record_admitted(id.clone(), RequestClass::Mutation, Instant::now());
+
             self.control.attach_input(&id, ticket.clone());
             self.control.track(id, PendingControlOperation::Other);
         }
@@ -749,6 +766,7 @@ impl Session {
         let Some(session_id) = self.session_id.as_deref() else {
             return Vec::new();
         };
+
         let Some(items) = load_child_transcript(cwd, session_id, tool_use_id) else {
             return Vec::new();
         };
@@ -801,11 +819,13 @@ impl Session {
                 self.process.abort();
                 events.extend(self.control.close(&message));
                 events.push(Event::Error { message: format!("{message} The entire settings-and-prompt batch was cancelled. Reopen the session before retrying."), fatal: true });
+
                 break;
             }
 
             if id == INIT_REQUEST_ID {
                 events.extend(self.control.close(&message));
+
                 events.push(Event::Error {
                     message,
                     fatal: true,
@@ -816,6 +836,7 @@ impl Session {
 
             if !cancelled && let Some(effort_events) = self.control.expire_effort(&id) {
                 events.extend(effort_events);
+
                 events.push(Event::Error {
                     message,
                     fatal: false,
@@ -851,6 +872,7 @@ impl Session {
 
         if self.compacting {
             self.compacting = false;
+
             events.push(Event::CompactionFinished {
                 error: Some(message.to_string()),
             });
@@ -908,6 +930,7 @@ impl Session {
 
         let response = match decision {
             "accept" => json!({"behavior": "allow", "updatedInput": pending.input}),
+
             "acceptForSession" => {
                 let mut response = json!({"behavior": "allow", "updatedInput": pending.input});
 
@@ -917,6 +940,7 @@ impl Session {
 
                 response
             }
+
             "cancel" => json!({"behavior": "deny", "message": "User cancelled tool execution."}),
             _ => json!({"behavior": "deny", "message": "User declined tool execution."}),
         };
@@ -960,6 +984,7 @@ impl Session {
 
                 json!({"behavior": "allow", "updatedInput": updated_input})
             }
+
             // Declining is a deny, which the CLI turns into a "no answer"
             // tool result; the turn continues instead of aborting.
             _ => json!({
@@ -1064,7 +1089,9 @@ impl Session {
 
         self.control
             .record_admitted(request_id.clone(), class, Instant::now());
+
         self.control.attach_input(&request_id, ticket);
+
         self.control
             .track(request_id.clone(), PendingControlOperation::Other);
 
@@ -1091,10 +1118,13 @@ impl Session {
         match message["subtype"].as_str() {
             Some("init") => self.process_init(message),
             Some("status") => compaction_progress(&mut self.compacting, message),
+
             Some("compact_boundary") => {
                 self.compacting = false;
+
                 self.transcript.process_compact_boundary(message)
             }
+
             // Every other subtype (hook_*, thinking_tokens, informational, …)
             // is telemetry the UI ignores.
             _ => Vec::new(),
@@ -1179,6 +1209,7 @@ impl Session {
                     Some(message) => SlashCommandOutcome::Rejected {
                         message: message.clone(),
                     },
+
                     None => SlashCommandOutcome::Completed { message: None },
                 },
             });
@@ -1311,6 +1342,7 @@ impl Session {
         if response["request_id"].as_str() == Some(INIT_REQUEST_ID) && !self.ready {
             let permission =
                 Some(configured_permission_mode().unwrap_or_else(|| "default".to_string()));
+
             let model = initial_ready_model(self.applied_model.as_deref());
 
             self.ready = true;

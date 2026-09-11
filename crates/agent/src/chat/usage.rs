@@ -12,8 +12,10 @@
 pub struct SessionStats {
     pub turns: u64,
     pub steps: u64,
+
     /// Summed model wall time over the steps that produced a message.
     pub model_ms: u64,
+
     /// Summed tool wall time over matched call/result pairs.
     pub tool_ms: u64,
 }
@@ -79,9 +81,11 @@ impl ContextWindowUsage {
 pub struct ContextSegment {
     pub label: String,
     pub tokens: u64,
+
     /// Colour the provider suggests for this segment, as it writes it. Kept as
     /// the provider's own string because a UI may prefer its theme instead.
     pub color: Option<String>,
+
     /// The segment is reserved rather than occupied: counted against the
     /// window, but holding no conversation content yet.
     pub deferred: bool,
@@ -94,12 +98,15 @@ pub struct ContextSegment {
 pub struct ContextComposition {
     pub segments: Vec<ContextSegment>,
     pub used_tokens: u64,
+
     /// Window the provider measures against. This can be smaller than the
     /// model's own window when the provider reserves room to compact.
     pub max_tokens: Option<u64>,
+
     /// The model's window before any such reserve, when the provider
     /// distinguishes the two.
     pub raw_max_tokens: Option<u64>,
+
     /// Where automatic compaction takes over, when the provider reports it.
     pub auto_compact_threshold: Option<u64>,
 }

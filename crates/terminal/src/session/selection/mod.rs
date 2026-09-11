@@ -60,23 +60,31 @@ impl SurfaceSelection {
         };
 
         let mut guard = self.selection.lock();
+
         match kind {
             SurfaceMouseEventKind::Down => {
                 let had_selection = guard.is_some();
+
                 *guard = Some(Selection::new(selection_type, pos, side));
+
                 had_selection || selection_type != SelectionType::Simple
             }
+
             SurfaceMouseEventKind::Move => {
                 let Some(selection) = guard.as_mut() else {
                     return false;
                 };
+
                 selection.update(pos, side);
+
                 true
             }
+
             SurfaceMouseEventKind::Up => {
                 if guard.as_ref().is_some_and(Selection::is_empty) {
                     *guard = None;
                 }
+
                 false
             }
         }
@@ -135,6 +143,7 @@ pub(crate) fn block_selection_range(
 
     if selection_type != SelectionType::Semantic {
         let col = col.min(cols.saturating_sub(1) as u32);
+
         return Some(((line, col), (line, col)));
     }
 

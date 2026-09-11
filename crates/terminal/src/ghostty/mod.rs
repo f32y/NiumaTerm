@@ -49,6 +49,7 @@ mod render_state;
 
 use crate::ghostty::kitty::KittyState;
 use crate::ghostty::render_state::RenderStateReader;
+
 mod types;
 
 pub use crate::ghostty::block::{AcquiredBlock, BlockRef};
@@ -109,9 +110,11 @@ pub struct GhosttyTerminal {
     kitty: KittyState,
     cols: u16,
     rows: u16,
+
     /// Boxed so its heap address stays fixed across `GhosttyTerminal` moves;
     /// registered with the engine as the callback userdata pointer.
     callbacks: Box<Callbacks>,
+
     titles: TitleMirror,
     scrollbar_override: Option<ScrollbarInfo>,
 }
@@ -146,6 +149,7 @@ impl GhosttyTerminal {
 
         if let Err(err) = Error::from_code(scrollback) {
             unsafe { ghostty_terminal_free(terminal) };
+
             return Err(err);
         }
 
@@ -153,16 +157,20 @@ impl GhosttyTerminal {
         // failure paths below only have to release the terminal.
         let render = match RenderStateReader::new(rows) {
             Ok(render) => render,
+
             Err(err) => {
                 unsafe { ghostty_terminal_free(terminal) };
+
                 return Err(err);
             }
         };
 
         let kitty = match KittyState::new() {
             Ok(kitty) => kitty,
+
             Err(err) => {
                 unsafe { ghostty_terminal_free(terminal) };
+
                 return Err(err);
             }
         };
@@ -189,16 +197,19 @@ impl GhosttyTerminal {
 
         unsafe {
             ghostty_terminal_set(terminal, VtTerminalOption::USERDATA, userdata);
+
             ghostty_terminal_set(
                 terminal,
                 VtTerminalOption::WRITE_PTY,
                 write_pty_cb as *const os::raw::c_void,
             );
+
             ghostty_terminal_set(
                 terminal,
                 VtTerminalOption::BELL,
                 bell_cb as *const os::raw::c_void,
             );
+
             ghostty_terminal_set(
                 terminal,
                 VtTerminalOption::CLIPBOARD_WRITE,
@@ -215,6 +226,7 @@ impl GhosttyTerminal {
         if nmt_platform::USES_CONPTY {
             unsafe {
                 let seq = b"\x1b[?2027h";
+
                 ghostty_terminal_vt_write(terminal, seq.as_ptr(), seq.len());
             }
         }
@@ -621,6 +633,7 @@ impl GhosttyTerminal {
 
         let to_rgb = |color: ColorArray| {
             let color: ColorRgb = color.into();
+
             [color.r, color.g, color.b]
         };
 
@@ -668,8 +681,10 @@ impl GhosttyTerminal {
         } {
             VtResult::SUCCESS => Ok(Some((out.x, out.y))),
             VtResult::NO_VALUE => Ok(None),
+
             other => {
                 Error::from_code(other)?;
+
                 Ok(None)
             }
         }
@@ -734,8 +749,10 @@ impl GhosttyTerminal {
         match unsafe { ghostty_terminal_finish_block(self.terminal, &mut handle) } {
             VtResult::SUCCESS => Ok(Some(handle)),
             VtResult::NO_VALUE => Ok(None),
+
             other => {
                 Error::from_code(other)?;
+
                 Ok(None)
             }
         }
@@ -865,8 +882,10 @@ impl GhosttyTerminal {
         {
             VtResult::SUCCESS => {}
             VtResult::NO_VALUE | VtResult::INVALID_VALUE => return Ok(None),
+
             other => {
                 Error::from_code(other)?;
+
                 return Ok(None);
             }
         }
@@ -1046,6 +1065,7 @@ impl GhosttyTerminal {
         image_id: u32,
     ) -> Option<graphics::GraphicData> {
         let graphics = block.kitty_graphics_raw()?;
+
         let image = unsafe { ghostty_kitty_graphics_image(graphics, image_id) };
 
         if image.is_null() {
@@ -1125,6 +1145,7 @@ impl GhosttyTerminal {
         buffer.begin_capture(self.cols as usize, self.rows as usize);
         buffer.viewport_top = self.viewport_top_screen();
         buffer.title = self.title();
+
         buffer.current_directory = self
             .current_directory()
             .map(|path| path.to_string_lossy().into_owned());

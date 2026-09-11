@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use crate::chat::{SkillCatalog, SkillInfo, SkillReference, SlashCommandInfo};
 use crate::session::AgentKind;
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum SkillError {
     Loading,
@@ -153,6 +154,7 @@ pub fn prepare_skill_selection(skill: &SkillInfo) -> Result<(String, SkillRefere
 /// selecting a different setting.
 pub fn resolve_choice(input: &str, choices: &[(String, String)]) -> Result<String, ChoiceError> {
     let query = input.trim().to_ascii_lowercase();
+
     let exact = choices.iter().find(|(value, label)| {
         value.eq_ignore_ascii_case(&query) || label.eq_ignore_ascii_case(&query)
     });
@@ -180,6 +182,7 @@ pub fn adapter_commands(kind: AgentKind) -> Vec<SlashCommandInfo> {
     use crate::claude_code::stream_json;
     use crate::codex::app_server;
     use crate::deepseek;
+
     match kind {
         AgentKind::Codex => app_server::Session::adapter_commands(),
         AgentKind::Claude => stream_json::Session::adapter_commands(),

@@ -69,9 +69,11 @@ pub fn i18n(key: &'static str) -> &'static str {
 
     match catalog.get(key) {
         Some(value) => value.as_str(),
+
         None => {
             #[cfg(debug_assertions)]
             tracing::warn!(key, "missing i18n key");
+
             key
         }
     }

@@ -73,6 +73,7 @@ fn parser_export_remains_callable_after_load_scope() {
     let address = {
         // The fixture is the parser library built from this workspace.
         let library = unsafe { ResidentLibrary::load(Path::new(&path)) }.unwrap();
+
         library.symbol(c"nmt_tree_sitter_abi_version").unwrap()
     };
 

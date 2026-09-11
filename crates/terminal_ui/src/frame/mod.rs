@@ -35,6 +35,7 @@ pub(crate) struct TerminalFrame {
     cols: usize,
     cursor: Option<TerminalCursor>,
     scrollbar: ScrollbarInfo,
+
     /// Paintable Kitty image placements resolved against the session image cache
     /// Empty in the common no-graphics case.
     images: Arc<[FrameImage]>,
@@ -183,6 +184,7 @@ pub(crate) fn extract_row(
     cursor: Option<TerminalCursor>,
 ) -> TerminalLine {
     let colors = BackgroundColors::new(buf.colors(), &FrameTheme::default());
+
     extract_row_with_colors(buf, row, cursor, &colors, None)
 }
 
@@ -204,7 +206,9 @@ fn extract_row_with_colors(
         }
 
         let is_codepoint = cell.content_tag() == ContentTag::Codepoint;
+
         let source_ch = if is_codepoint { cell.c() } else { '\0' };
+
         let cursor_shape = cursor
             .filter(|cursor| cursor.col == col as u16)
             .map(|cursor| cursor.shape);

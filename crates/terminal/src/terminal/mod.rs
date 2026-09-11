@@ -52,11 +52,13 @@ bitflags! {
         const REPORT_ALL_KEYS_AS_ESC  = 1 << 21;
         const REPORT_ASSOCIATED_TEXT  = 1 << 22;
         const MOUSE_MODE = Self::MOUSE_REPORT_CLICK.bits() | Self::MOUSE_MOTION.bits() | Self::MOUSE_DRAG.bits();
+
         const KITTY_KEYBOARD_PROTOCOL = Self::DISAMBIGUATE_ESC_CODES.bits()
                                       | Self::REPORT_EVENT_TYPES.bits()
                                       | Self::REPORT_ALTERNATE_KEYS.bits()
                                       | Self::REPORT_ALL_KEYS_AS_ESC.bits()
                                       | Self::REPORT_ASSOCIATED_TEXT.bits();
+
         const ANY                    = u32::MAX;
 
         const SIXEL_DISPLAY             = 1 << 28;
@@ -83,18 +85,22 @@ impl From<KeyboardModes> for Mode {
             Mode::DISAMBIGUATE_ESC_CODES,
             value.contains(KeyboardModes::DISAMBIGUATE_ESC_CODES),
         );
+
         mode.set(
             Mode::REPORT_EVENT_TYPES,
             value.contains(KeyboardModes::REPORT_EVENT_TYPES),
         );
+
         mode.set(
             Mode::REPORT_ALTERNATE_KEYS,
             value.contains(KeyboardModes::REPORT_ALTERNATE_KEYS),
         );
+
         mode.set(
             Mode::REPORT_ALL_KEYS_AS_ESC,
             value.contains(KeyboardModes::REPORT_ALL_KEYS_AS_ESC),
         );
+
         mode.set(
             Mode::REPORT_ASSOCIATED_TEXT,
             value.contains(KeyboardModes::REPORT_ASSOCIATED_TEXT),

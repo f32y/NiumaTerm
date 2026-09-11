@@ -49,6 +49,7 @@ impl PreparedCode {
                 language: language.into(),
                 highlighter: None,
             });
+
             text.push_str(command);
 
             if !output.text.is_empty() {
@@ -132,6 +133,7 @@ impl PreparedCode {
             let Some(highlighter) = &region.highlighter else {
                 continue;
             };
+
             let start = range.start.max(region.range.start);
             let end = range.end.min(region.range.end);
 

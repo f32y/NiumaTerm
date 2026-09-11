@@ -70,16 +70,21 @@ const SHELL_TASK_TYPE: &str = "local_bash";
 #[derive(Default)]
 pub(crate) struct ClaudeTasks {
     registry: Option<BackgroundTaskRegistry>,
+
     /// Task, tool-use, and agent identifiers mapped onto the canonical id of
     /// the row they describe.
     aliases: AliasTable,
+
     /// Process run each task was first seen in. A task still shown as running
     /// from an earlier run cannot be alive in the current process.
     created_epoch: HashMap<String, u64>,
+
     /// Advanced by each `init`, which the CLI emits once per process.
     epoch: u64,
+
     /// The conversations of this session's child agents.
     children: ChildTranscripts,
+
     /// Background shell metadata and the `Bash` commands behind it.
     shells: ShellIndex,
 }
@@ -103,6 +108,7 @@ pub(crate) struct ShellDetail {
     /// The row's canonical id, which is also the id of the item the detail
     /// view renders, so repeated reads merge into one card.
     pub(crate) id: String,
+
     pub(crate) command: Option<String>,
     pub(crate) description: Option<String>,
     pub(crate) output_file: Option<String>,
@@ -200,6 +206,7 @@ impl ClaudeTasks {
 
                 changed | registry.set_discovery(BackgroundTaskDiscoveryState::Ready)
             }
+
             Err(message) => {
                 let registry = self.registry.as_mut().expect("registry exists");
 
@@ -222,6 +229,7 @@ impl ClaudeTasks {
         self.registry = Some(BackgroundTaskRegistry::new(BackgroundTaskKey::claude_code(
             session_id,
         )));
+
         self.aliases.clear();
         self.created_epoch.clear();
         self.children.clear();
@@ -302,6 +310,7 @@ impl ClaudeTasks {
     /// already ignores it, rather than being charged to the newest task.
     fn apply_subagent_stop(&mut self, record: &Value) -> bool {
         let ids = record_identifiers(record);
+
         let Some(canonical) = self.canonical_from(&ids) else {
             return false;
         };
@@ -433,9 +442,11 @@ impl AliasTable {
 struct ChildTranscripts {
     /// Child conversation content observed since the caller last drained it.
     pending: Vec<(BackgroundTaskKey, BackgroundTaskTranscriptUpdate)>,
+
     /// Tool calls a child started, so its matching result completes the same
     /// row instead of appearing as a second one.
     open_tools: HashMap<String, Item>,
+
     /// Launch instructions already published as a child's opening message, by
     /// canonical id. Claude Code 2.1.2x keeps a child's conversation entirely
     /// in its own file and streams only the child's assistant output, so the
@@ -463,6 +474,7 @@ impl ChildTranscripts {
 
         self.launch_prompts
             .insert(tool_use_id.to_owned(), prompt.clone());
+
         self.pending.push((
             BackgroundTaskKey::claude_code(tool_use_id),
             BackgroundTaskTranscriptUpdate::appended(vec![Item::UserMessage {

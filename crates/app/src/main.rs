@@ -31,6 +31,7 @@ mod ipc;
 mod keymap;
 mod logging;
 mod profiling;
+
 // The menu bar is a macOS surface: on Windows the same commands live in the
 // title bar's menu button and nothing draws a bar above the window.
 #[cfg(target_os = "macos")]
@@ -41,6 +42,7 @@ mod remote;
 mod syntax;
 mod tabs;
 mod ui;
+
 // Updating is the one thing with a real implementation on both systems, but no
 // shared code: Windows replaces files under the Restart Manager, macOS hands a
 // signed bundle to Sparkle. Remote sessions, hosted on ConPTY with DPAPI-held
@@ -69,6 +71,7 @@ struct StartupArgs {
     url: Option<String>,
     testing: bool,
     profiling: bool,
+
     /// The instance an update replaced, which this one must outlive before it
     /// may claim the single-instance mutex that instance still holds.
     await_exit: Option<u32>,
@@ -191,6 +194,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
     nmt_profiling::set_enabled(profiling);
 
     agent_process().set_testing(testing);
+
     agent_process().set_hook_executable(
         utils::get_exe_dir()
             .join("NmtAgentHook.exe")
@@ -221,6 +225,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
     let argv_action = argv_url.map(|url| {
         cli::parse_nmt_url(&url).unwrap_or_else(|err| {
             warn!("ignoring command line: {err}");
+
             CliAction::Activate
         })
     });
@@ -572,6 +577,7 @@ fn startup_error_and_exit(file: &str, error: &str) -> ! {
             .replace("{file}", file)
             .replace("{error}", error),
     );
+
     process::exit(1);
 }
 
@@ -669,7 +675,9 @@ fn dispatch_cli_action(action: CliAction, cx: &mut App) {
             route,
             notification_id,
         } => dispatch_focus_notification(&route, &notification_id, cx),
+
         CliAction::Activate => foreground_last_active(cx),
+
         CliAction::NewTab { path } => {
             let Some(path) = openable_directory(path, cx) else {
                 return;
@@ -726,6 +734,7 @@ fn dispatch_cli_action(action: CliAction, cx: &mut App) {
             // No live window (all closed mid-dispatch): degrade to new_window.
             let Some((handle, shell)) = last_active_shell(cx) else {
                 open_window_at(&path, cx);
+
                 return;
             };
 
@@ -745,6 +754,7 @@ fn dispatch_cli_action(action: CliAction, cx: &mut App) {
                 open_window_at(&path, cx);
             }
         }
+
         CliAction::NewWindow { path } => {
             let Some(path) = openable_directory(path, cx) else {
                 return;

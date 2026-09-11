@@ -16,10 +16,12 @@ use crate::questions::{QuestionEditor, QuestionEditorState, QuestionStatus};
 impl AgentPane {
     pub(crate) fn present_questions(&mut self, index: usize, cx: &mut Context<Self>) {
         self.prompts.reveal(&self.session.input, index);
+
         let prompt = &self.session.input.batches()[index];
         let optional = prompt.mode() == QuestionMode::Optional;
         let waiting = prompt.mode() != QuestionMode::Async;
         let key = prompt.key();
+
         let description = prompt
             .questions()
             .first()
@@ -63,11 +65,14 @@ impl AgentPane {
                     else {
                         return false;
                     };
+
                     let Some(remaining) = prompt.auto_resolve_remaining(Instant::now()) else {
                         return false;
                     };
+
                     if remaining.is_zero() {
                         this.submit_question(key, QuestionAction::Timeout, cx);
+
                         return false;
                     }
 
@@ -94,14 +99,18 @@ impl AgentPane {
                 self.start_working(cx);
                 self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
             }
+
             self.push_item(Item::UserMessage { text: Some(text) }, cx);
         }
+
         self.prompts.hide_settled(&self.session.input);
+
         if completion.waiting_finished {
             self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
         }
 
         self.transcript.update(cx, |_, cx| cx.notify());
+
         cx.notify();
     }
 
@@ -113,6 +122,7 @@ impl AgentPane {
     ) {
         self.prompts
             .open_history(&mut self.session.input, item_id, questions);
+
         cx.notify();
     }
 
@@ -124,9 +134,11 @@ impl AgentPane {
     ) {
         if let Some(prompt) = self.prompts.questions_mut(&mut self.session.input) {
             prompt.toggle(question, option);
+
             if let Some(active) = self.prompts.active {
                 self.prompts.presentations[active].focus = (question, option);
             }
+
             cx.notify();
         }
     }
@@ -143,19 +155,26 @@ impl AgentPane {
         let Some(index) = self.prompts.active else {
             return false;
         };
+
         let key = self.session.input.batches()[index].key();
+
         let Some(prompt) = self.session.input.draft_mut(key) else {
             return false;
         };
+
         if prompt.mode() == QuestionMode::Async || prompt.status() != QuestionStatus::Pending {
             return false;
         }
+
         let presentation = &mut self.prompts.presentations[index];
+
         let handled = match control {
             PaletteControl::Previous => presentation.move_focus(prompt, false),
             PaletteControl::Next => presentation.move_focus(prompt, true),
+
             PaletteControl::Activate => {
                 let (question, option) = presentation.focus;
+
                 if prompt
                     .questions()
                     .get(question)
@@ -164,14 +183,18 @@ impl AgentPane {
                 {
                     return false;
                 }
+
                 prompt.toggle(question, option);
+
                 true
             }
+
             PaletteControl::Complete | PaletteControl::Dismiss => false,
         };
 
         if handled {
             cx.stop_propagation();
+
             cx.notify();
         }
 
@@ -198,14 +221,18 @@ impl AgentPane {
     ) {
         match self.session.submit_question(key, action, Instant::now()) {
             QuestionSubmission::Ignored => return,
+
             QuestionSubmission::Settled { waiting_finished } => {
                 if waiting_finished {
                     self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
                 }
             }
+
             QuestionSubmission::Waiting | QuestionSubmission::Failed => {}
         }
+
         self.prompts.hide_settled(&self.session.input);
+
         cx.notify();
     }
 
@@ -223,6 +250,7 @@ impl AgentPane {
         let Some(batch) = self.prompts.active else {
             return;
         };
+
         let count = self.session.input.batches()[batch].questions().len();
 
         for index in 0..count {
@@ -248,9 +276,11 @@ impl AgentPane {
                 let Some(prompt) = this.session.input.draft_mut(key) else {
                     return;
                 };
+
                 if !prompt.set_text(index, value) {
                     return;
                 }
+
                 cx.notify();
             };
 

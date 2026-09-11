@@ -70,6 +70,7 @@ async fn noise_echo_through_relay() {
     let mut control = connect(&format!("host_id={host_id}&role=host"), Some(TOKEN))
         .await
         .expect("host registration must succeed");
+
     let sync = next_json(&mut control).await;
 
     assert_eq!(sync["type"], "sync");
@@ -79,6 +80,7 @@ async fn noise_echo_through_relay() {
     let mut client_sock = connect(&format!("host_id={host_id}&role=client"), None)
         .await
         .expect("client connect must succeed");
+
     let mut client_hs = Handshake::initiator_ik(&client_keys.private, &host_keys.public).unwrap();
     let msg1 = client_hs.write_message().unwrap();
 
@@ -197,6 +199,7 @@ async fn client_socket_cap_enforced() {
     let mut control = connect(&format!("host_id={host_id}&role=host"), Some(TOKEN))
         .await
         .expect("host registration must succeed");
+
     let _sync = next_json(&mut control).await;
 
     // Hold the sockets open: dropping them would free slots as we go.
@@ -226,6 +229,7 @@ async fn buffer_overflow_closes_client() {
     let mut control = connect(&format!("host_id={host_id}&role=host"), Some(TOKEN))
         .await
         .expect("host registration must succeed");
+
     let _sync = next_json(&mut control).await;
 
     // Client floods frames while the host never opens a data socket: the
@@ -252,6 +256,7 @@ async fn buffer_overflow_closes_client() {
 
                 break;
             }
+
             Some(Ok(_)) => continue,
             // Depending on timing the close can surface as a protocol error
             // after the relay drops us; that still proves the disconnect.

@@ -46,8 +46,10 @@ impl TerminalInteraction {
                 if let Some(copy) = self.copy_selection(session, snapshot) {
                     return InputOutcome::CopyPending(copy);
                 }
+
                 Self::write(session, &bytes)
             }
+
             TerminalKeyAction::Write(bytes) => Self::write(session, &bytes),
             TerminalKeyAction::Paste => InputOutcome::PasteRequested,
             TerminalKeyAction::Ignore => InputOutcome::Ignored,
@@ -76,11 +78,13 @@ impl TerminalInteraction {
             )
         } else {
             let range = session.selection_range_in(snapshot)?;
+
             (
                 session.selected_text_in(snapshot)?,
                 CopiedSelection::Live(range),
             )
         };
+
         Some(PendingCopy {
             request,
             completion: CopyCompletion {
@@ -101,17 +105,21 @@ impl TerminalInteraction {
         if completion.generation != self.selection_generation {
             return;
         }
+
         match completion.selection {
             CopiedSelection::FrozenPending => {
                 self.pending_expansion = None;
                 self.frozen.clear();
             }
+
             CopiedSelection::Frozen(a, b) if self.frozen.current() == Some((a, b)) => {
                 self.frozen.clear();
             }
+
             CopiedSelection::Live(range) if session.selection_range_in(snapshot) == Some(range) => {
                 session.clear_selection();
             }
+
             _ => {}
         }
     }
@@ -128,10 +136,12 @@ impl TerminalInteraction {
         kind: SelectionType,
     ) {
         session.clear_selection();
+
         if kind == SelectionType::Simple {
             self.frozen.begin(point);
         } else {
             self.frozen.clear();
+
             if let Some(handle) = session
                 .block_item(point.item)
                 .and_then(|item| item.handle())
@@ -171,11 +181,13 @@ impl TerminalInteraction {
         let Some(mut pending) = self.pending_expansion.take() else {
             return;
         };
+
         match pending.request.try_recv() {
             Ok(Some(Ok(((start_line, start_col), (end_line, end_col))))) => {
                 let current = session
                     .block_item(pending.point.item)
                     .and_then(|item| item.handle());
+
                 if current.is_some_and(|handle| {
                     handle.id == pending.handle.id && handle.generation == pending.handle.generation
                 }) {
@@ -193,6 +205,7 @@ impl TerminalInteraction {
                     )));
                 }
             }
+
             Ok(None) => self.pending_expansion = Some(pending),
             _ => {}
         }

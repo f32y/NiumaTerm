@@ -53,6 +53,7 @@ pub(super) fn codex_command_request(rpc_id: u64, thread_id: &str, name: &str) ->
             "method": "thread/compact/start",
             "params": {"threadId": thread_id},
         })),
+
         "review" => Some(json!({
             "jsonrpc": "2.0",
             "id": rpc_id,
@@ -63,6 +64,7 @@ pub(super) fn codex_command_request(rpc_id: u64, thread_id: &str, name: &str) ->
                 "target": {"type": "uncommittedChanges"},
             },
         })),
+
         _ => None,
     }
 }
@@ -591,12 +593,14 @@ pub(super) fn parse_replay(turns: &Value) -> Vec<ReplayTurn> {
                 // live parser so dialogue, command output, diffs, and tool
                 // results cannot diverge between live and restored sessions.
                 Some("hookPrompt") | None => {}
+
                 Some(_) => {
                     if let Some(item) = parse_item(item) {
                         let visible = match &item {
                             Item::UserMessage { text } | Item::AgentMessage { text, .. } => {
                                 text.as_deref().is_some_and(|text| !text.trim().is_empty())
                             }
+
                             _ => true,
                         };
 
@@ -663,15 +667,18 @@ pub(super) fn parse_item(item: &Value) -> Option<Item> {
                 text: (!text.is_empty()).then_some(text),
             }
         }
+
         "agentMessage" => Item::AgentMessage {
             id,
             text: item["text"].as_str().map(str::to_owned),
             questions: parse_async_questions(item),
         },
+
         "reasoning" => Item::Reasoning {
             id,
             summary: reasoning_text(item),
         },
+
         "commandExecution" => Item::CommandExecution {
             id,
             command: stringify_command(&item["command"]),
@@ -680,16 +687,19 @@ pub(super) fn parse_item(item: &Value) -> Option<Item> {
             status,
             exit_code: item["exitCode"].as_i64(),
         },
+
         "fileChange" => Item::FileChange {
             id,
             paths: file_change_paths(&item["changes"]),
             diff: file_change_diff(&item["changes"]),
             status,
         },
+
         "contextCompaction" => Item::Compaction {
             id,
             detail: Compaction::default(),
         },
+
         kind => Item::Other {
             id,
             kind: kind.to_string(),
@@ -712,10 +722,12 @@ pub(super) fn command_purpose(actions: &Value) -> Option<String> {
     for action in actions {
         let label = match action["type"].as_str()? {
             "read" => format!("Read {}", nonempty_string(action, "name")?),
+
             "listFiles" => format!(
                 "List {}",
                 nonempty_string(action, "path").or_else(|| nonempty_string(action, "command"))?
             ),
+
             "search" => {
                 let query = nonempty_string(action, "query");
                 let path = nonempty_string(action, "path");
@@ -726,6 +738,7 @@ pub(super) fn command_purpose(actions: &Value) -> Option<String> {
                     _ => format!("Search {}", nonempty_string(action, "command")?),
                 }
             }
+
             "unknown" => return None,
             _ => return None,
         };
@@ -767,11 +780,13 @@ pub(super) fn tool_output(item: &Value) -> Option<String> {
 pub(super) fn stringify_command(command: &Value) -> String {
     match command {
         Value::String(s) => s.clone(),
+
         Value::Array(parts) => parts
             .iter()
             .map(|p| p.as_str().unwrap_or_default())
             .collect::<Vec<_>>()
             .join(" "),
+
         other => other.to_string(),
     }
 }

@@ -39,6 +39,7 @@ pub(crate) const APP_VERSION: &str = env!("NIUMATERM_VERSION");
 /// with a network request, and the recheck cadence keeps an installation that
 /// stays open for days from drifting more than a few hours behind a release.
 const FIRST_CHECK_DELAY: Duration = Duration::from_secs(5);
+
 const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -47,23 +48,30 @@ pub(crate) enum Status {
     /// off reports for as long as it stays off.
     #[default]
     Unknown,
+
     Checking,
+
     /// The channel has published nothing this build can be compared against,
     /// which is not the same as being current: an empty channel says nothing
     /// about what is running.
     NothingPublished,
+
     UpToDate,
     Available(Release),
+
     /// The package is being fetched and unpacked, or its captured plan is being
     /// applied without needing a user decision.
     Installing(Release),
+
     InspectingFileUse(Release),
     AwaitingFileUse(Release),
     ClosingFileUsers(Release),
+
     RecoveryWarning {
         release: Release,
         applications: Vec<String>,
     },
+
     Failed(CheckError),
     InstallFailed(InstallError),
 }
@@ -91,7 +99,9 @@ impl Status {
             | Self::InspectingFileUse(release)
             | Self::AwaitingFileUse(release)
             | Self::ClosingFileUsers(release) => Some(release),
+
             Self::RecoveryWarning { release, .. } => Some(release),
+
             Self::Unknown
             | Self::Checking
             | Self::NothingPublished
@@ -110,12 +120,16 @@ impl Status {
 pub(crate) enum InstallError {
     /// The release has no package, or none published beside a checksum.
     NoPackage,
+
     Unreachable,
+
     /// What arrived is not what was published.
     Checksum,
+
     Unpack,
     NotWritable,
     Replace,
+
     /// The files were replaced, so the update did land; only the restart into
     /// it did not.
     Relaunch,
@@ -125,10 +139,12 @@ pub(crate) struct AppUpdate {
     status: Status,
     testing: bool,
     pending: Option<PendingInstall>,
+
     /// The settings the current status was produced under. Settings changes
     /// arrive as one undifferentiated notification, so the values are mirrored
     /// here to tell an update setting moving from a change to anything else.
     channel: UpdateChannel,
+
     checking_enabled: bool,
 }
 
@@ -254,6 +270,7 @@ fn inspect_file_users(cx: &mut App) {
     let Some(pending) = cx.global::<AppUpdate>().pending.clone() else {
         return;
     };
+
     let release = pending.release.clone();
     let dll = pending.install.join(install::SHELL_EXTENSION_DLL);
 
@@ -279,9 +296,12 @@ fn finish_file_use_inspection(result: Result<FileUsage, RestartManagerError>, cx
     let prompt = match classify_file_usage(result) {
         Ok(None) => {
             continue_install(cx);
+
             return;
         }
+
         Ok(Some(prompt)) => prompt,
+
         Err(error) => {
             warn!("update: checking shell-extension users failed: {error}");
 
@@ -324,6 +344,7 @@ fn show_file_use_prompt(prompt: FileUsePrompt, cx: &mut App) {
     for handle in pending_windows(&pending, cx) {
         if file_users::open_file_use_prompt(handle, prompt.clone(), cx) {
             cx.refresh_windows();
+
             return;
         }
     }
@@ -407,7 +428,9 @@ fn fail_install(error: InstallError, cx: &mut App) {
 
 trait FileUserSession {
     fn file_usage(&self) -> Result<FileUsage, RestartManagerError>;
+
     fn shutdown(&self) -> Result<(), RestartManagerError>;
+
     fn restart(&self) -> Result<(), RestartManagerError>;
 }
 
@@ -443,10 +466,12 @@ impl FileUserSessionSource for SystemSessionSource {
 
 enum ClosePreparation<S> {
     Clear,
+
     Released {
         session: S,
         applications: Vec<AffectedApplication>,
     },
+
     Prompt(FileUsePrompt),
 }
 
@@ -454,6 +479,7 @@ pub(crate) fn close_file_users(cx: &mut App) {
     let Some(pending) = cx.global::<AppUpdate>().pending.clone() else {
         return;
     };
+
     let dll = pending.install.join(install::SHELL_EXTENSION_DLL);
 
     set_status(Status::ClosingFileUsers(pending.release), cx);
@@ -469,9 +495,11 @@ pub(crate) fn close_file_users(cx: &mut App) {
             ClosePreparation::Clear => {
                 cx.update(continue_install);
             }
+
             ClosePreparation::Prompt(prompt) => {
                 cx.update(|cx| show_file_use_prompt(prompt, cx));
             }
+
             ClosePreparation::Released {
                 session,
                 applications,
@@ -506,16 +534,20 @@ where
 {
     let session = match source.open(path) {
         Ok(session) => session,
+
         Err(error) => {
             warn!("update: starting shell-extension shutdown failed: {error}");
+
             return check_failed_prompt();
         }
     };
 
     let usage = match session.file_usage() {
         Ok(usage) => usage,
+
         Err(error) => {
             warn!("update: refreshing shell-extension users failed: {error}");
+
             return check_failed_prompt();
         }
     };
@@ -549,8 +581,10 @@ where
                 },
                 applications: usage.applications,
             }),
+
             Err(list_error) => {
                 warn!("update: listing applications after failed shutdown failed: {list_error}");
+
                 check_failed_prompt()
             }
         };
@@ -623,6 +657,7 @@ fn show_recovery_warning(applications: Vec<String>, cx: &mut App) {
     for handle in pending_windows(&pending, cx) {
         if file_users::open_recovery_warning(handle, applications.clone(), cx) {
             cx.refresh_windows();
+
             return;
         }
     }
@@ -733,6 +768,7 @@ pub(crate) fn schedule_automatic_checks(cx: &mut App) {
                     check(cx);
                 }
             });
+
             cx.background_executor().timer(CHECK_INTERVAL).await;
         }
     })

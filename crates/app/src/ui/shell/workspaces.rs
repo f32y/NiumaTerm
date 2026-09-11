@@ -226,6 +226,7 @@ impl Shell {
                 })
                 .on_ok(move |_, window, cx| {
                     let name = name_input.read(cx).value().trim().to_string();
+
                     let Some(roots) = dirs.read(cx).roots().cloned() else {
                         return false;
                     };

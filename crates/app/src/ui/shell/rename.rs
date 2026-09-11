@@ -150,6 +150,7 @@ impl Shell {
         }
 
         self.focus_active(window, cx);
+
         cx.notify();
     }
 

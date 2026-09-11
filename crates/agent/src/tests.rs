@@ -156,6 +156,7 @@ fn new_prompt_supersedes_needs_input_and_old_stop_is_ignored() {
         event(&r, "s1", Some("z"), AgentEventKind::PromptSubmitted),
         now,
     );
+
     monitor.apply(
         event(&r, "s1", Some("z"), AgentEventKind::PermissionRequested),
         now,
@@ -171,6 +172,7 @@ fn new_prompt_supersedes_needs_input_and_old_stop_is_ignored() {
         event(&r, "s2", Some("a"), AgentEventKind::PromptSubmitted),
         now,
     );
+
     monitor.apply(event(&r, "s1", Some("z"), AgentEventKind::Stopped), now);
 
     assert_eq!(
@@ -192,14 +194,17 @@ fn nested_session_and_opaque_turn_events_cannot_steal_owner() {
         event(&r, "parent", Some("10"), AgentEventKind::PromptSubmitted),
         now,
     );
+
     monitor.apply(
         event(&r, "child", None, AgentEventKind::SessionStarted),
         now,
     );
+
     monitor.apply(
         event(&r, "parent", Some("2"), AgentEventKind::ToolFinished),
         now,
     );
+
     monitor.apply(event(&r, "child", Some("1"), AgentEventKind::Stopped), now);
 
     let owner = monitor.pane(&r).unwrap().current_owner.as_ref().unwrap();
@@ -294,6 +299,7 @@ fn explicit_lifecycle_route_stays_active_until_completion() {
     let mut monitor = AgentMonitor::new("process");
 
     monitor.register_route(r.clone(), AgentActivityPolicy::ExplicitLifecycle, now);
+
     monitor.apply(
         event(&r, "s", Some("t"), AgentEventKind::PromptSubmitted),
         now,
@@ -332,6 +338,7 @@ fn matching_update_reschedules_stale_expiry() {
         event(&r, "s", Some("t"), AgentEventKind::PromptSubmitted),
         now,
     );
+
     monitor.apply(
         event(&r, "s", Some("t"), AgentEventKind::ToolFinished),
         update,
@@ -364,11 +371,14 @@ fn old_generation_completion_timer_cannot_complete_new_prompt() {
         event(&r, "s", Some("old"), AgentEventKind::PromptSubmitted),
         now,
     );
+
     monitor.apply(event(&r, "s", Some("old"), AgentEventKind::Stopped), now);
+
     monitor.apply(
         event(&r, "s", Some("new"), AgentEventKind::PromptSubmitted),
         now + Duration::from_millis(100),
     );
+
     monitor.process_due(now + COMPLETION_QUIET_WINDOW);
 
     assert_eq!(
@@ -388,6 +398,7 @@ fn latest_notification_acknowledgement_and_status_are_independent() {
         event(&r, "s", Some("t"), AgentEventKind::PromptSubmitted),
         now,
     );
+
     monitor.apply(
         event(&r, "s", Some("t"), AgentEventKind::PermissionRequested),
         now,
@@ -428,6 +439,7 @@ fn failed_native_operations_cannot_clear_internal_attention() {
         event(&r, "s", Some("t"), AgentEventKind::PromptSubmitted),
         now,
     );
+
     monitor.apply(
         event(&r, "s", Some("t"), AgentEventKind::PermissionRequested),
         now,
@@ -471,6 +483,7 @@ fn aggregation_counts_routes_and_prioritizes_needs_input() {
         event(&a, "s1", Some("t1"), AgentEventKind::PromptSubmitted),
         now,
     );
+
     monitor.apply(
         event(&b, "s2", Some("t2"), AgentEventKind::PromptSubmitted),
         now,
@@ -485,6 +498,7 @@ fn aggregation_counts_routes_and_prioritizes_needs_input() {
         event(&a, "s1", Some("t1"), AgentEventKind::PermissionRequested),
         now,
     );
+
     monitor.apply(
         event(&b, "s2", Some("t2"), AgentEventKind::PermissionRequested),
         now,
@@ -578,6 +592,7 @@ fn osc_style_notification_replaces_latest_without_changing_agent_state() {
         event(&r, "s", Some("t"), AgentEventKind::PromptSubmitted),
         now,
     );
+
     monitor.notify(&r, "first", "old");
 
     let old = monitor.notification(&r).unwrap().id.clone();
@@ -619,9 +634,11 @@ fn closed_route_cancels_pending_and_rejects_late_events() {
         event(&r, "s", Some("t"), AgentEventKind::PromptSubmitted),
         now,
     );
+
     monitor.apply(event(&r, "s", Some("t"), AgentEventKind::Stopped), now);
     monitor.remove_route(&r);
     monitor.process_due(now + COMPLETION_QUIET_WINDOW);
+
     monitor.apply(
         event(&r, "s", Some("t"), AgentEventKind::PromptSubmitted),
         now,
@@ -670,6 +687,7 @@ fn colliding_local_pane_ids_stay_isolated_across_windows_and_close_cascades() {
         ),
         now,
     );
+
     second.remove_route(&window_two); // pane/tab/workspace/window teardown converges here.
     second.process_due(now + COMPLETION_QUIET_WINDOW);
 

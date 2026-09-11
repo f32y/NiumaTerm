@@ -82,6 +82,7 @@ fn resolve_restored_launch(state: &mut TabState, settings: &AppSettings) {
 
     if !keep {
         let (shell, args) = settings.default_profile_command();
+
         state.shell = shell;
         state.args = args;
     }
@@ -144,6 +145,7 @@ fn pane_node_state(
                 cwd: state.cwd,
             }
         }
+
         PaneNode::Split {
             axis,
             children,
@@ -185,6 +187,7 @@ pub(super) fn default_session(
     // then starts in its own default directory, as before.
     let (cwd, spawn_cwd) = match initial_cwd {
         Some(dir) => (dir.clone(), Some(dir)),
+
         None => (
             home_dir()
                 .map(|home| home.display().to_string())
@@ -274,6 +277,7 @@ pub(super) fn restore_session(
                 name,
                 roots,
             ));
+
             workspaces
                 .as_mut()
                 .expect("workspace manager was just created")
@@ -346,10 +350,13 @@ pub(super) fn materialize_active_tab(
             let pane = match spawn_pane(cx, surface_id, launch, profile_name) {
                 Ok(pane) => {
                     Shell::watch_pane(&pane, cx);
+
                     pane
                 }
+
                 Err(error) => {
                     warn!("failed to restore tab {surface_id} lazily: {error}");
+
                     spawn_default_pane(cx, surface_id, default_profile, None)
                 }
             };
@@ -404,6 +411,7 @@ fn restore_tabs(
                     name
                 }
             }
+
             None => cx
                 .global::<AppSettings>()
                 .profile_name_for_command(tab_state.shell.as_deref(), &tab_state.args),
@@ -471,14 +479,18 @@ fn restore_pane_node(
             match spawn_pane(cx, surface_id, launch, profile_name) {
                 Ok(pane) => {
                     Shell::watch_pane(&pane, cx);
+
                     Some(PaneTree::restored_leaf(PaneId(surface_id), pane))
                 }
+
                 Err(error) => {
                     warn!("failed to restore pane {surface_id}: {error}");
+
                     None
                 }
             }
         }
+
         PaneNodeState::Split {
             axis,
             ratios,
@@ -492,6 +504,7 @@ fn restore_pane_node(
             match built.len() {
                 0 => None,
                 1 => built.into_iter().next(),
+
                 _ => {
                     let state = cx.new(|_| ResizableState::default());
 
@@ -530,12 +543,15 @@ pub(super) fn spawn_default_pane(
 
     let spawned = spawn_pane(cx, surface_id, launch, profile_name).or_else(|error| {
         warn!("spawn with workspace cwd/profile failed, retrying default: {error}");
+
         let (launch, profile_name) = launch_with_profile(None, default_profile, cx);
+
         spawn_pane(cx, surface_id, launch, profile_name)
     });
 
     let pane = match spawned {
         Ok(pane) => pane,
+
         Err(error) => {
             warn!("default profile failed, retrying built-in shell: {error}");
 
@@ -543,6 +559,7 @@ pub(super) fn spawn_default_pane(
 
             match spawn_pane(cx, surface_id, launch, profile_name) {
                 Ok(pane) => pane,
+
                 Err(error) => {
                     // Even the built-in shell cannot spawn (e.g. ConPTY
                     // unavailable) — no terminal can ever open, so tell
@@ -552,6 +569,7 @@ pub(super) fn spawn_default_pane(
                         &i18n("startup-terminal-spawn-error")
                             .replace("{error}", &error.to_string()),
                     );
+
                     process::exit(1);
                 }
             }
@@ -618,6 +636,7 @@ fn session_state(
                         // snapshot unchanged — its shells never ran, so the
                         // saved launch state is still the truth.
                         TabSurface::Pending(state) => (**state).clone(),
+
                         // Flat fields always mirror the focused pane, so a
                         // snapshot without splits stays in the old format
                         // and an old build restores something sensible
@@ -630,17 +649,20 @@ fn session_state(
 
                             state
                         }
+
                         // Agent conversations are not persisted (the
                         // agent process and its thread die with the app);
                         // the saved kind reopens a fresh agent tab.
                         TabSurface::Agent(pane) => {
                             let agent: &str = pane.read(cx).kind().into();
+
                             TabState {
                                 agent: Some(agent.into()),
                                 agent_profile: Some(pane.read(cx).profile_name().to_string()),
                                 ..TabState::default()
                             }
                         }
+
                         // Only the settings workspace holds this surface,
                         // and that workspace is skipped above; the arm
                         // exists so the match stays exhaustive.

@@ -42,24 +42,30 @@ pub struct SystemConfig {
         rename = "restore-last-session-when-opening"
     )]
     pub restore_last_session_when_opening: bool,
+
     /// Manage each tab's shell with a Windows Job Object (kill tree on close).
     #[serde(default, rename = "manage-subprocess-job")]
     pub manage_subprocess_job: bool,
+
     /// When to warn before closing a pane, tab, workspace, or window.
     #[serde(default, rename = "warn-before-terminating-shell")]
     pub warn_before_terminating_shell: WarnBeforeTerminatingShell,
+
     /// Ask for confirmation before closing a workspace, Agent tab, or window.
     #[serde(
         default = "default_bool_true",
         rename = "confirm-before-closing-workspace"
     )]
     pub confirm_before_closing_workspace: bool,
+
     /// Raise the main (UI) and render thread priority to AboveNormal.
     #[serde(default, rename = "prioritize-ui-threads")]
     pub prioritize_ui_threads: bool,
+
     /// Modified Enter key that inserts a new line without submitting input.
     #[serde(default, rename = "newline-shortcut")]
     pub newline_shortcut: NewlineShortcut,
+
     /// Open an Explorer directory in the deepest workspace that already
     /// contains it, instead of always opening a workspace of its own.
     #[serde(default = "default_bool_true", rename = "open-in-best-workspace")]

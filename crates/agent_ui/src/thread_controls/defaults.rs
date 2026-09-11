@@ -88,12 +88,14 @@ impl AgentPane {
         let Some(session) = self.session.runtime.backend_mut() else {
             return;
         };
+
         let Some(outcome) = self.session.controls.apply_model(session) else {
             return;
         };
 
         match outcome {
             Ok(()) => cx.notify(),
+
             Err(error) => self
                 .palette
                 .set_feedback(CommandFeedbackKind::Error, error, cx),
@@ -118,8 +120,10 @@ impl AgentPane {
         match session.select_agent_preset(&preset) {
             Ok(()) => {
                 self.session.controls.agent_preset = Some(preset);
+
                 cx.notify();
             }
+
             Err(error) => self
                 .palette
                 .set_feedback(CommandFeedbackKind::Error, error, cx),

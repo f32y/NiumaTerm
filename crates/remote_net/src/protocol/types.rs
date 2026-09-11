@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub struct ProtocolSessionOptions {
     /// `None` means the host's default shell.
     pub shell: Option<String>,
+
     pub working_directory: Option<String>,
     pub cols: u16,
     pub rows: u16,
@@ -40,15 +41,19 @@ pub struct ProtocolSessionSnapshot {
 pub enum HostBound {
     ListSessions,
     Open(ProtocolSessionOptions),
+
     Attach {
         session_id: u64,
     },
+
     Detach {
         session_id: u64,
     },
+
     Kill {
         session_id: u64,
     },
+
     /// Sent inside an XX-handshake channel to redeem a one-time pairing token.
     Pair {
         token: [u8; 16],
@@ -60,11 +65,14 @@ pub enum HostBound {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClientBound {
     SessionList(Vec<ProtocolSessionInfo>),
+
     Opened {
         session_id: u64,
     },
+
     Attached(ProtocolSessionSnapshot),
     Paired,
+
     Error {
         session_id: Option<u64>,
         message: String,

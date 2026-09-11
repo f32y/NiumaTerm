@@ -38,15 +38,19 @@ impl FrameStore {
             // the frame while unique ownership permits exchanging its contents.
             if let Some(front) = Arc::get_mut(&mut state.current) {
                 mem::swap(front, back);
+
                 return;
             }
 
             for (index, frame) in state.retired.iter_mut().enumerate() {
                 if let Some(frame) = Arc::get_mut(frame) {
                     mem::swap(frame, back);
+
                     let next = state.retired.swap_remove(index);
                     let old = mem::replace(&mut state.current, next);
+
                     state.retired.push(old);
+
                     return;
                 }
             }
@@ -56,12 +60,16 @@ impl FrameStore {
         // allocation and any evicted frame's destruction stay outside the lock.
         let next = mem::replace(back, RenderBuffer::new(0, 0));
         let next = Arc::new(next);
+
         let discarded = {
             let mut state = self.state.lock();
             let old = mem::replace(&mut state.current, next);
+
             state.retired.push(old);
+
             (state.retired.len() > 3).then(|| state.retired.remove(0))
         };
+
         drop(discarded);
     }
 }

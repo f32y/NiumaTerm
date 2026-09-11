@@ -29,6 +29,7 @@ pub(crate) fn hover_action(
     let action = match layout {
         HoverActionLayout::Bare => action,
         HoverActionLayout::Inline => action.px_1(),
+
         HoverActionLayout::Fill => action
             .absolute()
             .inset_0()
@@ -39,6 +40,7 @@ pub(crate) fn hover_action(
 
     let action = match visibility {
         HoverActionVisibility::Always => action,
+
         HoverActionVisibility::OnGroupHover(group) => {
             action.invisible().group_hover(group, |this| this.visible())
         }

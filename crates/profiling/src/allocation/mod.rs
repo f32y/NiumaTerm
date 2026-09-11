@@ -21,10 +21,13 @@ pub struct AllocationCounts {
     pub allocations: u64,
     pub reallocations: u64,
     pub deallocations: u64,
+
     /// Sizes of successful alloc/alloc_zeroed calls.
     pub allocated_bytes: u64,
+
     /// New sizes requested by successful realloc calls, including in-place ones.
     pub reallocated_bytes: u64,
+
     /// Sizes passed to dealloc; realloc's old size is not included.
     pub deallocated_bytes: u64,
 }
@@ -163,6 +166,7 @@ unsafe impl GlobalAlloc for ProfilingAllocator {
         // SAFETY: The caller supplies a live allocation and its original layout;
         // all allocations made by this wrapper come directly from System.
         unsafe { System.dealloc(pointer, layout) };
+
         record(AllocationCounts {
             deallocations: 1,
             deallocated_bytes: layout.size() as u64,
@@ -193,6 +197,7 @@ impl AllocationScope {
 
             state.depth += 1;
             slot.set(state);
+
             state.counts
         });
 

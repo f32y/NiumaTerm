@@ -27,6 +27,7 @@ impl Clipboard {
                     selection: Some(Box::new(selection)),
                 }
             }
+
             _ => Self::default(),
         }
     }
@@ -43,15 +44,19 @@ impl Default for Clipboard {
                 #[cfg(not(target_os = "macos"))]
                 selection: match X11ClipboardContext::<X11SelectionClipboard>::new() {
                     Ok(selection) => Some(Box::new(selection)),
+
                     Err(err) => {
                         warn!("Unable to initialize primary selection clipboard: {err}");
+
                         None
                     }
                 },
             },
+
             Err(err) => {
                 // A missing display server must not prevent terminal startup.
                 warn!("Unable to initialize clipboard, falling back to no-op: {err}");
+
                 Self::new_nop()
             }
         };

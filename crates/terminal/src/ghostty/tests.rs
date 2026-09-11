@@ -140,6 +140,7 @@ fn block_ref_reads_and_survives_removal() {
     let meta = r
         .read_row_visit(0, &palette, |_, cell_text, _, style| {
             text.push_str(cell_text.as_str());
+
             assert!(style.bold);
         })
         .unwrap()
@@ -1025,6 +1026,7 @@ fn resize_reflow_does_not_duplicate_viewport_content() {
             .collect();
 
         dups.sort();
+
         eprintln!(
             "[reflow-dup] step {step} {cols}x{rows}: {} tags, dups={dups:?}",
             counts.len()
@@ -1073,6 +1075,7 @@ fn resize_shrink_does_not_double_full_width_padded_lines() {
     for i in 0..40 {
         let body = format!("line{i:02}");
         let pad = cols as usize - body.len();
+
         padded.write_vt(format!("{body}{}\r\n", " ".repeat(pad)).as_bytes());
     }
 
@@ -1531,11 +1534,13 @@ fn shrink_resize_does_not_panic() {
 
     for i in 0..200u32 {
         let line = format!("line {i} with some text that is fairly long to wrap\r\n");
+
         t.write_vt(line.as_bytes());
     }
 
     for (c, r) in [(60u16, 20u16), (40, 15), (20, 10), (5, 3), (1, 1), (80, 24)] {
         t.resize(c, r, 8, 16).unwrap();
+
         let _ = t.snapshot().unwrap();
     }
 }
@@ -1580,7 +1585,9 @@ fn write_pty_dsr_cursor_report() {
 #[test]
 fn write_pty_primary_da() {
     let mut terminal = GhosttyTerminal::new(20, 5, 100).unwrap();
+
     terminal.write_vt(b"\x1b[c");
+
     assert!(!terminal.take_pty_writes().is_empty());
 }
 
@@ -1819,6 +1826,8 @@ fn read_screen_row_prompt_tag_and_hyperlinks() {
 #[test]
 fn read_screen_row_out_of_range_is_none() {
     let mut t = GhosttyTerminal::new(10, 3, 100).unwrap();
+
     t.write_vt(b"x");
+
     assert!(t.read_screen_row(9999).unwrap().is_none());
 }

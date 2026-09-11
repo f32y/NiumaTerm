@@ -37,6 +37,7 @@ impl AgentWorkspace {
                 primary: Some(primary),
                 additional,
             },
+
             None => Self::single(None),
         }
     }
@@ -90,6 +91,7 @@ impl AgentWorkspace {
 pub enum MultiRootAccess {
     /// Every attached directory reaches the harness.
     Full,
+
     /// The harness accepts one workspace root per session, so only the primary
     /// directory reaches it and the rest must be disclosed as unavailable.
     PrimaryOnly,

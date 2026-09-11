@@ -114,6 +114,7 @@ pub fn fetch() -> Result<UsageSnapshot, String> {
 
                     requested_limits = true;
                 }
+
                 Some(2) => return parse_rate_limits(&message),
                 _ => {}
             }

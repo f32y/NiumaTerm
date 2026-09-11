@@ -27,10 +27,12 @@ pub struct LaunchProfile<'a> {
 pub const ANTHROPIC_MODEL_ENV: &str = "ANTHROPIC_MODEL";
 pub const OPENAI_API_KEY_ENV: &str = "OPENAI_API_KEY";
 pub const CODEX_CREDENTIAL_ENV_PREFIX: &str = "NIUMATERM_CODEX_API_KEY_";
+
 /// DeepSeek Harness layers credential sources by trust and puts the inherited
 /// process environment above its own managed store, so a key exported here
 /// authenticates the host whatever that store holds.
 pub const DEEPSEEK_API_KEY_ENV: &str = "DEEPSEEK_API_KEY";
+
 /// The endpoint DeepSeek Harness routes to when its own settings document names
 /// none, which is the state a stock installation is in. A `baseURL` written
 /// through the harness's own Models page outranks this, because that document is
@@ -55,6 +57,7 @@ fn codex_provider_id(profile_name: &str) -> String {
 
     for byte in profile_name.trim().as_bytes() {
         let byte: u64 = (*byte).into();
+
         hash ^= byte;
         hash = hash.wrapping_mul(0x100000001b3);
     }
@@ -121,9 +124,11 @@ pub fn agent_launch<'a>(
         if !key.is_empty() {
             let key_env = match profile.kind {
                 AgentKind::Claude => "ANTHROPIC_API_KEY",
+
                 AgentKind::Codex => codex_credential_env
                     .as_deref()
                     .unwrap_or(OPENAI_API_KEY_ENV),
+
                 AgentKind::DeepSeek => DEEPSEEK_API_KEY_ENV,
             };
 
@@ -186,10 +191,12 @@ pub fn agent_launch<'a>(
             deepseek::NPX_EXECUTABLE.to_string(),
             deepseek::NPX_ARGUMENTS.map(str::to_string).to_vec(),
         ),
+
         (AgentKind::DeepSeek, ProfileLauncher::PnpmDlx) => (
             deepseek::PNPM_DLX_EXECUTABLE.to_string(),
             deepseek::PNPM_DLX_ARGUMENTS.map(str::to_string).to_vec(),
         ),
+
         _ => (profile.executable.trim().to_string(), Vec::new()),
     };
 

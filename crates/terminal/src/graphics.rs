@@ -284,12 +284,14 @@ impl GraphicData {
             ColorType::Rgb => {
                 let buffer =
                     RgbImage::from_raw(self.width as u32, self.height as u32, self.pixels)?;
+
                 DynamicImage::ImageRgb8(buffer)
             }
 
             ColorType::Rgba => {
                 let buffer =
                     RgbaImage::from_raw(self.width as u32, self.height as u32, self.pixels)?;
+
                 DynamicImage::ImageRgba8(buffer)
             }
         };
@@ -315,8 +317,10 @@ impl GraphicData {
 enum ResizeTarget {
     /// No resize applies; keep the original dimensions.
     Keep,
+
     /// A requested dimension resolved to zero pixels.
     Invalid,
+
     /// Resize to this clamped (width, height).
     Target(usize, usize),
 }
@@ -371,6 +375,7 @@ fn check_opaque_region() {
 
         for y in 3..6 {
             let offset = y * 10 * 4;
+
             data[offset..offset + 3 * 4].fill(0);
         }
 

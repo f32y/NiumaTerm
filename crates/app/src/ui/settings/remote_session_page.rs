@@ -98,6 +98,7 @@ pub(super) fn remote_session_page() -> SettingPage {
 #[cfg(windows)]
 pub(crate) fn reconcile_remote_host(cx: &App) {
     let settings = cx.global::<AppSettings>();
+
     reconcile_remote_session(&settings.remote_session);
 }
 
@@ -263,6 +264,7 @@ fn remote_client_status(cx: &mut App) -> Div {
                             if code.trim().is_empty() {
                                 cx.global_mut::<AppSettings>().editing.remote_client_status =
                                     Some(i18n("settings-remote-enter-code-first").to_owned());
+
                                 return;
                             }
 
@@ -293,6 +295,7 @@ fn remote_client_status(cx: &mut App) -> Div {
                                                 .replace("{name}", &host.name)
                                                 .replace("{id}", &host.host_id)
                                         }
+
                                         Err(e) => i18n("settings-remote-pairing-failed")
                                             .replace("{error}", &e.to_string()),
                                     };

@@ -9,6 +9,7 @@
 
 use nmt_agent::session::controller::SessionController;
 use nmt_agent::session::history::SessionHistory;
+
 pub mod input_history;
 
 mod capabilities;
@@ -58,13 +59,16 @@ use crate::workflows::WorkflowUi;
 pub enum AgentPaneEvent {
     Lifecycle(AgentEvent),
     Interrupted,
+
     /// This tab's workflow picture changed: it gained its first run, or its
     /// count of running agents moved. Reported as an event so the chrome can
     /// track it without observing every pane repaint.
     WorkflowActivity,
+
     /// This tab's count of running child agents moved. Reported as an event so
     /// the chrome can track it without observing every pane repaint.
     BackgroundTaskActivity,
+
     /// A conversation this pane listed but cannot continue: it ran in another
     /// directory, and a tab is rooted in the one it was opened for. The chrome
     /// owns tabs, so opening it where it worked is left to the chrome.
@@ -72,12 +76,14 @@ pub enum AgentPaneEvent {
         cwd: String,
         session_id: String,
     },
+
     /// A name for the conversation this pane is holding, derived from the
     /// message that opened it. The pane does not know which tab owns it, so
     /// naming the tab is left to the chrome that does. An empty name means the
     /// pane no longer holds a conversation worth naming, which drops the tab
     /// back to the name its profile gives it.
     TitleSuggested(String),
+
     /// The tab holding this pane should close. A pane owns no tab, so the
     /// chrome that does is asked to close it.
     CloseRequested,
@@ -175,22 +181,27 @@ mod tests;
 /// Recent-session list shown above the composer.
 struct SessionHistoryUi {
     data: SessionHistory,
+
     /// Blank conversations show the list automatically; `/resume` can reopen
     /// the same list after a conversation has started.
     mode: RecentSessionsMode,
+
     /// The one highlighted row, whether the pointer or the arrow keys put it
     /// there. A list has a single current row: what a click opens and what
     /// Enter opens are the same row, and only one thing on screen says so.
     selected: usize,
+
     /// Whether the pointer is over the list. A search narrows the rows while
     /// the arrow keys still belong to the input, so the keyboard's highlight
     /// is not drawn then; a pointer over the list is reason enough to draw it,
     /// because the row under the pointer is what a click would open.
     pointer_inside: bool,
+
     /// Where the pointer last was over the list, so a row sliding under a
     /// pointer that has not moved cannot take the highlight back. Keyboard
     /// navigation scrolls the list, which does exactly that.
     pointer: Option<Point<Pixels>>,
+
     scroll: VirtualListScrollHandle,
     transcript_blur: Fade,
 }
@@ -232,20 +243,26 @@ struct SlashPalette {
     /// Provider discovery is a replacement snapshot; adapter/local entries
     /// remain available independently of whether discovery has arrived.
     provider_commands: Vec<SlashCommandInfo>,
+
     provider_commands_ready: bool,
+
     /// Derived from `provider_commands`; every write to that list must drop
     /// this, or the palette keeps offering commands the harness has withdrawn.
     catalog: Option<CachedCatalog>,
+
     /// `None` means Codex discovery is still loading. A populated catalog can
     /// contain both usable skills and non-fatal per-file errors.
     skill_catalog: Option<SkillCatalog>,
+
     /// Exact picker identity retained while the composer keeps its `$name`
     /// token. It is validated against `skill_catalog` before every send.
     skill_binding: Option<SkillReference>,
+
     selected: usize,
     dismissed: bool,
     scroll: ScrollHandle,
     feedback: Option<CommandFeedback>,
+
     /// Order of the latest feedback shown. A delayed dismissal compares
     /// against it so it can only retire the message it was started for.
     feedback_seq: u64,
@@ -255,55 +272,74 @@ pub struct AgentPane {
     pub(crate) focus: FocusHandle,
     agent_route: AgentRoute,
     kind: AgentKind,
+
     /// The launch profile this pane was opened with (executable, endpoint,
     /// env vars); every session (re)start uses it.
     profile: AgentProfile,
+
     /// The directories this tab is configured with. The primary one is the
     /// tab's working directory: the session process runs there and provider
     /// session history is scoped to it, because a resume id only resolves
     /// against the directory its conversation ran in. Editing the parent
     /// workspace replaces this list for the next conversation.
     workspace: AgentWorkspace,
+
     /// The directory list the running conversation was started with. Held
     /// apart from `workspace` so an edit never changes what a process already
     /// running was granted.
     active_workspace: AgentWorkspace,
+
     input_history_scope: InputHistoryScope,
     input_history_navigation: InputHistoryNavigation,
+
     /// Images the pending message carries, anchored to the composer text by
     /// their `[Image #N]` placeholders, and the response text quoted into it.
     attachments: ComposerAttachments,
+
     /// The conversation as the user reads it. Presentation lives in its own
     /// view so a child agent's conversation renders through the same code.
     transcript: Entity<TranscriptView>,
+
     input: Entity<TextareaState>,
     history_ui: SessionHistoryUi,
+
     /// Provider state and transitions, independent of widgets and rendering.
     session: SessionController,
+
     /// Interaction state for the thread controls under the composer.
     controls: ThreadControls,
+
     /// The running turn's bookkeeping, from submission to settled output.
     turn: TurnPresentation,
+
     /// The approval and question cards that block a turn until answered.
     prompts: PendingPrompts,
+
     palette: SlashPalette,
+
     /// Cutting the conversation at an earlier point, by rewind or by fork.
     branch: BranchFlow,
+
     git_branch_poll: GitBranchPoll,
     context_window_usage: Option<ContextWindowUsage>,
+
     /// How that window is currently filled, when the provider measures it.
     /// Codex reports only accounting, so this stays empty there.
     context_composition: Option<ContextComposition>,
+
     /// The plan mode and standing objective drawn above the composer.
     session_state: SessionStateBadge,
+
     /// Whole-log counters the backend folds from its own log. Absent where the
     /// backend reports none, because counting the visible transcript instead
     /// would disagree with the conversation's real length.
     session_stats: Option<SessionStats>,
+
     /// Workflow runs of this session and the agent conversation the user has
     /// open. Workflow agents are not child agents, so they never reach the
     /// `Background Tasks` state above.
     workflows: WorkflowUi,
+
     /// Ramp of the layer that covers the pane while its backend cannot take
     /// input. Cross-fading the whole layer keeps its arrival readable as the
     /// tab being held rather than as a blur being switched on.

@@ -10,11 +10,15 @@ use crate::graphics;
 pub(crate) struct FrozenImage {
     pub generation: sync::Arc<graphics::ImageGeneration>,
     pub z: i32,
+
     /// Element-local y of the row's top edge.
     pub y: f32,
+
     /// Column within the row, and cell width of the band.
     pub col: u32,
+
     pub width: u32,
+
     /// Normalized source rectangle `[u0, v0, u1, v1]` into the full image.
     pub source: [f32; 4],
 }

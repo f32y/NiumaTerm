@@ -185,6 +185,7 @@ impl RouterState {
         let Some(delivery) = self.delivery(owner) else {
             return Ok(Vec::new());
         };
+
         let early = self.early_messages.take(&thread_id);
 
         let closed = early.iter().any(|message| {
@@ -239,6 +240,7 @@ impl RouterState {
 
         self.thread_owners
             .retain(|_, candidate| *candidate != owner);
+
         self.server_requests.retain(|_, route| route.owner != owner);
         self.root_by_owner.insert(owner, thread_id.clone());
 
@@ -248,6 +250,7 @@ impl RouterState {
     fn remove_thread(&mut self, thread_id: &str) {
         self.server_requests
             .retain(|_, route| route.thread_id != thread_id);
+
         self.thread_owners.remove(thread_id);
         self.root_by_owner.retain(|_, root| root != thread_id);
         self.early_messages.forget(thread_id);
@@ -347,8 +350,10 @@ impl Router {
                     input: None,
                 },
             );
+
             message["id"] = json!(global_id);
             self.refresh_timer(&state);
+
             return Ok(());
         }
 
@@ -356,16 +361,20 @@ impl Router {
 
         match state.server_requests.remove(&id) {
             Some(route) if route.owner == owner => Ok(()),
+
             Some(route) => {
                 state.server_requests.insert(id, route);
+
                 Err("Codex server request belongs to another Agent Tab".to_string())
             }
+
             None => Err("Codex server request is no longer pending".to_string()),
         }
     }
 
     pub(super) fn reject_outgoing(&self, id: u64) {
         let mut state = self.state.lock();
+
         state.pending_requests.remove(&id);
         self.refresh_timer(&state);
     }
@@ -384,6 +393,7 @@ impl Router {
         state
             .pending_requests
             .retain(|_, route| route.owner != owner || ids.contains(&route.purpose.local_id()));
+
         self.refresh_timer(&state);
     }
 
@@ -403,6 +413,7 @@ impl Router {
                 .into_iter()
                 .filter_map(|route| {
                     let delivery = state.delivery(route.owner)?;
+
                     Some((delivery, route.timeout_response()))
                 })
                 .collect::<Vec<_>>()
@@ -471,6 +482,7 @@ impl Router {
         {
             match state.replace_root(route.owner, thread_id.to_string()) {
                 Ok(early) => deliveries.extend(early),
+
                 Err(error) => {
                     message = json!({
                         "id": route.purpose.local_id(),
@@ -489,13 +501,16 @@ impl Router {
         let Some(thread_id) = message_thread_id(&message).map(str::to_string) else {
             return Vec::new();
         };
+
         let Some(id) = message["id"].as_u64() else {
             return Vec::new();
         };
+
         let mut state = self.state.lock();
 
         let Some(owner) = state.thread_owners.get(&thread_id).copied() else {
             state.hold_early(&thread_id, message);
+
             return Vec::new();
         };
 
@@ -517,6 +532,7 @@ impl Router {
             let reason = message["params"]["message"]
                 .as_str()
                 .unwrap_or("Codex protocol reader failed");
+
             let _ = startup.send(Err(reason.to_string()));
         }
 
@@ -555,6 +571,7 @@ impl Router {
 
         let Some(owner) = state.thread_owners.get(&thread_id).copied() else {
             state.hold_early(&thread_id, message);
+
             return Vec::new();
         };
 
@@ -598,15 +615,19 @@ impl Router {
         let mut state = self.state.lock();
 
         state.sessions.remove(&owner);
+
         state
             .pending_requests
             .retain(|_, route| route.owner != owner);
+
         state
             .server_requests
             .retain(|_, route| route.owner != owner);
+
         state
             .thread_owners
             .retain(|_, thread_owner| *thread_owner != owner);
+
         state.root_by_owner.remove(&owner);
         self.refresh_timer(&state);
 

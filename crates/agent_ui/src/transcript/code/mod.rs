@@ -1,9 +1,11 @@
 mod ansi;
 mod prepared;
+
 #[cfg(test)]
 pub(super) use crate::transcript::code::prepared::{
     VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, should_virtualize_transcript, transcript_segments,
 };
+
 mod render;
 mod source;
 #[cfg(test)]
@@ -61,6 +63,7 @@ impl CodeTranscriptCache {
                 cached
                     .view
                     .update(cx, |view, cx| view.set_source(source, cx));
+
                 cached.dirty = false;
             }
 
@@ -182,7 +185,9 @@ impl CodeView {
                 let prepared = cx
                     .background_spawn(async move {
                         let mut prepared = PreparedCode::new(&parsing);
+
                         prepared.parse_syntax();
+
                         prepared
                     })
                     .await;
@@ -200,6 +205,7 @@ impl CodeView {
                             && view.source.output.starts_with(&source.output))
                     {
                         view.prepared = Some(Arc::new(prepared));
+
                         cx.notify();
                     }
 

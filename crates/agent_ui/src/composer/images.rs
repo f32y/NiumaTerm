@@ -54,9 +54,11 @@ impl AgentPane {
             .flat_map(|item| item.into_entries())
             .find_map(|entry| match entry {
                 ClipboardEntry::Image(image) => Some(image),
+
                 ClipboardEntry::ExternalPaths(paths) => {
                     paths.paths().iter().find_map(|path| image_file(path))
                 }
+
                 ClipboardEntry::String(_) => None,
             })
         else {
@@ -79,8 +81,10 @@ impl AgentPane {
         {
             Ok(()) => {
                 cx.notify();
+
                 true
             }
+
             Err(AttachError::Full) => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,
@@ -91,6 +95,7 @@ impl AgentPane {
 
                 true
             }
+
             // Something on the clipboard claimed to be an image and was not.
             // Falling through lets the composer paste whatever text is there.
             Err(AttachError::Undecodable) => false,
@@ -147,6 +152,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         let text = self.input.read(cx).text().to_string();
+
         let Some(image) = self.attachments.images().linked_image(&text, range) else {
             return;
         };

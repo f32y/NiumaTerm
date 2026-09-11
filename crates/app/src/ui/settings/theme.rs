@@ -52,6 +52,7 @@ pub(super) fn ui_theme_config(value: &UiTheme) -> Option<Rc<ComponentThemeConfig
     let mut config = TomlTable::new();
 
     config.insert("name".to_string(), TomlValue::String(value.name.clone()));
+
     config.insert(
         "mode".to_string(),
         TomlValue::String(
@@ -125,6 +126,7 @@ fn select_theme(name: String, cx: &mut App) {
 
             cx.refresh_windows();
         }
+
         Err(err) => warn!("failed to select theme {name}: {err}"),
     }
 }
@@ -148,6 +150,7 @@ pub(crate) fn watch_themes(cx: &mut App) -> Option<Task<()>> {
 
     if let Err(err) = fs::create_dir_all(&themes_dir) {
         warn!("failed to create themes directory: {err}");
+
         return None;
     }
 
@@ -159,14 +162,17 @@ pub(crate) fn watch_themes(cx: &mut App) -> Option<Task<()>> {
         }
     }) {
         Ok(watcher) => watcher,
+
         Err(err) => {
             warn!("failed to watch themes directory: {err}");
+
             return None;
         }
     };
 
     if let Err(err) = watcher.watch(&themes_dir, RecursiveMode::NonRecursive) {
         warn!("failed to watch themes directory: {err}");
+
         return None;
     }
 
@@ -375,6 +381,7 @@ pub(crate) fn apply_window_translucency(cx: &mut App) {
 
         for token in [&mut theme.tokens.title_bar, &mut theme.tokens.tab_bar] {
             let color = token.color.opacity(opacity);
+
             *token = ComponentThemeToken::new(color, color.into());
         }
 

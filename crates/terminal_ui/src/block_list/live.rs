@@ -24,6 +24,7 @@ impl LiveItemState {
         pad_rows: f32,
     ) -> LiveItemLayout {
         let active_height = live_rows as f32 * cell_height;
+
         let chrome = block_list_live_chrome(
             self.index,
             live_rows,
@@ -35,8 +36,10 @@ impl LiveItemState {
         .map(|mut chrome| {
             chrome.bottom = history_height + active_height + pad_rows * cell_height;
             chrome.header_y = history_height;
+
             chrome
         });
+
         LiveItemLayout {
             active_top: history_height,
             active_height,

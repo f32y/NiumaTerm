@@ -23,6 +23,7 @@ mod tests;
 
 pub(crate) use nmt_agent::session::history::FilesystemHistoryRequest;
 use nmt_agent::session::history::{CountPublication, count_scoped_sessions, list_scoped_sessions};
+
 impl SessionHistoryUi {
     pub(super) fn invalidate_filesystem_history(&mut self) {
         self.data.invalidate_filesystem_history();
@@ -46,9 +47,11 @@ impl SessionHistoryUi {
         let result = self
             .data
             .publish_filesystem_count(request, cwd, epoch, count);
+
         if matches!(result, CountPublication::Empty) {
             self.selected = 0;
         }
+
         result
     }
 
@@ -62,9 +65,11 @@ impl SessionHistoryUi {
         if !self.data.publish_filesystem_rows(request, cwd, epoch, rows) {
             return false;
         }
+
         self.selected = self
             .selected
             .min(self.data.sessions.len().saturating_sub(1));
+
         true
     }
 }
@@ -77,10 +82,12 @@ impl AgentPane {
     /// rescanned.
     pub(crate) fn toggle_history_scope(&mut self, cx: &mut Context<Self>) {
         self.history_ui.invalidate_filesystem_history();
+
         self.history_ui.data.scope = match self.history_ui.data.scope {
             SessionScope::CurrentDirectory => SessionScope::AllDirectories,
             SessionScope::AllDirectories => SessionScope::CurrentDirectory,
         };
+
         self.history_ui.data.sessions.clear();
         self.history_ui.data.showing_search = false;
         self.history_ui.selected = 0;
@@ -106,6 +113,7 @@ impl AgentPane {
 
         let cwd = self.cwd();
         let scope = self.history_ui.data.scope;
+
         let request = self
             .history_ui
             .begin_filesystem_history(cwd.clone(), self.session.runtime.epoch());
@@ -131,12 +139,16 @@ impl AgentPane {
                         count,
                     ) {
                         CountPublication::Stale => false,
+
                         CountPublication::Empty => {
                             cx.notify();
+
                             false
                         }
+
                         CountPublication::LoadRows => {
                             cx.notify();
+
                             true
                         }
                     }
@@ -182,6 +194,7 @@ impl AgentPane {
             SettingsSeed::Reviewer => (false, true),
             SettingsSeed::None => (false, false),
         };
+
         self.session.controls.seed_thread_defaults = defaults;
         self.session.controls.seed_approval_reviewer = reviewer;
     }
@@ -201,6 +214,7 @@ impl AgentPane {
         }
 
         let cwd = self.cwd();
+
         let request = match self.session.restore.begin(
             &mut self.session.runtime,
             self.kind,
@@ -208,31 +222,41 @@ impl AgentPane {
             cwd.as_deref(),
         ) {
             ResumeStart::Busy => return,
+
             ResumeStart::Elsewhere { cwd, session_id } => {
                 self.history_ui.selected = index;
+
                 cx.emit(AgentPaneEvent::ResumeElsewhere { cwd, session_id });
                 cx.notify();
+
                 return;
             }
+
             ResumeStart::Rejected => {
                 self.history_ui.mode = RecentSessionsMode::Open;
                 self.history_ui.selected = index;
+
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,
                     i18n("agent-session-codex-recent-not-ready").to_string(),
                     cx,
                 );
+
                 return;
             }
+
             ResumeStart::Requested => {
                 self.seed_restored_settings(SettingsSeed::resumed(self.kind));
+
                 None
             }
+
             ResumeStart::ReadReplay(request) => Some(request),
         };
 
         self.history_ui.mode = RecentSessionsMode::Loading;
         self.history_ui.selected = index;
+
         self.palette.set_feedback(
             CommandFeedbackKind::Notice,
             i18n("agent-session-opening-recent").to_string(),
@@ -248,12 +272,14 @@ impl AgentPane {
                 .background_executor()
                 .spawn(async move {
                     let replay = request.load();
+
                     (request, replay)
                 })
                 .await;
 
             let _ = this.update(cx, |this, cx| {
                 let cwd = this.cwd();
+
                 match this.session.restore.loaded(
                     &mut this.session.runtime,
                     request,
@@ -261,19 +287,24 @@ impl AgentPane {
                     replay,
                 ) {
                     ReplayLoaded::Stale => {}
+
                     ReplayLoaded::Cancelled => {
                         this.history_ui.mode = RecentSessionsMode::Open;
                         this.palette.feedback = None;
+
                         cx.notify();
                     }
+
                     ReplayLoaded::Failed(message) => {
                         this.history_ui.mode = RecentSessionsMode::Open;
+
                         this.palette.set_feedback(
                             CommandFeedbackKind::Error,
                             i18n("agent-session-open-failed").replace("{error}", &message),
                             cx,
                         );
                     }
+
                     ReplayLoaded::Restart(identity) => {
                         this.start_session_with_options(
                             Some(identity),

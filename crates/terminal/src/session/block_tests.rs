@@ -68,15 +68,19 @@ fn complete<T>(
     while let Ok(Msg::Query(query)) = messages.try_recv() {
         answer_query(engine, 0, 0, query);
     }
+
     block_on(request).unwrap().unwrap()
 }
 
 #[test]
 fn session_block_reads_copy_expand_and_preserve_row_metadata() {
     let mut engine = GhosttyTerminal::new(24, 4, 100).unwrap();
+
     engine.write_vt(b"hello world\r\n\x1b]8;;https://example.com\x07linked\x1b]8;;\x07");
+
     let handle = engine.finish_block().unwrap().unwrap();
     let (session, messages) = session_from_engine(&mut engine);
+
     session
         .block_store()
         .lock()
@@ -85,21 +89,25 @@ fn session_block_reads_copy_expand_and_preserve_row_metadata() {
             handle,
             rows: 2,
         }]);
+
     session
         .block_store()
         .lock()
         .update_meta(1, |meta| meta.command = Some("echo hello".into()));
+
     assert_eq!(session.block_command(0).as_deref(), Some("echo hello"));
     assert_eq!(
         complete(session.block_text(0).unwrap(), &mut engine, &messages),
         "hello world\nlinked"
     );
     assert!(session.block_text(10).is_none());
+
     let point = BlockPoint {
         item: 0,
         line: 0,
         col: 7,
     };
+
     let (a, b) = complete(
         session
             .expand_frozen_selection(point, SelectionType::Semantic)
@@ -107,26 +115,33 @@ fn session_block_reads_copy_expand_and_preserve_row_metadata() {
         &mut engine,
         &messages,
     );
+
     assert_eq!((a.1, b.1), (6, 10));
+
     let a = BlockPoint {
         item: 0,
         line: a.0,
         col: a.1,
     };
+
     let b = BlockPoint {
         item: 0,
         line: b.0,
         col: b.1,
     };
+
     assert_eq!(
         complete(session.frozen_selection_text(b, a), &mut engine, &messages),
         "world"
     );
     assert!(session.block_row_text(0, 1).is_none());
+
     while let Ok(Msg::Query(query)) = messages.try_recv() {
         answer_query(&mut engine, 0, 0, query);
     }
+
     let row = session.block_row_text(0, 1).unwrap();
+
     assert_eq!(row.text.chars().count(), 24);
     assert!(row.text.starts_with("linked"));
     assert!(!row.wrapped);
@@ -137,18 +152,27 @@ fn session_block_reads_copy_expand_and_preserve_row_metadata() {
 #[test]
 fn retained_frame_and_history_page_do_not_prevent_reflow() {
     let mut engine = GhosttyTerminal::new(24, 4, 100).unwrap();
+
     engine.write_vt(b"hello world");
+
     let handle = engine.finish_block().unwrap().unwrap();
     let (session, messages) = session_from_engine(&mut engine);
+
     assert!(session.block_page(handle, 0).is_none());
+
     while let Ok(Msg::Query(query)) = messages.try_recv() {
         answer_query(&mut engine, 0, 0, query);
     }
+
     let page = session.block_page(handle, 0).unwrap();
     let old = session.snapshot();
+
     engine.resize(12, 4, 8, 18).unwrap();
+
     let mut next = engine.snapshot().unwrap();
+
     session.render_buffer.publish(&mut next);
+
     assert_eq!(old.cols(), 24);
     assert_eq!(page.cols, 24);
     assert_eq!(session.snapshot().cols(), 12);

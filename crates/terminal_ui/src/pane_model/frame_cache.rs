@@ -7,11 +7,13 @@ use crate::graphics;
 #[derive(Default)]
 pub(crate) struct TerminalFrameCache {
     frame: Option<TerminalFrame>,
+
     /// The frame no longer matches the surface and must be rebuilt on the next
     /// render. `frame` is kept: pointer/IME mapping between the invalidation
     /// and the rebuild must keep using what is on screen — mapping against an
     /// empty cache flips the row offsets mid-drag (broken-selection bug).
     stale: bool,
+
     full_invalidation: bool,
 }
 

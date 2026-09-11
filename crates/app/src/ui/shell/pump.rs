@@ -56,6 +56,7 @@ impl Shell {
                         chrome_changed |= tabs.set_title(tab_id, title.clone());
                     }
                 }
+
                 HostEvent::Exit => {
                     self.remove_agent_route(&agent_route, cx);
 
@@ -97,6 +98,7 @@ impl Shell {
                         chrome_changed = true;
                     }
                 }
+
                 HostEvent::Bell => {
                     // Only background tabs get the indicator: a bell on the tab
                     // in front of you is already conveyed by the sound and the
@@ -110,6 +112,7 @@ impl Shell {
                         chrome_changed = true;
                     }
                 }
+
                 HostEvent::Progress(report) => {
                     if let Some(tab_id) = self.tab_for_pane(pane_id)
                         && let Some(tabs) = self.workspaces.tab_manager_for_mut(tab_id)
@@ -118,6 +121,7 @@ impl Shell {
                         chrome_changed = true;
                     }
                 }
+
                 HostEvent::CommandFinished { exit_code } => {
                     if let Some(tab_id) = self.tab_for_pane(pane_id) {
                         let watched = self.workspaces.active_tabs().active_id() == tab_id;
@@ -142,13 +146,16 @@ impl Shell {
 
                     chrome_changed = true;
                 }
+
                 // A command starting flips the workspace indicator, which lives
                 // in the chrome rather than in the pane's own grid.
                 HostEvent::InteractiveState(_)
                 | HostEvent::PromptBoundaryTrusted(_)
                 | HostEvent::PromptStarted
                 | HostEvent::CommandStarted => chrome_changed = true,
+
                 HostEvent::Cwd(_) => session_changed = true,
+
                 HostEvent::Notification { title, body } => {
                     let mutation = self.agent_monitor.notify(&agent_route, title, body);
 
@@ -158,6 +165,7 @@ impl Shell {
 
                     self.process_native_notifications(cx);
                 }
+
                 _ => {}
             }
         }

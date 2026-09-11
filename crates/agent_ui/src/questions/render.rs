@@ -39,6 +39,7 @@ impl AgentPane {
             .can_submit(&self.session.runtime, prompt.key())
             && !self.branch_flow_holds_composer()
             && !self.session.commands.awaiting_turn;
+
         let presentation = &self.prompts.presentations[active];
 
         let status = match prompt.status() {
@@ -49,6 +50,7 @@ impl AgentPane {
                     "agent-question-pending"
                 }
             }
+
             QuestionStatus::Submitting => "agent-question-submitting",
             QuestionStatus::Submitted => "agent-question-submitted",
             QuestionStatus::Skipped => "agent-question-skipped",
@@ -98,6 +100,7 @@ impl AgentPane {
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.prompts.active = Some(previous);
                             this.prompts.collapsed = false;
+
                             cx.notify();
                         })),
                 )
@@ -114,6 +117,7 @@ impl AgentPane {
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.prompts.active = Some(next);
                             this.prompts.collapsed = false;
+
                             cx.notify();
                         })),
                 );
@@ -130,6 +134,7 @@ impl AgentPane {
                 }))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.prompts.collapsed = !this.prompts.collapsed;
+
                     cx.notify();
                 })),
         );
@@ -247,12 +252,14 @@ impl AgentPane {
                                     if !prompt.choose_custom(index) {
                                         return;
                                     }
+
                                     if let Some(active) = this.prompts.active
                                         && let Some(editor) =
                                             &this.prompts.presentations[active].editors[index]
                                     {
                                         editor.state.focus(window, cx);
                                     }
+
                                     cx.notify();
                                 }
                             })),
@@ -295,6 +302,7 @@ impl AgentPane {
                 QuestionError::Disconnected => i18n("agent-question-disconnected").to_string(),
                 QuestionError::Rejected(message) => message.clone(),
             };
+
             panel = panel.child(div().text_sm().text_color(cx.theme().danger).child(error));
         }
 

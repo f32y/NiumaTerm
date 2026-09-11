@@ -18,6 +18,7 @@ pub mod transcript;
 #[cfg(not(enable_profiling))]
 #[path = "transcript/disabled.rs"]
 pub mod transcript;
+
 /// Enable runtime-gated frame, transcript, and allocation collection together.
 #[inline]
 pub fn set_enabled(enabled: bool) {

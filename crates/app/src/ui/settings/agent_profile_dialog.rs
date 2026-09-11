@@ -62,6 +62,7 @@ enum EnvField {
 struct AgentProfileDraft {
     target: Option<usize>,
     profile: AgentProfile,
+
     /// Environment-variable cell currently open for editing. The table shows
     /// plain text until a cell is double-clicked, so only one input exists at
     /// a time and the rows stay readable.
@@ -81,6 +82,7 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
             .get(ix)
             .cloned()
             .unwrap_or_default(),
+
         // A new profile starts from the Claude Code built-in with a blank
         // name; Save fills in a unique placeholder.
         None => AgentProfile {
@@ -163,6 +165,7 @@ fn save_agent_profile_draft(cx: &mut App) {
 
     match target {
         Some(ix) => settings.update_agent_profile(ix, profile),
+
         None => {
             settings.agent_profiles.push(profile);
 
@@ -684,7 +687,9 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
                 AgentProfileKind::ClaudeCode => {
                     i18n("settings-agent-profile-model-claude-description")
                 }
+
                 AgentProfileKind::Codex => i18n("settings-agent-profile-model-codex-description"),
+
                 AgentProfileKind::DeepSeek => {
                     i18n("settings-agent-profile-model-deepseek-description")
                 }
@@ -731,7 +736,9 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
                 AgentProfileKind::ClaudeCode => {
                     i18n("settings-agent-profile-api-url-claude-description")
                 }
+
                 AgentProfileKind::Codex => i18n("settings-agent-profile-api-url-codex-description"),
+
                 AgentProfileKind::DeepSeek => {
                     i18n("settings-agent-profile-api-url-deepseek-description")
                 }
@@ -746,8 +753,10 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
                     i18n("settings-agent-profile-api-key-claude-description")
                         .replace("{key}", key_env)
                 }
+
                 AgentProfileKind::Codex => i18n("settings-agent-profile-api-key-codex-description")
                     .replace("{key}", key_env),
+
                 AgentProfileKind::DeepSeek => {
                     i18n("settings-agent-profile-api-key-deepseek-description")
                         .replace("{key}", key_env)

@@ -76,6 +76,7 @@ fn package_assets(assets: &[Asset]) -> Option<(&Asset, &Asset)> {
     })?;
 
     let expected = format!("{}.sha256", package.name);
+
     let checksum = assets
         .iter()
         .find(|asset| asset.name == expected && asset.url.starts_with(DOWNLOAD_URL_PREFIX))?;

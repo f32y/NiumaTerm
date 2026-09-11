@@ -37,7 +37,9 @@ use crate::{PtyOptions, Winsize};
 /// the directory where the NiumaTerm executable is located.
 type CreatePseudoConsoleFn =
     unsafe extern "system" fn(COORD, HANDLE, HANDLE, u32, *mut HPCON) -> HRESULT;
+
 type ResizePseudoConsoleFn = unsafe extern "system" fn(HPCON, COORD) -> HRESULT;
+
 type ClosePseudoConsoleFn = unsafe extern "system" fn(HPCON);
 
 struct ConptyApi {
@@ -126,6 +128,7 @@ impl ConptyApi {
 pub struct Conpty {
     pub handle: HPCON,
     api: ConptyApi,
+
     /// Job object holding the shell's process tree (`KILL_ON_JOB_CLOSE`),
     /// present when job management is enabled. Closing the handle on drop
     /// kills every process still in the job.

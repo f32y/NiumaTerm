@@ -43,6 +43,7 @@ fn an_idle_workspace_supplies_no_glyph_but_retains_semantics() {
 #[test]
 fn both_halves_of_the_column_are_spoken_together() {
     let (agent, agent_label) = agent_presentation(AgentRuntimeStatus::NeedsInput).unwrap();
+
     let (_, terminal_label) =
         terminal_presentation(TerminalActivity::Finished(CommandOutcome::Failed)).unwrap();
 

@@ -16,6 +16,7 @@ use crate::settings::UI_RADIUS;
 /// enough that a full message's worth of them does not push the composer off
 /// the pane.
 pub(in crate::composer) const THUMBNAIL: f32 = 56.0;
+
 const ANNOTATION_WIDTH: f32 = 240.0;
 const ANNOTATION_PREVIEW_CHARS: usize = 160;
 
@@ -86,10 +87,12 @@ impl ComposerAttachments {
             .cursor_pointer()
             .on_prepaint({
                 let placed = placed.clone();
+
                 move |bounds, _, _| placed.set(bounds)
             })
             .on_click(cx.listener({
                 let image = image.clone();
+
                 move |this, _, _, cx| this.open_image(image.clone(), Some(placed.get()), cx)
             }))
             .child(img(image).size_full().object_fit(ObjectFit::Cover))
@@ -141,6 +144,7 @@ impl ComposerAttachments {
 
         let label =
             i18n("agent-composer-annotation-item").replace("{index}", &(index + 1).to_string());
+
         let group: SharedString = format!("agent-response-annotation-{index}").into();
         let full: SharedString = text.to_string().into();
 

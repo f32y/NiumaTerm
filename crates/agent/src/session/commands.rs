@@ -43,9 +43,12 @@ impl CommandQueue {
         match policy {
             SlashCommandRunPolicy::Immediate => CommandAdmission::Execute(command),
             SlashCommandRunPolicy::IdleOnly => CommandAdmission::Busy { name: command.name },
+
             SlashCommandRunPolicy::QueueUntilIdle => {
                 let name = command.name.clone();
+
                 self.queue.push_back(command);
+
                 CommandAdmission::Queued {
                     name,
                     count: self.queue.len(),
@@ -62,30 +65,38 @@ impl CommandQueue {
         let outcome = backend.map_or(SlashCommandOutcome::NotReady, |session| {
             session.execute_slash_command(&command.name, &command.arguments)
         });
+
         if matches!(outcome, SlashCommandOutcome::Accepted) {
             self.awaiting_turn = true;
         }
+
         outcome
     }
 
     pub fn clear(&mut self) -> bool {
         let discarded = !self.queue.is_empty();
+
         self.queue.clear();
         self.awaiting_turn = false;
+
         discarded
     }
 
     pub fn settle(&mut self, outcome: &SlashCommandOutcome, status: Status) -> bool {
         match outcome {
             SlashCommandOutcome::Accepted => false,
+
             SlashCommandOutcome::Completed { .. } => {
                 if status == Status::Running {
                     return false;
                 }
+
                 take(&mut self.awaiting_turn)
             }
+
             SlashCommandOutcome::Rejected { .. } | SlashCommandOutcome::NotReady => {
                 self.awaiting_turn = false;
+
                 true
             }
         }

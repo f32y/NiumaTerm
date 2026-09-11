@@ -10,6 +10,7 @@ pub struct UpdateConfig {
     /// The manual check on the About page stays available while this is off.
     #[serde(default = "default_bool_true", rename = "check-updates")]
     pub check_updates: bool,
+
     /// Which published channel counts as an update.
     #[serde(default, rename = "channel")]
     pub channel: UpdateChannel,

@@ -105,6 +105,7 @@ impl fmt::Display for RestartManagerError {
                 formatter,
                 "a Restart Manager session needs at least one file"
             ),
+
             Self::RelativePath(path) => {
                 write!(
                     formatter,
@@ -112,6 +113,7 @@ impl fmt::Display for RestartManagerError {
                     path.display()
                 )
             }
+
             Self::Windows { operation, code } => {
                 write!(
                     formatter,
@@ -231,6 +233,7 @@ impl<A: Api> Session<A> {
 
             check(Operation::ListApplications, code)?;
             processes.truncate(count as usize);
+
             return Ok(FileUsage {
                 applications: processes.into_iter().map(Into::into).collect(),
                 reboot_reasons: reboot_reasons.into(),
@@ -288,8 +291,11 @@ fn wide_text(value: &[u16]) -> String {
 
 trait Api {
     fn start_session(&self, handle: *mut u32, key: *mut u16) -> WIN32_ERROR;
+
     fn end_session(&self, handle: u32) -> WIN32_ERROR;
+
     fn register_files(&self, handle: u32, paths: &[*const u16]) -> WIN32_ERROR;
+
     fn get_list(
         &self,
         handle: u32,
@@ -298,7 +304,9 @@ trait Api {
         processes: *mut RM_PROCESS_INFO,
         reboot_reasons: *mut u32,
     ) -> WIN32_ERROR;
+
     fn shutdown(&self, handle: u32, flags: u32, callback: RM_WRITE_STATUS_CALLBACK) -> WIN32_ERROR;
+
     fn restart(&self, handle: u32, flags: u32, callback: RM_WRITE_STATUS_CALLBACK) -> WIN32_ERROR;
 }
 

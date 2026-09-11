@@ -23,6 +23,7 @@ pub(super) const TABLE_HEADER_HEIGHT: f32 = 32.0;
 /// Operation-column glyph size. `Button` draws its icon at three quarters of
 /// the button size, so the control is sized to land the glyph on this value.
 pub(super) const TABLE_OPERATION_ICON: f32 = 16.0;
+
 pub(super) const TABLE_OPERATION_BUTTON: Pixels = px(TABLE_OPERATION_ICON / 0.75);
 
 /// Operation-column width for a table whose rows carry a single control.

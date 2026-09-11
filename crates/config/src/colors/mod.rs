@@ -19,7 +19,9 @@ use crate::render_types;
 // type now (mirrors `wgpu::Color`'s shape, but doesn't drag wgpu
 // into the dep tree on Linux/macOS native builds).
 pub type ColorWGPU = render_types::Color;
+
 pub type ColorArray = [f32; 4];
+
 pub type ColorComposition = (ColorArray, ColorWGPU);
 
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Hash)]
@@ -36,6 +38,7 @@ impl Mul<f32> for ColorRgb {
         let r: f32 = self.r.into();
         let g: f32 = self.g.into();
         let b: f32 = self.b.into();
+
         let result = ColorRgb {
             r: (r * rhs).clamp(0.0, 255.0) as u8,
             g: (g * rhs).clamp(0.0, 255.0) as u8,
@@ -86,6 +89,7 @@ pub struct Colors {
     /// ColorComposition type is (ColorArray, ColorWGPU)
     /// See more in colors definition
     pub background: ColorComposition,
+
     #[serde(
         deserialize_with = "deserialize_to_arr",
         default = "defaults::foreground"
@@ -452,6 +456,7 @@ impl ColorBuilder {
         // Compiled once: this runs for every color of every theme, and regex
         // compilation dwarfs the match itself.
         static NON_HEX_CHARS: OnceLock<Regex> = OnceLock::new();
+
         static VALID_HEX_SIZE: OnceLock<Regex> = OnceLock::new();
 
         let mut alpha: f64 = 1.0;
@@ -492,6 +497,7 @@ impl ColorBuilder {
                 blue: (rgb[2] as f64) / 255.0,
                 alpha,
             }),
+
             Format::SRGB0_255 => Ok(Self {
                 red: (rgb[0] as f64),
                 green: (rgb[1] as f64),
@@ -509,6 +515,7 @@ impl ColorBuilder {
                 blue: (rgb.b as f64) / 255.0,
                 alpha: 1.0,
             },
+
             Format::SRGB0_255 => Self {
                 red: (rgb.r as f64),
                 green: (rgb.g as f64),
@@ -541,6 +548,7 @@ impl Default for ColorBuilder {
 impl fmt::Display for ColorBuilder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         let text: String = self.into();
+
         fmt::Display::fmt(&text, f)
     }
 }

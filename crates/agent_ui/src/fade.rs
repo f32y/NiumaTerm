@@ -173,6 +173,7 @@ impl FrostedLayer {
     pub(crate) fn light(mut self) -> Self {
         self.blur = px(16.);
         self.tint = 0.25;
+
         self
     }
 
@@ -180,6 +181,7 @@ impl FrostedLayer {
     /// wraps.
     pub(crate) fn padded(mut self) -> Self {
         self.padded = true;
+
         self
     }
 
@@ -189,6 +191,7 @@ impl FrostedLayer {
         listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_click = Some(Box::new(listener));
+
         self
     }
 }

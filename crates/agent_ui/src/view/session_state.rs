@@ -19,6 +19,7 @@ pub(crate) struct SessionStateBadge {
     /// The standing objective the backend is working towards, when it runs
     /// one.
     goal: Option<GoalStatus>,
+
     /// Whether the backend is collaborating on a plan rather than carrying out
     /// work. Backends that have no such mode never set it.
     plan_mode: bool,

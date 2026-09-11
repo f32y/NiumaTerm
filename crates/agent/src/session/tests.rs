@@ -8,7 +8,9 @@ pub(super) struct Scratch(pub(super) PathBuf);
 impl Scratch {
     pub(super) fn new() -> Self {
         let path = env::temp_dir().join(format!("niumaterm-session-test-{}", Uuid::new_v4()));
+
         fs::create_dir(&path).unwrap();
+
         Self(path)
     }
 }
@@ -36,8 +38,10 @@ fn cli_session_starts_sends_images_and_rejects_cross_provider_recovery_without_a
 
     let scratch = Scratch::new();
     let log = scratch.0.join("input.jsonl");
+
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/session-runtime.ps1");
+
     let launch = LaunchConfig {
         executable: "powershell.exe".into(),
         executable_args: vec![
@@ -51,9 +55,11 @@ fn cli_session_starts_sends_images_and_rejects_cross_provider_recovery_without_a
         )],
         ..LaunchConfig::default()
     };
+
     let (sender, receiver) = mpsc::channel();
     let mut runtime = SessionRuntime::default();
     let epoch = runtime.begin_start();
+
     let backend = Backend::spawn(
         AgentKind::Claude,
         &launch,
@@ -74,7 +80,9 @@ fn cli_session_starts_sends_images_and_rejects_cross_provider_recovery_without_a
 
     let init = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
     let events = runtime.process(epoch, init).unwrap();
+
     assert!(events.iter().any(|event| matches!(event, Event::Ready(_))));
+
     runtime.ready();
 
     assert_eq!(
@@ -98,11 +106,14 @@ fn cli_session_starts_sends_images_and_rejects_cross_provider_recovery_without_a
             &scratch.0.join("images"),
         )
     });
+
     assert!(matches!(outcome, SendOutcome::StartedTurn));
 
     let deadline = Instant::now() + Duration::from_secs(5);
+
     let sent = loop {
         let input = fs::read_to_string(&log).unwrap_or_default();
+
         if let Some(message) = input
             .lines()
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())
@@ -110,14 +121,17 @@ fn cli_session_starts_sends_images_and_rejects_cross_provider_recovery_without_a
         {
             break message;
         }
+
         assert!(
             Instant::now() < deadline,
             "CLI did not receive the user message: {input}"
         );
+
         thread::sleep(Duration::from_millis(10));
     };
 
     let content = sent["message"]["content"].as_array().unwrap();
+
     assert!(
         content
             .iter()
@@ -129,6 +143,8 @@ fn cli_session_starts_sends_images_and_rejects_cross_provider_recovery_without_a
     assert!(!scratch.0.join("images").exists());
 
     let mut backend = runtime.retire().unwrap();
+
     backend.shutdown(Duration::from_secs(2), true).unwrap();
+
     assert!(runtime.process_exit(epoch).is_none());
 }

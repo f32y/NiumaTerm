@@ -31,6 +31,7 @@ impl AgentPane {
 
         let outcome = match self.session.runtime.backend_mut() {
             Some(session) => session.rename_conversation(title).map_err(operation_error),
+
             None => {
                 Err(i18n("agent-session-still-starting").replace("{name}", self.kind.display()))
             }
@@ -49,9 +50,11 @@ impl AgentPane {
 
                 true
             }
+
             Err(error) => {
                 self.palette
                     .set_feedback(CommandFeedbackKind::Error, error, cx);
+
                 false
             }
         }
@@ -86,6 +89,7 @@ impl AgentPane {
         };
 
         session.search_sessions(query);
+
         self.palette.set_feedback(
             CommandFeedbackKind::Notice,
             i18n("agent-session-searching").replace("{query}", query),
@@ -105,6 +109,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         let count = results.len();
+
         if !self.history_ui.data.search_results(results) {
             self.palette.set_feedback(
                 CommandFeedbackKind::Notice,
@@ -117,6 +122,7 @@ impl AgentPane {
 
         self.history_ui.selected = 0;
         self.history_ui.mode = RecentSessionsMode::Open;
+
         self.palette.set_feedback(
             CommandFeedbackKind::Notice,
             i18n("agent-session-search-matches").replace("{count}", &count.to_string()),
@@ -147,6 +153,7 @@ impl AgentPane {
         }
 
         self.session.delivery.removed(item_id);
+
         cx.notify();
     }
 }

@@ -16,9 +16,11 @@ use crate::transcript::compact_token_count;
 #[derive(IntoElement)]
 pub(super) struct ContextUsageIndicator {
     usage: ContextWindowUsage,
+
     /// What fills the window, when the provider measures it. Codex reports
     /// only accounting, so its card shows the accounting alone.
     composition: Option<ContextComposition>,
+
     /// Whole-log figures for the conversation, when the provider folds them.
     /// They belong beside the accounting because both answer what the
     /// conversation has cost, one in tokens and one in turns and time.
@@ -185,6 +187,7 @@ fn context_indicator_label(usage: ContextWindowUsage) -> String {
         Some(remaining_percent) => i18n("agent-context-used-left")
             .replace("{tokens}", &compact_token_count(usage.used_tokens()))
             .replace("{percent}", &remaining_percent.to_string()),
+
         None => i18n("agent-context-used")
             .replace("{tokens}", &compact_token_count(usage.used_tokens())),
     }
@@ -202,6 +205,7 @@ fn context_capacity_labels(usage: ContextWindowUsage) -> (String, Option<String>
                 i18n("agent-context-percent-left").replace("{percent}", &percent.to_string())
             }),
         ),
+
         None => (
             i18n("agent-context-used")
                 .replace("{tokens}", &compact_token_count(usage.used_tokens())),
@@ -307,8 +311,10 @@ impl RenderOnce for ContextUsageIndicator {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let usage = self.usage;
         let indicator_label = context_indicator_label(usage);
+
         let accessibility_label =
             i18n("agent-context-accessibility").replace("{usage}", &indicator_label);
+
         let (capacity_label, remaining_label) = context_capacity_labels(usage);
 
         // Both sections report the same categories, so the live context and

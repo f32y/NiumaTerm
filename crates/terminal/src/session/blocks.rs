@@ -13,8 +13,10 @@ pub struct BlockPoint {
 #[derive(Debug)]
 pub(super) struct FrozenSelectionPiece {
     pub handle: BlockHandle,
+
     /// `(row, col)` start within the block; `None` = the block's start.
     pub start: Option<(usize, u32)>,
+
     /// Inclusive `(row, col)` end within the block; `None` = the block's end.
     pub end: Option<(usize, u32)>,
 }

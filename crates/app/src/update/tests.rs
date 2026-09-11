@@ -73,6 +73,7 @@ impl FileUserSession for ScriptedSession {
                 operation: Operation::ShutdownApplications,
                 code,
             }),
+
             None => Ok(()),
         }
     }
@@ -87,6 +88,7 @@ impl FileUserSession for ScriptedSession {
                 operation: Operation::RestartApplications,
                 code,
             }),
+
             None => Ok(()),
         }
     }
@@ -443,6 +445,7 @@ fn close_preparation_uses_a_fresh_session_application_list() {
         ClosePreparation::Released { applications, .. } => {
             assert_eq!(applications, [current]);
         }
+
         ClosePreparation::Clear | ClosePreparation::Prompt(_) => panic!("expected shutdown"),
     }
 
@@ -481,6 +484,7 @@ fn failed_shutdown_restarts_before_remaining_users_are_reported() {
             assert_eq!(prompt.reason, FileUsePromptReason::RemainingUsers);
             assert_eq!(prompt.applications, [current]);
         }
+
         ClosePreparation::Clear | ClosePreparation::Released { .. } => {
             panic!("expected remaining users")
         }

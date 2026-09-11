@@ -23,6 +23,7 @@ fn is_false(value: &bool) -> bool {
 pub struct LocalState {
     #[serde(default)]
     pub windows: Vec<WindowLocalState>,
+
     /// Last-chosen agent thread settings per agent profile name (older
     /// snapshots keyed by agent ID, which still reads as a fallback);
     /// newly opened agent tabs seed their dropdowns from these.
@@ -55,6 +56,7 @@ pub struct WindowLocalState {
     pub window: Option<WindowState>,
     #[serde(default)]
     pub session: Option<SessionState>,
+
     /// Expanded workspace-sidebar width in logical pixels.
     #[serde(default)]
     pub sidebar_width: Option<f32>,
@@ -96,6 +98,7 @@ pub struct WorkspaceState {
     pub name: String,
     #[serde(default)]
     pub cwd: Option<String>,
+
     /// Directories the workspace owns beyond its primary `cwd`, in workspace
     /// order. Defaulting when absent lets a snapshot written before
     /// multi-directory workspaces restore as a single-directory workspace, and
@@ -103,6 +106,7 @@ pub struct WorkspaceState {
     /// requires every scalar field ahead of the `tabs` array of tables.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub additional_cwds: Vec<String>,
+
     #[serde(default)]
     pub pinned: bool,
     #[serde(default)]
@@ -126,27 +130,32 @@ pub struct TabState {
     /// User-authored display name shown in the tab bar.
     #[serde(default)]
     pub name: Option<String>,
+
     /// Distinguishes explicit names from older snapshots that persisted generated
     /// `Tab N` labels in `name`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub user_named: bool,
+
     #[serde(default)]
     pub shell: Option<String>,
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
     pub cwd: Option<String>,
+
     /// The agent kind ("codex") when this tab hosts an agent conversation
     /// instead of a terminal. Conversations are not persisted; restore
     /// reopens a fresh agent tab of the same kind, and an unknown kind
     /// degrades to a plain terminal tab.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+
     /// Name of the agent launch profile the tab was opened with. Restore
     /// resolves it against the configured agent profiles; a missing or
     /// deleted name falls back to the built-in profile for `agent`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_profile: Option<String>,
+
     /// Split-pane layout for a multi-pane tab. Absent for single-pane tabs,
     /// which keep the flat fields above as their whole format (so snapshots
     /// without splits stay readable by older builds). Declared last: TOML
@@ -167,13 +176,16 @@ pub enum PaneNodeState {
         #[serde(default)]
         cwd: Option<String>,
     },
+
     #[serde(rename = "split")]
     Split {
         axis: PaneSplitAxis,
+
         /// Normalized child sizes (sum ≈ 1). Restore falls back to an equal
         /// split when absent or when the length mismatches `children`.
         #[serde(default)]
         ratios: Vec<f32>,
+
         children: Vec<PaneNodeState>,
     },
 }
@@ -250,7 +262,9 @@ fn save_windows_to(path: &Path, windows: &[WindowLocalState]) -> io::Result<()> 
 fn update_state(path: &Path, edit: impl FnOnce(&mut LocalState)) -> io::Result<()> {
     persistence::update(path, |content| {
         let mut state = decode(content)?;
+
         edit(&mut state);
+
         serialize_toml(&state).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     })
 }

@@ -16,6 +16,7 @@ fn profile_surface_frame_pipeline() -> Result<(), &'static str> {
     }
 
     let theme = FrameTheme::default();
+
     let mut surface = TerminalFrameSource::new(
         TerminalSessionConfig {
             shell: Some("cmd.exe".into()),
@@ -49,10 +50,12 @@ fn profile_surface_frame_pipeline() -> Result<(), &'static str> {
         }
 
         assert!(Instant::now() < deadline, "profile shell must finish");
+
         thread::sleep(Duration::from_millis(1));
     }
 
     let mut previous = surface.frame(None, &theme);
+
     assert!(
         previous
             .lines()
@@ -62,6 +65,7 @@ fn profile_surface_frame_pipeline() -> Result<(), &'static str> {
 
     const WARMUP: usize = 256;
     const SAMPLES: usize = 10_000;
+
     let mut full = Duration::ZERO;
     let mut clean = Duration::ZERO;
 
@@ -73,6 +77,7 @@ fn profile_surface_frame_pipeline() -> Result<(), &'static str> {
         if sample >= WARMUP {
             full += elapsed;
         }
+
         assert_eq!(frame.lines().len(), 24);
 
         let start = Instant::now();
@@ -100,5 +105,6 @@ fn profile_surface_frame_pipeline() -> Result<(), &'static str> {
         full / SAMPLES as u32,
         clean / SAMPLES as u32,
     );
+
     Ok(())
 }

@@ -1,9 +1,11 @@
 use crate::claude_code::sessions as claude_sessions;
 use crate::codex::app_server;
 use crate::session::{AgentKind, Backend, ConversationTitleRequest, RenameOutcome};
+
 #[derive(Default)]
 pub struct ConversationNaming {
     pub named: bool,
+
     /// A rename remains pending until the provider can address and accept it.
     pub pending: Option<String>,
 }
@@ -58,6 +60,7 @@ impl ConversationNaming {
                 RenameOutcome::Accepted | RenameOutcome::Unsupported => {
                     self.pending = None;
                 }
+
                 RenameOutcome::Rejected => {}
             }
         }

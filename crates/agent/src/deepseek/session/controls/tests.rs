@@ -125,6 +125,7 @@ fn failure_releases_admission_for_retry_and_old_completion_is_ignored() {
     let server = thread::spawn(move || {
         for success in [false, true] {
             let (mut stream, _) = listener.accept().unwrap();
+
             read_request(&stream);
             reply(&mut stream, success);
         }

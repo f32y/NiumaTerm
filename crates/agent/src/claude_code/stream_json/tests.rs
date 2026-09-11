@@ -72,12 +72,15 @@ fn request_deadlines_wake_without_output_and_release_the_delivery_on_close() {
         })
         .unwrap(),
     );
+
     state.record_admitted("slow".into(), RequestClass::Mutation, Instant::now());
+
     state.record_admitted(
         "due".into(),
         RequestClass::Query,
         Instant::now() - Duration::from_secs(31),
     );
+
     rx.recv_timeout(Duration::from_secs(2)).unwrap();
 
     let expired = state.expired(Instant::now());
@@ -126,6 +129,7 @@ fn large_pending_control_sets_keep_independent_deadlines() {
 
     for (id, class, _) in expired {
         assert_eq!(class, RequestClass::Control);
+
         state.resolve(&json!({"request_id": id, "subtype": "error", "error": class.timeout_message("Claude")}));
     }
 
@@ -145,6 +149,7 @@ fn control_cancellation_matches_prompt_ids_and_close_settles_once() {
         input: json!({}),
         suggestions: None,
     });
+
     control.pending_questions = Some(PendingQuestions {
         request_id: "questions".into(),
         input: json!({}),
@@ -215,6 +220,7 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
 
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/fake-stream-json.cmd");
+
     let log = env::temp_dir().join(format!("niumaterm-controls-{}.jsonl", Uuid::new_v4()));
 
     let launch = LaunchConfig {
@@ -266,12 +272,15 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
         RequestClass::Mutation,
         Instant::now(),
     );
+
     session
         .control
         .attach_input("queued-restore", ticket.clone());
+
     session
         .control
         .track("queued-restore".into(), PendingControlOperation::FileRewind);
+
     session.control.complete(INIT_REQUEST_ID);
 
     let events = session.poll_timeouts(Instant::now() + Duration::from_secs(301));
@@ -284,9 +293,11 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
     session
         .control
         .track(id.clone(), PendingControlOperation::SessionTitle);
+
     session
         .control
         .record_effort("effort-first".into(), "high".into());
+
     session
         .control
         .record_effort("effort-second".into(), "max".into());
@@ -304,18 +315,22 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
     assert!(session.process(json!({"type": "control_response", "response": {"request_id": id, "subtype": "success", "response": {"title": "Late title"}}})).is_empty());
 
     session.control.complete(INIT_REQUEST_ID);
+
     session.control.track(
         "restore-timeout".into(),
         PendingControlOperation::FileRewind,
     );
+
     session.control.record_admitted(
         "restore-timeout".into(),
         RequestClass::Mutation,
         Instant::now(),
     );
+
     session
         .control
         .record_effort("effort-timeout".into(), "high".into());
+
     session.control.record_admitted(
         "effort-timeout".into(),
         RequestClass::Mutation,
@@ -340,15 +355,18 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
     assert!(session.process(json!({"type": "control_response", "response": {"request_id": "restore-timeout", "subtype": "success"}})).is_empty());
 
     session.compacting = true;
+
     session
         .process
         .shutdown(Duration::from_secs(1), true)
         .unwrap();
+
     session.control.pending_approval = Some(PendingApproval {
         request_id: "blocked-approval".into(),
         input: json!({}),
         suggestions: None,
     });
+
     session.control.pending_questions = Some(PendingQuestions {
         request_id: "blocked-questions".into(),
         input: json!({}),
@@ -404,6 +422,7 @@ fn transcript_snapshots_complete_their_streamed_items() {
     let mut transcript = TranscriptState::default();
 
     transcript.begin_turn();
+
     transcript.process_stream_event(
         &json!({"event":{"type":"message_start","message":{"usage":{"output_tokens":0}}}}),
     );
@@ -411,9 +430,11 @@ fn transcript_snapshots_complete_their_streamed_items() {
     let started = transcript.process_stream_event(
         &json!({"event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}),
     );
+
     let [Event::ItemStarted(Item::AgentMessage { id, .. })] = started.as_slice() else {
         panic!("text block should start a transcript item");
     };
+
     let deltas = transcript.process_stream_event(&json!({"event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}}));
 
     assert!(
@@ -595,6 +616,7 @@ fn pending_queries_do_not_block_an_atomic_settings_and_prompt_batch() {
 
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/capture-stream.ps1");
+
     let log = env::temp_dir().join(format!("niumaterm-admission-{}.jsonl", Uuid::new_v4()));
 
     let launch = LaunchConfig {
@@ -634,14 +656,19 @@ fn pending_queries_do_not_block_an_atomic_settings_and_prompt_batch() {
         effort: Some("high".into()),
         ..ThreadSettings::default()
     };
+
     let now = Instant::now();
+
     for index in 0..256 {
         let id = format!("pending-{index}");
+
         session
             .control
             .record_admitted(id.clone(), RequestClass::Query, now);
+
         session.control.track(id, PendingControlOperation::Other);
     }
+
     assert_eq!(
         session.send_user_message("queued prompt", &settings, &[]),
         SendOutcome::StartedTurn
@@ -690,6 +717,7 @@ fn fake_stream_json_process_never_receives_rewind_as_a_user_turn() {
 
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/fake-stream-json.cmd");
+
     let log = env::temp_dir().join(format!("niumaterm-fake-claude-{}.jsonl", Uuid::new_v4()));
 
     let launch = LaunchConfig {
@@ -760,6 +788,7 @@ fn resumed_session_id_is_available_before_the_first_init_event() {
 
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/fake-stream-json.cmd");
+
     let log = env::temp_dir().join(format!("niumaterm-resume-{}.jsonl", Uuid::new_v4()));
 
     let launch = LaunchConfig {
@@ -1401,6 +1430,7 @@ fn a_resumed_session_asks_for_its_context_before_the_first_turn() {
 
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/fake-stream-json.cmd");
+
     let log = env::temp_dir().join(format!("niumaterm-fake-resume-{}.jsonl", Uuid::new_v4()));
 
     let launch = LaunchConfig {
@@ -1631,6 +1661,7 @@ fn model_output_after_a_finished_turn_opens_the_next_one() {
 
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/fake-stream-json.cmd");
+
     let log = env::temp_dir().join(format!("niumaterm-fake-queued-{}.jsonl", Uuid::new_v4()));
 
     let launch = LaunchConfig {

@@ -142,6 +142,7 @@ fn missing_events_read_as_stale() {
     let mut settings = json!({});
 
     install_into(&mut settings, HOOK_COMMAND).unwrap();
+
     settings["hooks"]
         .as_object_mut()
         .unwrap()

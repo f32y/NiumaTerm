@@ -24,8 +24,10 @@ const POLL_INTERVAL: Duration = Duration::from_millis(20);
 #[derive(Clone, PartialEq, Eq)]
 pub struct AgentCli {
     executable: String,
+
     /// Arguments the executable itself needs, ahead of the command's own.
     arguments: Vec<String>,
+
     environment: Vec<(String, String)>,
 }
 
@@ -155,6 +157,7 @@ impl AgentCli {
     fn redact_capped(&self, bytes: &[u8], output_limit: usize) -> (String, bool) {
         let redacted = self.redact(&decode_child_output(bytes));
         let truncated = redacted.len() > output_limit;
+
         (utf8_suffix(&redacted, output_limit), truncated)
     }
 }
@@ -267,6 +270,7 @@ impl fmt::Display for ProcessError {
             | Self::Containment(message)
             | Self::Wait(message)
             | Self::Reader(message) => formatter.write_str(message),
+
             Self::TimedOut { after, diagnostic } => {
                 write!(formatter, "command timed out after {}s", after.as_secs())?;
 
@@ -321,6 +325,7 @@ where
     let capture_limit = limits
         .max_output_bytes
         .saturating_add(launcher.redaction_headroom(limits.max_output_bytes));
+
     let stdout_reader = spawn_bounded_reader(stdout, capture_limit);
     let stderr_reader = spawn_bounded_reader(stderr, capture_limit);
 
@@ -328,6 +333,7 @@ where
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if started.elapsed() < limits.timeout => thread::sleep(POLL_INTERVAL),
+
             Ok(None) => {
                 drop(job);
 
@@ -348,6 +354,7 @@ where
                     diagnostic: diagnostic.trim().chars().take(4_096).collect(),
                 });
             }
+
             Err(error) => {
                 drop(job);
 
@@ -367,8 +374,10 @@ where
     let stdout = join_reader(stdout_reader)?;
     let stderr = join_reader(stderr_reader)?;
     let raw_stdout = utf8_suffix(&decode_child_output(&stdout.bytes), limits.max_output_bytes);
+
     let (stdout_text, stdout_redaction_truncated) =
         launcher.redact_capped(&stdout.bytes, limits.max_output_bytes);
+
     let (stderr_text, stderr_redaction_truncated) =
         launcher.redact_capped(&stderr.bytes, limits.max_output_bytes);
 

@@ -92,6 +92,7 @@ fn fake_launcher(name: &str, body: &str) -> (PathBuf, PathBuf) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
+
         fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
     }
 

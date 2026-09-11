@@ -2,15 +2,19 @@ use std::mem::take;
 
 use crate::chat::{SessionScope, SessionSummary};
 use crate::claude_code::sessions;
+
 #[derive(Default)]
 pub struct SessionHistory {
     next_request_id: u64,
     filesystem_request: Option<FilesystemHistoryRequest>,
     pub sessions: Vec<SessionSummary>,
+
     /// Expected rows while a disk query is still loading; retired with its request.
     pub pending: Option<usize>,
+
     /// Search results replace recent pages; the next recent page replaces matches.
     pub showing_search: bool,
+
     pub scope: SessionScope,
 }
 
@@ -42,6 +46,7 @@ impl SessionHistory {
         epoch: u64,
     ) -> FilesystemHistoryRequest {
         self.invalidate_filesystem_history();
+
         self.next_request_id = self
             .next_request_id
             .checked_add(1)
@@ -89,6 +94,7 @@ impl SessionHistory {
             CountPublication::Empty
         } else {
             self.pending = Some(count);
+
             CountPublication::LoadRows
         }
     }
@@ -133,6 +139,7 @@ impl SessionHistory {
         if take(&mut self.showing_search) {
             self.sessions.clear();
         }
+
         for session in sessions {
             if !self
                 .sessions
@@ -148,9 +155,11 @@ impl SessionHistory {
         if sessions.is_empty() {
             return false;
         }
+
         self.invalidate_filesystem_history();
         self.sessions = sessions;
         self.showing_search = true;
+
         true
     }
 }

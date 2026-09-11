@@ -58,12 +58,15 @@ impl AgentPane {
                 identity,
                 profile_name: self.profile.name.clone(),
             }),
+
             Readiness::Updating => RecoveryReadiness::Busy(
                 i18n("agent-update-profile-already-updating").replace("{name}", &self.profile.name),
             ),
+
             Readiness::ActiveWork => RecoveryReadiness::Busy(
                 i18n("agent-update-profile-active-work").replace("{name}", &self.profile.name),
             ),
+
             Readiness::MissingIdentity => RecoveryReadiness::MissingIdentity(
                 i18n("agent-update-profile-missing-identity")
                     .replace("{name}", &self.profile.name)
@@ -74,6 +77,7 @@ impl AgentPane {
 
     pub fn prepare_update_wait(&mut self, cx: &mut Context<Self>) {
         self.session.runtime.wait_for_update();
+
         cx.notify();
     }
 
@@ -97,7 +101,9 @@ impl AgentPane {
 
         self.transcript
             .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
+
         self.session.runtime.wait_for_update();
+
         cx.notify();
     }
 
@@ -112,6 +118,7 @@ impl AgentPane {
         let (epoch, backend) = self.session.runtime.suspend_for_update();
 
         self.history_ui.invalidate_filesystem_history();
+
         cx.emit(AgentPaneEvent::Interrupted);
         cx.notify();
 
@@ -121,6 +128,7 @@ impl AgentPane {
 
         let worker = cx.background_executor().spawn(async move {
             let result = backend.shutdown(Duration::from_secs(5), force);
+
             (backend, result)
         });
 
@@ -147,6 +155,7 @@ impl AgentPane {
 
     pub fn mark_provider_updating(&mut self, cx: &mut Context<Self>) {
         self.session.runtime.provider_updating();
+
         cx.notify();
     }
 
@@ -155,6 +164,7 @@ impl AgentPane {
     /// after this returns.
     pub fn restore_after_update(&mut self, snapshot: &RecoverySnapshot, cx: &mut Context<Self>) {
         self.session.runtime.reconnect(Some(snapshot.clone()));
+
         self.start_session_with_options(
             snapshot.identity.clone(),
             true,
@@ -167,6 +177,7 @@ impl AgentPane {
             },
             cx,
         );
+
         cx.notify();
     }
 
@@ -182,11 +193,13 @@ impl AgentPane {
 
     pub fn fail_update_recovery(&mut self, message: String, cx: &mut Context<Self>) {
         self.session.runtime.recovery_failed(message);
+
         cx.notify();
     }
 
     pub(crate) fn start_new_after_update_failure(&mut self, cx: &mut Context<Self>) {
         self.session.runtime.reconnect(None);
+
         self.start_session_with_options(
             None,
             true,
@@ -199,6 +212,7 @@ impl AgentPane {
             },
             cx,
         );
+
         cx.notify();
     }
 }

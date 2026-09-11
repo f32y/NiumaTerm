@@ -47,6 +47,7 @@ impl TerminalFrameSource {
     ) -> Result<Self, String> {
         let grid_size = (config.cols, config.rows);
         let images = Arc::new(SessionBridge::new(id, wake));
+
         let session = TerminalSession::new(&config, id, colors, Some(images.clone()))
             .map_err(|error| format!("{:?}: {}", error.code, error))?;
 
@@ -91,10 +92,13 @@ impl TerminalFrameSource {
                 wake.signal(kind);
             })),
         ));
+
         let session =
             connect(images.clone()).map_err(|error| format!("{:?}: {}", error.code, error))?;
+
         let grid_size =
             session.with_render_buffer(|buffer| (buffer.cols() as u16, buffer.rows() as u16));
+
         Ok(Self {
             snapshot: session.snapshot(),
             session,
@@ -125,6 +129,7 @@ impl TerminalFrameSource {
         if accepted {
             self.grid_size = (cols, rows);
         }
+
         accepted
     }
 
@@ -134,7 +139,9 @@ impl TerminalFrameSource {
         theme: &FrameTheme,
     ) -> TerminalFrame {
         let total_start = time::Instant::now();
+
         self.snapshot = self.session.snapshot();
+
         let snapshot = &self.snapshot;
         let selection = self.session.selection_range_in(snapshot);
 
@@ -151,6 +158,7 @@ impl TerminalFrameSource {
         let frame = {
             let buf = snapshot;
             let extract_start = time::Instant::now();
+
             let frame = TerminalFrame::from_render_buffer_reusing(
                 buf,
                 selection,
@@ -158,6 +166,7 @@ impl TerminalFrameSource {
                 previous,
                 theme,
             );
+
             let extract_us = extract_start.elapsed().as_micros();
 
             trace!(
@@ -197,6 +206,7 @@ impl TerminalFrameSource {
         else {
             return FrozenView::default();
         };
+
         let visible = block_list::visible_rows(
             viewport.top,
             info.rows,
@@ -204,11 +214,14 @@ impl TerminalFrameSource {
             viewport.cell_height,
             viewport.pad_rows,
         );
+
         let first = visible.start / PAGE_ROWS * PAGE_ROWS;
+
         let pages: Vec<_> = (first..visible.end)
             .step_by(PAGE_ROWS)
             .filter_map(|row| self.session.block_page(handle, row))
             .collect();
+
         let mut view = block_list::frozen_block_view(
             &pages,
             &info,
@@ -220,9 +233,11 @@ impl TerminalFrameSource {
             selected_item,
             foreground,
         );
+
         let mut seen = HashSet::new();
         let mut placements = Vec::new();
         let mut generations = HashMap::new();
+
         for page in &pages {
             for placement in &page.placements {
                 if seen.insert((
@@ -233,11 +248,13 @@ impl TerminalFrameSource {
                 )) {
                     placements.push(*placement);
                 }
+
                 if let Some(generation) = self.frozen_image(page, placement.image_id) {
                     generations.insert(placement.image_id, generation);
                 }
             }
         }
+
         view.images = block_list::frozen_block_images(
             &placements,
             &generations,
@@ -245,6 +262,7 @@ impl TerminalFrameSource {
             viewport.cell_height,
             viewport.pad_rows,
         );
+
         view
     }
 
@@ -262,8 +280,10 @@ impl TerminalFrameSource {
             viewport.cell_height,
             viewport.pad_rows,
         );
+
         let lines = self.live_history_lines(visible.start as u64..visible.end as u64, foreground);
         let selection = self.session.selection_screen_range_in(&self.snapshot);
+
         block_list::live_history_view(
             lines,
             history_rows,
@@ -282,17 +302,23 @@ impl TerminalFrameSource {
         let PageSource::Block { id, generation, .. } = page.source else {
             return None;
         };
+
         let key = (id, image_id);
+
         if let Some(generation) = self.images.frozen.lock().get(&key).cloned() {
             return Some(generation);
         }
+
         let release = self.images.generations.lock().release_queue();
+
         let generation = graphics::graphic_to_generation(
             self.session
                 .take_block_image(BlockHandle { id, generation }, image_id)?,
             &release,
         )?;
+
         self.images.frozen.lock().insert(key, generation.clone());
+
         Some(generation)
     }
 
@@ -305,8 +331,10 @@ impl TerminalFrameSource {
             let page = self
                 .session
                 .screen_page_at(self.snapshot.revision, usize::try_from(row).ok()?)?;
+
             let data = page.row(row as usize)?;
             let mut builder = block_list::EngineRowBuilder::default();
+
             for cell in &data.cells {
                 builder.push(
                     cell.x,
@@ -316,6 +344,7 @@ impl TerminalFrameSource {
                     default_fg,
                 );
             }
+
             Some((row, builder.into()))
         })
         .collect()

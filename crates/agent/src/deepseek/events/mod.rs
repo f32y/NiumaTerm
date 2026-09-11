@@ -22,6 +22,7 @@ mod tests;
 const RECONNECT_DELAY: Duration = Duration::from_millis(500);
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 type Socket = WebSocket<MaybeTlsStream<TcpStream>>;
 
 pub(crate) struct Downlinks {
@@ -57,6 +58,7 @@ impl Downlinks {
                 if let Err(message) = result {
                     if let Some(sender) = connected_tx.take() {
                         let _ = sender.send(Err(message));
+
                         return;
                     }
 
@@ -74,12 +76,14 @@ impl Downlinks {
                 deliver(json!({ "payload": {
                     "type": "nmt/connection-reset", "sessionId": session_id,
                 } }));
+
                 thread::sleep(RECONNECT_DELAY);
             }
         });
 
         match connected.recv_timeout(CONNECT_TIMEOUT) {
             Ok(Ok(snapshot)) => Ok((Self { stopped }, snapshot)),
+
             outcome => {
                 stopped.store(true, Ordering::Relaxed);
 
@@ -169,6 +173,7 @@ pub(crate) fn snapshot(
             connect(client.stream_request()?).map_err(|error| error.to_string())?;
 
         set_poll_interval(&mut socket)?;
+
         open_stream(
             &mut socket,
             "snapshot",
@@ -182,14 +187,17 @@ pub(crate) fn snapshot(
             match read_message(&mut socket)? {
                 Some(frame) if frame["type"] == "item" && frame["value"]["type"] == "snapshot" => {
                     let _ = socket.close(None);
+
                     return Ok(frame["value"].clone());
                 }
+
                 Some(frame) if frame["type"] == "error" => {
                     return Err(frame["error"]["message"]
                         .as_str()
                         .unwrap_or("history read failed")
                         .to_string());
                 }
+
                 _ => {}
             }
         }
@@ -215,19 +223,24 @@ fn read_message(socket: &mut Socket) -> Result<Option<Value>, String> {
         Ok(Message::Text(text)) => serde_json::from_str(&text)
             .map(Some)
             .map_err(|error| error.to_string()),
+
         Ok(Message::Close(_)) => Err("the harness closed the stream".to_string()),
+
         // Reading queues Ping replies; flush them before an idle read timeout
         // so the Host's heartbeat does not discard a healthy connection.
         Ok(Message::Ping(_)) => socket
             .flush()
             .map(|_| None)
             .map_err(|error| error.to_string()),
+
         Ok(_) => Ok(None),
+
         Err(Error::Io(error))
             if matches!(error.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) =>
         {
             Ok(None)
         }
+
         Err(error) => Err(error.to_string()),
     }
 }
@@ -264,6 +277,7 @@ pub(crate) fn pump_for_test(
 ) {
     let _ = pump(&mut socket, stopped, Some(read_started), |frame| {
         deliver(frame);
+
         Ok(())
     });
 }
@@ -314,6 +328,7 @@ impl Streams {
                         .unwrap_or("stream failed")
                 ));
             }
+
             Some("end") => return Err(format!("the harness ended the {id} stream")),
             Some("item") => {}
             _ => return Err("the harness sent an invalid stream message".to_string()),
@@ -324,18 +339,23 @@ impl Streams {
         match id {
             "events" => self.event(value, client, deliver)?,
             "control" => self.control(value, deliver),
+
             "follow" => match value["type"].as_str() {
                 Some("snapshot") => {
                     deliver(json!({ "payload": {
                         "type": "nmt/replay", "sessionId": self.session_id, "page": value,
                     } }));
+
                     self.snapshot = Some(value.clone());
                 }
+
                 Some("event") => deliver(json!({ "payload": {
                     "type": "session/event", "sessionId": self.session_id, "event": value["event"],
                 } })),
+
                 _ => {}
             },
+
             _ => {}
         }
 
@@ -357,14 +377,17 @@ impl Streams {
 
                 self.control_ready = true;
             }
+
             Some("queue") if value["sessionId"] == self.session_id => {
                 self.queue(&value["items"], deliver)
             }
+
             Some("projection") if value["sessionId"] == self.session_id => {
                 if let Some(key) = value["key"].as_str() {
                     self.projection(key, &value["value"], &value["seq"], deliver);
                 }
             }
+
             _ => {}
         }
     }
@@ -397,6 +420,7 @@ impl Streams {
                         .to_string(),
                 );
             }
+
             Some("emit")
                 if value["event"] == "api-session/error" && value["args"][0] == self.session_id =>
             {
@@ -404,6 +428,7 @@ impl Streams {
                     "type": "host/agent-error", "sessionId": self.session_id, "message": value["args"][1],
                 } }));
             }
+
             Some("waterfall") => {
                 let client_id = self
                     .client_id
@@ -416,9 +441,11 @@ impl Streams {
 
                 let kind = match value["event"].as_str() {
                     Some("approval/request") => Some(("approval/requested", "approval/resolved")),
+
                     Some("user-questions/request") => {
                         Some(("question/requested", "question/resolved"))
                     }
+
                     _ => None,
                 };
 
@@ -443,6 +470,7 @@ impl Streams {
                 self.pending.insert(event_id.to_string(), resolved);
                 deliver(json!({ "clientId": client_id, "eventId": event_id, "payload": payload }));
             }
+
             Some("cancel") => {
                 if let Some(event_id) = value["eventId"].as_str()
                     && let Some(kind) = self.pending.remove(event_id)
@@ -454,6 +482,7 @@ impl Streams {
                     );
                 }
             }
+
             _ => {}
         }
 

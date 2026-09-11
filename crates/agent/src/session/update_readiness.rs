@@ -30,6 +30,7 @@ impl ConversationWork {
         {
             return Readiness::Updating;
         }
+
         if matches!(runtime.status(), Status::Starting | Status::Running)
             || self.approval_open
             || self.branch_pending
@@ -41,6 +42,7 @@ impl ConversationWork {
         {
             return Readiness::ActiveWork;
         }
+
         self.identity(runtime.backend())
     }
 
@@ -48,6 +50,7 @@ impl ConversationWork {
         if self.empty {
             return Readiness::Ready(None);
         }
+
         match backend.and_then(Backend::recovery_identity) {
             Some(identity) => Readiness::Ready(Some(identity)),
             None => Readiness::MissingIdentity,

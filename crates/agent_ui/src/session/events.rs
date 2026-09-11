@@ -23,6 +23,7 @@ impl AgentPane {
         let effect = self
             .session
             .apply_event(self.session.runtime.epoch(), event);
+
         self.present_session_effect(effect, cx);
     }
 
@@ -32,18 +33,23 @@ impl AgentPane {
             SessionEffect::Changed => cx.notify(),
             SessionEffect::Title(title) => cx.emit(AgentPaneEvent::TitleSuggested(title)),
             SessionEffect::Ready(settings) => self.on_ready(settings, cx),
+
             SessionEffect::Commands(commands) => {
                 self.palette.provider_commands = commands;
                 self.palette.catalog = None;
                 self.palette.provider_commands_ready = true;
                 self.palette.selected = 0;
+
                 cx.notify();
             }
+
             SessionEffect::Skills(catalog) => {
                 self.palette.skill_catalog = Some(catalog);
                 self.palette.selected = 0;
+
                 cx.notify();
             }
+
             SessionEffect::CommandResult {
                 name,
                 outcome,
@@ -51,61 +57,84 @@ impl AgentPane {
             } => {
                 self.on_slash_command_result(&name, outcome, advance, cx);
             }
+
             SessionEffect::TurnStarted { opened } => self.on_turn_started(opened, cx),
+
             SessionEffect::TurnCompleted { error, interrupted } => {
                 self.on_turn_completed(error, interrupted, cx)
             }
+
             SessionEffect::OutputTokens(tokens) => {
                 self.transcript.update(cx, |transcript, cx| {
                     transcript.set_working_output_tokens(tokens, cx)
                 });
+
                 cx.notify();
             }
+
             SessionEffect::ContextWindow(usage) => {
                 self.context_window_usage = Some(usage);
+
                 cx.notify();
             }
+
             SessionEffect::ContextComposition(composition) => {
                 self.context_composition = Some(composition);
+
                 cx.notify();
             }
+
             SessionEffect::CompactionStarted => {
                 self.note_visible_output();
+
                 self.transcript
                     .update(cx, |transcript, cx| transcript.set_compacting(true, cx));
+
                 cx.notify();
             }
+
             SessionEffect::CompactionFinished { error } => {
                 self.transcript
                     .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
+
                 if let Some(text) = error {
                     self.push_item(SessionItem::Error { text }, cx);
                 }
+
                 cx.notify();
             }
+
             SessionEffect::ItemStarted(item) => self.start_item(item, cx),
             SessionEffect::ItemCompleted(item) => self.complete_item(item, cx),
+
             SessionEffect::TextDelta {
                 item_id,
                 delta,
                 field,
             } => self.append_delta(&item_id, &delta, field, cx),
+
             SessionEffect::ApprovalRequested => {
                 self.note_visible_output();
+
                 self.emit_lifecycle(
                     AgentEventKind::PermissionRequested,
                     &i18n("agent-session-needs-input").replace("{name}", self.kind.display()),
                     self.session.input.approval().unwrap_or_default(),
                     cx,
                 );
+
                 cx.notify();
             }
+
             SessionEffect::ApprovalResolved => {
                 self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
+
                 cx.notify();
             }
+
             SessionEffect::QuestionsRequested { index } => {
                 self.note_visible_output();
+
                 self.emit_lifecycle(
                     AgentEventKind::PermissionRequested,
                     &i18n("agent-session-needs-input").replace("{name}", self.kind.display()),
@@ -115,35 +144,48 @@ impl AgentPane {
                         .map_or("", |question| question.question.as_str()),
                     cx,
                 );
+
                 self.prompts.reveal(&self.session.input, index);
+
                 cx.notify();
             }
+
             SessionEffect::QuestionsResolved => {
                 self.prompts.hide_settled(&self.session.input);
                 self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
+
                 cx.notify();
             }
+
             SessionEffect::InputRequested { index } => self.present_questions(index, cx),
+
             SessionEffect::InputResolved(completion) => {
                 self.present_question_completion(completion, cx)
             }
+
             SessionEffect::Workflows { activity_changed } => {
                 if activity_changed {
                     cx.emit(AgentPaneEvent::WorkflowActivity);
                 }
+
                 self.sync_workflow_refresh(cx);
+
                 cx.notify();
             }
+
             SessionEffect::BackgroundActivity => {
                 cx.emit(AgentPaneEvent::BackgroundTaskActivity);
                 cx.notify();
             }
+
             SessionEffect::Branch(update) => self.apply_rewind_update(update, cx),
+
             SessionEffect::Error {
                 message,
                 fatal,
                 failure,
             } => self.on_error(message, fatal, failure, cx),
+
             SessionEffect::EffortRejected { message } => {
                 self.controls.remember_defaults(
                     &self.session.controls,
@@ -151,42 +193,57 @@ impl AgentPane {
                     &self.profile,
                     cx,
                 );
+
                 self.palette
                     .set_feedback(CommandFeedbackKind::Error, message, cx);
             }
+
             SessionEffect::History(sessions) => self.on_history(sessions, cx),
             SessionEffect::SearchResults(results) => self.show_search_results(results, cx),
             SessionEffect::ConfirmedPrompts(prompts) => self.publish_prompts(prompts, cx),
+
             SessionEffect::Goal(goal) => {
                 self.session_state.set_goal(goal);
+
                 cx.notify();
             }
+
             SessionEffect::PlanMode(active) => {
                 self.session_state.set_plan_mode(active);
+
                 cx.notify();
             }
+
             SessionEffect::Stats(stats) => {
                 self.session_stats = Some(stats);
+
                 cx.notify();
             }
+
             SessionEffect::Replay(replay) => {
                 if let Some(completion) = replay.branch {
                     self.complete_branch(completion, cx);
                 }
+
                 if replay.replace || self.history_ui.mode == RecentSessionsMode::Loading {
                     if !replay.replace {
                         self.session.clear_conversation();
                     }
+
                     self.clear_conversation_presentation(cx);
                     self.history_ui.mode = RecentSessionsMode::Hidden;
                     self.palette.feedback = None;
                 }
+
                 self.apply_replay(replay.turns, cx);
             }
+
             SessionEffect::StatusDetail(detail) => self.on_status_detail(detail, cx),
+
             SessionEffect::ForkCheckpoints(checkpoints) => {
                 self.show_fork_checkpoints(checkpoints, cx)
             }
+
             SessionEffect::HostExited { message } => self.on_host_exited(message, cx),
         }
     }
@@ -202,8 +259,11 @@ impl AgentPane {
             identity,
             profile_name: self.profile.name.clone(),
         }));
+
         self.session.runtime.recovery_failed(message.clone());
+
         let failure = self.session.failed(&message, true);
+
         self.on_error(message, true, failure, cx);
     }
 
@@ -213,6 +273,7 @@ impl AgentPane {
         if let Some(completion) = ready.branch {
             self.complete_branch(completion, cx);
         }
+
         if let Some(replay) = ready.replay {
             self.clear_conversation_presentation(cx);
             self.history_ui.mode = RecentSessionsMode::Hidden;
@@ -230,18 +291,21 @@ impl AgentPane {
             || self.session.controls.seed_approval_reviewer)
             .then(|| stored_thread_settings(self.kind, &self.profile, cx))
             .flatten();
+
         let model = self
             .session
             .controls
             .seed_thread_defaults
             .then(|| launch_model(self.kind, &self.profile))
             .flatten();
+
         let effort = self
             .session
             .controls
             .seed_thread_defaults
             .then(|| launch_effort(&self.profile))
             .flatten();
+
         let selection = self.session.finish_ready(
             self.kind,
             ready.settings,
@@ -251,10 +315,12 @@ impl AgentPane {
         );
 
         self.prompts.reset_editors();
+
         if let Some(Err(error)) = selection {
             self.palette
                 .set_feedback(CommandFeedbackKind::Error, error, cx);
         }
+
         info!(
             "agent thread ready: profile=\"{}\", model={:?}, profile_model={:?}",
             self.profile.name,
@@ -266,6 +332,7 @@ impl AgentPane {
         // before this tab opened can be rebuilt from history.
         self.restore_background_tasks(cx);
         self.restore_workflows(cx);
+
         cx.notify();
     }
 
@@ -287,6 +354,7 @@ impl AgentPane {
                     cx,
                 );
             }
+
             SlashCommandOutcome::Completed { message } => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
@@ -296,19 +364,23 @@ impl AgentPane {
                     cx,
                 );
             }
+
             SlashCommandOutcome::Rejected { message } => {
                 self.palette
                     .set_feedback(CommandFeedbackKind::Error, message, cx);
             }
+
             SlashCommandOutcome::NotReady => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,
                     i18n("agent-session-provider-not-ready").replace("{name}", self.kind.display()),
                     cx,
                 );
+
                 self.run_next_queued_command(cx);
             }
         }
+
         if advance {
             self.run_next_queued_command(cx);
         }
@@ -323,9 +395,11 @@ impl AgentPane {
         if new_turn {
             self.start_working(cx);
         }
+
         self.publish_queued_user_messages(cx);
 
         self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
+
         cx.notify();
     }
 
@@ -342,6 +416,7 @@ impl AgentPane {
     ) {
         if interrupted {
             let turn = self.session.delivery.turn();
+
             self.transcript
                 .update(cx, |transcript, _| transcript.mark_interrupted(turn));
         }
@@ -350,6 +425,7 @@ impl AgentPane {
             .transcript
             .read(cx)
             .was_interrupted(self.session.delivery.turn());
+
         let error_already_shown = error.as_deref().is_some_and(|text| {
             self.transcript
                 .read(cx)
@@ -386,7 +462,9 @@ impl AgentPane {
             &completion_body,
             cx,
         );
+
         self.run_next_queued_command(cx);
+
         cx.notify();
     }
 
@@ -402,6 +480,7 @@ impl AgentPane {
         self.note_visible_output();
 
         let resume_failed = failure.resume_failed;
+
         if resume_failed || self.history_ui.mode == RecentSessionsMode::Loading {
             self.history_ui.mode = RecentSessionsMode::Open;
 
@@ -465,6 +544,7 @@ impl AgentPane {
         for text in prompts {
             self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
         }
+
         cx.notify();
     }
 
@@ -501,6 +581,7 @@ impl AgentPane {
             let newest = turn.items.iter().filter_map(|item| item.at).max();
 
             answered_at = answered_at.max(newest);
+
             self.transcript
                 .update(cx, |transcript, cx| transcript.append_replay(id, turn, cx));
         }
@@ -522,6 +603,7 @@ impl AgentPane {
             {
                 self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
             }
+
             return;
         }
 

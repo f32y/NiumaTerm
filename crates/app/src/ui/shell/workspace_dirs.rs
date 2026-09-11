@@ -35,6 +35,7 @@ enum Resolved {
 /// which can block for seconds on a disconnected share.
 fn resolve_directory(path: path::PathBuf) -> Resolved {
     let display = path.display().to_string();
+
     let Ok(resolved) = fs::canonicalize(&path) else {
         return Resolved::Unusable(display);
     };
@@ -76,8 +77,10 @@ pub(crate) struct WorkspaceDirsEditor {
     /// `None` while a workspace being created has no directory yet, which the
     /// non-empty [`WorkspaceRoots`] invariant cannot express.
     roots: Option<WorkspaceRoots>,
+
     /// Parallel to `roots.ordered()`; refreshed whenever the list changes.
     available: Vec<bool>,
+
     /// Why the last action did nothing, shown under the list.
     notice: Option<SharedString>,
 }
@@ -126,6 +129,7 @@ impl WorkspaceDirsEditor {
                 // answer of the wrong length would mislabel rows.
                 if editor.ordered().len() == expected {
                     editor.available = available;
+
                     cx.notify();
                 }
             });
@@ -152,6 +156,7 @@ impl WorkspaceDirsEditor {
                                 i18n("shell-workspace-dirs-unusable").replace("{path}", &path)
                             });
                         }
+
                         Resolved::Directory(path) => match &mut editor.roots {
                             Some(roots) => {
                                 if roots.add(path.clone()) == RootChange::Duplicate {
@@ -161,6 +166,7 @@ impl WorkspaceDirsEditor {
                                     });
                                 }
                             }
+
                             // The first usable directory of a workspace being
                             // created becomes its primary directory.
                             slot => *slot = Some(WorkspaceRoots::single(path)),
@@ -170,6 +176,7 @@ impl WorkspaceDirsEditor {
 
                 editor.notice = notice.map(Into::into);
                 editor.refresh_availability(cx);
+
                 cx.notify();
             });
         })
@@ -186,7 +193,9 @@ impl WorkspaceDirsEditor {
             RootChange::WouldBeEmpty => Some(i18n("shell-workspace-dirs-keep-one").into()),
             _ => None,
         };
+
         self.refresh_availability(cx);
+
         cx.notify();
     }
 
@@ -197,6 +206,7 @@ impl WorkspaceDirsEditor {
 
         self.notice = None;
         self.refresh_availability(cx);
+
         cx.notify();
     }
 
@@ -450,6 +460,7 @@ impl Shell {
         self.sync_agent_workspaces(id, cx);
         self.refresh_root_availability(cx);
         self.sync_session_memory(cx);
+
         cx.notify();
     }
 
@@ -459,6 +470,7 @@ impl Shell {
     /// without disturbing the one in flight.
     fn sync_agent_workspaces(&mut self, id: WorkspaceId, cx: &mut Context<Self>) {
         let workspace = agent_workspace(self.workspaces.roots_of(id));
+
         let Some(tabs) = self.workspaces.tabs_of(id) else {
             return;
         };
@@ -507,6 +519,7 @@ impl RootAvailability {
             let _ = shell.update(cx, |this, cx| {
                 if this.root_availability.unavailable != unreachable {
                     this.root_availability.unavailable = unreachable;
+
                     cx.notify();
                 }
             });

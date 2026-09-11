@@ -13,6 +13,7 @@ fn engine_block_items_marry_meta() {
     let mut store = BlockStore::default();
 
     store.update_meta(1, |m| m.command = Some("cargo build".into()));
+
     store.apply([
         BlockEvent::EngineBlock {
             seq: 1,
@@ -25,6 +26,7 @@ fn engine_block_items_marry_meta() {
             rows: 3,
         },
     ]);
+
     store.update_meta(2, |m| m.exit_code = Some(0));
 
     let items = store.items();

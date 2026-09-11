@@ -44,6 +44,7 @@ pub enum Channel {
     /// The default channel, which carries no channel name at all.
     #[default]
     Stable,
+
     Nightly,
 }
 
@@ -97,13 +98,16 @@ pub enum StartError {
     /// Sparkle presents AppKit windows, so it is built and driven from the main
     /// thread only.
     NotMainThread,
+
     /// The running bundle names no update feed. A development build is the
     /// ordinary case: the feed URL and the update signing key are stamped into
     /// the bundle when it is packaged, so a locally assembled one has neither
     /// and has no business reaching the published feed.
     NoFeedConfigured,
+
     /// An initializer returned nil.
     InitFailed(&'static str),
+
     /// Sparkle refused to start and said why.
     Refused(String),
 }
@@ -128,11 +132,13 @@ impl Error for StartError {}
 /// thread that created it.
 pub struct Updater {
     updater: Retained<AnyObject>,
+
     /// Sparkle keeps only a weak reference to its delegate and is silent
     /// about the user driver, which it never hands back. Holding a reference
     /// costs one object for the lifetime of the process; assuming the other way
     /// round and being wrong costs a use-after-free during an update check.
     _user_driver: Retained<AnyObject>,
+
     /// The updater references its delegate weakly and says so, so this is the
     /// only thing keeping it alive.
     delegate: Retained<UpdaterDelegate>,
@@ -207,6 +213,7 @@ impl Updater {
 unsafe extern "C" {
     #[link_name = "OBJC_CLASS_$_SPUStandardUserDriver"]
     static SPU_STANDARD_USER_DRIVER: AnyClass;
+
     #[link_name = "OBJC_CLASS_$_SPUUpdater"]
     static SPU_UPDATER: AnyClass;
 }
@@ -214,6 +221,7 @@ unsafe extern "C" {
 fn standard_user_driver(bundle: &NSBundle) -> Result<Retained<AnyObject>, StartError> {
     let driver: *mut AnyObject = unsafe {
         let allocated: *mut AnyObject = msg_send![&SPU_STANDARD_USER_DRIVER, alloc];
+
         msg_send![allocated, initWithHostBundle: bundle, delegate: ptr::null::<AnyObject>()]
     };
 
@@ -246,6 +254,7 @@ fn updater_for(
 fn start_updater(updater: &AnyObject) -> Result<(), StartError> {
     autoreleasepool(|pool| {
         let mut error: *mut NSError = ptr::null_mut();
+
         let started: bool = unsafe { msg_send![updater, startUpdater: &mut error] };
 
         if started {

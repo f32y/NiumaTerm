@@ -8,6 +8,7 @@ use crate::wake::{Wake, WakeSender, wake_channel};
 fn callback_wake_sender_forwards_wake() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let seen_for_sender = Arc::clone(&seen);
+
     let sender = WakeSender::from_fn(move |wake| {
         seen_for_sender.lock().push(wake);
     });

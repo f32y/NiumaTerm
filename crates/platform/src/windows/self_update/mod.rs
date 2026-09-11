@@ -15,6 +15,7 @@ impl fmt::Display for ReplaceFilesError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Copy { name, source } => write!(formatter, "copying {name} failed: {source}"),
+
             Self::Replace { name, source } => {
                 write!(formatter, "replacing {name} failed: {source}")
             }
@@ -36,6 +37,7 @@ pub fn replace_files(
     names: &[&str],
 ) -> Result<(), ReplaceFilesError> {
     copy_in(staging, install, names)?;
+
     swap(install, names)
 }
 
@@ -45,6 +47,7 @@ fn copy_in(staging: &Path, install: &Path, names: &[&str]) -> Result<(), Replace
 
         if let Err(source) = fs::copy(staging.join(name), &incoming) {
             discard_incoming(install, names);
+
             return Err(ReplaceFilesError::Copy {
                 name: (*name).to_string(),
                 source,
@@ -61,9 +64,11 @@ fn swap(install: &Path, names: &[&str]) -> Result<(), ReplaceFilesError> {
     for name in names {
         match replace(install, name) {
             Ok(had_previous) => done.push((name, had_previous)),
+
             Err(source) => {
                 undo(install, &done);
                 discard_incoming(install, names);
+
                 return Err(ReplaceFilesError::Replace {
                     name: (*name).to_string(),
                     source,
@@ -87,6 +92,7 @@ fn replace(install: &Path, name: &str) -> io::Result<bool> {
 
     match fs::rename(&incoming, &target) {
         Ok(()) => Ok(had_previous),
+
         Err(error) => {
             if had_previous {
                 let _ = fs::rename(&previous, &target);

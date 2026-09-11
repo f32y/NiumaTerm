@@ -222,9 +222,11 @@ fn local_session_publishes_engine_output_and_host_events() {
             .any(|event| matches!(event, HostEvent::Title(title) if title == MARKER));
 
         let snapshot = session.snapshot();
+
         let top = snapshot
             .viewport_top
             .expect("the viewport must have a top row");
+
         let output = (0..snapshot.rows())
             .map(|row| {
                 session
@@ -269,6 +271,7 @@ fn host_events_map_from_terminal_events() {
     listener.send_event(TerminalEvent::ResetTitle, wid);
     listener.send_event(TerminalEvent::Bell, wid);
     listener.send_event(TerminalEvent::CloseTerminal(0), wid);
+
     listener.send_event(
         TerminalEvent::DesktopNotification {
             title: "T".into(),
@@ -276,6 +279,7 @@ fn host_events_map_from_terminal_events() {
         },
         wid,
     );
+
     listener.send_event(TerminalEvent::PromptBoundaryTrusted(true), wid);
 
     let q = events.lock();
@@ -305,6 +309,7 @@ fn in_flight_block_lifecycle() {
             started_at: SystemTime::now(),
         }
     }
+
     fn capture(cmd: &str) -> CommandCapture {
         let now = SystemTime::now();
 
@@ -336,8 +341,10 @@ fn in_flight_block_lifecycle() {
 
     {
         let running = in_flight.lock().clone().expect("in-flight set");
+
         assert_eq!(running.command.as_str(), "sleep 5");
     }
+
     proxy.send_event(TerminalEvent::CommandFinished(capture("sleep 5")), wid);
 
     assert!(
@@ -410,6 +417,7 @@ fn block_batches_and_seq_metadata_reach_the_block_store() {
         }),
         wid,
     );
+
     proxy.send_event(
         TerminalEvent::CommandFinished(CommandCapture {
             seq: 1,
@@ -461,12 +469,15 @@ struct TestObserver {
     wakes: Arc<Mutex<Vec<SessionChange>>>,
     images: Arc<Mutex<HashMap<u32, ()>>>,
 }
+
 impl SessionObserver for TestObserver {
     fn graphics(&self, updates: UpdateQueues) {
         let mut images = self.images.lock();
+
         for (id, _) in updates.pending_images {
             images.insert(id, ());
         }
+
         for id in updates.remove_queue {
             images.remove(&(id.0 as u32));
         }
@@ -481,6 +492,7 @@ fn graphics_proxy(id: u64) -> (TerminalEventProxy, GraphicsProbes) {
     let shared = Arc::new(SessionSharedState::default());
     let observer = Arc::new(TestObserver::default());
     let proxy = TerminalEventProxy::new(shared.clone(), id, Some(observer.clone()));
+
     (
         proxy,
         GraphicsProbes {
@@ -574,6 +586,7 @@ fn sustained_output_does_not_grow_ui_queue() {
             )])]),
             wid,
         );
+
         proxy.send_event(rgba_update(1, 1, 1, 1), wid);
         proxy.send_event(TerminalEvent::TerminalDamaged(1), wid);
 
@@ -617,6 +630,7 @@ fn active_and_frozen_state_coherent_at_wake() {
         }]),
         wid,
     );
+
     proxy.send_event(rgba_update(1, 42, 2, 2), wid);
 
     // Before the flush the frozen row is not yet in the store.
@@ -665,12 +679,15 @@ fn final_damage_callback_observes_published_blocks_after_graphics() {
     }
 
     let shared = Arc::new(SessionSharedState::default());
+
     let observer = Arc::new(PublicationObserver {
         shared: shared.clone(),
         steps: Mutex::default(),
     });
+
     let proxy = TerminalEventProxy::new(shared, 1, Some(observer.clone()));
     let window = WindowId::dummy();
+
     proxy.send_event(
         TerminalEvent::BlockBatch(vec![BlockEvent::EngineBlock {
             seq: 1,
@@ -682,6 +699,7 @@ fn final_damage_callback_observes_published_blocks_after_graphics() {
         }]),
         window,
     );
+
     proxy.send_event(rgba_update(1, 42, 2, 2), window);
     proxy.send_event(TerminalEvent::TerminalDamaged(1), window);
 

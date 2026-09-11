@@ -410,6 +410,7 @@ fn chrome_keys_off_metadata() {
         m.started_at = Some(t0);
         m.ended_at = Some(t0 + time::Duration::from_secs(2));
     });
+
     store.update_meta(2, |m| {
         m.command = Some("bad".into());
         m.exit_code = Some(127);
@@ -654,9 +655,11 @@ fn frozen_block_view(
     let pages: Vec<_> = block
         .map(|(block, palette)| {
             let handle = block.handle();
+
             let rows = (0..block.row_count())
                 .map(|row| {
                     let mut cells = Vec::new();
+
                     let meta = block
                         .read_row_visit(row, palette, |x, text, wide, style| {
                             cells.push(RowCell {
@@ -668,6 +671,7 @@ fn frozen_block_view(
                         })
                         .unwrap()
                         .unwrap();
+
                     ScreenRowRead {
                         cells,
                         wrapped: meta.wrapped,
@@ -676,6 +680,7 @@ fn frozen_block_view(
                     }
                 })
                 .collect();
+
             Arc::new(RowPage {
                 source: PageSource::Block {
                     id: handle.id,
@@ -690,6 +695,7 @@ fn frozen_block_view(
         })
         .into_iter()
         .collect();
+
     frozen_page_view(
         &pages, info, item, visible, cell_h, pad, selection, selected, foreground,
     )

@@ -171,8 +171,10 @@ pub fn resolve_link(col: usize, row_at: impl Fn(i64) -> Option<RowText>) -> Opti
 pub fn follows_link(modifiers: ModifiersState) -> bool {
     #[cfg(target_os = "macos")]
     let expected = ModifiersState::SUPER;
+
     #[cfg(not(target_os = "macos"))]
     let expected = ModifiersState::CONTROL;
+
     modifiers == expected
 }
 

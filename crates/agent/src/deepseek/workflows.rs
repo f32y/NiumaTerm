@@ -23,6 +23,7 @@ impl WorkflowTracker {
     /// republishes the snapshot only when there is something new to show.
     pub(crate) fn apply(&mut self, event: &Value) -> bool {
         let data = &event["data"];
+
         let Some(run_id) = data["runId"].as_str() else {
             return false;
         };
@@ -52,7 +53,9 @@ impl WorkflowTracker {
 
                 true
             }
+
             Some("tool-workflow/agent-start") => self.start_agent(run_id, data),
+
             Some("tool-workflow/agent-end") => {
                 let Some(seq) = data["seq"].as_u64() else {
                     return false;
@@ -77,6 +80,7 @@ impl WorkflowTracker {
 
                 true
             }
+
             Some("tool-workflow/run-end") => {
                 let state = match data["stopReason"].as_str() {
                     Some("completed") => WorkflowRunState::Done,
@@ -100,6 +104,7 @@ impl WorkflowTracker {
 
                 true
             }
+
             _ => false,
         }
     }
@@ -119,6 +124,7 @@ impl WorkflowTracker {
         // A member names its group by title alone, so the run's list of groups
         // is built in the order members first mention one.
         let phase = data["phase"].as_str().map(str::to_string);
+
         let Some(run) = self.run_mut(run_id) else {
             return false;
         };
@@ -130,6 +136,7 @@ impl WorkflowTracker {
         let phase_index = phase.as_ref().map(|title| {
             match run.phases.iter().find(|entry| &entry.title == title) {
                 Some(entry) => entry.index,
+
                 None => {
                     let index = run.phases.len() as u64;
 

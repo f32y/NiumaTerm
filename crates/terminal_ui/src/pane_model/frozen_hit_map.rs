@@ -7,8 +7,10 @@ use crate::block_list::{BlockListPoint, FrozenItemChrome, FrozenPoint};
 pub(crate) struct FrozenHitMap {
     /// Hit-test data recorded from the last native list prepaint.
     hit: FrozenHitInfo,
+
     /// Visible frozen item chrome recorded from native list item bounds.
     chrome: Vec<FrozenItemChrome>,
+
     /// Visible separator y positions, painted outside GPUI List's content mask.
     separators: Vec<f32>,
 }
@@ -87,6 +89,7 @@ pub(crate) struct FrozenHitInfo {
     /// `(y, item, row, cell_count)` per visible block or live-history row;
     /// `usize::MAX` marks a live SCREEN row because it cannot be a list index.
     rows: Vec<(f32, usize, usize, u32)>,
+
     pub active_top: f32,
 }
 

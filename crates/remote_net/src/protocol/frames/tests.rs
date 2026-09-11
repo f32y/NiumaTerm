@@ -32,6 +32,7 @@ fn data_frames_roundtrip() {
 
     for frame in frames {
         let encoded = frame.encode().unwrap();
+
         assert_eq!(Frame::decode(&encoded).unwrap(), frame);
     }
 }
@@ -56,6 +57,7 @@ fn control_messages_roundtrip() {
     for msg in host_bound {
         let frame = Frame::control(&msg).unwrap();
         let bytes = frame.encode().unwrap();
+
         let Frame::Control(payload) = Frame::decode(&bytes).unwrap() else {
             panic!("expected control frame");
         };
@@ -72,6 +74,7 @@ fn control_messages_roundtrip() {
     });
 
     let frame = Frame::control(&msg).unwrap();
+
     let Frame::Control(payload) = Frame::decode(&frame.encode().unwrap()).unwrap() else {
         panic!("expected control frame");
     };

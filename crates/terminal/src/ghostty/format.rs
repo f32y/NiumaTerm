@@ -27,6 +27,7 @@ pub(super) fn format_terminal(
     opts.unwrap = unwrap;
     opts.trim = trim;
     opts.extra = vt_sized!(VtFormatterTerminalExtra);
+
     opts.selection = selection
         .map(|s| s as *const VtSelection)
         .unwrap_or(ptr::null());
@@ -49,6 +50,7 @@ pub(super) fn format_terminal(
             Vec::new()
         } else {
             let bytes = unsafe { slice::from_raw_parts(out_ptr, out_len) };
+
             bytes.to_vec()
         }
     });

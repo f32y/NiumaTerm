@@ -65,11 +65,13 @@ impl RenderOnce for InlineRename {
                 .p_0()
                 .text_center()
                 .appearance(false),
+
             InlineRenameStyle::SidebarTab => Input::new(&self.input)
                 .xsmall()
                 .p_0()
                 .text_xs()
                 .appearance(false),
+
             InlineRenameStyle::Workspace => Input::new(&self.input)
                 .xsmall()
                 .p_0()

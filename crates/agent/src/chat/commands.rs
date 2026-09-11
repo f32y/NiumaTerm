@@ -35,6 +35,7 @@ pub enum SlashCommandRunPolicy {
 pub struct SlashCommandInfo {
     /// Normalized protocol name without the leading slash.
     pub name: String,
+
     pub description: String,
     pub argument_hint: Option<String>,
     pub source: SlashCommandSource,

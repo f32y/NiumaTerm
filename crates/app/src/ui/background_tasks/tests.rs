@@ -32,11 +32,13 @@ impl Builder {
 
     fn task(mut self, key: BackgroundTaskKey, update: BackgroundTaskUpdate) -> Self {
         self.0.apply(key, update);
+
         self
     }
 
     fn discovery(mut self, discovery: BackgroundTaskDiscoveryState) -> Self {
         self.0.set_discovery(discovery);
+
         self
     }
 
@@ -144,7 +146,9 @@ fn both_providers_render_from_the_same_snapshot_shape() {
     let rows = running_rows(&claude);
 
     assert_eq!(rows.len(), 1);
+
     let provider: &str = rows[0].key.provider.into();
+
     assert_eq!(provider, "Claude Code");
     assert_eq!(rows[0].display_label(), "Review the diff");
 }

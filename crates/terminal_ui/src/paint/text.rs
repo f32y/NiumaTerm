@@ -143,6 +143,7 @@ pub(crate) fn paint_line_backgrounds_at(
 
         if run_color == cell_data.background && run_start + run_width == cell_data.col {
             run_width += width;
+
             continue;
         }
 

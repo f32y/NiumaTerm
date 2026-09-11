@@ -42,71 +42,93 @@ use crate::transcript::{CodeTranscriptCache, Entry, ReadingPosition};
 pub struct TranscriptView {
     pub(crate) content: TranscriptContent<EntryPresentation>,
     pub(super) row_cache: RowCache,
+
     /// Virtualized transcript: only visible rows build elements each frame.
     /// `rows` mirrors the list's item count; render() rebuilds the changed
     /// turn suffix and splices/remeasures just the changed range.
     pub(crate) transcript_list: ListState,
+
     pub(crate) rows: Vec<TranscriptRow>,
+
     /// Row heights depend on the prose and technical-content fonts, which the
     /// specs can't see; the last-seen values trigger a full remeasure on change.
     transcript_font: (SharedString, f32, SharedString, f32),
+
     /// Virtual rows cache measured heights; a width change can rewrap prose
     /// without changing row fingerprints, so the viewport width is tracked too.
     pub(super) transcript_width: Option<Pixels>,
+
     /// Last measured viewport height, which is how much empty space below the
     /// conversation lets its final row reach the top of the screen.
     pub(super) transcript_height: Option<Pixels>,
+
     /// Where the viewport sits in the window, which is what turns the window
     /// bounds a thumbnail reports into a position inside the preview layer.
     pub(super) transcript_origin: Option<Point<Pixels>>,
+
     /// Reading position from before a picker started scrolling the transcript
     /// to the prompt it highlights, so cancelling that picker returns the
     /// conversation to where the user was reading it.
     pub(super) stashed_position: Option<ReadingPosition>,
+
     /// A picker is following the transcript, so empty space is left below the
     /// conversation. Without that room a prompt near the end cannot be lifted
     /// clear of the picker: the list stops scrolling once its last row is on
     /// screen, which leaves exactly those prompts behind the list naming
     /// them.
     pub(super) reserve_below: bool,
+
     /// Collapse setting the rows above were built under, so a change to it can
     /// retire the per-turn and per-run departures from the mode it replaces.
     collapse_mode: CollapseRows,
+
     /// Which parts of the transcript are open, how far through their motion
     /// they are, and how tall each one lays out to.
     pub(crate) disclosures: Disclosures,
+
     /// Expanded technical output retains its parsed source and scroll position.
     /// Collapsing a row releases the extra source, syntax trees, and worker.
     pub(crate) code_transcripts: CodeTranscriptCache,
+
     /// What each finished turn is remembered by: whether it settled, how long
     /// it took, what it produced, and whether the user stopped it.
     pub(crate) turn_ledger: TurnLedger,
+
     /// The running turn, while one is in flight.
     pub(crate) live_turn: LiveTurn,
+
     /// The reply being let onto the screen a character at a time, while one
     /// is. Only text that streams in through this view is typed: a restored
     /// or mirrored conversation arrives whole and is shown whole.
     typewriter: Option<Typewriter>,
+
     /// Presentation inputs rather than owned state: the working directory
     /// resolves transcript links, and the provider decides a few labels.
     pub(crate) cwd: Option<String>,
+
     pub(crate) kind: AgentKind,
+
     /// Revision of the conversation this view was last filled from, for a view
     /// that mirrors content someone else owns rather than accumulating its own.
     source_revision: Option<u64>,
+
     /// The image a reader opened at full size over the conversation. Held per
     /// conversation rather than per pane so a child agent's transcript
     /// enlarges its own images inside its own bounds. Stays through the
     /// layer's fade-out, which needs something to fade.
     pub(crate) zoomed_image: Option<Arc<Image>>,
+
     /// Whether the preview layer is up or on its way out; the image alone
     /// cannot say, because it outlives the dismissal by the fade.
     pub(crate) zoom_open: bool,
+
     pub(crate) zoom_fade: Fade,
+
     /// The thumbnail the open image grew out of, in window coordinates, so
     /// the preview can shrink back into it. Absent when the image was opened
     /// from something with no place on screen, such as a link in the composer.
     pub(crate) zoom_origin: Option<Bounds<Pixels>>,
+
     /// The pane whose conversation this is, for the row actions that address
     /// the conversation rather than the row: branching in front of a prompt,
     /// rewinding to one. Absent on a view that mirrors somebody else's
@@ -185,6 +207,7 @@ impl TranscriptView {
 
         self.source_revision = Some(revision);
         self.code_transcripts.invalidate_all();
+
         self.content.replace(
             items
                 .iter()
@@ -256,6 +279,7 @@ impl TranscriptView {
             replay.seconds,
             replay.output_tokens,
         );
+
         cx.notify();
     }
 
@@ -294,6 +318,7 @@ impl TranscriptView {
         let Some(update) = self.content.append_delta(item_id, delta, field) else {
             return false;
         };
+
         let index = update.index;
 
         // Only a newly selected reply needs its old prefix counted. Existing
@@ -322,6 +347,7 @@ impl TranscriptView {
 
         self.code_transcripts.invalidate(index);
         self.row_cache.invalidate(index);
+
         update.non_blank
     }
 
@@ -332,6 +358,7 @@ impl TranscriptView {
             Some(typewriter) if typewriter.index() == index => {
                 shown_prefix(text, typewriter.shown())
             }
+
             _ => text,
         }
     }
@@ -357,6 +384,7 @@ impl TranscriptView {
         let Some(typewriter) = &mut self.typewriter else {
             return false;
         };
+
         let _profile = Probe::start(Operation::Typewriter);
         let index = typewriter.index();
         let previous = typewriter.shown();
@@ -410,6 +438,7 @@ impl TranscriptView {
     pub(crate) fn set_compacting(&mut self, compacting: bool, cx: &mut Context<Self>) {
         self.live_turn.set_compacting(compacting);
         self.row_cache.invalidate(self.content.entries().len());
+
         cx.notify();
     }
 
@@ -425,6 +454,7 @@ impl TranscriptView {
     pub(crate) fn start_working(&mut self, cx: &mut Context<Self>) {
         self.live_turn.start();
         self.row_cache.invalidate(self.content.entries().len());
+
         cx.notify();
     }
 
@@ -450,6 +480,7 @@ impl TranscriptView {
 
         self.turn_ledger
             .settle(turn, started.elapsed().as_secs(), output_tokens);
+
         self.invalidate_turn_rows(turn);
 
         cx.notify();
@@ -461,6 +492,7 @@ impl TranscriptView {
         self.live_turn.discard();
         self.turn_ledger.forget(turn);
         self.invalidate_turn_rows(turn);
+
         cx.notify();
     }
 }
@@ -472,6 +504,7 @@ fn reply_chars(items: &[Entry], index: usize) -> usize {
         Some(SessionItem::AgentMessage {
             text: Some(text), ..
         }) => text.chars().count(),
+
         _ => 0,
     }
 }
@@ -600,6 +633,7 @@ impl Render for TranscriptView {
                                 if this.transcript_width != Some(width) {
                                     this.transcript_width = Some(width);
                                     this.transcript_list.remeasure();
+
                                     cx.notify();
                                 }
                             })
@@ -717,9 +751,11 @@ const FLOOR_RATE: f32 = 60.0;
 /// has already moved on to where the new text appears.
 struct Typewriter {
     index: usize,
+
     /// Characters shown, carrying the fraction between frames so a rate
     /// below one character a frame still moves.
     shown: f32,
+
     ticked: Instant,
 }
 

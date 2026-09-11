@@ -25,10 +25,12 @@ pub(crate) fn initialize(cx: &mut App) {
 
         cx.on_app_quit(|_| {
             flush();
+
             async {}
         })
         .detach();
     }
+
     #[cfg(not(enable_profiling))]
     let _ = cx;
 }

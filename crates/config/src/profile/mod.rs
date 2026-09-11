@@ -19,6 +19,7 @@ pub struct ProfilesConfig {
     /// Name of the default profile; empty falls back to the first profile.
     #[serde(default)]
     pub default: String,
+
     #[serde(default)]
     pub list: Vec<Profile>,
 }
@@ -43,11 +44,13 @@ pub struct AgentProfilesConfig {
     /// Name of the default agent profile; empty falls back to the first one.
     #[serde(default)]
     pub default: String,
+
     /// True once the settings dialog has managed this section. Distinguishes
     /// "never configured" (seed the built-in profiles) from "user deleted
     /// every profile" (respect the empty list).
     #[serde(default)]
     pub initialized: bool,
+
     #[serde(default)]
     pub list: Vec<AgentProfile>,
 }
@@ -60,6 +63,7 @@ pub enum AgentProfileKind {
     #[default]
     ClaudeCode,
     Codex,
+
     /// DeepSeek Harness, driven through the local HTTP and WebSocket interface
     /// its `dsh web` host serves rather than through a stdio CLI protocol.
     #[serde(rename = "deepseek")]
@@ -97,32 +101,39 @@ pub struct AgentProfile {
     pub name: String,
     #[serde(default)]
     pub kind: AgentProfileKind,
+
     /// Executable name or path; a bare name resolves via PATH (and PATHEXT on
     /// Windows, so `claude` finds both `claude.exe` and the npm `claude.cmd`).
     /// Ignored while [`Self::launcher`] runs the harness from its package.
     #[serde(default)]
     pub executable: String,
+
     /// Only DeepSeek Harness offers package launchers; the other agent kinds
     /// use their configured executable regardless of this value.
     #[serde(default)]
     pub launcher: AgentProfileLauncher,
+
     /// Model selected when a new agent conversation starts. Each adapter maps
     /// this to its native configuration surface.
     #[serde(default)]
     pub model: String,
+
     /// Reasoning effort forced on every conversation this profile starts.
     /// Empty leaves the choice to the remembered thread settings and whatever
     /// the agent reports, which is what the pickers showed before this field
     /// existed.
     #[serde(default)]
     pub effort: String,
+
     /// Point Claude Code's per-tier model settings at [`Self::model`] too, so
     /// a custom endpoint that serves a single model still answers the requests
     /// the CLI routes to its Opus, Sonnet, and Haiku tiers.
     #[serde(default, rename = "replace-sub-models")]
     pub replace_sub_models: bool,
+
     #[serde(default, rename = "use-custom-endpoint")]
     pub use_custom_endpoint: bool,
+
     /// Idle minutes after the agent's last answer beyond which the next
     /// message is warned about: a provider prompt cache expires on its own
     /// clock, so the message that follows a long pause is billed as a full
@@ -130,12 +141,14 @@ pub struct AgentProfile {
     /// before this field existed carries.
     #[serde(default, rename = "cache-warn-minutes")]
     pub cache_warn_minutes: u32,
+
     #[serde(default, rename = "api-base-url")]
     pub api_base_url: String,
     #[serde(default, rename = "api-key")]
     pub api_key: String,
     #[serde(default)]
     pub env: Vec<EnvVar>,
+
     /// Declare [`Self::model`] as an image-capable model in DeepSeek Harness's
     /// own provider catalog. The harness refuses an image unless the selected
     /// model is listed there as taking one, and a model named by hand never
@@ -157,10 +170,12 @@ struct PersistedAgentProfile {
     executable: String,
     #[serde(default)]
     launcher: Option<AgentProfileLauncher>,
+
     /// Builds before package launchers became a three-way choice stored this
     /// boolean. A new `launcher` value wins when both fields are present.
     #[serde(default, rename = "via-npx")]
     via_npx: bool,
+
     #[serde(default)]
     model: String,
     #[serde(default)]
@@ -199,6 +214,7 @@ impl TryFrom<PersistedAgentProfile> for AgentProfile {
                     persisted.name
                 )
             })?,
+
             None => (persisted.api_base_url, persisted.api_key),
         };
 
@@ -418,6 +434,7 @@ fn decrypt_credentials(stored: &str) -> Result<(String, String), String> {
     let encoded = stored
         .strip_prefix(PREFIX)
         .ok_or_else(|| -> String { "unsupported credential format version".into() })?;
+
     let bytes = BASE64
         .decode(encoded)
         .map_err(|_| -> String { "credential value is not valid Base64".into() })?;
@@ -441,6 +458,7 @@ fn decrypt_credentials(stored: &str) -> Result<(String, String), String> {
 
     let text = String::from_utf8(plaintext)
         .map_err(|_| -> String { "decrypted credential payload is not valid UTF-8".into() })?;
+
     let payload: CredentialPayload = toml::from_str(&text)
         .map_err(|_| -> String { "decrypted credential payload could not be decoded".into() })?;
 

@@ -94,8 +94,10 @@ pub fn open_remote_session(
         .spawn(move || {
             let runtime = match RuntimeBuilder::new_current_thread().enable_all().build() {
                 Ok(rt) => rt,
+
                 Err(e) => {
                     let _ = ready_tx.send(Err(NetError::Internal(e.to_string())));
+
                     return;
                 }
             };
@@ -136,6 +138,7 @@ pub enum AttachTarget {
 /// declared dead. The host keeps the shell running across disconnects, so
 /// retrying is what makes a flaky link survivable rather than session-ending.
 const RECONNECT_ATTEMPTS: u32 = 5;
+
 const RECONNECT_BACKOFF: Duration = Duration::from_secs(2);
 
 #[allow(clippy::too_many_arguments)]
@@ -152,8 +155,10 @@ async fn session_thread(
     let (mut channel, snapshot) =
         match connect_and_attach(&relay_url, &host_id, &host_public_key, &device, target).await {
             Ok(attached) => attached,
+
             Err(e) => {
                 let _ = ready.send(Err(e));
+
                 return;
             }
         };
@@ -172,10 +177,13 @@ async fn session_thread(
     loop {
         match pump(channel, &output, &mut commands, resume_after).await {
             PumpExit::Local => return,
+
             PumpExit::SessionEnded => {
                 let _ = output.send(SessionByteEvent::Exited);
+
                 return;
             }
+
             PumpExit::Disconnected => {}
         }
 
@@ -190,6 +198,7 @@ async fn session_thread(
         .await
         else {
             let _ = output.send(SessionByteEvent::Exited);
+
             return;
         };
 
@@ -218,12 +227,14 @@ async fn connect_and_attach(
 
     let session_id = match target {
         AttachTarget::Existing(id) => id,
+
         AttachTarget::Open(options) => {
             with_timeout(channel.send_control(&HostBound::Open(options))).await?;
 
             match with_timeout(channel.recv_control::<ClientBound>()).await? {
                 ClientBound::Opened { session_id } => session_id,
                 ClientBound::Error { message, .. } => return Err(NetError::Protocol(message)),
+
                 other => {
                     return Err(NetError::Protocol(format!(
                         "expected Opened, got {other:?}"
@@ -238,6 +249,7 @@ async fn connect_and_attach(
     match with_timeout(channel.recv_control::<ClientBound>()).await? {
         ClientBound::Attached(snapshot) => Ok((channel, snapshot)),
         ClientBound::Error { message, .. } => Err(NetError::Protocol(message)),
+
         other => Err(NetError::Protocol(format!(
             "expected Attached, got {other:?}"
         ))),
@@ -272,13 +284,16 @@ async fn reconnect(
         {
             Ok(attached) => {
                 info!(session_id, attempt, "resumed remote session");
+
                 return Some(attached);
             }
+
             Err(error) => {
                 // A host rejection (session killed, device revoked) will not
                 // change on retry. Local failures and timeouts may recover.
                 if let Some(message) = error.permanent_reconnect_reason() {
                     warn!(session_id, "remote session cannot be resumed: {message}");
+
                     return None;
                 }
 
@@ -295,8 +310,10 @@ async fn reconnect(
 enum PumpExit {
     /// The local side hung up (tab closed) or stopped consuming output.
     Local,
+
     /// The remote shell exited, or the host rejected the stream.
     SessionEnded,
+
     /// The transport died; the session itself may still be alive on the host.
     Disconnected,
 }
@@ -317,12 +334,16 @@ async fn pump(
         tokio::select! {
             command = commands.recv() => {
                 let Some(frame) = command else { return PumpExit::Local };
+
                 let Ok(bytes) = frame.encode() else { continue };
+
                 let Ok(ciphertext) = chan.seal(&bytes) else { return PumpExit::Disconnected };
+
                 if sink.send(Message::Binary(ciphertext.into())).await.is_err() {
                     return PumpExit::Disconnected;
                 }
             }
+
             msg = stream.next() => {
                 let data = match msg {
                     Some(Ok(Message::Binary(data))) => data,
@@ -330,18 +351,22 @@ async fn pump(
                     Some(Ok(_)) => continue,
                     Some(Err(_)) => return PumpExit::Disconnected,
                 };
+
                 // A decrypt failure means the stream is desynchronized or
                 // tampered with: the Noise channel is unusable from here on.
                 let Ok(plaintext) = chan.open(&data) else { return PumpExit::Disconnected };
+
                 match Frame::decode(&plaintext) {
                     Ok(Frame::Output { seq, data, .. }) => {
                         if seq <= resume_after {
                             continue;
                         }
+
                         if output.send(SessionByteEvent::Output(data)).is_err() {
                             return PumpExit::Local;
                         }
                     }
+
                     Ok(Frame::Exited { .. }) => return PumpExit::SessionEnded,
                     // Control replies to mid-session requests are not used by
                     // the byte-stream consumer; ignore rather than error.
@@ -371,8 +396,10 @@ pub fn pair_device(
             // (which would surface to the caller as an opaque Closed).
             let runtime = match RuntimeBuilder::new_current_thread().enable_all().build() {
                 Ok(rt) => rt,
+
                 Err(e) => {
                     let _ = tx.send(Err(NetError::Internal(e.to_string())));
+
                     return;
                 }
             };
@@ -407,8 +434,10 @@ pub fn list_remote_sessions(
             // (which would surface to the caller as an opaque Closed).
             let runtime = match RuntimeBuilder::new_current_thread().enable_all().build() {
                 Ok(rt) => rt,
+
                 Err(e) => {
                     let _ = tx.send(Err(NetError::Internal(e.to_string())));
+
                     return;
                 }
             };
@@ -424,9 +453,11 @@ pub fn list_remote_sessions(
                 // Timeout (retryable), not a protocol violation.
                 match time::timeout(Duration::from_secs(10), channel.recv_control()).await {
                     Ok(Ok(ClientBound::SessionList(list))) => Ok(list),
+
                     Ok(Ok(other)) => Err(NetError::Protocol(format!(
                         "expected SessionList, got {other:?}"
                     ))),
+
                     Ok(Err(e)) => Err(e),
                     Err(_) => Err(NetError::Timeout),
                 }

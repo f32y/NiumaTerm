@@ -10,6 +10,7 @@ fn system_dll() -> PathBuf {
     let root: PathBuf = env::var_os("SystemRoot")
         .expect("SystemRoot is set on Windows")
         .into();
+
     root.join("System32").join("kernel32.dll")
 }
 

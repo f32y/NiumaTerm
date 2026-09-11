@@ -76,10 +76,13 @@ impl From<VtSgrUnderline::Type> for Underline {
 pub enum CellWide {
     #[default]
     Narrow,
+
     /// First cell of a double-width character.
     Wide,
+
     /// Second cell of a double-width character (no glyph).
     SpacerTail,
+
     /// Padding before a wide char at a soft-wrap boundary (no glyph).
     SpacerHead,
 }
@@ -120,6 +123,7 @@ impl CellText {
             CellTextRepr::Inline { len, buf } => unsafe {
                 str::from_utf8_unchecked(&buf[..*len as usize])
             },
+
             CellTextRepr::Heap(s) => s,
         }
     }
@@ -181,8 +185,10 @@ impl ops::Deref for CellText {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowCell {
     pub x: u16,
+
     /// Grapheme cluster for the cell. Empty for blank cells.
     pub text: CellText,
+
     pub wide: CellWide,
     pub style: SnapshotStyle,
 }
@@ -193,10 +199,13 @@ pub struct RowCell {
 pub struct ScreenRowMeta {
     /// This row soft-wraps into the next one (logical-line join point).
     pub wrapped: bool,
+
     /// OSC 133 `;A` tag: this row starts a prompt (harvest attribution anchor).
     pub prompt_start: bool,
+
     /// This row holds a kitty unicode placeholder.
     pub virtual_placeholder: bool,
+
     /// OSC 8 spans: `(start_col, end_col_inclusive, uri)`.
     pub hyperlinks: Vec<(u16, u16, String)>,
 }
@@ -207,10 +216,13 @@ pub struct ScreenRowMeta {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScreenRowRead {
     pub cells: Vec<RowCell>,
+
     /// This row soft-wraps into the next one (logical-line join point).
     pub wrapped: bool,
+
     /// OSC 133 `;A` tag: this row starts a prompt (harvest attribution anchor).
     pub prompt_start: bool,
+
     /// OSC 8 spans: `(start_col, end_col_inclusive, uri)`.
     pub hyperlinks: Vec<(u16, u16, String)>,
 }
@@ -219,11 +231,14 @@ pub struct ScreenRowRead {
 pub struct SnapshotCursor {
     pub x: u16,
     pub y: u16,
+
     /// `true` when the cursor should be shown — DECTCEM on **and** within the
     /// viewport (render-state `CURSOR_VISIBLE` ∧ `CURSOR_VIEWPORT_HAS_VALUE`).
     pub visible: bool,
+
     /// DECSCUSR shape from the render-state `CURSOR_VISUAL_STYLE`.
     pub shape: ansi::CursorShape,
+
     /// Modes-based blink from the render-state `CURSOR_BLINKING`.
     pub blinking: bool,
 }
@@ -236,6 +251,7 @@ pub struct SnapshotColors {
     pub fg: ColorRgb,
     pub bg: ColorRgb,
     pub cursor: Option<ColorRgb>,
+
     /// The **effective** window background (terminal-level `COLOR_BACKGROUND`): an
     /// OSC 11 override, or the config default pushed at init, or `None` when no bg
     /// is set at all. The renderer compares it to the config default to tell an OSC
@@ -252,24 +268,36 @@ pub struct SnapshotColors {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SnapshotPlacement {
     pub image_id: u32,
+
     /// Kitty placement ID. Distinguishes multiple placements of one image; needed
     /// to associate virtual-placeholder runs with the right placement.
     pub placement_id: u32,
+
     pub is_virtual: bool,
+
     /// Viewport-relative top-left. `row` may be negative (scrolled partly above).
     pub viewport_col: i32,
+
     pub viewport_row: i32,
+
     /// Rendered pixel size of the placement.
     pub pixel_width: u32,
+
     pub pixel_height: u32,
+
     /// Grid cells the placement spans.
     pub grid_cols: u32,
+
     pub grid_rows: u32,
+
     /// Sub-cell pixel offsets (kitty `X=`/`Y=`).
     pub cell_x_offset: u32,
+
     pub cell_y_offset: u32,
+
     /// Resolved source rectangle in image pixels (kitty `x=`/`y=`/`w=`/`h=`).
     pub source_x: u32,
+
     pub source_y: u32,
     pub source_width: u32,
     pub source_height: u32,
@@ -283,8 +311,10 @@ pub struct SnapshotPlacement {
 pub struct PlacementScreenPos {
     pub image_id: u32,
     pub placement_id: u32,
+
     /// Absolute SCREEN column/row of the placement's top-left pin.
     pub screen_col: u32,
+
     pub screen_row: u32,
     pub grid_cols: u32,
     pub grid_rows: u32,
@@ -309,6 +339,7 @@ impl From<char> for CellText {
     fn from(c: char) -> Self {
         let mut buf = [0u8; 22];
         let len = c.encode_utf8(&mut buf).len() as u8;
+
         CellText(CellTextRepr::Inline { len, buf })
     }
 }

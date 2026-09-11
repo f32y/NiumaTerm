@@ -26,6 +26,7 @@ fn runtime_dir() -> io::Result<PathBuf> {
 
     // SAFETY: `getuid` reads process state and cannot fail.
     let uid = unsafe { libc::getuid() };
+
     let directory = base.join(format!("NiumaTerm-{uid}"));
 
     fs::create_dir_all(&directory)?;
@@ -36,11 +37,13 @@ fn runtime_dir() -> io::Result<PathBuf> {
 
 fn socket_path(testing: bool) -> io::Result<PathBuf> {
     let name = if testing { "testing.sock" } else { "ipc.sock" };
+
     Ok(runtime_dir()?.join(name))
 }
 
 fn lock_path(testing: bool) -> io::Result<PathBuf> {
     let name = if testing { "testing.lock" } else { "ipc.lock" };
+
     Ok(runtime_dir()?.join(name))
 }
 
@@ -53,8 +56,10 @@ fn lock_path(testing: bool) -> io::Result<PathBuf> {
 pub fn try_become_primary(testing: bool) -> bool {
     let path = match lock_path(testing) {
         Ok(path) => path,
+
         Err(error) => {
             warn!("IPC lock directory unavailable ({error}); skipping single-instance");
+
             return true;
         }
     };
@@ -67,8 +72,10 @@ pub fn try_become_primary(testing: bool) -> bool {
         .open(&path)
     {
         Ok(file) => file,
+
         Err(error) => {
             warn!("IPC lock file unavailable ({error}); skipping single-instance");
+
             return true;
         }
     };
@@ -76,6 +83,7 @@ pub fn try_become_primary(testing: bool) -> bool {
     // SAFETY: the descriptor is owned by `file` and stays open for the call.
     if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
         mem::forget(file);
+
         return true;
     }
 
@@ -112,8 +120,10 @@ pub fn send(message: &str, timeout: Duration, testing: bool) -> io::Result<()> {
 pub fn spawn_server(testing: bool, mut on_message: impl FnMut(Vec<u8>) -> bool + Send + 'static) {
     let path = match socket_path(testing) {
         Ok(path) => path,
+
         Err(error) => {
             warn!("IPC socket directory unavailable ({error}); IPC disabled");
+
             return;
         }
     };
@@ -125,19 +135,23 @@ pub fn spawn_server(testing: bool, mut on_message: impl FnMut(Vec<u8>) -> bool +
         && error.kind() != io::ErrorKind::NotFound
     {
         warn!("stale IPC socket could not be removed ({error}); IPC disabled");
+
         return;
     }
 
     let listener = match UnixListener::bind(&path) {
         Ok(listener) => listener,
+
         Err(error) => {
             warn!("IPC socket bind failed ({error}); IPC disabled");
+
             return;
         }
     };
 
     if let Err(error) = fs::set_permissions(&path, fs::Permissions::from_mode(0o600)) {
         warn!("IPC socket permissions could not be tightened ({error}); IPC disabled");
+
         return;
     }
 

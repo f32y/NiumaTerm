@@ -25,7 +25,9 @@ fn rgb_placeholder_id_round_trip() {
     let id = IncompletePlacement::from_cell(AnsiColor::Spec(rgb), None, &[]).image_id_low;
 
     assert_eq!(id, 0x123456);
+
     let decoded: ColorRgb = id.into();
+
     assert_eq!(decoded, rgb);
 }
 
@@ -149,6 +151,7 @@ fn from_cell_missing_diacritics_yields_none_fields() {
 #[test]
 fn from_cell_named_fg_yields_zero_id() {
     let combining = [DIACRITICS[0], DIACRITICS[0]];
+
     let p =
         IncompletePlacement::from_cell(AnsiColor::Named(NamedColor::Foreground), None, &combining);
 
@@ -184,6 +187,7 @@ fn can_append_inherits_row_and_col() {
 fn can_append_explicit_sequential_col() {
     let a = p(Some(0), Some(0));
     let b = p(Some(0), Some(1));
+
     assert!(a.can_append(&b));
 }
 
@@ -191,6 +195,7 @@ fn can_append_explicit_sequential_col() {
 fn can_append_inherit_row_explicit_col() {
     let a = p(Some(0), Some(0));
     let b = p(None, Some(1));
+
     assert!(a.can_append(&b));
 }
 
@@ -207,6 +212,7 @@ fn cannot_append_col_jump() {
 fn cannot_append_different_row() {
     let a = p(Some(0), Some(0));
     let b = p(Some(1), Some(1));
+
     assert!(!a.can_append(&b));
 }
 
@@ -404,6 +410,7 @@ fn geom_screen_line_and_start_col_offset_screen_pos() {
 #[test]
 fn geom_returns_none_when_image_zero_sized() {
     let none = compute_run_geometry(&run(0, 0, 1), 10, 5, 0, 50, 10.0, 10.0, 0.0, 0.0, 0, 0);
+
     assert!(none.is_none());
 }
 
@@ -419,7 +426,9 @@ fn run_of_three_cells_with_only_first_diacritics() {
 
     for _ in 0..2 {
         let next = IncompletePlacement::from_cell(AnsiColor::Indexed(7), None, &[]);
+
         assert!(run.can_append(&next));
+
         run.append();
     }
 

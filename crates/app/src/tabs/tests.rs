@@ -41,6 +41,7 @@ fn new_tabs_use_their_profile_names() {
 #[test]
 fn close_is_refused_for_single_tab() {
     let mut mgr = manager(1);
+
     assert!(mgr.close(TabId(1)).is_none());
     assert_eq!(mgr.len(), 1);
 }
@@ -186,6 +187,7 @@ fn a_failure_survives_the_successes_that_follow_it() {
 #[test]
 fn an_unreported_exit_code_is_not_a_failure() {
     let outcome: CommandOutcome = None.into();
+
     assert_eq!(outcome, CommandOutcome::Succeeded);
 }
 

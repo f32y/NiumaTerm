@@ -53,6 +53,7 @@ fn smooth_scrolling_defaults_and_accepts_modes_and_legacy_values() {
     ] {
         let config: Config =
             from_str(&format!("[appearance]\nsmooth-scrolling = \"{value}\"\n")).unwrap();
+
         assert_eq!(config.appearance.smooth_scrolling, expected);
     }
 
