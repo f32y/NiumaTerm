@@ -18,8 +18,6 @@ mod conversation;
 pub(crate) mod errors;
 mod events;
 pub(crate) mod history;
-mod inbox;
-mod output;
 pub(crate) mod prompts;
 mod startup;
 #[cfg(test)]

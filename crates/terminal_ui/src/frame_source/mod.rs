@@ -1,28 +1,33 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{collections, ops, sync, time};
 
 use nmt_config::colors::Colors;
+use nmt_terminal::clipboard::{Clipboard, ClipboardType};
+use nmt_terminal::event::BlockEvent;
 use nmt_terminal::ghostty::BlockHandle;
+use nmt_terminal::graphics::UpdateQueues;
 use nmt_terminal::render_buffer::RenderBuffer;
 use nmt_terminal::session::page::{PAGE_ROWS, PageSource, RowPage};
 use nmt_terminal::session::{
-    BlockPoint, EngineError, SessionObserver, TerminalSession, TerminalSessionConfig,
+    BlockPoint, EngineError, SessionChange, SessionObserver, TerminalSession, TerminalSessionConfig,
 };
+use parking_lot::Mutex;
 use tracing::trace;
 
 use crate::block_list::FrozenView;
 use crate::block_list::chrome::DurationLabels;
 use crate::frame::{TerminalColor, TerminalFrame};
+pub(crate) use crate::frame_source::items::ItemViewport;
+use crate::graphics::{FrozenImageCache, GenerationStore, prune_frozen_images};
 use crate::pane_model::FrameTheme;
-use crate::session_bridge::SessionBridge;
 use crate::wake::{Wake, WakeSender, WakeSignal};
 use crate::{block_list, frame, graphics, metrics};
 
 mod items;
 #[cfg(all(test, windows, enable_profiling))]
 mod profile_tests;
-pub(crate) use crate::frame_source::items::ItemViewport;
 #[cfg(test)]
 mod tests;
 
@@ -314,5 +319,62 @@ impl TerminalFrameSource {
             Some((row, builder.into()))
         })
         .collect()
+    }
+}
+
+pub(crate) struct SessionBridge {
+    pub(crate) generations: Mutex<GenerationStore>,
+    pub(crate) frozen: FrozenImageCache,
+    live_count: AtomicUsize,
+    id: u64,
+    wake: Option<WakeSender>,
+}
+
+impl SessionBridge {
+    pub(crate) fn new(id: u64, wake: Option<WakeSender>) -> Self {
+        Self {
+            generations: Mutex::new(GenerationStore::default()),
+            frozen: Arc::default(),
+            live_count: AtomicUsize::new(0),
+            id,
+            wake,
+        }
+    }
+
+    pub(crate) fn has_live_images(&self) -> bool {
+        self.live_count.load(Ordering::Relaxed) != 0
+    }
+}
+
+impl SessionObserver for SessionBridge {
+    fn graphics(&self, updates: UpdateQueues) {
+        let mut store = self.generations.lock();
+
+        for (id, data) in updates.pending_images {
+            store.install(id, data);
+        }
+
+        for id in updates.remove_queue {
+            store.remove(id.0 as u32);
+        }
+
+        self.live_count.store(store.len(), Ordering::Relaxed);
+    }
+
+    fn blocks(&self, events: &[BlockEvent]) {
+        prune_frozen_images(&self.frozen, events);
+    }
+
+    fn clipboard(&self, kind: ClipboardType, text: String) {
+        Clipboard::default().set(kind, text);
+    }
+
+    fn changed(&self, change: SessionChange) {
+        if let Some(wake) = &self.wake {
+            wake.send(match change {
+                SessionChange::Content => Wake::Content(self.id),
+                SessionChange::HostEvents => Wake::Chrome(self.id),
+            });
+        }
     }
 }

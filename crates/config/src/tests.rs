@@ -1,6 +1,7 @@
 use tempfile::Builder as TempDirBuilder;
 
 use crate::colors::hex_to_color_arr;
+use crate::profile::encrypt_credentials;
 use crate::*;
 
 fn sample_appearance() -> AppearanceConfig {
@@ -450,7 +451,7 @@ fn legacy_plaintext_credentials_migrate_on_save() {
 
 #[test]
 fn encrypted_credentials_win_over_adjacent_legacy_fields() {
-    let stored = credentials::encrypt("https://current.example.com", "sk-current").unwrap();
+    let stored = encrypt_credentials("https://current.example.com", "sk-current").unwrap();
 
     let toml_str = format!(
         "[[agent-profiles.list]]\nname = \"Both\"\napi-credentials = \"{stored}\"\n\
@@ -466,7 +467,7 @@ fn encrypted_credentials_win_over_adjacent_legacy_fields() {
 
 #[test]
 fn invalid_encrypted_credentials_fail_without_legacy_fallback() {
-    let valid = credentials::encrypt("https://real.example.com", "sk-real").unwrap();
+    let valid = encrypt_credentials("https://real.example.com", "sk-real").unwrap();
 
     // Corrupt the last Base64 character while keeping the text decodable.
     let mut modified = valid.clone();

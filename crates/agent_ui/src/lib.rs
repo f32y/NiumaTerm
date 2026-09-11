@@ -16,7 +16,6 @@ mod commands;
 mod composer;
 mod context_usage;
 mod fade;
-mod links;
 mod pane_state;
 pub mod profile;
 mod questions;

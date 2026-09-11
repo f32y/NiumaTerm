@@ -25,7 +25,6 @@ pub(crate) mod frame_source;
 pub(crate) mod pane_model;
 #[cfg(test)]
 mod remote_tests;
-pub(crate) mod session_bridge;
 pub mod settings;
 pub(crate) mod terminal_view;
 pub(crate) mod theme;

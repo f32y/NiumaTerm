@@ -1,5 +1,9 @@
 mod ansi;
 mod prepared;
+#[cfg(test)]
+pub(super) use crate::transcript::code::prepared::{
+    VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, should_virtualize_transcript, transcript_segments,
+};
 mod render;
 mod source;
 #[cfg(test)]

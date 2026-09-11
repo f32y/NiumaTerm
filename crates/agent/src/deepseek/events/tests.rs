@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use serde_json::{Value, json};
 
 use crate::deepseek::api::ApiClient;
-use crate::deepseek::events::streams::Streams;
+use crate::deepseek::events::Streams;
 use crate::deepseek::mapping::{approval_request, question_request};
 
 fn item(stream: &str, value: Value) -> Value {

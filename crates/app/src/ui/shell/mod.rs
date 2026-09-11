@@ -69,7 +69,6 @@ use crate::remote;
 use crate::tabs::{Tab, TabId, TabManager};
 use crate::ui;
 use crate::ui::background_tasks::BackgroundTasksView;
-use crate::ui::floating_surface;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::{GitStatusModel, GitStatusView};
 use crate::ui::persistence::{default_session, materialize_active_tab, restore_session};

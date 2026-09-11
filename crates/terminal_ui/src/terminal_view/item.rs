@@ -2,17 +2,19 @@ use std::{panic, sync};
 
 use gpui::{
     App, Bounds, Element, ElementId, Entity, GlobalElementId, InspectorElementId, IntoElement,
-    LayoutId, Pixels, ShapedLine, Style, Window, point, px, relative, size,
+    LayoutId, Pixels, ShapedLine, Style, Window, fill, point, px, relative, rgb, size,
 };
 use nmt_terminal::block_store::BlockStore;
 use parking_lot::Mutex;
 
 use crate::block_list::live::LiveItemState;
-use crate::frame::TerminalFrame;
+use crate::block_list::{FrozenRow, FrozenView};
+use crate::frame::{TerminalColor, TerminalFrame};
 use crate::frame_source::ItemViewport;
 use crate::layout::frame_content_rows;
-use crate::paint::blocks::{paint_frozen, shape_frozen_rows};
+use crate::metrics::CellMetrics;
 use crate::paint::frame::{paint_frame, paint_frozen_images, shape_frame};
+use crate::paint::text::{paint_glyph_rows, paint_line_backgrounds_at, shape_lines};
 use crate::pane_model::frame_record::FrameRecord;
 use crate::view::TerminalPane;
 use crate::{block_list, metrics};
@@ -282,4 +284,64 @@ impl BlockListItem {
             BlockListItem::Frozen { pane, .. } | BlockListItem::Live { pane, .. } => pane,
         }
     }
+}
+
+/// Shape the visible frozen rows. Block rows cache by `(block_id,
+/// generation, row)`; live-history rows hash their text.
+fn shape_frozen_rows(rows: &[FrozenRow], cell_w: f32, window: &mut Window) -> Vec<ShapedLine> {
+    shape_lines(
+        rows.iter().map(|row| {
+            (
+                row.shape_key.unwrap_or_else(|| row.line.text_hash()),
+                &row.line,
+            )
+        }),
+        cell_w,
+        window,
+    )
+}
+
+/// Paint separators + frozen rows (backgrounds then glyphs).
+fn paint_frozen(
+    bounds: Bounds<Pixels>,
+    view: &FrozenView,
+    shaped: &[ShapedLine],
+    cell: CellMetrics,
+    selection_bg: TerminalColor,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    for row in &view.rows {
+        paint_line_backgrounds_at(bounds, &row.line, row.y, cell, window);
+    }
+
+    // Selection tint under the glyphs (over the cell backgrounds).
+
+    for row in &view.rows {
+        let Some((start, end)) = row.selected else {
+            continue;
+        };
+
+        window.paint_quad(fill(
+            Bounds::new(
+                point(
+                    bounds.left() + px(start as f32 * cell.width_px),
+                    bounds.top() + px(row.y),
+                ),
+                size(px((end - start) as f32 * cell.width_px), px(cell.height_px)),
+            ),
+            rgb(selection_bg.into()),
+        ));
+    }
+
+    paint_glyph_rows(
+        bounds,
+        view.rows
+            .iter()
+            .zip(shaped)
+            .map(|(row, line)| (row.y, line)),
+        cell.height_px,
+        window,
+        cx,
+    );
 }

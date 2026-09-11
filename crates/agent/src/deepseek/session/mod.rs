@@ -30,7 +30,11 @@ mod actions;
 mod controls;
 mod loads;
 
+#[cfg(test)]
+pub(super) use crate::deepseek::session::actions::{CloseAction, run_close_actions};
 use crate::deepseek::session::controls::{COMPLETED_FRAME, Controls, question_id};
+#[cfg(test)]
+pub(super) use crate::deepseek::session::loads::models_with_image;
 pub(crate) use crate::deepseek::session::loads::queued_prompts;
 pub(super) use crate::deepseek::session::loads::{
     fork_checkpoint_events, history_events, search_events, workflow_transcript_events,

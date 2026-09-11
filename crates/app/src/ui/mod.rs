@@ -68,10 +68,8 @@ pub(crate) use crate::ui::shell::{
 
 mod active_list;
 mod assets;
-mod auto_refresh;
 mod background_tasks;
 mod composition;
-mod floating_surface;
 mod fluent;
 mod font_picker;
 mod git_sidebar;

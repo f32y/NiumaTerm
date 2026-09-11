@@ -2,7 +2,6 @@
 
 use crate::update::ProviderKind;
 
-mod attachments;
 mod backend;
 pub mod branch;
 pub mod capabilities;

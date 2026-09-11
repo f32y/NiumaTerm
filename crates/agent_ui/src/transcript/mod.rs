@@ -12,14 +12,17 @@ mod render;
 mod reveal;
 mod rows;
 mod turns;
-mod typewriter;
 mod view;
-mod virtual_code;
-mod working_indicator;
 
 pub(super) use nmt_agent::transcript::is_work_item as is_work_row;
 
 pub(super) use crate::transcript::code::CodeTranscriptCache;
+#[cfg(test)]
+use crate::transcript::code::VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES;
+#[cfg(test)]
+use crate::transcript::code::should_virtualize_transcript;
+#[cfg(test)]
+use crate::transcript::code::transcript_segments;
 #[cfg(test)]
 use crate::transcript::disclosure_row::{
     AGENT_CARD_GAP, AGENT_CARD_ICON_BLOCK, AGENT_CARD_PADDING_X, AGENT_DISCLOSURE_DETAIL_INSET,
@@ -41,10 +44,5 @@ pub(super) use crate::transcript::rows::{Entry, ReadingPosition, RowSpec};
 #[cfg(test)]
 pub(super) use crate::transcript::rows::{TurnSummary, turn_summary};
 pub use crate::transcript::view::TranscriptView;
-#[cfg(test)]
-use crate::transcript::virtual_code::VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES;
-pub(super) use crate::transcript::virtual_code::should_virtualize_transcript;
-#[cfg(test)]
-pub(super) use crate::transcript::virtual_code::transcript_segments;
 #[cfg(test)]
 mod tests;

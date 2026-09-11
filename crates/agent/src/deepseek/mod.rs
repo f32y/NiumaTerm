@@ -11,7 +11,6 @@
 //! answerable interactions over independent logical streams on one connection.
 
 mod api;
-mod close;
 mod commands;
 mod events;
 mod frames;
@@ -22,7 +21,6 @@ mod models;
 mod presets;
 mod projections;
 mod session;
-mod settings;
 mod subagents;
 mod version;
 mod workflows;

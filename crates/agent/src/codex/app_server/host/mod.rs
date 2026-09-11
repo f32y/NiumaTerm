@@ -1,4 +1,3 @@
-mod early;
 mod router;
 
 use std::cmp::Reverse;

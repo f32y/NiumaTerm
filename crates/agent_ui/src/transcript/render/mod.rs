@@ -2,35 +2,37 @@ mod compaction_row;
 pub(super) mod image_preview;
 pub(super) mod text_style;
 
-#[cfg(test)]
-pub(crate) use crate::transcript::render::text_style::{
-    highlight_theme_for_surface, is_dark_surface, transcript_code_block_style,
-};
-use crate::transcript::render::text_style::{markdown_view, transcript_text_style};
-mod questions;
-mod turn_rows;
-mod user_row;
-mod work_row;
-
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use gpui::prelude::*;
-use gpui::{AnyElement, App, Context, Div, Pixels, Window, div, px, relative, rems};
+use gpui::{
+    Animation, AnimationExt as _, AnyElement, App, Context, Div, ElementId, Hsla, Pixels,
+    RenderOnce, Window, div, ease_in_out, px, relative, rems,
+};
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::shimmer::ShimmerText;
 use gpui_component::spinner::Spinner;
-use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex};
+use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
 use nmt_agent::chat::Item as SessionItem;
 use nmt_i18n::i18n;
 
 use crate::settings::{AgentSettings, UI_RADIUS};
 use crate::transcript::disclosure_row::{
     AGENT_CARD_DETAIL_SIZE, AGENT_CARD_GAP, AGENT_CARD_ICON_BLOCK, AGENT_CARD_PADDING_X,
+    AgentDisclosureRow, agent_card,
 };
-use crate::transcript::reveal::{RevealKey, revealed_block, revealed_part};
+use crate::transcript::format::{interrupted_status_label, worked_status_label};
+#[cfg(test)]
+pub(crate) use crate::transcript::render::text_style::{
+    highlight_theme_for_surface, is_dark_surface, transcript_code_block_style,
+};
+use crate::transcript::render::text_style::{markdown_view, transcript_text_style};
+use crate::transcript::reveal::{Disclosures, RevealKey, revealed_block, revealed_part};
 use crate::transcript::rows::{RowGap, TranscriptRow, is_run_row, row_gap};
-use crate::transcript::working_indicator::WorkingIndicator;
 use crate::transcript::{RowSpec, TranscriptView, is_work_row, working_label};
+mod questions;
+mod user_row;
+mod work_row;
 
 /// Edge of a transcript thumbnail, matching the composer strip so an image
 /// does not change size when the message it belongs to is sent.
@@ -157,21 +159,17 @@ impl TranscriptView {
                 turn,
                 row_count,
                 folded,
-            } => turn_rows::render_turn_fold(&self.disclosures, turn, row_count, folded, cx),
+            } => render_turn_fold(&self.disclosures, turn, row_count, folded, cx),
             RowSpec::TurnSummary {
                 seconds,
                 output_tokens,
-            } => turn_rows::render_turn_summary(seconds, output_tokens, cx),
-            RowSpec::Interrupted { output_tokens, .. } => {
-                turn_rows::render_interrupted_row(output_tokens, cx)
-            }
+            } => render_turn_summary(seconds, output_tokens, cx),
+            RowSpec::Interrupted { output_tokens, .. } => render_interrupted_row(output_tokens, cx),
             RowSpec::RunToggle {
                 run_start,
                 tool_count,
                 expanded,
-            } => {
-                turn_rows::render_run_toggle(&self.disclosures, run_start, tool_count, expanded, cx)
-            }
+            } => render_run_toggle(&self.disclosures, run_start, tool_count, expanded, cx),
             RowSpec::Working { compacting } => self.render_working_row(compacting, cx),
         };
 
@@ -460,3 +458,208 @@ impl TranscriptView {
             .into_any_element()
     }
 }
+
+// Rows that stand for a turn rather than for something inside one: the fold
+// that hides a finished turn's work, the summary on it, an interruption, and
+// the toggle for a workflow run.
+
+/// The settled turn's work disclosure. It heads the rows it hides, so the
+/// chevron keeps its usual meaning: the content it reveals is below it.
+fn render_turn_fold(
+    disclosures: &Disclosures,
+    turn: u64,
+    row_count: usize,
+    folded: bool,
+    cx: &mut Context<TranscriptView>,
+) -> AnyElement {
+    // The wording answers the click while the work under it may still be
+    // leaving: a row reading "hide" through the exit it started would be
+    // offering to do again what it is in the middle of doing.
+    let disclosing = disclosures.is_disclosing(RevealKey::Turn(turn));
+
+    let label = if disclosing {
+        i18n("agent-transcript-turn-work-hide").to_string()
+    } else {
+        i18n("agent-transcript-turn-work").replace("{count}", &row_count.to_string())
+    };
+
+    agent_card()
+        .child(
+            AgentDisclosureRow::new(("turn-fold", turn as usize), label.clone())
+                .expanded(!folded)
+                .opening(disclosures.progress(RevealKey::Turn(turn), Instant::now()))
+                .type_icon(IconName::GalleryVerticalEnd)
+                .accessible_label(format!(
+                    "{label}. {}",
+                    if disclosing {
+                        i18n("agent-transcript-expanded")
+                    } else {
+                        i18n("agent-transcript-collapsed")
+                    }
+                ))
+                .render(cx)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.toggle_disclosure(RevealKey::Turn(turn), cx)
+                })),
+        )
+        .into_any_element()
+}
+
+/// The settled turn's closing "Worked for Ns" line, doubling as a section
+/// divider (bottom hairline). Reporting only: it accounts for work the
+/// disclosure above it owns, so making it clickable too would give one
+/// turn two controls over the same rows.
+fn render_turn_summary(
+    seconds: u64,
+    output_tokens: Option<u64>,
+    cx: &mut Context<TranscriptView>,
+) -> AnyElement {
+    let label = worked_status_label(seconds, output_tokens);
+
+    v_flex()
+        .w_full()
+        .gap_1()
+        .child(
+            div()
+                .px_1()
+                .text_size(px(AGENT_CARD_DETAIL_SIZE))
+                .text_color(cx.theme().muted_foreground)
+                .child(label),
+        )
+        .child(div().w_full().h(px(1.)).bg(cx.theme().border.opacity(0.6)))
+        .into_any_element()
+}
+
+fn render_interrupted_row(
+    output_tokens: Option<u64>,
+    cx: &mut Context<TranscriptView>,
+) -> AnyElement {
+    v_flex()
+        .w_full()
+        .gap_1()
+        .child(
+            div()
+                .px_1()
+                .text_size(px(AGENT_CARD_DETAIL_SIZE))
+                .text_color(cx.theme().muted_foreground)
+                .child(interrupted_status_label(output_tokens)),
+        )
+        .child(div().w_full().h(px(1.)).bg(cx.theme().border.opacity(0.6)))
+        .into_any_element()
+}
+
+/// The "+N tool calls" / "Show fewer tool calls" toggle for a work run.
+fn render_run_toggle(
+    disclosures: &Disclosures,
+    run_start: usize,
+    tool_count: usize,
+    expanded: bool,
+    cx: &mut Context<TranscriptView>,
+) -> AnyElement {
+    // The wording answers the click while the steps under it may still be
+    // leaving: a toggle reading "show fewer" through the exit it started
+    // would be offering to do again what it is in the middle of doing.
+    let disclosing = disclosures.is_disclosing(RevealKey::Group(run_start));
+
+    let label = if disclosing {
+        i18n("agent-transcript-show-fewer-tool-calls").to_string()
+    } else {
+        i18n("agent-transcript-tool-calls").replace("{count}", &tool_count.to_string())
+    };
+
+    agent_card()
+        .child(
+            // No type icon: the toggle names a count of steps rather than
+            // being one, and its own chevron already says what it does.
+            AgentDisclosureRow::new(("wl-run", run_start), label.clone())
+                .expanded(expanded)
+                .opening(disclosures.progress(RevealKey::Group(run_start), Instant::now()))
+                .accessible_label(format!(
+                    "{label}. {}",
+                    if disclosing {
+                        i18n("agent-transcript-expanded")
+                    } else {
+                        i18n("agent-transcript-collapsed")
+                    }
+                ))
+                .render(cx)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.toggle_disclosure(RevealKey::Group(run_start), cx)
+                })),
+        )
+        .into_any_element()
+}
+
+const DOT_COUNT: usize = 3;
+const CYCLE_DURATION: Duration = Duration::from_millis(1_100);
+const DOT_CELL_SIZE: f32 = 4.0;
+/// Spacing that makes the cluster measure a card's icon block exactly. The
+/// live line stands in the slot a step gives its type icon, so a cluster wider
+/// than the slot would either push the label off the column a tool call's
+/// title starts on or bleed into the pane's own edge inset.
+const DOT_GAP: f32 =
+    (AGENT_CARD_ICON_BLOCK - DOT_COUNT as f32 * DOT_CELL_SIZE) / (DOT_COUNT as f32 - 1.0);
+// Dots wide enough to fill the slot on their own would run together into a
+// bar, and a negative gap would overlap them; either way the indicator stops
+// reading as three of anything.
+const _: () = assert!(DOT_GAP > 0.0);
+const DOT_MIN_SIZE: f32 = 3.2;
+const DOT_MIN_OPACITY: f32 = 0.28;
+const DOT_MAX_OPACITY: f32 = 0.88;
+
+/// Three pulsing dots for an ongoing operation with no measurable completion.
+#[derive(IntoElement)]
+struct WorkingIndicator {
+    color: Hsla,
+}
+
+impl WorkingIndicator {
+    fn new(color: Hsla) -> Self {
+        Self { color }
+    }
+}
+
+impl RenderOnce for WorkingIndicator {
+    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let color = self.color;
+
+        h_flex()
+            .gap(px(DOT_GAP))
+            .children((0..DOT_COUNT).map(move |index| {
+                // A fixed cell prevents the size pulse from shifting adjacent
+                // dots.
+                div()
+                    .flex()
+                    .size(px(DOT_CELL_SIZE))
+                    .items_center()
+                    .justify_center()
+                    .child(div().rounded_full().bg(color).with_animation(
+                        ElementId::NamedInteger("working-indicator-dot".into(), index as u64),
+                        Animation::new(CYCLE_DURATION).repeat(),
+                        move |dot, delta| {
+                            let pulse = dot_pulse(delta, index);
+                            let size = DOT_MIN_SIZE + (DOT_CELL_SIZE - DOT_MIN_SIZE) * pulse;
+                            let opacity =
+                                DOT_MIN_OPACITY + (DOT_MAX_OPACITY - DOT_MIN_OPACITY) * pulse;
+
+                            dot.size(px(size)).opacity(opacity)
+                        },
+                    ))
+            }))
+    }
+}
+
+/// How far into its pulse one dot is, for a cycle position shared by all of
+/// them. Each dot peaks a third of the cycle after the one before it, so the
+/// swell travels along the row rather than the three breathing together.
+fn dot_pulse(delta: f32, index: usize) -> f32 {
+    let interval = 1.0 / DOT_COUNT as f32;
+    let phase = (delta - index as f32 * interval).rem_euclid(1.0);
+    let distance = phase.min(1.0 - phase);
+    let pulse = (1.0 - distance / interval).clamp(0.0, 1.0);
+
+    ease_in_out(pulse)
+}
+
+#[cfg(test)]
+mod working_indicator_tests;

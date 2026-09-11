@@ -25,7 +25,6 @@ use serde_json::from_slice;
 use tracing::warn;
 
 use crate::ui::AppSettings;
-use crate::ui::auto_refresh::{self, AutoRefresh, RefreshState};
 use crate::ui::composition::{framed_region, table_header as table_header_style};
 
 /// Shown before the first successful fetch and retained after fetch errors.
@@ -170,7 +169,7 @@ impl TokenUsageView {
             },
         };
 
-        auto_refresh::start(&mut this, cx);
+        start(&mut this, cx);
 
         this
     }
@@ -228,7 +227,7 @@ impl Render for TokenUsageView {
                     .child(Icon::new(TokenIcon).xsmall().opacity(STATUS_ICON_OPACITY))
                     .child(label),
             )
-            .on_click(cx.listener(|this, _, _, cx| auto_refresh::refresh_from_user(this, cx)));
+            .on_click(cx.listener(|this, _, _, cx| refresh_from_user(this, cx)));
 
         HoverCard::new("token-usage-details")
             .anchor(gpui::Anchor::BottomLeft)
@@ -569,3 +568,96 @@ fn compact(n: u64) -> String {
 
 #[cfg(test)]
 mod tests;
+
+// Refresh on the settings toggle's off-to-on transition and every interval
+// while enabled. Unrelated settings edits do not trigger another refresh;
+// overlapping requests are ignored, and errors preserve the displayed data.
+#[derive(Default)]
+struct RefreshState {
+    refreshing: bool,
+    /// Whether the in-flight fetch was started by the user. A widget shows a
+    /// spinner only for those: one appearing on its own every interval draws
+    /// the eye to a background task nobody asked about.
+    user_requested: bool,
+    /// Previous toggle value, so unrelated settings edits cannot start a fetch.
+    enabled: bool,
+}
+
+trait AutoRefresh: Sized + 'static {
+    type Output: Send + 'static;
+
+    const INTERVAL: Duration;
+
+    fn enabled(settings: &AppSettings) -> bool;
+
+    fn state(&mut self) -> &mut RefreshState;
+
+    fn fetch() -> Self::Output;
+
+    fn apply(&mut self, output: Self::Output);
+}
+
+fn start<V: AutoRefresh>(view: &mut V, cx: &mut Context<V>) {
+    cx.observe_global::<AppSettings>(|this: &mut V, cx| {
+        let enabled = V::enabled(cx.global::<AppSettings>());
+
+        if enabled && !this.state().enabled {
+            refresh(this, cx);
+        }
+
+        this.state().enabled = enabled;
+    })
+    .detach();
+
+    cx.spawn(async move |this, cx| {
+        loop {
+            cx.background_executor().timer(V::INTERVAL).await;
+
+            let alive = this.update(cx, |this, cx| {
+                if this.state().enabled {
+                    refresh(this, cx);
+                }
+            });
+
+            if alive.is_err() {
+                break;
+            }
+        }
+    })
+    .detach();
+
+    if view.state().enabled {
+        refresh(view, cx);
+    }
+}
+
+/// Refresh in response to a click, so the widget can show it is working.
+fn refresh_from_user<V: AutoRefresh>(view: &mut V, cx: &mut Context<V>) {
+    view.state().user_requested = true;
+    refresh(view, cx);
+}
+
+fn refresh<V: AutoRefresh>(view: &mut V, cx: &mut Context<V>) {
+    if view.state().refreshing {
+        return;
+    }
+
+    view.state().refreshing = true;
+
+    cx.notify();
+
+    let fetch = cx.background_executor().spawn(async move { V::fetch() });
+
+    cx.spawn(async move |this, cx| {
+        let output = fetch.await;
+
+        this.update(cx, |this, cx| {
+            this.state().refreshing = false;
+            this.state().user_requested = false;
+            this.apply(output);
+            cx.notify();
+        })
+        .ok();
+    })
+    .detach();
+}

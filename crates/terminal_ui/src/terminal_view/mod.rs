@@ -1,4 +1,3 @@
-use crate::paint::chrome::{paint_frozen_chrome, paint_frozen_separators};
 mod item;
 
 #[cfg(test)]
@@ -9,16 +8,18 @@ use std::sync::Arc;
 
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, Element, ElementId, ElementInputHandler, Entity,
-    FocusHandle, GlobalElementId, InspectorElementId, IntoElement, LayoutId, Pixels, ShapedLine,
-    Style, Window, relative, size,
+    FocusHandle, GlobalElementId, InspectorElementId, IntoElement, LayoutId, Pixels, Rgba,
+    ShapedLine, Style, TextAlign, TextRun, Window, fill, point, px, relative, rgb, rgba, size,
 };
 
+use crate::block_list::FrozenItemChrome;
 use crate::frame::TerminalFrame;
 use crate::metrics;
 #[cfg(test)]
 pub(crate) use crate::paint::frame::cursor_bounds;
 use crate::paint::frame::{paint_frame, shape_frame};
 pub(crate) use crate::terminal_view::item::BlockListItem;
+use crate::theme::{BLOCK_GUTTER_GAP, BLOCK_GUTTER_WIDTH, BLOCK_SELECTED_TINT, SEPARATOR_COLOR};
 use crate::view::TerminalPane;
 
 /// The terminal viewport as a custom GPUI leaf element: prepaint shapes the
@@ -243,6 +244,90 @@ impl Element for BlockListView {
         window.handle_input(
             &self.focus,
             ElementInputHandler::new(bounds, self.pane.clone()),
+            cx,
+        );
+    }
+}
+
+fn paint_frozen_separators(bounds: Bounds<Pixels>, separators: &[f32], window: &mut Window) {
+    let left = bounds.left() - px(metrics::PADDING_PX);
+    let right = bounds.right() + px(metrics::PADDING_PX);
+    for y in separators {
+        window.paint_quad(fill(
+            Bounds::new(
+                point(left, bounds.top() + px(*y)),
+                size(right - left, px(1.0)),
+            ),
+            Rgba {
+                r: ((SEPARATOR_COLOR >> 16) & 0xff) as f32 / 255.0,
+                g: ((SEPARATOR_COLOR >> 8) & 0xff) as f32 / 255.0,
+                b: (SEPARATOR_COLOR & 0xff) as f32 / 255.0,
+                a: 0.67,
+            },
+        ));
+    }
+}
+
+fn paint_frozen_chrome(
+    bounds: Bounds<Pixels>,
+    items_chrome: &[FrozenItemChrome],
+    window: &mut Window,
+    cx: &mut App,
+) {
+    for chrome in items_chrome {
+        let top = bounds.top() + px(chrome.top);
+        let height = px(chrome.bottom - chrome.top);
+        let gutter_alpha = if chrome.selected { 0xe6 } else { 0x59 };
+
+        window.paint_quad(fill(
+            Bounds::new(
+                point(
+                    bounds.left() - px(BLOCK_GUTTER_GAP + BLOCK_GUTTER_WIDTH),
+                    top,
+                ),
+                size(px(BLOCK_GUTTER_WIDTH), height),
+            ),
+            rgba((chrome.accent << 8) | gutter_alpha),
+        ));
+
+        if chrome.selected {
+            window.paint_quad(fill(
+                Bounds::new(point(bounds.left(), top), size(bounds.size.width, height)),
+                rgba(BLOCK_SELECTED_TINT),
+            ));
+        }
+    }
+
+    let style = window.text_style();
+    let font_size = style.font_size.to_pixels(window.rem_size());
+
+    for chrome in items_chrome {
+        let Some(header) = chrome.header.as_deref() else {
+            continue;
+        };
+
+        let runs = [TextRun {
+            len: header.len(),
+            font: style.font(),
+            color: rgb(0x7f8c98).into(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        }];
+
+        let shaped = window.text_system().shape_line(
+            header.to_string().into(),
+            font_size,
+            &runs,
+            Some(bounds.size.width),
+        );
+
+        let _ = shaped.paint(
+            point(bounds.left(), bounds.top() + px(chrome.header_y)),
+            px(0.0),
+            TextAlign::Right,
+            Some(bounds.size.width),
+            window,
             cx,
         );
     }

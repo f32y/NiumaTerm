@@ -2,7 +2,6 @@ pub mod agent;
 pub mod appearance;
 pub mod builtin_themes;
 pub mod colors;
-mod credentials;
 pub mod defaults;
 pub mod local_state;
 mod persistence;

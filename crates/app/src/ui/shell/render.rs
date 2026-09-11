@@ -6,6 +6,7 @@ use gpui_component::modern_menu::{ModernMenu, dispatch_modern_menu_key};
 use nmt_agent_ui::{AgentKindExt as _, RecoveryIdentity};
 use nmt_i18n::i18n;
 
+use crate::ui::UI_RADIUS;
 use crate::ui::composition::FLOATING_SURFACE_SIDE_INSET;
 use crate::ui::shell::*;
 #[cfg(windows)]
@@ -705,7 +706,7 @@ impl Render for Shell {
                             .pl(px(ui::composition::FLOATING_SURFACE_SIDE_INSET))
                             .pt(px(ui::composition::FLOATING_SURFACE_TOP_INSET))
                             .child(
-                                floating_surface::card(cx)
+                                floating_surface_card(cx)
                                     .id("main-floating-surface")
                                     .min_w_0()
                                     .relative()
@@ -720,4 +721,21 @@ impl Render for Shell {
             .children(update_notification_layer)
             .children(dialog_layer)
     }
+}
+
+/// Frame for the main terminal or Agent surface. The surface runs into the
+/// window's right and bottom edges, so it is framed only where it actually
+/// borders other chrome: a left edge against the sidebar gutter, a top edge
+/// under the tab strip, and a single rounded corner between them. Drawing a
+/// border or radius on the other two sides would trace a line just inside the
+/// window frame.
+fn floating_surface_card(cx: &App) -> Div {
+    div()
+        .size_full()
+        .overflow_hidden()
+        .border_l_1()
+        .border_t_1()
+        .border_color(cx.theme().sidebar_border)
+        .rounded_tl(UI_RADIUS)
+        .bg(cx.theme().background)
 }

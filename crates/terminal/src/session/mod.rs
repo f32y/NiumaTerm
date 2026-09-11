@@ -10,8 +10,8 @@ use std::time;
 use futures::channel::oneshot;
 use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
-use nmt_input::encode_mouse_report;
 use nmt_input::keyboard::ModifiersState;
+use nmt_input::{bracket_paste, encode_mouse_report};
 use nmt_platform::process::ProcessTree;
 use nmt_platform::{
     EventedPty, PtyOptions, WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env,
@@ -27,16 +27,20 @@ use crate::pty_pipe::{SessionOptions, start_session};
 use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
 use crate::selection::{SelectionRange, SelectionType, WORD_DELIMITERS};
+pub use crate::session::blocks::BlockPoint;
 use crate::session::blocks::frozen_selection_pieces;
+pub use crate::session::config::TerminalSessionConfig;
+use crate::session::config::default_shell;
 pub use crate::session::error::{EngineError, EngineErrorCode};
-use crate::session::input::paste_payload;
 pub use crate::session::mouse::{
     SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
 };
 use crate::session::mouse::{mouse_button_code, mouse_motion_code, mouse_report_mods};
 pub use crate::session::observer::{SessionChange, SessionObserver};
 use crate::session::page::{PageCache, PageSource, RowPage};
+use crate::session::proxy::TerminalEventProxy;
 use crate::session::request::{BlockRange, Query, Request, TextPiece, TextSource};
+pub use crate::session::rows::RowText;
 use crate::session::rows::materialized_pointer_row;
 use crate::session::selection::{SurfaceSelection, selection_screen_range};
 use crate::terminal::Mode;
@@ -46,21 +50,14 @@ mod blocks;
 pub mod page;
 pub mod request;
 mod rows;
-pub use crate::session::blocks::BlockPoint;
-pub use crate::session::rows::RowText;
 
 mod config;
 mod error;
-mod input;
 pub mod interaction;
 mod mouse;
 mod observer;
 mod proxy;
 pub(crate) mod selection;
-
-pub use crate::session::config::TerminalSessionConfig;
-use crate::session::config::default_shell;
-use crate::session::proxy::TerminalEventProxy;
 
 type SessionBuffer = Arc<FrameStore>;
 
@@ -728,3 +725,17 @@ mod vtebench_tests;
 
 #[cfg(test)]
 mod block_tests;
+
+fn paste_payload(text: &str, bracketed: bool) -> Option<Vec<u8>> {
+    if text.is_empty() {
+        return None;
+    }
+
+    let mut body = text.replace("\r\n", "\r").replace('\n', "\r");
+
+    if bracketed {
+        body = body.replace("\x1b[201~", "");
+    }
+
+    Some(bracket_paste(body.as_bytes(), bracketed))
+}

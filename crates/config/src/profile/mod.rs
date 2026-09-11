@@ -1,0 +1,451 @@
+//! Shell profiles, persisted as top-level `[[profiles]]` entries in
+//! `config.toml` by the settings dialog.
+
+use aes_gcm::aead::rand_core::RngCore;
+use aes_gcm::aead::{Aead, KeyInit, OsRng, Payload};
+use aes_gcm::{Aes256Gcm, Key, Nonce};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use serde::{Deserialize, Serialize};
+use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, value};
+
+use crate::ensure_explicit_table;
+
+/// The `[profiles]` section: the default-profile name plus the profile
+/// entries (`[[profiles.list]]`). TOML cannot mix a scalar key with
+/// array-of-tables entries under the same name, hence the nested list.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ProfilesConfig {
+    /// Name of the default profile; empty falls back to the first profile.
+    #[serde(default)]
+    pub default: String,
+    #[serde(default)]
+    pub list: Vec<Profile>,
+}
+
+/// One `[[profiles]]` entry. An empty list means "use the app's built-in
+/// default profile".
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Profile {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub shell: String,
+    #[serde(default)]
+    pub args: String,
+}
+
+/// The `[agent-profiles]` section: the default agent-profile name plus the
+/// entries (`[[agent-profiles.list]]`). Same nested-list layout as
+/// `[profiles]`, for the same TOML reason.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct AgentProfilesConfig {
+    /// Name of the default agent profile; empty falls back to the first one.
+    #[serde(default)]
+    pub default: String,
+    /// True once the settings dialog has managed this section. Distinguishes
+    /// "never configured" (seed the built-in profiles) from "user deleted
+    /// every profile" (respect the empty list).
+    #[serde(default)]
+    pub initialized: bool,
+    #[serde(default)]
+    pub list: Vec<AgentProfile>,
+}
+
+/// Which agent CLI protocol a profile speaks; decides the spawn command line
+/// and which provider env vars a custom endpoint maps to.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AgentProfileKind {
+    #[default]
+    ClaudeCode,
+    Codex,
+    /// DeepSeek Harness, driven through the local HTTP and WebSocket interface
+    /// its `dsh web` host serves rather than through a stdio CLI protocol.
+    #[serde(rename = "deepseek")]
+    DeepSeek,
+}
+
+/// How a DeepSeek Harness profile obtains the `dsh` command it launches.
+/// Other agent kinds always use [`AgentProfileLauncher::Custom`].
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AgentProfileLauncher {
+    #[default]
+    Custom,
+    Npx,
+    PnpmDlx,
+}
+
+/// One environment variable applied to the agent process on launch.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct EnvVar {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub value: String,
+}
+
+/// One `[[agent-profiles.list]]` entry. The runtime type keeps the custom
+/// API URL and API key as plaintext strings for the settings editor and the
+/// launch adapters; on disk they live in one encrypted `api-credentials`
+/// value, decrypted through [`PersistedAgentProfile`] during load.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(try_from = "PersistedAgentProfile")]
+pub struct AgentProfile {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub kind: AgentProfileKind,
+    /// Executable name or path; a bare name resolves via PATH (and PATHEXT on
+    /// Windows, so `claude` finds both `claude.exe` and the npm `claude.cmd`).
+    /// Ignored while [`Self::launcher`] runs the harness from its package.
+    #[serde(default)]
+    pub executable: String,
+    /// Only DeepSeek Harness offers package launchers; the other agent kinds
+    /// use their configured executable regardless of this value.
+    #[serde(default)]
+    pub launcher: AgentProfileLauncher,
+    /// Model selected when a new agent conversation starts. Each adapter maps
+    /// this to its native configuration surface.
+    #[serde(default)]
+    pub model: String,
+    /// Reasoning effort forced on every conversation this profile starts.
+    /// Empty leaves the choice to the remembered thread settings and whatever
+    /// the agent reports, which is what the pickers showed before this field
+    /// existed.
+    #[serde(default)]
+    pub effort: String,
+    /// Point Claude Code's per-tier model settings at [`Self::model`] too, so
+    /// a custom endpoint that serves a single model still answers the requests
+    /// the CLI routes to its Opus, Sonnet, and Haiku tiers.
+    #[serde(default, rename = "replace-sub-models")]
+    pub replace_sub_models: bool,
+    #[serde(default, rename = "use-custom-endpoint")]
+    pub use_custom_endpoint: bool,
+    /// Idle minutes after the agent's last answer beyond which the next
+    /// message is warned about: a provider prompt cache expires on its own
+    /// clock, so the message that follows a long pause is billed as a full
+    /// cache write. `0` disables the warning, which is what a profile written
+    /// before this field existed carries.
+    #[serde(default, rename = "cache-warn-minutes")]
+    pub cache_warn_minutes: u32,
+    #[serde(default, rename = "api-base-url")]
+    pub api_base_url: String,
+    #[serde(default, rename = "api-key")]
+    pub api_key: String,
+    #[serde(default)]
+    pub env: Vec<EnvVar>,
+    /// Declare [`Self::model`] as an image-capable model in DeepSeek Harness's
+    /// own provider catalog. The harness refuses an image unless the selected
+    /// model is listed there as taking one, and a model named by hand never
+    /// is, so this is the only way a custom model name reaches image input.
+    #[serde(default, rename = "vision-model")]
+    pub vision_model: bool,
+}
+
+/// On-disk shape of one `[[agent-profiles.list]]` entry. Credentials arrive
+/// either as the encrypted `api-credentials` value or as the legacy plaintext
+/// fields written by builds that predate encryption.
+#[derive(Deserialize)]
+struct PersistedAgentProfile {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    kind: AgentProfileKind,
+    #[serde(default)]
+    executable: String,
+    #[serde(default)]
+    launcher: Option<AgentProfileLauncher>,
+    /// Builds before package launchers became a three-way choice stored this
+    /// boolean. A new `launcher` value wins when both fields are present.
+    #[serde(default, rename = "via-npx")]
+    via_npx: bool,
+    #[serde(default)]
+    model: String,
+    #[serde(default)]
+    effort: String,
+    #[serde(default, rename = "replace-sub-models")]
+    replace_sub_models: bool,
+    #[serde(default, rename = "use-custom-endpoint")]
+    use_custom_endpoint: bool,
+    #[serde(default, rename = "cache-warn-minutes")]
+    cache_warn_minutes: u32,
+    #[serde(default, rename = "api-credentials")]
+    api_credentials: Option<String>,
+    #[serde(default, rename = "api-base-url")]
+    api_base_url: String,
+    #[serde(default, rename = "api-key")]
+    api_key: String,
+    #[serde(default)]
+    env: Vec<EnvVar>,
+    #[serde(default, rename = "vision-model")]
+    vision_model: bool,
+}
+
+impl TryFrom<PersistedAgentProfile> for AgentProfile {
+    type Error = String;
+
+    fn try_from(persisted: PersistedAgentProfile) -> Result<Self, Self::Error> {
+        // An encrypted value always wins over adjacent legacy fields, even
+        // when it fails to decrypt: falling back would let a modified
+        // ciphertext silently downgrade the profile to attacker-visible or
+        // stale plaintext left beside it. The error names the profile but
+        // never its credential data.
+        let (api_base_url, api_key) = match &persisted.api_credentials {
+            Some(stored) => decrypt_credentials(stored).map_err(|err| {
+                format!(
+                    "agent profile \"{}\": cannot read api-credentials: {err}",
+                    persisted.name
+                )
+            })?,
+            None => (persisted.api_base_url, persisted.api_key),
+        };
+
+        let launcher = persisted.launcher.unwrap_or({
+            if persisted.via_npx {
+                AgentProfileLauncher::Npx
+            } else {
+                AgentProfileLauncher::Custom
+            }
+        });
+
+        Ok(AgentProfile {
+            name: persisted.name,
+            kind: persisted.kind,
+            executable: persisted.executable,
+            launcher,
+            model: persisted.model,
+            effort: persisted.effort,
+            replace_sub_models: persisted.replace_sub_models,
+            use_custom_endpoint: persisted.use_custom_endpoint,
+            cache_warn_minutes: persisted.cache_warn_minutes,
+            api_base_url,
+            api_key,
+            env: persisted.env,
+            vision_model: persisted.vision_model,
+        })
+    }
+}
+
+/// Write the `[profiles]` section (`default` plus the `[[profiles.list]]`
+/// entries) into a parsed `config.toml` document, replacing any existing one.
+pub(crate) fn patch_document(doc: &mut DocumentMut, profiles: &[Profile], default_profile: &str) {
+    ensure_explicit_table(doc, "profiles");
+    doc["profiles"]["default"] = value(default_profile);
+
+    let mut tables = ArrayOfTables::new();
+
+    for profile in profiles {
+        let mut table = Table::new();
+
+        table["name"] = value(&profile.name);
+        table["shell"] = value(&profile.shell);
+        table["args"] = value(&profile.args);
+        tables.push(table);
+    }
+
+    doc["profiles"]["list"] = Item::ArrayOfTables(tables);
+}
+
+/// Write the `[agent-profiles]` section (`default` plus the
+/// `[[agent-profiles.list]]` entries) into a parsed `config.toml` document,
+/// replacing any existing one. Credentials are written only as the encrypted
+/// `api-credentials` value; rebuilding every entry from the runtime type is
+/// what removes legacy plaintext fields on the first save after migration.
+/// An encryption failure aborts the whole patch so the caller never persists
+/// a document with missing credentials.
+pub(crate) fn patch_agent_document(
+    doc: &mut DocumentMut,
+    profiles: &[AgentProfile],
+    default_profile: &str,
+) -> Result<(), String> {
+    ensure_explicit_table(doc, "agent-profiles");
+    doc["agent-profiles"]["default"] = value(default_profile);
+
+    // Saving means the dialog managed this section; from now on an empty
+    // list is a deliberate state, never re-seeded.
+    doc["agent-profiles"]["initialized"] = value(true);
+
+    let mut tables = ArrayOfTables::new();
+
+    for profile in profiles {
+        let mut table = Table::new();
+
+        table["name"] = value(&profile.name);
+        table["kind"] = value::<&str>(profile.kind.into());
+        table["executable"] = value(&profile.executable);
+        table["launcher"] = value::<&str>(profile.launcher.into());
+        table["model"] = value(&profile.model);
+        table["effort"] = value(&profile.effort);
+        table["replace-sub-models"] = value(profile.replace_sub_models);
+        table["use-custom-endpoint"] = value(profile.use_custom_endpoint);
+        table["cache-warn-minutes"] = value::<i64>(profile.cache_warn_minutes.into());
+
+        if !profile.api_base_url.is_empty() || !profile.api_key.is_empty() {
+            let stored =
+                encrypt_credentials(&profile.api_base_url, &profile.api_key).map_err(|err| {
+                    format!(
+                        "agent profile \"{}\": cannot save credentials: {err}",
+                        profile.name
+                    )
+                })?;
+
+            table["api-credentials"] = value(stored);
+        }
+
+        let mut env = toml_edit::Array::new();
+
+        for var in &profile.env {
+            let mut entry = toml_edit::InlineTable::new();
+
+            entry.insert("name", var.name.as_str().into());
+            entry.insert("value", var.value.as_str().into());
+            env.push(entry);
+        }
+
+        table["env"] = value(env);
+        table["vision-model"] = value(profile.vision_model);
+
+        tables.push(table);
+    }
+
+    doc["agent-profiles"]["list"] = Item::ArrayOfTables(tables);
+
+    Ok(())
+}
+
+impl From<AgentProfileKind> for &'static str {
+    fn from(value: AgentProfileKind) -> Self {
+        match value {
+            AgentProfileKind::ClaudeCode => "claude-code",
+            AgentProfileKind::Codex => "codex",
+            AgentProfileKind::DeepSeek => "deepseek",
+        }
+    }
+}
+
+impl From<AgentProfileLauncher> for &'static str {
+    fn from(value: AgentProfileLauncher) -> Self {
+        match value {
+            AgentProfileLauncher::Custom => "custom",
+            AgentProfileLauncher::Npx => "npx",
+            AgentProfileLauncher::PnpmDlx => "pnpm-dlx",
+        }
+    }
+}
+
+// Encrypted at-rest storage for Agent Profile custom endpoint credentials.
+//
+// The custom API URL and API key are stored in `config.toml` as one
+// versioned AES-256-GCM value so a program reading the file cannot recover
+// them as plaintext. The key is compiled into the executable, so this only
+// protects against direct configuration reads; executable analysis or
+// process inspection can still recover the values.
+
+/// Fixed application key. Randomly generated once; the bytes carry no
+/// meaning. Changing them makes every previously saved `api-credentials`
+/// value unreadable, so they must stay identical across releases. A future
+/// key change requires a new version prefix with its own reader.
+const KEY: [u8; 32] = [
+    50, 115, 106, 127, 87, 114, 50, 181, 6, 252, 87, 27, 234, 146, 52, 129, 68, 126, 18, 153, 49,
+    151, 155, 236, 238, 137, 42, 155, 197, 212, 89, 52,
+];
+
+/// Version prefix selecting the decoder before Base64 processing. Unknown
+/// prefixes fail visibly instead of being guessed.
+const PREFIX: &str = "aes256gcm-v1:";
+
+/// Associated data binding ciphertext to this storage purpose, so a value
+/// cannot be replayed into a different future encryption use of the same key.
+const AAD: &[u8] = b"NiumaTerm/agent-profile-credentials/v1";
+
+/// AES-GCM nonce length in bytes (96 bits).
+const NONCE_LEN: usize = 12;
+
+/// AES-GCM authentication tag length in bytes.
+const TAG_LEN: usize = 16;
+
+/// Plaintext payload. URL and key are encrypted together so neither can be
+/// swapped independently of the other.
+#[derive(Serialize, Deserialize)]
+struct CredentialPayload {
+    #[serde(default, rename = "api-base-url")]
+    api_base_url: String,
+    #[serde(default, rename = "api-key")]
+    api_key: String,
+}
+
+/// Encrypt a custom API URL and API key into one `aes256gcm-v1:` value.
+/// Every call draws a fresh nonce, so repeated encryption of the same input
+/// produces different output. Errors never contain the input values.
+pub(super) fn encrypt_credentials(api_base_url: &str, api_key: &str) -> Result<String, String> {
+    let payload = toml::to_string(&CredentialPayload {
+        api_base_url: api_base_url.to_string(),
+        api_key: api_key.to_string(),
+    })
+    .map_err(|_| -> String { "credential payload could not be encoded".into() })?;
+
+    let mut nonce = [0u8; NONCE_LEN];
+
+    OsRng
+        .try_fill_bytes(&mut nonce)
+        .map_err(|_| -> String { "operating-system random source unavailable".into() })?;
+
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&KEY));
+
+    let ciphertext = cipher
+        .encrypt(
+            Nonce::from_slice(&nonce),
+            Payload {
+                msg: payload.as_bytes(),
+                aad: AAD,
+            },
+        )
+        .map_err(|_| -> String { "credential encryption failed".into() })?;
+
+    let mut bytes = nonce.to_vec();
+
+    bytes.extend_from_slice(&ciphertext);
+
+    Ok(format!("{PREFIX}{}", BASE64.encode(bytes)))
+}
+
+/// Decrypt an `api-credentials` value back into `(api_base_url, api_key)`.
+/// Errors describe only the failure category so diagnostics never leak
+/// encrypted or decrypted credential text.
+fn decrypt_credentials(stored: &str) -> Result<(String, String), String> {
+    let encoded = stored
+        .strip_prefix(PREFIX)
+        .ok_or_else(|| -> String { "unsupported credential format version".into() })?;
+    let bytes = BASE64
+        .decode(encoded)
+        .map_err(|_| -> String { "credential value is not valid Base64".into() })?;
+
+    if bytes.len() < NONCE_LEN + TAG_LEN {
+        return Err("credential value is too short".into());
+    }
+
+    let (nonce, ciphertext) = bytes.split_at(NONCE_LEN);
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&KEY));
+
+    let plaintext = cipher
+        .decrypt(
+            Nonce::from_slice(nonce),
+            Payload {
+                msg: ciphertext,
+                aad: AAD,
+            },
+        )
+        .map_err(|_| -> String { "credential value failed authentication".into() })?;
+
+    let text = String::from_utf8(plaintext)
+        .map_err(|_| -> String { "decrypted credential payload is not valid UTF-8".into() })?;
+    let payload: CredentialPayload = toml::from_str(&text)
+        .map_err(|_| -> String { "decrypted credential payload could not be decoded".into() })?;
+
+    Ok((payload.api_base_url, payload.api_key))
+}
+
+#[cfg(test)]
+mod credential_tests;

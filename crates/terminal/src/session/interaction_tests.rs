@@ -3,10 +3,10 @@ use nmt_input::keyboard::ModifiersState;
 use crate::ghostty::GhosttyTerminal;
 use crate::render_buffer::RenderBuffer;
 use crate::selection::{Selection, SelectionType};
-use crate::session::input::paste_payload;
 use crate::session::mouse::{
     SurfaceMouseButton, mouse_button_code, mouse_motion_code, mouse_report_mods,
 };
+use crate::session::paste_payload;
 use crate::session::selection::{block_selection_range, selection_screen_range};
 use crate::terminal::Mode;
 use crate::terminal::pos::{Column, Line, Pos, Side};

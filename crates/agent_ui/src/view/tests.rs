@@ -14,8 +14,9 @@ use crate::view::banners::{
     UpdateOverlayPhase, composer_stats_label, multi_root_notice, update_overlay_phase,
 };
 use crate::view::history::queued_message_label;
-use crate::view::last_response::{LastResponseTone, last_response_tone};
-use crate::view::{ComposerEnterBehavior, composer_enter_behavior};
+use crate::view::{
+    ComposerEnterBehavior, LastResponseTone, composer_enter_behavior, last_response_tone,
+};
 use crate::{AgentKind, SessionHistoryUi};
 
 #[test]

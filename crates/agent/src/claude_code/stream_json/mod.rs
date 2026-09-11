@@ -71,7 +71,6 @@ use crate::subprocess::JsonLineProcess;
 use crate::workspace::AgentWorkspace;
 
 mod control;
-mod effort;
 mod launch;
 mod parse;
 mod transcript;

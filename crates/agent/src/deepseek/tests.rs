@@ -14,11 +14,10 @@ use tungstenite::{Message, accept, connect};
 
 use crate::chat::{Event, Item};
 use crate::deepseek::api::ApiClient;
-use crate::deepseek::close::{CloseAction, run_close_actions};
 use crate::deepseek::events::pump_for_test;
 use crate::deepseek::history::sessions;
 use crate::deepseek::mapping::{ToolTracker, map_frame};
-use crate::deepseek::session::session_create_payload;
+use crate::deepseek::session::{CloseAction, run_close_actions, session_create_payload};
 use crate::deepseek::{history, mapping};
 use crate::workspace::AgentWorkspace;
 
@@ -1151,7 +1150,7 @@ fn a_selection_outside_the_catalog_still_shows_in_the_picker() {
 
 #[test]
 fn declaring_image_input_rewrites_the_catalog_the_harness_already_serves() {
-    use crate::deepseek::settings::models_with_image;
+    use crate::deepseek::session::models_with_image;
 
     // A settings write replaces the value at its path, so every model the
     // harness already serves has to travel with the one being declared.
