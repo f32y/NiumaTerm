@@ -9,10 +9,9 @@ use semver::{Version, VersionReq};
 
 use crate::launcher::{AgentCli, ProcessLimits, run_bounded};
 
-/// The range this build has been exercised against. `dsh` is pre-release with
-/// an explicit expectation of breaking changes, so this is a statement about
-/// what was tested rather than a guarantee about what works.
-pub const SUPPORTED_VERSIONS: &str = ">=0.1.2-rc.1, <0.1.3-0";
+/// The exact release used by the package launchers. The Remote API can change
+/// between pre-releases, so other releases retain a compatibility notice.
+pub const SUPPORTED_VERSIONS: &str = "=0.1.5-rc.1";
 
 /// `dsh --version` only has to start Node and print, but a first run on a cold
 /// machine still pays for module resolution.
@@ -66,9 +65,8 @@ pub(crate) fn classify(installed: &Version) -> VersionSupport {
     let requirement = VersionReq::parse(SUPPORTED_VERSIONS)
         .expect("the supported range is a literal in this file");
 
-    // Pre-release versions only satisfy a requirement whose own bound is a
-    // pre-release of the same triple, which is exactly how the tested lower
-    // bound is written. Matching therefore means what it says here.
+    // The exact requirement includes the pre-release identifier so a later
+    // release candidate or stable release still receives a compatibility notice.
     if requirement.matches(installed) {
         VersionSupport::Supported
     } else {

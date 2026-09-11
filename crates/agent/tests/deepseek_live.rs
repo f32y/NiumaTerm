@@ -11,9 +11,10 @@ use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 use std::{env, fs};
 
-use nmt_agent::chat::{Event, Item, SendOutcome};
+use nmt_agent::chat::{Event, Item, SendOutcome, SlashCommandOutcome};
 use nmt_agent::deepseek::{Host, Session};
 use nmt_agent::{AgentWorkspace, LaunchConfig};
+use tempfile::TempDir;
 use uuid::Uuid;
 
 /// A prompt into an idle conversation starts a turn of its own. Steering means
@@ -654,4 +655,58 @@ fn a_profile_can_declare_and_select_an_image_model() {
     drop(session);
 
     let _ = fs::remove_dir_all(&isolated);
+}
+
+#[test]
+#[ignore = "starts an isolated harness host without sending a prompt"]
+fn permission_commands_update_the_session_preset() {
+    let isolated = TempDir::new().unwrap();
+    let launch = LaunchConfig {
+        env: vec![
+            ("DSH_HOME".into(), isolated.path().display().to_string()),
+            ("DEEPSEEK_API_KEY".into(), "local-probe".into()),
+        ],
+        ..launch()
+    };
+    let (tx, frames) = channel();
+    let mut session = Session::create(&launch, &AgentWorkspace::default(), move |frame| {
+        let _ = tx.send(frame);
+    })
+    .expect("the isolated harness should open a conversation");
+
+    let (seen, received) = collect_until(&mut session, &frames, Duration::from_secs(15), |event| {
+        matches!(
+            event,
+            Event::ApprovalPresets {
+                current: Some(_),
+                ..
+            }
+        )
+    });
+    assert!(received, "no initial permission preset arrived: {seen:?}");
+    let initial = seen
+        .iter()
+        .find_map(|event| match event {
+            Event::ApprovalPresets { current, .. } => current.clone(),
+            _ => None,
+        })
+        .unwrap();
+    assert_ne!(initial, "danger-full-access");
+
+    for preset in ["danger-full-access", initial.as_str()] {
+        let outcome = session.execute_slash_command("permission", preset);
+        assert!(
+            matches!(outcome, SlashCommandOutcome::Completed { .. }),
+            "switching to {preset} failed: {outcome:?}"
+        );
+
+        let (seen, updated) = collect_until(
+            &mut session,
+            &frames,
+            Duration::from_secs(15),
+            |event| matches!(event, Event::ApprovalPresets { current: Some(current), .. } if current == preset),
+        );
+        assert!(updated, "the host did not publish {preset}: {seen:?}");
+        assert!(!session.has_active_operation());
+    }
 }

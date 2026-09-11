@@ -8,6 +8,7 @@ use crate::chat::{
     SkillCatalog, SkillInfo, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
     SlashCommandRunPolicy, SlashCommandSource,
 };
+use crate::deepseek::api::{ApiClient, CallError};
 
 /// Gateway endpoint listing one session's effective commands.
 pub(crate) const LIST_METHOD: &str = "commands/list";
@@ -17,7 +18,7 @@ pub(crate) const LIST_METHOD: &str = "commands/list";
 /// Sending the line as an ordinary prompt does not run it: the host admits a
 /// prompt to the agent whatever it starts with, so a slash line delivered that
 /// way reaches the model as text.
-pub(crate) const EXECUTE_METHOD: &str = "commands/execute";
+const EXECUTE_METHOD: &str = "commands/execute";
 
 /// Named arguments for a gateway call addressed to one session's agent.
 ///
@@ -28,13 +29,34 @@ pub(crate) fn agent_args(session_id: &str) -> Value {
     json!({ "agentId": session_id })
 }
 
-/// Named arguments for one command line addressed to a session's agent.
+/// Run one command line addressed to a session's agent.
 ///
-/// From 0.1.1 a command can be given attachments, and the field is required
-/// whether or not the command reads them. The commands this adapter runs carry
-/// none, so the list is present and empty.
-pub(crate) fn execute_args(session_id: &str, line: &str) -> Value {
-    json!({ "agentId": session_id, "line": line, "images": [] })
+/// The attachment list is required even when empty. Older hosts name it
+/// `images`; retry only their exact argument rejection, which occurs before
+/// the command runs. Other errors may follow execution and cannot be retried.
+pub(super) fn execute(
+    client: &ApiClient,
+    session_id: &str,
+    line: &str,
+) -> Result<Value, CallError> {
+    let result = client.call(
+        EXECUTE_METHOD,
+        json!({ "agentId": session_id, "line": line, "submittedAttachments": [] }),
+    );
+
+    match result {
+        Err(CallError::Business { code, message })
+            if code == "gateway/arguments-invalid"
+                && message
+                    == "typert gateway: commands/execute: args fields do not match the descriptor: missing \"images\"; unexpected \"submittedAttachments\"" =>
+        {
+            client.call(
+                EXECUTE_METHOD,
+                json!({ "agentId": session_id, "line": line, "images": [] }),
+            )
+        }
+        result => result,
+    }
 }
 
 /// Read a `skill.list` result.

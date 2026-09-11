@@ -385,10 +385,7 @@ impl Session {
             arguments => format!("/{name} {arguments}"),
         };
 
-        let answer = self.client.call(
-            commands::EXECUTE_METHOD,
-            commands::execute_args(&self.session_id, &line),
-        );
+        let answer = commands::execute(&self.client, &self.session_id, &line);
 
         match answer {
             Ok(value) => commands::outcome(name, &value),

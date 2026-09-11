@@ -76,6 +76,7 @@ const scenarios = process.argv[2] ? [process.argv[2]] : [
   'a_question_is_answered_and_the_turn_continues',
   'two_sessions_share_one_host_and_do_not_see_each_other',
   'a_profile_can_declare_and_select_an_image_model',
+  'permission_commands_update_the_session_preset',
 ];
 
 try {

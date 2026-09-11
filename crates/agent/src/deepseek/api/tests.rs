@@ -7,7 +7,8 @@ use serde_json::{Value, json};
 use tungstenite::accept_hdr;
 use tungstenite::handshake::server::Request;
 
-use crate::deepseek::api::ApiClient;
+use crate::deepseek::api::{ApiClient, CallError};
+use crate::deepseek::commands;
 
 fn read_request(stream: &TcpStream) -> (String, String, Value) {
     stream
@@ -156,4 +157,102 @@ fn event_reply_keeps_the_generation_and_event_ids() {
         )
         .unwrap();
     server.join().unwrap();
+}
+
+fn command_server(replies: Vec<(Value, Value)>) -> (ApiClient, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        for (arguments, answer) in replies {
+            let (mut stream, _) = listener.accept().unwrap();
+            let (line, _, body) = read_request(&stream);
+            assert_eq!(line, "POST /api/commands/execute HTTP/1.1\r\n");
+            assert_eq!(body["method"], "commands/execute");
+            assert_eq!(body["payload"]["args"], arguments);
+
+            let answer = answer.to_string();
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                answer.len()
+            )
+            .unwrap();
+        }
+    });
+    (ApiClient::new(format!("http://{address}")).unwrap(), server)
+}
+
+#[test]
+fn commands_submit_an_empty_attachment_list_for_every_command_line() {
+    let lines = [
+        "/permission dangerously",
+        "/permission",
+        "/compact keep the design",
+    ];
+    let value = json!({"commandId": "command-1", "result": {"kind": "success"}});
+    let (client, server) = command_server(
+        lines
+            .iter()
+            .map(|line| {
+                (
+                    json!({"agentId": "session-1", "line": line, "submittedAttachments": []}),
+                    json!({"result": {"ok": true, "value": value}}),
+                )
+            })
+            .collect(),
+    );
+    for line in lines {
+        assert_eq!(
+            commands::execute(&client, "session-1", line).unwrap(),
+            value
+        );
+    }
+    server.join().unwrap();
+}
+
+const LEGACY_ARGUMENT_ERROR: &str = "typert gateway: commands/execute: args fields do not match the descriptor: missing \"images\"; unexpected \"submittedAttachments\"";
+
+#[test]
+fn commands_retry_the_older_attachment_name_after_argument_rejection() {
+    let line = "/permission dangerously";
+    let value = json!({"commandId": "command-1", "result": {"kind": "success"}});
+    let (client, server) = command_server(vec![
+        (
+            json!({"agentId": "session-1", "line": line, "submittedAttachments": []}),
+            json!({"result": {"ok": false, "error": {
+                "code": "gateway/arguments-invalid", "message": LEGACY_ARGUMENT_ERROR,
+            }}}),
+        ),
+        (
+            json!({"agentId": "session-1", "line": line, "images": []}),
+            json!({"result": {"ok": true, "value": value}}),
+        ),
+    ]);
+    assert_eq!(
+        commands::execute(&client, "session-1", line).unwrap(),
+        value
+    );
+    server.join().unwrap();
+}
+
+#[test]
+fn commands_return_unrelated_failures_without_retrying() {
+    for (code, message) in [
+        ("gateway/internal", LEGACY_ARGUMENT_ERROR),
+        ("gateway/arguments-invalid", "another argument is invalid"),
+        ("command/failed", "the command failed after starting"),
+    ] {
+        let (client, server) = command_server(vec![(
+            json!({"agentId": "session-1", "line": "/permission dangerously", "submittedAttachments": []}),
+            json!({"result": {"ok": false, "error": {"code": code, "message": message}}}),
+        )]);
+        assert_eq!(
+            commands::execute(&client, "session-1", "/permission dangerously"),
+            Err(CallError::Business {
+                code: code.into(),
+                message: message.into()
+            })
+        );
+        server.join().unwrap();
+    }
 }

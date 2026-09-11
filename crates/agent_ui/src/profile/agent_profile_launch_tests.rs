@@ -212,12 +212,12 @@ fn a_deepseek_profile_without_the_switch_exports_no_endpoint() {
 }
 
 #[test]
-fn deepseek_package_launchers_build_their_native_commands() {
+fn deepseek_package_launchers_pin_the_supported_release() {
     let cases = [
         (
             AgentProfileLauncher::Npx,
             "npx",
-            vec!["-y", "@deepseek-ai/dsh@latest"],
+            vec!["-y", "@deepseek-ai/dsh@0.1.5-rc.1"],
         ),
         (
             AgentProfileLauncher::PnpmDlx,
@@ -225,7 +225,7 @@ fn deepseek_package_launchers_build_their_native_commands() {
             vec![
                 "dlx",
                 "--config.dlx-cache-max-age=Infinity",
-                "@deepseek-ai/dsh@latest",
+                "@deepseek-ai/dsh@0.1.5-rc.1",
             ],
         ),
     ];

@@ -440,27 +440,26 @@ fn host_and_stream_failures_reach_the_transcript() {
 }
 
 #[test]
-fn the_tested_release_is_inside_the_supported_range() {
+fn only_the_pinned_release_is_reported_as_supported() {
     use semver::Version;
 
     use crate::deepseek::version::{VersionSupport, classify};
 
-    // A pre-release only satisfies a requirement when some comparator carries
-    // the same triple and its own pre-release, which is why the lower bound is
-    // written as a pre-release rather than as a plain `0.1.0`.
-    for inside in ["0.1.2-rc.1", "0.1.2"] {
-        assert_eq!(
-            classify(&Version::parse(inside).unwrap()),
-            VersionSupport::Supported,
-            "{inside}"
-        );
-    }
+    assert_eq!(
+        classify(&Version::parse("0.1.5-rc.1").unwrap()),
+        VersionSupport::Supported,
+    );
 
     for outside in [
         "0.1.0-rc.6",
         "0.1.1-rc.2",
         "0.1.2-rc.0",
+        "0.1.2-rc.1",
+        "0.1.2",
         "0.1.3",
+        "0.1.5-rc.0",
+        "0.1.5-rc.2",
+        "0.1.5",
         "0.2.0",
         "1.0.0",
     ] {
@@ -538,14 +537,6 @@ fn an_approval_request_carries_what_answering_it_needs() {
 fn a_command_result_reports_what_the_registry_settled() {
     use crate::chat::SlashCommandOutcome;
     use crate::deepseek::commands;
-
-    // The gateway compares the whole argument set, so the image list the
-    // descriptor names has to be there even though no command run from here
-    // carries an attachment.
-    assert_eq!(
-        commands::execute_args(SESSION, "/compact keep the design"),
-        json!({ "agentId": SESSION, "line": "/compact keep the design", "images": [] })
-    );
 
     assert_eq!(
         commands::outcome(

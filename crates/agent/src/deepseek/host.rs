@@ -262,15 +262,11 @@ pub const DEFAULT_EXECUTABLE: &str = "dsh";
 /// with a null stdin, so npx's prompt before fetching a package it does not
 /// have cached could never be answered.
 ///
-/// The `@latest` tag is what makes this launcher mean the published package.
-/// npx resolves a bare package name against what is already installed first,
-/// so a machine carrying an older global `dsh` would keep running that one and
-/// this profile would differ from the executable launcher in nothing but its
-/// spelling. Naming a tag also keeps the harness current on its own, which
-/// matters while it is pre-release: image input, for one, exists only from
-/// 0.1.1-rc.1 onward.
+/// An exact release prevents package updates from changing the Remote API
+/// without an adapter update. It also prevents npx from selecting a different
+/// globally installed release when resolving the command.
 pub const NPX_EXECUTABLE: &str = "npx";
-pub const NPX_ARGUMENTS: [&str; 2] = ["-y", "@deepseek-ai/dsh@latest"];
+pub const NPX_ARGUMENTS: [&str; 2] = ["-y", "@deepseek-ai/dsh@0.1.5-rc.1"];
 
 /// pnpm's one-shot package launcher. Unlike npm's dependency resolver, pnpm
 /// can resolve the harness's mutually referring peer dependencies without
@@ -278,13 +274,13 @@ pub const NPX_ARGUMENTS: [&str; 2] = ["-y", "@deepseek-ai/dsh@latest"];
 ///
 /// Keep an installed release cached beyond pnpm's default one-day lifetime:
 /// rebuilding the same dependency tree delays the first tab in another process
-/// by tens of seconds. pnpm resolves `@latest` before choosing the cache keyed
-/// by the resolved release, so a new release still gets a new installation.
+/// by tens of seconds. The exact package release keeps later launches on the
+/// same Remote API until the adapter changes its supported release.
 pub const PNPM_DLX_EXECUTABLE: &str = "pnpm";
 pub const PNPM_DLX_ARGUMENTS: [&str; 3] = [
     "dlx",
     "--config.dlx-cache-max-age=Infinity",
-    "@deepseek-ai/dsh@latest",
+    "@deepseek-ai/dsh@0.1.5-rc.1",
 ];
 
 fn start_timeout(launch: &crate::LaunchConfig) -> Duration {
