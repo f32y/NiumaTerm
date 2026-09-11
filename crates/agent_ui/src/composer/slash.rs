@@ -135,9 +135,13 @@ impl AgentPane {
 
             match resolve_choice(&parsed.arguments, &choices) {
                 Ok(value) if command.name == "model" => {
-                    self.controls.state.settings.model = Some(value.clone());
-                    self.controls
-                        .remember_defaults(self.kind, &self.profile, cx);
+                    self.session.controls.settings.model = Some(value.clone());
+                    self.controls.remember_defaults(
+                        &self.session.controls,
+                        self.kind,
+                        &self.profile,
+                        cx,
+                    );
                     self.palette.set_feedback(
                         CommandFeedbackKind::Notice,
                         i18n("agent-composer-model-set").replace("{value}", &value),
@@ -155,9 +159,13 @@ impl AgentPane {
                     return true;
                 }
                 Ok(value) if command.name == "permissions" => {
-                    self.controls.state.settings.approval = Some(value.clone());
-                    self.controls
-                        .remember_defaults(self.kind, &self.profile, cx);
+                    self.session.controls.settings.approval = Some(value.clone());
+                    self.controls.remember_defaults(
+                        &self.session.controls,
+                        self.kind,
+                        &self.profile,
+                        cx,
+                    );
                     self.palette.set_feedback(
                         CommandFeedbackKind::Notice,
                         i18n("agent-composer-permissions-set")
@@ -229,7 +237,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) -> bool {
         if self.is_command_busy() {
-            return match self.palette.commands.while_busy(command, policy) {
+            return match self.session.commands.while_busy(command, policy) {
                 CommandAdmission::Queued { name, count } => {
                     self.palette.set_feedback(
                         CommandFeedbackKind::Queued,
@@ -266,10 +274,7 @@ impl AgentPane {
         command: PendingSlashCommand,
         cx: &mut Context<Self>,
     ) -> bool {
-        let outcome = self
-            .palette
-            .commands
-            .execute(self.runtime.backend_mut(), &command);
+        let outcome = self.session.execute_command(&command);
 
         match outcome {
             SlashCommandOutcome::Accepted => {
@@ -315,17 +320,17 @@ impl AgentPane {
             return;
         }
 
-        let Some(command) = self.palette.commands.queue.pop_front() else {
+        let Some(command) = self.session.commands.queue.pop_front() else {
             return;
         };
 
         if !self.execute_backend_command(command, cx) {
-            self.palette.commands.queue.clear();
+            self.session.commands.queue.clear();
         }
     }
 
     pub(super) fn show_status(&mut self, cx: &mut Context<Self>) {
-        let status = match self.runtime.status() {
+        let status = match self.session.runtime.status() {
             Status::Starting => i18n("agent-composer-status-starting"),
             Status::Idle => i18n("agent-composer-status-idle"),
             Status::Running => i18n("agent-composer-status-running"),
@@ -344,23 +349,23 @@ impl AgentPane {
         for (name, value) in [
             (
                 i18n("agent-setting-model"),
-                self.controls.state.settings.model.as_deref(),
+                self.session.controls.settings.model.as_deref(),
             ),
             (
                 i18n("agent-setting-permissions"),
-                self.controls.state.settings.approval.as_deref(),
+                self.session.controls.settings.approval.as_deref(),
             ),
             (
                 i18n("agent-setting-sandbox"),
-                self.controls.state.settings.sandbox.as_deref(),
+                self.session.controls.settings.sandbox.as_deref(),
             ),
             (
                 i18n("agent-setting-effort"),
-                self.controls.state.settings.effort.as_deref(),
+                self.session.controls.settings.effort.as_deref(),
             ),
             (
                 i18n("agent-setting-tier"),
-                self.controls.state.settings.tier.as_deref(),
+                self.session.controls.settings.tier.as_deref(),
             ),
         ] {
             if let Some(value) = value {
@@ -372,11 +377,11 @@ impl AgentPane {
             }
         }
 
-        if !self.palette.commands.queue.is_empty() {
+        if !self.session.commands.queue.is_empty() {
             fields.push(
                 i18n("agent-composer-status-field")
                     .replace("{name}", i18n("agent-composer-status-queued"))
-                    .replace("{value}", &self.palette.commands.queue.len().to_string()),
+                    .replace("{value}", &self.session.commands.queue.len().to_string()),
             );
         }
 
@@ -392,7 +397,7 @@ impl AgentPane {
         } else {
             // A skill is invoked through the harness, so it needs a session
             // that has finished starting and has not ended.
-            match self.runtime.status() {
+            match self.session.runtime.status() {
                 Status::Starting => Some(translated("agent-composer-agent-starting")),
                 Status::Exited => Some(translated("agent-composer-agent-exited")),
                 _ => None,
@@ -413,6 +418,7 @@ impl AgentPane {
         }
 
         let adapter = self
+            .session
             .runtime
             .backend()
             .map(Backend::adapter_commands)
@@ -436,8 +442,8 @@ impl AgentPane {
     pub(super) fn command_choices(&self, command: &str) -> Vec<(String, String)> {
         match command {
             "model" => self
+                .session
                 .controls
-                .state
                 .models
                 .iter()
                 .map(|model| (model.model.clone(), model.display.clone()))

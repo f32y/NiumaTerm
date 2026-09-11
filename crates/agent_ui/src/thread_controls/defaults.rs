@@ -8,6 +8,7 @@
 use gpui::{App, Context};
 use nmt_agent::chat::ThreadSettings;
 use nmt_agent::profile::launch_model as effective_launch_model;
+use nmt_agent::session::settings::ConversationSettings;
 use nmt_config::local_state;
 use nmt_config::profile::AgentProfile;
 use tracing::warn;
@@ -49,6 +50,7 @@ impl ThreadControls {
     /// user-driven settings change (dropdowns and slash commands).
     pub(crate) fn remember_defaults(
         &self,
+        state: &ConversationSettings,
         kind: AgentKind,
         profile: &AgentProfile,
         cx: &mut Context<AgentPane>,
@@ -58,7 +60,7 @@ impl ThreadControls {
 
             let key = defaults
                 .0
-                .remember(kind, &profile.name, self.state.settings.clone());
+                .remember(kind, &profile.name, state.settings.clone());
 
             let mut stored = defaults.to_local_state();
 
@@ -81,10 +83,10 @@ impl AgentPane {
     /// to, because a picker left showing a value the harness never adopted
     /// would misreport which model the next turn runs on.
     pub(crate) fn apply_model_selection(&mut self, cx: &mut Context<Self>) {
-        let Some(session) = self.runtime.backend_mut() else {
+        let Some(session) = self.session.runtime.backend_mut() else {
             return;
         };
-        let Some(outcome) = self.controls.state.apply_model(session) else {
+        let Some(outcome) = self.session.controls.apply_model(session) else {
             return;
         };
 
@@ -103,17 +105,17 @@ impl AgentPane {
     /// tools. That rule is not repeated here: the picker reports whatever the
     /// harness answers, and the row stays on the preset still in force.
     pub(crate) fn apply_agent_preset(&mut self, preset: String, cx: &mut Context<Self>) {
-        let Some(session) = self.runtime.backend_mut() else {
+        let Some(session) = self.session.runtime.backend_mut() else {
             return;
         };
 
-        if self.controls.state.agent_preset.as_deref() == Some(preset.as_str()) {
+        if self.session.controls.agent_preset.as_deref() == Some(preset.as_str()) {
             return;
         }
 
         match session.select_agent_preset(&preset) {
             Ok(()) => {
-                self.controls.state.agent_preset = Some(preset);
+                self.session.controls.agent_preset = Some(preset);
                 cx.notify();
             }
             Err(error) => self

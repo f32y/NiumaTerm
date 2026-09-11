@@ -9,6 +9,7 @@ use gpui::{Context, IntoElement, px};
 use gpui_component::{ActiveTheme as _, IconName, h_flex};
 use nmt_agent::claude_code::stream_json;
 use nmt_agent::codex::app_server;
+use nmt_agent::session::settings::ConversationSettings;
 use nmt_i18n::i18n;
 
 use crate::AgentPane;
@@ -29,10 +30,11 @@ impl ThreadControls {
     /// support (e.g. Haiku) get no effort control.
     pub(super) fn render_claude_row(
         &self,
+        state: &ConversationSettings,
         kind: AgentKind,
         cx: &mut Context<AgentPane>,
     ) -> impl IntoElement + use<> {
-        let model_options = self.model_options(cx);
+        let model_options = self.model_options(state, cx);
 
         let permission_options: Vec<(String, String)> = stream_json::PERMISSION_OPTIONS
             .iter()
@@ -43,11 +45,10 @@ impl ThreadControls {
         // model has the setting at all stays the harness's: a model that
         // advertises none (Haiku) gets no control rather than one whose every
         // value it would reject.
-        let supports_effort = self
-            .state
+        let supports_effort = state
             .models
             .iter()
-            .find(|m| Some(&m.model) == self.state.settings.model.as_ref())
+            .find(|m| Some(&m.model) == state.settings.model.as_ref())
             .is_some_and(|m| !m.efforts.is_empty());
 
         let model = setting_picker(
@@ -55,25 +56,33 @@ impl ThreadControls {
             "agent-model",
             i18n("agent-setting-model"),
             IconName::Cpu,
-            self.state.settings.model.clone(),
+            state.settings.model.clone(),
             model_options,
             |this, value, cx| {
-                this.controls.state.settings.model = Some(value);
-                this.controls
-                    .remember_defaults(this.kind, &this.profile, cx);
+                this.session.controls.settings.model = Some(value);
+                this.controls.remember_defaults(
+                    &this.session.controls,
+                    this.kind,
+                    &this.profile,
+                    cx,
+                );
             },
         )
         .into_any_element();
 
         let folded = vec![FoldedSetting {
             name: i18n("agent-setting-permissions"),
-            icon: permission_icon(self.state.settings.approval.as_deref()),
-            current: self.state.settings.approval.clone(),
+            icon: permission_icon(state.settings.approval.as_deref()),
+            current: state.settings.approval.clone(),
             options: permission_options,
             set: |this, value, cx| {
-                this.controls.state.settings.approval = Some(value);
-                this.controls
-                    .remember_defaults(this.kind, &this.profile, cx);
+                this.session.controls.settings.approval = Some(value);
+                this.controls.remember_defaults(
+                    &this.session.controls,
+                    this.kind,
+                    &this.profile,
+                    cx,
+                );
             },
         }];
 
@@ -90,16 +99,20 @@ impl ThreadControls {
                 // The protocol never reports the session's current effort;
                 // until the user picks one, the honest label is the CLI's
                 // own per-model default rather than an empty dash.
-                self.state
+                state
                     .settings
                     .effort
                     .clone()
                     .or_else(|| Some("default".to_string())),
                 effort_levels(kind),
                 |this, value, cx| {
-                    this.controls.state.settings.effort = Some(value);
-                    this.controls
-                        .remember_defaults(this.kind, &this.profile, cx);
+                    this.session.controls.settings.effort = Some(value);
+                    this.controls.remember_defaults(
+                        &this.session.controls,
+                        this.kind,
+                        &this.profile,
+                        cx,
+                    );
                 },
             )
             .into_any_element();
@@ -123,19 +136,19 @@ impl ThreadControls {
     /// service reports none, and then the control is absent rather than empty.
     pub(super) fn render_deepseek_row(
         &self,
+        state: &ConversationSettings,
         kind: AgentKind,
         cx: &mut Context<AgentPane>,
     ) -> impl IntoElement + use<> {
-        let model_options = self.model_options(cx);
+        let model_options = self.model_options(state, cx);
 
         // The setting belongs to the exact model route, so a model that
         // advertises no levels simply has no effort control; the levels it
         // then offers are the shared ladder.
-        let supports_effort = self
-            .state
+        let supports_effort = state
             .models
             .iter()
-            .find(|m| Some(&m.model) == self.state.settings.model.as_ref())
+            .find(|m| Some(&m.model) == state.settings.model.as_ref())
             .is_some_and(|m| !m.efforts.is_empty());
 
         let model = setting_picker(
@@ -143,12 +156,16 @@ impl ThreadControls {
             "agent-model",
             i18n("agent-setting-model"),
             IconName::Cpu,
-            self.state.settings.model.clone(),
+            state.settings.model.clone(),
             model_options,
             |this, value, cx| {
-                this.controls.state.settings.model = Some(value);
-                this.controls
-                    .remember_defaults(this.kind, &this.profile, cx);
+                this.session.controls.settings.model = Some(value);
+                this.controls.remember_defaults(
+                    &this.session.controls,
+                    this.kind,
+                    &this.profile,
+                    cx,
+                );
                 this.apply_model_selection(cx);
             },
         )
@@ -158,13 +175,12 @@ impl ThreadControls {
 
         // A deployment that composes no presets has one composition for every
         // conversation, so the control would offer a choice that does not exist.
-        if !self.state.agent_presets.is_empty() {
+        if !state.agent_presets.is_empty() {
             folded.push(FoldedSetting {
                 name: i18n("agent-setting-agent-preset"),
                 icon: IconName::Bot,
-                current: self.state.agent_preset.clone(),
-                options: self
-                    .state
+                current: state.agent_preset.clone(),
+                options: state
                     .agent_presets
                     .iter()
                     .map(|preset| (preset.value.clone(), preset.label.clone()))
@@ -173,13 +189,12 @@ impl ThreadControls {
             });
         }
 
-        if !self.state.approval_presets.is_empty() {
+        if !state.approval_presets.is_empty() {
             folded.push(FoldedSetting {
                 name: i18n("agent-setting-permissions"),
-                icon: permission_icon(self.state.settings.approval.as_deref()),
-                current: self.state.settings.approval.clone(),
-                options: self
-                    .state
+                icon: permission_icon(state.settings.approval.as_deref()),
+                current: state.settings.approval.clone(),
+                options: state
                     .approval_presets
                     .iter()
                     .map(|preset| (preset.value.clone(), preset.label.clone()))
@@ -203,12 +218,16 @@ impl ThreadControls {
         if supports_effort {
             let effort = effort_panel(
                 cx,
-                self.state.settings.effort.clone(),
+                state.settings.effort.clone(),
                 effort_levels(kind),
                 |this, value, cx| {
-                    this.controls.state.settings.effort = Some(value);
-                    this.controls
-                        .remember_defaults(this.kind, &this.profile, cx);
+                    this.session.controls.settings.effort = Some(value);
+                    this.controls.remember_defaults(
+                        &this.session.controls,
+                        this.kind,
+                        &this.profile,
+                        cx,
+                    );
                     this.apply_model_selection(cx);
                 },
             )
@@ -228,10 +247,11 @@ impl ThreadControls {
     /// overrides on the next `turn/start`.
     pub(super) fn render_codex_row(
         &self,
+        state: &ConversationSettings,
         kind: AgentKind,
         cx: &mut Context<AgentPane>,
     ) -> impl IntoElement + use<> {
-        let model_options = self.model_options(cx);
+        let model_options = self.model_options(state, cx);
 
         // Service tiers are per model, and the catalog only lists the
         // additional tiers (e.g. "Fast") — the normal tier is implicit, so
@@ -241,10 +261,10 @@ impl ThreadControls {
             vec![(String::new(), setting_value_label("normal"))];
 
         tier_options.extend(
-            self.state
+            state
                 .models
                 .iter()
-                .find(|m| Some(&m.model) == self.state.settings.model.as_ref())
+                .find(|m| Some(&m.model) == state.settings.model.as_ref())
                 .map(|m| m.tiers.clone())
                 .unwrap_or_default(),
         );
@@ -269,26 +289,35 @@ impl ThreadControls {
             "agent-model",
             i18n("agent-setting-model"),
             IconName::Cpu,
-            self.state.settings.model.clone(),
+            state.settings.model.clone(),
             model_options,
             |this, value, cx| {
                 // A tier the new model doesn't offer falls back to that
                 // model's default tier instead of erroring the next turn.
-                if let Some(info) = this.controls.state.models.iter().find(|m| m.model == value)
+                if let Some(info) = this
+                    .session
+                    .controls
+                    .models
+                    .iter()
+                    .find(|m| m.model == value)
                     && !this
+                        .session
                         .controls
-                        .state
                         .settings
                         .tier
                         .as_ref()
                         .is_some_and(|tier| info.tiers.iter().any(|(id, _)| id == tier))
                 {
-                    this.controls.state.settings.tier = info.default_tier.clone();
+                    this.session.controls.settings.tier = info.default_tier.clone();
                 }
 
-                this.controls.state.settings.model = Some(value);
-                this.controls
-                    .remember_defaults(this.kind, &this.profile, cx);
+                this.session.controls.settings.model = Some(value);
+                this.controls.remember_defaults(
+                    &this.session.controls,
+                    this.kind,
+                    &this.profile,
+                    cx,
+                );
             },
         )
         .into_any_element();
@@ -296,58 +325,78 @@ impl ThreadControls {
         let folded = vec![
             FoldedSetting {
                 name: i18n("agent-setting-approval"),
-                icon: permission_icon(self.state.settings.approval.as_deref()),
-                current: self.state.settings.approval.clone(),
+                icon: permission_icon(state.settings.approval.as_deref()),
+                current: state.settings.approval.clone(),
                 options: approval_options,
                 set: |this, value, cx| {
-                    this.controls.state.settings.approval = Some(value);
-                    this.controls
-                        .remember_defaults(this.kind, &this.profile, cx);
+                    this.session.controls.settings.approval = Some(value);
+                    this.controls.remember_defaults(
+                        &this.session.controls,
+                        this.kind,
+                        &this.profile,
+                        cx,
+                    );
                 },
             },
             FoldedSetting {
                 name: i18n("agent-setting-approval-reviewer"),
                 icon: IconName::User,
-                current: self.state.settings.approvals_reviewer.clone(),
+                current: state.settings.approvals_reviewer.clone(),
                 options: reviewer_options,
                 set: |this, value, cx| {
-                    this.controls.state.settings.approvals_reviewer = Some(value);
-                    this.controls
-                        .remember_defaults(this.kind, &this.profile, cx);
+                    this.session.controls.settings.approvals_reviewer = Some(value);
+                    this.controls.remember_defaults(
+                        &this.session.controls,
+                        this.kind,
+                        &this.profile,
+                        cx,
+                    );
                 },
             },
             FoldedSetting {
                 name: i18n("agent-setting-sandbox"),
                 icon: IconName::Shield,
-                current: self.state.settings.sandbox.clone(),
+                current: state.settings.sandbox.clone(),
                 options: sandbox_options,
                 set: |this, value, cx| {
-                    this.controls.state.settings.sandbox = Some(value);
-                    this.controls
-                        .remember_defaults(this.kind, &this.profile, cx);
+                    this.session.controls.settings.sandbox = Some(value);
+                    this.controls.remember_defaults(
+                        &this.session.controls,
+                        this.kind,
+                        &this.profile,
+                        cx,
+                    );
                 },
             },
             FoldedSetting {
                 name: i18n("agent-setting-tier"),
                 icon: IconName::Zap,
-                current: Some(self.state.settings.tier.clone().unwrap_or_default()),
+                current: Some(state.settings.tier.clone().unwrap_or_default()),
                 options: tier_options,
                 set: |this, value, cx| {
-                    this.controls.state.settings.tier = (!value.is_empty()).then_some(value);
-                    this.controls
-                        .remember_defaults(this.kind, &this.profile, cx);
+                    this.session.controls.settings.tier = (!value.is_empty()).then_some(value);
+                    this.controls.remember_defaults(
+                        &this.session.controls,
+                        this.kind,
+                        &this.profile,
+                        cx,
+                    );
                 },
             },
         ];
 
         let effort = effort_panel(
             cx,
-            self.state.settings.effort.clone(),
+            state.settings.effort.clone(),
             effort_levels(kind),
             |this, value, cx| {
-                this.controls.state.settings.effort = Some(value);
-                this.controls
-                    .remember_defaults(this.kind, &this.profile, cx);
+                this.session.controls.settings.effort = Some(value);
+                this.controls.remember_defaults(
+                    &this.session.controls,
+                    this.kind,
+                    &this.profile,
+                    cx,
+                );
             },
         )
         .into_any_element();

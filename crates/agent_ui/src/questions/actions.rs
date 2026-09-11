@@ -4,25 +4,21 @@ use gpui::prelude::*;
 use gpui::{Context, Window};
 use gpui_component::input::{InputEvent, InputState, TextareaState};
 use nmt_agent::AgentEventKind;
-use nmt_agent::chat::{
-    Item, Question, QuestionInput, QuestionMode, QuestionRequest, QuestionResolution,
-};
-use nmt_agent::session::input::{QuestionAction, QuestionKey, Submission};
+use nmt_agent::chat::{Item, Question, QuestionInput, QuestionMode};
+use nmt_agent::session::controller::QuestionSubmission;
+use nmt_agent::session::input::{QuestionAction, QuestionCompletion, QuestionKey};
 use nmt_i18n::i18n;
 
 use crate::AgentPane;
 use crate::composer::PaletteControl;
 use crate::questions::{QuestionEditor, QuestionEditorState, QuestionStatus};
-use crate::session::Status;
 
 impl AgentPane {
-    pub(crate) fn receive_questions(&mut self, request: QuestionRequest, cx: &mut Context<Self>) {
-        let optional = request.mode == QuestionMode::Optional;
-        let waiting = request.mode != QuestionMode::Async;
-        let Some(index) = self.prompts.receive(&self.runtime, request) else {
-            return;
-        };
-        let prompt = &self.prompts.core.batches()[index];
+    pub(crate) fn present_questions(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.prompts.reveal(&self.session.input, index);
+        let prompt = &self.session.input.batches()[index];
+        let optional = prompt.mode() == QuestionMode::Optional;
+        let waiting = prompt.mode() != QuestionMode::Async;
         let key = prompt.key();
         let description = prompt
             .questions()
@@ -45,21 +41,22 @@ impl AgentPane {
             return;
         }
 
-        let epoch = self.runtime.epoch();
+        let epoch = self.session.runtime.epoch();
 
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
 
                 let keep_running = this.update(cx, |this, cx| {
-                    if !this.runtime.is_current(epoch) || this.runtime.update_suspension().is_some()
+                    if !this.session.runtime.is_current(epoch)
+                        || this.session.runtime.update_suspension().is_some()
                     {
                         return false;
                     }
 
                     let Some(prompt) = this
-                        .prompts
-                        .core
+                        .session
+                        .input
                         .batches()
                         .iter()
                         .find(|prompt| prompt.key() == key)
@@ -87,29 +84,19 @@ impl AgentPane {
         .detach();
     }
 
-    pub(crate) fn resolve_questions(
+    pub(crate) fn present_question_completion(
         &mut self,
-        id: &str,
-        resolution: QuestionResolution,
+        completion: QuestionCompletion,
         cx: &mut Context<Self>,
     ) {
-        let Some(completion) = self
-            .prompts
-            .core
-            .resolve(self.runtime.epoch(), id, resolution)
-        else {
-            return;
-        };
         if let Some(text) = completion.message {
-            if completion.started_turn && self.runtime.status() == Status::Idle {
-                self.delivery.begin_turn();
+            if completion.started_turn {
                 self.start_working(cx);
-                self.runtime.turn_started();
                 self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
             }
             self.push_item(Item::UserMessage { text: Some(text) }, cx);
         }
-        self.prompts.hide_settled();
+        self.prompts.hide_settled(&self.session.input);
         if completion.waiting_finished {
             self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
         }
@@ -118,28 +105,14 @@ impl AgentPane {
         cx.notify();
     }
 
-    pub(crate) fn question_submission_failed(
-        &mut self,
-        id: &str,
-        message: String,
-        cx: &mut Context<Self>,
-    ) {
-        if self
-            .prompts
-            .core
-            .submission_failed(self.runtime.epoch(), id, message)
-        {
-            cx.notify();
-        }
-    }
-
     pub(crate) fn open_message_questions(
         &mut self,
         item_id: &str,
         questions: Vec<Question>,
         cx: &mut Context<Self>,
     ) {
-        self.prompts.open_history(item_id, questions);
+        self.prompts
+            .open_history(&mut self.session.input, item_id, questions);
         cx.notify();
     }
 
@@ -149,7 +122,7 @@ impl AgentPane {
         option: usize,
         cx: &mut Context<Self>,
     ) {
-        if let Some(prompt) = self.prompts.questions_mut() {
+        if let Some(prompt) = self.prompts.questions_mut(&mut self.session.input) {
             prompt.toggle(question, option);
             if let Some(active) = self.prompts.active {
                 self.prompts.presentations[active].focus = (question, option);
@@ -170,8 +143,8 @@ impl AgentPane {
         let Some(index) = self.prompts.active else {
             return false;
         };
-        let key = self.prompts.core.batches()[index].key();
-        let Some(prompt) = self.prompts.core.draft_mut(key) else {
+        let key = self.session.input.batches()[index].key();
+        let Some(prompt) = self.session.input.draft_mut(key) else {
             return false;
         };
         if prompt.mode() == QuestionMode::Async || prompt.status() != QuestionStatus::Pending {
@@ -206,13 +179,13 @@ impl AgentPane {
     }
 
     pub(crate) fn submit_current_questions(&mut self, cx: &mut Context<Self>) {
-        if let Some(prompt) = self.prompts.questions() {
+        if let Some(prompt) = self.prompts.questions(&self.session.input) {
             self.submit_question(prompt.key(), QuestionAction::Answer, cx);
         }
     }
 
     pub(crate) fn skip_current_questions(&mut self, cx: &mut Context<Self>) {
-        if let Some(prompt) = self.prompts.questions() {
+        if let Some(prompt) = self.prompts.questions(&self.session.input) {
             self.submit_question(prompt.key(), QuestionAction::Skip, cx);
         }
     }
@@ -223,29 +196,22 @@ impl AgentPane {
         action: QuestionAction,
         cx: &mut Context<Self>,
     ) {
-        if self.branch_flow_holds_composer() || self.palette.commands.awaiting_turn {
-            return;
-        }
-        let waiting = self.prompts.core.waiting();
-        match self.prompts.core.submit(
-            &mut self.runtime,
-            key,
-            action,
-            &self.controls.state.settings,
-            Instant::now(),
-        ) {
-            Submission::Ignored => return,
-            Submission::Settled if waiting && !self.prompts.core.waiting() => {
-                self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
+        match self.session.submit_question(key, action, Instant::now()) {
+            QuestionSubmission::Ignored => return,
+            QuestionSubmission::Settled { waiting_finished } => {
+                if waiting_finished {
+                    self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
+                }
             }
-            Submission::Settled | Submission::Waiting | Submission::Failed => {}
+            QuestionSubmission::Waiting | QuestionSubmission::Failed => {}
         }
-        self.prompts.hide_settled();
+        self.prompts.hide_settled(&self.session.input);
         cx.notify();
     }
 
+    #[cfg(test)]
     pub(crate) fn restore_question_drafts(&mut self) {
-        self.prompts.core.restore(&mut self.runtime);
+        self.session.restore_questions();
         self.prompts.reset_editors();
     }
 
@@ -257,10 +223,10 @@ impl AgentPane {
         let Some(batch) = self.prompts.active else {
             return;
         };
-        let count = self.prompts.core.batches()[batch].questions().len();
+        let count = self.session.input.batches()[batch].questions().len();
 
         for index in 0..count {
-            let prompt = &self.prompts.core.batches()[batch];
+            let prompt = &self.session.input.batches()[batch];
             let input = prompt.questions()[index].input;
 
             if input == QuestionInput::SelectionOnly
@@ -272,14 +238,14 @@ impl AgentPane {
 
             let text = prompt.text(index).to_string();
             let key = prompt.key();
-            let epoch = self.runtime.epoch();
+            let epoch = self.session.runtime.epoch();
 
             let on_change = move |this: &mut Self, value: String, cx: &mut Context<Self>| {
-                if !this.runtime.is_current(epoch) {
+                if !this.session.runtime.is_current(epoch) {
                     return;
                 }
 
-                let Some(prompt) = this.prompts.core.draft_mut(key) else {
+                let Some(prompt) = this.session.input.draft_mut(key) else {
                     return;
                 };
                 if !prompt.set_text(index, value) {

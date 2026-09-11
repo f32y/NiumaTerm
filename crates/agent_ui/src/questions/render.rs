@@ -20,7 +20,7 @@ impl AgentPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let count = self.prompts.pending_count();
+        let count = self.session.input.pending_count();
 
         if self.prompts.collapsed && count == 0 {
             return None;
@@ -29,13 +29,16 @@ impl AgentPane {
         self.prepare_question_editors(window, cx);
 
         let active = self.prompts.active?;
-        let prompt = self.prompts.questions()?;
+        let prompt = self.prompts.questions(&self.session.input)?;
         let collapsed = self.prompts.collapsed;
         let pending = prompt.pending();
 
-        let enabled = self.prompts.core.can_submit(&self.runtime, prompt.key())
+        let enabled = self
+            .session
+            .input
+            .can_submit(&self.session.runtime, prompt.key())
             && !self.branch_flow_holds_composer()
-            && !self.palette.commands.awaiting_turn;
+            && !self.session.commands.awaiting_turn;
         let presentation = &self.prompts.presentations[active];
 
         let status = match prompt.status() {
@@ -69,8 +72,8 @@ impl AgentPane {
         );
 
         let candidates: Vec<usize> = self
-            .prompts
-            .core
+            .session
+            .input
             .batches()
             .iter()
             .enumerate()
@@ -143,7 +146,7 @@ impl AgentPane {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
-                    if let Some(prompt) = this.prompts.questions_mut() {
+                    if let Some(prompt) = this.prompts.questions_mut(&mut this.session.input) {
                         prompt.touch();
                     }
 
@@ -151,7 +154,7 @@ impl AgentPane {
                 }),
             )
             .capture_key_down(cx.listener(|this, _, _, cx| {
-                if let Some(prompt) = this.prompts.questions_mut() {
+                if let Some(prompt) = this.prompts.questions_mut(&mut this.session.input) {
                     prompt.touch();
                 }
 
@@ -238,7 +241,9 @@ impl AgentPane {
                             .checked(prompt.is_custom(index))
                             .disabled(!enabled)
                             .on_click(cx.listener(move |this, _, window, cx| {
-                                if let Some(prompt) = this.prompts.questions_mut() {
+                                if let Some(prompt) =
+                                    this.prompts.questions_mut(&mut this.session.input)
+                                {
                                     if !prompt.choose_custom(index) {
                                         return;
                                     }

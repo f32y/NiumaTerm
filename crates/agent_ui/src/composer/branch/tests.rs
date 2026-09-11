@@ -43,17 +43,19 @@ fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>)
 }
 
 fn install(pane: &mut AgentPane) {
-    let epoch = pane.runtime.begin_start();
-    pane.branch.core.starting(epoch, None);
-    pane.restore.starting(epoch, None);
+    let epoch = pane.session.runtime.begin_start();
+    pane.session.branch.starting(epoch, None);
+    pane.session.restore.starting(epoch, None);
     let mut backend = TestBackend::new([], SlashCommandOutcome::Accepted, Vec::new())
         .with_recovery(AgentKind::Claude, "source");
     backend.fork_accepted = true;
     assert!(matches!(
-        pane.runtime.install(epoch, Ok(Backend::Test(backend))),
+        pane.session
+            .runtime
+            .install(epoch, Ok(Backend::Test(backend))),
         StartOutcome::Installed
     ));
-    pane.runtime.ready();
+    pane.session.runtime.ready();
 }
 
 fn replay(text: &str) -> Vec<ReplayTurn> {
@@ -90,7 +92,7 @@ fn fork(pane: &mut AgentPane, cx: &mut Context<AgentPane>) {
     };
     pane.apply_event(Event::ForkCheckpoints(Ok(vec![checkpoint.clone()])), cx);
     pane.start_conversation_branch(checkpoint, cx);
-    assert!(pane.branch.is_working());
+    assert!(pane.session.branch.is_working());
 }
 
 fn local_checkpoint() -> ClaudeCheckpoint {
@@ -106,29 +108,32 @@ fn local_checkpoint() -> ClaudeCheckpoint {
 fn prepare_local(pane: &mut AgentPane, action: RewindAction, cx: &mut Context<AgentPane>) {
     let checkpoint = local_checkpoint();
     let request = pane
+        .session
         .branch
-        .core
-        .begin_rewind(&pane.runtime, pane.cwd(), None)
+        .begin_rewind(&pane.session.runtime, pane.cwd(), None)
         .expect("load");
-    pane.branch.core.checkpoints_loaded(
-        pane.runtime.epoch(),
+    pane.session.branch.checkpoints_loaded(
+        pane.session.runtime.epoch(),
         request,
         Ok(vec![checkpoint.clone()]),
     );
     assert!(
-        pane.branch
-            .core
-            .select_checkpoint(pane.runtime.epoch(), checkpoint)
+        pane.session
+            .branch
+            .select_checkpoint(pane.session.runtime.epoch(), checkpoint)
     );
     pane.branch.draft = Some(pane.input.read(cx).text().to_string());
-    let update = pane.branch.core.rewind(&mut pane.runtime, action);
+    let update = pane
+        .session
+        .branch
+        .rewind(&mut pane.session.runtime, action);
     let request = match update {
         BranchUpdate::CreateFork(request) => request,
         BranchUpdate::RestoringFiles(_) => {
             let BranchUpdate::CreateFork(request) = pane
+                .session
                 .branch
-                .core
-                .files_completed(pane.runtime.epoch(), Ok(()))
+                .files_completed(pane.session.runtime.epoch(), Ok(()))
             else {
                 panic!("fork after files")
             };
@@ -136,8 +141,8 @@ fn prepare_local(pane: &mut AgentPane, action: RewindAction, cx: &mut Context<Ag
         }
         _ => panic!("fork expected"),
     };
-    let update = pane.branch.core.fork_created(
-        pane.runtime.epoch(),
+    let update = pane.session.branch.fork_created(
+        pane.session.runtime.epoch(),
         request,
         Ok(ClaudeFork {
             session_id: Some("copy".into()),
@@ -164,7 +169,7 @@ fn protocol_branch_keeps_old_rows_until_replay_and_fills_the_prompt_once(cx: &mu
             pane.apply_event(Event::Ready(ThreadSettings::default()), cx);
             pane.apply_event(Event::Replay(replay("copy")), cx);
             assert_eq!(rows(pane, cx), ["copy"]);
-            assert!(!pane.branch.holds_composer());
+            assert!(!pane.session.branch.holds_composer());
             pane.fill_branch_prompt(window, cx);
             assert_eq!(pane.input.read(cx).text().to_string(), "cut prompt");
             pane.input
@@ -212,7 +217,7 @@ fn protocol_failure_preserves_conversation_and_does_not_refill_the_prompt(cx: &m
             pane.fill_branch_prompt(window, cx);
             assert_eq!(rows(pane, cx), ["current"]);
             assert!(pane.input.read(cx).text().len() == 0);
-            assert_eq!(pane.runtime.status(), Status::Idle);
+            assert_eq!(pane.session.runtime.status(), Status::Idle);
             assert_eq!(pane.history_ui.mode, RecentSessionsMode::Open);
         })
     });
@@ -226,7 +231,7 @@ fn local_branch_waits_for_ready_preserves_controls_and_keeps_later_drafts(cx: &m
         pane.update(cx, |pane, cx| {
             install(pane);
             pane.apply_replay(replay("current"), cx);
-            pane.controls.state.settings.model = Some("selected-model".into());
+            pane.session.controls.settings.model = Some("selected-model".into());
             prepare_local(pane, RewindAction::Conversation, cx);
             assert_eq!(rows(pane, cx), ["current"]);
             assert_eq!(pane.history_ui.mode, RecentSessionsMode::Loading);
@@ -237,7 +242,7 @@ fn local_branch_waits_for_ready_preserves_controls_and_keeps_later_drafts(cx: &m
             pane.fill_branch_prompt(window, cx);
             assert_eq!(rows(pane, cx), ["kept prefix"]);
             assert_eq!(
-                pane.controls.state.settings.model.as_deref(),
+                pane.session.controls.settings.model.as_deref(),
                 Some("selected-model")
             );
             assert_eq!(pane.input.read(cx).text().to_string(), "later draft");
@@ -264,8 +269,9 @@ fn local_start_failure_keeps_old_rows_and_reports_files_already_restored(cx: &mu
             pane.apply_replay(replay("current"), cx);
             prepare_local(pane, RewindAction::FilesAndConversation, cx);
             assert!(matches!(
-                pane.runtime
-                    .install(pane.runtime.epoch(), Err("cannot start".into())),
+                pane.session
+                    .runtime
+                    .install(pane.session.runtime.epoch(), Err("cannot start".into())),
                 StartOutcome::Failed(_)
             ));
             pane.apply_event(
@@ -278,8 +284,8 @@ fn local_start_failure_keeps_old_rows_and_reports_files_already_restored(cx: &mu
             pane.fill_branch_prompt(window, cx);
             assert_eq!(rows(pane, cx), ["current"]);
             assert!(pane.input.read(cx).text().len() == 0);
-            assert_eq!(pane.runtime.status(), Status::Exited);
-            assert!(!pane.branch.holds_composer());
+            assert_eq!(pane.session.runtime.status(), Status::Exited);
+            assert!(!pane.session.branch.holds_composer());
             let feedback = pane
                 .palette
                 .feedback
@@ -304,30 +310,31 @@ fn partial_success_picker_disables_repeating_files_but_allows_continuing_the_con
             install(pane);
             let checkpoint = local_checkpoint();
             let request = pane
+                .session
                 .branch
-                .core
-                .begin_rewind(&pane.runtime, pane.cwd(), None)
+                .begin_rewind(&pane.session.runtime, pane.cwd(), None)
                 .expect("read");
-            pane.branch.core.checkpoints_loaded(
-                pane.runtime.epoch(),
+            pane.session.branch.checkpoints_loaded(
+                pane.session.runtime.epoch(),
                 request,
                 Ok(vec![checkpoint.clone()]),
             );
-            pane.branch
-                .core
-                .select_checkpoint(pane.runtime.epoch(), checkpoint);
-            pane.branch
-                .core
-                .rewind(&mut pane.runtime, RewindAction::FilesAndConversation);
-            let BranchUpdate::CreateFork(request) = pane
+            pane.session
                 .branch
-                .core
-                .files_completed(pane.runtime.epoch(), Ok(()))
+                .select_checkpoint(pane.session.runtime.epoch(), checkpoint);
+            pane.session.branch.rewind(
+                &mut pane.session.runtime,
+                RewindAction::FilesAndConversation,
+            );
+            let BranchUpdate::CreateFork(request) = pane
+                .session
+                .branch
+                .files_completed(pane.session.runtime.epoch(), Ok(()))
             else {
                 panic!("fork expected")
             };
-            let update = pane.branch.core.fork_created(
-                pane.runtime.epoch(),
+            let update = pane.session.branch.fork_created(
+                pane.session.runtime.epoch(),
                 request,
                 Err("disk full".into()),
             );
@@ -364,8 +371,8 @@ fn history_resume_cannot_take_over_an_open_branch_picker(cx: &mut TestAppContext
             assert!(pane.open_fork(cx));
             pane.resume_session(0, cx);
             assert_eq!(pane.history_ui.mode, RecentSessionsMode::Open);
-            assert_eq!(pane.runtime.status(), Status::Idle);
-            assert!(pane.branch.picker_is_open());
+            assert_eq!(pane.session.runtime.status(), Status::Idle);
+            assert!(pane.session.branch.picker_is_open());
         })
     });
 }

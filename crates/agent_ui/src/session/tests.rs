@@ -337,10 +337,10 @@ mod conversation_title_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                let epoch = pane.runtime.begin_start();
+                let epoch = pane.session.runtime.begin_start();
 
                 assert!(matches!(
-                    pane.runtime.install(
+                    pane.session.runtime.install(
                         epoch,
                         Ok(Backend::Test(TestBackend::new(
                             [],
@@ -351,11 +351,11 @@ mod conversation_title_tests {
                     StartOutcome::Installed
                 ));
 
-                pane.runtime.turn_started();
+                pane.session.runtime.turn_started();
                 pane.stop_for_output_failure("Output limit reached".into(), cx);
 
-                assert!(pane.runtime.backend().is_none());
-                assert_eq!(pane.runtime.status(), Status::Exited);
+                assert!(pane.session.runtime.backend().is_none());
+                assert_eq!(pane.session.runtime.status(), Status::Exited);
             });
         });
     }
@@ -376,39 +376,41 @@ mod conversation_title_tests {
 
                 backend.rename_outcome = RenameOutcome::Rejected;
 
-                let epoch = pane.runtime.begin_start();
+                let epoch = pane.session.runtime.begin_start();
 
                 assert!(matches!(
-                    pane.runtime.install(epoch, Ok(Backend::Test(backend))),
+                    pane.session
+                        .runtime
+                        .install(epoch, Ok(Backend::Test(backend))),
                     StartOutcome::Installed
                 ));
 
                 pane.rename_session("first");
                 pane.rename_session("latest");
 
-                assert_eq!(pane.naming.pending.as_deref(), Some("latest"));
+                assert_eq!(pane.session.naming.pending.as_deref(), Some("latest"));
 
                 pane.sync_pending_rename();
 
-                assert_eq!(pane.naming.pending.as_deref(), Some("latest"));
+                assert_eq!(pane.session.naming.pending.as_deref(), Some("latest"));
 
-                let Some(Backend::Test(backend)) = pane.runtime.backend_mut() else {
+                let Some(Backend::Test(backend)) = pane.session.runtime.backend_mut() else {
                     panic!("expected test backend");
                 };
 
                 backend.rename_outcome = RenameOutcome::Accepted;
                 pane.sync_pending_rename();
 
-                assert!(pane.naming.pending.is_none());
+                assert!(pane.session.naming.pending.is_none());
 
-                let Some(Backend::Test(backend)) = pane.runtime.backend_mut() else {
+                let Some(Backend::Test(backend)) = pane.session.runtime.backend_mut() else {
                     panic!("expected test backend");
                 };
 
                 backend.rename_outcome = RenameOutcome::Unsupported;
                 pane.rename_session("local only");
 
-                assert!(pane.naming.pending.is_none());
+                assert!(pane.session.naming.pending.is_none());
             });
         });
     }
@@ -440,10 +442,10 @@ mod conversation_title_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                let epoch = pane.runtime.begin_start();
+                let epoch = pane.session.runtime.begin_start();
 
                 assert!(matches!(
-                    pane.runtime.install(
+                    pane.session.runtime.install(
                         epoch,
                         Ok(Backend::Test(TestBackend::new(
                             [],
@@ -454,7 +456,7 @@ mod conversation_title_tests {
                     StartOutcome::Installed
                 ));
 
-                pane.prompts.core.restore(&mut pane.runtime);
+                pane.session.input.restore(&mut pane.session.runtime);
                 pane.apply_event(
                     Event::ApprovalRequested {
                         description: "Run a command".into(),
@@ -463,12 +465,12 @@ mod conversation_title_tests {
                 );
                 pane.respond_approval("accept", cx);
 
-                assert!(pane.prompts.approval().is_some());
+                assert!(pane.session.input.approval().is_some());
 
                 pane.apply_event(Event::ApprovalResolved, cx);
-                pane.runtime.ready();
+                pane.session.runtime.ready();
                 pane.restore_question_drafts();
-                if let Some(Backend::Test(backend)) = pane.runtime.backend_mut() {
+                if let Some(Backend::Test(backend)) = pane.session.runtime.backend_mut() {
                     backend.input_result = Err("The question response could not be queued.".into());
                 }
                 pane.apply_event(
@@ -487,7 +489,7 @@ mod conversation_title_tests {
 
                 let question = pane
                     .prompts
-                    .questions()
+                    .questions(&pane.session.input)
                     .expect("rejected answer remains visible");
 
                 assert!(question.error().is_some());
@@ -503,10 +505,10 @@ mod conversation_title_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                let epoch = pane.runtime.begin_start();
+                let epoch = pane.session.runtime.begin_start();
 
                 assert!(matches!(
-                    pane.runtime.install(
+                    pane.session.runtime.install(
                         epoch,
                         Ok(Backend::Test(TestBackend::new(
                             [SendOutcome::StartedTurn],
@@ -517,12 +519,12 @@ mod conversation_title_tests {
                     StartOutcome::Installed
                 ));
 
-                pane.runtime.ready();
+                pane.session.runtime.ready();
 
                 assert!(
                     pane.send_text("  Inspect title generation\n and its fallback  ".into(), cx)
                 );
-                assert!(pane.naming.named);
+                assert!(pane.session.naming.named);
             });
         });
         cx.run_until_parked();
@@ -545,10 +547,10 @@ mod conversation_title_tests {
             pane.update(cx, |pane, cx| {
                 pane.kind = crate::AgentKind::Claude;
 
-                let epoch = pane.runtime.begin_start();
+                let epoch = pane.session.runtime.begin_start();
 
                 assert!(matches!(
-                    pane.runtime.install(
+                    pane.session.runtime.install(
                         epoch,
                         Ok(Backend::Test(TestBackend::new(
                             [SendOutcome::StartedTurn, SendOutcome::Steered],
@@ -559,10 +561,10 @@ mod conversation_title_tests {
                     StartOutcome::Installed
                 ));
 
-                pane.runtime.ready();
+                pane.session.runtime.ready();
 
                 assert!(pane.send_text("one two three four five six seven eight".into(), cx));
-                assert!(pane.naming.named);
+                assert!(pane.session.naming.named);
                 assert!(pane.send_text("a later prompt cannot rename this".into(), cx));
             });
         });
@@ -587,14 +589,14 @@ mod conversation_title_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                assert!(pane.naming.named);
+                assert!(pane.session.naming.named);
 
                 pane.kind = crate::AgentKind::Claude;
 
-                let epoch = pane.runtime.begin_start();
+                let epoch = pane.session.runtime.begin_start();
 
                 assert!(matches!(
-                    pane.runtime.install(
+                    pane.session.runtime.install(
                         epoch,
                         Ok(Backend::Test(TestBackend::new(
                             [SendOutcome::StartedTurn],
@@ -605,7 +607,7 @@ mod conversation_title_tests {
                     StartOutcome::Installed
                 ));
 
-                pane.runtime.ready();
+                pane.session.runtime.ready();
 
                 assert!(pane.send_text("follow up on the restored session".into(), cx));
             });
@@ -730,10 +732,10 @@ mod queued_prompt_placement_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                let epoch = pane.runtime.begin_start();
+                let epoch = pane.session.runtime.begin_start();
 
                 assert!(matches!(
-                    pane.runtime.install(
+                    pane.session.runtime.install(
                         epoch,
                         Ok(Backend::Test(TestBackend::new(
                             [],
@@ -744,24 +746,24 @@ mod queued_prompt_placement_tests {
                     StartOutcome::Installed
                 ));
 
-                pane.runtime.ready();
-                pane.palette.commands.awaiting_turn = true;
+                pane.session.runtime.ready();
+                pane.session.commands.awaiting_turn = true;
 
-                let previous_turn = pane.delivery.turn();
+                let previous_turn = pane.session.delivery.turn();
 
                 assert!(!pane.transcript.read(cx).is_working());
 
                 pane.apply_event(SessionEvent::TurnStarted, cx);
 
-                assert!(!pane.palette.commands.awaiting_turn);
-                assert_eq!(pane.delivery.turn(), previous_turn + 1);
-                assert_eq!(pane.runtime.status(), Status::Running);
+                assert!(!pane.session.commands.awaiting_turn);
+                assert_eq!(pane.session.delivery.turn(), previous_turn + 1);
+                assert_eq!(pane.session.runtime.status(), Status::Running);
                 assert!(pane.transcript.read(cx).is_working());
 
                 pane.apply_event(SessionEvent::TurnStarted, cx);
 
                 assert_eq!(
-                    pane.delivery.turn(),
+                    pane.session.delivery.turn(),
                     previous_turn + 1,
                     "a repeated event must not open another turn"
                 );
@@ -776,10 +778,10 @@ mod queued_prompt_placement_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                let epoch = pane.runtime.begin_start();
+                let epoch = pane.session.runtime.begin_start();
 
                 assert!(matches!(
-                    pane.runtime.install(
+                    pane.session.runtime.install(
                         epoch,
                         Ok(Backend::Test(TestBackend::new(
                             [SendOutcome::StartedTurn, SendOutcome::Steered],
@@ -790,13 +792,13 @@ mod queued_prompt_placement_tests {
                     StartOutcome::Installed
                 ));
 
-                pane.runtime.ready();
+                pane.session.runtime.ready();
 
                 assert!(pane.send_text("open the turn".into(), cx));
 
                 pane.apply_event(SessionEvent::TurnStarted, cx);
 
-                let first_turn = pane.delivery.turn();
+                let first_turn = pane.session.delivery.turn();
 
                 assert!(pane.send_text("queued behind it".into(), cx));
 
@@ -820,11 +822,11 @@ mod queued_prompt_placement_tests {
                 pane.apply_event(SessionEvent::TurnStarted, cx);
 
                 assert_eq!(
-                    pane.delivery.turn(),
+                    pane.session.delivery.turn(),
                     first_turn + 1,
                     "that turn is numbered"
                 );
-                assert_eq!(pane.runtime.status(), Status::Running);
+                assert_eq!(pane.session.runtime.status(), Status::Running);
                 assert!(pane.transcript.read(cx).is_working());
                 assert_eq!(
                     user_rows(pane, cx),
@@ -849,10 +851,10 @@ mod queued_prompt_placement_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                let epoch = pane.runtime.begin_start();
+                let epoch = pane.session.runtime.begin_start();
 
                 assert!(matches!(
-                    pane.runtime.install(
+                    pane.session.runtime.install(
                         epoch,
                         Ok(Backend::Test(TestBackend::new(
                             [SendOutcome::StartedTurn],
@@ -863,7 +865,7 @@ mod queued_prompt_placement_tests {
                     StartOutcome::Installed
                 ));
 
-                pane.runtime.ready();
+                pane.session.runtime.ready();
 
                 let text = "Reply with exactly: ok".to_string();
 
@@ -881,7 +883,7 @@ mod queued_prompt_placement_tests {
                 );
 
                 assert!(
-                    pane.delivery.pending().is_empty(),
+                    pane.session.delivery.pending().is_empty(),
                     "a prompt already in the transcript is not also waiting"
                 );
 
@@ -899,7 +901,7 @@ mod queued_prompt_placement_tests {
                     vec![(1, text)],
                     "the message appears once, in the turn it opened"
                 );
-                assert!(pane.delivery.pending().is_empty());
+                assert!(pane.session.delivery.pending().is_empty());
             });
         });
     }
@@ -1046,10 +1048,10 @@ mod session_replacement_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                let epoch = pane.runtime.begin_start();
+                let epoch = pane.session.runtime.begin_start();
 
                 assert!(matches!(
-                    pane.runtime.install(
+                    pane.session.runtime.install(
                         epoch,
                         Ok(Backend::Test(
                             TestBackend::new(
@@ -1063,11 +1065,14 @@ mod session_replacement_tests {
                     StartOutcome::Installed
                 ));
 
-                pane.runtime.ready();
+                pane.session.runtime.ready();
 
                 pane.reset_conversation(cx);
 
-                assert!(pane.runtime.backend().is_none(), "the pane sends nowhere");
+                assert!(
+                    pane.session.runtime.backend().is_none(),
+                    "the pane sends nowhere"
+                );
                 assert!(
                     !released.load(Ordering::SeqCst),
                     "the replaced session outlives the reset, so the host it holds keeps running"
@@ -1120,10 +1125,10 @@ mod shared_host_recovery_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                let epoch = pane.runtime.begin_start();
+                let epoch = pane.session.runtime.begin_start();
 
                 assert!(matches!(
-                    pane.runtime.install(
+                    pane.session.runtime.install(
                         epoch,
                         Ok(Backend::Test(
                             TestBackend::new(
@@ -1137,7 +1142,7 @@ mod shared_host_recovery_tests {
                     StartOutcome::Installed
                 ));
 
-                pane.runtime.ready();
+                pane.session.runtime.ready();
 
                 pane.apply_event(
                     SessionEvent::HostExited {
@@ -1146,13 +1151,14 @@ mod shared_host_recovery_tests {
                     cx,
                 );
 
-                assert_eq!(pane.runtime.status(), Status::Exited);
+                assert_eq!(pane.session.runtime.status(), Status::Exited);
                 assert!(matches!(
-                    pane.runtime.update_suspension(),
+                    pane.session.runtime.update_suspension(),
                     Some(UpdateSuspension::Failed(_))
                 ));
 
                 let snapshot = pane
+                    .session
                     .runtime
                     .last_recovery_snapshot()
                     .expect("recovery snapshot");
@@ -1165,7 +1171,7 @@ mod shared_host_recovery_tests {
                         .map(|identity| identity.id.as_str()),
                     Some("thread-recovery")
                 );
-                assert!(pane.runtime.backend().is_some());
+                assert!(pane.session.runtime.backend().is_some());
             });
         });
     }
@@ -1268,10 +1274,10 @@ mod command_catalog_cache_tests {
         // assertions run.
         cx.update(|_, cx| {
             pane.update(cx, |pane, _| {
-                let epoch = pane.runtime.begin_start();
+                let epoch = pane.session.runtime.begin_start();
 
                 assert!(matches!(
-                    pane.runtime.install(
+                    pane.session.runtime.install(
                         epoch,
                         Ok(Backend::Test(TestBackend::new(
                             [SendOutcome::StartedTurn],

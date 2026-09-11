@@ -6,14 +6,13 @@ pub(super) mod rewind;
 mod tests;
 
 use gpui::Context;
-use nmt_agent::session::branch::{BranchCompletion, ConversationBranch, FileProgress};
+use nmt_agent::session::branch::{BranchCompletion, FileProgress};
 
 use crate::composer::CommandFeedbackKind;
 use crate::{AgentPane, RecentSessionsMode, translated};
 
 #[derive(Default)]
 pub(crate) struct BranchFlow {
-    pub(crate) core: ConversationBranch,
     draft: Option<String>,
     pending_prompt: Option<PendingBranchPrompt>,
 }
@@ -24,20 +23,7 @@ struct PendingBranchPrompt {
 }
 
 impl BranchFlow {
-    pub(crate) fn holds_composer(&self) -> bool {
-        self.core.holds_composer()
-    }
-
-    pub(crate) fn is_working(&self) -> bool {
-        self.core.is_working()
-    }
-
-    pub(crate) fn picker_is_open(&self) -> bool {
-        self.core.picker_is_open()
-    }
-
     pub(crate) fn clear(&mut self) {
-        self.core.clear();
         self.draft = None;
         self.pending_prompt = None;
     }
@@ -45,7 +31,7 @@ impl BranchFlow {
 
 impl AgentPane {
     pub(crate) fn branch_flow_holds_composer(&self) -> bool {
-        self.branch.holds_composer()
+        self.session.branch.holds_composer()
     }
 
     pub(crate) fn complete_branch(&mut self, completion: BranchCompletion, cx: &mut Context<Self>) {

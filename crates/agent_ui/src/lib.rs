@@ -7,9 +7,8 @@
 //! installs and exposes the pane plus the recovery types the update
 //! coordinator drives across a backend replacement.
 
-use nmt_agent::session::commands::CommandQueue;
+use nmt_agent::session::controller::SessionController;
 use nmt_agent::session::history::SessionHistory;
-use nmt_agent::session::naming::ConversationNaming;
 pub mod input_history;
 
 mod capabilities;
@@ -37,9 +36,6 @@ use nmt_agent::chat::{
     ContextComposition, ContextWindowUsage, SessionStats, SkillCatalog, SkillReference,
     SlashCommandInfo,
 };
-use nmt_agent::session::delivery::MessageDelivery;
-use nmt_agent::session::lifecycle::SessionRuntime;
-use nmt_agent::session::restore::ConversationRestore;
 use nmt_agent::{AgentEvent, AgentRoute, AgentWorkspace};
 use nmt_config::profile::AgentProfile;
 use nmt_i18n::i18n;
@@ -48,7 +44,7 @@ use crate::composer::attachments::ComposerAttachments;
 use crate::composer::{BranchFlow, CommandFeedback};
 use crate::fade::Fade;
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
-use crate::pane_state::{ChildAgents, TurnPresentation};
+use crate::pane_state::TurnPresentation;
 pub use crate::profile::{AgentKind, AgentKindExt, AgentThreadDefaults, agent_launch};
 use crate::session::prompts::PendingPrompts;
 pub use crate::session::{
@@ -254,7 +250,6 @@ struct SlashPalette {
     /// Order of the latest feedback shown. A delayed dismissal compares
     /// against it so it can only retire the message it was started for.
     feedback_seq: u64,
-    commands: CommandQueue,
 }
 
 pub struct AgentPane {
@@ -279,26 +274,17 @@ pub struct AgentPane {
     /// Images the pending message carries, anchored to the composer text by
     /// their `[Image #N]` placeholders, and the response text quoted into it.
     attachments: ComposerAttachments,
-    /// Whether this conversation has already named its tab. Only the message
-    /// that opens a conversation names it: a later one is a follow-up on the
-    /// same subject, and renaming on every send would make the tab strip
-    /// churn under a working agent.
-    naming: ConversationNaming,
     /// The conversation as the user reads it. Presentation lives in its own
     /// view so a child agent's conversation renders through the same code.
     transcript: Entity<TranscriptView>,
     input: Entity<TextareaState>,
     history_ui: SessionHistoryUi,
-    /// The backend process and its lifecycle; a (re)spawn replaces it whole.
-    runtime: SessionRuntime,
-    restore: ConversationRestore,
-    /// Thread controls under the composer: values, catalogs, seeding flags.
+    /// Provider state and transitions, independent of widgets and rendering.
+    session: SessionController,
+    /// Interaction state for the thread controls under the composer.
     controls: ThreadControls,
     /// The running turn's bookkeeping, from submission to settled output.
     turn: TurnPresentation,
-    delivery: MessageDelivery,
-    /// Child-agent activity the provider adapter reports for this session.
-    children: ChildAgents,
     /// The approval and question cards that block a turn until answered.
     prompts: PendingPrompts,
     palette: SlashPalette,

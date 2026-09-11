@@ -91,85 +91,89 @@ pub(super) fn composer_stats_label(
 
 impl AgentPane {
     pub(super) fn render_approval_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.prompts.approval().map(str::to_owned).map(|approval| {
-            v_flex()
-                .w_full()
-                .px_4()
-                .py_3()
-                .gap_2()
-                .border_b_1()
-                .border_color(cx.theme().border.opacity(0.65))
-                .bg(cx.theme().muted.opacity(0.2))
-                .child(
-                    div()
-                        .text_xs()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(cx.theme().muted_foreground)
-                        .child(i18n("agent-approval-pending")),
-                )
-                .child(
-                    div()
-                        // The description carries whatever the request holds:
-                        // a whole plan for ExitPlanMode, a full command line
-                        // for Bash. Without a ceiling the card grows past the
-                        // pane and the decision buttons below it are clipped
-                        // away, leaving the turn unanswerable.
-                        .id("approval-description")
-                        .max_h(px(256.))
-                        .overflow_y_scroll()
-                        .px_3()
-                        .py_2()
-                        .rounded(UI_RADIUS)
-                        .border_1()
-                        .border_color(cx.theme().border)
-                        .bg(cx.theme().background.opacity(0.7))
-                        .text_sm()
-                        .child(approval),
-                )
-                .child(
-                    h_flex()
-                        .justify_end()
-                        .gap_2()
-                        .child(
-                            Button::new("approval-cancel")
-                                .ghost()
-                                .label(i18n("agent-approval-cancel-turn"))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.respond_approval("cancel", cx)
-                                })),
-                        )
-                        .child(
-                            Button::new("approval-decline")
-                                .outline()
-                                .label(i18n("agent-approval-decline"))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.respond_approval("decline", cx)
-                                })),
-                        )
-                        // Offered only where it means something. A harness that
-                        // can answer just this one call would quietly turn a
-                        // session-wide grant into a single-use one.
-                        .when(self.kind.caps().session_scoped_approval, |this| {
-                            this.child(
-                                Button::new("approval-session")
-                                    .outline()
-                                    .label(i18n("agent-approval-allow-session"))
+        self.session
+            .input
+            .approval()
+            .map(str::to_owned)
+            .map(|approval| {
+                v_flex()
+                    .w_full()
+                    .px_4()
+                    .py_3()
+                    .gap_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border.opacity(0.65))
+                    .bg(cx.theme().muted.opacity(0.2))
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(cx.theme().muted_foreground)
+                            .child(i18n("agent-approval-pending")),
+                    )
+                    .child(
+                        div()
+                            // The description carries whatever the request holds:
+                            // a whole plan for ExitPlanMode, a full command line
+                            // for Bash. Without a ceiling the card grows past the
+                            // pane and the decision buttons below it are clipped
+                            // away, leaving the turn unanswerable.
+                            .id("approval-description")
+                            .max_h(px(256.))
+                            .overflow_y_scroll()
+                            .px_3()
+                            .py_2()
+                            .rounded(UI_RADIUS)
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .bg(cx.theme().background.opacity(0.7))
+                            .text_sm()
+                            .child(approval),
+                    )
+                    .child(
+                        h_flex()
+                            .justify_end()
+                            .gap_2()
+                            .child(
+                                Button::new("approval-cancel")
+                                    .ghost()
+                                    .label(i18n("agent-approval-cancel-turn"))
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        this.respond_approval("acceptForSession", cx)
+                                        this.respond_approval("cancel", cx)
                                     })),
                             )
-                        })
-                        .child(
-                            Button::new("approval-accept")
-                                .primary()
-                                .label(i18n("agent-approval-approve-once"))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.respond_approval("accept", cx)
-                                })),
-                        ),
-                )
-                .into_any_element()
-        })
+                            .child(
+                                Button::new("approval-decline")
+                                    .outline()
+                                    .label(i18n("agent-approval-decline"))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.respond_approval("decline", cx)
+                                    })),
+                            )
+                            // Offered only where it means something. A harness that
+                            // can answer just this one call would quietly turn a
+                            // session-wide grant into a single-use one.
+                            .when(self.kind.caps().session_scoped_approval, |this| {
+                                this.child(
+                                    Button::new("approval-session")
+                                        .outline()
+                                        .label(i18n("agent-approval-allow-session"))
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.respond_approval("acceptForSession", cx)
+                                        })),
+                                )
+                            })
+                            .child(
+                                Button::new("approval-accept")
+                                    .primary()
+                                    .label(i18n("agent-approval-approve-once"))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.respond_approval("accept", cx)
+                                    })),
+                            ),
+                    )
+                    .into_any_element()
+            })
     }
 
     /// A strip naming the workspace directories the installed harness cannot
@@ -201,7 +205,7 @@ impl AgentPane {
     }
 
     pub(super) fn render_update_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.runtime.update_suspension().and_then(|state| {
+        self.session.runtime.update_suspension().and_then(|state| {
             // The phases that tear the backend down and bring it back own the
             // whole surface through `render_update_overlay`, so the strip only
             // covers the two states the tab stays usable in.
@@ -280,7 +284,7 @@ impl AgentPane {
     /// backend: input would go nowhere, and the transcript underneath is a
     /// stale snapshot of a conversation that is about to be replayed.
     pub(super) fn render_update_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let label = update_overlay_phase(self.runtime.update_suspension()?)?.label();
+        let label = update_overlay_phase(self.session.runtime.update_suspension()?)?.label();
 
         let body = v_flex()
             .items_center()
@@ -309,7 +313,7 @@ impl AgentPane {
     /// left to do, because the pane behind it has no conversation to return
     /// to: the transcript holds one error row and nothing else.
     pub(super) fn render_start_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let failure = self.runtime.start_failure().map(str::to_owned);
+        let failure = self.session.runtime.start_failure().map(str::to_owned);
 
         if failure.is_none() && !self.shows_start_overlay() {
             return None;
@@ -383,11 +387,13 @@ impl AgentPane {
         let turns = self
             .session_stats
             .map(|stats| stats.turns)
-            .unwrap_or(self.delivery.turn());
+            .unwrap_or(self.session.delivery.turn());
 
         let stats = composer_stats_label(
             turns,
-            self.transcript.read(cx).turn_steps(self.delivery.turn()),
+            self.transcript
+                .read(cx)
+                .turn_steps(self.session.delivery.turn()),
             self.turn.first_output_latency,
             self.context_window_usage.and_then(cache_hit_percent),
         );

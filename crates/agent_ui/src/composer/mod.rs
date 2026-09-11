@@ -32,6 +32,7 @@ use gpui::{Context, SharedString, Window};
 use gpui_component::button::Button;
 use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogClose, DialogFooter};
 use gpui_component::{WindowExt, v_flex};
+use nmt_agent::session::commands::CommandQueue;
 pub(super) use nmt_agent::session::commands::PendingSlashCommand;
 use nmt_i18n::i18n;
 
@@ -111,11 +112,10 @@ pub(super) fn restored_input_after_interruption(submitted: &str, current: &str) 
 impl SlashPalette {
     /// Provider commands and their cached catalog belong to one session, so
     /// resetting discovery must invalidate both together.
-    pub(crate) fn reset_command_runtime(&mut self, commands_ready: bool) {
+    pub(crate) fn reset_discovery(&mut self, commands_ready: bool) {
         self.provider_commands.clear();
         self.provider_commands_ready = commands_ready;
         self.catalog = None;
-        self.commands.clear();
         self.selected = 0;
         self.dismissed = false;
     }
@@ -169,10 +169,10 @@ impl SlashPalette {
     }
 
     /// The message worth showing right now, if any.
-    pub(crate) fn visible_feedback(&self) -> Option<&CommandFeedback> {
+    pub(crate) fn visible_feedback(&self, commands: &CommandQueue) -> Option<&CommandFeedback> {
         self.feedback
             .as_ref()
-            .filter(|feedback| feedback_is_current(feedback.kind, self.commands.queue.is_empty()))
+            .filter(|feedback| feedback_is_current(feedback.kind, commands.queue.is_empty()))
     }
 }
 
@@ -315,8 +315,8 @@ impl AgentPane {
     }
 
     pub(super) fn is_command_busy(&self) -> bool {
-        self.runtime.status() == Status::Running
-            || self.palette.commands.awaiting_turn
+        self.session.runtime.status() == Status::Running
+            || self.session.commands.awaiting_turn
             || self.history_ui.mode == RecentSessionsMode::Loading
             || self.branch_flow_holds_composer()
     }

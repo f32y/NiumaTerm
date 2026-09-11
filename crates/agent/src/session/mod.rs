@@ -8,6 +8,7 @@ pub mod branch;
 pub mod capabilities;
 pub mod children;
 pub mod commands;
+pub mod controller;
 pub mod delivery;
 pub mod history;
 pub mod input;

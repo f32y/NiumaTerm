@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use gpui::{App, Context, Task};
 use nmt_agent::launcher::AgentCli;
-use nmt_agent::session::update_readiness::{ConversationWork, Readiness, prepare_stop};
+use nmt_agent::session::update_readiness::{ConversationWork, Readiness};
 use nmt_agent::update::InstallationKey;
 use nmt_i18n::i18n;
 
@@ -34,23 +34,22 @@ impl AgentPane {
     /// it as another blank conversation loses no conversation state.
     fn update_work(&self, cx: &App) -> ConversationWork {
         ConversationWork {
-            approval_open: self.prompts.approval_open(),
-            branch_pending: self.branch.holds_composer(),
+            approval_open: self.session.input.approval().is_some(),
+            branch_pending: self.session.branch.holds_composer(),
             compacting: self.transcript.read(cx).is_compacting(),
             empty: self.transcript.read(cx).is_empty(),
         }
     }
 
     pub fn recovery_readiness(&self, cx: &App) -> RecoveryReadiness {
-        self.present_readiness(self.update_work(cx).readiness(
-            &self.runtime,
-            &self.palette.commands,
-            &self.delivery,
-        ))
+        self.present_readiness(self.session.update_readiness(self.update_work(cx)))
     }
 
     pub fn recovery_identity_snapshot(&self, cx: &App) -> RecoveryReadiness {
-        self.present_readiness(self.update_work(cx).identity(self.runtime.backend()))
+        self.present_readiness(
+            self.update_work(cx)
+                .identity(self.session.runtime.backend()),
+        )
     }
 
     fn present_readiness(&self, readiness: Readiness) -> RecoveryReadiness {
@@ -74,31 +73,31 @@ impl AgentPane {
     }
 
     pub fn prepare_update_wait(&mut self, cx: &mut Context<Self>) {
-        self.runtime.wait_for_update();
+        self.session.runtime.wait_for_update();
         cx.notify();
     }
 
     pub fn cancel_update_wait(&mut self, cx: &mut Context<Self>) {
-        if self.runtime.cancel_update_wait() {
+        if self.session.runtime.cancel_update_wait() {
             cx.notify();
         }
     }
 
     pub fn stop_active_work_for_update(&mut self, cx: &mut Context<Self>) {
-        if self.prompts.approval_open() {
+        if self.session.input.approval().is_some() {
             self.respond_approval("cancel", cx);
         } else {
             self.interrupt(cx);
         }
 
-        prepare_stop(&mut self.palette.commands, &mut self.delivery);
+        self.session.prepare_update_stop();
         self.publish_queued_user_messages(cx);
 
         self.cancel_branch_picker(cx);
 
         self.transcript
             .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
-        self.runtime.wait_for_update();
+        self.session.runtime.wait_for_update();
         cx.notify();
     }
 
@@ -110,7 +109,7 @@ impl AgentPane {
         force: bool,
         cx: &mut Context<Self>,
     ) -> Task<Result<(), String>> {
-        let (epoch, backend) = self.runtime.suspend_for_update();
+        let (epoch, backend) = self.session.runtime.suspend_for_update();
 
         self.history_ui.invalidate_filesystem_history();
         cx.emit(AgentPaneEvent::Interrupted);
@@ -130,7 +129,7 @@ impl AgentPane {
 
             if result.is_err() {
                 let _ = this.update(cx, |this, cx| {
-                    if let Err(mut orphan) = this.runtime.shutdown_failed(epoch, backend) {
+                    if let Err(mut orphan) = this.session.runtime.shutdown_failed(epoch, backend) {
                         cx.background_executor()
                             .spawn(async move {
                                 let _ = orphan.shutdown(Duration::from_secs(5), true);
@@ -147,7 +146,7 @@ impl AgentPane {
     }
 
     pub fn mark_provider_updating(&mut self, cx: &mut Context<Self>) {
-        self.runtime.provider_updating();
+        self.session.runtime.provider_updating();
         cx.notify();
     }
 
@@ -155,13 +154,14 @@ impl AgentPane {
     /// the process now comes up on a background thread, so a failure lands
     /// after this returns.
     pub fn restore_after_update(&mut self, snapshot: &RecoverySnapshot, cx: &mut Context<Self>) {
-        self.runtime.reconnect(Some(snapshot.clone()));
+        self.session.runtime.reconnect(Some(snapshot.clone()));
         self.start_session_with_options(
             snapshot.identity.clone(),
             true,
             |this, started, _| {
                 if !started {
-                    this.runtime
+                    this.session
+                        .runtime
                         .recovery_failed(i18n("agent-update-recovery-restart-failed").to_string());
                 }
             },
@@ -171,28 +171,28 @@ impl AgentPane {
     }
 
     pub(crate) fn retry_update_recovery(&mut self, cx: &mut Context<Self>) {
-        if let Some(snapshot) = self.runtime.last_recovery_snapshot().cloned() {
+        if let Some(snapshot) = self.session.runtime.last_recovery_snapshot().cloned() {
             self.restore_after_update(&snapshot, cx);
         }
     }
 
     pub fn restoration_readiness(&self) -> RestorationReadiness {
-        self.runtime.restoration_readiness()
+        self.session.runtime.restoration_readiness()
     }
 
     pub fn fail_update_recovery(&mut self, message: String, cx: &mut Context<Self>) {
-        self.runtime.recovery_failed(message);
+        self.session.runtime.recovery_failed(message);
         cx.notify();
     }
 
     pub(crate) fn start_new_after_update_failure(&mut self, cx: &mut Context<Self>) {
-        self.runtime.reconnect(None);
+        self.session.runtime.reconnect(None);
         self.start_session_with_options(
             None,
             true,
             |this, started, _| {
                 if !started {
-                    this.runtime.recovery_failed(
+                    this.session.runtime.recovery_failed(
                         i18n("agent-update-recovery-new-session-failed").to_string(),
                     );
                 }

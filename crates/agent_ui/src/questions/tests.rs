@@ -2,8 +2,8 @@ use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, WindowHan
 use gpui_component::Root;
 use nmt_agent::AgentWorkspace;
 use nmt_agent::chat::{
-    Question, QuestionInput, QuestionMode, QuestionOption, QuestionRequest, QuestionResolution,
-    SlashCommandOutcome,
+    Event, Question, QuestionInput, QuestionMode, QuestionOption, QuestionRequest,
+    QuestionResolution, SlashCommandOutcome,
 };
 use nmt_agent::session::input::{QuestionDraft, QuestionStatus};
 use nmt_agent::session::lifecycle::StartOutcome;
@@ -41,15 +41,17 @@ fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>)
     let pane = pane.expect("create agent pane");
     cx.update(|cx| {
         pane.update(cx, |pane, _| {
-            let epoch = pane.runtime.begin_start();
-            pane.prompts.core.starting(epoch);
+            let epoch = pane.session.runtime.begin_start();
+            pane.session.input.starting(epoch);
             let backend = TestBackend::new([], SlashCommandOutcome::NotReady, Vec::new())
                 .with_recovery(AgentKind::Codex, "question-thread");
             assert!(matches!(
-                pane.runtime.install(epoch, Ok(Backend::Test(backend))),
+                pane.session
+                    .runtime
+                    .install(epoch, Ok(Backend::Test(backend))),
                 StartOutcome::Installed
             ));
-            pane.runtime.ready();
+            pane.session.runtime.ready();
             pane.restore_question_drafts();
         })
     });
@@ -71,8 +73,16 @@ fn question_editors_keep_multiline_text_and_mask_secrets(cx: &mut TestAppContext
 
             secret.input = QuestionInput::Secret;
 
-            pane.prompts.ask_questions(vec![plain, secret]);
-            let prompt = pane.prompts.questions_mut().expect("active draft");
+            pane.apply_event(
+                Event::QuestionsRequested {
+                    questions: vec![plain, secret],
+                },
+                cx,
+            );
+            let prompt = pane
+                .prompts
+                .questions_mut(&mut pane.session.input)
+                .expect("active draft");
             prompt.set_text(0, "first line\nsecond line".into());
             prompt.set_text(1, "test-token".into());
             pane.prepare_question_editors(window, cx);
@@ -186,46 +196,48 @@ fn confirmed_secret_answer_releases_its_widget_and_reveals_the_next_batch(cx: &m
         pane.update(cx, |pane, cx| {
             let mut secret = question("Token", false, &[]);
             secret.input = QuestionInput::Secret;
-            pane.receive_questions(
-                QuestionRequest {
+            pane.apply_event(
+                Event::InputRequested(QuestionRequest {
                     id: "secret".into(),
                     mode: QuestionMode::Blocking,
                     questions: vec![secret],
-                },
+                }),
                 cx,
             );
             pane.prompts
-                .questions_mut()
+                .questions_mut(&mut pane.session.input)
                 .unwrap()
                 .set_text(0, "sensitive".into());
             pane.prepare_question_editors(window, cx);
             assert!(pane.prompts.presentations[0].editors[0].is_some());
-            pane.receive_questions(
-                QuestionRequest {
+            pane.apply_event(
+                Event::InputRequested(QuestionRequest {
                     id: "next".into(),
                     mode: QuestionMode::Async,
                     questions: vec![question("Next", false, &["yes"])],
-                },
+                }),
                 cx,
             );
             assert_eq!(pane.prompts.active, Some(0));
             pane.submit_current_questions(cx);
             assert_eq!(
-                pane.prompts.core.batches()[0].status(),
+                pane.session.input.batches()[0].status(),
                 QuestionStatus::Submitting
             );
-            pane.resolve_questions(
-                "secret",
-                QuestionResolution::Submitted {
-                    message: None,
-                    started_turn: false,
+            pane.apply_event(
+                Event::InputResolved {
+                    id: "secret".into(),
+                    resolution: QuestionResolution::Submitted {
+                        message: None,
+                        started_turn: false,
+                    },
                 },
                 cx,
             );
             assert!(pane.prompts.presentations[0].editors[0].is_none());
-            assert_eq!(pane.prompts.core.batches()[0].text(0), "");
+            assert_eq!(pane.session.input.batches()[0].text(0), "");
             assert_eq!(pane.prompts.active, Some(1));
-            assert_eq!(pane.prompts.pending_count(), 1);
+            assert_eq!(pane.session.input.pending_count(), 1);
         });
     });
 }
@@ -246,9 +258,9 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
                     ..question("Async", false, &[])
                 }],
             };
-            pane.receive_questions(asynchronous.clone(), cx);
+            pane.apply_event(Event::InputRequested(asynchronous.clone()), cx);
             pane.prompts
-                .questions_mut()
+                .questions_mut(&mut pane.session.input)
                 .unwrap()
                 .set_text(0, "keep this".into());
             pane.prepare_question_editors(window, cx);
@@ -260,7 +272,7 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
                 panic!("text editor required");
             };
             let editor = editor.clone();
-            pane.receive_questions(asynchronous, cx);
+            pane.apply_event(Event::InputRequested(asynchronous), cx);
             let QuestionEditorState::Text(current) = &pane.prompts.presentations[0].editors[0]
                 .as_ref()
                 .unwrap()
@@ -269,20 +281,29 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
                 panic!("text editor required");
             };
             assert_eq!(editor, *current);
-            pane.receive_questions(
-                QuestionRequest {
+            pane.apply_event(
+                Event::InputRequested(QuestionRequest {
                     id: "blocking".into(),
                     mode: QuestionMode::Blocking,
                     questions: vec![question("Blocking", false, &["yes"])],
-                },
+                }),
                 cx,
             );
             assert_eq!(pane.prompts.active, Some(1));
-            assert_eq!(pane.prompts.core.batches()[0].text(0), "keep this");
+            assert_eq!(pane.session.input.batches()[0].text(0), "keep this");
             pane.skip_current_questions(cx);
-            pane.resolve_questions("blocking", QuestionResolution::Skipped, cx);
+            pane.apply_event(
+                Event::InputResolved {
+                    id: "blocking".into(),
+                    resolution: QuestionResolution::Skipped,
+                },
+                cx,
+            );
             assert_eq!(pane.prompts.active, Some(0));
-            assert_eq!(pane.prompts.questions().unwrap().text(0), "keep this");
+            assert_eq!(
+                pane.prompts.questions(&pane.session.input).unwrap().text(0),
+                "keep this"
+            );
         });
     });
 }
@@ -297,15 +318,28 @@ fn replacing_a_legacy_batch_rebuilds_editors_without_reusing_the_old_answer(
         pane.update(cx, |pane, cx| {
             let mut question = question("Answer", false, &[]);
             question.input = QuestionInput::Text;
-            pane.prompts.ask_questions(vec![question.clone()]);
+            pane.apply_event(
+                Event::QuestionsRequested {
+                    questions: vec![question.clone()],
+                },
+                cx,
+            );
             pane.prompts
-                .questions_mut()
+                .questions_mut(&mut pane.session.input)
                 .unwrap()
                 .set_text(0, "old value".into());
             pane.prepare_question_editors(window, cx);
-            let old_key = pane.prompts.questions().unwrap().key();
-            pane.prompts.ask_questions(vec![question]);
-            assert_ne!(pane.prompts.questions().unwrap().key(), old_key);
+            let old_key = pane.prompts.questions(&pane.session.input).unwrap().key();
+            pane.apply_event(
+                Event::QuestionsRequested {
+                    questions: vec![question],
+                },
+                cx,
+            );
+            assert_ne!(
+                pane.prompts.questions(&pane.session.input).unwrap().key(),
+                old_key
+            );
             assert!(pane.prompts.presentations[0].editors[0].is_none());
             pane.prepare_question_editors(window, cx);
             let QuestionEditorState::Text(editor) = &pane.prompts.presentations[0].editors[0]
@@ -316,7 +350,10 @@ fn replacing_a_legacy_batch_rebuilds_editors_without_reusing_the_old_answer(
                 panic!("text editor required");
             };
             assert_eq!(editor.read(cx).value().as_ref(), "");
-            assert_eq!(pane.prompts.questions().unwrap().text(0), "");
+            assert_eq!(
+                pane.prompts.questions(&pane.session.input).unwrap().text(0),
+                ""
+            );
         });
     });
 }

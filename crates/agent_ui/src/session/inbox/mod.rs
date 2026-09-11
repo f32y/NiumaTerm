@@ -11,7 +11,7 @@ use crate::AgentPane;
 
 impl AgentPane {
     pub(super) fn stop_for_output_failure(&mut self, error: String, cx: &mut Context<Self>) {
-        if let Some(mut backend) = self.runtime.retire() {
+        if let Some(mut backend) = self.session.runtime.retire() {
             for event in backend.process_exit() {
                 self.apply_event(event, cx);
             }

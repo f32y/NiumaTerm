@@ -29,7 +29,7 @@ impl AgentPane {
             return false;
         }
 
-        let outcome = match self.runtime.backend_mut() {
+        let outcome = match self.session.runtime.backend_mut() {
             Some(session) => session.rename_conversation(title).map_err(operation_error),
             None => {
                 Err(i18n("agent-session-still-starting").replace("{name}", self.kind.display()))
@@ -75,7 +75,7 @@ impl AgentPane {
             return false;
         }
 
-        let Some(session) = self.runtime.backend_mut() else {
+        let Some(session) = self.session.runtime.backend_mut() else {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-still-starting").replace("{name}", self.kind.display()),
@@ -131,6 +131,7 @@ impl AgentPane {
     /// removing the row first would make it look like it never went.
     pub(crate) fn remove_queued_prompt(&mut self, item_id: &str, cx: &mut Context<Self>) {
         let removed = self
+            .session
             .runtime
             .backend_mut()
             .is_some_and(|session| session.remove_queued_prompt(item_id));
@@ -145,7 +146,7 @@ impl AgentPane {
             return;
         }
 
-        self.delivery.removed(item_id);
+        self.session.delivery.removed(item_id);
         cx.notify();
     }
 }

@@ -19,10 +19,8 @@ use crate::profile::AgentKind;
 use crate::settings::AgentSettings;
 use crate::thread_controls::effort::EffortGaugeIcon;
 
-/// The thread controls under the composer: current values, catalogs to pick
-/// from, and the seeding flags that decide what the next `Ready` overlays.
+/// Widget interaction state; the session owns settings and provider catalogs.
 pub(crate) struct ThreadControls {
-    pub(crate) state: ConversationSettings,
     pub(crate) effort_drag: Option<usize>,
 }
 
@@ -80,11 +78,16 @@ pub(super) const EFFORT_THUMB_INSET: Pixels = px(3.0);
 
 impl ThreadControls {
     /// The dropdown row under the input, per agent kind.
-    pub(crate) fn render_row(&self, kind: AgentKind, cx: &mut Context<AgentPane>) -> AnyElement {
+    pub(crate) fn render_row(
+        &self,
+        state: &ConversationSettings,
+        kind: AgentKind,
+        cx: &mut Context<AgentPane>,
+    ) -> AnyElement {
         match kind {
-            AgentKind::Codex => self.render_codex_row(kind, cx).into_any_element(),
-            AgentKind::Claude => self.render_claude_row(kind, cx).into_any_element(),
-            AgentKind::DeepSeek => self.render_deepseek_row(kind, cx).into_any_element(),
+            AgentKind::Codex => self.render_codex_row(state, kind, cx).into_any_element(),
+            AgentKind::Claude => self.render_claude_row(state, kind, cx).into_any_element(),
+            AgentKind::DeepSeek => self.render_deepseek_row(state, kind, cx).into_any_element(),
         }
     }
 
@@ -93,10 +96,14 @@ impl ThreadControls {
     /// harness displays and the route id a pick is sent as - and which of them
     /// tells the user what they are choosing depends on the deployment, so the
     /// pairing is a setting rather than a decision made here.
-    pub(super) fn model_options(&self, cx: &App) -> Vec<(String, String)> {
+    pub(super) fn model_options(
+        &self,
+        state: &ConversationSettings,
+        cx: &App,
+    ) -> Vec<(String, String)> {
         let style = cx.global::<AgentSettings>().model_list_style;
 
-        self.state
+        state
             .models
             .iter()
             .map(|m| (m.model.clone(), style.label(&m.display, &m.model)))

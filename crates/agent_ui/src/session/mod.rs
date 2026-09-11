@@ -1,22 +1,17 @@
-use futures::StreamExt as _;
 use gpui::prelude::*;
 use nmt_agent::AgentEvent;
 use nmt_agent::session::ImageAttachment;
-use nmt_agent::session::delivery::{MessageDelivery, RecoverablePrompt, Submission};
-use nmt_agent::session::lifecycle::{SessionRuntime, StartOutcome};
-use nmt_agent::session::naming::ConversationNaming;
+use nmt_agent::session::controller::{SessionController, SubmissionBlock};
+use nmt_agent::session::delivery::{RecoverablePrompt, Submission};
 #[cfg(test)]
 use nmt_agent::session::naming::conversation_title_request as build_title_request;
 pub(crate) use nmt_agent::session::restore::directories_match;
-use nmt_agent::session::restore::{ConversationRestore, SettingsSeed};
-use nmt_agent::session::settings::ConversationSettings;
 
 use crate::capabilities::AgentCapabilities as _;
-use crate::pane_state::{ChildAgents, TurnPresentation};
+use crate::pane_state::TurnPresentation;
 use crate::profile::AgentKindExt as _;
-use crate::session::output::{EventBatch, MAX_MESSAGES_PER_BATCH, MAX_UPDATE_TIME};
 use crate::session::prompts::PendingPrompts;
-use crate::thread_controls::{ThreadControls, launch_effort, launch_model, stored_thread_settings};
+use crate::thread_controls::ThreadControls;
 use crate::view::session_state::SessionStateBadge;
 mod background_tasks;
 mod conversation;
@@ -26,19 +21,19 @@ pub(crate) mod history;
 mod inbox;
 mod output;
 pub(crate) mod prompts;
+mod startup;
 #[cfg(test)]
 mod tests;
 pub(crate) mod turn;
 mod update_recovery;
 
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::{env, fs};
 
 use gpui::{App, Context, Image, Window};
 use gpui_component::input::{InputEvent, TextareaState};
-use nmt_agent::chat::{Event as SessionEvent, Item as SessionItem, SkillReference, ThreadSettings};
+use nmt_agent::chat::{Item as SessionItem, SkillReference, ThreadSettings};
 pub(super) use nmt_agent::session::Backend;
 #[cfg(test)]
 use nmt_agent::session::ConversationTitleRequest;
@@ -50,16 +45,15 @@ pub(crate) use nmt_agent::session::test_support::TestBackend;
 use nmt_agent::{
     AgentEventKind, AgentRoute, AgentWorkspace, agent_process, git, normalize_body, normalize_title,
 };
-use nmt_config::profile::{AgentProfile, AgentProfileKind};
+use nmt_config::profile::AgentProfile;
 use nmt_i18n::i18n;
-use tracing::info;
 
 use crate::commands::reconcile_skill_binding;
 use crate::composer::attachments::{ComposerAttachments, scratch_dir};
 use crate::composer::{BranchFlow, CommandFeedbackKind, prompt_with_response_annotations};
 use crate::fade::Fade;
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
-use crate::profile::{AgentKind, agent_launch};
+use crate::profile::AgentKind;
 pub use crate::session::update_recovery::RecoveryReadiness;
 use crate::settings::AgentSettings;
 use crate::transcript::TranscriptView;
@@ -77,9 +71,6 @@ impl Drop for AgentPane {
     }
 }
 
-/// How a session's directory reads in a list: its last two components, which
-/// is enough to tell projects apart without spending the row's width on a
-/// path that is mostly shared prefix.
 /// The pane's branch label: a detached `HEAD` shows its short commit,
 /// matching the git footer's presentation of the same state.
 fn branch_label(cwd: &str, max_age: Duration) -> Option<String> {
@@ -221,21 +212,12 @@ impl AgentPane {
             input_history_scope,
             input_history_navigation: InputHistoryNavigation::default(),
             attachments: ComposerAttachments::default(),
-            naming: ConversationNaming::default(),
             transcript,
             input,
-            runtime: SessionRuntime::default(),
-            restore: ConversationRestore::default(),
+            session: SessionController::new(kind),
             history_ui: SessionHistoryUi::default(),
             prompts: PendingPrompts::default(),
-            controls: ThreadControls {
-                state: ConversationSettings {
-                    seed_thread_defaults: true,
-                    ..Default::default()
-                },
-                effort_drag: None,
-            },
-            delivery: MessageDelivery::new(kind),
+            controls: ThreadControls { effort_drag: None },
             turn: TurnPresentation {
                 submitted_at: None,
                 first_output_latency: None,
@@ -251,11 +233,6 @@ impl AgentPane {
             context_composition: None,
             session_state: SessionStateBadge::default(),
             session_stats: None,
-            children: ChildAgents {
-                background_tasks: None,
-                transcripts: HashMap::new(),
-                restored_session: None,
-            },
             workflows: WorkflowUi::default(),
             overlay_fade: Fade::default(),
         };
@@ -356,7 +333,7 @@ impl AgentPane {
         images: Vec<Arc<Image>>,
         cx: &mut Context<Self>,
     ) {
-        let turn = self.delivery.turn();
+        let turn = self.session.delivery.turn();
 
         self.transcript
             .update(cx, |transcript, cx| transcript.push(turn, item, images, cx));
@@ -411,9 +388,9 @@ impl AgentPane {
         cx.emit(AgentPaneEvent::Lifecycle(AgentEvent {
             route: self.agent_route.clone(),
             agent: self.kind.id().to_string(),
-            session_id: format!("agent-tab-{}", self.runtime.epoch()),
+            session_id: format!("agent-tab-{}", self.session.runtime.epoch()),
             turn_id: (kind != AgentEventKind::SessionStarted)
-                .then(|| format!("turn-{}", self.delivery.turn())),
+                .then(|| format!("turn-{}", self.session.delivery.turn())),
             kind,
             title: normalize_title(title),
             body: normalize_body(body),
@@ -423,375 +400,8 @@ impl AgentPane {
     pub(super) fn latest_agent_message(&self, cx: &App) -> Option<String> {
         self.transcript
             .read(cx)
-            .latest_agent_message(self.delivery.turn())
+            .latest_agent_message(self.session.delivery.turn())
             .map(str::to_owned)
-    }
-
-    /// Request the backend process (optionally resuming a persisted Claude
-    /// session) and pump its messages onto the UI thread. Channel closure is
-    /// the EOF signal (the sender is owned by the reader thread). Returns
-    /// before the process exists; the pane sits in `Status::Starting` until it
-    /// does. The calling stack sees no repaint — the arrival notifies.
-    /// Whether the cover is on screen right now.
-    ///
-    /// Read from the start's own state rather than latched on and off around
-    /// it. A harness's process exists well before the harness answers: Codex
-    /// spawns in a moment and then reads its configuration and catalogs, and
-    /// the pane stays in `Status::Starting` until the thread-ready message
-    /// arrives. Tying the cover to the spawn instead put it on screen after
-    /// the process was already up and left it there once the harness was
-    /// ready.
-    pub(super) fn shows_start_overlay(&self) -> bool {
-        self.runtime.status() == Status::Starting
-    }
-
-    pub(super) fn start_session(&mut self, resume: Option<String>, cx: &mut Context<Self>) {
-        self.start_session_with_options(
-            resume.map(|id| RecoveryIdentity::new(AgentKind::Claude, id)),
-            false,
-            |_, _, _| {},
-            cx,
-        )
-    }
-
-    /// `on_result` runs once the backend either came up or failed to, carrying
-    /// whether it did. The spawn no longer answers that on the calling stack,
-    /// so a caller that reports the outcome does it from there.
-    pub(super) fn start_session_with_options(
-        &mut self,
-        recovery: Option<RecoveryIdentity>,
-        preserve_thread_settings: bool,
-        on_result: impl FnOnce(&mut Self, bool, &mut Context<Self>) + 'static,
-        cx: &mut Context<Self>,
-    ) {
-        // The pane's profile is a snapshot from when the tab opened; profile
-        // edits in settings don't reach into live panes. Re-resolving by
-        // name at every (re)start picks them up, so a new conversation
-        // launches with the profile as currently configured. A renamed or
-        // deleted profile keeps the snapshot so the tab still works.
-        if let Some(fresh) = cx
-            .global::<AgentSettings>()
-            .profiles
-            .iter()
-            .find(|p| p.kind == self.profile.kind && p.name == self.profile.name)
-        {
-            self.profile = fresh.clone();
-        }
-
-        // The profile model is known before either CLI completes its
-        // handshake, so the picker need not flash the backend default while a
-        // custom endpoint is starting.
-        if !preserve_thread_settings && let Some(model) = launch_model(self.kind, &self.profile) {
-            self.controls.state.settings.model = Some(model);
-        }
-
-        // A pinned effort reaches the backend through the launch, so the
-        // picker shows it from the first frame rather than the level the
-        // agent would otherwise have used.
-        if !preserve_thread_settings && let Some(effort) = launch_effort(&self.profile) {
-            self.controls.state.settings.effort = Some(effort);
-        }
-
-        let kind = self.kind;
-        let name = kind.display();
-
-        // The conversation about to start owns this snapshot for its whole
-        // life; a later workspace edit reaches the one after it.
-        self.active_workspace = self.workspace.clone();
-
-        let workspace = self.active_workspace.clone();
-
-        let caps = kind.caps();
-
-        // A resume into a backend that replays its own thread controls keeps
-        // them; anything else starts from the remembered picks. The reviewer is
-        // seeded separately because a backend can replay the rest without it.
-        let seed = if preserve_thread_settings {
-            SettingsSeed::None
-        } else if recovery.is_some() {
-            SettingsSeed::resumed(kind)
-        } else {
-            SettingsSeed::Defaults
-        };
-        self.seed_restored_settings(seed);
-        self.controls.state.restore_on_ready =
-            preserve_thread_settings.then(|| self.controls.state.settings.clone());
-
-        // Replacing a conversation must clear any running or unread state
-        // associated with the previous backend before the new epoch can emit.
-        cx.emit(AgentPaneEvent::Interrupted);
-
-        // The previous attempt's reason describes a backend nobody is waiting
-        // on any more, and this start is what the pane now reports.
-        let epoch = self.runtime.begin_start();
-        self.prompts.core.starting(epoch);
-        self.prompts.release_secret_editors();
-        self.restore.starting(epoch, recovery.as_ref());
-        if !self.branch.core.starting(epoch, recovery.as_ref()) {
-            self.branch.clear();
-        }
-
-        self.history_ui.invalidate_filesystem_history();
-
-        // A resumed conversation already has an opening prompt, even when an
-        // older transcript has no stored title. Only a fresh conversation may
-        // claim its next accepted prompt as the subject.
-        self.naming.named = recovery.is_some();
-        self.palette.skill_catalog = None;
-        self.palette.skill_binding = None;
-
-        let (tx, rx) = inbox::channel();
-        let mut batches = rx.ready_chunks(MAX_MESSAGES_PER_BATCH);
-        let deliver = move |message| {
-            tx.send(message);
-        };
-        let mut launch = agent_launch(&self.profile);
-
-        // A backend that builds its system prompt from the model it resolves at
-        // launch would otherwise describe a different model than the one
-        // serving the turns, because the pick would only reach the CLI
-        // afterwards. The pane already knows the pick here: the profile
-        // assigned it above, or it is the one remembered for this profile. A
-        // tab with neither leaves the flag off and starts on the CLI's
-        // configured model.
-        if caps.model_baked_into_launch {
-            launch.model = self.controls.state.settings.model.clone().or_else(|| {
-                stored_thread_settings(self.kind, &self.profile, cx)
-                    .and_then(|stored| stored.model.clone())
-            });
-        }
-
-        let codex_host_catalog = if kind == AgentKind::Codex {
-            cx.global::<AgentSettings>()
-                .profiles
-                .iter()
-                .filter(|profile| profile.kind == AgentProfileKind::Codex)
-                .map(agent_launch)
-                .collect()
-        } else {
-            Vec::new()
-        };
-
-        // Env names only: the values can carry API keys.
-        info!(
-            "agent session start: profile=\"{}\", executable=\"{}\", model={:?}, env=[{}]",
-            self.profile.name,
-            launch.executable,
-            launch.model,
-            launch
-                .env
-                .iter()
-                .map(|(name, _)| name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-
-        // Process creation blocks for hundreds of milliseconds on Windows
-        // (cmd.exe, then the CLI's own launcher), which is long enough to drop
-        // frames if it runs on the UI thread. The pane already models the gap
-        // as `Status::Starting` with no backend installed, so the spawn moves
-        // to a background thread and the result arrives in a later update.
-        let spawned = cx.background_executor().spawn(async move {
-            Backend::spawn(
-                kind,
-                &launch,
-                &codex_host_catalog,
-                &workspace,
-                recovery,
-                deliver,
-            )
-        });
-
-        cx.spawn(async move |this, cx| {
-            let spawned = spawned.await;
-
-            let started = this
-                .update(cx, |this, cx| {
-                    // A superseded start reports nothing: the newer one owns
-                    // the pane's state, and this caller's outcome no longer
-                    // describes what the pane is doing.
-                    match this.install_started_session(spawned, epoch, name, cx) {
-                        Some(started) => {
-                            on_result(this, started, cx);
-                            cx.notify();
-                            started
-                        }
-                        None => false,
-                    }
-                })
-                .unwrap_or(false);
-
-            if !started {
-                return;
-            }
-
-            while let Some(messages) = batches.next().await {
-                let mut messages = messages.into_iter();
-
-                while messages.len() > 0 {
-                    let updated = this.update(cx, |this, cx| {
-                        let started = Instant::now();
-                        let mut events = EventBatch::default();
-
-                        for message in messages.by_ref() {
-                            // A transition during this batch can replace the backend.
-                            // Remaining messages still belong to the earlier session.
-                            if !this.runtime.is_current(epoch) {
-                                return false;
-                            }
-
-                            let mut message = match message {
-                                Ok(message) => message,
-                                Err(error) => {
-                                    events
-                                        .flush(|event| this.apply_session_event(epoch, event, cx));
-
-                                    if this.runtime.is_current(epoch) {
-                                        this.stop_for_output_failure(error, cx);
-                                    }
-
-                                    return false;
-                                }
-                            };
-
-                            let Some(next_events) = this.runtime.process(epoch, message.take())
-                            else {
-                                return false;
-                            };
-
-                            for event in next_events {
-                                events.push(event, |event| {
-                                    this.apply_session_event(epoch, event, cx)
-                                });
-                            }
-
-                            if started.elapsed() >= MAX_UPDATE_TIME {
-                                break;
-                            }
-                        }
-
-                        events.flush(|event| this.apply_session_event(epoch, event, cx));
-
-                        true
-                    });
-
-                    if !updated.unwrap_or(false) {
-                        return;
-                    }
-
-                    // An already-ready stream need not yield at its next await.
-                    // Give input and frame work a chance between bounded slices.
-                    cx.background_executor()
-                        .timer(Duration::from_millis(1))
-                        .await;
-                }
-            }
-
-            let _ = this.update(cx, |this, cx| {
-                // A deliberately replaced session exits by design;
-                // only the live session's death is worth a line.
-                let Some(exit_events) = this.runtime.process_exit(epoch) else {
-                    return;
-                };
-
-                for event in exit_events {
-                    this.apply_session_event(epoch, event, cx);
-                }
-
-                if !this.runtime.is_current(epoch) {
-                    return;
-                }
-
-                cx.emit(AgentPaneEvent::Interrupted);
-                if let Some(failure) = this.branch.core.failed(
-                    &mut this.runtime,
-                    "session exited before branch readiness".into(),
-                ) {
-                    this.history_ui.mode = RecentSessionsMode::Open;
-                    this.report_branch_failure(failure, cx);
-                }
-                if this.restore.failed(&mut this.runtime) {
-                    this.history_ui.mode = RecentSessionsMode::Open;
-                }
-                this.runtime
-                    .exited(&i18n("agent-session-exited-before-restored").replace("{name}", name));
-                if this.palette.commands.clear() {
-                    this.palette.set_feedback(
-                        CommandFeedbackKind::Error,
-                        i18n("agent-session-queued-cancelled-exited").replace("{name}", name),
-                        cx,
-                    );
-                }
-
-                this.prompts.core.disconnect();
-                this.prompts.release_secret_editors();
-                this.delivery.exited();
-                this.publish_queued_user_messages(cx);
-                this.finish_working(cx);
-                this.push_item(
-                    SessionItem::Error {
-                        text: i18n("agent-session-exited").replace("{name}", name),
-                    },
-                    cx,
-                );
-            });
-        })
-        .detach();
-    }
-
-    /// Applying an event can start another conversation, including while a
-    /// batch is being flushed. Every remaining event still belongs to the
-    /// session that produced that batch.
-    fn apply_session_event(&mut self, epoch: u64, event: SessionEvent, cx: &mut Context<Self>) {
-        if self.runtime.is_current(epoch) {
-            self.apply_event(event, cx);
-        }
-    }
-
-    /// Take ownership of a backend that finished spawning, reporting whether it
-    /// came up. `None` means a newer start superseded this one while the
-    /// process was coming up; that leaves a live CLI behind, so the orphan is
-    /// shut down rather than dropped.
-    fn install_started_session(
-        &mut self,
-        spawned: Result<Backend, String>,
-        epoch: u64,
-        name: &'static str,
-        cx: &mut Context<Self>,
-    ) -> Option<bool> {
-        let spawned = spawned.map_err(|error| {
-            i18n("agent-session-start-failed")
-                .replace("{name}", name)
-                .replace("{error}", &error)
-        });
-
-        match self.runtime.install(epoch, spawned) {
-            StartOutcome::Installed => Some(true),
-            StartOutcome::Superseded(orphan) => {
-                if let Some(mut orphan) = orphan {
-                    cx.background_executor()
-                        .spawn(async move {
-                            let _ = orphan.shutdown(Duration::from_secs(5), true);
-                        })
-                        .detach();
-                }
-
-                None
-            }
-            StartOutcome::Failed(text) => {
-                cx.emit(AgentPaneEvent::Interrupted);
-                self.palette.commands.clear();
-                self.delivery.start_failed();
-
-                let turn = self.delivery.turn();
-
-                self.transcript.update(cx, |transcript, _| {
-                    transcript.push_stamped(turn, SessionItem::Error { text });
-                });
-
-                Some(false)
-            }
-        }
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -845,77 +455,51 @@ impl AgentPane {
         restore_on_interrupt: Option<(String, Vec<String>)>,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.prompts.core.has_submission() {
-            self.palette.set_feedback(
-                CommandFeedbackKind::Notice,
-                i18n("agent-question-send-pending"),
-                cx,
-            );
-
-            return false;
-        }
-
-        if self.branch_flow_holds_composer() {
-            self.palette.set_feedback(
-                CommandFeedbackKind::Error,
-                i18n("agent-session-rewind-blocks-send").to_string(),
-                cx,
-            );
-
-            return false;
-        }
-
-        if self.palette.commands.awaiting_turn {
-            self.palette.set_feedback(
-                CommandFeedbackKind::Error,
-                i18n("agent-session-command-starting").to_string(),
-                cx,
-            );
-
-            return false;
-        }
-
-        self.sync_pending_rename();
-
         let title_text = restore_on_interrupt
             .as_ref()
             .map_or(text.as_str(), |(prompt, _)| prompt.as_str());
 
-        let title_request = self
-            .naming
-            .request(self.kind, title_text, tab_title_from_prompt);
+        let title_request =
+            self.session
+                .naming
+                .request(self.kind, title_text, tab_title_from_prompt);
 
-        let settings = self.controls.state.settings.clone();
+        let settings = self.session.controls.settings.clone();
         let scratch = scratch_dir(self.agent_route.as_str());
 
-        let outcome = self.runtime.send(|session| {
-            let images = self
-                .attachments
-                .images()
-                .iter()
-                .map(|image| ImageAttachment {
-                    bytes: image.bytes(),
-                    media_type: image.format().mime_type(),
-                });
-
-            match title_request.as_ref() {
-                Some(title) => session
-                    .send_user_message_with_title(&text, &settings, skill, images, &scratch, title),
-                None => session.send_user_message(&text, &settings, skill, images, &scratch),
-            }
-        });
-
         let restores_annotations = restore_on_interrupt.is_some();
-        let started_text = match self.delivery.submit(outcome, text, || {
-            restore_on_interrupt.map(|(text, response_annotations)| RecoverablePrompt {
-                text,
-                response_annotations,
-                skill: skill.cloned(),
-            })
-        }) {
-            Submission::Started { text } => Some(text),
-            Submission::Queued => None,
-            Submission::NotReady => {
+        let outcome = self.session.submit(
+            text,
+            |session, text| {
+                let images = self
+                    .attachments
+                    .images()
+                    .iter()
+                    .map(|image| ImageAttachment {
+                        bytes: image.bytes(),
+                        media_type: image.format().mime_type(),
+                    });
+
+                match title_request.as_ref() {
+                    Some(title) => session.send_user_message_with_title(
+                        text, &settings, skill, images, &scratch, title,
+                    ),
+                    None => session.send_user_message(text, &settings, skill, images, &scratch),
+                }
+            },
+            || {
+                restore_on_interrupt.map(|(text, response_annotations)| RecoverablePrompt {
+                    text,
+                    response_annotations,
+                    skill: skill.cloned(),
+                })
+            },
+        );
+
+        let started_text = match outcome {
+            Ok(Submission::Started { text }) => Some(text),
+            Ok(Submission::Queued) => None,
+            Ok(Submission::NotReady) => {
                 self.push_item(
                     SessionItem::Error {
                         text: i18n("agent-session-still-starting")
@@ -925,8 +509,24 @@ impl AgentPane {
                 );
                 return false;
             }
-            Submission::Rejected { message } => {
+            Ok(Submission::Rejected { message }) => {
                 self.push_item(SessionItem::Error { text: message }, cx);
+                return false;
+            }
+            Err(reason) => {
+                let (kind, message) = match reason {
+                    SubmissionBlock::QuestionResponse => {
+                        (CommandFeedbackKind::Notice, "agent-question-send-pending")
+                    }
+                    SubmissionBlock::ConversationChange => (
+                        CommandFeedbackKind::Error,
+                        "agent-session-rewind-blocks-send",
+                    ),
+                    SubmissionBlock::CommandStarting => {
+                        (CommandFeedbackKind::Error, "agent-session-command-starting")
+                    }
+                };
+                self.palette.set_feedback(kind, i18n(message), cx);
                 return false;
             }
         };
@@ -937,7 +537,7 @@ impl AgentPane {
         if matches!(self.kind, AgentKind::Codex | AgentKind::Claude)
             && let Some(title) = title_request
         {
-            self.naming.named = true;
+            self.session.naming.named = true;
             cx.emit(AgentPaneEvent::TitleSuggested(title.provisional_title));
         }
 
@@ -979,7 +579,6 @@ impl AgentPane {
     pub(super) fn clear_conversation_presentation(&mut self, cx: &mut Context<Self>) {
         self.transcript
             .update(cx, |transcript, _| transcript.clear());
-        self.delivery.reset();
         self.turn.submitted_at = None;
         self.turn.first_output_latency = None;
 
@@ -988,27 +587,12 @@ impl AgentPane {
         // fresh one, which has never been answered at all.
         self.turn.forget_last_response();
 
-        // The new conversation restarts turn ids from zero, so a stop request
-        // left over from the old one could match an unrelated future turn.
-        self.runtime.clear_turn();
         self.context_window_usage = None;
         self.context_composition = None;
         self.session_state.clear();
         self.session_stats = None;
         self.branch.clear();
-        self.restore.cancel();
         self.history_ui.invalidate_filesystem_history();
-
-        // An approval belongs to the tool call that asked for it. The backend
-        // that asked is the one being replaced, so leaving the card up offers a
-        // decision that would be answered into a different conversation.
-        self.prompts.dismiss_approval();
-
-        // Child rows belong to the conversation being replaced; keeping them
-        // would show another parent session's tasks until the new adapter
-        // publishes its first snapshot.
-        self.children.background_tasks = None;
-        self.children.transcripts.clear();
 
         // Workflow runs are scoped the same way, and their refresh must not
         // keep polling a directory that belongs to the replaced conversation.
@@ -1016,37 +600,37 @@ impl AgentPane {
 
         // The question card is answered into the backend being replaced, so it
         // cannot outlive it either.
-        self.prompts.dismiss_questions();
+        self.prompts.clear();
     }
 
-    /// Opening the `Background Tasks` view asks the provider for fresher data.
     /// Pass a tab rename through to the conversation, so the name reaches the
     /// harness's own session record rather than living only in this tab.
     pub fn rename_session(&mut self, title: &str) {
-        self.naming.rename(title);
+        self.session.naming.rename(title);
         self.sync_pending_rename();
     }
 
     pub(super) fn sync_pending_rename(&mut self) {
-        self.naming.sync(self.runtime.backend_mut());
+        self.session.naming.sync(self.session.runtime.backend_mut());
     }
 
     pub(super) fn reset_conversation(&mut self, cx: &mut Context<Self>) {
         // DeepSeek and Codex hosts stop once their final session reference is
         // released. Keeping the retired backend until the replacement starts
         // transfers that reference without restarting an unchanged host.
-        let retiring = self.runtime.retire();
+        let retiring = self.session.runtime.retire();
 
         // A fresh conversation always follows the live tail again, even if
         // the previous transcript was scrolled up when it was discarded.
+        self.session.clear_conversation();
         self.clear_conversation_presentation(cx);
-        self.controls.state.settings = ThreadSettings::default();
-        self.controls.state.models.clear();
+        self.session.controls.settings = ThreadSettings::default();
+        self.session.controls.models.clear();
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
-        self.prompts.dismiss_approval();
         self.palette
-            .reset_command_runtime(!self.kind.caps().async_command_discovery);
+            .reset_discovery(!self.kind.caps().async_command_discovery);
+        self.session.commands.clear();
         self.palette.feedback = None;
         self.history_ui.mode = RecentSessionsMode::Hidden;
 

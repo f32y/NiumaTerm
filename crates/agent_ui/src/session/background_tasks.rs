@@ -10,7 +10,7 @@ use nmt_agent::background_task::{
     BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscript,
 };
 use nmt_agent::claude_code::sessions;
-use nmt_agent::session::children::ChildAgents;
+#[cfg(test)]
 pub(super) use nmt_agent::session::children::scoped_background_tasks;
 
 use crate::AgentPane;
@@ -21,6 +21,7 @@ impl AgentPane {
     /// parent transcript or composer.
     pub(crate) fn restore_background_tasks(&mut self, cx: &mut Context<Self>) {
         let Some(session_id) = self
+            .session
             .runtime
             .backend()
             .and_then(|session| session.session_id())
@@ -29,11 +30,11 @@ impl AgentPane {
             return;
         };
 
-        if !self.children.claim_restore(&session_id) {
+        if !self.session.children.claim_restore(&session_id) {
             return;
         }
 
-        let Some(session) = self.runtime.backend_mut() else {
+        let Some(session) = self.session.runtime.backend_mut() else {
             return;
         };
 
@@ -41,7 +42,7 @@ impl AgentPane {
         // runs keep their newer state.
         let starting_sequence = session.begin_task_restoration();
         let cwd = self.cwd();
-        let epoch = self.runtime.epoch();
+        let epoch = self.session.runtime.epoch();
 
         cx.spawn(async move |this, cx| {
             let restored = cx
@@ -50,11 +51,11 @@ impl AgentPane {
                 .await;
 
             let _ = this.update(cx, |this, cx| {
-                if !this.runtime.is_current(epoch) {
+                if !this.session.runtime.is_current(epoch) {
                     return;
                 }
 
-                let Some(session) = this.runtime.backend_mut() else {
+                let Some(session) = this.session.runtime.backend_mut() else {
                     return;
                 };
 
@@ -67,18 +68,14 @@ impl AgentPane {
     }
 
     pub fn refresh_background_tasks(&mut self) {
-        if let Some(session) = self.runtime.backend_mut() {
-            session.refresh_background_tasks();
-        }
+        self.session.refresh_background_tasks();
     }
 
     /// Provider-qualified identity of the parent session child tasks belong to.
     /// `None` until the backend reports a thread or session id, which is what
     /// disables the title-bar `Background Tasks` button.
     pub fn background_task_parent(&self) -> Option<BackgroundTaskKey> {
-        let identity = self.runtime.backend()?.recovery_identity()?;
-
-        ChildAgents::parent(identity)
+        self.session.background_task_parent()
     }
 
     /// Ask the provider for one child's conversation. A provider that already
@@ -89,7 +86,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         let cwd = self.cwd();
-        let Some(session) = self.runtime.backend_mut() else {
+        let Some(session) = self.session.runtime.backend_mut() else {
             return;
         };
 
@@ -103,9 +100,7 @@ impl AgentPane {
     /// turns out not to be stoppable after all — the snapshot a row was drawn
     /// from can be a moment behind the child finishing on its own.
     pub fn interrupt_background_task(&mut self, key: &BackgroundTaskKey) -> bool {
-        self.runtime
-            .backend_mut()
-            .is_some_and(|session| session.interrupt_background_task(key))
+        self.session.interrupt_background_task(key)
     }
 
     /// One child's conversation, only while the pane still holds the session
@@ -114,18 +109,14 @@ impl AgentPane {
         &self,
         key: &BackgroundTaskKey,
     ) -> Option<&BackgroundTaskTranscript> {
-        self.background_tasks()?;
-        self.children.transcripts.get(key)
+        self.session.background_task_transcript(key)
     }
 
     /// The latest snapshot, only while it still describes the session the pane
     /// currently holds. A snapshot left over from a replaced session is hidden
     /// rather than shown against the new parent.
     pub fn background_tasks(&self) -> Option<&BackgroundTaskSnapshot> {
-        scoped_background_tasks(
-            self.background_task_parent().as_ref(),
-            self.children.background_tasks.as_ref(),
-        )
+        self.session.background_tasks()
     }
 
     /// Child agents of this tab the provider currently reports as active.

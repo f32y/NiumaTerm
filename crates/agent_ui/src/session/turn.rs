@@ -47,7 +47,7 @@ pub(crate) fn response_age_tick(age: Duration) -> Option<Duration> {
 
 impl AgentPane {
     pub(crate) fn note_visible_output(&mut self) {
-        self.delivery.visible_output();
+        self.session.delivery.visible_output();
         self.turn.note_visible_output();
     }
 
@@ -84,7 +84,7 @@ impl AgentPane {
     /// row. These values are UI state rather than provider transcript content,
     /// so they stay outside the shared item stream.
     pub(super) fn finish_working(&mut self, cx: &mut Context<Self>) {
-        let turn = self.delivery.turn();
+        let turn = self.session.delivery.turn();
 
         self.transcript
             .update(cx, |transcript, cx| transcript.settle_turn(turn, cx));
@@ -107,9 +107,9 @@ impl AgentPane {
     }
 
     pub(crate) fn interrupt_from_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let working = self.delivery.is_active();
+        let interrupted = self.session.interrupt_from_user();
 
-        if let Some((turn, prompt)) = self.delivery.take_interrupted_prompt() {
+        if let Some((turn, prompt)) = interrupted.prompt {
             self.transcript
                 .update(cx, |transcript, cx| transcript.discard_turn(turn, cx));
 
@@ -127,15 +127,11 @@ impl AgentPane {
             cx.notify();
         }
 
-        let outcome = self
-            .runtime
-            .interrupt(working.then_some(self.delivery.turn()));
-
-        self.present_interrupt_result(outcome, cx);
+        self.present_interrupt_result(interrupted.outcome, cx);
     }
 
     pub(super) fn interrupt(&mut self, cx: &mut Context<Self>) {
-        let outcome = self.runtime.interrupt(None);
+        let outcome = self.session.runtime.interrupt(None);
         self.present_interrupt_result(outcome, cx);
     }
 
@@ -157,11 +153,7 @@ impl AgentPane {
     }
 
     pub(crate) fn respond_approval(&mut self, decision: &str, cx: &mut Context<Self>) {
-        match self
-            .prompts
-            .core
-            .respond_approval(&mut self.runtime, decision)
-        {
+        match self.session.respond_approval(decision) {
             ApprovalOutcome::Ignored => return,
             ApprovalOutcome::Settled => {
                 self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);

@@ -85,7 +85,7 @@ impl AgentPane {
         self.history_ui.data.showing_search = false;
         self.history_ui.selected = 0;
 
-        if let Some(session) = self.runtime.backend_mut() {
+        if let Some(session) = self.session.runtime.backend_mut() {
             session.request_history(self.history_ui.data.scope);
         }
 
@@ -108,7 +108,7 @@ impl AgentPane {
         let scope = self.history_ui.data.scope;
         let request = self
             .history_ui
-            .begin_filesystem_history(cwd.clone(), self.runtime.epoch());
+            .begin_filesystem_history(cwd.clone(), self.session.runtime.epoch());
 
         cx.notify();
 
@@ -127,7 +127,7 @@ impl AgentPane {
                     match this.history_ui.publish_filesystem_count(
                         &request,
                         cwd.as_deref(),
-                        this.runtime.epoch(),
+                        this.session.runtime.epoch(),
                         count,
                     ) {
                         CountPublication::Stale => false,
@@ -166,7 +166,7 @@ impl AgentPane {
                 if this.history_ui.publish_filesystem_rows(
                     &request,
                     cwd.as_deref(),
-                    this.runtime.epoch(),
+                    this.session.runtime.epoch(),
                     sessions,
                 ) {
                     cx.notify();
@@ -182,8 +182,8 @@ impl AgentPane {
             SettingsSeed::Reviewer => (false, true),
             SettingsSeed::None => (false, false),
         };
-        self.controls.state.seed_thread_defaults = defaults;
-        self.controls.state.seed_approval_reviewer = reviewer;
+        self.session.controls.seed_thread_defaults = defaults;
+        self.session.controls.seed_approval_reviewer = reviewer;
     }
 
     /// Keep the displayed conversation until the replacement supplies its replay.
@@ -194,39 +194,42 @@ impl AgentPane {
 
         // Both operations replace the conversation; a visible history list
         // must not start a resume while a branch picker or file step owns it.
-        if self.history_ui.mode == RecentSessionsMode::Loading || self.branch.holds_composer() {
+        if self.history_ui.mode == RecentSessionsMode::Loading
+            || self.session.branch.holds_composer()
+        {
             return;
         }
 
         let cwd = self.cwd();
-        let request =
-            match self
-                .restore
-                .begin(&mut self.runtime, self.kind, summary, cwd.as_deref())
-            {
-                ResumeStart::Busy => return,
-                ResumeStart::Elsewhere { cwd, session_id } => {
-                    self.history_ui.selected = index;
-                    cx.emit(AgentPaneEvent::ResumeElsewhere { cwd, session_id });
-                    cx.notify();
-                    return;
-                }
-                ResumeStart::Rejected => {
-                    self.history_ui.mode = RecentSessionsMode::Open;
-                    self.history_ui.selected = index;
-                    self.palette.set_feedback(
-                        CommandFeedbackKind::Error,
-                        i18n("agent-session-codex-recent-not-ready").to_string(),
-                        cx,
-                    );
-                    return;
-                }
-                ResumeStart::Requested => {
-                    self.seed_restored_settings(SettingsSeed::resumed(self.kind));
-                    None
-                }
-                ResumeStart::ReadReplay(request) => Some(request),
-            };
+        let request = match self.session.restore.begin(
+            &mut self.session.runtime,
+            self.kind,
+            summary,
+            cwd.as_deref(),
+        ) {
+            ResumeStart::Busy => return,
+            ResumeStart::Elsewhere { cwd, session_id } => {
+                self.history_ui.selected = index;
+                cx.emit(AgentPaneEvent::ResumeElsewhere { cwd, session_id });
+                cx.notify();
+                return;
+            }
+            ResumeStart::Rejected => {
+                self.history_ui.mode = RecentSessionsMode::Open;
+                self.history_ui.selected = index;
+                self.palette.set_feedback(
+                    CommandFeedbackKind::Error,
+                    i18n("agent-session-codex-recent-not-ready").to_string(),
+                    cx,
+                );
+                return;
+            }
+            ResumeStart::Requested => {
+                self.seed_restored_settings(SettingsSeed::resumed(self.kind));
+                None
+            }
+            ResumeStart::ReadReplay(request) => Some(request),
+        };
 
         self.history_ui.mode = RecentSessionsMode::Loading;
         self.history_ui.selected = index;
@@ -251,10 +254,12 @@ impl AgentPane {
 
             let _ = this.update(cx, |this, cx| {
                 let cwd = this.cwd();
-                match this
-                    .restore
-                    .loaded(&mut this.runtime, request, cwd.as_deref(), replay)
-                {
+                match this.session.restore.loaded(
+                    &mut this.session.runtime,
+                    request,
+                    cwd.as_deref(),
+                    replay,
+                ) {
                     ReplayLoaded::Stale => {}
                     ReplayLoaded::Cancelled => {
                         this.history_ui.mode = RecentSessionsMode::Open;
@@ -275,7 +280,7 @@ impl AgentPane {
                             false,
                             |this, started, _| {
                                 if !started {
-                                    this.restore.failed(&mut this.runtime);
+                                    this.session.restore.failed(&mut this.session.runtime);
                                     this.history_ui.mode = RecentSessionsMode::Open;
                                 }
                             },

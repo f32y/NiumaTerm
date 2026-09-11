@@ -14,39 +14,24 @@
 use std::time::Duration;
 
 use gpui::{Context, Task};
-use nmt_agent::chat::Item as SessionItem;
 use nmt_agent::claude_code::workflows::{
     self, RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
 };
 pub use nmt_agent::session::workflows::OpenWorkflowAgent;
 use nmt_agent::session::workflows::WorkflowData;
-use nmt_agent::workflow::{WorkflowRun, WorkflowSnapshot};
+use nmt_agent::workflow::WorkflowRun;
 
+use crate::AgentPane;
 use crate::capabilities::AgentCapabilities as _;
 use crate::session::Backend;
-use crate::{AgentPane, AgentPaneEvent};
 #[derive(Default)]
 pub(crate) struct WorkflowUi {
-    pub(crate) data: WorkflowData,
     visible: bool,
     refresh: Option<Task<()>>,
 }
 
 impl WorkflowUi {
-    pub(crate) fn runs(&self) -> &[WorkflowRun] {
-        self.data.runs()
-    }
-
-    pub(crate) fn running_agents(&self) -> usize {
-        self.data.running_agents()
-    }
-
-    pub(crate) fn open_conversation(&self) -> Option<&OpenWorkflowAgent> {
-        self.data.open_conversation()
-    }
-
     fn clear(&mut self) {
-        self.data.clear();
         self.refresh = None;
     }
     /// Show or hide the view, reporting whether that is a change.
@@ -58,49 +43,17 @@ impl WorkflowUi {
         changed
     }
 
-    fn should_refresh(&self, reads_from_disk: bool) -> bool {
-        reads_from_disk && self.visible && self.data.has_active_run()
+    fn should_refresh(&self, reads_from_disk: bool, data: &WorkflowData) -> bool {
+        reads_from_disk && self.visible && data.has_active_run()
     }
 }
 
 use nmt_agent::session::workflows::RefreshPlan;
 
 impl AgentPane {
-    /// Drop every run when the pane moves to another conversation.
+    /// Stop polling the old conversation when its state is cleared.
     pub(super) fn clear_workflows(&mut self) {
         self.workflows.clear();
-    }
-
-    /// Replacement snapshot from the provider stream.
-    pub(super) fn apply_workflow_snapshot(
-        &mut self,
-        snapshot: WorkflowSnapshot,
-        cx: &mut Context<Self>,
-    ) {
-        if self.workflows.data.set_snapshot(snapshot) {
-            cx.emit(AgentPaneEvent::WorkflowActivity);
-        }
-
-        // A run that just started is what makes refreshing worth doing.
-        self.sync_workflow_refresh(cx);
-        cx.notify();
-    }
-
-    /// One agent conversation read from disk.
-    pub(super) fn apply_workflow_transcript(
-        &mut self,
-        task_id: &str,
-        agent_id: &str,
-        items: Vec<SessionItem>,
-        cx: &mut Context<Self>,
-    ) {
-        if self
-            .workflows
-            .data
-            .apply_transcript(task_id, agent_id, items)
-        {
-            cx.notify();
-        }
     }
 
     /// Show or hide the view. Refreshing follows visibility, so this is what
@@ -125,7 +78,8 @@ impl AgentPane {
             return None;
         }
 
-        self.runtime
+        self.session
+            .runtime
             .backend()
             .and_then(Backend::session_id)
             .map(str::to_owned)
@@ -133,29 +87,29 @@ impl AgentPane {
 
     /// Runs of the scoped session, in provider order.
     pub fn workflow_runs(&self) -> &[WorkflowRun] {
-        self.workflows.runs()
+        self.session.workflows.runs()
     }
 
     /// Agents of this tab the provider currently reports as running.
     pub fn running_workflow_agents(&self) -> usize {
-        self.workflows.running_agents()
+        self.session.workflows.running_agents()
     }
 
     /// The agent conversation the user has open, if any.
     pub fn open_workflow_conversation(&self) -> Option<&OpenWorkflowAgent> {
-        self.workflows.open_conversation()
+        self.session.workflows.open_conversation()
     }
 
     /// Open one agent's conversation, reading it immediately rather than
     /// waiting for the next tick.
     pub fn open_workflow_agent(&mut self, task_id: &str, agent_id: &str, cx: &mut Context<Self>) {
-        self.workflows.data.open_agent(task_id, agent_id);
+        self.session.workflows.open_agent(task_id, agent_id);
         self.read_open_workflow_agent(cx);
         cx.notify();
     }
 
     pub fn close_workflow_agent(&mut self, cx: &mut Context<Self>) {
-        self.workflows.data.close_agent();
+        self.session.workflows.close_agent();
         cx.notify();
     }
 
@@ -175,6 +129,7 @@ impl AgentPane {
         }
 
         let Some(session_id) = self
+            .session
             .runtime
             .backend()
             .and_then(Backend::session_id)
@@ -183,12 +138,12 @@ impl AgentPane {
             return;
         };
 
-        if !self.workflows.data.claim_restore(&session_id) {
+        if !self.session.workflows.claim_restore(&session_id) {
             return;
         }
 
         let cwd = self.cwd();
-        let epoch = self.runtime.epoch();
+        let epoch = self.session.runtime.epoch();
         let read = cx
             .background_executor()
             .spawn(async move { workflows::read_run_snapshots(cwd.as_deref(), &session_id) });
@@ -199,7 +154,7 @@ impl AgentPane {
             this.update(cx, |this, cx| {
                 // A restoration that outlived its session says nothing about
                 // the conversation now open.
-                if !this.runtime.is_current(epoch) {
+                if !this.session.runtime.is_current(epoch) {
                     return;
                 }
 
@@ -218,11 +173,11 @@ impl AgentPane {
         // A failed read leaves whatever the live stream reported; the view is
         // still usable and the next open retries.
         let Ok(restored) = restored else {
-            self.workflows.data.forget_restore();
+            self.session.workflows.forget_restore();
             return;
         };
 
-        let Some(session) = self.runtime.backend_mut() else {
+        let Some(session) = self.session.runtime.backend_mut() else {
             return;
         };
 
@@ -232,7 +187,7 @@ impl AgentPane {
     }
 
     /// Start the poll when there is something to poll, stop it otherwise.
-    fn sync_workflow_refresh(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn sync_workflow_refresh(&mut self, cx: &mut Context<Self>) {
         if !self.should_refresh_workflows() {
             self.workflows.refresh = None;
             return;
@@ -279,8 +234,10 @@ impl AgentPane {
     }
 
     fn should_refresh_workflows(&self) -> bool {
-        self.workflows
-            .should_refresh(self.kind.caps().workflows_read_from_disk)
+        self.workflows.should_refresh(
+            self.kind.caps().workflows_read_from_disk,
+            &self.session.workflows,
+        )
     }
 
     fn workflow_refresh_plan(&self) -> Option<RefreshPlan> {
@@ -288,7 +245,9 @@ impl AgentPane {
             return None;
         }
 
-        self.workflows.data.refresh_plan(&self.runtime, self.cwd())
+        self.session
+            .workflows
+            .refresh_plan(&self.session.runtime, self.cwd())
     }
 
     /// Fold a tick's reads in. Returns whether the loop should keep running.
@@ -299,14 +258,14 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) -> bool {
         // A tick that outlived its session must not touch the new one.
-        if !self.runtime.is_current(epoch) {
+        if !self.session.runtime.is_current(epoch) {
             return false;
         }
 
         for result in results {
-            self.workflows.data.note_open_len(&result);
+            self.session.workflows.note_open_len(&result);
 
-            let Some(session) = self.runtime.backend_mut() else {
+            let Some(session) = self.session.runtime.backend_mut() else {
                 return false;
             };
 
@@ -315,7 +274,7 @@ impl AgentPane {
             }
         }
 
-        if self.workflows.data.mark_open_availability() {
+        if self.session.workflows.mark_open_availability() {
             cx.notify();
         }
 
@@ -324,7 +283,7 @@ impl AgentPane {
 
     /// Read the open conversation once, outside the tick cadence.
     fn read_open_workflow_agent(&mut self, cx: &mut Context<Self>) {
-        let Some(open) = self.workflows.open_conversation() else {
+        let Some(open) = self.session.workflows.open_conversation() else {
             return;
         };
 
@@ -334,7 +293,7 @@ impl AgentPane {
         if !self.kind.caps().workflows_read_from_disk {
             let (task_id, agent_id) = (open.task_id.clone(), open.agent_id.clone());
 
-            if let Some(session) = self.runtime.backend_mut() {
+            if let Some(session) = self.session.runtime.backend_mut() {
                 session.request_workflow_agent_transcript(&task_id, &agent_id);
             }
 
@@ -342,6 +301,7 @@ impl AgentPane {
         }
 
         let Some(session_id) = self
+            .session
             .runtime
             .backend()
             .and_then(Backend::session_id)
@@ -352,13 +312,13 @@ impl AgentPane {
 
         let request = WorkflowRefreshRequest {
             task_id: open.task_id.clone(),
-            agent_ids: self.workflows.data.agent_ids(&open.task_id),
+            agent_ids: self.session.workflows.agent_ids(&open.task_id),
             open_agent: Some(open.agent_id.clone()),
             open_agent_len: None,
         };
 
         let cwd = self.cwd();
-        let epoch = self.runtime.epoch();
+        let epoch = self.session.runtime.epoch();
         let read = cx
             .background_executor()
             .spawn(async move { workflows::refresh_run(cwd.as_deref(), &session_id, &request) });
@@ -367,7 +327,7 @@ impl AgentPane {
             let result = read.await;
 
             this.update(cx, |this, cx| {
-                if !this.runtime.is_current(epoch) {
+                if !this.session.runtime.is_current(epoch) {
                     return;
                 }
 

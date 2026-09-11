@@ -1,10 +1,6 @@
-use std::collections::VecDeque;
-
 use nmt_agent::catalog::ParsedSlashCommand;
-use nmt_agent::session::commands::CommandQueue;
 
 use crate::commands::*;
-use crate::composer::PendingSlashCommand;
 use crate::{CachedCatalog, RecentSessionsMode, SlashPalette};
 
 fn info(name: &str, source: SlashCommandSource) -> SlashCommandInfo {
@@ -218,14 +214,10 @@ fn palette_direction_navigation_wraps_and_handles_catalog_changes() {
 }
 
 #[test]
-fn clear_resets_command_runtime_without_owning_history_state() {
+fn clear_resets_discovery_without_owning_history_state() {
     let mut palette = SlashPalette {
         provider_commands: vec![info("review", SlashCommandSource::Provider)],
         provider_commands_ready: true,
-        commands: CommandQueue {
-            queue: VecDeque::from([PendingSlashCommand::new("compact", String::new())]),
-            awaiting_turn: true,
-        },
         selected: 3,
         dismissed: true,
         ..SlashPalette::default()
@@ -239,13 +231,11 @@ fn clear_resets_command_runtime_without_owning_history_state() {
     let history_dismissed = true;
     let history = vec!["persisted session"];
 
-    palette.reset_command_runtime(false);
+    palette.reset_discovery(false);
 
     assert!(palette.provider_commands.is_empty());
     assert!(palette.catalog.is_none());
     assert!(!palette.provider_commands_ready);
-    assert!(palette.commands.queue.is_empty());
-    assert!(!palette.commands.awaiting_turn);
     assert_eq!(palette.selected, 0);
     assert!(!palette.dismissed);
     assert!(history_dismissed);

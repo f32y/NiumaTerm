@@ -68,7 +68,7 @@ impl AgentPane {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement + use<>> {
-        if self.delivery.pending().is_empty() {
+        if self.session.delivery.pending().is_empty() {
             return None;
         }
 
@@ -83,36 +83,32 @@ impl AgentPane {
                 .bg(cx.theme().muted.opacity(0.3))
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .children(
-                    self.delivery
-                        .pending()
-                        .iter()
-                        .enumerate()
-                        .map(|(index, prompt)| {
-                            h_flex()
-                                .w_full()
-                                .gap_1()
-                                .items_center()
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .truncate()
-                                        .child(queued_message_label(prompt)),
-                                )
-                                .children(prompt.id.clone().map(|id| {
-                                    Button::new(("queued-prompt-remove", index))
-                                        .ghost()
-                                        .xsmall()
-                                        .icon(IconName::Close)
-                                        .tooltip(i18n("agent-history-queued-remove"))
-                                        .accessibility_label(i18n("agent-history-queued-remove"))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.remove_queued_prompt(&id, cx)
-                                        }))
-                                }))
-                        }),
-                ),
+                .children(self.session.delivery.pending().iter().enumerate().map(
+                    |(index, prompt)| {
+                        h_flex()
+                            .w_full()
+                            .gap_1()
+                            .items_center()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .child(queued_message_label(prompt)),
+                            )
+                            .children(prompt.id.clone().map(|id| {
+                                Button::new(("queued-prompt-remove", index))
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(IconName::Close)
+                                    .tooltip(i18n("agent-history-queued-remove"))
+                                    .accessibility_label(i18n("agent-history-queued-remove"))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.remove_queued_prompt(&id, cx)
+                                    }))
+                            }))
+                    },
+                )),
         )
     }
 
@@ -207,7 +203,7 @@ impl AgentPane {
                             // the next one (no-op without a cursor, and
                             // only Codex pages from the backend).
                             if visible_range.end >= this.history_ui.data.sessions.len()
-                                && let Some(session) = this.runtime.backend_mut()
+                                && let Some(session) = this.session.runtime.backend_mut()
                             {
                                 session.request_more_history();
                             }
