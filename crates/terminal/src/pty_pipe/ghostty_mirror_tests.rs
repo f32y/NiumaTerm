@@ -11,8 +11,8 @@ use parking_lot::Mutex;
 
 use crate::event::{self, VoidListener};
 use crate::pty_pipe::{
-    Interest, Poll, PtyPipe, PtyState, READ_BUFFER_SIZE, SYNC_OUTPUT_TIMEOUT, SessionOptions,
-    Token, Waker, mode, publish_render_buffer,
+    Interest, Poll, PtyPipe, PtyState, READ_BUFFER_SIZE, SNAPSHOT_MIN_INTERVAL,
+    SYNC_OUTPUT_TIMEOUT, SessionOptions, Token, Waker, mode, publish_render_buffer,
 };
 use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
@@ -465,6 +465,7 @@ fn osc_progress_hides_published_cursor_until_removed() {
         .reader
         .data
         .extend_from_slice(b";42\x1b\\    Building [====>     ] 4/10\r");
+    machine.last_snapshot_at = Some(time::Instant::now() - SNAPSHOT_MIN_INTERVAL);
     machine.pty_read(&mut state, &mut buf).unwrap();
     {
         let buffer = render_buffer.load();
@@ -477,6 +478,7 @@ fn osc_progress_hides_published_cursor_until_removed() {
         .reader
         .data
         .extend_from_slice(b"\x1b]9;4;0;\x1b\\");
+    machine.last_snapshot_at = Some(time::Instant::now() - SNAPSHOT_MIN_INTERVAL);
     machine.pty_read(&mut state, &mut buf).unwrap();
 
     assert!(

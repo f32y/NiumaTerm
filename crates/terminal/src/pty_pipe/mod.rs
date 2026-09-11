@@ -38,20 +38,22 @@ const WAKER_TOKEN: Token = Token(0);
 const READ_BUFFER_SIZE: usize = 0x10_0000;
 /// Yield to queued commands after each bounded PTY read batch.
 const MAX_READ_BATCH: usize = u16::MAX as usize;
-/// Min interval between full-viewport `snapshot()` + render-buffer readbacks
-/// while PTY input is saturated (a batch hit `MAX_READ_BATCH` with more data
-/// pending). The readback is a constant-cost per-cell FFI walk (~1ms at 220×55)
-/// that used to run once per batch and dominated the vtebench cell benchmarks.
-/// The renderer samples
-/// the render buffer at most once per display frame, so under saturation one
-/// readback per frame is enough. 5ms sits below one 144 Hz frame (6.94ms), so
-/// high-refresh displays still get a fresh grid every frame; plumb the real
-/// monitor refresh rate here if 240 Hz+ becomes a target. A caught-up read
-/// (interactive echo) always snapshots — this only coalesces under saturation.
+/// Coalesce viewport captures across PTY batches, including short bursts that
+/// temporarily drain the pipe. Five milliseconds fits within a 144 Hz frame;
+/// the poll deadline publishes the final burst even when no more bytes arrive.
+/// Output after an idle interval is captured immediately.
 const SNAPSHOT_MIN_INTERVAL: time::Duration = time::Duration::from_millis(5);
 /// Match Windows Terminal's upper bound so a missing DEC 2026 reset cannot
 /// leave the last committed frame visible indefinitely.
 const SYNC_OUTPUT_TIMEOUT: time::Duration = time::Duration::from_millis(100);
+
+#[derive(Clone, Copy)]
+enum FlushReason {
+    Drained,
+    Saturated,
+    Command,
+    Exit,
+}
 
 /// Escape raw PTY bytes for human-readable vt_trace output.
 fn escape_bytes(bytes: &[u8]) -> String {
@@ -143,10 +145,9 @@ pub struct PtyPipe<T: EventedPty, U: EventListener> {
     prev_alt_screen: bool,
     /// Last value sent by both alt-screen notifications, which share one edge.
     prev_alt_screen_sent: bool,
-    /// When the last `snapshot()` readback ran, for saturation coalescing
-    /// (`SNAPSHOT_MIN_INTERVAL`). PTY-thread-private.
-    last_snapshot_at: time::Instant,
-    /// True when a saturated batch or synchronized update deferred its readback.
+    /// The last capture time; absent until the first PTY output is captured.
+    last_snapshot_at: Option<time::Instant>,
+    /// True when a recent capture or synchronized update deferred its readback.
     /// Makes the event loop run `pty_read` without requiring new PTY bytes.
     snapshot_pending: bool,
     /// Start of the current DEC 2026 transaction. The event-loop poll uses this
@@ -299,7 +300,7 @@ where
             mark_seq: 0,
             prev_alt_screen: false,
             prev_alt_screen_sent: false,
-            last_snapshot_at: time::Instant::now(),
+            last_snapshot_at: None,
             snapshot_pending: false,
             sync_output_started_at: None,
             #[cfg(enable_profiling)]
@@ -399,7 +400,11 @@ where
             );
             self.profile.start()
         };
-        let result = self.flush_engine_state(caught_up);
+        let result = self.flush_engine_state(if caught_up {
+            FlushReason::Drained
+        } else {
+            FlushReason::Saturated
+        });
         #[cfg(enable_profiling)]
         self.profile.record(Stage::Flush, flush_started);
         result
@@ -619,13 +624,16 @@ where
     }
 
     #[inline]
-    fn flush_engine_state(&mut self, caught_up: bool) -> io::Result<()> {
-        // Coalesce the full-viewport readback: a caught-up read always
-        // snapshots (interactive echo and the stream's final state land with no
-        // added latency); a saturated read rate-limits it to
-        // SNAPSHOT_MIN_INTERVAL so the readback stops dominating parse
-        // throughput (see the constant's doc).
-        let do_snapshot = caught_up || self.last_snapshot_at.elapsed() >= SNAPSHOT_MIN_INTERVAL;
+    fn flush_engine_state(&mut self, reason: FlushReason) -> io::Result<()> {
+        // An empty pipe can be a gap between producer writes, not the end of
+        // output. Both drained and saturated reads share the capture interval.
+        // Explicit view commands and shutdown still publish immediately.
+        let capture_due = match reason {
+            FlushReason::Command | FlushReason::Exit => true,
+            FlushReason::Drained | FlushReason::Saturated => self
+                .last_snapshot_at
+                .is_none_or(|at| at.elapsed() >= SNAPSHOT_MIN_INTERVAL),
+        };
 
         // Collect one batch's protocol responses, metadata, image changes,
         // and frame before delivering events that announce the publication.
@@ -648,22 +656,24 @@ where
 
             let sync_output = engine.mode(mode::SYNC_OUTPUT);
 
-            let (capture, image_delta) = if do_snapshot && !sync_output {
+            // Finishing a synchronized update commits its complete frame even
+            // when the preceding publication was recent.
+            let sync_finished = self.sync_output_started_at.is_some() && !sync_output;
+            let (capture, image_delta) = if (capture_due || sync_finished) && !sync_output {
                 #[cfg(enable_profiling)]
                 let capture_started = self.profile.start();
                 let capture = engine.snapshot_into(&mut self.back_buffer);
                 #[cfg(enable_profiling)]
                 self.profile.record(
-                    if caught_up {
-                        Stage::CaptureEager
-                    } else {
-                        Stage::CaptureSaturated
+                    match reason {
+                        FlushReason::Saturated => Stage::CaptureSaturated,
+                        _ => Stage::CaptureEager,
                     },
                     capture_started,
                 );
 
-                // Kitty image pixel deltas, under the same lock. Only the PTY
-                // reader path drives image shipping; the scroll path never calls this.
+                // Pixel updates describe the same engine state as the captured
+                // placements and reach the frontend before that frame is announced.
                 let image_delta = match &capture {
                     Ok(()) => engine.take_image_deltas(self.back_buffer.placements()),
                     Err(_) => (Vec::new(), Vec::new()),
@@ -751,25 +761,14 @@ where
 
         self.emit_interactive_state();
 
-        // Readback skipped under saturation: self-wake so another `pty_read`
-        // pass runs even if the pipe drained exactly at the MAX_READ_BATCH
-        // boundary (no OS readiness would re-fire, and the Windows soft-ready
-        // flag may already be clear). That pass either parses more pending data
-        // or reads 0 bytes, lands caught-up, and flushes this pending snapshot.
         let Some(capture) = capture else {
             self.snapshot_pending = true;
-
-            // A synchronized frame needs more PTY bytes (normally DEC reset 2026)
-            // before it is safe to publish. Waking immediately would spin while the
-            // pipe is empty; the next readable event will commit the complete frame.
-            if !sync_output {
-                let _ = self.waker.wake();
-            }
-
+            // The poll deadline retries a deferred capture without requiring
+            // another byte or spinning on self-generated wakeups.
             return Ok(());
         };
 
-        self.last_snapshot_at = time::Instant::now();
+        self.last_snapshot_at = Some(time::Instant::now());
         self.snapshot_pending = false;
 
         #[cfg(enable_profiling)]
@@ -790,6 +789,34 @@ where
         }
 
         Ok(())
+    }
+
+    fn pending_snapshot_timeout(&self) -> Option<time::Duration> {
+        if !self.snapshot_pending {
+            return None;
+        }
+
+        Some(match self.sync_output_started_at {
+            Some(started) => SYNC_OUTPUT_TIMEOUT.saturating_sub(started.elapsed()),
+            None => self.last_snapshot_at.map_or(time::Duration::ZERO, |at| {
+                SNAPSHOT_MIN_INTERVAL.saturating_sub(at.elapsed())
+            }),
+        })
+    }
+
+    fn flush_pending_on_exit(&mut self) {
+        if !self.snapshot_pending {
+            return;
+        }
+
+        // No later timer or synchronized-update terminator will arrive after
+        // the loop exits. Retain its final parsed state for closed-session views.
+        if self.ghostty.mode(mode::SYNC_OUTPUT) {
+            self.ghostty.write_vt(b"\x1b[?2026l");
+        }
+        if let Err(error) = self.flush_engine_state(FlushReason::Exit) {
+            warn!("failed to publish final terminal frame: {error}");
+        }
     }
 
     /// Drain the channel.
@@ -897,6 +924,7 @@ where
                         .fetch_add(1, sync::atomic::Ordering::Relaxed)
                         + 1;
                     self.back_buffer.theme_revision = self.theme_revision;
+                    self.last_snapshot_at = Some(time::Instant::now());
                     #[cfg(enable_profiling)]
                     let publish_started = self.profile.start();
                     let published = publish_render_buffer(
@@ -1032,8 +1060,7 @@ where
             let timeout = if self.pty.has_ready() {
                 Some(time::Duration::ZERO)
             } else {
-                self.sync_output_started_at
-                    .map(|started| SYNC_OUTPUT_TIMEOUT.saturating_sub(started.elapsed()))
+                self.pending_snapshot_timeout()
             };
 
             #[cfg(enable_profiling)]
@@ -1101,6 +1128,7 @@ where
             }
 
             if child_exited && let Some(ChildEvent::Exited) = self.pty.next_child_event() {
+                self.flush_pending_on_exit();
                 // Emit `CloseTerminal` directly; PtyPipe owns the event proxy and route id.
                 self.event_proxy
                     .send_event(TerminalEvent::CloseTerminal(self.route_id), self.window_id);
@@ -1119,9 +1147,8 @@ where
             let skip_io = false;
 
             if !skip_io {
-                // A saturated batch self-wakes, while synchronized output uses the
-                // poll deadline. Either path runs `pty_read` without new PTY bytes
-                // so the pending snapshot can flush (it reads WouldBlock at worst).
+                // Readiness drains new input; a capture deadline also reaches
+                // this path with an empty pipe to publish the final pending frame.
                 if (do_read || self.snapshot_pending)
                     && let Err(err) = self.pty_read(&mut state, &mut buf)
                 {
@@ -1165,6 +1192,8 @@ where
                 break 'event_loop;
             }
         }
+
+        self.flush_pending_on_exit();
 
         // The PTY sources are not dropped here, so deregister them explicitly.
         let _ = self.pty.deregister(&self.poll);

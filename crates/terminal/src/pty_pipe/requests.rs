@@ -7,7 +7,7 @@ use tracing::warn;
 
 use crate::event::{EventListener, Msg, TerminalEvent};
 use crate::ghostty::{BlockHandle, GhosttyTerminal};
-use crate::pty_pipe::PtyPipe;
+use crate::pty_pipe::{FlushReason, PtyPipe};
 use crate::session::page::{PAGE_ROWS, PageSource, RowPage};
 use crate::session::request::{Checkpoint, Query, RequestError, TextSource};
 use crate::session::selection::block_selection_range;
@@ -92,7 +92,7 @@ impl<T: EventedPty + Send + 'static, U: EventListener + Send + 'static> PtyPipe<
             self.profile.command();
             started
         };
-        let result = self.flush_engine_state(true);
+        let result = self.flush_engine_state(FlushReason::Command);
         #[cfg(enable_profiling)]
         self.profile.record(Stage::Flush, flush_started);
         if let Err(error) = result {
