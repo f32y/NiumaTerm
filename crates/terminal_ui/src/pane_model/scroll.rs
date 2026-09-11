@@ -2,8 +2,9 @@ use crate::block_list::nav_item_top;
 use crate::layout::frame_content_rows;
 use crate::pane_model::PaneController;
 use crate::pane_model::list_mirror::{BlockListMirror, ListOp};
-use crate::pane_model::viewport::Viewport;
+use crate::pane_model::viewport::{LocalPoint, Viewport};
 
+#[derive(Debug)]
 pub(crate) enum ScrollOutcome {
     Ignored,
     GridRequested,
@@ -11,6 +12,22 @@ pub(crate) enum ScrollOutcome {
 }
 
 impl PaneController {
+    pub(crate) fn scrollbar_mouse_down(
+        &mut self,
+        position: LocalPoint,
+        thumb_top: f32,
+        thumb_height: f32,
+    ) -> ScrollOutcome {
+        let fraction = (position.y / self.content_size.1.max(1.0)).clamp(0.0, 1.0);
+        if (thumb_top..thumb_top + thumb_height).contains(&fraction) {
+            self.scrollbar.begin_drag(fraction - thumb_top);
+            ScrollOutcome::Ignored
+        } else {
+            self.scrollbar.begin_drag(thumb_height / 2.0);
+            self.scroll_thumb_to(self.scrollbar.thumb_top_for(fraction))
+        }
+    }
+
     pub(crate) fn scroll_to_latest(&mut self) -> ScrollOutcome {
         if !self.viewport.is_scrolled() {
             return ScrollOutcome::Ignored;

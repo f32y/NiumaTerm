@@ -10,6 +10,7 @@ pub(crate) use nmt_terminal::session::BlockPoint as FrozenPoint;
 pub(crate) mod chrome;
 mod geometry;
 mod images;
+pub(crate) mod live;
 pub(crate) mod reconcile;
 mod rows;
 mod selection;

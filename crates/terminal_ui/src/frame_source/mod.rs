@@ -12,9 +12,11 @@ use crate::pane_model::FrameTheme;
 use crate::session_bridge::SessionBridge;
 use crate::wake::{Wake, WakeSender, WakeSignal};
 
+mod items;
 #[cfg(all(test, windows, enable_profiling))]
 mod profile_tests;
 mod reads;
+pub(crate) use crate::frame_source::items::ItemViewport;
 #[cfg(test)]
 mod tests;
 

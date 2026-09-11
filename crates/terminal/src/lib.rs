@@ -5,6 +5,8 @@ pub mod event;
 pub mod ghostty;
 pub mod graphics;
 pub mod grid_emit;
+pub mod input;
+pub mod links;
 pub mod pty_pipe;
 pub mod publication;
 pub mod render_buffer;

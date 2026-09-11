@@ -1,4 +1,4 @@
-use gpui::{Context, Pixels};
+use gpui::Context;
 
 use crate::pane_model::scroll::ScrollOutcome;
 use crate::scrollbar::geometry::SCROLLBAR_AUTO_HIDE_DELAY;
@@ -21,13 +21,7 @@ impl TerminalPane {
         cx.notify();
     }
 
-    pub(crate) fn scrollbar_fraction(&self, y: Pixels) -> f32 {
-        let bounds = self.content_bounds.unwrap_or_default();
-        ((y.as_f32() - bounds.origin.y.as_f32()) / bounds.size.height.as_f32().max(1.0))
-            .clamp(0.0, 1.0)
-    }
-
-    pub(super) fn apply_scroll_outcome(
+    pub(crate) fn apply_scroll_outcome(
         &mut self,
         outcome: ScrollOutcome,
         cx: &mut Context<Self>,
@@ -47,10 +41,5 @@ impl TerminalPane {
     pub(super) fn scroll_to_latest(&mut self, cx: &mut Context<Self>) -> bool {
         let outcome = self.model.scroll_to_latest();
         self.apply_scroll_outcome(outcome, cx)
-    }
-
-    pub(crate) fn scroll_thumb_to(&mut self, thumb_top: f32, cx: &mut Context<Self>) {
-        let outcome = self.model.scroll_thumb_to(thumb_top);
-        self.apply_scroll_outcome(outcome, cx);
     }
 }

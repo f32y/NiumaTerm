@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use nmt_terminal::ghostty::ScrollbarInfo;
 use nmt_terminal::session::{SurfaceCell, SurfaceCellSide};
 
@@ -21,7 +23,7 @@ pub(crate) struct LocalRect {
 pub(crate) enum Viewport {
     Grid {
         scrollbar: ScrollbarInfo,
-        row_offsets: Vec<f32>,
+        row_offsets: Arc<[f32]>,
     },
     BlockList {
         scroll_px: f32,
@@ -35,12 +37,19 @@ impl Default for Viewport {
     fn default() -> Self {
         Self::Grid {
             scrollbar: ScrollbarInfo::default(),
-            row_offsets: Vec::new(),
+            row_offsets: Arc::default(),
         }
     }
 }
 
 impl Viewport {
+    pub(crate) fn row_offsets(&self) -> Arc<[f32]> {
+        match self {
+            Self::Grid { row_offsets, .. } => row_offsets.clone(),
+            Self::BlockList { .. } => Arc::default(),
+        }
+    }
+
     pub(crate) fn is_scrolled(&self) -> bool {
         match self {
             Self::Grid { scrollbar, .. } => {
@@ -94,7 +103,7 @@ impl Viewport {
     ) -> (SurfaceCell, SurfaceCellSide) {
         let x = local.x.max(0.0);
         let (y, offsets) = match self {
-            Self::Grid { row_offsets, .. } => (local.y.max(0.0), row_offsets.as_slice()),
+            Self::Grid { row_offsets, .. } => (local.y.max(0.0), row_offsets.as_ref()),
             Self::BlockList { active_top, .. } => ((local.y - active_top).max(0.0), &[][..]),
         };
         let col = (x / cell.width_px).floor() as u16;

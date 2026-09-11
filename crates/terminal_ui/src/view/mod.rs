@@ -1,6 +1,7 @@
 mod blocks;
 mod events;
 mod input;
+mod key;
 pub(crate) mod links;
 mod list_state;
 mod mouse;
@@ -140,18 +141,14 @@ impl TerminalPane {
                 .list
                 .set_alignment(block_list_alignment(settings.fixed_bottom));
 
-            this.model.source.session.set_theme_colors(&colors);
-
-            if settings.cursor_shape != this.model.settings.cursor_shape {
-                let previous = this.model.settings.cursor_shape;
-                let requested = settings.cursor_shape;
-                let request = this.model.source.session.set_cursor_shape(requested);
+            if let Some(update) = this
+                .model
+                .update_settings(settings, &colors, duration_labels())
+            {
                 cx.spawn(async move |this, cx| {
-                    if !matches!(request.await, Ok(Ok(()))) {
+                    if let Some(failure) = update.failure().await {
                         let _ = this.update(cx, |this, cx| {
-                            if this.model.settings.cursor_shape == requested {
-                                this.model.settings.cursor_shape = previous;
-                                this.invalidate(cx);
+                            if this.model.cursor_shape_failed(failure) {
                                 cx.notify();
                             }
                         });
@@ -159,13 +156,6 @@ impl TerminalPane {
                 })
                 .detach();
             }
-
-            this.model.settings = settings;
-            this.model.theme = FrameTheme::from(&colors);
-            this.model.duration_labels = duration_labels();
-            this.model.cell_metrics = None;
-
-            this.model.frame_cache.invalidate_full();
 
             cx.notify();
         })
@@ -214,10 +204,8 @@ impl TerminalPane {
     }
 
     fn cell_metrics(&mut self, window: &mut Window, cx: &App) -> metrics::CellMetrics {
-        *self
-            .model
-            .cell_metrics
-            .get_or_insert_with(|| metrics::measure_cell(window, cx))
+        self.model
+            .cell_metrics_or_measure(|| metrics::measure_cell(window, cx))
     }
 
     /// Top-left of the terminal content in window coords (falls back to origin
@@ -237,32 +225,23 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         self.content_bounds = Some(bounds);
-        self.model.content_size = (bounds.size.width.as_f32(), bounds.size.height.as_f32());
-        self.model.cell_metrics = Some(cell);
-        self.model.update_viewport();
-
-        if self.model.source.resize_for_content(
+        if self.model.resize_content(
             bounds.size.width.as_f32(),
             bounds.size.height.as_f32(),
             cell,
         ) {
-            self.model.frame_cache.invalidate();
             cx.notify();
         }
     }
 
     fn invalidate(&mut self, cx: &mut Context<Self>) {
-        self.model.frame_cache.invalidate();
-
-        if self.model.dirty.mark() {
+        if self.model.invalidate() {
             cx.notify();
         }
     }
 
     fn invalidate_chrome(&mut self, cx: &mut Context<Self>) {
-        self.model.frame_cache.invalidate();
-
-        self.model.dirty.mark();
+        self.model.invalidate();
 
         // Background panes cannot clear their dirty bit by rendering, but the
         // shell observer still needs every chrome wake to refresh tab state.
@@ -337,8 +316,6 @@ impl Render for TerminalPane {
             self.image_releases_attached = true;
         }
 
-        self.model.dirty.begin_frame();
-
         self.wake.mark_delivered(self.identity.id);
 
         // Host events are drained by the shell pump (observer), and the surface
@@ -346,13 +323,7 @@ impl Render for TerminalPane {
         // here, so background tabs and chrome offsets are handled correctly.
         let cell = self.cell_metrics(window, cx);
 
-        if self.model.frame_cache.needs_rebuild() {
-            self.model.refresh_frame();
-        }
-
-        let frame = self.model.frame_cache.current().unwrap_or_default();
-
-        let fixed_bottom = self.model.settings.fixed_bottom;
+        let frame = self.model.begin_frame();
         let show_block_chrome = self.model.settings.show_block_chrome;
 
         self.block_list
@@ -417,12 +388,8 @@ impl Render for TerminalPane {
             // Moving off the pane produces no further mouse-move events here,
             // so hover end is what clears a still-Ctrl-held underline.
             .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
-                if !hovered {
-                    this.model.links.forget_position();
-
-                    if this.model.links.clear() {
-                        cx.notify();
-                    }
+                if !hovered && this.model.pointer_left() {
+                    cx.notify();
                 }
             }))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
@@ -444,14 +411,13 @@ impl Render for TerminalPane {
                 }
                 .into_any_element()
             } else {
-                TerminalView::new(frame, cell, self.focus.clone(), cx.entity(), fixed_bottom)
-                    .into_any_element()
+                TerminalView::new(frame, cell, self.focus.clone(), cx.entity()).into_any_element()
             })
             .children(scrollbar)
             // Ctrl-hover link underline. Rects are content-origin-relative;
             // absolute children position from the padding box, so shift by
             // the content padding.
-            .when_some(self.model.links.current(), |this, link| {
+            .when_some(self.model.hovered_link(), |this, link| {
                 this.cursor_pointer()
                     .children(link.rects.iter().map(|rect| {
                         div()

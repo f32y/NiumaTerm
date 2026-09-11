@@ -1,18 +1,33 @@
-use gpui::{Keystroke, Modifiers};
 use nmt_config::system::NewlineShortcut;
+use nmt_input::keyboard::ModifiersState;
 
-use crate::input::{key_action, pty_bytes_for_key, should_defer_to_ime};
-use crate::pane_model::key_action::TerminalKeyAction;
+use crate::input::{
+    TerminalKey, TerminalKeyAction, WheelDelta, key_action, pty_bytes_for_key, should_defer_to_ime,
+};
 
-fn key(name: &str, key_char: Option<&str>) -> Keystroke {
-    Keystroke {
-        modifiers: Modifiers::none(),
-        key: name.to_string(),
-        key_char: key_char.map(str::to_string),
+#[test]
+fn wheel_steps_and_smooth_rows_use_terminal_speed_and_rounding() {
+    assert_eq!(WheelDelta::Rows(3.0).lines(), 3);
+    assert_eq!(WheelDelta::Steps(-2.0).lines(), -6);
+    assert_eq!(WheelDelta::Rows(0.2).lines(), 0);
+    assert_eq!(WheelDelta::Rows(-0.5).lines(), -1);
+    assert_eq!(WheelDelta::Rows(1.5).lines(), 2);
+}
+
+fn key<'a>(name: &'a str, key_char: Option<&'a str>) -> TerminalKey<'a> {
+    TerminalKey {
+        modifiers: ModifiersState::empty(),
+        key: name,
+        key_char,
+        function: false,
     }
 }
 
-fn modified(name: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
+fn modified<'a>(
+    name: &'a str,
+    key_char: Option<&'a str>,
+    modifiers: ModifiersState,
+) -> TerminalKey<'a> {
     let mut key = key(name, key_char);
     key.modifiers = modifiers;
     key
@@ -40,13 +55,13 @@ fn basic_control_keys_send_terminal_bytes() {
 
 #[test]
 fn legacy_enter_modifiers_match_windows_terminal() {
-    let mut ctrl_alt = Modifiers::control();
+    let mut ctrl_alt = ModifiersState::CONTROL;
 
-    ctrl_alt.alt = true;
+    ctrl_alt.insert(ModifiersState::ALT);
 
     assert_eq!(
         pty_bytes_for_key(
-            &modified("enter", Some("\r"), Modifiers::none()),
+            &modified("enter", Some("\r"), ModifiersState::empty()),
             NewlineShortcut::CtrlEnter,
         )
         .as_deref(),
@@ -54,7 +69,7 @@ fn legacy_enter_modifiers_match_windows_terminal() {
     );
     assert_eq!(
         pty_bytes_for_key(
-            &modified("enter", Some("\r"), Modifiers::control()),
+            &modified("enter", Some("\r"), ModifiersState::CONTROL),
             NewlineShortcut::CtrlEnter,
         )
         .as_deref(),
@@ -62,7 +77,7 @@ fn legacy_enter_modifiers_match_windows_terminal() {
     );
     assert_eq!(
         pty_bytes_for_key(
-            &modified("enter", Some("\r"), Modifiers::alt()),
+            &modified("enter", Some("\r"), ModifiersState::ALT),
             NewlineShortcut::CtrlEnter,
         )
         .as_deref(),
@@ -80,8 +95,8 @@ fn legacy_enter_modifiers_match_windows_terminal() {
 
 #[test]
 fn newline_shortcut_controls_modified_enter() {
-    let ctrl_enter = modified("enter", Some("\r"), Modifiers::control());
-    let shift_enter = modified("enter", Some("\r"), Modifiers::shift());
+    let ctrl_enter = modified("enter", Some("\r"), ModifiersState::CONTROL);
+    let shift_enter = modified("enter", Some("\r"), ModifiersState::SHIFT);
 
     for (shortcut, ctrl_bytes, shift_bytes) in [
         (NewlineShortcut::CtrlEnter, b'\n', b'\r'),
@@ -123,7 +138,7 @@ fn function_keys_use_terminal_sequences() {
 fn modified_named_keys_include_modifier_parameters() {
     let mut ctrl_left = key("left", None);
 
-    ctrl_left.modifiers.control = true;
+    ctrl_left.modifiers.insert(ModifiersState::CONTROL);
 
     assert_eq!(
         pty_bytes_for_key(&ctrl_left, NewlineShortcut::CtrlEnter).as_deref(),
@@ -132,7 +147,7 @@ fn modified_named_keys_include_modifier_parameters() {
 
     let mut shift_tab = key("tab", None);
 
-    shift_tab.modifiers.shift = true;
+    shift_tab.modifiers.insert(ModifiersState::SHIFT);
 
     assert_eq!(
         pty_bytes_for_key(&shift_tab, NewlineShortcut::CtrlEnter).as_deref(),
@@ -147,7 +162,7 @@ fn plain_ctrl_chords_send_legacy_control_bytes() {
     for (name, byte) in [("z", 0x1au8), ("d", 0x04), ("\\", 0x1c)] {
         assert_eq!(
             pty_bytes_for_key(
-                &modified(name, None, Modifiers::control()),
+                &modified(name, None, ModifiersState::CONTROL),
                 NewlineShortcut::CtrlEnter,
             )
             .as_deref(),
@@ -157,9 +172,9 @@ fn plain_ctrl_chords_send_legacy_control_bytes() {
     }
 
     // Ctrl-Shift chords stay with the UI (copy/paste shortcuts).
-    let mut ctrl_shift = Modifiers::control();
+    let mut ctrl_shift = ModifiersState::CONTROL;
 
-    ctrl_shift.shift = true;
+    ctrl_shift.insert(ModifiersState::SHIFT);
 
     assert_eq!(
         pty_bytes_for_key(&modified("x", None, ctrl_shift), NewlineShortcut::CtrlEnter,),
@@ -174,7 +189,7 @@ fn plain_text_defers_to_ime_but_special_keys_do_not() {
     assert!(should_defer_to_ime(&modified(
         "A",
         Some("A"),
-        Modifiers::shift()
+        ModifiersState::SHIFT
     )));
 
     // Named keys and modified keys still encode in on_key_down.
@@ -183,7 +198,7 @@ fn plain_text_defers_to_ime_but_special_keys_do_not() {
     assert!(!should_defer_to_ime(&modified(
         "c",
         Some("c"),
-        Modifiers::control()
+        ModifiersState::CONTROL
     )));
 
     // A key with no committed character never defers.
@@ -193,8 +208,8 @@ fn plain_text_defers_to_ime_but_special_keys_do_not() {
 #[cfg(not(target_os = "macos"))]
 #[test]
 fn copy_paste_shortcuts_are_actions_not_pty_bytes() {
-    let copy = modified("c", Some("c"), Modifiers::control());
-    let paste = modified("v", Some("v"), Modifiers::control());
+    let copy = modified("c", Some("c"), ModifiersState::CONTROL);
+    let paste = modified("v", Some("v"), ModifiersState::CONTROL);
 
     assert_eq!(
         key_action(&copy, NewlineShortcut::CtrlEnter),
@@ -210,8 +225,16 @@ fn copy_paste_shortcuts_are_actions_not_pty_bytes() {
 #[cfg(not(target_os = "macos"))]
 #[test]
 fn ctrl_shift_copy_paste_are_no_longer_app_shortcuts() {
-    let copy = modified("c", Some("c"), Modifiers::control_shift());
-    let paste = modified("v", Some("v"), Modifiers::control_shift());
+    let copy = modified(
+        "c",
+        Some("c"),
+        ModifiersState::CONTROL | ModifiersState::SHIFT,
+    );
+    let paste = modified(
+        "v",
+        Some("v"),
+        ModifiersState::CONTROL | ModifiersState::SHIFT,
+    );
 
     assert_eq!(
         key_action(&copy, NewlineShortcut::CtrlEnter),
@@ -227,8 +250,8 @@ fn ctrl_shift_copy_paste_are_no_longer_app_shortcuts() {
 #[test]
 fn command_copy_paste_are_actions_not_pty_bytes() {
     // AppKit reports no committed character for a Command or Control chord.
-    let copy = modified("c", None, Modifiers::command());
-    let paste = modified("v", None, Modifiers::command());
+    let copy = modified("c", None, ModifiersState::SUPER);
+    let paste = modified("v", None, ModifiersState::SUPER);
 
     assert_eq!(
         key_action(&copy, NewlineShortcut::CtrlEnter),
@@ -245,7 +268,7 @@ fn command_copy_paste_are_actions_not_pty_bytes() {
 #[cfg(target_os = "macos")]
 #[test]
 fn control_c_stays_the_interrupt_byte_beside_command_c() {
-    let interrupt = modified("c", None, Modifiers::control());
+    let interrupt = modified("c", None, ModifiersState::CONTROL);
 
     assert_eq!(
         pty_bytes_for_key(&interrupt, NewlineShortcut::CtrlEnter),

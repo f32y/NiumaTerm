@@ -1,6 +1,8 @@
 //! Terminal presentation and its GPUI host.
 //!
-//! `pane_model` owns interaction state and returns input and list operations.
+//! `nmt_terminal` owns input encoding, cell selection, copy requests, and link
+//! interpretation. `pane_model` maps pixel gestures onto those operations and
+//! owns frame and list state.
 //! `frame_source` reads the session and resolves images. `view`, `terminal_view`
 //! and `paint` own entities, elements, timers, and drawing. Presentation values
 //! receive settings and theme snapshots instead of consulting host globals.
@@ -14,9 +16,7 @@ pub(crate) mod block_list;
 pub(crate) mod dirty;
 pub mod frame;
 pub(crate) mod graphics;
-pub(crate) mod input;
 pub(crate) mod layout;
-pub(crate) mod links;
 pub mod metrics;
 pub(crate) mod paint;
 pub(crate) mod scrollbar;

@@ -1,20 +1,19 @@
-use std::{collections, panic, sync};
+use std::{panic, sync};
 
 use gpui::{
     App, Bounds, Element, ElementId, Entity, GlobalElementId, InspectorElementId, IntoElement,
     LayoutId, Pixels, ShapedLine, Style, Window, point, px, relative, size,
 };
 use nmt_terminal::block_store::BlockStore;
-use nmt_terminal::session::page::PAGE_ROWS;
 use parking_lot::Mutex;
 
-use crate::block_list::block_list_live_chrome;
+use crate::block_list::live::LiveItemState;
 use crate::frame::TerminalFrame;
+use crate::frame_source::ItemViewport;
 use crate::layout::frame_content_rows;
 use crate::paint::blocks::{paint_frozen, shape_frozen_rows};
 use crate::paint::frame::{paint_frame, paint_frozen_images, shape_frame};
 use crate::pane_model::frame_record::FrameRecord;
-use crate::session::InFlightBlock;
 use crate::view::TerminalPane;
 use crate::{block_list, metrics};
 
@@ -35,10 +34,7 @@ pub(crate) enum BlockListItem {
         /// Active-grid scrollback rows rendered above the live grid
         /// when scrolling into a running command.
         history_rows: u64,
-        in_flight: Option<InFlightBlock>,
-        has_open_prompt: bool,
-        live_index: usize,
-        selected_item: Option<usize>,
+        state: LiveItemState,
         cols: u32,
         cell: metrics::CellMetrics,
         pane: Entity<TerminalPane>,
@@ -62,6 +58,7 @@ pub(crate) enum BlockListItemPrepaint {
         tail_view: block_list::FrozenView,
         tail_shaped: Vec<ShapedLine>,
         active_shaped: Vec<ShapedLine>,
+        active_bounds: Bounds<Pixels>,
     },
 }
 
@@ -140,6 +137,12 @@ impl Element for BlockListItem {
         let origin_y = self.pane().read(cx).content_origin().y;
         let item_top = (bounds.top() - origin_y).as_f32();
         let pad_rows = self.pane().read(cx).model.settings.pad_rows;
+        let viewport = ItemViewport {
+            top: bounds.top().as_f32(),
+            height: window.viewport_size().height.as_f32(),
+            cell_height: self.cell().height_px,
+            pad_rows,
+        };
 
         match self {
             BlockListItem::Frozen {
@@ -151,67 +154,15 @@ impl Element for BlockListItem {
                 selected_item,
                 pane,
             } => {
-                let snapshot = pane.read(cx).model.source.session.block_item(*item_idx);
-                let mut view = match snapshot.and_then(|item| {
-                    block_list::handle_item_info(&item, &pane.read(cx).model.duration_labels)
-                        .zip(item.handle())
-                }) {
-                    Some((info, handle)) => {
-                        let visible = block_list::visible_rows(
-                            bounds.top().as_f32(),
-                            info.rows,
-                            window.viewport_size().height.as_f32(),
-                            cell.height_px,
-                            pad_rows,
-                        );
-                        let surface = &pane.read(cx).model.source;
-                        let first = visible.start / PAGE_ROWS * PAGE_ROWS;
-                        let pages: Vec<_> = (first..visible.end)
-                            .step_by(PAGE_ROWS)
-                            .filter_map(|row| surface.session.block_page(handle, row))
-                            .collect();
-                        let mut view = block_list::frozen_block_view(
-                            &pages,
-                            &info,
-                            *item_idx,
-                            visible.clone(),
-                            cell.height_px,
-                            pad_rows,
-                            *selection,
-                            *selected_item,
-                            theme.foreground,
-                        );
-                        let mut seen = collections::HashSet::new();
-                        let mut placements = Vec::new();
-                        let mut generations = collections::HashMap::new();
-                        for page in &pages {
-                            for placement in &page.placements {
-                                if seen.insert((
-                                    placement.image_id,
-                                    placement.placement_id,
-                                    placement.screen_col,
-                                    placement.screen_row,
-                                )) {
-                                    placements.push(*placement);
-                                }
-                                if let Some(generation) =
-                                    surface.frozen_image(page, placement.image_id)
-                                {
-                                    generations.insert(placement.image_id, generation);
-                                }
-                            }
-                        }
-                        view.images = block_list::frozen_block_images(
-                            &placements,
-                            &generations,
-                            &visible,
-                            cell.height_px,
-                            pad_rows,
-                        );
-                        view
-                    }
-                    None => Default::default(),
-                };
+                let model = &pane.read(cx).model;
+                let mut view = model.source.frozen_block_view(
+                    *item_idx,
+                    &viewport,
+                    *selection,
+                    *selected_item,
+                    &model.duration_labels,
+                    theme.foreground,
+                );
 
                 let record = FrameRecord::from_view(&view, item_top);
                 pane.update(cx, |pane, _| pane.model.record_frame(record));
@@ -225,75 +176,30 @@ impl Element for BlockListItem {
             BlockListItem::Live {
                 frame,
                 history_rows,
-                in_flight,
-                has_open_prompt,
-                live_index,
-                selected_item,
+                state,
                 cols,
                 cell,
                 pane,
             } => {
-                // The active grid's scrollback rows render above the live
-                // grid, visible range only; a running command's
-                // scroll-up history).
-                let tail_view = {
-                    let visible = block_list::visible_rows(
-                        bounds.top().as_f32(),
-                        (*history_rows).min(usize::MAX as u64) as usize,
-                        window.viewport_size().height.as_f32(),
-                        cell.height_px,
-                        pad_rows,
-                    );
-
-                    let pane = pane.read(cx);
-
-                    let lines = pane.model.source.live_history_lines(
-                        visible.start as u64..visible.end as u64,
-                        theme.foreground,
-                    );
-                    let selection = pane
-                        .model
-                        .source
-                        .session
-                        .selection_screen_range_in(&pane.model.source.snapshot);
-
-                    block_list::live_history_view(
-                        lines,
-                        *history_rows,
-                        *cols,
-                        cell.height_px,
-                        pad_rows,
-                        selection,
-                    )
-                };
+                let tail_view = pane.read(cx).model.source.live_history_view(
+                    *history_rows,
+                    *cols,
+                    &viewport,
+                    theme.foreground,
+                );
 
                 let live_rows = frame_content_rows(frame);
 
-                let live_chrome = block_list_live_chrome(
-                    *live_index,
-                    live_rows,
-                    cell.height_px,
-                    in_flight.as_ref(),
-                    *has_open_prompt,
-                    *selected_item == Some(*live_index),
-                );
-
-                let mut record = FrameRecord::from_view(&tail_view, item_top);
-                record.active_top = Some(item_top + tail_view.active_top);
-                if let Some(mut chrome) = live_chrome {
-                    chrome.bottom = tail_view.active_top
-                        + live_rows as f32 * cell.height_px
-                        + pad_rows * cell.height_px;
-                    chrome.header_y = tail_view.active_top;
-                    record.push_chrome(chrome, item_top);
-                }
+                let layout =
+                    state.layout(tail_view.active_top, live_rows, cell.height_px, pad_rows);
+                let record = FrameRecord::from_live_view(&tail_view, &layout, item_top);
                 pane.update(cx, |pane, _| pane.model.record_frame(record));
 
                 let tail_shaped = shape_frozen_rows(&tail_view.rows, cell.width_px, window);
 
                 let active_bounds = Bounds::new(
-                    point(bounds.left(), bounds.top() + px(tail_view.active_top)),
-                    size(bounds.size.width, px(live_rows as f32 * cell.height_px)),
+                    point(bounds.left(), bounds.top() + px(layout.active_top)),
+                    size(bounds.size.width, px(layout.active_height)),
                 );
 
                 let active_shaped = shape_frame(active_bounds, frame, *cell, window);
@@ -302,6 +208,7 @@ impl Element for BlockListItem {
                     tail_view,
                     tail_shaped,
                     active_shaped,
+                    active_bounds,
                 }
             }
         }
@@ -335,6 +242,7 @@ impl Element for BlockListItem {
                     tail_view,
                     tail_shaped,
                     active_shaped,
+                    active_bounds,
                 },
             ) => {
                 paint_frozen(
@@ -347,16 +255,8 @@ impl Element for BlockListItem {
                     cx,
                 );
 
-                let active_bounds = Bounds::new(
-                    point(bounds.left(), bounds.top() + px(tail_view.active_top)),
-                    size(
-                        bounds.size.width,
-                        px(active_shaped.len() as f32 * cell.height_px),
-                    ),
-                );
-
                 paint_frame(
-                    active_bounds,
+                    *active_bounds,
                     frame,
                     active_shaped.as_slice(),
                     *cell,
@@ -371,6 +271,12 @@ impl Element for BlockListItem {
 }
 
 impl BlockListItem {
+    fn cell(&self) -> metrics::CellMetrics {
+        match self {
+            Self::Frozen { cell, .. } | Self::Live { cell, .. } => *cell,
+        }
+    }
+
     fn pane(&self) -> &Entity<TerminalPane> {
         match self {
             BlockListItem::Frozen { pane, .. } | BlockListItem::Live { pane, .. } => pane,

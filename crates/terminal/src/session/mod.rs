@@ -37,6 +37,7 @@ pub use crate::session::rows::RowText;
 mod config;
 mod error;
 mod input;
+pub mod interaction;
 mod mouse;
 mod observer;
 mod proxy;

@@ -5,6 +5,7 @@ mod item;
 mod tests;
 
 use std::panic;
+use std::sync::Arc;
 
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, Element, ElementId, ElementInputHandler, Entity,
@@ -13,7 +14,6 @@ use gpui::{
 };
 
 use crate::frame::TerminalFrame;
-use crate::layout::bottom_anchor_offsets;
 use crate::metrics;
 #[cfg(test)]
 pub(crate) use crate::paint::frame::cursor_bounds;
@@ -29,9 +29,6 @@ pub(crate) struct TerminalView {
     cell: metrics::CellMetrics,
     focus: FocusHandle,
     pane: Entity<TerminalPane>,
-    /// FixedBottom input style: bottom-anchor the grid so the last content row
-    /// pins to the viewport floor to match Warp, including interactive output.
-    fixed_bottom: bool,
 }
 
 impl TerminalView {
@@ -40,14 +37,12 @@ impl TerminalView {
         cell: metrics::CellMetrics,
         focus: FocusHandle,
         pane: Entity<TerminalPane>,
-        fixed_bottom: bool,
     ) -> Self {
         Self {
             frame,
             cell,
             focus,
             pane,
-            fixed_bottom,
         }
     }
 }
@@ -60,9 +55,14 @@ impl IntoElement for TerminalView {
     }
 }
 
+pub(crate) struct TerminalPrepaint {
+    shaped: Vec<ShapedLine>,
+    row_offsets: Arc<[f32]>,
+}
+
 impl Element for TerminalView {
     type RequestLayoutState = Style;
-    type PrepaintState = Vec<ShapedLine>;
+    type PrepaintState = TerminalPrepaint;
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -97,15 +97,20 @@ impl Element for TerminalView {
         _request_layout: &mut Style,
         window: &mut Window,
         cx: &mut App,
-    ) -> Vec<ShapedLine> {
+    ) -> TerminalPrepaint {
         // Feed the real content rect back to the pane so it resizes the surface to
         // its actual area (below the tab bar), not the full window.
         let cell = self.cell;
 
-        self.pane
-            .update(cx, |pane, cx| pane.set_content_bounds(bounds, cell, cx));
+        let row_offsets = self.pane.update(cx, |pane, cx| {
+            pane.set_content_bounds(bounds, cell, cx);
+            pane.model.viewport.row_offsets()
+        });
 
-        shape_frame(bounds, &self.frame, self.cell, window)
+        TerminalPrepaint {
+            shaped: shape_frame(bounds, &self.frame, self.cell, window),
+            row_offsets,
+        }
     }
 
     fn paint(
@@ -114,18 +119,16 @@ impl Element for TerminalView {
         _inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         _request_layout: &mut Style,
-        prepaint: &mut Vec<ShapedLine>,
+        prepaint: &mut TerminalPrepaint,
         window: &mut Window,
         cx: &mut App,
     ) {
-        let offsets = bottom_anchor_offsets(&self.frame, self.cell.height_px, self.fixed_bottom);
-
         paint_frame(
             bounds,
             &self.frame,
-            prepaint.as_slice(),
+            prepaint.shaped.as_slice(),
             self.cell,
-            &offsets,
+            &prepaint.row_offsets,
             window,
             cx,
         );

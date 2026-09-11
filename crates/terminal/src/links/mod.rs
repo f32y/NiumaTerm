@@ -1,16 +1,18 @@
 use std::ops::Range;
 
-use nmt_terminal::session::RowText;
+use nmt_input::keyboard::ModifiersState;
+
+use crate::session::RowText;
 
 #[derive(Debug, PartialEq)]
-pub(crate) struct RowSegment {
+pub struct RowSegment {
     pub delta: i64,
     pub col: usize,
     pub cols: usize,
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) struct ResolvedLink {
+pub struct ResolvedLink {
     pub url: String,
     pub segments: Vec<RowSegment>,
 }
@@ -81,10 +83,7 @@ fn url_at_col(text: &str, col: usize) -> Option<(String, Range<usize>)> {
     (url_range.contains(&col) && open_allowed(url)).then(|| (url.to_string(), url_range))
 }
 
-pub(crate) fn resolve_link(
-    col: usize,
-    row_at: impl Fn(i64) -> Option<RowText>,
-) -> Option<ResolvedLink> {
+pub fn resolve_link(col: usize, row_at: impl Fn(i64) -> Option<RowText>) -> Option<ResolvedLink> {
     let segment = |delta, col, cols| Some(RowSegment { delta, col, cols });
     let pointed = row_at(0)?;
 
@@ -107,7 +106,7 @@ pub(crate) fn resolve_link(
 
     // Join cap bounds the engine row reads per hover/click: a wrapped
     // logical line can chain through the whole scrollback (e.g. `cat` of
-    // a minified file), and each joined row is a locked engine read. A
+    // a minified file), and each joined row may require a page lookup. A
     // URL wrapping further than ±8 rows truncates at the cap.
     const JOIN_CAP: i64 = 8;
 
@@ -165,6 +164,16 @@ pub(crate) fn resolve_link(
         url,
         segments: rects,
     })
+}
+
+/// macOS reserves Control-click for the secondary click, so links use
+/// Command there. Other platforms use Control without additional modifiers.
+pub fn follows_link(modifiers: ModifiersState) -> bool {
+    #[cfg(target_os = "macos")]
+    let expected = ModifiersState::SUPER;
+    #[cfg(not(target_os = "macos"))]
+    let expected = ModifiersState::CONTROL;
+    modifiers == expected
 }
 
 #[cfg(test)]

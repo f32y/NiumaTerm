@@ -1,4 +1,4 @@
-use std::time;
+use std::{mem, time};
 
 use crate::scrollbar::geometry::scrollbar_opacity;
 /// Scrollbar drag and fade state. The bar is opaque while the thumb is held
@@ -37,8 +37,8 @@ impl ScrollbarActivity {
         self.grab = grab;
     }
 
-    pub(crate) fn end_drag(&mut self) {
-        self.dragging = false;
+    pub(super) fn end_drag(&mut self) -> bool {
+        mem::take(&mut self.dragging)
     }
 
     pub(crate) fn is_dragging(&self) -> bool {

@@ -1,14 +1,27 @@
-use gpui::{Keystroke, Modifiers};
 use nmt_config::system::NewlineShortcut;
 use nmt_input::event::ElementState;
 use nmt_input::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
 use nmt_input::{KeyEncodeFlags, KeyInput, encode_terminal_input};
 
-use crate::pane_model::key_action::TerminalKeyAction;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum TerminalKeyAction {
+    Write(Vec<u8>),
+    CopyOrWrite(Vec<u8>),
+    Paste,
+    Ignore,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct TerminalKey<'a> {
+    pub key: &'a str,
+    pub key_char: Option<&'a str>,
+    pub modifiers: ModifiersState,
+    pub function: bool,
+}
 
 #[cfg(test)]
 pub(crate) fn pty_bytes_for_key(
-    event: &Keystroke,
+    event: &TerminalKey<'_>,
     newline_shortcut: NewlineShortcut,
 ) -> Option<Vec<u8>> {
     match key_action(event, newline_shortcut) {
@@ -20,19 +33,19 @@ pub(crate) fn pty_bytes_for_key(
 }
 
 /// Whether a keystroke is plain printable text that the platform delivers
-/// through the char/IME path (`replace_text_in_range`). Such keys must NOT also
-/// be encoded in `on_key_down`, or the character is written to the PTY twice.
+/// through the host's char/IME commit path. Encoding the same key in its key
+/// handler would write the character to the PTY twice.
 /// Named keys (Enter, Tab, arrows, …) and modified keys still encode normally.
-pub(crate) fn should_defer_to_ime(event: &Keystroke) -> bool {
+pub fn should_defer_to_ime(event: &TerminalKey<'_>) -> bool {
     event.key_char.is_some()
-        && !event.modifiers.control
-        && !event.modifiers.alt
-        && !event.modifiers.platform
-        && named_key(&event.key).is_none()
+        && !event.modifiers.control_key()
+        && !event.modifiers.alt_key()
+        && !event.modifiers.super_key()
+        && named_key(event.key).is_none()
 }
 
 pub(crate) fn key_action(
-    event: &Keystroke,
+    event: &TerminalKey<'_>,
     newline_shortcut: NewlineShortcut,
 ) -> TerminalKeyAction {
     if let Some(action) = modified_enter_action(event, newline_shortcut) {
@@ -47,7 +60,7 @@ pub(crate) fn key_action(
 
     encode_terminal_input(
         &input,
-        modifiers_state(event.modifiers),
+        event.modifiers,
         KeyEncodeFlags::empty(),
         fallback_text(event),
     )
@@ -57,14 +70,17 @@ pub(crate) fn key_action(
 }
 
 fn modified_enter_action(
-    event: &Keystroke,
+    event: &TerminalKey<'_>,
     newline_shortcut: NewlineShortcut,
 ) -> Option<TerminalKeyAction> {
-    if !event.key.eq_ignore_ascii_case("enter") || event.modifiers.alt || event.modifiers.platform {
+    if !event.key.eq_ignore_ascii_case("enter")
+        || event.modifiers.alt_key()
+        || event.modifiers.super_key()
+    {
         return None;
     }
 
-    let inserts_newline = match (event.modifiers.control, event.modifiers.shift) {
+    let inserts_newline = match (event.modifiers.control_key(), event.modifiers.shift_key()) {
         (true, false) => newline_shortcut == NewlineShortcut::CtrlEnter,
         (false, true) => newline_shortcut == NewlineShortcut::ShiftEnter,
         _ => return None,
@@ -81,10 +97,10 @@ fn modified_enter_action(
 /// filters control characters out of `key_char`, and the shared encoder only
 /// builds Ctrl sequences under the kitty protocol, so without this a plain
 /// Ctrl+<letter> press encodes to nothing at all.
-fn legacy_ctrl_byte(event: &Keystroke) -> Option<u8> {
+fn legacy_ctrl_byte(event: &TerminalKey<'_>) -> Option<u8> {
     let m = &event.modifiers;
 
-    if !m.control || m.alt || m.platform || m.shift {
+    if !m.control_key() || m.alt_key() || m.super_key() || m.shift_key() {
         return None;
     }
 
@@ -108,24 +124,24 @@ fn legacy_ctrl_byte(event: &Keystroke) -> Option<u8> {
     }
 }
 
-fn key_input(event: &Keystroke) -> KeyInput {
-    let logical_key = named_key(&event.key)
+fn key_input(event: &TerminalKey<'_>) -> KeyInput {
+    let logical_key = named_key(event.key)
         .map(Key::Named)
-        .unwrap_or_else(|| Key::Character(event.key.as_str().into()));
+        .unwrap_or_else(|| Key::Character(event.key.into()));
 
     KeyInput {
         logical_key: logical_key.clone(),
         key_without_modifiers: logical_key,
-        text_with_all_modifiers: event.key_char.as_deref().map(Into::into),
+        text_with_all_modifiers: event.key_char.map(Into::into),
         location: KeyLocation::Standard,
         state: ElementState::Pressed,
         repeat: false,
     }
 }
 
-fn fallback_text(event: &Keystroke) -> Option<&str> {
+fn fallback_text<'a>(event: &TerminalKey<'a>) -> Option<&'a str> {
     if event.key.eq_ignore_ascii_case("enter") {
-        return match (event.modifiers.control, event.modifiers.alt) {
+        return match (event.modifiers.control_key(), event.modifiers.alt_key()) {
             (false, false) => Some("\r"),
             (true, false) => Some("\n"),
             (false, true) => Some("\x1b\r"),
@@ -133,7 +149,7 @@ fn fallback_text(event: &Keystroke) -> Option<&str> {
         };
     }
 
-    event.key_char.as_deref().or(match event.key.as_str() {
+    event.key_char.or(match event.key {
         "tab" => Some("\t"),
         "escape" | "esc" => Some("\x1b"),
         "space" => Some(" "),
@@ -149,13 +165,13 @@ fn fallback_text(event: &Keystroke) -> Option<&str> {
 /// encoded, so the habit of reaching for them does nothing instead of writing
 /// an escape sequence into the command line.
 #[cfg(not(target_os = "macos"))]
-fn clipboard_action(event: &Keystroke) -> Option<TerminalKeyAction> {
-    if !event.modifiers.control || event.modifiers.alt || event.modifiers.platform {
+fn clipboard_action(event: &TerminalKey<'_>) -> Option<TerminalKeyAction> {
+    if !event.modifiers.control_key() || event.modifiers.alt_key() || event.modifiers.super_key() {
         return None;
     }
 
     match (
-        event.modifiers.shift,
+        event.modifiers.shift_key(),
         event.key.to_ascii_lowercase().as_str(),
     ) {
         (false, "c") => Some(TerminalKeyAction::CopyOrWrite(vec![0x03])),
@@ -172,11 +188,11 @@ fn clipboard_action(event: &Keystroke) -> Option<TerminalKeyAction> {
 /// back to, which is why it carries none: with nothing selected it copies
 /// nothing rather than interrupting the running program.
 #[cfg(target_os = "macos")]
-fn clipboard_action(event: &Keystroke) -> Option<TerminalKeyAction> {
-    if !event.modifiers.platform
-        || event.modifiers.control
-        || event.modifiers.alt
-        || event.modifiers.shift
+fn clipboard_action(event: &TerminalKey<'_>) -> Option<TerminalKeyAction> {
+    if !event.modifiers.super_key()
+        || event.modifiers.control_key()
+        || event.modifiers.alt_key()
+        || event.modifiers.shift_key()
     {
         return None;
     }
@@ -186,28 +202,6 @@ fn clipboard_action(event: &Keystroke) -> Option<TerminalKeyAction> {
         "v" => Some(TerminalKeyAction::Paste),
         _ => None,
     }
-}
-
-pub(crate) fn modifiers_state(modifiers: Modifiers) -> ModifiersState {
-    let mut out = ModifiersState::empty();
-
-    if modifiers.shift {
-        out |= ModifiersState::SHIFT;
-    }
-
-    if modifiers.alt {
-        out |= ModifiersState::ALT;
-    }
-
-    if modifiers.control {
-        out |= ModifiersState::CONTROL;
-    }
-
-    if modifiers.platform {
-        out |= ModifiersState::SUPER;
-    }
-
-    out
 }
 
 fn named_key(name: &str) -> Option<NamedKey> {
@@ -240,6 +234,28 @@ fn named_key(name: &str) -> Option<NamedKey> {
         "f12" => NamedKey::F12,
         _ => return None,
     })
+}
+
+/// Wheel steps have a terminal speed multiplier; smooth scrolling arrives as
+/// logical rows after the host converts its device's pixel units.
+#[derive(Clone, Copy, Debug)]
+pub enum WheelDelta {
+    Steps(f32),
+    Rows(f32),
+}
+
+impl WheelDelta {
+    pub fn lines(self) -> i32 {
+        let raw = match self {
+            Self::Steps(steps) => steps * 3.0,
+            Self::Rows(rows) => rows,
+        };
+        if raw.abs() < 0.5 {
+            0
+        } else {
+            raw.round() as i32
+        }
+    }
 }
 
 #[cfg(test)]

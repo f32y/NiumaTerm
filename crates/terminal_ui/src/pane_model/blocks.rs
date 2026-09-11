@@ -1,9 +1,10 @@
+use nmt_terminal::session::interaction::PendingCopy;
+
 use crate::block_list::{BlockListPoint, block_list_active_top_px, block_list_render_metrics};
 use crate::frame::TerminalFrame;
 use crate::layout::{frame_content_rows, live_frame_text};
 use crate::metrics::CellMetrics;
 use crate::pane_model::PaneController;
-use crate::pane_model::key_action::{CopiedSelection, PendingCopy};
 use crate::pane_model::list_mirror::{ListOp, ListPosition};
 use crate::pane_model::viewport::LocalPoint;
 
@@ -54,11 +55,7 @@ impl PaneController {
             self.source
                 .session
                 .block_text(item)
-                .map(|request| PendingCopy {
-                    request,
-                    selection: CopiedSelection::None,
-                    generation: self.selection_generation,
-                })
+                .map(PendingCopy::from_request)
         }
     }
 

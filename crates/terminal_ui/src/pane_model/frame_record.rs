@@ -1,4 +1,5 @@
 use crate::block_list::chrome::offset_frozen_chrome;
+use crate::block_list::live::LiveItemLayout;
 use crate::block_list::{FrozenItemChrome, FrozenView};
 use crate::pane_model::PaneController;
 
@@ -7,7 +8,7 @@ pub(crate) struct FrameRecord {
     rows: Vec<(f32, usize, usize, u32)>,
     separators: Vec<f32>,
     chrome: Vec<FrozenItemChrome>,
-    pub active_top: Option<f32>,
+    active_top: Option<f32>,
 }
 
 impl FrameRecord {
@@ -29,8 +30,19 @@ impl FrameRecord {
         }
     }
 
-    pub(crate) fn push_chrome(&mut self, chrome: FrozenItemChrome, item_top: f32) {
-        self.chrome.push(offset_frozen_chrome(chrome, item_top));
+    pub(crate) fn from_live_view(
+        view: &FrozenView,
+        layout: &LiveItemLayout,
+        item_top: f32,
+    ) -> Self {
+        let mut record = Self::from_view(view, item_top);
+        record.active_top = Some(item_top + layout.active_top);
+        if let Some(chrome) = &layout.chrome {
+            record
+                .chrome
+                .push(offset_frozen_chrome(chrome.clone(), item_top));
+        }
+        record
     }
 }
 

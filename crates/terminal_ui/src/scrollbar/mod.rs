@@ -34,18 +34,14 @@ pub(super) fn scrollbar_element(
                 cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
                     cx.stop_propagation();
 
-                    let fraction = this.scrollbar_fraction(event.position.y);
-
-                    if (thumb_top..thumb_top + thumb_height).contains(&fraction) {
-                        // Grab the thumb where the pointer hit it — no jump.
-                        this.model.scrollbar.begin_drag(fraction - thumb_top);
-                    } else {
-                        // Track click: center the thumb on the pointer.
-                        this.model.scrollbar.begin_drag(thumb_height / 2.0);
-                        this.scroll_thumb_to(this.model.scrollbar.thumb_top_for(fraction), cx);
+                    let outcome = this.model.scrollbar_mouse_down(
+                        this.local_position(event.position),
+                        thumb_top,
+                        thumb_height,
+                    );
+                    if !this.apply_scroll_outcome(outcome, cx) {
+                        this.mark_scrollbar_activity(cx);
                     }
-
-                    this.mark_scrollbar_activity(cx);
                 }),
             )
             .on_drag(ScrollbarDrag, |_, _, _, cx| {

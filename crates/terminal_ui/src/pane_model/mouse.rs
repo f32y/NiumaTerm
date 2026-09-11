@@ -1,16 +1,14 @@
 use nmt_input::keyboard::ModifiersState;
-use nmt_terminal::ghostty::BlockHandle;
+use nmt_terminal::input::WheelDelta;
+use nmt_terminal::links::follows_link;
 use nmt_terminal::selection::SelectionType;
-use nmt_terminal::session::request::{BlockRange, Request};
-use nmt_terminal::session::{
-    BlockPoint, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
-};
+use nmt_terminal::session::interaction::selection_type_for_click_count;
+use nmt_terminal::session::{SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell};
 
 use crate::block_list::BlockListPoint;
 use crate::pane_model::PaneController;
-use crate::pane_model::selection_drag::{
-    block_gutter_hit, selection_drag_started, selection_type_for_click_count,
-};
+use crate::pane_model::scroll::ScrollOutcome;
+use crate::pane_model::selection_geometry::{block_gutter_hit, selection_drag_started};
 use crate::pane_model::viewport::LocalPoint;
 
 const BLOCK_GUTTER_SELECTION_ENABLED: bool = false;
@@ -20,7 +18,6 @@ pub(crate) struct MouseInput {
     pub button: Option<SurfaceMouseButton>,
     pub modifiers: ModifiersState,
     pub click_count: usize,
-    pub follow_link: bool,
 }
 
 pub(crate) enum MouseOutcome {
@@ -29,67 +26,27 @@ pub(crate) enum MouseOutcome {
     SelectionChanged,
     FrozenSelectionStarted,
     EngineHandled,
+    Scrolled(ScrollOutcome),
+    HoverChanged,
 }
 
-pub(crate) struct PendingExpansion {
-    point: BlockPoint,
-    handle: BlockHandle,
-    request: Request<BlockRange>,
-    kind: SelectionType,
+pub(crate) struct MouseRelease {
+    pub outcome: MouseOutcome,
+    pub scrollbar_released: bool,
 }
 
-impl PendingExpansion {
-    pub(super) fn copy_text(&self, model: &PaneController) -> Request<String> {
-        model.source.session.block_selection_text(
-            self.handle,
-            self.point.line,
-            self.point.col,
-            self.kind,
-        )
-    }
+pub(crate) struct WheelOutcome {
+    pub handled: bool,
+    pub hover_changed: bool,
 }
 
 impl PaneController {
-    pub(crate) fn poll_expansion(&mut self) {
-        let Some(mut pending) = self.pending_expansion.take() else {
-            return;
-        };
-        match pending.request.try_recv() {
-            Ok(Some(Ok(((start_line, start_col), (end_line, end_col))))) => {
-                let current = self
-                    .source
-                    .session
-                    .block_item(pending.point.item)
-                    .and_then(|item| item.handle());
-                if current.is_some_and(|handle| {
-                    handle.id == pending.handle.id && handle.generation == pending.handle.generation
-                }) {
-                    self.frozen_drag.select(Some((
-                        BlockPoint {
-                            item: pending.point.item,
-                            line: start_line,
-                            col: start_col,
-                        },
-                        BlockPoint {
-                            item: pending.point.item,
-                            line: end_line,
-                            col: end_col,
-                        },
-                    )));
-                }
-            }
-            Ok(None) => self.pending_expansion = Some(pending),
-            _ => {}
-        }
-    }
-
     pub(crate) fn mouse_down(&mut self, input: MouseInput) -> MouseOutcome {
-        self.selection_generation = self.selection_generation.wrapping_add(1);
-        self.pending_expansion = None;
-        self.frozen_drag.set_origin(None);
+        self.interaction.begin_pointer();
+        self.selection_origin = None;
         let left = input.button == Some(SurfaceMouseButton::Left);
         if left
-            && input.follow_link
+            && follows_link(input.modifiers)
             && let Some(link) = self.link_at_position(input.position)
         {
             return MouseOutcome::OpenUrl(link.url);
@@ -114,37 +71,17 @@ impl PaneController {
             .session
             .mouse_reporting_active_for(input.modifiers);
         let kind = selection_type_for_click_count(input.click_count);
-        self.frozen_drag
-            .set_origin((left && !reports).then_some(input.position));
+        self.selection_origin = (left && !reports).then_some(input.position);
         if self.block_list_mode() && !reports {
             if left
                 && let Some(BlockListPoint::Frozen(point)) =
                     self.block_list_point_at(input.position)
             {
-                self.source.session.clear_selection();
-                if kind == SelectionType::Simple {
-                    self.frozen_drag.begin(point);
-                } else {
-                    self.frozen_drag.clear();
-                    if let Some(handle) = self
-                        .source
-                        .session
-                        .block_item(point.item)
-                        .and_then(|item| item.handle())
-                        && let Some(request) =
-                            self.source.session.expand_frozen_selection(point, kind)
-                    {
-                        self.pending_expansion = Some(PendingExpansion {
-                            kind,
-                            point,
-                            handle,
-                            request,
-                        });
-                    }
-                }
+                self.interaction
+                    .select_block(&self.source.session, point, kind);
                 return MouseOutcome::FrozenSelectionStarted;
             }
-            cleared |= self.frozen_drag.clear();
+            cleared |= self.interaction.clear_block_selection();
         }
         match self.apply_mouse(input, SurfaceMouseEventKind::Down, kind) {
             MouseOutcome::Ignored if cleared => MouseOutcome::SelectionChanged,
@@ -152,29 +89,58 @@ impl PaneController {
         }
     }
 
-    pub(crate) fn mouse_up(&mut self, input: MouseInput) -> MouseOutcome {
-        self.frozen_drag.set_origin(None);
-        if self.frozen_drag.commit() {
-            return MouseOutcome::Ignored;
+    pub(crate) fn mouse_up(&mut self, input: MouseInput) -> MouseRelease {
+        let scrollbar_released = self.scrollbar.end_drag();
+        self.selection_origin = None;
+        let outcome = if self.interaction.commit_block_selection() {
+            MouseOutcome::Ignored
+        } else {
+            self.apply_mouse(input, SurfaceMouseEventKind::Up, SelectionType::Simple)
+        };
+        MouseRelease {
+            outcome,
+            scrollbar_released,
         }
-        self.apply_mouse(input, SurfaceMouseEventKind::Up, SelectionType::Simple)
     }
 
     pub(crate) fn mouse_move(&mut self, input: MouseInput) -> MouseOutcome {
-        if let Some(origin) = self.frozen_drag.origin() {
+        let hover_changed = if input.button.is_none() {
+            self.hover_at(input.position, input.modifiers)
+        } else {
+            self.links.record_position(input.position);
+            false
+        };
+        match self.move_selection_or_scroll(input) {
+            MouseOutcome::Ignored | MouseOutcome::Scrolled(ScrollOutcome::Ignored)
+                if hover_changed =>
+            {
+                MouseOutcome::HoverChanged
+            }
+            outcome => outcome,
+        }
+    }
+
+    fn move_selection_or_scroll(&mut self, input: MouseInput) -> MouseOutcome {
+        if self.scrollbar.is_dragging() {
+            let fraction = (input.position.y / self.content_size.1.max(1.0)).clamp(0.0, 1.0);
+            return MouseOutcome::Scrolled(
+                self.scroll_thumb_to(self.scrollbar.thumb_top_for(fraction)),
+            );
+        }
+        if let Some(origin) = self.selection_origin {
             let Some(cell) = self.cell_metrics else {
                 return MouseOutcome::Ignored;
             };
             if !selection_drag_started(origin, input.position, cell.width_px) {
                 return MouseOutcome::Ignored;
             }
-            self.frozen_drag.set_origin(None);
+            self.selection_origin = None;
         }
-        if self.frozen_drag.anchor().is_some() {
+        if self.interaction.block_anchor().is_some() {
             let mut position = input.position;
             position.y = position.y.min((self.frozen.active_top() - 1.0).max(0.0));
             if let Some(BlockListPoint::Frozen(head)) = self.block_list_point_at(position)
-                && self.frozen_drag.extend(head)
+                && self.interaction.extend_block_selection(head)
             {
                 return MouseOutcome::SelectionChanged;
             }
@@ -249,18 +215,25 @@ impl PaneController {
     }
 
     pub(crate) fn scroll_wheel(
-        &self,
+        &mut self,
         position: LocalPoint,
-        lines: i32,
+        delta: WheelDelta,
         modifiers: ModifiersState,
-    ) -> bool {
+    ) -> WheelOutcome {
+        let lines = delta.lines();
+        let hover_changed = self.links.clear();
+        let mut outcome = WheelOutcome {
+            handled: false,
+            hover_changed,
+        };
         if lines == 0 || (self.block_list_mode() && !self.source.session.mouse_reporting_active()) {
-            return false;
+            return outcome;
         }
         let Some(metrics) = self.cell_metrics else {
-            return false;
+            return outcome;
         };
         let (cell, _) = self.viewport.cell_at(position, metrics);
-        self.source.session.apply_scroll(cell, lines, modifiers)
+        outcome.handled = self.source.session.apply_scroll(cell, lines, modifiers);
+        outcome
     }
 }

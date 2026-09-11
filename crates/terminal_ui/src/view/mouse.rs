@@ -2,29 +2,16 @@ use gpui::{
     Context, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
     ScrollDelta, ScrollWheelEvent, Window,
 };
+use nmt_terminal::input::WheelDelta;
 use nmt_terminal::session::SurfaceMouseButton;
 
-use crate::input::modifiers_state;
-use crate::metrics::CellMetrics;
 use crate::pane_model::mouse::{MouseInput, MouseOutcome};
 use crate::pane_model::viewport::LocalPoint;
 use crate::view::TerminalPane;
-use crate::view::links::follows_link;
-
-pub(super) fn terminal_scroll_lines(delta: ScrollDelta, cell: CellMetrics) -> i32 {
-    let raw = match delta {
-        ScrollDelta::Lines(point) => point.y * 3.0,
-        ScrollDelta::Pixels(point) => point.y.as_f32() / cell.height_px.max(1.0),
-    };
-    if raw.abs() < 0.5 {
-        0
-    } else {
-        raw.round() as i32
-    }
-}
+use crate::view::key::modifiers_state;
 
 impl TerminalPane {
-    pub(super) fn local_position(&self, position: Point<Pixels>) -> LocalPoint {
+    pub(crate) fn local_position(&self, position: Point<Pixels>) -> LocalPoint {
         let origin = self.content_origin();
         LocalPoint {
             x: (position.x - origin.x).as_f32(),
@@ -49,7 +36,6 @@ impl TerminalPane {
             }),
             modifiers: modifiers_state(modifiers),
             click_count,
-            follow_link: follows_link(modifiers),
         }
     }
 
@@ -57,12 +43,15 @@ impl TerminalPane {
         match outcome {
             MouseOutcome::Ignored => {}
             MouseOutcome::OpenUrl(url) => cx.open_url(&url),
-            MouseOutcome::SelectionChanged => cx.notify(),
+            MouseOutcome::SelectionChanged | MouseOutcome::HoverChanged => cx.notify(),
             MouseOutcome::FrozenSelectionStarted => {
                 self.invalidate(cx);
                 cx.notify();
             }
             MouseOutcome::EngineHandled => self.invalidate(cx),
+            MouseOutcome::Scrolled(outcome) => {
+                self.apply_scroll_outcome(outcome, cx);
+            }
         }
     }
 
@@ -91,13 +80,12 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         self.cell_metrics(window, cx);
-        if self.model.scrollbar.is_dragging() {
+        let input = self.mouse_input(event.position, Some(event.button), event.modifiers, 1);
+        let release = self.model.mouse_up(input);
+        if release.scrollbar_released {
             self.mark_scrollbar_activity(cx);
         }
-        self.model.scrollbar.end_drag();
-        let input = self.mouse_input(event.position, Some(event.button), event.modifiers, 1);
-        let outcome = self.model.mouse_up(input);
-        self.apply_mouse_outcome(outcome, cx);
+        self.apply_mouse_outcome(release.outcome, cx);
     }
 
     pub(crate) fn on_mouse_move(
@@ -107,20 +95,6 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         self.cell_metrics(window, cx);
-        let local = self.local_position(event.position);
-        self.model.links.record_position(local);
-        if event.pressed_button.is_none() {
-            self.update_hovered_link(event.position, event.modifiers, cx);
-        }
-        if self.model.scrollbar.is_dragging() {
-            self.scroll_thumb_to(
-                self.model
-                    .scrollbar
-                    .thumb_top_for(self.scrollbar_fraction(event.position.y)),
-                cx,
-            );
-            return;
-        }
         let input = self.mouse_input(event.position, event.pressed_button, event.modifiers, 1);
         let outcome = self.model.mouse_move(input);
         self.apply_mouse_outcome(outcome, cx);
@@ -132,16 +106,22 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.model.links.clear() {
+        let cell = self.cell_metrics(window, cx);
+        let delta = match event.delta {
+            ScrollDelta::Lines(point) => WheelDelta::Steps(point.y),
+            ScrollDelta::Pixels(point) => {
+                WheelDelta::Rows(point.y.as_f32() / cell.height_px.max(1.0))
+            }
+        };
+        let outcome = self.model.scroll_wheel(
+            self.local_position(event.position),
+            delta,
+            modifiers_state(event.modifiers),
+        );
+        if outcome.hover_changed {
             cx.notify();
         }
-        let cell = self.cell_metrics(window, cx);
-        let lines = terminal_scroll_lines(event.delta, cell);
-        if self.model.scroll_wheel(
-            self.local_position(event.position),
-            lines,
-            modifiers_state(event.modifiers),
-        ) {
+        if outcome.handled {
             self.mark_scrollbar_activity(cx);
             self.invalidate(cx);
         }

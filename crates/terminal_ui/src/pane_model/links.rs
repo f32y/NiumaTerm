@@ -1,5 +1,7 @@
+use nmt_input::keyboard::ModifiersState;
+use nmt_terminal::links::{follows_link, resolve_link};
+
 use crate::block_list::BlockListPoint;
-use crate::links::resolve_link;
 use crate::pane_model::PaneController;
 use crate::pane_model::viewport::{LocalPoint, LocalRect};
 
@@ -16,16 +18,16 @@ pub(crate) struct LinkHit {
 /// moving the mouse still has to rescan, and that rescan has no event position
 /// of its own to work from.
 #[derive(Default)]
-pub(crate) struct LinkHover {
+pub(super) struct LinkHover {
     hit: Option<LinkHit>,
-    pub(crate) enabled: bool,
+    pub(super) enabled: bool,
     last_position: Option<LocalPoint>,
 }
 
 impl LinkHover {
     /// Record the pointer position and the link resolved under it. Returns
     /// whether the underline changed, so the caller repaints only when it did.
-    pub(crate) fn update(&mut self, position: LocalPoint, hit: Option<LinkHit>) -> bool {
+    pub(super) fn update(&mut self, position: LocalPoint, hit: Option<LinkHit>) -> bool {
         self.last_position = Some(position);
 
         if self.hit == hit {
@@ -39,31 +41,66 @@ impl LinkHover {
 
     /// Record where the pointer is without rescanning, so a later modifier
     /// change resolves the link where the pointer actually sits.
-    pub(crate) fn record_position(&mut self, position: LocalPoint) {
+    pub(super) fn record_position(&mut self, position: LocalPoint) {
         self.last_position = Some(position);
     }
 
-    pub(crate) fn position(&self) -> Option<LocalPoint> {
+    pub(super) fn position(&self) -> Option<LocalPoint> {
         self.last_position
     }
 
     /// Forget where the pointer was, so a modifier change after the pointer
     /// left the pane cannot resurrect an underline.
-    pub(crate) fn forget_position(&mut self) {
+    pub(super) fn forget_position(&mut self) {
         self.last_position = None;
     }
 
     /// Drop the underline, reporting whether one was showing.
-    pub(crate) fn clear(&mut self) -> bool {
+    pub(super) fn clear(&mut self) -> bool {
         self.hit.take().is_some()
     }
 
-    pub(crate) fn current(&self) -> Option<&LinkHit> {
+    pub(super) fn current(&self) -> Option<&LinkHit> {
         self.hit.as_ref()
     }
 }
 
 impl PaneController {
+    pub(crate) fn hovered_link(&self) -> Option<&LinkHit> {
+        self.links.current()
+    }
+
+    pub(crate) fn pointer_left(&mut self) -> bool {
+        self.links.enabled = false;
+        self.links.forget_position();
+        self.links.clear()
+    }
+
+    pub(crate) fn hover_modifiers_changed(&mut self, modifiers: ModifiersState) -> bool {
+        self.links.enabled = follows_link(modifiers);
+        let Some(position) = self.links.position() else {
+            return false;
+        };
+        let hit = self
+            .links
+            .enabled
+            .then(|| self.link_at_position(position))
+            .flatten();
+        self.links.update(position, hit)
+    }
+
+    pub(super) fn hover_at(&mut self, position: LocalPoint, modifiers: ModifiersState) -> bool {
+        if position.x < 0.0
+            || position.y < 0.0
+            || position.x > self.content_size.0
+            || position.y > self.content_size.1
+        {
+            return self.pointer_left();
+        }
+        self.links.record_position(position);
+        self.hover_modifiers_changed(modifiers)
+    }
+
     /// Resolve the link under a pointer position: the row's OSC 8 span if one
     /// covers the pointed-at cell, else a URL-shaped token in the row text.
     /// Soft-wrapped neighbor rows are joined so long URLs match whole. Also

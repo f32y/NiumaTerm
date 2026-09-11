@@ -105,7 +105,7 @@ impl EventedPty for TestPty {
     }
 }
 
-pub(super) fn controller(vt: &[u8], engine_blocks: bool) -> (PaneController, Arc<Mutex<Vec<u8>>>) {
+pub(crate) fn controller(vt: &[u8], engine_blocks: bool) -> (PaneController, Arc<Mutex<Vec<u8>>>) {
     let input = Arc::new(Mutex::new(Vec::new()));
     let mut output = vt.to_vec();
     output.extend_from_slice(b"\x1b]0;controller-ready\x07");
@@ -165,4 +165,16 @@ pub(super) fn controller(vt: &[u8], engine_blocks: bool) -> (PaneController, Arc
     controller.content_size = (320.0, 108.0);
     controller.refresh_frame();
     (controller, input)
+}
+
+pub(crate) fn assert_input(input: &Mutex<Vec<u8>>, expected: &[u8]) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while input.lock().len() < expected.len() {
+        assert!(
+            Instant::now() < deadline,
+            "terminal input did not reach the PTY"
+        );
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(*input.lock(), expected);
 }

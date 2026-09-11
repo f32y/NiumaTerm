@@ -1,8 +1,10 @@
 use gpui::prelude::*;
 use gpui::{AnyElement, Bounds, Context, Pixels, Window, list};
 
+use crate::block_list::live::LiveItemState;
 use crate::frame::TerminalFrame;
 use crate::metrics::CellMetrics;
+use crate::pane_model::key_action::TextInput;
 use crate::pane_model::list_mirror::ListPosition;
 use crate::terminal_view::BlockListItem;
 use crate::view::{
@@ -17,9 +19,7 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         self.set_content_bounds(bounds, cell, cx);
-        self.model
-            .frozen
-            .begin_frame(self.model.block_list.active_top);
+        self.model.begin_block_list_frame();
     }
 
     pub(super) fn on_copy_block_command(
@@ -52,13 +52,7 @@ impl TerminalPane {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(command) = self.model.selected_block_command()
-            && self
-                .model
-                .source
-                .session
-                .write_text(&format!("{command}\r"))
-        {
+        if self.model.write_text_input(TextInput::RerunSelectedBlock) {
             self.invalidate(cx);
         }
     }
@@ -128,7 +122,7 @@ impl TerminalPane {
         let in_flight_for_items = self.model.in_flight.clone();
         let has_open_prompt_for_items = self.model.open_prompt;
         let selected_frozen_item = self.model.gutter.selected();
-        let frozen_selection = self.model.frozen_drag.current();
+        let frozen_selection = self.model.interaction.block_selection();
         let cell_for_items = cell;
         let pane_for_items = cx.entity();
         let store_for_items = self.model.source.session.block_store();
@@ -149,10 +143,12 @@ impl TerminalPane {
                 BlockListItem::Live {
                     frame: frame_for_items.clone(),
                     history_rows,
-                    in_flight: in_flight_for_items.clone(),
-                    has_open_prompt: has_open_prompt_for_items,
-                    live_index,
-                    selected_item: selected_frozen_item,
+                    state: LiveItemState {
+                        index: live_index,
+                        in_flight: in_flight_for_items.clone(),
+                        has_open_prompt: has_open_prompt_for_items,
+                        selected_item: selected_frozen_item,
+                    },
                     cols,
                     cell: cell_for_items,
                     pane: pane_for_items.clone(),

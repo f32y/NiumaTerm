@@ -1,28 +1,101 @@
+use std::sync::Arc;
+
 use nmt_input::keyboard::ModifiersState;
 use nmt_terminal::block_store::BlockStore;
 use nmt_terminal::ghostty::ScrollbarInfo;
-use nmt_terminal::selection::SelectionType;
+use nmt_terminal::input::{TerminalKey, WheelDelta};
 use nmt_terminal::session::{SurfaceCell, SurfaceCellSide, SurfaceMouseButton};
 
+use crate::block_list::FrozenView;
+use crate::block_list::live::LiveItemState;
 use crate::block_list::reconcile::BlockListRenderMetrics;
 use crate::metrics::CellMetrics;
-use crate::pane_model::key_action::{KeyOutcome, TerminalKeyAction};
+use crate::pane_model::frame_record::FrameRecord;
+use crate::pane_model::key_action::{KeyOutcome, TextInput};
 use crate::pane_model::list_mirror::{BlockListMirror, ListOp, ListPosition};
 use crate::pane_model::mouse::{MouseInput, MouseOutcome};
 use crate::pane_model::scroll::ScrollOutcome;
-use crate::pane_model::selection_drag::{
-    block_gutter_hit, selection_drag_started, selection_type_for_click_count,
-};
-use crate::pane_model::test_session::controller;
+use crate::pane_model::selection_geometry::{block_gutter_hit, selection_drag_started};
+use crate::pane_model::test_session::{assert_input, controller};
 use crate::pane_model::viewport::{LocalPoint, Viewport};
 
 #[test]
-fn repeated_clicks_choose_terminal_selection_modes() {
-    assert_eq!(selection_type_for_click_count(1), SelectionType::Simple);
-    assert_eq!(selection_type_for_click_count(2), SelectionType::Semantic);
-    assert_eq!(selection_type_for_click_count(3), SelectionType::Lines);
-    assert_eq!(selection_type_for_click_count(4), SelectionType::Lines);
+fn resize_updates_content_geometry_and_only_invalidates_for_a_new_grid() {
+    let (mut model, _) = controller(b"", false);
+    let cell = model.cell_metrics.unwrap();
+    assert!(!model.resize_content(327.0, 108.0, cell));
+    assert_eq!(model.content_size, (327.0, 108.0));
+    assert!(!model.frame_cache.needs_rebuild());
+    assert!(model.resize_content(400.0, 144.0, cell));
+    assert_eq!(model.content_cols(), 50);
+    assert_eq!(model.content_size, (400.0, 144.0));
+    assert_eq!(model.cell_metrics, Some(cell));
+    assert!(model.frame_cache.needs_rebuild());
+    assert!(!model.resize_content(400.0, 144.0, cell));
 }
+
+#[test]
+fn pending_repaint_retains_shared_grid_coordinates_and_coalesces_wakes() {
+    let (mut model, _) = controller(b"text", false);
+    model.settings.fixed_bottom = true;
+    model.update_viewport();
+    let cell = model.cell_metrics.unwrap();
+    let offsets = model.viewport.row_offsets();
+    assert_eq!(offsets.as_ref(), &[90.0; 6]);
+    assert!(model.invalidate());
+    assert!(!model.invalidate());
+    assert!(Arc::ptr_eq(&offsets, &model.viewport.row_offsets()));
+    assert_eq!(model.viewport.cursor_y(0, cell.height_px), offsets[0]);
+    assert_eq!(
+        model
+            .viewport
+            .cell_at(LocalPoint { x: 32.0, y: 90.0 }, cell)
+            .0,
+        SurfaceCell { col: 4, row: 0 }
+    );
+    assert!(model.frame_cache.current().is_some());
+    model.begin_frame();
+    assert_eq!(model.viewport.row_offsets(), offsets);
+    assert!(model.invalidate());
+}
+
+#[test]
+fn block_frame_reset_discards_visible_records_and_retains_selection_and_live_origin() {
+    let (mut model, _) = controller(b"", true);
+    model.gutter.select(3);
+    model.frozen.push_row(10.0, 3, 0, 40);
+    model.frozen.push_separator(8.0);
+    model.block_list.active_top = 90.0;
+    model.begin_block_list_frame();
+    assert!(model.frozen.row_top(3, 0).is_none());
+    assert!(model.frozen.separators().is_empty());
+    assert_eq!(model.gutter.selected(), Some(3));
+    assert_eq!(model.viewport.cursor_y(0, 18.0), 90.0);
+
+    let tail = FrozenView {
+        active_top: 54.0,
+        ..FrozenView::default()
+    };
+    let state = LiveItemState {
+        index: 4,
+        in_flight: None,
+        has_open_prompt: true,
+        selected_item: Some(4),
+    };
+    let layout = state.layout(tail.active_top, 2, 18.0, 1.0);
+    model.record_frame(FrameRecord::from_live_view(&tail, &layout, -18.0));
+    assert_eq!(model.viewport.cursor_y(0, 18.0), 36.0);
+    let chrome = &model.frozen.chrome()[0];
+    assert_eq!(
+        (chrome.top, chrome.bottom, chrome.header_y),
+        (-18.0, 90.0, 36.0)
+    );
+    assert!(chrome.selected);
+    model.begin_block_list_frame();
+    assert!(model.frozen.chrome().is_empty());
+    assert_eq!(model.viewport.cursor_y(0, 18.0), 90.0);
+}
+
 #[test]
 fn block_gutter_hit_band() {
     let origin_x = 10.0;
@@ -71,7 +144,7 @@ fn both_viewports_map_pointer_cursor_and_thumb_consistently() {
                 offset: 10,
                 len: 20,
             },
-            row_offsets: vec![36.0; 4],
+            row_offsets: vec![36.0; 4].into(),
         },
         Viewport::BlockList {
             scroll_px: 10.0,
@@ -100,7 +173,6 @@ fn left_press(position: LocalPoint) -> MouseInput {
         button: Some(SurfaceMouseButton::Left),
         modifiers: ModifiersState::empty(),
         click_count: 1,
-        follow_link: false,
     }
 }
 
@@ -126,24 +198,24 @@ fn frozen_selection_obeys_mouse_reporting_and_drag_threshold() {
             ),
             (true, MouseOutcome::EngineHandled) | (false, MouseOutcome::FrozenSelectionStarted)
         ));
-        assert_eq!(model.frozen_drag.anchor().is_some(), !reporting);
+        assert_eq!(model.interaction.block_anchor().is_some(), !reporting);
         if !reporting {
             assert!(matches!(
                 model.mouse_move(left_press(LocalPoint { x: 17.0, y: 4.0 })),
                 MouseOutcome::Ignored
             ));
-            assert!(model.frozen_drag.current().is_none());
+            assert!(model.interaction.block_selection().is_none());
             assert!(matches!(
                 model.mouse_move(left_press(LocalPoint { x: 40.0, y: 20.0 })),
                 MouseOutcome::SelectionChanged
             ));
-            let (a, b) = model.frozen_drag.current().unwrap();
+            let (a, b) = model.interaction.block_selection().unwrap();
             assert_eq!((a.line, a.col, b.line, b.col), (0, 2, 1, 5));
             model.mouse_move(left_press(LocalPoint { x: 48.0, y: 120.0 }));
-            assert_eq!(model.frozen_drag.current().unwrap().1.line, 1);
+            assert_eq!(model.interaction.block_selection().unwrap().1.line, 1);
             model.mouse_up(left_press(LocalPoint { x: 40.0, y: 20.0 }));
-            assert!(model.frozen_drag.anchor().is_none());
-            assert!(model.frozen_drag.current().is_some());
+            assert!(model.interaction.block_anchor().is_none());
+            assert!(model.interaction.block_selection().is_some());
         }
     }
 }
@@ -152,12 +224,19 @@ fn frozen_selection_obeys_mouse_reporting_and_drag_threshold() {
 fn modified_link_click_precedes_program_mouse_reporting() {
     let (mut model, _) = controller(b"https://example.com\x1b[?1000h", false);
     let mut input = left_press(LocalPoint { x: 40.0, y: 4.0 });
-    input.follow_link = true;
+    #[cfg(target_os = "macos")]
+    {
+        input.modifiers = ModifiersState::SUPER;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        input.modifiers = ModifiersState::CONTROL;
+    }
     assert!(
         matches!(model.mouse_down(input), MouseOutcome::OpenUrl(url) if url == "https://example.com")
     );
     assert!(model.source.session.selection_range().is_none());
-    assert!(model.frozen_drag.anchor().is_none());
+    assert!(model.interaction.block_anchor().is_none());
 }
 
 #[test]
@@ -166,7 +245,12 @@ fn key_outcomes_distinguish_accepted_input_from_read_only_rejection() {
     model.block_list.scrollbar = (24.0, 120.0);
     model.update_viewport();
     assert!(matches!(
-        model.apply_key_action(TerminalKeyAction::Write(vec![0x1b])),
+        model.send_key(&TerminalKey {
+            key: "escape",
+            key_char: None,
+            modifiers: ModifiersState::empty(),
+            function: false,
+        }),
         KeyOutcome::Written
     ));
     assert!(
@@ -181,7 +265,12 @@ fn key_outcomes_distinguish_accepted_input_from_read_only_rejection() {
     assert!(matches!(model.scroll_to_latest(), ScrollOutcome::Ignored));
     model.source.session.mark_read_only();
     assert!(matches!(
-        model.apply_key_action(TerminalKeyAction::Write(vec![0x1b])),
+        model.send_key(&TerminalKey {
+            key: "escape",
+            key_char: None,
+            modifiers: ModifiersState::empty(),
+            function: false,
+        }),
         KeyOutcome::Ignored
     ));
 }
@@ -235,29 +324,163 @@ fn presentation_modules_do_not_import_host_services() {
     use std::fs;
     use std::path::Path;
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    for directory in ["pane_model", "block_list", "frame", "links"] {
-        for entry in fs::read_dir(root.join(directory)).unwrap() {
-            let path = entry.unwrap().path();
-            let name = path.file_name().unwrap().to_string_lossy();
-            if !name.ends_with(".rs") || name.contains("test") || name.contains("profile") {
+    let mut pending: Vec<_> = [
+        "pane_model",
+        "block_list",
+        "frame",
+        "frame_source",
+        "wake",
+        "dirty",
+        "layout.rs",
+        "scrollbar/geometry.rs",
+    ]
+    .into_iter()
+    .map(|path| root.join(path))
+    .collect();
+    while let Some(path) = pending.pop() {
+        if path.is_dir() {
+            pending.extend(
+                fs::read_dir(&path)
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path()),
+            );
+            continue;
+        }
+        let name = path.file_name().unwrap().to_string_lossy();
+        if !name.ends_with(".rs") || name.contains("test") || name.contains("profile") {
+            continue;
+        }
+        let text = fs::read_to_string(&path).unwrap();
+        for line in text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with("//"))
+        {
+            if path == root.join("frame/line.rs") && line == "use gpui::SharedString;" {
                 continue;
             }
-            let text = fs::read_to_string(&path).unwrap();
-            for line in text.lines() {
-                let line = line.trim();
-                if line == "use gpui::SharedString;" && directory == "frame" && name == "line.rs" {
-                    continue;
-                }
-                assert!(
-                    !line.contains("use gpui")
-                        && !line.contains("crate::view")
-                        && !line.contains("crate::paint")
-                        && !line.contains("use nmt_i18n")
-                        && !line.contains("active_colors"),
-                    "host dependency in {}: {line}",
-                    path.display()
-                );
-            }
+            assert!(
+                !line.contains("gpui::")
+                    && !line.contains("gpui_component")
+                    && !line.contains("crate::view")
+                    && !line.contains("crate::paint")
+                    && !line.contains("nmt_i18n::")
+                    && !line.contains("TerminalSettings")
+                    && !line.contains("active_colors"),
+                "host dependency in {}: {line}",
+                path.display()
+            );
         }
     }
+}
+
+#[test]
+fn end_scrolls_history_but_modified_end_and_alternate_screen_reach_the_pty() {
+    for (vt, function, modifiers, scrolls) in [
+        (&b""[..], false, ModifiersState::empty(), true),
+        (&b""[..], true, ModifiersState::empty(), false),
+        (&b""[..], false, ModifiersState::SHIFT, false),
+        (&b"\x1b[?1049h"[..], false, ModifiersState::empty(), false),
+    ] {
+        let (mut model, _) = controller(vt, true);
+        model.block_list.scrollbar = (24.0, 120.0);
+        model.update_viewport();
+        let outcome = model.key_down(&TerminalKey {
+            key: "end",
+            key_char: None,
+            modifiers,
+            function,
+        });
+        match (scrolls, outcome) {
+            (true, KeyOutcome::Scrolled(ScrollOutcome::List(ListOp::ScrollToEnd))) => {}
+            (false, KeyOutcome::Written) => {}
+            (_, outcome) => panic!("unexpected End outcome: {outcome:?}"),
+        }
+    }
+}
+
+#[test]
+fn committed_text_is_sent_once_and_dropped_paths_use_bracketed_paste() {
+    let (mut model, input) = controller(b"\x1b[?2004h", false);
+    assert!(matches!(
+        model.key_down(&TerminalKey {
+            key: "a",
+            key_char: Some("a"),
+            modifiers: ModifiersState::empty(),
+            function: false,
+        }),
+        KeyOutcome::Ignored
+    ));
+    assert!(model.write_text_input(TextInput::Commit("a")));
+    assert!(!model.write_text_input(TextInput::Commit("")));
+    let paths = [
+        "C:\\src\\main.rs".into(),
+        "C:\\My Project\\notes.txt".into(),
+    ];
+    assert!(model.write_text_input(TextInput::DropPaths(&paths)));
+    assert_input(
+        &input,
+        b"a\x1b[200~C:\\src\\main.rs \"C:\\My Project\\notes.txt\"\x1b[201~",
+    );
+    model.source.session.mark_read_only();
+    assert!(!model.write_text_input(TextInput::Commit("rejected")));
+    assert!(!model.write_text_input(TextInput::DropPaths(&paths)));
+}
+
+#[test]
+fn hover_tracks_modifiers_wheel_and_pointer_exit_without_a_window() {
+    let (mut model, _) = controller(b"https://example.com", false);
+    let mut input = left_press(LocalPoint { x: 40.0, y: 4.0 });
+    input.button = None;
+    model.mouse_move(input);
+    assert!(model.hovered_link().is_none());
+    #[cfg(target_os = "macos")]
+    let modifier = ModifiersState::SUPER;
+    #[cfg(not(target_os = "macos"))]
+    let modifier = ModifiersState::CONTROL;
+    assert!(model.hover_modifiers_changed(modifier));
+    assert_eq!(model.hovered_link().unwrap().url, "https://example.com");
+    assert!(!model.hover_modifiers_changed(modifier));
+    assert!(
+        model
+            .scroll_wheel(LocalPoint::default(), WheelDelta::Rows(0.0), modifier)
+            .hover_changed
+    );
+    assert!(model.hovered_link().is_none());
+    assert!(model.hover_modifiers_changed(modifier));
+    assert!(model.pointer_left());
+    assert!(!model.hover_modifiers_changed(modifier));
+    model.refresh_frame();
+    assert!(model.hovered_link().is_none());
+}
+
+#[test]
+fn scrollbar_grab_preserves_offset_and_track_click_centers_the_thumb() {
+    let (mut model, _) = controller(b"", true);
+    model.content_size.1 = 100.0;
+    model.block_list.scrollbar = (0.0, 100.0);
+    model.update_viewport();
+    assert!(matches!(
+        model.scrollbar_mouse_down(LocalPoint { x: 0.0, y: 20.0 }, 0.0, 0.5),
+        ScrollOutcome::Ignored
+    ));
+    assert!(model.scrollbar.is_dragging());
+    assert!(matches!(
+        model.mouse_move(left_press(LocalPoint { x: 0.0, y: 40.0 })),
+        MouseOutcome::Scrolled(ScrollOutcome::List(_))
+    ));
+    assert!((model.block_list.scrollbar.0 - 40.0).abs() < 0.001);
+    let release = model.mouse_up(left_press(LocalPoint { x: 0.0, y: 40.0 }));
+    assert!(release.scrollbar_released);
+    assert!(!model.scrollbar.is_dragging());
+    assert!(
+        !model
+            .mouse_up(left_press(LocalPoint::default()))
+            .scrollbar_released
+    );
+    assert!(matches!(
+        model.scrollbar_mouse_down(LocalPoint { x: 0.0, y: 75.0 }, 0.0, 0.5),
+        ScrollOutcome::List(_)
+    ));
+    assert_eq!(model.block_list.scrollbar.0, 100.0);
 }

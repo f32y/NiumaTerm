@@ -1,5 +1,4 @@
 use std::ops::Range;
-use std::path::PathBuf;
 use std::time::Duration;
 
 use gpui::prelude::*;
@@ -10,10 +9,11 @@ use gpui::{
 use gpui_component::WindowExt as _;
 use gpui_component::notification::Notification;
 use nmt_i18n::i18n;
+use nmt_terminal::session::interaction::PendingCopy;
 use tracing::warn;
 
-use crate::input as terminal_input;
-use crate::pane_model::key_action::{KeyOutcome, PendingCopy};
+use crate::pane_model::key_action::{KeyOutcome, TextInput};
+use crate::view::key::terminal_key;
 use crate::view::{AgentInterrupted, SendShiftTab, SendTab, TerminalPane};
 
 struct TextCopiedNotification;
@@ -32,26 +32,6 @@ fn show_text_copied(window: &mut Window, cx: &mut App) {
     );
 }
 
-pub(super) fn should_scroll_to_latest(keystroke: &Keystroke, alt_screen: bool) -> bool {
-    !alt_screen && !keystroke.modifiers.modified() && keystroke.key.eq_ignore_ascii_case("end")
-}
-
-pub(super) fn dropped_paths_text(paths: &[PathBuf]) -> String {
-    paths
-        .iter()
-        .map(|path| {
-            let path = path.to_string_lossy();
-
-            if path.contains(' ') {
-                format!("\"{path}\"")
-            } else {
-                path.into_owned()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 impl TerminalPane {
     pub(super) fn begin_copy(
         &mut self,
@@ -62,10 +42,7 @@ impl TerminalPane {
         cx.spawn_in(window, async move |this, cx| match copy.request.await {
             Ok(Ok(text)) => {
                 let _ = this.update_in(cx, |this, window, cx| {
-                    if this
-                        .model
-                        .finish_copy(text, copy.selection, copy.generation)
-                    {
+                    if this.model.finish_copy(text, copy.completion) {
                         show_text_copied(window, cx);
                         this.invalidate(cx);
                         cx.notify();
@@ -91,26 +68,15 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if should_scroll_to_latest(&event.keystroke, self.model.source.session.alt_screen())
-            && self.scroll_to_latest(cx)
-        {
-            return;
-        }
-
-        // Plain printable text arrives through the char/IME path
-        // (`replace_text_in_range`); encoding it here too would double it.
-        if terminal_input::should_defer_to_ime(&event.keystroke) {
-            return;
-        }
-
-        let action =
-            terminal_input::key_action(&event.keystroke, self.model.settings.newline_shortcut);
-
         let interrupts_agent = matches!(event.keystroke.key.as_str(), "escape" | "esc")
             && !event.keystroke.modifiers.modified();
 
-        match self.model.apply_key_action(action) {
+        match self.model.key_down(&terminal_key(&event.keystroke)) {
             KeyOutcome::Ignored => return,
+            KeyOutcome::Scrolled(outcome) => {
+                self.apply_scroll_outcome(outcome, cx);
+                return;
+            }
             KeyOutcome::Written => self.react_to_pty_input(cx),
             KeyOutcome::CopyPending(copy) => {
                 self.begin_copy(copy, window, cx);
@@ -127,20 +93,18 @@ impl TerminalPane {
 
     /// Route a keystroke straight to the terminal PTY.
     pub(crate) fn feed_terminal_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
-        match self.model.apply_key_action(terminal_input::key_action(
-            keystroke,
-            self.model.settings.newline_shortcut,
-        )) {
+        match self.model.send_key(&terminal_key(keystroke)) {
             KeyOutcome::Ignored => return,
+            KeyOutcome::Scrolled(outcome) => {
+                self.apply_scroll_outcome(outcome, cx);
+                return;
+            }
             KeyOutcome::Written => self.react_to_pty_input(cx),
             KeyOutcome::CopyPending(copy) => {
                 cx.spawn(async move |this, cx| {
                     if let Ok(Ok(text)) = copy.request.await {
                         let _ = this.update(cx, |this, cx| {
-                            if this
-                                .model
-                                .finish_copy(text, copy.selection, copy.generation)
-                            {
+                            if this.model.finish_copy(text, copy.completion) {
                                 this.invalidate(cx);
                                 cx.notify();
                             }
@@ -195,9 +159,7 @@ impl TerminalPane {
 
         if self
             .model
-            .source
-            .session
-            .paste_text(&dropped_paths_text(paths.paths()))
+            .write_text_input(TextInput::DropPaths(paths.paths()))
         {
             self.invalidate(cx);
         }
@@ -216,11 +178,7 @@ impl EntityInputHandler for TerminalPane {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if text.is_empty() {
-            return;
-        }
-
-        if self.model.source.session.write_text(text) {
+        if self.model.write_text_input(TextInput::Commit(text)) {
             self.react_to_pty_input(cx);
             self.invalidate(cx);
         }

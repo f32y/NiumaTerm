@@ -7,14 +7,16 @@ pub(crate) use crate::pane_model::settings::{FrameTheme, PaneSettings};
 mod blocks;
 pub(crate) mod frozen_hit_map;
 mod gutter_selection;
+mod lifecycle;
 mod links;
 pub(crate) mod list_mirror;
 pub(crate) mod mouse;
 pub(crate) mod scroll;
 mod scrollbar_activity;
-pub(crate) mod selection_drag;
+pub(crate) mod selection_geometry;
 pub(crate) mod viewport;
 
+use nmt_terminal::session::interaction::TerminalInteraction;
 use nmt_terminal::session::{HostEvent, InFlightBlock};
 
 use crate::block_list::chrome::DurationLabels;
@@ -27,20 +29,17 @@ use crate::pane_model::frozen_hit_map::FrozenHitMap;
 use crate::pane_model::gutter_selection::GutterSelection;
 use crate::pane_model::links::LinkHover;
 use crate::pane_model::list_mirror::BlockListMirror;
-use crate::pane_model::mouse::PendingExpansion;
 use crate::pane_model::scrollbar_activity::ScrollbarActivity;
-use crate::pane_model::selection_drag::FrozenSelectionDrag;
-use crate::pane_model::viewport::Viewport;
+use crate::pane_model::viewport::{LocalPoint, Viewport};
 
 pub(crate) struct PaneController {
     pub source: TerminalFrameSource,
-    pub pending_expansion: Option<PendingExpansion>,
-    pub selection_generation: u64,
+    pub interaction: TerminalInteraction,
     pub settings: PaneSettings,
     pub theme: FrameTheme,
     pub duration_labels: DurationLabels,
     pub frame_cache: TerminalFrameCache,
-    pub dirty: DirtyState,
+    dirty: DirtyState,
     pub cell_metrics: Option<CellMetrics>,
     pub content_size: (f32, f32),
     pub in_flight: Option<InFlightBlock>,
@@ -48,9 +47,10 @@ pub(crate) struct PaneController {
     pub block_list: BlockListMirror,
     pub frozen: FrozenHitMap,
     pub gutter: GutterSelection,
-    pub frozen_drag: FrozenSelectionDrag,
+    /// Ignore pointer jitter until the press moves beyond the drag threshold.
+    selection_origin: Option<LocalPoint>,
     pub scrollbar: ScrollbarActivity,
-    pub links: LinkHover,
+    links: LinkHover,
     pub viewport: Viewport,
 }
 
@@ -63,8 +63,7 @@ impl PaneController {
     ) -> Self {
         Self {
             source,
-            pending_expansion: None,
-            selection_generation: 0,
+            interaction: TerminalInteraction::default(),
             settings,
             theme,
             duration_labels,
@@ -77,7 +76,7 @@ impl PaneController {
             block_list: BlockListMirror::default(),
             frozen: FrozenHitMap::default(),
             gutter: GutterSelection::default(),
-            frozen_drag: FrozenSelectionDrag::default(),
+            selection_origin: None,
             scrollbar: ScrollbarActivity::default(),
             links: LinkHover::default(),
             viewport: Viewport::default(),
@@ -95,7 +94,7 @@ impl PaneController {
     }
 
     pub(crate) fn refresh_frame(&mut self) {
-        self.poll_expansion();
+        self.interaction.poll_expansion(&self.source.session);
         let previous = self.frame_cache.reusable_frame();
         self.frame_cache
             .rebuild(self.source.frame(previous.as_ref(), &self.theme));
@@ -120,9 +119,12 @@ impl PaneController {
             let frame = self.frame_cache.current().unwrap_or_default();
             Viewport::Grid {
                 scrollbar: frame.scrollbar(),
-                row_offsets: self.cell_metrics.map_or_else(Vec::new, |cell| {
-                    bottom_anchor_offsets(&frame, cell.height_px, self.settings.fixed_bottom)
-                }),
+                row_offsets: self
+                    .cell_metrics
+                    .map_or_else(Vec::new, |cell| {
+                        bottom_anchor_offsets(&frame, cell.height_px, self.settings.fixed_bottom)
+                    })
+                    .into(),
             }
         };
     }
@@ -152,6 +154,6 @@ impl PaneController {
 }
 
 #[cfg(test)]
-mod test_session;
+pub(crate) mod test_session;
 #[cfg(test)]
 mod tests;

@@ -2,19 +2,110 @@
 
 Date: 2026-09-11
 
-Status: Proposal. No code changed. Follows
+Status: Terminal behavior moved into `nmt_terminal`; presentation state and
+GPUI hosting remain in `nmt_terminal_ui`. Real-window validation remains
+outstanding. Follows
 [terminal-core-ui-split.md](terminal-core-ui-split.md), which moved runtime
 state into `nmt_terminal` and left "presentation, GPUI integration, and window
 resources" in `nmt_terminal_ui`.
 
+## Implementation Notes
+
+The findings and interface sketches below describe the starting point. Batches
+0 through 6 first separated responsibilities within the UI crate. The follow-up
+migration moves terminal behavior into the existing core crate; completing the
+internal module split alone did not complete that separation.
+
+- `nmt_terminal::input` owns the plain key description, key encoding, newline
+  and clipboard chords, IME deferral classification, and wheel speed and
+  rounding. `view/key.rs` converts GPUI keys, while `view/mouse.rs` converts
+  pixel deltas into logical rows. Both normal and injected keys reach the core
+  through the controller; the host does not select an encoder or newline rule.
+- `nmt_terminal::session::interaction::TerminalInteraction` owns frozen cell
+  selection, click-count selection modes, asynchronous word/line expansion,
+  copy requests, and completion checks that preserve newer selections.
+  `PaneController` retains the pixel drag threshold and hit testing and
+  delegates cell operations to that state. Clipboard reads and writes stay in
+  the UI; the core returns `PasteRequested` or `PendingCopy` without accessing
+  the desktop clipboard. The host acknowledges a copy only after accepting it.
+- `TerminalSession::paste_paths` quotes path lists and uses the existing paste
+  handling. `TerminalSession::rerun_block` resolves and submits a command by
+  block index. Both return actual queue acceptance, including read-only and
+  unavailable-session rejection.
+- `nmt_terminal::links` owns allowed schemes, URL matching, wrapped-row joining,
+  OSC 8 interpretation, and the platform modifier rule. It returns text-row
+  segments; the UI maps those segments to underline rectangles.
+- `PaneController` owns End-key viewport routing, link hover, pixel selection
+  gestures, and scrollbar dragging. Typing-related scrolling, agent events,
+  notifications, timers, and repaint scheduling stay in `view`.
+- `frame_source/items.rs` reads frozen pages, combines image placements,
+  resolves image generations, and assembles frozen and live-history views.
+  Elements retain GPUI layout, shaping, painting, and `FrameRecord` delivery.
+- `pane_model/settings` owns settings application, cursor-shape requests and
+  failure recovery, theme and duration-label updates, metric invalidation,
+  and full frame invalidation. The host reads globals, updates list alignment,
+  awaits pending requests, and schedules repaints.
+- `pane_model/lifecycle.rs` owns measured-cell caching, content size updates,
+  session resize requests, frame invalidation and rebuild, wake coalescing,
+  and per-frame hit-map reset. Resetting visible records keeps persistent
+  gutter selection and the live origin available when the live item is hidden.
+- `Viewport` shares its grid row offsets with the element's prepaint state.
+  Painting, pointer mapping, and IME placement consume the same layout;
+  invalidation retains the displayed coordinates until the next render.
+- `block_list/live.rs` computes live content and decoration geometry from
+  history height, active rows, padding, command state, and selection.
+  `FrameRecord::from_live_view` maps that result into pane coordinates;
+  elements only translate the layout into GPUI bounds and shape and paint it.
+- The source-level dependency check recursively covers `pane_model`,
+  `block_list`, `frame`, `frame_source`, `wake`, `dirty`,
+  `layout.rs`, and scrollbar geometry. The documented `SharedString` exception
+  remains; this check is a guard against direct host dependencies, not a
+  replacement for compiler-enforced crate boundaries. Moved input, link, and
+  interaction code now compiles and runs tests in `nmt_terminal`, which has no
+  dependency on `nmt_terminal_ui` or GPUI.
+
+`TerminalLaunch`, application-owned launch assembly, remote options beside
+`NetPty`, explicit settings/theme values, `Viewport`, `BlockListMirror`,
+separate hit-map and gutter-selection state, and `SessionBridge` are in place.
+`AgentRoute` stays a type dependency. Per-frame hit records are delivered
+through `pane.update`; they no longer own persistent gutter selection.
+
+Subsequent session work gave the PTY exclusive ownership of the engine.
+Block text and selection expansion now return requests, while row reads use
+immutable snapshots and cached pages. The synchronous signatures and lock
+examples below are historical rather than current implementation guidance.
+
+Automated validation covers End routing, IME delivery without duplicate text,
+bracketed path paste, accepted versus rejected command replay, hover lifecycle,
+scrollbar grab offsets, frozen row/image loading and image reuse. GPUI host
+tests cover Escape event delivery and typing-scroll settings for key and IME
+input, including rejected writes. Existing selection, viewport, frame, list,
+and image tests remain in place.
+
+Follow-up tests cover successful, rejected, canceled, and superseded cursor
+updates; settings-driven metric and full-frame refresh; repeated content
+sizes; retained coordinates while repaint is pending; hit-map reset without
+selection loss; and live decoration placement with history and padding.
+
+Core tests now cover key and wheel rules, wrapped URLs and allowed schemes,
+word expansion followed by copy, preservation of a newer selection after an
+older copy completes, cell-span clipping, quoted path paste, and block replay
+with read-only rejection. UI tests retain pixel hit testing, frame and list
+layout, and host reactions to the core results.
+
+The real-window checks in the validation plan still need execution. The
+Windows automation helper was unavailable during the follow-up implementation;
+automated tests do not establish frame-pump or actual list-layout behavior.
+
 ## Objective
 
-Inside `nmt_terminal_ui`, separate the code that decides what the terminal
-shows and how pointer, keyboard, and scroll input map onto the session from
-the code that talks to GPUI. The first group must be constructible and
-testable without a `Window`, an `App`, or a global settings object. The second
-group converts GPUI events into plain inputs, applies the results to widgets,
-and schedules repaints and timers.
+Put terminal behavior in `nmt_terminal`: input encoding, cell-based selection,
+session commands, copy request lifecycle, and interpretation of terminal text.
+Keep pixel geometry, frame/list presentation state, graphics resources, and
+GPUI hosting in `nmt_terminal_ui`. Hosts convert device events into plain
+inputs, translate cell results into visible geometry, and schedule repaints
+and timers. Core behavior must be constructible and testable without a
+`Window`, an `App`, or a global settings object.
 
 The unit of migration is again a responsibility. A function that happens to
 compile without `gpui` is not automatically in the right place; a function
@@ -228,6 +319,12 @@ Three tiers inside `nmt_terminal_ui`, plus two moves out of it.
 
 ```text
 nmt_terminal (additions)
+  input/               plain keys, terminal encoding, IME classification,
+                        wheel speed and rounding
+  links/               allowed URLs, wrapped-row resolution, row segments
+  session/interaction/ frozen cell selection, pending expansion, copy
+                        requests and completion, key command dispatch
+  session/input.rs     path paste and block replay alongside text input
   session/blocks.rs     BlockPoint, block_command, block_text,
                         frozen_selection_text, expand_frozen_selection
   session/rows.rs       RowText (padded text, wrapped flag, OSC 8 spans),
@@ -246,9 +343,9 @@ nmt_terminal_ui
     frame/              unchanged shape; colors and theme passed in
     block_list/         geometry, rows, selection, images, chrome labels,
                         list-mirror planning (ListOp values, no ListState)
-    layout.rs, links/url.rs, input/, scrollbar/geometry.rs, wake/, dirty/
+    layout.rs, scrollbar/geometry.rs, wake/, dirty/
     pane_model/         PaneSettings, FrameTheme, Viewport, FrozenHitMap,
-                        GutterSelection, FrozenSelectionDrag, LinkHover,
+                        GutterSelection, pixel drag origin, LinkHover,
                         ScrollbarActivity (no timer), TerminalFrameCache,
                         PaneController and its outcome enums
     frame_source/       what remains of TerminalSurface: session + images +
@@ -281,7 +378,7 @@ nmt_terminal_ui
 | `view/events.rs` `terminal_surface_for_tab` | Delete; the app's existing fallback chain covers it |
 | `view/mod.rs` agent route allocation | Application; pane receives the route and environment |
 | `surface/mod.rs` `for_gpui_remote` options | `nmt_remote_net::net_pty` |
-| `surface/input.rs` key actions and clipboard | `pane_model` interaction rules |
+| `surface/input.rs` key actions and clipboard | Core input and interaction; clipboard access in UI |
 | `surface/mod.rs` `frame`, `resize_for_content`, image cache access | `frame_source` |
 | `graphics/session.rs` | `session_bridge`, renamed to say what it is |
 | `frame/colors.rs` `active_colors()` per frame | `FrameTheme` argument built once per settings change |
@@ -289,13 +386,13 @@ nmt_terminal_ui
 | `block_list/geometry.rs` `block_list_alignment` | View |
 | `block_list/reconcile.rs` `BlockListState` | View (`ListState` owner); planning stays |
 | `block_list/chrome.rs` paint functions | `paint/` |
-| `view/mouse.rs` pure helpers and `FrozenSelectionDrag` | `pane_model` |
+| `view/mouse.rs` selection rules and drag geometry | Core cell-selection state; pixel geometry in `pane_model` |
 | `view/scroll.rs` `ScrollbarActivity` | `pane_model`, timer scheduling moves to view |
-| `links/mod.rs` URL logic and `LinkHover` | `pane_model` (or `links/url.rs`) |
-| `links/mod.rs` `link_at_position` | Split: pure resolve in `pane_model`, rectangles via `Viewport` |
+| `links/mod.rs` URL logic and `LinkHover` | URL logic in core `links`; hover state in `pane_model` |
+| `links/mod.rs` `link_at_position` | Core text resolution; pointer and rectangle mapping via `Viewport` |
 | `view/blocks.rs` `render_block_list_content` | Planning in `pane_model` returning `ListOp`s; application and element construction in view |
 | `terminal_view/item.rs` frozen image resolution | `frame_source` get-or-load |
-| `view/*` handlers | `PaneController` methods returning outcomes; view applies them |
+| `view/*` handlers | `PaneController` maps geometry and delegates terminal behavior to core; view applies outcomes |
 
 ## Interface Sketches
 
@@ -504,11 +601,10 @@ evidence.
 
 ## Non-goals
 
-- No new crate in this pass. `TerminalLine` holds a `SharedString` for
-  `shape_line_by_hash` and `FrameImage` holds a GPUI `RenderImage`; a crate
-  boundary would force generics or duplicate types for no test benefit the
-  layering check does not already give. Revisit after batch 5, when the
-  boundary is visible in the module tree and a split is a `git mv`.
+- No new crate in this pass. Terminal behavior uses the existing
+  `nmt_terminal` crate. `TerminalLine` holds a `SharedString` for
+  `shape_line_by_hash`, and `FrameImage` holds a GPUI `RenderImage`; those
+  rendering values stay in `nmt_terminal_ui` without generic replacements.
 - Block-list geometry, display ordering, and shaping caches stay in the UI
   crate, as the previous split decided.
 - No event bus. Outcome enums are per handler and consumed immediately.

@@ -1,6 +1,5 @@
-use nmt_terminal::session::RowText;
-
 use crate::links;
+use crate::session::RowText;
 
 #[test]
 fn url_at_col_finds_and_trims_urls() {

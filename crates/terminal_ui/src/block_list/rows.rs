@@ -6,11 +6,12 @@ use nmt_terminal::ghostty::{BlockHandle, CellText, CellWide, SnapshotStyle, Unde
 use nmt_terminal::grid_emit::row_selection_for;
 use nmt_terminal::selection::SelectionRange;
 use nmt_terminal::session::BlockPoint as FrozenPoint;
+use nmt_terminal::session::interaction::block_selection_span;
 use nmt_terminal::session::page::{PageSource, RowPage};
 use nmt_terminal::terminal::square::Wide;
 
 use crate::block_list::chrome::{DurationLabels, FrozenItemChrome, item_accent, item_header};
-use crate::block_list::selection::{expand_wide_span, selected_span};
+use crate::block_list::selection::expand_wide_span;
 use crate::block_list::{FrozenRow, FrozenView};
 use crate::frame::{LineBuilder, StyleRun, TerminalCell, TerminalColor, TerminalLine};
 
@@ -206,8 +207,8 @@ pub(crate) fn frozen_block_view(
         }
 
         let line = builder.finish();
-        let selected =
-            selected_span(selection, item_idx, row, cols).map(|span| expand_wide_span(&line, span));
+        let selected = block_selection_span(selection, item_idx, row, cols)
+            .map(|span| expand_wide_span(&line, span));
 
         view.rows.push(FrozenRow {
             y: pad + row as f32 * cell_h,
