@@ -44,3 +44,6 @@ tracing.workspace = true
 unicode-width.workspace = true
 url.workspace = true
 futures.workspace = true
+
+[target.'cfg(enable_profiling)'.dependencies]
+nmt_profiling.workspace = true

@@ -1,6 +1,8 @@
 use std::sync::atomic::Ordering;
 
 use nmt_platform::EventedPty;
+#[cfg(enable_profiling)]
+use nmt_profiling::pty::Stage;
 use tracing::warn;
 
 use crate::event::{EventListener, Msg, TerminalEvent};
@@ -46,16 +48,22 @@ impl<T: EventedPty + Send + 'static, U: EventListener + Send + 'static> PtyPipe<
                 let _ = reply.send(result);
             }
             Msg::Query(query) => {
+                #[cfg(enable_profiling)]
+                let query_started = self.profile.start();
                 answer_query(
                     &mut self.ghostty,
                     self.content_version.load(Ordering::Relaxed),
                     self.theme_revision,
                     query,
                 );
+                #[cfg(enable_profiling)]
+                self.profile.record(Stage::Query, query_started);
                 self.event_proxy
                     .send_event(TerminalEvent::ReadReady, self.window_id);
             }
             Msg::Checkpoint(request) => {
+                #[cfg(enable_profiling)]
+                let checkpoint_started = self.profile.start();
                 let result = self
                     .ghostty
                     .format_vt_state()
@@ -66,6 +74,8 @@ impl<T: EventedPty + Send + 'static, U: EventListener + Send + 'static> PtyPipe<
                     })
                     .map_err(|error| RequestError::Engine(error.to_string()));
                 (request.0)(result);
+                #[cfg(enable_profiling)]
+                self.profile.record(Stage::Checkpoint, checkpoint_started);
             }
             Msg::Input(_) | Msg::Resize(_) | Msg::Shutdown => {
                 unreachable!("handled by the PTY loop")
@@ -76,7 +86,16 @@ impl<T: EventedPty + Send + 'static, U: EventListener + Send + 'static> PtyPipe<
     fn publish_command(&mut self) {
         self.content_version.fetch_add(1, Ordering::Relaxed);
         self.snapshot_pending = true;
-        if let Err(error) = self.flush_engine_state(true) {
+        #[cfg(enable_profiling)]
+        let flush_started = {
+            let started = self.profile.start();
+            self.profile.command();
+            started
+        };
+        let result = self.flush_engine_state(true);
+        #[cfg(enable_profiling)]
+        self.profile.record(Stage::Flush, flush_started);
+        if let Err(error) = result {
             warn!("failed to publish terminal update: {error}");
         }
     }

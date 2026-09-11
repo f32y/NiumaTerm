@@ -4429,6 +4429,7 @@ dependencies = [
  "nmt_config",
  "nmt_input",
  "nmt_platform",
+ "nmt_profiling",
  "parking_lot",
  "rapidhash",
  "regex",

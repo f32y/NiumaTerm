@@ -7,6 +7,8 @@ use std::{cell, error, fmt, path, time};
 #[cfg(target_os = "linux")]
 use libc::EIO;
 use nmt_platform::{ChildEvent, EventedPty, Events, Interest, Poll, Token, Waker};
+#[cfg(enable_profiling)]
+use nmt_profiling::pty::{BatchEnd, PtyProfiler, Stage};
 use tracing::{error, warn};
 
 use crate::event::{self, EventListener, Msg, MsgSender, TerminalEvent, WindowId};
@@ -150,6 +152,8 @@ pub struct PtyPipe<T: EventedPty, U: EventListener> {
     /// Start of the current DEC 2026 transaction. The event-loop poll uses this
     /// deadline to recover when an application omits the matching reset.
     sync_output_started_at: Option<time::Instant>,
+    #[cfg(enable_profiling)]
+    profile: PtyProfiler,
 }
 
 /// Read the VT-controlled modes from the Ghostty engine into `Mode`.
@@ -298,6 +302,8 @@ where
             last_snapshot_at: time::Instant::now(),
             snapshot_pending: false,
             sync_output_started_at: None,
+            #[cfg(enable_profiling)]
+            profile: PtyProfiler::new(window_id.0, options.route_id, cols, rows),
         })
     }
 
@@ -337,7 +343,13 @@ where
 
         loop {
             // Read from the PTY.
-            match self.pty.reader().read(&mut buf[unprocessed..]) {
+            #[cfg(enable_profiling)]
+            let read_started = self.profile.start();
+            let read = self.pty.reader().read(&mut buf[unprocessed..]);
+            #[cfg(enable_profiling)]
+            self.profile
+                .read(read_started, read.as_ref().copied().unwrap_or(0));
+            match read {
                 // This is received on Windows/macOS when no more data is readable from the PTY.
                 Ok(0) if unprocessed == 0 => {
                     caught_up = true;
@@ -375,11 +387,28 @@ where
             return Ok(());
         }
 
-        self.flush_engine_state(caught_up)
+        #[cfg(enable_profiling)]
+        let flush_started = {
+            self.profile.batch(
+                if caught_up {
+                    BatchEnd::Drained
+                } else {
+                    BatchEnd::Saturated
+                },
+                processed,
+            );
+            self.profile.start()
+        };
+        let result = self.flush_engine_state(caught_up);
+        #[cfg(enable_profiling)]
+        self.profile.record(Stage::Flush, flush_started);
+        result
     }
 
     #[inline]
     fn process_pty_chunk(&mut self, input: &[u8]) {
+        #[cfg(enable_profiling)]
+        let ingest_started = self.profile.start();
         let input_len = input.len();
 
         // The owner parses into private engine state while the UI retains its
@@ -585,6 +614,8 @@ where
         if let (Some(sink), Some(output)) = (&output_sink, observed_output) {
             sink(output);
         }
+        #[cfg(enable_profiling)]
+        self.profile.record(Stage::Ingest, ingest_started);
     }
 
     #[inline]
@@ -618,7 +649,18 @@ where
             let sync_output = engine.mode(mode::SYNC_OUTPUT);
 
             let (capture, image_delta) = if do_snapshot && !sync_output {
+                #[cfg(enable_profiling)]
+                let capture_started = self.profile.start();
                 let capture = engine.snapshot_into(&mut self.back_buffer);
+                #[cfg(enable_profiling)]
+                self.profile.record(
+                    if caught_up {
+                        Stage::CaptureEager
+                    } else {
+                        Stage::CaptureSaturated
+                    },
+                    capture_started,
+                );
 
                 // Kitty image pixel deltas, under the same lock. Only the PTY
                 // reader path drives image shipping; the scroll path never calls this.
@@ -730,12 +772,17 @@ where
         self.last_snapshot_at = time::Instant::now();
         self.snapshot_pending = false;
 
-        if publish_render_buffer(
+        #[cfg(enable_profiling)]
+        let publish_started = self.profile.start();
+        let published = publish_render_buffer(
             &self.render_buffer,
             &mut self.back_buffer,
             capture,
             self.sniffer.progress_active(),
-        ) {
+        );
+        #[cfg(enable_profiling)]
+        self.profile.record(Stage::Publish, publish_started);
+        if published {
             self.event_proxy.send_event(
                 TerminalEvent::TerminalDamaged(self.route_id),
                 self.window_id,
@@ -806,6 +853,8 @@ where
                         if let Err(err) = engine.resize(cols, rows, cell_w, cell_h) {
                             warn!("engine resize failed: {err:?}");
                         }
+                        #[cfg(enable_profiling)]
+                        self.profile.set_grid(engine.cols(), engine.rows());
 
                         if vt_trace::enabled() {
                             vt_trace::trace(
@@ -825,7 +874,11 @@ where
                             blocks_sync = Some(engine_blocks_live_list(engine));
                         }
 
+                        #[cfg(enable_profiling)]
+                        let capture_started = self.profile.start();
                         let capture = engine.snapshot_into(&mut self.back_buffer);
+                        #[cfg(enable_profiling)]
+                        self.profile.record(Stage::CaptureResize, capture_started);
 
                         (capture, engine.active_cursor_row())
                     };
@@ -844,12 +897,17 @@ where
                         .fetch_add(1, sync::atomic::Ordering::Relaxed)
                         + 1;
                     self.back_buffer.theme_revision = self.theme_revision;
-                    if publish_render_buffer(
+                    #[cfg(enable_profiling)]
+                    let publish_started = self.profile.start();
+                    let published = publish_render_buffer(
                         &self.render_buffer,
                         &mut self.back_buffer,
                         snapshot,
                         self.sniffer.progress_active(),
-                    ) {
+                    );
+                    #[cfg(enable_profiling)]
+                    self.profile.record(Stage::Publish, publish_started);
+                    if published {
                         // VT modes do not change on resize, so the lock-free
                         // atomic remains valid from the last PTY read.
                         self.event_proxy.send_event(
@@ -960,6 +1018,8 @@ where
         let mut events = Events::with_capacity(1024);
 
         'event_loop: loop {
+            #[cfg(enable_profiling)]
+            self.profile.report_due();
             // Windows soft-ready is level-like but lives outside the OS poll set,
             // and its worker only wakes on the clear→set edge. A `pty_read` capped
             // by MAX_READ_BATCH can return with data still in the ring (flag left
@@ -976,7 +1036,12 @@ where
                     .map(|started| SYNC_OUTPUT_TIMEOUT.saturating_sub(started.elapsed()))
             };
 
-            if let Err(err) = self.poll.poll(&mut events, timeout) {
+            #[cfg(enable_profiling)]
+            let poll_started = self.profile.start();
+            let polled = self.poll.poll(&mut events, timeout);
+            #[cfg(enable_profiling)]
+            self.profile.record(Stage::Poll, poll_started);
+            if let Err(err) = polled {
                 match err.kind() {
                     ErrorKind::Interrupted => continue,
                     _ => {
@@ -1103,6 +1168,8 @@ where
 
         // The PTY sources are not dropped here, so deregister them explicitly.
         let _ = self.pty.deregister(&self.poll);
+        #[cfg(enable_profiling)]
+        self.profile.flush();
 
         (self, state)
     }

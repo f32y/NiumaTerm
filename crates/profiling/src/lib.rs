@@ -12,6 +12,8 @@ pub mod frame_stats;
 #[path = "frame_stats/disabled.rs"]
 pub mod frame_stats;
 #[cfg(enable_profiling)]
+pub mod pty;
+#[cfg(enable_profiling)]
 pub mod transcript;
 #[cfg(not(enable_profiling))]
 #[path = "transcript/disabled.rs"]
