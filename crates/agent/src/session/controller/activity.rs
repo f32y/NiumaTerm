@@ -1,5 +1,5 @@
-use crate::background_task::{BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscript};
-use crate::session::children::{ChildAgents, scoped_background_tasks};
+use crate::background_task::{BackgroundTaskKey, BackgroundTaskSnapshot};
+use crate::session::children::{ChildAgents, ChildTranscript, scoped_background_tasks};
 use crate::session::controller::SessionController;
 use crate::session::update_readiness::{ConversationWork, Readiness, prepare_stop};
 
@@ -15,10 +15,7 @@ impl SessionController {
         )
     }
 
-    pub fn background_task_transcript(
-        &self,
-        key: &BackgroundTaskKey,
-    ) -> Option<&BackgroundTaskTranscript> {
+    pub fn background_task_transcript(&self, key: &BackgroundTaskKey) -> Option<&ChildTranscript> {
         self.background_tasks()?;
 
         self.children.transcripts.get(key)

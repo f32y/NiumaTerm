@@ -1,9 +1,12 @@
+use std::cell::RefCell;
 use std::hint::black_box;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{AppContext as _, TestAppContext};
 use nmt_agent::chat::{Item, ReplayItem, ReplayTurn};
 use nmt_agent::transcript::TextField;
+use nmt_agent::transcript::conversation::ConversationState;
 use nmt_config::agent::CollapseRows;
 
 use crate::profile::AgentKind;
@@ -31,7 +34,10 @@ fn history(turns: u64) -> TranscriptView {
             },
         );
 
-        view.turn_ledger.settle_replayed(turn, None);
+        view.conversation
+            .borrow_mut()
+            .turns
+            .replay(turn, false, None, None);
     }
 
     view.push_stamped(
@@ -138,10 +144,10 @@ fn indexed_updates_preserve_duplicate_id_order_and_item_kinds() {
     });
 
     assert!(
-        matches!(&view.content.entries()[0].item, Item::Reasoning { summary: Some(text), .. } if text == "working")
+        matches!(&view.conversation.borrow().content.entries()[0].item, Item::Reasoning { summary: Some(text), .. } if text == "working")
     );
     assert!(
-        matches!(&view.content.entries()[1].item, Item::AgentMessage { text: Some(text), .. } if text == "complete")
+        matches!(&view.conversation.borrow().content.entries()[1].item, Item::AgentMessage { text: Some(text), .. } if text == "complete")
     );
 
     assert_rows_match_rebuild(&mut view, CollapseRows::Off);
@@ -311,4 +317,118 @@ fn long_transcript_timing() {
         "5000 turns, 200 tail updates: full={full:?}, incremental={:?}",
         started.elapsed()
     );
+}
+
+#[gpui::test]
+fn readers_share_long_content_but_keep_folds_and_missed_revisions_independent(
+    cx: &mut TestAppContext,
+) {
+    let content = Rc::new(RefCell::new(ConversationState::default()));
+
+    for index in 0..1000 {
+        content.borrow_mut().push(
+            index,
+            Item::Reasoning {
+                id: format!("work-{index}"),
+                summary: Some("retained text ".repeat(512)),
+            },
+            Vec::new(),
+        );
+    }
+
+    content.borrow_mut().push(
+        1000,
+        Item::AgentMessage {
+            id: "tail".into(),
+            text: Some("live".into()),
+            questions: None,
+        },
+        Vec::new(),
+    );
+
+    let original = {
+        let state = content.borrow();
+
+        let Item::Reasoning {
+            summary: Some(text),
+            ..
+        } = &state.content.entries()[500].item
+        else {
+            panic!("reasoning row");
+        };
+
+        text.as_ptr()
+    };
+
+    let (first, second) = cx.update(|cx| {
+        cx.set_global(AgentSettings::default());
+
+        let first = cx.new(|cx| {
+            let mut view = TranscriptView::new(AgentKind::Codex, None);
+
+            view.attach_content(content.clone(), cx);
+
+            view
+        });
+
+        let second = cx.new(|cx| {
+            let mut view = TranscriptView::new(AgentKind::Codex, None);
+
+            view.attach_content(content.clone(), cx);
+
+            view
+        });
+
+        (first, second)
+    });
+
+    first.update(cx, |view, cx| {
+        view.toggle_disclosure(RevealKey::Row(500), cx)
+    });
+
+    for _ in 0..70 {
+        content
+            .borrow_mut()
+            .append_delta("tail", "x", TextField::Reply);
+
+        first.update(cx, |view, _| view.sync_content());
+    }
+
+    second.update(cx, |view, _| {
+        view.sync_content();
+
+        assert!(!view.disclosures.row_expanded(500));
+        assert_eq!(
+            view.conversation
+                .borrow()
+                .content
+                .latest_agent_message(1000)
+                .unwrap()
+                .len(),
+            74
+        );
+        assert!(Rc::ptr_eq(&view.conversation, &content));
+
+        let state = view.conversation.borrow();
+
+        let Item::Reasoning {
+            summary: Some(text),
+            ..
+        } = &state.content.entries()[500].item
+        else {
+            panic!("reasoning row");
+        };
+
+        assert_eq!(text.as_ptr(), original);
+    });
+
+    first.update(cx, |view, _| assert!(view.disclosures.row_expanded(500)));
+    content.borrow_mut().retain_last(1);
+
+    first.update(cx, |view, _| {
+        view.sync_content();
+
+        assert!(!view.disclosures.row_expanded(500));
+        assert_eq!(view.conversation.borrow().content.entries().len(), 1);
+    });
 }

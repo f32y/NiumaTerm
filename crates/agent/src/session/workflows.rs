@@ -1,6 +1,11 @@
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use crate::chat::Item as SessionItem;
 use crate::claude_code::workflows::{WorkflowRefreshRequest, WorkflowRefreshResult};
 use crate::session::lifecycle::SessionRuntime;
+use crate::transcript::conversation::ConversationState;
 use crate::workflow::{WorkflowAgentState, WorkflowRun, WorkflowSnapshot};
 
 /// The agent conversation the user has open, and what has been read of it.
@@ -8,7 +13,8 @@ use crate::workflow::{WorkflowAgentState, WorkflowRun, WorkflowSnapshot};
 pub struct OpenWorkflowAgent {
     pub task_id: String,
     pub agent_id: String,
-    pub items: Vec<SessionItem>,
+    pub conversation: Rc<RefCell<ConversationState>>,
+    readers: Rc<Cell<usize>>,
 
     /// Size the transcript had when `items` was parsed, so an unchanged file
     /// is never re-parsed.
@@ -33,7 +39,7 @@ impl OpenWorkflowAgent {
 #[derive(Default)]
 pub struct WorkflowData {
     pub snapshot: Option<WorkflowSnapshot>,
-    pub open: Option<OpenWorkflowAgent>,
+    conversations: HashMap<(String, String), OpenWorkflowAgent>,
 
     /// Session whose completed runs were already read back from disk, so a
     /// resumed conversation restores once rather than on every reopen.
@@ -51,7 +57,12 @@ impl WorkflowData {
 
     pub fn clear(&mut self) {
         self.snapshot = None;
-        self.open = None;
+
+        for open in self.conversations.values() {
+            open.conversation.borrow_mut().clear();
+        }
+
+        self.conversations.clear();
         self.restored_session = None;
     }
 
@@ -81,21 +92,29 @@ impl WorkflowData {
         self.activity() != before
     }
 
-    /// The agent conversation the user has open, if any.
-    pub fn open_conversation(&self) -> Option<&OpenWorkflowAgent> {
-        self.open.as_ref()
+    pub fn conversation(&self, task_id: &str, agent_id: &str) -> Option<&OpenWorkflowAgent> {
+        self.conversations
+            .get(&(task_id.to_owned(), agent_id.to_owned()))
     }
 
-    pub fn open_agent(&mut self, task_id: &str, agent_id: &str) {
-        self.open = Some(OpenWorkflowAgent {
-            task_id: task_id.to_owned(),
-            agent_id: agent_id.to_owned(),
-            ..OpenWorkflowAgent::default()
-        });
-    }
+    pub fn open_agent(&mut self, task_id: &str, agent_id: &str) -> WorkflowReader {
+        let key = (task_id.to_owned(), agent_id.to_owned());
 
-    pub fn close_agent(&mut self) {
-        self.open = None;
+        let open = self
+            .conversations
+            .entry(key.clone())
+            .or_insert_with(|| OpenWorkflowAgent {
+                task_id: key.0.clone(),
+                agent_id: key.1.clone(),
+                ..Default::default()
+            });
+
+        open.readers.set(open.readers.get() + 1);
+
+        WorkflowReader {
+            key,
+            readers: open.readers.clone(),
+        }
     }
 
     /// Fold one agent conversation in, reporting whether it is still the one
@@ -106,15 +125,21 @@ impl WorkflowData {
         agent_id: &str,
         items: Vec<SessionItem>,
     ) -> bool {
-        let Some(open) = self.open.as_mut() else {
+        let Some(open) = self
+            .conversations
+            .get_mut(&(task_id.to_owned(), agent_id.to_owned()))
+        else {
             return false;
         };
 
-        if open.task_id != task_id || open.agent_id != agent_id {
-            return false;
+        let mut conversation = open.conversation.borrow_mut();
+
+        conversation.clear();
+
+        for item in items {
+            conversation.push(0, item, Vec::new());
         }
 
-        open.items = items;
         open.unavailable = false;
         open.revision += 1;
 
@@ -138,31 +163,27 @@ impl WorkflowData {
     /// once its run has settled, because no further content is coming.
     /// Reports whether that answer changed.
     pub fn mark_open_availability(&mut self) -> bool {
-        let settled = self
-            .open
+        let runs = self
+            .snapshot
             .as_ref()
-            .map(|open| open.task_id.clone())
-            .and_then(|task_id| {
-                self.runs()
-                    .iter()
-                    .find(|run| run.task_id == task_id)
-                    .map(|run| run.state.is_terminal())
-            })
-            .unwrap_or(false);
+            .map(|snapshot| snapshot.runs.as_slice())
+            .unwrap_or_default();
 
-        let Some(open) = self.open.as_mut() else {
-            return false;
-        };
+        let mut changed = false;
 
-        let unavailable = settled && open.items.is_empty();
+        for open in self.conversations.values_mut() {
+            let settled = runs
+                .iter()
+                .find(|run| run.task_id == open.task_id)
+                .is_some_and(|run| run.state.is_terminal());
 
-        if open.unavailable == unavailable {
-            return false;
+            let unavailable = settled && open.conversation.borrow().content.entries().is_empty();
+
+            changed |= open.unavailable != unavailable;
+            open.unavailable = unavailable;
         }
 
-        open.unavailable = unavailable;
-
-        true
+        changed
     }
 
     pub fn has_active_run(&self) -> bool {
@@ -177,19 +198,32 @@ impl WorkflowData {
         &self,
         requests: Vec<WorkflowRefreshRequest>,
     ) -> Vec<WorkflowRefreshRequest> {
-        let open = self.open.as_ref();
+        let mut scoped = Vec::new();
 
-        requests
-            .into_iter()
-            .map(|mut request| {
-                if let Some(open) = open.filter(|open| open.task_id == request.task_id) {
-                    request.open_agent = Some(open.agent_id.clone());
-                    request.open_agent_len = open.len;
-                }
+        for request in requests {
+            let mut readers = self
+                .conversations
+                .values()
+                .filter(|open| open.task_id == request.task_id && open.readers.get() > 0)
+                .peekable();
 
-                request
-            })
-            .collect()
+            if readers.peek().is_none() {
+                scoped.push(request);
+
+                continue;
+            }
+
+            for open in readers {
+                scoped.push(WorkflowRefreshRequest {
+                    task_id: request.task_id.clone(),
+                    agent_ids: request.agent_ids.clone(),
+                    open_agent: Some(open.agent_id.clone()),
+                    open_agent_len: open.len,
+                });
+            }
+        }
+
+        scoped
     }
 
     /// Record how much of the open transcript a tick read, so an unchanged
@@ -199,7 +233,10 @@ impl WorkflowData {
             return;
         };
 
-        let Some(open) = self.open.as_mut() else {
+        let Some(open) = self
+            .conversations
+            .get_mut(&(result.task_id.clone(), transcript.agent_id.clone()))
+        else {
             return;
         };
 
@@ -249,5 +286,17 @@ impl WorkflowData {
             epoch: runtime.epoch(),
             requests,
         })
+    }
+}
+
+/// A reader keeps refresh interest in one member without owning execution.
+pub struct WorkflowReader {
+    pub key: (String, String),
+    readers: Rc<Cell<usize>>,
+}
+
+impl Drop for WorkflowReader {
+    fn drop(&mut self) {
+        self.readers.set(self.readers.get().saturating_sub(1));
     }
 }

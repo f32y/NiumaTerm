@@ -175,6 +175,10 @@ pub(super) fn effort_panel(
 
                             move |_, _, cx| {
                                 pane.update(cx, |this, cx| {
+                                    if !this.binding.is_current() {
+                                        return;
+                                    }
+
                                     if this.controls.effort_drag.take().is_some() {
                                         cx.notify();
                                     }
@@ -230,6 +234,10 @@ pub(super) fn effort_panel(
 
                                         move |_, _, cx| {
                                             pane.update(cx, |this, cx| {
+                                                if !this.binding.is_current() {
+                                                    return;
+                                                }
+
                                                 this.controls.effort_drag = Some(index);
 
                                                 cx.notify();
@@ -245,6 +253,10 @@ pub(super) fn effort_panel(
                                             }
 
                                             pane.update(cx, |this, cx| {
+                                                if !this.binding.is_current() {
+                                                    return;
+                                                }
+
                                                 // Moving within the stop
                                                 // the drag already holds
                                                 // is not a change, and a
@@ -270,6 +282,10 @@ pub(super) fn effort_panel(
                                     // them two round trips.
                                     .on_mouse_up(MouseButton::Left, move |_, _, cx| {
                                         pane.update(cx, |this, cx| {
+                                            if !this.binding.is_current() {
+                                                return;
+                                            }
+
                                             this.controls.effort_drag = None;
                                             set(this, value.clone(), cx);
 

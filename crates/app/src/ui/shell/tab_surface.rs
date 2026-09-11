@@ -1,4 +1,5 @@
 use gpui::{App, Entity};
+use nmt_agent_ui::execution::{AgentSession, SessionOwner};
 use nmt_agent_ui::{AgentKind, AgentPane};
 use nmt_config::local_state::TabState;
 use nmt_terminal_ui::view::TerminalPane;
@@ -7,6 +8,11 @@ use crate::pane_tree::PaneId;
 use crate::ui::terminal_layout::TerminalLayout;
 
 pub(crate) type TerminalPaneTree = TerminalLayout<Entity<TerminalPane>>;
+
+pub(crate) struct AgentTab {
+    pub(crate) owner: SessionOwner,
+    pub(crate) pane: Entity<AgentPane>,
+}
 
 /// A tab's surface. Restored tabs start `Pending` — the saved snapshot with no
 /// shell process behind it — and become `Live` (spawning their shells) the
@@ -18,7 +24,7 @@ pub(crate) enum TabSurface {
     /// An agent conversation rendered as chat bubbles instead of a terminal
     /// grid. It owns an agent route but no terminal panes or child-process
     /// accounting exposed through `tree()`.
-    Agent(Entity<AgentPane>),
+    Agent(AgentTab),
 
     /// The settings UI filling the main area. It is rebuilt from the settings
     /// global on every render, so the variant carries no state of its own.
@@ -28,7 +34,7 @@ pub(crate) enum TabSurface {
 impl TabSurface {
     pub(crate) fn agent_kind(&self, cx: &App) -> Option<AgentKind> {
         match self {
-            Self::Agent(pane) => Some(pane.read(cx).kind()),
+            Self::Agent(tab) => Some(tab.pane.read(cx).kind()),
             Self::Pending(state) => state.agent.as_deref().and_then(AgentKind::from_id),
             Self::Live(_) | Self::Settings => None,
         }
@@ -84,7 +90,14 @@ impl TabSurface {
 
     pub(super) fn agent(&self) -> Option<&Entity<AgentPane>> {
         match self {
-            TabSurface::Agent(pane) => Some(pane),
+            TabSurface::Agent(tab) => Some(&tab.pane),
+            _ => None,
+        }
+    }
+
+    pub(super) fn agent_session(&self) -> Option<&Entity<AgentSession>> {
+        match self {
+            Self::Agent(tab) => Some(tab.owner.session()),
             _ => None,
         }
     }

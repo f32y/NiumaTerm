@@ -11,7 +11,6 @@ mod profiling_tests;
 mod render;
 mod reveal;
 mod rows;
-mod turns;
 mod view;
 
 pub(super) use nmt_agent::transcript::is_work_item as is_work_row;

@@ -1,7 +1,13 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
-use crate::background_task::{BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscript};
+use crate::background_task::{
+    BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscriptState,
+    BackgroundTaskTranscriptUpdate, MAX_TRANSCRIPT_ITEMS,
+};
 use crate::session::{AgentKind, RecoveryIdentity};
+use crate::transcript::conversation::ConversationState;
 
 /// Child-agent activity the provider adapter reports for this conversation.
 #[derive(Default)]
@@ -14,7 +20,7 @@ pub struct ChildAgents {
     /// Each child's own conversation, accumulated here rather than in the
     /// adapter so live activity is retained once and the retention bound
     /// applies to what is actually shown.
-    pub transcripts: HashMap<BackgroundTaskKey, BackgroundTaskTranscript>,
+    pub transcripts: HashMap<BackgroundTaskKey, ChildTranscript>,
 
     /// Claude session id whose child agents were already restored from
     /// history. Ready fires again during first-turn initialization, so the
@@ -54,5 +60,98 @@ impl ChildAgents {
             AgentKind::Claude => BackgroundTaskKey::claude_code(identity.id),
             AgentKind::DeepSeek => return None,
         })
+    }
+}
+
+/// Retained child content is shared with readers without copying its items.
+#[derive(Default)]
+pub struct ChildTranscript {
+    pub conversation: Rc<RefCell<ConversationState>>,
+    state: BackgroundTaskTranscriptState,
+    dropped: usize,
+    revision: u64,
+}
+
+impl ChildTranscript {
+    pub fn state(&self) -> &BackgroundTaskTranscriptState {
+        &self.state
+    }
+
+    pub fn dropped(&self) -> usize {
+        self.dropped
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.conversation.borrow().content.entries().is_empty()
+    }
+
+    pub fn apply(&mut self, update: BackgroundTaskTranscriptUpdate) -> bool {
+        let mut changed = false;
+
+        if let Some(state) = update.state
+            && self.state != state
+        {
+            self.state = state;
+            changed = true;
+        }
+
+        let mut conversation = self.conversation.borrow_mut();
+
+        if update.restore && !conversation.content.entries().is_empty() {
+            if changed {
+                self.revision += 1;
+            }
+
+            return changed;
+        }
+
+        if update.replace || update.restore {
+            if conversation
+                .content
+                .entries()
+                .iter()
+                .map(|entry| &entry.item)
+                .eq(update.items.iter())
+            {
+                if changed {
+                    self.revision += 1;
+                }
+
+                return changed;
+            }
+
+            conversation.clear();
+            self.dropped = 0;
+            changed = true;
+        }
+
+        for item in update.items {
+            if item
+                .id()
+                .is_some_and(|id| conversation.content.contains_item(id))
+            {
+                conversation.merge_completed(&item);
+            } else {
+                conversation.push(0, item, Vec::new());
+            }
+
+            changed = true;
+        }
+
+        let dropped = conversation.retain_last(MAX_TRANSCRIPT_ITEMS);
+
+        if dropped > 0 {
+            self.dropped += dropped;
+        }
+
+        if changed {
+            self.revision += 1;
+        }
+
+        changed
     }
 }

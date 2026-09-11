@@ -5,8 +5,11 @@
 //! the last answer settled, so the moments recorded here are what the idle
 //! reading is built on.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(test)]
+use std::time::Instant;
 
+#[cfg(test)]
 use chrono::Utc;
 use gpui::{Context, Window};
 use nmt_agent::AgentEventKind;
@@ -30,6 +33,7 @@ use crate::{AgentPane, AgentPaneEvent};
 /// clock's range, which on Windows starts at boot and so cannot reach back to a
 /// conversation from before the last restart. A stamp from ahead of this
 /// machine's clock is idle time that has not happened.
+#[cfg(test)]
 pub(super) fn replayed_response_age(at_unix: i64, now_unix: i64) -> Duration {
     let seconds = u64::try_from(now_unix.saturating_sub(at_unix)).unwrap_or(0);
 
@@ -47,16 +51,9 @@ pub(crate) fn response_age_tick(age: Duration) -> Option<Duration> {
 }
 
 impl AgentPane {
-    pub(crate) fn note_visible_output(&mut self) {
-        self.session.delivery.visible_output();
-        self.turn.note_visible_output();
-    }
-
     /// Start the turn clock and drive the once-a-second repaint of the live
     /// progress row; the ticker stops itself once `finish_working` clears it.
     pub(crate) fn start_working(&mut self, cx: &mut Context<Self>) {
-        self.turn.submitted_at = Some(Instant::now());
-
         self.transcript
             .update(cx, |transcript, cx| transcript.start_working(cx));
 
@@ -84,36 +81,32 @@ impl AgentPane {
         .detach();
     }
 
-    /// Settle the current turn's duration and exact output usage for its status
-    /// row. These values are UI state rather than provider transcript content,
-    /// so they stay outside the shared item stream.
-    pub(super) fn finish_working(&mut self, cx: &mut Context<Self>) {
-        let turn = self.session.delivery.turn();
-
-        self.transcript
-            .update(cx, |transcript, cx| transcript.settle_turn(turn, cx));
-
-        self.turn.note_response_settled(Instant::now(), cx);
-
-        cx.notify();
-    }
-
     /// Carry a resumed conversation's own last answer into the reading, from
     /// the provider's wall-clock stamp for it.
     ///
     /// Without this the reading restarts at the resume, which reads as a warm
     /// conversation and skips the cold-prompt-cache warning in front of the
     /// first message — the one send where the cache is certainly gone.
+    #[cfg(test)]
     pub(super) fn note_replayed_response(&mut self, at_unix: i64, cx: &mut Context<Self>) {
         let age = replayed_response_age(at_unix, Utc::now().timestamp());
         let now = Instant::now();
 
-        self.turn
-            .note_response_settled(now.checked_sub(age).unwrap_or(now), cx);
+        self.session
+            .borrow()
+            .conversation
+            .borrow_mut()
+            .last_response_at = Some(now.checked_sub(age).unwrap_or(now));
+
+        self.turn.refresh_timer(cx);
     }
 
     pub(crate) fn interrupt_from_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let interrupted = self.session.interrupt_from_user();
+        if !self.binding.is_current() {
+            return;
+        }
+
+        let interrupted = self.session.borrow_mut().interrupt_from_user();
 
         if let Some((turn, prompt)) = interrupted.prompt {
             self.transcript
@@ -139,12 +132,6 @@ impl AgentPane {
         self.present_interrupt_result(interrupted.outcome, cx);
     }
 
-    pub(super) fn interrupt(&mut self, cx: &mut Context<Self>) {
-        let outcome = self.session.runtime.interrupt(None);
-
-        self.present_interrupt_result(outcome, cx);
-    }
-
     fn present_interrupt_result(&mut self, outcome: InterruptOutcome, cx: &mut Context<Self>) {
         match outcome {
             InterruptOutcome::Unavailable => {}
@@ -158,14 +145,21 @@ impl AgentPane {
             }
 
             InterruptOutcome::Accepted => {
-                cx.emit(AgentPaneEvent::Interrupted);
+                self.emit_event(AgentPaneEvent::Interrupted, cx);
+
                 cx.notify();
             }
         }
     }
 
     pub(crate) fn respond_approval(&mut self, decision: &str, cx: &mut Context<Self>) {
-        match self.session.respond_approval(decision) {
+        if !self.binding.is_current() {
+            return;
+        }
+
+        let outcome = self.session.borrow_mut().respond_approval(decision);
+
+        match outcome {
             ApprovalOutcome::Ignored => return,
 
             ApprovalOutcome::Settled => {

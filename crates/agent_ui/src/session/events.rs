@@ -1,37 +1,52 @@
 use gpui::Context;
 use nmt_agent::AgentEventKind;
-use nmt_agent::chat::{
-    Event as SessionEvent, Item as SessionItem, ReplayTurn, SessionSummary, SlashCommandOutcome,
-    TurnActivity,
-};
+use nmt_agent::chat::{SessionSummary, SlashCommandOutcome};
+use nmt_agent::session::branch::BranchUpdate;
 use nmt_agent::session::controller::{SessionEffect, SessionFailure, SessionReady};
 #[cfg(test)]
 pub(super) use nmt_agent::session::settings::resolve_ready_settings;
+#[cfg(test)]
 use nmt_agent::transcript::TextField;
 use nmt_i18n::i18n;
 use tracing::info;
 
 use crate::composer::CommandFeedbackKind;
-use crate::session::{Backend, RecoverySnapshot, Status};
-use crate::thread_controls::{launch_effort, launch_model, stored_thread_settings};
-use crate::transcript::hidden;
+use crate::session::{Backend, RecoverySnapshot};
+use crate::thread_controls::launch_model;
+#[cfg(test)]
+use crate::thread_controls::{launch_effort, stored_thread_settings};
 use crate::{AgentPane, AgentPaneEvent, RecentSessionsMode};
 
 impl AgentPane {
     /// Apply provider state before presenting its effects in transcript order.
+    #[cfg(test)]
     pub(crate) fn apply_event(&mut self, event: SessionEvent, cx: &mut Context<Self>) {
-        let effect = self
-            .session
-            .apply_event(self.session.runtime.epoch(), event);
+        self.prepare_ready_defaults(cx);
+
+        let effect = {
+            let mut guard = self.session.borrow_mut();
+            let state = &mut *guard;
+
+            state.apply_event(state.runtime.epoch(), event)
+        };
 
         self.present_session_effect(effect, cx);
     }
 
     pub(super) fn present_session_effect(&mut self, effect: SessionEffect, cx: &mut Context<Self>) {
+        self.presenting_session_effect = true;
+
+        self.transcript
+            .update(cx, |transcript, _| transcript.sync_content());
+
         match effect {
             SessionEffect::Unchanged => {}
             SessionEffect::Changed => cx.notify(),
-            SessionEffect::Title(title) => cx.emit(AgentPaneEvent::TitleSuggested(title)),
+
+            SessionEffect::Title(title) => {
+                self.emit_event(AgentPaneEvent::TitleSuggested(title), cx)
+            }
+
             SessionEffect::Ready(settings) => self.on_ready(settings, cx),
 
             SessionEffect::Commands(commands) => {
@@ -64,62 +79,25 @@ impl AgentPane {
                 self.on_turn_completed(error, interrupted, cx)
             }
 
-            SessionEffect::OutputTokens(tokens) => {
-                self.transcript.update(cx, |transcript, cx| {
-                    transcript.set_working_output_tokens(tokens, cx)
-                });
-
-                cx.notify();
-            }
-
-            SessionEffect::ContextWindow(usage) => {
-                self.context_window_usage = Some(usage);
-
-                cx.notify();
-            }
-
-            SessionEffect::ContextComposition(composition) => {
-                self.context_composition = Some(composition);
-
-                cx.notify();
-            }
-
-            SessionEffect::CompactionStarted => {
-                self.note_visible_output();
-
-                self.transcript
-                    .update(cx, |transcript, cx| transcript.set_compacting(true, cx));
-
-                cx.notify();
-            }
-
-            SessionEffect::CompactionFinished { error } => {
-                self.transcript
-                    .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
-
-                if let Some(text) = error {
-                    self.push_item(SessionItem::Error { text }, cx);
-                }
-
-                cx.notify();
-            }
-
-            SessionEffect::ItemStarted(item) => self.start_item(item, cx),
-            SessionEffect::ItemCompleted(item) => self.complete_item(item, cx),
-
-            SessionEffect::TextDelta {
-                item_id,
-                delta,
-                field,
-            } => self.append_delta(&item_id, &delta, field, cx),
+            SessionEffect::OutputTokens(_)
+            | SessionEffect::ContextWindow(_)
+            | SessionEffect::ContextComposition(_)
+            | SessionEffect::CompactionStarted
+            | SessionEffect::CompactionFinished { .. }
+            | SessionEffect::ItemStarted(_)
+            | SessionEffect::ItemCompleted(_)
+            | SessionEffect::TextDelta { .. }
+            | SessionEffect::ConfirmedPrompts(_)
+            | SessionEffect::Goal(_)
+            | SessionEffect::PlanMode(_)
+            | SessionEffect::Stats(_)
+            | SessionEffect::StatusDetail(_) => cx.notify(),
 
             SessionEffect::ApprovalRequested => {
-                self.note_visible_output();
-
                 self.emit_lifecycle(
                     AgentEventKind::PermissionRequested,
                     &i18n("agent-session-needs-input").replace("{name}", self.kind.display()),
-                    self.session.input.approval().unwrap_or_default(),
+                    self.session.borrow().input.approval().unwrap_or_default(),
                     cx,
                 );
 
@@ -133,25 +111,23 @@ impl AgentPane {
             }
 
             SessionEffect::QuestionsRequested { index } => {
-                self.note_visible_output();
-
                 self.emit_lifecycle(
                     AgentEventKind::PermissionRequested,
                     &i18n("agent-session-needs-input").replace("{name}", self.kind.display()),
-                    self.session.input.batches()[index]
+                    self.session.borrow().input.batches()[index]
                         .questions()
                         .first()
                         .map_or("", |question| question.question.as_str()),
                     cx,
                 );
 
-                self.prompts.reveal(&self.session.input, index);
+                self.prompts.reveal(&self.session.borrow().input, index);
 
                 cx.notify();
             }
 
             SessionEffect::QuestionsResolved => {
-                self.prompts.hide_settled(&self.session.input);
+                self.prompts.hide_settled(&self.session.borrow().input);
                 self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
 
                 cx.notify();
@@ -165,17 +141,20 @@ impl AgentPane {
 
             SessionEffect::Workflows { activity_changed } => {
                 if activity_changed {
-                    cx.emit(AgentPaneEvent::WorkflowActivity);
+                    self.emit_event(AgentPaneEvent::WorkflowActivity, cx);
                 }
-
-                self.sync_workflow_refresh(cx);
 
                 cx.notify();
             }
 
             SessionEffect::BackgroundActivity => {
-                cx.emit(AgentPaneEvent::BackgroundTaskActivity);
+                self.emit_event(AgentPaneEvent::BackgroundTaskActivity, cx);
+
                 cx.notify();
+            }
+
+            SessionEffect::Branch(update @ BranchUpdate::Branching) => {
+                self.apply_fork_update(update, cx)
             }
 
             SessionEffect::Branch(update) => self.apply_rewind_update(update, cx),
@@ -188,7 +167,7 @@ impl AgentPane {
 
             SessionEffect::EffortRejected { message } => {
                 self.controls.remember_defaults(
-                    &self.session.controls,
+                    &self.session.borrow().controls,
                     self.kind,
                     &self.profile,
                     cx,
@@ -200,25 +179,6 @@ impl AgentPane {
 
             SessionEffect::History(sessions) => self.on_history(sessions, cx),
             SessionEffect::SearchResults(results) => self.show_search_results(results, cx),
-            SessionEffect::ConfirmedPrompts(prompts) => self.publish_prompts(prompts, cx),
-
-            SessionEffect::Goal(goal) => {
-                self.session_state.set_goal(goal);
-
-                cx.notify();
-            }
-
-            SessionEffect::PlanMode(active) => {
-                self.session_state.set_plan_mode(active);
-
-                cx.notify();
-            }
-
-            SessionEffect::Stats(stats) => {
-                self.session_stats = Some(stats);
-
-                cx.notify();
-            }
 
             SessionEffect::Replay(replay) => {
                 if let Some(completion) = replay.branch {
@@ -226,19 +186,14 @@ impl AgentPane {
                 }
 
                 if replay.replace || self.history_ui.mode == RecentSessionsMode::Loading {
-                    if !replay.replace {
-                        self.session.clear_conversation();
-                    }
-
                     self.clear_conversation_presentation(cx);
                     self.history_ui.mode = RecentSessionsMode::Hidden;
                     self.palette.feedback = None;
                 }
 
-                self.apply_replay(replay.turns, cx);
+                self.transcript
+                    .update(cx, |transcript, _| transcript.sync_content());
             }
-
-            SessionEffect::StatusDetail(detail) => self.on_status_detail(detail, cx),
 
             SessionEffect::ForkCheckpoints(checkpoints) => {
                 self.show_fork_checkpoints(checkpoints, cx)
@@ -246,23 +201,32 @@ impl AgentPane {
 
             SessionEffect::HostExited { message } => self.on_host_exited(message, cx),
         }
+
+        self.presenting_session_effect = false;
     }
 
     fn on_host_exited(&mut self, message: String, cx: &mut Context<Self>) {
         let identity = self
             .session
+            .borrow()
             .runtime
             .backend()
             .and_then(Backend::recovery_identity);
 
-        self.session.runtime.reconnect(Some(RecoverySnapshot {
-            identity,
-            profile_name: self.profile.name.clone(),
-        }));
+        self.session
+            .borrow_mut()
+            .runtime
+            .reconnect(Some(RecoverySnapshot {
+                identity,
+                profile_name: self.profile.name.clone(),
+            }));
 
-        self.session.runtime.recovery_failed(message.clone());
+        self.session
+            .borrow_mut()
+            .runtime
+            .recovery_failed(message.clone());
 
-        let failure = self.session.failed(&message, true);
+        let failure = self.session.borrow_mut().failed(&message, true);
 
         self.on_error(message, true, failure, cx);
     }
@@ -274,45 +238,13 @@ impl AgentPane {
             self.complete_branch(completion, cx);
         }
 
-        if let Some(replay) = ready.replay {
+        if ready.replaced {
             self.clear_conversation_presentation(cx);
             self.history_ui.mode = RecentSessionsMode::Hidden;
             self.palette.feedback = None;
-            self.apply_replay(replay, cx);
         }
 
-        // Seed the settings dropdowns with the thread's effective
-        // configuration so they show real values before any change.
-        // Ready can fire again mid-session (Claude's first-turn init
-        // confirms the permission mode); a payload without effort
-        // keeps the user's pick — Claude never reports effort, so
-        // None there means "unknown", never "reset".
-        let stored = (self.session.controls.seed_thread_defaults
-            || self.session.controls.seed_approval_reviewer)
-            .then(|| stored_thread_settings(self.kind, &self.profile, cx))
-            .flatten();
-
-        let model = self
-            .session
-            .controls
-            .seed_thread_defaults
-            .then(|| launch_model(self.kind, &self.profile))
-            .flatten();
-
-        let effort = self
-            .session
-            .controls
-            .seed_thread_defaults
-            .then(|| launch_effort(&self.profile))
-            .flatten();
-
-        let selection = self.session.finish_ready(
-            self.kind,
-            ready.settings,
-            stored,
-            model.as_deref(),
-            effort.as_deref(),
-        );
+        let selection = ready.selection;
 
         self.prompts.reset_editors();
 
@@ -324,14 +256,12 @@ impl AgentPane {
         info!(
             "agent thread ready: profile=\"{}\", model={:?}, profile_model={:?}",
             self.profile.name,
-            self.session.controls.settings.model,
+            self.session.borrow().controls.settings.model,
             launch_model(self.kind, &self.profile)
         );
 
         // The session id is known by now, so child agents that ran
         // before this tab opened can be rebuilt from history.
-        self.restore_background_tasks(cx);
-        self.restore_workflows(cx);
 
         cx.notify();
     }
@@ -411,27 +341,9 @@ impl AgentPane {
     fn on_turn_completed(
         &mut self,
         error: Option<String>,
-        interrupted: bool,
+        _interrupted: bool,
         cx: &mut Context<Self>,
     ) {
-        if interrupted {
-            let turn = self.session.delivery.turn();
-
-            self.transcript
-                .update(cx, |transcript, _| transcript.mark_interrupted(turn));
-        }
-
-        let interrupted_by_user = self
-            .transcript
-            .read(cx)
-            .was_interrupted(self.session.delivery.turn());
-
-        let error_already_shown = error.as_deref().is_some_and(|text| {
-            self.transcript
-                .read(cx)
-                .turn_has_error(self.session.delivery.turn(), text)
-        });
-
         let completion_body = error
             .clone()
             .or_else(|| self.latest_agent_message(cx))
@@ -439,22 +351,8 @@ impl AgentPane {
                 i18n("agent-session-turn-completed").replace("{name}", self.kind.display())
             });
 
-        // Compaction lives inside a turn; a flag surviving the turn
-        // would leave the indicator spinning with nothing behind it.
-        self.transcript
-            .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
-
-        self.publish_queued_user_messages(cx);
-
-        self.finish_working(cx);
+        self.turn.refresh_timer(cx);
         self.refresh_git_branch(cx);
-
-        if let Some(text) = error
-            && !interrupted_by_user
-            && !error_already_shown
-        {
-            self.push_item(SessionItem::Error { text }, cx);
-        }
 
         self.emit_lifecycle(
             AgentEventKind::Stopped,
@@ -477,18 +375,10 @@ impl AgentPane {
         failure: SessionFailure,
         cx: &mut Context<Self>,
     ) {
-        self.note_visible_output();
-
         let resume_failed = failure.resume_failed;
 
         if resume_failed || self.history_ui.mode == RecentSessionsMode::Loading {
             self.history_ui.mode = RecentSessionsMode::Open;
-
-            if !fatal && !resume_failed && failure.branch.is_none() {
-                self.session
-                    .runtime
-                    .conversation_change_rejected(Status::Idle);
-            }
 
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
@@ -502,13 +392,12 @@ impl AgentPane {
         }
 
         if fatal {
-            self.prompts.release_secret_editors(&self.session.input);
+            self.prompts
+                .release_secret_editors(&self.session.borrow().input);
 
-            cx.emit(AgentPaneEvent::Interrupted);
+            self.emit_event(AgentPaneEvent::Interrupted, cx);
             self.publish_queued_user_messages(cx);
         }
-
-        self.push_item(SessionItem::Error { text: message }, cx);
 
         if failure.cancelled_commands {
             self.palette.set_feedback(
@@ -530,65 +419,22 @@ impl AgentPane {
         cx.notify();
     }
 
-    /// The backend owns its pending inbox, so its snapshot replaces whatever
-    /// this side queued optimistically. Anything it dropped is gone from the
-    /// list by being absent rather than by a second event saying so, and a
-    /// dropped prompt was claimed into the running turn — which is when its
-    /// transcript row is due.
-    ///
-    /// The backend's own echo of that message claims the row too, and either
-    /// can arrive first. Both read the same list and remove what they
-    /// publish, so whichever loses the race finds nothing left to publish and
-    /// the row appears exactly once.
-    fn publish_prompts(&mut self, prompts: Vec<String>, cx: &mut Context<Self>) {
-        for text in prompts {
-            self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
-        }
-
-        cx.notify();
-    }
-
-    /// The working row carries it: a turn waiting out a provider retry is
-    /// indistinguishable from one thinking slowly, and the elapsed time and
-    /// token count say nothing about which it is.
-    fn on_status_detail(&mut self, detail: Option<TurnActivity>, cx: &mut Context<Self>) {
-        let detail = detail.map(|activity| match activity {
-            TurnActivity::Retrying {
-                attempt,
-                total,
-                reason,
-            } => i18n("agent-transcript-retrying")
-                .replace("{attempt}", &attempt.to_string())
-                .replace("{total}", &total.to_string())
-                .replace("{reason}", &reason),
-        });
-
-        self.transcript.update(cx, |transcript, cx| {
-            transcript.set_working_detail(detail, cx)
-        });
-    }
-
     /// Pre-fill the transcript with a resumed session's reconstructed
     /// conversation. Replay entries share one turn and carry no fold header,
     /// so they render as a plain chronological stream above the new turns.
+    #[cfg(test)]
     pub(crate) fn apply_replay(&mut self, replay: Vec<ReplayTurn>, cx: &mut Context<Self>) {
-        let mut answered_at = None;
+        let answered_at = replay
+            .iter()
+            .flat_map(|turn| turn.items.iter())
+            .filter_map(|item| item.at)
+            .max();
 
-        for turn in replay {
-            // Each restored turn takes its own id, so the sequence continues
-            // past the replay and new turns cannot merge into the last one.
-            let id = self.session.delivery.replay_turn();
-            let newest = turn.items.iter().filter_map(|item| item.at).max();
+        self.session.borrow_mut().apply_replay(replay);
 
-            answered_at = answered_at.max(newest);
+        self.transcript
+            .update(cx, |transcript, _| transcript.sync_content());
 
-            self.transcript
-                .update(cx, |transcript, cx| transcript.append_replay(id, turn, cx));
-        }
-
-        // The restored conversation's idle span runs from the provider's own
-        // stamp for its last answer. A transcript that carries no stamps leaves
-        // the reading absent, which is all it can honestly say.
         if let Some(at) = answered_at {
             self.note_replayed_response(at, cx);
         }
@@ -596,60 +442,39 @@ impl AgentPane {
         cx.notify();
     }
 
-    pub(crate) fn start_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
-        if let SessionItem::UserMessage { text } = &item {
-            if let Some(text) = text
-                && let Some(text) = self.session.delivery.echoed(text)
-            {
-                self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
-            }
+    #[cfg(test)]
+    pub(super) fn prepare_ready_defaults(&mut self, cx: &Context<Self>) {
+        let seed = self.session.borrow().controls.seed_thread_defaults;
 
-            return;
-        }
-
-        if !hidden(&item) {
-            self.note_visible_output();
-        }
-
-        if matches!(item, SessionItem::AgentMessage { .. }) {
-            self.session.delivery.agent_message();
-            self.publish_queued_user_messages(cx);
-        }
-
-        self.push_item(item, cx);
-    }
-
-    pub(super) fn publish_queued_user_messages(&mut self, cx: &mut Context<Self>) {
-        while let Some(text) = self.session.delivery.pop_confirmed() {
-            self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
-        }
-    }
-
-    pub(crate) fn complete_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
-        let Some(id) = item.id().map(str::to_owned) else {
-            return;
+        self.session.borrow_mut().ready_defaults = ReadyDefaults {
+            stored: (seed || self.session.borrow().controls.seed_approval_reviewer)
+                .then(|| stored_thread_settings(self.kind, &self.profile, cx).cloned())
+                .flatten(),
+            model: seed
+                .then(|| launch_model(self.kind, &self.profile))
+                .flatten(),
+            effort: seed.then(|| launch_effort(&self.profile)).flatten(),
         };
+    }
 
-        let known = self.transcript.read(cx).contains_item(&id);
-
-        // A completed item this pane never saw start (e.g. joined mid-turn)
-        // still gets a transcript entry.
-        if !known {
-            self.start_item(item.clone(), cx);
-        }
+    #[cfg(test)]
+    pub(crate) fn start_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
+        self.session.borrow_mut().start_item(item);
 
         self.transcript
-            .update(cx, |transcript, _| transcript.merge_completed(&item));
-
-        if !hidden(&item) {
-            self.note_visible_output();
-        }
+            .update(cx, |transcript, _| transcript.sync_content());
 
         cx.notify();
     }
 
-    /// Append streamed text to the requested field. A delta that
-    /// actually landed is visible agent output, which resets the idle clock.
+    pub(super) fn publish_queued_user_messages(&mut self, cx: &mut Context<Self>) {
+        self.session.borrow_mut().publish_confirmed();
+
+        self.transcript
+            .update(cx, |transcript, _| transcript.sync_content());
+    }
+
+    #[cfg(test)]
     pub(crate) fn append_delta(
         &mut self,
         item_id: &str,
@@ -657,14 +482,18 @@ impl AgentPane {
         field: TextField,
         cx: &mut Context<Self>,
     ) {
-        let visible = self.transcript.update(cx, |transcript, _| {
-            transcript.append_delta(item_id, delta, field)
-        });
+        self.session
+            .borrow_mut()
+            .append_delta(item_id, delta, field);
 
-        if visible {
-            self.note_visible_output();
-        }
+        self.transcript
+            .update(cx, |transcript, _| transcript.sync_content());
 
         cx.notify();
     }
 }
+
+#[cfg(test)]
+use nmt_agent::chat::{Event as SessionEvent, Item as SessionItem, ReplayTurn};
+#[cfg(test)]
+use nmt_agent::session::controller::ReadyDefaults;

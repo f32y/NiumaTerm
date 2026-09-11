@@ -34,13 +34,15 @@ impl TranscriptView {
 
         // The previous last turn may gain another entry, and its final row's
         // spacing depends on the first row appended below it.
-        let index = self.content.append(entry);
+        let index = self.conversation.borrow_mut().append(entry);
 
         self.row_cache.invalidate(index.saturating_sub(1));
     }
 
     pub(super) fn invalidate_turn_rows(&mut self, turn: u64) {
         if let Some(index) = self
+            .conversation
+            .borrow()
             .content
             .entries()
             .iter()
@@ -48,7 +50,8 @@ impl TranscriptView {
         {
             self.row_cache.invalidate(index);
         } else {
-            self.row_cache.invalidate(self.content.entries().len());
+            self.row_cache
+                .invalidate(self.conversation.borrow().content.entries().len());
         }
     }
 
@@ -68,7 +71,9 @@ impl TranscriptView {
         };
 
         let _profile = Probe::start(Operation::RowsRebuild);
-        let items = self.content.entries();
+        let shared = self.conversation.clone();
+        let conversation = shared.borrow();
+        let items = conversation.content.entries();
 
         let keep = self
             .row_cache
@@ -107,9 +112,9 @@ impl TranscriptView {
             start = end;
         }
 
-        if self.live_turn.is_working() {
+        if self.conversation.borrow().live.is_working() {
             specs.push(RowSpec::Working {
-                compacting: self.live_turn.is_compacting(),
+                compacting: self.conversation.borrow().live.is_compacting(),
             });
         }
 

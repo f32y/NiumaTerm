@@ -2,10 +2,12 @@ use std::collections::HashSet;
 use std::mem;
 use std::sync::Arc;
 
-use chrono::Local;
+use chrono::Utc;
 use gpui::{Context, FollowMode, Image, ListOffset, px};
 use nmt_agent::chat::Item as SessionItem;
 use nmt_agent::transcript::TranscriptEntry;
+use nmt_agent::transcript::conversation::ConversationImage;
+pub(crate) use nmt_agent::transcript::conversation::EntryMetadata as EntryPresentation;
 use nmt_config::agent::CollapseRows;
 
 use crate::composer::PromptTarget;
@@ -13,18 +15,6 @@ use crate::transcript::view::TranscriptView;
 use crate::transcript::{compaction_accounting, hidden, is_work_row, should_show_jump_to_latest};
 
 pub(crate) type Entry = TranscriptEntry<EntryPresentation>;
-
-/// Display data that stays with its entry while provider content is updated.
-/// The content model stores this value without interpreting or copying it.
-#[derive(Default)]
-pub(crate) struct EntryPresentation {
-    pub(crate) at: String,
-
-    /// Images a user message carried. Held here rather than on the protocol
-    /// item because they are this side's own record: a harness reports what a
-    /// message said, not the pixels the person attached to it.
-    pub(crate) images: Vec<Arc<Image>>,
-}
 
 /// One transcript row for the virtualized list. `PartialEq` powers the
 /// render-time diff: kind + indices catch structural changes (fold, collapse,
@@ -319,8 +309,11 @@ impl TranscriptView {
             turn,
             item,
             metadata: EntryPresentation {
-                at: Local::now().format("%H:%M").to_string(),
-                images,
+                at: Some(Utc::now().timestamp()),
+                images: images
+                    .into_iter()
+                    .map(|image| Arc::new(ConversationImage::new(image.bytes().into())))
+                    .collect(),
             },
         });
 
@@ -332,7 +325,7 @@ impl TranscriptView {
     /// Running turns render chronologically.
     pub(crate) fn entry_spec(&self, index: usize) -> RowSpec {
         let fingerprint = entry_fingerprint(
-            &self.content.entries()[index].item,
+            &self.conversation.borrow().content.entries()[index].item,
             self.disclosures.row_expanded(index),
             self.disclosures.annotation_expanded(index),
         );
@@ -353,7 +346,7 @@ impl TranscriptView {
         RowSpec::Work {
             index,
             fingerprint: entry_fingerprint(
-                &self.content.entries()[index].item,
+                &self.conversation.borrow().content.entries()[index].item,
                 self.disclosures.row_expanded(index),
                 false,
             ),
@@ -367,7 +360,9 @@ impl TranscriptView {
     pub(crate) fn build_row_specs(&self, collapse: CollapseRows) -> Vec<RowSpec> {
         let mut rows = Vec::new();
         let mut start = 0;
-        let items = self.content.entries();
+        let shared = self.conversation.clone();
+        let conversation = shared.borrow();
+        let items = conversation.content.entries();
 
         while start < items.len() {
             let turn = items[start].turn;
@@ -383,9 +378,9 @@ impl TranscriptView {
 
         // Live progress row, pinned below everything the running turn has
         // produced; replaced by the turn's fold header on completion.
-        if self.live_turn.is_working() {
+        if self.conversation.borrow().live.is_working() {
             rows.push(RowSpec::Working {
-                compacting: self.live_turn.is_compacting(),
+                compacting: self.conversation.borrow().live.is_compacting(),
             });
         }
 
@@ -404,8 +399,8 @@ impl TranscriptView {
         // own marker; otherwise an elapsed-time line, when the session reported
         // a duration at all.
         let summary = turn_summary(
-            self.turn_ledger.was_interrupted(turn),
-            self.turn_ledger.seconds(turn),
+            self.conversation.borrow().turns.was_interrupted(turn),
+            self.conversation.borrow().turns.seconds(turn),
         );
 
         if summary == Some(TurnSummary::Interrupted) {
@@ -413,7 +408,7 @@ impl TranscriptView {
 
             rows.push(RowSpec::Interrupted {
                 turn,
-                output_tokens: self.turn_ledger.output_tokens(turn),
+                output_tokens: self.conversation.borrow().turns.output_tokens(turn),
             });
 
             return;
@@ -423,7 +418,7 @@ impl TranscriptView {
         // work is what the user is watching happen. Folding keys off the turn
         // having settled rather than off a known duration, so a replayed turn
         // folds too — the transcript file carries no timing for it.
-        if !self.turn_ledger.is_settled(turn) {
+        if !self.conversation.borrow().turns.is_settled(turn) {
             self.stream_specs(start, end, &|_| false, collapse, rows);
 
             return;
@@ -442,7 +437,9 @@ impl TranscriptView {
         // into a turn already in flight was written after part of the reply
         // existed, so hoisting it here would show it above output it never
         // saw; it keeps its place in the stream instead.
-        let items = self.content.entries();
+        let shared = self.conversation.clone();
+        let conversation = shared.borrow();
+        let items = conversation.content.entries();
 
         let opening_user =
             (start..end).find(|&i| matches!(&items[i].item, SessionItem::UserMessage { .. }));
@@ -486,7 +483,7 @@ impl TranscriptView {
         if let Some(TurnSummary::Worked(seconds)) = summary {
             rows.push(RowSpec::TurnSummary {
                 seconds,
-                output_tokens: self.turn_ledger.output_tokens(turn),
+                output_tokens: self.conversation.borrow().turns.output_tokens(turn),
             });
         }
     }
@@ -504,7 +501,9 @@ impl TranscriptView {
         rows: &mut Vec<RowSpec>,
     ) {
         let mut i = start;
-        let items = self.content.entries();
+        let shared = self.conversation.clone();
+        let conversation = shared.borrow();
+        let items = conversation.content.entries();
 
         while i < end {
             let item = &items[i].item;
@@ -568,7 +567,9 @@ impl TranscriptView {
     /// turn closes; everything between the prompt and that answer is what the
     /// fold hides.
     pub(crate) fn survives_fold(&self, index: usize) -> bool {
-        let items = self.content.entries();
+        let shared = self.conversation.clone();
+        let conversation = shared.borrow();
+        let items = conversation.content.entries();
         let entry = &items[index];
 
         match &entry.item {
@@ -608,7 +609,11 @@ impl TranscriptView {
     pub(super) fn sync_transcript_tail(&mut self, start: usize, specs: &[RowSpec]) {
         let mut new = mem::take(&mut self.row_cache.scratch_rows);
 
-        spaced_rows(self.content.entries(), specs, &mut new);
+        spaced_rows(
+            self.conversation.borrow().content.entries(),
+            specs,
+            &mut new,
+        );
 
         if self.rows[start..] == new {
             new.clear();
@@ -667,13 +672,15 @@ impl TranscriptView {
     /// menu. `None` where the row is not a prompt that opened a turn, which is
     /// a row no cut can be anchored on.
     pub(crate) fn prompt_target(&self, index: usize) -> Option<PromptTarget> {
+        let conversation = self.conversation.borrow();
+
         let SessionItem::UserMessage { text: Some(prompt) } =
-            &self.content.entries().get(index)?.item
+            &conversation.content.entries().get(index)?.item
         else {
             return None;
         };
 
-        let openings = turn_opening_prompts(self.content.entries());
+        let openings = turn_opening_prompts(self.conversation.borrow().content.entries());
         let position = openings.iter().position(|opening| *opening == index)?;
 
         Some(PromptTarget {
@@ -687,10 +694,13 @@ impl TranscriptView {
     /// text confirming the count landed on the same message. `None` where the
     /// two disagree, which is a row the transcript should not be moved to.
     pub(crate) fn prompt_row(&self, target: &PromptTarget) -> Option<usize> {
-        let openings = turn_opening_prompts(self.content.entries());
+        let openings = turn_opening_prompts(self.conversation.borrow().content.entries());
         let index = *openings.get(openings.len().checked_sub(target.depth + 1)?)?;
 
-        let SessionItem::UserMessage { text: Some(prompt) } = &self.content.entries()[index].item
+        let conversation = self.conversation.borrow();
+
+        let SessionItem::UserMessage { text: Some(prompt) } =
+            &conversation.content.entries()[index].item
         else {
             return None;
         };

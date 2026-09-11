@@ -1,19 +1,24 @@
 use crate::chat::{ReplayTurn, ThreadSettings};
 use crate::session::AgentKind;
-use crate::session::branch::{BranchCompletion, BranchReplay};
+use crate::session::branch::{BranchCompletion, BranchReplay, FileProgress};
 use crate::session::capabilities::AgentCapabilities as _;
 use crate::session::controller::SessionController;
 use crate::session::restore::{ReadyAction, ReplayAction};
 
+pub struct SessionBranch {
+    pub prompt: String,
+    pub files: FileProgress,
+    pub replayed: bool,
+}
+
 pub struct SessionReady {
-    pub settings: ThreadSettings,
-    pub branch: Option<BranchCompletion>,
-    pub replay: Option<Vec<ReplayTurn>>,
+    pub branch: Option<SessionBranch>,
+    pub replaced: bool,
+    pub selection: Option<Result<(), String>>,
 }
 
 pub struct SessionReplay {
-    pub turns: Vec<ReplayTurn>,
-    pub branch: Option<BranchCompletion>,
+    pub branch: Option<SessionBranch>,
     pub replace: bool,
 }
 
@@ -26,7 +31,7 @@ impl SessionController {
             self.clear_conversation();
         }
 
-        let replay = match self.restore.ready(epoch) {
+        let mut replay = match self.restore.ready(epoch) {
             ReadyAction::Ignore => return None,
             ReadyAction::Apply => None,
 
@@ -37,10 +42,27 @@ impl SessionController {
             }
         };
 
+        let branch = branch.map(|completion| self.apply_branch_content(completion));
+        let replaced = replay.is_some();
+
+        if let Some(turns) = replay.take() {
+            self.apply_replay(turns);
+        }
+
+        let defaults = self.ready_defaults.clone();
+
+        let selection = self.finish_ready(
+            self.kind,
+            settings.clone(),
+            defaults.stored.as_ref(),
+            defaults.model.as_deref(),
+            defaults.effort.as_deref(),
+        );
+
         Some(SessionReady {
-            settings,
             branch,
-            replay,
+            replaced,
+            selection,
         })
     }
 
@@ -71,11 +93,25 @@ impl SessionController {
             }
         };
 
-        Some(SessionReplay {
-            turns,
-            branch,
-            replace,
-        })
+        let branch = branch.map(|completion| self.apply_branch_content(completion));
+
+        self.apply_replay(turns);
+
+        Some(SessionReplay { branch, replace })
+    }
+
+    fn apply_branch_content(&mut self, completion: BranchCompletion) -> SessionBranch {
+        let replayed = completion.replay.is_some();
+
+        if let Some(turns) = completion.replay {
+            self.apply_replay(turns);
+        }
+
+        SessionBranch {
+            prompt: completion.prompt,
+            files: completion.files,
+            replayed,
+        }
     }
 
     /// Apply host-supplied defaults after any restored content has been accepted.

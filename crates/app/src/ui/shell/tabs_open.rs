@@ -1,7 +1,9 @@
+use nmt_agent_ui::execution::AgentSession;
 use nmt_agent_ui::{AgentKindExt as _, RecoveryIdentity};
 use nmt_i18n::i18n;
 
 use crate::ui::persistence::spawn_default_pane;
+use crate::ui::shell::tab_surface::AgentTab;
 use crate::ui::shell::*;
 use crate::ui::terminal_launch::attach_remote;
 
@@ -201,15 +203,19 @@ impl Shell {
             profile.name.clone()
         };
 
-        let pane =
-            cx.new(|cx| AgentPane::new_resuming(profile.clone(), workspace, resume, window, cx));
+        let owner = AgentSession::create(profile.clone(), workspace, cx);
+        let pane = cx.new(|cx| AgentPane::attach(&owner, window, cx));
 
         Self::watch_agent_tab(&pane, cx);
         self.register_agent_tab(&pane, cx);
 
-        self.workspaces
-            .active_tabs_mut()
-            .new_tab(TabSurface::Agent(pane), TabId(id), title);
+        owner.start(resume, cx);
+
+        self.workspaces.active_tabs_mut().new_tab(
+            TabSurface::Agent(AgentTab { owner, pane }),
+            TabId(id),
+            title,
+        );
 
         self.focus_active(window, cx);
         self.sync_session_memory(cx);

@@ -262,7 +262,12 @@ impl TranscriptView {
         };
 
         let below = self.rows.get(ix + 1).map(|row| &row.spec);
-        let merged = row_gap(self.content.entries(), &above.spec, below);
+
+        let merged = row_gap(
+            self.conversation.borrow().content.entries(),
+            &above.spec,
+            below,
+        );
 
         px(gap_px(merged) - gap_px(above.gap))
     }
@@ -275,7 +280,7 @@ impl TranscriptView {
         compacting: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(started) = self.live_turn.started() else {
+        let Some(started) = self.conversation.borrow().live.started() else {
             return div().into_any_element();
         };
 
@@ -316,8 +321,8 @@ impl TranscriptView {
                                 .text_color(cx.theme().muted_foreground)
                                 .child(working_label(
                                     started,
-                                    self.live_turn.output_tokens(),
-                                    self.live_turn.detail(),
+                                    self.conversation.borrow().live.output_tokens(),
+                                    self.conversation.borrow().live.detail(),
                                 )),
                         ),
                 )
@@ -360,8 +365,8 @@ impl TranscriptView {
                         // slightly lifted at the twelve-pixel detail size.
                         ShimmerText::new(working_label(
                             started,
-                            self.live_turn.output_tokens(),
-                            self.live_turn.detail(),
+                            self.conversation.borrow().live.output_tokens(),
+                            self.conversation.borrow().live.detail(),
                         ))
                         .id("agent-working-label")
                         .highlight_color(cx.theme().foreground)
@@ -377,7 +382,9 @@ impl TranscriptView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let entry = &self.content.entries()[index];
+        let shared = self.conversation.clone();
+        let conversation = shared.borrow();
+        let entry = &conversation.content.entries()[index];
 
         match &entry.item {
             SessionItem::UserMessage { text: Some(text) } => self.render_user_row(index, text, cx),

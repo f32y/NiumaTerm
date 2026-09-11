@@ -20,6 +20,7 @@ use nmt_agent::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskSummary,
 };
 use nmt_agent_ui::AgentPane;
+use nmt_agent_ui::execution::ChildReader;
 use nmt_agent_ui::transcript::TranscriptView;
 use nmt_i18n::i18n;
 
@@ -113,6 +114,8 @@ pub(crate) struct BackgroundTasksView {
     /// child rather than to the parent conversation.
     detail_transcript: Option<Entity<TranscriptView>>,
 
+    detail_interest: Option<ChildReader>,
+
     /// The Agent pane whose children are shown. Weak because the tab can close
     /// while the panel is still mounted for its closing animation.
     target: Option<WeakEntity<AgentPane>>,
@@ -133,6 +136,7 @@ impl BackgroundTasksView {
         Self {
             mode: PanelMode::List,
             detail_transcript: None,
+            detail_interest: None,
             target: None,
             running_expanded: false,
             finished_expanded: false,
@@ -165,6 +169,7 @@ impl BackgroundTasksView {
         // returns to the list rather than keeping that child on screen.
         self.mode = PanelMode::List;
         self.detail_transcript = None;
+        self.detail_interest = None;
         self.running_expanded = false;
         self.finished_expanded = false;
         self.scroll = ScrollHandle::new();
@@ -189,7 +194,10 @@ impl BackgroundTasksView {
     fn snapshot(&self, cx: &Context<Self>) -> Option<BackgroundTaskSnapshot> {
         let target = self.target.as_ref()?.upgrade()?;
 
-        target.read(cx).background_tasks().cloned()
+        target
+            .read(cx)
+            .background_tasks()
+            .map(|snapshot| snapshot.clone())
     }
 
     /// Keep one repaint task alive exactly while a visible active row has a
@@ -209,9 +217,7 @@ impl BackgroundTasksView {
             loop {
                 cx.background_executor().timer(ELAPSED_TICK).await;
 
-                let alive = this.update(cx, |this, cx| {
-                    this.refresh_open_child(cx);
-
+                let alive = this.update(cx, |_, cx| {
                     cx.notify();
                 });
 

@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use gpui::Context;
 use nmt_agent::chat::{SessionScope, SessionSummary};
-use nmt_agent::session::restore::{ReplayLoaded, ResumeStart, SettingsSeed};
+use nmt_agent::session::restore::{ResumeStart, SettingsSeed};
 use nmt_i18n::i18n;
 
 use crate::capabilities::AgentCapabilities as _;
@@ -92,7 +92,7 @@ impl AgentPane {
         self.history_ui.data.showing_search = false;
         self.history_ui.selected = 0;
 
-        if let Some(session) = self.session.runtime.backend_mut() {
+        if let Some(session) = self.session.borrow_mut().runtime.backend_mut() {
             session.request_history(self.history_ui.data.scope);
         }
 
@@ -116,7 +116,7 @@ impl AgentPane {
 
         let request = self
             .history_ui
-            .begin_filesystem_history(cwd.clone(), self.session.runtime.epoch());
+            .begin_filesystem_history(cwd.clone(), self.session.borrow().runtime.epoch());
 
         cx.notify();
 
@@ -135,7 +135,7 @@ impl AgentPane {
                     match this.history_ui.publish_filesystem_count(
                         &request,
                         cwd.as_deref(),
-                        this.session.runtime.epoch(),
+                        this.session.borrow().runtime.epoch(),
                         count,
                     ) {
                         CountPublication::Stale => false,
@@ -178,7 +178,7 @@ impl AgentPane {
                 if this.history_ui.publish_filesystem_rows(
                     &request,
                     cwd.as_deref(),
-                    this.session.runtime.epoch(),
+                    this.session.borrow().runtime.epoch(),
                     sessions,
                 ) {
                     cx.notify();
@@ -189,18 +189,26 @@ impl AgentPane {
     }
 
     pub(super) fn seed_restored_settings(&mut self, seed: SettingsSeed) {
+        if !self.binding.is_current() {
+            return;
+        }
+
         let (defaults, reviewer) = match seed {
             SettingsSeed::Defaults => (true, false),
             SettingsSeed::Reviewer => (false, true),
             SettingsSeed::None => (false, false),
         };
 
-        self.session.controls.seed_thread_defaults = defaults;
-        self.session.controls.seed_approval_reviewer = reviewer;
+        self.session.borrow_mut().controls.seed_thread_defaults = defaults;
+        self.session.borrow_mut().controls.seed_approval_reviewer = reviewer;
     }
 
     /// Keep the displayed conversation until the replacement supplies its replay.
     pub(crate) fn resume_session(&mut self, index: usize, cx: &mut Context<Self>) {
+        if !self.binding.is_current() {
+            return;
+        }
+
         let Some(summary) = self.history_ui.data.sessions.get(index) else {
             return;
         };
@@ -208,25 +216,30 @@ impl AgentPane {
         // Both operations replace the conversation; a visible history list
         // must not start a resume while a branch picker or file step owns it.
         if self.history_ui.mode == RecentSessionsMode::Loading
-            || self.session.branch.holds_composer()
+            || self.session.borrow().branch.holds_composer()
         {
             return;
         }
 
         let cwd = self.cwd();
 
-        let request = match self.session.restore.begin(
-            &mut self.session.runtime,
-            self.kind,
-            summary,
-            cwd.as_deref(),
-        ) {
+        let outcome = {
+            let mut guard = self.session.borrow_mut();
+            let state = &mut *guard;
+
+            state
+                .restore
+                .begin(&mut state.runtime, self.kind, summary, cwd.as_deref())
+        };
+
+        let request = match outcome {
             ResumeStart::Busy => return,
 
             ResumeStart::Elsewhere { cwd, session_id } => {
                 self.history_ui.selected = index;
 
-                cx.emit(AgentPaneEvent::ResumeElsewhere { cwd, session_id });
+                self.emit_event(AgentPaneEvent::ResumeElsewhere { cwd, session_id }, cx);
+
                 cx.notify();
 
                 return;
@@ -267,60 +280,8 @@ impl AgentPane {
             return;
         };
 
-        cx.spawn(async move |this, cx| {
-            let (request, replay) = cx
-                .background_executor()
-                .spawn(async move {
-                    let replay = request.load();
-
-                    (request, replay)
-                })
-                .await;
-
-            let _ = this.update(cx, |this, cx| {
-                let cwd = this.cwd();
-
-                match this.session.restore.loaded(
-                    &mut this.session.runtime,
-                    request,
-                    cwd.as_deref(),
-                    replay,
-                ) {
-                    ReplayLoaded::Stale => {}
-
-                    ReplayLoaded::Cancelled => {
-                        this.history_ui.mode = RecentSessionsMode::Open;
-                        this.palette.feedback = None;
-
-                        cx.notify();
-                    }
-
-                    ReplayLoaded::Failed(message) => {
-                        this.history_ui.mode = RecentSessionsMode::Open;
-
-                        this.palette.set_feedback(
-                            CommandFeedbackKind::Error,
-                            i18n("agent-session-open-failed").replace("{error}", &message),
-                            cx,
-                        );
-                    }
-
-                    ReplayLoaded::Restart(identity) => {
-                        this.start_session_with_options(
-                            Some(identity),
-                            false,
-                            |this, started, _| {
-                                if !started {
-                                    this.session.restore.failed(&mut this.session.runtime);
-                                    this.history_ui.mode = RecentSessionsMode::Open;
-                                }
-                            },
-                            cx,
-                        );
-                    }
-                }
-            });
-        })
-        .detach();
+        if let Some(host) = self.host.upgrade() {
+            host.update(cx, |host, cx| host.read_resume(request, cx));
+        }
     }
 }

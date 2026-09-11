@@ -5,95 +5,39 @@
 //! is scoped to the session's own key and a snapshot from a replaced
 //! conversation reaches nothing.
 
+use std::cell::Ref;
+
 use gpui::Context;
-use nmt_agent::background_task::{
-    BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscript,
-};
-use nmt_agent::claude_code::sessions;
+use nmt_agent::background_task::{BackgroundTaskKey, BackgroundTaskSnapshot};
+use nmt_agent::session::children::ChildTranscript;
 #[cfg(test)]
 pub(super) use nmt_agent::session::children::scoped_background_tasks;
 
 use crate::AgentPane;
+use crate::execution::ChildReader;
 
 impl AgentPane {
-    /// Rebuild Claude child agents from the session's persisted history. The
-    /// read runs on a background thread and its failure never blocks the
-    /// parent transcript or composer.
-    pub(crate) fn restore_background_tasks(&mut self, cx: &mut Context<Self>) {
-        let Some(session_id) = self
-            .session
-            .runtime
-            .backend()
-            .and_then(|session| session.session_id())
-            .map(str::to_owned)
-        else {
-            return;
-        };
-
-        if !self.session.children.claim_restore(&session_id) {
-            return;
-        }
-
-        let Some(session) = self.session.runtime.backend_mut() else {
-            return;
-        };
-
-        // Captured before the read starts so live updates that land while it
-        // runs keep their newer state.
-        let starting_sequence = session.begin_task_restoration();
-        let cwd = self.cwd();
-        let epoch = self.session.runtime.epoch();
-
-        cx.spawn(async move |this, cx| {
-            let restored = cx
-                .background_executor()
-                .spawn(async move { sessions::load_task_history(cwd.as_deref(), &session_id) })
-                .await;
-
-            let _ = this.update(cx, |this, cx| {
-                if !this.session.runtime.is_current(epoch) {
-                    return;
-                }
-
-                let Some(session) = this.session.runtime.backend_mut() else {
-                    return;
-                };
-
-                for event in session.finish_task_restoration(restored, starting_sequence) {
-                    this.apply_event(event, cx);
-                }
-            });
-        })
-        .detach();
-    }
-
     pub fn refresh_background_tasks(&mut self) {
-        self.session.refresh_background_tasks();
+        self.session.borrow_mut().refresh_background_tasks();
     }
 
     /// Provider-qualified identity of the parent session child tasks belong to.
     /// `None` until the backend reports a thread or session id, which is what
     /// disables the title-bar `Background Tasks` button.
     pub fn background_task_parent(&self) -> Option<BackgroundTaskKey> {
-        self.session.background_task_parent()
+        self.session.borrow().background_task_parent()
     }
 
     /// Ask the provider for one child's conversation. A provider that already
     /// has it, or that streams it live, does no work here.
-    pub fn load_background_task_transcript(
+    pub fn watch_background_task(
         &mut self,
         key: &BackgroundTaskKey,
         cx: &mut Context<Self>,
-    ) {
-        let cwd = self.cwd();
-
-        let Some(session) = self.session.runtime.backend_mut() else {
-            return;
-        };
-
-        for event in session.load_background_task_transcript(key, cwd.as_deref()) {
-            self.apply_event(event, cx);
-        }
+    ) -> Option<ChildReader> {
+        self.host
+            .upgrade()?
+            .update(cx, |host, cx| host.watch_child(key, cx))
     }
 
     /// Stop one child agent, leaving this tab's own turn running. Reports
@@ -101,7 +45,11 @@ impl AgentPane {
     /// turns out not to be stoppable after all — the snapshot a row was drawn
     /// from can be a moment behind the child finishing on its own.
     pub fn interrupt_background_task(&mut self, key: &BackgroundTaskKey) -> bool {
-        self.session.interrupt_background_task(key)
+        if !self.binding.is_current() {
+            return false;
+        }
+
+        self.session.borrow_mut().interrupt_background_task(key)
     }
 
     /// One child's conversation, only while the pane still holds the session
@@ -109,21 +57,24 @@ impl AgentPane {
     pub fn background_task_transcript(
         &self,
         key: &BackgroundTaskKey,
-    ) -> Option<&BackgroundTaskTranscript> {
-        self.session.background_task_transcript(key)
+    ) -> Option<Ref<'_, ChildTranscript>> {
+        Ref::filter_map(self.session.borrow(), |session| {
+            session.background_task_transcript(key)
+        })
+        .ok()
     }
 
     /// The latest snapshot, only while it still describes the session the pane
     /// currently holds. A snapshot left over from a replaced session is hidden
     /// rather than shown against the new parent.
-    pub fn background_tasks(&self) -> Option<&BackgroundTaskSnapshot> {
-        self.session.background_tasks()
+    pub fn background_tasks(&self) -> Option<Ref<'_, BackgroundTaskSnapshot>> {
+        Ref::filter_map(self.session.borrow(), |session| session.background_tasks()).ok()
     }
 
     /// Child agents of this tab the provider currently reports as active.
     pub fn running_background_tasks(&self) -> usize {
         self.background_tasks()
-            .map(BackgroundTaskSnapshot::active_count)
+            .map(|snapshot| snapshot.active_count())
             .unwrap_or(0)
     }
 

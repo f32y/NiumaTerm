@@ -32,7 +32,7 @@ fn disabled_hooks_leave_transcript_updates_available(_cx: &mut TestAppContext) {
     view.refresh_rows(CollapseRows::WorkAndToolCalls);
 
     assert!(matches!(
-        &view.content.entries()[0].item,
+        &view.conversation.borrow().content.entries()[0].item,
         Item::Reasoning { summary: Some(text), .. } if text == "before-after"
     ));
 

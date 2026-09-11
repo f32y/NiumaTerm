@@ -180,16 +180,16 @@ fn search_retires_disk_reads_and_next_history_page_replaces_matches() {
 }
 
 #[test]
-fn workflow_member_switch_rejects_old_content_and_preserves_file_length_cache() {
+fn workflow_readers_keep_separate_content_and_preserve_file_length_cache() {
     let mut workflows = WorkflowData::default();
 
     assert!(workflows.claim_restore("session"));
     assert!(!workflows.claim_restore("session"));
 
-    workflows.open_agent("run", "first");
-    workflows.open_agent("run", "second");
+    let first = workflows.open_agent("run", "first");
+    let _second = workflows.open_agent("run", "second");
 
-    assert!(!workflows.apply_transcript("run", "first", vec![Item::Error { text: "old".into() }]));
+    assert!(workflows.apply_transcript("run", "first", vec![Item::Error { text: "old".into() }]));
     assert!(workflows.apply_transcript("run", "second", vec![Item::Error { text: "new".into() }]));
 
     workflows.note_open_len(&WorkflowRefreshResult {
@@ -202,6 +202,8 @@ fn workflow_member_switch_rejects_old_content_and_preserves_file_length_cache() 
         ..Default::default()
     });
 
+    drop(first);
+
     let requests = workflows.scope_requests(vec![WorkflowRefreshRequest {
         task_id: "run".into(),
         agent_ids: vec![],
@@ -211,11 +213,14 @@ fn workflow_member_switch_rejects_old_content_and_preserves_file_length_cache() 
 
     assert_eq!(requests[0].open_agent.as_deref(), Some("second"));
     assert_eq!(requests[0].open_agent_len, Some(128));
-    assert_eq!(workflows.open_conversation().unwrap().revision(), 1);
+    assert_eq!(
+        workflows.conversation("run", "second").unwrap().revision(),
+        1
+    );
 
     workflows.clear();
 
-    assert!(workflows.open_conversation().is_none());
+    assert!(workflows.conversation("run", "second").is_none());
     assert!(workflows.claim_restore("session"));
 }
 

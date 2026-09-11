@@ -205,8 +205,11 @@ impl AgentPane {
         minutes > 0
             && !self.transcript.read(cx).is_working()
             && self
-                .turn
-                .last_response_at()
+                .session
+                .borrow()
+                .conversation
+                .borrow()
+                .last_response_at
                 .is_some_and(|at| at.elapsed() >= Duration::from_secs(minutes * 60))
     }
 
@@ -214,8 +217,11 @@ impl AgentPane {
     /// in the composer, so the decision costs nothing to reverse.
     fn confirm_send_after_cache_expiry(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let idle = self
-            .turn
-            .last_response_at()
+            .session
+            .borrow()
+            .conversation
+            .borrow()
+            .last_response_at
             .map(|at| last_response_label(at.elapsed().as_secs()))
             .unwrap_or_default();
 
@@ -320,8 +326,8 @@ impl AgentPane {
     }
 
     pub(super) fn is_command_busy(&self) -> bool {
-        self.session.runtime.status() == Status::Running
-            || self.session.commands.awaiting_turn
+        self.session.borrow().runtime.status() == Status::Running
+            || self.session.borrow().commands.awaiting_turn
             || self.history_ui.mode == RecentSessionsMode::Loading
             || self.branch_flow_holds_composer()
     }

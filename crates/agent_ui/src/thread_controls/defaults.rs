@@ -85,12 +85,23 @@ impl AgentPane {
     /// to, because a picker left showing a value the harness never adopted
     /// would misreport which model the next turn runs on.
     pub(crate) fn apply_model_selection(&mut self, cx: &mut Context<Self>) {
-        let Some(session) = self.session.runtime.backend_mut() else {
+        if !self.binding.is_current() {
             return;
-        };
+        }
 
-        let Some(outcome) = self.session.controls.apply_model(session) else {
-            return;
+        let outcome = {
+            let mut guard = self.session.borrow_mut();
+            let state = &mut *guard;
+
+            let Some(session) = state.runtime.backend_mut() else {
+                return;
+            };
+
+            let Some(outcome) = state.controls.apply_model(session) else {
+                return;
+            };
+
+            outcome
         };
 
         match outcome {
@@ -109,17 +120,27 @@ impl AgentPane {
     /// tools. That rule is not repeated here: the picker reports whatever the
     /// harness answers, and the row stays on the preset still in force.
     pub(crate) fn apply_agent_preset(&mut self, preset: String, cx: &mut Context<Self>) {
-        let Some(session) = self.session.runtime.backend_mut() else {
-            return;
-        };
-
-        if self.session.controls.agent_preset.as_deref() == Some(preset.as_str()) {
+        if !self.binding.is_current() {
             return;
         }
 
-        match session.select_agent_preset(&preset) {
+        let outcome = {
+            let mut state = self.session.borrow_mut();
+
+            if state.controls.agent_preset.as_deref() == Some(preset.as_str()) {
+                return;
+            }
+
+            let Some(session) = state.runtime.backend_mut() else {
+                return;
+            };
+
+            session.select_agent_preset(&preset)
+        };
+
+        match outcome {
             Ok(()) => {
-                self.session.controls.agent_preset = Some(preset);
+                self.session.borrow_mut().controls.agent_preset = Some(preset);
 
                 cx.notify();
             }

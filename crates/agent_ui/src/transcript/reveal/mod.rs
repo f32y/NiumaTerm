@@ -661,7 +661,7 @@ impl TranscriptView {
     fn fold_over(&self, ix: usize) -> Option<u64> {
         let turn = self.row_turn(ix)?;
 
-        if !self.turn_ledger.is_settled(turn) || !self.hidden_by_fold(ix) {
+        if !self.conversation.borrow().turns.is_settled(turn) || !self.hidden_by_fold(ix) {
             return None;
         }
 
@@ -694,10 +694,13 @@ impl TranscriptView {
     fn row_turn(&self, ix: usize) -> Option<u64> {
         match self.rows.get(ix)?.spec {
             RowSpec::Entry { index, .. } | RowSpec::Work { index, .. } => {
-                Some(self.content.entries()[index].turn)
+                Some(self.conversation.borrow().content.entries()[index].turn)
             }
 
-            RowSpec::RunToggle { run_start, .. } => Some(self.content.entries()[run_start].turn),
+            RowSpec::RunToggle { run_start, .. } => {
+                Some(self.conversation.borrow().content.entries()[run_start].turn)
+            }
+
             RowSpec::TurnFold { turn, .. } | RowSpec::Interrupted { turn, .. } => Some(turn),
             RowSpec::TurnSummary { .. } | RowSpec::Working { .. } => None,
         }

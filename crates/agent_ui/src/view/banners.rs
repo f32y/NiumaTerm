@@ -92,6 +92,7 @@ pub(super) fn composer_stats_label(
 impl AgentPane {
     pub(super) fn render_approval_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.session
+            .borrow()
             .input
             .approval()
             .map(str::to_owned)
@@ -205,88 +206,95 @@ impl AgentPane {
     }
 
     pub(super) fn render_update_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.session.runtime.update_suspension().and_then(|state| {
-            // The phases that tear the backend down and bring it back own the
-            // whole surface through `render_update_overlay`, so the strip only
-            // covers the two states the tab stays usable in.
-            let (label, detail, failed) = match state {
-                UpdateSuspension::Waiting => (
-                    i18n("agent-update-waiting-label"),
-                    i18n("agent-update-waiting-detail"),
-                    false,
-                ),
+        self.session
+            .borrow()
+            .runtime
+            .update_suspension()
+            .and_then(|state| {
+                // The phases that tear the backend down and bring it back own the
+                // whole surface through `render_update_overlay`, so the strip only
+                // covers the two states the tab stays usable in.
+                let (label, detail, failed) = match state {
+                    UpdateSuspension::Waiting => (
+                        i18n("agent-update-waiting-label"),
+                        i18n("agent-update-waiting-detail"),
+                        false,
+                    ),
 
-                UpdateSuspension::Failed(message) => (
-                    i18n("agent-update-reconnect-failed-label"),
-                    message.as_str(),
-                    true,
-                ),
+                    UpdateSuspension::Failed(message) => (
+                        i18n("agent-update-reconnect-failed-label"),
+                        message.as_str(),
+                        true,
+                    ),
 
-                UpdateSuspension::Stopping
-                | UpdateSuspension::Updating
-                | UpdateSuspension::Reconnecting => return None,
-            };
+                    UpdateSuspension::Stopping
+                    | UpdateSuspension::Updating
+                    | UpdateSuspension::Reconnecting => return None,
+                };
 
-            let banner = h_flex()
-                .w_full()
-                .px_4()
-                .py_2()
-                .gap_3()
-                .border_b_1()
-                .border_color(cx.theme().border)
-                .bg(if failed {
-                    cx.theme().danger.opacity(0.12)
-                } else {
-                    cx.theme().primary.opacity(0.10)
-                })
-                .child(
-                    div()
-                        .text_xs()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(if failed {
-                            cx.theme().danger
-                        } else {
-                            cx.theme().primary
-                        })
-                        .child(label),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(detail.to_string()),
-                )
-                .when(failed, |row| {
-                    row.child(
-                        Button::new("agent-update-retry")
-                            .outline()
-                            .small()
-                            .label(i18n("agent-update-retry"))
-                            .on_click(cx.listener(|this, _, _, cx| this.retry_update_recovery(cx))),
+                let banner = h_flex()
+                    .w_full()
+                    .px_4()
+                    .py_2()
+                    .gap_3()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .bg(if failed {
+                        cx.theme().danger.opacity(0.12)
+                    } else {
+                        cx.theme().primary.opacity(0.10)
+                    })
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(if failed {
+                                cx.theme().danger
+                            } else {
+                                cx.theme().primary
+                            })
+                            .child(label),
                     )
                     .child(
-                        Button::new("agent-update-new-session")
-                            .danger()
-                            .small()
-                            .label(i18n("agent-update-start-new-session"))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.start_new_after_update_failure(cx)
-                            })),
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(detail.to_string()),
                     )
-                })
-                .into_any_element();
+                    .when(failed, |row| {
+                        row.child(
+                            Button::new("agent-update-retry")
+                                .outline()
+                                .small()
+                                .label(i18n("agent-update-retry"))
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| this.retry_update_recovery(cx)),
+                                ),
+                        )
+                        .child(
+                            Button::new("agent-update-new-session")
+                                .danger()
+                                .small()
+                                .label(i18n("agent-update-start-new-session"))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.start_new_after_update_failure(cx)
+                                })),
+                        )
+                    })
+                    .into_any_element();
 
-            Some(banner)
-        })
+                Some(banner)
+            })
     }
 
     /// What the blocking layer shows while the update transaction owns the
     /// backend: input would go nowhere, and the transcript underneath is a
     /// stale snapshot of a conversation that is about to be replayed.
     pub(super) fn render_update_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let label = update_overlay_phase(self.session.runtime.update_suspension()?)?.label();
+        let label =
+            update_overlay_phase(self.session.borrow().runtime.update_suspension()?)?.label();
 
         let body = v_flex()
             .items_center()
@@ -315,7 +323,12 @@ impl AgentPane {
     /// left to do, because the pane behind it has no conversation to return
     /// to: the transcript holds one error row and nothing else.
     pub(super) fn render_start_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let failure = self.session.runtime.start_failure().map(str::to_owned);
+        let failure = self
+            .session
+            .borrow()
+            .runtime
+            .start_failure()
+            .map(str::to_owned);
 
         if failure.is_none() && !self.shows_start_overlay() {
             return None;
@@ -349,8 +362,8 @@ impl AgentPane {
                                 .outline()
                                 .small()
                                 .label(i18n("agent-start-close-tab"))
-                                .on_click(cx.listener(|_, _, _, cx| {
-                                    cx.emit(AgentPaneEvent::CloseRequested);
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.emit_event(AgentPaneEvent::CloseRequested, cx);
                                 })),
                         ),
                 ),
@@ -380,25 +393,34 @@ impl AgentPane {
     pub(super) fn render_composer_status(&self, cx: &mut Context<Self>) -> AnyElement {
         let (branch, branch_opacity) = self.git_branch_poll.presentation();
 
-        let usage = self.context_window_usage.map(|usage| {
-            ContextUsageIndicator::new(usage, self.context_composition.clone(), self.session_stats)
+        let shared = self.session.borrow().conversation.clone();
+        let conversation = shared.borrow();
+
+        let usage = conversation.context_window_usage.map(|usage| {
+            ContextUsageIndicator::new(
+                usage,
+                conversation.context_composition.clone(),
+                conversation.session_stats,
+            )
         });
 
         // A backend that folds the count from its whole log is authoritative:
         // this side's counter sees only the turns it replayed, and a replay is
         // one page rather than the conversation.
-        let turns = self
+        let turns = conversation
             .session_stats
             .map(|stats| stats.turns)
-            .unwrap_or(self.session.delivery.turn());
+            .unwrap_or(self.session.borrow().delivery.turn());
 
         let stats = composer_stats_label(
             turns,
             self.transcript
                 .read(cx)
-                .turn_steps(self.session.delivery.turn()),
-            self.turn.first_output_latency,
-            self.context_window_usage.and_then(cache_hit_percent),
+                .turn_steps(self.session.borrow().delivery.turn()),
+            conversation.first_output_latency,
+            conversation
+                .context_window_usage
+                .and_then(cache_hit_percent),
         );
 
         h_flex()

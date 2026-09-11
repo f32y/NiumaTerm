@@ -59,7 +59,11 @@ impl AgentPane {
         target: Option<PromptTarget>,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.session.runtime.status() != Status::Idle || self.is_command_busy() {
+        if !self.binding.is_current() {
+            return false;
+        }
+
+        if self.session.borrow().runtime.status() != Status::Idle || self.is_command_busy() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 translated("agent-rewind-idle-only"),
@@ -71,11 +75,14 @@ impl AgentPane {
 
         let cwd = self.cwd();
 
-        let request = match self
-            .session
-            .branch
-            .begin_rewind(&self.session.runtime, cwd, target)
-        {
+        let outcome = {
+            let mut guard = self.session.borrow_mut();
+            let state = &mut *guard;
+
+            state.branch.begin_rewind(&state.runtime, cwd, target)
+        };
+
+        let request = match outcome {
             Ok(request) => request,
 
             Err(error) => {
@@ -98,27 +105,9 @@ impl AgentPane {
             cx,
         );
 
-        cx.spawn(async move |this, cx| {
-            let (request, result) = cx
-                .background_executor()
-                .spawn(async move {
-                    let result = request.load();
-
-                    (request, result)
-                })
-                .await;
-
-            let _ = this.update(cx, |this, cx| {
-                let update = this.session.branch.checkpoints_loaded(
-                    this.session.runtime.epoch(),
-                    request,
-                    result,
-                );
-
-                this.apply_rewind_update(update, cx);
-            });
-        })
-        .detach();
+        if let Some(host) = self.host.upgrade() {
+            host.update(cx, |host, cx| host.read_checkpoints(request, cx));
+        }
 
         true
     }
@@ -239,6 +228,10 @@ impl AgentPane {
     }
 
     pub(crate) fn activate_rewind_action(&mut self, action: RewindAction, cx: &mut Context<Self>) {
+        if !self.binding.is_current() {
+            return;
+        }
+
         if action == RewindAction::Cancel {
             self.cancel_rewind_picker(cx);
 
@@ -247,10 +240,12 @@ impl AgentPane {
 
         self.branch.draft = Some(self.input.read(cx).text().to_string());
 
-        let update = self
-            .session
-            .branch
-            .rewind(&mut self.session.runtime, action);
+        let update = {
+            let mut guard = self.session.borrow_mut();
+            let state = &mut *guard;
+
+            state.branch.rewind(&mut state.runtime, action)
+        };
 
         self.apply_rewind_update(update, cx);
     }
@@ -297,63 +292,13 @@ impl AgentPane {
                 );
             }
 
-            BranchUpdate::CreateFork(request) => {
-                self.palette.set_feedback(
-                    CommandFeedbackKind::Status,
-                    translated("agent-rewind-creating-prefix"),
-                    cx,
-                );
-
-                cx.spawn(async move |this, cx| {
-                    let (request, result) = cx
-                        .background_executor()
-                        .spawn(async move {
-                            let result = request.run();
-
-                            (request, result)
-                        })
-                        .await;
-
-                    let _ = this.update(cx, |this, cx| {
-                        let update = this.session.branch.fork_created(
-                            this.session.runtime.epoch(),
-                            request,
-                            result,
-                        );
-
-                        this.apply_rewind_update(update, cx);
-                    });
-                })
-                .detach();
-            }
-
-            BranchUpdate::StartSession(identity) => {
-                self.palette.reset_discovery(false);
-                self.session.commands.clear();
+            update @ (BranchUpdate::CreateFork(_) | BranchUpdate::StartSession(_)) => {
                 self.history_ui.mode = RecentSessionsMode::Loading;
+                self.palette.reset_discovery(false);
 
-                self.start_session_with_options(
-                    identity,
-                    true,
-                    |this, started, cx| {
-                        if !started {
-                            let error = this
-                                .session
-                                .runtime
-                                .start_failure()
-                                .unwrap_or("session did not start")
-                                .to_owned();
-
-                            if let Some(failure) =
-                                this.session.branch.failed(&mut this.session.runtime, error)
-                            {
-                                this.history_ui.mode = RecentSessionsMode::Open;
-                                this.report_branch_failure(failure, cx);
-                            }
-                        }
-                    },
-                    cx,
-                );
+                if let Some(host) = self.host.upgrade() {
+                    host.update(cx, |host, cx| host.apply_branch_update(update, cx));
+                }
             }
 
             BranchUpdate::FilesRestored => {

@@ -103,6 +103,15 @@ impl CodeTranscriptCache {
         }
     }
 
+    pub(crate) fn invalidate_from(&mut self, first: usize) {
+        for (index, cached) in &mut self.entries {
+            if *index >= first {
+                cached.dirty = true;
+            }
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn invalidate_all(&mut self) {
         for cached in self.entries.values_mut() {
             cached.dirty = true;

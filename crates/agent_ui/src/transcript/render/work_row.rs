@@ -39,81 +39,85 @@ impl TranscriptView {
     ) -> AnyElement {
         let cwd = self.cwd.clone();
 
-        let (icon, heading, reason, status, detail) = match &self.content.entries()[index].item {
-            SessionItem::CommandExecution {
-                purpose,
-                aggregated_output,
-                status,
-                exit_code,
-                ..
-            } => {
-                // Belt and braces: a non-zero exit code is a failure even if
-                // the provider reported the execution as completed.
-                let state = status.as_deref().unwrap_or("inProgress");
+        let shared = self.conversation.clone();
+        let conversation = shared.borrow();
 
-                let failed = matches!(state, "failed" | "declined")
-                    || exit_code.is_some_and(|code| code != 0);
+        let (icon, heading, reason, status, detail) =
+            match &conversation.content.entries()[index].item {
+                SessionItem::CommandExecution {
+                    purpose,
+                    aggregated_output,
+                    status,
+                    exit_code,
+                    ..
+                } => {
+                    // Belt and braces: a non-zero exit code is a failure even if
+                    // the provider reported the execution as completed.
+                    let state = status.as_deref().unwrap_or("inProgress");
 
-                let state = if failed { "failed" } else { state };
+                    let failed = matches!(state, "failed" | "declined")
+                        || exit_code.is_some_and(|code| code != 0);
 
-                let detail = aggregated_output.as_deref().unwrap_or("");
+                    let state = if failed { "failed" } else { state };
 
-                (
-                    IconName::SquareTerminal,
-                    command_execution_heading(purpose.as_deref()).to_string(),
-                    failed
-                        .then(|| command_failure_reason(aggregated_output.as_deref()))
-                        .flatten(),
-                    Some(state.to_string()),
-                    Some(detail),
-                )
-            }
+                    let detail = aggregated_output.as_deref().unwrap_or("");
 
-            SessionItem::FileChange {
-                paths,
-                diff,
-                status,
-                ..
-            } => (
-                IconName::File,
-                i18n("agent-transcript-edit-paths").replace("{paths}", paths),
-                None,
-                Some(status.as_deref().unwrap_or("inProgress").to_string()),
-                diff.as_deref().filter(|diff| !diff.trim().is_empty()),
-            ),
+                    (
+                        IconName::SquareTerminal,
+                        command_execution_heading(purpose.as_deref()).to_string(),
+                        failed
+                            .then(|| command_failure_reason(aggregated_output.as_deref()))
+                            .flatten(),
+                        Some(state.to_string()),
+                        Some(detail),
+                    )
+                }
 
-            SessionItem::Other {
-                kind,
-                title,
-                output,
-                status,
-                ..
-            } => (
-                if kind == "webSearch" {
-                    IconName::Globe
-                } else {
-                    IconName::Settings2
-                },
-                if title.trim().is_empty() {
-                    kind.clone()
-                } else {
-                    format!("{kind} {title}")
-                },
-                None,
-                Some(status.as_deref().unwrap_or("inProgress").to_string()),
-                output.as_deref().filter(|output| !output.trim().is_empty()),
-            ),
+                SessionItem::FileChange {
+                    paths,
+                    diff,
+                    status,
+                    ..
+                } => (
+                    IconName::File,
+                    i18n("agent-transcript-edit-paths").replace("{paths}", paths),
+                    None,
+                    Some(status.as_deref().unwrap_or("inProgress").to_string()),
+                    diff.as_deref().filter(|diff| !diff.trim().is_empty()),
+                ),
 
-            SessionItem::Reasoning { summary, .. } => (
-                IconName::Bot,
-                i18n("agent-transcript-thinking").to_string(),
-                None,
-                None,
-                summary.as_deref().filter(|text| !text.trim().is_empty()),
-            ),
+                SessionItem::Other {
+                    kind,
+                    title,
+                    output,
+                    status,
+                    ..
+                } => (
+                    if kind == "webSearch" {
+                        IconName::Globe
+                    } else {
+                        IconName::Settings2
+                    },
+                    if title.trim().is_empty() {
+                        kind.clone()
+                    } else {
+                        format!("{kind} {title}")
+                    },
+                    None,
+                    Some(status.as_deref().unwrap_or("inProgress").to_string()),
+                    output.as_deref().filter(|output| !output.trim().is_empty()),
+                ),
 
-            _ => return div().into_any_element(),
-        };
+                SessionItem::Reasoning { summary, .. } => (
+                    IconName::Bot,
+                    i18n("agent-transcript-thinking").to_string(),
+                    None,
+                    None,
+                    summary.as_deref().filter(|text| !text.trim().is_empty()),
+                ),
+
+                _ => return div().into_any_element(),
+            };
 
         let expandable = detail.is_some();
         let expanded = expandable && self.disclosures.row_expanded(index);
@@ -214,10 +218,12 @@ impl TranscriptView {
                         .child(reason)
                 }))
                 .children(detail.filter(|_| expanded).map(|detail| {
-                    let body = if is_code_item(&self.content.entries()[index].item) {
+                    let body = if is_code_item(
+                        &self.conversation.borrow().content.entries()[index].item,
+                    ) {
                         let view = self.code_transcripts.ensure(
                             index,
-                            &self.content.entries()[index].item,
+                            &self.conversation.borrow().content.entries()[index].item,
                             cx,
                         );
 

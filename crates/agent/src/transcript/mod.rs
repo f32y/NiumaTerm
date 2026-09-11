@@ -2,10 +2,14 @@
 //! rendering, scroll position, and the provider that produced the messages.
 
 use std::collections::HashMap;
+use std::mem;
 
 use smallvec::SmallVec;
 
 use crate::chat::Item;
+
+pub mod conversation;
+pub mod turns;
 
 /// One conversation entry. The caller supplies metadata such as a local display
 /// stamp or attachment handles; content updates leave it untouched.
@@ -106,6 +110,10 @@ impl<M> TranscriptContent<M> {
         self.item_index.contains_key(id)
     }
 
+    pub fn last_metadata_mut(&mut self) -> Option<&mut M> {
+        self.entries.last_mut().map(|entry| &mut entry.metadata)
+    }
+
     /// Return the first compatible entry that accepted the completed payload.
     /// Omitted fields retain their streamed values through Item::merge_completed.
     pub fn merge_completed(&mut self, item: &Item) -> Option<usize> {
@@ -187,6 +195,20 @@ impl<M> TranscriptContent<M> {
             .iter()
             .filter(|entry| entry.turn == turn && is_work_item(&entry.item))
             .count()
+    }
+
+    pub fn retain_last(&mut self, count: usize) -> usize {
+        let dropped = self.entries.len().saturating_sub(count);
+
+        if dropped > 0 {
+            self.entries.drain(..dropped);
+
+            let entries = mem::take(&mut self.entries);
+
+            self.replace(entries);
+        }
+
+        dropped
     }
 
     /// Task lists are full replacements, so only the newest matching item counts.

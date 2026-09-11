@@ -17,6 +17,10 @@ impl AgentPane {
     /// normalizes it away answers the same refusal after a round trip and the
     /// composer would have discarded the line in the meantime.
     pub(crate) fn rename_conversation(&mut self, title: &str, cx: &mut Context<Self>) -> bool {
+        if !self.binding.is_current() {
+            return false;
+        }
+
         let title = title.trim();
 
         if title.is_empty() {
@@ -29,7 +33,7 @@ impl AgentPane {
             return false;
         }
 
-        let outcome = match self.session.runtime.backend_mut() {
+        let outcome = match self.session.borrow_mut().runtime.backend_mut() {
             Some(session) => session.rename_conversation(title).map_err(operation_error),
 
             None => {
@@ -66,6 +70,10 @@ impl AgentPane {
     /// arriving results land in a surface the user is already looking at
     /// rather than one they would have to go and find.
     pub(crate) fn search_conversations(&mut self, query: &str, cx: &mut Context<Self>) -> bool {
+        if !self.binding.is_current() {
+            return false;
+        }
+
         let query = query.trim();
 
         if query.is_empty() {
@@ -78,7 +86,9 @@ impl AgentPane {
             return false;
         }
 
-        let Some(session) = self.session.runtime.backend_mut() else {
+        let mut state = self.session.borrow_mut();
+
+        let Some(session) = state.runtime.backend_mut() else {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-still-starting").replace("{name}", self.kind.display()),
@@ -136,8 +146,13 @@ impl AgentPane {
     /// already claimed is one the transcript is about to show as sent, and
     /// removing the row first would make it look like it never went.
     pub(crate) fn remove_queued_prompt(&mut self, item_id: &str, cx: &mut Context<Self>) {
+        if !self.binding.is_current() {
+            return;
+        }
+
         let removed = self
             .session
+            .borrow_mut()
             .runtime
             .backend_mut()
             .is_some_and(|session| session.remove_queued_prompt(item_id));
@@ -152,7 +167,7 @@ impl AgentPane {
             return;
         }
 
-        self.session.delivery.removed(item_id);
+        self.session.borrow_mut().delivery.removed(item_id);
 
         cx.notify();
     }

@@ -100,57 +100,60 @@ impl Render for AgentPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let command_palette = self.render_command_palette(cx);
 
-        let command_feedback =
-            self.palette
-                .visible_feedback(&self.session.commands)
-                .map(|feedback| {
-                    let (color, label) = match feedback.kind {
-                        CommandFeedbackKind::Notice => {
-                            (cx.theme().primary, i18n("agent-feedback-notice"))
-                        }
+        let command_feedback = self
+            .palette
+            .visible_feedback(&self.session.borrow().commands)
+            .map(|feedback| {
+                let (color, label) = match feedback.kind {
+                    CommandFeedbackKind::Notice => {
+                        (cx.theme().primary, i18n("agent-feedback-notice"))
+                    }
 
-                        CommandFeedbackKind::Status => {
-                            (cx.theme().muted_foreground, i18n("agent-feedback-status"))
-                        }
+                    CommandFeedbackKind::Status => {
+                        (cx.theme().muted_foreground, i18n("agent-feedback-status"))
+                    }
 
-                        CommandFeedbackKind::Error => {
-                            (cx.theme().danger, i18n("agent-feedback-error"))
-                        }
+                    CommandFeedbackKind::Error => (cx.theme().danger, i18n("agent-feedback-error")),
 
-                        CommandFeedbackKind::Queued => {
-                            (cx.theme().warning, i18n("agent-feedback-queued"))
-                        }
-                    };
+                    CommandFeedbackKind::Queued => {
+                        (cx.theme().warning, i18n("agent-feedback-queued"))
+                    }
+                };
 
-                    h_flex()
-                        .w_full()
-                        .gap_2()
-                        .px_3()
-                        .pb_2()
-                        .text_xs()
-                        .child(
-                            div()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(color)
-                                .child(label),
-                        )
-                        .child(
-                            div()
-                                .min_w_0()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(feedback.message.clone()),
-                        )
-                });
+                h_flex()
+                    .w_full()
+                    .gap_2()
+                    .px_3()
+                    .pb_2()
+                    .text_xs()
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(color)
+                            .child(label),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(feedback.message.clone()),
+                    )
+            });
 
         let queued_message = self.render_queued_prompts(cx);
-        let session_state = self.session_state.render(cx);
+
+        let session_state = self.session_state.render(
+            &self.session.borrow().goal,
+            self.session.borrow().plan_mode,
+            cx,
+        );
 
         let approval = self.render_approval_panel(cx);
         let questions = self.render_question_panel(window, cx);
 
-        let action: ComposerAction = self.session.runtime.status().into();
+        let action: ComposerAction = self.session.borrow().runtime.status().into();
         let running = action == ComposerAction::Stop;
-        let update_suspended = self.session.runtime.update_suspension().is_some();
+        let update_suspended = self.session.borrow().runtime.update_suspension().is_some();
         let update_banner = self.render_update_banner(cx);
         let multi_root_notice = self.render_multi_root_notice(cx);
         let update_overlay = self.render_update_overlay(cx);
@@ -230,13 +233,13 @@ impl Render for AgentPane {
                 // A branch or rewind picker owns Escape ahead of anything
                 // under it, and closing one changes nothing else.
                 if this.cancel_branch_picker(cx) {
-                } else if this.session.input.approval().is_some() {
+                } else if this.session.borrow().input.approval().is_some() {
                     this.respond_approval("cancel", cx);
-                } else if this.prompts.questions_open(&this.session.input) {
+                } else if this.prompts.questions_open(&this.session.borrow().input) {
                     this.prompts.collapsed = true;
 
                     cx.notify();
-                } else if this.session.runtime.status() == Status::Running {
+                } else if this.session.borrow().runtime.status() == Status::Running {
                     this.interrupt_from_ui(window, cx);
                 }
             }))
@@ -428,7 +431,7 @@ impl Render for AgentPane {
                                         .gap_2()
                                         .child(div().flex_1().min_w_0().child(
                                             self.controls.render_row(
-                                                &self.session.controls,
+                                                &self.session.borrow().controls,
                                                 self.kind,
                                                 cx,
                                             ),
@@ -606,7 +609,12 @@ impl AgentPane {
     /// transcript's own live "Working for" reading is the answer then, and two
     /// clocks a few pixels apart would be read as disagreeing.
     fn render_last_response(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let at = self.turn.last_response_at()?;
+        let at = self
+            .session
+            .borrow()
+            .conversation
+            .borrow()
+            .last_response_at?;
 
         if self.transcript.read(cx).is_working() {
             return None;

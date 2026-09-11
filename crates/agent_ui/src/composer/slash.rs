@@ -52,6 +52,10 @@ impl AgentPane {
     /// Route a leading slash before ordinary message handling. Every failure
     /// returns false so the user's input stays available for correction.
     pub(super) fn submit_slash_input(&mut self, input: &str, cx: &mut Context<Self>) -> bool {
+        if !self.binding.is_current() {
+            return false;
+        }
+
         let Some(parsed) = parse_slash_command(input) else {
             return false;
         };
@@ -140,10 +144,10 @@ impl AgentPane {
 
             match resolve_choice(&parsed.arguments, &choices) {
                 Ok(value) if command.name == "model" => {
-                    self.session.controls.settings.model = Some(value.clone());
+                    self.session.borrow_mut().controls.settings.model = Some(value.clone());
 
                     self.controls.remember_defaults(
-                        &self.session.controls,
+                        &self.session.borrow().controls,
                         self.kind,
                         &self.profile,
                         cx,
@@ -167,10 +171,10 @@ impl AgentPane {
                 }
 
                 Ok(value) if command.name == "permissions" => {
-                    self.session.controls.settings.approval = Some(value.clone());
+                    self.session.borrow_mut().controls.settings.approval = Some(value.clone());
 
                     self.controls.remember_defaults(
-                        &self.session.controls,
+                        &self.session.borrow().controls,
                         self.kind,
                         &self.profile,
                         cx,
@@ -260,7 +264,13 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) -> bool {
         if self.is_command_busy() {
-            return match self.session.commands.while_busy(command, policy) {
+            let admission = self
+                .session
+                .borrow_mut()
+                .commands
+                .while_busy(command, policy);
+
+            return match admission {
                 CommandAdmission::Queued { name, count } => {
                     self.palette.set_feedback(
                         CommandFeedbackKind::Queued,
@@ -299,7 +309,11 @@ impl AgentPane {
         command: PendingSlashCommand,
         cx: &mut Context<Self>,
     ) -> bool {
-        let outcome = self.session.execute_command(&command);
+        if !self.binding.is_current() {
+            return false;
+        }
+
+        let outcome = self.session.borrow_mut().execute_command(&command);
 
         match outcome {
             SlashCommandOutcome::Accepted => {
@@ -346,21 +360,17 @@ impl AgentPane {
     }
 
     pub(crate) fn run_next_queued_command(&mut self, cx: &mut Context<Self>) {
-        if self.is_command_busy() {
+        if self.presenting_session_effect {
             return;
         }
 
-        let Some(command) = self.session.commands.queue.pop_front() else {
-            return;
-        };
-
-        if !self.execute_backend_command(command, cx) {
-            self.session.commands.queue.clear();
+        if let Some(host) = self.host.upgrade() {
+            host.update(cx, |host, cx| host.advance_commands(cx));
         }
     }
 
     pub(super) fn show_status(&mut self, cx: &mut Context<Self>) {
-        let status = match self.session.runtime.status() {
+        let status = match self.session.borrow().runtime.status() {
             Status::Starting => i18n("agent-composer-status-starting"),
             Status::Idle => i18n("agent-composer-status-idle"),
             Status::Running => i18n("agent-composer-status-running"),
@@ -379,23 +389,23 @@ impl AgentPane {
         for (name, value) in [
             (
                 i18n("agent-setting-model"),
-                self.session.controls.settings.model.as_deref(),
+                self.session.borrow().controls.settings.model.as_deref(),
             ),
             (
                 i18n("agent-setting-permissions"),
-                self.session.controls.settings.approval.as_deref(),
+                self.session.borrow().controls.settings.approval.as_deref(),
             ),
             (
                 i18n("agent-setting-sandbox"),
-                self.session.controls.settings.sandbox.as_deref(),
+                self.session.borrow().controls.settings.sandbox.as_deref(),
             ),
             (
                 i18n("agent-setting-effort"),
-                self.session.controls.settings.effort.as_deref(),
+                self.session.borrow().controls.settings.effort.as_deref(),
             ),
             (
                 i18n("agent-setting-tier"),
-                self.session.controls.settings.tier.as_deref(),
+                self.session.borrow().controls.settings.tier.as_deref(),
             ),
         ] {
             if let Some(value) = value {
@@ -407,11 +417,14 @@ impl AgentPane {
             }
         }
 
-        if !self.session.commands.queue.is_empty() {
+        if !self.session.borrow().commands.queue.is_empty() {
             fields.push(
                 i18n("agent-composer-status-field")
                     .replace("{name}", i18n("agent-composer-status-queued"))
-                    .replace("{value}", &self.session.commands.queue.len().to_string()),
+                    .replace(
+                        "{value}",
+                        &self.session.borrow().commands.queue.len().to_string(),
+                    ),
             );
         }
 
@@ -427,7 +440,7 @@ impl AgentPane {
         } else {
             // A skill is invoked through the harness, so it needs a session
             // that has finished starting and has not ended.
-            match self.session.runtime.status() {
+            match self.session.borrow().runtime.status() {
                 Status::Starting => Some(translated("agent-composer-agent-starting")),
                 Status::Exited => Some(translated("agent-composer-agent-exited")),
                 _ => None,
@@ -449,6 +462,7 @@ impl AgentPane {
 
         let adapter = self
             .session
+            .borrow()
             .runtime
             .backend()
             .map(Backend::adapter_commands)
@@ -473,6 +487,7 @@ impl AgentPane {
         match command {
             "model" => self
                 .session
+                .borrow()
                 .controls
                 .models
                 .iter()

@@ -3,7 +3,7 @@ use futures::channel::mpsc;
 use futures::executor::block_on;
 use nmt_agent::chat::Event;
 
-use crate::session::startup::{EventBatch, MAX_MESSAGES_PER_BATCH};
+use crate::execution::inbox::{EventBatch, MAX_MESSAGES_PER_BATCH};
 
 fn text(item_id: &str, delta: &str) -> Event {
     Event::AgentMessageDelta {

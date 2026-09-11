@@ -394,7 +394,7 @@ impl WorkflowsView {
     ) -> Option<AnyElement> {
         let transcript = self.detail_transcript.clone()?;
 
-        let (label, items, revision, unavailable) = {
+        let (label, content, unavailable) = {
             let _profile = Probe::start(Operation::WorkflowSnapshot);
             let pane = pane.read(cx);
             let open = pane.open_workflow_conversation()?;
@@ -409,12 +409,14 @@ impl WorkflowsView {
                 .and_then(|agent| agent.label.clone())
                 .unwrap_or_else(|| open.agent_id.clone());
 
-            (label, open.items.clone(), open.revision(), open.unavailable)
+            (label, open.conversation.clone(), open.unavailable)
         };
 
-        transcript.update(cx, |view, cx| view.show_items(&items, revision, cx));
+        let empty = content.borrow().content.entries().is_empty();
 
-        let body: AnyElement = if items.is_empty() && unavailable {
+        transcript.update(cx, |view, cx| view.attach_content(content, cx));
+
+        let body: AnyElement = if empty && unavailable {
             empty_state(
                 i18n("workflows-conversation-unavailable"),
                 i18n("workflows-conversation-unavailable-detail"),

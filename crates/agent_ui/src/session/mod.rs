@@ -1,13 +1,14 @@
 use gpui::prelude::*;
-use nmt_agent::AgentEvent;
 use nmt_agent::session::ImageAttachment;
-use nmt_agent::session::controller::{SessionController, SubmissionBlock};
+use nmt_agent::session::controller::SubmissionBlock;
 use nmt_agent::session::delivery::{RecoverablePrompt, Submission};
 #[cfg(test)]
 use nmt_agent::session::naming::conversation_title_request as build_title_request;
 pub(crate) use nmt_agent::session::restore::directories_match;
+use nmt_agent::transcript::conversation::ConversationImage;
 
 use crate::capabilities::AgentCapabilities as _;
+use crate::execution::{AgentSession, PresentationEffect, SessionOwner};
 use crate::pane_state::TurnPresentation;
 use crate::profile::AgentKindExt as _;
 use crate::session::prompts::PendingPrompts;
@@ -26,13 +27,13 @@ mod tests;
 pub(crate) mod turn;
 mod update_recovery;
 
+use std::env;
 use std::sync::Arc;
 use std::time::Duration;
-use std::{env, fs};
 
-use gpui::{App, Context, Image, Window};
+use gpui::{App, Context, Entity, Image, Window};
 use gpui_component::input::{InputEvent, TextareaState};
-use nmt_agent::chat::{Item as SessionItem, SkillReference, ThreadSettings};
+use nmt_agent::chat::{Item as SessionItem, SkillReference};
 pub(super) use nmt_agent::session::Backend;
 #[cfg(test)]
 use nmt_agent::session::ConversationTitleRequest;
@@ -41,9 +42,7 @@ pub use nmt_agent::session::lifecycle::{RecoverySnapshot, RestorationReadiness};
 pub(super) use nmt_agent::session::lifecycle::{Status, UpdateSuspension};
 #[cfg(test)]
 pub(crate) use nmt_agent::session::test_support::TestBackend;
-use nmt_agent::{
-    AgentEventKind, AgentRoute, AgentWorkspace, agent_process, git, normalize_body, normalize_title,
-};
+use nmt_agent::{AgentEventKind, AgentRoute, AgentWorkspace, git};
 use nmt_config::profile::AgentProfile;
 use nmt_i18n::i18n;
 
@@ -60,15 +59,6 @@ use crate::workflows::WorkflowUi;
 use crate::{
     AgentPane, AgentPaneEvent, GitBranchPoll, RecentSessionsMode, SessionHistoryUi, SlashPalette,
 };
-
-/// A pane's attachment files live only as long as the pane: the harness that
-/// reads them has already read what it was sent, and nothing else refers to
-/// them. A directory that was never created removes cleanly.
-impl Drop for AgentPane {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(scratch_dir(self.agent_route.as_str()));
-    }
-}
 
 /// The pane's branch label: a detached `HEAD` shows its short commit,
 /// matching the git footer's presentation of the same state.
@@ -116,6 +106,7 @@ fn conversation_title_request(kind: AgentKind, text: &str) -> Option<Conversatio
 }
 
 impl AgentPane {
+    #[cfg(test)]
     pub fn new(
         profile: AgentProfile,
         workspace: AgentWorkspace,
@@ -129,6 +120,7 @@ impl AgentPane {
     /// fresh conversation. Used to reopen a listed conversation in the
     /// directory it ran in, which is a different one than the tab that
     /// listed it.
+    #[cfg(test)]
     pub fn new_resuming(
         profile: AgentProfile,
         workspace: AgentWorkspace,
@@ -136,6 +128,22 @@ impl AgentPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let owner = AgentSession::create(profile, workspace, cx);
+        let mut pane = Self::attach(&owner, window, cx);
+
+        pane.owned_session = Some(owner);
+        pane.start_session_with_options(resume, false, |_, _, _| {}, cx);
+
+        pane
+    }
+
+    pub fn attach(owner: &SessionOwner, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let host = owner.session();
+        let profile = host.read(cx).profile.clone();
+        let workspace = host.read(cx).workspace.clone();
+        let session = host.read(cx).controller.clone();
+        let route = host.read(cx).route.clone();
+        let binding = owner.bind();
         let kind = AgentKind::from_profile(profile.kind);
         let cwd = workspace.primary().map(str::to_string);
         let input_history_scope = InputHistoryScope::local(kind, &workspace);
@@ -194,9 +202,10 @@ impl AgentPane {
         // mirroring somebody else's conversation is left without one.
         let owner = cx.entity().downgrade();
 
-        let transcript = cx.new(|_| {
+        let transcript = cx.new(|cx| {
             let mut transcript = TranscriptView::new(kind, cwd.clone());
 
+            transcript.attach_content(session.borrow().conversation.clone(), cx);
             transcript.set_owner(owner);
 
             transcript
@@ -204,7 +213,7 @@ impl AgentPane {
 
         let mut this = Self {
             focus: cx.focus_handle(),
-            agent_route: agent_process().allocate_route(),
+            agent_route: route,
             kind,
             profile,
             // Nothing has started yet, so the active snapshot matches the
@@ -216,30 +225,73 @@ impl AgentPane {
             attachments: ComposerAttachments::default(),
             transcript,
             input,
-            session: SessionController::new(kind),
+            session,
+            host: host.downgrade(),
+            binding,
+            presenting_session_effect: false,
+            #[cfg(test)]
+            owned_session: None,
             history_ui: SessionHistoryUi::default(),
             prompts: PendingPrompts::default(),
             controls: ThreadControls { effort_drag: None },
-            turn: TurnPresentation {
-                submitted_at: None,
-                first_output_latency: None,
-                last_response_at: None,
-            },
+            turn: TurnPresentation::default(),
             palette: SlashPalette {
                 provider_commands_ready: !kind.caps().async_command_discovery,
                 ..SlashPalette::default()
             },
             branch: BranchFlow::default(),
             git_branch_poll: GitBranchPoll::default(),
-            context_window_usage: None,
-            context_composition: None,
-            session_state: SessionStateBadge::default(),
-            session_stats: None,
+            session_state: SessionStateBadge,
             workflows: WorkflowUi::default(),
             overlay_fade: Fade::default(),
         };
 
-        this.start_session_with_options(resume, false, |_, _, _| {}, cx);
+        {
+            let state = this.session.borrow();
+
+            for index in 0..state.input.batches().len() {
+                this.prompts.reveal(&state.input, index);
+            }
+
+            this.prompts.hide_settled(&state.input);
+
+            if let Some(commands) = &state.command_catalog {
+                this.palette.provider_commands = commands.clone();
+                this.palette.provider_commands_ready = true;
+            }
+
+            this.palette.skill_catalog = state.skill_catalog.clone();
+        }
+
+        this.active_workspace = host.read(cx).active_workspace.clone();
+        this.turn.refresh_timer(cx);
+
+        if this.transcript.read(cx).is_working() {
+            this.start_working(cx);
+        }
+
+        cx.observe(host, |this, _, cx| {
+            this.transcript.update(cx, |view, cx| {
+                view.sync_content();
+
+                cx.notify();
+            });
+
+            cx.notify();
+        })
+        .detach();
+
+        cx.subscribe(host, |this, _, event: &PresentationEffect, cx| {
+            if this.binding.is_current()
+                && this.binding.generation == event.generation
+                && this.session.borrow().runtime.is_current(event.epoch)
+                && let Some(effect) = event.effect.borrow_mut().take()
+            {
+                this.present_session_effect(effect, cx);
+            }
+        })
+        .detach();
+
         this.refresh_git_branch(cx);
 
         cx.spawn(async move |this, cx| {
@@ -304,6 +356,10 @@ impl AgentPane {
     /// edited. The running conversation keeps the snapshot it started with;
     /// the next one clones this.
     pub fn set_workspace(&mut self, workspace: AgentWorkspace, cx: &mut Context<Self>) {
+        if !self.binding.is_current() {
+            return;
+        }
+
         if self.workspace == workspace {
             return;
         }
@@ -311,6 +367,11 @@ impl AgentPane {
         let primary_changed = self.workspace.primary() != workspace.primary();
 
         self.input_history_scope = InputHistoryScope::local(self.kind, &workspace);
+
+        if let Some(host) = self.host.upgrade() {
+            host.update(cx, |host, _| host.workspace = workspace.clone());
+        }
+
         self.workspace = workspace;
 
         if primary_changed {
@@ -335,7 +396,7 @@ impl AgentPane {
         images: Vec<Arc<Image>>,
         cx: &mut Context<Self>,
     ) {
-        let turn = self.session.delivery.turn();
+        let turn = self.session.borrow().delivery.turn();
 
         self.transcript
             .update(cx, |transcript, cx| transcript.push(turn, item, images, cx));
@@ -383,6 +444,23 @@ impl AgentPane {
         .detach();
     }
 
+    pub fn agent_session(&self) -> Option<Entity<AgentSession>> {
+        self.host.upgrade()
+    }
+
+    pub(super) fn emit_event(&self, event: AgentPaneEvent, cx: &mut Context<Self>) {
+        if self.presenting_session_effect {
+            return;
+        }
+
+        if let Some(host) = self.host.upgrade() {
+            host.update(cx, |_, cx| cx.emit(event.clone()));
+        }
+
+        #[cfg(test)]
+        cx.emit(event);
+    }
+
     pub(super) fn emit_lifecycle(
         &self,
         kind: AgentEventKind,
@@ -390,25 +468,19 @@ impl AgentPane {
         body: &str,
         cx: &mut Context<Self>,
     ) {
-        let agent: &str = self.kind.into();
+        if self.presenting_session_effect {
+            return;
+        }
 
-        cx.emit(AgentPaneEvent::Lifecycle(AgentEvent {
-            route: self.agent_route.clone(),
-            agent: agent.into(),
-            session_id: format!("agent-tab-{}", self.session.runtime.epoch()),
-            turn_id: (kind != AgentEventKind::SessionStarted)
-                .then(|| format!("turn-{}", self.session.delivery.turn())),
-            kind,
-            title: normalize_title(title),
-            body: normalize_body(body),
-        }));
+        if let Some(host) = self.host.upgrade() {
+            host.update(cx, |host, cx| host.emit_lifecycle(kind, title, body, cx));
+        }
     }
 
     pub(super) fn latest_agent_message(&self, cx: &App) -> Option<String> {
         self.transcript
             .read(cx)
-            .latest_agent_message(self.session.delivery.turn())
-            .map(str::to_owned)
+            .latest_agent_message(self.session.borrow().delivery.turn())
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -463,21 +535,28 @@ impl AgentPane {
         restore_on_interrupt: Option<(String, Vec<String>)>,
         cx: &mut Context<Self>,
     ) -> bool {
+        if !self.binding.is_current() {
+            return false;
+        }
+
         let title_text = restore_on_interrupt
             .as_ref()
             .map_or(text.as_str(), |(prompt, _)| prompt.as_str());
 
         let title_request =
             self.session
+                .borrow()
                 .naming
                 .request(self.kind, title_text, tab_title_from_prompt);
 
-        let settings = self.session.controls.settings.clone();
+        let settings = self.session.borrow().controls.settings.clone();
         let scratch = scratch_dir(self.agent_route.as_str());
 
         let restores_annotations = restore_on_interrupt.is_some();
 
-        let outcome = self.session.submit(
+        let image_prompt = (!self.attachments.images().is_empty()).then(|| text.clone());
+
+        let outcome = self.session.borrow_mut().submit(
             text,
             |session, text| {
                 let images = self
@@ -556,9 +635,9 @@ impl AgentPane {
         if matches!(self.kind, AgentKind::Codex | AgentKind::Claude)
             && let Some(title) = title_request
         {
-            self.session.naming.named = true;
+            self.session.borrow_mut().naming.named = true;
 
-            cx.emit(AgentPaneEvent::TitleSuggested(title.provisional_title));
+            self.emit_event(AgentPaneEvent::TitleSuggested(title.provisional_title), cx);
         }
 
         // Accepted: the images went with it, so the transcript keeps them and
@@ -583,16 +662,40 @@ impl AgentPane {
 
         match started_text {
             Some(text) => {
-                self.push_item_with_images(
-                    SessionItem::UserMessage { text: Some(text) },
-                    sent_images,
-                    cx,
+                let _ = text;
+                let shared = self.session.borrow().conversation.clone();
+                let mut conversation = shared.borrow_mut();
+
+                conversation.attach_last_images(
+                    sent_images
+                        .into_iter()
+                        .map(|image| Arc::new(ConversationImage::new(image.bytes().into())))
+                        .collect(),
                 );
+
+                drop(conversation);
+
+                self.transcript
+                    .update(cx, |transcript, _| transcript.sync_content());
 
                 self.start_working(cx);
             }
 
-            None => cx.notify(),
+            None => {
+                if let Some(text) = image_prompt {
+                    let images = sent_images
+                        .into_iter()
+                        .map(|image| Arc::new(ConversationImage::new(image.bytes().into())))
+                        .collect();
+
+                    self.session
+                        .borrow_mut()
+                        .pending_images
+                        .push_back((text, images));
+                }
+
+                cx.notify();
+            }
         }
 
         true
@@ -600,20 +703,8 @@ impl AgentPane {
 
     pub(super) fn clear_conversation_presentation(&mut self, cx: &mut Context<Self>) {
         self.transcript
-            .update(cx, |transcript, _| transcript.clear());
+            .update(cx, |transcript, _| transcript.reset_presentation());
 
-        self.turn.submitted_at = None;
-        self.turn.first_output_latency = None;
-
-        // The reading answers "how long has this conversation been waiting on
-        // me"; the replaced conversation's last answer says nothing about the
-        // fresh one, which has never been answered at all.
-        self.turn.forget_last_response();
-
-        self.context_window_usage = None;
-        self.context_composition = None;
-        self.session_state.clear();
-        self.session_stats = None;
         self.branch.clear();
         self.history_ui.invalidate_filesystem_history();
 
@@ -629,43 +720,47 @@ impl AgentPane {
     /// Pass a tab rename through to the conversation, so the name reaches the
     /// harness's own session record rather than living only in this tab.
     pub fn rename_session(&mut self, title: &str) {
-        self.session.naming.rename(title);
+        if !self.binding.is_current() {
+            return;
+        }
+
+        self.session.borrow_mut().naming.rename(title);
         self.sync_pending_rename();
     }
 
     pub(super) fn sync_pending_rename(&mut self) {
-        self.session.naming.sync(self.session.runtime.backend_mut());
+        if !self.binding.is_current() {
+            return;
+        }
+
+        {
+            let mut guard = self.session.borrow_mut();
+            let state = &mut *guard;
+
+            state.naming.sync(state.runtime.backend_mut())
+        };
     }
 
     pub(super) fn reset_conversation(&mut self, cx: &mut Context<Self>) {
-        // DeepSeek and Codex hosts stop once their final session reference is
-        // released. Keeping the retired backend until the replacement starts
-        // transfers that reference without restarting an unchanged host.
-        let retiring = self.session.runtime.retire();
+        if !self.binding.is_current() {
+            return;
+        }
 
-        // A fresh conversation always follows the live tail again, even if
-        // the previous transcript was scrolled up when it was discarded.
-        self.session.clear_conversation();
+        if let Some(host) = self.host.upgrade() {
+            host.update(cx, |host, cx| host.reset(cx));
+        }
+
         self.clear_conversation_presentation(cx);
-        self.session.controls.settings = ThreadSettings::default();
-        self.session.controls.models.clear();
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
 
         self.palette
             .reset_discovery(!self.kind.caps().async_command_discovery);
 
-        self.session.commands.clear();
+        self.session.borrow_mut().commands.clear();
         self.palette.feedback = None;
         self.history_ui.mode = RecentSessionsMode::Hidden;
 
-        // The discarded conversation's subject no longer describes this tab,
-        // so the tab falls back to its profile name until the replacement
-        // conversation names itself.
-        cx.emit(AgentPaneEvent::TitleSuggested(String::new()));
-
-        // History records belong to the provider and remain intact; only the
-        // live backend and this tab's conversation presentation are reset.
-        self.start_session_with_options(None, false, move |_, _, _| drop(retiring), cx);
+        cx.notify();
     }
 }

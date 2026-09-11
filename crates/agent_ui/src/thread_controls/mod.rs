@@ -198,6 +198,10 @@ pub(super) fn folded_settings_pill(
                                 submenu.item(PopupMenuItem::new(label).checked(checked).on_click(
                                     move |_, _, cx| {
                                         pane.update(cx, |this, cx| {
+                                            if !this.binding.is_current() {
+                                                return;
+                                            }
+
                                             set(this, value.clone(), cx);
 
                                             cx.notify();
@@ -321,6 +325,10 @@ pub(super) fn setting_picker(
 
                 menu = menu.item(PopupMenuItem::new(label).on_click(move |_, _, cx| {
                     pane.update(cx, |this, cx| {
+                        if !this.binding.is_current() {
+                            return;
+                        }
+
                         set(this, value.clone(), cx);
 
                         cx.notify();

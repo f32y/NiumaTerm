@@ -25,6 +25,14 @@ impl SessionController {
         let prompt = self.delivery.take_interrupted_prompt();
         let outcome = self.runtime.interrupt(turn);
 
+        if let Some((turn, _)) = &prompt {
+            let mut conversation = self.conversation.borrow_mut();
+
+            conversation.live.discard();
+            conversation.turns.forget(*turn);
+            conversation.changed_turn(*turn);
+        }
+
         UserInterruption { prompt, outcome }
     }
 

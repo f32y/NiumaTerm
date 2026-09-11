@@ -105,7 +105,7 @@ impl SessionController {
             return SessionEffect::Unchanged;
         }
 
-        match event {
+        let effect = match event {
             Event::Ready(settings) => self
                 .prepare_ready(settings)
                 .map_or(SessionEffect::Unchanged, SessionEffect::Ready),
@@ -136,8 +136,17 @@ impl SessionController {
                 SessionEffect::EffortRejected { message }
             }
 
-            Event::Commands(commands) => SessionEffect::Commands(commands),
-            Event::Skills(catalog) => SessionEffect::Skills(catalog),
+            Event::Commands(commands) => {
+                self.command_catalog = Some(commands.clone());
+
+                SessionEffect::Commands(commands)
+            }
+
+            Event::Skills(catalog) => {
+                self.skill_catalog = Some(catalog.clone());
+
+                SessionEffect::Skills(catalog)
+            }
 
             Event::SlashCommandResult { name, outcome } => {
                 let advance = self.settle_command(&outcome);
@@ -259,7 +268,13 @@ impl SessionController {
             }
 
             Event::BackgroundTaskTranscript { key, update } => {
-                if update.apply_to(self.children.transcripts.entry(key).or_default()) {
+                if self
+                    .children
+                    .transcripts
+                    .entry(key)
+                    .or_default()
+                    .apply(update)
+                {
                     SessionEffect::Changed
                 } else {
                     SessionEffect::Unchanged
@@ -289,8 +304,17 @@ impl SessionController {
                 SessionEffect::ConfirmedPrompts(self.delivery.snapshot(prompts))
             }
 
-            Event::GoalUpdated(goal) => SessionEffect::Goal(goal),
-            Event::PlanModeUpdated(active) => SessionEffect::PlanMode(active),
+            Event::GoalUpdated(goal) => {
+                self.goal = goal;
+
+                SessionEffect::Changed
+            }
+
+            Event::PlanModeUpdated(active) => {
+                self.plan_mode = active;
+
+                SessionEffect::Changed
+            }
 
             Event::TitleUpdated(title) => {
                 self.naming.named = true;
@@ -305,7 +329,11 @@ impl SessionController {
                 .map_or(SessionEffect::Unchanged, SessionEffect::Replay),
 
             Event::StatusDetail(detail) => SessionEffect::StatusDetail(detail),
-            Event::ForkCheckpoints(checkpoints) => SessionEffect::ForkCheckpoints(checkpoints),
+
+            Event::ForkCheckpoints(checkpoints) => {
+                SessionEffect::Branch(self.branch.fork_checkpoints(&mut self.runtime, checkpoints))
+            }
+
             Event::HostExited { message } => SessionEffect::HostExited { message },
 
             Event::Error { message, fatal } => {
@@ -317,6 +345,8 @@ impl SessionController {
                     failure,
                 }
             }
-        }
+        };
+
+        self.record_content(effect)
     }
 }

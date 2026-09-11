@@ -24,25 +24,6 @@ use crate::ui::background_tasks::rows::{
 use crate::ui::composition::empty_state;
 
 impl BackgroundTasksView {
-    /// Re-read the open child while it is still working. Claude Code writes a
-    /// child's own turns to that child's file instead of publishing them on
-    /// the parent stream, so no event arrives to repaint from and the panel
-    /// has to look again. The read costs one transcript parse per tick, which
-    /// is why it runs only while a working child is actually on screen.
-    pub(super) fn refresh_open_child(&mut self, cx: &mut Context<Self>) {
-        let Some(key) = self.mode.detail_key().cloned() else {
-            return;
-        };
-
-        let Some(pane) = self.target.as_ref().and_then(WeakEntity::upgrade) else {
-            return;
-        };
-
-        pane.update(cx, |pane, cx| {
-            pane.load_background_task_transcript(&key, cx);
-        });
-    }
-
     /// Open one child's conversation, remembering the list state so going back
     /// returns to what the user was reading.
     pub(super) fn open_detail(&mut self, key: BackgroundTaskKey, cx: &mut Context<Self>) {
@@ -64,9 +45,7 @@ impl BackgroundTasksView {
         // Codex stores a descendant's conversation and hands it over on
         // request; Claude Code has been accumulating it live, so this is a
         // no-op there.
-        pane.update(cx, |pane, cx| {
-            pane.load_background_task_transcript(&key, cx);
-        });
+        self.detail_interest = pane.update(cx, |pane, cx| pane.watch_background_task(&key, cx));
 
         cx.notify();
     }
@@ -90,6 +69,7 @@ impl BackgroundTasksView {
         self.running_expanded = running_expanded;
         self.finished_expanded = finished_expanded;
         self.detail_transcript = None;
+        self.detail_interest = None;
 
         cx.notify();
     }
@@ -116,7 +96,7 @@ impl BackgroundTasksView {
 
         self.sync_elapsed_timer(active, cx);
 
-        let (items, state, dropped, revision) = self
+        let (content, state, dropped) = self
             .target
             .as_ref()
             .and_then(WeakEntity::upgrade)
@@ -126,15 +106,20 @@ impl BackgroundTasksView {
                 let child = pane.background_task_transcript(&key)?;
 
                 Some((
-                    child.items().to_vec(),
+                    Some(child.conversation.clone()),
                     child.state().clone(),
                     child.dropped(),
-                    child.revision(),
                 ))
             })
-            .unwrap_or_else(|| (Vec::new(), BackgroundTaskTranscriptState::NotLoaded, 0, 0));
+            .unwrap_or_else(|| (None, BackgroundTaskTranscriptState::NotLoaded, 0));
 
-        transcript.update(cx, |view, cx| view.show_items(&items, revision, cx));
+        let empty = content
+            .as_ref()
+            .is_none_or(|content| content.borrow().content.entries().is_empty());
+
+        if let Some(content) = content {
+            transcript.update(cx, |view, cx| view.attach_content(content, cx));
+        }
 
         let theme = cx.theme();
 
@@ -189,7 +174,7 @@ impl BackgroundTasksView {
                     .children(row_timing(task, now).map(|timing| div().flex_none().child(timing))),
             );
 
-        let body: AnyElement = match (&state, items.is_empty()) {
+        let body: AnyElement = match (&state, empty) {
             (BackgroundTaskTranscriptState::Unavailable { message }, _) => empty_state(
                 i18n("tasks-background-transcript-unavailable-title"),
                 &i18n("tasks-background-transcript-unavailable-detail")

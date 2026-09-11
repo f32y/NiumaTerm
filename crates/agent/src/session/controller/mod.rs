@@ -3,28 +3,41 @@
 //! The host schedules blocking work and displays returned outcomes. Runtime,
 //! delivery, recovery, and interactions advance together under one owner.
 
-use crate::chat::{SendOutcome, SlashCommandOutcome};
+use std::cell::RefCell;
+use std::collections::VecDeque;
+use std::rc::Rc;
+use std::sync::Arc;
+
+use crate::chat::{
+    GoalStatus, Item, SendOutcome, SkillCatalog, SlashCommandInfo, SlashCommandOutcome,
+    ThreadSettings,
+};
 use crate::session::branch::ConversationBranch;
 use crate::session::children::ChildAgents;
 use crate::session::commands::{CommandQueue, PendingSlashCommand};
 use crate::session::delivery::{MessageDelivery, RecoverablePrompt, Submission};
 use crate::session::input::SessionInput;
-use crate::session::lifecycle::{SessionRuntime, StartOutcome};
+use crate::session::lifecycle::{SessionRuntime, StartOutcome, Status};
 use crate::session::naming::ConversationNaming;
 use crate::session::restore::ConversationRestore;
 use crate::session::settings::ConversationSettings;
 use crate::session::workflows::WorkflowData;
 use crate::session::{AgentKind, Backend, RecoveryIdentity};
+use crate::transcript::conversation::{ConversationImage, ConversationState};
 
 mod activity;
+mod content;
 mod events;
 mod input;
 mod readiness;
 mod transitions;
 
+#[cfg(test)]
+mod tests;
+
 pub use crate::session::controller::events::SessionEffect;
 pub use crate::session::controller::input::{QuestionSubmission, UserInterruption};
-pub use crate::session::controller::readiness::{SessionReady, SessionReplay};
+pub use crate::session::controller::readiness::{SessionBranch, SessionReady, SessionReplay};
 pub use crate::session::controller::transitions::{SessionFailure, SessionStart};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,7 +47,22 @@ pub enum SubmissionBlock {
     CommandStarting,
 }
 
+#[derive(Clone, Default)]
+pub struct ReadyDefaults {
+    pub stored: Option<ThreadSettings>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
 pub struct SessionController {
+    kind: AgentKind,
+    pub ready_defaults: ReadyDefaults,
+    pub goal: Option<GoalStatus>,
+    pub plan_mode: bool,
+    pub command_catalog: Option<Vec<SlashCommandInfo>>,
+    pub skill_catalog: Option<SkillCatalog>,
+    pub conversation: Rc<RefCell<ConversationState>>,
+    pub pending_images: VecDeque<(String, Vec<Arc<ConversationImage>>)>,
     pub runtime: SessionRuntime,
     pub delivery: MessageDelivery,
     pub restore: ConversationRestore,
@@ -50,6 +78,14 @@ pub struct SessionController {
 impl SessionController {
     pub fn new(kind: AgentKind) -> Self {
         Self {
+            kind,
+            ready_defaults: ReadyDefaults::default(),
+            goal: None,
+            plan_mode: false,
+            command_catalog: None,
+            skill_catalog: None,
+            conversation: Rc::new(RefCell::new(ConversationState::default())),
+            pending_images: VecDeque::new(),
             runtime: SessionRuntime::default(),
             delivery: MessageDelivery::new(kind),
             restore: ConversationRestore::default(),
@@ -89,11 +125,43 @@ impl SessionController {
 
         let outcome = self.runtime.send(|backend| send(backend, &text));
 
-        Ok(self.delivery.submit(outcome, text, recovery))
+        let result = self.delivery.submit(outcome, text, recovery);
+
+        if let Submission::Started { text } = &result {
+            self.conversation.borrow_mut().start();
+
+            self.push_item(Item::UserMessage {
+                text: Some(text.clone()),
+            });
+        }
+
+        Ok(result)
     }
 
     pub fn execute_command(&mut self, command: &PendingSlashCommand) -> SlashCommandOutcome {
         self.commands.execute(self.runtime.backend_mut(), command)
+    }
+
+    pub fn next_command(&mut self) -> Option<(String, SlashCommandOutcome)> {
+        if self.runtime.status() != Status::Idle
+            || self.commands.awaiting_turn
+            || self.branch.holds_composer()
+            || self.input.waiting()
+        {
+            return None;
+        }
+
+        let command = self.commands.queue.pop_front()?;
+        let outcome = self.execute_command(&command);
+
+        if matches!(
+            outcome,
+            SlashCommandOutcome::Rejected { .. } | SlashCommandOutcome::NotReady
+        ) {
+            self.commands.queue.clear();
+        }
+
+        Some((command.name, outcome))
     }
 
     fn settle_command(&mut self, outcome: &SlashCommandOutcome) -> bool {

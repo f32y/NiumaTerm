@@ -80,7 +80,10 @@ fn history(turns: u64, live: Item) -> TranscriptView {
             });
         }
 
-        view.turn_ledger.settle_replayed(turn, None);
+        view.conversation
+            .borrow_mut()
+            .turns
+            .replay(turn, false, None, None);
     }
 
     view.append_entry(Entry {

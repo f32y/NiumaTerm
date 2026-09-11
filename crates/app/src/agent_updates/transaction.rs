@@ -11,13 +11,12 @@ use nmt_agent::update::{
     InstallationKey, ProviderKind, UpdateCoordinator, UpdateError, UpdateErrorKind, UpdatePhase,
     UpdateProgress,
 };
-use nmt_agent_ui::{AgentPane, RecoveryReadiness, RecoverySnapshot, RestorationReadiness};
+use nmt_agent_ui::execution::{AgentSession, SessionRegistry};
+use nmt_agent_ui::{RecoveryReadiness, RecoverySnapshot, RestorationReadiness};
 use nmt_config::profile::AgentProfileKind;
 use nmt_i18n::i18n;
 
 use crate::agent_updates::AgentUpdates;
-use crate::ui::Shell;
-use crate::window::ShellRegistry;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum UpdateMode {
@@ -96,20 +95,20 @@ pub(super) fn combine_transaction_error(
 }
 
 pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut App) {
-    let panes = matching_panes(&key, cx);
+    let sessions = matching_sessions(&key, cx);
 
-    let busy = panes
+    let busy = sessions
         .iter()
-        .filter(|pane| {
+        .filter(|session| {
             matches!(
-                pane.read(cx).recovery_readiness(cx),
+                session.read(cx).recovery_readiness(cx),
                 RecoveryReadiness::Busy(_)
             )
         })
         .count();
 
     if busy == 0 {
-        start_transaction(key, UpdateMode::WhenIdle, panes, cx);
+        start_transaction(key, UpdateMode::WhenIdle, sessions, cx);
 
         return;
     }
@@ -142,12 +141,12 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
                             .on_click(move |_, window, cx| {
                                 window.close_dialog(cx);
 
-                                let panes = matching_panes(&wait_key, cx);
+                                let sessions = matching_sessions(&wait_key, cx);
 
                                 start_transaction(
                                     wait_key.clone(),
                                     UpdateMode::WhenIdle,
-                                    panes,
+                                    sessions,
                                     cx,
                                 );
                             }),
@@ -160,9 +159,14 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
                             .on_click(move |_, window, cx| {
                                 window.close_dialog(cx);
 
-                                let panes = matching_panes(&stop_key, cx);
+                                let sessions = matching_sessions(&stop_key, cx);
 
-                                start_transaction(stop_key.clone(), UpdateMode::StopNow, panes, cx);
+                                start_transaction(
+                                    stop_key.clone(),
+                                    UpdateMode::StopNow,
+                                    sessions,
+                                    cx,
+                                );
                             }),
                     )
                     .child(
@@ -176,33 +180,22 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
     });
 }
 
-fn matching_panes(key: &InstallationKey, cx: &mut App) -> Vec<Entity<AgentPane>> {
-    let shells = cx
-        .global::<ShellRegistry>()
-        .0
+fn matching_sessions(key: &InstallationKey, cx: &mut App) -> Vec<Entity<AgentSession>> {
+    let sessions = SessionRegistry::sessions(cx);
+
+    let installations = sessions
         .iter()
-        .map(|entry| entry.shell.clone())
-        .collect::<Vec<_>>();
-
-    let mut panes = Vec::new();
-
-    for shell in shells {
-        let _ = shell.update(cx, |shell: &mut Shell, _| panes.extend(shell.agent_panes()));
-    }
-
-    let installations = panes
-        .iter()
-        .map(|pane| pane.read(cx).installation_key())
+        .map(|session| session.read(cx).installation_key())
         .collect::<Vec<_>>();
 
     let affected = affected_installation_indices(key, &installations)
         .into_iter()
         .collect::<HashSet<_>>();
 
-    panes
+    sessions
         .into_iter()
         .enumerate()
-        .filter_map(|(index, pane)| affected.contains(&index).then_some(pane))
+        .filter_map(|(index, session)| affected.contains(&index).then_some(session))
         .collect()
 }
 
@@ -222,7 +215,7 @@ pub(super) fn affected_installation_indices(
 fn start_transaction(
     key: InstallationKey,
     mode: UpdateMode,
-    panes: Vec<Entity<AgentPane>>,
+    sessions: Vec<Entity<AgentSession>>,
     cx: &mut App,
 ) {
     let coordinator = cx.global::<AgentUpdates>().coordinator.clone();
@@ -234,13 +227,12 @@ fn start_transaction(
     }
 
     if mode.interrupts_active_work()
-        && let Some(message) =
-            panes
-                .iter()
-                .find_map(|pane| match pane.read(cx).recovery_identity_snapshot(cx) {
-                    RecoveryReadiness::MissingIdentity(message) => Some(message),
-                    _ => None,
-                })
+        && let Some(message) = sessions.iter().find_map(|session| {
+            match session.read(cx).recovery_identity_snapshot(cx) {
+                RecoveryReadiness::MissingIdentity(message) => Some(message),
+                _ => None,
+            }
+        })
     {
         coordinator.finish_update(
             &key,
@@ -254,12 +246,12 @@ fn start_transaction(
         return;
     }
 
-    for pane in &panes {
-        pane.update(cx, |pane, cx| {
+    for session in &sessions {
+        session.update(cx, |session, cx| {
             if mode.interrupts_active_work() {
-                pane.stop_active_work_for_update(cx);
+                session.stop_active_work_for_update(cx);
             } else {
-                pane.prepare_update_wait(cx);
+                session.prepare_update_wait(cx);
             }
         });
     }
@@ -271,9 +263,9 @@ fn start_transaction(
 
         let snapshots = loop {
             let assessments = cx.update(|cx| {
-                panes
+                sessions
                     .iter()
-                    .map(|pane| pane.read(cx).recovery_readiness(cx))
+                    .map(|session| session.read(cx).recovery_readiness(cx))
                     .collect::<Vec<_>>()
             });
 
@@ -285,7 +277,7 @@ fn start_transaction(
                 PreflightResolution::Ready(snapshots) => break snapshots,
 
                 PreflightResolution::Failed(message) => {
-                    finish_preflight_failure(&coordinator, &key, &panes, message, cx);
+                    finish_preflight_failure(&coordinator, &key, &sessions, message, cx);
 
                     return;
                 }
@@ -303,16 +295,16 @@ fn start_transaction(
             UpdatePhase::Suspending,
             Some(UpdateProgress {
                 completed: 0,
-                total: panes.len(),
+                total: sessions.len(),
             }),
         );
 
         let suspension_tasks = cx.update(|cx| {
-            panes
+            sessions
                 .iter()
-                .map(|pane| {
-                    pane.update(cx, |pane, cx| {
-                        pane.suspend_for_update(mode.interrupts_active_work(), cx)
+                .map(|session| {
+                    session.update(cx, |session, cx| {
+                        session.suspend_for_update(mode.interrupts_active_work(), cx)
                     })
                 })
                 .collect::<Vec<_>>()
@@ -332,7 +324,7 @@ fn start_transaction(
         {
             let error = UpdateError::new(UpdateErrorKind::Recovery, error);
 
-            restore_tabs(&coordinator, &key, &panes, &snapshots, &suspended, cx).await;
+            restore_tabs(&coordinator, &key, &sessions, &snapshots, &suspended, cx).await;
             coordinator.finish_update(&key, None, Some(error), 0);
             cx.update(|cx| cx.refresh_windows());
 
@@ -342,8 +334,8 @@ fn start_transaction(
         coordinator.transition(&key, UpdatePhase::Updating, None);
 
         cx.update(|cx| {
-            for pane in &panes {
-                pane.update(cx, |pane, cx| pane.mark_provider_updating(cx));
+            for session in &sessions {
+                session.update(cx, |session, cx| session.mark_provider_updating(cx));
             }
 
             cx.refresh_windows();
@@ -376,7 +368,7 @@ fn start_transaction(
         };
 
         let restore_failures =
-            restore_tabs(&coordinator, &key, &panes, &snapshots, &suspended, cx).await;
+            restore_tabs(&coordinator, &key, &sessions, &snapshots, &suspended, cx).await;
 
         operation_error = combine_transaction_error(operation_error, restore_failures);
         coordinator.finish_update(&key, verified, operation_error, 0);
@@ -388,7 +380,7 @@ fn start_transaction(
 fn finish_preflight_failure(
     coordinator: &UpdateCoordinator,
     key: &InstallationKey,
-    panes: &[Entity<AgentPane>],
+    sessions: &[Entity<AgentSession>],
     message: String,
     cx: &mut gpui::AsyncApp,
 ) {
@@ -400,8 +392,8 @@ fn finish_preflight_failure(
     );
 
     cx.update(|cx| {
-        for pane in panes {
-            pane.update(cx, |pane, cx| pane.cancel_update_wait(cx));
+        for session in sessions {
+            session.update(cx, |session, cx| session.cancel_update_wait(cx));
         }
 
         cx.refresh_windows();
@@ -411,7 +403,7 @@ fn finish_preflight_failure(
 async fn restore_tabs(
     coordinator: &UpdateCoordinator,
     key: &InstallationKey,
-    panes: &[Entity<AgentPane>],
+    sessions: &[Entity<AgentSession>],
     snapshots: &[RecoverySnapshot],
     suspended: &[usize],
     cx: &mut gpui::AsyncApp,
@@ -431,8 +423,8 @@ async fn restore_tabs(
 
     for index in suspended.iter().copied() {
         cx.update(|cx| {
-            panes[index].update(cx, |pane, cx| {
-                pane.restore_after_update(&snapshots[index], cx)
+            sessions[index].update(cx, |session, cx| {
+                session.restore_after_update(&snapshots[index], cx)
             })
         });
     }
@@ -444,7 +436,7 @@ async fn restore_tabs(
             suspended
                 .iter()
                 .copied()
-                .map(|index| panes[index].read(cx).restoration_readiness())
+                .map(|index| sessions[index].read(cx).restoration_readiness())
                 .collect::<Vec<_>>()
         });
 
@@ -481,8 +473,8 @@ async fn restore_tabs(
                     if matches!(state, RestorationReadiness::Pending) {
                         let index = suspended[position];
 
-                        panes[index].update(cx, |pane, cx| {
-                            pane.fail_update_recovery(
+                        sessions[index].update(cx, |session, cx| {
+                            session.fail_update_recovery(
                                 i18n("agent-update-recovery-timeout").to_string(),
                                 cx,
                             )

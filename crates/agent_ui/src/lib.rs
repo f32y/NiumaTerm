@@ -16,6 +16,7 @@ mod capabilities;
 mod commands;
 mod composer;
 mod context_usage;
+pub mod execution;
 mod fade;
 mod pane_state;
 pub mod profile;
@@ -27,21 +28,22 @@ pub mod transcript;
 mod view;
 mod workflows;
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
-use gpui::{Entity, FocusHandle, Pixels, Point, ScrollHandle, SharedString};
+use gpui::{Entity, FocusHandle, Pixels, Point, ScrollHandle, SharedString, WeakEntity};
 use gpui_component::VirtualListScrollHandle;
 use gpui_component::input::TextareaState;
-use nmt_agent::chat::{
-    ContextComposition, ContextWindowUsage, SessionStats, SkillCatalog, SkillReference,
-    SlashCommandInfo,
-};
+use nmt_agent::chat::{SkillCatalog, SkillReference, SlashCommandInfo};
 use nmt_agent::{AgentEvent, AgentRoute, AgentWorkspace};
 use nmt_config::profile::AgentProfile;
 use nmt_i18n::i18n;
 
 use crate::composer::attachments::ComposerAttachments;
 use crate::composer::{BranchFlow, CommandFeedback};
+#[cfg(test)]
+use crate::execution::SessionOwner;
+use crate::execution::{AgentSession, CommandBinding};
 use crate::fade::Fade;
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
 use crate::pane_state::TurnPresentation;
@@ -304,7 +306,13 @@ pub struct AgentPane {
     history_ui: SessionHistoryUi,
 
     /// Provider state and transitions, independent of widgets and rendering.
-    session: SessionController,
+    session: Rc<RefCell<SessionController>>,
+
+    host: WeakEntity<AgentSession>,
+    binding: CommandBinding,
+    presenting_session_effect: bool,
+    #[cfg(test)]
+    owned_session: Option<SessionOwner>,
 
     /// Interaction state for the thread controls under the composer.
     controls: ThreadControls,
@@ -321,19 +329,9 @@ pub struct AgentPane {
     branch: BranchFlow,
 
     git_branch_poll: GitBranchPoll,
-    context_window_usage: Option<ContextWindowUsage>,
-
-    /// How that window is currently filled, when the provider measures it.
-    /// Codex reports only accounting, so this stays empty there.
-    context_composition: Option<ContextComposition>,
 
     /// The plan mode and standing objective drawn above the composer.
     session_state: SessionStateBadge,
-
-    /// Whole-log counters the backend folds from its own log. Absent where the
-    /// backend reports none, because counting the visible transcript instead
-    /// would disagree with the conversation's real length.
-    session_stats: Option<SessionStats>,
 
     /// Workflow runs of this session and the agent conversation the user has
     /// open. Workflow agents are not child agents, so they never reach the

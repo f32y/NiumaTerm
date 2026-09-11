@@ -1,5 +1,6 @@
 //! Local preview of command and output rendering. No commands are executed.
 
+use std::cell::RefCell;
 use std::env;
 use std::rc::Rc;
 
@@ -15,6 +16,7 @@ use gpui_macos::MacPlatform as Platform;
 #[cfg(windows)]
 use gpui_windows::WindowsPlatform as Platform;
 use nmt_agent::chat::Item;
+use nmt_agent::transcript::conversation::ConversationState;
 use nmt_agent_ui::profile::AgentKind;
 use nmt_agent_ui::settings::AgentSettings;
 use nmt_agent_ui::transcript::TranscriptView;
@@ -158,7 +160,13 @@ fn main() {
                     let transcript = cx.new(|cx| {
                         let mut transcript = TranscriptView::new(AgentKind::Codex, None);
 
-                        transcript.show_items(&samples(), 1, cx);
+                        let mut content = ConversationState::default();
+
+                        for item in samples() {
+                            content.push(0, item, Vec::new());
+                        }
+
+                        transcript.attach_content(Rc::new(RefCell::new(content)), cx);
 
                         transcript
                     });

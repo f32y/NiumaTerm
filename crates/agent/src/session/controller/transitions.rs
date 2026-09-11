@@ -26,6 +26,12 @@ impl SessionController {
 
         self.runtime.turn_started();
 
+        if opened {
+            self.conversation.borrow_mut().start();
+        }
+
+        self.publish_confirmed();
+
         opened
     }
 
@@ -35,6 +41,16 @@ impl SessionController {
 
         self.commands.turn_completed();
         self.delivery.completed();
+        self.publish_confirmed();
+
+        let turn = self.delivery.turn();
+        let mut conversation = self.conversation.borrow_mut();
+
+        if interrupted {
+            conversation.turns.mark_interrupted(turn);
+        }
+
+        conversation.settle(turn);
 
         interrupted
     }
@@ -85,14 +101,23 @@ impl SessionController {
     /// Retain the backend while retiring conversation-specific state. Restarted
     /// turn numbers must not match an interrupt requested for the old content.
     pub fn clear_conversation(&mut self) {
+        self.conversation.borrow_mut().clear();
         self.delivery.reset();
+        self.pending_images.clear();
         self.runtime.clear_turn();
         self.branch.clear();
         self.restore.cancel();
         self.input.dismiss_approval();
         self.input.clear_questions();
         self.children.background_tasks = None;
+
+        for child in self.children.transcripts.values() {
+            child.conversation.borrow_mut().clear();
+        }
+
         self.children.transcripts.clear();
+        self.goal = None;
+        self.plan_mode = false;
         self.workflows.clear();
     }
 }

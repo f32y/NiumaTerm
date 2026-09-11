@@ -3,6 +3,7 @@ use std::process;
 use dirs::home_dir;
 use gpui::{App, AppContext, Axis, Context, Entity, Window};
 use gpui_component::resizable::ResizableState;
+use nmt_agent_ui::execution::AgentSession;
 use nmt_agent_ui::{AgentKind, AgentKindExt as _, AgentPane};
 use nmt_config::local_state::{
     PaneNodeState, PaneSplitAxis, SessionState, TabState, WorkspaceState,
@@ -15,6 +16,7 @@ use crate::pane_tree::{PaneId, PaneNode, PaneTree};
 use crate::tabs::{TabId, TabManager};
 use crate::ui::Shell;
 use crate::ui::settings::{AgentProfile, AppSettings, builtin_agent_profile};
+use crate::ui::shell::tab_surface::AgentTab;
 use crate::ui::shell::{TabSurface, agent_workspace};
 use crate::ui::terminal_launch::spawn_pane;
 use crate::ui::terminal_layout::TerminalLayout;
@@ -326,11 +328,13 @@ pub(super) fn materialize_active_tab(
             cx.global::<AppSettings>(),
         );
 
-        let pane = cx.new(|cx| AgentPane::new(profile, workspace, window, cx));
+        let owner = AgentSession::create(profile, workspace, cx);
+        let pane = cx.new(|cx| AgentPane::attach(&owner, window, cx));
 
         Shell::watch_agent_tab(&pane, cx);
 
-        *workspaces.active_tabs_mut().active_mut() = TabSurface::Agent(pane);
+        owner.start(None, cx);
+        *workspaces.active_tabs_mut().active_mut() = TabSurface::Agent(AgentTab { owner, pane });
 
         return true;
     }
@@ -653,7 +657,8 @@ fn session_state(
                         // Agent conversations are not persisted (the
                         // agent process and its thread die with the app);
                         // the saved kind reopens a fresh agent tab.
-                        TabSurface::Agent(pane) => {
+                        TabSurface::Agent(tab) => {
+                            let pane = &tab.pane;
                             let agent: &str = pane.read(cx).kind().into();
 
                             TabState {

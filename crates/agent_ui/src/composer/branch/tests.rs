@@ -49,10 +49,10 @@ fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>)
 }
 
 fn install(pane: &mut AgentPane) {
-    let epoch = pane.session.runtime.begin_start();
+    let epoch = pane.session.borrow_mut().runtime.begin_start();
 
-    pane.session.branch.starting(epoch, None);
-    pane.session.restore.starting(epoch, None);
+    pane.session.borrow_mut().branch.starting(epoch, None);
+    pane.session.borrow_mut().restore.starting(epoch, None);
 
     let mut backend = TestBackend::new([], SlashCommandOutcome::Accepted, Vec::new())
         .with_recovery(AgentKind::Claude, "source");
@@ -61,12 +61,13 @@ fn install(pane: &mut AgentPane) {
 
     assert!(matches!(
         pane.session
+            .borrow_mut()
             .runtime
             .install(epoch, Ok(Backend::Test(backend))),
         StartOutcome::Installed
     ));
 
-    pane.session.runtime.ready();
+    pane.session.borrow_mut().runtime.ready();
 }
 
 fn replay(text: &str) -> Vec<ReplayTurn> {
@@ -84,6 +85,8 @@ fn replay(text: &str) -> Vec<ReplayTurn> {
 fn rows(pane: &AgentPane, cx: &App) -> Vec<String> {
     pane.transcript
         .read(cx)
+        .conversation
+        .borrow()
         .content
         .entries()
         .iter()
@@ -106,7 +109,7 @@ fn fork(pane: &mut AgentPane, cx: &mut Context<AgentPane>) {
     pane.apply_event(Event::ForkCheckpoints(Ok(vec![checkpoint.clone()])), cx);
     pane.start_conversation_branch(checkpoint, cx);
 
-    assert!(pane.session.branch.is_working());
+    assert!(pane.session.borrow().branch.is_working());
 }
 
 fn local_checkpoint() -> ClaudeCheckpoint {
@@ -122,40 +125,52 @@ fn local_checkpoint() -> ClaudeCheckpoint {
 fn prepare_local(pane: &mut AgentPane, action: RewindAction, cx: &mut Context<AgentPane>) {
     let checkpoint = local_checkpoint();
 
-    let request = pane
-        .session
-        .branch
-        .begin_rewind(&pane.session.runtime, pane.cwd(), None)
-        .expect("load");
+    let request = {
+        let mut guard = pane.session.borrow_mut();
+        let state = &mut *guard;
 
-    pane.session.branch.checkpoints_loaded(
-        pane.session.runtime.epoch(),
-        request,
-        Ok(vec![checkpoint.clone()]),
-    );
+        state.branch.begin_rewind(&state.runtime, pane.cwd(), None)
+    }
+    .expect("load");
 
-    assert!(
-        pane.session
+    {
+        let mut guard = pane.session.borrow_mut();
+        let state = &mut *guard;
+
+        state.branch.checkpoints_loaded(
+            state.runtime.epoch(),
+            request,
+            Ok(vec![checkpoint.clone()]),
+        )
+    };
+
+    assert!({
+        let mut guard = pane.session.borrow_mut();
+        let state = &mut *guard;
+        state
             .branch
-            .select_checkpoint(pane.session.runtime.epoch(), checkpoint)
-    );
+            .select_checkpoint(state.runtime.epoch(), checkpoint)
+    });
 
     pane.branch.draft = Some(pane.input.read(cx).text().to_string());
 
-    let update = pane
-        .session
-        .branch
-        .rewind(&mut pane.session.runtime, action);
+    let update = {
+        let mut guard = pane.session.borrow_mut();
+        let state = &mut *guard;
+
+        state.branch.rewind(&mut state.runtime, action)
+    };
 
     let request = match update {
         BranchUpdate::CreateFork(request) => request,
 
         BranchUpdate::RestoringFiles(_) => {
-            let BranchUpdate::CreateFork(request) = pane
-                .session
-                .branch
-                .files_completed(pane.session.runtime.epoch(), Ok(()))
-            else {
+            let BranchUpdate::CreateFork(request) = ({
+                let mut guard = pane.session.borrow_mut();
+                let state = &mut *guard;
+
+                state.branch.files_completed(state.runtime.epoch(), Ok(()))
+            }) else {
                 panic!("fork after files")
             };
 
@@ -165,14 +180,19 @@ fn prepare_local(pane: &mut AgentPane, action: RewindAction, cx: &mut Context<Ag
         _ => panic!("fork expected"),
     };
 
-    let update = pane.session.branch.fork_created(
-        pane.session.runtime.epoch(),
-        request,
-        Ok(ClaudeFork {
-            session_id: Some("copy".into()),
-            replay: replay("kept prefix"),
-        }),
-    );
+    let update = {
+        let mut guard = pane.session.borrow_mut();
+        let state = &mut *guard;
+
+        state.branch.fork_created(
+            state.runtime.epoch(),
+            request,
+            Ok(ClaudeFork {
+                session_id: Some("copy".into()),
+                replay: replay("kept prefix"),
+            }),
+        )
+    };
 
     assert!(matches!(update, BranchUpdate::StartSession(_)));
 
@@ -198,7 +218,7 @@ fn protocol_branch_keeps_old_rows_until_replay_and_fills_the_prompt_once(cx: &mu
             pane.apply_event(Event::Replay(replay("copy")), cx);
 
             assert_eq!(rows(pane, cx), ["copy"]);
-            assert!(!pane.session.branch.holds_composer());
+            assert!(!pane.session.borrow().branch.holds_composer());
 
             pane.fill_branch_prompt(window, cx);
 
@@ -259,7 +279,7 @@ fn protocol_failure_preserves_conversation_and_does_not_refill_the_prompt(cx: &m
 
             assert_eq!(rows(pane, cx), ["current"]);
             assert!(pane.input.read(cx).text().len() == 0);
-            assert_eq!(pane.session.runtime.status(), Status::Idle);
+            assert_eq!(pane.session.borrow().runtime.status(), Status::Idle);
             assert_eq!(pane.history_ui.mode, RecentSessionsMode::Open);
         })
     });
@@ -274,7 +294,7 @@ fn local_branch_waits_for_ready_preserves_controls_and_keeps_later_drafts(cx: &m
         pane.update(cx, |pane, cx| {
             install(pane);
             pane.apply_replay(replay("current"), cx);
-            pane.session.controls.settings.model = Some("selected-model".into());
+            pane.session.borrow_mut().controls.settings.model = Some("selected-model".into());
             prepare_local(pane, RewindAction::Conversation, cx);
 
             assert_eq!(rows(pane, cx), ["current"]);
@@ -288,7 +308,7 @@ fn local_branch_waits_for_ready_preserves_controls_and_keeps_later_drafts(cx: &m
 
             assert_eq!(rows(pane, cx), ["kept prefix"]);
             assert_eq!(
-                pane.session.controls.settings.model.as_deref(),
+                pane.session.borrow().controls.settings.model.as_deref(),
                 Some("selected-model")
             );
             assert_eq!(pane.input.read(cx).text().to_string(), "later draft");
@@ -320,9 +340,13 @@ fn local_start_failure_keeps_old_rows_and_reports_files_already_restored(cx: &mu
             prepare_local(pane, RewindAction::FilesAndConversation, cx);
 
             assert!(matches!(
-                pane.session
-                    .runtime
-                    .install(pane.session.runtime.epoch(), Err("cannot start".into())),
+                {
+                    let mut guard = pane.session.borrow_mut();
+                    let state = &mut *guard;
+                    state
+                        .runtime
+                        .install(state.runtime.epoch(), Err("cannot start".into()))
+                },
                 StartOutcome::Failed(_)
             ));
 
@@ -338,8 +362,8 @@ fn local_start_failure_keeps_old_rows_and_reports_files_already_restored(cx: &mu
 
             assert_eq!(rows(pane, cx), ["current"]);
             assert!(pane.input.read(cx).text().len() == 0);
-            assert_eq!(pane.session.runtime.status(), Status::Exited);
-            assert!(!pane.session.branch.holds_composer());
+            assert_eq!(pane.session.borrow().runtime.status(), Status::Exited);
+            assert!(!pane.session.borrow().branch.holds_composer());
 
             let feedback = pane
                 .palette
@@ -368,40 +392,60 @@ fn partial_success_picker_disables_repeating_files_but_allows_continuing_the_con
 
             let checkpoint = local_checkpoint();
 
-            let request = pane
-                .session
-                .branch
-                .begin_rewind(&pane.session.runtime, pane.cwd(), None)
-                .expect("read");
+            let request = {
+                let mut guard = pane.session.borrow_mut();
+                let state = &mut *guard;
 
-            pane.session.branch.checkpoints_loaded(
-                pane.session.runtime.epoch(),
-                request,
-                Ok(vec![checkpoint.clone()]),
-            );
+                state.branch.begin_rewind(&state.runtime, pane.cwd(), None)
+            }
+            .expect("read");
 
-            pane.session
-                .branch
-                .select_checkpoint(pane.session.runtime.epoch(), checkpoint);
+            {
+                let mut guard = pane.session.borrow_mut();
+                let state = &mut *guard;
 
-            pane.session.branch.rewind(
-                &mut pane.session.runtime,
-                RewindAction::FilesAndConversation,
-            );
+                state.branch.checkpoints_loaded(
+                    state.runtime.epoch(),
+                    request,
+                    Ok(vec![checkpoint.clone()]),
+                )
+            };
 
-            let BranchUpdate::CreateFork(request) = pane
-                .session
-                .branch
-                .files_completed(pane.session.runtime.epoch(), Ok(()))
-            else {
+            {
+                let mut guard = pane.session.borrow_mut();
+                let state = &mut *guard;
+
+                state
+                    .branch
+                    .select_checkpoint(state.runtime.epoch(), checkpoint)
+            };
+
+            {
+                let mut guard = pane.session.borrow_mut();
+                let state = &mut *guard;
+
+                state
+                    .branch
+                    .rewind(&mut state.runtime, RewindAction::FilesAndConversation)
+            };
+
+            let BranchUpdate::CreateFork(request) = ({
+                let mut guard = pane.session.borrow_mut();
+                let state = &mut *guard;
+
+                state.branch.files_completed(state.runtime.epoch(), Ok(()))
+            }) else {
                 panic!("fork expected")
             };
 
-            let update = pane.session.branch.fork_created(
-                pane.session.runtime.epoch(),
-                request,
-                Err("disk full".into()),
-            );
+            let update = {
+                let mut guard = pane.session.borrow_mut();
+                let state = &mut *guard;
+
+                state
+                    .branch
+                    .fork_created(state.runtime.epoch(), request, Err("disk full".into()))
+            };
 
             pane.apply_rewind_update(update, cx);
 
@@ -444,8 +488,8 @@ fn history_resume_cannot_take_over_an_open_branch_picker(cx: &mut TestAppContext
             pane.resume_session(0, cx);
 
             assert_eq!(pane.history_ui.mode, RecentSessionsMode::Open);
-            assert_eq!(pane.session.runtime.status(), Status::Idle);
-            assert!(pane.session.branch.picker_is_open());
+            assert_eq!(pane.session.borrow().runtime.status(), Status::Idle);
+            assert!(pane.session.borrow().branch.picker_is_open());
         })
     });
 }

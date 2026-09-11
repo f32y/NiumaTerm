@@ -1,7 +1,9 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Local};
 use gpui::prelude::*;
 use gpui::{
     Bounds, Context, FollowMode, Image, IntoElement, ListAlignment, ListState, Pixels, Point,
@@ -10,8 +12,8 @@ use gpui::{
 use gpui_component::button::Button;
 use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme as _, ElementExt as _, IconName, Sizable as _};
-use nmt_agent::chat::{Item as SessionItem, ReplayTurn};
-use nmt_agent::transcript::{TextField, TranscriptContent};
+use nmt_agent::chat::Item as SessionItem;
+use nmt_agent::transcript::conversation::ConversationState;
 use nmt_config::agent::CollapseRows;
 use nmt_i18n::i18n;
 use nmt_profiling::transcript::{Operation, Probe};
@@ -25,8 +27,7 @@ use crate::transcript::incremental::RowCache;
 use crate::transcript::render::TRANSCRIPT_LINE_HEIGHT;
 use crate::transcript::render::image_preview::ZOOM_DURATION;
 use crate::transcript::reveal::Disclosures;
-use crate::transcript::rows::{EntryPresentation, TranscriptRow, folds_turns};
-use crate::transcript::turns::{LiveTurn, TurnLedger};
+use crate::transcript::rows::{TranscriptRow, folds_turns};
 use crate::transcript::{CodeTranscriptCache, Entry, ReadingPosition};
 
 /// One agent conversation as the user reads it: the entry list, the row
@@ -40,7 +41,8 @@ use crate::transcript::{CodeTranscriptCache, Entry, ReadingPosition};
 /// own conversation and a child agent's conversation render through here, which
 /// is what keeps their presentation from drifting apart.
 pub struct TranscriptView {
-    pub(crate) content: TranscriptContent<EntryPresentation>,
+    pub(crate) conversation: Rc<RefCell<ConversationState>>,
+    pub(crate) image_previews: RefCell<HashMap<(usize, usize), Arc<Image>>>,
     pub(super) row_cache: RowCache,
 
     /// Virtualized transcript: only visible rows build elements each frame.
@@ -90,13 +92,6 @@ pub struct TranscriptView {
     /// Collapsing a row releases the extra source, syntax trees, and worker.
     pub(crate) code_transcripts: CodeTranscriptCache,
 
-    /// What each finished turn is remembered by: whether it settled, how long
-    /// it took, what it produced, and whether the user stopped it.
-    pub(crate) turn_ledger: TurnLedger,
-
-    /// The running turn, while one is in flight.
-    pub(crate) live_turn: LiveTurn,
-
     /// The reply being let onto the screen a character at a time, while one
     /// is. Only text that streams in through this view is typed: a restored
     /// or mirrored conversation arrives whole and is shown whole.
@@ -111,6 +106,8 @@ pub struct TranscriptView {
     /// Revision of the conversation this view was last filled from, for a view
     /// that mirrors content someone else owns rather than accumulating its own.
     source_revision: Option<u64>,
+
+    observed_version: (u64, u64),
 
     /// The image a reader opened at full size over the conversation. Held per
     /// conversation rather than per pane so a child agent's transcript
@@ -142,7 +139,8 @@ impl TranscriptView {
         let collapse_mode = CollapseRows::default();
 
         Self {
-            content: TranscriptContent::default(),
+            conversation: Rc::new(RefCell::new(ConversationState::default())),
+            image_previews: Default::default(),
             row_cache: RowCache::default(),
             transcript_list: {
                 // Bottom alignment + tail follow give chat-log behavior: pinned
@@ -165,12 +163,11 @@ impl TranscriptView {
             disclosures: Disclosures::new(folds_turns(collapse_mode)),
             collapse_mode,
             code_transcripts: CodeTranscriptCache::default(),
-            turn_ledger: TurnLedger::default(),
-            live_turn: LiveTurn::default(),
             typewriter: None,
             cwd,
             kind,
             source_revision: None,
+            observed_version: (0, 0),
             zoomed_image: None,
             zoom_open: false,
             zoom_fade: Fade::lasting(ZOOM_DURATION),
@@ -181,6 +178,47 @@ impl TranscriptView {
 
     /// Claim this view as one pane's own conversation, which is what makes its
     /// rows offer the actions that address the conversation.
+    pub(crate) fn sync_content(&mut self) {
+        let shared = self.conversation.clone();
+        let conversation = shared.borrow();
+        let version = conversation.version();
+
+        let Some(change) = conversation.changes_since(self.observed_version) else {
+            return;
+        };
+
+        if version.0 != self.observed_version.0 {
+            self.reset_presentation();
+        } else if let Some((index, previous_bytes)) = change.reply {
+            if !self
+                .typewriter
+                .as_ref()
+                .is_some_and(|typing| typing.index() == index)
+            {
+                if let Some(previous) = &self.typewriter {
+                    self.row_cache.invalidate(previous.index());
+                }
+
+                if let SessionItem::AgentMessage {
+                    text: Some(text), ..
+                } = &conversation.content.entries()[index].item
+                {
+                    self.typewriter = Some(Typewriter::start(
+                        index,
+                        text[..previous_bytes].chars().count(),
+                        Instant::now(),
+                    ));
+                }
+            }
+
+            self.code_transcripts.invalidate(index);
+        }
+
+        self.code_transcripts.invalidate_from(change.first);
+        self.row_cache.invalidate(change.first);
+        self.observed_version = version;
+    }
+
     pub(crate) fn set_owner(&mut self, owner: gpui::WeakEntity<AgentPane>) {
         self.owner = Some(owner);
     }
@@ -190,165 +228,38 @@ impl TranscriptView {
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.content.entries().is_empty()
+        self.conversation.borrow().content.entries().is_empty()
     }
 
-    /// Mirror a conversation this view does not own. `revision` identifies the
-    /// source's current content, so an unchanged source costs one comparison
-    /// rather than a rebuild. Row indices stay stable because the source only
-    /// appends and merges in place, which keeps expansion state valid.
-    pub fn show_items(&mut self, items: &[SessionItem], revision: u64, cx: &mut Context<Self>) {
-        if self.source_revision == Some(revision) {
+    pub fn attach_content(
+        &mut self,
+        conversation: Rc<RefCell<ConversationState>>,
+        cx: &mut Context<Self>,
+    ) {
+        if Rc::ptr_eq(&self.conversation, &conversation) {
+            self.sync_content();
+
             return;
         }
 
-        let _profile = Probe::start(Operation::MirrorRebuild);
-        let follow = self.source_revision.is_none();
-
-        self.source_revision = Some(revision);
-        self.code_transcripts.invalidate_all();
-
-        self.content.replace(
-            items
-                .iter()
-                .map(|item| Entry {
-                    turn: 0,
-                    item: item.clone(),
-                    metadata: EntryPresentation::default(),
-                })
-                .collect(),
-        );
-
+        self.conversation = conversation;
+        self.reset_presentation();
+        self.observed_version = self.conversation.borrow().version();
         self.row_cache.invalidate(0);
-
-        if follow {
-            self.scroll_to_bottom();
-        }
 
         cx.notify();
     }
 
-    /// Drop the conversation and every piece of view state derived from it.
-    /// Used when the owning view switches to a different conversation, so one
-    /// conversation's expansion and scroll position cannot leak into another's.
-    pub(crate) fn clear(&mut self) {
-        self.content.clear();
+    pub(crate) fn reset_presentation(&mut self) {
+        self.image_previews.borrow_mut().clear();
         self.row_cache.invalidate(0);
         self.source_revision = None;
         self.stashed_position = None;
         self.reserve_below = false;
         self.scroll_to_bottom();
         self.disclosures.clear();
-        self.turn_ledger.clear();
         self.code_transcripts.clear();
-        self.live_turn.discard();
         self.typewriter = None;
-    }
-
-    /// Append one turn of a restored conversation under its own turn id, with
-    /// the accounting the provider persisted for it. Replaying it settles the
-    /// turn, so it folds its work exactly like one completed in this process.
-    /// Its duration is a separate question: the transcript file records none,
-    /// so a replayed turn usually closes without an elapsed-time line rather
-    /// than stating a time the session never reported.
-    pub(crate) fn append_replay(&mut self, turn: u64, replay: ReplayTurn, cx: &mut Context<Self>) {
-        let _profile = Probe::start(Operation::Replay);
-
-        if replay.items.is_empty() {
-            self.invalidate_turn_rows(turn);
-        }
-
-        for entry in replay.items {
-            self.append_entry(Entry {
-                turn,
-                item: entry.item,
-                metadata: EntryPresentation {
-                    at: entry
-                        .at
-                        .and_then(|at| DateTime::from_timestamp(at, 0))
-                        .map(|at| at.with_timezone(&Local).format("%H:%M").to_string())
-                        .unwrap_or_default(),
-                    images: Vec::new(),
-                },
-            });
-        }
-
-        self.turn_ledger.replay(
-            turn,
-            replay.interrupted,
-            replay.seconds,
-            replay.output_tokens,
-        );
-
-        cx.notify();
-    }
-
-    /// Append one entry with an explicit stamp, for content this view records
-    /// outside the normal push path.
-    pub(crate) fn push_stamped(&mut self, turn: u64, item: SessionItem) {
-        self.append_entry(Entry {
-            turn,
-            item,
-            metadata: EntryPresentation {
-                at: Local::now().format("%H:%M").to_string(),
-                images: Vec::new(),
-            },
-        });
-    }
-
-    pub(crate) fn contains_item(&self, id: &str) -> bool {
-        self.content.contains_item(id)
-    }
-
-    /// Fold an authoritative completed payload into the entry that streamed it.
-    pub(crate) fn merge_completed(&mut self, item: &SessionItem) {
-        let _profile = Probe::start(Operation::MergeCompleted);
-
-        if let Some(index) = self.content.merge_completed(item) {
-            self.code_transcripts.invalidate(index);
-            self.row_cache.invalidate(index);
-        }
-    }
-
-    /// Extend a streamed item's text. Returns whether the result is non-empty,
-    /// which is what tells the caller the row became visible.
-    pub(crate) fn append_delta(&mut self, item_id: &str, delta: &str, field: TextField) -> bool {
-        let _profile = Probe::start(Operation::AppendDelta);
-
-        let Some(update) = self.content.append_delta(item_id, delta, field) else {
-            return false;
-        };
-
-        let index = update.index;
-
-        // Only a newly selected reply needs its old prefix counted. Existing
-        // typed edges keep advancing in the view without rescanning each delta.
-        if matches!(field, TextField::Reply)
-            && !self
-                .typewriter
-                .as_ref()
-                .is_some_and(|typing| typing.index() == index)
-        {
-            if let Some(previous) = &self.typewriter {
-                self.row_cache.invalidate(previous.index());
-            }
-
-            if let SessionItem::AgentMessage {
-                text: Some(text), ..
-            } = &self.content.entries()[index].item
-            {
-                self.typewriter = Some(Typewriter::start(
-                    index,
-                    text[..update.previous_bytes].chars().count(),
-                    Instant::now(),
-                ));
-            }
-        }
-
-        self.code_transcripts.invalidate(index);
-        self.row_cache.invalidate(index);
-
-        update.non_blank
     }
 
     /// The part of reply `index` the reader sees this frame: the whole of it
@@ -388,7 +299,11 @@ impl TranscriptView {
         let _profile = Probe::start(Operation::Typewriter);
         let index = typewriter.index();
         let previous = typewriter.shown();
-        let moving = typewriter.advance(reply_chars(self.content.entries(), index), now);
+
+        let moving = typewriter.advance(
+            reply_chars(self.conversation.borrow().content.entries(), index),
+            now,
+        );
 
         if typewriter.shown() != previous {
             self.row_cache.invalidate(index);
@@ -402,86 +317,39 @@ impl TranscriptView {
     }
 
     /// Latest non-empty assistant reply of `turn`, for notification bodies.
-    pub(crate) fn latest_agent_message(&self, turn: u64) -> Option<&str> {
-        self.content.latest_agent_message(turn)
-    }
-
-    /// Whether this turn already shows the provider error reported at
-    /// completion. Codex can announce the error immediately and repeat it in
-    /// the terminal turn state, while the transcript should show one row.
-    pub(crate) fn turn_has_error(&self, turn: u64, text: &str) -> bool {
-        self.content.turn_has_error(turn, text)
+    pub(crate) fn latest_agent_message(&self, turn: u64) -> Option<String> {
+        self.conversation
+            .borrow()
+            .content
+            .latest_agent_message(turn)
+            .map(str::to_owned)
     }
 
     /// How many actions `turn` has taken: the tool calls, file changes and
     /// thinking passes it logged. Conversation text is the turn talking rather
     /// than working, so it does not count.
     pub(crate) fn turn_steps(&self, turn: u64) -> usize {
-        self.content.turn_steps(turn)
+        self.conversation.borrow().content.turn_steps(turn)
     }
 
     /// Completed and total entries of the task list the agent is working from.
     /// Only the newest list counts: a task list is republished in full whenever
     /// it changes, so the earlier ones describe states the agent has left.
     pub(crate) fn task_tally(&self) -> Option<(u32, u32)> {
-        self.content.task_tally()
+        self.conversation.borrow().content.task_tally()
     }
 
     pub(crate) fn is_working(&self) -> bool {
-        self.live_turn.is_working()
-    }
-
-    pub(crate) fn is_compacting(&self) -> bool {
-        self.live_turn.is_compacting()
-    }
-
-    pub(crate) fn set_compacting(&mut self, compacting: bool, cx: &mut Context<Self>) {
-        self.live_turn.set_compacting(compacting);
-        self.row_cache.invalidate(self.content.entries().len());
-
-        cx.notify();
-    }
-
-    pub(crate) fn was_interrupted(&self, turn: u64) -> bool {
-        self.turn_ledger.was_interrupted(turn)
-    }
-
-    pub(crate) fn mark_interrupted(&mut self, turn: u64) {
-        self.turn_ledger.mark_interrupted(turn);
-        self.invalidate_turn_rows(turn);
+        self.conversation.borrow().live.is_working()
     }
 
     pub(crate) fn start_working(&mut self, cx: &mut Context<Self>) {
-        self.live_turn.start();
-        self.row_cache.invalidate(self.content.entries().len());
-
-        cx.notify();
-    }
-
-    pub(crate) fn set_working_detail(&mut self, detail: Option<String>, cx: &mut Context<Self>) {
-        if self.live_turn.set_detail(detail) {
-            cx.notify();
+        if !self.conversation.borrow().live.is_working() {
+            self.conversation.borrow_mut().start();
         }
-    }
 
-    pub(crate) fn set_working_output_tokens(&mut self, output_tokens: u64, cx: &mut Context<Self>) {
-        if self.live_turn.set_output_tokens(output_tokens) {
-            cx.notify();
-        }
-    }
-
-    /// Settle the running turn's duration and output usage for its status row.
-    /// These are view state rather than provider transcript content, so they
-    /// stay outside the shared item stream.
-    pub(crate) fn settle_turn(&mut self, turn: u64, cx: &mut Context<Self>) {
-        let Some((started, output_tokens)) = self.live_turn.finish() else {
-            return;
-        };
-
-        self.turn_ledger
-            .settle(turn, started.elapsed().as_secs(), output_tokens);
-
-        self.invalidate_turn_rows(turn);
+        self.row_cache
+            .invalidate(self.conversation.borrow().content.entries().len());
 
         cx.notify();
     }
@@ -489,8 +357,8 @@ impl TranscriptView {
     /// Discard a turn that never produced visible output, so an immediate stop
     /// leaves no elapsed-time row behind for work that did not happen.
     pub(crate) fn discard_turn(&mut self, turn: u64, cx: &mut Context<Self>) {
-        self.live_turn.discard();
-        self.turn_ledger.forget(turn);
+        self.conversation.borrow_mut().live.discard();
+        self.conversation.borrow_mut().turns.forget(turn);
         self.invalidate_turn_rows(turn);
 
         cx.notify();
@@ -523,6 +391,8 @@ fn picker_reserve(viewport: Pixels) -> Pixels {
 
 impl Render for TranscriptView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_content();
+
         // Content whose exit has finished leaves the transcript before the
         // rows are built, so the removal and the specs it changes land in one
         // pass rather than a frame apart.
@@ -813,3 +683,6 @@ fn shown_prefix(text: &str, chars: usize) -> &str {
 
 #[cfg(test)]
 mod typewriter_tests;
+
+#[cfg(test)]
+mod fixtures;

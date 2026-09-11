@@ -6,11 +6,14 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Instant;
 
+use chrono::{DateTime, Local};
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Bounds, ClipboardItem, Context, Div, ObjectFit, Window, div, img, px, relative,
+    AnyElement, App, Bounds, ClipboardItem, Context, Div, Image, ImageFormat, ObjectFit, Window,
+    div, img, px, relative,
 };
 use gpui_component::modern_menu::{ModernMenu, ModernMenuExt as _};
 use gpui_component::{
@@ -39,7 +42,14 @@ impl TranscriptView {
             .text_color(cx.theme().muted_foreground)
             .invisible()
             .group_hover("entry", |this| this.visible())
-            .child(self.content.entries()[index].metadata.at.clone())
+            .child(
+                self.conversation.borrow().content.entries()[index]
+                    .metadata
+                    .at
+                    .and_then(|at| DateTime::from_timestamp(at, 0))
+                    .map(|at| at.with_timezone(&Local).format("%H:%M").to_string())
+                    .unwrap_or_default(),
+            )
     }
 
     pub(crate) fn copy_menu(
@@ -52,7 +62,9 @@ impl TranscriptView {
             // list layout independent of the hidden message size.
             let copy_text = pane
                 .read_with(cx, |pane, _| {
-                    pane.content
+                    pane.conversation
+                        .borrow()
+                        .content
                         .entries()
                         .get(index)
                         .map(|entry| entry_copy_text(&entry.item))
@@ -359,7 +371,8 @@ impl TranscriptView {
     /// should see what was sent, not the placeholder that stood in for it while
     /// the message was being written.
     fn render_entry_images(&self, index: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let images = &self.content.entries().get(index)?.metadata.images;
+        let conversation = self.conversation.borrow();
+        let images = &conversation.content.entries().get(index)?.metadata.images;
 
         if images.is_empty() {
             return None;
@@ -372,6 +385,15 @@ impl TranscriptView {
                 .flex_wrap()
                 .justify_end()
                 .children(images.iter().enumerate().map(|(position, image)| {
+                    let image = self
+                        .image_previews
+                        .borrow_mut()
+                        .entry((index, position))
+                        .or_insert_with(|| {
+                            Arc::new(Image::from_bytes(ImageFormat::Png, image.bytes.to_vec()))
+                        })
+                        .clone();
+
                     // A click carries the pointer's position, not the
                     // thumbnail's; the bounds the layout gave it are kept from
                     // the prepaint that precedes the click, so the preview

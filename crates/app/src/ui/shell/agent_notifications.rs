@@ -1,3 +1,5 @@
+use nmt_agent_ui::execution::AgentSession;
+
 use crate::ui::shell::*;
 
 struct AgentRouteLocation {
@@ -161,8 +163,8 @@ impl Shell {
             .map(|(_, pane)| pane.read(cx).agent_route().clone())
             .collect();
 
-        if let Some(pane) = surface.agent() {
-            routes.push(pane.read(cx).agent_route().clone());
+        if let Some(session) = surface.agent_session() {
+            routes.push(session.read(cx).agent_route().clone());
         }
 
         routes
@@ -184,7 +186,10 @@ impl Shell {
 
             for (tab_index, tab) in tabs.tabs().iter().enumerate() {
                 if let Some(pane) = tab.surface().agent()
-                    && pane.read(cx).agent_route() == route
+                    && tab
+                        .surface()
+                        .agent_session()
+                        .is_some_and(|session| session.read(cx).agent_route() == route)
                 {
                     return Some(AgentRouteLocation {
                         workspace_id: summary.id,
@@ -325,17 +330,21 @@ impl Shell {
 
     /// The tab holding this agent pane. A pane knows its route but not its
     /// tab, and the two are only related through the surface the tab owns.
-    fn tab_for_agent_pane(&self, pane: &Entity<AgentPane>) -> Option<TabId> {
+    fn tab_for_agent_session(&self, session: &Entity<AgentSession>) -> Option<TabId> {
         self.workspaces
             .all_tabs()
             .flat_map(|tabs| tabs.tabs())
-            .find(|tab| tab.surface().agent() == Some(pane))
+            .find(|tab| tab.surface().agent_session() == Some(session))
             .map(|tab| tab.id())
     }
 
     pub(crate) fn watch_agent_tab(pane: &Entity<AgentPane>, cx: &mut Context<Self>) {
-        cx.subscribe(pane, |this, pane, event: &AgentPaneEvent, cx| {
-            let route = pane.read(cx).agent_route().clone();
+        let Some(session) = pane.read(cx).agent_session() else {
+            return;
+        };
+
+        cx.subscribe(&session, |this, session, event: &AgentPaneEvent, cx| {
+            let route = session.read(cx).agent_route().clone();
 
             let mutation = match event {
                 AgentPaneEvent::Lifecycle(event) if event.route == route => this
@@ -361,7 +370,7 @@ impl Shell {
                     // is read at render time, so this only has to repaint the
                     // title bar.
                     this.panels
-                        .note_background_task_seen(pane.read(cx).background_task_count() > 0);
+                        .note_background_task_seen(session.read(cx).background_task_count() > 0);
 
                     cx.notify();
 
@@ -372,7 +381,7 @@ impl Shell {
                     // Opening a tab needs a window, which an event
                     // subscription has none of; the next render has one.
                     this.pending_agent_resume = Some(PendingAgentResume {
-                        profile: pane.read(cx).profile().clone(),
+                        profile: session.read(cx).profile().clone(),
                         cwd: cwd.clone(),
                         session_id: session_id.clone(),
                     });
@@ -385,7 +394,7 @@ impl Shell {
                 AgentPaneEvent::TitleSuggested(title) => {
                     // A user-authored rename outranks this, so a tab the user
                     // has named keeps its name.
-                    if let Some(tab_id) = this.tab_for_agent_pane(&pane)
+                    if let Some(tab_id) = this.tab_for_agent_session(&session)
                         && let Some(tabs) = this.workspaces.tab_manager_for_mut(tab_id)
                         && tabs.set_title(tab_id, title.clone())
                     {
@@ -398,7 +407,7 @@ impl Shell {
                 AgentPaneEvent::CloseRequested => {
                     // Same reason as the resume above: closing a tab needs a
                     // window, and the next render has one.
-                    this.pending_agent_close = this.tab_for_agent_pane(&pane);
+                    this.pending_agent_close = this.tab_for_agent_session(&session);
 
                     cx.notify();
 

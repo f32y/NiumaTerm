@@ -3,7 +3,7 @@ use futures::executor::block_on;
 use nmt_agent::message_memory::OUTPUT_FAILURE_METHOD;
 use serde_json::json;
 
-use crate::session::startup::channel;
+use crate::execution::inbox::channel;
 
 #[test]
 fn large_history_and_message_burst_preserve_later_events() {

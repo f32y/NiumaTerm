@@ -1,10 +1,10 @@
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use gpui::prelude::*;
 use gpui::{Context, Window};
 use gpui_component::input::{InputEvent, InputState, TextareaState};
 use nmt_agent::AgentEventKind;
-use nmt_agent::chat::{Item, Question, QuestionInput, QuestionMode};
+use nmt_agent::chat::{Question, QuestionInput, QuestionMode};
 use nmt_agent::session::controller::QuestionSubmission;
 use nmt_agent::session::input::{QuestionAction, QuestionCompletion, QuestionKey};
 use nmt_i18n::i18n;
@@ -15,12 +15,12 @@ use crate::questions::{QuestionEditor, QuestionEditorState, QuestionStatus};
 
 impl AgentPane {
     pub(crate) fn present_questions(&mut self, index: usize, cx: &mut Context<Self>) {
-        self.prompts.reveal(&self.session.input, index);
+        self.prompts.reveal(&self.session.borrow().input, index);
 
-        let prompt = &self.session.input.batches()[index];
-        let optional = prompt.mode() == QuestionMode::Optional;
+        let shared = self.session.clone();
+        let state = shared.borrow();
+        let prompt = &state.input.batches()[index];
         let waiting = prompt.mode() != QuestionMode::Async;
-        let key = prompt.key();
 
         let description = prompt
             .questions()
@@ -38,55 +38,6 @@ impl AgentPane {
         }
 
         cx.notify();
-
-        if !optional {
-            return;
-        }
-
-        let epoch = self.session.runtime.epoch();
-
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(Duration::from_secs(1)).await;
-
-                let keep_running = this.update(cx, |this, cx| {
-                    if !this.session.runtime.is_current(epoch)
-                        || this.session.runtime.update_suspension().is_some()
-                    {
-                        return false;
-                    }
-
-                    let Some(prompt) = this
-                        .session
-                        .input
-                        .batches()
-                        .iter()
-                        .find(|prompt| prompt.key() == key)
-                    else {
-                        return false;
-                    };
-
-                    let Some(remaining) = prompt.auto_resolve_remaining(Instant::now()) else {
-                        return false;
-                    };
-
-                    if remaining.is_zero() {
-                        this.submit_question(key, QuestionAction::Timeout, cx);
-
-                        return false;
-                    }
-
-                    cx.notify();
-
-                    true
-                });
-
-                if !keep_running.unwrap_or(false) {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     pub(crate) fn present_question_completion(
@@ -94,16 +45,12 @@ impl AgentPane {
         completion: QuestionCompletion,
         cx: &mut Context<Self>,
     ) {
-        if let Some(text) = completion.message {
-            if completion.started_turn {
-                self.start_working(cx);
-                self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
-            }
-
-            self.push_item(Item::UserMessage { text: Some(text) }, cx);
+        if completion.started_turn {
+            self.start_working(cx);
+            self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
         }
 
-        self.prompts.hide_settled(&self.session.input);
+        self.prompts.hide_settled(&self.session.borrow().input);
 
         if completion.waiting_finished {
             self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
@@ -120,8 +67,12 @@ impl AgentPane {
         questions: Vec<Question>,
         cx: &mut Context<Self>,
     ) {
+        if !self.binding.is_current() {
+            return;
+        }
+
         self.prompts
-            .open_history(&mut self.session.input, item_id, questions);
+            .open_history(&mut self.session.borrow_mut().input, item_id, questions);
 
         cx.notify();
     }
@@ -132,7 +83,14 @@ impl AgentPane {
         option: usize,
         cx: &mut Context<Self>,
     ) {
-        if let Some(prompt) = self.prompts.questions_mut(&mut self.session.input) {
+        if !self.binding.is_current() {
+            return;
+        }
+
+        if let Some(prompt) = self
+            .prompts
+            .questions_mut(&mut self.session.borrow_mut().input)
+        {
             prompt.toggle(question, option);
 
             if let Some(active) = self.prompts.active {
@@ -148,6 +106,10 @@ impl AgentPane {
         control: PaletteControl,
         cx: &mut Context<Self>,
     ) -> bool {
+        if !self.binding.is_current() {
+            return false;
+        }
+
         if self.prompts.collapsed {
             return false;
         }
@@ -156,9 +118,11 @@ impl AgentPane {
             return false;
         };
 
-        let key = self.session.input.batches()[index].key();
+        let key = self.session.borrow().input.batches()[index].key();
 
-        let Some(prompt) = self.session.input.draft_mut(key) else {
+        let mut state = self.session.borrow_mut();
+
+        let Some(prompt) = state.input.draft_mut(key) else {
             return false;
         };
 
@@ -202,14 +166,24 @@ impl AgentPane {
     }
 
     pub(crate) fn submit_current_questions(&mut self, cx: &mut Context<Self>) {
-        if let Some(prompt) = self.prompts.questions(&self.session.input) {
-            self.submit_question(prompt.key(), QuestionAction::Answer, cx);
+        let key = self
+            .prompts
+            .questions(&self.session.borrow().input)
+            .map(|prompt| prompt.key());
+
+        if let Some(key) = key {
+            self.submit_question(key, QuestionAction::Answer, cx);
         }
     }
 
     pub(crate) fn skip_current_questions(&mut self, cx: &mut Context<Self>) {
-        if let Some(prompt) = self.prompts.questions(&self.session.input) {
-            self.submit_question(prompt.key(), QuestionAction::Skip, cx);
+        let key = self
+            .prompts
+            .questions(&self.session.borrow().input)
+            .map(|prompt| prompt.key());
+
+        if let Some(key) = key {
+            self.submit_question(key, QuestionAction::Skip, cx);
         }
     }
 
@@ -219,7 +193,16 @@ impl AgentPane {
         action: QuestionAction,
         cx: &mut Context<Self>,
     ) {
-        match self.session.submit_question(key, action, Instant::now()) {
+        if !self.binding.is_current() {
+            return;
+        }
+
+        let outcome = self
+            .session
+            .borrow_mut()
+            .submit_question(key, action, Instant::now());
+
+        match outcome {
             QuestionSubmission::Ignored => return,
 
             QuestionSubmission::Settled { waiting_finished } => {
@@ -231,14 +214,14 @@ impl AgentPane {
             QuestionSubmission::Waiting | QuestionSubmission::Failed => {}
         }
 
-        self.prompts.hide_settled(&self.session.input);
+        self.prompts.hide_settled(&self.session.borrow().input);
 
         cx.notify();
     }
 
     #[cfg(test)]
     pub(crate) fn restore_question_drafts(&mut self) {
-        self.session.restore_questions();
+        self.session.borrow_mut().restore_questions();
         self.prompts.reset_editors();
     }
 
@@ -251,10 +234,14 @@ impl AgentPane {
             return;
         };
 
-        let count = self.session.input.batches()[batch].questions().len();
+        let count = self.session.borrow().input.batches()[batch]
+            .questions()
+            .len();
 
         for index in 0..count {
-            let prompt = &self.session.input.batches()[batch];
+            let shared = self.session.clone();
+            let state = shared.borrow();
+            let prompt = &state.input.batches()[batch];
             let input = prompt.questions()[index].input;
 
             if input == QuestionInput::SelectionOnly
@@ -266,14 +253,16 @@ impl AgentPane {
 
             let text = prompt.text(index).to_string();
             let key = prompt.key();
-            let epoch = self.session.runtime.epoch();
+            let epoch = self.session.borrow().runtime.epoch();
 
             let on_change = move |this: &mut Self, value: String, cx: &mut Context<Self>| {
-                if !this.session.runtime.is_current(epoch) {
+                if !this.binding.is_current() || !this.session.borrow().runtime.is_current(epoch) {
                     return;
                 }
 
-                let Some(prompt) = this.session.input.draft_mut(key) else {
+                let mut state = this.session.borrow_mut();
+
+                let Some(prompt) = state.input.draft_mut(key) else {
                     return;
                 };
 

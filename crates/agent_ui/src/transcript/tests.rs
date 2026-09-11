@@ -506,7 +506,11 @@ mod steered_prompt_rows_tests {
     /// Settle a turn the way a turn completed in this process does: finished,
     /// with the duration the session reported for it.
     fn settle(transcript: &mut TranscriptView, turn: u64, seconds: u64) {
-        transcript.turn_ledger.settle_replayed(turn, Some(seconds));
+        transcript
+            .conversation
+            .borrow_mut()
+            .turns
+            .replay(turn, false, Some(seconds), None);
     }
 
     /// Render order as entry indexes, with the turn's two chrome rows named.
@@ -628,7 +632,11 @@ mod steered_prompt_rows_tests {
 
                 // What a resumed conversation looks like: the turn is over, but
                 // the transcript file recorded no wall time for it.
-                transcript.turn_ledger.settle_replayed(1, None);
+                transcript
+                    .conversation
+                    .borrow_mut()
+                    .turns
+                    .replay(1, false, None, None);
 
                 // It folds like any settled turn, and closes after its reply
                 // rather than stating a duration the session never reported.

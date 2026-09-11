@@ -41,13 +41,13 @@ impl AgentPane {
     /// Whether such a flow is past its picker and working. Until then the
     /// input still holds text worth editing, so only sending is refused.
     pub(crate) fn branch_flow_is_working(&self) -> bool {
-        self.session.branch.is_working()
+        self.session.borrow().branch.is_working()
     }
 
     /// Whether a list of branch points is on screen, which is what makes the
     /// palette's highlight something the transcript follows.
     pub(crate) fn branch_picker_is_open(&self) -> bool {
-        self.session.branch.picker_is_open()
+        self.session.borrow().branch.picker_is_open()
     }
 
     /// Hand the transcript to a picker that is about to scroll it to the
@@ -86,7 +86,11 @@ impl AgentPane {
     }
 
     pub(crate) fn cancel_branch_picker(&mut self, cx: &mut Context<Self>) -> bool {
-        if !self.session.branch.cancel_picker() {
+        if !self.binding.is_current() {
+            return false;
+        }
+
+        if !self.session.borrow_mut().branch.cancel_picker() {
             return false;
         }
 
@@ -117,7 +121,11 @@ impl AgentPane {
         target: Option<PromptTarget>,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.session.runtime.status() != Status::Idle || self.is_command_busy() {
+        if !self.binding.is_current() {
+            return false;
+        }
+
+        if self.session.borrow().runtime.status() != Status::Idle || self.is_command_busy() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 translated("agent-fork-idle-only"),
@@ -127,11 +135,12 @@ impl AgentPane {
             return false;
         }
 
-        if let Err(error) = self
-            .session
-            .branch
-            .begin_fork(&mut self.session.runtime, target)
-        {
+        if let Err(error) = {
+            let mut guard = self.session.borrow_mut();
+            let state = &mut *guard;
+
+            state.branch.begin_fork(&mut state.runtime, target)
+        } {
             let message = match error {
                 BranchError::Busy => translated("agent-fork-idle-only"),
                 _ => self.branch_error_message(error).into(),
@@ -161,15 +170,19 @@ impl AgentPane {
         checkpoints: Result<Vec<ForkCheckpoint>, String>,
         cx: &mut Context<Self>,
     ) {
-        let update = self
-            .session
-            .branch
-            .fork_checkpoints(&mut self.session.runtime, checkpoints);
+        let update = {
+            let mut guard = self.session.borrow_mut();
+            let state = &mut *guard;
+
+            state
+                .branch
+                .fork_checkpoints(&mut state.runtime, checkpoints)
+        };
 
         self.apply_fork_update(update, cx);
     }
 
-    fn apply_fork_update(&mut self, update: BranchUpdate, cx: &mut Context<Self>) {
+    pub(crate) fn apply_fork_update(&mut self, update: BranchUpdate, cx: &mut Context<Self>) {
         match update {
             BranchUpdate::Empty => self.palette.set_feedback(
                 CommandFeedbackKind::Error,
@@ -198,9 +211,9 @@ impl AgentPane {
             BranchUpdate::Branching => {
                 self.branch.draft = Some(self.input.read(cx).text().to_string());
                 self.history_ui.mode = RecentSessionsMode::Loading;
-                self.session.restore.cancel();
-                self.session.controls.seed_thread_defaults = false;
-                self.session.controls.seed_approval_reviewer = false;
+                self.session.borrow_mut().restore.cancel();
+                self.session.borrow_mut().controls.seed_thread_defaults = false;
+                self.session.borrow_mut().controls.seed_approval_reviewer = false;
 
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
@@ -263,10 +276,16 @@ impl AgentPane {
         checkpoint: ForkCheckpoint,
         cx: &mut Context<Self>,
     ) {
-        let update = self
-            .session
-            .branch
-            .fork(&mut self.session.runtime, checkpoint);
+        if !self.binding.is_current() {
+            return;
+        }
+
+        let update = {
+            let mut guard = self.session.borrow_mut();
+            let state = &mut *guard;
+
+            state.branch.fork(&mut state.runtime, checkpoint)
+        };
 
         self.apply_fork_update(update, cx);
     }

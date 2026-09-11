@@ -12,7 +12,7 @@ pub(crate) use crate::ui::shell::render::MIN_SIDEBAR_WIDTH;
 
 mod settings_workspace;
 mod tab_presentation;
-mod tab_surface;
+pub(crate) mod tab_surface;
 mod tabs_open;
 mod updates_layer;
 mod workspace_dirs;
@@ -223,14 +223,6 @@ impl Drop for Shell {
 }
 
 impl Shell {
-    pub(crate) fn agent_panes(&self) -> Vec<Entity<AgentPane>> {
-        self.workspaces
-            .all_tabs()
-            .flat_map(|tabs| tabs.tabs())
-            .filter_map(|tab| tab.surface().agent().cloned())
-            .collect()
-    }
-
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         // Repaint shell chrome when settings change.
         cx.observe_global_in::<AppSettings>(window, |_this, window, cx| {

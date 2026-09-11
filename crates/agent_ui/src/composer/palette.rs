@@ -164,7 +164,7 @@ impl AgentPane {
     }
 
     pub(crate) fn palette_model(&mut self, cx: &Context<Self>) -> Option<PaletteModel> {
-        match (&self.session.branch).into() {
+        match (&self.session.borrow().branch).into() {
             view @ (BranchView::LoadingRewind
             | BranchView::RewindCheckpoints(_)
             | BranchView::RewindAction(_, _)) => return self.rewind_palette_model(view),
@@ -288,7 +288,7 @@ impl AgentPane {
                     } else if command.source == SlashCommandSource::Local {
                         None
                     } else {
-                        match self.session.runtime.status() {
+                        match self.session.borrow().runtime.status() {
                             Status::Starting => Some(translated("agent-composer-agent-starting")),
                             Status::Exited => Some(translated("agent-composer-agent-exited")),
                             _ => None,
@@ -530,6 +530,10 @@ impl AgentPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.binding.is_current() {
+            return;
+        }
+
         let Some(row) = self
             .palette_model(cx)
             .and_then(|model| model.rows.get(index).cloned())
@@ -606,11 +610,16 @@ impl AgentPane {
             }
 
             PaletteAction::RewindCheckpoint(checkpoint) => {
-                if self
-                    .session
-                    .branch
-                    .select_checkpoint(self.session.runtime.epoch(), checkpoint)
-                {
+                let selected = {
+                    let mut guard = self.session.borrow_mut();
+                    let state = &mut *guard;
+
+                    state
+                        .branch
+                        .select_checkpoint(state.runtime.epoch(), checkpoint)
+                };
+
+                if selected {
                     self.palette.selected = 0;
 
                     cx.notify();

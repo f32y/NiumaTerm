@@ -15,36 +15,20 @@ use crate::AgentPane;
 /// governed by, which is the question the composer is asking. They are set and
 /// cleared together, and drawn nowhere else.
 #[derive(Default)]
-pub(crate) struct SessionStateBadge {
-    /// The standing objective the backend is working towards, when it runs
-    /// one.
-    goal: Option<GoalStatus>,
-
-    /// Whether the backend is collaborating on a plan rather than carrying out
-    /// work. Backends that have no such mode never set it.
-    plan_mode: bool,
-}
+pub(crate) struct SessionStateBadge;
 
 impl SessionStateBadge {
-    pub(crate) fn set_goal(&mut self, goal: Option<GoalStatus>) {
-        self.goal = goal;
-    }
-
-    pub(crate) fn set_plan_mode(&mut self, active: bool) {
-        self.plan_mode = active;
-    }
-
-    pub(crate) fn clear(&mut self) {
-        self.goal = None;
-        self.plan_mode = false;
-    }
-
-    pub(crate) fn render(&self, cx: &mut Context<AgentPane>) -> Option<impl IntoElement + use<>> {
-        if !self.plan_mode && self.goal.is_none() {
+    pub(crate) fn render(
+        &self,
+        goal: &Option<GoalStatus>,
+        plan_mode: bool,
+        cx: &mut Context<AgentPane>,
+    ) -> Option<impl IntoElement + use<>> {
+        if !plan_mode && goal.is_none() {
             return None;
         }
 
-        let plan = self.plan_mode.then(|| {
+        let plan = plan_mode.then(|| {
             h_flex()
                 .flex_none()
                 .gap_1()
@@ -57,7 +41,7 @@ impl SessionStateBadge {
         // The round counter is what says how much of the goal's own budget is
         // left, so it travels with the objective rather than waiting for the
         // goal to run out on its own.
-        let goal = self.goal.as_ref().map(|goal| {
+        let goal = goal.as_ref().map(|goal| {
             let rounds = if goal.max_rounds > 0 {
                 {
                     i18n("agent-session-goal-rounds")
