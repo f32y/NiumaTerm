@@ -3,9 +3,7 @@ use parking_lot::Mutex;
 use crate::ghostty::{BlockRef, Palette};
 use crate::render_buffer::RenderBuffer;
 use crate::selection::{Selection, SelectionRange, SelectionType, WORD_DELIMITERS};
-use crate::session::TerminalSession;
 use crate::session::mouse::{SurfaceCellSide, SurfaceMouseEventKind, SurfaceScreenCell};
-use crate::session::request::{Request, TextSource};
 use crate::terminal::pos::{Column, Line, Pos, Side};
 
 #[cfg(test)]
@@ -17,7 +15,7 @@ mod tests;
 /// `viewport_top` instead of caching one that would go stale on the next scroll.
 #[derive(Default)]
 pub(super) struct SurfaceSelection {
-    selection: Mutex<Option<Selection>>,
+    pub(super) selection: Mutex<Option<Selection>>,
 }
 
 impl SurfaceSelection {
@@ -98,78 +96,6 @@ impl SurfaceSelection {
         }
 
         false
-    }
-}
-
-impl TerminalSession {
-    pub fn selected_text(&self) -> Option<Request<String>> {
-        self.selected_text_in(&self.snapshot())
-    }
-
-    pub fn selected_text_in(&self, snapshot: &RenderBuffer) -> Option<Request<String>> {
-        let selection = self.shared.selection.selection.lock();
-        let range = selection_screen_range(
-            selection.as_ref()?,
-            snapshot,
-            snapshot.viewport_top.unwrap_or(0) as i32,
-        )?;
-        let start = (
-            u16::try_from(range.start.col.0).ok()?,
-            u32::try_from(range.start.row.0).ok()?,
-        );
-        let end = (
-            u16::try_from(range.end.col.0).ok()?,
-            u32::try_from(range.end.row.0).ok()?,
-        );
-        Some(self.request_text(TextSource::Screen {
-            revision: snapshot.revision,
-            start,
-            end,
-            rectangle: range.is_block,
-        }))
-    }
-
-    pub fn selection_range(&self) -> Option<SelectionRange> {
-        self.selection_range_in(&self.snapshot())
-    }
-
-    pub fn selection_range_in(&self, snapshot: &RenderBuffer) -> Option<SelectionRange> {
-        let selection = self.shared.selection.selection.lock();
-        selection.as_ref()?.to_range_engine(
-            snapshot,
-            snapshot.viewport_top.unwrap_or(0) as i32,
-            WORD_DELIMITERS,
-        )
-    }
-
-    pub fn apply_screen_selection(
-        &self,
-        cell: SurfaceScreenCell,
-        side: SurfaceCellSide,
-        kind: SurfaceMouseEventKind,
-        selection_type: SelectionType,
-    ) -> bool {
-        self.shared
-            .selection
-            .apply_screen(cell, side, kind, selection_type)
-    }
-
-    pub fn selection_screen_range(&self) -> Option<SelectionRange> {
-        let snapshot = self.snapshot();
-        self.selection_screen_range_in(&snapshot)
-    }
-
-    pub fn selection_screen_range_in(&self, snapshot: &RenderBuffer) -> Option<SelectionRange> {
-        let selection = self.shared.selection.selection.lock();
-        selection_screen_range(
-            selection.as_ref()?,
-            snapshot,
-            snapshot.viewport_top.unwrap_or(0) as i32,
-        )
-    }
-
-    pub fn clear_selection(&self) {
-        self.shared.selection.clear();
     }
 }
 

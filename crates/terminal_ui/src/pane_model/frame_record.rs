@@ -1,14 +1,13 @@
 use crate::block_list::chrome::offset_frozen_chrome;
 use crate::block_list::live::LiveItemLayout;
 use crate::block_list::{FrozenItemChrome, FrozenView};
-use crate::pane_model::PaneController;
 
 /// The small hit-test record retained after the element keeps its shaped rows.
 pub(crate) struct FrameRecord {
-    rows: Vec<(f32, usize, usize, u32)>,
-    separators: Vec<f32>,
-    chrome: Vec<FrozenItemChrome>,
-    active_top: Option<f32>,
+    pub(super) rows: Vec<(f32, usize, usize, u32)>,
+    pub(super) separators: Vec<f32>,
+    pub(super) chrome: Vec<FrozenItemChrome>,
+    pub(super) active_top: Option<f32>,
 }
 
 impl FrameRecord {
@@ -43,23 +42,5 @@ impl FrameRecord {
                 .push(offset_frozen_chrome(chrome.clone(), item_top));
         }
         record
-    }
-}
-
-impl PaneController {
-    pub(crate) fn record_frame(&mut self, record: FrameRecord) {
-        for (y, item, row, cols) in record.rows {
-            self.frozen.push_row(y, item, row, cols);
-        }
-        for y in record.separators {
-            self.frozen.push_separator(y);
-        }
-        for chrome in record.chrome {
-            self.frozen.push_chrome(chrome, 0.0);
-        }
-        if let Some(top) = record.active_top {
-            self.frozen.set_active_top(top);
-            self.update_viewport();
-        }
     }
 }

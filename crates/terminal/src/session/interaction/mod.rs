@@ -5,8 +5,10 @@ use nmt_config::system::NewlineShortcut;
 
 use crate::input::{TerminalKey, TerminalKeyAction, key_action};
 use crate::render_buffer::RenderBuffer;
-use crate::session::TerminalSession;
+use crate::selection::SelectionType;
+use crate::session::interaction::copy::CopiedSelection;
 use crate::session::interaction::selection::{FrozenSelection, PendingExpansion};
+use crate::session::{BlockPoint, TerminalSession};
 
 mod copy;
 mod selection;
@@ -57,6 +59,142 @@ impl TerminalInteraction {
             InputOutcome::Written
         } else {
             InputOutcome::Ignored
+        }
+    }
+
+    pub fn copy_selection(
+        &self,
+        session: &TerminalSession,
+        snapshot: &RenderBuffer,
+    ) -> Option<PendingCopy> {
+        let (request, selection) = if let Some(pending) = &self.pending_expansion {
+            (pending.copy_text(session), CopiedSelection::FrozenPending)
+        } else if let Some((a, b)) = self.frozen.current() {
+            (
+                session.frozen_selection_text(a, b),
+                CopiedSelection::Frozen(a, b),
+            )
+        } else {
+            let range = session.selection_range_in(snapshot)?;
+            (
+                session.selected_text_in(snapshot)?,
+                CopiedSelection::Live(range),
+            )
+        };
+        Some(PendingCopy {
+            request,
+            completion: CopyCompletion {
+                selection,
+                generation: self.selection_generation,
+            },
+        })
+    }
+
+    /// Clear the copied selection only after the host accepts the text. A
+    /// later pointer gesture owns its selection even if the old read finishes.
+    pub fn complete_copy(
+        &mut self,
+        session: &TerminalSession,
+        snapshot: &RenderBuffer,
+        completion: CopyCompletion,
+    ) {
+        if completion.generation != self.selection_generation {
+            return;
+        }
+        match completion.selection {
+            CopiedSelection::FrozenPending => {
+                self.pending_expansion = None;
+                self.frozen.clear();
+            }
+            CopiedSelection::Frozen(a, b) if self.frozen.current() == Some((a, b)) => {
+                self.frozen.clear();
+            }
+            CopiedSelection::Live(range) if session.selection_range_in(snapshot) == Some(range) => {
+                session.clear_selection();
+            }
+            _ => {}
+        }
+    }
+
+    pub fn begin_pointer(&mut self) {
+        self.selection_generation = self.selection_generation.wrapping_add(1);
+        self.pending_expansion = None;
+    }
+
+    pub fn select_block(
+        &mut self,
+        session: &TerminalSession,
+        point: BlockPoint,
+        kind: SelectionType,
+    ) {
+        session.clear_selection();
+        if kind == SelectionType::Simple {
+            self.frozen.begin(point);
+        } else {
+            self.frozen.clear();
+            if let Some(handle) = session
+                .block_item(point.item)
+                .and_then(|item| item.handle())
+                && let Some(request) = session.expand_frozen_selection(point, kind)
+            {
+                self.pending_expansion = Some(PendingExpansion {
+                    point,
+                    handle,
+                    request,
+                    kind,
+                });
+            }
+        }
+    }
+
+    pub fn block_anchor(&self) -> Option<BlockPoint> {
+        self.frozen.anchor()
+    }
+
+    pub fn block_selection(&self) -> Option<(BlockPoint, BlockPoint)> {
+        self.frozen.current()
+    }
+
+    pub fn extend_block_selection(&mut self, head: BlockPoint) -> bool {
+        self.frozen.extend(head)
+    }
+
+    pub fn commit_block_selection(&mut self) -> bool {
+        self.frozen.commit()
+    }
+
+    pub fn clear_block_selection(&mut self) -> bool {
+        self.frozen.clear()
+    }
+
+    pub fn poll_expansion(&mut self, session: &TerminalSession) {
+        let Some(mut pending) = self.pending_expansion.take() else {
+            return;
+        };
+        match pending.request.try_recv() {
+            Ok(Some(Ok(((start_line, start_col), (end_line, end_col))))) => {
+                let current = session
+                    .block_item(pending.point.item)
+                    .and_then(|item| item.handle());
+                if current.is_some_and(|handle| {
+                    handle.id == pending.handle.id && handle.generation == pending.handle.generation
+                }) {
+                    self.frozen.select(Some((
+                        BlockPoint {
+                            item: pending.point.item,
+                            line: start_line,
+                            col: start_col,
+                        },
+                        BlockPoint {
+                            item: pending.point.item,
+                            line: end_line,
+                            col: end_col,
+                        },
+                    )));
+                }
+            }
+            Ok(None) => self.pending_expansion = Some(pending),
+            _ => {}
         }
     }
 }

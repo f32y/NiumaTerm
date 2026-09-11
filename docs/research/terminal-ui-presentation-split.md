@@ -16,9 +16,17 @@ The findings and interface sketches below describe the starting point. Batches
 migration moves terminal behavior into the existing core crate; completing the
 internal module split alone did not complete that separation.
 
+Each type's implementations now live together in one file, including trait
+implementations. The consolidated types are `GhosttyTerminal`, `PtyPipe`,
+`TerminalSession`, `TerminalInteraction`, `TerminalFrame`,
+`TerminalFrameSource`, `PaneController`, and `TerminalPane`; each uses its
+module's `mod.rs`. Supporting types, free functions, and tests remain in
+child modules. This keeps a type's behavior readable in one place even where
+the resulting file exceeds the usual size guideline.
+
 - `nmt_terminal::input` owns the plain key description, key encoding, newline
   and clipboard chords, IME deferral classification, and wheel speed and
-  rounding. `view/key.rs` converts GPUI keys, while `view/mouse.rs` converts
+  rounding. `view/key.rs` converts GPUI keys, while `TerminalPane` converts
   pixel deltas into logical rows. Both normal and injected keys reach the core
   through the controller; the host does not select an encoder or newline rule.
 - `nmt_terminal::session::interaction::TerminalInteraction` owns frozen cell
@@ -38,14 +46,14 @@ internal module split alone did not complete that separation.
 - `PaneController` owns End-key viewport routing, link hover, pixel selection
   gestures, and scrollbar dragging. Typing-related scrolling, agent events,
   notifications, timers, and repaint scheduling stay in `view`.
-- `frame_source/items.rs` reads frozen pages, combines image placements,
+- `TerminalFrameSource` reads frozen pages, combines image placements,
   resolves image generations, and assembles frozen and live-history views.
   Elements retain GPUI layout, shaping, painting, and `FrameRecord` delivery.
-- `pane_model/settings` owns settings application, cursor-shape requests and
+- `PaneController` owns settings application, cursor-shape requests and
   failure recovery, theme and duration-label updates, metric invalidation,
   and full frame invalidation. The host reads globals, updates list alignment,
   awaits pending requests, and schedules repaints.
-- `pane_model/lifecycle.rs` owns measured-cell caching, content size updates,
+- `PaneController` owns measured-cell caching, content size updates,
   session resize requests, frame invalidation and rebuild, wake coalescing,
   and per-frame hit-map reset. Resetting visible records keeps persistent
   gutter selection and the live origin available when the live item is hidden.

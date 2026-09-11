@@ -16,9 +16,7 @@ use libghostty_vt_sys::{
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::ghostty::{
-    BlockRef, Error, GhosttyTerminal, PlacementScreenPos, Result, SnapshotPlacement,
-};
+use crate::ghostty::{BlockRef, Error, PlacementScreenPos, Result, SnapshotPlacement};
 use crate::graphics;
 
 /// Kitty placement walking and the image-delta cache.
@@ -374,60 +372,6 @@ impl KittyState {
     }
 }
 
-impl GhosttyTerminal {
-    pub fn block_image_pixels(
-        &self,
-        block: &BlockRef,
-        image_id: u32,
-    ) -> Option<graphics::GraphicData> {
-        let graphics = block.kitty_graphics_raw()?;
-        let image = unsafe { ghostty_kitty_graphics_image(graphics, image_id) };
-
-        if image.is_null() {
-            return None;
-        }
-
-        let read_u32 = |data: VtKittyGraphicsImageData::Type| -> u32 {
-            let mut v: u32 = 0;
-
-            unsafe {
-                ghostty_kitty_graphics_image_get(image, data, (&mut v as *mut u32).cast());
-            }
-
-            v
-        };
-
-        let width = read_u32(VtKittyGraphicsImageData::WIDTH);
-        let height = read_u32(VtKittyGraphicsImageData::HEIGHT);
-
-        let mut data_len: usize = 0;
-
-        unsafe {
-            ghostty_kitty_graphics_image_get(
-                image,
-                VtKittyGraphicsImageData::DATA_LEN,
-                (&mut data_len as *mut usize).cast(),
-            );
-        }
-
-        unsafe { kitty_image_graphic_data(image, image_id, width, height, data_len) }
-    }
-
-    /// Screen positions of every kitty placement pinned by one frozen block.
-    pub fn block_placements(&mut self, block: &BlockRef) -> Vec<PlacementScreenPos> {
-        self.kitty.block_placements(self.terminal, block)
-    }
-
-    /// Image pixels the frontend has not been sent yet, plus the ids the
-    /// engine has dropped.
-    pub fn take_image_deltas(
-        &mut self,
-        placements: &[SnapshotPlacement],
-    ) -> (Vec<(u32, graphics::GraphicData)>, Vec<u32>) {
-        self.kitty.take_image_deltas(self.terminal, placements)
-    }
-}
-
 /// Read one datum of the placement the iterator is positioned on. `T` must be
 /// the 32-bit integer type the FFI writes for `data` (u32 or i32).
 fn placement_scalar<T: Default>(
@@ -472,7 +416,7 @@ fn placement_geometry(
 /// # Safety
 /// `image` must be a live image handle from the storage the caller currently
 /// pins (engine lock or an acquired block ref).
-unsafe fn kitty_image_graphic_data(
+pub(super) unsafe fn kitty_image_graphic_data(
     image: VtKittyGraphicsImage,
     image_id: u32,
     width: u32,

@@ -1,32 +1,48 @@
-mod blocks;
-mod events;
 mod input;
 mod key;
-pub(crate) mod links;
 mod list_state;
-mod mouse;
-mod scroll;
 #[cfg(test)]
 mod tests;
 
+use std::ops::Range;
 use std::sync::Arc;
 
 use futures::StreamExt;
 use gpui::prelude::*;
 use gpui::{
-    App, AppContext, Bounds, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
-    MouseButton, Pixels, Point, Size, Window, actions, div, px, rgb,
+    AnyElement, App, AppContext, Bounds, Context, Entity, EntityInputHandler, EventEmitter,
+    ExternalPaths, FocusHandle, Focusable, IntoElement, KeyDownEvent, Keystroke, Modifiers,
+    ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
+    Point, ScrollDelta, ScrollWheelEvent, Size, UTF16Selection, Window, actions, div, list, point,
+    px, rgb, size,
 };
 use nmt_agent::AgentRoute;
 use nmt_config::active_colors;
 use nmt_config::local_state::TabState;
-use nmt_terminal::session::{EngineError, SessionObserver, TerminalSession, TerminalSessionConfig};
+use nmt_terminal::input::WheelDelta;
+use nmt_terminal::session::interaction::PendingCopy;
+use nmt_terminal::session::{
+    EngineError, HostEvent, SessionObserver, SurfaceMouseButton, TerminalSession,
+    TerminalSessionConfig,
+};
+use tracing::warn;
 
+use crate::block_list::live::LiveItemState;
+use crate::frame::TerminalFrame;
 use crate::frame_source::TerminalFrameSource;
+use crate::metrics::CellMetrics;
+use crate::pane_model::key_action::{KeyOutcome, TextInput};
+use crate::pane_model::list_mirror::ListPosition;
+use crate::pane_model::mouse::{MouseInput, MouseOutcome};
+use crate::pane_model::scroll::ScrollOutcome;
+use crate::pane_model::viewport::LocalPoint;
 use crate::pane_model::{FrameTheme, PaneController, PaneSettings};
+use crate::scrollbar::geometry::SCROLLBAR_AUTO_HIDE_DELAY;
 use crate::scrollbar::scrollbar_element;
 use crate::settings::{TerminalSettings, duration_labels};
-use crate::terminal_view::{BlockListView, TerminalView};
+use crate::terminal_view::{BlockListItem, BlockListView, TerminalView};
+use crate::view::input::show_text_copied;
+use crate::view::key::{modifiers_state, terminal_key};
 use crate::view::list_state::{BlockListState, block_list_alignment};
 use crate::{metrics, wake};
 
@@ -282,6 +298,520 @@ impl TerminalPane {
             state.cwd = Some(cwd);
         }
         state
+    }
+
+    pub(crate) fn begin_block_list_frame(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        cell: CellMetrics,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_content_bounds(bounds, cell, cx);
+        self.model.begin_block_list_frame();
+    }
+
+    fn on_copy_block_command(
+        &mut self,
+        _: &CopyBlockCommand,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(command) = self.model.selected_block_command()
+            && self.model.copy_text_to_clipboard(command)
+        {
+            cx.notify();
+        }
+    }
+
+    fn on_copy_block_output(
+        &mut self,
+        _: &CopyBlockOutput,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(copy) = self.model.selected_block_output() {
+            self.begin_copy(copy, window, cx);
+        }
+    }
+
+    fn on_rerun_block(&mut self, _: &RerunBlock, _: &mut Window, cx: &mut Context<Self>) {
+        if self.model.write_text_input(TextInput::RerunSelectedBlock) {
+            self.invalidate(cx);
+        }
+    }
+
+    fn on_previous_block(&mut self, _: &PreviousBlock, _: &mut Window, cx: &mut Context<Self>) {
+        let outcome = self.model.jump_to_block(-1);
+        self.apply_scroll_outcome(outcome, cx);
+    }
+
+    fn on_next_block(&mut self, _: &NextBlock, _: &mut Window, cx: &mut Context<Self>) {
+        let outcome = self.model.jump_to_block(1);
+        self.apply_scroll_outcome(outcome, cx);
+    }
+
+    fn render_block_list_content(
+        &mut self,
+        frame: &TerminalFrame,
+        cell: CellMetrics,
+        viewport_px: f32,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let offset = self.block_list.list.logical_scroll_top();
+        let plan = self.model.prepare_block_list(
+            frame,
+            cell,
+            viewport_px,
+            ListPosition {
+                item_ix: offset.item_ix,
+                offset_px: offset.offset_in_item.as_f32(),
+            },
+        )?;
+        for op in plan.ops {
+            self.block_list.apply(op);
+        }
+        if !self.block_list.scroll_handler_set {
+            let pane = cx.entity();
+            self.block_list.list.set_scroll_handler(move |_, _, cx| {
+                pane.update(cx, |pane, cx| pane.mark_scrollbar_activity(cx));
+            });
+            self.block_list.scroll_handler_set = true;
+        }
+        Some(self.block_list_element(
+            frame,
+            cell,
+            plan.cols,
+            plan.history_rows,
+            plan.live_index,
+            cx,
+        ))
+    }
+
+    fn block_list_element(
+        &self,
+        frame: &TerminalFrame,
+        cell: CellMetrics,
+        cols: u32,
+        history_rows: u64,
+        live_index: usize,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let frame_for_items = frame.clone();
+        let in_flight_for_items = self.model.in_flight.clone();
+        let has_open_prompt_for_items = self.model.open_prompt;
+        let selected_frozen_item = self.model.gutter.selected();
+        let frozen_selection = self.model.interaction.block_selection();
+        let cell_for_items = cell;
+        let pane_for_items = cx.entity();
+        let store_for_items = self.model.source.session.block_store();
+
+        list(self.block_list.list.clone(), move |ix, _window, _cx| {
+            if ix < live_index {
+                BlockListItem::Frozen {
+                    item_idx: ix,
+                    store: store_for_items.clone(),
+                    cols,
+                    cell: cell_for_items,
+                    selection: frozen_selection,
+                    selected_item: selected_frozen_item,
+                    pane: pane_for_items.clone(),
+                }
+                .into_any_element()
+            } else {
+                BlockListItem::Live {
+                    frame: frame_for_items.clone(),
+                    history_rows,
+                    state: LiveItemState {
+                        index: live_index,
+                        in_flight: in_flight_for_items.clone(),
+                        has_open_prompt: has_open_prompt_for_items,
+                        selected_item: selected_frozen_item,
+                    },
+                    cols,
+                    cell: cell_for_items,
+                    pane: pane_for_items.clone(),
+                }
+                .into_any_element()
+            }
+        })
+        .size_full()
+        .into_any_element()
+    }
+
+    pub fn drain_host_events(&mut self) -> Vec<HostEvent> {
+        self.model.drain_host_events()
+    }
+
+    fn begin_copy(&mut self, copy: PendingCopy, window: &mut Window, cx: &mut Context<Self>) {
+        cx.spawn_in(window, async move |this, cx| match copy.request.await {
+            Ok(Ok(text)) => {
+                let _ = this.update_in(cx, |this, window, cx| {
+                    if this.model.finish_copy(text, copy.completion) {
+                        show_text_copied(window, cx);
+                        this.invalidate(cx);
+                        cx.notify();
+                    }
+                });
+            }
+            result => warn!("terminal copy did not complete: {result:?}"),
+        })
+        .detach();
+    }
+
+    /// UI reaction to input reaching the PTY: optionally snap the view back
+    /// to the latest output.
+    fn react_to_pty_input(&mut self, cx: &mut Context<Self>) {
+        if self.model.settings.scroll_to_bottom_when_typing {
+            self.scroll_to_latest(cx);
+        }
+    }
+
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let interrupts_agent = matches!(event.keystroke.key.as_str(), "escape" | "esc")
+            && !event.keystroke.modifiers.modified();
+
+        match self.model.key_down(&terminal_key(&event.keystroke)) {
+            KeyOutcome::Ignored => return,
+            KeyOutcome::Scrolled(outcome) => {
+                self.apply_scroll_outcome(outcome, cx);
+                return;
+            }
+            KeyOutcome::Written => self.react_to_pty_input(cx),
+            KeyOutcome::CopyPending(copy) => {
+                self.begin_copy(copy, window, cx);
+                return;
+            }
+        }
+
+        if interrupts_agent {
+            cx.emit(AgentInterrupted);
+        }
+
+        self.invalidate(cx);
+    }
+
+    /// Route a keystroke straight to the terminal PTY.
+    pub(crate) fn feed_terminal_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
+        match self.model.send_key(&terminal_key(keystroke)) {
+            KeyOutcome::Ignored => return,
+            KeyOutcome::Scrolled(outcome) => {
+                self.apply_scroll_outcome(outcome, cx);
+                return;
+            }
+            KeyOutcome::Written => self.react_to_pty_input(cx),
+            KeyOutcome::CopyPending(copy) => {
+                cx.spawn(async move |this, cx| {
+                    if let Ok(Ok(text)) = copy.request.await {
+                        let _ = this.update(cx, |this, cx| {
+                            if this.model.finish_copy(text, copy.completion) {
+                                this.invalidate(cx);
+                                cx.notify();
+                            }
+                        });
+                    }
+                })
+                .detach();
+            }
+        }
+
+        self.invalidate(cx);
+    }
+
+    /// Tab/Shift-Tab belong to the shell (completion) while the terminal is
+    /// focused, but `Root` binds them to focus traversal and key bindings
+    /// dispatch before the pane's `on_key_down` listener. These actions are
+    /// bound in the deeper `Terminal` context, which wins over `Root`.
+    fn on_send_tab(&mut self, _: &SendTab, _: &mut Window, cx: &mut Context<Self>) {
+        self.feed_terminal_key(
+            &Keystroke {
+                modifiers: Modifiers::none(),
+                key: "tab".into(),
+                key_char: None,
+            },
+            cx,
+        );
+    }
+
+    fn on_send_shift_tab(&mut self, _: &SendShiftTab, _: &mut Window, cx: &mut Context<Self>) {
+        self.feed_terminal_key(
+            &Keystroke {
+                modifiers: Modifiers::shift(),
+                key: "tab".into(),
+                key_char: None,
+            },
+            cx,
+        );
+    }
+
+    fn on_file_drop(&mut self, paths: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus, cx);
+
+        if self
+            .model
+            .write_text_input(TextInput::DropPaths(paths.paths()))
+        {
+            self.invalidate(cx);
+        }
+    }
+
+    fn on_modifiers_changed(
+        &mut self,
+        event: &ModifiersChangedEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .model
+            .hover_modifiers_changed(modifiers_state(event.modifiers))
+        {
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn local_position(&self, position: Point<Pixels>) -> LocalPoint {
+        let origin = self.content_origin();
+        LocalPoint {
+            x: (position.x - origin.x).as_f32(),
+            y: (position.y - origin.y).as_f32(),
+        }
+    }
+
+    fn mouse_input(
+        &self,
+        position: Point<Pixels>,
+        button: Option<MouseButton>,
+        modifiers: Modifiers,
+        click_count: usize,
+    ) -> MouseInput {
+        MouseInput {
+            position: self.local_position(position),
+            button: button.and_then(|button| match button {
+                MouseButton::Left => Some(SurfaceMouseButton::Left),
+                MouseButton::Middle => Some(SurfaceMouseButton::Middle),
+                MouseButton::Right => Some(SurfaceMouseButton::Right),
+                MouseButton::Navigate(_) => None,
+            }),
+            modifiers: modifiers_state(modifiers),
+            click_count,
+        }
+    }
+
+    fn apply_mouse_outcome(&mut self, outcome: MouseOutcome, cx: &mut Context<Self>) {
+        match outcome {
+            MouseOutcome::Ignored => {}
+            MouseOutcome::OpenUrl(url) => cx.open_url(&url),
+            MouseOutcome::SelectionChanged | MouseOutcome::HoverChanged => cx.notify(),
+            MouseOutcome::FrozenSelectionStarted => {
+                self.invalidate(cx);
+                cx.notify();
+            }
+            MouseOutcome::EngineHandled => self.invalidate(cx),
+            MouseOutcome::Scrolled(outcome) => {
+                self.apply_scroll_outcome(outcome, cx);
+            }
+        }
+    }
+
+    fn on_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        window.focus(&self.focus, cx);
+        self.cell_metrics(window, cx);
+        let input = self.mouse_input(
+            event.position,
+            Some(event.button),
+            event.modifiers,
+            event.click_count,
+        );
+        let outcome = self.model.mouse_down(input);
+        self.apply_mouse_outcome(outcome, cx);
+    }
+
+    fn on_mouse_up(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.cell_metrics(window, cx);
+        let input = self.mouse_input(event.position, Some(event.button), event.modifiers, 1);
+        let release = self.model.mouse_up(input);
+        if release.scrollbar_released {
+            self.mark_scrollbar_activity(cx);
+        }
+        self.apply_mouse_outcome(release.outcome, cx);
+    }
+
+    pub(crate) fn on_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.cell_metrics(window, cx);
+        let input = self.mouse_input(event.position, event.pressed_button, event.modifiers, 1);
+        let outcome = self.model.mouse_move(input);
+        self.apply_mouse_outcome(outcome, cx);
+    }
+
+    fn on_scroll_wheel(
+        &mut self,
+        event: &ScrollWheelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let cell = self.cell_metrics(window, cx);
+        let delta = match event.delta {
+            ScrollDelta::Lines(point) => WheelDelta::Steps(point.y),
+            ScrollDelta::Pixels(point) => {
+                WheelDelta::Rows(point.y.as_f32() / cell.height_px.max(1.0))
+            }
+        };
+        let outcome = self.model.scroll_wheel(
+            self.local_position(event.position),
+            delta,
+            modifiers_state(event.modifiers),
+        );
+        if outcome.hover_changed {
+            cx.notify();
+        }
+        if outcome.handled {
+            self.mark_scrollbar_activity(cx);
+            self.invalidate(cx);
+        }
+    }
+
+    pub(crate) fn mark_scrollbar_activity(&mut self, cx: &mut Context<Self>) {
+        let generation = self.model.scrollbar.mark_activity();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(SCROLLBAR_AUTO_HIDE_DELAY)
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.model.scrollbar.should_fade(generation) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    pub(crate) fn apply_scroll_outcome(
+        &mut self,
+        outcome: ScrollOutcome,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match outcome {
+            ScrollOutcome::Ignored => return false,
+            ScrollOutcome::GridRequested => self.invalidate(cx),
+            ScrollOutcome::List(op) => {
+                self.block_list.apply(op);
+                cx.notify();
+            }
+        }
+        self.mark_scrollbar_activity(cx);
+        true
+    }
+
+    fn scroll_to_latest(&mut self, cx: &mut Context<Self>) -> bool {
+        let outcome = self.model.scroll_to_latest();
+        self.apply_scroll_outcome(outcome, cx)
+    }
+}
+
+/// Commit-only IME: composition and candidate placement stay with the OS; the
+/// pane receives only the committed string. Inline preedit stays in the IME-owned UI,
+/// marked-text methods are inert. `bounds_for_range` reports the terminal cursor
+/// cell so the OS positions the candidate window correctly.
+impl EntityInputHandler for TerminalPane {
+    fn replace_text_in_range(
+        &mut self,
+        _range: Option<Range<usize>>,
+        text: &str,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.model.write_text_input(TextInput::Commit(text)) {
+            self.react_to_pty_input(cx);
+            self.invalidate(cx);
+        }
+    }
+
+    fn bounds_for_range(
+        &mut self,
+        _range_utf16: Range<usize>,
+        element_bounds: Bounds<Pixels>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
+        let cursor = self.model.frame_cache.current()?.cursor()?;
+        let cell = self.model.cell_metrics?;
+
+        // `element_bounds` is the terminal leaf's content rect (padding already
+        // excluded), so the cursor cell offsets from its origin directly — plus
+        // the inter-block gap offset for the cursor's row.
+        let cursor_y = self.model.viewport.cursor_y(cursor.row, cell.height_px);
+
+        Some(Bounds::new(
+            point(
+                element_bounds.left() + px(cursor.col as f32 * cell.width_px),
+                element_bounds.top() + px(cursor_y),
+            ),
+            size(px(cell.width_px), px(cell.height_px)),
+        ))
+    }
+
+    // No editable document and no preedit: text and marked-text methods are inert.
+    fn text_for_range(
+        &mut self,
+        _range: Range<usize>,
+        _adjusted: &mut Option<Range<usize>>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<String> {
+        None
+    }
+
+    fn selected_text_range(
+        &mut self,
+        _ignore_disabled: bool,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<UTF16Selection> {
+        // GPUI's Windows IME path queries bounds only after obtaining a
+        // selection; an empty virtual caret keeps commit-only input eligible.
+        Some(UTF16Selection {
+            range: 0..0,
+            reversed: false,
+        })
+    }
+
+    fn marked_text_range(
+        &self,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<Range<usize>> {
+        None
+    }
+
+    fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {}
+
+    fn replace_and_mark_text_in_range(
+        &mut self,
+        _range: Option<Range<usize>>,
+        _new_text: &str,
+        _new_selected: Option<Range<usize>>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+    }
+
+    fn character_index_for_point(
+        &mut self,
+        _point: Point<Pixels>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<usize> {
+        None
     }
 }
 

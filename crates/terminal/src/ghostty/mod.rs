@@ -5,35 +5,39 @@ use std::{array, mem, os, path, ptr, slice};
 /// Engine handle of a finished command block (per-block grid). Plain value
 /// type; lookup is by id, `generation` is the data version for cache keys.
 pub use libghostty_vt_sys::BlockHandle;
+#[cfg(test)]
+use libghostty_vt_sys::RowSemanticPrompt as VtRowSemanticPrompt;
 use libghostty_vt_sys::{
-    ColorRgb as VtColorRgb, GridRef as VtGridRef, KITTY_KEY_DISAMBIGUATE, KITTY_KEY_REPORT_ALL,
+    BlockRef as VtBlockRef, ColorRgb as VtColorRgb, FormatterFormat as VtFormatterFormat,
+    GridRef as VtGridRef, KITTY_KEY_DISAMBIGUATE, KITTY_KEY_REPORT_ALL,
     KITTY_KEY_REPORT_ALTERNATES, KITTY_KEY_REPORT_ASSOCIATED, KITTY_KEY_REPORT_EVENTS,
-    KittyGraphics as VtKittyGraphics, PointCoordinate as VtPointCoordinate, PointTag as VtPointTag,
-    Result as VtResult, String as VtString, Terminal as VtTerminal,
-    TerminalCursorStyle as VtTerminalCursorStyle, TerminalData as VtTerminalData,
-    TerminalModeConfig as VtTerminalModeConfig, TerminalOption as VtTerminalOption,
-    TerminalScrollViewport as VtTerminalScrollViewport,
+    KittyGraphics as VtKittyGraphics, KittyGraphicsImageData as VtKittyGraphicsImageData,
+    Point as VtPoint, PointCoordinate as VtPointCoordinate, PointTag as VtPointTag,
+    PointValue as VtPointValue, Result as VtResult, Selection as VtSelection, String as VtString,
+    Terminal as VtTerminal, TerminalCursorStyle as VtTerminalCursorStyle,
+    TerminalData as VtTerminalData, TerminalModeConfig as VtTerminalModeConfig,
+    TerminalOption as VtTerminalOption, TerminalScrollViewport as VtTerminalScrollViewport,
     TerminalScrollViewportTag as VtTerminalScrollViewportTag,
     TerminalScrollViewportValue as VtTerminalScrollViewportValue,
-    TerminalScrollbar as VtTerminalScrollbar, ghostty_kitty_graphics_image, ghostty_terminal_free,
-    ghostty_terminal_get, ghostty_terminal_new, ghostty_terminal_point_from_grid_ref,
-    ghostty_terminal_resize, ghostty_terminal_scroll_viewport, ghostty_terminal_set,
-    ghostty_terminal_vt_write,
-};
-#[cfg(test)]
-use libghostty_vt_sys::{
-    RowSemanticPrompt as VtRowSemanticPrompt, Selection as VtSelection, sized as vt_sized,
+    TerminalScrollbar as VtTerminalScrollbar, ghostty_block_ref_cols, ghostty_kitty_graphics_image,
+    ghostty_kitty_graphics_image_get, ghostty_terminal_block_acquire, ghostty_terminal_block_at,
+    ghostty_terminal_block_cols, ghostty_terminal_block_count, ghostty_terminal_block_grid_ref,
+    ghostty_terminal_block_row_count, ghostty_terminal_blocks_bytes, ghostty_terminal_clear_blocks,
+    ghostty_terminal_finish_block, ghostty_terminal_free, ghostty_terminal_get,
+    ghostty_terminal_grid_ref, ghostty_terminal_new, ghostty_terminal_point_from_grid_ref,
+    ghostty_terminal_remove_block, ghostty_terminal_resize, ghostty_terminal_scroll_viewport,
+    ghostty_terminal_set, ghostty_terminal_vt_write, sized as vt_sized,
 };
 #[cfg(test)]
 use nmt_config::colors::ColorRgb;
 use nmt_config::colors::Colors;
 
-#[cfg(test)]
-use crate::graphics;
+use crate::ghostty::format::format_terminal;
+use crate::ghostty::grid_read::visit_row_cells;
+use crate::ghostty::kitty::kitty_image_graphic_data;
 use crate::pwd::pwd_to_path;
-#[cfg(test)]
 use crate::render_buffer::RenderBuffer;
-use crate::{ansi, clipboard, terminal};
+use crate::{ansi, clipboard, graphics, terminal};
 
 mod block;
 mod callbacks;
@@ -720,6 +724,457 @@ impl GhosttyTerminal {
         };
 
         unsafe { ghostty_terminal_scroll_viewport(self.terminal, behavior) };
+    }
+
+    /// Finish the current command block: freeze the primary screen into the
+    /// engine's block set (O(1) ownership move) and continue on a fresh
+    /// primary screen with writer state carried over. Returns `None` when
+    /// the active screen has no content (no block created). Errors with
+    /// `InvalidValue` if the alternate screen is active — callers gate on
+    /// the primary screen because alternate-screen content should not enter history.
+    pub fn finish_block(&mut self) -> Result<Option<BlockHandle>> {
+        let mut handle = BlockHandle::default();
+
+        match unsafe { ghostty_terminal_finish_block(self.terminal, &mut handle) } {
+            VtResult::SUCCESS => Ok(Some(handle)),
+            VtResult::NO_VALUE => Ok(None),
+            other => {
+                Error::from_code(other)?;
+                Ok(None)
+            }
+        }
+    }
+
+    /// Remove and destroy all finished blocks (user clear; `;K` path).
+    pub fn clear_blocks(&mut self) {
+        unsafe { ghostty_terminal_clear_blocks(self.terminal) }
+    }
+
+    /// Remove and destroy one finished block. Returns `false` for a stale
+    /// handle (already removed/evicted).
+    pub fn remove_block(&mut self, handle: BlockHandle) -> bool {
+        (unsafe { ghostty_terminal_remove_block(self.terminal, handle) }) == VtResult::SUCCESS
+    }
+
+    pub fn block_count(&self) -> usize {
+        unsafe { ghostty_terminal_block_count(self.terminal) }
+    }
+
+    /// The handle of the finished block at `index`, oldest first.
+    pub fn block_at(&self, index: usize) -> Option<BlockHandle> {
+        let mut handle = BlockHandle::default();
+
+        (unsafe { ghostty_terminal_block_at(self.terminal, index, &mut handle) }
+            == VtResult::SUCCESS)
+            .then_some(handle)
+    }
+
+    /// Logical row count of a finished block (trailing blanks after the
+    /// finish-time cursor truncated). `None` for a stale handle.
+    pub fn block_row_count(&self, handle: BlockHandle) -> Option<usize> {
+        let mut rows: usize = 0;
+
+        (unsafe { ghostty_terminal_block_row_count(self.terminal, handle, &mut rows) }
+            == VtResult::SUCCESS)
+            .then_some(rows)
+    }
+
+    /// The column count the block was frozen at (can differ from the live
+    /// terminal width after a resize). `None` for a stale handle.
+    pub fn block_cols(&self, handle: BlockHandle) -> Option<u16> {
+        let mut cols: u16 = 0;
+
+        (unsafe { ghostty_terminal_block_cols(self.terminal, handle, &mut cols) }
+            == VtResult::SUCCESS)
+            .then_some(cols)
+    }
+
+    /// Total page-storage bytes of all finished blocks — the value the
+    /// block byte budget is enforced against.
+    pub fn blocks_bytes(&self) -> usize {
+        unsafe { ghostty_terminal_blocks_bytes(self.terminal) }
+    }
+
+    /// Set the finished-block byte budget. Oldest blocks are evicted
+    /// immediately (and on every finish) while the total exceeds it; the
+    /// newest block is never evicted. Zero means unlimited.
+    pub fn set_block_budget_bytes(&mut self, bytes: usize) -> Result<()> {
+        Error::from_code(unsafe {
+            ghostty_terminal_set(
+                self.terminal,
+                VtTerminalOption::BLOCK_BUDGET_BYTES,
+                (&bytes as *const usize).cast(),
+            )
+        })
+    }
+
+    /// Take a read reference on a finished block (engine-refcounted; any
+    /// thread). `None` for a stale handle or while the engine is
+    /// reflowing the block — retry next frame. The reference pins an
+    /// immutable snapshot: the block cannot be freed or mutated while it
+    /// is held, and reads through it take no engine lock. Keep it
+    /// short-lived (one read pass) — a held reference blocks the writer's
+    /// resize reflow.
+    pub fn block_acquire(&self, handle: BlockHandle) -> Option<BlockRef> {
+        let mut raw: VtBlockRef = ptr::null_mut();
+
+        if unsafe { ghostty_terminal_block_acquire(self.terminal, handle, &mut raw) }
+            != VtResult::SUCCESS
+            || raw.is_null()
+        {
+            return None;
+        }
+
+        let mut cols: u16 = 0;
+
+        unsafe {
+            let _ = ghostty_block_ref_cols(raw, &mut cols);
+        }
+
+        Some(BlockRef { raw, cols })
+    }
+
+    /// [`Self::block_acquire`] plus everything a frame's read pass needs
+    /// from under the engine lock in one call: the palette styles resolve
+    /// against and the block's Kitty placements in block-relative
+    /// coordinates. Every subsequent text read through the
+    /// returned reference is lock-free.
+    pub fn acquire_block_snapshot(&mut self, handle: BlockHandle) -> Option<AcquiredBlock> {
+        let block = self.block_acquire(handle)?;
+        let palette = self.color_palette();
+        let placements = self.block_placements(&block);
+
+        Some(AcquiredBlock {
+            block,
+            palette,
+            placements,
+        })
+    }
+
+    /// Walk one row of a finished block with styles — the frozen-block
+    /// counterpart of [`Self::read_screen_row_visit`]. Returns `None` for a
+    /// stale handle or a row at/beyond the block's logical row count.
+    /// Unlike active-screen refs, block refs stay valid until the block is
+    /// removed, but this still reads within one call (same visitor shape).
+    pub fn read_block_row_visit(
+        &self,
+        handle: BlockHandle,
+        row: usize,
+        palette: &[VtColorRgb; 256],
+        on_cell: impl FnMut(u16, CellText, CellWide, SnapshotStyle),
+    ) -> Result<Option<ScreenRowMeta>> {
+        let mut grid_ref = VtGridRef::default();
+
+        match unsafe { ghostty_terminal_block_grid_ref(self.terminal, handle, row, &mut grid_ref) }
+        {
+            VtResult::SUCCESS => {}
+            VtResult::NO_VALUE | VtResult::INVALID_VALUE => return Ok(None),
+            other => {
+                Error::from_code(other)?;
+                return Ok(None);
+            }
+        }
+
+        let cols = self.block_cols(handle).unwrap_or(self.cols);
+
+        Ok(Some(visit_row_cells(grid_ref, cols, palette, on_cell)?))
+    }
+
+    /// Materializing convenience over [`Self::read_block_row_visit`] — test-only.
+    pub fn read_block_row(&self, handle: BlockHandle, row: usize) -> Result<Option<ScreenRowRead>> {
+        let palette = self.color_palette();
+        let cols = self.block_cols(handle).unwrap_or(self.cols) as usize;
+        let mut cells = Vec::with_capacity(cols);
+
+        let meta = self.read_block_row_visit(handle, row, &palette, |x, text, wide, style| {
+            cells.push(RowCell {
+                x,
+                text,
+                wide,
+                style,
+            })
+        })?;
+
+        Ok(meta.map(|meta| ScreenRowRead {
+            cells,
+            wrapped: meta.wrapped,
+            prompt_start: meta.prompt_start,
+            hyperlinks: meta.hyperlinks,
+        }))
+    }
+
+    /// Export terminal text via the engine formatter. `selection = None`
+    /// formats the whole screen + scrollback; otherwise only the selection range.
+    /// `unwrap` rejoins soft-wrapped lines (no inserted newline at a wrap point);
+    /// `trim` drops trailing blanks. Used for selection-to-string and the search
+    /// corpus.
+    pub fn format_text(
+        &mut self,
+        selection: Option<&VtSelection>,
+        unwrap: bool,
+        trim: bool,
+    ) -> Result<String> {
+        format_terminal(
+            self.terminal,
+            VtFormatterFormat::PLAIN,
+            selection,
+            unwrap,
+            trim,
+        )
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    /// Export the complete terminal state as a VT stream. Replaying the returned
+    /// bytes reconstructs the current screen, styles, modes, palette, and cursor,
+    /// which lets a newly attached client start from a consistent checkpoint.
+    pub fn format_vt_state(&mut self) -> Result<Vec<u8>> {
+        format_terminal(self.terminal, VtFormatterFormat::VT, None, false, false)
+    }
+
+    /// Selection-to-string for a SCREEN-coordinate range (inclusive endpoints).
+    /// Used when the selection reaches past the viewport into scrollback:
+    /// the O(scrollback) endpoint resolve is one-shot on copy, and the extract is
+    /// O(selection).
+    pub fn format_screen_range(
+        &mut self,
+        start: (u16, u32),
+        end: (u16, u32),
+        rectangle: bool,
+        unwrap: bool,
+        trim: bool,
+    ) -> Result<String> {
+        let start_ref = self.grid_ref_at(VtPointTag::SCREEN, start.0, start.1)?;
+        let end_ref = self.grid_ref_at(VtPointTag::SCREEN, end.0, end.1)?;
+
+        let mut sel = vt_sized!(VtSelection);
+
+        sel.start = start_ref;
+        sel.end = end_ref;
+        sel.rectangle = rectangle;
+
+        self.format_text(Some(&sel), unwrap, trim)
+    }
+
+    /// Resolve a point (in the given coordinate system) to a `GridRef`. Fast for
+    /// `VIEWPORT`/`ACTIVE`; **O(scrollback) for `SCREEN`/`HISTORY`**. The ref is
+    /// valid only until the next mutating call (`write_vt`/`resize`/
+    /// `scroll_viewport`) — use it within one read pass, never cache it.
+    pub fn grid_ref_at(&self, tag: VtPointTag::Type, x: u16, y: u32) -> Result<VtGridRef> {
+        let point = VtPoint {
+            tag,
+            value: VtPointValue {
+                coordinate: VtPointCoordinate { x, y },
+            },
+        };
+
+        let mut grid_ref = VtGridRef::default();
+
+        Error::from_code(unsafe {
+            ghostty_terminal_grid_ref(self.terminal, point, &mut grid_ref)
+        })?;
+
+        Ok(grid_ref)
+    }
+
+    /// Resolve a viewport coordinate to a `GridRef` (fast).
+    pub fn viewport_grid_ref(&self, x: u16, y: u16) -> Result<VtGridRef> {
+        self.grid_ref_at(VtPointTag::VIEWPORT, x, y as u32)
+    }
+
+    /// The SCREEN row of the top visible row (`viewport_top`) — the constant that
+    /// maps between SCREEN and visible coordinates (`screen_row = viewport_top +
+    /// visible_row`). One cheap viewport `grid_ref`; `None` if the viewport is
+    /// empty. Selection rendering uses this to translate coordinate spaces.
+    pub fn viewport_top_screen(&self) -> Option<u32> {
+        let r = self.viewport_grid_ref(0, 0).ok()?;
+
+        self.point_from_grid_ref(&r, VtPointTag::SCREEN)
+            .ok()
+            .flatten()
+            .map(|(_, y)| y)
+    }
+
+    /// Read one absolute `SCREEN` row into a materialized `Vec` — test-only
+    /// convenience over [`Self::read_screen_row_visit`].
+    pub fn read_screen_row(&self, row: u32) -> Result<Option<ScreenRowRead>> {
+        let mut cells = Vec::with_capacity(self.cols as usize);
+
+        let meta =
+            self.read_screen_row_visit(row, &self.color_palette(), |x, text, wide, style| {
+                cells.push(RowCell {
+                    x,
+                    text,
+                    wide,
+                    style,
+                })
+            })?;
+
+        Ok(meta.map(|meta| ScreenRowRead {
+            cells,
+            wrapped: meta.wrapped,
+            prompt_start: meta.prompt_start,
+            hyperlinks: meta.hyperlinks,
+        }))
+    }
+
+    /// Walk one absolute `SCREEN` row with styles, invoking `on_cell` for each
+    /// content cell (sparse: blank default cells are skipped) instead of
+    /// materializing a `Vec` — the harvester constructs its `LineCell`s in
+    /// place, so no intermediate row buffer exists on the freeze hot path.
+    /// Colors resolve against a caller-supplied palette (hoisted out of
+    /// per-row cost: the palette is a 256-entry FFI copy and cannot change
+    /// while the engine lock is held). Reaches any scrollback row without
+    /// moving the viewport or refreshing the render state. Returns `None`
+    /// when `row` is out of range.
+    ///
+    /// The pin lookup is O(scrollback page hops); per-cell reads are O(cols).
+    /// The `GridRef`s are created and dropped within this call so mutations cannot
+    /// invalidate a cached reference.
+    /// Per-cell FFI is tag-driven: blank/plain-codepoint cells never touch the
+    /// grapheme or style readers, keeping the row-harvest hot path free of unnecessary FFI.
+    pub fn read_screen_row_visit(
+        &self,
+        row: u32,
+        palette: &[VtColorRgb; 256],
+        on_cell: impl FnMut(u16, CellText, CellWide, SnapshotStyle),
+    ) -> Result<Option<ScreenRowMeta>> {
+        let grid_ref = match self.grid_ref_at(VtPointTag::SCREEN, 0, row) {
+            Ok(r) => r,
+            Err(Error::InvalidValue) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+
+        Ok(Some(visit_row_cells(
+            grid_ref, self.cols, palette, on_cell,
+        )?))
+    }
+
+    pub fn block_image_pixels(
+        &self,
+        block: &BlockRef,
+        image_id: u32,
+    ) -> Option<graphics::GraphicData> {
+        let graphics = block.kitty_graphics_raw()?;
+        let image = unsafe { ghostty_kitty_graphics_image(graphics, image_id) };
+
+        if image.is_null() {
+            return None;
+        }
+
+        let read_u32 = |data: VtKittyGraphicsImageData::Type| -> u32 {
+            let mut v: u32 = 0;
+
+            unsafe {
+                ghostty_kitty_graphics_image_get(image, data, (&mut v as *mut u32).cast());
+            }
+
+            v
+        };
+
+        let width = read_u32(VtKittyGraphicsImageData::WIDTH);
+        let height = read_u32(VtKittyGraphicsImageData::HEIGHT);
+
+        let mut data_len: usize = 0;
+
+        unsafe {
+            ghostty_kitty_graphics_image_get(
+                image,
+                VtKittyGraphicsImageData::DATA_LEN,
+                (&mut data_len as *mut usize).cast(),
+            );
+        }
+
+        unsafe { kitty_image_graphic_data(image, image_id, width, height, data_len) }
+    }
+
+    /// Screen positions of every kitty placement pinned by one frozen block.
+    pub fn block_placements(&mut self, block: &BlockRef) -> Vec<PlacementScreenPos> {
+        self.kitty.block_placements(self.terminal, block)
+    }
+
+    /// Image pixels the frontend has not been sent yet, plus the ids the
+    /// engine has dropped.
+    pub fn take_image_deltas(
+        &mut self,
+        placements: &[SnapshotPlacement],
+    ) -> (Vec<(u32, graphics::GraphicData)>, Vec<u32>) {
+        self.kitty.take_image_deltas(self.terminal, placements)
+    }
+
+    /// Probe: whether any visible row carries a PROMPT semantic tag (command-blocks-
+    /// rendering — mark-forwarding regression checks in terminal pipeline tests).
+    #[cfg(test)]
+    pub(crate) fn has_prompt_tagged_row(&mut self) -> bool {
+        self.semantic_prompt_tags()
+            .map(|tags| tags.contains(&VtRowSemanticPrompt::PROMPT))
+            .unwrap_or(false)
+    }
+
+    /// The engine's `SEMANTIC_PROMPT` tag per visible row.
+    #[cfg(test)]
+    fn semantic_prompt_tags(&mut self) -> Result<Vec<VtRowSemanticPrompt::Type>> {
+        self.render.row_semantic_prompts(self.terminal, self.rows)
+    }
+
+    /// Populate a reusable render buffer from the full visible viewport.
+    pub fn snapshot_into(&mut self, buffer: &mut RenderBuffer) -> Result<()> {
+        self.render.update(self.terminal)?;
+        self.render.consume_damage(self.rows)?;
+
+        let cursor = self.render.cursor().unwrap_or(SnapshotCursor {
+            x: 0,
+            y: 0,
+            visible: false,
+            shape: ansi::CursorShape::Block,
+            blinking: false,
+        });
+
+        let palette = self.color_palette();
+
+        buffer.begin_capture(self.cols as usize, self.rows as usize);
+        buffer.viewport_top = self.viewport_top_screen();
+        buffer.title = self.title();
+        buffer.current_directory = self
+            .current_directory()
+            .map(|path| path.to_string_lossy().into_owned());
+
+        // A transient row lookup failure blanks only that row; publishing the
+        // remaining viewport is safer than withholding an otherwise valid frame.
+        for y in 0..self.rows {
+            let meta = self
+                .grid_ref_at(VtPointTag::VIEWPORT, 0, y as u32)
+                .and_then(|grid_ref| {
+                    visit_row_cells(grid_ref, self.cols, &palette, |x, text, wide, style| {
+                        buffer.write_cell(x as usize, y as usize, text.as_str(), wide, &style);
+                    })
+                })
+                .unwrap_or_default();
+
+            buffer.write_row_meta(y as usize, meta);
+        }
+
+        let colors = self.render.colors(self.terminal);
+        let placements = self.kitty.placements(self.terminal);
+        let scrollbar = self.scrollbar();
+
+        buffer.finish_capture(
+            cursor,
+            colors,
+            placements,
+            scrollbar,
+            self.render.row_versions(),
+        );
+
+        Ok(())
+    }
+
+    /// Allocate and populate an owned render buffer for diagnostics and tests.
+    pub fn snapshot(&mut self) -> Result<RenderBuffer> {
+        let mut buffer = RenderBuffer::new(self.cols as usize, self.rows as usize);
+
+        self.snapshot_into(&mut buffer)?;
+
+        Ok(buffer)
     }
 }
 

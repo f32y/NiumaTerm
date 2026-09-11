@@ -1,6 +1,5 @@
 use crate::ghostty::BlockHandle;
 use crate::selection::SelectionType;
-use crate::session::interaction::TerminalInteraction;
 use crate::session::request::{BlockRange, Request};
 use crate::session::{BlockPoint, TerminalSession};
 
@@ -67,99 +66,15 @@ impl FrozenSelection {
 }
 
 pub(super) struct PendingExpansion {
-    point: BlockPoint,
-    handle: BlockHandle,
-    request: Request<BlockRange>,
-    kind: SelectionType,
+    pub(super) point: BlockPoint,
+    pub(super) handle: BlockHandle,
+    pub(super) request: Request<BlockRange>,
+    pub(super) kind: SelectionType,
 }
 
 impl PendingExpansion {
     pub(super) fn copy_text(&self, session: &TerminalSession) -> Request<String> {
         session.block_selection_text(self.handle, self.point.line, self.point.col, self.kind)
-    }
-}
-
-impl TerminalInteraction {
-    pub fn begin_pointer(&mut self) {
-        self.selection_generation = self.selection_generation.wrapping_add(1);
-        self.pending_expansion = None;
-    }
-
-    pub fn select_block(
-        &mut self,
-        session: &TerminalSession,
-        point: BlockPoint,
-        kind: SelectionType,
-    ) {
-        session.clear_selection();
-        if kind == SelectionType::Simple {
-            self.frozen.begin(point);
-        } else {
-            self.frozen.clear();
-            if let Some(handle) = session
-                .block_item(point.item)
-                .and_then(|item| item.handle())
-                && let Some(request) = session.expand_frozen_selection(point, kind)
-            {
-                self.pending_expansion = Some(PendingExpansion {
-                    point,
-                    handle,
-                    request,
-                    kind,
-                });
-            }
-        }
-    }
-
-    pub fn block_anchor(&self) -> Option<BlockPoint> {
-        self.frozen.anchor()
-    }
-
-    pub fn block_selection(&self) -> Option<(BlockPoint, BlockPoint)> {
-        self.frozen.current()
-    }
-
-    pub fn extend_block_selection(&mut self, head: BlockPoint) -> bool {
-        self.frozen.extend(head)
-    }
-
-    pub fn commit_block_selection(&mut self) -> bool {
-        self.frozen.commit()
-    }
-
-    pub fn clear_block_selection(&mut self) -> bool {
-        self.frozen.clear()
-    }
-
-    pub fn poll_expansion(&mut self, session: &TerminalSession) {
-        let Some(mut pending) = self.pending_expansion.take() else {
-            return;
-        };
-        match pending.request.try_recv() {
-            Ok(Some(Ok(((start_line, start_col), (end_line, end_col))))) => {
-                let current = session
-                    .block_item(pending.point.item)
-                    .and_then(|item| item.handle());
-                if current.is_some_and(|handle| {
-                    handle.id == pending.handle.id && handle.generation == pending.handle.generation
-                }) {
-                    self.frozen.select(Some((
-                        BlockPoint {
-                            item: pending.point.item,
-                            line: start_line,
-                            col: start_col,
-                        },
-                        BlockPoint {
-                            item: pending.point.item,
-                            line: end_line,
-                            col: end_col,
-                        },
-                    )));
-                }
-            }
-            Ok(None) => self.pending_expansion = Some(pending),
-            _ => {}
-        }
     }
 }
 

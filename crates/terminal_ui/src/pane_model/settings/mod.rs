@@ -4,18 +4,16 @@ use nmt_config::colors::term::List;
 use nmt_config::system::NewlineShortcut;
 use nmt_terminal::session::request::Request;
 
-use crate::block_list::chrome::DurationLabels;
 use crate::frame::TerminalColor;
-use crate::pane_model::PaneController;
 
 pub(crate) struct CursorShapeUpdate {
-    request: Request<()>,
-    failure: CursorShapeFailure,
+    pub(super) request: Request<()>,
+    pub(super) failure: CursorShapeFailure,
 }
 
 pub(crate) struct CursorShapeFailure {
-    previous: CursorShape,
-    requested: CursorShape,
+    pub(super) previous: CursorShape,
+    pub(super) requested: CursorShape,
 }
 
 impl CursorShapeUpdate {
@@ -24,40 +22,6 @@ impl CursorShapeUpdate {
             Ok(Ok(())) => None,
             _ => Some(self.failure),
         }
-    }
-}
-
-impl PaneController {
-    pub(crate) fn update_settings(
-        &mut self,
-        settings: PaneSettings,
-        colors: &Colors,
-        duration_labels: DurationLabels,
-    ) -> Option<CursorShapeUpdate> {
-        self.source.session.set_theme_colors(colors);
-        let cursor_update =
-            (settings.cursor_shape != self.settings.cursor_shape).then(|| CursorShapeUpdate {
-                request: self.source.session.set_cursor_shape(settings.cursor_shape),
-                failure: CursorShapeFailure {
-                    previous: self.settings.cursor_shape,
-                    requested: settings.cursor_shape,
-                },
-            });
-        self.settings = settings;
-        self.theme = FrameTheme::from(colors);
-        self.duration_labels = duration_labels;
-        self.cell_metrics = None;
-        self.frame_cache.invalidate_full();
-        cursor_update
-    }
-
-    pub(crate) fn cursor_shape_failed(&mut self, failure: CursorShapeFailure) -> bool {
-        if self.settings.cursor_shape != failure.requested {
-            return false;
-        }
-        self.settings.cursor_shape = failure.previous;
-        self.invalidate();
-        true
     }
 }
 

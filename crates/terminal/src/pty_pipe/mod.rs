@@ -1,5 +1,5 @@
 use std::io::{self, ErrorKind, Read, Write};
-use std::sync::atomic::{AtomicU32, AtomicU64};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{self, Arc, mpsc};
 use std::thread::{Builder, JoinHandle};
 use std::{cell, error, fmt, path, time};
@@ -14,8 +14,10 @@ use tracing::{error, warn};
 use crate::event::{self, EventListener, Msg, MsgSender, TerminalEvent, WindowId};
 use crate::ghostty::{self, GhosttyTerminal, mode};
 use crate::prompt_sniffer::PromptSniffer;
+use crate::pty_pipe::requests::answer_query;
 use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
+use crate::session::request::{Checkpoint, RequestError};
 use crate::{terminal, vt_trace};
 
 mod marks;
@@ -1208,6 +1210,93 @@ where
             .name("PTY reader".into())
             .spawn(move || self.run_event_loop())
             .expect("thread spawn works")
+    }
+
+    fn handle_request(&mut self, request: Msg) {
+        match request {
+            Msg::Scroll(delta) => {
+                self.ghostty.scroll_viewport_delta(delta);
+                self.publish_command();
+            }
+            Msg::ScrollTo(target) => {
+                let scrollbar = self.ghostty.scrollbar();
+                let target = target.min(scrollbar.total.saturating_sub(scrollbar.len));
+                let delta = (i128::from(target) - i128::from(scrollbar.offset))
+                    .clamp(isize::MIN as i128, isize::MAX as i128)
+                    as isize;
+                self.ghostty.scroll_viewport_delta(delta);
+                self.publish_command();
+            }
+            Msg::ScrollToEnd => {
+                self.ghostty.scroll_viewport_bottom();
+                self.publish_command();
+            }
+            Msg::Theme(colors) => {
+                self.ghostty.set_theme_colors(&colors);
+                self.theme_revision = self.theme_revision.wrapping_add(1);
+                self.publish_command();
+            }
+            Msg::CursorShape { shape, reply } => {
+                let result = self
+                    .ghostty
+                    .set_default_cursor_shape(shape)
+                    .map_err(|error| RequestError::Engine(error.to_string()));
+                if result.is_ok() {
+                    self.publish_command();
+                }
+                let _ = reply.send(result);
+            }
+            Msg::Query(query) => {
+                #[cfg(enable_profiling)]
+                let query_started = self.profile.start();
+                answer_query(
+                    &mut self.ghostty,
+                    self.content_version.load(Ordering::Relaxed),
+                    self.theme_revision,
+                    query,
+                );
+                #[cfg(enable_profiling)]
+                self.profile.record(Stage::Query, query_started);
+                self.event_proxy
+                    .send_event(TerminalEvent::ReadReady, self.window_id);
+            }
+            Msg::Checkpoint(request) => {
+                #[cfg(enable_profiling)]
+                let checkpoint_started = self.profile.start();
+                let result = self
+                    .ghostty
+                    .format_vt_state()
+                    .map(|vt| Checkpoint {
+                        vt,
+                        cols: self.ghostty.cols(),
+                        rows: self.ghostty.rows(),
+                    })
+                    .map_err(|error| RequestError::Engine(error.to_string()));
+                (request.0)(result);
+                #[cfg(enable_profiling)]
+                self.profile.record(Stage::Checkpoint, checkpoint_started);
+            }
+            Msg::Input(_) | Msg::Resize(_) | Msg::Shutdown => {
+                unreachable!("handled by the PTY loop")
+            }
+        }
+    }
+
+    fn publish_command(&mut self) {
+        self.content_version.fetch_add(1, Ordering::Relaxed);
+        self.snapshot_pending = true;
+        #[cfg(enable_profiling)]
+        let flush_started = {
+            let started = self.profile.start();
+            self.profile.command();
+            started
+        };
+        let result = self.flush_engine_state(FlushReason::Command);
+        #[cfg(enable_profiling)]
+        self.profile.record(Stage::Flush, flush_started);
+        if let Err(error) = result {
+            warn!("failed to publish terminal update: {error}");
+        }
     }
 }
 

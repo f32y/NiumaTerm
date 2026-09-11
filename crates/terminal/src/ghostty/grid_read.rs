@@ -3,116 +3,19 @@ use std::{os, ptr};
 use libghostty_vt_sys::{
     Cell as VtCell, CellContentTag as VtCellContentTag, CellData as VtCellData,
     CellWide as VtCellWide, ColorPaletteIndex as VtColorPaletteIndex, ColorRgb as VtColorRgb,
-    GridRef as VtGridRef, Point as VtPoint, PointCoordinate as VtPointCoordinate,
-    PointTag as VtPointTag, PointValue as VtPointValue, Result as VtResult, Row as VtRow,
-    RowData as VtRowData, RowSemanticPrompt as VtRowSemanticPrompt, Style as VtStyle,
-    StyleColor as VtStyleColor, StyleColorTag as VtStyleColorTag, ghostty_cell_get,
-    ghostty_cell_get_multi, ghostty_grid_ref_cell, ghostty_grid_ref_graphemes,
-    ghostty_grid_ref_hyperlink_uri, ghostty_grid_ref_row, ghostty_grid_ref_style,
-    ghostty_row_get_multi, ghostty_terminal_grid_ref, sized as vt_sized,
+    GridRef as VtGridRef, Result as VtResult, Row as VtRow, RowData as VtRowData,
+    RowSemanticPrompt as VtRowSemanticPrompt, Style as VtStyle, StyleColor as VtStyleColor,
+    StyleColorTag as VtStyleColorTag, ghostty_cell_get, ghostty_cell_get_multi,
+    ghostty_grid_ref_cell, ghostty_grid_ref_graphemes, ghostty_grid_ref_hyperlink_uri,
+    ghostty_grid_ref_row, ghostty_grid_ref_style, ghostty_row_get_multi, sized as vt_sized,
 };
 
+#[cfg(doc)]
+use crate::ghostty::GhosttyTerminal;
 use crate::ghostty::types::color_from_vt;
 use crate::ghostty::{
-    CellText, CellWide, Color, Error, GhosttyTerminal, Result, RowCell, ScreenRowMeta,
-    ScreenRowRead, SnapshotStyle, Underline,
+    CellText, CellWide, Color, Error, Result, ScreenRowMeta, SnapshotStyle, Underline,
 };
-
-impl GhosttyTerminal {
-    /// Resolve a point (in the given coordinate system) to a `GridRef`. Fast for
-    /// `VIEWPORT`/`ACTIVE`; **O(scrollback) for `SCREEN`/`HISTORY`**. The ref is
-    /// valid only until the next mutating call (`write_vt`/`resize`/
-    /// `scroll_viewport`) — use it within one read pass, never cache it.
-    pub fn grid_ref_at(&self, tag: VtPointTag::Type, x: u16, y: u32) -> Result<VtGridRef> {
-        let point = VtPoint {
-            tag,
-            value: VtPointValue {
-                coordinate: VtPointCoordinate { x, y },
-            },
-        };
-
-        let mut grid_ref = VtGridRef::default();
-
-        Error::from_code(unsafe {
-            ghostty_terminal_grid_ref(self.terminal, point, &mut grid_ref)
-        })?;
-
-        Ok(grid_ref)
-    }
-
-    /// Resolve a viewport coordinate to a `GridRef` (fast).
-    pub fn viewport_grid_ref(&self, x: u16, y: u16) -> Result<VtGridRef> {
-        self.grid_ref_at(VtPointTag::VIEWPORT, x, y as u32)
-    }
-
-    /// The SCREEN row of the top visible row (`viewport_top`) — the constant that
-    /// maps between SCREEN and visible coordinates (`screen_row = viewport_top +
-    /// visible_row`). One cheap viewport `grid_ref`; `None` if the viewport is
-    /// empty. Selection rendering uses this to translate coordinate spaces.
-    pub fn viewport_top_screen(&self) -> Option<u32> {
-        let r = self.viewport_grid_ref(0, 0).ok()?;
-
-        self.point_from_grid_ref(&r, VtPointTag::SCREEN)
-            .ok()
-            .flatten()
-            .map(|(_, y)| y)
-    }
-
-    /// Read one absolute `SCREEN` row into a materialized `Vec` — test-only
-    /// convenience over [`Self::read_screen_row_visit`].
-    pub fn read_screen_row(&self, row: u32) -> Result<Option<ScreenRowRead>> {
-        let mut cells = Vec::with_capacity(self.cols as usize);
-
-        let meta =
-            self.read_screen_row_visit(row, &self.color_palette(), |x, text, wide, style| {
-                cells.push(RowCell {
-                    x,
-                    text,
-                    wide,
-                    style,
-                })
-            })?;
-
-        Ok(meta.map(|meta| ScreenRowRead {
-            cells,
-            wrapped: meta.wrapped,
-            prompt_start: meta.prompt_start,
-            hyperlinks: meta.hyperlinks,
-        }))
-    }
-
-    /// Walk one absolute `SCREEN` row with styles, invoking `on_cell` for each
-    /// content cell (sparse: blank default cells are skipped) instead of
-    /// materializing a `Vec` — the harvester constructs its `LineCell`s in
-    /// place, so no intermediate row buffer exists on the freeze hot path.
-    /// Colors resolve against a caller-supplied palette (hoisted out of
-    /// per-row cost: the palette is a 256-entry FFI copy and cannot change
-    /// while the engine lock is held). Reaches any scrollback row without
-    /// moving the viewport or refreshing the render state. Returns `None`
-    /// when `row` is out of range.
-    ///
-    /// The pin lookup is O(scrollback page hops); per-cell reads are O(cols).
-    /// The `GridRef`s are created and dropped within this call so mutations cannot
-    /// invalidate a cached reference.
-    /// Per-cell FFI is tag-driven: blank/plain-codepoint cells never touch the
-    /// grapheme or style readers, keeping the row-harvest hot path free of unnecessary FFI.
-    pub fn read_screen_row_visit(
-        &self,
-        row: u32,
-        palette: &[VtColorRgb; 256],
-        on_cell: impl FnMut(u16, CellText, CellWide, SnapshotStyle),
-    ) -> Result<Option<ScreenRowMeta>> {
-        let grid_ref = match self.grid_ref_at(VtPointTag::SCREEN, 0, row) {
-            Ok(r) => r,
-            Err(Error::InvalidValue) => return Ok(None),
-            Err(e) => return Err(e),
-        };
-
-        Ok(Some(visit_row_cells(
-            grid_ref, self.cols, palette, on_cell,
-        )?))
-    }
-}
 
 /// Resolve a tagged style color against the palette. `None` for the default
 /// (terminal-level) color, concrete RGB otherwise.

@@ -3,11 +3,16 @@
 
 use std::collections::VecDeque;
 use std::error::Error as StdError;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time;
 
+use futures::channel::oneshot;
+use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
+use nmt_input::encode_mouse_report;
+use nmt_input::keyboard::ModifiersState;
 use nmt_platform::process::ProcessTree;
 use nmt_platform::{
     EventedPty, PtyOptions, WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env,
@@ -15,17 +20,28 @@ use nmt_platform::{
 use parking_lot::Mutex;
 use tracing::error;
 
-use crate::block_store::BlockStore;
+use crate::block_store::{BlockItem, BlockStore};
 use crate::event::{BlockEvent, Msg, MsgSender, ProgressReport};
+use crate::ghostty::BlockHandle;
+use crate::graphics::GraphicData;
 use crate::pty_pipe::{SessionOptions, start_session};
 use crate::publication::FrameStore;
+use crate::render_buffer::RenderBuffer;
+use crate::selection::{SelectionRange, SelectionType, WORD_DELIMITERS};
+use crate::session::blocks::frozen_selection_pieces;
 pub use crate::session::error::{EngineError, EngineErrorCode};
+use crate::session::input::paste_payload;
 pub use crate::session::mouse::{
     SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
 };
+use crate::session::mouse::{mouse_button_code, mouse_motion_code, mouse_report_mods};
 pub use crate::session::observer::{SessionChange, SessionObserver};
-use crate::session::page::PageCache;
-use crate::session::selection::SurfaceSelection;
+use crate::session::page::{PageCache, PageSource, RowPage};
+use crate::session::request::{BlockRange, Query, Request, TextPiece, TextSource};
+use crate::session::rows::materialized_pointer_row;
+use crate::session::selection::{SurfaceSelection, selection_screen_range};
+use crate::terminal::Mode;
+use crate::terminal::pos::{Column, Line, Pos};
 
 mod blocks;
 pub mod page;
@@ -41,8 +57,6 @@ pub mod interaction;
 mod mouse;
 mod observer;
 mod proxy;
-mod reads;
-mod scroll;
 pub(crate) mod selection;
 
 pub use crate::session::config::TerminalSessionConfig;
@@ -293,6 +307,413 @@ impl TerminalSession {
 
     pub fn open_prompt_region(&self) -> bool {
         *self.shared.open_prompt.lock()
+    }
+
+    pub fn block_selection_text(
+        &self,
+        handle: BlockHandle,
+        line: usize,
+        col: u32,
+        kind: SelectionType,
+    ) -> Request<String> {
+        self.request_text(TextSource::BlockSelection {
+            handle,
+            line,
+            col,
+            kind,
+        })
+    }
+
+    pub fn block_item(&self, item: usize) -> Option<BlockItem> {
+        self.shared.block_store.lock().items().get(item).cloned()
+    }
+
+    pub fn block_command(&self, item: usize) -> Option<String> {
+        let store = self.shared.block_store.lock();
+        if let Some(item) = store.items().get(item) {
+            return item.meta.command.clone();
+        }
+        let live = item == store.items().len();
+        drop(store);
+        live.then(|| self.in_flight_block())
+            .flatten()
+            .map(|block| block.command)
+    }
+
+    pub fn block_text(&self, item: usize) -> Option<Request<String>> {
+        let handle = self.block_handle(item)?;
+        Some(self.request_text(TextSource::Blocks(vec![TextPiece {
+            handle,
+            start: None,
+            end: None,
+        }])))
+    }
+
+    pub fn expand_frozen_selection(
+        &self,
+        at: BlockPoint,
+        kind: SelectionType,
+    ) -> Option<Request<BlockRange>> {
+        let handle = self.block_handle(at.item)?;
+        let (reply, request) = oneshot::channel();
+        let _ = self.messenger.send(Msg::Query(Query::ExpandSelection {
+            handle,
+            line: at.line,
+            col: at.col,
+            kind,
+            reply,
+        }));
+        Some(request)
+    }
+
+    pub fn frozen_selection_text(&self, a: BlockPoint, b: BlockPoint) -> Request<String> {
+        let pieces = frozen_selection_pieces(&self.shared.block_store.lock(), a, b);
+        self.request_text(TextSource::Blocks(
+            pieces
+                .into_iter()
+                .map(|piece| TextPiece {
+                    handle: piece.handle,
+                    start: piece.start,
+                    end: piece.end,
+                })
+                .collect(),
+        ))
+    }
+
+    fn request_text(&self, source: TextSource) -> Request<String> {
+        let (reply, request) = oneshot::channel();
+        let _ = self
+            .messenger
+            .send(Msg::Query(Query::Text { source, reply }));
+        request
+    }
+
+    fn block_handle(&self, item: usize) -> Option<BlockHandle> {
+        self.shared.block_store.lock().items().get(item)?.handle()
+    }
+
+    pub fn paste_paths(&self, paths: &[PathBuf]) -> bool {
+        let text = paths
+            .iter()
+            .map(|path| {
+                let path = path.to_string_lossy();
+                if path.contains(' ') {
+                    format!("\"{path}\"")
+                } else {
+                    path.into_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        self.paste_text(&text)
+    }
+
+    pub fn rerun_block(&self, item: usize) -> bool {
+        self.block_command(item)
+            .is_some_and(|command| self.write_text(&format!("{command}\r")))
+    }
+
+    pub fn write_text(&self, text: &str) -> bool {
+        self.write_input(text.as_bytes())
+    }
+
+    pub fn paste_text(&self, text: &str) -> bool {
+        let Some(bytes) = paste_payload(text, self.modes().contains(Mode::BRACKETED_PASTE)) else {
+            return false;
+        };
+
+        self.write_input(&bytes)
+    }
+
+    pub fn apply_mouse(
+        &self,
+        cell: SurfaceCell,
+        side: SurfaceCellSide,
+        button: Option<SurfaceMouseButton>,
+        kind: SurfaceMouseEventKind,
+        modifiers: ModifiersState,
+        selection_type: SelectionType,
+    ) -> bool {
+        if let Some(mode) = self.app_mouse_mode(modifiers) {
+            return match kind {
+                SurfaceMouseEventKind::Down | SurfaceMouseEventKind::Up => {
+                    let Some(code) = button.and_then(mouse_button_code) else {
+                        return false;
+                    };
+
+                    self.report_mouse(
+                        mode,
+                        code,
+                        kind == SurfaceMouseEventKind::Down,
+                        cell.col,
+                        cell.row,
+                        modifiers,
+                    )
+                }
+                SurfaceMouseEventKind::Move => {
+                    let Some(code) = mouse_motion_code(mode, button) else {
+                        return false;
+                    };
+
+                    self.report_mouse(mode, code, true, cell.col, cell.row, modifiers)
+                }
+            };
+        }
+
+        if button != Some(SurfaceMouseButton::Left) {
+            return false;
+        }
+
+        let pos = Pos::new(Line(cell.row as i32), Column(cell.col as usize));
+
+        self.shared
+            .selection
+            .apply_at(self.screen_pos(pos), side, kind, selection_type)
+    }
+
+    fn modes(&self) -> Mode {
+        let bits = self.vt_modes.load(Ordering::Relaxed);
+
+        Mode::from_bits_truncate(bits)
+    }
+
+    fn mouse_mode(&self) -> Option<Mode> {
+        let mode = self.modes();
+
+        mode.intersects(Mode::MOUSE_MODE).then_some(mode)
+    }
+
+    fn app_mouse_mode(&self, modifiers: ModifiersState) -> Option<Mode> {
+        if modifiers.shift_key() {
+            return None;
+        }
+
+        self.mouse_mode()
+    }
+
+    fn report_mouse(
+        &self,
+        mode: Mode,
+        button: u8,
+        pressed: bool,
+        col: u16,
+        row: u16,
+        modifiers: ModifiersState,
+    ) -> bool {
+        let Some(msg) = encode_mouse_report(
+            mode.contains(Mode::SGR_MOUSE),
+            button,
+            mouse_report_mods(modifiers),
+            pressed,
+            col,
+            row,
+        ) else {
+            return false;
+        };
+
+        self.write_input(&msg)
+    }
+
+    pub fn title(&self) -> String {
+        self.snapshot().title.clone()
+    }
+
+    /// Reports queue acceptance; the owner publishes colors with its next frame.
+    pub fn set_theme_colors(&self, colors: &Colors) -> bool {
+        self.messenger.send(Msg::Theme(Box::new(*colors))).is_ok()
+    }
+
+    pub fn set_cursor_shape(&self, shape: CursorShape) -> Request<()> {
+        let (reply, request) = oneshot::channel();
+        let _ = self.messenger.send(Msg::CursorShape { shape, reply });
+        request
+    }
+
+    pub fn snapshot(&self) -> Arc<RenderBuffer> {
+        self.render_buffer.load()
+    }
+
+    pub fn with_render_buffer<R>(&self, read: impl FnOnce(&RenderBuffer) -> R) -> R {
+        read(&self.snapshot())
+    }
+
+    pub fn viewport_top_screen_row(&self) -> Option<u32> {
+        self.snapshot().viewport_top
+    }
+
+    fn viewport_top(&self) -> i32 {
+        self.viewport_top_screen_row()
+            .unwrap_or(0)
+            .min(i32::MAX as u32) as i32
+    }
+
+    fn screen_pos(&self, pos: Pos) -> Pos {
+        Pos::new(Line(pos.row.0.saturating_add(self.viewport_top())), pos.col)
+    }
+
+    pub fn mouse_reporting_active(&self) -> bool {
+        self.mouse_mode().is_some()
+    }
+
+    pub fn mouse_reporting_active_for(&self, modifiers: ModifiersState) -> bool {
+        self.app_mouse_mode(modifiers).is_some()
+    }
+
+    pub fn take_block_image(&self, handle: BlockHandle, image_id: u32) -> Option<GraphicData> {
+        self.pages
+            .lock()
+            .take_image(handle, image_id, &self.messenger)
+    }
+
+    pub fn screen_page(&self, row: usize) -> Option<Arc<RowPage>> {
+        self.screen_page_at(self.snapshot().revision, row)
+    }
+
+    pub fn screen_page_at(&self, revision: u64, row: usize) -> Option<Arc<RowPage>> {
+        self.pages
+            .lock()
+            .read(PageSource::Screen { revision }, row, &self.messenger)
+    }
+
+    pub fn block_page(&self, handle: BlockHandle, row: usize) -> Option<Arc<RowPage>> {
+        let source = PageSource::Block {
+            id: handle.id,
+            generation: handle.generation,
+            theme: self.snapshot().theme_revision,
+        };
+        self.pages.lock().read(source, row, &self.messenger)
+    }
+
+    pub fn screen_row_text(&self, row: u32) -> Option<RowText> {
+        self.screen_row_text_in(&self.snapshot(), row)
+    }
+
+    pub fn screen_row_text_in(&self, snapshot: &RenderBuffer, row: u32) -> Option<RowText> {
+        if let Some(index) = snapshot.viewport_top.and_then(|top| row.checked_sub(top))
+            && let Some(cells) = snapshot.grid().get(index as usize)
+        {
+            return Some(RowText {
+                text: cells
+                    .inner
+                    .iter()
+                    .map(|cell| match cell.c() {
+                        '\0' => ' ',
+                        c => c,
+                    })
+                    .collect(),
+                wrapped: snapshot.row_wrapped(index as usize),
+                hyperlinks: snapshot.row_hyperlinks(index as usize).to_vec(),
+            });
+        }
+        let page = self.screen_page_at(snapshot.revision, row as usize)?;
+        Some(materialized_pointer_row(page.row(row as usize)?, page.cols))
+    }
+
+    pub fn block_row_text(&self, item: usize, row: usize) -> Option<RowText> {
+        let page = self.block_page(self.block_handle(item)?, row)?;
+        Some(materialized_pointer_row(page.row(row)?, page.cols))
+    }
+
+    pub fn scroll_to(&self, offset: u64) -> bool {
+        !self.exited() && self.messenger.send(Msg::ScrollTo(offset)).is_ok()
+    }
+
+    pub fn scroll_to_end(&self) -> bool {
+        !self.exited() && self.messenger.send(Msg::ScrollToEnd).is_ok()
+    }
+
+    pub fn apply_scroll(&self, cell: SurfaceCell, lines: i32, modifiers: ModifiersState) -> bool {
+        if lines == 0 {
+            return false;
+        }
+        if let Some(mode) = self.mouse_mode() {
+            let button = if lines > 0 { 64 } else { 65 };
+            return self.report_mouse(mode, button, true, cell.col, cell.row, modifiers);
+        }
+        self.scroll_lines(-(lines as isize))
+    }
+
+    /// A successful send accepts the scroll request. The next published frame
+    /// determines the resulting position, including clamping at history edges.
+    pub fn scroll_lines(&self, delta: isize) -> bool {
+        if delta == 0 || self.exited() {
+            return false;
+        }
+        let before = self.snapshot().scrollbar();
+        if before.total <= before.len {
+            return false;
+        }
+        self.messenger.send(Msg::Scroll(delta)).is_ok()
+    }
+
+    pub fn selected_text(&self) -> Option<Request<String>> {
+        self.selected_text_in(&self.snapshot())
+    }
+
+    pub fn selected_text_in(&self, snapshot: &RenderBuffer) -> Option<Request<String>> {
+        let selection = self.shared.selection.selection.lock();
+        let range = selection_screen_range(
+            selection.as_ref()?,
+            snapshot,
+            snapshot.viewport_top.unwrap_or(0) as i32,
+        )?;
+        let start = (
+            u16::try_from(range.start.col.0).ok()?,
+            u32::try_from(range.start.row.0).ok()?,
+        );
+        let end = (
+            u16::try_from(range.end.col.0).ok()?,
+            u32::try_from(range.end.row.0).ok()?,
+        );
+        Some(self.request_text(TextSource::Screen {
+            revision: snapshot.revision,
+            start,
+            end,
+            rectangle: range.is_block,
+        }))
+    }
+
+    pub fn selection_range(&self) -> Option<SelectionRange> {
+        self.selection_range_in(&self.snapshot())
+    }
+
+    pub fn selection_range_in(&self, snapshot: &RenderBuffer) -> Option<SelectionRange> {
+        let selection = self.shared.selection.selection.lock();
+        selection.as_ref()?.to_range_engine(
+            snapshot,
+            snapshot.viewport_top.unwrap_or(0) as i32,
+            WORD_DELIMITERS,
+        )
+    }
+
+    pub fn apply_screen_selection(
+        &self,
+        cell: SurfaceScreenCell,
+        side: SurfaceCellSide,
+        kind: SurfaceMouseEventKind,
+        selection_type: SelectionType,
+    ) -> bool {
+        self.shared
+            .selection
+            .apply_screen(cell, side, kind, selection_type)
+    }
+
+    pub fn selection_screen_range(&self) -> Option<SelectionRange> {
+        let snapshot = self.snapshot();
+        self.selection_screen_range_in(&snapshot)
+    }
+
+    pub fn selection_screen_range_in(&self, snapshot: &RenderBuffer) -> Option<SelectionRange> {
+        let selection = self.shared.selection.selection.lock();
+        selection_screen_range(
+            selection.as_ref()?,
+            snapshot,
+            snapshot.viewport_top.unwrap_or(0) as i32,
+        )
+    }
+
+    pub fn clear_selection(&self) {
+        self.shared.selection.clear();
     }
 }
 

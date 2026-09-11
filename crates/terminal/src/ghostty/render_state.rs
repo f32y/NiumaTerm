@@ -1,7 +1,7 @@
 use std::ptr;
 
 use libghostty_vt_sys::{
-    ColorRgb as VtColorRgb, PointTag as VtPointTag, RenderState as VtRenderState,
+    ColorRgb as VtColorRgb, RenderState as VtRenderState,
     RenderStateCursorVisualStyle as VtRenderStateCursorVisualStyle,
     RenderStateData as VtRenderStateData, RenderStateDirty as VtRenderStateDirty,
     RenderStateOption as VtRenderStateOption, RenderStateRowData as VtRenderStateRowData,
@@ -19,9 +19,7 @@ use libghostty_vt_sys::{
 };
 
 use crate::ansi;
-use crate::ghostty::grid_read::visit_row_cells;
-use crate::ghostty::{Error, GhosttyTerminal, Result, SnapshotColors, SnapshotCursor};
-use crate::render_buffer::RenderBuffer;
+use crate::ghostty::{Error, Result, SnapshotColors, SnapshotCursor};
 
 /// The engine's render state and the row damage derived from it.
 ///
@@ -374,83 +372,5 @@ impl RenderStateReader {
             cursor,
             bg_override,
         }
-    }
-}
-
-impl GhosttyTerminal {
-    /// Probe: whether any visible row carries a PROMPT semantic tag (command-blocks-
-    /// rendering — mark-forwarding regression checks in terminal pipeline tests).
-    #[cfg(test)]
-    pub(crate) fn has_prompt_tagged_row(&mut self) -> bool {
-        self.semantic_prompt_tags()
-            .map(|tags| tags.contains(&VtRowSemanticPrompt::PROMPT))
-            .unwrap_or(false)
-    }
-
-    /// The engine's `SEMANTIC_PROMPT` tag per visible row.
-    #[cfg(test)]
-    pub(super) fn semantic_prompt_tags(&mut self) -> Result<Vec<VtRowSemanticPrompt::Type>> {
-        self.render.row_semantic_prompts(self.terminal, self.rows)
-    }
-
-    /// Populate a reusable render buffer from the full visible viewport.
-    pub fn snapshot_into(&mut self, buffer: &mut RenderBuffer) -> Result<()> {
-        self.render.update(self.terminal)?;
-        self.render.consume_damage(self.rows)?;
-
-        let cursor = self.render.cursor().unwrap_or(SnapshotCursor {
-            x: 0,
-            y: 0,
-            visible: false,
-            shape: ansi::CursorShape::Block,
-            blinking: false,
-        });
-
-        let palette = self.color_palette();
-
-        buffer.begin_capture(self.cols as usize, self.rows as usize);
-        buffer.viewport_top = self.viewport_top_screen();
-        buffer.title = self.title();
-        buffer.current_directory = self
-            .current_directory()
-            .map(|path| path.to_string_lossy().into_owned());
-
-        // A transient row lookup failure blanks only that row; publishing the
-        // remaining viewport is safer than withholding an otherwise valid frame.
-        for y in 0..self.rows {
-            let meta = self
-                .grid_ref_at(VtPointTag::VIEWPORT, 0, y as u32)
-                .and_then(|grid_ref| {
-                    visit_row_cells(grid_ref, self.cols, &palette, |x, text, wide, style| {
-                        buffer.write_cell(x as usize, y as usize, text.as_str(), wide, &style);
-                    })
-                })
-                .unwrap_or_default();
-
-            buffer.write_row_meta(y as usize, meta);
-        }
-
-        let colors = self.render.colors(self.terminal);
-        let placements = self.kitty.placements(self.terminal);
-        let scrollbar = self.scrollbar();
-
-        buffer.finish_capture(
-            cursor,
-            colors,
-            placements,
-            scrollbar,
-            self.render.row_versions(),
-        );
-
-        Ok(())
-    }
-
-    /// Allocate and populate an owned render buffer for diagnostics and tests.
-    pub fn snapshot(&mut self) -> Result<RenderBuffer> {
-        let mut buffer = RenderBuffer::new(self.cols as usize, self.rows as usize);
-
-        self.snapshot_into(&mut buffer)?;
-
-        Ok(buffer)
     }
 }
