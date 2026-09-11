@@ -335,7 +335,7 @@ pub(super) fn materialize_active_tab(
         .panes
         .as_ref()
         .and_then(|panes| restore_pane_node(panes, next_id, cx))
-        .map(TerminalLayout::from_root)
+        .map(Into::into)
         .unwrap_or_else(|| {
             let surface_id = Shell::alloc_id(next_id);
             let default_profile = cx.global::<AppSettings>().default_profile_command();
@@ -633,11 +633,14 @@ fn session_state(
                         // Agent conversations are not persisted (the
                         // agent process and its thread die with the app);
                         // the saved kind reopens a fresh agent tab.
-                        TabSurface::Agent(pane) => TabState {
-                            agent: Some(pane.read(cx).kind().id().to_string()),
-                            agent_profile: Some(pane.read(cx).profile_name().to_string()),
-                            ..TabState::default()
-                        },
+                        TabSurface::Agent(pane) => {
+                            let agent: &str = pane.read(cx).kind().into();
+                            TabState {
+                                agent: Some(agent.into()),
+                                agent_profile: Some(pane.read(cx).profile_name().to_string()),
+                                ..TabState::default()
+                            }
+                        }
                         // Only the settings workspace holds this surface,
                         // and that workspace is skipped above; the arm
                         // exists so the match stays exhaustive.

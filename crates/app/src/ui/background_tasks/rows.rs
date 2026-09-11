@@ -30,13 +30,14 @@ pub(super) fn render_row(
     let detail = row_detail(task);
     let timing = row_timing(task, now);
     let state_label = background_task_state_label(task.state);
+    let provider: &str = task.key.provider.into();
 
     // Everything the row shows visually, in one string. A screen reader
     // announces the row as a whole, so it needs the parts the layout separates
     // into two lines plus the child id, which is not rendered anywhere.
     let description: SharedString = format!(
         "{} · {} · {} · {}\n{}",
-        task.key.provider.label(),
+        provider,
         background_task_kind_label(task.kind),
         task.key.id,
         state_label,
@@ -53,21 +54,18 @@ pub(super) fn render_row(
     let stop = task.can_stop.then(|| {
         // Keyed by the child rather than by row position: the two sections
         // enumerate independently, so a positional id is not unique across them.
-        Button::new(SharedString::from(format!(
-            "background-task-stop-{}",
-            task.key.id
-        )))
-        .ghost()
-        .xsmall()
-        .icon(StopTaskIcon)
-        .tooltip(i18n("tasks-background-stop-tooltip"))
-        .accessibility_label(i18n("tasks-background-stop-tooltip"))
-        .on_click(cx.listener(move |this, _, _, cx| {
-            // The row opens the child's conversation, so a click that was
-            // meant for Stop must not also navigate.
-            cx.stop_propagation();
-            this.stop_task(&stop_key, cx);
-        }))
+        Button::new(format!("background-task-stop-{}", task.key.id))
+            .ghost()
+            .xsmall()
+            .icon(StopTaskIcon)
+            .tooltip(i18n("tasks-background-stop-tooltip"))
+            .accessibility_label(i18n("tasks-background-stop-tooltip"))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                // The row opens the child's conversation, so a click that was
+                // meant for Stop must not also navigate.
+                cx.stop_propagation();
+                this.stop_task(&stop_key, cx);
+            }))
     });
 
     h_flex()
@@ -102,7 +100,7 @@ pub(super) fn render_row(
                         .items_center()
                         .text_xs()
                         .text_color(theme.muted_foreground)
-                        .child(div().flex_none().child(task.key.provider.label()))
+                        .child(div().flex_none().child(provider))
                         .child(
                             div()
                                 .flex_none()

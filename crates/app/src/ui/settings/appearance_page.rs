@@ -23,18 +23,15 @@ pub(super) fn appearance_page(
                             ("zh-CN".into(), "简体中文".into()),
                         ],
                         |cx| {
-                            cx.global::<AppSettings>()
-                                .appearance
-                                .language
-                                .as_str()
-                                .into()
+                            let key: &str = cx.global::<AppSettings>().appearance.language.into();
+                            key.into()
                         },
                         |value, cx| {
                             cx.global_mut::<AppSettings>().appearance.language =
-                                Language::from_value(&value);
+                                value.as_str().into();
                         },
                     )
-                    .default_value(SharedString::from("en")),
+                    .default_value("en"),
                 )),
         )
         .group(
@@ -98,18 +95,16 @@ pub(super) fn appearance_page(
                             ("off".into(), i18n("settings-common-off").into()),
                         ],
                         |cx| {
-                            cx.global::<AppSettings>()
-                                .appearance
-                                .window_backdrop
-                                .as_str()
-                                .into()
+                            let key: &str =
+                                cx.global::<AppSettings>().appearance.window_backdrop.into();
+                            key.into()
                         },
                         |value, cx| {
                             cx.global_mut::<AppSettings>().appearance.window_backdrop =
-                                WindowBackdrop::from_value(&value);
+                                value.as_str().into();
                         },
                     )
-                    .default_value(SharedString::from("acrylic")),
+                    .default_value("acrylic"),
                 ))
                 .item(SettingItem::new(
                     i18n("settings-appearance-effect-on-content-area"),
@@ -164,18 +159,19 @@ pub(super) fn appearance_page(
                             ("off".into(), i18n("settings-common-off").into()),
                         ],
                         |cx| {
-                            cx.global::<AppSettings>()
+                            let key: &str = cx
+                                .global::<AppSettings>()
                                 .appearance
                                 .smooth_scrolling
-                                .as_str()
-                                .into()
+                                .into();
+                            key.into()
                         },
                         |value, cx| {
                             cx.global_mut::<AppSettings>().appearance.smooth_scrolling =
-                                SmoothScrollingMode::from_value(&value);
+                                value.as_str().into();
                         },
                     )
-                    .default_value(SharedString::from("all")),
+                    .default_value("all"),
                 ))
                 .item(SettingItem::new(
                     i18n("settings-appearance-reduce-motion"),
@@ -320,18 +316,16 @@ pub(super) fn appearance_page(
                                 ),
                             ],
                             |cx| {
-                                cx.global::<AppSettings>()
-                                    .appearance
-                                    .tab_bar_style
-                                    .as_str()
-                                    .into()
+                                let key: &str =
+                                    cx.global::<AppSettings>().appearance.tab_bar_style.into();
+                                key.into()
                             },
                             |value, cx| {
                                 cx.global_mut::<AppSettings>().appearance.tab_bar_style =
-                                    TabBarStyle::from_value(&value);
+                                    value.as_str().into();
                             },
                         )
-                        .default_value(SharedString::from("horizontal")),
+                        .default_value("horizontal"),
                     )
                     .description(i18n("settings-appearance-tab-bar-style-description")),
                 )
@@ -433,7 +427,7 @@ pub(super) fn appearance_page(
                                     clamp_git_interval(value.parse().unwrap_or(30));
                             },
                         )
-                        .default_value(SharedString::from("30")),
+                        .default_value("30"),
                     )
                     // The titlebar switch is the feature's master toggle;
                     // while it is off the interval has no display to pace, so

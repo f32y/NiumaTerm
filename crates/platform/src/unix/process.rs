@@ -65,7 +65,7 @@ pub fn launch_env_var(name: &str) -> Option<OsString> {
     login_shell::missing_variables()
         .iter()
         .find(|(candidate, _)| candidate == name)
-        .map(|(_, value)| OsString::from(value))
+        .map(|(_, value)| value.into())
         .or_else(|| env::var_os(name))
 }
 

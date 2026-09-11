@@ -164,7 +164,7 @@ fn growing_process_list_is_retried_and_decoded() {
     let explorer = process("Windows Explorer", 123);
 
     let state = State {
-        list: VecDeque::from([
+        list: [
             ListReply {
                 code: ERROR_MORE_DATA,
                 processes: Vec::new(),
@@ -183,7 +183,8 @@ fn growing_process_list_is_retried_and_decoded() {
                 needed: 1,
                 reboot_reasons: RmRebootReasonPermissionDenied as u32,
             },
-        ]),
+        ]
+        .into(),
         ..Default::default()
     };
 
@@ -232,12 +233,13 @@ fn registration_failure_still_ends_the_started_session() {
 #[test]
 fn shutdown_and_restart_use_normal_action_flags() {
     let state = State {
-        list: VecDeque::from([ListReply {
+        list: [ListReply {
             code: ERROR_SUCCESS,
             processes: Vec::new(),
             needed: 0,
             reboot_reasons: 0,
-        }]),
+        }]
+        .into(),
         ..Default::default()
     };
 
@@ -307,8 +309,8 @@ fn dll_holder_process() {
 #[test]
 fn a_loaded_dll_is_reported_and_old_copy_cleans_up_after_exit() {
     let scratch = integration_scratch();
-    let system_root = env::var_os("WINDIR").expect("Windows directory");
-    let source = PathBuf::from(system_root).join(r"System32\version.dll");
+    let system_root: PathBuf = env::var_os("WINDIR").expect("Windows directory").into();
+    let source = system_root.join(r"System32\version.dll");
     let target = scratch.join("NmtShellExtension.dll");
     let previous = scratch.join("NmtShellExtension.dll.nmt-previous");
 

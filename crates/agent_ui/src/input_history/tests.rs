@@ -117,7 +117,7 @@ fn open_test_pane(
 
 #[test]
 fn navigation_moves_without_wrapping_and_clears_after_newest() {
-    let entries: Arc<[String]> = Arc::from(vec!["oldest".into(), "newest".into()]);
+    let entries: Arc<[String]> = vec!["oldest".into(), "newest".into()].into();
     let mut navigation = InputHistoryNavigation::default();
 
     assert_eq!(
@@ -162,7 +162,7 @@ fn navigation_moves_without_wrapping_and_clears_after_newest() {
 
 #[test]
 fn drafts_selections_and_interior_cursors_keep_editor_navigation() {
-    let entries: Arc<[String]> = Arc::from(vec!["first".into(), "second".into()]);
+    let entries: Arc<[String]> = vec!["first".into(), "second".into()].into();
     let mut navigation = InputHistoryNavigation::default();
 
     assert_eq!(
@@ -207,7 +207,7 @@ fn drafts_selections_and_interior_cursors_keep_editor_navigation() {
 
 #[test]
 fn multiline_and_slash_entries_are_plain_text_during_navigation() {
-    let entries: Arc<[String]> = Arc::from(vec!["/status".into(), "first\nsecond".into()]);
+    let entries: Arc<[String]> = vec!["/status".into(), "first\nsecond".into()].into();
     let mut navigation = InputHistoryNavigation::default();
 
     assert_eq!(

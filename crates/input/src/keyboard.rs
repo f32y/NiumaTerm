@@ -2,13 +2,13 @@
 //!
 //! Copied from winit's keyboard types (winit is MIT/Apache-2.0) so this crate no
 //! longer depends on winit — only the variants the encoder and the GPUI frontend
-//! actually use. The `Key<Str>` generic + `as_ref()` mirror winit so the encoder
-//! can match owned keys (`Key<SmolStr>`) and string literals (`Key<&str>`).
+//! actually use. Converting `&Key<SmolStr>` to `Key<&str>` lets the encoder
+//! match owned keys against string literals without copying the text.
 
 use bitflags::bitflags;
 use smol_str::SmolStr;
 
-/// A logical key. `Str` is `SmolStr` for owned keys; [`Key::as_ref`] yields
+/// A logical key. `Str` is `SmolStr` for owned keys; converting a borrowed key with `.into()` yields
 /// `Key<&str>` for matching character keys against string literals.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Key<Str = SmolStr> {
@@ -16,16 +16,6 @@ pub enum Key<Str = SmolStr> {
     Named(NamedKey),
     /// A key that produces character(s).
     Character(Str),
-}
-
-impl Key<SmolStr> {
-    /// Borrow the key, turning `Character(SmolStr)` into `Character(&str)`.
-    pub fn as_ref(&self) -> Key<&str> {
-        match self {
-            Key::Named(named) => Key::Named(*named),
-            Key::Character(s) => Key::Character(s.as_str()),
-        }
-    }
 }
 
 /// Physical location of a key press (distinguishes the numpad for kitty numpad
@@ -162,5 +152,15 @@ impl ModifiersState {
 
     pub fn super_key(&self) -> bool {
         self.contains(Self::SUPER)
+    }
+}
+
+impl<'a> From<&'a Key<SmolStr>> for Key<&'a str> {
+    /// Borrow the key, turning `Character(SmolStr)` into `Character(&str)`.
+    fn from(value: &'a Key<SmolStr>) -> Self {
+        match value {
+            Key::Named(named) => Key::Named(*named),
+            Key::Character(s) => Key::Character(s.as_str()),
+        }
     }
 }

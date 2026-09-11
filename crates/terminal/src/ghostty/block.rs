@@ -133,7 +133,7 @@ impl BlockRef {
             return None;
         }
 
-        let last_col = u32::from(self.cols().saturating_sub(1));
+        let last_col: u32 = self.cols().saturating_sub(1).into();
 
         let clamp = |(row, col): (usize, u32)| {
             (

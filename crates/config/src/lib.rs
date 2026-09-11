@@ -120,7 +120,7 @@ fn home_dir_or_temp() -> PathBuf {
 #[inline]
 fn base_config_dir_path() -> PathBuf {
     env::var("NMT_CONFIG_HOME")
-        .map(PathBuf::from)
+        .map(Into::into)
         .unwrap_or_else(|_| config_dir(&home_dir_or_temp()))
 }
 
@@ -146,11 +146,11 @@ impl Config {
             let name = path
                 .file_stem()
                 .and_then(|name| name.to_str())
-                .ok_or_else(|| String::from("invalid theme filepath"))?;
+                .ok_or_else(|| -> String { "invalid theme filepath".into() })?;
 
             get_builtin_theme(name)
                 .map(str::to_owned)
-                .ok_or_else(|| String::from("filepath does not exist"))?
+                .ok_or_else(|| -> String { "filepath does not exist".into() })?
         };
 
         parse_toml::<Theme>(&content)
@@ -162,7 +162,7 @@ impl Config {
         let path = Path::new(name);
 
         if path.file_name().and_then(|name| name.to_str()) != Some(name) {
-            return Err(String::from("theme name must not contain a path"));
+            return Err("theme name must not contain a path".into());
         }
 
         Self::load_theme(&theme_file_path(&config_dir_path().join("themes"), name))
@@ -304,25 +304,6 @@ pub enum CursorShape {
     Hidden,
 }
 
-impl CursorShape {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            CursorShape::Block => "block",
-            CursorShape::Underline => "underline",
-            CursorShape::Beam => "line",
-            CursorShape::Hidden => "hidden",
-        }
-    }
-
-    pub fn from_char(c: char) -> CursorShape {
-        match c {
-            '_' => CursorShape::Underline,
-            '|' => CursorShape::Beam,
-            _ => CursorShape::Block,
-        }
-    }
-}
-
 impl From<CursorShape> for char {
     fn from(value: CursorShape) -> Self {
         match value {
@@ -442,7 +423,7 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> 
     }
 
     ensure_explicit_table(doc, "cursor");
-    doc["cursor"]["shape"] = value(cursor_shape.as_str());
+    doc["cursor"]["shape"] = value::<&str>(cursor_shape.into());
 
     patch_group(doc, "system", system)?;
     patch_group(doc, "agent", agent)?;
@@ -493,3 +474,34 @@ pub(crate) fn ensure_explicit_table(doc: &mut DocumentMut, key: &str) {
 
 #[cfg(test)]
 mod tests;
+
+impl From<CursorShape> for &'static str {
+    fn from(value: CursorShape) -> Self {
+        match value {
+            CursorShape::Block => "block",
+            CursorShape::Underline => "underline",
+            CursorShape::Beam => "line",
+            CursorShape::Hidden => "hidden",
+        }
+    }
+}
+
+impl From<char> for CursorShape {
+    fn from(c: char) -> Self {
+        match c {
+            '_' => CursorShape::Underline,
+            '|' => CursorShape::Beam,
+            _ => CursorShape::Block,
+        }
+    }
+}
+
+impl From<&str> for CursorShape {
+    fn from(value: &str) -> Self {
+        match value {
+            "line" => CursorShape::Beam,
+            "underline" => CursorShape::Underline,
+            _ => CursorShape::Block,
+        }
+    }
+}

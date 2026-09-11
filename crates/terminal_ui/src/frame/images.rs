@@ -63,7 +63,7 @@ pub(crate) enum ZLayer {
 pub(super) fn empty_images() -> Arc<[FrameImage]> {
     static EMPTY: sync::OnceLock<Arc<[FrameImage]>> = sync::OnceLock::new();
 
-    EMPTY.get_or_init(|| Arc::from(Vec::new())).clone()
+    EMPTY.get_or_init(|| Vec::new().into()).clone()
 }
 
 impl FrameImage {
@@ -295,7 +295,7 @@ fn push_virtual_run(
     row: usize,
     out: &mut Vec<FrameImage>,
 ) {
-    let run = incomplete.complete();
+    let run: PlaceholderRun = (&incomplete).into();
 
     let Some(placement) = buf
         .placements()

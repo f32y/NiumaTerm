@@ -17,8 +17,6 @@ pub enum Direction {
     Right,
 }
 
-impl Direction {}
-
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Cursor<T> {
     pub pos: Pos,
@@ -40,13 +38,6 @@ pub struct CursorState {
 }
 
 impl CursorState {
-    pub fn new(cursor: char) -> CursorState {
-        CursorState {
-            pos: Pos::default(),
-            content: CursorShape::from_char(cursor),
-        }
-    }
-
     pub fn is_visible(&self) -> bool {
         self.content != CursorShape::Hidden
     }
@@ -434,3 +425,12 @@ macro_rules! ops {
 
 ops!(Column, Column, usize);
 ops!(Line, Line, i32);
+
+impl From<char> for CursorState {
+    fn from(cursor: char) -> Self {
+        CursorState {
+            pos: Pos::default(),
+            content: cursor.into(),
+        }
+    }
+}

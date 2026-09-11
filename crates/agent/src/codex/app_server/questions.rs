@@ -409,7 +409,7 @@ impl Session {
                     return Ok(());
                 };
 
-                let mut text = String::from("Answers to your questions:\n");
+                let mut text: String = "Answers to your questions:\n".into();
 
                 for (index, (question, answers)) in
                     pending.request.questions.iter().zip(answers).enumerate()

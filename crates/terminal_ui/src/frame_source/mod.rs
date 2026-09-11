@@ -311,7 +311,7 @@ impl TerminalFrameSource {
                     default_fg,
                 );
             }
-            Some((row, builder.finish()))
+            Some((row, builder.into()))
         })
         .collect()
     }

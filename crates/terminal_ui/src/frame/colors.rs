@@ -1,5 +1,5 @@
 use nmt_config::colors::term::{DIM_FACTOR, List, TermColors};
-use nmt_config::colors::{AnsiColor, NamedColor};
+use nmt_config::colors::{AnsiColor, ColorArray, NamedColor};
 use nmt_terminal::render_buffer::RenderBuffer;
 use nmt_terminal::terminal::square::{ContentTag, Square};
 use nmt_terminal::terminal::style::{Style, StyleFlags};
@@ -81,7 +81,8 @@ impl BackgroundColors {
             }
             AnsiColor::Spec(rgb) => {
                 if dim {
-                    TerminalColor::from_color_arr((*rgb * DIM_FACTOR).to_arr())
+                    let color: ColorArray = (*rgb * DIM_FACTOR).into();
+                    color.into()
                 } else {
                     *rgb
                 }
@@ -106,6 +107,6 @@ impl BackgroundColors {
     }
 
     fn indexed(&self, index: usize) -> TerminalColor {
-        TerminalColor::from_color_arr(self.term_colors[index].unwrap_or(self.colors[index]))
+        self.term_colors[index].unwrap_or(self.colors[index]).into()
     }
 }

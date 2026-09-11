@@ -6,8 +6,7 @@ use std::{env, fs, process, slice};
 use gpui::TestAppContext;
 use nmt_config::update::UpdateChannel;
 use nmt_platform::windows::restart_manager::{
-    AffectedApplication, ApplicationKind, ApplicationStatus, FileUsage, Operation, RebootReasons,
-    RestartManagerError,
+    AffectedApplication, ApplicationKind, FileUsage, Operation, RebootReasons, RestartManagerError,
 };
 use nmt_version::Version;
 use parking_lot::Mutex;
@@ -121,7 +120,7 @@ fn application(name: &str, process_id: u32, restartable: bool) -> AffectedApplic
         service_name: None,
         process_id,
         kind: ApplicationKind::Explorer,
-        status: ApplicationStatus::from_bits(0),
+        status: 0.into(),
         terminal_session_id: Some(1),
         restartable,
     }
@@ -424,10 +423,11 @@ fn close_preparation_uses_a_fresh_session_application_list() {
     let current = application("Current host", 22, true);
 
     let state = Arc::new(Mutex::new(CloseState {
-        usage: VecDeque::from([Ok(FileUsage {
+        usage: [Ok(FileUsage {
             applications: vec![current.clone()],
             reboot_reasons: RebootReasons::default(),
-        })]),
+        })]
+        .into(),
         shutdown_error: None,
         restart_error: None,
         events: Vec::new(),
@@ -454,7 +454,7 @@ fn failed_shutdown_restarts_before_remaining_users_are_reported() {
     let current = application("Current host", 22, true);
 
     let state = Arc::new(Mutex::new(CloseState {
-        usage: VecDeque::from([
+        usage: [
             Ok(FileUsage {
                 applications: vec![current.clone()],
                 reboot_reasons: RebootReasons::default(),
@@ -463,7 +463,8 @@ fn failed_shutdown_restarts_before_remaining_users_are_reported() {
                 applications: vec![current.clone()],
                 reboot_reasons: RebootReasons::default(),
             }),
-        ]),
+        ]
+        .into(),
         shutdown_error: Some(351),
         restart_error: None,
         events: Vec::new(),

@@ -6,9 +6,11 @@ use windows::core::Error as WindowsError;
 use crate::{APP_ID, NativeNotification};
 
 fn shortcut_path() -> Result<PathBuf, String> {
-    let app_data = env::var_os("APPDATA").ok_or("APPDATA is unavailable")?;
+    let app_data: PathBuf = env::var_os("APPDATA")
+        .ok_or("APPDATA is unavailable")?
+        .into();
 
-    Ok(PathBuf::from(app_data)
+    Ok(app_data
         .join("Microsoft")
         .join("Windows")
         .join("Start Menu")
@@ -22,12 +24,13 @@ pub(crate) fn show(notification: &NativeNotification) -> Result<(), String> {
     use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
     use windows::core::HSTRING;
 
-    unsafe { SetCurrentProcessExplicitAppUserModelID(&HSTRING::from(APP_ID)) }
+    let app_id: HSTRING = APP_ID.into();
+    unsafe { SetCurrentProcessExplicitAppUserModelID(&app_id) }
         .map_err(|error| error.to_string())?;
 
     let xml = XmlDocument::new().map_err(|error| error.to_string())?;
 
-    xml.LoadXml(&HSTRING::from(toast_xml(notification)))
+    xml.LoadXml(&toast_xml(notification).into())
         .map_err(|error| error.to_string())?;
 
     let toast =
@@ -35,17 +38,17 @@ pub(crate) fn show(notification: &NativeNotification) -> Result<(), String> {
 
     if !notification.tag.is_empty() {
         toast
-            .SetTag(&HSTRING::from(&notification.tag))
+            .SetTag(&(&notification.tag).into())
             .map_err(|error| error.to_string())?;
     }
 
     if !notification.group.is_empty() {
         toast
-            .SetGroup(&HSTRING::from(&notification.group))
+            .SetGroup(&(&notification.group).into())
             .map_err(|error| error.to_string())?;
     }
 
-    let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(APP_ID))
+    let notifier = ToastNotificationManager::CreateToastNotifierWithId(&app_id)
         .map_err(|error| error.to_string())?;
 
     notifier.Show(&toast).map_err(|error| error.to_string())
@@ -53,15 +56,10 @@ pub(crate) fn show(notification: &NativeNotification) -> Result<(), String> {
 
 pub(crate) fn remove(tag: &str, group: &str) -> Result<(), String> {
     use windows::UI::Notifications::ToastNotificationManager;
-    use windows::core::HSTRING;
 
     ToastNotificationManager::History()
         .and_then(|history| {
-            history.RemoveGroupedTagWithId(
-                &HSTRING::from(tag),
-                &HSTRING::from(group),
-                &HSTRING::from(APP_ID),
-            )
+            history.RemoveGroupedTagWithId(&tag.into(), &group.into(), &APP_ID.into())
         })
         .map_err(|error| error.to_string())
 }
@@ -90,7 +88,7 @@ pub(crate) fn register_identity(exe_path: &Path) -> Result<(), String> {
 
     let result = (|| unsafe {
         let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
-        let exe = HSTRING::from(exe_path.to_string_lossy().as_ref());
+        let exe: HSTRING = exe_path.to_string_lossy().as_ref().into();
 
         link.SetPath(&exe)?;
         link.SetIconLocation(&exe, 0)?;
@@ -101,14 +99,15 @@ pub(crate) fn register_identity(exe_path: &Path) -> Result<(), String> {
         };
 
         let store: IPropertyStore = link.cast()?;
-        let app_id = PROPVARIANT::from(APP_ID);
+        let app_id: PROPVARIANT = APP_ID.into();
 
         store.SetValue(&APP_ID_KEY, &app_id)?;
         store.Commit()?;
 
         let persist: IPersistFile = link.cast()?;
 
-        persist.Save(&HSTRING::from(shortcut.to_string_lossy().as_ref()), true)
+        let shortcut: HSTRING = shortcut.to_string_lossy().as_ref().into();
+        persist.Save(&shortcut, true)
     })()
     .map_err(|error: WindowsError| error.to_string());
 

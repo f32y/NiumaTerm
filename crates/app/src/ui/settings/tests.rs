@@ -8,6 +8,7 @@ use gpui::{
 };
 use nmt_agent_ui::{AgentKind, AgentKindExt as _};
 use nmt_config::Config;
+use nmt_config::appearance::SmoothScrollingMode;
 use nmt_config::builtin_themes::{THEMES as BUILTIN_THEMES, get as builtin_theme_source};
 use nmt_config::theme::Theme as ConfigTheme;
 
@@ -17,9 +18,12 @@ use crate::ui::settings::*;
 
 #[test]
 fn cursor_shape_dropdown_values_match_config_shapes() {
-    assert_eq!(cursor_shape_from_value("block"), CursorShape::Block);
-    assert_eq!(cursor_shape_from_value("line"), CursorShape::Beam);
-    assert_eq!(cursor_shape_from_value("underline"), CursorShape::Underline);
+    let parsed: CursorShape = "block".into();
+    assert_eq!(parsed, CursorShape::Block);
+    let parsed: CursorShape = "line".into();
+    assert_eq!(parsed, CursorShape::Beam);
+    let parsed: CursorShape = "underline".into();
+    assert_eq!(parsed, CursorShape::Underline);
 }
 
 #[test]
@@ -151,11 +155,14 @@ fn window_backdrop_value_roundtrip() {
         WindowBackdrop::Acrylic,
         WindowBackdrop::Off,
     ] {
-        assert_eq!(WindowBackdrop::from_value(backdrop.as_str()), backdrop);
+        let value: &str = backdrop.into();
+        let parsed: WindowBackdrop = value.into();
+        assert_eq!(parsed, backdrop);
     }
 
     // Unknown values fall back to the opaque mode, which always renders.
-    assert_eq!(WindowBackdrop::from_value("bogus"), WindowBackdrop::Off);
+    let parsed: WindowBackdrop = "bogus".into();
+    assert_eq!(parsed, WindowBackdrop::Off);
 }
 
 #[test]
@@ -172,11 +179,14 @@ fn git_interval_clamps_to_allowed_set() {
 #[test]
 fn input_style_value_roundtrip() {
     for style in [InputStyle::Waterfall, InputStyle::FixedBottom] {
-        assert_eq!(input_style_from_value(style.as_str()), style);
+        let value: &str = style.into();
+        let parsed: InputStyle = value.into();
+        assert_eq!(parsed, style);
     }
 
     // Unknown values fall back to the default style.
-    assert_eq!(input_style_from_value("bogus"), InputStyle::Waterfall);
+    let parsed: InputStyle = "bogus".into();
+    assert_eq!(parsed, InputStyle::Waterfall);
 }
 
 #[test]
@@ -556,14 +566,15 @@ fn every_registered_harness_can_be_named_seeded_and_launched() {
     // built-in profile all have to agree on the same registry.
     for kind in AgentKind::ALL {
         let profile = builtin_agent_profile(kind.profile_kind());
+        let id: &str = kind.into();
 
-        assert_eq!(profile.kind, kind.profile_kind(), "{}", kind.id());
-        assert!(!profile.executable.trim().is_empty(), "{}", kind.id());
-        assert!(!profile.name.trim().is_empty(), "{}", kind.id());
+        assert_eq!(profile.kind, kind.profile_kind(), "{}", id);
+        assert!(!profile.executable.trim().is_empty(), "{}", id);
+        assert!(!profile.name.trim().is_empty(), "{}", id);
         assert!(
             !agent_kind_display_label(kind.profile_kind()).is_empty(),
             "{} has no display label",
-            kind.id()
+            id
         );
     }
 
@@ -571,7 +582,7 @@ fn every_registered_harness_can_be_named_seeded_and_launched() {
     // existing one, which would make its profiles open the wrong backend.
     for kind in AgentKind::ALL {
         assert_eq!(AgentKind::from_profile(kind.profile_kind()), kind);
-        assert_eq!(AgentKind::from_id(kind.id()), Some(kind));
+        assert_eq!(AgentKind::from_id(kind.into()), Some(kind));
     }
 
     assert_eq!(

@@ -20,16 +20,6 @@ impl WorkflowRunState {
     pub fn is_terminal(self) -> bool {
         matches!(self, Self::Done | Self::Failed | Self::Stopped)
     }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Starting => "Starting",
-            Self::Running => "Running",
-            Self::Done => "Done",
-            Self::Failed => "Failed",
-            Self::Stopped => "Stopped",
-        }
-    }
 }
 
 /// Lifecycle of one agent within a run.
@@ -42,18 +32,6 @@ pub enum WorkflowAgentState {
     /// The run ended before this agent did. Only a restored run reports it:
     /// a live agent always resolves to one of the states above.
     Stopped,
-}
-
-impl WorkflowAgentState {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Queued => "Queued",
-            Self::Running => "Running",
-            Self::Done => "Done",
-            Self::Failed => "Failed",
-            Self::Stopped => "Stopped",
-        }
-    }
 }
 
 /// One of the phases a run declares, in provider order.
@@ -145,5 +123,29 @@ impl WorkflowSnapshot {
     /// while this holds.
     pub fn has_active_run(&self) -> bool {
         self.runs.iter().any(|run| !run.state.is_terminal())
+    }
+}
+
+impl From<WorkflowRunState> for &'static str {
+    fn from(value: WorkflowRunState) -> Self {
+        match value {
+            WorkflowRunState::Starting => "Starting",
+            WorkflowRunState::Running => "Running",
+            WorkflowRunState::Done => "Done",
+            WorkflowRunState::Failed => "Failed",
+            WorkflowRunState::Stopped => "Stopped",
+        }
+    }
+}
+
+impl From<WorkflowAgentState> for &'static str {
+    fn from(value: WorkflowAgentState) -> Self {
+        match value {
+            WorkflowAgentState::Queued => "Queued",
+            WorkflowAgentState::Running => "Running",
+            WorkflowAgentState::Done => "Done",
+            WorkflowAgentState::Failed => "Failed",
+            WorkflowAgentState::Stopped => "Stopped",
+        }
     }
 }

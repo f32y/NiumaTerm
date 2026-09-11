@@ -245,7 +245,7 @@ fn title_bar_controls_stay_inside_a_narrow_window(cx: &mut TestAppContext) {
         };
 
         let right = group("right");
-        let right_edge = f32::from(right.origin.x + right.size.width);
+        let right_edge: f32 = (right.origin.x + right.size.width).into();
 
         assert!(
             right_edge <= width,
@@ -253,11 +253,12 @@ fn title_bar_controls_stay_inside_a_narrow_window(cx: &mut TestAppContext) {
         );
 
         let tabs = group("tabs");
+        let tab_width: f32 = tabs.size.width.into();
 
         assert!(
-            f32::from(tabs.size.width) >= TAB_STRIP_MIN_WIDTH,
+            tab_width >= TAB_STRIP_MIN_WIDTH,
             "at window width {width} the tab strip collapsed to {}",
-            f32::from(tabs.size.width),
+            tab_width,
         );
     }
 }

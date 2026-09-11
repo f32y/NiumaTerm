@@ -18,7 +18,7 @@ use windows::Win32::UI::Shell::{
     IEnumExplorerCommand, IExplorerCommand, IExplorerCommand_Impl, IShellItemArray,
     SIGDN_FILESYSPATH,
 };
-use windows::core::{Error, GUID, IUnknown, PWSTR, Result, implement};
+use windows::core::{GUID, IUnknown, PWSTR, Result, implement};
 use windows_core::{BOOL, Interface, Ref};
 
 const CLSID_NIUMATERM_NEW_TAB: GUID = GUID::from_u128(0xF1D94FEB_1AA5_4B27_9440_C3BC16247C61);
@@ -63,7 +63,7 @@ fn dll_path() -> Option<PathBuf> {
 
     let len = unsafe { GetModuleFileNameW(Some(instance.into()), &mut buf) };
 
-    (len > 0).then(|| PathBuf::from(String::from_utf16_lossy(&buf[..len as usize])))
+    (len > 0).then(|| String::from_utf16_lossy(&buf[..len as usize]).into())
 }
 
 fn alloc_co_task_str(s: &str) -> PWSTR {
@@ -157,7 +157,7 @@ impl IExplorerCommand_Impl for NiumaTermNewTabCommand_Impl {
     }
 
     fn EnumSubCommands(&self) -> Result<IEnumExplorerCommand> {
-        Err(Error::from(E_NOINTERFACE))
+        Err(E_NOINTERFACE.into())
     }
 }
 
@@ -189,7 +189,7 @@ impl IClassFactory_Impl for NiumaTermClassFactory_Impl {
         }
 
         if !punkouter.is_null() {
-            return Err(Error::from(CLASS_E_NOAGGREGATION));
+            return Err(CLASS_E_NOAGGREGATION.into());
         }
 
         unsafe {

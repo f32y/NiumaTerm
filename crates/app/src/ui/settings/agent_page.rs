@@ -47,6 +47,14 @@ fn agent_hook_item(
 }
 
 pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPage {
+    let work_and_tool_calls_key: &str = CollapseRows::WorkAndToolCalls.into();
+    let tool_calls_key: &str = CollapseRows::ToolCalls.into();
+    let off_key: &str = CollapseRows::Off.into();
+    let name_and_id_key: &str = ModelListStyle::NameAndId.into();
+    let id_and_name_key: &str = ModelListStyle::IdAndName.into();
+    let name_only_key: &str = ModelListStyle::NameOnly.into();
+    let id_only_key: &str = ModelListStyle::IdOnly.into();
+
     let installations = agent_updates::installations_for_profiles(agent_profiles, cx);
 
     let general = SettingGroup::new()
@@ -66,28 +74,22 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                 SettingField::dropdown(
                     vec![
                         (
-                            CollapseRows::WorkAndToolCalls.as_str().into(),
+                            work_and_tool_calls_key.into(),
                             i18n("settings-agent-collapse-work-and-tool-calls").into(),
                         ),
                         (
-                            CollapseRows::ToolCalls.as_str().into(),
+                            tool_calls_key.into(),
                             i18n("settings-agent-collapse-only-tool-calls").into(),
                         ),
-                        (
-                            CollapseRows::Off.as_str().into(),
-                            i18n("settings-common-off").into(),
-                        ),
+                        (off_key.into(), i18n("settings-common-off").into()),
                     ],
                     |cx| {
-                        cx.global::<AppSettings>()
-                            .agent
-                            .collapse_tool_calls
-                            .as_str()
-                            .into()
+                        let key: &str = cx.global::<AppSettings>().agent.collapse_tool_calls.into();
+                        key.into()
                     },
                     |value, cx| {
                         cx.global_mut::<AppSettings>().agent.collapse_tool_calls =
-                            CollapseRows::from_value(&value);
+                            value.as_str().into();
                     },
                 ),
             )
@@ -113,32 +115,29 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                 SettingField::dropdown(
                     vec![
                         (
-                            ModelListStyle::NameAndId.as_str().into(),
+                            name_and_id_key.into(),
                             i18n("settings-agent-model-list-style-name-and-id").into(),
                         ),
                         (
-                            ModelListStyle::IdAndName.as_str().into(),
+                            id_and_name_key.into(),
                             i18n("settings-agent-model-list-style-id-and-name").into(),
                         ),
                         (
-                            ModelListStyle::NameOnly.as_str().into(),
+                            name_only_key.into(),
                             i18n("settings-agent-model-list-style-name-only").into(),
                         ),
                         (
-                            ModelListStyle::IdOnly.as_str().into(),
+                            id_only_key.into(),
                             i18n("settings-agent-model-list-style-id-only").into(),
                         ),
                     ],
                     |cx| {
-                        cx.global::<AppSettings>()
-                            .agent
-                            .model_list_style
-                            .as_str()
-                            .into()
+                        let key: &str = cx.global::<AppSettings>().agent.model_list_style.into();
+                        key.into()
                     },
                     |value, cx| {
                         cx.global_mut::<AppSettings>().agent.model_list_style =
-                            ModelListStyle::from_value(&value);
+                            value.as_str().into();
                     },
                 ),
             )

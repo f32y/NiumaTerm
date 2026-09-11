@@ -29,9 +29,10 @@ pub fn enabled() -> bool {
 
 fn log_dir() -> PathBuf {
     if let Some(dir) = env::var_os("NMT_VT_TRACE_DIR") {
-        PathBuf::from(dir)
+        dir.into()
     } else {
-        PathBuf::from("target").join("logs")
+        let target: PathBuf = "target".into();
+        target.join("logs")
     }
 }
 

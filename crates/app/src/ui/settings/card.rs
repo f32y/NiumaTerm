@@ -28,7 +28,7 @@ pub(super) fn card_text_input(
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<InputState> {
-    let state = window.use_keyed_state(SharedString::from(key), cx, {
+    let state = window.use_keyed_state(key, cx, {
         let value = value.clone();
 
         move |window, cx| {
@@ -68,7 +68,7 @@ pub(super) fn card_text_input(
 /// and two hints sharing one would share that state.
 pub(super) fn description_hint(owner: &str, description: SharedString, cx: &App) -> Stateful<Div> {
     gpui::div()
-        .id(SharedString::from(format!("card-hint-{owner}")))
+        .id(format!("card-hint-{owner}"))
         .flex_shrink_0()
         .text_color(cx.theme().muted_foreground)
         .child(Icon::new(IconName::CircleHelp).size_3())

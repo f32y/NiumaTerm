@@ -1,6 +1,6 @@
 // Kitty graphics protocol virtual placement encoding/decoding
 
-use nmt_config::colors::{AnsiColor, ColorRgb};
+use nmt_config::colors::AnsiColor;
 
 /// The Kitty Unicode placeholder codepoint (U+10EEEE). Cells containing
 /// this codepoint are interpreted as image placeholders; their fg color
@@ -322,15 +322,6 @@ pub fn diacritic_to_index(c: char) -> Option<u32> {
     DIACRITICS.iter().position(|&d| d == c).map(|i| i as u32)
 }
 
-/// Convert an image ID to RGB color (lower 24 bits)
-pub fn id_to_rgb(id: u32) -> ColorRgb {
-    ColorRgb {
-        r: ((id >> 16) & 0xFF) as u8,
-        g: ((id >> 8) & 0xFF) as u8,
-        b: (id & 0xFF) as u8,
-    }
-}
-
 /// Encode virtual placement data into a string with placeholder + diacritics
 ///
 /// Kitty placeholder encoding:
@@ -342,7 +333,7 @@ pub fn id_to_rgb(id: u32) -> ColorRgb {
 /// Image ID (lower 24 bits) is encoded in foreground color
 /// Placement ID is encoded in underline color
 pub fn encode_placeholder(row: u32, col: u32, image_id_high: Option<u8>) -> String {
-    let mut result = String::from('\u{10EEEE}');
+    let mut result: String = '\u{10EEEE}'.into();
 
     // Add row diacritic
     if let Some(d) = index_to_diacritic(row) {
@@ -472,19 +463,6 @@ impl IncompletePlacement {
     pub fn append(&mut self) {
         self.width += 1;
     }
-
-    /// Resolve the run into a final placement, defaulting any still-`None`
-    /// fields. Mirrors ghostty's `complete()`.
-    pub fn complete(&self) -> PlaceholderRun {
-        PlaceholderRun {
-            image_id: ((self.image_id_high.unwrap_or(0) as u32) << 24)
-                | (self.image_id_low & 0x00FF_FFFF),
-            placement_id: self.placement_id,
-            row: self.row.unwrap_or(0),
-            col: self.col.unwrap_or(0),
-            width: self.width,
-        }
-    }
 }
 
 /// One row of cells of a virtual placement that all show consecutive
@@ -607,4 +585,19 @@ pub fn compute_run_geometry(
         height: vis_y1 - vis_y0,
         source_rect: [src_u0, src_v0, src_u1, src_v1],
     })
+}
+
+impl From<&IncompletePlacement> for PlaceholderRun {
+    /// Resolve the run into a final placement, defaulting any still-`None`
+    /// fields. Mirrors ghostty's `complete()`.
+    fn from(value: &IncompletePlacement) -> Self {
+        PlaceholderRun {
+            image_id: ((value.image_id_high.unwrap_or(0) as u32) << 24)
+                | (value.image_id_low & 0x00FF_FFFF),
+            placement_id: value.placement_id,
+            row: value.row.unwrap_or(0),
+            col: value.col.unwrap_or(0),
+            width: value.width,
+        }
+    }
 }

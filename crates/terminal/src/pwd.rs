@@ -13,9 +13,9 @@ pub(crate) fn pwd_to_path(pwd: &str) -> path::PathBuf {
                 path
             };
 
-            return path::PathBuf::from(path);
+            return path.into();
         }
     }
 
-    path::PathBuf::from(pwd)
+    pwd.into()
 }

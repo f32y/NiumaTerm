@@ -4,8 +4,10 @@ use crate::claude_code::usage_fetcher::*;
 fn credentials_path_prefers_an_explicit_claude_config_dir() {
     // Built through `join` rather than written out, so the expectation uses
     // whatever separator the platform's `PathBuf` produces.
-    let config_dir = PathBuf::from("profiles").join("claude");
-    let home = PathBuf::from("home").join("test");
+    let profiles: PathBuf = "profiles".into();
+    let config_dir = profiles.join("claude");
+    let home: PathBuf = "home".into();
+    let home = home.join("test");
 
     assert_eq!(
         credentials_path(Some(config_dir.as_os_str()), Some(&home)),

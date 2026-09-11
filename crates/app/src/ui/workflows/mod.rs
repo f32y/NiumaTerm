@@ -8,9 +8,7 @@
 //! never drives a run.
 
 use gpui::prelude::*;
-use gpui::{
-    AnyElement, Context, Entity, Hsla, ScrollHandle, SharedString, WeakEntity, Window, div, px,
-};
+use gpui::{AnyElement, Context, Entity, Hsla, ScrollHandle, WeakEntity, Window, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::{ActiveTheme as _, IconName, Sizable as _, StyledExt as _, h_flex, v_flex};
 use nmt_agent::workflow::{WorkflowAgent, WorkflowAgentState, WorkflowRun, WorkflowRunState};
@@ -367,7 +365,7 @@ impl WorkflowsView {
         // agent an id, because that id names its transcript.
         match agent_id {
             Some(agent_id) => div()
-                .id(SharedString::from(format!("workflow-agent-{agent_id}")))
+                .id(format!("workflow-agent-{agent_id}"))
                 .w_full()
                 .min_w_0()
                 .cursor_pointer()

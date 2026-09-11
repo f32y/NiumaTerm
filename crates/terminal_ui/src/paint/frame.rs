@@ -119,8 +119,8 @@ fn paint_frame_images(
         let Some((dest, source)) = img.destination(
             cell.width_px,
             cell.height_px,
-            f32::from(bounds.left()),
-            f32::from(bounds.top()),
+            bounds.left().into(),
+            bounds.top().into(),
             row_offset,
         ) else {
             continue;
@@ -145,14 +145,17 @@ pub(crate) fn paint_frozen_images(
         return;
     }
 
+    let left: f32 = bounds.left().into();
+    let top: f32 = bounds.top().into();
+
     for img in &view.images {
         if (img.z >= 0) != above_text {
             continue;
         }
 
         let dest = [
-            f32::from(bounds.left()) + img.col as f32 * cell.width_px,
-            f32::from(bounds.top()) + img.y,
+            left + img.col as f32 * cell.width_px,
+            top + img.y,
             img.width as f32 * cell.width_px,
             cell.height_px,
         ];
@@ -233,7 +236,7 @@ fn paint_cursor(
         return;
     };
 
-    window.paint_quad(fill(bounds, rgb(cursor.color.rgb_u32())));
+    window.paint_quad(fill(bounds, rgb(cursor.color.into())));
 }
 
 pub(crate) fn cursor_bounds(

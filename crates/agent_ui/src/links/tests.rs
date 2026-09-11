@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::links::resolve_local_path;
 
@@ -12,11 +12,11 @@ fn resolves_agent_file_locations() {
     );
     assert_eq!(
         resolve_local_path("C:/Workspace/NiumaTerm/Cargo.toml:582", Some(cwd)),
-        Some(PathBuf::from("C:/Workspace/NiumaTerm/Cargo.toml"))
+        Some("C:/Workspace/NiumaTerm/Cargo.toml".into())
     );
     assert_eq!(
         resolve_local_path("/C:/Workspace/NiumaTerm/Cargo.toml:111", Some(cwd)),
-        Some(PathBuf::from("C:/Workspace/NiumaTerm/Cargo.toml"))
+        Some("C:/Workspace/NiumaTerm/Cargo.toml".into())
     );
     assert_eq!(
         resolve_local_path("crates/app/src/main.rs:42:7", Some(cwd)),

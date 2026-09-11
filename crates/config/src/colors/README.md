@@ -26,9 +26,9 @@ without depending on `wgpu`. `ColorWGPU` is kept as a legacy type alias.
 
 ```rust
 let color: nmt_config::render_types::Color =
-    ColorBuilder::from_hex(String::from("#151515"), Format::SRGB0_1)
+    ColorBuilder::from_hex("#151515".into(), Format::SRGB0_1)
         .unwrap()
-        .to_wgpu();
+        .into();
 
 assert_eq!(
     color,

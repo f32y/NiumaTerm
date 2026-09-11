@@ -18,7 +18,7 @@ fn resolve_local_path(target: &str, cwd: Option<&Path>) -> Option<PathBuf> {
     }
 
     let target = strip_extra_drive_slash(target);
-    let path = PathBuf::from(target);
+    let path: PathBuf = target.into();
 
     if path.is_absolute() || has_windows_root(target) {
         Some(path)

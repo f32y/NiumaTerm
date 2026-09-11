@@ -130,11 +130,7 @@ fn opacity_slider_field(target: OpacityTarget) -> SettingField<SharedString> {
                         .text_color(cx.theme().primary),
                 ),
             )
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .child(SharedString::from(format!("{current:.2}"))),
-            )
+            .child(div().flex_shrink_0().child(format!("{current:.2}")))
     })
 }
 
@@ -154,10 +150,10 @@ pub(super) fn background_image_field() -> SettingField<SharedString> {
             .background_image
             .clone();
 
-        let label = SharedString::from(
-            path.clone()
-                .unwrap_or_else(|| i18n("settings-common-none").to_string()),
-        );
+        let label: SharedString = path
+            .clone()
+            .unwrap_or_else(|| i18n("settings-common-none").to_string())
+            .into();
 
         h_flex()
             .map(|this| {

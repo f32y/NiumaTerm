@@ -31,7 +31,8 @@ async fn settings_refresh_colors_metrics_and_layout_without_repeating_cursor_req
         .unwrap();
     assert_eq!(model.settings.cursor_shape, CursorShape::Beam);
     assert_eq!(model.settings.pad_rows, 0.0);
-    assert_eq!(model.theme.foreground.rgb_u32(), 0x0c2238);
+    let foreground: u32 = model.theme.foreground.into();
+    assert_eq!(foreground, 0x0c2238);
     assert_eq!(model.duration_labels.seconds, "{seconds} seconds");
     assert!(model.cell_metrics.is_none());
     assert!(model.frame_cache.needs_rebuild());

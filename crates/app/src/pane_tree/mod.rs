@@ -25,15 +25,6 @@ pub enum SplitDirection {
 }
 
 impl SplitDirection {
-    /// Left/Right split side-by-side (horizontal group); Up/Down stack
-    /// (vertical group).
-    pub fn axis(self) -> Axis {
-        match self {
-            Self::Left | Self::Right => Axis::Horizontal,
-            Self::Up | Self::Down => Axis::Vertical,
-        }
-    }
-
     /// True when the new pane goes before the focused one (Left/Up).
     pub fn before(self) -> bool {
         matches!(self, Self::Left | Self::Up)
@@ -124,12 +115,6 @@ impl<L, S: Clone> PaneTree<L, S> {
         }
     }
 
-    /// Build from a restored root; focus falls to the first leaf.
-    pub fn from_root(root: PaneNode<L, S>) -> Self {
-        let focused = root.first_leaf_id();
-        Self { root, focused }
-    }
-
     pub fn root(&self) -> &PaneNode<L, S> {
         &self.root
     }
@@ -194,7 +179,7 @@ impl<L, S: Clone> PaneTree<L, S> {
         direction: SplitDirection,
         make_state: impl FnOnce() -> S,
     ) -> SplitOutcome<S> {
-        let axis = direction.axis();
+        let axis: Axis = direction.into();
         let before = direction.before();
         let focused = self.focused;
 
@@ -456,3 +441,22 @@ impl<L, S: Clone> PaneTree<L, S> {
 
 #[cfg(test)]
 mod tests;
+
+impl<L, S> From<PaneNode<L, S>> for PaneTree<L, S> {
+    /// Build from a restored root; focus falls to the first leaf.
+    fn from(root: PaneNode<L, S>) -> Self {
+        let focused = root.first_leaf_id();
+        Self { root, focused }
+    }
+}
+
+impl From<SplitDirection> for Axis {
+    /// Left/Right split side-by-side (horizontal group); Up/Down stack
+    /// (vertical group).
+    fn from(value: SplitDirection) -> Self {
+        match value {
+            SplitDirection::Left | SplitDirection::Right => Axis::Horizontal,
+            SplitDirection::Up | SplitDirection::Down => Axis::Vertical,
+        }
+    }
+}

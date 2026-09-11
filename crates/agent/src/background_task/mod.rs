@@ -22,16 +22,6 @@ pub enum BackgroundTaskProvider {
     DeepSeek,
 }
 
-impl BackgroundTaskProvider {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Codex => "Codex",
-            Self::ClaudeCode => "Claude Code",
-            Self::DeepSeek => "DeepSeek Harness",
-        }
-    }
-}
-
 /// A provider plus a provider-local stable id. Used both for a child task and
 /// for the parent session that owns it, because both need the same
 /// qualification to stay distinct across simultaneously open providers.
@@ -166,18 +156,6 @@ impl BackgroundTaskState {
     /// is active but blocked, so it counts as active and is reported separately.
     pub fn is_active(self) -> bool {
         !self.is_terminal()
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Starting => "Starting",
-            Self::Working => "Working",
-            Self::NeedsInput => "Needs Input",
-            Self::Done => "Done",
-            Self::Interrupted => "Interrupted",
-            Self::Stopped => "Stopped",
-            Self::Failed => "Failed",
-        }
     }
 }
 
@@ -609,3 +587,27 @@ pub(crate) fn replace_text(current: &mut Option<String>, incoming: &Option<Strin
 
 #[cfg(test)]
 mod tests;
+
+impl From<BackgroundTaskProvider> for &'static str {
+    fn from(value: BackgroundTaskProvider) -> Self {
+        match value {
+            BackgroundTaskProvider::Codex => "Codex",
+            BackgroundTaskProvider::ClaudeCode => "Claude Code",
+            BackgroundTaskProvider::DeepSeek => "DeepSeek Harness",
+        }
+    }
+}
+
+impl From<BackgroundTaskState> for &'static str {
+    fn from(value: BackgroundTaskState) -> Self {
+        match value {
+            BackgroundTaskState::Starting => "Starting",
+            BackgroundTaskState::Working => "Working",
+            BackgroundTaskState::NeedsInput => "Needs Input",
+            BackgroundTaskState::Done => "Done",
+            BackgroundTaskState::Interrupted => "Interrupted",
+            BackgroundTaskState::Stopped => "Stopped",
+            BackgroundTaskState::Failed => "Failed",
+        }
+    }
+}

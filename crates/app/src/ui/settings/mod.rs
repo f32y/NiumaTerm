@@ -54,7 +54,6 @@ use nmt_agent::codex::hook as codex_hook;
 use nmt_agent::update::{DiscoverySupport, InstallationKey, ProviderKind, UpdatePhase};
 #[cfg(test)]
 use nmt_config::CursorShape;
-use nmt_config::appearance::SmoothScrollingMode;
 use nmt_config::system::{NewlineShortcut, WarnBeforeTerminatingShell};
 use nmt_i18n::i18n;
 use nmt_platform::{
@@ -97,7 +96,7 @@ use crate::ui::settings::remote_session_page::remote_session_page;
 pub(crate) use crate::ui::settings::state::builtin_agent_profile;
 pub use crate::ui::settings::state::{
     AgentProfile, AgentProfileKind, AgentProfileLauncher, AppSettings, CollapseRows, EnvVar,
-    InputStyle, Language, MIN_TAB_WIDTH, ModelListStyle, Profile, TabBarStyle, WindowBackdrop,
+    InputStyle, MIN_TAB_WIDTH, ModelListStyle, Profile, TabBarStyle, WindowBackdrop,
 };
 #[cfg(test)]
 use crate::ui::settings::state::{
@@ -111,8 +110,7 @@ pub(crate) use crate::ui::settings::state::{
     DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_UI_FONT,
 };
 use crate::ui::settings::state::{
-    agent_kind_display_label, clamp_git_interval, clamp_tab_width, cursor_shape_from_value,
-    input_style_from_value, input_style_label,
+    agent_kind_display_label, clamp_git_interval, clamp_tab_width, input_style_label,
 };
 use crate::ui::settings::system_page::system_page;
 use crate::ui::settings::table::{

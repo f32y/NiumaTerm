@@ -615,12 +615,12 @@ impl GhosttyTerminal {
 
     pub fn set_theme_colors(&mut self, colors: &Colors) {
         use nmt_config::colors::term::List;
-        use nmt_config::colors::{ColorRgb, NamedColor};
+        use nmt_config::colors::{ColorArray, ColorRgb, NamedColor};
 
-        let list = List::from(colors);
+        let list: List = colors.into();
 
-        let to_rgb = |color| {
-            let color = ColorRgb::from_color_arr(color);
+        let to_rgb = |color: ColorArray| {
+            let color: ColorRgb = color.into();
             [color.r, color.g, color.b]
         };
 

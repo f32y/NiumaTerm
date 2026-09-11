@@ -67,7 +67,7 @@ pub(crate) struct InputHistoryNavigation {
 
 impl InputHistoryNavigation {
     pub(crate) fn reset(&mut self) {
-        self.entries = Arc::from([]);
+        self.entries = [].into();
         self.index = None;
     }
 

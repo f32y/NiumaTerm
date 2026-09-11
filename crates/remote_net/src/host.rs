@@ -9,9 +9,7 @@ use std::{io, thread};
 
 use futures::stream::SplitSink;
 use futures::{SinkExt, StreamExt};
-use nmt_remote_session_hub::{
-    RemoteSessionHub, SessionEvent, SessionId, SessionInfo, SessionOptions,
-};
+use nmt_remote_session_hub::{RemoteSessionHub, SessionEvent, SessionId};
 use parking_lot::Mutex;
 use tokio::runtime::Builder as RuntimeBuilder;
 use tokio::sync::{mpsc, watch};
@@ -21,8 +19,8 @@ use tracing::{info, warn};
 
 use crate::protocol::{
     CONNECT_MODE_IK, CONNECT_MODE_PAIR, ClientBound, Frame, Handshake, HostBound, MAX_DATA_LEN,
-    PairingCode, ProtocolSessionInfo, ProtocolSessionOptions, ProtocolSessionSnapshot,
-    SecureChannel, StaticKeypair, derive_host_id, new_pairing_token,
+    PairingCode, ProtocolSessionSnapshot, SecureChannel, StaticKeypair, derive_host_id,
+    new_pairing_token,
 };
 use crate::{
     AuthorizedDevices, KeyStoreError, NetError, RelayControlMessage, WsStream, hex_encode,
@@ -557,7 +555,7 @@ fn handle_frame(
     event_tx: &mpsc::UnboundedSender<(u64, SessionEvent)>,
     bridges: &mut HashMap<u64, SubscriptionBridge>,
 ) -> Option<Result<Frame, NetError>> {
-    let reply = |msg: &ClientBound| Some(Frame::control(msg).map_err(NetError::from));
+    let reply = |msg: &ClientBound| Some(Frame::control(msg).map_err(Into::into));
 
     let error = |session_id: Option<u64>, e: &dyn Display| {
         reply(&ClientBound::Error {
@@ -579,19 +577,19 @@ fn handle_frame(
                         .hub
                         .list_sessions()
                         .into_iter()
-                        .map(to_protocol_info)
+                        .map(Into::into)
                         .collect();
 
                     reply(&ClientBound::SessionList(sessions))
                 }
-                HostBound::Open(options) => match shared.hub.open(to_hub_options(options)) {
+                HostBound::Open(options) => match shared.hub.open(options.into()) {
                     Ok(id) => reply(&ClientBound::Opened { session_id: id.0 }),
                     Err(e) => error(None, &e),
                 },
                 HostBound::Attach { session_id } => {
                     match shared.hub.attach(SessionId(session_id)) {
                         Ok(subscription) => {
-                            let snapshot = to_protocol_snapshot(subscription.snapshot());
+                            let snapshot: ProtocolSessionSnapshot = subscription.snapshot().into();
 
                             bridges.insert(
                                 session_id,
@@ -661,46 +659,4 @@ fn constant_time_eq(a: &[u8; 16], b: &[u8; 16]) -> bool {
         .zip(b.iter())
         .fold(0u8, |acc, (x, y)| acc | (x ^ y))
         == 0
-}
-
-fn to_hub_options(request: ProtocolSessionOptions) -> SessionOptions {
-    let mut options = SessionOptions::default();
-
-    if let Some(shell) = request.shell {
-        options.shell = shell;
-    }
-
-    options.working_directory = request.working_directory;
-
-    if request.cols > 0 {
-        options.cols = request.cols;
-    }
-
-    if request.rows > 0 {
-        options.rows = request.rows;
-    }
-
-    options
-}
-
-fn to_protocol_info(info: SessionInfo) -> ProtocolSessionInfo {
-    ProtocolSessionInfo {
-        session_id: info.id.0,
-        shell: info.shell,
-        title: info.title.unwrap_or_default(),
-        exited: info.exited,
-        attached_clients: info.attached_clients as u32,
-    }
-}
-
-fn to_protocol_snapshot(
-    snapshot: &nmt_remote_session_hub::SessionSnapshot,
-) -> ProtocolSessionSnapshot {
-    ProtocolSessionSnapshot {
-        session_id: snapshot.session_id.0,
-        base_seq: snapshot.base_seq,
-        vt: snapshot.vt.clone(),
-        cols: snapshot.cols,
-        rows: snapshot.rows,
-    }
 }

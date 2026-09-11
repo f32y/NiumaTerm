@@ -45,32 +45,6 @@ impl RemoteSession {
     pub fn snapshot(&self) -> &ProtocolSessionSnapshot {
         &self.snapshot
     }
-
-    /// A cloneable input handle usable independently of the output receiver, so
-    /// the terminal PTY adapter can own the byte stream while the UI still sends
-    /// input/resize.
-    pub fn input(&self) -> RemoteInput {
-        RemoteInput {
-            session_id: self.session_id,
-            commands: self.commands.clone(),
-        }
-    }
-
-    /// Transfer the snapshot and both stream directions without copying VT bytes.
-    pub fn into_parts(
-        self,
-    ) -> (
-        ProtocolSessionSnapshot,
-        RemoteInput,
-        std_mpsc::Receiver<SessionByteEvent>,
-    ) {
-        let input = RemoteInput {
-            session_id: self.session_id,
-            commands: self.commands,
-        };
-
-        (self.snapshot, input, self.output)
-    }
 }
 
 /// Write side of a remote session: input and resize, decoupled from the output
@@ -463,4 +437,34 @@ pub fn list_remote_sessions(
         .map_err(|e| NetError::Internal(e.to_string()))?;
 
     rx.recv().map_err(|_| NetError::Closed)?
+}
+
+impl From<RemoteSession>
+    for (
+        ProtocolSessionSnapshot,
+        RemoteInput,
+        std_mpsc::Receiver<SessionByteEvent>,
+    )
+{
+    /// Transfer the snapshot and both stream directions without copying VT bytes.
+    fn from(value: RemoteSession) -> Self {
+        let input = RemoteInput {
+            session_id: value.session_id,
+            commands: value.commands,
+        };
+
+        (value.snapshot, input, value.output)
+    }
+}
+
+impl From<&RemoteSession> for RemoteInput {
+    /// A cloneable input handle usable independently of the output receiver, so
+    /// the terminal PTY adapter can own the byte stream while the UI still sends
+    /// input/resize.
+    fn from(value: &RemoteSession) -> Self {
+        RemoteInput {
+            session_id: value.session_id,
+            commands: value.commands.clone(),
+        }
+    }
 }

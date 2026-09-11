@@ -181,30 +181,13 @@ pub struct ConversationBranch {
 }
 
 impl ConversationBranch {
-    pub fn view(&self) -> BranchView<'_> {
-        match &self.state {
-            None => BranchView::Idle,
-            Some(State::LoadingFork { .. }) => BranchView::LoadingFork,
-            Some(State::ForkPicker { checkpoints, .. }) => BranchView::ForkCheckpoints(checkpoints),
-            Some(State::Branching { .. }) => BranchView::Working,
-            Some(State::Local(local)) => match &local.phase {
-                LocalPhase::Loading(_) => BranchView::LoadingRewind,
-                LocalPhase::Checkpoints(checkpoints) => BranchView::RewindCheckpoints(checkpoints),
-                LocalPhase::Selecting { checkpoint, files } => {
-                    BranchView::RewindAction(checkpoint, *files)
-                }
-                _ => BranchView::Working,
-            },
-        }
-    }
-
     pub fn holds_composer(&self) -> bool {
         self.state.is_some()
     }
 
     pub fn picker_is_open(&self) -> bool {
         matches!(
-            self.view(),
+            self.into(),
             BranchView::LoadingRewind
                 | BranchView::RewindCheckpoints(_)
                 | BranchView::RewindAction(_, _)
@@ -214,7 +197,7 @@ impl ConversationBranch {
     }
 
     pub fn is_working(&self) -> bool {
-        matches!(self.view(), BranchView::Working)
+        matches!(self.into(), BranchView::Working)
     }
 
     pub fn cancel_picker(&mut self) -> bool {
@@ -347,5 +330,24 @@ impl ConversationBranch {
             files,
             error: BranchError::Failed(error),
         })
+    }
+}
+
+impl<'a> From<&'a ConversationBranch> for BranchView<'a> {
+    fn from(value: &'a ConversationBranch) -> Self {
+        match &value.state {
+            None => BranchView::Idle,
+            Some(State::LoadingFork { .. }) => BranchView::LoadingFork,
+            Some(State::ForkPicker { checkpoints, .. }) => BranchView::ForkCheckpoints(checkpoints),
+            Some(State::Branching { .. }) => BranchView::Working,
+            Some(State::Local(local)) => match &local.phase {
+                LocalPhase::Loading(_) => BranchView::LoadingRewind,
+                LocalPhase::Checkpoints(checkpoints) => BranchView::RewindCheckpoints(checkpoints),
+                LocalPhase::Selecting { checkpoint, files } => {
+                    BranchView::RewindAction(checkpoint, *files)
+                }
+                _ => BranchView::Working,
+            },
+        }
     }
 }

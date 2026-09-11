@@ -256,11 +256,10 @@ fn measure<C, T>(
 
     for (operation, total) in OPERATIONS.into_iter().zip(totals) {
         if total.calls > 0 {
+            let operation: &str = operation.into();
             eprintln!(
                 "  {}: calls={} allocations={:?}",
-                operation.label(),
-                total.calls,
-                total.allocations
+                operation, total.calls, total.allocations
             );
         }
     }

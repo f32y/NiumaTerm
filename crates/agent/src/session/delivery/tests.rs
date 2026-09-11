@@ -307,19 +307,19 @@ fn a_provider_start_after_recovering_a_prompt_opens_a_fresh_turn() {
 #[test]
 fn confirmed_text_keeps_its_allocation_through_echo_and_snapshot_paths() {
     let mut delivery = MessageDelivery::new(AgentKind::DeepSeek);
-    let text = String::from("echoed message");
+    let text: String = "echoed message".into();
     let address = text.as_ptr();
     delivery.submit(SendOutcome::Steered, text, || None);
     let echoed = delivery.echoed("echoed message").unwrap();
     assert_eq!(echoed.as_ptr(), address);
 
-    let text = String::from("claimed message");
+    let text: String = "claimed message".into();
     let address = text.as_ptr();
     delivery.submit(SendOutcome::Steered, text, || None);
     let claimed = delivery.snapshot(vec![]);
     assert_eq!(claimed[0].as_ptr(), address);
 
-    let text = String::from("flushed message");
+    let text: String = "flushed message".into();
     let address = text.as_ptr();
     delivery.submit(SendOutcome::Steered, text, || None);
     delivery.exited();

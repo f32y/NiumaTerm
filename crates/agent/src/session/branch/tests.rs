@@ -98,7 +98,7 @@ fn cancelled_disk_reads_cannot_publish_into_a_new_picker() {
         flow.checkpoints_loaded(runtime.epoch(), old, Ok(Vec::new())),
         BranchUpdate::Ignored
     ));
-    assert!(matches!(flow.view(), BranchView::LoadingRewind));
+    assert!(matches!((&flow).into(), BranchView::LoadingRewind));
     assert!(matches!(
         flow.checkpoints_loaded(runtime.epoch(), new, Ok(vec![checkpoint()])),
         BranchUpdate::Picker { .. }
@@ -126,7 +126,7 @@ fn wrong_prompt_text_falls_back_to_picker_and_unknown_rows_cannot_be_selected() 
     let mut other = checkpoint();
     other.user_message_id = "not-listed".into();
     assert!(!flow.select_checkpoint(runtime.epoch(), other));
-    assert!(matches!(flow.view(), BranchView::RewindCheckpoints(_)));
+    assert!(matches!((&flow).into(), BranchView::RewindCheckpoints(_)));
 }
 
 #[test]

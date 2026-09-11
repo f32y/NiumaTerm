@@ -90,7 +90,7 @@ impl ChildExitWatcher {
             Err(err)
         } else {
             Ok(ChildExitWatcher {
-                wait_handle: AtomicPtr::from(wait_handle),
+                wait_handle: wait_handle.into(),
                 event_rx,
                 soft,
                 child_handle,

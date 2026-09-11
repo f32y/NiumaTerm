@@ -20,18 +20,6 @@ pub enum CommandOutcome {
     Failed,
 }
 
-impl CommandOutcome {
-    /// Grade an OSC 133 `;D` exit code. A shell that reports no code offers no
-    /// evidence of failure, so silence reads as success rather than flagging
-    /// every command from a partially integrated shell.
-    pub fn from_exit_code(exit_code: Option<i32>) -> Self {
-        match exit_code {
-            Some(0) | None => Self::Succeeded,
-            Some(_) => Self::Failed,
-        }
-    }
-}
-
 pub struct Tab<S> {
     id: TabId,
     surface: S,
@@ -278,3 +266,15 @@ impl<S> TabManager<S> {
 
 #[cfg(test)]
 mod tests;
+
+impl From<Option<i32>> for CommandOutcome {
+    /// Grade an OSC 133 `;D` exit code. A shell that reports no code offers no
+    /// evidence of failure, so silence reads as success rather than flagging
+    /// every command from a partially integrated shell.
+    fn from(exit_code: Option<i32>) -> Self {
+        match exit_code {
+            Some(0) | None => Self::Succeeded,
+            Some(_) => Self::Failed,
+        }
+    }
+}

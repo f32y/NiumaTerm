@@ -58,7 +58,7 @@ fn agent_snapshot(cx: &App) -> AgentSettings {
         profiles: settings.agent_profiles.clone(),
         background_opacity: main_view_background_opacity(cx),
         font_fallbacks: default_font_fallbacks(),
-        terminal_background: rgb(theme_default_background().rgb_u32()).into(),
+        terminal_background: rgb(theme_default_background().into()).into(),
     }
 }
 

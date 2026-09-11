@@ -29,10 +29,10 @@ fn main() {
         return;
     }
 
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let out_dir: PathBuf = env::var("OUT_DIR").unwrap().into();
 
     let source = match env::var_os(FRAMEWORK_DIR_ENV) {
-        Some(dir) => PathBuf::from(dir),
+        Some(dir) => dir.into(),
         None => fetch_framework(&out_dir),
     };
 

@@ -156,7 +156,7 @@ fn remote_host_status(cx: &mut App) -> Div {
                         .on_click(|_, _, cx: &mut App| {
                             if let Some(code) = remote::begin_pairing() {
                                 cx.global_mut::<AppSettings>().editing.remote_pairing_code =
-                                    Some(code.encode());
+                                    Some((&code).into());
                             }
                         }),
                 ),

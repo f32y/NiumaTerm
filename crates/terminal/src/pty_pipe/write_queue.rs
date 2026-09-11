@@ -17,7 +17,7 @@ impl PtyState {
 
     #[inline]
     pub(super) fn goto_next(&mut self) {
-        self.writing = self.write_list.pop_front().map(Writing::new);
+        self.writing = self.write_list.pop_front().map(Into::into);
     }
 
     #[inline]
@@ -43,14 +43,6 @@ pub(super) struct Writing {
 
 impl Writing {
     #[inline]
-    fn new(c: Cow<'static, [u8]>) -> Writing {
-        Writing {
-            source: c,
-            written: 0,
-        }
-    }
-
-    #[inline]
     pub(super) fn advance(&mut self, n: usize) {
         self.written += n;
     }
@@ -63,5 +55,15 @@ impl Writing {
     #[inline]
     pub(super) fn finished(&self) -> bool {
         self.written >= self.source.len()
+    }
+}
+
+impl From<Cow<'static, [u8]>> for Writing {
+    #[inline]
+    fn from(c: Cow<'static, [u8]>) -> Self {
+        Writing {
+            source: c,
+            written: 0,
+        }
     }
 }

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use gpui::SharedString;
+use gpui::{Global, SharedString};
 use gpui_component::{Icon, IconNamed};
 use nmt_agent::LaunchConfig;
 use nmt_agent::chat::ThreadSettings;
@@ -114,10 +114,13 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
 #[derive(Default)]
 pub struct AgentThreadDefaults(pub(crate) RememberedSettings);
 
-impl gpui::Global for AgentThreadDefaults {}
+impl Global for AgentThreadDefaults {}
 
-impl AgentThreadDefaults {
-    pub fn from_local_state(stored: &BTreeMap<String, StoredAgentDefaults>) -> Self {
+#[cfg(test)]
+mod agent_profile_launch_tests;
+
+impl From<&BTreeMap<String, StoredAgentDefaults>> for AgentThreadDefaults {
+    fn from(stored: &BTreeMap<String, StoredAgentDefaults>) -> Self {
         Self(RememberedSettings::from_entries(stored.iter().map(
             |(kind, d)| {
                 (
@@ -134,9 +137,12 @@ impl AgentThreadDefaults {
             },
         )))
     }
+}
 
-    pub fn to_local_state(&self) -> BTreeMap<String, StoredAgentDefaults> {
-        self.0
+impl From<&AgentThreadDefaults> for BTreeMap<String, StoredAgentDefaults> {
+    fn from(value: &AgentThreadDefaults) -> Self {
+        value
+            .0
             .iter()
             .map(|(kind, s)| {
                 (
@@ -154,6 +160,3 @@ impl AgentThreadDefaults {
             .collect()
     }
 }
-
-#[cfg(test)]
-mod agent_profile_launch_tests;

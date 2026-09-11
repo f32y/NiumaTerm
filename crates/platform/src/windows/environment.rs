@@ -18,7 +18,7 @@ pub fn data_dir() -> PathBuf {
 pub fn home_dir() -> Option<PathBuf> {
     env::var_os("USERPROFILE")
         .or_else(|| env::var_os("HOME"))
-        .map(PathBuf::from)
+        .map(Into::into)
 }
 
 pub fn config_dir(home: &Path) -> PathBuf {

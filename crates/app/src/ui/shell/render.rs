@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use gpui::KeyDownEvent;
 use gpui_component::Disableable;
 use gpui_component::modern_menu::{ModernMenu, dispatch_modern_menu_key};
@@ -634,7 +636,8 @@ impl Render for Shell {
             .background_image
             .clone()
             .map(|path| {
-                img(path::PathBuf::from(path))
+                let path: PathBuf = path.into();
+                img(path)
                     .absolute()
                     .inset_0()
                     .size_full()

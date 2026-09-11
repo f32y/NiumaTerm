@@ -255,8 +255,13 @@ fn scaled_dimensions(width: u32, height: u32) -> Option<(u32, u32)> {
         return None;
     }
 
-    let scale = f64::from(MAX_IMAGE_EDGE) / f64::from(long_edge);
-    let scaled = |edge: u32| ((f64::from(edge) * scale).round() as u32).max(1);
+    let max_edge: f64 = MAX_IMAGE_EDGE.into();
+    let long_edge: f64 = long_edge.into();
+    let scale = max_edge / long_edge;
+    let scaled = |edge: u32| {
+        let edge: f64 = edge.into();
+        ((edge * scale).round() as u32).max(1)
+    };
 
     Some((scaled(width), scaled(height)))
 }

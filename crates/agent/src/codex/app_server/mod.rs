@@ -226,7 +226,7 @@ impl Session {
         deliver: impl Fn(Value) + Send + Sync + 'static,
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Self, String> {
-        let thread_profile = ThreadProfile::from(launch);
+        let thread_profile: ThreadProfile = launch.into();
         let host = CodexHost::acquire(launch, host_catalog, on_stderr)?;
         let deliver: SessionDelivery = Arc::new(deliver);
         let root_delivery = Arc::clone(&deliver);

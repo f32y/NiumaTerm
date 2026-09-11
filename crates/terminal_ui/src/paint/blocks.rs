@@ -53,7 +53,7 @@ pub(crate) fn paint_frozen(
                 ),
                 size(px((end - start) as f32 * cell.width_px), px(cell.height_px)),
             ),
-            rgb(selection_bg.rgb_u32()),
+            rgb(selection_bg.into()),
         ));
     }
 

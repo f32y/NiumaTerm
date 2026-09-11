@@ -25,7 +25,7 @@ fn splitting_session_moves_snapshot_and_preserves_both_stream_directions() {
         commands,
     };
 
-    let (snapshot, input, output) = session.into_parts();
+    let (snapshot, input, output): (_, _, _) = session.into();
 
     assert_eq!(
         snapshot.vt.as_ptr(),

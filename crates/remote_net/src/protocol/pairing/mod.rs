@@ -28,12 +28,6 @@ pub enum PairingCodeError {
 }
 
 impl PairingCode {
-    pub fn encode(&self) -> String {
-        let payload = postcard::to_stdvec(self).expect("in-memory serialization cannot fail");
-        let encoded = base32::encode(base32::Alphabet::Rfc4648 { padding: false }, &payload);
-        format!("{CODE_PREFIX}{encoded}")
-    }
-
     pub fn decode(code: &str) -> Result<Self, PairingCodeError> {
         // Tolerate the mangling that happens to hand-copied strings:
         // surrounding whitespace and lowercased letters.
@@ -69,3 +63,11 @@ pub fn new_pairing_token() -> [u8; 16] {
 
 #[cfg(test)]
 mod tests;
+
+impl From<&PairingCode> for String {
+    fn from(value: &PairingCode) -> Self {
+        let payload = postcard::to_stdvec(value).expect("in-memory serialization cannot fail");
+        let encoded = base32::encode(base32::Alphabet::Rfc4648 { padding: false }, &payload);
+        format!("{CODE_PREFIX}{encoded}")
+    }
+}

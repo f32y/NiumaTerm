@@ -19,15 +19,15 @@ pub fn default_shell() -> Shell {
     #[cfg(not(target_os = "windows"))]
     {
         Shell {
-            program: String::from(""),
-            args: vec![String::from("--login")],
+            program: "".into(),
+            args: vec!["--login".into()],
         }
     }
 
     #[cfg(target_os = "windows")]
     {
         Shell {
-            program: String::from(DEFAULT_CONFIG_SHELL),
+            program: DEFAULT_CONFIG_SHELL.into(),
             args: vec![],
         }
     }
@@ -45,13 +45,13 @@ pub fn default_cursor() -> CursorShape {
 
 #[inline]
 pub fn default_theme() -> String {
-    String::from("modern_dark")
+    "modern_dark".into()
 }
 
 #[inline]
 pub fn default_editor() -> Shell {
     Shell {
-        program: String::from(DEFAULT_EDITOR),
+        program: DEFAULT_EDITOR.into(),
         args: vec![],
     }
 }

@@ -88,7 +88,7 @@ fn mixed_states_group_into_running_and_finished_with_their_counts() {
     // Failed and Stopped keep their own labels rather than a shared one.
     let labels: Vec<_> = finished_rows(&snapshot)
         .iter()
-        .map(|task| task.state.label())
+        .map(|task| task.state.into())
         .collect();
 
     assert!(labels.contains(&"Failed"));
@@ -144,7 +144,8 @@ fn both_providers_render_from_the_same_snapshot_shape() {
     let rows = running_rows(&claude);
 
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].key.provider.label(), "Claude Code");
+    let provider: &str = rows[0].key.provider.into();
+    assert_eq!(provider, "Claude Code");
     assert_eq!(rows[0].display_label(), "Review the diff");
 }
 

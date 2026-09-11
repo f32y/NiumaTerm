@@ -9,7 +9,7 @@ use nmt_platform::process::hidden_command;
 use serde_json::{Value, json};
 
 use crate::AgentWorkspace;
-use crate::input_history::store::{HistoryStore, load_from_path, save_to_path};
+use crate::input_history::store::{HistoryStore, StoredHistory, load_from_path, save_to_path};
 use crate::input_history::{AgentInputHistory, HistoryWriter, InputHistoryScope};
 use crate::session::AgentKind;
 static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(1);
@@ -111,7 +111,7 @@ fn history_directory_keys_follow_native_spelling() {
 
     let path = directory.path().join("history.json");
 
-    save_to_path(&path, &history.snapshot()).expect("save scoped history");
+    save_to_path(&path, &(&history).into()).expect("save scoped history");
 
     let restored = load_from_path(&path).expect("restore scoped history");
 
@@ -156,9 +156,9 @@ fn legacy_migration_and_stale_saves_preserve_distinct_records() {
 
     first.record(&scope, "from first".into());
     second.record(&scope, "from second".into());
-    save_to_path(&path, &first.snapshot()).unwrap();
-    save_to_path(&path, &second.snapshot()).unwrap();
-    save_to_path(&path, &first.snapshot()).unwrap();
+    save_to_path(&path, &(&first).into()).unwrap();
+    save_to_path(&path, &(&second).into()).unwrap();
+    save_to_path(&path, &(&first).into()).unwrap();
 
     let entries = load_from_path(&path).unwrap().entries(&scope);
 
@@ -181,13 +181,13 @@ fn stale_saves_do_not_revive_expired_entries_or_overwrite_invalid_files() {
 
     store.record(&scope, "expired".into());
 
-    let stale = store.snapshot();
+    let stale: StoredHistory = (&store).into();
 
     for index in 0..100 {
         store.record(&scope, format!("new-{index}"));
     }
 
-    save_to_path(&path, &store.snapshot()).unwrap();
+    save_to_path(&path, &(&store).into()).unwrap();
     save_to_path(&path, &stale).unwrap();
 
     let entries = load_from_path(&path).unwrap().entries(&scope);
@@ -196,7 +196,7 @@ fn stale_saves_do_not_revive_expired_entries_or_overwrite_invalid_files() {
 
     fs::write(&path, b"invalid history").unwrap();
 
-    assert!(save_to_path(&path, &store.snapshot()).is_err());
+    assert!(save_to_path(&path, &(&store).into()).is_err());
     assert_eq!(fs::read(&path).unwrap(), b"invalid history");
 }
 
@@ -205,14 +205,14 @@ fn history_process_writer() {
     let Some(path) = env::var_os("NMT_HISTORY_TEST_PATH") else {
         return;
     };
-    let path = PathBuf::from(path);
+    let path: PathBuf = path.into();
     let writer = env::var("NMT_HISTORY_TEST_WRITER").unwrap();
     let scope = scope("local", AgentKind::Codex, path.parent().unwrap());
     let mut history = HistoryStore::default();
 
     for index in 0..15 {
         history.record(&scope, format!("writer-{writer}-{index}"));
-        save_to_path(&path, &history.snapshot()).unwrap();
+        save_to_path(&path, &(&history).into()).unwrap();
     }
 }
 
@@ -292,7 +292,7 @@ fn json_round_trip_preserves_scoped_entries() {
     history.record(&codex, "line one\nline two".into());
     history.record(&claude, "/status".into());
 
-    save_to_path(&path, &history.snapshot()).expect("save history");
+    save_to_path(&path, &(&history).into()).expect("save history");
 
     let restored = load_from_path(&path).expect("load history");
 
@@ -334,7 +334,7 @@ fn failed_save_leaves_the_in_memory_entry_available() {
 
     history.record(&scope, "still available".into());
 
-    assert!(save_to_path(&path, &history.snapshot()).is_err());
+    assert!(save_to_path(&path, &(&history).into()).is_err());
     assert_eq!(history.entries(&scope), ["still available"]);
 }
 
@@ -357,17 +357,17 @@ fn slow_storage_coalesces_saves_and_flush_waits_for_latest_write() {
     let mut store = HistoryStore::default();
 
     store.record(&scope, "first".into());
-    writer.save(store.snapshot()).unwrap();
+    writer.save((&store).into()).unwrap();
     started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
 
     for index in 0..50 {
         store.record(&scope, format!("entry {index}"));
-        writer.save(store.snapshot()).unwrap();
+        writer.save((&store).into()).unwrap();
     }
 
     let (flushed_tx, flushed_rx) = mpsc::sync_channel(0);
 
-    writer.queue(store.snapshot(), Some(flushed_tx)).unwrap();
+    writer.queue((&store).into(), Some(flushed_tx)).unwrap();
 
     assert!(flushed_rx.try_recv().is_err());
 
@@ -404,7 +404,7 @@ fn snapshots_keep_entries_from_before_later_edits() {
 
     store.record(&scope, "original".into());
 
-    let snapshot = store.snapshot();
+    let snapshot: StoredHistory = (&store).into();
 
     store.record(&scope, "later".into());
     save_to_path(&path, &snapshot).unwrap();

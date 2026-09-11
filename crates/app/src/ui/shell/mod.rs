@@ -66,7 +66,7 @@ use crate::cli::CliAction;
 use crate::pane_tree::{PaneId, PaneNode, SplitDirection};
 #[cfg(windows)]
 use crate::remote;
-use crate::tabs::{CommandOutcome, Tab, TabId, TabManager};
+use crate::tabs::{Tab, TabId, TabManager};
 use crate::ui;
 use crate::ui::background_tasks::BackgroundTasksView;
 use crate::ui::floating_surface;

@@ -498,7 +498,7 @@ fn invalid_encrypted_credentials_fail_without_legacy_fallback() {
 
 #[test]
 fn testing_mode_uses_test_subdirectory() {
-    let base = PathBuf::from("NiumaTerm");
+    let base: PathBuf = "NiumaTerm".into();
     assert_eq!(config_dir_for_mode(base.clone(), false), base);
     assert_eq!(config_dir_for_mode(base.clone(), true), base.join("Test"));
 }
@@ -717,9 +717,9 @@ fn built_in_themes_load_without_user_files() {
 
 #[test]
 fn custom_theme_overrides_builtin_case_insensitively() {
-    let mut themes = vec![(String::from("ubuntu"), Theme::default())];
+    let mut themes = vec![("ubuntu".into(), Theme::default())];
 
-    merge_theme(&mut themes, (String::from("Ubuntu"), Theme::default()));
+    merge_theme(&mut themes, ("Ubuntu".into(), Theme::default()));
 
     assert_eq!(themes.len(), 1);
     assert_eq!(themes[0].0, "Ubuntu");

@@ -78,7 +78,7 @@ impl From<&TerminalSettings> for PaneSettings {
 }
 
 pub fn theme_default_background() -> TerminalColor {
-    with_active_colors(|colors| TerminalColor::from_color_arr(colors.background.0))
+    with_active_colors(|colors| colors.background.0.into())
 }
 
 pub(crate) fn duration_labels() -> DurationLabels {

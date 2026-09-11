@@ -47,10 +47,10 @@ pub(crate) struct FrameTheme {
 impl From<&Colors> for FrameTheme {
     fn from(colors: &Colors) -> Self {
         Self {
-            foreground: TerminalColor::from_color_arr(colors.foreground),
-            background: TerminalColor::from_color_arr(colors.background.0),
-            selection_background: TerminalColor::from_color_arr(colors.selection_background),
-            palette: List::from(colors),
+            foreground: colors.foreground.into(),
+            background: colors.background.0.into(),
+            selection_background: colors.selection_background.into(),
+            palette: colors.into(),
         }
     }
 }
@@ -58,7 +58,7 @@ impl From<&Colors> for FrameTheme {
 #[cfg(test)]
 impl Default for FrameTheme {
     fn default() -> Self {
-        Self::from(&Colors::default())
+        (&Colors::default()).into()
     }
 }
 

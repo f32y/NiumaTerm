@@ -155,7 +155,7 @@ impl RememberedSettings {
     pub fn get(&self, kind: AgentKind, profile_name: &str) -> Option<&ThreadSettings> {
         self.0
             .get(Self::key(kind, profile_name))
-            .or_else(|| self.0.get(kind.id()))
+            .or_else(|| self.0.get(kind.into()))
     }
 
     pub fn remember(
@@ -171,7 +171,7 @@ impl RememberedSettings {
 
     fn key(kind: AgentKind, profile_name: &str) -> &str {
         if profile_name.trim().is_empty() {
-            kind.id()
+            kind.into()
         } else {
             profile_name
         }

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use nmt_config::colors::term::TermColors;
 use nmt_config::colors::{ColorArray, Colors, NamedColor};
 use nmt_terminal::ansi::CursorShape;
@@ -20,12 +18,12 @@ use crate::pane_model::frame_cache::TerminalFrameCache;
 
 fn frame_with_line(line: &str) -> TerminalFrame {
     TerminalFrame {
-        lines: Arc::from([line_from_parts(line.to_owned(), Vec::new(), Vec::new())]),
-        line_states: Arc::from([Default::default()]),
+        lines: [line_from_parts(line.to_owned(), Vec::new(), Vec::new())].into(),
+        line_states: [Default::default()].into(),
         cols: line.len(),
         cursor: None,
         scrollbar: Default::default(),
-        images: Arc::from([]),
+        images: [].into(),
     }
 }
 
@@ -35,17 +33,14 @@ fn first_line(frame: &TerminalFrame) -> &str {
 
 #[test]
 fn terminal_cursor_color_prefers_runtime_override() {
-    let expected = ColorArray::from([0.8, 0.1, 0.2, 1.0]);
+    let expected: ColorArray = [0.8, 0.1, 0.2, 1.0];
     let mut term_colors = TermColors::default();
 
     term_colors[NamedColor::Cursor] = Some(expected);
 
     let colors = BackgroundColors::new(term_colors, &FrameTheme::default());
 
-    assert_eq!(
-        colors.named(NamedColor::Cursor),
-        TerminalColor::from_color_arr(expected)
-    );
+    assert_eq!(colors.named(NamedColor::Cursor), expected.into());
 }
 
 #[test]
@@ -58,9 +53,10 @@ fn block_cursor_uses_terminal_background_for_glyph() {
 
     engine.snapshot_into(&mut buf).unwrap();
 
-    let gray = |value: u8| {
-        let value = f32::from(value) / 255.;
-        ColorArray::from([value, value, value, 1.])
+    let gray = |value: u8| -> ColorArray {
+        let value: f32 = value.into();
+        let value = value / 255.;
+        [value, value, value, 1.]
     };
 
     let mut term_colors = TermColors::default();
@@ -459,7 +455,7 @@ fn selection_overlay_uses_selection_background() {
         &GenerationMap::new(),
     );
 
-    let selected = TerminalColor::from_color_arr(Colors::default().selection_background);
+    let selected: TerminalColor = Colors::default().selection_background.into();
     let cells = frame.lines()[0].cells();
 
     assert_eq!(cells[0].background, None);

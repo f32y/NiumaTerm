@@ -105,7 +105,7 @@ impl SessionInput {
             return None;
         }
 
-        let mut draft = QuestionDraft::from_request(request);
+        let mut draft: QuestionDraft = request.into();
         draft.identity = runtime
             .backend()
             .and_then(|backend| backend.recovery_identity());

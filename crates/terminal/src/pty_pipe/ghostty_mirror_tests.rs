@@ -248,7 +248,7 @@ fn disabled_terminal_responses_are_forwarded_without_replying() {
         Arc::new(AtomicU32::new(0)),
         pty,
         VoidListener {},
-        event::WindowId::from(0),
+        0.into(),
         &SessionOptions {
             cols: 20,
             rows: 3,
@@ -292,7 +292,7 @@ fn resize_message_publishes_snapshot_to_render_buffer() {
         vt_modes,
         pty,
         VoidListener {},
-        event::WindowId::from(0),
+        0.into(),
         &SessionOptions {
             cols: 20,
             rows: 3,
@@ -348,7 +348,7 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
         Arc::new(AtomicU32::new(0)),
         pty,
         VoidListener {},
-        event::WindowId::from(0),
+        0.into(),
         &SessionOptions {
             cols: 20,
             rows: 3,
@@ -436,7 +436,7 @@ fn osc_progress_hides_published_cursor_until_removed() {
         Arc::new(AtomicU32::new(0)),
         pty,
         VoidListener {},
-        event::WindowId::from(0),
+        0.into(),
         &SessionOptions {
             cols: 80,
             rows: 3,
@@ -508,7 +508,7 @@ fn conpty_resize_echo_realigns_machine_pty_read_to_cursor_row() {
         vt_modes,
         pty,
         VoidListener {},
-        event::WindowId::from(0),
+        0.into(),
         &SessionOptions {
             cols: 134,
             rows: 42,
@@ -565,7 +565,7 @@ fn conpty_resize_repaint_realigns_clear_without_new_input() {
         vt_modes,
         pty,
         VoidListener {},
-        event::WindowId::from(0),
+        0.into(),
         &SessionOptions {
             cols: 134,
             rows: 42,
@@ -625,7 +625,7 @@ fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
         vt_modes,
         pty,
         VoidListener {},
-        event::WindowId::from(0),
+        0.into(),
         &SessionOptions {
             cols: 20,
             rows: 4,
@@ -712,7 +712,7 @@ fn conpty_resize_echo_routes_to_active_cursor_when_scrolled_typing() {
         vt_modes,
         pty,
         VoidListener {},
-        event::WindowId::from(0),
+        0.into(),
         &SessionOptions {
             cols: 20,
             rows: 4,
@@ -819,7 +819,7 @@ fn pty_read_events(
         Arc::new(AtomicU32::new(0)),
         pty,
         CollectingListener(Arc::clone(&events)),
-        event::WindowId::from(0),
+        0.into(),
         &SessionOptions {
             cols: 80,
             rows: 24,

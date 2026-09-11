@@ -6,7 +6,7 @@ fn reader_with(bytes: &[u8]) -> (NetReader, SoftReady) {
     ready.set_ready();
 
     let reader = NetReader {
-        buffer: Arc::new(Mutex::new(VecDeque::from(bytes.to_vec()))),
+        buffer: Arc::new(Mutex::new(bytes.to_vec().into())),
         read_ready: ready.clone(),
     };
 
@@ -35,7 +35,7 @@ fn reader_yields_bytes_then_signals_drained() {
 
 #[test]
 fn buffer_overflow_keeps_the_newest_bytes() {
-    let mut queue = VecDeque::from(vec![b'x'; MAX_BUFFERED_BYTES]);
+    let mut queue: VecDeque<_> = vec![b'x'; MAX_BUFFERED_BYTES].into();
 
     assert!(!push_bounded(&mut queue, Vec::new()), "at the cap is fine");
 

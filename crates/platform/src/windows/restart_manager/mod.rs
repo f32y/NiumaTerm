@@ -35,10 +35,6 @@ pub enum ApplicationKind {
 pub struct ApplicationStatus(u32);
 
 impl ApplicationStatus {
-    pub fn from_bits(bits: u32) -> Self {
-        Self(bits)
-    }
-
     pub fn bits(self) -> u32 {
         self.0
     }
@@ -208,7 +204,7 @@ impl<A: Api> Session<A> {
         if code == ERROR_SUCCESS {
             return Ok(FileUsage {
                 applications: Vec::new(),
-                reboot_reasons: decode_reboot_reasons(reboot_reasons),
+                reboot_reasons: reboot_reasons.into(),
             });
         }
 
@@ -236,8 +232,8 @@ impl<A: Api> Session<A> {
             check(Operation::ListApplications, code)?;
             processes.truncate(count as usize);
             return Ok(FileUsage {
-                applications: processes.into_iter().map(decode_application).collect(),
-                reboot_reasons: decode_reboot_reasons(reboot_reasons),
+                applications: processes.into_iter().map(Into::into).collect(),
+                reboot_reasons: reboot_reasons.into(),
             });
         }
 
@@ -288,55 +284,6 @@ fn wide_text(value: &[u16]) -> String {
         .unwrap_or(value.len());
 
     String::from_utf16_lossy(&value[..end])
-}
-
-fn decode_application(process: RM_PROCESS_INFO) -> AffectedApplication {
-    let service_name = wide_text(&process.strServiceShortName);
-
-    AffectedApplication {
-        name: wide_text(&process.strAppName),
-        service_name: (!service_name.is_empty()).then_some(service_name),
-        process_id: process.Process.dwProcessId,
-        kind: application_kind(process.ApplicationType),
-        status: ApplicationStatus(process.AppStatus),
-        terminal_session_id: (process.TSSessionId != u32::MAX).then_some(process.TSSessionId),
-        restartable: process.bRestartable != 0,
-    }
-}
-
-fn application_kind(kind: i32) -> ApplicationKind {
-    if kind == RmMainWindow {
-        ApplicationKind::MainWindow
-    } else if kind == RmOtherWindow {
-        ApplicationKind::OtherWindow
-    } else if kind == RmService {
-        ApplicationKind::Service
-    } else if kind == RmExplorer {
-        ApplicationKind::Explorer
-    } else if kind == RmConsole {
-        ApplicationKind::Console
-    } else if kind == RmCritical {
-        ApplicationKind::Critical
-    } else {
-        ApplicationKind::Unknown
-    }
-}
-
-fn decode_reboot_reasons(bits: u32) -> RebootReasons {
-    let known = RmRebootReasonPermissionDenied as u32
-        | RmRebootReasonSessionMismatch as u32
-        | RmRebootReasonCriticalProcess as u32
-        | RmRebootReasonCriticalService as u32
-        | RmRebootReasonDetectedSelf as u32;
-
-    RebootReasons {
-        permission_denied: bits & RmRebootReasonPermissionDenied as u32 != 0,
-        session_mismatch: bits & RmRebootReasonSessionMismatch as u32 != 0,
-        critical_process: bits & RmRebootReasonCriticalProcess as u32 != 0,
-        critical_service: bits & RmRebootReasonCriticalService as u32 != 0,
-        detected_self: bits & RmRebootReasonDetectedSelf as u32 != 0,
-        unknown_bits: bits & !known,
-    }
 }
 
 trait Api {
@@ -397,5 +344,66 @@ impl Api for SystemApi {
 
     fn restart(&self, handle: u32, flags: u32, callback: RM_WRITE_STATUS_CALLBACK) -> WIN32_ERROR {
         unsafe { RmRestart(handle, flags, callback) }
+    }
+}
+
+impl From<u32> for ApplicationStatus {
+    fn from(bits: u32) -> Self {
+        Self(bits)
+    }
+}
+
+impl From<RM_PROCESS_INFO> for AffectedApplication {
+    fn from(process: RM_PROCESS_INFO) -> Self {
+        let service_name = wide_text(&process.strServiceShortName);
+
+        AffectedApplication {
+            name: wide_text(&process.strAppName),
+            service_name: (!service_name.is_empty()).then_some(service_name),
+            process_id: process.Process.dwProcessId,
+            kind: process.ApplicationType.into(),
+            status: ApplicationStatus(process.AppStatus),
+            terminal_session_id: (process.TSSessionId != u32::MAX).then_some(process.TSSessionId),
+            restartable: process.bRestartable != 0,
+        }
+    }
+}
+
+impl From<i32> for ApplicationKind {
+    fn from(kind: i32) -> Self {
+        if kind == RmMainWindow {
+            ApplicationKind::MainWindow
+        } else if kind == RmOtherWindow {
+            ApplicationKind::OtherWindow
+        } else if kind == RmService {
+            ApplicationKind::Service
+        } else if kind == RmExplorer {
+            ApplicationKind::Explorer
+        } else if kind == RmConsole {
+            ApplicationKind::Console
+        } else if kind == RmCritical {
+            ApplicationKind::Critical
+        } else {
+            ApplicationKind::Unknown
+        }
+    }
+}
+
+impl From<u32> for RebootReasons {
+    fn from(bits: u32) -> Self {
+        let known = RmRebootReasonPermissionDenied as u32
+            | RmRebootReasonSessionMismatch as u32
+            | RmRebootReasonCriticalProcess as u32
+            | RmRebootReasonCriticalService as u32
+            | RmRebootReasonDetectedSelf as u32;
+
+        RebootReasons {
+            permission_denied: bits & RmRebootReasonPermissionDenied as u32 != 0,
+            session_mismatch: bits & RmRebootReasonSessionMismatch as u32 != 0,
+            critical_process: bits & RmRebootReasonCriticalProcess as u32 != 0,
+            critical_service: bits & RmRebootReasonCriticalService as u32 != 0,
+            detected_self: bits & RmRebootReasonDetectedSelf as u32 != 0,
+            unknown_bits: bits & !known,
+        }
     }
 }

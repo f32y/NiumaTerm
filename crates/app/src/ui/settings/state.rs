@@ -9,7 +9,7 @@ use nmt_agent_ui::{AgentKind, AgentKindExt as _};
 use nmt_config::agent::AgentConfig;
 pub use nmt_config::agent::{CollapseRows, ModelListStyle};
 use nmt_config::appearance::AppearanceConfig;
-pub use nmt_config::appearance::{InputStyle, Language, TabBarStyle, WindowBackdrop};
+pub use nmt_config::appearance::{InputStyle, TabBarStyle, WindowBackdrop};
 use nmt_config::defaults::default_theme;
 pub use nmt_config::profile::{
     AgentProfile, AgentProfileKind, AgentProfileLauncher, EnvVar, Profile,
@@ -113,21 +113,6 @@ pub(super) fn input_style_label(style: InputStyle) -> &'static str {
     match style {
         InputStyle::Waterfall => i18n("settings-terminal-input-style-waterfall"),
         InputStyle::FixedBottom => i18n("settings-terminal-input-style-fixed-bottom"),
-    }
-}
-
-pub(super) fn input_style_from_value(value: &str) -> InputStyle {
-    match value {
-        "fixed-bottom" => InputStyle::FixedBottom,
-        _ => InputStyle::Waterfall,
-    }
-}
-
-pub(super) fn cursor_shape_from_value(value: &str) -> CursorShape {
-    match value {
-        "line" => CursorShape::Beam,
-        "underline" => CursorShape::Underline,
-        _ => CursorShape::Block,
     }
 }
 

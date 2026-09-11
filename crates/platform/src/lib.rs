@@ -118,22 +118,6 @@ pub struct WinsizeBuilder {
     pub height: u16,
 }
 
-impl WinsizeBuilder {
-    fn build(&self) -> Winsize {
-        let ws_row = self.rows as c_ushort;
-        let ws_col = self.cols as c_ushort;
-        let ws_xpixel = self.width as c_ushort;
-        let ws_ypixel = self.height as c_ushort;
-
-        Winsize {
-            ws_row,
-            ws_col,
-            ws_xpixel,
-            ws_ypixel,
-        }
-    }
-}
-
 /// Request notification authorization from the OS.
 /// On macOS this triggers the permission prompt on first call.
 /// No-op on other platforms.
@@ -210,4 +194,20 @@ pub struct PromptIntegration {
 /// `None` rather than a launch that would drop the user's own configuration.
 pub fn prompt_integration(shell: Option<&str>) -> Option<PromptIntegration> {
     platform::prompt_integration(shell)
+}
+
+impl From<&WinsizeBuilder> for Winsize {
+    fn from(value: &WinsizeBuilder) -> Self {
+        let ws_row = value.rows as c_ushort;
+        let ws_col = value.cols as c_ushort;
+        let ws_xpixel = value.width as c_ushort;
+        let ws_ypixel = value.height as c_ushort;
+
+        Winsize {
+            ws_row,
+            ws_col,
+            ws_xpixel,
+            ws_ypixel,
+        }
+    }
 }

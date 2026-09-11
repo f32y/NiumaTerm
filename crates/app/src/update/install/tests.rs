@@ -119,9 +119,10 @@ fn a_new_syntax_language_dll_is_selected_for_installation() {
 /// written here cannot exercise it. A system DLL is the one such file present
 /// on every machine these tests run on.
 fn versioned_binary() -> PathBuf {
-    PathBuf::from(env::var_os("SystemRoot").expect("SystemRoot is set on Windows"))
-        .join("System32")
-        .join("kernel32.dll")
+    let root: PathBuf = env::var_os("SystemRoot")
+        .expect("SystemRoot is set on Windows")
+        .into();
+    root.join("System32").join("kernel32.dll")
 }
 
 #[test]

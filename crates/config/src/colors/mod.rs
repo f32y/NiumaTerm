@@ -8,11 +8,11 @@ use std::num::ParseIntError;
 use std::ops::Mul;
 use std::sync::OnceLock;
 
-use defaults::*;
 use regex::Regex;
 use serde::de::Error as DeError;
 use serde::{Deserialize, Serialize, de};
 
+use crate::colors::defaults::*;
 use crate::render_types;
 
 // `ColorWGPU` is the legacy name; `crate::render_types::Color` is the actual
@@ -33,10 +33,13 @@ impl Mul<f32> for ColorRgb {
     type Output = ColorRgb;
 
     fn mul(self, rhs: f32) -> ColorRgb {
+        let r: f32 = self.r.into();
+        let g: f32 = self.g.into();
+        let b: f32 = self.b.into();
         let result = ColorRgb {
-            r: (f32::from(self.r) * rhs).clamp(0.0, 255.0) as u8,
-            g: (f32::from(self.g) * rhs).clamp(0.0, 255.0) as u8,
-            b: (f32::from(self.b) * rhs).clamp(0.0, 255.0) as u8,
+            r: (r * rhs).clamp(0.0, 255.0) as u8,
+            g: (g * rhs).clamp(0.0, 255.0) as u8,
+            b: (b * rhs).clamp(0.0, 255.0) as u8,
         };
 
         trace!(
@@ -50,40 +53,13 @@ impl Mul<f32> for ColorRgb {
 
 impl From<&ColorRgb> for ColorArray {
     fn from(color: &ColorRgb) -> ColorArray {
-        color.to_arr()
+        ColorBuilder::from_rgb(*color, Format::SRGB0_1).into()
     }
 }
 
 impl From<(u8, u8, u8)> for ColorRgb {
     fn from((r, g, b): (u8, u8, u8)) -> Self {
         Self { r, g, b }
-    }
-}
-
-impl ColorRgb {
-    pub fn from_color_arr(arr: ColorArray) -> ColorRgb {
-        // Clamp + round (instead of truncating) so a channel like 0.9999
-        // maps back to 255 on float→u8 round-trips.
-        let channel = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-
-        ColorRgb {
-            r: channel(arr[0]),
-            g: channel(arr[1]),
-            b: channel(arr[2]),
-        }
-    }
-
-    /// Packed `0xRRGGBB` form, e.g. for `gpui::rgb`.
-    pub fn rgb_u32(self) -> u32 {
-        ((self.r as u32) << 16) | ((self.g as u32) << 8) | self.b as u32
-    }
-
-    pub fn to_arr(&self) -> ColorArray {
-        ColorBuilder::from_rgb(*self, Format::SRGB0_1).to_arr()
-    }
-
-    pub fn to_wgpu(&self) -> ColorWGPU {
-        ColorBuilder::from_rgb(*self, Format::SRGB0_1).to_wgpu()
     }
 }
 
@@ -375,7 +351,7 @@ impl Default for Colors {
 pub fn hex_to_color_arr(s: &str) -> ColorArray {
     ColorBuilder::from_hex(s.to_string(), Format::SRGB0_1)
         .unwrap_or_default()
-        .to_arr()
+        .into()
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
@@ -486,11 +462,11 @@ impl ColorBuilder {
             VALID_HEX_SIZE.get_or_init(|| Regex::new(r"(?i)^#?[a-f\d]{6}([a-f\d]{2})?$").unwrap());
 
         if non_hex_chars.is_match(&hex) {
-            return Err(String::from("Error: Character is not valid"));
+            return Err("Error: Character is not valid".into());
         }
 
         if !valid_hex_size.is_match(&hex) {
-            return Err(String::from("Error: Hex String size is not valid"));
+            return Err("Error: Hex String size is not valid".into());
         }
 
         hex = hex.replace('#', "");
@@ -506,7 +482,7 @@ impl ColorBuilder {
         let rgb = decode_hex(&hex).unwrap_or_default();
 
         if rgb.is_empty() || (rgb.len() != 3 && rgb.len() != 4) {
-            return Err(String::from("Error: Invalid string, not able to convert"));
+            return Err("Error: Invalid string, not able to convert".into());
         }
 
         match conversion_type {
@@ -541,31 +517,6 @@ impl ColorBuilder {
             },
         }
     }
-
-    pub fn to_wgpu(&self) -> render_types::Color {
-        render_types::Color {
-            r: self.red,
-            g: self.green,
-            b: self.blue,
-            a: self.alpha,
-        }
-    }
-
-    pub fn to_arr(&self) -> ColorArray {
-        [
-            self.red as f32,
-            self.green as f32,
-            self.blue as f32,
-            self.alpha as f32,
-        ]
-    }
-
-    pub fn format_string(&self) -> String {
-        format!(
-            "r: {:?}, g: {:?}, b: {:?}, a: {:?}",
-            self.red, self.green, self.blue, self.alpha
-        )
-    }
 }
 
 fn decode_hex(s: &str) -> Result<Vec<u8>, ParseIntError> {
@@ -589,7 +540,8 @@ impl Default for ColorBuilder {
 
 impl fmt::Display for ColorBuilder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        fmt::Display::fmt(&self.format_string(), f)
+        let text: String = self.into();
+        fmt::Display::fmt(&text, f)
     }
 }
 
@@ -600,7 +552,7 @@ where
     let s = String::deserialize(deserializer)?;
 
     match ColorBuilder::from_hex(s, Format::SRGB0_1) {
-        Ok(color) => Ok((color.to_arr(), color.to_wgpu())),
+        Ok(color) => Ok((color.into(), color.into())),
         Err(e) => Err(DeError::custom(e)),
     }
 }
@@ -612,7 +564,7 @@ where
     let s = String::deserialize(deserializer)?;
 
     match ColorBuilder::from_hex(s, Format::SRGB0_1) {
-        Ok(color) => Ok(color.to_arr()),
+        Ok(color) => Ok(color.into()),
         Err(e) => Err(DeError::custom(e)),
     }
 }
@@ -624,7 +576,100 @@ where
     let s = String::deserialize(deserializer)?;
 
     match ColorBuilder::from_hex(s, Format::SRGB0_1) {
-        Ok(color) => Ok(Some(color.to_arr())),
+        Ok(color) => Ok(Some(color.into())),
         Err(e) => Err(DeError::custom(e)),
+    }
+}
+
+impl From<ColorArray> for ColorRgb {
+    fn from(arr: ColorArray) -> Self {
+        // Clamp + round (instead of truncating) so a channel like 0.9999
+        // maps back to 255 on float→u8 round-trips.
+        let channel = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+
+        ColorRgb {
+            r: channel(arr[0]),
+            g: channel(arr[1]),
+            b: channel(arr[2]),
+        }
+    }
+}
+
+impl From<ColorRgb> for u32 {
+    /// Packed `0xRRGGBB` form, e.g. for `gpui::rgb`.
+    fn from(value: ColorRgb) -> Self {
+        ((value.r as u32) << 16) | ((value.g as u32) << 8) | value.b as u32
+    }
+}
+
+impl From<&ColorRgb> for ColorWGPU {
+    fn from(value: &ColorRgb) -> Self {
+        ColorBuilder::from_rgb(*value, Format::SRGB0_1).into()
+    }
+}
+
+impl From<&ColorBuilder> for ColorArray {
+    fn from(value: &ColorBuilder) -> Self {
+        [
+            value.red as f32,
+            value.green as f32,
+            value.blue as f32,
+            value.alpha as f32,
+        ]
+    }
+}
+
+impl From<&ColorBuilder> for ColorWGPU {
+    fn from(value: &ColorBuilder) -> Self {
+        render_types::Color {
+            r: value.red,
+            g: value.green,
+            b: value.blue,
+            a: value.alpha,
+        }
+    }
+}
+
+impl From<ColorRgb> for ColorArray {
+    fn from(value: ColorRgb) -> Self {
+        (&value).into()
+    }
+}
+
+impl From<ColorRgb> for ColorWGPU {
+    fn from(value: ColorRgb) -> Self {
+        (&value).into()
+    }
+}
+
+impl From<ColorBuilder> for ColorArray {
+    fn from(value: ColorBuilder) -> Self {
+        (&value).into()
+    }
+}
+
+impl From<ColorBuilder> for ColorWGPU {
+    fn from(value: ColorBuilder) -> Self {
+        (&value).into()
+    }
+}
+
+impl From<u32> for ColorRgb {
+    /// Decode packed `0xRRGGBB` channels, ignoring the high byte.
+    fn from(id: u32) -> Self {
+        ColorRgb {
+            r: ((id >> 16) & 0xFF) as u8,
+            g: ((id >> 8) & 0xFF) as u8,
+            b: (id & 0xFF) as u8,
+        }
+    }
+}
+
+impl From<&ColorBuilder> for String {
+    fn from(value: &ColorBuilder) -> Self {
+        format!(
+            "r: {:?}, g: {:?}, b: {:?}, a: {:?}",
+            value.red, value.green, value.blue, value.alpha
+        )
     }
 }

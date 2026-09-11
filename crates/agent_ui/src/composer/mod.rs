@@ -93,14 +93,6 @@ pub(super) enum ComposerAction {
     Stop,
 }
 
-pub(super) fn composer_action(status: Status) -> ComposerAction {
-    if status == Status::Running {
-        ComposerAction::Stop
-    } else {
-        ComposerAction::Send
-    }
-}
-
 pub(super) fn restored_input_after_interruption(submitted: &str, current: &str) -> String {
     if current.trim().is_empty() || current == submitted {
         submitted.to_string()
@@ -200,14 +192,14 @@ impl AgentPane {
     /// profile's warning threshold. A running turn is still writing into the
     /// live cache, so a mid-turn steer never counts as a cold start.
     fn prompt_cache_may_have_expired(&self, cx: &Context<Self>) -> bool {
-        let minutes = self.profile.cache_warn_minutes;
+        let minutes: u64 = self.profile.cache_warn_minutes.into();
 
         minutes > 0
             && !self.transcript.read(cx).is_working()
             && self
                 .turn
                 .last_response_at()
-                .is_some_and(|at| at.elapsed() >= Duration::from_secs(u64::from(minutes) * 60))
+                .is_some_and(|at| at.elapsed() >= Duration::from_secs(minutes * 60))
     }
 
     /// Ask before paying for a cold prompt cache. Cancelling leaves the text
@@ -322,4 +314,12 @@ impl AgentPane {
     }
 }
 
-impl AgentPane {}
+impl From<Status> for ComposerAction {
+    fn from(status: Status) -> Self {
+        if status == Status::Running {
+            ComposerAction::Stop
+        } else {
+            ComposerAction::Send
+        }
+    }
+}

@@ -24,29 +24,6 @@ pub(crate) enum CliAction {
     },
 }
 
-impl CliAction {
-    /// The action as an `nmt://` URL, for forwarding over the IPC pipe. The
-    /// path is absolute here (parsing resolved it against the caller's cwd),
-    /// so the primary decodes the same directory regardless of its own cwd.
-    pub(crate) fn to_url(&self) -> String {
-        match self {
-            Self::Activate => "nmt://action/activate".to_string(),
-            Self::NewTab { path } => format!("nmt://action/new_tab?path={}", encode_path(path)),
-            Self::NewWindow { path } => {
-                format!("nmt://action/new_window?path={}", encode_path(path))
-            }
-            Self::FocusNotification {
-                route,
-                notification_id,
-            } => format!(
-                "nmt://action/focus_notification?route={}&notification_id={}",
-                utf8_percent_encode(route.as_str(), NON_ALPHANUMERIC),
-                utf8_percent_encode(notification_id, NON_ALPHANUMERIC)
-            ),
-        }
-    }
-}
-
 fn encode_path(path: &Path) -> String {
     utf8_percent_encode(&path.display().to_string(), NON_ALPHANUMERIC).to_string()
 }
@@ -125,3 +102,28 @@ pub(crate) fn parse_nmt_url(url: &str) -> Result<CliAction, String> {
 
 #[cfg(test)]
 mod tests;
+
+impl From<&CliAction> for String {
+    /// The action as an `nmt://` URL, for forwarding over the IPC pipe. The
+    /// path is absolute here (parsing resolved it against the caller's cwd),
+    /// so the primary decodes the same directory regardless of its own cwd.
+    fn from(value: &CliAction) -> Self {
+        match value {
+            CliAction::Activate => "nmt://action/activate".to_string(),
+            CliAction::NewTab { path } => {
+                format!("nmt://action/new_tab?path={}", encode_path(path))
+            }
+            CliAction::NewWindow { path } => {
+                format!("nmt://action/new_window?path={}", encode_path(path))
+            }
+            CliAction::FocusNotification {
+                route,
+                notification_id,
+            } => format!(
+                "nmt://action/focus_notification?route={}&notification_id={}",
+                utf8_percent_encode(route.as_str(), NON_ALPHANUMERIC),
+                utf8_percent_encode(notification_id, NON_ALPHANUMERIC)
+            ),
+        }
+    }
+}

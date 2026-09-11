@@ -3,6 +3,10 @@ use nmt_i18n::i18n;
 use crate::ui::settings::*;
 
 pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
+    let when_child_processes_running_key: &str =
+        WarnBeforeTerminatingShell::WhenChildProcessesRunning.into();
+    let ctrl_enter_key: &str = NewlineShortcut::CtrlEnter.into();
+
     SettingPage::new(i18n("settings-system-title"))
         .default_open(true)
         .group(
@@ -53,22 +57,20 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                             ("always".into(), i18n("settings-system-warn-always").into()),
                         ],
                         |cx| {
-                            cx.global::<AppSettings>()
+                            let key: &str = cx
+                                .global::<AppSettings>()
                                 .system
                                 .warn_before_terminating_shell
-                                .as_str()
-                                .into()
+                                .into();
+                            key.into()
                         },
                         |value, cx| {
                             cx.global_mut::<AppSettings>()
                                 .system
-                                .warn_before_terminating_shell =
-                                WarnBeforeTerminatingShell::from_value(&value);
+                                .warn_before_terminating_shell = value.as_str().into();
                         },
                     )
-                    .default_value(SharedString::from(
-                        WarnBeforeTerminatingShell::WhenChildProcessesRunning.as_str(),
-                    )),
+                    .default_value(when_child_processes_running_key),
                 )),
         )
         .group(
@@ -162,18 +164,16 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                             ("off".into(), i18n("settings-common-off").into()),
                         ],
                         |cx| {
-                            cx.global::<AppSettings>()
-                                .system
-                                .newline_shortcut
-                                .as_str()
-                                .into()
+                            let key: &str =
+                                cx.global::<AppSettings>().system.newline_shortcut.into();
+                            key.into()
                         },
                         |value, cx| {
                             cx.global_mut::<AppSettings>().system.newline_shortcut =
-                                NewlineShortcut::from_value(&value);
+                                value.as_str().into();
                         },
                     )
-                    .default_value(SharedString::from(NewlineShortcut::CtrlEnter.as_str())),
+                    .default_value(ctrl_enter_key),
                 )),
         )
 }

@@ -39,7 +39,7 @@ use crate::pane_model::list_mirror::ListPosition;
 use crate::pane_model::mouse::{MouseInput, MouseOutcome};
 use crate::pane_model::scroll::ScrollOutcome;
 use crate::pane_model::viewport::LocalPoint;
-use crate::pane_model::{FrameTheme, PaneController, PaneSettings};
+use crate::pane_model::{PaneController, PaneSettings};
 use crate::scrollbar::geometry::SCROLLBAR_AUTO_HIDE_DELAY;
 use crate::scrollbar::scrollbar_element;
 use crate::settings::{TerminalSettings, duration_labels};
@@ -155,7 +155,7 @@ impl TerminalPane {
         // Apply terminal presentation settings to existing panes and invalidate
         // measurements that depend on font metrics.
         cx.observe_global::<TerminalSettings>(|this, cx| {
-            let settings = PaneSettings::from(cx.global::<TerminalSettings>());
+            let settings: PaneSettings = cx.global::<TerminalSettings>().into();
             let colors = active_colors();
             this.block_list
                 .list
@@ -209,8 +209,8 @@ impl TerminalPane {
             identity,
             model: PaneController::new(
                 surface,
-                PaneSettings::from(settings),
-                FrameTheme::from(&active_colors()),
+                settings.into(),
+                (&active_colors()).into(),
                 duration_labels(),
             ),
             content_bounds: None,
@@ -897,14 +897,14 @@ impl Render for TerminalPane {
             .relative()
             // This is the terminal region's single full-bleed background;
             // cells with explicit background colors stay opaque on top.
-            .bg(rgb(self.model.theme.background.rgb_u32())
+            .bg(rgb(self.model.theme.background.into())
                 .opacity(cx.global::<TerminalSettings>().background_opacity))
             // The shell frames each pane as a 1px-bordered rounded card; the
             // fill is rounded to the card's inner radius so its corners don't
             // paint square over the frame. The cell padding below keeps glyphs
             // clear of the rounded corners.
             .rounded(cx.global::<TerminalSettings>().corner_radius - px(1.))
-            .text_color(rgb(self.model.theme.foreground.rgb_u32()))
+            .text_color(rgb(self.model.theme.foreground.into()))
             .font(cx.global::<TerminalSettings>().font())
             .text_size(px(metrics::font_size_px(cx)))
             .line_height(px(cell.height_px))
@@ -963,7 +963,7 @@ impl Render for TerminalPane {
                             .top(px(rect.origin.y + metrics::PADDING_PX))
                             .w(px(rect.width))
                             .h(px(rect.height))
-                            .bg(rgb(self.model.theme.foreground.rgb_u32()))
+                            .bg(rgb(self.model.theme.foreground.into()))
                     }))
             })
     }

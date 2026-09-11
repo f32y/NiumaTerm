@@ -5,6 +5,8 @@
 //! a capability question, so the picks are remembered here and seeded only
 //! where the harness does not restore them itself.
 
+use std::collections::BTreeMap;
+
 use gpui::{App, Context};
 use nmt_agent::chat::ThreadSettings;
 use nmt_agent::profile::launch_model as effective_launch_model;
@@ -62,7 +64,7 @@ impl ThreadControls {
                 .0
                 .remember(kind, &profile.name, state.settings.clone());
 
-            let mut stored = defaults.to_local_state();
+            let mut stored: BTreeMap<_, _> = (&*defaults).into();
 
             stored.retain(|name, _| name == &key);
 

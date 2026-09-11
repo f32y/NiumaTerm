@@ -177,7 +177,9 @@ fn constant_time_eq(left: &str, right: &str) -> bool {
     let length = left.len().max(right.len());
 
     for index in 0..length {
-        different |= usize::from(*left.get(index).unwrap_or(&0) ^ *right.get(index).unwrap_or(&0));
+        let byte_diff: usize =
+            (*left.get(index).unwrap_or(&0) ^ *right.get(index).unwrap_or(&0)).into();
+        different |= byte_diff;
     }
 
     different == 0

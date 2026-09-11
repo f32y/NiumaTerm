@@ -26,23 +26,6 @@ pub const OPERATIONS: [Operation; 9] = [
     Operation::WorkflowSnapshot,
 ];
 
-impl Operation {
-    /// Stable operation name used by live reports and repeatable measurements.
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::AppendEntry => "append-entry",
-            Self::Replay => "replay",
-            Self::MergeCompleted => "merge-completed",
-            Self::AppendDelta => "append-delta",
-            Self::RowsRebuild => "rows-rebuild",
-            Self::Typewriter => "typewriter",
-            Self::MirrorRebuild => "mirror-rebuild",
-            Self::BackgroundSnapshot => "background-snapshot",
-            Self::WorkflowSnapshot => "workflow-snapshot",
-        }
-    }
-}
-
 /// Inclusive measurements accumulated for one operation on the calling thread.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Totals {
@@ -116,9 +99,10 @@ pub fn flush() {
             continue;
         }
 
+        let operation: &str = operation.into();
         info!(
             target: "transcript_perf",
-            operation = operation.label(),
+            operation,
             calls = total.calls,
             total_us = total.elapsed.as_secs_f64() * 1_000_000.0,
             avg_us = total.elapsed.as_secs_f64() * 1_000_000.0 / total.calls as f64,

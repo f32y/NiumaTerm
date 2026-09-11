@@ -93,26 +93,9 @@ impl HistoryStore {
             .unwrap_or_default()
     }
 
-    pub(super) fn snapshot(&self) -> StoredHistory {
-        StoredHistory {
-            version: HISTORY_FILE_VERSION,
-            scopes: self
-                .scopes
-                .iter()
-                .map(|(scope, entries)| StoredScope {
-                    target: scope.target.clone(),
-                    backend: scope.backend.clone(),
-                    cwd: scope.cwd.clone(),
-                    additional: scope.additional.clone(),
-                    entries: Arc::clone(entries),
-                })
-                .collect(),
-        }
-    }
-
     fn merge(&mut self, snapshot: &StoredHistory) {
         for scope in &snapshot.scopes {
-            let key = scope.key();
+            let key: InputHistoryScope = scope.into();
             let entries = self.scopes.entry(key).or_default();
 
             // Stable identities make repeated saves idempotent even when a
@@ -131,17 +114,6 @@ impl HistoryStore {
             let keep_from = merged.len().saturating_sub(MAX_ENTRIES_PER_SCOPE);
 
             *entries = Arc::new(merged.into_iter().skip(keep_from).collect());
-        }
-    }
-}
-
-impl<E> StoredScope<E> {
-    fn key(&self) -> InputHistoryScope {
-        InputHistoryScope {
-            target: self.target.clone(),
-            backend: self.backend.clone(),
-            cwd: self.cwd.clone(),
-            additional: self.additional.clone(),
         }
     }
 }
@@ -170,7 +142,7 @@ pub(super) fn load_from_path(path: &Path) -> io::Result<HistoryStore> {
                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
             for scope in stored.scopes {
-                let key = scope.key();
+                let key: InputHistoryScope = (&scope).into();
                 let mut entries = VecDeque::<HistoryEntry>::new();
 
                 for (index, text) in scope.entries.iter().enumerate() {
@@ -252,7 +224,8 @@ pub(super) fn save_to_path(path: &Path, history: &StoredHistory) -> io::Result<(
 
     merged.merge(history);
 
-    let content = serde_json::to_vec_pretty(&merged.snapshot()).map_err(io::Error::other)?;
+    let content =
+        serde_json::to_vec_pretty::<StoredHistory>(&(&merged).into()).map_err(io::Error::other)?;
     let mut temporary = NamedTempFile::new_in(parent)?;
 
     temporary.write_all(&content)?;
@@ -261,4 +234,34 @@ pub(super) fn save_to_path(path: &Path, history: &StoredHistory) -> io::Result<(
     let temporary = temporary.into_temp_path();
 
     replace_file(&temporary, path)
+}
+
+impl From<&HistoryStore> for StoredHistory {
+    fn from(value: &HistoryStore) -> Self {
+        StoredHistory {
+            version: HISTORY_FILE_VERSION,
+            scopes: value
+                .scopes
+                .iter()
+                .map(|(scope, entries)| StoredScope {
+                    target: scope.target.clone(),
+                    backend: scope.backend.clone(),
+                    cwd: scope.cwd.clone(),
+                    additional: scope.additional.clone(),
+                    entries: Arc::clone(entries),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl<E> From<&StoredScope<E>> for InputHistoryScope {
+    fn from(value: &StoredScope<E>) -> Self {
+        InputHistoryScope {
+            target: value.target.clone(),
+            backend: value.backend.clone(),
+            cwd: value.cwd.clone(),
+            additional: value.additional.clone(),
+        }
+    }
 }

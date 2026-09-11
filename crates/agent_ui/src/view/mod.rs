@@ -25,7 +25,7 @@ use gpui_component::{IconName, IconNamed, WindowExt as _, h_flex, v_flex};
 use nmt_config::system::NewlineShortcut;
 use nmt_i18n::i18n;
 
-use crate::composer::{CommandFeedbackKind, ComposerAction, PaletteControl, composer_action};
+use crate::composer::{CommandFeedbackKind, ComposerAction, PaletteControl};
 use crate::fade::FrostedLayer;
 use crate::session::Status;
 use crate::settings::{AgentSettings, UI_RADIUS};
@@ -139,7 +139,8 @@ impl Render for AgentPane {
         let approval = self.render_approval_panel(cx);
         let questions = self.render_question_panel(window, cx);
 
-        let running = composer_action(self.session.runtime.status()) == ComposerAction::Stop;
+        let action: ComposerAction = self.session.runtime.status().into();
+        let running = action == ComposerAction::Stop;
         let update_suspended = self.session.runtime.update_suspension().is_some();
         let update_banner = self.render_update_banner(cx);
         let multi_root_notice = self.render_multi_root_notice(cx);

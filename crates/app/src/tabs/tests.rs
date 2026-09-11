@@ -167,8 +167,8 @@ fn bell_flags_a_tab_until_it_is_activated() {
 fn a_failure_survives_the_successes_that_follow_it() {
     let mut mgr = manager(2); // tab 2 is active
 
-    mgr.record_outcome(TabId(1), CommandOutcome::from_exit_code(Some(1)));
-    mgr.record_outcome(TabId(1), CommandOutcome::from_exit_code(Some(0)));
+    mgr.record_outcome(TabId(1), Some(1).into());
+    mgr.record_outcome(TabId(1), Some(0).into());
 
     assert_eq!(mgr.tabs()[0].last_outcome(), Some(CommandOutcome::Failed));
 
@@ -185,10 +185,8 @@ fn a_failure_survives_the_successes_that_follow_it() {
 
 #[test]
 fn an_unreported_exit_code_is_not_a_failure() {
-    assert_eq!(
-        CommandOutcome::from_exit_code(None),
-        CommandOutcome::Succeeded
-    );
+    let outcome: CommandOutcome = None.into();
+    assert_eq!(outcome, CommandOutcome::Succeeded);
 }
 
 #[test]

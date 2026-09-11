@@ -162,7 +162,7 @@ impl AgentPane {
     }
 
     pub(crate) fn palette_model(&mut self, cx: &Context<Self>) -> Option<PaletteModel> {
-        match self.session.branch.view() {
+        match (&self.session.branch).into() {
             view @ (BranchView::LoadingRewind
             | BranchView::RewindCheckpoints(_)
             | BranchView::RewindAction(_, _)) => return self.rewind_palette_model(view),

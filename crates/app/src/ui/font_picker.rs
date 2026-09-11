@@ -207,7 +207,7 @@ fn scan_fonts(window: &mut Window) -> Vec<(SharedString, bool)> {
         .into_iter()
         .map(|name| {
             let mono = is_monospace(&name, window);
-            (SharedString::from(name), mono)
+            (name.into(), mono)
         })
         .collect()
 }

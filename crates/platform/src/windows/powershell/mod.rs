@@ -65,8 +65,8 @@ pub fn prompt_integration(shell: Option<&str>) -> Option<crate::PromptIntegratio
 
     is_shell(shell).then(|| crate::PromptIntegration {
         args: vec![
-            String::from("-NoExit"),
-            String::from("-EncodedCommand"),
+            "-NoExit".into(),
+            "-EncodedCommand".into(),
             ENCODED
                 .get_or_init(|| encode_command(INTEGRATION_SCRIPT))
                 .clone(),

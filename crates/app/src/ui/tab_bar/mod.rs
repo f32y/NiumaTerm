@@ -764,7 +764,7 @@ impl TabStrip {
             // guard keeps that from repeating every frame.
             .when(auto_size, |this| {
                 this.on_prepaint(move |bounds, _, cx| {
-                    let width = f32::from(bounds.size.width);
+                    let width: f32 = bounds.size.width.into();
 
                     if measured_width.get() != width {
                         measured_width.set(width);

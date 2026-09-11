@@ -84,7 +84,7 @@ impl AgentCli {
     /// then whatever a child started by [`AgentCli::command`] would inherit.
     pub fn effective_env_os(&self, target: &str) -> Option<OsString> {
         override_value(&self.environment, target)
-            .map(OsString::from)
+            .map(Into::into)
             .or_else(|| launch_env_var(target))
     }
 
@@ -97,10 +97,8 @@ impl AgentCli {
         let resolved = if configured.components().count() > 1 || configured.is_absolute() {
             Some(configured.to_path_buf())
         } else {
-            let path = self
-                .effective_env_os("PATH")
-                .unwrap_or_else(|| OsString::from(""));
-            let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let path = self.effective_env_os("PATH").unwrap_or_else(|| "".into());
+            let cwd = env::current_dir().unwrap_or_else(|_| ".".into());
 
             which::which_in(&self.executable, Some(path), cwd).ok()
         };

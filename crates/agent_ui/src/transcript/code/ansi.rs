@@ -11,31 +11,6 @@ pub(super) enum AnsiColor {
     Rgb(u8, u8, u8),
 }
 
-impl AnsiColor {
-    fn resolve(self) -> Hsla {
-        let value = match self {
-            Self::Rgb(r, g, b) => u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b),
-            Self::Indexed(index) => match index {
-                0..=15 => [
-                    0x000000, 0xcd3131, 0x0dbc79, 0xe5e510, 0x2472c8, 0xbc3fbc, 0x11a8cd, 0xe5e5e5,
-                    0x666666, 0xf14c4c, 0x23d18b, 0xf5f543, 0x3b8eea, 0xd670d6, 0x29b8db, 0xffffff,
-                ][usize::from(index)],
-                16..=231 => {
-                    let index = u32::from(index - 16);
-                    let component = |value| if value == 0 { 0 } else { 55 + 40 * value };
-
-                    component(index / 36) << 16
-                        | component(index / 6 % 6) << 8
-                        | component(index % 6)
-                }
-                232..=255 => u32::from(8 + 10 * (index - 232)) * 0x010101,
-            },
-        };
-
-        rgb(value).into()
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct AnsiStyle {
     pub(super) foreground: Option<AnsiColor>,
@@ -50,8 +25,8 @@ pub(super) struct AnsiStyle {
 
 impl AnsiStyle {
     pub(super) fn resolve(self, foreground: Hsla, background: Hsla) -> HighlightStyle {
-        let mut color = self.foreground.map(AnsiColor::resolve);
-        let mut background_color = self.background.map(AnsiColor::resolve);
+        let mut color = self.foreground.map(Into::into);
+        let mut background_color = self.background.map(Into::into);
 
         if self.reverse {
             (color, background_color) = (
@@ -215,5 +190,42 @@ impl Perform for AnsiText {
                 _ => {}
             }
         }
+    }
+}
+
+impl From<AnsiColor> for Hsla {
+    fn from(value: AnsiColor) -> Self {
+        let value = match value {
+            AnsiColor::Rgb(r, g, b) => {
+                let r: u32 = r.into();
+                let g: u32 = g.into();
+                let b: u32 = b.into();
+                r << 16 | g << 8 | b
+            }
+            AnsiColor::Indexed(index) => match index {
+                0..=15 => {
+                    let index: usize = index.into();
+                    [
+                        0x000000, 0xcd3131, 0x0dbc79, 0xe5e510, 0x2472c8, 0xbc3fbc, 0x11a8cd,
+                        0xe5e5e5, 0x666666, 0xf14c4c, 0x23d18b, 0xf5f543, 0x3b8eea, 0xd670d6,
+                        0x29b8db, 0xffffff,
+                    ][index]
+                }
+                16..=231 => {
+                    let index: u32 = (index - 16).into();
+                    let component = |value| if value == 0 { 0 } else { 55 + 40 * value };
+
+                    component(index / 36) << 16
+                        | component(index / 6 % 6) << 8
+                        | component(index % 6)
+                }
+                232..=255 => {
+                    let level: u32 = (8 + 10 * (index - 232)).into();
+                    level * 0x010101
+                }
+            },
+        };
+
+        rgb(value).into()
     }
 }

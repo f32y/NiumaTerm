@@ -4,7 +4,7 @@ use nmt_config::render_types::Color;
 #[test]
 fn test_conversion_from_hex_invalid_character() {
     let invalid_character_color =
-        match ColorBuilder::from_hex(String::from("#invalid-color"), Format::SRGB0_255) {
+        match ColorBuilder::from_hex("#invalid-color".into(), Format::SRGB0_255) {
             Ok(d) => d.to_string(),
             Err(e) => e,
         };
@@ -14,8 +14,7 @@ fn test_conversion_from_hex_invalid_character() {
 
 #[test]
 fn test_conversion_from_hex_invalid_size() {
-    let invalid_invalid_size = match ColorBuilder::from_hex(String::from("abc"), Format::SRGB0_255)
-    {
+    let invalid_invalid_size = match ColorBuilder::from_hex("abc".into(), Format::SRGB0_255) {
         Ok(d) => d.to_string(),
         Err(e) => e,
     };
@@ -25,9 +24,9 @@ fn test_conversion_from_hex_invalid_size() {
 
 #[test]
 fn test_conversion_from_hex_sgb_255() {
-    let color: Color = ColorBuilder::from_hex(String::from("#151515"), Format::SRGB0_1)
+    let color: Color = ColorBuilder::from_hex("#151515".into(), Format::SRGB0_1)
         .unwrap()
-        .to_wgpu();
+        .into();
 
     assert_eq!(
         color,
@@ -39,7 +38,7 @@ fn test_conversion_from_hex_sgb_255() {
         }
     );
 
-    let color = ColorBuilder::from_hex(String::from("#FFFFFF"), Format::SRGB0_1).unwrap();
+    let color = ColorBuilder::from_hex("#FFFFFF".into(), Format::SRGB0_1).unwrap();
 
     assert_eq!(
         color,
@@ -54,9 +53,9 @@ fn test_conversion_from_hex_sgb_255() {
 
 #[test]
 fn test_conversion_from_hex_sgb_1() {
-    let color: Color = ColorBuilder::from_hex(String::from("#151515"), Format::SRGB0_255)
+    let color: Color = ColorBuilder::from_hex("#151515".into(), Format::SRGB0_255)
         .unwrap()
-        .to_wgpu();
+        .into();
 
     assert_eq!(
         color,
@@ -68,7 +67,7 @@ fn test_conversion_from_hex_sgb_1() {
         }
     );
 
-    let color = ColorBuilder::from_hex(String::from("#FFFFFF"), Format::SRGB0_255).unwrap();
+    let color = ColorBuilder::from_hex("#FFFFFF".into(), Format::SRGB0_255).unwrap();
 
     assert_eq!(
         color,
@@ -83,8 +82,7 @@ fn test_conversion_from_hex_sgb_1() {
 
 #[test]
 fn test_conversion_from_gray_hex_with_alpha() {
-    let color_with_alpha =
-        ColorBuilder::from_hex(String::from("#15151580"), Format::SRGB0_255).unwrap();
+    let color_with_alpha = ColorBuilder::from_hex("#15151580".into(), Format::SRGB0_255).unwrap();
 
     assert_eq!(
         color_with_alpha,
@@ -97,7 +95,7 @@ fn test_conversion_from_gray_hex_with_alpha() {
     );
 
     let color_with_alpha_srgb0_1 =
-        ColorBuilder::from_hex(String::from("#15151580"), Format::SRGB0_1).unwrap();
+        ColorBuilder::from_hex("#15151580".into(), Format::SRGB0_1).unwrap();
 
     assert_eq!(
         color_with_alpha_srgb0_1,
@@ -112,8 +110,7 @@ fn test_conversion_from_gray_hex_with_alpha() {
 
 #[test]
 fn test_conversion_from_teal_hex_with_alpha() {
-    let color_with_alpha =
-        ColorBuilder::from_hex(String::from("#06a49b99"), Format::SRGB0_255).unwrap();
+    let color_with_alpha = ColorBuilder::from_hex("#06a49b99".into(), Format::SRGB0_255).unwrap();
 
     assert_eq!(
         color_with_alpha,
@@ -126,7 +123,7 @@ fn test_conversion_from_teal_hex_with_alpha() {
     );
 
     let color_with_alpha_srgb0_1 =
-        ColorBuilder::from_hex(String::from("#06a49b99"), Format::SRGB0_1).unwrap();
+        ColorBuilder::from_hex("#06a49b99".into(), Format::SRGB0_1).unwrap();
 
     assert_eq!(
         color_with_alpha_srgb0_1,

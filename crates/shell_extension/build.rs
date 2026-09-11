@@ -13,7 +13,7 @@ fn main() {
         return;
     }
 
-    let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let manifest_dir: PathBuf = env::var_os("CARGO_MANIFEST_DIR").unwrap().into();
     let def = manifest_dir.join("shell_extension.def");
 
     println!("cargo:rerun-if-changed={}", def.display());

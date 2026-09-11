@@ -94,7 +94,7 @@ fn zsh_is_integrated_through_an_injected_bootstrap() {
 
     // The launch has to suppress zsh's own startup files, since the bootstrap
     // replays them itself.
-    assert!(integrated.args.contains(&String::from("-f")));
+    assert!(integrated.args.contains(&"-f".into()));
 }
 
 /// bash is handed its integration the same way zsh is, so the same two things
@@ -118,7 +118,7 @@ fn bash_is_integrated_through_an_injected_bootstrap() {
 
     // The launch has to suppress bash's own startup files, since the bootstrap
     // replays them itself.
-    assert!(integrated.args.contains(&String::from("--norc")));
+    assert!(integrated.args.contains(&"--norc".into()));
 }
 
 /// A shell the platform has no integration for must be told so. Claiming a

@@ -108,23 +108,6 @@ impl QuestionDraft {
         }
     }
 
-    pub(super) fn from_request(request: QuestionRequest) -> Self {
-        let mut prompt = Self::new(request.questions);
-
-        prompt.id = Some(request.id);
-        prompt.mode = request.mode;
-
-        if request.mode == QuestionMode::Async {
-            for (question, selected) in prompt.questions.iter().zip(&mut prompt.selected) {
-                if !question.options.is_empty() {
-                    selected.push(0);
-                }
-            }
-        }
-
-        prompt
-    }
-
     pub fn pending(&self) -> bool {
         matches!(
             self.status,
@@ -224,5 +207,24 @@ impl QuestionDraft {
                 self.text[index].clear();
             }
         }
+    }
+}
+
+impl From<QuestionRequest> for QuestionDraft {
+    fn from(request: QuestionRequest) -> Self {
+        let mut prompt = Self::new(request.questions);
+
+        prompt.id = Some(request.id);
+        prompt.mode = request.mode;
+
+        if request.mode == QuestionMode::Async {
+            for (question, selected) in prompt.questions.iter().zip(&mut prompt.selected) {
+                if !question.options.is_empty() {
+                    selected.push(0);
+                }
+            }
+        }
+
+        prompt
     }
 }

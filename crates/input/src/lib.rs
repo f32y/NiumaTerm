@@ -119,7 +119,8 @@ pub fn build_key_sequence(key: &KeyInput, mods: ModifiersState, flags: KeyEncode
 
     // Add modifiers information.
     if kitty_event_type || !modifiers.is_empty() || associated_text.is_some() {
-        payload.push_str(&format!(";{}", modifiers.encode_esc_sequence()));
+        let encoded: u8 = modifiers.into();
+        payload.push_str(&format!(";{encoded}"));
     }
 
     // Push event type.
@@ -136,7 +137,7 @@ pub fn build_key_sequence(key: &KeyInput, mods: ModifiersState, flags: KeyEncode
     }
 
     if let Some(text) = associated_text {
-        let mut codepoints = text.chars().map(u32::from);
+        let mut codepoints = text.chars().map(|ch| -> u32 { ch.into() });
 
         if let Some(codepoint) = codepoints.next() {
             payload.push_str(&format!(";{codepoint}"));
@@ -147,7 +148,7 @@ pub fn build_key_sequence(key: &KeyInput, mods: ModifiersState, flags: KeyEncode
         }
     }
 
-    payload.push(terminator.encode_esc_sequence());
+    payload.push(terminator.into());
 
     payload.into_bytes()
 }
@@ -409,7 +410,7 @@ impl SequenceBuilder {
         key: &KeyInput,
         associated_text: Option<&str>,
     ) -> Option<SequenceBase> {
-        let character = match key.logical_key.as_ref() {
+        let character = match (&key.logical_key).into() {
             Key::Character(character) if self.kitty_seq => character,
             _ => return None,
         };
@@ -424,17 +425,17 @@ impl SequenceBuilder {
                 ch
             };
 
-            let alternate_key_code = u32::from(ch);
-            let mut unicode_key_code = u32::from(unshifted_ch);
+            let alternate_key_code: u32 = ch.into();
+            let mut unicode_key_code: u32 = unshifted_ch.into();
 
             // Try to get the base for keys which change based on modifier, like `1` for `!`.
             //
             // However it should only be performed when `SHIFT` is pressed.
             if shift
                 && alternate_key_code == unicode_key_code
-                && let Key::Character(unmodded) = key.key_without_modifiers.as_ref()
+                && let Key::Character(unmodded) = (&key.key_without_modifiers).into()
             {
-                unicode_key_code = u32::from(unmodded.chars().next().unwrap_or(unshifted_ch));
+                unicode_key_code = unmodded.chars().next().unwrap_or(unshifted_ch).into();
             }
 
             // NOTE: Base layouts are ignored, since winit doesn't expose this information
@@ -465,7 +466,7 @@ impl SequenceBuilder {
             return None;
         }
 
-        let base = match key.logical_key.as_ref() {
+        let base = match (&key.logical_key).into() {
             Key::Character("0") => "57399",
             Key::Character("1") => "57400",
             Key::Character("2") => "57401",
@@ -707,15 +708,6 @@ enum SequenceTerminator {
     Kitty,
 }
 
-impl SequenceTerminator {
-    fn encode_esc_sequence(self) -> char {
-        match self {
-            SequenceTerminator::Normal(char) => char,
-            SequenceTerminator::Kitty => 'u',
-        }
-    }
-}
-
 bitflags! {
     /// The modifiers encoding for escape sequence.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -726,13 +718,6 @@ bitflags! {
         const SUPER   = 0b0000_1000;
         // NOTE: Kitty protocol defines additional modifiers to what is present here, like
         // Capslock, but it's not a modifier as per winit.
-    }
-}
-
-impl SequenceModifiers {
-    /// Get the value which should be passed to escape sequence.
-    pub fn encode_esc_sequence(self) -> u8 {
-        self.bits() + 1
     }
 }
 
@@ -756,4 +741,20 @@ fn is_control_character(text: &str) -> bool {
     let codepoint = text.bytes().next().unwrap();
 
     text.len() == 1 && (codepoint < 0x20 || (0x7f..=0x9f).contains(&codepoint))
+}
+
+impl From<SequenceTerminator> for char {
+    fn from(value: SequenceTerminator) -> Self {
+        match value {
+            SequenceTerminator::Normal(char) => char,
+            SequenceTerminator::Kitty => 'u',
+        }
+    }
+}
+
+impl From<SequenceModifiers> for u8 {
+    /// Get the value which should be passed to escape sequence.
+    fn from(value: SequenceModifiers) -> Self {
+        value.bits() + 1
+    }
 }

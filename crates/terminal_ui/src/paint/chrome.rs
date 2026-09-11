@@ -1,6 +1,5 @@
 use gpui::{
-    App, Bounds, Hsla, Pixels, Rgba, SharedString, TextAlign, TextRun, Window, fill, point, px,
-    rgb, rgba, size,
+    App, Bounds, Pixels, Rgba, TextAlign, TextRun, Window, fill, point, px, rgb, rgba, size,
 };
 
 use crate::block_list::FrozenItemChrome;
@@ -71,14 +70,14 @@ pub(crate) fn paint_frozen_chrome(
         let runs = [TextRun {
             len: header.len(),
             font: style.font(),
-            color: Hsla::from(rgb(0x7f8c98)),
+            color: rgb(0x7f8c98).into(),
             background_color: None,
             underline: None,
             strikethrough: None,
         }];
 
         let shaped = window.text_system().shape_line(
-            SharedString::from(header.to_string()),
+            header.to_string().into(),
             font_size,
             &runs,
             Some(bounds.size.width),

@@ -11,54 +11,19 @@
 
 use std::mem;
 
+use nmt_config::colors::ColorRgb;
 use nmt_config::colors::term::TermColors;
-use nmt_config::colors::{AnsiColor, ColorRgb, NamedColor};
 use rustc_hash::FxHashMap;
 
 use crate::ansi;
 use crate::ghostty::{
     CellWide, ScreenRowMeta, ScrollbarInfo, SnapshotColors, SnapshotCursor, SnapshotPlacement,
-    SnapshotStyle, Underline,
+    SnapshotStyle,
 };
 use crate::terminal::grid::row::Row;
 use crate::terminal::pos::{Column, Line, Pos};
 use crate::terminal::square::{Extras, Square, Wide};
-use crate::terminal::style::{Style, StyleFlags, StyleId, StyleSet};
-
-/// Build a `Style` from a Ghostty snapshot style. Ghostty `blink` and
-/// `overline` have no render flag and are intentionally dropped rather than
-/// synthesizing unsupported styling.
-pub(crate) fn style_from_snapshot(s: &SnapshotStyle) -> Style {
-    let mut flags = StyleFlags::empty();
-
-    flags.set(StyleFlags::BOLD, s.bold);
-    flags.set(StyleFlags::ITALIC, s.italic);
-    flags.set(StyleFlags::DIM, s.faint);
-    flags.set(StyleFlags::INVERSE, s.inverse);
-    flags.set(StyleFlags::HIDDEN, s.invisible);
-    flags.set(StyleFlags::STRIKEOUT, s.strikethrough);
-    flags |= match s.underline {
-        Underline::None => StyleFlags::empty(),
-        Underline::Single => StyleFlags::UNDERLINE,
-        Underline::Double => StyleFlags::DOUBLE_UNDERLINE,
-        Underline::Curly => StyleFlags::UNDERCURL,
-        Underline::Dotted => StyleFlags::DOTTED_UNDERLINE,
-        Underline::Dashed => StyleFlags::DASHED_UNDERLINE,
-    };
-
-    Style {
-        fg: s
-            .fg
-            .map(AnsiColor::Spec)
-            .unwrap_or(AnsiColor::Named(NamedColor::Foreground)),
-        bg: s
-            .bg
-            .map(AnsiColor::Spec)
-            .unwrap_or(AnsiColor::Named(NamedColor::Background)),
-        underline_color: s.underline_color.map(AnsiColor::Spec),
-        flags,
-    }
-}
+use crate::terminal::style::{Style, StyleId, StyleSet};
 
 /// A decoupled, renderable copy of the visible viewport.
 pub struct RenderBuffer {
@@ -295,7 +260,7 @@ impl RenderBuffer {
             return;
         }
 
-        let id = self.styles.intern(style_from_snapshot(style));
+        let id = self.styles.intern(style.into());
 
         let mut chars = text.chars();
 
@@ -364,11 +329,11 @@ impl RenderBuffer {
 
         let mut term_colors = TermColors::default();
 
-        term_colors[NamedColor::Foreground] = Some(colors.fg.to_arr());
-        term_colors[NamedColor::Background] = Some(colors.bg.to_arr());
+        term_colors[NamedColor::Foreground] = Some(colors.fg.into());
+        term_colors[NamedColor::Background] = Some(colors.bg.into());
 
         if let Some(color) = colors.cursor {
-            term_colors[NamedColor::Cursor] = Some(color.to_arr());
+            term_colors[NamedColor::Cursor] = Some(color.into());
         }
 
         self.colors = term_colors;

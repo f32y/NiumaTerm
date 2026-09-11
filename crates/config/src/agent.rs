@@ -62,24 +62,6 @@ pub enum ModelListStyle {
 }
 
 impl ModelListStyle {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::NameAndId => "name-and-id",
-            Self::IdAndName => "id-and-name",
-            Self::NameOnly => "name-only",
-            Self::IdOnly => "id-only",
-        }
-    }
-
-    pub fn from_value(value: &str) -> Self {
-        match value {
-            "id-and-name" => Self::IdAndName,
-            "name-only" => Self::NameOnly,
-            "id-only" => Self::IdOnly,
-            _ => Self::NameAndId,
-        }
-    }
-
     /// One picker entry, from the harness's display name and the route id it
     /// is selected by. A harness that reports the id as the display name, or
     /// no name at all, leaves nothing to put beside the id, so the paired
@@ -116,24 +98,6 @@ pub enum CollapseRows {
     Off,
 }
 
-impl CollapseRows {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::WorkAndToolCalls => "work-and-tool-calls",
-            Self::ToolCalls => "tool-calls",
-            Self::Off => "off",
-        }
-    }
-
-    pub fn from_value(value: &str) -> Self {
-        match value {
-            "tool-calls" => Self::ToolCalls,
-            "off" => Self::Off,
-            _ => Self::WorkAndToolCalls,
-        }
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum CollapseRowsValue {
@@ -155,4 +119,46 @@ where
         CollapseRowsValue::Legacy(true) => CollapseRows::WorkAndToolCalls,
         CollapseRowsValue::Legacy(false) => CollapseRows::WorkAndToolCalls,
     })
+}
+
+impl From<ModelListStyle> for &'static str {
+    fn from(value: ModelListStyle) -> Self {
+        match value {
+            ModelListStyle::NameAndId => "name-and-id",
+            ModelListStyle::IdAndName => "id-and-name",
+            ModelListStyle::NameOnly => "name-only",
+            ModelListStyle::IdOnly => "id-only",
+        }
+    }
+}
+
+impl From<&str> for ModelListStyle {
+    fn from(value: &str) -> Self {
+        match value {
+            "id-and-name" => Self::IdAndName,
+            "name-only" => Self::NameOnly,
+            "id-only" => Self::IdOnly,
+            _ => Self::NameAndId,
+        }
+    }
+}
+
+impl From<CollapseRows> for &'static str {
+    fn from(value: CollapseRows) -> Self {
+        match value {
+            CollapseRows::WorkAndToolCalls => "work-and-tool-calls",
+            CollapseRows::ToolCalls => "tool-calls",
+            CollapseRows::Off => "off",
+        }
+    }
+}
+
+impl From<&str> for CollapseRows {
+    fn from(value: &str) -> Self {
+        match value {
+            "tool-calls" => Self::ToolCalls,
+            "off" => Self::Off,
+            _ => Self::WorkAndToolCalls,
+        }
+    }
 }

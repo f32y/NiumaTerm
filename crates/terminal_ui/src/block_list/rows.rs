@@ -99,10 +99,6 @@ impl EngineRowBuilder {
 
         self.col = x + if is_wide { 2 } else { 1 };
     }
-
-    pub(crate) fn finish(self) -> TerminalLine {
-        self.line.finish()
-    }
 }
 
 /// Metadata determines the item's height even while its visible pages are
@@ -184,7 +180,7 @@ pub(crate) fn frozen_block_view(
         return view;
     };
     let handle = BlockHandle { id, generation };
-    let cols = u32::from(first.cols);
+    let cols: u32 = first.cols.into();
 
     // Cached item metadata determines layout; only completed page reads can
     // contribute text until the owner publishes the missing ranges.
@@ -206,7 +202,7 @@ pub(crate) fn frozen_block_view(
             );
         }
 
-        let line = builder.finish();
+        let line: TerminalLine = builder.into();
         let selected = block_selection_span(selection, item_idx, row, cols)
             .map(|span| expand_wide_span(&line, span));
 
@@ -279,4 +275,10 @@ pub(crate) fn live_history_view(
     }
 
     view
+}
+
+impl From<EngineRowBuilder> for TerminalLine {
+    fn from(value: EngineRowBuilder) -> Self {
+        value.line.into()
+    }
 }

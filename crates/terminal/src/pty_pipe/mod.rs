@@ -514,9 +514,9 @@ where
             Some(mut prefix) => {
                 prefix.extend_from_slice(bytes);
 
-                Arc::from(prefix)
+                prefix.into()
             }
-            None => Arc::from(bytes),
+            None => bytes.into(),
         });
 
         let was_rewritten = rewritten.is_some();
@@ -1221,9 +1221,10 @@ where
             Msg::ScrollTo(target) => {
                 let scrollbar = self.ghostty.scrollbar();
                 let target = target.min(scrollbar.total.saturating_sub(scrollbar.len));
-                let delta = (i128::from(target) - i128::from(scrollbar.offset))
-                    .clamp(isize::MIN as i128, isize::MAX as i128)
-                    as isize;
+                let target: i128 = target.into();
+                let offset: i128 = scrollbar.offset.into();
+                let delta =
+                    (target - offset).clamp(isize::MIN as i128, isize::MAX as i128) as isize;
                 self.ghostty.scroll_viewport_delta(delta);
                 self.publish_command();
             }

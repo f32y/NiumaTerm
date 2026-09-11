@@ -103,7 +103,7 @@ pub(crate) fn block_selection_range(
     col: u32,
     selection_type: SelectionType,
 ) -> Option<((usize, u32), (usize, u32))> {
-    let cols = usize::from(block.cols());
+    let cols: usize = block.cols().into();
 
     if cols == 0 || line >= block.row_count() {
         return None;
@@ -164,7 +164,7 @@ pub(crate) fn block_selection_range(
                     2
                 };
 
-                let x = usize::from(x);
+                let x: usize = x.into();
 
                 if x < cols {
                     classes[offset + x] = class;

@@ -18,8 +18,8 @@ use nmt_remote_net::protocol::{
     generate_keypair,
 };
 use nmt_remote_net::{
-    AttachTarget, HostConfig, HostHandle, SessionByteEvent, client_connect_ik, client_connect_pair,
-    list_remote_sessions, open_remote_session,
+    AttachTarget, HostConfig, HostHandle, RemoteInput, SessionByteEvent, client_connect_ik,
+    client_connect_pair, list_remote_sessions, open_remote_session,
 };
 use tokio::{task, time};
 
@@ -208,9 +208,8 @@ async fn client_runtime_byte_stream() {
     .unwrap()
     .expect("client runtime attaches");
 
-    session
-        .input()
-        .send_input(format!("echo {MARKER}\r").into_bytes());
+    let input: RemoteInput = (&session).into();
+    input.send_input(format!("echo {MARKER}\r").into_bytes());
 
     let seen = task::spawn_blocking(move || {
         let mut buf = Vec::new();
@@ -327,9 +326,8 @@ async fn client_runtime_resumes_after_transport_loss() {
     time::sleep(Duration::from_secs(45)).await;
 
     // Input after the restart can only arrive if the runtime re-attached.
-    session
-        .input()
-        .send_input(format!("echo {MARKER}\r").into_bytes());
+    let input: RemoteInput = (&session).into();
+    input.send_input(format!("echo {MARKER}\r").into_bytes());
 
     let seen = task::spawn_blocking(move || {
         let mut buf = Vec::new();

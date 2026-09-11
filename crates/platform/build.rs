@@ -11,7 +11,7 @@ fn main() {
         return;
     }
 
-    let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let manifest: PathBuf = env::var("CARGO_MANIFEST_DIR").unwrap().into();
 
     // crates/platform -> repo root -> assets/windows
     let src_dir = manifest
@@ -21,7 +21,7 @@ fn main() {
         .join("windows");
 
     // OUT_DIR = <target>/<profile>/build/nmt_platform-<hash>/out — walk up 3 to <target>/<profile>.
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let out_dir: PathBuf = env::var("OUT_DIR").unwrap().into();
 
     let Some(profile_dir) = out_dir.ancestors().nth(3) else {
         println!("cargo:warning=could not derive target profile dir from OUT_DIR");

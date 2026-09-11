@@ -217,7 +217,8 @@ pub fn macos_cwd(pid: c_int) -> Result<PathBuf, Error> {
         }
     };
 
-    Ok(CString::from(c_str).into_string().map(PathBuf::from)?)
+    let c_string: CString = c_str.into();
+    Ok(c_string.into_string().map(Into::into)?)
 }
 
 #[cfg(test)]

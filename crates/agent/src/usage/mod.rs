@@ -112,7 +112,7 @@ pub(crate) fn parse_timestamp_millis(value: &Value) -> Option<i64> {
     }
 
     if let Ok(number) = text.parse::<f64>() {
-        return parse_timestamp_millis(&Value::from(number));
+        return parse_timestamp_millis(&number.into());
     }
 
     DateTime::parse_from_rfc3339(text)

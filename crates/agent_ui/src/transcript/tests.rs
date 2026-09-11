@@ -2,7 +2,7 @@ mod prompt_truncation_tests {
     use gpui::{FontFallbacks, px};
     use nmt_agent::chat::{Compaction, CompactionTrigger, Item as SessionItem};
 
-    use crate::composer::{ComposerAction, composer_action, prompt_with_response_annotations};
+    use crate::composer::{ComposerAction, prompt_with_response_annotations};
     use crate::profile::AgentKind;
     use crate::session::Status;
     use crate::settings::AgentSettings;
@@ -47,10 +47,12 @@ mod prompt_truncation_tests {
 
     #[test]
     fn composer_replaces_send_with_stop_only_while_running() {
-        assert_eq!(composer_action(Status::Running), ComposerAction::Stop);
+        let action: ComposerAction = Status::Running.into();
+        assert_eq!(action, ComposerAction::Stop);
 
         for status in [Status::Starting, Status::Idle, Status::Exited] {
-            assert_eq!(composer_action(status), ComposerAction::Send);
+            let action: ComposerAction = status.into();
+            assert_eq!(action, ComposerAction::Send);
         }
     }
 

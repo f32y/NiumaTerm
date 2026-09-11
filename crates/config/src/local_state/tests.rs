@@ -14,7 +14,7 @@ fn save_load_roundtrip_and_bad_file_defaults() {
     assert_eq!(load_from(&path), LocalState::default());
 
     let state = LocalState {
-        agent_defaults: BTreeMap::from([(
+        agent_defaults: [(
             "claude".to_string(),
             AgentDefaults {
                 model: Some("opus".to_string()),
@@ -24,7 +24,8 @@ fn save_load_roundtrip_and_bad_file_defaults() {
                 effort: Some("high".to_string()),
                 tier: None,
             },
-        )]),
+        )]
+        .into(),
         windows: vec![
             WindowLocalState {
                 window: Some(WindowState {
@@ -132,18 +133,19 @@ fn save_agent_defaults_updates_only_agent_defaults() {
             session: None,
             sidebar_width: Some(240.0),
         }],
-        agent_defaults: BTreeMap::from([(
+        agent_defaults: [(
             "claude".to_string(),
             AgentDefaults {
                 model: Some("sonnet".to_string()),
                 ..AgentDefaults::default()
             },
-        )]),
+        )]
+        .into(),
     };
 
     save_to(&path, &initial).unwrap();
 
-    let defaults = BTreeMap::from([
+    let defaults: BTreeMap<_, _> = [
         (
             "claude".to_string(),
             AgentDefaults {
@@ -161,7 +163,8 @@ fn save_agent_defaults_updates_only_agent_defaults() {
                 ..AgentDefaults::default()
             },
         ),
-    ]);
+    ]
+    .into();
 
     save_agent_defaults_to(&path, &defaults).unwrap();
 
@@ -178,21 +181,23 @@ fn windows_and_profile_updates_preserve_other_writers() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("local_state.toml");
 
-    let first = BTreeMap::from([(
+    let first: BTreeMap<_, _> = [(
         "first".to_string(),
         AgentDefaults {
             model: Some("model-a".to_string()),
             ..AgentDefaults::default()
         },
-    )]);
+    )]
+    .into();
 
-    let second = BTreeMap::from([(
+    let second: BTreeMap<_, _> = [(
         "second".to_string(),
         AgentDefaults {
             model: Some("model-b".to_string()),
             ..AgentDefaults::default()
         },
-    )]);
+    )]
+    .into();
 
     save_agent_defaults_to(&path, &first).unwrap();
 

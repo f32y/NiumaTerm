@@ -52,7 +52,7 @@ pub(crate) fn terminal_text_runs(line: &TerminalLine, base: &TextRun) -> Vec<Tex
             let mut text_run = base.clone();
 
             text_run.len = run.len;
-            text_run.color = rgb(run.fg.rgb_u32()).into();
+            text_run.color = rgb(run.fg.into()).into();
 
             if run.bold {
                 text_run.font.weight = FontWeight::BOLD;
@@ -134,7 +134,7 @@ pub(crate) fn paint_line_backgrounds_at(
                 ),
                 size(px(width as f32 * cell.width_px), px(cell.height_px)),
             ),
-            rgb(color.rgb_u32()),
+            rgb(color.into()),
         ));
     };
 

@@ -80,18 +80,6 @@ pub enum Wide {
     LeadingSpacer = 3,
 }
 
-impl Wide {
-    #[inline]
-    fn from_bits(bits: u64) -> Wide {
-        match (bits >> WIDE_SHIFT) & 0b11 {
-            0 => Wide::Narrow,
-            1 => Wide::Wide,
-            2 => Wide::Spacer,
-            _ => Wide::LeadingSpacer,
-        }
-    }
-}
-
 /// Discriminator for what the cell's payload represents. Default is
 /// `Codepoint`, the standard text cell. The bg-only variants are an
 /// optimization for cells that carry only a background color (selection,
@@ -108,21 +96,6 @@ pub enum ContentTag {
     /// Bg-only cell with an RGB background.
     /// RGB packed in bits 32..55 (R, G, B).
     BgRgb = 2,
-}
-
-impl ContentTag {
-    /// Decode the content tag from a raw `Square` u64. Public so render
-    /// hot loops can read the cell once and dispatch on the tag without
-    /// going through the `Square::content_tag()` method (which reloads
-    /// the cell from memory if the optimizer can't prove it aliases).
-    #[inline(always)]
-    pub fn from_bits(bits: u64) -> ContentTag {
-        match (bits >> CONTENT_TAG_SHIFT) & 0b11 {
-            0 => ContentTag::Codepoint,
-            1 => ContentTag::BgPalette,
-            _ => ContentTag::BgRgb,
-        }
-    }
 }
 
 bitflags! {
@@ -220,14 +193,6 @@ impl Default for Square {
 }
 
 impl Square {
-    /// Create a cell with the given codepoint and the default style/extras.
-    #[inline]
-    pub fn from_char(c: char) -> Self {
-        let mut s = Square(0);
-        s.set_c(c);
-        s
-    }
-
     /// Read the underlying packed bits. Used by render hot loops that want
     /// to extract multiple fields from a single cell load — calling the
     /// individual accessors would otherwise reload the cell from memory
@@ -256,7 +221,7 @@ impl Square {
 
     #[inline]
     pub fn wide(self) -> Wide {
-        Wide::from_bits(self.0)
+        self.0.into()
     }
 
     #[inline]
@@ -319,7 +284,7 @@ impl Square {
 
     #[inline]
     pub fn content_tag(self) -> ContentTag {
-        ContentTag::from_bits(self.0)
+        self.0.into()
     }
 
     /// Convert this cell into a bg-only cell holding a palette-indexed
@@ -424,3 +389,40 @@ impl Square {
 
 #[cfg(test)]
 mod tests;
+
+impl From<char> for Square {
+    /// Create a cell with the given codepoint and the default style/extras.
+    #[inline]
+    fn from(c: char) -> Self {
+        let mut s = Square(0);
+        s.set_c(c);
+        s
+    }
+}
+
+impl From<u64> for Wide {
+    #[inline]
+    fn from(bits: u64) -> Self {
+        match (bits >> WIDE_SHIFT) & 0b11 {
+            0 => Wide::Narrow,
+            1 => Wide::Wide,
+            2 => Wide::Spacer,
+            _ => Wide::LeadingSpacer,
+        }
+    }
+}
+
+impl From<u64> for ContentTag {
+    /// Decode the content tag from a raw `Square` u64. Public so render
+    /// hot loops can read the cell once and dispatch on the tag without
+    /// going through the `Square::content_tag()` method (which reloads
+    /// the cell from memory if the optimizer can't prove it aliases).
+    #[inline(always)]
+    fn from(bits: u64) -> Self {
+        match (bits >> CONTENT_TAG_SHIFT) & 0b11 {
+            0 => ContentTag::Codepoint,
+            1 => ContentTag::BgPalette,
+            _ => ContentTag::BgRgb,
+        }
+    }
+}

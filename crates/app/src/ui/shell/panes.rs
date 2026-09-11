@@ -53,7 +53,7 @@ impl Shell {
 
         // Avoid spawning a shell when its panel cannot fit beside this pane.
         let has_room = focused.read(cx).content_size().is_none_or(|size| {
-            let extent = match direction.axis() {
+            let extent = match direction.into() {
                 Axis::Horizontal => size.width,
                 Axis::Vertical => size.height,
             };

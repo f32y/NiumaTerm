@@ -141,8 +141,8 @@ impl ComposerAttachments {
 
         let label =
             i18n("agent-composer-annotation-item").replace("{index}", &(index + 1).to_string());
-        let group = SharedString::from(format!("agent-response-annotation-{index}"));
-        let full = SharedString::from(text.to_string());
+        let group: SharedString = format!("agent-response-annotation-{index}").into();
+        let full: SharedString = text.to_string().into();
 
         div()
             .id(("agent-response-annotation", index))

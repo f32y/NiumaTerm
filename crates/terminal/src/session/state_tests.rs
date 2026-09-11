@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::SystemTime;
@@ -25,10 +24,7 @@ fn path_paste_and_block_replay_obey_session_input_rules() {
     session
         .vt_modes
         .store(Mode::BRACKETED_PASTE.bits(), Ordering::Release);
-    let paths = [
-        PathBuf::from(r"C:\src\main.rs"),
-        PathBuf::from(r"C:\My Project\notes.txt"),
-    ];
+    let paths = [r"C:\src\main.rs".into(), r"C:\My Project\notes.txt".into()];
     assert!(!session.paste_paths(&[]));
     assert!(session.paste_paths(&paths));
     assert!(matches!(messages.try_recv().unwrap(), Msg::Input(bytes)

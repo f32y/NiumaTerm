@@ -213,7 +213,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
 
     // Translations must be ready before any view exists so the first frame
     // already renders in the configured language.
-    nmt_i18n::init(get().appearance.language.as_str());
+    nmt_i18n::init(get().appearance.language.into());
 
     // A second launch forwards its action to the existing process so one process
     // URL (or an activate request) to the running instance and exits. A
@@ -227,8 +227,9 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
 
     if !platform_ipc::try_become_primary(testing) {
         let action = argv_action.clone().unwrap_or(CliAction::Activate);
+        let url: String = (&action).into();
 
-        match platform_ipc::send(&action.to_url(), time::Duration::from_secs(2), testing) {
+        match platform_ipc::send(&url, time::Duration::from_secs(2), testing) {
             Ok(()) => return,
             Err(error) => warn!("primary instance pipe unreachable: {error}"),
         }
@@ -293,7 +294,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
         // The component library localizes its own chrome (dialog buttons,
         // search placeholders) through a separate catalog; keep it on the
         // app language.
-        gpui_component::set_locale(get().appearance.language.as_str());
+        gpui_component::set_locale(get().appearance.language.into());
 
         ui::apply_ui_theme(get().ui_theme.as_ref(), cx);
 
@@ -374,12 +375,12 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             // the observer fires on every settings edit (including theme
             // filter keystrokes), and only a real language switch should
             // pay for a full re-render of every window.
-            let language = cx.global::<AppSettings>().appearance.language;
-            let language_changed = &*gpui_component::locale() != language.as_str();
+            let language: &str = cx.global::<AppSettings>().appearance.language.into();
+            let language_changed = &*gpui_component::locale() != language;
 
             if language_changed {
-                nmt_i18n::set_language(language.as_str());
-                gpui_component::set_locale(language.as_str());
+                nmt_i18n::set_language(language);
+                gpui_component::set_locale(language);
 
                 // AppKit holds the strings the bar was built from, so it
                 // keeps the previous language until it is rebuilt.
@@ -468,9 +469,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
         cx.set_global(WindowRegistry(Vec::new()));
         cx.set_global(ShellRegistry(Vec::new()));
         cx.set_global(LastActiveWindow(None));
-        cx.set_global(AgentThreadDefaults::from_local_state(
-            &remembered_state.agent_defaults,
-        ));
+        cx.set_global::<AgentThreadDefaults>((&remembered_state.agent_defaults).into());
 
         // A closed window is discarded — except the last one, whose
         // geometry and session the quit hook still has to write out. On

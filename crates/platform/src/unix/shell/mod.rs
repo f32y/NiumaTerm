@@ -20,7 +20,7 @@ pub fn default_shell() -> String {
         .ok()
         .map(|user| user.shell)
         .filter(|shell| !shell.is_empty())
-        .unwrap_or_else(|| String::from("/bin/sh"))
+        .unwrap_or_else(|| "/bin/sh".into())
 }
 
 /// How `shell` must be launched so it emits the bundled OSC 133 prompt marks,
@@ -75,14 +75,14 @@ fn zsh_integration() -> Option<PromptIntegration> {
 fn bash_integration() -> Option<PromptIntegration> {
     let directory = bash_directory()?;
 
-    let mut environment = vec![(String::from("HISTCONTROL"), String::from("ignorespace"))];
+    let mut environment = vec![("HISTCONTROL".into(), "ignorespace".into())];
 
     if let Ok(saved) = env::var("HISTCONTROL") {
-        environment.push((String::from("NMT_SAVED_HISTCONTROL"), saved));
+        environment.push(("NMT_SAVED_HISTCONTROL".into(), saved));
     }
 
     Some(PromptIntegration {
-        args: vec![String::from("--norc"), String::from("--noprofile")],
+        args: vec!["--norc".into(), "--noprofile".into()],
         environment,
         bootstrap: Some(bootstrap_line(&directory.join(BASH_HOOKS))),
     })

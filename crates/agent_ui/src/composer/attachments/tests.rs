@@ -172,8 +172,12 @@ fn attaching_shrinks_an_oversized_image() {
     assert!(width.max(height) <= MAX_IMAGE_EDGE);
     assert!(width.max(height) > MAX_IMAGE_EDGE - 4);
 
-    let from_ratio = f64::from(from_width) / f64::from(from_height);
-    let to_ratio = f64::from(width) / f64::from(height);
+    let from_width: f64 = from_width.into();
+    let from_height: f64 = from_height.into();
+    let width: f64 = width.into();
+    let height: f64 = height.into();
+    let from_ratio = from_width / from_height;
+    let to_ratio = width / height;
 
     assert!((from_ratio - to_ratio).abs() < 0.01);
 }

@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::mpsc::channel;
 
 use crate::codex::app_server::compaction::{
@@ -785,10 +784,7 @@ fn structured_skill_input_extends_the_original_text_shape() {
 
 #[test]
 fn local_images_follow_the_text_in_the_order_the_message_names_them() {
-    let images = [
-        PathBuf::from(r"C:\tmp\one.png"),
-        PathBuf::from(r"C:\tmp\two.png"),
-    ];
+    let images = [r"C:\tmp\one.png".into(), r"C:\tmp\two.png".into()];
 
     assert_eq!(
         codex_user_input("compare [Image #1] with [Image #2]", None, &images),

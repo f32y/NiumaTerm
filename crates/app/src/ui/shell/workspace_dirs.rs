@@ -168,7 +168,7 @@ impl WorkspaceDirsEditor {
                     }
                 }
 
-                editor.notice = notice.map(SharedString::from);
+                editor.notice = notice.map(Into::into);
                 editor.refresh_availability(cx);
                 cx.notify();
             });

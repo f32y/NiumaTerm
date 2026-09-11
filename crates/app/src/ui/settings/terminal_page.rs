@@ -3,6 +3,9 @@ use nmt_i18n::i18n;
 use crate::ui::settings::*;
 
 pub(super) fn terminal_page() -> SettingPage {
+    let waterfall_key: &str = InputStyle::Waterfall.into();
+    let fixed_bottom_key: &str = InputStyle::FixedBottom.into();
+
     SettingPage::new(i18n("settings-terminal-title"))
         .default_open(true)
         .group(
@@ -13,27 +16,25 @@ pub(super) fn terminal_page() -> SettingPage {
                     SettingField::dropdown(
                         vec![
                             (
-                                InputStyle::Waterfall.as_str().into(),
+                                waterfall_key.into(),
                                 input_style_label(InputStyle::Waterfall).into(),
                             ),
                             (
-                                InputStyle::FixedBottom.as_str().into(),
+                                fixed_bottom_key.into(),
                                 input_style_label(InputStyle::FixedBottom).into(),
                             ),
                         ],
                         |cx| {
-                            cx.global::<AppSettings>()
-                                .appearance
-                                .input_style
-                                .as_str()
-                                .into()
+                            let key: &str =
+                                cx.global::<AppSettings>().appearance.input_style.into();
+                            key.into()
                         },
                         |value, cx| {
                             cx.global_mut::<AppSettings>().appearance.input_style =
-                                input_style_from_value(&value);
+                                value.as_str().into();
                         },
                     )
-                    .default_value(SharedString::from(InputStyle::Waterfall.as_str())),
+                    .default_value(waterfall_key),
                 ))
                 .item(SettingItem::new(
                     i18n("settings-terminal-cursor-shape"),
@@ -49,13 +50,15 @@ pub(super) fn terminal_page() -> SettingPage {
                                 i18n("settings-terminal-cursor-underline").into(),
                             ),
                         ],
-                        |cx| cx.global::<AppSettings>().cursor_shape.as_str().into(),
+                        |cx| {
+                            let key: &str = cx.global::<AppSettings>().cursor_shape.into();
+                            key.into()
+                        },
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().cursor_shape =
-                                cursor_shape_from_value(&value);
+                            cx.global_mut::<AppSettings>().cursor_shape = value.as_str().into();
                         },
                     )
-                    .default_value(SharedString::from("block")),
+                    .default_value("block"),
                 ))
                 .item(SettingItem::new(
                     i18n("settings-terminal-command-blocks"),

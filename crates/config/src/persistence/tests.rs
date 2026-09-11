@@ -38,7 +38,7 @@ fn process_writer() {
     let Some(path) = env::var_os("NMT_CONFIG_TEST_UPDATE_PATH") else {
         return;
     };
-    let path = PathBuf::from(path);
+    let path: PathBuf = path.into();
 
     for _ in 0..25 {
         update(&path, |content| {

@@ -20,7 +20,7 @@ pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 /// runtime directory rather than a nested app path.
 fn runtime_dir() -> io::Result<PathBuf> {
     let base = env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
+        .map(|value| -> PathBuf { value.into() })
         .filter(|path| path.is_absolute())
         .unwrap_or_else(env::temp_dir);
 

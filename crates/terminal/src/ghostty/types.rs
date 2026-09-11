@@ -114,12 +114,6 @@ enum CellTextRepr {
 }
 
 impl CellText {
-    pub fn from_char(c: char) -> Self {
-        let mut buf = [0u8; 22];
-        let len = c.encode_utf8(&mut buf).len() as u8;
-        CellText(CellTextRepr::Inline { len, buf })
-    }
-
     pub fn as_str(&self) -> &str {
         match &self.0 {
             // Invariant: constructors only store valid UTF-8 prefixes.
@@ -167,7 +161,7 @@ impl From<&str> for CellText {
 impl From<String> for CellText {
     fn from(s: String) -> Self {
         if s.len() <= 22 {
-            CellText::from(s.as_str())
+            s.as_str().into()
         } else {
             CellText(CellTextRepr::Heap(s))
         }
@@ -309,4 +303,12 @@ pub struct ScrollbarInfo {
     pub total: u64,
     pub offset: u64,
     pub len: u64,
+}
+
+impl From<char> for CellText {
+    fn from(c: char) -> Self {
+        let mut buf = [0u8; 22];
+        let len = c.encode_utf8(&mut buf).len() as u8;
+        CellText(CellTextRepr::Inline { len, buf })
+    }
 }

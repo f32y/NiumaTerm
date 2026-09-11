@@ -15,22 +15,6 @@ pub enum WarnBeforeTerminatingShell {
 }
 
 impl WarnBeforeTerminatingShell {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Disabled => "disabled",
-            Self::WhenChildProcessesRunning => "when-child-processes-running",
-            Self::Always => "always",
-        }
-    }
-
-    pub fn from_value(value: &str) -> Self {
-        match value {
-            "disabled" => Self::Disabled,
-            "always" => Self::Always,
-            _ => Self::WhenChildProcessesRunning,
-        }
-    }
-
     pub fn should_warn(self, child_process_count: usize) -> bool {
         match self {
             Self::Disabled => false,
@@ -47,24 +31,6 @@ pub enum NewlineShortcut {
     CtrlEnter,
     ShiftEnter,
     Off,
-}
-
-impl NewlineShortcut {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::CtrlEnter => "ctrl-enter",
-            Self::ShiftEnter => "shift-enter",
-            Self::Off => "off",
-        }
-    }
-
-    pub fn from_value(value: &str) -> Self {
-        match value {
-            "shift-enter" => Self::ShiftEnter,
-            "off" => Self::Off,
-            _ => Self::CtrlEnter,
-        }
-    }
 }
 
 /// The `[system]` section: process/system behavior settings.
@@ -110,6 +76,46 @@ impl Default for SystemConfig {
             prioritize_ui_threads: false,
             newline_shortcut: NewlineShortcut::default(),
             open_in_best_workspace: true,
+        }
+    }
+}
+
+impl From<WarnBeforeTerminatingShell> for &'static str {
+    fn from(value: WarnBeforeTerminatingShell) -> Self {
+        match value {
+            WarnBeforeTerminatingShell::Disabled => "disabled",
+            WarnBeforeTerminatingShell::WhenChildProcessesRunning => "when-child-processes-running",
+            WarnBeforeTerminatingShell::Always => "always",
+        }
+    }
+}
+
+impl From<&str> for WarnBeforeTerminatingShell {
+    fn from(value: &str) -> Self {
+        match value {
+            "disabled" => Self::Disabled,
+            "always" => Self::Always,
+            _ => Self::WhenChildProcessesRunning,
+        }
+    }
+}
+
+impl From<NewlineShortcut> for &'static str {
+    fn from(value: NewlineShortcut) -> Self {
+        match value {
+            NewlineShortcut::CtrlEnter => "ctrl-enter",
+            NewlineShortcut::ShiftEnter => "shift-enter",
+            NewlineShortcut::Off => "off",
+        }
+    }
+}
+
+impl From<&str> for NewlineShortcut {
+    fn from(value: &str) -> Self {
+        match value {
+            "shift-enter" => Self::ShiftEnter,
+            "off" => Self::Off,
+            _ => Self::CtrlEnter,
         }
     }
 }

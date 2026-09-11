@@ -132,6 +132,7 @@ impl BackgroundTasksView {
 
         let theme = cx.theme();
 
+        let provider: &str = task.key.provider.into();
         let header = v_flex()
             .px_2()
             .py_1()
@@ -171,7 +172,7 @@ impl BackgroundTasksView {
                     .items_center()
                     .text_xs()
                     .text_color(theme.muted_foreground)
-                    .child(div().flex_none().child(task.key.provider.label()))
+                    .child(div().flex_none().child(provider))
                     .child(
                         div()
                             .flex_none()

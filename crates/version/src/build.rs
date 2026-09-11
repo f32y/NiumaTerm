@@ -141,7 +141,7 @@ fn derive_from_git() -> String {
 /// yields nothing for a build from a published archive, where the triggers
 /// would have no revision to watch anyway.
 fn git_dir() -> Option<PathBuf> {
-    let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR")?);
+    let manifest: PathBuf = env::var_os("CARGO_MANIFEST_DIR")?.into();
 
     manifest
         .ancestors()

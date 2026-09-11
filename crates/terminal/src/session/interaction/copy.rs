@@ -29,10 +29,12 @@ impl PendingCopy {
     pub fn ready(text: String) -> Self {
         let (reply, request) = oneshot::channel();
         let _ = reply.send(Ok(text));
-        Self::from_request(request)
+        request.into()
     }
+}
 
-    pub fn from_request(request: Request<String>) -> Self {
+impl From<Request<String>> for PendingCopy {
+    fn from(request: Request<String>) -> Self {
         Self {
             request,
             completion: CopyCompletion {

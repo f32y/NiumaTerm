@@ -204,7 +204,7 @@ pub(crate) fn entry_fingerprint(
         } => (
             text.as_ref().map_or(0, String::len),
             questions.as_ref().map_or(0, Vec::len),
-            u64::from(questions.is_some()),
+            questions.is_some().into(),
         ),
         SessionItem::UserMessage { text } | SessionItem::Reasoning { summary: text, .. } => {
             (text.as_ref().map_or(0, String::len), 0, 0)

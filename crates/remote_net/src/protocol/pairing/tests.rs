@@ -12,19 +12,21 @@ fn sample() -> PairingCode {
 #[test]
 fn roundtrip() {
     let code = sample();
-    assert_eq!(PairingCode::decode(&code.encode()).unwrap(), code);
+    let encoded: String = (&code).into();
+    assert_eq!(PairingCode::decode(&encoded).unwrap(), code);
 }
 
 #[test]
 fn tolerates_whitespace_and_case() {
     let code = sample();
-    let mangled = format!("  {}  ", code.encode().to_lowercase());
+    let encoded: String = (&code).into();
+    let mangled = format!("  {}  ", encoded.to_lowercase());
     assert_eq!(PairingCode::decode(&mangled).unwrap(), code);
 }
 
 #[test]
 fn corrupted_inputs_error_cleanly() {
-    let encoded = sample().encode();
+    let encoded: String = (&sample()).into();
 
     // Truncated payload.
     assert_eq!(

@@ -142,13 +142,13 @@ fn start_with_startup_files(
 
     let mut environment = integration.environment;
 
-    environment.push((String::from("HOME"), home_value.clone()));
+    environment.push(("HOME".into(), home_value.clone()));
 
     // The shell inherits this process's `HISTFILE`, which would be the
     // developer's own; give each session its own so a history assertion sees
     // only what this session did.
     environment.push((
-        String::from("HISTFILE"),
+        "HISTFILE".into(),
         home.join("history").to_string_lossy().into_owned(),
     ));
 
@@ -157,7 +157,7 @@ fn start_with_startup_files(
         // caller passes, so an empty home only isolates zsh if the bootstrap
         // is pointed at it the way zsh itself would be. `login -p` does keep
         // ZDOTDIR.
-        environment.push((String::from("ZDOTDIR"), home_value));
+        environment.push(("ZDOTDIR".into(), home_value));
     }
 
     match create_pty_with_env(PtyOptions {
@@ -335,7 +335,7 @@ fn zsh_still_reads_the_users_startup_files() {
 fn bash_bootstrap_in_temp_home(label: &str, files: &[(&str, &str)], probe: &str) -> String {
     let Some(bash) = shell_path("bash") else {
         eprintln!("skipping: no bash on this host");
-        return String::from("<skipped>");
+        return "<skipped>".into();
     };
 
     let integration = prompt_integration(Some(&bash)).expect("bash is integrated");

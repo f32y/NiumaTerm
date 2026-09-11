@@ -12,15 +12,6 @@ pub struct RawSlice {
     len: usize,
 }
 
-impl RawSlice {
-    fn new(value: &'static str) -> Self {
-        Self {
-            data: value.as_ptr(),
-            len: value.len(),
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct LanguageDescriptor {
@@ -44,13 +35,13 @@ impl LanguageDescriptor {
         locals: &'static str,
     ) -> Self {
         Self {
-            name: RawSlice::new(name),
-            aliases: RawSlice::new(aliases),
-            injection_languages: RawSlice::new(injection_languages),
+            name: name.into(),
+            aliases: aliases.into(),
+            injection_languages: injection_languages.into(),
             language: Some(language),
-            highlights: RawSlice::new(highlights),
-            injections: RawSlice::new(injections),
-            locals: RawSlice::new(locals),
+            highlights: highlights.into(),
+            injections: injections.into(),
+            locals: locals.into(),
         }
     }
 }
@@ -458,3 +449,12 @@ pub unsafe extern "system" fn nmt_tree_sitter_language(
 
 #[cfg(test)]
 mod tests;
+
+impl From<&'static str> for RawSlice {
+    fn from(value: &'static str) -> Self {
+        Self {
+            data: value.as_ptr(),
+            len: value.len(),
+        }
+    }
+}

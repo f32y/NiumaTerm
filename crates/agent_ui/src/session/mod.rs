@@ -385,9 +385,10 @@ impl AgentPane {
         body: &str,
         cx: &mut Context<Self>,
     ) {
+        let agent: &str = self.kind.into();
         cx.emit(AgentPaneEvent::Lifecycle(AgentEvent {
             route: self.agent_route.clone(),
-            agent: self.kind.id().to_string(),
+            agent: agent.into(),
             session_id: format!("agent-tab-{}", self.session.runtime.epoch()),
             turn_id: (kind != AgentEventKind::SessionStarted)
                 .then(|| format!("turn-{}", self.session.delivery.turn())),

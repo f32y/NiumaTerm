@@ -26,10 +26,7 @@ fn terminal_profiles_group(profiles: &[Profile]) -> SettingGroup {
                 p.name.clone()
             };
 
-            (
-                SharedString::from(p.name.clone()),
-                SharedString::from(label),
-            )
+            (p.name.clone().into(), label.into())
         })
         .collect();
 
@@ -259,10 +256,7 @@ fn agent_profiles_group(agent_profiles: &[AgentProfile]) -> SettingGroup {
                 p.name.clone()
             };
 
-            (
-                SharedString::from(p.name.clone()),
-                SharedString::from(label),
-            )
+            (p.name.clone().into(), label.into())
         })
         .collect();
 

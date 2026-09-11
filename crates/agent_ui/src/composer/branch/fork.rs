@@ -8,7 +8,7 @@
 //! backend which prompts it can branch in front of, show them, and hand the
 //! chosen one back so the branch starts where it was cut.
 
-use gpui::{Context, SharedString, Window};
+use gpui::{Context, Window};
 use nmt_agent::chat::ForkCheckpoint;
 pub(crate) use nmt_agent::session::branch::PromptTarget;
 #[cfg(test)]
@@ -218,8 +218,7 @@ impl AgentPane {
                     .map(|checkpoint| PaletteRow {
                         label: rewind_prompt_label(&checkpoint.prompt).into(),
                         description: translated("agent-fork-branch-before-prompt"),
-                        hint: rewind_timestamp(checkpoint.timestamp.as_deref())
-                            .map(SharedString::from),
+                        hint: rewind_timestamp(checkpoint.timestamp.as_deref()).map(Into::into),
                         disabled_reason: None,
                         action: PaletteAction::ForkCheckpoint(checkpoint),
                     })

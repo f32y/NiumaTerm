@@ -19,11 +19,11 @@ fn effective_environment_matches_child_case_rules_and_last_override() {
 
     assert_eq!(
         launcher.effective_env_os("NMT_CASE_PROBE"),
-        Some(OsString::from(expected_upper))
+        Some(expected_upper.into())
     );
     assert_eq!(
         launcher.effective_env_os("nmt_case_probe"),
-        Some(OsString::from("lower"))
+        Some("lower".into())
     );
 
     #[cfg(windows)]

@@ -16,12 +16,6 @@ impl<L> TerminalLayout<L> {
         }
     }
 
-    pub(super) fn from_root(root: PaneNode<L, Entity<ResizableState>>) -> Self {
-        Self {
-            tree: PaneTree::from_root(root),
-        }
-    }
-
     pub(super) fn root(&self) -> &PaneNode<L, Entity<ResizableState>> {
         self.tree.root()
     }
@@ -78,7 +72,7 @@ impl<L> TerminalLayout<L> {
 
             for (index, child) in children.iter().enumerate() {
                 if matches!(child, PaneNode::Leaf { id: child_id, .. } if *child_id == id) {
-                    return (*axis == direction.axis()).then(|| (state.clone(), index));
+                    return (*axis == direction.into()).then(|| (state.clone(), index));
                 }
 
                 if let Some(found) = parent_state(child, id, direction) {
@@ -138,7 +132,7 @@ impl<L> TerminalLayout<L> {
         window: &mut Window,
         cx: &mut App,
     ) -> bool {
-        let Some((state, index, count)) = self.tree.resize_split(direction.axis()) else {
+        let Some((state, index, count)) = self.tree.resize_split(direction.into()) else {
             return false;
         };
         let Some(current) = state.read(cx).sizes().get(index).copied() else {
@@ -165,3 +159,9 @@ impl<L> TerminalLayout<L> {
 
 #[cfg(test)]
 mod tests;
+
+impl<L> From<PaneNode<L, Entity<ResizableState>>> for TerminalLayout<L> {
+    fn from(root: PaneNode<L, Entity<ResizableState>>) -> Self {
+        Self { tree: root.into() }
+    }
+}

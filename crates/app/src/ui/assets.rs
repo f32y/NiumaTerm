@@ -28,7 +28,7 @@ impl AssetSource for AppAssets {
         items.extend(
             ProjectAssets::iter()
                 .filter(|p| p.starts_with(path))
-                .map(|p| SharedString::from(p.to_string())),
+                .map(|p| p.to_string().into()),
         );
 
         Ok(items)

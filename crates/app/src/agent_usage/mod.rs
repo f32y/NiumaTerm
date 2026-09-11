@@ -41,6 +41,7 @@ fn quota_gauge(
 ) -> Option<AnyElement> {
     let window = usage.compact_window()?;
     let value = format!("{}%", window.remaining_percentage);
+    let remaining: f32 = window.remaining_percentage.into();
 
     Some(
         h_flex()
@@ -62,7 +63,7 @@ fn quota_gauge(
                     .child(
                         div()
                             .h_full()
-                            .w(relative(f32::from(window.remaining_percentage) / 100.0))
+                            .w(relative(remaining / 100.0))
                             .rounded_full()
                             .bg(cx.theme().primary.opacity(QUOTA_FILL_OPACITY)),
                     ),
@@ -428,6 +429,7 @@ fn usage_bar_color(remaining_percentage: u8, colors: UsagePanelColors) -> Hsla {
 
 fn render_usage_window(row: UsageWindowRow<'_>, now: i64, colors: UsagePanelColors) -> AnyElement {
     let remaining = row.window.remaining_percentage;
+    let percentage: f32 = remaining.into();
 
     v_flex()
         .gap_1()
@@ -464,7 +466,7 @@ fn render_usage_window(row: UsageWindowRow<'_>, now: i64, colors: UsagePanelColo
                 .child(
                     div()
                         .h_full()
-                        .w(relative(f32::from(remaining) / 100.0))
+                        .w(relative(percentage / 100.0))
                         .rounded_full()
                         .bg(usage_bar_color(remaining, colors)),
                 ),

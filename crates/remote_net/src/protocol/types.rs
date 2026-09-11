@@ -1,3 +1,4 @@
+use nmt_remote_session_hub::{SessionInfo, SessionOptions, SessionSnapshot};
 use serde::{Deserialize, Serialize};
 
 /// Options a remote client may request when opening a session. Deliberately a
@@ -68,4 +69,50 @@ pub enum ClientBound {
         session_id: Option<u64>,
         message: String,
     },
+}
+
+impl From<ProtocolSessionOptions> for SessionOptions {
+    fn from(request: ProtocolSessionOptions) -> Self {
+        let mut options = SessionOptions::default();
+
+        if let Some(shell) = request.shell {
+            options.shell = shell;
+        }
+
+        options.working_directory = request.working_directory;
+
+        if request.cols > 0 {
+            options.cols = request.cols;
+        }
+
+        if request.rows > 0 {
+            options.rows = request.rows;
+        }
+
+        options
+    }
+}
+
+impl From<SessionInfo> for ProtocolSessionInfo {
+    fn from(info: SessionInfo) -> Self {
+        ProtocolSessionInfo {
+            session_id: info.id.0,
+            shell: info.shell,
+            title: info.title.unwrap_or_default(),
+            exited: info.exited,
+            attached_clients: info.attached_clients as u32,
+        }
+    }
+}
+
+impl From<&SessionSnapshot> for ProtocolSessionSnapshot {
+    fn from(snapshot: &SessionSnapshot) -> Self {
+        ProtocolSessionSnapshot {
+            session_id: snapshot.session_id.0,
+            base_seq: snapshot.base_seq,
+            vt: snapshot.vt.clone(),
+            cols: snapshot.cols,
+            rows: snapshot.rows,
+        }
+    }
 }

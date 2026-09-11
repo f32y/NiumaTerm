@@ -215,10 +215,7 @@ impl PaneController {
                 .and_then(|frame| live_frame_text(&frame))
                 .map(PendingCopy::ready)
         } else {
-            self.source
-                .session
-                .block_text(item)
-                .map(PendingCopy::from_request)
+            self.source.session.block_text(item).map(Into::into)
         }
     }
 
@@ -667,7 +664,7 @@ impl PaneController {
                         .snapshot
                         .viewport_top
                         .unwrap_or(0)
-                        .saturating_add(u32::from(cell.row)),
+                        .saturating_add(cell.row.into()),
                 },
                 side,
                 kind,
@@ -815,7 +812,7 @@ impl PaneController {
                 },
             });
         self.settings = settings;
-        self.theme = FrameTheme::from(colors);
+        self.theme = colors.into();
         self.duration_labels = duration_labels;
         self.cell_metrics = None;
         self.frame_cache.invalidate_full();

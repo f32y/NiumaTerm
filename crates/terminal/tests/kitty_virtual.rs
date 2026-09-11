@@ -25,7 +25,8 @@ fn rgb_placeholder_id_round_trip() {
     let id = IncompletePlacement::from_cell(AnsiColor::Spec(rgb), None, &[]).image_id_low;
 
     assert_eq!(id, 0x123456);
-    assert_eq!(id_to_rgb(id), rgb);
+    let decoded: ColorRgb = id.into();
+    assert_eq!(decoded, rgb);
 }
 
 #[test]
@@ -72,7 +73,7 @@ fn from_cell_indexed_fg_two_diacritics() {
     assert_eq!(p.row, Some(3));
     assert_eq!(p.col, Some(7));
 
-    let run = p.complete();
+    let run: PlaceholderRun = (&p).into();
 
     assert_eq!(run.image_id, 42);
     assert_eq!(run.row, 3);
@@ -101,7 +102,7 @@ fn from_cell_rgb_fg_three_diacritics() {
     assert_eq!(p.row, Some(0));
     assert_eq!(p.col, Some(1));
 
-    let run = p.complete();
+    let run: PlaceholderRun = (&p).into();
 
     assert_eq!(run.image_id, 0x0200_0000 | 0x00AB_CDEF);
 }
@@ -139,7 +140,7 @@ fn from_cell_missing_diacritics_yields_none_fields() {
     assert_eq!(p.col, None);
 
     // `complete()` defaults missing fields to 0.
-    let run = p.complete();
+    let run: PlaceholderRun = (&p).into();
 
     assert_eq!(run.row, 5);
     assert_eq!(run.col, 0);
@@ -422,7 +423,7 @@ fn run_of_three_cells_with_only_first_diacritics() {
         run.append();
     }
 
-    let r = run.complete();
+    let r: PlaceholderRun = (&run).into();
 
     assert_eq!(r.row, 0);
     assert_eq!(r.col, 0);

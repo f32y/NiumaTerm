@@ -61,16 +61,6 @@ pub enum AgentProfileKind {
     DeepSeek,
 }
 
-impl AgentProfileKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            AgentProfileKind::ClaudeCode => "claude-code",
-            AgentProfileKind::Codex => "codex",
-            AgentProfileKind::DeepSeek => "deepseek",
-        }
-    }
-}
-
 /// How a DeepSeek Harness profile obtains the `dsh` command it launches.
 /// Other agent kinds always use [`AgentProfileLauncher::Custom`].
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -80,16 +70,6 @@ pub enum AgentProfileLauncher {
     Custom,
     Npx,
     PnpmDlx,
-}
-
-impl AgentProfileLauncher {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            AgentProfileLauncher::Custom => "custom",
-            AgentProfileLauncher::Npx => "npx",
-            AgentProfileLauncher::PnpmDlx => "pnpm-dlx",
-        }
-    }
 }
 
 /// One environment variable applied to the agent process on launch.
@@ -288,14 +268,14 @@ pub(crate) fn patch_agent_document(
         let mut table = Table::new();
 
         table["name"] = value(&profile.name);
-        table["kind"] = value(profile.kind.as_str());
+        table["kind"] = value::<&str>(profile.kind.into());
         table["executable"] = value(&profile.executable);
-        table["launcher"] = value(profile.launcher.as_str());
+        table["launcher"] = value::<&str>(profile.launcher.into());
         table["model"] = value(&profile.model);
         table["effort"] = value(&profile.effort);
         table["replace-sub-models"] = value(profile.replace_sub_models);
         table["use-custom-endpoint"] = value(profile.use_custom_endpoint);
-        table["cache-warn-minutes"] = value(i64::from(profile.cache_warn_minutes));
+        table["cache-warn-minutes"] = value::<i64>(profile.cache_warn_minutes.into());
 
         if !profile.api_base_url.is_empty() || !profile.api_key.is_empty() {
             let stored =
@@ -328,4 +308,24 @@ pub(crate) fn patch_agent_document(
     doc["agent-profiles"]["list"] = Item::ArrayOfTables(tables);
 
     Ok(())
+}
+
+impl From<AgentProfileKind> for &'static str {
+    fn from(value: AgentProfileKind) -> Self {
+        match value {
+            AgentProfileKind::ClaudeCode => "claude-code",
+            AgentProfileKind::Codex => "codex",
+            AgentProfileKind::DeepSeek => "deepseek",
+        }
+    }
+}
+
+impl From<AgentProfileLauncher> for &'static str {
+    fn from(value: AgentProfileLauncher) -> Self {
+        match value {
+            AgentProfileLauncher::Custom => "custom",
+            AgentProfileLauncher::Npx => "npx",
+            AgentProfileLauncher::PnpmDlx => "pnpm-dlx",
+        }
+    }
 }

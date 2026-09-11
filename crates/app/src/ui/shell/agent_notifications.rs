@@ -132,11 +132,11 @@ impl Shell {
                 continue;
             }
 
-            let activation_url = CliAction::FocusNotification {
+            let activation_url: String = (&CliAction::FocusNotification {
                 route: notification.route.clone(),
                 notification_id: notification.id.clone(),
-            }
-            .to_url();
+            })
+                .into();
 
             thread::spawn(move || {
                 match show_notification(&NativeNotification {

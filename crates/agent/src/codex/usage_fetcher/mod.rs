@@ -167,7 +167,7 @@ fn parse_rate_limits(message: &Value) -> Result<UsageSnapshot, String> {
         ["primary", "secondary"].into_iter().find_map(|name| {
             let window = &limits[name];
 
-            if window["windowDurationMins"].as_u64() != Some(u64::from(duration_mins)) {
+            if window["windowDurationMins"].as_u64() != Some(duration_mins.into()) {
                 return None;
             }
 

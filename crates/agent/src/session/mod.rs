@@ -69,14 +69,6 @@ impl AgentKind {
     /// rather than inserted.
     pub const ALL: [Self; 3] = [Self::Claude, Self::Codex, Self::DeepSeek];
 
-    pub fn id(self) -> &'static str {
-        match self {
-            AgentKind::Codex => "codex",
-            AgentKind::Claude => "claude",
-            AgentKind::DeepSeek => "deepseek",
-        }
-    }
-
     pub fn display(self) -> &'static str {
         match self {
             AgentKind::Codex => "Codex",
@@ -88,7 +80,10 @@ impl AgentKind {
     /// `None` for unknown kinds (a newer snapshot), which degrade to a plain
     /// terminal tab instead of losing the tab.
     pub fn from_id(id: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|kind| kind.id() == id)
+        Self::ALL.into_iter().find(|kind| {
+            let candidate: &str = (*kind).into();
+            candidate == id
+        })
     }
 
     /// DeepSeek is installed outside the application update service.
@@ -103,3 +98,13 @@ impl AgentKind {
 
 #[cfg(test)]
 mod ui_split_tests;
+
+impl From<AgentKind> for &'static str {
+    fn from(value: AgentKind) -> Self {
+        match value {
+            AgentKind::Codex => "codex",
+            AgentKind::Claude => "claude",
+            AgentKind::DeepSeek => "deepseek",
+        }
+    }
+}

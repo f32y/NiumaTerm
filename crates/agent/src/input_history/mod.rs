@@ -34,9 +34,10 @@ impl InputHistoryScope {
     }
 
     fn new(target: impl Into<String>, kind: AgentKind, workspace: &AgentWorkspace) -> Self {
+        let backend: &str = kind.into();
         Self {
             target: target.into(),
-            backend: kind.id().to_string(),
+            backend: backend.into(),
             cwd: normalize_working_directory(workspace.primary()),
             additional: workspace.history_signature(),
         }
@@ -46,8 +47,8 @@ impl InputHistoryScope {
 fn normalize_working_directory(cwd: Option<&str>) -> String {
     let supplied = cwd
         .filter(|cwd| !cwd.trim().is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        .map(Into::into)
+        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| ".".into()));
 
     let absolute = if supplied.is_absolute() {
         supplied
@@ -93,7 +94,7 @@ pub struct AgentInputHistory {
 
 impl AgentInputHistory {
     pub fn entries(&self, scope: &InputHistoryScope) -> Arc<[String]> {
-        Arc::from(self.store.entries(scope))
+        self.store.entries(scope).into()
     }
 
     pub fn record(&mut self, scope: &InputHistoryScope, text: String) -> bool {
@@ -102,7 +103,7 @@ impl AgentInputHistory {
         }
 
         if let Some(writer) = self.writer.as_ref()
-            && writer.save(self.store.snapshot()).is_err()
+            && writer.save((&self.store).into()).is_err()
         {
             warn!("failed to queue Agent input history save");
         }
@@ -111,7 +112,7 @@ impl AgentInputHistory {
     }
 
     pub fn flush(&self) -> io::Result<()> {
-        let snapshot = self.store.snapshot();
+        let snapshot: StoredHistory = (&self.store).into();
 
         if let Some(writer) = self.writer.as_ref()
             && writer.flush(snapshot.clone()).is_ok()

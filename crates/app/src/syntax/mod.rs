@@ -162,7 +162,7 @@ fn list(raw: RawSlice) -> Result<Vec<SharedString>> {
     Ok(text(raw)?
         .split('\0')
         .filter(|value| !value.is_empty())
-        .map(SharedString::from)
+        .map(Into::into)
         .collect())
 }
 

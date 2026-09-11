@@ -13,9 +13,7 @@ use libghostty_vt_sys::{
 #[cfg(doc)]
 use crate::ghostty::GhosttyTerminal;
 use crate::ghostty::types::color_from_vt;
-use crate::ghostty::{
-    CellText, CellWide, Color, Error, Result, ScreenRowMeta, SnapshotStyle, Underline,
-};
+use crate::ghostty::{CellText, CellWide, Color, Error, Result, ScreenRowMeta, SnapshotStyle};
 
 /// Resolve a tagged style color against the palette. `None` for the default
 /// (terminal-level) color, concrete RGB otherwise.
@@ -182,17 +180,19 @@ pub(super) fn visit_row_cells(
             }
         }
 
-        let wide = CellWide::from(wide_raw);
+        let wide: CellWide = wide_raw.into();
 
         let text = match tag {
             VtCellContentTag::CODEPOINT => {
                 if cp == 0 {
                     CellText::default()
                 } else {
-                    CellText::from_char(char::from_u32(cp).unwrap_or(char::REPLACEMENT_CHARACTER))
+                    char::from_u32(cp)
+                        .unwrap_or(char::REPLACEMENT_CHARACTER)
+                        .into()
                 }
             }
-            VtCellContentTag::CODEPOINT_GRAPHEME => CellText::from(grid_ref_graphemes(&grid_ref)),
+            VtCellContentTag::CODEPOINT_GRAPHEME => grid_ref_graphemes(&grid_ref).into(),
             _ => CellText::default(), // BG_COLOR_*: no text
         };
 
@@ -216,7 +216,7 @@ pub(super) fn visit_row_cells(
                 style.invisible = raw_style.invisible;
                 style.strikethrough = raw_style.strikethrough;
                 style.overline = raw_style.overline;
-                style.underline = Underline::from(raw_style.underline);
+                style.underline = raw_style.underline.into();
             }
         }
 

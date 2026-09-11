@@ -36,14 +36,14 @@ fn application_support_dir(home: &Path) -> PathBuf {
 #[cfg(not(target_os = "macos"))]
 fn base_data_dir() -> Option<PathBuf> {
     env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
+        .map(|value| -> PathBuf { value.into() })
         .filter(|path| path.is_absolute())
         .or_else(|| home_dir().map(|home| home.join(".local").join("share")))
 }
 
 pub fn home_dir() -> Option<PathBuf> {
     env::var_os("HOME")
-        .map(PathBuf::from)
+        .map(|value| -> PathBuf { value.into() })
         .filter(|home| !home.as_os_str().is_empty())
 }
 
@@ -57,7 +57,7 @@ pub fn config_dir(home: &Path) -> PathBuf {
 #[cfg(not(target_os = "macos"))]
 pub fn config_dir(home: &Path) -> PathBuf {
     env::var("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
+        .map(|value| -> PathBuf { value.into() })
         .unwrap_or_else(|_| home.join(".config"))
         .join(APP_ID)
 }

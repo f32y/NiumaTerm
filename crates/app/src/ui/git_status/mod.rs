@@ -152,7 +152,8 @@ fn count_file_lines(root: &str, path: &str) -> u64 {
 
     // A trailing fragment without a newline is still a line (matches numstat);
     // `last` starts as '\n' so an empty file counts zero.
-    newlines + u64::from(last != b'\n')
+    let trailing_line: u64 = (last != b'\n').into();
+    newlines + trailing_line
 }
 
 /// Fetch and classify the unified diff of one file. Untracked files render

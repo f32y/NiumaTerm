@@ -28,15 +28,6 @@ pub enum CompactionTrigger {
     Manual,
 }
 
-impl CompactionTrigger {
-    pub fn label(self) -> &'static str {
-        match self {
-            CompactionTrigger::Automatic => "automatic",
-            CompactionTrigger::Manual => "manual",
-        }
-    }
-}
-
 /// One finished context compaction: the conversation before it was replaced by
 /// a summary. Every field is optional because backends report different subsets
 /// live and in their persisted transcript, and the boundary is worth showing
@@ -155,7 +146,8 @@ impl Item {
             .lines()
             .filter(|line| line.starts_with("- ["))
             .fold((0, 0), |(done, total), line| {
-                (done + u32::from(line.starts_with("- [x]")), total + 1)
+                let completed: u32 = line.starts_with("- [x]").into();
+                (done + completed, total + 1)
             });
 
         (tally.1 > 0).then_some(tally)
@@ -530,3 +522,12 @@ pub enum SendOutcome {
 
 #[cfg(test)]
 mod tests;
+
+impl From<CompactionTrigger> for &'static str {
+    fn from(value: CompactionTrigger) -> Self {
+        match value {
+            CompactionTrigger::Automatic => "automatic",
+            CompactionTrigger::Manual => "manual",
+        }
+    }
+}

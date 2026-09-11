@@ -1,5 +1,3 @@
-#[cfg(any(windows, target_os = "macos"))]
-use nmt_config::update::UpdateChannel;
 use nmt_i18n::i18n;
 
 #[cfg(target_os = "macos")]
@@ -62,13 +60,15 @@ pub(super) fn about_page() -> SettingPage {
                         i18n("settings-about-channel-nightly").into(),
                     ),
                 ],
-                |cx| cx.global::<AppSettings>().update.channel.as_str().into(),
+                |cx| {
+                    let key: &str = cx.global::<AppSettings>().update.channel.into();
+                    key.into()
+                },
                 |value, cx| {
-                    cx.global_mut::<AppSettings>().update.channel =
-                        UpdateChannel::from_value(&value);
+                    cx.global_mut::<AppSettings>().update.channel = value.as_str().into();
                 },
             )
-            .default_value(SharedString::from("stable")),
+            .default_value("stable"),
         ))
         .item(update_check_item());
 

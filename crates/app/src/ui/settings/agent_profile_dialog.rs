@@ -255,7 +255,7 @@ fn env_cell(
         // subscription is held in its own keyed slot, which lives exactly as
         // long as this cell is the one being edited.
         window.use_keyed_state(
-            SharedString::from(format!("agent-profile-dialog-env-{row}-{key}-close")),
+            format!("agent-profile-dialog-env-{row}-{key}-close"),
             cx,
             |_, cx| {
                 cx.subscribe(&input, |_, _, event: &InputEvent, cx| {
@@ -374,25 +374,23 @@ fn env_var_table(env: &[EnvVar], window: &mut Window, cx: &mut App) -> AnyElemen
                         .child(
                             // Removing a row the user can still cancel out of
                             // by closing the dialog needs no confirmation.
-                            Button::new(SharedString::from(format!(
-                                "agent-profile-dialog-env-remove-{row}"
-                            )))
-                            .ghost()
-                            .with_size(TABLE_OPERATION_BUTTON)
-                            .icon(TrashIcon)
-                            .accessibility_label(i18n("settings-common-delete"))
-                            .tooltip(i18n("settings-common-delete"))
-                            .on_click(move |_, _, cx: &mut App| {
-                                let draft = cx.global_mut::<AgentProfileDraft>();
+                            Button::new(format!("agent-profile-dialog-env-remove-{row}"))
+                                .ghost()
+                                .with_size(TABLE_OPERATION_BUTTON)
+                                .icon(TrashIcon)
+                                .accessibility_label(i18n("settings-common-delete"))
+                                .tooltip(i18n("settings-common-delete"))
+                                .on_click(move |_, _, cx: &mut App| {
+                                    let draft = cx.global_mut::<AgentProfileDraft>();
 
-                                if row < draft.profile.env.len() {
-                                    draft.profile.env.remove(row);
-                                }
+                                    if row < draft.profile.env.len() {
+                                        draft.profile.env.remove(row);
+                                    }
 
-                                // Indices shift under the editor, so the open
-                                // cell would follow the wrong variable.
-                                draft.editing_env = None;
-                            }),
+                                    // Indices shift under the editor, so the open
+                                    // cell would follow the wrong variable.
+                                    draft.editing_env = None;
+                                }),
                         ),
                 ),
         );

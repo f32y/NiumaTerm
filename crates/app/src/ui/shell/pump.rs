@@ -128,10 +128,7 @@ impl Shell {
                             // already shows its own output, and the record
                             // would clear on activation anyway.
                             if !watched {
-                                tabs.record_outcome(
-                                    tab_id,
-                                    CommandOutcome::from_exit_code(*exit_code),
-                                );
+                                tabs.record_outcome(tab_id, (*exit_code).into());
                             }
 
                             // The bar belongs to the command that reported it.

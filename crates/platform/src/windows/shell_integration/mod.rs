@@ -159,7 +159,7 @@ fn context_menu_owned_registry_roots() -> Vec<String> {
         }
     }
 
-    roots.extend(LEGACY_NEW_WINDOW_ROOTS.map(String::from));
+    roots.extend(LEGACY_NEW_WINDOW_ROOTS.map(Into::into));
 
     roots
 }

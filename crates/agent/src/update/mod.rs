@@ -456,7 +456,7 @@ impl UpdateCoordinator {
             || (InstallationUpdateState::default(), None, None),
             |entry| {
                 (
-                    state_from_status(entry.status),
+                    entry.status.into(),
                     Some(entry.checked_at),
                     entry.dismissed_target,
                 )
@@ -483,11 +483,8 @@ impl UpdateCoordinator {
     pub fn snapshots(&self) -> Vec<InstallationSnapshot> {
         let inner = self.inner.lock();
 
-        let mut snapshots = inner
-            .records
-            .values()
-            .map(record_snapshot)
-            .collect::<Vec<_>>();
+        let mut snapshots: Vec<InstallationSnapshot> =
+            inner.records.values().map(Into::into).collect::<Vec<_>>();
 
         snapshots.sort_by(|a, b| a.identity.key.as_str().cmp(b.identity.key.as_str()));
 
@@ -495,7 +492,7 @@ impl UpdateCoordinator {
     }
 
     pub fn snapshot(&self, key: &InstallationKey) -> Option<InstallationSnapshot> {
-        self.inner.lock().records.get(key).map(record_snapshot)
+        self.inner.lock().records.get(key).map(Into::into)
     }
 
     /// Check an installation. Automatic callers reuse a successful result for
@@ -548,7 +545,7 @@ impl UpdateCoordinator {
                 let now = (self.now)();
 
                 record.last_checked = Some(now);
-                record.state = state_from_status(status.clone());
+                record.state = status.clone().into();
 
                 if matches!(status.support, DiscoverySupport::Supported) {
                     let entry = CacheEntry {
@@ -772,23 +769,6 @@ impl UpdateCoordinator {
     }
 }
 
-fn state_from_status(status: VersionStatus) -> InstallationUpdateState {
-    let phase = if matches!(status.support, DiscoverySupport::Unsupported { .. }) {
-        UpdatePhase::Unsupported
-    } else if status.update_available() {
-        UpdatePhase::Available
-    } else {
-        UpdatePhase::Current
-    };
-
-    InstallationUpdateState {
-        phase,
-        versions: Some(status),
-        progress: None,
-        error: None,
-    }
-}
-
 fn cacheable_status(status: &VersionStatus) -> VersionStatus {
     let mut status = status.clone();
 
@@ -797,17 +777,6 @@ fn cacheable_status(status: &VersionStatus) -> VersionStatus {
     status.remediation = None;
 
     status
-}
-
-fn record_snapshot(record: &InstallationRecord) -> InstallationSnapshot {
-    InstallationSnapshot {
-        identity: record.identity.clone(),
-        state: record.state.clone(),
-        last_checked: record.last_checked,
-        dismissed_target: record.dismissed_target.clone(),
-        busy: record.busy,
-        notification_hidden: record.notification_hidden,
-    }
 }
 
 fn read_cache(path: &Path) -> CacheFile {
@@ -849,3 +818,35 @@ mod coordinator_tests;
 
 #[cfg(test)]
 mod tests;
+
+impl From<VersionStatus> for InstallationUpdateState {
+    fn from(status: VersionStatus) -> Self {
+        let phase = if matches!(status.support, DiscoverySupport::Unsupported { .. }) {
+            UpdatePhase::Unsupported
+        } else if status.update_available() {
+            UpdatePhase::Available
+        } else {
+            UpdatePhase::Current
+        };
+
+        InstallationUpdateState {
+            phase,
+            versions: Some(status),
+            progress: None,
+            error: None,
+        }
+    }
+}
+
+impl From<&InstallationRecord> for InstallationSnapshot {
+    fn from(record: &InstallationRecord) -> Self {
+        InstallationSnapshot {
+            identity: record.identity.clone(),
+            state: record.state.clone(),
+            last_checked: record.last_checked,
+            dismissed_target: record.dismissed_target.clone(),
+            busy: record.busy,
+            notification_hidden: record.notification_hidden,
+        }
+    }
+}

@@ -144,7 +144,7 @@ fn oauth_credentials_path() -> Option<PathBuf> {
 fn credentials_path(config_dir: Option<&OsStr>, home: Option<&Path>) -> Option<PathBuf> {
     config_dir
         .filter(|path| !path.is_empty())
-        .map(PathBuf::from)
+        .map(Into::into)
         .or_else(|| home.map(|path| path.join(".claude")))
         .map(|path| path.join(".credentials.json"))
 }

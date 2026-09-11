@@ -13,6 +13,8 @@ use nmt_config::colors::{AnsiColor, NamedColor};
 use rustc_hash::FxHashMap;
 use tracing::warn;
 
+use crate::ghostty::{SnapshotStyle, Underline};
+
 /// Index into the per-grid `StyleSet`. Id `0` is always the default style
 /// (`Style::default()`), so a freshly-zeroed cell renders correctly without
 /// any lookup.
@@ -198,5 +200,42 @@ impl StyleSet {
 impl Default for StyleSet {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl From<&SnapshotStyle> for Style {
+    /// Build a `Style` from a Ghostty snapshot style. Ghostty `blink` and
+    /// `overline` have no render flag and are intentionally dropped rather than
+    /// synthesizing unsupported styling.
+    fn from(s: &SnapshotStyle) -> Self {
+        let mut flags = StyleFlags::empty();
+
+        flags.set(StyleFlags::BOLD, s.bold);
+        flags.set(StyleFlags::ITALIC, s.italic);
+        flags.set(StyleFlags::DIM, s.faint);
+        flags.set(StyleFlags::INVERSE, s.inverse);
+        flags.set(StyleFlags::HIDDEN, s.invisible);
+        flags.set(StyleFlags::STRIKEOUT, s.strikethrough);
+        flags |= match s.underline {
+            Underline::None => StyleFlags::empty(),
+            Underline::Single => StyleFlags::UNDERLINE,
+            Underline::Double => StyleFlags::DOUBLE_UNDERLINE,
+            Underline::Curly => StyleFlags::UNDERCURL,
+            Underline::Dotted => StyleFlags::DOTTED_UNDERLINE,
+            Underline::Dashed => StyleFlags::DASHED_UNDERLINE,
+        };
+
+        Style {
+            fg: s
+                .fg
+                .map(AnsiColor::Spec)
+                .unwrap_or(AnsiColor::Named(NamedColor::Foreground)),
+            bg: s
+                .bg
+                .map(AnsiColor::Spec)
+                .unwrap_or(AnsiColor::Named(NamedColor::Background)),
+            underline_color: s.underline_color.map(AnsiColor::Spec),
+            flags,
+        }
     }
 }

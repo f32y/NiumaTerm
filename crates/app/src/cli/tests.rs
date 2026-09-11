@@ -8,12 +8,12 @@ use crate::cli::*;
 /// than round-trip it, and the assertion would be about the wrong thing.
 #[cfg(windows)]
 fn absolute(segments: &[&str]) -> PathBuf {
-    PathBuf::from(format!(r"C:\{}", segments.join(r"\")))
+    format!(r"C:\{}", segments.join(r"\")).into()
 }
 
 #[cfg(unix)]
 fn absolute(segments: &[&str]) -> PathBuf {
-    PathBuf::from(format!("/{}", segments.join("/")))
+    format!("/{}", segments.join("/")).into()
 }
 
 #[cfg(windows)]
@@ -92,16 +92,15 @@ fn resolves_relative_path_against_cwd() {
 }
 
 #[test]
-fn url_round_trips_through_to_url() {
+fn action_url_round_trip() {
     let action = CliAction::NewWindow {
         path: absolute(&["My Dir", "项目"]),
     };
 
-    assert_eq!(parse_nmt_url(&action.to_url()).unwrap(), action);
-    assert_eq!(
-        parse_nmt_url(&CliAction::Activate.to_url()).unwrap(),
-        CliAction::Activate
-    );
+    let url: String = (&action).into();
+    assert_eq!(parse_nmt_url(&url).unwrap(), action);
+    let activate_url: String = (&CliAction::Activate).into();
+    assert_eq!(parse_nmt_url(&activate_url).unwrap(), CliAction::Activate);
 }
 
 #[test]
@@ -111,7 +110,8 @@ fn focus_notification_round_trips_and_rejects_invalid_ids() {
         notification_id: "process:pane:1".into(),
     };
 
-    assert_eq!(parse_nmt_url(&action.to_url()).unwrap(), action);
+    let url: String = (&action).into();
+    assert_eq!(parse_nmt_url(&url).unwrap(), action);
     assert!(parse_nmt_url("nmt://action/focus_notification?route=a").is_err());
     assert!(
         parse_nmt_url(&format!(

@@ -9,7 +9,8 @@ fn main() {
     nmt_version::emit_internal();
 
     if env::var_os("CARGO_CFG_WINDOWS").is_some() {
-        let icon = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/windows/app.ico");
+        let manifest_dir: PathBuf = env!("CARGO_MANIFEST_DIR").into();
+        let icon = manifest_dir.join("../../assets/windows/app.ico");
 
         println!("cargo:rerun-if-changed={}", icon.display());
         WindowsResource::new()

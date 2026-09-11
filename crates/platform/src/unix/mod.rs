@@ -274,39 +274,40 @@ pub fn terminfo_exists(terminfo: &str) -> bool {
 
     // Return true if the terminfo file exists at the specified location.
     macro_rules! check_path {
-        ($path:expr) => {
-            if $path.join(first).join(terminfo).exists()
-                || $path.join(&first_hex).join(terminfo).exists()
+        ($path:expr) => {{
+            let path: PathBuf = $path;
+            if path.join(first).join(terminfo).exists()
+                || path.join(&first_hex).join(terminfo).exists()
             {
                 return true;
             }
-        };
+        }};
     }
 
     if let Some(dir) = env::var_os("TERMINFO") {
-        check_path!(PathBuf::from(&dir));
+        check_path!((&dir).into());
     } else if let Some(home) = home_dir() {
         check_path!(home.join(".terminfo"));
     }
 
     if let Ok(dirs) = env::var("TERMINFO_DIRS") {
         for dir in dirs.split(':') {
-            check_path!(PathBuf::from(dir));
+            check_path!(dir.into());
         }
     }
 
     if let Ok(prefix) = env::var("PREFIX") {
-        let path = PathBuf::from(prefix);
+        let path: PathBuf = prefix.into();
 
         check_path!(path.join("etc/terminfo"));
         check_path!(path.join("lib/terminfo"));
         check_path!(path.join("share/terminfo"));
     }
 
-    check_path!(PathBuf::from("/etc/terminfo"));
-    check_path!(PathBuf::from("/lib/terminfo"));
-    check_path!(PathBuf::from("/usr/share/terminfo"));
-    check_path!(PathBuf::from("/boot/system/data/terminfo"));
+    check_path!("/etc/terminfo".into());
+    check_path!("/lib/terminfo".into());
+    check_path!("/usr/share/terminfo".into());
+    check_path!("/boot/system/data/terminfo".into());
 
     // No valid terminfo path has been found.
     false
@@ -639,7 +640,8 @@ fn create_pty_with_management(
     {
         // If running inside a flatpak sandbox.
         // Must retrieve $SHELL from outside the sandbox, so ask the host.
-        if path::PathBuf::from("/.flatpak-info").exists() {
+        let flatpak_info: PathBuf = "/.flatpak-info".into();
+        if flatpak_info.exists() {
             builder = Command::new("flatpak-spawn");
 
             let mut with_args = vec![
@@ -928,7 +930,7 @@ impl Child {
     /// simply changing the sizes using tcsetwinsize() does not necessarily
     /// change the actual window size, and if not, will not generate a SIGWINCH.
     pub fn set_winsize(&self, winsize_builder: WinsizeBuilder) -> io::Result<()> {
-        let winsize: Winsize = winsize_builder.build();
+        let winsize: Winsize = (&winsize_builder).into();
 
         match unsafe { libc::ioctl(**self, TIOCSWINSZ, &winsize as *const _) } {
             -1 => Err(io::Error::last_os_error()),
@@ -945,7 +947,7 @@ impl Child {
         let res = unsafe { waitpid(*self.pid, &mut status as *mut libc::c_int, libc::WNOHANG) };
 
         if res <= -1 {
-            return Err(String::from("error"));
+            return Err("error".into());
         }
 
         if res == 0 && status == 0 {
@@ -1108,7 +1110,7 @@ pub fn foreground_process_name(main_fd: RawFd, shell_pid: u32) -> String {
             .trim_end()
             .parse()
             .unwrap_or_default(),
-        Err(..) => String::from(""),
+        Err(..) => "".into(),
     };
 
     #[cfg(target_os = "macos")]

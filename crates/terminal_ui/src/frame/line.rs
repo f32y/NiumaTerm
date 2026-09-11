@@ -167,10 +167,6 @@ impl LineBuilder {
         self.cells.push(cell);
     }
 
-    pub(crate) fn finish(self) -> TerminalLine {
-        line_from_parts(self.text, self.cells, self.runs)
-    }
-
     pub(super) fn finish_with_cursor(self, cursor_col: Option<u16>) -> TerminalLine {
         TerminalLine::new(self.text, self.cells, self.runs, cursor_col)
     }
@@ -206,4 +202,10 @@ fn hash_line(text: &str, runs: &[StyleRun]) -> u64 {
     }
 
     hasher.finish()
+}
+
+impl From<LineBuilder> for TerminalLine {
+    fn from(value: LineBuilder) -> Self {
+        line_from_parts(value.text, value.cells, value.runs)
+    }
 }

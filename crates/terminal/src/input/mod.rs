@@ -56,7 +56,7 @@ pub(crate) fn key_action(
         return action;
     }
 
-    let input = key_input(event);
+    let input: KeyInput = event.into();
 
     encode_terminal_input(
         &input,
@@ -121,21 +121,6 @@ fn legacy_ctrl_byte(event: &TerminalKey<'_>) -> Option<u8> {
         '^' => Some(0x1e),
         '_' => Some(0x1f),
         _ => None,
-    }
-}
-
-fn key_input(event: &TerminalKey<'_>) -> KeyInput {
-    let logical_key = named_key(event.key)
-        .map(Key::Named)
-        .unwrap_or_else(|| Key::Character(event.key.into()));
-
-    KeyInput {
-        logical_key: logical_key.clone(),
-        key_without_modifiers: logical_key,
-        text_with_all_modifiers: event.key_char.map(Into::into),
-        location: KeyLocation::Standard,
-        state: ElementState::Pressed,
-        repeat: false,
     }
 }
 
@@ -260,3 +245,20 @@ impl WheelDelta {
 
 #[cfg(test)]
 mod tests;
+
+impl From<&TerminalKey<'_>> for KeyInput {
+    fn from(event: &TerminalKey<'_>) -> Self {
+        let logical_key = named_key(event.key)
+            .map(Key::Named)
+            .unwrap_or_else(|| Key::Character(event.key.into()));
+
+        KeyInput {
+            logical_key: logical_key.clone(),
+            key_without_modifiers: logical_key,
+            text_with_all_modifiers: event.key_char.map(Into::into),
+            location: KeyLocation::Standard,
+            state: ElementState::Pressed,
+            repeat: false,
+        }
+    }
+}

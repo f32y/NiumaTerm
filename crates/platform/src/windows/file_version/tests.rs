@@ -7,9 +7,10 @@ use crate::windows::file_version::version_string;
 /// work before anything can be concluded from what our own build stamps, and
 /// this file is present on every machine the tests run on.
 fn system_dll() -> PathBuf {
-    PathBuf::from(env::var_os("SystemRoot").expect("SystemRoot is set on Windows"))
-        .join("System32")
-        .join("kernel32.dll")
+    let root: PathBuf = env::var_os("SystemRoot")
+        .expect("SystemRoot is set on Windows")
+        .into();
+    root.join("System32").join("kernel32.dll")
 }
 
 #[test]

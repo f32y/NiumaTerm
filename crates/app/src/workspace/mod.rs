@@ -65,7 +65,7 @@ impl ProgressTally {
     /// One unit of work that is `percent` complete.
     pub fn percent(percent: u8) -> Self {
         Self {
-            done: u32::from(percent).min(100),
+            done: percent.min(100).into(),
             total: 100,
         }
     }

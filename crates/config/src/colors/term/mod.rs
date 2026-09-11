@@ -119,8 +119,8 @@ impl List {
         if let Some(color) = colors.light_foreground {
             self[NamedColor::LightForeground] = color;
         } else {
-            self[NamedColor::LightForeground] =
-                (ColorRgb::from_color_arr(colors.foreground)).to_arr();
+            let color: ColorRgb = colors.foreground.into();
+            self[NamedColor::LightForeground] = color.into();
         }
 
         // Foreground and background.
@@ -132,63 +132,64 @@ impl List {
         if let Some(color) = colors.dim_foreground {
             self[NamedColor::DimForeground] = color;
         } else {
-            self[NamedColor::DimForeground] =
-                (ColorRgb::from_color_arr(colors.foreground) * DIM_FACTOR).to_arr();
+            let color: ColorRgb = colors.foreground.into();
+            self[NamedColor::DimForeground] = (color * DIM_FACTOR).into();
         }
 
         if let Some(color) = colors.dim_black {
             self[NamedColor::DimBlack] = color;
         } else {
-            self[NamedColor::DimBlack] =
-                (ColorRgb::from_color_arr(colors.black) * DIM_FACTOR).to_arr();
+            let color: ColorRgb = colors.black.into();
+            self[NamedColor::DimBlack] = (color * DIM_FACTOR).into();
         }
 
         if let Some(color) = colors.dim_red {
             self[NamedColor::DimRed] = color;
         } else {
-            self[NamedColor::DimRed] = (ColorRgb::from_color_arr(colors.red) * DIM_FACTOR).to_arr();
+            let color: ColorRgb = colors.red.into();
+            self[NamedColor::DimRed] = (color * DIM_FACTOR).into();
         }
 
         if let Some(color) = colors.dim_green {
             self[NamedColor::DimGreen] = color;
         } else {
-            self[NamedColor::DimGreen] =
-                (ColorRgb::from_color_arr(colors.green) * DIM_FACTOR).to_arr();
+            let color: ColorRgb = colors.green.into();
+            self[NamedColor::DimGreen] = (color * DIM_FACTOR).into();
         }
 
         if let Some(color) = colors.dim_yellow {
             self[NamedColor::DimYellow] = color;
         } else {
-            self[NamedColor::DimYellow] =
-                (ColorRgb::from_color_arr(colors.yellow) * DIM_FACTOR).to_arr();
+            let color: ColorRgb = colors.yellow.into();
+            self[NamedColor::DimYellow] = (color * DIM_FACTOR).into();
         }
 
         if let Some(color) = colors.dim_blue {
             self[NamedColor::DimBlue] = color;
         } else {
-            self[NamedColor::DimBlue] =
-                (ColorRgb::from_color_arr(colors.blue) * DIM_FACTOR).to_arr();
+            let color: ColorRgb = colors.blue.into();
+            self[NamedColor::DimBlue] = (color * DIM_FACTOR).into();
         }
 
         if let Some(color) = colors.dim_magenta {
             self[NamedColor::DimMagenta] = color;
         } else {
-            self[NamedColor::DimMagenta] =
-                (ColorRgb::from_color_arr(colors.magenta) * DIM_FACTOR).to_arr();
+            let color: ColorRgb = colors.magenta.into();
+            self[NamedColor::DimMagenta] = (color * DIM_FACTOR).into();
         }
 
         if let Some(color) = colors.dim_cyan {
             self[NamedColor::DimCyan] = color;
         } else {
-            self[NamedColor::DimCyan] =
-                (ColorRgb::from_color_arr(colors.cyan) * DIM_FACTOR).to_arr();
+            let color: ColorRgb = colors.cyan.into();
+            self[NamedColor::DimCyan] = (color * DIM_FACTOR).into();
         }
 
         if let Some(color) = colors.dim_white {
             self[NamedColor::DimWhite] = color;
         } else {
-            self[NamedColor::DimWhite] =
-                (ColorRgb::from_color_arr(colors.white) * DIM_FACTOR).to_arr();
+            let color: ColorRgb = colors.white.into();
+            self[NamedColor::DimWhite] = (color * DIM_FACTOR).into();
         }
     }
 
@@ -205,7 +206,7 @@ impl List {
                         g: if g == 0 { 0 } else { g * 40 + 55 },
                     };
 
-                    let arr = ColorBuilder::from_rgb(rgb, Format::SRGB0_1).to_arr();
+                    let arr = ColorBuilder::from_rgb(rgb, Format::SRGB0_1).into();
 
                     self[index] = arr;
                     index += 1;
@@ -228,7 +229,7 @@ impl List {
                 b: value,
             };
 
-            let arr = ColorBuilder::from_rgb(rgb, Format::SRGB0_1).to_arr();
+            let arr = ColorBuilder::from_rgb(rgb, Format::SRGB0_1).into();
 
             self[index] = arr;
             index += 1;

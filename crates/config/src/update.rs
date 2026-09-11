@@ -34,15 +34,17 @@ pub enum UpdateChannel {
     Nightly,
 }
 
-impl UpdateChannel {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Stable => "stable",
-            Self::Nightly => "nightly",
+impl From<UpdateChannel> for &'static str {
+    fn from(value: UpdateChannel) -> Self {
+        match value {
+            UpdateChannel::Stable => "stable",
+            UpdateChannel::Nightly => "nightly",
         }
     }
+}
 
-    pub fn from_value(value: &str) -> Self {
+impl From<&str> for UpdateChannel {
+    fn from(value: &str) -> Self {
         match value {
             "nightly" => Self::Nightly,
             _ => Self::Stable,

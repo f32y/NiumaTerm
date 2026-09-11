@@ -57,13 +57,13 @@ pub(crate) fn encrypt(api_base_url: &str, api_key: &str) -> Result<String, Strin
         api_base_url: api_base_url.to_string(),
         api_key: api_key.to_string(),
     })
-    .map_err(|_| String::from("credential payload could not be encoded"))?;
+    .map_err(|_| -> String { "credential payload could not be encoded".into() })?;
 
     let mut nonce = [0u8; NONCE_LEN];
 
     OsRng
         .try_fill_bytes(&mut nonce)
-        .map_err(|_| String::from("operating-system random source unavailable"))?;
+        .map_err(|_| -> String { "operating-system random source unavailable".into() })?;
 
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&KEY));
 
@@ -75,7 +75,7 @@ pub(crate) fn encrypt(api_base_url: &str, api_key: &str) -> Result<String, Strin
                 aad: AAD,
             },
         )
-        .map_err(|_| String::from("credential encryption failed"))?;
+        .map_err(|_| -> String { "credential encryption failed".into() })?;
 
     let mut bytes = nonce.to_vec();
 
@@ -90,13 +90,13 @@ pub(crate) fn encrypt(api_base_url: &str, api_key: &str) -> Result<String, Strin
 pub(crate) fn decrypt(stored: &str) -> Result<(String, String), String> {
     let encoded = stored
         .strip_prefix(PREFIX)
-        .ok_or_else(|| String::from("unsupported credential format version"))?;
+        .ok_or_else(|| -> String { "unsupported credential format version".into() })?;
     let bytes = BASE64
         .decode(encoded)
-        .map_err(|_| String::from("credential value is not valid Base64"))?;
+        .map_err(|_| -> String { "credential value is not valid Base64".into() })?;
 
     if bytes.len() < NONCE_LEN + TAG_LEN {
-        return Err(String::from("credential value is too short"));
+        return Err("credential value is too short".into());
     }
 
     let (nonce, ciphertext) = bytes.split_at(NONCE_LEN);
@@ -110,12 +110,12 @@ pub(crate) fn decrypt(stored: &str) -> Result<(String, String), String> {
                 aad: AAD,
             },
         )
-        .map_err(|_| String::from("credential value failed authentication"))?;
+        .map_err(|_| -> String { "credential value failed authentication".into() })?;
 
     let text = String::from_utf8(plaintext)
-        .map_err(|_| String::from("decrypted credential payload is not valid UTF-8"))?;
+        .map_err(|_| -> String { "decrypted credential payload is not valid UTF-8".into() })?;
     let payload: CredentialPayload = toml::from_str(&text)
-        .map_err(|_| String::from("decrypted credential payload could not be decoded"))?;
+        .map_err(|_| -> String { "decrypted credential payload could not be decoded".into() })?;
 
     Ok((payload.api_base_url, payload.api_key))
 }

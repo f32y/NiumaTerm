@@ -13,13 +13,6 @@ pub enum InputStyle {
 }
 
 impl InputStyle {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Waterfall => "waterfall",
-            Self::FixedBottom => "fixed-bottom",
-        }
-    }
-
     pub fn is_fixed_bottom(self) -> bool {
         matches!(self, Self::FixedBottom)
     }
@@ -36,24 +29,6 @@ pub enum SmoothScrollingMode {
 }
 
 impl SmoothScrollingMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::All => "all",
-            Self::OnlyTerminal => "only-terminal",
-            Self::OnlyAgent => "only-agent",
-            Self::Off => "off",
-        }
-    }
-
-    pub fn from_value(value: &str) -> Self {
-        match value {
-            "only-terminal" => Self::OnlyTerminal,
-            "only-agent" => Self::OnlyAgent,
-            "off" => Self::Off,
-            _ => Self::All,
-        }
-    }
-
     pub fn terminal_enabled(self) -> bool {
         matches!(self, Self::All | Self::OnlyTerminal)
     }
@@ -101,22 +76,6 @@ pub enum TabBarStyle {
     Vertical,
 }
 
-impl TabBarStyle {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Horizontal => "horizontal",
-            Self::Vertical => "vertical",
-        }
-    }
-
-    pub fn from_value(value: &str) -> Self {
-        match value {
-            "vertical" => Self::Vertical,
-            _ => Self::Horizontal,
-        }
-    }
-}
-
 /// The window backdrop material. Acrylic honors the opacity slider; the Mica
 /// variants hand the chrome entirely to DWM, and Off keeps the window opaque.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -134,29 +93,6 @@ pub enum WindowBackdrop {
     Off,
 }
 
-impl WindowBackdrop {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::MicaAlt => "mica-alt",
-            Self::Mica => "mica",
-            Self::Acrylic => "acrylic",
-            Self::Off => "off",
-        }
-    }
-
-    /// An unrecognized name falls back to Off. It most likely comes from a
-    /// newer build that knows a material this one does not, and an opaque
-    /// window is guaranteed to render; guessing at a translucent mode is not.
-    pub fn from_value(value: &str) -> Self {
-        match value {
-            "mica-alt" => Self::MicaAlt,
-            "mica" => Self::Mica,
-            "acrylic" => Self::Acrylic,
-            _ => Self::Off,
-        }
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum WindowBackdropValue {
@@ -171,7 +107,7 @@ where
     D: Deserializer<'de>,
 {
     Ok(match WindowBackdropValue::deserialize(deserializer)? {
-        WindowBackdropValue::Mode(mode) => WindowBackdrop::from_value(&mode),
+        WindowBackdropValue::Mode(mode) => mode.as_str().into(),
         // Legacy `enable-window-transparency` boolean: on kept the acrylic
         // + opacity behavior, off was fully opaque.
         WindowBackdropValue::Legacy(true) => WindowBackdrop::Acrylic,
@@ -189,29 +125,13 @@ pub enum Language {
     ZhCn,
 }
 
-impl Language {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::En => "en",
-            Self::ZhCn => "zh-CN",
-        }
-    }
-
-    pub fn from_value(value: &str) -> Self {
-        match value {
-            "zh-CN" => Self::ZhCn,
-            _ => Self::En,
-        }
-    }
-}
-
 fn deserialize_language<'de, D>(deserializer: D) -> Result<Language, D::Error>
 where
     D: Deserializer<'de>,
 {
     // A hand-edited or future language tag must load as English instead of
     // failing the whole config parse.
-    Ok(Language::from_value(&String::deserialize(deserializer)?))
+    Ok(String::deserialize(deserializer)?.as_str().into())
 }
 
 fn default_git_status_refresh_interval() -> u64 {
@@ -484,6 +404,107 @@ impl Default for AppearanceConfig {
             agent_transcript_font_size: default_agent_transcript_font_size(),
             reduce_motion: false,
             human_friendly_agent_ui_layout: true,
+        }
+    }
+}
+
+impl From<InputStyle> for &'static str {
+    fn from(value: InputStyle) -> Self {
+        match value {
+            InputStyle::Waterfall => "waterfall",
+            InputStyle::FixedBottom => "fixed-bottom",
+        }
+    }
+}
+
+impl From<SmoothScrollingMode> for &'static str {
+    fn from(value: SmoothScrollingMode) -> Self {
+        match value {
+            SmoothScrollingMode::All => "all",
+            SmoothScrollingMode::OnlyTerminal => "only-terminal",
+            SmoothScrollingMode::OnlyAgent => "only-agent",
+            SmoothScrollingMode::Off => "off",
+        }
+    }
+}
+
+impl From<&str> for SmoothScrollingMode {
+    fn from(value: &str) -> Self {
+        match value {
+            "only-terminal" => Self::OnlyTerminal,
+            "only-agent" => Self::OnlyAgent,
+            "off" => Self::Off,
+            _ => Self::All,
+        }
+    }
+}
+
+impl From<TabBarStyle> for &'static str {
+    fn from(value: TabBarStyle) -> Self {
+        match value {
+            TabBarStyle::Horizontal => "horizontal",
+            TabBarStyle::Vertical => "vertical",
+        }
+    }
+}
+
+impl From<&str> for TabBarStyle {
+    fn from(value: &str) -> Self {
+        match value {
+            "vertical" => Self::Vertical,
+            _ => Self::Horizontal,
+        }
+    }
+}
+
+impl From<WindowBackdrop> for &'static str {
+    fn from(value: WindowBackdrop) -> Self {
+        match value {
+            WindowBackdrop::MicaAlt => "mica-alt",
+            WindowBackdrop::Mica => "mica",
+            WindowBackdrop::Acrylic => "acrylic",
+            WindowBackdrop::Off => "off",
+        }
+    }
+}
+
+impl From<&str> for WindowBackdrop {
+    /// An unrecognized name falls back to Off. It most likely comes from a
+    /// newer build that knows a material this one does not, and an opaque
+    /// window is guaranteed to render; guessing at a translucent mode is not.
+    fn from(value: &str) -> Self {
+        match value {
+            "mica-alt" => Self::MicaAlt,
+            "mica" => Self::Mica,
+            "acrylic" => Self::Acrylic,
+            _ => Self::Off,
+        }
+    }
+}
+
+impl From<Language> for &'static str {
+    fn from(value: Language) -> Self {
+        match value {
+            Language::En => "en",
+            Language::ZhCn => "zh-CN",
+        }
+    }
+}
+
+impl From<&str> for Language {
+    fn from(value: &str) -> Self {
+        match value {
+            "zh-CN" => Self::ZhCn,
+            _ => Self::En,
+        }
+    }
+}
+
+impl From<&str> for InputStyle {
+    fn from(value: &str) -> Self {
+        match value {
+            "fixed-bottom" => InputStyle::FixedBottom,
+            _ => InputStyle::Waterfall,
         }
     }
 }

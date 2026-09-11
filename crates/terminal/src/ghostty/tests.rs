@@ -649,7 +649,7 @@ fn snapshot_captures_colors() {
                 g: 0x22,
                 b: 0x33
             }
-            .to_arr()
+            .into()
         ),
         "OSC 10 sets the effective foreground"
     );
@@ -677,14 +677,16 @@ fn theme_colors_update_engine_defaults() {
     terminal.set_theme_colors(&colors);
 
     let snapshot = terminal.snapshot().unwrap();
+    let foreground: ColorRgb = colors.foreground.into();
+    let background: ColorRgb = colors.background.0.into();
 
     assert_eq!(
         snapshot.colors()[NamedColor::Foreground],
-        Some(ColorRgb::from_color_arr(colors.foreground).to_arr())
+        Some(foreground.into())
     );
     assert_eq!(
         snapshot.colors()[NamedColor::Background],
-        Some(ColorRgb::from_color_arr(colors.background.0).to_arr())
+        Some(background.into())
     );
 }
 

@@ -133,8 +133,7 @@ impl AgentPane {
                     .map(|checkpoint| PaletteRow {
                         label: rewind_prompt_label(&checkpoint.prompt).into(),
                         description: translated("agent-rewind-return-before-prompt"),
-                        hint: rewind_timestamp(checkpoint.timestamp.as_deref())
-                            .map(SharedString::from),
+                        hint: rewind_timestamp(checkpoint.timestamp.as_deref()).map(Into::into),
                         disabled_reason: None,
                         action: PaletteAction::RewindCheckpoint(checkpoint),
                     })
