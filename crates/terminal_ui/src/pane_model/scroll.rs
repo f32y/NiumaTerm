@@ -6,7 +6,7 @@ use crate::pane_model::viewport::Viewport;
 
 pub(crate) enum ScrollOutcome {
     Ignored,
-    GridChanged,
+    GridRequested,
     List(ListOp),
 }
 
@@ -31,10 +31,16 @@ impl PaneController {
         };
         match &self.viewport {
             Viewport::BlockList { .. } => self.scroll_list_to(target as f32),
-            Viewport::Grid { scrollbar, .. } => {
-                let delta = target.round() as isize - scrollbar.offset as isize;
-                if delta != 0 && self.source.session.scroll_lines(delta) {
-                    ScrollOutcome::GridChanged
+            Viewport::Grid { .. } => {
+                let accepted = if thumb_top >= 1.0 {
+                    self.source.session.scroll_to_end()
+                } else {
+                    self.source
+                        .session
+                        .scroll_to(target.round().max(0.0) as u64)
+                };
+                if accepted {
+                    ScrollOutcome::GridRequested
                 } else {
                     ScrollOutcome::Ignored
                 }

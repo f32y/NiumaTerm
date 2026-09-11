@@ -1,10 +1,15 @@
+use std::ops::Range;
+use std::sync::Arc;
 use std::{collections, time};
 
 use nmt_terminal::block_store::{BlockStore, SegmentMeta};
 use nmt_terminal::event::BlockEvent;
-use nmt_terminal::ghostty::{BlockHandle, GhosttyTerminal};
+use nmt_terminal::ghostty::{
+    BlockHandle, BlockRef, GhosttyTerminal, Palette, RowCell, ScreenRowRead,
+};
 use nmt_terminal::selection::SelectionRange;
 use nmt_terminal::session::BlockPoint as FrozenPoint;
+use nmt_terminal::session::page::{PageSource, RowPage};
 use nmt_terminal::terminal::pos::{Column, Line, Pos};
 
 use crate::block_list::FrozenView;
@@ -14,10 +19,10 @@ use crate::block_list::geometry::{
 };
 use crate::block_list::images::frozen_block_images;
 use crate::block_list::rows::{
-    HandleItemInfo, frozen_block_view, handle_item_info, live_history_view,
+    HandleItemInfo, frozen_block_view as frozen_page_view, handle_item_info, live_history_view,
 };
 use crate::block_list::selection::BlockListPoint;
-use crate::frame::line_from_parts;
+use crate::frame::{TerminalColor, line_from_parts};
 use crate::pane_model::FrameTheme;
 use crate::pane_model::frozen_hit_map::FrozenHitInfo;
 use crate::theme;
@@ -632,4 +637,60 @@ fn kitty_v1_per_block_ownership_deviations() {
         "frozen pixels survive an active delete-all"
     );
     assert_eq!(t.block_placements(&block).len(), 1);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn frozen_block_view(
+    block: Option<(&BlockRef, &Palette)>,
+    info: &HandleItemInfo,
+    item: usize,
+    visible: Range<usize>,
+    cell_h: f32,
+    pad: f32,
+    selection: Option<(FrozenPoint, FrozenPoint)>,
+    selected: Option<usize>,
+    foreground: TerminalColor,
+) -> FrozenView {
+    let pages: Vec<_> = block
+        .map(|(block, palette)| {
+            let handle = block.handle();
+            let rows = (0..block.row_count())
+                .map(|row| {
+                    let mut cells = Vec::new();
+                    let meta = block
+                        .read_row_visit(row, palette, |x, text, wide, style| {
+                            cells.push(RowCell {
+                                x,
+                                text,
+                                wide,
+                                style,
+                            })
+                        })
+                        .unwrap()
+                        .unwrap();
+                    ScreenRowRead {
+                        cells,
+                        wrapped: meta.wrapped,
+                        prompt_start: meta.prompt_start,
+                        hyperlinks: meta.hyperlinks,
+                    }
+                })
+                .collect();
+            Arc::new(RowPage {
+                source: PageSource::Block {
+                    id: handle.id,
+                    generation: handle.generation,
+                    theme: 0,
+                },
+                start: 0,
+                cols: block.cols(),
+                rows,
+                placements: Vec::new(),
+            })
+        })
+        .into_iter()
+        .collect();
+    frozen_page_view(
+        &pages, info, item, visible, cell_h, pad, selection, selected, foreground,
+    )
 }

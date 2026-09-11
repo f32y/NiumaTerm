@@ -207,8 +207,8 @@ fn local_session_publishes_engine_output_and_host_events() {
     .unwrap();
 
     assert!(session.engine_blocks());
-    assert_eq!(session.engine.lock().cols(), 90);
-    assert_eq!(session.engine.lock().rows(), 25);
+    assert_eq!(session.snapshot().cols(), 90);
+    assert_eq!(session.snapshot().rows(), 25);
 
     session.write_input(format!("title {MARKER}\r\necho {MARKER}\r\n").as_bytes());
 
@@ -221,9 +221,21 @@ fn local_session_publishes_engine_output_and_host_events() {
             .iter()
             .any(|event| matches!(event, HostEvent::Title(title) if title == MARKER));
 
-        let output = session.engine.lock().format_vt_state().unwrap();
+        let snapshot = session.snapshot();
+        let top = snapshot
+            .viewport_top
+            .expect("the viewport must have a top row");
+        let output = (0..snapshot.rows())
+            .map(|row| {
+                session
+                    .screen_row_text_in(&snapshot, top + row as u32)
+                    .expect("visible rows must be available in the snapshot")
+                    .text
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
 
-        if title_seen && String::from_utf8_lossy(&output).contains(MARKER) {
+        if title_seen && output.contains(MARKER) {
             break;
         }
 

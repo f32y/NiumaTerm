@@ -38,13 +38,11 @@ impl TerminalPane {
     pub(super) fn on_copy_block_output(
         &mut self,
         _: &CopyBlockOutput,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(text) = self.model.selected_block_output()
-            && self.model.copy_text_to_clipboard(text)
-        {
-            cx.notify();
+        if let Some(copy) = self.model.selected_block_output() {
+            self.begin_copy(copy, window, cx);
         }
     }
 

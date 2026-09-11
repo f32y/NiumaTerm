@@ -3,6 +3,7 @@ use crate::frame::TerminalFrame;
 use crate::layout::{frame_content_rows, live_frame_text};
 use crate::metrics::CellMetrics;
 use crate::pane_model::PaneController;
+use crate::pane_model::key_action::{CopiedSelection, PendingCopy};
 use crate::pane_model::list_mirror::{ListOp, ListPosition};
 use crate::pane_model::viewport::LocalPoint;
 
@@ -41,15 +42,23 @@ impl PaneController {
         self.source.session.block_command(self.gutter.selected()?)
     }
 
-    pub(crate) fn selected_block_output(&self) -> Option<String> {
+    pub(crate) fn selected_block_output(&self) -> Option<PendingCopy> {
         let item = self.gutter.selected()?;
         let live = item == self.source.session.block_store().lock().items().len();
         if live {
             self.frame_cache
                 .current()
                 .and_then(|frame| live_frame_text(&frame))
+                .map(PendingCopy::ready)
         } else {
-            self.source.session.block_text(item)
+            self.source
+                .session
+                .block_text(item)
+                .map(|request| PendingCopy {
+                    request,
+                    selection: CopiedSelection::None,
+                    generation: self.selection_generation,
+                })
         }
     }
 

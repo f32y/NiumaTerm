@@ -11,7 +11,7 @@ const BLOCK_BOUNDARY_CLEAR: &[u8] = b"\x1b[2J\x1b[3J\x1b[H";
 /// Engine-blocks mode: the engine's live finished-block list, oldest first,
 /// with current row counts — the payload of
 /// [`crate::event::BlockEvent::EngineBlocksSync`]. Cheap FFI walk; called
-/// under the engine lock on the PTY thread after finish/resize.
+/// on the owner thread after finish or resize.
 pub(super) fn engine_blocks_live_list(
     engine: &GhosttyTerminal,
 ) -> Vec<(ghostty::BlockHandle, usize)> {

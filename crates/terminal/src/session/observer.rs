@@ -9,8 +9,8 @@ pub enum SessionChange {
 }
 
 /// Receives synchronous updates on the PTY worker. Implementations must not
-/// access windows, wait for another thread, or call back into the session:
-/// terminal events can originate while the engine is locked.
+/// access windows or wait for another thread: a callback can run during a
+/// parse batch, and waiting for an enqueued command would stall its owner.
 pub trait SessionObserver: Send + Sync {
     fn graphics(&self, _updates: UpdateQueues) {}
     fn blocks(&self, _events: &[BlockEvent]) {}

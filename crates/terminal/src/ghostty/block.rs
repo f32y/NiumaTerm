@@ -16,10 +16,8 @@ use libghostty_vt_sys::{
 use crate::ghostty::grid_read::visit_row_cells;
 use crate::ghostty::{
     BlockHandle, CellText, CellWide, Error, GhosttyTerminal, Palette, PlacementScreenPos, Result,
-    ScreenRowMeta, SnapshotStyle,
+    RowCell, ScreenRowMeta, ScreenRowRead, SnapshotStyle,
 };
-#[cfg(test)]
-use crate::ghostty::{RowCell, ScreenRowRead};
 
 /// An acquired read reference to a finished block (engine-refcounted).
 ///
@@ -368,7 +366,6 @@ impl GhosttyTerminal {
     }
 
     /// Materializing convenience over [`Self::read_block_row_visit`] — test-only.
-    #[cfg(test)]
     pub fn read_block_row(&self, handle: BlockHandle, row: usize) -> Result<Option<ScreenRowRead>> {
         let palette = self.color_palette();
         let cols = self.block_cols(handle).unwrap_or(self.cols) as usize;

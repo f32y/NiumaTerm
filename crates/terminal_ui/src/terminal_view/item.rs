@@ -5,6 +5,7 @@ use gpui::{
     LayoutId, Pixels, ShapedLine, Style, Window, point, px, relative, size,
 };
 use nmt_terminal::block_store::BlockStore;
+use nmt_terminal::session::page::PAGE_ROWS;
 use parking_lot::Mutex;
 
 use crate::block_list::block_list_live_chrome;
@@ -150,12 +151,12 @@ impl Element for BlockListItem {
                 selected_item,
                 pane,
             } => {
-                let snapshot = pane.read(cx).model.source.session.block_snapshot(*item_idx);
-                let mut view = match snapshot.and_then(|(item, acquired)| {
+                let snapshot = pane.read(cx).model.source.session.block_item(*item_idx);
+                let mut view = match snapshot.and_then(|item| {
                     block_list::handle_item_info(&item, &pane.read(cx).model.duration_labels)
-                        .map(|info| (info, acquired))
+                        .zip(item.handle())
                 }) {
-                    Some((info, acquired)) => {
+                    Some((info, handle)) => {
                         let visible = block_list::visible_rows(
                             bounds.top().as_f32(),
                             info.rows,
@@ -163,9 +164,14 @@ impl Element for BlockListItem {
                             cell.height_px,
                             pad_rows,
                         );
-
+                        let surface = &pane.read(cx).model.source;
+                        let first = visible.start / PAGE_ROWS * PAGE_ROWS;
+                        let pages: Vec<_> = (first..visible.end)
+                            .step_by(PAGE_ROWS)
+                            .filter_map(|row| surface.session.block_page(handle, row))
+                            .collect();
                         let mut view = block_list::frozen_block_view(
-                            acquired.as_ref().map(|acq| (&acq.block, &acq.palette)),
+                            &pages,
                             &info,
                             *item_idx,
                             visible.clone(),
@@ -175,37 +181,33 @@ impl Element for BlockListItem {
                             *selected_item,
                             theme.foreground,
                         );
-
-                        // Resolve each frozen Kitty placement's
-                        // generation from the session's (block_id, image_id)
-                        // cache; misses read pixels out of the acquired block
-                        // once and land in the cache for later frames.
-                        if let Some(acq) = &acquired
-                            && !acq.placements.is_empty()
-                        {
-                            let ids: collections::HashSet<u32> =
-                                acq.placements.iter().map(|p| p.image_id).collect();
-
-                            let surface = &pane.read(cx).model.source;
-
-                            let generations: collections::HashMap<_, _> = ids
-                                .into_iter()
-                                .filter_map(|id| {
-                                    surface
-                                        .frozen_image(&acq.block, id)
-                                        .map(|generation| (id, generation))
-                                })
-                                .collect();
-
-                            view.images = block_list::frozen_block_images(
-                                &acq.placements,
-                                &generations,
-                                &visible,
-                                cell.height_px,
-                                pad_rows,
-                            );
+                        let mut seen = collections::HashSet::new();
+                        let mut placements = Vec::new();
+                        let mut generations = collections::HashMap::new();
+                        for page in &pages {
+                            for placement in &page.placements {
+                                if seen.insert((
+                                    placement.image_id,
+                                    placement.placement_id,
+                                    placement.screen_col,
+                                    placement.screen_row,
+                                )) {
+                                    placements.push(*placement);
+                                }
+                                if let Some(generation) =
+                                    surface.frozen_image(page, placement.image_id)
+                                {
+                                    generations.insert(placement.image_id, generation);
+                                }
+                            }
                         }
-
+                        view.images = block_list::frozen_block_images(
+                            &placements,
+                            &generations,
+                            &visible,
+                            cell.height_px,
+                            pad_rows,
+                        );
                         view
                     }
                     None => Default::default(),
@@ -249,7 +251,11 @@ impl Element for BlockListItem {
                         visible.start as u64..visible.end as u64,
                         theme.foreground,
                     );
-                    let selection = pane.model.source.session.selection_screen_range();
+                    let selection = pane
+                        .model
+                        .source
+                        .session
+                        .selection_screen_range_in(&pane.model.source.snapshot);
 
                     block_list::live_history_view(
                         lines,

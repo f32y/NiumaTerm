@@ -17,9 +17,9 @@
 use std::time::{Duration, Instant};
 use std::{path, thread};
 
+use futures::executor::block_on;
 use nmt_config::active_colors;
 
-use crate::ghostty::BlockHandle;
 use crate::session::{HostEvent, TerminalSession, TerminalSessionConfig};
 
 fn integration_config() -> TerminalSessionConfig {
@@ -85,7 +85,7 @@ fn wait_for(
 }
 
 fn screen_text(session: &TerminalSession) -> String {
-    let b = session.render_buffer.lock();
+    let b = session.snapshot();
 
     (0..b.rows())
         .map(|y| {
@@ -100,42 +100,14 @@ fn screen_text(session: &TerminalSession) -> String {
 }
 
 fn block_texts(session: &TerminalSession) -> Vec<(Option<String>, String)> {
-    // Two phases: snapshot under the store lock, then format each block
-    // through the engine (the store and engine locks never nest).
-    let items: Vec<(Option<String>, Option<BlockHandle>)> = {
-        let store = session.block_store();
-        let store = store.lock();
-
-        store
-            .items()
-            .iter()
-            .map(|item| (item.meta.command.clone(), item.handle()))
-            .collect()
-    };
-
-    items
-        .into_iter()
-        .map(|(command, handle)| {
-            let text = handle
-                .and_then(|handle| {
-                    let engine = session.engine.lock();
-
-                    engine.block_acquire(handle).and_then(|block| {
-                        let rows = block.row_count();
-
-                        if rows == 0 {
-                            return Some(String::new());
-                        }
-
-                        let last_col = block.cols().saturating_sub(1);
-
-                        block
-                            .format_range((0, 0), (rows - 1, last_col), true, true)
-                            .ok()
-                    })
-                })
+    let count = session.block_store().lock().items().len();
+    (0..count)
+        .map(|item| {
+            let command = session.block_command(item);
+            let text = session
+                .block_text(item)
+                .and_then(|request| block_on(request).ok()?.ok())
                 .unwrap_or_default();
-
             (command, text)
         })
         .collect()

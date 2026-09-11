@@ -1,7 +1,11 @@
+use futures::channel::oneshot;
+
 use crate::block_store::{BlockItem, BlockStore};
-use crate::ghostty::{AcquiredBlock, BlockHandle};
+use crate::event::Msg;
+use crate::ghostty::BlockHandle;
 use crate::selection::SelectionType;
 use crate::session::TerminalSession;
+use crate::session::request::{BlockRange, Query, Request, TextPiece, TextSource};
 
 /// A position in the frozen history: store item, physical block row, column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -12,12 +16,23 @@ pub struct BlockPoint {
 }
 
 impl TerminalSession {
-    /// Copy item metadata before acquiring the engine. The PTY worker takes
-    /// the engine before the store, so these locks must never overlap here.
-    pub fn block_snapshot(&self, item: usize) -> Option<(BlockItem, Option<AcquiredBlock>)> {
-        let item = self.shared.block_store.lock().items().get(item)?.clone();
-        let acquired = item.handle().and_then(|handle| self.acquire_block(handle));
-        Some((item, acquired))
+    pub fn block_selection_text(
+        &self,
+        handle: BlockHandle,
+        line: usize,
+        col: u32,
+        kind: SelectionType,
+    ) -> Request<String> {
+        self.request_text(TextSource::BlockSelection {
+            handle,
+            line,
+            col,
+            kind,
+        })
+    }
+
+    pub fn block_item(&self, item: usize) -> Option<BlockItem> {
+        self.shared.block_store.lock().items().get(item).cloned()
     }
 
     pub fn block_command(&self, item: usize) -> Option<String> {
@@ -32,62 +47,60 @@ impl TerminalSession {
             .map(|block| block.command)
     }
 
-    pub fn block_text(&self, item: usize) -> Option<String> {
+    pub fn block_text(&self, item: usize) -> Option<Request<String>> {
         let handle = self.block_handle(item)?;
-        self.format_block_range(handle, None, None)
+        Some(self.request_text(TextSource::Blocks(vec![TextPiece {
+            handle,
+            start: None,
+            end: None,
+        }])))
     }
 
     pub fn expand_frozen_selection(
         &self,
         at: BlockPoint,
         kind: SelectionType,
-    ) -> Option<(BlockPoint, BlockPoint)> {
+    ) -> Option<Request<BlockRange>> {
         let handle = self.block_handle(at.item)?;
-        let ((start_line, start_col), (end_line, end_col)) =
-            self.frozen_selection_range(handle, at.line, at.col, kind)?;
-        Some((
-            BlockPoint {
-                item: at.item,
-                line: start_line,
-                col: start_col,
-            },
-            BlockPoint {
-                item: at.item,
-                line: end_line,
-                col: end_col,
-            },
+        let (reply, request) = oneshot::channel();
+        let _ = self.messenger.send(Msg::Query(Query::ExpandSelection {
+            handle,
+            line: at.line,
+            col: at.col,
+            kind,
+            reply,
+        }));
+        Some(request)
+    }
+
+    pub fn frozen_selection_text(&self, a: BlockPoint, b: BlockPoint) -> Request<String> {
+        let pieces = frozen_selection_pieces(&self.shared.block_store.lock(), a, b);
+        self.request_text(TextSource::Blocks(
+            pieces
+                .into_iter()
+                .map(|piece| TextPiece {
+                    handle: piece.handle,
+                    start: piece.start,
+                    end: piece.end,
+                })
+                .collect(),
         ))
     }
 
-    pub fn frozen_selection_text(&self, a: BlockPoint, b: BlockPoint) -> String {
-        let pieces = frozen_selection_pieces(&self.shared.block_store.lock(), a, b);
-        pieces
-            .into_iter()
-            .filter_map(|piece| self.format_block_range(piece.handle, piece.start, piece.end))
-            .collect::<Vec<_>>()
-            .join("\n")
+    pub(super) fn request_text(&self, source: TextSource) -> Request<String> {
+        let (reply, request) = oneshot::channel();
+        let _ = self
+            .messenger
+            .send(Msg::Query(Query::Text { source, reply }));
+        request
     }
 
     pub(super) fn block_handle(&self, item: usize) -> Option<BlockHandle> {
         self.shared.block_store.lock().items().get(item)?.handle()
     }
-
-    fn format_block_range(
-        &self,
-        handle: BlockHandle,
-        start: Option<(usize, u32)>,
-        end: Option<(usize, u32)>,
-    ) -> Option<String> {
-        self.acquire_block(handle)?
-            .block
-            .format_range_clamped(start, end, true, true)
-    }
 }
 
-/// One deferred piece of a frozen selection: an inclusive cell range of one
-/// engine block, formatted by the caller through `BlockRef::format_range`
-/// AFTER releasing the store lock because the PTY thread nests
-/// engine → store, so the reverse nesting would deadlock).
+/// One immutable request range, resolved by the engine owner.
 #[derive(Debug)]
 pub(super) struct FrozenSelectionPiece {
     pub handle: BlockHandle,

@@ -4420,6 +4420,7 @@ dependencies = [
  "cursor-icon",
  "dirs",
  "flate2",
+ "futures",
  "image",
  "lazy_static",
  "libc",

@@ -10,9 +10,10 @@ use gpui::{
 use gpui_component::WindowExt as _;
 use gpui_component::notification::Notification;
 use nmt_i18n::i18n;
+use tracing::warn;
 
 use crate::input as terminal_input;
-use crate::pane_model::key_action::KeyOutcome;
+use crate::pane_model::key_action::{KeyOutcome, PendingCopy};
 use crate::view::{AgentInterrupted, SendShiftTab, SendTab, TerminalPane};
 
 struct TextCopiedNotification;
@@ -52,6 +53,30 @@ pub(super) fn dropped_paths_text(paths: &[PathBuf]) -> String {
 }
 
 impl TerminalPane {
+    pub(super) fn begin_copy(
+        &mut self,
+        copy: PendingCopy,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn_in(window, async move |this, cx| match copy.request.await {
+            Ok(Ok(text)) => {
+                let _ = this.update_in(cx, |this, window, cx| {
+                    if this
+                        .model
+                        .finish_copy(text, copy.selection, copy.generation)
+                    {
+                        show_text_copied(window, cx);
+                        this.invalidate(cx);
+                        cx.notify();
+                    }
+                });
+            }
+            result => warn!("terminal copy did not complete: {result:?}"),
+        })
+        .detach();
+    }
+
     /// UI reaction to input reaching the PTY: optionally snap the view back
     /// to the latest output.
     fn react_to_pty_input(&mut self, cx: &mut Context<Self>) {
@@ -86,11 +111,9 @@ impl TerminalPane {
 
         match self.model.apply_key_action(action) {
             KeyOutcome::Ignored => return,
-            KeyOutcome::Copied => show_text_copied(window, cx),
             KeyOutcome::Written => self.react_to_pty_input(cx),
-            KeyOutcome::FrozenCopied => {
-                show_text_copied(window, cx);
-                cx.notify();
+            KeyOutcome::CopyPending(copy) => {
+                self.begin_copy(copy, window, cx);
                 return;
             }
         }
@@ -110,7 +133,22 @@ impl TerminalPane {
         )) {
             KeyOutcome::Ignored => return,
             KeyOutcome::Written => self.react_to_pty_input(cx),
-            KeyOutcome::Copied | KeyOutcome::FrozenCopied => {}
+            KeyOutcome::CopyPending(copy) => {
+                cx.spawn(async move |this, cx| {
+                    if let Ok(Ok(text)) = copy.request.await {
+                        let _ = this.update(cx, |this, cx| {
+                            if this
+                                .model
+                                .finish_copy(text, copy.selection, copy.generation)
+                            {
+                                this.invalidate(cx);
+                                cx.notify();
+                            }
+                        });
+                    }
+                })
+                .detach();
+            }
         }
 
         self.invalidate(cx);

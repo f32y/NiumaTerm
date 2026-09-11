@@ -61,6 +61,11 @@ impl EventListener for TerminalEventProxy {
     }
 
     fn send_event(&self, event: TerminalEvent, _id: WindowId) {
+        if matches!(event, TerminalEvent::ReadReady) {
+            self.signal(SessionChange::Content);
+            return;
+        }
+
         // Content damage drives a render with no chrome rebuild. This is the read's
         // final wake: image generations have already installed (UpdateGraphics runs
         // before this), so flush the staged block events before the UI
@@ -96,6 +101,7 @@ impl EventListener for TerminalEventProxy {
             TerminalEvent::Title(t) | TerminalEvent::TitleWithSubtitle(t, _) => HostEvent::Title(t),
             TerminalEvent::ResetTitle => HostEvent::Title(String::new()),
             TerminalEvent::Bell => HostEvent::Bell,
+            TerminalEvent::Cwd(cwd) => HostEvent::Cwd(cwd),
             TerminalEvent::ProgressReport(report) => HostEvent::Progress(report),
             TerminalEvent::ClipboardStore(ty, text) => {
                 if let Some(observer) = &self.observer {

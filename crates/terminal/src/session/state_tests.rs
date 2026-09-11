@@ -3,29 +3,36 @@ use std::sync::{Arc, mpsc};
 use std::time::SystemTime;
 
 use nmt_platform::{Poll, Token, Waker};
-use parking_lot::FairMutex;
+use parking_lot::Mutex;
 
 use crate::event::{CommandCapture, EventListener, Msg, MsgSender, TerminalEvent, WindowId};
 use crate::ghostty::GhosttyTerminal;
+use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
 use crate::selection::SelectionType;
 use crate::session::mouse::{SurfaceCellSide, SurfaceMouseEventKind, SurfaceScreenCell};
+use crate::session::page::PageCache;
 use crate::session::proxy::TerminalEventProxy;
 use crate::session::{SessionSharedState, TerminalSession};
 
 pub(super) fn test_session() -> (TerminalSession, mpsc::Receiver<Msg>) {
+    let mut engine = GhosttyTerminal::new(24, 4, 100).unwrap();
+    engine.write_vt(b"hello world");
+    session_from_engine(&mut engine)
+}
+
+pub(super) fn session_from_engine(
+    engine: &mut GhosttyTerminal,
+) -> (TerminalSession, mpsc::Receiver<Msg>) {
     let (tx, rx) = mpsc::channel();
     let poll = Poll::new().unwrap();
     let waker = Arc::new(Waker::new(poll.registry(), Token(0)).unwrap());
-    let mut engine = GhosttyTerminal::new(24, 4, 100).unwrap();
-    engine.write_vt(b"hello world");
-    let mut buffer = RenderBuffer::new(24, 4);
+    let mut buffer = RenderBuffer::new(engine.cols() as usize, engine.rows() as usize);
     engine.snapshot_into(&mut buffer).unwrap();
-
     (
         TerminalSession {
-            engine: Arc::new(FairMutex::new(engine)),
-            render_buffer: Arc::new(FairMutex::new(buffer)),
+            pages: Mutex::new(PageCache::default()),
+            render_buffer: Arc::new(FrameStore::new(buffer)),
             vt_modes: Arc::new(AtomicU32::new(0)),
             messenger: MsgSender::new(tx, waker),
             shared: Arc::new(SessionSharedState::default()),
@@ -105,10 +112,11 @@ fn current_directory_is_available_before_event_drain() {
         (r"C:\plain\path", r"C:\plain\path"),
         ("/unix/path", "/unix/path"),
     ] {
-        session
-            .engine
-            .lock()
-            .write_vt(format!("\x1b]7;{reported}\x07").as_bytes());
+        let mut engine = GhosttyTerminal::new(24, 4, 100).unwrap();
+        engine.write_vt(format!("\x1b]7;{reported}\x07").as_bytes());
+        engine.poll_pwd();
+        let mut snapshot = engine.snapshot().unwrap();
+        session.render_buffer.publish(&mut snapshot);
         assert_eq!(session.current_directory().as_deref(), Some(expected));
     }
 }

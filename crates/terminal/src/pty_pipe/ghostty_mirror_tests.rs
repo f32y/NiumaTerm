@@ -7,19 +7,20 @@ use nmt_platform::conpty_realign::{
     max_cup_row_col, rewrite_conpty_resize_echo_cup_rows, su_realign_count,
 };
 use nmt_platform::{ChildEvent, EventedPty, ProcessReadWrite, WinsizeBuilder};
-use parking_lot::{FairMutex, Mutex};
+use parking_lot::Mutex;
 
 use crate::event::{self, VoidListener};
 use crate::pty_pipe::{
     Interest, Poll, PtyPipe, PtyState, READ_BUFFER_SIZE, SYNC_OUTPUT_TIMEOUT, SessionOptions,
     Token, Waker, mode, publish_render_buffer,
 };
+use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
 use crate::{ansi, ghostty};
 
 #[test]
 fn failed_capture_does_not_publish_back_buffer() {
-    let front = FairMutex::new(RenderBuffer::new(2, 1));
+    let front = FrameStore::new(RenderBuffer::new(2, 1));
     let mut back = RenderBuffer::new(3, 1);
 
     assert!(!publish_render_buffer(
@@ -28,11 +29,11 @@ fn failed_capture_does_not_publish_back_buffer() {
         Err(ghostty::Error::InvalidValue),
         false,
     ));
-    assert_eq!(front.lock().cols(), 2);
+    assert_eq!(front.load().cols(), 2);
     assert_eq!(back.cols(), 3);
 
     assert!(publish_render_buffer(&front, &mut back, Ok(()), false));
-    assert_eq!(front.lock().cols(), 3);
+    assert_eq!(front.load().cols(), 3);
     assert_eq!(back.cols(), 2);
 }
 
@@ -243,7 +244,7 @@ fn disabled_terminal_responses_are_forwarded_without_replying() {
     };
 
     let mut machine = PtyPipe::new(
-        Arc::new(FairMutex::new(RenderBuffer::new(20, 3))),
+        Arc::new(FrameStore::new(RenderBuffer::new(20, 3))),
         Arc::new(AtomicU32::new(0)),
         pty,
         VoidListener {},
@@ -278,7 +279,7 @@ fn disabled_terminal_responses_are_forwarded_without_replying() {
 
 #[test]
 fn resize_message_publishes_snapshot_to_render_buffer() {
-    let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(20, 3)));
+    let render_buffer = Arc::new(FrameStore::new(RenderBuffer::new(20, 3)));
     let vt_modes = Arc::new(AtomicU32::new(0));
 
     let pty = FakePty {
@@ -307,7 +308,7 @@ fn resize_message_publishes_snapshot_to_render_buffer() {
     .unwrap();
 
     {
-        let mut engine = machine.ghostty.lock();
+        let engine = &mut machine.ghostty;
         engine.write_vt(b"resize-ok");
     }
 
@@ -325,7 +326,7 @@ fn resize_message_publishes_snapshot_to_render_buffer() {
 
     assert!(machine.drain_recv_channel(&mut state));
 
-    let buffer = render_buffer.lock();
+    let buffer = render_buffer.load();
 
     assert_eq!(buffer.rows(), 5);
     assert_eq!(render_buffer_row_text(&buffer, 0), "resize-ok");
@@ -333,7 +334,7 @@ fn resize_message_publishes_snapshot_to_render_buffer() {
 
 #[test]
 fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
-    let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(20, 3)));
+    let render_buffer = Arc::new(FrameStore::new(RenderBuffer::new(20, 3)));
 
     let pty = FakePty {
         reader: FakeReader {
@@ -367,7 +368,7 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
 
     machine.pty_read(&mut state, &mut buf).unwrap();
 
-    assert_eq!(render_buffer.lock().cursor().row.0, 2);
+    assert_eq!(render_buffer.load().cursor().row.0, 2);
 
     machine
         .pty
@@ -376,7 +377,7 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
         .extend_from_slice(b"\x1b[?2026h\x1b[1;1HWorking");
     machine.pty_read(&mut state, &mut buf).unwrap();
     {
-        let buffer = render_buffer.lock();
+        let buffer = render_buffer.load();
 
         assert_eq!(
             buffer.cursor().row.0,
@@ -396,7 +397,7 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
         .extend_from_slice(b"\x1b[3;3H\x1b[?2026l");
     machine.pty_read(&mut state, &mut buf).unwrap();
     {
-        let buffer = render_buffer.lock();
+        let buffer = render_buffer.load();
         assert_eq!(buffer.cursor().row.0, 2);
         assert_eq!(render_buffer_row_text(&buffer, 0), "Working");
     }
@@ -411,17 +412,17 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
     machine.pty_read(&mut state, &mut buf).unwrap();
 
     {
-        let buffer = render_buffer.lock();
+        let buffer = render_buffer.load();
         assert_eq!(buffer.cursor().row.0, 1);
         assert_eq!(render_buffer_row_text(&buffer, 1), "Stuck");
     }
 
-    assert!(!machine.ghostty.lock().mode(mode::SYNC_OUTPUT));
+    assert!(!machine.ghostty.mode(mode::SYNC_OUTPUT));
 }
 
 #[test]
 fn osc_progress_hides_published_cursor_until_removed() {
-    let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(80, 3)));
+    let render_buffer = Arc::new(FrameStore::new(RenderBuffer::new(80, 3)));
 
     let pty = FakePty {
         reader: FakeReader {
@@ -452,7 +453,6 @@ fn osc_progress_hides_published_cursor_until_removed() {
 
     machine
         .ghostty
-        .lock()
         .set_default_cursor_shape(ansi::CursorShape::Beam)
         .unwrap();
 
@@ -467,7 +467,7 @@ fn osc_progress_hides_published_cursor_until_removed() {
         .extend_from_slice(b";42\x1b\\    Building [====>     ] 4/10\r");
     machine.pty_read(&mut state, &mut buf).unwrap();
     {
-        let buffer = render_buffer.lock();
+        let buffer = render_buffer.load();
         assert_eq!(buffer.cursor_shape(), ansi::CursorShape::Beam);
         assert!(!buffer.cursor_visible(), "active progress hides the cursor");
     }
@@ -480,7 +480,7 @@ fn osc_progress_hides_published_cursor_until_removed() {
     machine.pty_read(&mut state, &mut buf).unwrap();
 
     assert!(
-        render_buffer.lock().cursor_visible(),
+        render_buffer.load().cursor_visible(),
         "removing progress restores the terminal cursor state"
     );
 }
@@ -491,7 +491,7 @@ fn osc_progress_hides_published_cursor_until_removed() {
 #[cfg(windows)]
 #[test]
 fn conpty_resize_echo_realigns_machine_pty_read_to_cursor_row() {
-    let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(134, 42)));
+    let render_buffer = Arc::new(FrameStore::new(RenderBuffer::new(134, 42)));
     let vt_modes = Arc::new(AtomicU32::new(0));
 
     let pty = FakePty {
@@ -522,7 +522,7 @@ fn conpty_resize_echo_realigns_machine_pty_read_to_cursor_row() {
     .unwrap();
 
     {
-        let mut engine = machine.ghostty.lock();
+        let engine = &mut machine.ghostty;
         engine.write_vt(b"\x1b[2J\x1b[10;1HHISTORY\x1b[42;1HC:\\Workspace\\NiumaTerm>");
     }
     machine.conpty_resize_echo_realign = true;
@@ -533,7 +533,7 @@ fn conpty_resize_echo_realigns_machine_pty_read_to_cursor_row() {
 
     machine.pty_read(&mut state, &mut read_buf).unwrap();
 
-    let snapshot = machine.ghostty.lock().snapshot().unwrap();
+    let snapshot = machine.ghostty.snapshot().unwrap();
 
     assert_eq!(snapshot_row_text(&snapshot, 9), "HISTORY");
     assert_eq!(
@@ -548,7 +548,7 @@ fn conpty_resize_echo_realigns_machine_pty_read_to_cursor_row() {
 #[cfg(windows)]
 #[test]
 fn conpty_resize_repaint_realigns_clear_without_new_input() {
-    let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(134, 42)));
+    let render_buffer = Arc::new(FrameStore::new(RenderBuffer::new(134, 42)));
     let vt_modes = Arc::new(AtomicU32::new(0));
 
     let pty = FakePty {
@@ -579,7 +579,7 @@ fn conpty_resize_repaint_realigns_clear_without_new_input() {
     .unwrap();
 
     {
-        let mut engine = machine.ghostty.lock();
+        let engine = &mut machine.ghostty;
         engine.write_vt(b"\x1b[2J\x1b[10;1HHISTORY\x1b[42;1HC:\\Workspace\\NiumaTerm>");
     }
     machine.conpty_resize_echo_realign = true;
@@ -590,7 +590,7 @@ fn conpty_resize_repaint_realigns_clear_without_new_input() {
 
     machine.pty_read(&mut state, &mut read_buf).unwrap();
 
-    let snapshot = machine.ghostty.lock().snapshot().unwrap();
+    let snapshot = machine.ghostty.snapshot().unwrap();
 
     assert_eq!(snapshot_row_text(&snapshot, 9), "HISTORY");
     assert_eq!(
@@ -606,7 +606,7 @@ fn conpty_resize_repaint_realigns_clear_without_new_input() {
 /// from the viewport-relative `cursor.y` reading 0 while scrolled).
 #[test]
 fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
-    let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(20, 4)));
+    let render_buffer = Arc::new(FrameStore::new(RenderBuffer::new(20, 4)));
     let vt_modes = Arc::new(AtomicU32::new(0));
 
     let pty = FakePty {
@@ -639,7 +639,7 @@ fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
     .unwrap();
 
     {
-        let mut engine = machine.ghostty.lock();
+        let engine = &mut machine.ghostty;
 
         // Fill well past the 4-row viewport so there is scrollback to pin to.
         engine.write_vt(b"\x1b[2JL0\r\nL1\r\nL2\r\nL3\r\nL4\r\nL5\r\nL6\r\nL7\r\nL8\r\nPROMPT>");
@@ -665,7 +665,7 @@ fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
     // INJECT must be realigned onto the engine's active cursor row (read
     // independently of the scroll pin), exactly once, never on row 0.
     let (active_row, snapshot) = {
-        let mut engine = machine.ghostty.lock();
+        let engine = &mut machine.ghostty;
         let active_row = engine.active_cursor_row().unwrap();
 
         engine.scroll_viewport_bottom();
@@ -693,7 +693,7 @@ fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
 #[cfg(windows)]
 #[test]
 fn conpty_resize_echo_routes_to_active_cursor_when_scrolled_typing() {
-    let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(20, 4)));
+    let render_buffer = Arc::new(FrameStore::new(RenderBuffer::new(20, 4)));
     let vt_modes = Arc::new(AtomicU32::new(0));
 
     let pty = FakePty {
@@ -726,7 +726,7 @@ fn conpty_resize_echo_routes_to_active_cursor_when_scrolled_typing() {
     .unwrap();
 
     {
-        let mut engine = machine.ghostty.lock();
+        let engine = &mut machine.ghostty;
 
         engine.write_vt(b"\x1b[2JL0\r\nL1\r\nL2\r\nL3\r\nL4\r\nL5\r\nL6\r\nL7\r\nL8\r\nPROMPT>");
         engine.scroll_viewport_top();
@@ -751,7 +751,7 @@ fn conpty_resize_echo_routes_to_active_cursor_when_scrolled_typing() {
     // The echo went to the active screen (off the scrolled-to-top view); scroll
     // to the bottom to observe where it landed.
     let snapshot = {
-        let mut engine = machine.ghostty.lock();
+        let engine = &mut machine.ghostty;
         engine.scroll_viewport_bottom();
         engine.snapshot().unwrap()
     };
@@ -813,7 +813,7 @@ fn pty_read_events(
     };
 
     let mut machine = PtyPipe::new(
-        Arc::new(FairMutex::new(RenderBuffer::new(80, 24))),
+        Arc::new(FrameStore::new(RenderBuffer::new(80, 24))),
         Arc::new(AtomicU32::new(0)),
         pty,
         CollectingListener(Arc::clone(&events)),
@@ -917,7 +917,7 @@ fn pty_read_boundary_protocol_snapshots_clears_then_starts_next_prompt() {
 echo hi\r\n\x1b]133;C\x07hi\r\n\
 \x1b]133;D;0\x07\x1b[2J\x1b[3J\x1b[H\x1b]133;A\x07PS> \x1b]133;B\x07";
 
-    let (events, machine) = pty_read_events(stream);
+    let (events, mut machine) = pty_read_events(stream);
 
     let mut shape = Vec::new();
     let mut handles = Vec::new();
@@ -947,14 +947,14 @@ echo hi\r\n\x1b]133;C\x07hi\r\n\
 
     // The frozen block holds the command's rows, readable via BlockRef.
     {
-        let engine = machine.ghostty.lock();
+        let engine = &mut machine.ghostty;
         let block = engine.block_acquire(handles[0]).expect("block alive");
         let text = block.format_range((0, 0), (1, 79), true, true).unwrap();
 
         assert_eq!(text, "PS> echo hi\nhi");
     }
 
-    let snapshot = machine.ghostty.lock().snapshot().unwrap();
+    let snapshot = machine.ghostty.snapshot().unwrap();
 
     assert_eq!(snapshot_row_text(&snapshot, 0), "PS>");
     assert!(
@@ -976,7 +976,7 @@ echo hi\r\n\x1b]133;C\x07hi\r\n\
 \x1b]133;D;0\x07\x1b[2J\x1b[3J\x1b[H\x1b]133;A\x07PS> \x1b]133;B\x07\
 clear\r\n\x1b]133;C\x07\x1b]133;K\x07\x1b[2J\x1b[3J\x1b[H";
 
-    let (events, machine) = pty_read_events(stream);
+    let (events, mut machine) = pty_read_events(stream);
 
     let cleared_at = events.iter().position(|event| {
         matches!(event, TerminalEvent::BlockBatch(batch)
@@ -988,7 +988,7 @@ clear\r\n\x1b]133;C\x07\x1b]133;K\x07\x1b[2J\x1b[3J\x1b[H";
         "the ;K mark must surface HistoryCleared: {events:?}"
     );
 
-    let snapshot = machine.ghostty.lock().snapshot().unwrap();
+    let snapshot = machine.ghostty.snapshot().unwrap();
 
     assert!(
         (0..snapshot.rows() as u16).all(|y| snapshot_row_text(&snapshot, y).is_empty()),
@@ -1001,9 +1001,9 @@ fn pty_read_boundary_protocol_does_not_clear_alt_screen() {
     let stream = b"\x1b]133;A\x07\x1b]133;B\x07\x1b]133;C\x07\
 \x1b]133;D;0\x07\x1b]133;A\x07PS> \x1b]133;B\x07\
 vim\r\n\x1b]133;C\x07\x1b[?1049hTUI\x1b]133;D;0\x07";
-    let (_events, machine) = pty_read_events(stream);
+    let (_events, mut machine) = pty_read_events(stream);
 
-    let mut engine = machine.ghostty.lock();
+    let engine = &mut machine.ghostty;
 
     assert!(engine.mode(ghostty::mode::ALT_SCREEN));
 
@@ -1038,7 +1038,7 @@ echo one\r\n\x1b]133;C\x07one\r\n\
 echo two\r\n\x1b]133;C\x07two\r\n\
 \x1b]7;file:///C:/w\x07\x1b]133;D;0\x07\x1b]133;A\x07PS> \x1b]133;B\x07";
 
-    let (events, machine) = pty_read_events(stream);
+    let (events, mut machine) = pty_read_events(stream);
 
     let starts: Vec<_> = events
         .iter()
@@ -1073,7 +1073,7 @@ echo two\r\n\x1b]133;C\x07two\r\n\
     // Mark forwarding is working when the engine tags the
     // prompt rows — the drift-correction ground truth for the view.
     assert!(
-        machine.ghostty.lock().has_prompt_tagged_row(),
+        machine.ghostty.has_prompt_tagged_row(),
         "engine rows must carry semantic prompt tags after mark forwarding"
     );
 }

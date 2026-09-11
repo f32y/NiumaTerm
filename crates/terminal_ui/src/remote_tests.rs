@@ -82,7 +82,7 @@ fn remote_session_renders_through_net_pty() {
     )
     .expect("attach");
 
-    let surface = TerminalFrameSource::attach(wake_channel().0, 1, |observer| {
+    let mut surface = TerminalFrameSource::attach(wake_channel().0, 1, |observer| {
         terminal_session(remote, 1, Colors::default(), Some(observer))
     })
     .expect("remote session");

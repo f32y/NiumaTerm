@@ -1,42 +1,128 @@
+use futures::channel::oneshot;
 use nmt_terminal::clipboard::{Clipboard, ClipboardType};
+use nmt_terminal::selection::SelectionRange;
+use nmt_terminal::session::BlockPoint;
+use nmt_terminal::session::request::Request;
 
 use crate::pane_model::PaneController;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TerminalKeyAction {
     Write(Vec<u8>),
-    /// Copy the selection, or write `bytes` when there is nothing selected.
-    /// A chord that carries no byte for the shell leaves `bytes` empty and so
-    /// does nothing when there is nothing to copy.
     CopyOrWrite(Vec<u8>),
     Paste,
     Ignore,
 }
 
-/// Distinguishes clipboard copies from other handled keys so UI feedback does
-/// not fire when Ctrl-C writes ETX to the terminal.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) enum KeyOutcome {
     Ignored,
     Written,
-    FrozenCopied,
-    Copied,
+    CopyPending(PendingCopy),
+}
+
+#[derive(Debug)]
+pub(crate) enum CopiedSelection {
+    Live(SelectionRange),
+    Frozen(BlockPoint, BlockPoint),
+    FrozenPending,
+    None,
+}
+
+#[derive(Debug)]
+pub(crate) struct PendingCopy {
+    pub request: Request<String>,
+    pub selection: CopiedSelection,
+    pub generation: u64,
+}
+
+impl PendingCopy {
+    pub(crate) fn ready(text: String) -> Self {
+        let (reply, request) = oneshot::channel();
+        let _ = reply.send(Ok(text));
+        Self {
+            request,
+            selection: CopiedSelection::None,
+            generation: 0,
+        }
+    }
 }
 
 impl PaneController {
     pub(crate) fn copy_text_to_clipboard(&self, text: String) -> bool {
-        if text.is_empty() {
+        !text.is_empty() && Clipboard::default().set(ClipboardType::Clipboard, text)
+    }
+
+    pub(crate) fn finish_copy(
+        &mut self,
+        text: String,
+        selection: CopiedSelection,
+        generation: u64,
+    ) -> bool {
+        if !self.copy_text_to_clipboard(text) {
             return false;
         }
-
-        let mut clipboard = Clipboard::default();
-
-        clipboard.set(ClipboardType::Clipboard, text);
+        if generation != self.selection_generation {
+            return true;
+        }
+        match selection {
+            CopiedSelection::FrozenPending => {
+                self.pending_expansion = None;
+                self.frozen_drag.clear();
+            }
+            CopiedSelection::Frozen(a, b) if self.frozen_drag.current() == Some((a, b)) => {
+                self.frozen_drag.clear();
+            }
+            CopiedSelection::Live(range)
+                if self
+                    .source
+                    .session
+                    .selection_range_in(&self.source.snapshot)
+                    == Some(range) =>
+            {
+                self.source.session.clear_selection()
+            }
+            _ => {}
+        }
         true
     }
 
     pub(crate) fn apply_key_action(&mut self, action: TerminalKeyAction) -> KeyOutcome {
         match action {
+            TerminalKeyAction::CopyOrWrite(bytes) => {
+                if let Some(pending) = &self.pending_expansion {
+                    return KeyOutcome::CopyPending(PendingCopy {
+                        request: pending.copy_text(self),
+                        selection: CopiedSelection::FrozenPending,
+                        generation: self.selection_generation,
+                    });
+                }
+                if let Some((a, b)) = self.frozen_drag.current() {
+                    return KeyOutcome::CopyPending(PendingCopy {
+                        request: self.source.session.frozen_selection_text(a, b),
+                        selection: CopiedSelection::Frozen(a, b),
+                        generation: self.selection_generation,
+                    });
+                }
+                if let Some(range) = self
+                    .source
+                    .session
+                    .selection_range_in(&self.source.snapshot)
+                    && let Some(request) =
+                        self.source.session.selected_text_in(&self.source.snapshot)
+                {
+                    return KeyOutcome::CopyPending(PendingCopy {
+                        request,
+                        selection: CopiedSelection::Live(range),
+                        generation: self.selection_generation,
+                    });
+                }
+                if self.source.session.write_input(&bytes) {
+                    KeyOutcome::Written
+                } else {
+                    KeyOutcome::Ignored
+                }
+            }
             TerminalKeyAction::Write(bytes) => {
                 if self.source.session.write_input(&bytes) {
                     KeyOutcome::Written
@@ -44,26 +130,9 @@ impl PaneController {
                     KeyOutcome::Ignored
                 }
             }
-            TerminalKeyAction::CopyOrWrite(bytes) => {
-                if let Some((a, b)) = self.frozen_drag.current() {
-                    let text = self.source.session.frozen_selection_text(a, b);
-                    if self.copy_text_to_clipboard(text) {
-                        self.frozen_drag.clear();
-                        return KeyOutcome::FrozenCopied;
-                    }
-                }
-                if self.copy_selection() {
-                    return KeyOutcome::Copied;
-                }
-
-                if self.source.session.write_input(&bytes) {
-                    KeyOutcome::Written
-                } else {
-                    KeyOutcome::Ignored
-                }
-            }
             TerminalKeyAction::Paste => {
-                if self.paste() {
+                let text = Clipboard::default().get(ClipboardType::Clipboard);
+                if self.source.session.paste_text(&text) {
                     KeyOutcome::Written
                 } else {
                     KeyOutcome::Ignored
@@ -71,31 +140,5 @@ impl PaneController {
             }
             TerminalKeyAction::Ignore => KeyOutcome::Ignored,
         }
-    }
-
-    fn paste(&self) -> bool {
-        let mut clipboard = Clipboard::default();
-
-        let text = clipboard.get(ClipboardType::Clipboard);
-
-        self.source.session.paste_text(&text)
-    }
-
-    fn copy_selection(&self) -> bool {
-        let Some(text) = self
-            .source
-            .session
-            .selected_text()
-            .filter(|text| !text.is_empty())
-        else {
-            return false;
-        };
-
-        let mut clipboard = Clipboard::default();
-
-        clipboard.set(ClipboardType::Clipboard, text);
-        self.source.session.clear_selection();
-
-        true
     }
 }

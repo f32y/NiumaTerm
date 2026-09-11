@@ -34,7 +34,7 @@ impl TerminalPane {
     ) -> bool {
         match outcome {
             ScrollOutcome::Ignored => return false,
-            ScrollOutcome::GridChanged => self.invalidate(cx),
+            ScrollOutcome::GridRequested => self.invalidate(cx),
             ScrollOutcome::List(op) => {
                 self.block_list.apply(op);
                 cx.notify();

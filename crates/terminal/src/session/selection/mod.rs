@@ -1,10 +1,11 @@
 use parking_lot::Mutex;
 
-use crate::ghostty::{BlockHandle, BlockRef, Palette};
+use crate::ghostty::{BlockRef, Palette};
 use crate::render_buffer::RenderBuffer;
 use crate::selection::{Selection, SelectionRange, SelectionType, WORD_DELIMITERS};
 use crate::session::TerminalSession;
 use crate::session::mouse::{SurfaceCellSide, SurfaceMouseEventKind, SurfaceScreenCell};
+use crate::session::request::{Request, TextSource};
 use crate::terminal::pos::{Column, Line, Pos, Side};
 
 #[cfg(test)]
@@ -40,36 +41,6 @@ impl SurfaceSelection {
             kind,
             selection_type,
         )
-    }
-
-    /// The selection mapped to visible-row coordinates for the frame highlight.
-    /// Anchors are SCREEN coordinates (content-stable across scrolling), so the
-    /// caller's `viewport_top` re-bases them; rows outside the viewport are
-    /// clipped per-row by `row_selection_for`.
-    pub(super) fn range_at(
-        &self,
-        session: &TerminalSession,
-        viewport_top: i32,
-    ) -> Option<SelectionRange> {
-        let guard = self.selection.lock();
-        let sel = guard.as_ref()?;
-        let buf = session.render_buffer.lock();
-
-        sel.to_range_engine(&buf, viewport_top, WORD_DELIMITERS)
-    }
-
-    /// Selection in absolute SCREEN coordinates for live-history rows rendered
-    /// above the pinned engine viewport.
-    pub(super) fn screen_range(
-        &self,
-        session: &TerminalSession,
-        viewport_top: i32,
-    ) -> Option<SelectionRange> {
-        let guard = self.selection.lock();
-        let selection = guard.as_ref()?;
-        let buf = session.render_buffer.lock();
-
-        selection_screen_range(selection, &buf, viewport_top)
     }
 
     /// Drop the engine-region selection (block-split: a frozen-region
@@ -128,39 +99,47 @@ impl SurfaceSelection {
 
         false
     }
-
-    /// Selected text via the engine formatter. Ranges reaching into scrollback
-    /// extract real content instead of stopping at the viewport.
-    fn text(&self, session: &TerminalSession, viewport_top: i32) -> Option<String> {
-        let range = self.screen_range(session, viewport_top)?;
-
-        if range.start.row.0 < 0 || range.end.row.0 < 0 {
-            return None;
-        }
-
-        session
-            .engine
-            .lock()
-            .format_screen_range(
-                (range.start.col.0 as u16, range.start.row.0 as u32),
-                (range.end.col.0 as u16, range.end.row.0 as u32),
-                range.is_block,
-                // Rejoin soft-wrapped lines and drop trailing blanks, matching
-                // the prior hand-rolled trim behavior.
-                true,
-                true,
-            )
-            .ok()
-    }
 }
 
 impl TerminalSession {
-    pub fn selected_text(&self) -> Option<String> {
-        self.shared.selection.text(self, self.viewport_top())
+    pub fn selected_text(&self) -> Option<Request<String>> {
+        self.selected_text_in(&self.snapshot())
+    }
+
+    pub fn selected_text_in(&self, snapshot: &RenderBuffer) -> Option<Request<String>> {
+        let selection = self.shared.selection.selection.lock();
+        let range = selection_screen_range(
+            selection.as_ref()?,
+            snapshot,
+            snapshot.viewport_top.unwrap_or(0) as i32,
+        )?;
+        let start = (
+            u16::try_from(range.start.col.0).ok()?,
+            u32::try_from(range.start.row.0).ok()?,
+        );
+        let end = (
+            u16::try_from(range.end.col.0).ok()?,
+            u32::try_from(range.end.row.0).ok()?,
+        );
+        Some(self.request_text(TextSource::Screen {
+            revision: snapshot.revision,
+            start,
+            end,
+            rectangle: range.is_block,
+        }))
     }
 
     pub fn selection_range(&self) -> Option<SelectionRange> {
-        self.shared.selection.range_at(self, self.viewport_top())
+        self.selection_range_in(&self.snapshot())
+    }
+
+    pub fn selection_range_in(&self, snapshot: &RenderBuffer) -> Option<SelectionRange> {
+        let selection = self.shared.selection.selection.lock();
+        selection.as_ref()?.to_range_engine(
+            snapshot,
+            snapshot.viewport_top.unwrap_or(0) as i32,
+            WORD_DELIMITERS,
+        )
     }
 
     pub fn apply_screen_selection(
@@ -176,30 +155,21 @@ impl TerminalSession {
     }
 
     pub fn selection_screen_range(&self) -> Option<SelectionRange> {
-        self.shared
-            .selection
-            .screen_range(self, self.viewport_top())
+        let snapshot = self.snapshot();
+        self.selection_screen_range_in(&snapshot)
+    }
+
+    pub fn selection_screen_range_in(&self, snapshot: &RenderBuffer) -> Option<SelectionRange> {
+        let selection = self.shared.selection.selection.lock();
+        selection_screen_range(
+            selection.as_ref()?,
+            snapshot,
+            snapshot.viewport_top.unwrap_or(0) as i32,
+        )
     }
 
     pub fn clear_selection(&self) {
         self.shared.selection.clear();
-    }
-
-    /// Expand a click inside a frozen block into a selection range. A frozen
-    /// block lives in the engine rather than in the render buffer, so this
-    /// reads the block directly and never consults the live selection.
-    pub fn frozen_selection_range(
-        &self,
-        handle: BlockHandle,
-        line: usize,
-        col: u32,
-        selection_type: SelectionType,
-    ) -> Option<((usize, u32), (usize, u32))> {
-        let engine = self.engine.lock();
-        let palette = engine.color_palette();
-        let block = engine.block_acquire(handle)?;
-
-        block_selection_range(&block, &palette, line, col, selection_type)
     }
 }
 
@@ -216,7 +186,7 @@ pub(super) fn selection_screen_range(
     Some(range)
 }
 
-pub(super) fn block_selection_range(
+pub(crate) fn block_selection_range(
     block: &BlockRef,
     palette: &Palette,
     line: usize,

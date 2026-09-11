@@ -27,12 +27,15 @@ use crate::pane_model::frozen_hit_map::FrozenHitMap;
 use crate::pane_model::gutter_selection::GutterSelection;
 use crate::pane_model::links::LinkHover;
 use crate::pane_model::list_mirror::BlockListMirror;
+use crate::pane_model::mouse::PendingExpansion;
 use crate::pane_model::scrollbar_activity::ScrollbarActivity;
 use crate::pane_model::selection_drag::FrozenSelectionDrag;
 use crate::pane_model::viewport::Viewport;
 
 pub(crate) struct PaneController {
     pub source: TerminalFrameSource,
+    pub pending_expansion: Option<PendingExpansion>,
+    pub selection_generation: u64,
     pub settings: PaneSettings,
     pub theme: FrameTheme,
     pub duration_labels: DurationLabels,
@@ -60,6 +63,8 @@ impl PaneController {
     ) -> Self {
         Self {
             source,
+            pending_expansion: None,
+            selection_generation: 0,
             settings,
             theme,
             duration_labels,
@@ -90,10 +95,17 @@ impl PaneController {
     }
 
     pub(crate) fn refresh_frame(&mut self) {
+        self.poll_expansion();
         let previous = self.frame_cache.reusable_frame();
         self.frame_cache
             .rebuild(self.source.frame(previous.as_ref(), &self.theme));
         self.update_viewport();
+        if self.links.enabled
+            && let Some(position) = self.links.position()
+        {
+            let hit = self.link_at_position(position);
+            self.links.update(position, hit);
+        }
     }
 
     pub(crate) fn update_viewport(&mut self) {

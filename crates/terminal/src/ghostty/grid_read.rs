@@ -14,11 +14,9 @@ use libghostty_vt_sys::{
 
 use crate::ghostty::types::color_from_vt;
 use crate::ghostty::{
-    CellText, CellWide, Color, Error, GhosttyTerminal, Result, ScreenRowMeta, SnapshotStyle,
-    Underline,
+    CellText, CellWide, Color, Error, GhosttyTerminal, Result, RowCell, ScreenRowMeta,
+    ScreenRowRead, SnapshotStyle, Underline,
 };
-#[cfg(test)]
-use crate::ghostty::{RowCell, ScreenRowRead};
 
 impl GhosttyTerminal {
     /// Resolve a point (in the given coordinate system) to a `GridRef`. Fast for
@@ -62,7 +60,6 @@ impl GhosttyTerminal {
 
     /// Read one absolute `SCREEN` row into a materialized `Vec` — test-only
     /// convenience over [`Self::read_screen_row_visit`].
-    #[cfg(test)]
     pub fn read_screen_row(&self, row: u32) -> Result<Option<ScreenRowRead>> {
         let mut cells = Vec::with_capacity(self.cols as usize);
 

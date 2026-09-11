@@ -10,9 +10,9 @@ use nmt_platform::windows::powershell::DEFAULT_SHELL;
 use nmt_platform::windows::process::ProcessTree;
 use nmt_platform::{PtyOptions, WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env};
 use nmt_terminal::event::{EventListener, Msg, MsgSender, TerminalEvent, WindowId};
-use nmt_terminal::ghostty::GhosttyTerminal;
 use nmt_terminal::pty_pipe::{SessionOptions as PipeOptions, start_session};
-use parking_lot::{FairMutex, Mutex};
+use nmt_terminal::session::request::CheckpointRequest;
+use parking_lot::Mutex;
 
 const SUBSCRIBER_QUEUE_CAPACITY: usize = 128;
 
@@ -250,7 +250,6 @@ struct RemoteSession {
     shell: String,
     title: Option<String>,
     messenger: MsgSender,
-    engine: Arc<FairMutex<GhosttyTerminal>>,
     stream: Arc<Mutex<StreamState>>,
     shutdown_sent: AtomicBool,
     process_tree: Option<ProcessTree>,
@@ -351,7 +350,6 @@ impl RemoteSessionHub {
             shell: options.shell,
             title: options.starting_title,
             messenger: handles.messenger,
-            engine: handles.engine,
             stream,
             shutdown_sent: AtomicBool::new(false),
             process_tree,
@@ -366,53 +364,45 @@ impl RemoteSessionHub {
         let session = self.get(id)?;
         let (sender, receiver) = sync_channel(SUBSCRIBER_QUEUE_CAPACITY);
 
-        // PTY output publishes its sequence while holding this same engine lock.
-        // The checkpoint and subscription registration therefore form one stream
-        // boundary: every byte is either in the checkpoint or in a later event.
-        let mut engine = session.engine.lock();
-
-        let vt = engine
-            .format_vt_state()
-            .map_err(|error| HubError::Engine(error.to_string()))?;
-
-        let cols = engine.cols();
-        let rows = engine.rows();
-
-        let mut stream = session.stream.lock();
-
-        if stream.exited {
-            return Err(HubError::SessionExited(id));
-        }
-
-        let subscriber_id = stream.next_subscriber_id;
-
-        stream.next_subscriber_id = stream.next_subscriber_id.saturating_add(1);
-
-        let base_seq = stream.next_seq.saturating_sub(1);
-
-        stream.subscribers.insert(
-            subscriber_id,
-            Subscriber {
-                sender,
-                wake_thread: None,
+        let stream = Arc::clone(&session.stream);
+        let (completed, completion) = sync_channel(1);
+        session.send(Msg::Checkpoint(CheckpointRequest(Box::new(
+            move |result| {
+                let result = result
+                    .map_err(|error| HubError::Engine(format!("{error:?}")))
+                    .and_then(|checkpoint| {
+                        let mut state = stream.lock();
+                        if state.exited {
+                            return Err(HubError::SessionExited(id));
+                        }
+                        let subscriber_id = state.next_subscriber_id;
+                        state.next_subscriber_id = state.next_subscriber_id.saturating_add(1);
+                        let base_seq = state.next_seq.saturating_sub(1);
+                        state.subscribers.insert(
+                            subscriber_id,
+                            Subscriber {
+                                sender,
+                                wake_thread: None,
+                            },
+                        );
+                        drop(state);
+                        Ok(SessionSubscription {
+                            snapshot: SessionSnapshot {
+                                session_id: id,
+                                base_seq,
+                                vt: checkpoint.vt,
+                                cols: checkpoint.cols,
+                                rows: checkpoint.rows,
+                            },
+                            receiver,
+                            subscriber_id,
+                            stream,
+                        })
+                    });
+                let _ = completed.send(result);
             },
-        );
-
-        drop(stream);
-        drop(engine);
-
-        Ok(SessionSubscription {
-            snapshot: SessionSnapshot {
-                session_id: id,
-                base_seq,
-                vt,
-                cols,
-                rows,
-            },
-            receiver,
-            subscriber_id,
-            stream: Arc::clone(&session.stream),
-        })
+        ))))?;
+        completion.recv().map_err(|_| HubError::ChannelClosed(id))?
     }
 
     pub fn write_input(&self, id: SessionId, data: &[u8]) -> Result<(), HubError> {

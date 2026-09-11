@@ -2,21 +2,22 @@ use std::io::{self, ErrorKind, Read, Write};
 use std::sync::atomic::{AtomicU32, AtomicU64};
 use std::sync::{self, Arc, mpsc};
 use std::thread::{Builder, JoinHandle};
-use std::{cell, error, fmt, mem, path, time};
+use std::{cell, error, fmt, path, time};
 
 #[cfg(target_os = "linux")]
 use libc::EIO;
 use nmt_platform::{ChildEvent, EventedPty, Events, Interest, Poll, Token, Waker};
-use parking_lot::FairMutex;
 use tracing::{error, warn};
 
 use crate::event::{self, EventListener, Msg, MsgSender, TerminalEvent, WindowId};
 use crate::ghostty::{self, GhosttyTerminal, mode};
 use crate::prompt_sniffer::PromptSniffer;
+use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
 use crate::{terminal, vt_trace};
 
 mod marks;
+pub(crate) mod requests;
 mod session;
 mod write_queue;
 
@@ -33,10 +34,10 @@ pub use crate::pty_pipe::write_queue::PtyState;
 const WAKER_TOKEN: Token = Token(0);
 
 const READ_BUFFER_SIZE: usize = 0x10_0000;
-/// Max bytes to read from the PTY while the terminal is locked.
-const MAX_LOCKED_READ: usize = u16::MAX as usize;
+/// Yield to queued commands after each bounded PTY read batch.
+const MAX_READ_BATCH: usize = u16::MAX as usize;
 /// Min interval between full-viewport `snapshot()` + render-buffer readbacks
-/// while PTY input is saturated (a batch hit `MAX_LOCKED_READ` with more data
+/// while PTY input is saturated (a batch hit `MAX_READ_BATCH` with more data
 /// pending). The readback is a constant-cost per-cell FFI walk (~1ms at 220×55)
 /// that used to run once per batch and dominated the vtebench cell benchmarks.
 /// The renderer samples
@@ -78,15 +79,13 @@ pub struct PtyPipe<T: EventedPty, U: EventListener> {
     /// callback signal readiness through it; the `MsgSender` wakes it after each send
     /// (mio 1.2 has no pollable channel / user-space readiness).
     waker: Arc<Waker>,
-    /// Ghostty VT engine driving the terminal state. Shared behind a lock so the
-    /// frontend can reach it synchronously for scroll, selection, and search. The
-    /// PTY thread locks it for `write_vt` and render-state reads; the
-    /// render buffer is on a separate lock so a frame never waits behind a parse.
-    ghostty: Arc<FairMutex<GhosttyTerminal>>,
-    /// Ghostty-fed viewport copy the renderer reads. Populated here
-    /// each batch; on its own lock, separate from the engine so paint never
-    /// waits behind parsing.
-    render_buffer: Arc<FairMutex<RenderBuffer>>,
+    /// The event loop exclusively owns the parser and all mutable engine state.
+    /// Other threads submit commands and retain published data independently.
+    ghostty: GhosttyTerminal,
+    theme_revision: u64,
+    /// Publication exchanges immutable frame ownership without exposing the
+    /// engine. Readers release the short publication lock before extraction.
+    render_buffer: Arc<FrameStore>,
     /// PTY-thread-private target for direct Ghostty capture. A completed frame
     /// swaps with `render_buffer`, so the shared lock covers only publication.
     back_buffer: RenderBuffer,
@@ -98,8 +97,8 @@ pub struct PtyPipe<T: EventedPty, U: EventListener> {
     /// compares it to detect content changes and invalidate cached views.
     content_version: Arc<AtomicU64>,
     /// Optional observer for the exact VT stream accepted by the engine. It runs
-    /// under the engine lock so a checkpoint and its following byte sequence can
-    /// be ordered atomically; observers must therefore return promptly.
+    /// on the owner thread before another command or byte batch can run,
+    /// preserving checkpoint ordering. Observers must return promptly.
     output_sink: Option<OutputSink>,
     terminal_responses_enabled: bool,
     event_proxy: U,
@@ -185,7 +184,7 @@ fn ghostty_vt_modes(g: &GhosttyTerminal) -> terminal::Mode {
 }
 
 fn publish_render_buffer(
-    front: &FairMutex<RenderBuffer>,
+    front: &FrameStore,
     back: &mut RenderBuffer,
     capture: ghostty::Result<()>,
     hide_cursor: bool,
@@ -198,7 +197,7 @@ fn publish_render_buffer(
         back.set_cursor_visible(false);
     }
 
-    mem::swap(&mut *front.lock(), back);
+    front.publish(back);
 
     true
 }
@@ -223,7 +222,7 @@ where
     U: EventListener + Send + 'static,
 {
     pub(crate) fn new(
-        render_buffer: Arc<FairMutex<RenderBuffer>>,
+        render_buffer: Arc<FrameStore>,
         vt_modes: Arc<AtomicU32>,
         pty: T,
         event_proxy: U,
@@ -241,7 +240,7 @@ where
         // Start the engine at the render buffer's viewport dimensions so the first
         // resize cannot diverge from a zero-sized construction.
         let (cols, rows) = {
-            let rb = render_buffer.lock();
+            let rb = render_buffer.load();
             (rb.cols() as u16, rb.rows() as u16)
         };
 
@@ -271,7 +270,8 @@ where
             poll,
             waker,
             pty,
-            ghostty: Arc::new(FairMutex::new(ghostty)),
+            ghostty,
+            theme_revision: 0,
             render_buffer,
             back_buffer: RenderBuffer::new(cols as usize, rows as usize),
             vt_modes,
@@ -332,7 +332,7 @@ where
         let mut processed = 0;
 
         // True when the loop drained the PTY (WouldBlock/EOF); false when it
-        // broke at MAX_LOCKED_READ with more data likely pending.
+        // broke at MAX_READ_BATCH with more data likely pending.
         let mut caught_up = false;
 
         loop {
@@ -366,7 +366,7 @@ where
             unprocessed = 0;
 
             // Don't accumulate unboundedly before reflecting to the renderer.
-            if processed >= MAX_LOCKED_READ {
+            if processed >= MAX_READ_BATCH {
                 break;
             }
         }
@@ -382,12 +382,11 @@ where
     fn process_pty_chunk(&mut self, input: &[u8]) {
         let input_len = input.len();
 
-        // Feed the bytes into Ghostty's VT engine (under the engine lock).
-        // The render buffer is on a separate lock, so this never blocks a
-        // render frame while the same engine snapshot is locked.
+        // The owner parses into private engine state while the UI retains its
+        // last published frame. Neither side waits for the other's read pass.
         let output_sink = self.output_sink.clone();
 
-        let mut engine = self.ghostty.lock();
+        let engine = &mut self.ghostty;
 
         let echo_pending_at_entry = nmt_platform::USES_CONPTY && self.conpty_resize_echo_pending;
 
@@ -553,7 +552,7 @@ where
             if got != Some(expected) && vt_trace::enabled() {
                 vt_trace::trace(
                     "su_realign_assert",
-                    &mut engine,
+                    engine,
                     &format!("expected R_conpty={expected} got={got:?}"),
                 );
             }
@@ -571,7 +570,7 @@ where
         if vt_trace::enabled() && (repaint_window || was_rewritten || echo_pending_at_entry) {
             vt_trace::trace(
                 "pty_resize_read",
-                &mut engine,
+                engine,
                 &format!(
                     "read_bytes={input_len} rewritten={was_rewritten} \
                          repaint_window={repaint_window} echo_pending={echo_pending_at_entry} \
@@ -597,17 +596,17 @@ where
         // throughput (see the constant's doc).
         let do_snapshot = caught_up || self.last_snapshot_at.elapsed() >= SNAPSHOT_MIN_INTERVAL;
 
-        // Drain everything from the engine under ONE lock: query/DSR/DA
-        // responses, bell, title, pwd, VT modes, and the snapshot. Then act on
-        // the owned results below with the engine lock released.
+        // Collect one batch's protocol responses, metadata, image changes,
+        // and frame before delivering events that announce the publication.
+        let pwd = self.ghostty.poll_pwd();
         let (responses, bell, clipboard_writes, title, vt_modes, sync_output, capture, image_delta) = {
-            let mut engine = self.ghostty.lock();
+            let engine = &mut self.ghostty;
 
             let responses = engine.take_pty_writes();
             let bell = engine.take_bell();
             let clipboard_writes = engine.take_clipboard_writes();
             let title = engine.poll_title();
-            let vt_modes = ghostty_vt_modes(&engine);
+            let vt_modes = ghostty_vt_modes(engine);
             let sync_output_timed_out = self
                 .sync_output_started_at
                 .is_some_and(|started| started.elapsed() >= SYNC_OUTPUT_TIMEOUT);
@@ -644,6 +643,13 @@ where
                 image_delta,
             )
         };
+
+        if let Some(cwd) = pwd {
+            self.event_proxy
+                .send_event(TerminalEvent::Cwd(cwd), self.window_id);
+        }
+        self.back_buffer.revision = self.content_version.load(sync::atomic::Ordering::Relaxed);
+        self.back_buffer.theme_revision = self.theme_revision;
 
         // Ship new/changed kitty image pixels + removals via the existing graphics
         // event to the renderer's image store. Empty in steady state.
@@ -704,7 +710,7 @@ where
         self.emit_interactive_state();
 
         // Readback skipped under saturation: self-wake so another `pty_read`
-        // pass runs even if the pipe drained exactly at the MAX_LOCKED_READ
+        // pass runs even if the pipe drained exactly at the MAX_READ_BATCH
         // boundary (no OS readiness would re-fire, and the Windows soft-ready
         // flag may already be clear). That pass either parses more pending data
         // or reads 0 bytes, lands caught-up, and flushes this pending snapshot.
@@ -743,7 +749,10 @@ where
     ///
     /// Returns `false` when a shutdown message was received.
     fn drain_recv_channel(&mut self, state: &mut PtyState) -> bool {
-        while let Ok(msg) = self.receiver.try_recv() {
+        for _ in 0..64 {
+            let Ok(msg) = self.receiver.try_recv() else {
+                return true;
+            };
             match msg {
                 Msg::Input(input) => {
                     // Only treat input as a resize echo for a brief window after a
@@ -776,12 +785,12 @@ where
                     let mut blocks_sync: Option<Vec<(ghostty::BlockHandle, usize)>> = None;
 
                     let (snapshot, active_row) = {
-                        let mut engine = self.ghostty.lock();
+                        let engine = &mut self.ghostty;
 
                         if vt_trace::enabled() {
                             vt_trace::trace(
                                 "perf_resize_before",
-                                &mut engine,
+                                engine,
                                 &format!(
                                     "request cols={} rows={} px={}x{} cell={}x{}",
                                     cols,
@@ -801,7 +810,7 @@ where
                         if vt_trace::enabled() {
                             vt_trace::trace(
                                 "perf_resize_after_engine",
-                                &mut engine,
+                                engine,
                                 &format!(
                                     "applied cols={} rows={} cell={}x{}",
                                     cols, rows, cell_w, cell_h
@@ -813,7 +822,7 @@ where
                         // block (new generations + row counts) — ship the fresh
                         // list so the store's cached layout follows the engine reflow.
                         if self.engine_blocks && engine.block_count() > 0 {
-                            blocks_sync = Some(engine_blocks_live_list(&engine));
+                            blocks_sync = Some(engine_blocks_live_list(engine));
                         }
 
                         let capture = engine.snapshot_into(&mut self.back_buffer);
@@ -830,6 +839,11 @@ where
                         );
                     }
 
+                    self.back_buffer.revision = self
+                        .content_version
+                        .fetch_add(1, sync::atomic::Ordering::Relaxed)
+                        + 1;
+                    self.back_buffer.theme_revision = self.theme_revision;
                     if publish_render_buffer(
                         &self.render_buffer,
                         &mut self.back_buffer,
@@ -843,10 +857,6 @@ where
                             self.window_id,
                         );
                     }
-
-                    // Resize reflows content → invalidate any deep-search corpus.
-                    self.content_version
-                        .fetch_add(1, sync::atomic::Ordering::Relaxed);
 
                     if nmt_platform::USES_CONPTY {
                         self.conpty_resize_echo_realign = true;
@@ -869,9 +879,12 @@ where
                     }
                 }
                 Msg::Shutdown => return false,
+                request => self.handle_request(request),
             }
         }
 
+        // A bounded drain must re-arm its wake even when no new sender arrives.
+        let _ = self.waker.wake();
         true
     }
 
@@ -949,7 +962,7 @@ where
         'event_loop: loop {
             // Windows soft-ready is level-like but lives outside the OS poll set,
             // and its worker only wakes on the clear→set edge. A `pty_read` capped
-            // by MAX_LOCKED_READ can return with data still in the ring (flag left
+            // by MAX_READ_BATCH can return with data still in the ring (flag left
             // set), so blocking with `None` would sleep forever on already-signalled
             // data. When a source is still ready, poll with a zero timeout to spin
             // back to `drain_ready` instead of sleeping. Unix returns `false` here

@@ -409,6 +409,11 @@ impl GhosttyTerminal {
         let palette = self.color_palette();
 
         buffer.begin_capture(self.cols as usize, self.rows as usize);
+        buffer.viewport_top = self.viewport_top_screen();
+        buffer.title = self.title();
+        buffer.current_directory = self
+            .current_directory()
+            .map(|path| path.to_string_lossy().into_owned());
 
         // A transient row lookup failure blanks only that row; publishing the
         // remaining viewport is safer than withholding an otherwise valid frame.
@@ -422,7 +427,7 @@ impl GhosttyTerminal {
                 })
                 .unwrap_or_default();
 
-            buffer.write_row_meta(y as usize, meta.wrapped, meta.virtual_placeholder);
+            buffer.write_row_meta(y as usize, meta);
         }
 
         let colors = self.render.colors(self.terminal);

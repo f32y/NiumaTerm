@@ -134,7 +134,7 @@ impl TerminalPane {
         // Apply terminal presentation settings to existing panes and invalidate
         // measurements that depend on font metrics.
         cx.observe_global::<TerminalSettings>(|this, cx| {
-            let mut settings = PaneSettings::from(cx.global::<TerminalSettings>());
+            let settings = PaneSettings::from(cx.global::<TerminalSettings>());
             let colors = active_colors();
             this.block_list
                 .list
@@ -142,14 +142,22 @@ impl TerminalPane {
 
             this.model.source.session.set_theme_colors(&colors);
 
-            if settings.cursor_shape != this.model.settings.cursor_shape
-                && !this
-                    .model
-                    .source
-                    .session
-                    .set_cursor_shape(settings.cursor_shape)
-            {
-                settings.cursor_shape = this.model.settings.cursor_shape;
+            if settings.cursor_shape != this.model.settings.cursor_shape {
+                let previous = this.model.settings.cursor_shape;
+                let requested = settings.cursor_shape;
+                let request = this.model.source.session.set_cursor_shape(requested);
+                cx.spawn(async move |this, cx| {
+                    if !matches!(request.await, Ok(Ok(()))) {
+                        let _ = this.update(cx, |this, cx| {
+                            if this.model.settings.cursor_shape == requested {
+                                this.model.settings.cursor_shape = previous;
+                                this.invalidate(cx);
+                                cx.notify();
+                            }
+                        });
+                    }
+                })
+                .detach();
             }
 
             this.model.settings = settings;

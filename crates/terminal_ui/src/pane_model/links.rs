@@ -18,6 +18,7 @@ pub(crate) struct LinkHit {
 #[derive(Default)]
 pub(crate) struct LinkHover {
     hit: Option<LinkHit>,
+    pub(crate) enabled: bool,
     last_position: Option<LocalPoint>,
 }
 
@@ -75,7 +76,7 @@ impl PaneController {
             Block { item: usize, line: i64 },
         }
 
-        let viewport_top = self.source.session.viewport_top_screen_row();
+        let viewport_top = self.source.snapshot.viewport_top;
 
         let (source, col) = match self.block_list_point_at(position) {
             Some(BlockListPoint::Frozen(pt)) => (
@@ -99,9 +100,11 @@ impl PaneController {
         };
 
         let row_at = |delta: i64| match source {
-            RowSource::Screen(row) => u32::try_from(row + delta)
-                .ok()
-                .and_then(|row| self.source.session.screen_row_text(row)),
+            RowSource::Screen(row) => u32::try_from(row + delta).ok().and_then(|row| {
+                self.source
+                    .session
+                    .screen_row_text_in(&self.source.snapshot, row)
+            }),
             RowSource::Block { item, line, .. } => usize::try_from(line + delta)
                 .ok()
                 .and_then(|line| self.source.session.block_row_text(item, line)),

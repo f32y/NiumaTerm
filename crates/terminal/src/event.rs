@@ -4,12 +4,14 @@ use std::fmt::{self, Debug, Formatter};
 use std::sync::{self, Arc};
 use std::{option, path, time};
 
-use nmt_config::colors::ColorRgb;
+use nmt_config::CursorShape;
+use nmt_config::colors::{ColorRgb, Colors};
 use nmt_platform::{Waker, WinsizeBuilder};
 
 use crate::clipboard::ClipboardType;
 use crate::ghostty;
 use crate::graphics::UpdateQueues;
+use crate::session::request::{CheckpointRequest, Query, Reply};
 use crate::terminal::Match;
 use crate::terminal::pos::{Direction, Pos};
 
@@ -34,8 +36,7 @@ impl From<u64> for WindowId {
 /// One PTY-thread block event: a trusted
 /// `;D` freezes the whole command into a finished engine block
 /// (`finish_block`, O(1) ownership transfer) and the app receives the
-/// HANDLE; rendering reads the frozen block directly through a refcounted
-/// `BlockRef`.
+/// handle; the owner materializes requested rows into independent pages.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockEvent {
     /// The user cleared the terminal (announced in-band via the `;K` mark):
@@ -45,7 +46,7 @@ pub enum BlockEvent {
     /// A trusted `;D` froze the command into a finished engine block. The
     /// store keeps only the handle; rendering reads the block through
     /// `BlockRef`. `rows` is the row count at finish time, cached app-side
-    /// so layout never takes the engine lock.
+    /// so layout never needs an engine query.
     EngineBlock {
         seq: u64,
         handle: ghostty::BlockHandle,
@@ -103,6 +104,16 @@ pub enum Msg {
     Shutdown,
 
     Resize(WinsizeBuilder),
+    Scroll(isize),
+    ScrollTo(u64),
+    ScrollToEnd,
+    Theme(Box<Colors>),
+    CursorShape {
+        shape: CursorShape,
+        reply: Reply<()>,
+    },
+    Query(Query),
+    Checkpoint(CheckpointRequest),
 }
 
 /// A `Msg` sender that wakes the PTY event loop's mio `Poll` after each send, so the
@@ -144,7 +155,7 @@ pub enum TerminalEvent {
     /// New terminal content available per route.
     RenderRoute(usize),
     /// Terminal content changed — lightweight notification (no damage payload).
-    /// Damage stays in the terminal; renderer extracts it when it locks.
+    /// Damage versions travel in the published frame.
     TerminalDamaged(usize),
     /// Graphics update available from terminal.
     UpdateGraphics {
@@ -210,6 +221,8 @@ pub enum TerminalEvent {
 
     /// Reset to the default window title.
     ResetTitle,
+    Cwd(String),
+    ReadReady,
 
     /// Request to store a text string in the clipboard.
     ClipboardStore(ClipboardType, String),
@@ -346,6 +359,8 @@ impl Debug for TerminalEvent {
             }
             TerminalEvent::MouseCursorDirty => write!(f, "MouseCursorDirty"),
             TerminalEvent::ResetTitle => write!(f, "ResetTitle"),
+            TerminalEvent::ReadReady => f.write_str("ReadReady"),
+            TerminalEvent::Cwd(cwd) => f.debug_tuple("Cwd").field(cwd).finish(),
             TerminalEvent::PrepareUpdateConfig => write!(f, "PrepareUpdateConfig"),
             TerminalEvent::PrepareRender(millis) => write!(f, "PrepareRender({millis})"),
             TerminalEvent::PrepareRenderOnRoute(millis, route) => {
@@ -397,11 +412,9 @@ impl Debug for TerminalEvent {
 
 /// Event Loop for notifying the renderer about terminal events.
 ///
-/// `send_event` may be called from the PTY reader thread while it still holds
-/// the engine lock (e.g. sniffer-mark events emitted mid-chunk), and that lock
-/// is a non-reentrant FairMutex. Implementations must therefore never lock the
-/// engine synchronously from inside `send_event` — queue the event and process
-/// it on another thread/tick instead, or the reader thread deadlocks.
+/// Receives events synchronously during PTY processing. Implementations must
+/// not wait for commands sent back to the same event loop, since parsing and
+/// shutdown cannot proceed until the callback returns.
 pub trait EventListener {
     fn event(&self) -> (Option<TerminalEvent>, bool);
 

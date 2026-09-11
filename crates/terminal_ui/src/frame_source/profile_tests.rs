@@ -16,7 +16,7 @@ fn profile_surface_frame_pipeline() -> Result<(), &'static str> {
     }
 
     let theme = FrameTheme::default();
-    let surface = TerminalFrameSource::new(
+    let mut surface = TerminalFrameSource::new(
         TerminalSessionConfig {
             shell: Some("cmd.exe".into()),
             args: vec![

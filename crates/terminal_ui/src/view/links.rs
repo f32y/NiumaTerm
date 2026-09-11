@@ -28,6 +28,7 @@ impl TerminalPane {
             .content_bounds
             .is_some_and(|bounds| bounds.contains(&position));
         let local = self.local_position(position);
+        self.model.links.enabled = inside && follows_link(modifiers);
         let hit = (inside && follows_link(modifiers))
             .then(|| self.model.link_at_position(local))
             .flatten();
@@ -42,6 +43,7 @@ impl TerminalPane {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.model.links.enabled = follows_link(event.modifiers);
         if let Some(position) = self.model.links.position() {
             let hit = follows_link(event.modifiers)
                 .then(|| self.model.link_at_position(position))

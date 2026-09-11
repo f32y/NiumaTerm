@@ -4,17 +4,16 @@ use std::sync::atomic::AtomicU32;
 
 use nmt_config::colors::Colors;
 use nmt_platform::EventedPty;
-use parking_lot::FairMutex;
 
 use crate::ansi::CursorShape;
 use crate::event::{EventListener, MsgSender, WindowId};
-use crate::ghostty::GhosttyTerminal;
 use crate::pty_pipe::PtyPipe;
+use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
 
-/// Observer for the exact VT byte stream accepted by the engine. Runs under
-/// the engine lock so a checkpoint and its following bytes order atomically;
-/// observers must return promptly.
+/// Observes the exact VT bytes accepted by the engine, on the owner thread.
+/// Returning before the next command preserves checkpoint and output ordering;
+/// observers must not wait for work submitted to this same event loop.
 pub type OutputSink = Arc<dyn Fn(Arc<[u8]>) + Send + Sync>;
 
 /// Construction settings for [`start_session`].
@@ -40,11 +39,8 @@ pub struct SessionOptions {
 
 /// Shared handles to one running terminal session, returned by [`start_session`].
 pub struct SessionHandles {
-    /// VT engine. The PTY thread and the frontend serialize through its lock.
-    pub engine: Arc<FairMutex<GhosttyTerminal>>,
-    /// Viewport copy the renderer reads; on its own lock, separate from the
-    /// engine, so paint never waits behind a parse.
-    pub render_buffer: Arc<FairMutex<RenderBuffer>>,
+    /// Immutable viewport publications, retained independently by each reader.
+    pub render_buffer: Arc<FrameStore>,
     /// VT modes published by the pipe; the input path reads them lock-free.
     pub vt_modes: Arc<AtomicU32>,
     /// Sender for input, resize, and shutdown messages to the PTY thread.
@@ -64,7 +60,7 @@ where
     T: EventedPty + Send + 'static,
     U: EventListener + Send + 'static,
 {
-    let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(
+    let render_buffer = Arc::new(FrameStore::new(RenderBuffer::new(
         options.cols.max(1) as usize,
         options.rows.max(1) as usize,
     )));
@@ -80,23 +76,24 @@ where
         &options,
     )?;
 
-    // The pipe has not spawned yet, so the engine lock is uncontended and the
-    // cursor shape lands before the first PTY byte can be parsed.
+    // Configure the engine before transferring exclusive ownership to the
+    // event-loop thread, so the first publication uses the requested cursor.
     pipe.ghostty
-        .lock()
         .set_default_cursor_shape(options.cursor_shape)
         .map_err(|error| Box::new(error) as Box<dyn error::Error>)?;
 
     pipe.terminal_responses_enabled = options.terminal_responses;
     pipe.output_sink = options.output_sink;
 
-    let engine = Arc::clone(&pipe.ghostty);
+    pipe.ghostty
+        .snapshot_into(&mut pipe.back_buffer)
+        .map_err(|error| Box::new(error) as Box<dyn error::Error>)?;
+    render_buffer.publish(&mut pipe.back_buffer);
     let messenger = pipe.channel();
 
     drop(pipe.spawn());
 
     Ok(SessionHandles {
-        engine,
         render_buffer,
         vt_modes,
         messenger,

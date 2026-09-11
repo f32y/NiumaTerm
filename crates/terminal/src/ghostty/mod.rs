@@ -54,11 +54,9 @@ use crate::ghostty::callbacks::{
 };
 pub use crate::ghostty::error::{Error, Result};
 pub use crate::ghostty::types::{
-    CellText, CellWide, Color, Palette, PlacementScreenPos, ScreenRowMeta, ScrollbarInfo,
-    SnapshotColors, SnapshotCursor, SnapshotPlacement, SnapshotStyle, Underline,
+    CellText, CellWide, Color, Palette, PlacementScreenPos, RowCell, ScreenRowMeta, ScreenRowRead,
+    ScrollbarInfo, SnapshotColors, SnapshotCursor, SnapshotPlacement, SnapshotStyle, Underline,
 };
-#[cfg(test)]
-pub use crate::ghostty::types::{RowCell, ScreenRowRead};
 
 /// VT mode identifiers for [`GhosttyTerminal::mode`].
 ///

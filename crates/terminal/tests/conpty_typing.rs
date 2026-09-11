@@ -8,9 +8,8 @@ use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
 use nmt_platform::{Pty, WinsizeBuilder, create_pty};
 use nmt_terminal::event::{Msg, VoidListener};
-use nmt_terminal::ghostty::GhosttyTerminal;
 use nmt_terminal::pty_pipe::{SessionHandles, SessionOptions, start_session};
-use parking_lot::FairMutex;
+use nmt_terminal::publication::FrameStore;
 
 fn start(pty: Pty, cols: u16, rows: u16) -> SessionHandles {
     start_session(
@@ -31,9 +30,8 @@ fn start(pty: Pty, cols: u16, rows: u16) -> SessionHandles {
     .expect("machine")
 }
 
-fn snapshot_text(engine: &Arc<FairMutex<GhosttyTerminal>>) -> Vec<String> {
-    let mut e = engine.lock();
-    let snap = e.snapshot().expect("snapshot");
+fn snapshot_text(frames: &Arc<FrameStore>) -> Vec<String> {
+    let snap = frames.load();
     let mut out = vec![String::new(); snap.rows()];
 
     for (y, out_row) in out.iter_mut().enumerate() {
@@ -64,7 +62,7 @@ fn typing_past_right_edge_does_not_duplicate() {
     };
 
     let handles = start(pty, cols, rows);
-    let engine = handles.engine;
+    let frames = Arc::clone(&handles.render_buffer);
     let sender = handles.messenger;
 
     // Let the prompt settle.
@@ -76,7 +74,7 @@ fn typing_past_right_edge_does_not_duplicate() {
         .expect("send input");
     thread::sleep(Duration::from_millis(2000));
 
-    let text = snapshot_text(&engine);
+    let text = snapshot_text(&frames);
     let total_x: usize = text.iter().map(|l| l.matches('x').count()).sum();
 
     // The input is 120 x's; with wrapping the grid holds ~120 of them. A
@@ -102,7 +100,7 @@ fn typing_after_resize_does_not_duplicate() {
     };
 
     let handles = start(pty, 80, 24);
-    let engine = handles.engine;
+    let frames = Arc::clone(&handles.render_buffer);
     let sender = handles.messenger;
 
     thread::sleep(Duration::from_millis(2000));
@@ -123,7 +121,7 @@ fn typing_after_resize_does_not_duplicate() {
         .expect("send input");
     thread::sleep(Duration::from_millis(2000));
 
-    let text = snapshot_text(&engine);
+    let text = snapshot_text(&frames);
     let total_x: usize = text.iter().map(|l| l.matches('x').count()).sum();
 
     assert!(
@@ -148,7 +146,7 @@ fn per_keystroke_typing_does_not_duplicate() {
     };
 
     let handles = start(pty, 80, 24);
-    let engine = handles.engine;
+    let frames = Arc::clone(&handles.render_buffer);
     let sender = handles.messenger;
     let rb = handles.render_buffer;
 
@@ -156,12 +154,12 @@ fn per_keystroke_typing_does_not_duplicate() {
 
     for _ in 0..120 {
         let scrolled_up = {
-            let sb = rb.lock().scrollbar();
+            let sb = rb.load().scrollbar();
             sb.offset < sb.total.saturating_sub(sb.len)
         };
 
         if scrolled_up {
-            engine.lock().scroll_viewport_bottom();
+            sender.send(Msg::Scroll(isize::MAX)).unwrap();
         }
 
         sender.send(Msg::Input(vec![b'x'].into())).expect("send x");
@@ -171,10 +169,10 @@ fn per_keystroke_typing_does_not_duplicate() {
     thread::sleep(Duration::from_millis(2000));
 
     // Check both the engine snapshot and the render buffer (what the app reads).
-    let engine_text = snapshot_text(&engine);
+    let engine_text = snapshot_text(&frames);
 
     let buf_text: Vec<String> = {
-        let b = rb.lock();
+        let b = rb.load();
 
         (0..b.rows())
             .map(|y| {
@@ -212,7 +210,7 @@ fn resize_then_fast_per_keystroke_does_not_duplicate() {
     };
 
     let handles = start(pty, 80, 24);
-    let engine = handles.engine;
+    let frames = Arc::clone(&handles.render_buffer);
     let sender = handles.messenger;
 
     thread::sleep(Duration::from_millis(2000));
@@ -235,7 +233,7 @@ fn resize_then_fast_per_keystroke_does_not_duplicate() {
 
     thread::sleep(Duration::from_millis(2500));
 
-    let text = snapshot_text(&engine);
+    let text = snapshot_text(&frames);
     let total_x: usize = text.iter().map(|l| l.matches('x').count()).sum();
 
     assert!(

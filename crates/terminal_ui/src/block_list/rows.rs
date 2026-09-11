@@ -1,12 +1,12 @@
+use std::sync::Arc;
 use std::{collections, iter, ops};
 
 use nmt_terminal::block_store::BlockItem;
-use nmt_terminal::ghostty::{
-    BlockHandle, BlockRef, CellText, CellWide, Palette, SnapshotStyle, Underline,
-};
+use nmt_terminal::ghostty::{BlockHandle, CellText, CellWide, SnapshotStyle, Underline};
 use nmt_terminal::grid_emit::row_selection_for;
 use nmt_terminal::selection::SelectionRange;
 use nmt_terminal::session::BlockPoint as FrozenPoint;
+use nmt_terminal::session::page::{PageSource, RowPage};
 use nmt_terminal::terminal::square::Wide;
 
 use crate::block_list::chrome::{DurationLabels, FrozenItemChrome, item_accent, item_header};
@@ -104,9 +104,8 @@ impl EngineRowBuilder {
     }
 }
 
-/// Chrome inputs of a block item, cloneable out of the store lock —
-/// prepaint acquires the engine `BlockRef` afterwards, and the store and
-/// engine locks must never nest (surface lock discipline).
+/// Metadata determines the item's height even while its visible pages are
+/// still being materialized by the engine owner.
 #[derive(Clone)]
 pub(crate) struct HandleItemInfo {
     /// Cached engine row count — the layout height source.
@@ -128,15 +127,11 @@ pub(crate) fn handle_item_info(
     })
 }
 
-/// The frozen view of an engine-block item: physical rows read through the
-/// acquired [`BlockRef`], only for the visible range. Row `r`
-/// keeps its item-local y even when earlier rows are skipped, so geometry
-/// matches `item_px` exactly. `block = None` (stale handle / mid-reflow)
-/// renders chrome at the cached height with no rows — content returns next
-/// frame.
+/// Build visible rows from immutable pages. Missing pages keep their layout
+/// space until the asynchronous read completes and wakes the pane.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn frozen_block_view(
-    block: Option<(&BlockRef, &Palette)>,
+    pages: &[Arc<RowPage>],
     info: &HandleItemInfo,
     item_idx: usize,
     visible: ops::Range<usize>,
@@ -175,31 +170,39 @@ pub(crate) fn frozen_block_view(
         selected: selected_item == Some(item_idx),
     });
 
-    let Some((block, palette)) = block else {
+    let Some(first) = pages.first() else {
         return view;
     };
 
-    let handle = block.handle();
-    let cols = u32::from(block.cols());
+    let PageSource::Block {
+        id,
+        generation,
+        theme,
+    } = first.source
+    else {
+        return view;
+    };
+    let handle = BlockHandle { id, generation };
+    let cols = u32::from(first.cols);
 
-    // The snapshot is the reading truth; the cached row count is the layout
-    // truth. Read only rows both agree on (a lagging sync converges next
-    // frame).
-    let read_rows = rows.min(block.row_count());
+    // Cached item metadata determines layout; only completed page reads can
+    // contribute text until the owner publishes the missing ranges.
+    let read_rows = rows;
 
     for row in visible.start..visible.end.min(read_rows) {
         let mut builder = EngineRowBuilder::default();
 
-        let ok = block
-            .read_row_visit(row, palette, |x, t, w, s| {
-                builder.push(x, t, w, &s, default_fg)
-            })
-            .ok()
-            .flatten()
-            .is_some();
-
-        if !ok {
-            break;
+        let Some(data) = pages.iter().find_map(|page| page.row(row)) else {
+            continue;
+        };
+        for cell in &data.cells {
+            builder.push(
+                cell.x,
+                cell.text.clone(),
+                cell.wide,
+                &cell.style,
+                default_fg,
+            );
         }
 
         let line = builder.finish();
@@ -213,7 +216,7 @@ pub(crate) fn frozen_block_view(
             row,
             cell_count: cols,
             selected,
-            shape_key: Some(block_row_shape_key(handle, row)),
+            shape_key: Some(block_row_shape_key(handle, theme, row)),
         });
     }
 
@@ -223,12 +226,12 @@ pub(crate) fn frozen_block_view(
 /// Shaped-line cache key for an engine-block row: `(block_id, generation,
 /// row)`. Content is immutable per generation, so the layout
 /// caches across frames without hashing the row text.
-fn block_row_shape_key(handle: BlockHandle, row: usize) -> u64 {
+fn block_row_shape_key(handle: BlockHandle, theme: u64, row: usize) -> u64 {
     use std::hash::{Hash, Hasher};
 
     let mut hasher = collections::hash_map::DefaultHasher::new();
 
-    (handle.id, handle.generation, row).hash(&mut hasher);
+    (handle.id, handle.generation, theme, row).hash(&mut hasher);
 
     hasher.finish()
 }
@@ -236,7 +239,7 @@ fn block_row_shape_key(handle: BlockHandle, row: usize) -> u64 {
 /// The live item's scrolled-up history: active-grid scrollback rows read as
 /// physical lines rendered above the live grid. Rows carry
 /// an out-of-band item index that the hit map converts back to their absolute
-/// SCREEN row; selection remains owned by the engine rather than BlockStore.
+/// SCREEN row; selection remains in the pane session rather than BlockStore.
 pub(crate) fn live_history_view(
     lines: Vec<(u64, TerminalLine)>,
     total_rows: u64,

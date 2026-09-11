@@ -12,22 +12,24 @@ use nmt_platform::process::ProcessTree;
 use nmt_platform::{
     EventedPty, PtyOptions, WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env,
 };
-use parking_lot::{FairMutex, Mutex};
+use parking_lot::Mutex;
 use tracing::error;
 
 use crate::block_store::BlockStore;
 use crate::event::{BlockEvent, Msg, MsgSender, ProgressReport};
-use crate::ghostty::GhosttyTerminal;
 use crate::pty_pipe::{SessionOptions, start_session};
-use crate::render_buffer::RenderBuffer;
+use crate::publication::FrameStore;
 pub use crate::session::error::{EngineError, EngineErrorCode};
 pub use crate::session::mouse::{
     SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
 };
 pub use crate::session::observer::{SessionChange, SessionObserver};
+use crate::session::page::PageCache;
 use crate::session::selection::SurfaceSelection;
 
 mod blocks;
+pub mod page;
+pub mod request;
 mod rows;
 pub use crate::session::blocks::BlockPoint;
 pub use crate::session::rows::RowText;
@@ -40,14 +42,13 @@ mod observer;
 mod proxy;
 mod reads;
 mod scroll;
-mod selection;
+pub(crate) mod selection;
 
 pub use crate::session::config::TerminalSessionConfig;
 use crate::session::config::default_shell;
 use crate::session::proxy::TerminalEventProxy;
 
-type SessionEngine = Arc<FairMutex<GhosttyTerminal>>;
-type SessionBuffer = Arc<FairMutex<RenderBuffer>>;
+type SessionBuffer = Arc<FrameStore>;
 
 /// A host event surfaced from the PTY thread to the shell. The shell
 /// drains these on its render tick via [`TerminalSession::poll_events`].
@@ -91,19 +92,18 @@ pub struct InFlightBlock {
     pub started_at: time::SystemTime,
 }
 
-/// One terminal surface's runtime state — a thin headless bundle over terminal's
-/// `PtyPipe`. The PTY thread parses ConPTY output into the engine + render buffer;
-/// the render host reads the buffer under its own lock.
+/// The host's session handle: commands, immutable frame publications, and
+/// asynchronous reads. The PTY event loop exclusively owns the engine.
 pub struct TerminalSession {
-    engine: SessionEngine,
+    pages: Mutex<PageCache>,
     render_buffer: SessionBuffer,
     vt_modes: Arc<AtomicU32>,
     messenger: MsgSender,
     shared: Arc<SessionSharedState>,
     process_tree: Option<ProcessTree>,
     /// Engine-blocks mode is active: frozen history lives in
-    /// finished engine blocks, rendered through `BlockRef` handles. Mirrors the
-    /// flag the PTY pipe runs with.
+    /// finished engine blocks, read through owned pages. Mirrors the flag the
+    /// PTY event loop runs with.
     engine_blocks: bool,
 }
 
@@ -198,7 +198,7 @@ impl TerminalSession {
         let handles = start_session(pty, proxy, options).map_err(engine_init_error)?;
 
         Ok(Self {
-            engine: handles.engine,
+            pages: Mutex::new(PageCache::default()),
             render_buffer: handles.render_buffer,
             vt_modes: handles.vt_modes,
             messenger: handles.messenger,
@@ -268,15 +268,11 @@ impl TerminalSession {
     }
 
     pub fn current_directory(&self) -> Option<String> {
-        self.engine
-            .lock()
-            .current_directory()
-            .map(|path| path.to_string_lossy().into_owned())
+        self.render_buffer.load().current_directory.clone()
     }
 
-    /// Drain all pending host events. Queued events (title/bell/exit/
-    /// …) drain first in order; then, if the working directory changed, a trailing
-    /// `Cwd` event is appended (OSC 7 updates state rather than emitting a TerminalEvent).
+    /// Drain host events in their publication order. Directory changes are
+    /// captured by the engine owner alongside other metadata.
     pub fn poll_events(&self) -> Vec<HostEvent> {
         let mut out = Vec::new();
         let mut q = self.shared.events.lock();
@@ -286,10 +282,6 @@ impl TerminalSession {
         }
 
         drop(q);
-
-        if let Some(pwd) = self.engine.lock().poll_pwd() {
-            out.push(HostEvent::Cwd(pwd));
-        }
 
         out
     }

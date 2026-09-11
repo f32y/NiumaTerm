@@ -1,78 +1,106 @@
-use crate::ghostty::ScreenRowMeta;
-use crate::session::TerminalSession;
+use std::sync::Arc;
 
-/// One row read for pointer URL hit-testing: plain text padded to the grid
-/// width so char index == grid column (only each cell's first codepoint is
-/// kept — grapheme extras would break the column mapping), the row's OSC 8
-/// spans, and its soft-wrap flag.
+use crate::ghostty::{BlockHandle, ScreenRowMeta, ScreenRowRead};
+use crate::graphics::GraphicData;
+use crate::render_buffer::RenderBuffer;
+use crate::session::TerminalSession;
+use crate::session::page::{PageSource, RowPage};
+
+/// Pointer text preserves grid columns by retaining the first codepoint per cell.
+#[derive(Clone, Debug)]
 pub struct RowText {
     pub text: String,
     pub wrapped: bool,
-    /// OSC 8 spans: `(start_col, end_col_inclusive, uri)`.
     pub hyperlinks: Vec<(u16, u16, String)>,
 }
 
 impl TerminalSession {
-    /// Read one absolute SCREEN row for pointer URL hit-testing.
+    pub fn take_block_image(&self, handle: BlockHandle, image_id: u32) -> Option<GraphicData> {
+        self.pages
+            .lock()
+            .take_image(handle, image_id, &self.messenger)
+    }
+
+    pub fn screen_page(&self, row: usize) -> Option<Arc<RowPage>> {
+        self.screen_page_at(self.snapshot().revision, row)
+    }
+
+    pub fn screen_page_at(&self, revision: u64, row: usize) -> Option<Arc<RowPage>> {
+        self.pages
+            .lock()
+            .read(PageSource::Screen { revision }, row, &self.messenger)
+    }
+
+    pub fn block_page(&self, handle: BlockHandle, row: usize) -> Option<Arc<RowPage>> {
+        let source = PageSource::Block {
+            id: handle.id,
+            generation: handle.generation,
+            theme: self.snapshot().theme_revision,
+        };
+        self.pages.lock().read(source, row, &self.messenger)
+    }
+
     pub fn screen_row_text(&self, row: u32) -> Option<RowText> {
-        self.with_screen_reader(|engine| {
-            let palette = engine.color_palette();
-            let cols = engine.cols() as usize;
-
-            let mut chars: Vec<char> = Vec::with_capacity(cols);
-
-            let meta = engine
-                .read_screen_row_visit(row, &palette, |x, text, _wide, _style| {
-                    push_pointer_cell(&mut chars, x, text.as_str());
-                })
-                .ok()
-                .flatten()?;
-
-            Some(pointer_row(chars, cols, meta))
-        })
+        self.screen_row_text_in(&self.snapshot(), row)
     }
 
-    /// Read one row of a finished engine block for pointer URL hit-testing.
+    pub fn screen_row_text_in(&self, snapshot: &RenderBuffer, row: u32) -> Option<RowText> {
+        if let Some(index) = snapshot.viewport_top.and_then(|top| row.checked_sub(top))
+            && let Some(cells) = snapshot.grid().get(index as usize)
+        {
+            return Some(RowText {
+                text: cells
+                    .inner
+                    .iter()
+                    .map(|cell| match cell.c() {
+                        '\0' => ' ',
+                        c => c,
+                    })
+                    .collect(),
+                wrapped: snapshot.row_wrapped(index as usize),
+                hyperlinks: snapshot.row_hyperlinks(index as usize).to_vec(),
+            });
+        }
+        let page = self.screen_page_at(snapshot.revision, row as usize)?;
+        Some(materialized_pointer_row(page.row(row as usize)?, page.cols))
+    }
+
     pub fn block_row_text(&self, item: usize, row: usize) -> Option<RowText> {
-        let handle = self.block_handle(item)?;
-        self.with_screen_reader(|engine| {
-            let palette = engine.color_palette();
-            let cols = engine.block_cols(handle).unwrap_or_else(|| engine.cols()) as usize;
-
-            let mut chars: Vec<char> = Vec::with_capacity(cols);
-
-            let meta = engine
-                .read_block_row_visit(handle, row, &palette, |x, text, _wide, _style| {
-                    push_pointer_cell(&mut chars, x, text.as_str());
-                })
-                .ok()
-                .flatten()?;
-
-            Some(pointer_row(chars, cols, meta))
-        })
+        let page = self.block_page(self.block_handle(item)?, row)?;
+        Some(materialized_pointer_row(page.row(row)?, page.cols))
     }
+}
+
+fn materialized_pointer_row(row: &ScreenRowRead, cols: u16) -> RowText {
+    let mut chars = Vec::with_capacity(cols as usize);
+    for cell in &row.cells {
+        push_pointer_cell(&mut chars, cell.x, cell.text.as_str());
+    }
+    pointer_row(
+        chars,
+        cols as usize,
+        ScreenRowMeta {
+            wrapped: row.wrapped,
+            hyperlinks: row.hyperlinks.clone(),
+            ..ScreenRowMeta::default()
+        },
+    )
 }
 
 fn push_pointer_cell(chars: &mut Vec<char>, x: u16, text: &str) {
     let x = x as usize;
-
     if chars.len() < x {
         chars.resize(x, ' ');
     }
-
     if chars.len() == x {
         chars.push(text.chars().next().unwrap_or(' '));
     }
 }
 
 fn pointer_row(mut chars: Vec<char>, cols: usize, meta: ScreenRowMeta) -> RowText {
-    // Pad to the full grid width so joined soft-wrapped rows keep every
-    // segment exactly `cols` chars (column math stays trivial), and so a
-    // blank tail reads as spaces that correctly terminate a URL token.
     if chars.len() < cols {
         chars.resize(cols, ' ');
     }
-
     RowText {
         text: chars.into_iter().collect(),
         wrapped: meta.wrapped,

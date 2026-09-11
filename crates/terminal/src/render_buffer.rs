@@ -5,12 +5,9 @@
 //! interned `style_table`, a grapheme `extras` map, cursor state, colors,
 //! scrollbar geometry, and terminal-graphics placement metadata.
 //!
-//! The **PTY thread** populates it directly from Ghostty; the GPUI frontend
-//! extracts `TerminalFrame`s from it. It lives behind its own lock, separate from
-//! the engine lock, so normal frame extraction does not wait behind `write_vt`
-//! parsing.
-//!
-//! The frontend reads this copy without holding the engine lock during paint.
+//! The PTY thread fills a private buffer and publishes it as an immutable
+//! `Arc`. Readers can retain a frame across later writes and resizes. Buffers
+//! return to the capture pool after their last external reader releases them.
 
 use std::mem;
 
@@ -20,8 +17,8 @@ use rustc_hash::FxHashMap;
 
 use crate::ansi;
 use crate::ghostty::{
-    CellWide, ScrollbarInfo, SnapshotColors, SnapshotCursor, SnapshotPlacement, SnapshotStyle,
-    Underline,
+    CellWide, ScreenRowMeta, ScrollbarInfo, SnapshotColors, SnapshotCursor, SnapshotPlacement,
+    SnapshotStyle, Underline,
 };
 use crate::terminal::grid::row::Row;
 use crate::terminal::pos::{Column, Line, Pos};
@@ -74,6 +71,11 @@ pub(crate) fn wide_from(w: CellWide) -> Wide {
 
 /// A decoupled, renderable copy of the visible viewport.
 pub struct RenderBuffer {
+    pub revision: u64,
+    pub theme_revision: u64,
+    pub viewport_top: Option<u32>,
+    pub title: String,
+    pub current_directory: Option<String>,
     cols: usize,
     rows: usize,
     /// One `Row<Square>` per visible line. The GPUI app extracts terminal frames
@@ -89,6 +91,8 @@ pub struct RenderBuffer {
     /// Per row: `true` when the row soft-wraps into the next. Used by line
     /// selection (`row_search`) to span a wrapped logical line. Length == `rows`.
     row_wrapped: Vec<bool>,
+    /// Link ranges accompany the grid; pointer text is derived only when read.
+    row_hyperlinks: Vec<Vec<(u16, u16, String)>>,
     /// Monotonic engine content version for each visible row. Unlike transient
     /// dirty flags, these survive skipped publications until the UI observes them.
     row_versions: Vec<u64>,
@@ -120,6 +124,11 @@ pub struct RenderBuffer {
 impl RenderBuffer {
     pub fn new(cols: usize, rows: usize) -> Self {
         Self {
+            revision: 0,
+            theme_revision: 0,
+            viewport_top: None,
+            title: String::new(),
+            current_directory: None,
             cols,
             rows,
             grid: (0..rows).map(|_| Row::new(cols.max(1))).collect(),
@@ -127,6 +136,7 @@ impl RenderBuffer {
             extras: FxHashMap::default(),
             next_extras_id: 1,
             row_wrapped: vec![false; rows],
+            row_hyperlinks: vec![Vec::new(); rows],
             row_versions: vec![0; rows],
             cursor: Pos::default(),
             cursor_visible: false,
@@ -182,6 +192,10 @@ impl RenderBuffer {
     /// Whether visible row `y` soft-wraps into the next row.
     pub fn row_wrapped(&self, y: usize) -> bool {
         self.row_wrapped.get(y).copied().unwrap_or(false)
+    }
+
+    pub(crate) fn row_hyperlinks(&self, y: usize) -> &[(u16, u16, String)] {
+        self.row_hyperlinks.get(y).map_or(&[], Vec::as_slice)
     }
 
     /// Per-row soft-wrap flags (length == `rows`), for the selection searches.
@@ -265,6 +279,7 @@ impl RenderBuffer {
         self.next_extras_id = 1;
         self.row_wrapped.clear();
         self.row_wrapped.resize(rows, false);
+        self.row_hyperlinks.resize_with(rows, Vec::new);
         self.placements.clear();
 
         // Every capture rewrites every visible cell (the grid was just
@@ -319,13 +334,17 @@ impl RenderBuffer {
         }
     }
 
-    pub(crate) fn write_row_meta(&mut self, y: usize, wrapped: bool, placeholder: bool) {
+    pub(crate) fn write_row_meta(&mut self, y: usize, meta: ScreenRowMeta) {
         if let Some(value) = self.row_wrapped.get_mut(y) {
-            *value = wrapped;
+            *value = meta.wrapped;
         }
 
         if let Some(row) = self.grid.get_mut(y) {
-            row.kitty_virtual_placeholder = placeholder;
+            row.kitty_virtual_placeholder = meta.virtual_placeholder;
+        }
+
+        if let Some(links) = self.row_hyperlinks.get_mut(y) {
+            *links = meta.hyperlinks;
         }
     }
 

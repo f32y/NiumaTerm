@@ -6,6 +6,7 @@ pub mod ghostty;
 pub mod graphics;
 pub mod grid_emit;
 pub mod pty_pipe;
+pub mod publication;
 pub mod render_buffer;
 pub mod selection;
 pub mod selection_search;

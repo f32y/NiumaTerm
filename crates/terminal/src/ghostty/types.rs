@@ -184,8 +184,6 @@ impl ops::Deref for CellText {
 
 /// One sparse cell of a [`ScreenRowRead`], with inline [`CellText`] instead of
 /// a per-cell `String`.
-/// Test-only: production reads visit cells in place (`read_screen_row_visit`).
-#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowCell {
     pub x: u16,
@@ -209,10 +207,9 @@ pub struct ScreenRowMeta {
     pub hyperlinks: Vec<(u16, u16, String)>,
 }
 
-/// A materialized styled row read — test-only convenience over the visitor.
+/// A materialized styled row that can outlive an engine read.
 /// `cells` follows the snapshot convention: sparse (blank default cells are
 /// skipped), ascending `x`, with `y` fixed at 0 (row-local).
-#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScreenRowRead {
     pub cells: Vec<RowCell>,

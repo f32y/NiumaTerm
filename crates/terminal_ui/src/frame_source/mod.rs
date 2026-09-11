@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::{collections, time};
 
 use nmt_config::colors::Colors;
+use nmt_terminal::render_buffer::RenderBuffer;
 use nmt_terminal::session::{EngineError, SessionObserver, TerminalSession, TerminalSessionConfig};
 use tracing::trace;
 
@@ -20,6 +21,7 @@ mod tests;
 pub struct TerminalFrameSource {
     pub(crate) session: TerminalSession,
     pub(crate) images: Arc<SessionBridge>,
+    pub(crate) snapshot: Arc<RenderBuffer>,
     grid_size: (u16, u16),
 }
 
@@ -36,6 +38,7 @@ impl TerminalFrameSource {
             .map_err(|error| format!("{:?}: {}", error.code, error))?;
 
         Ok(Self {
+            snapshot: session.snapshot(),
             session,
             images,
             grid_size,
@@ -80,6 +83,7 @@ impl TerminalFrameSource {
         let grid_size =
             session.with_render_buffer(|buffer| (buffer.cols() as u16, buffer.rows() as u16));
         Ok(Self {
+            snapshot: session.snapshot(),
             session,
             images,
             grid_size,
@@ -112,17 +116,17 @@ impl TerminalFrameSource {
     }
 
     pub(crate) fn frame(
-        &self,
+        &mut self,
         previous: Option<&TerminalFrame>,
         theme: &FrameTheme,
     ) -> TerminalFrame {
         let total_start = time::Instant::now();
-        let selection = self.session.selection_range();
+        self.snapshot = self.session.snapshot();
+        let snapshot = &self.snapshot;
+        let selection = self.session.selection_range_in(snapshot);
 
-        // Resolve live image generations before taking the render-buffer lock so the
-        // generation-store and render locks are never nested. A graphics-free
-        // session skips the store entirely via the lock-free live-image check, so it
-        // pays nothing here.
+        // Resolve image generations after retaining the frame. Graphics-free
+        // sessions skip the image store entirely.
         let generations = if self.images.has_live_images() {
             self.images.generations.lock().live_generations()
         } else {
@@ -131,9 +135,8 @@ impl TerminalFrameSource {
 
         let sel_us = total_start.elapsed().as_micros();
 
-        let frame = self.session.with_render_buffer(|buf| {
-            // Time spent here is *after* the render_buffer lock is acquired, so
-            // (total - sel - extract) is the lock-wait + selection lock cost.
+        let frame = {
+            let buf = snapshot;
             let extract_start = time::Instant::now();
             let frame = TerminalFrame::from_render_buffer_reusing(
                 buf,
@@ -149,17 +152,17 @@ impl TerminalFrameSource {
                 rows = buf.rows(),
                 cols = buf.cols(),
                 extract_us,
-                "frame extract (inside render_buffer lock)"
+                "immutable frame extract"
             );
 
             frame
-        });
+        };
 
         trace!(
             target: "perf",
             sel_us,
             total_us = total_start.elapsed().as_micros(),
-            "frame total (selection + lock-wait + extract)"
+            "frame total (snapshot + selection + extract)"
         );
 
         frame
