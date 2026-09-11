@@ -1,4 +1,3 @@
-mod input;
 mod key;
 mod list_state;
 #[cfg(test)]
@@ -6,6 +5,7 @@ mod tests;
 
 use std::ops::Range;
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::StreamExt;
 use gpui::prelude::*;
@@ -16,9 +16,12 @@ use gpui::{
     Point, ScrollDelta, ScrollWheelEvent, Size, UTF16Selection, Window, actions, div, list, point,
     px, rgb, size,
 };
+use gpui_component::WindowExt as _;
+use gpui_component::notification::Notification;
 use nmt_agent::AgentRoute;
 use nmt_config::active_colors;
 use nmt_config::local_state::TabState;
+use nmt_i18n::i18n;
 use nmt_terminal::input::WheelDelta;
 use nmt_terminal::session::interaction::PendingCopy;
 use nmt_terminal::session::{
@@ -41,7 +44,6 @@ use crate::scrollbar::geometry::SCROLLBAR_AUTO_HIDE_DELAY;
 use crate::scrollbar::scrollbar_element;
 use crate::settings::{TerminalSettings, duration_labels};
 use crate::terminal_view::{BlockListItem, BlockListView, TerminalView};
-use crate::view::input::show_text_copied;
 use crate::view::key::{modifiers_state, terminal_key};
 use crate::view::list_state::{BlockListState, block_list_alignment};
 use crate::{metrics, wake};
@@ -96,6 +98,8 @@ pub struct TerminalPane {
 }
 
 pub struct AgentInterrupted;
+
+struct TextCopiedNotification;
 
 impl EventEmitter<AgentInterrupted> for TerminalPane {}
 
@@ -182,7 +186,12 @@ impl TerminalPane {
                 if this
                     .update(cx, |this, cx| match wake {
                         wake::Wake::Content(_) => this.invalidate(cx),
-                        wake::Wake::Chrome(_) => this.invalidate_chrome(cx),
+                        wake::Wake::Chrome(_) => {
+                            this.model.invalidate();
+                            // Background panes cannot clear their dirty bit by rendering, but the
+                            // shell observer still needs every chrome wake to refresh tab state.
+                            cx.notify();
+                        }
                     })
                     .is_err()
                 {
@@ -254,14 +263,6 @@ impl TerminalPane {
         if self.model.invalidate() {
             cx.notify();
         }
-    }
-
-    fn invalidate_chrome(&mut self, cx: &mut Context<Self>) {
-        self.model.invalidate();
-
-        // Background panes cannot clear their dirty bit by rendering, but the
-        // shell observer still needs every chrome wake to refresh tab state.
-        cx.notify();
     }
 
     pub fn id(&self) -> u64 {
@@ -447,7 +448,17 @@ impl TerminalPane {
             Ok(Ok(text)) => {
                 let _ = this.update_in(cx, |this, window, cx| {
                     if this.model.finish_copy(text, copy.completion) {
-                        show_text_copied(window, cx);
+                        window.push_notification(
+                            Notification::new()
+                                .message(i18n("terminal-text-copied"))
+                                .id::<TextCopiedNotification>()
+                                .autohide_after(Duration::from_millis(1500))
+                                .show_close(false)
+                                .w_auto()
+                                .px_3()
+                                .py_2(),
+                            cx,
+                        );
                         this.invalidate(cx);
                         cx.notify();
                     }
@@ -462,7 +473,8 @@ impl TerminalPane {
     /// to the latest output.
     fn react_to_pty_input(&mut self, cx: &mut Context<Self>) {
         if self.model.settings.scroll_to_bottom_when_typing {
-            self.scroll_to_latest(cx);
+            let outcome = self.model.scroll_to_latest();
+            self.apply_scroll_outcome(outcome, cx);
         }
     }
 
@@ -710,11 +722,6 @@ impl TerminalPane {
         }
         self.mark_scrollbar_activity(cx);
         true
-    }
-
-    fn scroll_to_latest(&mut self, cx: &mut Context<Self>) -> bool {
-        let outcome = self.model.scroll_to_latest();
-        self.apply_scroll_outcome(outcome, cx)
     }
 }
 

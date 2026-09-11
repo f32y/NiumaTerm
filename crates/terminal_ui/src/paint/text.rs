@@ -7,17 +7,6 @@ use nmt_terminal::terminal::square::Wide;
 use crate::frame::{TerminalColor, TerminalLine};
 use crate::metrics;
 
-pub(crate) fn block_separator_bounds(
-    bounds: Bounds<Pixels>,
-    y: Pixels,
-    thickness: f32,
-) -> Bounds<Pixels> {
-    let left = bounds.left() - px(metrics::PADDING_PX);
-    let right = bounds.right() + px(metrics::PADDING_PX);
-
-    Bounds::new(point(left, y), size(right - left, px(thickness)))
-}
-
 /// Shape terminal lines with per-cell forced width, cached by the caller's
 /// key — the one shaping path for live-frame rows and frozen block rows.
 pub(crate) fn shape_lines<'a>(

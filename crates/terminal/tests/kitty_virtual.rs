@@ -15,14 +15,14 @@ fn test_diacritic_conversion() {
 }
 
 #[test]
-fn test_rgb_id_conversion() {
+fn rgb_placeholder_id_round_trip() {
     let rgb = ColorRgb {
         r: 0x12,
         g: 0x34,
         b: 0x56,
     };
 
-    let id = rgb_to_id(rgb);
+    let id = IncompletePlacement::from_cell(AnsiColor::Spec(rgb), None, &[]).image_id_low;
 
     assert_eq!(id, 0x123456);
     assert_eq!(id_to_rgb(id), rgb);

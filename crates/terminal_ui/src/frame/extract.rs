@@ -8,7 +8,7 @@ use nmt_terminal::terminal::square::{ContentTag, Wide};
 use nmt_terminal::terminal::style::StyleFlags;
 
 use crate::frame::TerminalCursor;
-use crate::frame::colors::{BackgroundColors, cell_is_selected};
+use crate::frame::colors::BackgroundColors;
 use crate::frame::line::{LineBuilder, StyleRun, TerminalCell, TerminalLine, display_char};
 #[cfg(test)]
 use crate::pane_model::FrameTheme;
@@ -52,7 +52,9 @@ pub(super) fn extract_row_with_colors(
             .filter(|cursor| cursor.col == col as u16)
             .map(|cursor| cursor.shape);
 
-        let background = if cell_is_selected(row_selection, col as u16) {
+        let background = if row_selection
+            .is_some_and(|selection| col as u16 >= selection.lo && col as u16 <= selection.hi)
+        {
             Some(colors.selection_background)
         } else {
             colors.cell_background(buf, cell)

@@ -54,11 +54,7 @@ pub(super) fn item_header(meta: &SegmentMeta, labels: &DurationLabels) -> Option
         (None, None) => "?".to_string(),
     };
 
-    Some(command_header(command, &status))
-}
-
-fn command_header(command: &str, status: &str) -> String {
-    format!("{} · {status}", truncate_command(command, 32))
+    Some(format!("{} · {status}", truncate_command(command, 32)))
 }
 
 /// Chrome of the live item: a running command uses the running accent, while

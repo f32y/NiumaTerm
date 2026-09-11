@@ -682,10 +682,6 @@ impl GhosttyTerminal {
             return;
         }
 
-        self.scroll_viewport_delta_raw(delta);
-    }
-
-    fn scroll_viewport_delta_raw(&mut self, delta: isize) {
         let behavior = VtTerminalScrollViewport {
             tag: VtTerminalScrollViewportTag::DELTA,
             value: VtTerminalScrollViewportValue { delta },
@@ -976,17 +972,12 @@ impl GhosttyTerminal {
         Ok(grid_ref)
     }
 
-    /// Resolve a viewport coordinate to a `GridRef` (fast).
-    pub fn viewport_grid_ref(&self, x: u16, y: u16) -> Result<VtGridRef> {
-        self.grid_ref_at(VtPointTag::VIEWPORT, x, y as u32)
-    }
-
     /// The SCREEN row of the top visible row (`viewport_top`) — the constant that
     /// maps between SCREEN and visible coordinates (`screen_row = viewport_top +
     /// visible_row`). One cheap viewport `grid_ref`; `None` if the viewport is
     /// empty. Selection rendering uses this to translate coordinate spaces.
     pub fn viewport_top_screen(&self) -> Option<u32> {
-        let r = self.viewport_grid_ref(0, 0).ok()?;
+        let r = self.grid_ref_at(VtPointTag::VIEWPORT, 0, 0).ok()?;
 
         self.point_from_grid_ref(&r, VtPointTag::SCREEN)
             .ok()

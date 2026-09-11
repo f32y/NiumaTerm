@@ -59,43 +59,27 @@ impl SurfaceSelection {
             SurfaceCellSide::Right => Side::Right,
         };
 
+        let mut guard = self.selection.lock();
         match kind {
-            SurfaceMouseEventKind::Down => self.begin(pos, side, selection_type),
-            SurfaceMouseEventKind::Move => self.update(pos, side),
-            SurfaceMouseEventKind::Up => self.finish(),
+            SurfaceMouseEventKind::Down => {
+                let had_selection = guard.is_some();
+                *guard = Some(Selection::new(selection_type, pos, side));
+                had_selection || selection_type != SelectionType::Simple
+            }
+            SurfaceMouseEventKind::Move => {
+                let Some(selection) = guard.as_mut() else {
+                    return false;
+                };
+                selection.update(pos, side);
+                true
+            }
+            SurfaceMouseEventKind::Up => {
+                if guard.as_ref().is_some_and(Selection::is_empty) {
+                    *guard = None;
+                }
+                false
+            }
         }
-    }
-
-    fn begin(&self, pos: Pos, side: Side, selection_type: SelectionType) -> bool {
-        let mut guard = self.selection.lock();
-
-        let had_selection = guard.is_some();
-
-        *guard = Some(Selection::new(selection_type, pos, side));
-
-        had_selection || selection_type != SelectionType::Simple
-    }
-
-    fn update(&self, pos: Pos, side: Side) -> bool {
-        let mut guard = self.selection.lock();
-
-        let Some(selection) = guard.as_mut() else {
-            return false;
-        };
-
-        selection.update(pos, side);
-
-        true
-    }
-
-    fn finish(&self) -> bool {
-        let mut guard = self.selection.lock();
-
-        if guard.as_ref().is_some_and(Selection::is_empty) {
-            *guard = None;
-        }
-
-        false
     }
 }
 

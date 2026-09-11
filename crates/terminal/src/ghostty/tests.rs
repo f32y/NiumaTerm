@@ -854,7 +854,7 @@ fn screen_coords_stable_across_output() {
     t.write_vt(b"AAAA\r\nBBBB\r\nCCCC");
 
     // Anchor row "AAAA" (viewport row 0) to a SCREEN coordinate.
-    let r = t.viewport_grid_ref(0, 0).unwrap();
+    let r = t.grid_ref_at(VtPointTag::VIEWPORT, 0, 0).unwrap();
 
     let (_, screen_y) = t
         .point_from_grid_ref(&r, VtPointTag::SCREEN)
@@ -890,7 +890,7 @@ fn viewport_top_maps_screen_to_visible() {
     t.write_vt(b"l0\r\nl1\r\nl2\r\nl3\r\nl4\r\nl5");
 
     let screen_of = |t: &GhosttyTerminal, y: u16| -> u32 {
-        let r = t.viewport_grid_ref(0, y).unwrap();
+        let r = t.grid_ref_at(VtPointTag::VIEWPORT, 0, y.into()).unwrap();
 
         t.point_from_grid_ref(&r, VtPointTag::SCREEN)
             .unwrap()
@@ -1448,13 +1448,13 @@ fn format_screen_range_reaches_scrollback() {
 }
 
 #[test]
-fn viewport_grid_ref_resolves() {
+fn viewport_cell_resolves_to_grid_ref() {
     let mut terminal = GhosttyTerminal::new(20, 2, 100).unwrap();
 
     terminal.write_vt(b"x");
 
     // A valid viewport cell resolves to a non-null grid ref node.
-    let r = terminal.viewport_grid_ref(0, 0).unwrap();
+    let r = terminal.grid_ref_at(VtPointTag::VIEWPORT, 0, 0).unwrap();
 
     assert!(!r.node.is_null());
 }

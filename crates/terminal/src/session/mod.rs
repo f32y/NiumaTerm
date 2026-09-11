@@ -2,7 +2,6 @@
 //! the ConPTY-backed PTY worker so platform details stay outside the UI layer.
 
 use std::collections::VecDeque;
-use std::error::Error as StdError;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -210,7 +209,13 @@ impl TerminalSession {
         let shared = Arc::new(SessionSharedState::default());
         let proxy = TerminalEventProxy::new(Arc::clone(&shared), options.route_id as u64, observer);
         let engine_blocks = options.engine_blocks;
-        let handles = start_session(pty, proxy, options).map_err(engine_init_error)?;
+        let handles = start_session(pty, proxy, options).map_err(|error| {
+            error!("session start failed: {error:?}");
+            EngineError::new(
+                EngineErrorCode::EngineInit,
+                format!("libghostty-vt engine init failed: {error}"),
+            )
+        })?;
 
         Ok(Self {
             pages: Mutex::new(PageCache::default()),
@@ -464,11 +469,19 @@ impl TerminalSession {
             return false;
         }
 
-        let pos = Pos::new(Line(cell.row as i32), Column(cell.col as usize));
+        let viewport_top = self
+            .snapshot()
+            .viewport_top
+            .unwrap_or(0)
+            .min(i32::MAX as u32) as i32;
+        let pos = Pos::new(
+            Line((cell.row as i32).saturating_add(viewport_top)),
+            Column(cell.col as usize),
+        );
 
         self.shared
             .selection
-            .apply_at(self.screen_pos(pos), side, kind, selection_type)
+            .apply_at(pos, side, kind, selection_type)
     }
 
     fn modes(&self) -> Mode {
@@ -535,20 +548,6 @@ impl TerminalSession {
 
     pub fn with_render_buffer<R>(&self, read: impl FnOnce(&RenderBuffer) -> R) -> R {
         read(&self.snapshot())
-    }
-
-    pub fn viewport_top_screen_row(&self) -> Option<u32> {
-        self.snapshot().viewport_top
-    }
-
-    fn viewport_top(&self) -> i32 {
-        self.viewport_top_screen_row()
-            .unwrap_or(0)
-            .min(i32::MAX as u32) as i32
-    }
-
-    fn screen_pos(&self, pos: Pos) -> Pos {
-        Pos::new(Line(pos.row.0.saturating_add(self.viewport_top())), pos.col)
     }
 
     pub fn mouse_reporting_active(&self) -> bool {
@@ -630,20 +629,15 @@ impl TerminalSession {
             let button = if lines > 0 { 64 } else { 65 };
             return self.report_mouse(mode, button, true, cell.col, cell.row, modifiers);
         }
-        self.scroll_lines(-(lines as isize))
-    }
-
-    /// A successful send accepts the scroll request. The next published frame
-    /// determines the resulting position, including clamping at history edges.
-    pub fn scroll_lines(&self, delta: isize) -> bool {
-        if delta == 0 || self.exited() {
+        if self.exited() {
             return false;
         }
         let before = self.snapshot().scrollbar();
         if before.total <= before.len {
             return false;
         }
-        self.messenger.send(Msg::Scroll(delta)).is_ok()
+        // Queue acceptance precedes the published position and history-edge clamping.
+        self.messenger.send(Msg::Scroll(-(lines as isize))).is_ok()
     }
 
     pub fn selected_text(&self) -> Option<Request<String>> {
@@ -721,15 +715,6 @@ impl Drop for TerminalSession {
     fn drop(&mut self) {
         let _ = self.messenger.send(Msg::Shutdown);
     }
-}
-
-fn engine_init_error(error: Box<dyn StdError>) -> EngineError {
-    error!("session start failed: {error:?}");
-
-    EngineError::new(
-        EngineErrorCode::EngineInit,
-        format!("libghostty-vt engine init failed: {error}"),
-    )
 }
 
 #[cfg(test)]

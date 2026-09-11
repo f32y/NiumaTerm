@@ -331,11 +331,6 @@ pub fn id_to_rgb(id: u32) -> ColorRgb {
     }
 }
 
-/// Convert RGB color to image ID (24 bits)
-pub fn rgb_to_id(rgb: ColorRgb) -> u32 {
-    ((rgb.r as u32) << 16) | ((rgb.g as u32) << 8) | (rgb.b as u32)
-}
-
 /// Encode virtual placement data into a string with placeholder + diacritics
 ///
 /// Kitty placeholder encoding:
@@ -405,7 +400,7 @@ pub fn decode_placeholder(s: &str) -> Option<(u32, u32, Option<u8>)> {
 fn color_to_id(color: AnsiColor) -> u32 {
     match color {
         AnsiColor::Indexed(n) => n as u32,
-        AnsiColor::Spec(rgb) => rgb_to_id(rgb),
+        AnsiColor::Spec(rgb) => ((rgb.r as u32) << 16) | ((rgb.g as u32) << 8) | (rgb.b as u32),
         AnsiColor::Named(_) => 0,
     }
 }

@@ -276,24 +276,6 @@ impl Square {
     }
 
     #[inline]
-    pub fn insert_cell_flag(&mut self, f: CellFlags) {
-        let mut cur = self.cell_flags();
-
-        cur.insert(f);
-
-        self.set_cell_flags(cur);
-    }
-
-    #[inline]
-    pub fn remove_cell_flag(&mut self, f: CellFlags) {
-        let mut cur = self.cell_flags();
-
-        cur.remove(f);
-
-        self.set_cell_flags(cur);
-    }
-
-    #[inline]
     pub fn contains_cell_flag(self, f: CellFlags) -> bool {
         self.cell_flags().contains(f)
     }
@@ -419,11 +401,9 @@ impl Square {
 
     #[inline]
     pub fn set_wrapline(&mut self, on: bool) {
-        if on {
-            self.insert_cell_flag(CellFlags::WRAPLINE);
-        } else {
-            self.remove_cell_flag(CellFlags::WRAPLINE);
-        }
+        let mut flags = self.cell_flags();
+        flags.set(CellFlags::WRAPLINE, on);
+        self.set_cell_flags(flags);
     }
 
     #[inline]

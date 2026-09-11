@@ -46,13 +46,6 @@ fn region_for(sub: u8) -> Option<PromptRegion> {
     }
 }
 
-/// The `;D` mark's exit-code argument: `arg` is the bytes between the subcommand and the
-/// terminator (`;42` for `ESC]133;D;42<BEL>`; empty for a bare `;D`).
-fn parse_exit_code(arg: &[u8]) -> Option<i32> {
-    let digits = arg.strip_prefix(b";")?;
-    str::from_utf8(digits).ok()?.parse().ok()
-}
-
 /// Parse a potential OSC 133 mark at `s` (caller guarantees `s[0] == 0x1b`).
 pub(super) fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
     let progress_prefix_len = s.len().min(OSC_PROGRESS_PREFIX.len());
@@ -135,9 +128,13 @@ pub(super) fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
     let sub = s[OSC133_PREFIX.len()];
     let arg_start = OSC133_PREFIX.len() + 1;
 
+    // OSC 133 D carries an optional ";<exit code>" before its terminator.
     let exit_at = |term: usize| {
         (sub == b'D')
-            .then(|| parse_exit_code(&s[arg_start..term]))
+            .then(|| {
+                let digits = s[arg_start..term].strip_prefix(b";")?;
+                str::from_utf8(digits).ok()?.parse().ok()
+            })
             .flatten()
     };
 

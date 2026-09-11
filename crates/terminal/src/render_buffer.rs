@@ -60,15 +60,6 @@ pub(crate) fn style_from_snapshot(s: &SnapshotStyle) -> Style {
     }
 }
 
-pub(crate) fn wide_from(w: CellWide) -> Wide {
-    match w {
-        CellWide::Narrow => Wide::Narrow,
-        CellWide::Wide => Wide::Wide,
-        CellWide::SpacerTail => Wide::Spacer,
-        CellWide::SpacerHead => Wide::LeadingSpacer,
-    }
-}
-
 /// A decoupled, renderable copy of the visible viewport.
 pub struct RenderBuffer {
     pub revision: u64,
@@ -313,7 +304,12 @@ impl RenderBuffer {
 
         sq.set_c(base);
         sq.set_style_id(id);
-        sq.set_wide(wide_from(wide));
+        sq.set_wide(match wide {
+            CellWide::Narrow => Wide::Narrow,
+            CellWide::Wide => Wide::Wide,
+            CellWide::SpacerTail => Wide::Spacer,
+            CellWide::SpacerHead => Wide::LeadingSpacer,
+        });
 
         let zerowidth: Vec<char> = chars.collect();
 

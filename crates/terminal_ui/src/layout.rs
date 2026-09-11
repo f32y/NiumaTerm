@@ -1,4 +1,4 @@
-use crate::frame::{TerminalFrame, TerminalLine};
+use crate::frame::TerminalFrame;
 
 pub(crate) fn frame_content_rows(frame: &TerminalFrame) -> usize {
     let lines = frame.lines();
@@ -6,7 +6,11 @@ pub(crate) fn frame_content_rows(frame: &TerminalFrame) -> usize {
     let mut content_end = 0;
 
     for (row, line) in lines.iter().enumerate().rev() {
-        if terminal_line_has_content(line) {
+        if line
+            .cells()
+            .iter()
+            .any(|c| !matches!(c.ch, '\0' | ' ' | '\u{00a0}'))
+        {
             content_end = row + 1;
             break;
         }
@@ -50,7 +54,7 @@ pub(crate) fn live_frame_text(frame: &TerminalFrame) -> Option<String> {
         .lines()
         .iter()
         .take(rows)
-        .map(terminal_line_plain_text)
+        .map(|line| line.text().replace('\u{00a0}', " ").trim_end().to_string())
         .collect::<Vec<_>>();
 
     while lines.last().is_some_and(|line| line.is_empty()) {
@@ -58,16 +62,6 @@ pub(crate) fn live_frame_text(frame: &TerminalFrame) -> Option<String> {
     }
 
     (!lines.is_empty()).then(|| lines.join("\n"))
-}
-
-fn terminal_line_plain_text(line: &TerminalLine) -> String {
-    line.text().replace('\u{00a0}', " ").trim_end().to_string()
-}
-
-fn terminal_line_has_content(line: &TerminalLine) -> bool {
-    line.cells()
-        .iter()
-        .any(|c| !matches!(c.ch, '\0' | ' ' | '\u{00a0}'))
 }
 
 /// The pixel y-offset for a viewport row (0 with no gaps / out of range).

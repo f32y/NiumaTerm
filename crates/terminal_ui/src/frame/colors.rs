@@ -1,6 +1,5 @@
 use nmt_config::colors::term::{DIM_FACTOR, List, TermColors};
 use nmt_config::colors::{AnsiColor, NamedColor};
-use nmt_terminal::grid_emit::RowSelection;
 use nmt_terminal::render_buffer::RenderBuffer;
 use nmt_terminal::terminal::square::{ContentTag, Square};
 use nmt_terminal::terminal::style::{Style, StyleFlags};
@@ -36,7 +35,14 @@ impl BackgroundColors {
             ContentTag::BgPalette => Some(self.indexed(cell.bg_palette_index() as usize)),
             ContentTag::Codepoint => {
                 let style = buf.style(cell.style_id());
-                self.style_background(style)
+                if style.flags.contains(StyleFlags::INVERSE) {
+                    Some(self.color(&style.fg, style.flags, true))
+                } else {
+                    match style.bg {
+                        AnsiColor::Named(NamedColor::Background) => None,
+                        _ => Some(self.color(&style.bg, style.flags, false)),
+                    }
+                }
             }
         }
     }
@@ -55,17 +61,6 @@ impl BackgroundColors {
 
     pub(super) fn default_foreground(&self) -> TerminalColor {
         self.named(NamedColor::Foreground)
-    }
-
-    fn style_background(&self, style: Style) -> Option<TerminalColor> {
-        if style.flags.contains(StyleFlags::INVERSE) {
-            Some(self.color(&style.fg, style.flags, true))
-        } else {
-            match style.bg {
-                AnsiColor::Named(NamedColor::Background) => None,
-                _ => Some(self.color(&style.bg, style.flags, false)),
-            }
-        }
     }
 
     fn color(&self, color: &AnsiColor, flags: StyleFlags, foreground: bool) -> TerminalColor {
@@ -113,8 +108,4 @@ impl BackgroundColors {
     fn indexed(&self, index: usize) -> TerminalColor {
         TerminalColor::from_color_arr(self.term_colors[index].unwrap_or(self.colors[index]))
     }
-}
-
-pub(super) fn cell_is_selected(row_selection: Option<RowSelection>, col: u16) -> bool {
-    row_selection.is_some_and(|selection| col >= selection.lo && col <= selection.hi)
 }

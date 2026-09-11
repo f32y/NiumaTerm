@@ -1,6 +1,6 @@
 use std::slice;
 
-use gpui::{App, TextStyle, Window, px};
+use gpui::{App, Window, px};
 
 use crate::settings::TerminalSettings;
 
@@ -14,10 +14,6 @@ pub fn font_family(cx: &App) -> String {
 
 pub(crate) fn font_size_px(cx: &App) -> f32 {
     cx.global::<TerminalSettings>().font_size
-}
-
-pub(crate) fn line_height_multiplier(cx: &App) -> f32 {
-    cx.global::<TerminalSettings>().line_height
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -37,7 +33,7 @@ impl CellMetrics {
     }
 }
 
-pub(crate) fn terminal_text_style(window: &Window, cx: &App) -> TextStyle {
+pub(crate) fn measure_cell(window: &mut Window, cx: &App) -> CellMetrics {
     let mut style = window.text_style();
 
     let size = font_size_px(cx);
@@ -45,13 +41,7 @@ pub(crate) fn terminal_text_style(window: &Window, cx: &App) -> TextStyle {
     style.font_family = font_family(cx).into();
     style.font_fallbacks = Some(cx.global::<TerminalSettings>().font_fallbacks.clone());
     style.font_size = px(size).into();
-    style.line_height = px(size * line_height_multiplier(cx)).into();
-
-    style
-}
-
-pub(crate) fn measure_cell(window: &mut Window, cx: &App) -> CellMetrics {
-    let style = terminal_text_style(window, cx);
+    style.line_height = px(size * cx.global::<TerminalSettings>().line_height).into();
     let font_size = style.font_size.to_pixels(window.rem_size());
     let run = style.to_run(1);
 

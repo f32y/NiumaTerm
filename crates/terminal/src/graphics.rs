@@ -93,13 +93,6 @@ pub struct UpdateQueues {
 }
 
 impl GraphicData {
-    /// Check if the image may contain transparent pixels. If it returns
-    /// `false`, it is guaranteed that there are no transparent pixels.
-    #[inline]
-    pub fn maybe_transparent(&self) -> bool {
-        !self.is_opaque && self.color_type == ColorType::Rgba
-    }
-
     /// Check if all pixels under a region are opaque.
     ///
     /// If the region exceeds the boundaries of the image it is considered as
@@ -111,9 +104,8 @@ impl GraphicData {
             return false;
         }
 
-        // Don't check actual pixels if the image does not contain an alpha
-        // channel.
-        if !self.maybe_transparent() {
+        // Known opaque images and images without an alpha channel need no pixel scan.
+        if self.is_opaque || self.color_type != ColorType::Rgba {
             return true;
         }
 

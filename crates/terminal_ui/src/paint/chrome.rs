@@ -4,7 +4,7 @@ use gpui::{
 };
 
 use crate::block_list::FrozenItemChrome;
-use crate::paint::text::block_separator_bounds;
+use crate::metrics;
 use crate::theme::{BLOCK_GUTTER_GAP, BLOCK_GUTTER_WIDTH, BLOCK_SELECTED_TINT, SEPARATOR_COLOR};
 
 pub(crate) fn paint_frozen_separators(
@@ -12,9 +12,14 @@ pub(crate) fn paint_frozen_separators(
     separators: &[f32],
     window: &mut Window,
 ) {
+    let left = bounds.left() - px(metrics::PADDING_PX);
+    let right = bounds.right() + px(metrics::PADDING_PX);
     for y in separators {
         window.paint_quad(fill(
-            block_separator_bounds(bounds, bounds.top() + px(*y), 1.0),
+            Bounds::new(
+                point(left, bounds.top() + px(*y)),
+                size(right - left, px(1.0)),
+            ),
             Rgba {
                 r: ((SEPARATOR_COLOR >> 16) & 0xff) as f32 / 255.0,
                 g: ((SEPARATOR_COLOR >> 8) & 0xff) as f32 / 255.0,
