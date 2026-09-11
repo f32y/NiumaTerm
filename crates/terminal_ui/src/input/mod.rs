@@ -4,7 +4,7 @@ use nmt_input::event::ElementState;
 use nmt_input::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
 use nmt_input::{KeyEncodeFlags, KeyInput, encode_terminal_input};
 
-use crate::surface::TerminalKeyAction;
+use crate::pane_model::key_action::TerminalKeyAction;
 
 #[cfg(test)]
 pub(crate) fn pty_bytes_for_key(

@@ -2,8 +2,11 @@ use std::hint::black_box;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use nmt_config::colors::Colors;
+
+use crate::frame_source::TerminalFrameSource;
+use crate::pane_model::FrameTheme;
 use crate::session::{HostEvent, TerminalSessionConfig};
-use crate::surface::TerminalSurface;
 
 #[test]
 #[ignore = "manual release-only surface frame profile"]
@@ -12,7 +15,8 @@ fn profile_surface_frame_pipeline() -> Result<(), &'static str> {
         return Err("run this profile with cargo test --release -p nmt_terminal_ui");
     }
 
-    let surface = TerminalSurface::new(
+    let theme = FrameTheme::default();
+    let surface = TerminalFrameSource::new(
         TerminalSessionConfig {
             shell: Some("cmd.exe".into()),
             args: vec![
@@ -28,6 +32,7 @@ fn profile_surface_frame_pipeline() -> Result<(), &'static str> {
         },
         1,
         None,
+        Colors::default(),
     )
     .unwrap();
 
@@ -47,7 +52,7 @@ fn profile_surface_frame_pipeline() -> Result<(), &'static str> {
         thread::sleep(Duration::from_millis(1));
     }
 
-    let mut previous = surface.frame(None);
+    let mut previous = surface.frame(None, &theme);
     assert!(
         previous
             .lines()
@@ -62,7 +67,7 @@ fn profile_surface_frame_pipeline() -> Result<(), &'static str> {
 
     for sample in 0..WARMUP + SAMPLES {
         let start = Instant::now();
-        let frame = black_box(surface.frame(None));
+        let frame = black_box(surface.frame(None, &theme));
         let elapsed = start.elapsed();
 
         if sample >= WARMUP {
@@ -71,7 +76,7 @@ fn profile_surface_frame_pipeline() -> Result<(), &'static str> {
         assert_eq!(frame.lines().len(), 24);
 
         let start = Instant::now();
-        let reused = black_box(surface.frame(Some(black_box(&previous))));
+        let reused = black_box(surface.frame(Some(black_box(&previous)), &theme));
         let elapsed = start.elapsed();
 
         if sample >= WARMUP {

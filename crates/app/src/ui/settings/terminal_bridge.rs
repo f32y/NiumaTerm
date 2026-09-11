@@ -10,8 +10,7 @@
 
 use gpui::{App, rgb};
 use nmt_agent_ui::settings::AgentSettings;
-use nmt_terminal_ui::frame::theme_default_background;
-use nmt_terminal_ui::settings::TerminalSettings;
+use nmt_terminal_ui::settings::{TerminalSettings, theme_default_background};
 
 use crate::ui::settings::opacity::main_view_background_opacity;
 use crate::ui::settings::state::AppSettings;

@@ -14,7 +14,6 @@ nmt_config.workspace = true
 nmt_i18n.workspace = true
 nmt_input.workspace = true
 nmt_platform.workspace = true
-nmt_remote_net.workspace = true
 nmt_terminal.workspace = true
 
 futures.workspace = true
@@ -27,6 +26,7 @@ parking_lot.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+nmt_remote_net.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 tokio.workspace = true
 

@@ -9,9 +9,14 @@
 //! this global alone.
 
 use gpui::{Font, FontFallbacks, Global, Pixels, SharedString, font};
-use nmt_config::CursorShape;
 use nmt_config::appearance::InputStyle;
 use nmt_config::system::NewlineShortcut;
+use nmt_config::{CursorShape, with_active_colors};
+
+use crate::block_list::ITEM_PAD_ROWS;
+use crate::block_list::chrome::DurationLabels;
+use crate::frame::TerminalColor;
+use crate::pane_model::PaneSettings;
 
 pub struct TerminalSettings {
     pub input_style: InputStyle,
@@ -51,5 +56,35 @@ impl TerminalSettings {
         let mut font = font(self.font_family.clone());
         font.fallbacks = Some(self.font_fallbacks.clone());
         font
+    }
+}
+
+impl From<&TerminalSettings> for PaneSettings {
+    fn from(settings: &TerminalSettings) -> Self {
+        Self {
+            fixed_bottom: settings.fixed_bottom(),
+            pad_rows: if settings.command_blocks {
+                ITEM_PAD_ROWS
+            } else {
+                0.0
+            },
+            show_block_chrome: settings.command_blocks,
+            smooth_wheel: settings.smooth_wheel,
+            scroll_to_bottom_when_typing: settings.scroll_to_bottom_when_typing,
+            newline_shortcut: settings.newline_shortcut,
+            cursor_shape: settings.cursor_shape,
+        }
+    }
+}
+
+pub fn theme_default_background() -> TerminalColor {
+    with_active_colors(|colors| TerminalColor::from_color_arr(colors.background.0))
+}
+
+pub(crate) fn duration_labels() -> DurationLabels {
+    DurationLabels {
+        minutes_seconds: nmt_i18n::i18n("terminal-duration-minutes-seconds").to_string(),
+        seconds: nmt_i18n::i18n("terminal-duration-seconds").to_string(),
+        milliseconds: nmt_i18n::i18n("terminal-duration-milliseconds").to_string(),
     }
 }

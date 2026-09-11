@@ -1,3 +1,5 @@
+use nmt_terminal::session::RowText;
+
 use crate::links;
 
 #[test]
@@ -43,4 +45,51 @@ fn url_at_col_finds_and_trims_urls() {
 
     // Out-of-range column is safe.
     assert_eq!(url_at("short", 40), None);
+}
+
+#[test]
+fn wrapped_url_resolution_returns_row_segments_and_prefers_osc8() {
+    let rows = ["https://exam", "ple.com/abc "];
+    let resolved = links::resolve_link(4, |delta| {
+        let index = usize::try_from(1 + delta).ok()?;
+        Some(RowText {
+            text: rows.get(index)?.to_string(),
+            wrapped: index == 0,
+            hyperlinks: Vec::new(),
+        })
+    })
+    .unwrap();
+    assert_eq!(resolved.url, "https://example.com/abc");
+    assert_eq!(
+        resolved.segments,
+        [
+            links::RowSegment {
+                delta: -1,
+                col: 0,
+                cols: 12
+            },
+            links::RowSegment {
+                delta: 0,
+                col: 0,
+                cols: 11
+            },
+        ]
+    );
+    let resolved = links::resolve_link(3, |delta| {
+        (delta == 0).then(|| RowText {
+            text: "https://text".into(),
+            wrapped: false,
+            hyperlinks: vec![(0, 11, "https://target".into())],
+        })
+    })
+    .unwrap();
+    assert_eq!(resolved.url, "https://target");
+    assert!(
+        links::resolve_link(3, |delta| (delta == 0).then(|| RowText {
+            text: "https://text".into(),
+            wrapped: false,
+            hyperlinks: vec![(0, 11, "custom://target".into())],
+        }))
+        .is_none()
+    );
 }

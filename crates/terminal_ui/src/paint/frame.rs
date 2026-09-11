@@ -1,9 +1,18 @@
+use std::sync;
+
+use gpui::{
+    App, Bounds, ContentMask, Corners, Pixels, RenderImage, ShapedLine, Window, fill, point, px,
+    rgb, size,
+};
+use nmt_terminal::ansi::CursorShape;
 use tracing::error;
 
-use crate::terminal_view::*;
-use crate::{block_list, frame, graphics};
+use crate::frame::{TerminalCursor, TerminalFrame};
+use crate::layout::row_y_offset;
+use crate::paint::text::{paint_glyph_rows, paint_line_backgrounds_at, shape_lines};
+use crate::{block_list, frame, graphics, metrics};
 
-pub(super) fn shape_frame(
+pub(crate) fn shape_frame(
     bounds: Bounds<Pixels>,
     frame: &TerminalFrame,
     cell: metrics::CellMetrics,
@@ -23,7 +32,7 @@ pub(super) fn shape_frame(
     )
 }
 
-pub(super) fn paint_frame(
+pub(crate) fn paint_frame(
     bounds: Bounds<Pixels>,
     frame: &TerminalFrame,
     lines: &[ShapedLine],
@@ -125,7 +134,7 @@ fn paint_frame_images(
 /// the requested side of the frozen text: `above_text == false` paints the below-text
 /// slices (before `paint_frozen`), `true` the above-text slices (after). Uses the same
 /// source-crop primitive as live images; clips to each slice's destination cell rect.
-pub(super) fn paint_frozen_images(
+pub(crate) fn paint_frozen_images(
     bounds: Bounds<Pixels>,
     view: &block_list::FrozenView,
     cell: metrics::CellMetrics,

@@ -16,6 +16,7 @@ use crate::tabs::{TabId, TabManager};
 use crate::ui::Shell;
 use crate::ui::settings::{AgentProfile, AppSettings, builtin_agent_profile};
 use crate::ui::shell::{TabSurface, agent_workspace};
+use crate::ui::terminal_launch::spawn_pane;
 use crate::ui::terminal_layout::TerminalLayout;
 use crate::window::WindowRegistry;
 use crate::workspace::{
@@ -342,7 +343,7 @@ pub(super) fn materialize_active_tab(
             let (launch, profile_name) =
                 launch_with_profile(Some(state), default_profile.clone(), cx);
 
-            let pane = match TerminalPane::spawn(cx, surface_id, launch, profile_name) {
+            let pane = match spawn_pane(cx, surface_id, launch, profile_name) {
                 Ok(pane) => {
                     Shell::watch_pane(&pane, cx);
                     pane
@@ -465,10 +466,9 @@ fn restore_pane_node(
 
             resolve_restored_launch(&mut launch, cx.global::<AppSettings>());
 
-            // Spawn retries without the saved cwd internally.
             let (launch, profile_name) = launch_with_profile(Some(launch), (None, Vec::new()), cx);
 
-            match TerminalPane::spawn(cx, surface_id, launch, profile_name) {
+            match spawn_pane(cx, surface_id, launch, profile_name) {
                 Ok(pane) => {
                     Shell::watch_pane(&pane, cx);
                     Some(PaneTree::restored_leaf(PaneId(surface_id), pane))
@@ -528,10 +528,10 @@ pub(super) fn spawn_default_pane(
 
     let (launch, profile_name) = launch_with_profile(launch, default_profile.clone(), cx);
 
-    let spawned = TerminalPane::spawn(cx, surface_id, launch, profile_name).or_else(|error| {
+    let spawned = spawn_pane(cx, surface_id, launch, profile_name).or_else(|error| {
         warn!("spawn with workspace cwd/profile failed, retrying default: {error}");
         let (launch, profile_name) = launch_with_profile(None, default_profile, cx);
-        TerminalPane::spawn(cx, surface_id, launch, profile_name)
+        spawn_pane(cx, surface_id, launch, profile_name)
     });
 
     let pane = match spawned {
@@ -541,7 +541,7 @@ pub(super) fn spawn_default_pane(
 
             let (launch, profile_name) = launch_with_profile(None, (None, Vec::new()), cx);
 
-            match TerminalPane::spawn(cx, surface_id, launch, profile_name) {
+            match spawn_pane(cx, surface_id, launch, profile_name) {
                 Ok(pane) => pane,
                 Err(error) => {
                     // Even the built-in shell cannot spawn (e.g. ConPTY

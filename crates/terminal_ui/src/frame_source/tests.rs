@@ -1,7 +1,7 @@
-use nmt_config::local_state::TabState;
+use nmt_config::colors::Colors;
 
+use crate::frame_source::TerminalFrameSource;
 use crate::session::{HostEvent, TerminalSessionConfig};
-use crate::surface::{TerminalSurface, restorable_tab_state, tab_state_with_cwd};
 
 #[test]
 fn bad_shell_returns_error() {
@@ -10,56 +10,11 @@ fn bad_shell_returns_error() {
         ..TerminalSessionConfig::default()
     };
 
-    let err = TerminalSurface::new(config, 1, None)
+    let err = TerminalFrameSource::new(config, 1, None, Colors::default())
         .err()
         .expect("bad shell must fail");
 
     assert!(err.contains("PtySpawn"));
-}
-
-#[test]
-fn tab_state_uses_last_reported_cwd() {
-    let launch = TabState {
-        name: None,
-        user_named: false,
-        shell: Some("pwsh.exe".into()),
-        args: vec!["-NoLogo".into()],
-        cwd: Some("C:/old".into()),
-        agent: None,
-        agent_profile: None,
-        panes: None,
-    };
-
-    let state = tab_state_with_cwd(&launch, Some("C:/new".into()));
-
-    assert_eq!(state.shell, launch.shell);
-    assert_eq!(state.args, launch.args);
-    assert_eq!(state.cwd.as_deref(), Some("C:/new"));
-}
-
-#[test]
-fn restorable_tab_state_keeps_original_launch_command() {
-    let config = TerminalSessionConfig {
-        shell: Some("pwsh.exe".to_string()),
-        working_dir: Some("C:/Projects/example".to_string()),
-        ..TerminalSessionConfig::default()
-    };
-
-    let state = restorable_tab_state(&config);
-    let integrated = config.with_shell_integration();
-
-    assert_eq!(state.shell.as_deref(), Some("pwsh.exe"));
-    assert!(state.args.is_empty());
-    assert_eq!(state.cwd.as_deref(), Some("C:/Projects/example"));
-
-    // PowerShell's integration rewrites the launch args, so the restorable
-    // state has to be the copy taken before it. Elsewhere the shell is not one
-    // with an integration and the args stay empty either way.
-    #[cfg(windows)]
-    assert!(!integrated.args.is_empty());
-
-    #[cfg(unix)]
-    assert!(integrated.args.is_empty());
 }
 
 #[test]

@@ -27,6 +27,11 @@ pub use crate::session::mouse::{
 pub use crate::session::observer::{SessionChange, SessionObserver};
 use crate::session::selection::SurfaceSelection;
 
+mod blocks;
+mod rows;
+pub use crate::session::blocks::BlockPoint;
+pub use crate::session::rows::RowText;
+
 mod config;
 mod error;
 mod input;
@@ -321,3 +326,6 @@ mod state_tests;
 mod tests;
 #[cfg(test)]
 mod vtebench_tests;
+
+#[cfg(test)]
+mod block_tests;

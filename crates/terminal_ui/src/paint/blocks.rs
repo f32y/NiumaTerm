@@ -1,5 +1,9 @@
-use crate::block_list::*;
+use gpui::{App, Bounds, Pixels, ShapedLine, Window, fill, point, px, rgb, size};
+
+use crate::block_list::{FrozenRow, FrozenView};
+use crate::frame::TerminalColor;
 use crate::metrics::CellMetrics;
+use crate::paint::text::{paint_glyph_rows, paint_line_backgrounds_at, shape_lines};
 
 /// Shape the visible frozen rows. Block rows cache by `(block_id,
 /// generation, row)`; live-history rows hash their text.
@@ -26,6 +30,7 @@ pub(crate) fn paint_frozen(
     view: &FrozenView,
     shaped: &[ShapedLine],
     cell: CellMetrics,
+    selection_bg: TerminalColor,
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -34,7 +39,6 @@ pub(crate) fn paint_frozen(
     }
 
     // Selection tint under the glyphs (over the cell backgrounds).
-    let selection_bg = theme_selection_background();
 
     for row in &view.rows {
         let Some((start, end)) = row.selected else {

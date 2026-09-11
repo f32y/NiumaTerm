@@ -1,7 +1,9 @@
-use gpui::{ListAlignment, ListOffset, px};
 use nmt_terminal::event::BlockEvent;
 use nmt_terminal::ghostty::BlockHandle;
 
+use crate::block_list::chrome::offset_frozen_chrome;
+use crate::block_list::reconcile::shift_selected_item_for_eviction;
+use crate::pane_model::list_mirror::ListPosition;
 use crate::{block_list, theme};
 
 fn block_item(seq: u64, id: u64, rows: usize) -> BlockEvent {
@@ -65,9 +67,9 @@ fn block_list_render_metrics_resolve_scroll_once() {
         80,
         10.0,
         block_list::ITEM_PAD_ROWS,
-        ListOffset {
+        ListPosition {
             item_ix: 1,
-            offset_in_item: px(3.0),
+            offset_px: 3.0,
         },
     );
 
@@ -85,23 +87,14 @@ fn block_list_render_metrics_resolve_scroll_once() {
 
 #[test]
 fn selected_item_tracks_store_head_eviction() {
+    assert_eq!(shift_selected_item_for_eviction(Some(4), 2, 10), Some(2));
+    assert_eq!(shift_selected_item_for_eviction(Some(1), 2, 10), None);
     assert_eq!(
-        block_list::shift_selected_item_for_eviction(Some(4), 2, 10),
-        Some(2)
-    );
-    assert_eq!(
-        block_list::shift_selected_item_for_eviction(Some(1), 2, 10),
-        None
-    );
-    assert_eq!(
-        block_list::shift_selected_item_for_eviction(Some(10), 3, 7),
+        shift_selected_item_for_eviction(Some(10), 3, 7),
         Some(7),
         "old live index shifts to the new live index"
     );
-    assert_eq!(
-        block_list::shift_selected_item_for_eviction(Some(11), 3, 7),
-        None
-    );
+    assert_eq!(shift_selected_item_for_eviction(Some(11), 3, 7), None);
 }
 
 #[test]
@@ -194,15 +187,6 @@ fn remeasure_scope_tracks_layout_vs_content_changes() {
 }
 
 #[test]
-fn block_list_alignment_follows_input_style_anchor() {
-    assert_eq!(block_list::block_list_alignment(false), ListAlignment::Top);
-    assert_eq!(
-        block_list::block_list_alignment(true),
-        ListAlignment::Bottom
-    );
-}
-
-#[test]
 fn block_list_live_chrome_marks_idle_open_prompt() {
     let chrome = block_list::block_list_live_chrome(4, 2, 10.0, None, true, false).unwrap();
 
@@ -226,7 +210,7 @@ fn frozen_chrome_offset_moves_header_with_item() {
         selected: false,
     };
 
-    let chrome = block_list::offset_frozen_chrome(chrome, 80.0);
+    let chrome = offset_frozen_chrome(chrome, 80.0);
 
     assert_eq!(
         (chrome.top, chrome.bottom, chrome.header_y),

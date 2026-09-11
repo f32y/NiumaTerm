@@ -5,69 +5,29 @@
 //! Scrolling is pure UI state over the list — the engine viewport stays
 //! pinned at the bottom.
 
-mod chrome;
+pub(crate) use nmt_terminal::session::BlockPoint as FrozenPoint;
+
+pub(crate) mod chrome;
 mod geometry;
 mod images;
-mod paint;
-mod reconcile;
+pub(crate) mod reconcile;
 mod rows;
 mod selection;
 
-use std::{collections, iter, ops, sync, time};
-
-use gpui::{
-    App, Bounds, FollowMode, Hsla, ListAlignment, ListOffset, ListState, Pixels, Rgba, ShapedLine,
-    SharedString, TextAlign, TextRun, Window, fill, point, px, rgb, rgba, size,
-};
-use nmt_terminal::block_store::{BlockItem, BlockStore, SegmentMeta};
-use nmt_terminal::ghostty::{
-    BlockHandle, BlockRef, CellText, CellWide, Palette, PlacementScreenPos, SnapshotStyle,
-    Underline,
-};
-use nmt_terminal::grid_emit::row_selection_for;
-use nmt_terminal::selection::SelectionRange;
-use nmt_terminal::terminal::square::Wide;
-
-#[cfg(test)]
-use crate::block_list::chrome::item_header;
-pub(crate) use crate::block_list::chrome::{
-    FrozenItemChrome, block_list_live_chrome, live_chrome, offset_frozen_chrome,
-    paint_frozen_chrome, paint_frozen_separators,
-};
-#[cfg(test)]
-use crate::block_list::geometry::item_rows;
+pub(crate) use crate::block_list::chrome::{FrozenItemChrome, block_list_live_chrome, live_chrome};
 pub(crate) use crate::block_list::geometry::{
-    ITEM_PAD_ROWS, block_list_active_top_px, block_list_alignment, block_pad_rows, item_px,
-    live_item_px, nav_item_top, visible_rows,
+    ITEM_PAD_ROWS, block_list_active_top_px, item_px, live_item_px, nav_item_top, visible_rows,
 };
 pub(crate) use crate::block_list::images::{FrozenImage, frozen_block_images};
-pub(crate) use crate::block_list::paint::{paint_frozen, shape_frozen_rows};
 pub(crate) use crate::block_list::reconcile::{
-    BlockListMeasureKey, BlockListState, ListReconcile, RemeasureScope, block_list_render_metrics,
-    plan_list_reconcile, shift_selected_item_for_eviction,
+    BlockListMeasureKey, ListReconcile, RemeasureScope, block_list_render_metrics,
+    plan_list_reconcile,
 };
-#[cfg(test)]
-use crate::block_list::rows::HandleItemInfo;
 pub(crate) use crate::block_list::rows::{
     EngineRowBuilder, frozen_block_view, handle_item_info, live_history_view,
 };
-pub(crate) use crate::block_list::selection::{
-    BlockListPoint, FrozenGutterSelection, FrozenPoint, frozen_selection_pieces,
-};
-use crate::frame::{
-    LineBuilder, StyleRun, TerminalCell, TerminalColor, TerminalLine, theme_default_foreground,
-    theme_selection_background,
-};
-use crate::layout::truncate_command;
-use crate::paint_text::{
-    block_separator_bounds, paint_glyph_rows, paint_line_backgrounds_at, shape_lines,
-};
-use crate::session::InFlightBlock;
-use crate::settings::TerminalSettings;
-use crate::theme::{
-    BLOCK_FAILURE_COLOR, BLOCK_GUTTER_GAP, BLOCK_GUTTER_WIDTH, BLOCK_INPUT_COLOR,
-    BLOCK_RUNNING_COLOR, BLOCK_SELECTED_TINT, BLOCK_SUCCESS_COLOR, SEPARATOR_COLOR,
-};
+pub(crate) use crate::block_list::selection::BlockListPoint;
+use crate::frame::TerminalLine;
 
 /// One visible frozen row, positioned in element-local pixels.
 pub(crate) struct FrozenRow {

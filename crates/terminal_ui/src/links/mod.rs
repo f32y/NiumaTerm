@@ -1,40 +1,24 @@
 use std::ops::Range;
 
-use gpui::{
-    App, Bounds, Context, Modifiers, ModifiersChangedEvent, Pixels, Point, Window, point, px, size,
-};
-use nmt_terminal::ghostty::BlockHandle;
+use nmt_terminal::session::RowText;
 
-use crate::block_list::BlockListPoint;
-use crate::view::{TerminalPane, terminal_cell_at_position};
+#[derive(Debug, PartialEq)]
+pub(crate) struct RowSegment {
+    pub delta: i64,
+    pub col: usize,
+    pub cols: usize,
+}
 
-/// A link resolved under the pointer: the URL plus underline rects relative
-/// to the content origin (only the visible rows of a wrapped URL get rects).
-#[derive(Clone, Debug, PartialEq)]
-pub(super) struct LinkHit {
-    pub(super) url: String,
-    pub(super) rects: Vec<Bounds<Pixels>>,
+#[derive(Debug, PartialEq)]
+pub(crate) struct ResolvedLink {
+    pub url: String,
+    pub segments: Vec<RowSegment>,
 }
 
 /// Schemes Ctrl+click will open. A gate, not just a matcher: OSC 8 URIs come
 /// from whatever program printed them, and an escape sequence must not be
 /// able to launch arbitrary protocol handlers.
 const URL_SCHEMES: [&str; 4] = ["https://", "http://", "file://", "mailto:"];
-
-/// Whether a click held down the modifier that follows a link.
-///
-/// macOS reserves Control-click for the secondary click, so a Control-click on
-/// a link would open a context menu at the same time; there the modifier is
-/// Command, which is also what its browsers and editors follow links on.
-pub(crate) fn follows_link(modifiers: Modifiers) -> bool {
-    #[cfg(target_os = "macos")]
-    let modifier_held = modifiers.platform && !modifiers.control;
-
-    #[cfg(not(target_os = "macos"))]
-    let modifier_held = modifiers.control && !modifiers.platform;
-
-    modifier_held && !modifiers.alt && !modifiers.shift
-}
 
 fn open_allowed(url: &str) -> bool {
     URL_SCHEMES
@@ -97,284 +81,90 @@ fn url_at_col(text: &str, col: usize) -> Option<(String, Range<usize>)> {
     (url_range.contains(&col) && open_allowed(url)).then(|| (url.to_string(), url_range))
 }
 
-/// The Ctrl-hover link underline and the pointer position it was resolved
-/// at. The two travel together because pressing or releasing Ctrl without
-/// moving the mouse still has to rescan, and that rescan has no event position
-/// of its own to work from.
-#[derive(Default)]
-pub(super) struct LinkHover {
-    hit: Option<LinkHit>,
-    last_position: Option<Point<Pixels>>,
-}
+pub(crate) fn resolve_link(
+    col: usize,
+    row_at: impl Fn(i64) -> Option<RowText>,
+) -> Option<ResolvedLink> {
+    let segment = |delta, col, cols| Some(RowSegment { delta, col, cols });
+    let pointed = row_at(0)?;
 
-impl LinkHover {
-    /// Record the pointer position and the link resolved under it. Returns
-    /// whether the underline changed, so the caller repaints only when it did.
-    pub(super) fn update(&mut self, position: Point<Pixels>, hit: Option<LinkHit>) -> bool {
-        self.last_position = Some(position);
-
-        if self.hit == hit {
-            return false;
+    if let Some((start, end, uri)) = pointed
+        .hyperlinks
+        .iter()
+        .find(|(start, end, _)| (*start as usize..=*end as usize).contains(&col))
+    {
+        if !open_allowed(uri) {
+            return None;
         }
 
-        self.hit = hit;
-
-        true
+        return Some(ResolvedLink {
+            url: uri.clone(),
+            segments: segment(0, *start as usize, (*end - *start) as usize + 1)
+                .into_iter()
+                .collect(),
+        });
     }
 
-    /// Record where the pointer is without rescanning, so a later modifier
-    /// change resolves the link where the pointer actually sits.
-    pub(super) fn record_position(&mut self, position: Point<Pixels>) {
-        self.last_position = Some(position);
+    // Join cap bounds the engine row reads per hover/click: a wrapped
+    // logical line can chain through the whole scrollback (e.g. `cat` of
+    // a minified file), and each joined row is a locked engine read. A
+    // URL wrapping further than ±8 rows truncates at the cap.
+    const JOIN_CAP: i64 = 8;
+
+    let width = pointed.text.chars().count();
+
+    let mut text = pointed.text;
+    let mut col = col;
+    let mut wrapped_down = pointed.wrapped;
+
+    for delta in 1..=JOIN_CAP {
+        if !wrapped_down {
+            break;
+        }
+
+        let Some(next) = row_at(delta) else { break };
+
+        text.push_str(&next.text);
+
+        wrapped_down = next.wrapped;
     }
 
-    pub(super) fn position(&self) -> Option<Point<Pixels>> {
-        self.last_position
+    let mut back = 0i64;
+
+    for delta in 1..=JOIN_CAP {
+        let Some(prev) = row_at(-delta).filter(|prev| prev.wrapped) else {
+            break;
+        };
+
+        back = delta;
+
+        col += prev.text.chars().count();
+
+        text.insert_str(0, &prev.text);
     }
 
-    /// Forget where the pointer was, so a modifier change after the pointer
-    /// left the pane cannot resurrect an underline.
-    pub(super) fn forget_position(&mut self) {
-        self.last_position = None;
-    }
+    let (url, range) = url_at_col(&text, col)?;
 
-    /// Drop the underline, reporting whether one was showing.
-    pub(super) fn clear(&mut self) -> bool {
-        self.hit.take().is_some()
-    }
+    // Every joined segment is exactly `width` chars (rows are padded to
+    // the grid width), so the URL's char range maps directly onto rows.
+    let mut rects = Vec::new();
 
-    pub(super) fn current(&self) -> Option<&LinkHit> {
-        self.hit.as_ref()
-    }
-}
-
-impl TerminalPane {
-    /// Track the Ctrl-hover link underline: set while Ctrl is held over a
-    /// link inside the content area, cleared otherwise.
-    pub(super) fn update_hovered_link(
-        &mut self,
-        position: Point<Pixels>,
-        modifiers: Modifiers,
-        cx: &mut Context<Self>,
+    if let (Some(first_seg), Some(last_seg)) = (
+        range.start.checked_div(width),
+        (range.end - 1).checked_div(width),
     ) {
-        let inside = self
-            .content_bounds
-            .is_some_and(|bounds| bounds.contains(&position));
+        for seg in first_seg..=last_seg {
+            let start = range.start.max(seg * width);
+            let end = range.end.min((seg + 1) * width);
 
-        let hit = (inside && follows_link(modifiers))
-            .then(|| self.link_at_position(position, cx))
-            .flatten();
-
-        if self.links.update(position, hit) {
-            cx.notify();
+            rects.extend(segment(seg as i64 - back, start - seg * width, end - start));
         }
     }
 
-    pub(super) fn on_modifiers_changed(
-        &mut self,
-        event: &ModifiersChangedEvent,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(position) = self.links.position() {
-            self.update_hovered_link(position, event.modifiers, cx);
-        }
-    }
-
-    /// Resolve the link under a pointer position: the row's OSC 8 span if one
-    /// covers the pointed-at cell, else a URL-shaped token in the row text.
-    /// Soft-wrapped neighbor rows are joined so long URLs match whole. Also
-    /// yields underline rects (content-origin-relative) for hover feedback.
-    pub(super) fn link_at_position(&self, position: Point<Pixels>, cx: &App) -> Option<LinkHit> {
-        let cell_metrics = self.cell_metrics?;
-
-        enum RowSource {
-            Screen(i64),
-            Block {
-                handle: BlockHandle,
-                item: usize,
-                line: i64,
-            },
-        }
-
-        let block_list = self.block_list_mode(cx);
-
-        // Bottom-anchor slack is uniform across rows (see
-        // `bottom_anchor_offsets`), so one value shifts every underline.
-        let slack = self.current_row_offsets(cx).first().copied().unwrap_or(0.0);
-
-        let viewport_top = self.surface.session.viewport_top_screen_row();
-
-        let (source, col) = match self.block_list_point_at(position, cx) {
-            Some(BlockListPoint::Frozen(pt)) => {
-                // The handle lookup releases the store lock before the engine
-                // reads below (the PTY thread nests engine → store, so the
-                // reverse nesting would deadlock).
-                let handle = {
-                    let store = self.surface.session.block_store();
-                    let store = store.lock();
-                    store.items().get(pt.item)?.handle()?
-                };
-
-                (
-                    RowSource::Block {
-                        handle,
-                        item: pt.item,
-                        line: pt.line as i64,
-                    },
-                    pt.col as usize,
-                )
-            }
-            Some(BlockListPoint::LiveHistory { row, col }) => {
-                (RowSource::Screen(row as i64), col as usize)
-            }
-            None => {
-                let offsets = self.current_row_offsets(cx);
-
-                let mut origin = self.content_origin();
-
-                if block_list {
-                    origin.y += px(self.frozen.active_top());
-                }
-
-                let (cell, _) = terminal_cell_at_position(position, origin, cell_metrics, &offsets);
-
-                (
-                    RowSource::Screen(viewport_top? as i64 + cell.row as i64),
-                    cell.col as usize,
-                )
-            }
-        };
-
-        let row_at = |delta: i64| match source {
-            RowSource::Screen(row) => u32::try_from(row + delta)
-                .ok()
-                .and_then(|row| self.surface.pointer_screen_row(row)),
-            RowSource::Block { handle, line, .. } => usize::try_from(line + delta)
-                .ok()
-                .and_then(|line| self.surface.pointer_block_row(handle, line)),
-        };
-
-        // Content-local y of the row `delta` rows below the pointed-at one;
-        // `None` when it is scrolled out of view (that segment gets no rect).
-        let row_y = |delta: i64| -> Option<f32> {
-            match source {
-                RowSource::Screen(row) => {
-                    let row = row + delta;
-                    let top = viewport_top? as i64;
-
-                    if row < top {
-                        // A live-history row above the engine viewport.
-                        return self.frozen.row_top(usize::MAX, usize::try_from(row).ok()?);
-                    }
-
-                    let below = (row - top) as f32 * cell_metrics.height_px;
-
-                    Some(if block_list {
-                        self.frozen.active_top() + below
-                    } else {
-                        below + slack
-                    })
-                }
-                RowSource::Block { item, line, .. } => self
-                    .frozen
-                    .row_top(item, usize::try_from(line + delta).ok()?),
-            }
-        };
-
-        let underline = |delta: i64, start_col: usize, cols: usize| -> Option<Bounds<Pixels>> {
-            let y = row_y(delta)?;
-
-            Some(Bounds::new(
-                point(
-                    px(start_col as f32 * cell_metrics.width_px),
-                    px(y + cell_metrics.height_px - 1.5),
-                ),
-                size(px(cols as f32 * cell_metrics.width_px), px(1.0)),
-            ))
-        };
-
-        let pointed = row_at(0)?;
-
-        if let Some((start, end, uri)) = pointed
-            .hyperlinks
-            .iter()
-            .find(|(start, end, _)| (*start as usize..=*end as usize).contains(&col))
-        {
-            if !open_allowed(uri) {
-                return None;
-            }
-
-            return Some(LinkHit {
-                url: uri.clone(),
-                rects: underline(0, *start as usize, (*end - *start) as usize + 1)
-                    .into_iter()
-                    .collect(),
-            });
-        }
-
-        // Join cap bounds the engine row reads per hover/click: a wrapped
-        // logical line can chain through the whole scrollback (e.g. `cat` of
-        // a minified file), and each joined row is a locked engine read. A
-        // URL wrapping further than ±8 rows truncates at the cap.
-        const JOIN_CAP: i64 = 8;
-
-        let width = pointed.text.chars().count();
-
-        let mut text = pointed.text;
-        let mut col = col;
-        let mut wrapped_down = pointed.wrapped;
-
-        for delta in 1..=JOIN_CAP {
-            if !wrapped_down {
-                break;
-            }
-
-            let Some(next) = row_at(delta) else { break };
-
-            text.push_str(&next.text);
-
-            wrapped_down = next.wrapped;
-        }
-
-        let mut back = 0i64;
-
-        for delta in 1..=JOIN_CAP {
-            let Some(prev) = row_at(-delta).filter(|prev| prev.wrapped) else {
-                break;
-            };
-
-            back = delta;
-
-            col += prev.text.chars().count();
-
-            text.insert_str(0, &prev.text);
-        }
-
-        let (url, range) = url_at_col(&text, col)?;
-
-        // Every joined segment is exactly `width` chars (rows are padded to
-        // the grid width), so the URL's char range maps directly onto rows.
-        let mut rects = Vec::new();
-
-        if let (Some(first_seg), Some(last_seg)) = (
-            range.start.checked_div(width),
-            (range.end - 1).checked_div(width),
-        ) {
-            for seg in first_seg..=last_seg {
-                let start = range.start.max(seg * width);
-                let end = range.end.min((seg + 1) * width);
-
-                rects.extend(underline(
-                    seg as i64 - back,
-                    start - seg * width,
-                    end - start,
-                ));
-            }
-        }
-
-        Some(LinkHit { url, rects })
-    }
+    Some(ResolvedLink {
+        url,
+        segments: rects,
+    })
 }
 
 #[cfg(test)]

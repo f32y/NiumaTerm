@@ -1,6 +1,18 @@
-use crate::block_list::chrome::{item_accent, item_header};
+use std::{collections, iter, ops};
+
+use nmt_terminal::block_store::BlockItem;
+use nmt_terminal::ghostty::{
+    BlockHandle, BlockRef, CellText, CellWide, Palette, SnapshotStyle, Underline,
+};
+use nmt_terminal::grid_emit::row_selection_for;
+use nmt_terminal::selection::SelectionRange;
+use nmt_terminal::session::BlockPoint as FrozenPoint;
+use nmt_terminal::terminal::square::Wide;
+
+use crate::block_list::chrome::{DurationLabels, FrozenItemChrome, item_accent, item_header};
 use crate::block_list::selection::{expand_wide_span, selected_span};
-use crate::block_list::*;
+use crate::block_list::{FrozenRow, FrozenView};
+use crate::frame::{LineBuilder, StyleRun, TerminalCell, TerminalColor, TerminalLine};
 
 /// Builds one display line from an engine row visit (frozen-block row or
 /// active-grid history row): every column contributes a char (gaps become
@@ -97,21 +109,22 @@ impl EngineRowBuilder {
 /// engine locks must never nest (surface lock discipline).
 #[derive(Clone)]
 pub(crate) struct HandleItemInfo {
-    pub handle: BlockHandle,
     /// Cached engine row count — the layout height source.
     pub rows: usize,
     pub accent: u32,
     pub header: Option<String>,
 }
 
-pub(crate) fn handle_item_info(item: &BlockItem) -> Option<HandleItemInfo> {
-    let handle = item.handle()?;
+pub(crate) fn handle_item_info(
+    item: &BlockItem,
+    labels: &DurationLabels,
+) -> Option<HandleItemInfo> {
+    item.handle()?;
 
     Some(HandleItemInfo {
-        handle,
         rows: item.engine_rows(),
         accent: item_accent(&item.meta),
-        header: item_header(&item.meta),
+        header: item_header(&item.meta, labels),
     })
 }
 
@@ -131,8 +144,8 @@ pub(crate) fn frozen_block_view(
     pad_rows: f32,
     selection: Option<(FrozenPoint, FrozenPoint)>,
     selected_item: Option<usize>,
+    default_fg: TerminalColor,
 ) -> FrozenView {
-    let default_fg = theme_default_foreground();
     let selection = selection.map(|(a, b)| if a <= b { (a, b) } else { (b, a) });
     let rows = info.rows;
     let pad = pad_rows * cell_h;

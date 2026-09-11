@@ -1,6 +1,21 @@
-use crate::block_list;
-use crate::terminal_view::paint::{paint_frame, paint_frozen_images, shape_frame};
-use crate::terminal_view::*;
+use std::{collections, panic, sync};
+
+use gpui::{
+    App, Bounds, Element, ElementId, Entity, GlobalElementId, InspectorElementId, IntoElement,
+    LayoutId, Pixels, ShapedLine, Style, Window, point, px, relative, size,
+};
+use nmt_terminal::block_store::BlockStore;
+use parking_lot::Mutex;
+
+use crate::block_list::block_list_live_chrome;
+use crate::frame::TerminalFrame;
+use crate::layout::frame_content_rows;
+use crate::paint::blocks::{paint_frozen, shape_frozen_rows};
+use crate::paint::frame::{paint_frame, paint_frozen_images, shape_frame};
+use crate::pane_model::frame_record::FrameRecord;
+use crate::session::InFlightBlock;
+use crate::view::TerminalPane;
+use crate::{block_list, metrics};
 
 type SharedBlockStore = sync::Arc<Mutex<BlockStore>>;
 
@@ -72,7 +87,7 @@ impl Element for BlockListItem {
 
         style.size.width = relative(1.0).into();
 
-        let pad_rows = block_pad_rows(cx);
+        let pad_rows = self.pane().read(cx).model.settings.pad_rows;
 
         let height = match self {
             BlockListItem::Frozen {
@@ -120,34 +135,27 @@ impl Element for BlockListItem {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
+        let theme = self.pane().read(cx).model.theme;
         let origin_y = self.pane().read(cx).content_origin().y;
         let item_top = (bounds.top() - origin_y).as_f32();
-        let pad_rows = block_pad_rows(cx);
+        let pad_rows = self.pane().read(cx).model.settings.pad_rows;
 
         match self {
             BlockListItem::Frozen {
                 item_idx,
-                store,
+                store: _,
                 cols: _,
                 cell,
                 selection,
                 selected_item,
                 pane,
             } => {
-                // Snapshot the item under the store lock, then release it
-                // before touching the engine — the PTY thread nests engine →
-                // store, so the reverse nesting here would deadlock.
-                let handle_info = {
-                    let store = store.lock();
-
-                    store
-                        .items()
-                        .get(*item_idx)
-                        .and_then(block_list::handle_item_info)
-                };
-
-                let mut view = match handle_info {
-                    Some(info) => {
+                let snapshot = pane.read(cx).model.source.session.block_snapshot(*item_idx);
+                let mut view = match snapshot.and_then(|(item, acquired)| {
+                    block_list::handle_item_info(&item, &pane.read(cx).model.duration_labels)
+                        .map(|info| (info, acquired))
+                }) {
+                    Some((info, acquired)) => {
                         let visible = block_list::visible_rows(
                             bounds.top().as_f32(),
                             info.rows,
@@ -155,8 +163,6 @@ impl Element for BlockListItem {
                             cell.height_px,
                             pad_rows,
                         );
-
-                        let acquired = pane.read(cx).surface.session.acquire_block(info.handle);
 
                         let mut view = block_list::frozen_block_view(
                             acquired.as_ref().map(|acq| (&acq.block, &acq.palette)),
@@ -167,6 +173,7 @@ impl Element for BlockListItem {
                             pad_rows,
                             *selection,
                             *selected_item,
+                            theme.foreground,
                         );
 
                         // Resolve each frozen Kitty placement's
@@ -179,25 +186,13 @@ impl Element for BlockListItem {
                             let ids: collections::HashSet<u32> =
                                 acq.placements.iter().map(|p| p.image_id).collect();
 
-                            let surface = &pane.read(cx).surface;
+                            let surface = &pane.read(cx).model.source;
 
                             let generations: collections::HashMap<_, _> = ids
                                 .into_iter()
                                 .filter_map(|id| {
                                     surface
-                                        .frozen_image(info.handle.id, id)
-                                        .or_else(|| {
-                                            let generation =
-                                                surface.frozen_image_generation(&acq.block, id)?;
-
-                                            surface.insert_frozen_image(
-                                                info.handle.id,
-                                                id,
-                                                generation.clone(),
-                                            );
-
-                                            Some(generation)
-                                        })
+                                        .frozen_image(&acq.block, id)
                                         .map(|generation| (id, generation))
                                 })
                                 .collect();
@@ -216,11 +211,12 @@ impl Element for BlockListItem {
                     None => Default::default(),
                 };
 
-                pane.update(cx, |pane, _| pane.record_frozen_view(&view, item_top));
+                let record = FrameRecord::from_view(&view, item_top);
+                pane.update(cx, |pane, _| pane.model.record_frame(record));
 
                 view.items_chrome.clear();
 
-                let shaped = block_list::shape_frozen_rows(&view.rows, cell.width_px, window);
+                let shaped = shape_frozen_rows(&view.rows, cell.width_px, window);
 
                 BlockListItemPrepaint::Frozen { view, shaped }
             }
@@ -249,10 +245,11 @@ impl Element for BlockListItem {
 
                     let pane = pane.read(cx);
 
-                    let lines = pane
-                        .surface
-                        .live_history_lines(visible.start as u64..visible.end as u64);
-                    let selection = pane.surface.session.selection_screen_range();
+                    let lines = pane.model.source.live_history_lines(
+                        visible.start as u64..visible.end as u64,
+                        theme.foreground,
+                    );
+                    let selection = pane.model.source.session.selection_screen_range();
 
                     block_list::live_history_view(
                         lines,
@@ -275,26 +272,18 @@ impl Element for BlockListItem {
                     *selected_item == Some(*live_index),
                 );
 
-                pane.update(cx, |pane, _| {
-                    pane.record_frozen_view(&tail_view, item_top);
+                let mut record = FrameRecord::from_view(&tail_view, item_top);
+                record.active_top = Some(item_top + tail_view.active_top);
+                if let Some(mut chrome) = live_chrome {
+                    chrome.bottom = tail_view.active_top
+                        + live_rows as f32 * cell.height_px
+                        + pad_rows * cell.height_px;
+                    chrome.header_y = tail_view.active_top;
+                    record.push_chrome(chrome, item_top);
+                }
+                pane.update(cx, |pane, _| pane.model.record_frame(record));
 
-                    let active_top = item_top + tail_view.active_top;
-
-                    pane.frozen.set_active_top(active_top);
-
-                    if let Some(mut chrome) = live_chrome {
-                        chrome.bottom = tail_view.active_top
-                            + live_rows as f32 * cell.height_px
-                            + pad_rows * cell.height_px;
-
-                        chrome.header_y = tail_view.active_top;
-
-                        pane.record_frozen_chrome(chrome, item_top);
-                    }
-                });
-
-                let tail_shaped =
-                    block_list::shape_frozen_rows(&tail_view.rows, cell.width_px, window);
+                let tail_shaped = shape_frozen_rows(&tail_view.rows, cell.width_px, window);
 
                 let active_bounds = Bounds::new(
                     point(bounds.left(), bounds.top() + px(tail_view.active_top)),
@@ -322,6 +311,7 @@ impl Element for BlockListItem {
         window: &mut Window,
         cx: &mut App,
     ) {
+        let selection_bg = self.pane().read(cx).model.theme.selection_background;
         match (self, prepaint) {
             (
                 BlockListItem::Frozen { cell, .. },
@@ -329,7 +319,7 @@ impl Element for BlockListItem {
             ) => {
                 paint_frozen_images(bounds, view, *cell, window, false);
 
-                block_list::paint_frozen(bounds, view, shaped, *cell, window, cx);
+                paint_frozen(bounds, view, shaped, *cell, selection_bg, window, cx);
 
                 paint_frozen_images(bounds, view, *cell, window, true);
             }
@@ -341,7 +331,15 @@ impl Element for BlockListItem {
                     active_shaped,
                 },
             ) => {
-                block_list::paint_frozen(bounds, tail_view, tail_shaped, *cell, window, cx);
+                paint_frozen(
+                    bounds,
+                    tail_view,
+                    tail_shaped,
+                    *cell,
+                    selection_bg,
+                    window,
+                    cx,
+                );
 
                 let active_bounds = Bounds::new(
                     point(bounds.left(), bounds.top() + px(tail_view.active_top)),

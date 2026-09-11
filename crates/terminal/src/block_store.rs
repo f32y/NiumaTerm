@@ -35,7 +35,7 @@ pub struct SegmentMeta {
 
 /// One finished command of the frozen history list: metadata + the engine
 /// block backing it. Born complete — no content ever streams into an item.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BlockItem {
     pub seq: Option<u64>,
     pub meta: SegmentMeta,

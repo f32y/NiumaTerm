@@ -3,6 +3,7 @@ use nmt_i18n::i18n;
 
 use crate::ui::persistence::spawn_default_pane;
 use crate::ui::shell::*;
+use crate::ui::terminal_launch::attach_remote;
 
 impl Shell {
     pub(super) fn default_profile(cx: &Context<Self>) -> (Option<String>, Vec<String>) {
@@ -122,7 +123,7 @@ impl Shell {
                 .await;
 
             let _ = this.update_in(cx, |this, window, cx| match connected {
-                Ok(remote) => match TerminalPane::spawn_remote(cx, id, remote) {
+                Ok(remote) => match attach_remote(cx, id, remote) {
                     Ok(pane) => {
                         this.leave_settings_workspace();
                         this.register_agent_pane(&pane, cx);

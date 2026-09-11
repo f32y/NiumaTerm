@@ -1,7 +1,13 @@
-use nmt_i18n::i18n;
+use std::time;
+
+use nmt_terminal::block_store::SegmentMeta;
 
 use crate::block_list;
-use crate::block_list::*;
+use crate::layout::truncate_command;
+use crate::session::InFlightBlock;
+use crate::theme::{
+    BLOCK_FAILURE_COLOR, BLOCK_INPUT_COLOR, BLOCK_RUNNING_COLOR, BLOCK_SUCCESS_COLOR,
+};
 
 /// Chrome of one visible item: gutter accent, right-aligned header,
 /// selection state. Element coords (scroll already subtracted); may extend
@@ -30,14 +36,14 @@ pub(super) fn item_accent(meta: &SegmentMeta) -> u32 {
 
 /// Header label of a frozen item: truncated command + status/duration.
 /// `None` without a command (nothing meaningful to show).
-pub(super) fn item_header(meta: &SegmentMeta) -> Option<String> {
+pub(super) fn item_header(meta: &SegmentMeta, labels: &DurationLabels) -> Option<String> {
     let command = meta.command.as_deref()?;
     let ended_at = meta.ended_at?;
 
     let duration = meta
         .started_at
         .and_then(|started_at| ended_at.duration_since(started_at).ok())
-        .map(format_duration);
+        .map(|duration| format_duration(duration, labels));
 
     let status = match (meta.exit_code, duration) {
         (Some(0), Some(d)) => format!("✓ {d}"),
@@ -87,100 +93,22 @@ pub(crate) fn live_chrome(
 }
 
 /// `1.2s` / `815ms` / `2m05s` — the header's duration label.
-pub(crate) fn format_duration(d: time::Duration) -> String {
+pub(crate) fn format_duration(d: time::Duration, labels: &DurationLabels) -> String {
     let secs = d.as_secs();
 
     if secs >= 60 {
-        i18n("terminal-duration-minutes-seconds")
+        labels
+            .minutes_seconds
             .replace("{minutes}", &(secs / 60).to_string())
             .replace("{seconds}", &format!("{:02}", secs % 60))
     } else if secs >= 1 {
-        i18n("terminal-duration-seconds").replace("{seconds}", &format!("{:.1}", d.as_secs_f32()))
+        labels
+            .seconds
+            .replace("{seconds}", &format!("{:.1}", d.as_secs_f32()))
     } else {
-        i18n("terminal-duration-milliseconds").replace("{count}", &d.as_millis().to_string())
-    }
-}
-
-pub(crate) fn paint_frozen_separators(
-    bounds: Bounds<Pixels>,
-    separators: &[f32],
-    window: &mut Window,
-) {
-    for y in separators {
-        window.paint_quad(fill(
-            block_separator_bounds(bounds, bounds.top() + px(*y), 1.0),
-            Rgba {
-                r: ((SEPARATOR_COLOR >> 16) & 0xff) as f32 / 255.0,
-                g: ((SEPARATOR_COLOR >> 8) & 0xff) as f32 / 255.0,
-                b: (SEPARATOR_COLOR & 0xff) as f32 / 255.0,
-                a: 0.67,
-            },
-        ));
-    }
-}
-
-pub(crate) fn paint_frozen_chrome(
-    bounds: Bounds<Pixels>,
-    items_chrome: &[FrozenItemChrome],
-    window: &mut Window,
-    cx: &mut App,
-) {
-    for chrome in items_chrome {
-        let top = bounds.top() + px(chrome.top);
-        let height = px(chrome.bottom - chrome.top);
-        let gutter_alpha = if chrome.selected { 0xe6 } else { 0x59 };
-
-        window.paint_quad(fill(
-            Bounds::new(
-                point(
-                    bounds.left() - px(BLOCK_GUTTER_GAP + BLOCK_GUTTER_WIDTH),
-                    top,
-                ),
-                size(px(BLOCK_GUTTER_WIDTH), height),
-            ),
-            rgba((chrome.accent << 8) | gutter_alpha),
-        ));
-
-        if chrome.selected {
-            window.paint_quad(fill(
-                Bounds::new(point(bounds.left(), top), size(bounds.size.width, height)),
-                rgba(BLOCK_SELECTED_TINT),
-            ));
-        }
-    }
-
-    let style = window.text_style();
-    let font_size = style.font_size.to_pixels(window.rem_size());
-
-    for chrome in items_chrome {
-        let Some(header) = chrome.header.as_deref() else {
-            continue;
-        };
-
-        let runs = [TextRun {
-            len: header.len(),
-            font: style.font(),
-            color: Hsla::from(rgb(0x7f8c98)),
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        }];
-
-        let shaped = window.text_system().shape_line(
-            SharedString::from(header.to_string()),
-            font_size,
-            &runs,
-            Some(bounds.size.width),
-        );
-
-        let _ = shaped.paint(
-            point(bounds.left(), bounds.top() + px(chrome.header_y)),
-            px(0.0),
-            TextAlign::Right,
-            Some(bounds.size.width),
-            window,
-            cx,
-        );
+        labels
+            .milliseconds
+            .replace("{count}", &d.as_millis().to_string())
     }
 }
 
@@ -210,4 +138,22 @@ pub(crate) fn offset_frozen_chrome(
     chrome.header_y += item_top;
 
     chrome
+}
+
+#[derive(Clone)]
+pub(crate) struct DurationLabels {
+    pub minutes_seconds: String,
+    pub seconds: String,
+    pub milliseconds: String,
+}
+
+#[cfg(test)]
+impl Default for DurationLabels {
+    fn default() -> Self {
+        Self {
+            minutes_seconds: "{minutes}m{seconds}s".into(),
+            seconds: "{seconds}s".into(),
+            milliseconds: "{count}ms".into(),
+        }
+    }
 }

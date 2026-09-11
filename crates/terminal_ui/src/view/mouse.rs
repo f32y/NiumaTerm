@@ -1,74 +1,21 @@
-use crate::input as terminal_input;
-use crate::view::*;
+use gpui::{
+    Context, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
+    ScrollDelta, ScrollWheelEvent, Window,
+};
+use nmt_terminal::session::SurfaceMouseButton;
 
-const BLOCK_GUTTER_SELECTION_ENABLED: bool = false;
+use crate::input::modifiers_state;
+use crate::metrics::CellMetrics;
+use crate::pane_model::mouse::{MouseInput, MouseOutcome};
+use crate::pane_model::viewport::LocalPoint;
+use crate::view::TerminalPane;
+use crate::view::links::follows_link;
 
-/// A pointer x hits the block gutter when it falls in the strip painted in the
-/// left padding, with a small tolerance into column 0.
-pub(super) fn block_gutter_hit(x: f32, origin_x: f32) -> bool {
-    let left = origin_x - BLOCK_GUTTER_GAP - BLOCK_GUTTER_WIDTH - 2.0;
-    let right = origin_x + 3.0;
-    (left..=right).contains(&x)
-}
-
-pub(super) fn selection_drag_started(
-    origin: Point<Pixels>,
-    position: Point<Pixels>,
-    cell_width: f32,
-) -> bool {
-    let dx = position.x.as_f32() - origin.x.as_f32();
-    let dy = position.y.as_f32() - origin.y.as_f32();
-
-    dx * dx + dy * dy >= cell_width * cell_width / 16.0
-}
-
-pub(super) fn selection_type_for_click_count(click_count: usize) -> SelectionType {
-    match click_count {
-        2 => SelectionType::Semantic,
-        3.. => SelectionType::Lines,
-        _ => SelectionType::Simple,
-    }
-}
-
-/// Map a pointer position to a grid cell. `offsets` shifts rows for bottom anchoring.
-pub(crate) fn terminal_cell_at_position(
-    position: Point<Pixels>,
-    origin: Point<Pixels>,
-    cell: metrics::CellMetrics,
-    offsets: &[f32],
-) -> (SurfaceCell, SurfaceCellSide) {
-    let x = (position.x.as_f32() - origin.x.as_f32()).max(0.0);
-    let y = (position.y.as_f32() - origin.y.as_f32()).max(0.0);
-    let col = (x / cell.width_px).floor() as u16;
-    let row = terminal_row_at_y(y, cell.height_px, offsets);
-    let cell_x = x - (col as f32 * cell.width_px);
-
-    let side = if cell_x < cell.width_px / 2.0 {
-        SurfaceCellSide::Left
-    } else {
-        SurfaceCellSide::Right
-    };
-
-    (SurfaceCell { col, row }, side)
-}
-
-fn surface_mouse_button(button: MouseButton) -> Option<SurfaceMouseButton> {
-    match button {
-        MouseButton::Left => Some(SurfaceMouseButton::Left),
-        MouseButton::Middle => Some(SurfaceMouseButton::Middle),
-        MouseButton::Right => Some(SurfaceMouseButton::Right),
-        MouseButton::Navigate(_) => None,
-    }
-}
-
-const WHEEL_LINES_PER_STEP: f32 = 3.0;
-
-pub(super) fn terminal_scroll_lines(delta: ScrollDelta, cell: metrics::CellMetrics) -> i32 {
+pub(super) fn terminal_scroll_lines(delta: ScrollDelta, cell: CellMetrics) -> i32 {
     let raw = match delta {
-        ScrollDelta::Lines(point) => point.y * WHEEL_LINES_PER_STEP,
+        ScrollDelta::Lines(point) => point.y * 3.0,
         ScrollDelta::Pixels(point) => point.y.as_f32() / cell.height_px.max(1.0),
     };
-
     if raw.abs() < 0.5 {
         0
     } else {
@@ -76,78 +23,49 @@ pub(super) fn terminal_scroll_lines(delta: ScrollDelta, cell: metrics::CellMetri
     }
 }
 
-/// A selection gesture in the frozen block region.
-///
-/// The three values are one gesture at three stages: the pixel the press
-/// landed on, the cell it resolved to once the pointer moved far enough, and
-/// the range that grew from it. A press alone selects nothing, so the anchor
-/// exists only between the press and the first move that commits to a drag.
-#[derive(Default)]
-pub(crate) struct FrozenSelectionDrag {
-    /// Frozen-region selection: (anchor, head), both inclusive cell points.
-    selection: Option<(FrozenPoint, FrozenPoint)>,
-    /// Anchor of an in-progress frozen-region drag. The selection itself is
-    /// only created on the first mouse-move, so a plain click selects nothing
-    /// (matching the engine's empty-selection-dropped-on-up semantics).
-    anchor: Option<FrozenPoint>,
-    /// Pixel origin of a text-selection gesture. Ignoring movement within a
-    /// quarter-cell radius prevents normal hand jitter from selecting a glyph.
-    drag_origin: Option<Point<Pixels>>,
-}
-
-impl FrozenSelectionDrag {
-    pub(super) fn origin(&self) -> Option<Point<Pixels>> {
-        self.drag_origin
-    }
-
-    pub(super) fn set_origin(&mut self, origin: Option<Point<Pixels>>) {
-        self.drag_origin = origin;
-    }
-
-    /// Start a drag from `anchor`, dropping whatever was selected.
-    pub(super) fn begin(&mut self, anchor: FrozenPoint) {
-        self.selection = None;
-        self.anchor = Some(anchor);
-    }
-
-    /// Take a range whole, as a double- or triple-click does. There is nothing
-    /// left to drag from, so the anchor goes with it.
-    pub(super) fn select(&mut self, selection: Option<(FrozenPoint, FrozenPoint)>) {
-        self.selection = selection;
-        self.anchor = None;
-    }
-
-    pub(super) fn anchor(&self) -> Option<FrozenPoint> {
-        self.anchor
-    }
-
-    /// Grow the selection to `head`, reporting whether a drag was in progress.
-    pub(super) fn extend(&mut self, head: FrozenPoint) -> bool {
-        let Some(anchor) = self.anchor else {
-            return false;
-        };
-
-        self.selection = Some((anchor, head));
-
-        true
-    }
-
-    /// End a drag without committing it, reporting whether one was open.
-    pub(super) fn commit(&mut self) -> bool {
-        self.anchor.take().is_some()
-    }
-
-    /// Drop the selection, reporting whether one was showing.
-    pub(crate) fn clear(&mut self) -> bool {
-        self.selection.take().is_some()
-    }
-
-    pub(crate) fn current(&self) -> Option<(FrozenPoint, FrozenPoint)> {
-        self.selection
-    }
-}
-
 impl TerminalPane {
+    pub(super) fn local_position(&self, position: Point<Pixels>) -> LocalPoint {
+        let origin = self.content_origin();
+        LocalPoint {
+            x: (position.x - origin.x).as_f32(),
+            y: (position.y - origin.y).as_f32(),
+        }
+    }
+
+    fn mouse_input(
+        &self,
+        position: Point<Pixels>,
+        button: Option<MouseButton>,
+        modifiers: Modifiers,
+        click_count: usize,
+    ) -> MouseInput {
+        MouseInput {
+            position: self.local_position(position),
+            button: button.and_then(|button| match button {
+                MouseButton::Left => Some(SurfaceMouseButton::Left),
+                MouseButton::Middle => Some(SurfaceMouseButton::Middle),
+                MouseButton::Right => Some(SurfaceMouseButton::Right),
+                MouseButton::Navigate(_) => None,
+            }),
+            modifiers: modifiers_state(modifiers),
+            click_count,
+            follow_link: follows_link(modifiers),
+        }
+    }
+
+    fn apply_mouse_outcome(&mut self, outcome: MouseOutcome, cx: &mut Context<Self>) {
+        match outcome {
+            MouseOutcome::Ignored => {}
+            MouseOutcome::OpenUrl(url) => cx.open_url(&url),
+            MouseOutcome::SelectionChanged => cx.notify(),
+            MouseOutcome::FrozenSelectionStarted => {
+                self.invalidate(cx);
+                cx.notify();
+            }
+            MouseOutcome::EngineHandled => self.invalidate(cx),
+        }
+    }
+
     pub(super) fn on_mouse_down(
         &mut self,
         event: &MouseDownEvent,
@@ -155,79 +73,15 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         window.focus(&self.focus, cx);
-
-        self.frozen_drag.set_origin(None);
-
-        // A modified left-click opens the URL under the pointer (OSC 8 target
-        // or URL-shaped text). It wins over selection and mouse reporting so
-        // links stay clickable inside TUIs, matching common terminal behavior.
-        if event.button == MouseButton::Left
-            && follows_link(event.modifiers)
-            && let Some(link) = self.link_at_position(event.position, cx)
-        {
-            info!(url = link.url, "modified click open url");
-            cx.open_url(&link.url);
-            return;
-        }
-
-        if BLOCK_GUTTER_SELECTION_ENABLED
-            && event.button == MouseButton::Left
-            && self.block_chrome_enabled(cx)
-            && self.try_select_frozen_item(event.position, cx)
-        {
-            return;
-        }
-
-        // Block-split: a left press in the frozen region starts a frozen
-        // selection (and drops the engine one); any other press clears it.
-        let reports_mouse = self
-            .surface
-            .session
-            .mouse_reporting_active_for(terminal_input::modifiers_state(event.modifiers));
-
-        let selection_type = selection_type_for_click_count(event.click_count);
-
-        self.frozen_drag.set_origin(
-            (event.button == MouseButton::Left && !reports_mouse).then_some(event.position),
-        );
-
-        if self.block_list_mode(cx) && !reports_mouse {
-            if event.button == MouseButton::Left
-                && let Some(BlockListPoint::Frozen(pt)) =
-                    self.block_list_point_at(event.position, cx)
-            {
-                // The engine highlight is baked into the cached frame, so
-                // clearing the selection needs a frame rebuild too.
-                self.surface.session.clear_selection();
-
-                if selection_type == SelectionType::Simple {
-                    self.frozen_drag.begin(pt);
-                } else {
-                    let expanded = self.expanded_frozen_selection(pt, selection_type);
-                    self.frozen_drag.select(expanded);
-                }
-
-                self.invalidate(cx);
-
-                cx.notify();
-
-                return;
-            }
-
-            if self.frozen_drag.clear() {
-                cx.notify();
-            }
-        }
-
-        self.apply_mouse_event(
+        self.cell_metrics(window, cx);
+        let input = self.mouse_input(
             event.position,
             Some(event.button),
-            SurfaceMouseEventKind::Down,
             event.modifiers,
-            selection_type,
-            window,
-            cx,
+            event.click_count,
         );
+        let outcome = self.model.mouse_down(input);
+        self.apply_mouse_outcome(outcome, cx);
     }
 
     pub(super) fn on_mouse_up(
@@ -236,28 +90,14 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.frozen_drag.set_origin(None);
-
-        if self.scrollbar.is_dragging() {
-            // Drag ended: start the linger countdown that hides the bar.
-            self.scrollbar.mark_activity(cx);
+        self.cell_metrics(window, cx);
+        if self.model.scrollbar.is_dragging() {
+            self.mark_scrollbar_activity(cx);
         }
-
-        self.scrollbar.end_drag();
-
-        if self.frozen_drag.commit() {
-            return;
-        }
-
-        self.apply_mouse_event(
-            event.position,
-            Some(event.button),
-            SurfaceMouseEventKind::Up,
-            event.modifiers,
-            SelectionType::Simple,
-            window,
-            cx,
-        );
+        self.model.scrollbar.end_drag();
+        let input = self.mouse_input(event.position, Some(event.button), event.modifiers, 1);
+        let outcome = self.model.mouse_up(input);
+        self.apply_mouse_outcome(outcome, cx);
     }
 
     pub(crate) fn on_mouse_move(
@@ -266,58 +106,24 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.links.record_position(event.position);
-
+        self.cell_metrics(window, cx);
+        let local = self.local_position(event.position);
+        self.model.links.record_position(local);
         if event.pressed_button.is_none() {
             self.update_hovered_link(event.position, event.modifiers, cx);
         }
-
-        if self.scrollbar.is_dragging() {
-            let fraction = self.scrollbar_fraction(event.position.y);
-            self.scroll_thumb_to(self.scrollbar.thumb_top_for(fraction), cx);
+        if self.model.scrollbar.is_dragging() {
+            self.scroll_thumb_to(
+                self.model
+                    .scrollbar
+                    .thumb_top_for(self.scrollbar_fraction(event.position.y)),
+                cx,
+            );
             return;
         }
-
-        if let Some(origin) = self.frozen_drag.origin() {
-            let cell_width = self.cell_metrics(window, cx).width_px;
-
-            if !selection_drag_started(origin, event.position, cell_width) {
-                return;
-            }
-
-            self.frozen_drag.set_origin(None);
-        }
-
-        if self.frozen_drag.anchor().is_some() {
-            // Clamp into the frozen region so a drag past the boundary sticks to
-            // the last frozen row instead of vanishing.
-            let mut pos = event.position;
-
-            let origin = self.content_origin();
-            let max_y = origin.y + px((self.frozen.active_top() - 1.0).max(0.0));
-
-            if pos.y > max_y {
-                pos.y = max_y;
-            }
-
-            if let Some(BlockListPoint::Frozen(head)) = self.block_list_point_at(pos, cx)
-                && self.frozen_drag.extend(head)
-            {
-                cx.notify();
-            }
-
-            return;
-        }
-
-        self.apply_mouse_event(
-            event.position,
-            event.pressed_button,
-            SurfaceMouseEventKind::Move,
-            event.modifiers,
-            SelectionType::Simple,
-            window,
-            cx,
-        );
+        let input = self.mouse_input(event.position, event.pressed_button, event.modifiers, 1);
+        let outcome = self.model.mouse_move(input);
+        self.apply_mouse_outcome(outcome, cx);
     }
 
     pub(super) fn on_scroll_wheel(
@@ -326,113 +132,17 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Rows shift under the pointer; drop the underline instead of leaving
-        // it stale. The next mouse move recomputes it.
-        if self.links.clear() {
+        if self.model.links.clear() {
             cx.notify();
         }
-
-        let cell_metrics = self.cell_metrics(window, cx);
-
-        let lines = terminal_scroll_lines(event.delta, cell_metrics);
-
-        if lines == 0 {
-            return;
-        }
-
-        // Block-split: scrolling is list state; the engine viewport stays
-        // pinned. TUI mouse reporting still goes to the program.
-        if self.block_list_mode(cx) && !self.surface.session.mouse_reporting_active() {
-            return;
-        }
-
-        let offsets = self.current_row_offsets(cx);
-
-        let (cell, _) = terminal_cell_at_position(
-            event.position,
-            self.content_origin(),
-            cell_metrics,
-            &offsets,
-        );
-
-        if self.surface.session.apply_scroll(
-            cell,
+        let cell = self.cell_metrics(window, cx);
+        let lines = terminal_scroll_lines(event.delta, cell);
+        if self.model.scroll_wheel(
+            self.local_position(event.position),
             lines,
-            terminal_input::modifiers_state(event.modifiers),
+            modifiers_state(event.modifiers),
         ) {
-            self.scrollbar.mark_activity(cx);
-
-            self.invalidate(cx);
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn apply_mouse_event(
-        &mut self,
-        position: Point<Pixels>,
-        button: Option<MouseButton>,
-        kind: SurfaceMouseEventKind,
-        modifiers: Modifiers,
-        selection_type: SelectionType,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let cell_metrics = self.cell_metrics(window, cx);
-
-        let modifiers = terminal_input::modifiers_state(modifiers);
-
-        if self.block_list_mode(cx)
-            && !self.surface.session.mouse_reporting_active_for(modifiers)
-            && button == Some(MouseButton::Left)
-            && let Some(point) = self.block_list_point_at(position, cx)
-        {
-            let (_, side) =
-                terminal_cell_at_position(position, self.content_origin(), cell_metrics, &[]);
-
-            let cell = match point {
-                BlockListPoint::LiveHistory { row, col } => SurfaceScreenCell { row, col },
-                // An engine selection cannot cross into an immutable finished
-                // block, so dragging above the active block clamps to its first
-                // SCREEN row.
-                BlockListPoint::Frozen(point) => SurfaceScreenCell {
-                    row: 0,
-                    col: point.col.min(u16::MAX as u32) as u16,
-                },
-            };
-
-            if self
-                .surface
-                .session
-                .apply_screen_selection(cell, side, kind, selection_type)
-            {
-                self.invalidate(cx);
-            }
-
-            return;
-        }
-
-        let offsets = self.current_row_offsets(cx);
-
-        // Block-split: the live grid starts at `active_top` in the list, so
-        // shift the mapping origin.
-        let mut origin = self.content_origin();
-
-        if self.block_list_mode(cx) {
-            origin.y += px(self.frozen.active_top());
-        }
-
-        let (cell, side) = terminal_cell_at_position(position, origin, cell_metrics, &offsets);
-
-        let handled = self.surface.session.apply_mouse(
-            cell,
-            side,
-            button.and_then(surface_mouse_button),
-            kind,
-            modifiers,
-            selection_type,
-        );
-
-        if handled {
+            self.mark_scrollbar_activity(cx);
             self.invalidate(cx);
         }
     }

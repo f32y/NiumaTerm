@@ -4365,8 +4365,10 @@ version = "1.3.4"
 dependencies = [
  "base32",
  "futures",
+ "nmt_config",
  "nmt_platform",
  "nmt_remote_session_hub",
+ "nmt_terminal",
  "parking_lot",
  "postcard",
  "rand 0.10.2",

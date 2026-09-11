@@ -1,10 +1,13 @@
 #![cfg(windows)]
 use std::{env, fs, process, thread, time};
 
+use nmt_config::colors::Colors;
+use nmt_remote_net::net_pty::terminal_session;
 use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 
+use crate::frame_source::TerminalFrameSource;
 use crate::layout::live_frame_text;
-use crate::surface::TerminalSurface;
+use crate::pane_model::FrameTheme;
 use crate::wake::wake_channel;
 
 /// End-to-end proof that a remote session renders through `NetPty`: start a
@@ -79,8 +82,10 @@ fn remote_session_renders_through_net_pty() {
     )
     .expect("attach");
 
-    let surface =
-        TerminalSurface::for_gpui_remote(wake_channel().0, 1, remote).expect("remote session");
+    let surface = TerminalFrameSource::attach(wake_channel().0, 1, |observer| {
+        terminal_session(remote, 1, Colors::default(), Some(observer))
+    })
+    .expect("remote session");
 
     surface
         .session
@@ -90,7 +95,7 @@ fn remote_session_renders_through_net_pty() {
     let mut rendered = false;
 
     while time::Instant::now() < deadline {
-        let vt = live_frame_text(&surface.frame(None)).unwrap_or_default();
+        let vt = live_frame_text(&surface.frame(None, &FrameTheme::default())).unwrap_or_default();
 
         if vt.contains(MARKER) {
             rendered = true;

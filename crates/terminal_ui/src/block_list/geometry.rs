@@ -1,5 +1,6 @@
-use crate::block_list;
-use crate::block_list::*;
+use std::ops;
+
+use nmt_terminal::block_store::{BlockItem, BlockStore};
 
 /// Blank rows above and below each item's content: one full cell row on each
 /// side, with the separator rule on the item's top edge — so adjacent blocks
@@ -83,26 +84,6 @@ pub(crate) fn nav_item_top(
         tops.into_iter().rev().find(|t| *t < from_px - 0.5)
     } else {
         tops.into_iter().find(|t| *t > from_px + 0.5)
-    }
-}
-
-/// Blank rows around each block for the current presentation: chrome shows
-/// one pad row above and below; compact (Command Blocks off) packs block rows
-/// contiguously like a classic grid. Every block-list geometry consumer must
-/// use this one value per frame so heights, hit-testing, and scroll math agree.
-pub(crate) fn block_pad_rows(cx: &App) -> f32 {
-    if cx.global::<TerminalSettings>().command_blocks {
-        block_list::ITEM_PAD_ROWS
-    } else {
-        0.0
-    }
-}
-
-pub(crate) fn block_list_alignment(fixed_bottom: bool) -> ListAlignment {
-    if fixed_bottom {
-        ListAlignment::Bottom
-    } else {
-        ListAlignment::Top
     }
 }
 

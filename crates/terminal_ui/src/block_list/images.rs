@@ -1,4 +1,7 @@
-use crate::block_list::*;
+use std::{collections, ops, sync};
+
+use nmt_terminal::ghostty::PlacementScreenPos;
+
 use crate::graphics;
 
 /// A frozen Kitty image band positioned inside one block-list item: one

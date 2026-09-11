@@ -15,7 +15,7 @@ pub(crate) struct TerminalFrameCache {
     full_invalidation: bool,
 }
 
-pub(super) type GenerationMap = collections::HashMap<u32, Arc<graphics::ImageGeneration>>;
+pub(crate) type GenerationMap = collections::HashMap<u32, Arc<graphics::ImageGeneration>>;
 
 impl TerminalFrameCache {
     /// The last built frame — served even when stale, so consumers between an

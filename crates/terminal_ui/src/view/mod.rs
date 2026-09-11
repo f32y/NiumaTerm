@@ -1,70 +1,33 @@
 mod blocks;
 mod events;
 mod input;
+pub(crate) mod links;
+mod list_state;
 mod mouse;
 mod scroll;
-
 #[cfg(test)]
 mod tests;
 
-use std::ops::Range;
-use std::path::PathBuf;
-use std::time::{self, Duration};
+use std::sync::Arc;
 
 use futures::StreamExt;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, AppContext, Bounds, Context, Entity, EntityInputHandler, EventEmitter,
-    ExternalPaths, FocusHandle, Focusable, IntoElement, KeyDownEvent, Keystroke, ListOffset,
-    Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    ScrollDelta, ScrollWheelEvent, Size, UTF16Selection, Window, actions, div, list, point, px,
-    rgb, size,
+    App, AppContext, Bounds, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
+    MouseButton, Pixels, Point, Size, Window, actions, div, px, rgb,
 };
-use gpui_component::WindowExt as _;
-use gpui_component::notification::Notification;
-use nmt_agent::{AgentRoute, agent_process};
+use nmt_agent::AgentRoute;
+use nmt_config::active_colors;
 use nmt_config::local_state::TabState;
-use nmt_config::{CursorShape, active_colors};
-#[cfg(windows)]
-use nmt_i18n::i18n;
-use nmt_terminal::block_store::BlockStore;
-use nmt_terminal::ghostty::{BlockHandle, ScrollbarInfo};
-use nmt_terminal::selection::SelectionType;
-use tracing::{info, warn};
+use nmt_terminal::session::{EngineError, SessionObserver, TerminalSession, TerminalSessionConfig};
 
-use crate::block_list::{
-    BlockListMeasureKey, BlockListPoint, BlockListState, FrozenPoint, ListReconcile,
-    RemeasureScope, block_list_active_top_px, block_list_alignment, block_list_render_metrics,
-    block_pad_rows, plan_list_reconcile,
-};
-use crate::dirty::DirtyState;
-use crate::frame::{
-    TerminalFrame, TerminalFrameCache, theme_default_background, theme_default_foreground,
-};
-use crate::layout::{
-    bottom_anchor_offsets, frame_content_rows, live_frame_text, row_y_offset, terminal_row_at_y,
-};
-use crate::links::{LinkHover, follows_link};
-use crate::scrollbar::{scrollbar_element, scrollbar_offset_for_thumb};
-use crate::session::{HostEvent, InFlightBlock};
-use crate::settings::TerminalSettings;
-use crate::surface::{
-    SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
-    TerminalKeyAction as SurfaceKeyAction, TerminalKeyResult as SurfaceKeyResult, TerminalSurface,
-};
-use crate::terminal_view::{BlockListItem, BlockListView, TerminalView};
-use crate::theme::{BLOCK_GUTTER_GAP, BLOCK_GUTTER_WIDTH};
-use crate::view::events::terminal_surface_for_tab;
-#[cfg(test)]
-use crate::view::input::dropped_paths_text;
-use crate::view::mouse::FrozenSelectionDrag;
-pub(super) use crate::view::mouse::terminal_cell_at_position;
-#[cfg(test)]
-use crate::view::mouse::{
-    block_gutter_hit, selection_drag_started, selection_type_for_click_count, terminal_scroll_lines,
-};
-use crate::view::scroll::ScrollbarActivity;
-use crate::{block_list, metrics, wake};
+use crate::frame_source::TerminalFrameSource;
+use crate::pane_model::{FrameTheme, PaneController, PaneSettings};
+use crate::scrollbar::scrollbar_element;
+use crate::settings::{TerminalSettings, duration_labels};
+use crate::terminal_view::{BlockListView, TerminalView};
+use crate::view::list_state::{BlockListState, block_list_alignment};
+use crate::{metrics, wake};
 
 actions!(
     terminal,
@@ -86,36 +49,33 @@ actions!(
     ]
 );
 
-pub struct TerminalPane {
-    pub focus: FocusHandle,
+pub struct TerminalLaunch {
+    pub config: TerminalSessionConfig,
+    pub restorable: TabState,
+    pub profile_name: String,
+    pub agent_route: AgentRoute,
+}
+
+struct PaneIdentity {
     /// Surface/tab id (same value as this pane's `TabId`); the shell pump uses it
     /// to route host events to the owning tab.
     id: u64,
     profile_name: String,
+    restorable: TabState,
     agent_route: AgentRoute,
-    pub(super) surface: TerminalSurface,
-    cursor_shape: CursorShape,
-    frame_cache: TerminalFrameCache,
-    pub(super) cell_metrics: Option<metrics::CellMetrics>,
+}
+
+pub struct TerminalPane {
+    pub focus: FocusHandle,
+    identity: PaneIdentity,
+    pub(crate) model: PaneController,
     /// The terminal leaf's laid-out content rect (window coords, padding
     /// excluded), set from the element's paint. Resize and pointer hit-testing use
     /// it so chrome (tab bar) offsets are honored instead of assuming the window.
     pub(super) content_bounds: Option<Bounds<Pixels>>,
-    pub(super) scrollbar: ScrollbarActivity,
     wake: wake::WakeSignal,
-    dirty: DirtyState,
     image_releases_attached: bool,
-    /// The in-flight command mirrored from the session on drain.
-    in_flight: Option<InFlightBlock>,
-    /// Whether a trusted prompt input region is open.
-    open_prompt: bool,
     pub(super) block_list: BlockListState,
-    /// What the block list painted last frame, and the item selected in its
-    /// gutter.
-    pub(crate) frozen: block_list::FrozenGutterSelection,
-    /// The in-progress selection gesture in the frozen block region.
-    pub(super) frozen_drag: FrozenSelectionDrag,
-    pub(super) links: LinkHover,
 }
 
 pub struct AgentInterrupted;
@@ -123,105 +83,81 @@ pub struct AgentInterrupted;
 impl EventEmitter<AgentInterrupted> for TerminalPane {}
 
 impl TerminalPane {
-    /// Launch policy is resolved by the caller: `tab_state` arrives with a
-    /// concrete shell (the settings layer fills a blank one from the default
-    /// profile) and `profile_name` names the profile it resolved to.
     pub fn spawn(
         cx: &mut impl AppContext,
         surface_id: u64,
-        tab_state: TabState,
-        profile_name: String,
+        launch: TerminalLaunch,
     ) -> Result<Entity<Self>, String> {
         let (wake, wake_rx) = wake::wake_channel();
-        let agent_route = agent_process().allocate_route();
-        let environment = agent_process().environment_for(&agent_route);
-
-        let (cursor_shape, manage_process_tree) =
-            cx.read_global(|settings: &TerminalSettings, _| {
-                (settings.cursor_shape, settings.manage_subprocess_job)
-            });
-
-        let surface = terminal_surface_for_tab(
-            &wake,
+        let source = TerminalFrameSource::for_gpui(
+            wake.clone(),
             surface_id,
-            &tab_state,
-            &profile_name,
-            cursor_shape,
-            environment,
-            manage_process_tree,
+            launch.config,
+            active_colors(),
         )?;
-
-        Ok(cx.new(|cx| {
-            Self::from_surface(
-                cx,
-                surface_id,
-                profile_name,
-                agent_route,
-                wake,
-                wake_rx,
-                surface,
-            )
-        }))
+        let identity = PaneIdentity {
+            id: surface_id,
+            profile_name: launch.profile_name,
+            restorable: launch.restorable,
+            agent_route: launch.agent_route,
+        };
+        Ok(cx.new(|cx| Self::from_source(cx, identity, wake, wake_rx, source)))
     }
 
-    /// Spawn a pane backed by an already-attached remote session. Mirrors
-    /// [`Self::spawn`] but skips local-only concerns (shell profile, working
-    /// dir); the remote host owns the process.
-    #[cfg(windows)]
-    pub fn spawn_remote(
+    /// Install the observer before starting the session so its first output,
+    /// images and wake notifications reach the pane being constructed.
+    pub fn attach(
         cx: &mut impl AppContext,
-        surface_id: u64,
-        remote: nmt_remote_net::RemoteSession,
-    ) -> Result<Entity<Self>, String> {
-        let (wake, wake_rx) = wake::wake_channel();
-        let agent_route = agent_process().allocate_route();
-
-        let surface = TerminalSurface::for_gpui_remote(wake.clone(), surface_id, remote)?;
-
-        Ok(cx.new(|cx| {
-            Self::from_surface(
-                cx,
-                surface_id,
-                i18n("terminal-remote-profile-name").to_string(),
-                agent_route,
-                wake,
-                wake_rx,
-                surface,
-            )
-        }))
-    }
-
-    fn from_surface(
-        cx: &mut Context<Self>,
         surface_id: u64,
         profile_name: String,
         agent_route: AgentRoute,
+        connect: impl FnOnce(Arc<dyn SessionObserver>) -> Result<TerminalSession, EngineError>,
+    ) -> Result<Entity<Self>, String> {
+        let (wake, wake_rx) = wake::wake_channel();
+        let source = TerminalFrameSource::attach(wake.clone(), surface_id, connect)?;
+        let identity = PaneIdentity {
+            id: surface_id,
+            profile_name,
+            restorable: TabState::default(),
+            agent_route,
+        };
+        Ok(cx.new(|cx| Self::from_source(cx, identity, wake, wake_rx, source)))
+    }
+
+    fn from_source(
+        cx: &mut Context<Self>,
+        identity: PaneIdentity,
         wake: wake::WakeSignal,
         mut wake_rx: wake::WakeReceiver,
-        surface: TerminalSurface,
+        surface: TerminalFrameSource,
     ) -> Self {
         // Apply terminal presentation settings to existing panes and invalidate
         // measurements that depend on font metrics.
         cx.observe_global::<TerminalSettings>(|this, cx| {
-            let settings = cx.global::<TerminalSettings>();
-            let fixed_bottom = settings.fixed_bottom();
-            let cursor_shape = settings.cursor_shape;
-
+            let mut settings = PaneSettings::from(cx.global::<TerminalSettings>());
+            let colors = active_colors();
             this.block_list
                 .list
-                .set_alignment(block_list_alignment(fixed_bottom));
+                .set_alignment(block_list_alignment(settings.fixed_bottom));
 
-            this.surface.session.set_theme_colors(&active_colors());
+            this.model.source.session.set_theme_colors(&colors);
 
-            if cursor_shape != this.cursor_shape
-                && this.surface.session.set_cursor_shape(cursor_shape)
+            if settings.cursor_shape != this.model.settings.cursor_shape
+                && !this
+                    .model
+                    .source
+                    .session
+                    .set_cursor_shape(settings.cursor_shape)
             {
-                this.cursor_shape = cursor_shape;
+                settings.cursor_shape = this.model.settings.cursor_shape;
             }
 
-            this.cell_metrics = None;
+            this.model.settings = settings;
+            this.model.theme = FrameTheme::from(&colors);
+            this.model.duration_labels = duration_labels();
+            this.model.cell_metrics = None;
 
-            this.frame_cache.invalidate_full();
+            this.model.frame_cache.invalidate_full();
 
             cx.notify();
         })
@@ -243,42 +179,35 @@ impl TerminalPane {
         .detach();
 
         let settings = cx.global::<TerminalSettings>();
-        let cursor_shape = settings.cursor_shape;
         let fixed_bottom_requested = settings.fixed_bottom();
 
         Self {
             focus: cx.focus_handle(),
-            id: surface_id,
-            profile_name,
-            agent_route,
-            surface,
-            cursor_shape,
-            frame_cache: TerminalFrameCache::default(),
-            cell_metrics: None,
+            identity,
+            model: PaneController::new(
+                surface,
+                PaneSettings::from(settings),
+                FrameTheme::from(&active_colors()),
+                duration_labels(),
+            ),
             content_bounds: None,
-            scrollbar: ScrollbarActivity::default(),
             wake,
-            dirty: DirtyState::default(),
             image_releases_attached: false,
-            in_flight: None,
-            open_prompt: false,
             block_list: BlockListState::new(block_list_alignment(fixed_bottom_requested)),
-            frozen: Default::default(),
-            frozen_drag: FrozenSelectionDrag::default(),
-            links: LinkHover::default(),
         }
     }
 
     pub fn agent_route(&self) -> &AgentRoute {
-        &self.agent_route
+        &self.identity.agent_route
     }
 
     pub fn profile_name(&self) -> &str {
-        &self.profile_name
+        &self.identity.profile_name
     }
 
     fn cell_metrics(&mut self, window: &mut Window, cx: &App) -> metrics::CellMetrics {
         *self
+            .model
             .cell_metrics
             .get_or_insert_with(|| metrics::measure_cell(window, cx))
     }
@@ -300,63 +229,44 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         self.content_bounds = Some(bounds);
+        self.model.content_size = (bounds.size.width.as_f32(), bounds.size.height.as_f32());
+        self.model.cell_metrics = Some(cell);
+        self.model.update_viewport();
 
-        if self.surface.resize_for_content(
+        if self.model.source.resize_for_content(
             bounds.size.width.as_f32(),
             bounds.size.height.as_f32(),
             cell,
         ) {
-            self.frame_cache.invalidate();
+            self.model.frame_cache.invalidate();
             cx.notify();
         }
     }
 
-    fn refresh_frame(&mut self) {
-        let previous = self.frame_cache.reusable_frame();
-
-        self.frame_cache
-            .rebuild(self.surface.frame(previous.as_ref()));
-    }
-
     fn invalidate(&mut self, cx: &mut Context<Self>) {
-        self.frame_cache.invalidate();
+        self.model.frame_cache.invalidate();
 
-        if self.dirty.mark() {
+        if self.model.dirty.mark() {
             cx.notify();
         }
     }
 
     fn invalidate_chrome(&mut self, cx: &mut Context<Self>) {
-        self.frame_cache.invalidate();
+        self.model.frame_cache.invalidate();
 
-        self.dirty.mark();
+        self.model.dirty.mark();
 
         // Background panes cannot clear their dirty bit by rendering, but the
         // shell observer still needs every chrome wake to refresh tab state.
         cx.notify();
     }
 
-    /// The current frame's row offsets for pointer/IME mapping.
-    pub(super) fn current_row_offsets(&self, cx: &App) -> Vec<f32> {
-        if self.block_list_mode(cx) {
-            return Vec::new();
-        }
-
-        let (Some(frame), Some(cell)) = (self.frame_cache.current(), self.cell_metrics) else {
-            return Vec::new();
-        };
-
-        let fixed_bottom = cx.global::<TerminalSettings>().fixed_bottom();
-
-        bottom_anchor_offsets(&frame, cell.height_px, fixed_bottom)
-    }
-
     pub fn id(&self) -> u64 {
-        self.id
+        self.identity.id
     }
 
     pub fn terminal_title(&self) -> String {
-        self.surface.session.title()
+        self.model.source.session.title()
     }
 
     /// The pane's last laid-out content size (`None` before the first paint).
@@ -369,18 +279,22 @@ impl TerminalPane {
     /// Number of child processes in the shell's Job Object (requires the
     /// job-management setting; 0 otherwise).
     pub fn child_process_count(&self) -> usize {
-        self.surface.session.child_process_count()
+        self.model.source.session.child_process_count()
     }
 
     /// Whether a command is currently executing in this pane. Mirrors the
     /// session's in-flight block, so it only reports for shells whose OSC 133
     /// marks are trusted; an unintegrated shell always reads as idle.
     pub fn command_running(&self) -> bool {
-        self.in_flight.is_some()
+        self.model.in_flight.is_some()
     }
 
     pub fn tab_state(&self) -> TabState {
-        self.surface.tab_state()
+        let mut state = self.identity.restorable.clone();
+        if let Some(cwd) = self.model.source.session.current_directory() {
+            state.cwd = Some(cwd);
+        }
+        state
     }
 }
 
@@ -390,12 +304,10 @@ impl Focusable for TerminalPane {
     }
 }
 
-impl TerminalPane {}
-
 impl Render for TerminalPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.image_releases_attached {
-            let queue = self.surface.images.generations.lock().release_queue();
+            let queue = self.model.source.images.generations.lock().release_queue();
             if let Some(mut releases) = queue.lock().attach() {
                 let handle = window.window_handle();
                 // The task owns no pane or generation references. It drains through
@@ -417,28 +329,27 @@ impl Render for TerminalPane {
             self.image_releases_attached = true;
         }
 
-        self.dirty.begin_frame();
+        self.model.dirty.begin_frame();
 
-        self.wake.mark_delivered(self.id);
+        self.wake.mark_delivered(self.identity.id);
 
         // Host events are drained by the shell pump (observer), and the surface
         // is resized from the leaf's actual bounds in paint — neither happens
         // here, so background tabs and chrome offsets are handled correctly.
         let cell = self.cell_metrics(window, cx);
 
-        if self.frame_cache.needs_rebuild() {
-            self.refresh_frame();
+        if self.model.frame_cache.needs_rebuild() {
+            self.model.refresh_frame();
         }
 
-        let frame = self.frame_cache.current().unwrap_or_default();
+        let frame = self.model.frame_cache.current().unwrap_or_default();
 
-        let settings = cx.global::<TerminalSettings>();
-        let fixed_bottom = settings.fixed_bottom();
-        let show_block_chrome = settings.command_blocks;
+        let fixed_bottom = self.model.settings.fixed_bottom;
+        let show_block_chrome = self.model.settings.show_block_chrome;
 
         self.block_list
             .list
-            .set_smooth_wheel_enabled(settings.smooth_wheel);
+            .set_smooth_wheel_enabled(self.model.settings.smooth_wheel);
 
         // Block-split list: native GPUI list owns visibility, clamp, resize
         // anchoring, and tail following.
@@ -450,21 +361,13 @@ impl Render for TerminalPane {
         let block_list_element = self.render_block_list_content(&frame, cell, viewport_px, cx);
 
         // Auto-hide: the scrollbar stays solid briefly, then fades out.
-        let scrollbar_opacity = self.scrollbar.opacity();
+        let scrollbar_opacity = self.model.scrollbar.opacity();
 
         if scrollbar_opacity.is_some_and(|opacity| opacity < 1.0) {
             window.request_animation_frame();
         }
 
-        let scrollbar_info = if block_list_element.is_some() {
-            ScrollbarInfo {
-                total: (self.block_list.scrollbar.1 + viewport_px).max(0.0) as u64,
-                offset: self.block_list.scrollbar.0.max(0.0) as u64,
-                len: viewport_px.max(0.0) as u64,
-            }
-        } else {
-            frame.scrollbar()
-        };
+        let scrollbar_info = self.model.viewport.scrollbar_info();
 
         // Keep the transparent track hit-testable so hovering the scrollbar
         // region can reveal it after the activity fade has completed.
@@ -473,19 +376,19 @@ impl Render for TerminalPane {
         div()
             // Stateful id: hover-end tracking (the link-underline clear
             // below) needs element state.
-            .id(("terminal-pane", self.id as usize))
+            .id(("terminal-pane", self.identity.id as usize))
             .size_full()
             .relative()
             // This is the terminal region's single full-bleed background;
             // cells with explicit background colors stay opaque on top.
-            .bg(rgb(theme_default_background().rgb_u32())
+            .bg(rgb(self.model.theme.background.rgb_u32())
                 .opacity(cx.global::<TerminalSettings>().background_opacity))
             // The shell frames each pane as a 1px-bordered rounded card; the
             // fill is rounded to the card's inner radius so its corners don't
             // paint square over the frame. The cell padding below keeps glyphs
             // clear of the rounded corners.
             .rounded(cx.global::<TerminalSettings>().corner_radius - px(1.))
-            .text_color(rgb(theme_default_foreground().rgb_u32()))
+            .text_color(rgb(self.model.theme.foreground.rgb_u32()))
             .font(cx.global::<TerminalSettings>().font())
             .text_size(px(metrics::font_size_px(cx)))
             .line_height(px(cell.height_px))
@@ -507,9 +410,9 @@ impl Render for TerminalPane {
             // so hover end is what clears a still-Ctrl-held underline.
             .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
                 if !hovered {
-                    this.links.forget_position();
+                    this.model.links.forget_position();
 
-                    if this.links.clear() {
+                    if this.model.links.clear() {
                         cx.notify();
                     }
                 }
@@ -540,16 +443,16 @@ impl Render for TerminalPane {
             // Ctrl-hover link underline. Rects are content-origin-relative;
             // absolute children position from the padding box, so shift by
             // the content padding.
-            .when_some(self.links.current(), |this, link| {
+            .when_some(self.model.links.current(), |this, link| {
                 this.cursor_pointer()
                     .children(link.rects.iter().map(|rect| {
                         div()
                             .absolute()
-                            .left(rect.origin.x + px(metrics::PADDING_PX))
-                            .top(rect.origin.y + px(metrics::PADDING_PX))
-                            .w(rect.size.width)
-                            .h(rect.size.height)
-                            .bg(rgb(theme_default_foreground().rgb_u32()))
+                            .left(px(rect.origin.x + metrics::PADDING_PX))
+                            .top(px(rect.origin.y + metrics::PADDING_PX))
+                            .w(px(rect.width))
+                            .h(px(rect.height))
+                            .bg(rgb(self.model.theme.foreground.rgb_u32()))
                     }))
             })
     }

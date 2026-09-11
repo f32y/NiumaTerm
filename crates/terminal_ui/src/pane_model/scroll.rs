@@ -1,0 +1,77 @@
+use crate::block_list::nav_item_top;
+use crate::layout::frame_content_rows;
+use crate::pane_model::PaneController;
+use crate::pane_model::list_mirror::{BlockListMirror, ListOp};
+use crate::pane_model::viewport::Viewport;
+
+pub(crate) enum ScrollOutcome {
+    Ignored,
+    GridChanged,
+    List(ListOp),
+}
+
+impl PaneController {
+    pub(crate) fn scroll_to_latest(&mut self) -> ScrollOutcome {
+        if !self.viewport.is_scrolled() {
+            return ScrollOutcome::Ignored;
+        }
+        match self.viewport {
+            Viewport::BlockList { .. } => {
+                self.block_list.scrollbar.0 = self.block_list.scrollbar.1;
+                self.update_viewport();
+                ScrollOutcome::List(ListOp::ScrollToEnd)
+            }
+            Viewport::Grid { .. } => self.scroll_thumb_to(1.0),
+        }
+    }
+
+    pub(crate) fn scroll_thumb_to(&mut self, thumb_top: f32) -> ScrollOutcome {
+        let Some(target) = self.viewport.thumb_target(thumb_top) else {
+            return ScrollOutcome::Ignored;
+        };
+        match &self.viewport {
+            Viewport::BlockList { .. } => self.scroll_list_to(target as f32),
+            Viewport::Grid { scrollbar, .. } => {
+                let delta = target.round() as isize - scrollbar.offset as isize;
+                if delta != 0 && self.source.session.scroll_lines(delta) {
+                    ScrollOutcome::GridChanged
+                } else {
+                    ScrollOutcome::Ignored
+                }
+            }
+        }
+    }
+
+    fn scroll_list_to(&mut self, target: f32) -> ScrollOutcome {
+        let (Some(frame), Some(cell)) = (self.frame_cache.current(), self.cell_metrics) else {
+            return ScrollOutcome::Ignored;
+        };
+        let store = self.source.session.block_store();
+        let op = BlockListMirror::scroll_to_px(
+            &store.lock(),
+            self.live_history_rows(&frame),
+            frame_content_rows(&frame),
+            (self.content_cols(), cell.height_px, self.settings.pad_rows),
+            target,
+        );
+        self.block_list.scrollbar.0 = target.min(self.block_list.scrollbar.1);
+        self.update_viewport();
+        ScrollOutcome::List(op)
+    }
+
+    pub(crate) fn jump_to_block(&mut self, direction: i8) -> ScrollOutcome {
+        let Some(cell) = self.cell_metrics else {
+            return ScrollOutcome::Ignored;
+        };
+        let store = self.source.session.block_store();
+        let target = nav_item_top(
+            &store.lock(),
+            self.content_cols(),
+            cell.height_px,
+            self.settings.pad_rows,
+            self.block_list.scrollbar.0,
+            direction,
+        );
+        target.map_or(ScrollOutcome::Ignored, |target| self.scroll_list_to(target))
+    }
+}

@@ -21,9 +21,6 @@ use nmt_terminal::event::BlockEvent;
 use nmt_terminal::graphics::{ColorType, GraphicData};
 use parking_lot::Mutex;
 
-mod session;
-pub(crate) use crate::graphics::session::SessionImages;
-
 // Generations are built and dropped on the PTY thread, so both the GPUI image
 // and the wrapper must cross threads. The compile-time assertion enforces the invariant.
 const _: fn() = || {

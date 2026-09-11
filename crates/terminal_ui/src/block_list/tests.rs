@@ -1,11 +1,25 @@
+use std::{collections, time};
+
+use nmt_terminal::block_store::{BlockStore, SegmentMeta};
 use nmt_terminal::event::BlockEvent;
 use nmt_terminal::ghostty::{BlockHandle, GhosttyTerminal};
 use nmt_terminal::selection::SelectionRange;
+use nmt_terminal::session::BlockPoint as FrozenPoint;
 use nmt_terminal::terminal::pos::{Column, Line, Pos};
 
-use crate::block_list::selection::FrozenHitInfo;
-use crate::block_list::*;
+use crate::block_list::FrozenView;
+use crate::block_list::chrome::{DurationLabels, item_header, live_chrome};
+use crate::block_list::geometry::{
+    ITEM_PAD_ROWS, item_px, item_rows, live_item_px, nav_item_top, visible_rows,
+};
+use crate::block_list::images::frozen_block_images;
+use crate::block_list::rows::{
+    HandleItemInfo, frozen_block_view, handle_item_info, live_history_view,
+};
+use crate::block_list::selection::BlockListPoint;
 use crate::frame::line_from_parts;
+use crate::pane_model::FrameTheme;
+use crate::pane_model::frozen_hit_map::FrozenHitInfo;
 use crate::theme;
 
 fn row_texts(view: &FrozenView) -> Vec<String> {
@@ -21,7 +35,11 @@ fn row_texts(view: &FrozenView) -> Vec<String> {
         .collect()
 }
 
-fn finished_block(vt: &[u8], cols: u16, rows: u16) -> (GhosttyTerminal, HandleItemInfo) {
+fn finished_block(
+    vt: &[u8],
+    cols: u16,
+    rows: u16,
+) -> (GhosttyTerminal, BlockHandle, HandleItemInfo) {
     let mut t = GhosttyTerminal::new(cols, rows, 10_000).unwrap();
 
     t.write_vt(vt);
@@ -30,13 +48,12 @@ fn finished_block(vt: &[u8], cols: u16, rows: u16) -> (GhosttyTerminal, HandleIt
     let rows = t.block_row_count(handle).unwrap();
 
     let info = HandleItemInfo {
-        handle,
         rows,
         accent: theme::BLOCK_SUCCESS_COLOR,
         header: Some("cmd · ✓".into()),
     };
 
-    (t, info)
+    (t, handle, info)
 }
 
 /// A finished engine block renders as physical rows with chrome, item-
@@ -44,14 +61,11 @@ fn finished_block(vt: &[u8], cols: u16, rows: u16) -> (GhosttyTerminal, HandleIt
 /// keys.
 #[test]
 fn frozen_block_view_reads_engine_rows() {
-    let (t, info) = finished_block(b"hello\r\n\x1b[1mbold\r\n", 10, 4);
+    let (t, handle, info) = finished_block(b"hello\r\n\x1b[1mbold\r\n", 10, 4);
 
     assert_eq!(info.rows, 2);
 
-    let (block, palette) = (
-        t.block_acquire(info.handle).expect("acquire"),
-        t.color_palette(),
-    );
+    let (block, palette) = (t.block_acquire(handle).expect("acquire"), t.color_palette());
 
     let view = frozen_block_view(
         Some((&block, &palette)),
@@ -62,6 +76,7 @@ fn frozen_block_view_reads_engine_rows() {
         ITEM_PAD_ROWS,
         None,
         Some(3),
+        FrameTheme::default().foreground,
     );
 
     assert_eq!(row_texts(&view), ["hello", "bold"]);
@@ -89,14 +104,11 @@ fn frozen_block_view_reads_engine_rows() {
 /// their item-local y so geometry never shifts.
 #[test]
 fn frozen_block_view_windows_visible_rows() {
-    let (t, info) = finished_block(b"r0\r\nr1\r\nr2\r\n", 10, 5);
+    let (t, handle, info) = finished_block(b"r0\r\nr1\r\nr2\r\n", 10, 5);
 
     assert_eq!(info.rows, 3);
 
-    let (block, palette) = (
-        t.block_acquire(info.handle).expect("acquire"),
-        t.color_palette(),
-    );
+    let (block, palette) = (t.block_acquire(handle).expect("acquire"), t.color_palette());
 
     let view = frozen_block_view(
         Some((&block, &palette)),
@@ -107,6 +119,7 @@ fn frozen_block_view_windows_visible_rows() {
         ITEM_PAD_ROWS,
         None,
         None,
+        FrameTheme::default().foreground,
     );
 
     assert_eq!(row_texts(&view), ["r1"]);
@@ -119,16 +132,22 @@ fn frozen_block_view_windows_visible_rows() {
 #[test]
 fn frozen_block_view_placeholder_keeps_height() {
     let info = HandleItemInfo {
-        handle: BlockHandle {
-            id: 1,
-            generation: 1,
-        },
         rows: 4,
         accent: 0,
         header: None,
     };
 
-    let view = frozen_block_view(None, &info, 0, 0..4, 10.0, ITEM_PAD_ROWS, None, None);
+    let view = frozen_block_view(
+        None,
+        &info,
+        0,
+        0..4,
+        10.0,
+        ITEM_PAD_ROWS,
+        None,
+        None,
+        FrameTheme::default().foreground,
+    );
 
     assert!(view.rows.is_empty());
     assert_eq!(view.active_top, 60.0);
@@ -138,12 +157,9 @@ fn frozen_block_view_placeholder_keeps_height() {
 /// Selection spans map straight onto physical rows.
 #[test]
 fn frozen_block_view_selection_spans_rows() {
-    let (t, info) = finished_block(b"aaaa\r\nbbbb\r\ncccc\r\n", 10, 5);
+    let (t, handle, info) = finished_block(b"aaaa\r\nbbbb\r\ncccc\r\n", 10, 5);
 
-    let (block, palette) = (
-        t.block_acquire(info.handle).expect("acquire"),
-        t.color_palette(),
-    );
+    let (block, palette) = (t.block_acquire(handle).expect("acquire"), t.color_palette());
 
     let sel = Some((
         FrozenPoint {
@@ -167,6 +183,7 @@ fn frozen_block_view_selection_spans_rows() {
         ITEM_PAD_ROWS,
         sel,
         None,
+        FrameTheme::default().foreground,
     );
 
     let spans: Vec<Option<(u16, u16)>> = view.rows.iter().map(|r| r.selected).collect();
@@ -180,12 +197,9 @@ fn frozen_block_view_selection_spans_rows() {
 
 #[test]
 fn frozen_selection_expands_wide_character() {
-    let (t, info) = finished_block("中A".as_bytes(), 10, 2);
+    let (t, handle, info) = finished_block("中A".as_bytes(), 10, 2);
 
-    let (block, palette) = (
-        t.block_acquire(info.handle).expect("acquire"),
-        t.color_palette(),
-    );
+    let (block, palette) = (t.block_acquire(handle).expect("acquire"), t.color_palette());
 
     for col in [0, 1] {
         let point = FrozenPoint {
@@ -203,6 +217,7 @@ fn frozen_selection_expands_wide_character() {
             ITEM_PAD_ROWS,
             Some((point, point)),
             None,
+            FrameTheme::default().foreground,
         );
 
         assert_eq!(view.rows[0].selected, Some((0, 2)));
@@ -214,12 +229,9 @@ fn frozen_selection_expands_wide_character() {
 /// items pack contiguously — the classic-grid look over frozen blocks.
 #[test]
 fn compact_pad_rows_pack_rows_contiguously() {
-    let (t, info) = finished_block(b"hello\r\nworld\r\n", 10, 4);
+    let (t, handle, info) = finished_block(b"hello\r\nworld\r\n", 10, 4);
 
-    let (block, palette) = (
-        t.block_acquire(info.handle).expect("acquire"),
-        t.color_palette(),
-    );
+    let (block, palette) = (t.block_acquire(handle).expect("acquire"), t.color_palette());
 
     let view = frozen_block_view(
         Some((&block, &palette)),
@@ -230,6 +242,7 @@ fn compact_pad_rows_pack_rows_contiguously() {
         0.0,
         None,
         None,
+        FrameTheme::default().foreground,
     );
 
     assert_eq!(view.rows[0].y, 0.0, "no top pad");
@@ -261,54 +274,6 @@ fn compact_pad_rows_pack_rows_contiguously() {
 
     assert_eq!(history.rows[0].y, 0.0);
     assert_eq!(history.active_top, 10.0);
-}
-
-/// `frozen_selection_pieces` produces one per-block range with block-edge
-/// endpoints resolved per item.
-#[test]
-fn selection_pieces_cover_block_ranges() {
-    let mut store = BlockStore::default();
-
-    store.apply([
-        BlockEvent::EngineBlock {
-            seq: 1,
-            handle: BlockHandle {
-                id: 6,
-                generation: 1,
-            },
-            rows: 2,
-        },
-        BlockEvent::EngineBlock {
-            seq: 2,
-            handle: BlockHandle {
-                id: 7,
-                generation: 1,
-            },
-            rows: 5,
-        },
-    ]);
-
-    let pieces = frozen_selection_pieces(
-        &store,
-        FrozenPoint {
-            item: 0,
-            line: 0,
-            col: 2,
-        },
-        FrozenPoint {
-            item: 1,
-            line: 3,
-            col: 4,
-        },
-    );
-
-    assert_eq!(pieces.len(), 2);
-    assert_eq!(pieces[0].handle.id, 6);
-    assert_eq!(pieces[0].start, Some((0, 2)));
-    assert_eq!(pieces[0].end, None, "selection continues past this item");
-    assert_eq!(pieces[1].handle.id, 7);
-    assert_eq!(pieces[1].start, None, "selection starts before this item");
-    assert_eq!(pieces[1].end, Some((3, 4)));
 }
 
 /// `item_rows`/`item_px` use the cached engine row count.
@@ -446,12 +411,12 @@ fn chrome_keys_off_metadata() {
         m.ended_at = Some(t0 + time::Duration::from_secs(2));
     });
 
-    let info1 = handle_item_info(&store.items()[0]).unwrap();
+    let info1 = handle_item_info(&store.items()[0], &DurationLabels::default()).unwrap();
 
     assert_eq!(info1.accent, theme::BLOCK_SUCCESS_COLOR);
     assert_eq!(info1.header.as_deref(), Some("build · ✓ 2.0s"));
 
-    let info2 = handle_item_info(&store.items()[1]).unwrap();
+    let info2 = handle_item_info(&store.items()[1], &DurationLabels::default()).unwrap();
 
     assert_eq!(info2.accent, theme::BLOCK_FAILURE_COLOR);
     assert_eq!(info2.header.as_deref(), Some("bad · ✗ 127"));
@@ -467,11 +432,14 @@ fn item_header_waits_for_end_time() {
         ..SegmentMeta::default()
     };
 
-    assert_eq!(item_header(&meta), None);
+    assert_eq!(item_header(&meta, &DurationLabels::default()), None);
 
     meta.ended_at = Some(t0 + time::Duration::from_secs(2));
 
-    assert_eq!(item_header(&meta).as_deref(), Some("build · ? · 2.0s"));
+    assert_eq!(
+        item_header(&meta, &DurationLabels::default()).as_deref(),
+        Some("build · ? · 2.0s")
+    );
 }
 
 /// Previous/next navigation walks item tops with edge no-ops.

@@ -1,12 +1,12 @@
 use nmt_config::colors::term::{DIM_FACTOR, List, TermColors};
 use nmt_config::colors::{AnsiColor, NamedColor};
-use nmt_config::{active_colors, with_active_colors};
 use nmt_terminal::grid_emit::RowSelection;
 use nmt_terminal::render_buffer::RenderBuffer;
 use nmt_terminal::terminal::square::{ContentTag, Square};
 use nmt_terminal::terminal::style::{Style, StyleFlags};
 
 use crate::frame::TerminalColor;
+use crate::pane_model::FrameTheme;
 
 pub(super) struct BackgroundColors {
     colors: List,
@@ -15,15 +15,11 @@ pub(super) struct BackgroundColors {
 }
 
 impl BackgroundColors {
-    pub(super) fn new(term_colors: TermColors) -> Self {
-        // Active theme from config (loader resolves the theme/adaptive palette);
-        // `term_colors` still overrides per-index via engine OSC 4 changes.
-        let colors = active_colors();
-
+    pub(super) fn new(term_colors: TermColors, theme: &FrameTheme) -> Self {
         Self {
-            colors: List::from(&colors),
+            colors: theme.palette,
             term_colors,
-            selection_background: TerminalColor::from_color_arr(colors.selection_background),
+            selection_background: theme.selection_background,
         }
     }
 
@@ -117,21 +113,6 @@ impl BackgroundColors {
     fn indexed(&self, index: usize) -> TerminalColor {
         TerminalColor::from_color_arr(self.term_colors[index].unwrap_or(self.colors[index]))
     }
-}
-
-/// The theme's default foreground, for harvested cells with no explicit fg
-/// (block-split).
-pub(crate) fn theme_default_foreground() -> TerminalColor {
-    with_active_colors(|colors| TerminalColor::from_color_arr(colors.foreground))
-}
-
-pub fn theme_default_background() -> TerminalColor {
-    with_active_colors(|colors| TerminalColor::from_color_arr(colors.background.0))
-}
-
-/// The theme's selection background (block-split frozen selection).
-pub(crate) fn theme_selection_background() -> TerminalColor {
-    with_active_colors(|colors| TerminalColor::from_color_arr(colors.selection_background))
 }
 
 pub(super) fn cell_is_selected(row_selection: Option<RowSelection>, col: u16) -> bool {

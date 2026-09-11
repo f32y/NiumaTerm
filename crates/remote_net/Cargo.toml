@@ -9,6 +9,8 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+nmt_config.workspace = true
+nmt_terminal.workspace = true
 base32.workspace = true
 futures.workspace = true
 parking_lot.workspace = true

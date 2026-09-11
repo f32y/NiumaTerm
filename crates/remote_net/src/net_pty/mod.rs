@@ -18,10 +18,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
+use nmt_config::colors::Colors;
 use nmt_platform::{
     ChildEvent, EventedPty, Interest, Poll, ProcessReadWrite, SoftReady, Token, Waker,
     WinsizeBuilder,
 };
+use nmt_terminal::pty_pipe::SessionOptions;
+use nmt_terminal::session::{EngineError, SessionObserver, TerminalSession};
 use parking_lot::Mutex;
 use tracing::warn;
 
@@ -272,3 +275,31 @@ impl EventedPty for NetPty {
 
 #[cfg(test)]
 mod tests;
+
+/// Attach the client engine with terminal responses enabled; the remote host
+/// owns command history while this engine displays its streamed viewport.
+pub fn terminal_session(
+    remote: RemoteSession,
+    id: u64,
+    colors: Colors,
+    observer: Option<Arc<dyn SessionObserver>>,
+) -> Result<TerminalSession, EngineError> {
+    let cols = remote.snapshot().cols.max(1);
+    let rows = remote.snapshot().rows.max(1);
+    TerminalSession::from_pty(
+        NetPty::new(remote),
+        None,
+        SessionOptions {
+            cols,
+            rows,
+            route_id: id as usize,
+            colors,
+            cursor_shape: nmt_config::CursorShape::Block,
+            scrollback_lines: 10_000,
+            engine_blocks: false,
+            terminal_responses: true,
+            output_sink: None,
+        },
+        observer,
+    )
+}

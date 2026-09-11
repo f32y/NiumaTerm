@@ -8,11 +8,12 @@ use nmt_terminal::selection::SelectionRange;
 use nmt_terminal::terminal::square::{ContentTag, Wide};
 use nmt_terminal::terminal::style::StyleFlags;
 
-use crate::frame::cache::GenerationMap;
 use crate::frame::colors::{BackgroundColors, cell_is_selected};
 use crate::frame::images::{empty_images, extract_frame_images};
 use crate::frame::line::{LineBuilder, StyleRun, TerminalCell, TerminalLine, display_char};
 use crate::frame::{TerminalCursor, TerminalFrame};
+use crate::pane_model::FrameTheme;
+use crate::pane_model::frame_cache::GenerationMap;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct TerminalLineState {
@@ -32,7 +33,7 @@ impl TerminalFrame {
         selection: Option<SelectionRange>,
         generations: &GenerationMap,
     ) -> Self {
-        Self::from_render_buffer_reusing(buf, selection, generations, None)
+        Self::from_render_buffer_reusing(buf, selection, generations, None, &FrameTheme::default())
     }
 
     pub(crate) fn from_render_buffer_reusing(
@@ -40,8 +41,9 @@ impl TerminalFrame {
         selection: Option<SelectionRange>,
         generations: &GenerationMap,
         previous: Option<&Self>,
+        theme: &FrameTheme,
     ) -> Self {
-        let colors = BackgroundColors::new(buf.colors());
+        let colors = BackgroundColors::new(buf.colors(), theme);
         let cursor = frame_cursor(buf, &colors);
 
         let reusable = previous.filter(|frame| {
@@ -105,7 +107,7 @@ pub(crate) fn extract_row(
     row: usize,
     cursor: Option<TerminalCursor>,
 ) -> TerminalLine {
-    let colors = BackgroundColors::new(buf.colors());
+    let colors = BackgroundColors::new(buf.colors(), &FrameTheme::default());
     extract_row_with_colors(buf, row, cursor, &colors, None)
 }
 

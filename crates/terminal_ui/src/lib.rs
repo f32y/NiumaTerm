@@ -1,5 +1,9 @@
-//! The GPUI terminal pane: session plumbing over the VT engine, frame
-//! extraction, block-list presentation, and the pane view itself.
+//! Terminal presentation and its GPUI host.
+//!
+//! `pane_model` owns interaction state and returns input and list operations.
+//! `frame_source` reads the session and resolves images. `view`, `terminal_view`
+//! and `paint` own entities, elements, timers, and drawing. Presentation values
+//! receive settings and theme snapshots instead of consulting host globals.
 //!
 //! The application shell owns tabs, workspaces, and settings; this crate
 //! reads only the [`settings::TerminalSettings`] snapshot the shell installs
@@ -14,13 +18,15 @@ pub(crate) mod input;
 pub(crate) mod layout;
 pub(crate) mod links;
 pub mod metrics;
-pub(crate) mod paint_text;
+pub(crate) mod paint;
 pub(crate) mod scrollbar;
 pub use nmt_terminal::session;
+pub(crate) mod frame_source;
+pub(crate) mod pane_model;
 #[cfg(test)]
 mod remote_tests;
+pub(crate) mod session_bridge;
 pub mod settings;
-pub(crate) mod surface;
 pub(crate) mod terminal_view;
 pub(crate) mod theme;
 pub mod view;

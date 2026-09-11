@@ -10,6 +10,7 @@ use nmt_terminal::ghostty::GhosttyTerminal;
 use nmt_terminal::render_buffer::RenderBuffer;
 
 use crate::frame::{GenerationMap, TerminalFrame};
+use crate::pane_model::FrameTheme;
 
 const COLS: u16 = 80;
 const ROWS: u16 = 24;
@@ -61,6 +62,7 @@ fn profile_full_frame_pipeline() -> Result<(), &'static str> {
     // 2 + 3. per-frame snapshot + extract of the live viewport (render thread).
     // A persistent RenderBuffer is reused across frames, as production does.
     let gens = GenerationMap::new();
+    let theme = FrameTheme::default();
     let mut render_buf = RenderBuffer::new(COLS as usize, ROWS as usize);
     let mut capture_total = Duration::ZERO;
     let mut extract_total = Duration::ZERO;
@@ -73,7 +75,8 @@ fn profile_full_frame_pipeline() -> Result<(), &'static str> {
         capture_total += s.elapsed();
 
         let e = Instant::now();
-        let frame = TerminalFrame::from_render_buffer_with_selection(&render_buf, None, &gens);
+        let frame =
+            TerminalFrame::from_render_buffer_reusing(&render_buf, None, &gens, None, &theme);
 
         extract_total += e.elapsed();
         sink += frame.lines().len();
@@ -84,7 +87,8 @@ fn profile_full_frame_pipeline() -> Result<(), &'static str> {
     engine.write_vt(b"\x1b[1;1H");
     engine.snapshot_into(&mut render_buf).unwrap();
 
-    let mut previous = TerminalFrame::from_render_buffer_with_selection(&render_buf, None, &gens);
+    let mut previous =
+        TerminalFrame::from_render_buffer_reusing(&render_buf, None, &gens, None, &theme);
     let mut incremental_total = Duration::ZERO;
 
     const WARMUP_FRAMES: usize = 256;
@@ -99,6 +103,7 @@ fn profile_full_frame_pipeline() -> Result<(), &'static str> {
             None,
             hint::black_box(&gens),
             Some(hint::black_box(&previous)),
+            &theme,
         ));
 
         let elapsed = e.elapsed();

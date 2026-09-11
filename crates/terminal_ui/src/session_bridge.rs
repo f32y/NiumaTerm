@@ -10,7 +10,7 @@ use parking_lot::Mutex;
 use crate::graphics::{FrozenImageCache, GenerationStore, prune_frozen_images};
 use crate::wake::{Wake, WakeSender};
 
-pub(crate) struct SessionImages {
+pub(crate) struct SessionBridge {
     pub(crate) generations: Mutex<GenerationStore>,
     pub(crate) frozen: FrozenImageCache,
     live_count: AtomicUsize,
@@ -18,7 +18,7 @@ pub(crate) struct SessionImages {
     wake: Option<WakeSender>,
 }
 
-impl SessionImages {
+impl SessionBridge {
     pub(crate) fn new(id: u64, wake: Option<WakeSender>) -> Self {
         Self {
             generations: Mutex::new(GenerationStore::default()),
@@ -34,7 +34,7 @@ impl SessionImages {
     }
 }
 
-impl SessionObserver for SessionImages {
+impl SessionObserver for SessionBridge {
     fn graphics(&self, updates: UpdateQueues) {
         let mut store = self.generations.lock();
 

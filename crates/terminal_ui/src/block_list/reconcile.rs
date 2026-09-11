@@ -1,50 +1,9 @@
+use std::ops;
+
+use nmt_terminal::block_store::BlockStore;
+
 use crate::block_list;
-use crate::block_list::*;
-
-pub(crate) struct BlockListState {
-    /// Native GPUI list state for block-split rendering.
-    pub list: ListState,
-    /// Last item count mirrored into `list`.
-    pub item_count: usize,
-    /// Last store eviction counter mirrored into `list`.
-    pub evicted_items: u64,
-    /// The native list scroll callback is stable for the pane; install once.
-    pub scroll_handler_set: bool,
-    /// Pixel mirror of native list scroll: `(scroll_top, max_scroll)`.
-    pub scrollbar: (f32, f32),
-    /// Element-local top of the live grid, even outside list prepaint overdraw.
-    pub active_top: f32,
-    /// Inputs that affected measured heights of the mutable tail last frame.
-    last_measure_key: Option<BlockListMeasureKey>,
-}
-
-impl BlockListState {
-    pub(crate) fn new(alignment: ListAlignment) -> Self {
-        let list = ListState::new(1, alignment, px(240.0));
-
-        list.set_follow_mode(FollowMode::Tail);
-
-        Self {
-            list,
-            item_count: 1,
-            evicted_items: 0,
-            scroll_handler_set: false,
-            scrollbar: (0.0, 0.0),
-            active_top: 0.0,
-            last_measure_key: None,
-        }
-    }
-
-    /// What the native list has to re-measure for this frame, recording the
-    /// inputs so the next frame compares against them.
-    pub(crate) fn remeasure_scope(&mut self, next: BlockListMeasureKey) -> RemeasureScope {
-        let scope = plan_remeasure(self.last_measure_key, next);
-
-        self.last_measure_key = Some(next);
-
-        scope
-    }
-}
+use crate::pane_model::list_mirror::ListPosition;
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct BlockListMeasureKey {
@@ -78,7 +37,7 @@ pub(crate) fn block_list_render_metrics(
     cols: u32,
     cell_h: f32,
     pad_rows: f32,
-    offset: ListOffset,
+    offset: ListPosition,
 ) -> BlockListRenderMetrics {
     let items = store.items();
     let store_len = items.len();
@@ -107,7 +66,7 @@ pub(crate) fn block_list_render_metrics(
     if offset.item_ix >= item_count {
         offset_px = total_px;
     } else if offset.item_ix <= store_len {
-        offset_px += offset.offset_in_item.as_f32();
+        offset_px += offset.offset_px;
     }
 
     BlockListRenderMetrics {

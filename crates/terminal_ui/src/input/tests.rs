@@ -2,7 +2,7 @@ use gpui::{Keystroke, Modifiers};
 use nmt_config::system::NewlineShortcut;
 
 use crate::input::{key_action, pty_bytes_for_key, should_defer_to_ime};
-use crate::surface::TerminalKeyAction;
+use crate::pane_model::key_action::TerminalKeyAction;
 
 fn key(name: &str, key_char: Option<&str>) -> Keystroke {
     Keystroke {

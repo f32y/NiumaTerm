@@ -90,3 +90,5 @@ mod tests;
 mod token_usage;
 mod workflows;
 mod workspace_sidebar;
+
+mod terminal_launch;

@@ -1,31 +1,25 @@
+use crate::paint::chrome::{paint_frozen_chrome, paint_frozen_separators};
 mod item;
-mod paint;
 
 #[cfg(test)]
 mod tests;
 
-use std::{collections, panic, sync};
+use std::panic;
 
 use gpui::{
-    AnyElement, App, AvailableSpace, Bounds, ContentMask, Corners, Element, ElementId,
-    ElementInputHandler, Entity, FocusHandle, GlobalElementId, InspectorElementId, IntoElement,
-    LayoutId, Pixels, RenderImage, ShapedLine, Style, Window, fill, point, px, relative, rgb, size,
+    AnyElement, App, AvailableSpace, Bounds, Element, ElementId, ElementInputHandler, Entity,
+    FocusHandle, GlobalElementId, InspectorElementId, IntoElement, LayoutId, Pixels, ShapedLine,
+    Style, Window, relative, size,
 };
-use nmt_terminal::ansi::CursorShape;
-use nmt_terminal::block_store::BlockStore;
-use parking_lot::Mutex;
 
-use crate::block_list::{block_list_live_chrome, block_pad_rows};
-use crate::frame::{TerminalCursor, TerminalFrame};
-use crate::layout::{bottom_anchor_offsets, frame_content_rows, row_y_offset};
-use crate::paint_text::{paint_glyph_rows, paint_line_backgrounds_at, shape_lines};
-use crate::session::InFlightBlock;
-pub(crate) use crate::terminal_view::item::BlockListItem;
+use crate::frame::TerminalFrame;
+use crate::layout::bottom_anchor_offsets;
+use crate::metrics;
 #[cfg(test)]
-pub(crate) use crate::terminal_view::paint::cursor_bounds;
-use crate::terminal_view::paint::{paint_frame, shape_frame};
+pub(crate) use crate::paint::frame::cursor_bounds;
+use crate::paint::frame::{paint_frame, shape_frame};
+pub(crate) use crate::terminal_view::item::BlockListItem;
 use crate::view::TerminalPane;
-use crate::{block_list, metrics};
 
 /// The terminal viewport as a custom GPUI leaf element: prepaint shapes the
 /// visible rows (multi-run, per-cell foreground), paint draws backgrounds, the
@@ -230,17 +224,17 @@ impl Element for BlockListView {
         cx: &mut App,
     ) {
         let pane = self.pane.read(cx);
-        let separators = pane.frozen.separators().to_vec();
-        let chrome = pane.frozen.chrome().to_vec();
+        let separators = pane.model.frozen.separators().to_vec();
+        let chrome = pane.model.frozen.chrome().to_vec();
 
         if self.show_chrome {
-            block_list::paint_frozen_separators(bounds, &separators, window);
+            paint_frozen_separators(bounds, &separators, window);
         }
 
         self.list.paint(window, cx);
 
         if self.show_chrome {
-            block_list::paint_frozen_chrome(bounds, &chrome, window, cx);
+            paint_frozen_chrome(bounds, &chrome, window, cx);
         }
 
         window.handle_input(

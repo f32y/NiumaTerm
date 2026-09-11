@@ -11,10 +11,12 @@ use nmt_terminal::terminal::pos::{Column, Line, Pos};
 use nmt_terminal::terminal::square::Wide;
 
 use crate::frame::{
-    BackgroundColors, FrameImageKind, GenerationMap, TerminalColor, TerminalFrame,
-    TerminalFrameCache, ZLayer, cursor_for_row, extract_frame_images, extract_row,
-    extract_row_with_colors, frame_cursor, line_from_parts, theme_default_foreground,
+    BackgroundColors, FrameImageKind, GenerationMap, TerminalColor, TerminalFrame, ZLayer,
+    cursor_for_row, extract_frame_images, extract_row, extract_row_with_colors, frame_cursor,
+    line_from_parts,
 };
+use crate::pane_model::FrameTheme;
+use crate::pane_model::frame_cache::TerminalFrameCache;
 
 fn frame_with_line(line: &str) -> TerminalFrame {
     TerminalFrame {
@@ -38,7 +40,7 @@ fn terminal_cursor_color_prefers_runtime_override() {
 
     term_colors[NamedColor::Cursor] = Some(expected);
 
-    let colors = BackgroundColors::new(term_colors);
+    let colors = BackgroundColors::new(term_colors, &FrameTheme::default());
 
     assert_eq!(
         colors.named(NamedColor::Cursor),
@@ -67,7 +69,7 @@ fn block_cursor_uses_terminal_background_for_glyph() {
     term_colors[NamedColor::Background] = Some(gray(0xe0));
     term_colors[NamedColor::Cursor] = Some(gray(0x38));
 
-    let colors = BackgroundColors::new(term_colors);
+    let colors = BackgroundColors::new(term_colors, &FrameTheme::default());
     let cursor = frame_cursor(&buf, &colors).unwrap();
     let row = extract_row_with_colors(&buf, 0, Some(cursor), &colors, None);
 
@@ -162,11 +164,23 @@ fn incremental_extraction_reuses_only_clean_rows() {
     engine.snapshot_into(&mut buf).unwrap();
 
     let generations = GenerationMap::new();
-    let first = TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, None);
+    let first = TerminalFrame::from_render_buffer_reusing(
+        &buf,
+        None,
+        &generations,
+        None,
+        &FrameTheme::default(),
+    );
 
     engine.snapshot_into(&mut buf).unwrap();
 
-    let clean = TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, Some(&first));
+    let clean = TerminalFrame::from_render_buffer_reusing(
+        &buf,
+        None,
+        &generations,
+        Some(&first),
+        &FrameTheme::default(),
+    );
 
     assert!(
         first
@@ -180,13 +194,25 @@ fn incremental_extraction_reuses_only_clean_rows() {
     engine.write_vt(b"X");
     engine.snapshot_into(&mut buf).unwrap();
 
-    let changed = TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, Some(&clean));
+    let changed = TerminalFrame::from_render_buffer_reusing(
+        &buf,
+        None,
+        &generations,
+        Some(&clean),
+        &FrameTheme::default(),
+    );
 
     assert!(clean.lines()[0].ptr_eq(&changed.lines()[0]));
     assert!(!clean.lines()[1].ptr_eq(&changed.lines()[1]));
     assert!(clean.lines()[2].ptr_eq(&changed.lines()[2]));
 
-    let forced = TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, None);
+    let forced = TerminalFrame::from_render_buffer_reusing(
+        &buf,
+        None,
+        &generations,
+        None,
+        &FrameTheme::default(),
+    );
 
     assert!(
         changed
@@ -199,6 +225,39 @@ fn incremental_extraction_reuses_only_clean_rows() {
 }
 
 #[test]
+fn supplied_theme_controls_selection_without_installed_globals() {
+    let mut engine = GhosttyTerminal::new(8, 2, 100).unwrap();
+    engine.write_vt(b"theme\x1b[?25l");
+    let mut buffer = RenderBuffer::new(8, 2);
+    engine.snapshot_into(&mut buffer).unwrap();
+    let generations = GenerationMap::new();
+    let mut theme = FrameTheme::default();
+    let selection = Some(SelectionRange::new(
+        Pos::new(Line(0), Column(0)),
+        Pos::new(Line(0), Column(4)),
+        false,
+    ));
+    let first =
+        TerminalFrame::from_render_buffer_reusing(&buffer, selection, &generations, None, &theme);
+    theme.selection_background = (0x12, 0x34, 0x56).into();
+    let mut cache = TerminalFrameCache::default();
+    cache.rebuild(first.clone());
+    cache.invalidate_full();
+    let next = TerminalFrame::from_render_buffer_reusing(
+        &buffer,
+        selection,
+        &generations,
+        cache.reusable_frame().as_ref(),
+        &theme,
+    );
+    assert_eq!(
+        next.lines()[0].cells()[0].background,
+        Some(theme.selection_background)
+    );
+    assert!(!first.lines()[0].ptr_eq(&next.lines()[0]));
+}
+
+#[test]
 fn cursor_only_change_rebuilds_affected_row() {
     let mut engine = GhosttyTerminal::new(8, 2, 100).unwrap();
     let mut buf = RenderBuffer::new(8, 2);
@@ -207,7 +266,13 @@ fn cursor_only_change_rebuilds_affected_row() {
     engine.snapshot_into(&mut buf).unwrap();
 
     let generations = GenerationMap::new();
-    let first = TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, None);
+    let first = TerminalFrame::from_render_buffer_reusing(
+        &buf,
+        None,
+        &generations,
+        None,
+        &FrameTheme::default(),
+    );
     let versions = buf.row_versions().to_vec();
 
     engine.write_vt(b"\r");
@@ -215,7 +280,13 @@ fn cursor_only_change_rebuilds_affected_row() {
 
     assert_eq!(buf.row_versions(), versions, "CR changes only the cursor");
 
-    let moved = TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, Some(&first));
+    let moved = TerminalFrame::from_render_buffer_reusing(
+        &buf,
+        None,
+        &generations,
+        Some(&first),
+        &FrameTheme::default(),
+    );
 
     assert!(!first.lines()[0].ptr_eq(&moved.lines()[0]));
     assert!(first.lines()[1].ptr_eq(&moved.lines()[1]));
@@ -230,7 +301,13 @@ fn selection_changes_rebuild_only_affected_rows() {
     engine.snapshot_into(&mut buf).unwrap();
 
     let generations = GenerationMap::new();
-    let plain = TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, None);
+    let plain = TerminalFrame::from_render_buffer_reusing(
+        &buf,
+        None,
+        &generations,
+        None,
+        &FrameTheme::default(),
+    );
 
     let row0 = SelectionRange::new(
         Pos::new(Line(0), Column(0)),
@@ -238,15 +315,25 @@ fn selection_changes_rebuild_only_affected_rows() {
         false,
     );
 
-    let selected =
-        TerminalFrame::from_render_buffer_reusing(&buf, Some(row0), &generations, Some(&plain));
+    let selected = TerminalFrame::from_render_buffer_reusing(
+        &buf,
+        Some(row0),
+        &generations,
+        Some(&plain),
+        &FrameTheme::default(),
+    );
 
     assert!(!plain.lines()[0].ptr_eq(&selected.lines()[0]));
     assert!(plain.lines()[1].ptr_eq(&selected.lines()[1]));
     assert!(plain.lines()[2].ptr_eq(&selected.lines()[2]));
 
-    let cleared =
-        TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, Some(&selected));
+    let cleared = TerminalFrame::from_render_buffer_reusing(
+        &buf,
+        None,
+        &generations,
+        Some(&selected),
+        &FrameTheme::default(),
+    );
 
     assert!(!selected.lines()[0].ptr_eq(&cleared.lines()[0]));
     assert!(selected.lines()[1].ptr_eq(&cleared.lines()[1]));
@@ -494,7 +581,7 @@ fn extracts_cursor_shape_without_mutating_row_text() {
 
     assert_eq!(frame.cursor().unwrap().shape, CursorShape::Beam);
     assert!(row.text().as_ref().starts_with("A\u{00a0}"));
-    assert_eq!(row.runs()[0].fg, theme_default_foreground());
+    assert_eq!(row.runs()[0].fg, FrameTheme::default().foreground);
 }
 
 // --- Kitty image frame extraction ---

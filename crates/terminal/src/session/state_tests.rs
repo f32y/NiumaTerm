@@ -13,7 +13,7 @@ use crate::session::mouse::{SurfaceCellSide, SurfaceMouseEventKind, SurfaceScree
 use crate::session::proxy::TerminalEventProxy;
 use crate::session::{SessionSharedState, TerminalSession};
 
-fn test_session() -> (TerminalSession, mpsc::Receiver<Msg>) {
+pub(super) fn test_session() -> (TerminalSession, mpsc::Receiver<Msg>) {
     let (tx, rx) = mpsc::channel();
     let poll = Poll::new().unwrap();
     let waker = Arc::new(Waker::new(poll.registry(), Token(0)).unwrap());

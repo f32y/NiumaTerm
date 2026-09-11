@@ -1,7 +1,19 @@
+use std::ops::Range;
+use std::path::PathBuf;
+use std::time::Duration;
+
+use gpui::prelude::*;
+use gpui::{
+    App, Bounds, Context, EntityInputHandler, ExternalPaths, KeyDownEvent, Keystroke, Modifiers,
+    Pixels, Point, UTF16Selection, Window, point, px, size,
+};
+use gpui_component::WindowExt as _;
+use gpui_component::notification::Notification;
 use nmt_i18n::i18n;
 
 use crate::input as terminal_input;
-use crate::view::*;
+use crate::pane_model::key_action::KeyOutcome;
+use crate::view::{AgentInterrupted, SendShiftTab, SendTab, TerminalPane};
 
 struct TextCopiedNotification;
 
@@ -43,7 +55,7 @@ impl TerminalPane {
     /// UI reaction to input reaching the PTY: optionally snap the view back
     /// to the latest output.
     fn react_to_pty_input(&mut self, cx: &mut Context<Self>) {
-        if cx.global::<TerminalSettings>().scroll_to_bottom_when_typing {
+        if self.model.settings.scroll_to_bottom_when_typing {
             self.scroll_to_latest(cx);
         }
     }
@@ -54,7 +66,7 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if should_scroll_to_latest(&event.keystroke, self.surface.session.alt_screen())
+        if should_scroll_to_latest(&event.keystroke, self.model.source.session.alt_screen())
             && self.scroll_to_latest(cx)
         {
             return;
@@ -66,33 +78,21 @@ impl TerminalPane {
             return;
         }
 
-        let action = terminal_input::key_action(
-            &event.keystroke,
-            cx.global::<TerminalSettings>().newline_shortcut,
-        );
+        let action =
+            terminal_input::key_action(&event.keystroke, self.model.settings.newline_shortcut);
 
         let interrupts_agent = matches!(event.keystroke.key.as_str(), "escape" | "esc")
             && !event.keystroke.modifiers.modified();
 
-        // Block-split: copy the frozen-region selection on the copy chord.
-        if let (SurfaceKeyAction::CopyOrWrite(_), Some((a, b))) =
-            (&action, self.frozen_drag.current())
-        {
-            let text = self.frozen_selection_to_text(a, b);
-
-            if !text.is_empty() {
-                self.surface.copy_text_to_clipboard(text);
+        match self.model.apply_key_action(action) {
+            KeyOutcome::Ignored => return,
+            KeyOutcome::Copied => show_text_copied(window, cx),
+            KeyOutcome::Written => self.react_to_pty_input(cx),
+            KeyOutcome::FrozenCopied => {
                 show_text_copied(window, cx);
-                self.frozen_drag.clear();
                 cx.notify();
                 return;
             }
-        }
-
-        match self.surface.apply_key_action(action) {
-            SurfaceKeyResult::Ignored => return,
-            SurfaceKeyResult::Copied => show_text_copied(window, cx),
-            SurfaceKeyResult::Handled => self.react_to_pty_input(cx),
         }
 
         if interrupts_agent {
@@ -104,13 +104,13 @@ impl TerminalPane {
 
     /// Route a keystroke straight to the terminal PTY.
     pub(crate) fn feed_terminal_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
-        match self.surface.apply_key_action(terminal_input::key_action(
+        match self.model.apply_key_action(terminal_input::key_action(
             keystroke,
-            cx.global::<TerminalSettings>().newline_shortcut,
+            self.model.settings.newline_shortcut,
         )) {
-            SurfaceKeyResult::Ignored => return,
-            SurfaceKeyResult::Handled => self.react_to_pty_input(cx),
-            SurfaceKeyResult::Copied => {}
+            KeyOutcome::Ignored => return,
+            KeyOutcome::Written => self.react_to_pty_input(cx),
+            KeyOutcome::Copied | KeyOutcome::FrozenCopied => {}
         }
 
         self.invalidate(cx);
@@ -156,7 +156,8 @@ impl TerminalPane {
         window.focus(&self.focus, cx);
 
         if self
-            .surface
+            .model
+            .source
             .session
             .paste_text(&dropped_paths_text(paths.paths()))
         {
@@ -181,7 +182,7 @@ impl EntityInputHandler for TerminalPane {
             return;
         }
 
-        if self.surface.session.write_text(text) {
+        if self.model.source.session.write_text(text) {
             self.react_to_pty_input(cx);
             self.invalidate(cx);
         }
@@ -192,27 +193,20 @@ impl EntityInputHandler for TerminalPane {
         _range_utf16: Range<usize>,
         element_bounds: Bounds<Pixels>,
         _window: &mut Window,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        let cursor = self.frame_cache.current()?.cursor()?;
-        let cell = self.cell_metrics?;
+        let cursor = self.model.frame_cache.current()?.cursor()?;
+        let cell = self.model.cell_metrics?;
 
         // `element_bounds` is the terminal leaf's content rect (padding already
         // excluded), so the cursor cell offsets from its origin directly — plus
         // the inter-block gap offset for the cursor's row.
-        let offsets = self.current_row_offsets(cx);
-
-        let mut y_offset = row_y_offset(&offsets, cursor.row as usize);
-
-        // Block list: the live grid starts at `active_top` in the list.
-        if self.block_list_mode(cx) {
-            y_offset += self.frozen.active_top();
-        }
+        let cursor_y = self.model.viewport.cursor_y(cursor.row, cell.height_px);
 
         Some(Bounds::new(
             point(
                 element_bounds.left() + px(cursor.col as f32 * cell.width_px),
-                element_bounds.top() + px(cursor.row as f32 * cell.height_px + y_offset),
+                element_bounds.top() + px(cursor_y),
             ),
             size(px(cell.width_px), px(cell.height_px)),
         ))

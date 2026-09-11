@@ -1,4 +1,9 @@
-use crate::scrollbar::*;
+use std::time;
+
+use crate::scrollbar::geometry::{
+    SCROLLBAR_AUTO_HIDE_DELAY, SCROLLBAR_FADE_OUT_DURATION, scrollbar_offset_for_thumb,
+    scrollbar_opacity, scrollbar_thumb_geometry,
+};
 
 #[test]
 fn scrollbar_opacity_fades_after_linger() {

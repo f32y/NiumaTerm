@@ -3,19 +3,13 @@ use std::sync::Arc;
 use nmt_terminal::ansi::CursorShape;
 use nmt_terminal::ghostty::ScrollbarInfo;
 
-mod cache;
 mod colors;
 mod extract;
 mod images;
 mod line;
 
 #[cfg(test)]
-use crate::frame::cache::GenerationMap;
-pub(crate) use crate::frame::cache::TerminalFrameCache;
-#[cfg(test)]
 use crate::frame::colors::BackgroundColors;
-pub use crate::frame::colors::theme_default_background;
-pub(crate) use crate::frame::colors::{theme_default_foreground, theme_selection_background};
 use crate::frame::extract::TerminalLineState;
 #[cfg(test)]
 pub(crate) use crate::frame::extract::extract_row;
@@ -29,6 +23,8 @@ pub(crate) use crate::frame::line::line_from_parts;
 pub(crate) use crate::frame::line::{
     LineBuilder, StyleRun, TerminalCell, TerminalColor, TerminalLine,
 };
+#[cfg(test)]
+use crate::pane_model::frame_cache::GenerationMap;
 
 #[derive(Clone, Default)]
 pub(crate) struct TerminalFrame {
