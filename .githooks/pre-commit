@@ -141,6 +141,17 @@ EOF
     exit 1
 }
 
+check_readability() {
+    readability_files=$(git diff --cached --name-only --no-renames \
+        --diff-filter=ACM -- ':(glob)crates/**/*.rs')
+    if [ -z "$readability_files" ]; then
+        return 0
+    fi
+
+    echo "pre-commit: checking readability of staged Rust changes"
+    cargo run --quiet --locked --manifest-path tools/readability/Cargo.toml -- --staged
+}
+
 check_rustfmt_and_clippy() {
     rust_files=$(git diff --cached --name-only --diff-filter=ACMRD -- '*.rs')
 
@@ -273,4 +284,5 @@ check_third_party_dirs_are_separate
 check_protected_paths_on_main
 check_no_ai_slop_marker
 check_comment_rationale
+check_readability
 check_rustfmt_and_clippy

@@ -1,0 +1,14 @@
+[package]
+name = "nmt-readability"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Keep hook startup independent of application and platform dependencies.
+[workspace]
+
+[dependencies]
+proc-macro2 = { version = "=1.0.107", features = ["span-locations"] }
+quote = "=1.0.47"
+syn = { version = "=2.0.119", features = ["full", "visit"] }
+tempfile = "=3.27.0"

@@ -33,6 +33,10 @@ if [ "$1" = metadata ]; then
     exit 0
 fi
 printf 'cargo %s\n' "$*" >>"$HOOK_TEST_LOG"
+if [ "$1" = run ] && [ "${HOOK_TEST_READABILITY_FAILURE:-0}" = 1 ]; then
+    echo 'readability: missing blank line' >&2
+    exit 1
+fi
 EOF
 
 cat >"$fake_bin/rustfmt" <<'EOF'
@@ -67,6 +71,19 @@ grep -F 'crates/demo/src/lib.rs' "$log" >/dev/null
 grep -F 'crates/demo/src/tests.rs' "$log" >/dev/null
 test "$(grep -c '^cargo clippy ' "$log")" -eq 1
 grep -F -- '-- -D clippy::absolute_paths' "$log" >/dev/null
+test "$(grep -c '^cargo run ' "$log")" -eq 1
+grep -F -- '--manifest-path tools/readability/Cargo.toml -- --staged' "$log" >/dev/null
+
+: >"$log"
+if HOOK_TEST_READABILITY_FAILURE=1 HOOK_TEST_LOG="$log" PATH="$fake_bin:$PATH" sh "$hook" >"$scratch/readability.out" 2>&1; then
+    echo 'pre-commit test: a readability failure was accepted' >&2
+    exit 1
+fi
+grep -F 'readability: missing blank line' "$scratch/readability.out" >/dev/null
+if grep -E '^(rustfmt|cargo clippy) ' "$log" >/dev/null; then
+    echo 'pre-commit test: expensive checks ran after readability failed' >&2
+    exit 1
+fi
 
 git commit -qm first-party-change
 : >"$log"
@@ -75,12 +92,23 @@ git add .
 HOOK_TEST_LOG="$log" PATH="$fake_bin:$PATH" sh "$hook" >"$scratch/other.out" 2>&1
 test "$(grep -c '^cargo clippy ' "$log")" -eq 1
 grep -F -- '-p tool' "$log" >/dev/null
+if grep -F 'cargo run ' "$log" >/dev/null; then
+    echo 'pre-commit test: readability was applied outside first-party crates' >&2
+    exit 1
+fi
 if grep -F -- '-D clippy::absolute_paths' "$log" >/dev/null; then
     echo 'pre-commit test: strict lint was applied outside first-party crates' >&2
     exit 1
 fi
 
 git commit -qm other-change
+: >"$log"
+printf '%s\n' 'pub fn value() -> u8 { 3 }' >"crates/demo/src/é.rs"
+git add .
+HOOK_TEST_LOG="$log" PATH="$fake_bin:$PATH" sh "$hook" >"$scratch/unicode.out" 2>&1
+grep -F -- '--manifest-path tools/readability/Cargo.toml -- --staged' "$log" >/dev/null
+
+git commit -qm unicode-path
 : >"$log"
 printf '%s\n' '// The task says to keep this branch.' >>"crates/demo/src/lib.rs"
 git add .
