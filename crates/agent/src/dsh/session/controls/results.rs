@@ -1,11 +1,11 @@
 use serde_json::Value;
 
 use crate::chat::{Event, QuestionResolution};
-use crate::deepseek::session::Session;
-use crate::deepseek::session::controls::{Operation, question_id};
+use crate::dsh::session::Session;
+use crate::dsh::session::controls::{Operation, question_id};
 
 impl Session {
-    pub(in crate::deepseek::session) fn expire_questions(&mut self) -> Vec<Event> {
+    pub(in crate::dsh::session) fn expire_questions(&mut self) -> Vec<Event> {
         self.controls.retire_questions();
 
         self.pending_questions
@@ -18,10 +18,7 @@ impl Session {
             .collect()
     }
 
-    pub(in crate::deepseek::session) fn control_completed(
-        &mut self,
-        payload: &Value,
-    ) -> Vec<Event> {
+    pub(in crate::dsh::session) fn control_completed(&mut self, payload: &Value) -> Vec<Event> {
         let Some(operation) = payload["id"]
             .as_u64()
             .and_then(|id| self.controls.complete(id))

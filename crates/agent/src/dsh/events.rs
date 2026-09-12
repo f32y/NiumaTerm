@@ -13,8 +13,8 @@ use tracing::warn;
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Error, Message, WebSocket, connect};
 
-use crate::deepseek::api::{ApiClient, CallError};
-use crate::deepseek::host::Host;
+use crate::dsh::api::{ApiClient, CallError};
+use crate::dsh::host::Host;
 
 #[cfg(test)]
 #[path = "events_tests.rs"]

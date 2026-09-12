@@ -20,7 +20,7 @@ use crate::session::{AgentKind, ImageAttachment, OperationError, UnsupportedOper
 use crate::workflow::{
     RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult, WorkflowSource,
 };
-use crate::{AgentWorkspace, LaunchConfig, deepseek};
+use crate::{AgentWorkspace, LaunchConfig, dsh};
 
 /// The conversation a restarted backend should continue, qualified by the
 /// harness that issued the id. Ids are only meaningful to the harness that
@@ -45,7 +45,7 @@ impl RecoveryIdentity {
 pub enum Backend {
     Codex(app_server::Session),
     Claude(stream_json::Session),
-    DeepSeek(deepseek::Session),
+    DeepSeek(dsh::Session),
     #[cfg(any(test, feature = "test-support"))]
     Test(TestBackend),
 }
@@ -113,7 +113,7 @@ impl Backend {
             // every DeepSeek tab, and this attaches a conversation to it,
             // starting it only if no tab holds one yet. `resume` is unused
             // because continuing an earlier conversation is not mapped yet.
-            AgentKind::DeepSeek => deepseek::Session::create(launch, workspace, deliver)
+            AgentKind::DeepSeek => dsh::Session::create(launch, workspace, deliver)
                 .map(Backend::DeepSeek)
                 .map_err(|error| error.message().to_string()),
         }
@@ -219,7 +219,7 @@ impl Backend {
         match self {
             Backend::Codex(_) => app_server::Session::adapter_commands(),
             Backend::Claude(_) => stream_json::Session::adapter_commands(),
-            Backend::DeepSeek(_) => deepseek::Session::adapter_commands(),
+            Backend::DeepSeek(_) => dsh::Session::adapter_commands(),
 
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => session.commands.clone(),

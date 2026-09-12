@@ -13,12 +13,12 @@ use serde_json::{Value, json};
 use tungstenite::{Message, accept, connect};
 
 use crate::chat::{Event, Item};
-use crate::deepseek::api::ApiClient;
-use crate::deepseek::events::pump_for_test;
-use crate::deepseek::history::sessions;
-use crate::deepseek::mapping::{ToolTracker, map_frame};
-use crate::deepseek::session::{CloseAction, run_close_actions, session_create_payload};
-use crate::deepseek::{history, mapping};
+use crate::dsh::api::ApiClient;
+use crate::dsh::events::pump_for_test;
+use crate::dsh::history::sessions;
+use crate::dsh::mapping::{ToolTracker, map_frame};
+use crate::dsh::session::{CloseAction, run_close_actions, session_create_payload};
+use crate::dsh::{history, mapping};
 use crate::workspace::AgentWorkspace;
 
 const SESSION: &str = "session-debb6efc";
@@ -445,7 +445,7 @@ fn host_and_stream_failures_reach_the_transcript() {
 fn only_the_pinned_release_is_reported_as_supported() {
     use semver::Version;
 
-    use crate::deepseek::version::{VersionSupport, classify};
+    use crate::dsh::version::{VersionSupport, classify};
 
     assert_eq!(
         classify(&Version::parse("0.1.5-rc.1").unwrap()),
@@ -478,7 +478,7 @@ fn only_the_pinned_release_is_reported_as_supported() {
 #[test]
 fn an_unresolvable_harness_is_reported_as_missing_rather_than_as_a_failed_start() {
     use crate::LaunchConfig;
-    use crate::deepseek::{HostError, Session};
+    use crate::dsh::{HostError, Session};
 
     // The two failures have different answers for the user, so the adapter has
     // to tell them apart before any process is spawned.
@@ -495,7 +495,7 @@ fn an_unresolvable_harness_is_reported_as_missing_rather_than_as_a_failed_start(
 
 #[test]
 fn an_approval_request_carries_what_answering_it_needs() {
-    use crate::deepseek::mapping::approval_request;
+    use crate::dsh::mapping::approval_request;
 
     // Shape copied from a real blocked turn: the harness waits here, so a
     // client that cannot recognize this leaves the agent stalled with no
@@ -538,7 +538,7 @@ fn an_approval_request_carries_what_answering_it_needs() {
 #[test]
 fn a_command_result_reports_what_the_registry_settled() {
     use crate::chat::SlashCommandOutcome;
-    use crate::deepseek::commands;
+    use crate::dsh::commands;
 
     assert_eq!(
         commands::outcome(
@@ -570,7 +570,7 @@ fn a_command_result_reports_what_the_registry_settled() {
 
 #[test]
 fn the_skill_catalog_names_what_a_prompt_can_write() {
-    use crate::deepseek::commands;
+    use crate::dsh::commands;
 
     let catalog = commands::skills(&json!({
         "skills": [
@@ -602,7 +602,7 @@ fn the_skill_catalog_names_what_a_prompt_can_write() {
 
 #[test]
 fn a_workflow_run_is_folded_from_its_own_increments() {
-    use crate::deepseek::workflows::WorkflowTracker;
+    use crate::dsh::workflows::WorkflowTracker;
     use crate::workflow::{WorkflowAgentState, WorkflowRunState};
 
     let mut workflows = WorkflowTracker::default();
@@ -673,7 +673,7 @@ fn a_workflow_run_is_folded_from_its_own_increments() {
 #[test]
 fn the_child_catalog_becomes_rows_that_can_be_opened() {
     use crate::background_task::{BackgroundTaskRefs, BackgroundTaskState};
-    use crate::deepseek::subagents;
+    use crate::dsh::subagents;
 
     let catalog = json!({
         "parentAvailable": true,
@@ -729,7 +729,7 @@ fn the_child_catalog_becomes_rows_that_can_be_opened() {
 #[test]
 fn the_command_registry_fills_the_palette() {
     use crate::chat::{SlashCommandArguments, SlashCommandRunPolicy, SlashCommandSource};
-    use crate::deepseek::commands;
+    use crate::dsh::commands;
 
     let listed = json!([
         { "name": "compact", "description": "Summarize the conversation so far" },
@@ -764,7 +764,7 @@ fn the_command_registry_fills_the_palette() {
 fn the_session_list_offers_only_what_this_tab_can_continue() {
     use std::time::{Duration, UNIX_EPOCH};
 
-    use crate::deepseek::history;
+    use crate::dsh::history;
 
     let listed = json!({
         "items": [
@@ -810,7 +810,7 @@ fn the_session_list_offers_only_what_this_tab_can_continue() {
 
 #[test]
 fn a_replayed_page_rebuilds_turns_from_the_same_events_the_stream_carries() {
-    use crate::deepseek::history;
+    use crate::dsh::history;
 
     let entry = |event: Value| json!({ "event": event });
 
@@ -1055,7 +1055,7 @@ fn a_todo_write_renders_as_the_shared_checklist_shape() {
 
 #[test]
 fn the_model_directory_addresses_a_pick_as_a_provider_and_model_pair() {
-    use crate::deepseek::models::ModelDirectory;
+    use crate::dsh::models::ModelDirectory;
 
     let directory = ModelDirectory::parse(&json!({
         "current": { "provider": "deepseek", "model": "deepseek-chat", "reasoningEffort": "high" },
@@ -1129,7 +1129,7 @@ fn the_model_directory_addresses_a_pick_as_a_provider_and_model_pair() {
 
 #[test]
 fn a_selection_outside_the_catalog_still_shows_in_the_picker() {
-    use crate::deepseek::models::ModelDirectory;
+    use crate::dsh::models::ModelDirectory;
 
     // Catalog membership is advisory: a route can serve a model it stopped
     // advertising, and that session runs perfectly well.
@@ -1154,7 +1154,7 @@ fn a_selection_outside_the_catalog_still_shows_in_the_picker() {
 
 #[test]
 fn declaring_image_input_rewrites_the_catalog_the_harness_already_serves() {
-    use crate::deepseek::session::models_with_image;
+    use crate::dsh::session::models_with_image;
 
     // A settings write replaces the value at its path, so every model the
     // harness already serves has to travel with the one being declared.
@@ -1213,7 +1213,7 @@ fn projection_frame(key: &str, value: Value) -> Value {
 #[test]
 fn usage_projections_combine_into_one_window_snapshot() {
     use crate::chat::ContextUsageScope;
-    use crate::deepseek::projections::ProjectionTracker;
+    use crate::dsh::projections::ProjectionTracker;
 
     let mut usage = ProjectionTracker::default();
 
@@ -1273,9 +1273,9 @@ fn usage_projections_combine_into_one_window_snapshot() {
 
 #[test]
 fn the_permission_presets_come_from_the_deployment_rather_than_from_here() {
-    use crate::deepseek::models::ModelDirectory;
-    use crate::deepseek::projections::ProjectionTracker;
-    use crate::deepseek::session::ready_settings;
+    use crate::dsh::models::ModelDirectory;
+    use crate::dsh::projections::ProjectionTracker;
+    use crate::dsh::session::ready_settings;
 
     let mut projections = ProjectionTracker::default();
 
@@ -1326,7 +1326,7 @@ fn the_permission_presets_come_from_the_deployment_rather_than_from_here() {
 
 #[test]
 fn the_history_page_baseline_seeds_what_a_live_push_would_not() {
-    use crate::deepseek::projections::ProjectionTracker;
+    use crate::dsh::projections::ProjectionTracker;
 
     // A push reports only what changed after the tab attached, so a session
     // that has been running since before it opened would show nothing.
@@ -1358,7 +1358,7 @@ fn the_history_page_baseline_seeds_what_a_live_push_would_not() {
 
 #[test]
 fn a_conversation_still_waiting_for_a_name_keeps_the_one_it_shows() {
-    use crate::deepseek::projections::ProjectionTracker;
+    use crate::dsh::projections::ProjectionTracker;
 
     // The unit is registered from the moment a session exists and reports null
     // until the titler has something to work from, so the absent case is a
@@ -1379,7 +1379,7 @@ fn a_conversation_still_waiting_for_a_name_keeps_the_one_it_shows() {
 
 #[test]
 fn a_context_breakdown_becomes_the_composition_segments() {
-    use crate::deepseek::projections::ProjectionTracker;
+    use crate::dsh::projections::ProjectionTracker;
 
     let mut usage = ProjectionTracker::default();
 
@@ -1417,7 +1417,7 @@ fn a_context_breakdown_becomes_the_composition_segments() {
 
 #[test]
 fn a_question_request_carries_the_ids_an_answer_is_matched_against() {
-    use crate::deepseek::mapping::question_request;
+    use crate::dsh::mapping::question_request;
 
     let frame = json!({
         "type": "server-request",
@@ -1773,7 +1773,7 @@ fn a_result_for_a_call_this_session_never_saw_is_ignored() {
 #[test]
 fn a_pending_inbox_snapshot_becomes_the_queued_prompt_rows() {
     use crate::chat::QueuedPrompt;
-    use crate::deepseek::session::queued_prompts;
+    use crate::dsh::session::queued_prompts;
 
     let items = json!([
         {
@@ -1815,7 +1815,7 @@ fn a_pending_inbox_snapshot_becomes_the_queued_prompt_rows() {
 
 #[test]
 fn a_search_answer_takes_its_display_from_the_list_and_keeps_the_rank_order() {
-    use crate::deepseek::history::search_results;
+    use crate::dsh::history::search_results;
 
     let matches = json!({
         "items": [
@@ -1852,7 +1852,7 @@ fn a_search_answer_takes_its_display_from_the_list_and_keeps_the_rank_order() {
 
 #[test]
 fn the_goal_projection_carries_the_objective_and_how_much_of_its_budget_is_spent() {
-    use crate::deepseek::projections::ProjectionTracker;
+    use crate::dsh::projections::ProjectionTracker;
 
     let mut projections = ProjectionTracker::default();
 
@@ -1895,7 +1895,7 @@ fn the_goal_projection_carries_the_objective_and_how_much_of_its_budget_is_spent
 
 #[test]
 fn a_pending_plan_selection_reports_the_state_it_is_heading_for() {
-    use crate::deepseek::projections::ProjectionTracker;
+    use crate::dsh::projections::ProjectionTracker;
 
     let mut projections = ProjectionTracker::default();
 
@@ -1921,7 +1921,7 @@ fn a_pending_plan_selection_reports_the_state_it_is_heading_for() {
 
 #[test]
 fn the_session_stats_projection_reports_whole_log_counters() {
-    use crate::deepseek::projections::ProjectionTracker;
+    use crate::dsh::projections::ProjectionTracker;
 
     let mut projections = ProjectionTracker::default();
 
@@ -1956,7 +1956,7 @@ fn the_session_stats_projection_reports_whole_log_counters() {
 
 #[test]
 fn a_broken_preset_is_listed_by_the_harness_but_not_offered_for_selection() {
-    use crate::deepseek::presets::catalog;
+    use crate::dsh::presets::catalog;
 
     let presets = catalog(&json!([
         { "id": "coding", "name": "Coding", "description": "Ships code", "trust": "system" },
@@ -1990,7 +1990,7 @@ fn a_broken_preset_is_listed_by_the_harness_but_not_offered_for_selection() {
 #[test]
 fn branch_points_pair_each_prompt_with_the_seq_of_the_one_ahead_of_it() {
     use crate::chat::{ForkAnchor, ForkCheckpoint};
-    use crate::deepseek::history;
+    use crate::dsh::history;
 
     let entry = |event: Value| json!({ "event": event });
 
@@ -2093,7 +2093,7 @@ fn recent_conversations_are_filtered_by_the_primary_directory() {
 /// events; a well-formed frame keeps decoding as before.
 #[test]
 fn a_frame_missing_a_required_field_is_dropped_not_emptied() {
-    use crate::deepseek::session::{
+    use crate::dsh::session::{
         fork_checkpoint_events, history_events, search_events, workflow_transcript_events,
     };
 
@@ -2221,7 +2221,7 @@ fn stopped_history_keeps_packed_and_unpacked_partial_text() {
 
 #[test]
 fn an_older_log_snapshot_cannot_overwrite_a_newer_control_update() {
-    use crate::deepseek::projections::ProjectionTracker;
+    use crate::dsh::projections::ProjectionTracker;
 
     let mut tracker = ProjectionTracker::default();
     let frame = json!({"payload":{"type":"session/projection","sessionId":SESSION,"key":"title","seq":12,"value":"new title"}});

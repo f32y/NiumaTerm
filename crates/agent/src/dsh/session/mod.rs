@@ -16,14 +16,14 @@ use crate::chat::{
     Event, QuestionMode, QuestionRequest as ChatQuestionRequest, SlashCommandArguments,
     SlashCommandInfo, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
-use crate::deepseek::api::ApiClient;
-use crate::deepseek::events::Downlinks;
-use crate::deepseek::host::{self, Host, HostError};
-use crate::deepseek::mapping::{self, ApprovalRequest, QuestionRequest, ToolTracker};
-use crate::deepseek::models::ModelDirectory;
-use crate::deepseek::projections::ProjectionTracker;
-use crate::deepseek::workflows::WorkflowTracker;
-use crate::deepseek::{commands, frames, history, presets, subagents};
+use crate::dsh::api::ApiClient;
+use crate::dsh::events::Downlinks;
+use crate::dsh::host::{self, Host, HostError};
+use crate::dsh::mapping::{self, ApprovalRequest, QuestionRequest, ToolTracker};
+use crate::dsh::models::ModelDirectory;
+use crate::dsh::projections::ProjectionTracker;
+use crate::dsh::workflows::WorkflowTracker;
+use crate::dsh::{commands, frames, history, presets, subagents};
 use crate::workspace::AgentWorkspace;
 
 mod actions;
@@ -31,15 +31,15 @@ mod controls;
 mod loads;
 
 #[cfg(test)]
-pub(super) use crate::deepseek::session::actions::{CloseAction, run_close_actions};
-use crate::deepseek::session::controls::{COMPLETED_FRAME, Controls, question_id};
+pub(super) use crate::dsh::session::actions::{CloseAction, run_close_actions};
+use crate::dsh::session::controls::{COMPLETED_FRAME, Controls, question_id};
 #[cfg(test)]
-pub(super) use crate::deepseek::session::loads::models_with_image;
-pub(crate) use crate::deepseek::session::loads::queued_prompts;
-pub(super) use crate::deepseek::session::loads::{
+pub(super) use crate::dsh::session::loads::models_with_image;
+pub(crate) use crate::dsh::session::loads::queued_prompts;
+pub(super) use crate::dsh::session::loads::{
     fork_checkpoint_events, history_events, search_events, workflow_transcript_events,
 };
-use crate::deepseek::session::loads::{
+use crate::dsh::session::loads::{
     load_agent_presets, load_commands, load_models, load_sessions, load_skills,
 };
 

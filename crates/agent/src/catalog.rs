@@ -181,11 +181,11 @@ pub fn resolve_choice(input: &str, choices: &[(String, String)]) -> Result<Strin
 pub fn adapter_commands(kind: AgentKind) -> Vec<SlashCommandInfo> {
     use crate::claude_code::stream_json;
     use crate::codex::app_server;
-    use crate::deepseek;
+    use crate::dsh;
 
     match kind {
         AgentKind::Codex => app_server::Session::adapter_commands(),
         AgentKind::Claude => stream_json::Session::adapter_commands(),
-        AgentKind::DeepSeek => deepseek::Session::adapter_commands(),
+        AgentKind::DeepSeek => dsh::Session::adapter_commands(),
     }
 }

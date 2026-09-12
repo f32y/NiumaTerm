@@ -10,11 +10,11 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::chat::{ForkAnchor, MessageImage, SendOutcome, SlashCommandOutcome};
-use crate::deepseek::api::{ApiClient, CallError};
-use crate::deepseek::commands;
-use crate::deepseek::session::Session;
-use crate::deepseek::session::controls::{Operation, question_id};
-use crate::deepseek::session::loads::{
+use crate::dsh::api::{ApiClient, CallError};
+use crate::dsh::commands;
+use crate::dsh::session::Session;
+use crate::dsh::session::controls::{Operation, question_id};
+use crate::dsh::session::loads::{
     load_commands, load_fork_checkpoints, load_search, load_sessions, load_skills,
     load_subagent_transcript, load_subagents, load_workflow_transcript,
 };
@@ -482,7 +482,7 @@ impl Drop for Session {
 const CLOSE_CALL_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::deepseek) enum CloseAction {
+pub(in crate::dsh) enum CloseAction {
     RemoveQueued(String),
     CancelTurn,
 }
@@ -490,7 +490,7 @@ pub(in crate::deepseek) enum CloseAction {
 /// Apply the remote work needed before a tab forgets its session. Queue entries
 /// are removed before the active turn is cancelled because the Harness keeps
 /// its inbox on cancellation and would otherwise start another invisible turn.
-pub(in crate::deepseek) fn run_close_actions(
+pub(in crate::dsh) fn run_close_actions(
     client: &ApiClient,
     session_id: &str,
     actions: &[CloseAction],

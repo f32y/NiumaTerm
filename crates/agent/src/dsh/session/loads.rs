@@ -6,15 +6,15 @@ use std::thread;
 use serde_json::{Value, json};
 
 use crate::chat::{Event, QueuedPrompt};
-use crate::deepseek::api::ApiClient;
-use crate::deepseek::events::session_address;
-use crate::deepseek::models::ModelDirectory;
-use crate::deepseek::session::{
+use crate::dsh::api::ApiClient;
+use crate::dsh::events::session_address;
+use crate::dsh::models::ModelDirectory;
+use crate::dsh::session::{
     COMMANDS_FRAME, FORK_CHECKPOINT_MESSAGES, FORK_CHECKPOINTS_FRAME, HISTORY_FRAME, MODELS_FRAME,
     PRESETS_FRAME, REPLAY_MESSAGES, SEARCH_FRAME, SKILLS_FRAME, SUBAGENT_TRANSCRIPT_FRAME,
     SUBAGENTS_FRAME, WORKFLOW_TRANSCRIPT_FRAME,
 };
-use crate::deepseek::{commands, events, frames, history};
+use crate::dsh::{commands, events, frames, history};
 
 /// Read the conversations this tab's directory can continue.
 ///
@@ -71,7 +71,7 @@ pub(crate) fn queued_prompts(items: &Value) -> Vec<QueuedPrompt> {
 /// Frame decoders with no session state of their own: each turns one bridge
 /// frame into the events it announces. They are addressed to this tab by the
 /// request that provoked them, so they carry no session id to check.
-pub(in crate::deepseek) fn workflow_transcript_events(payload: &Value) -> Vec<Event> {
+pub(in crate::dsh) fn workflow_transcript_events(payload: &Value) -> Vec<Event> {
     let Some(frame) =
         frames::parse::<frames::WorkflowTranscriptFrame>(WORKFLOW_TRANSCRIPT_FRAME, payload)
     else {
@@ -85,7 +85,7 @@ pub(in crate::deepseek) fn workflow_transcript_events(payload: &Value) -> Vec<Ev
     }]
 }
 
-pub(in crate::deepseek) fn history_events(payload: &Value) -> Vec<Event> {
+pub(in crate::dsh) fn history_events(payload: &Value) -> Vec<Event> {
     let Some(frame) = frames::parse::<frames::HistoryFrame>(HISTORY_FRAME, payload) else {
         return Vec::new();
     };
@@ -96,7 +96,7 @@ pub(in crate::deepseek) fn history_events(payload: &Value) -> Vec<Event> {
     ))]
 }
 
-pub(in crate::deepseek) fn search_events(payload: &Value) -> Vec<Event> {
+pub(in crate::dsh) fn search_events(payload: &Value) -> Vec<Event> {
     let Some(frame) = frames::parse::<frames::SearchFrame>(SEARCH_FRAME, payload) else {
         return Vec::new();
     };
@@ -116,7 +116,7 @@ pub(in crate::deepseek) fn search_events(payload: &Value) -> Vec<Event> {
     ))]
 }
 
-pub(in crate::deepseek) fn fork_checkpoint_events(payload: &Value) -> Vec<Event> {
+pub(in crate::dsh) fn fork_checkpoint_events(payload: &Value) -> Vec<Event> {
     let Some(frame) =
         frames::parse::<frames::ForkCheckpointsFrame>(FORK_CHECKPOINTS_FRAME, payload)
     else {
@@ -622,11 +622,7 @@ fn declares_image(models: &Value, model: &str, field: &str) -> bool {
 /// already held. That does pin the adapter's built-in catalog into the user's
 /// own settings, which is the same thing editing the array in the harness's
 /// configuration form does.
-pub(in crate::deepseek) fn models_with_image(
-    models: &Value,
-    model: &str,
-    field: &str,
-) -> Option<Value> {
+pub(in crate::dsh) fn models_with_image(models: &Value, model: &str, field: &str) -> Option<Value> {
     if declares_image(models, model, field) {
         return None;
     }

@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use crate::deepseek::api::ApiClient;
-use crate::deepseek::mapping::{ApprovalRequest, QuestionRequest};
+use crate::dsh::api::ApiClient;
+use crate::dsh::mapping::{ApprovalRequest, QuestionRequest};
 
 mod results;
 

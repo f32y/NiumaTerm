@@ -6,9 +6,9 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use crate::deepseek::api::ApiClient;
-use crate::deepseek::mapping::ApprovalRequest;
-use crate::deepseek::session::controls::{Controls, Operation};
+use crate::dsh::api::ApiClient;
+use crate::dsh::mapping::ApprovalRequest;
+use crate::dsh::session::controls::{Controls, Operation};
 
 fn read_request(stream: &TcpStream) -> Value {
     stream

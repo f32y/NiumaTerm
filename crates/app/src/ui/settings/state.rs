@@ -4,7 +4,7 @@ use std::path::Path;
 use gpui::Global;
 #[cfg(windows)]
 use gpui::SharedString;
-use nmt_agent::deepseek;
+use nmt_agent::dsh;
 use nmt_agent_ui::{AgentKind, AgentKindExt as _};
 use nmt_config::agent::AgentConfig;
 pub use nmt_config::agent::{CollapseRows, ModelListStyle};
@@ -168,7 +168,7 @@ pub(crate) fn builtin_agent_profile(kind: AgentProfileKind) -> AgentProfile {
     let executable = match kind {
         AgentProfileKind::ClaudeCode => "claude",
         AgentProfileKind::Codex => "codex",
-        AgentProfileKind::DeepSeek => deepseek::DEFAULT_EXECUTABLE,
+        AgentProfileKind::DeepSeek => dsh::DEFAULT_EXECUTABLE,
     };
 
     AgentProfile {

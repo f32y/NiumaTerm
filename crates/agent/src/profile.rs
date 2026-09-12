@@ -1,7 +1,7 @@
 //! Provider launch rules independent of application configuration storage.
 
 use crate::session::AgentKind;
-use crate::{CodexProviderConfig, LaunchConfig, deepseek};
+use crate::{CodexProviderConfig, LaunchConfig, dsh};
 
 #[derive(Clone, Copy)]
 pub enum ProfileLauncher {
@@ -188,13 +188,13 @@ pub fn agent_launch<'a>(
     // launcher that their adapter does not support.
     let (executable, executable_args) = match (profile.kind, profile.launcher) {
         (AgentKind::DeepSeek, ProfileLauncher::Npx) => (
-            deepseek::NPX_EXECUTABLE.to_string(),
-            deepseek::NPX_ARGUMENTS.map(str::to_string).to_vec(),
+            dsh::NPX_EXECUTABLE.to_string(),
+            dsh::NPX_ARGUMENTS.map(str::to_string).to_vec(),
         ),
 
         (AgentKind::DeepSeek, ProfileLauncher::PnpmDlx) => (
-            deepseek::PNPM_DLX_EXECUTABLE.to_string(),
-            deepseek::PNPM_DLX_ARGUMENTS.map(str::to_string).to_vec(),
+            dsh::PNPM_DLX_EXECUTABLE.to_string(),
+            dsh::PNPM_DLX_ARGUMENTS.map(str::to_string).to_vec(),
         ),
 
         _ => (profile.executable.trim().to_string(), Vec::new()),

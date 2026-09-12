@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use std::{env, fs};
 
 use nmt_agent::chat::{Event, Item, SendOutcome, SlashCommandOutcome};
-use nmt_agent::deepseek::{Host, Session};
+use nmt_agent::dsh::{Host, Session};
 use nmt_agent::{AgentWorkspace, LaunchConfig};
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -288,7 +288,7 @@ fn two_sessions_share_one_host_and_do_not_see_each_other() {
 #[test]
 #[ignore = "resolves the installed harness"]
 fn the_installed_release_is_one_this_build_supports() {
-    use nmt_agent::deepseek::{SUPPORTED_VERSIONS, VersionSupport, describe_version};
+    use nmt_agent::dsh::{SUPPORTED_VERSIONS, VersionSupport, describe_version};
     use nmt_agent::launcher::AgentCli;
 
     let cli = AgentCli::from_launch(&launch(), "dsh");

@@ -4,7 +4,7 @@ pub mod catalog;
 pub mod chat;
 pub mod claude_code;
 pub mod codex;
-pub mod deepseek;
+pub mod dsh;
 pub mod git;
 pub mod images;
 pub mod input_history;

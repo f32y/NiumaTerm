@@ -8,7 +8,7 @@ use crate::chat::{
     SkillCatalog, SkillInfo, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
     SlashCommandRunPolicy, SlashCommandSource,
 };
-use crate::deepseek::api::{ApiClient, CallError};
+use crate::dsh::api::{ApiClient, CallError};
 
 /// Gateway endpoint listing one session's effective commands.
 pub(crate) const LIST_METHOD: &str = "commands/list";

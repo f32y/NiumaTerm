@@ -7,8 +7,8 @@ use serde_json::{Value, json};
 use tungstenite::accept_hdr;
 use tungstenite::handshake::server::Request;
 
-use crate::deepseek::api::{ApiClient, CallError};
-use crate::deepseek::commands;
+use crate::dsh::api::{ApiClient, CallError};
+use crate::dsh::commands;
 
 fn read_request(stream: &TcpStream) -> (String, String, Value) {
     stream

@@ -14,7 +14,7 @@ use serde_json::Value;
 use crate::chat::{
     Event, ForkAnchor, ForkCheckpoint, Item, ReplayItem, ReplayTurn, SessionSummary,
 };
-use crate::deepseek::mapping::{ToolTracker, map_session_event};
+use crate::dsh::mapping::{ToolTracker, map_session_event};
 
 /// Read a `session.list` result into the resumable conversations of one
 /// working directory.

@@ -2,9 +2,9 @@ use std::cell::RefCell;
 
 use serde_json::{Value, json};
 
-use crate::deepseek::api::ApiClient;
-use crate::deepseek::events::Streams;
-use crate::deepseek::mapping::{approval_request, question_request};
+use crate::dsh::api::ApiClient;
+use crate::dsh::events::Streams;
+use crate::dsh::mapping::{approval_request, question_request};
 
 fn item(stream: &str, value: Value) -> Value {
     json!({ "type": "item", "streamId": stream, "value": value })

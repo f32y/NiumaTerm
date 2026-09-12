@@ -12,7 +12,7 @@ use std::time::Duration;
 use nmt_platform::process::{KillOnCloseJob, decode_child_output};
 use parking_lot::Mutex;
 
-use crate::deepseek::api::ApiClient;
+use crate::dsh::api::ApiClient;
 use crate::launcher::AgentCli;
 
 /// The host announces where it bound on stdout, which is the only way to learn

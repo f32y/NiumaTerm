@@ -1,4 +1,4 @@
-//! Typed payloads of the bridge frames [`crate::deepseek::Session::process`]
+//! Typed payloads of the bridge frames [`crate::dsh::Session::process`]
 //! routes on.
 //!
 //! Each struct names the fields its frame cannot be used without. Parsing

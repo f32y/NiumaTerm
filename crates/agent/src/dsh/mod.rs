@@ -28,9 +28,9 @@ mod workflows;
 #[cfg(test)]
 mod tests;
 
-pub use crate::deepseek::host::{
+pub use crate::dsh::host::{
     DEFAULT_EXECUTABLE, Host, HostError, NPX_ARGUMENTS, NPX_EXECUTABLE, PNPM_DLX_ARGUMENTS,
     PNPM_DLX_EXECUTABLE,
 };
-pub use crate::deepseek::session::Session;
-pub use crate::deepseek::version::{SUPPORTED_VERSIONS, VersionSupport, describe_version};
+pub use crate::dsh::session::Session;
+pub use crate::dsh::version::{SUPPORTED_VERSIONS, VersionSupport, describe_version};
