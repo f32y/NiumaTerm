@@ -1,4 +1,5 @@
 imports_granularity = "Module"
-group_imports = "StdExternalCrate"
+# Preserve visibility groups separated by blank lines.
+group_imports = "Preserve"
 reorder_imports = true
 reorder_modules = true

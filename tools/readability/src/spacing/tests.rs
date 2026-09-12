@@ -1,6 +1,10 @@
 use std::collections::BTreeMap;
 
-use crate::spacing::{Issue, apply, inspect};
+use crate::spacing::{self, Issue, Issues, apply};
+
+fn inspect(source: &str) -> Result<Issues, syn::Error> {
+    Ok(spacing::inspect(source, &syn::parse_file(source)?))
+}
 
 #[test]
 fn separates_bindings_control_flow_and_results() {
@@ -201,4 +205,54 @@ fn rejects_insertions_that_change_a_string_token() {
 #[test]
 fn reports_invalid_rust_without_rewriting_it() {
     assert!(inspect("fn broken( {").is_err());
+}
+
+#[test]
+fn separates_visibility_groups_before_attributes_and_comments_with_crlf() {
+    let source = "mod outer {\r\n    pub(crate) use crate::api::Public;\r\n    // The helper is shared only inside the parent module.\r\n    #[cfg(test)]\r\n    pub(super) use crate::api::{\r\n        First,\r\n        Second,\r\n    };\r\n    pub(super) use crate::api::Third;\r\n}\r\n";
+    let issues = inspect(source).unwrap();
+    let fixed = apply(source, &issues).unwrap();
+
+    assert_eq!(issues.len(), 1);
+    assert_eq!(issues.values().next().unwrap().rule, "declaration-groups");
+    assert_eq!(fixed, source.replace("Public;\r\n", "Public;\r\n\r\n"));
+    assert!(inspect(&fixed).unwrap().is_empty());
+}
+
+#[test]
+fn separates_module_documentation_from_code_and_attributes() {
+    for (source, expected) in [
+        (
+            "//! Module details.\n//! More details.\nuse std::fmt;\n",
+            "//! Module details.\n//! More details.\n\nuse std::fmt;\n",
+        ),
+        (
+            "//! Module details.\n#![allow(unused)]\nuse std::fmt;\n",
+            "//! Module details.\n\n#![allow(unused)]\nuse std::fmt;\n",
+        ),
+        (
+            "mod inner {\r\n    //! Module details.\r\n    /// The entry point.\r\n    fn run() {}\r\n}\r\n",
+            "mod inner {\r\n    //! Module details.\r\n\r\n    /// The entry point.\r\n    fn run() {}\r\n}\r\n",
+        ),
+        (
+            "mod inner { //! Module details.\n    use std::fmt;\n}\n",
+            "mod inner { //! Module details.\n\n    use std::fmt;\n}\n",
+        ),
+    ] {
+        let issues = inspect(source).unwrap();
+
+        assert_eq!(issues.len(), 1, "{source}");
+        assert_eq!(issues.values().next().unwrap().rule, "module-docs");
+        assert_eq!(apply(source, &issues).unwrap(), expected);
+        assert!(inspect(expected).unwrap().is_empty());
+    }
+
+    for source in [
+        "//! Documentation only.\n",
+        "mod inner {\n    //! Documentation only.\n}\n",
+        "/// Function details.\nfn run() {}\n",
+        "const TEXT: &str = r#\"//! Literal text.\nuse std::fmt;\"#;\n",
+    ] {
+        assert!(inspect(source).unwrap().is_empty(), "{source}");
+    }
 }

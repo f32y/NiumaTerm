@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::iter;
@@ -6,24 +9,51 @@ use proc_macro2::{Delimiter, Span, TokenStream, TokenTree};
 use quote::ToTokens;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
-use syn::{Attribute, Expr, Item, Stmt};
+use syn::{AttrStyle, Attribute, Expr, Item, Stmt};
 
-type Issues = BTreeMap<usize, Issue>;
+use crate::declarations::group;
+
+pub(crate) type Issues = BTreeMap<usize, Issue>;
 
 pub(crate) struct Issue {
     pub(crate) rule: &'static str,
     pub(crate) through_line: usize,
 }
 
-#[cfg(test)]
-mod tests;
-
 struct Spacing<'a> {
     lines: Vec<&'a str>,
     insertions: Issues,
+    block_depth: usize,
 }
 
 impl Spacing<'_> {
+    fn module_docs(&mut self, attrs: &[Attribute], items: &[Item]) {
+        let mut previous = None;
+
+        for attribute in attrs
+            .iter()
+            .filter(|attribute| matches!(attribute.style, AttrStyle::Inner(_)))
+        {
+            let start = attribute.span().start();
+            let line_doc = attribute.path().is_ident("doc")
+                && self.lines[start.line - 1]
+                    .chars()
+                    .skip(start.column)
+                    .take(3)
+                    .eq("//!".chars());
+
+            if line_doc {
+                previous = Some(attribute.span());
+            } else if let Some(previous) = previous.take() {
+                self.separate(previous, attribute.span(), "module-docs");
+            }
+        }
+
+        if let (Some(previous), Some(next)) = (previous, items.first()) {
+            self.separate(previous, next.span(), "module-docs");
+        }
+    }
+
     fn separate(&mut self, previous: Span, next: Span, reason: &'static str) {
         let end = previous.end().line;
         let start = next.start().line;
@@ -60,6 +90,15 @@ impl Spacing<'_> {
     fn items(&mut self, items: &[Item]) {
         for pair in items.windows(2) {
             let (a, b) = (&pair[0], &pair[1]);
+
+            if self.block_depth == 0
+                && let (Some(a_group), Some(b_group)) = (group(a), group(b))
+                && a_group != b_group
+            {
+                self.separate(a.span(), b.span(), "declaration-groups");
+
+                continue;
+            }
 
             let grouped = matches!(
                 (a, b),
@@ -340,12 +379,14 @@ impl<'ast> Visit<'ast> for Spacing<'_> {
     }
 
     fn visit_file(&mut self, file: &'ast syn::File) {
+        self.module_docs(&file.attrs, &file.items);
         self.items(&file.items);
         visit::visit_file(self, file);
     }
 
     fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
         if let Some((_, items)) = &item.content {
+            self.module_docs(&item.attrs, items);
             self.items(items);
         }
 
@@ -377,6 +418,8 @@ impl<'ast> Visit<'ast> for Spacing<'_> {
     }
 
     fn visit_block(&mut self, block: &'ast syn::Block) {
+        self.block_depth += 1;
+
         for (index, pair) in block.stmts.windows(2).enumerate() {
             if let Some(reason) = boundary(&pair[0], &pair[1], index + 2 == block.stmts.len()) {
                 self.separate(pair[0].span(), pair[1].span(), reason);
@@ -384,6 +427,8 @@ impl<'ast> Visit<'ast> for Spacing<'_> {
         }
 
         visit::visit_block(self, block);
+
+        self.block_depth -= 1;
     }
 
     fn visit_expr_match(&mut self, expr: &'ast syn::ExprMatch) {
@@ -445,17 +490,16 @@ fn skips_formatting(attrs: &[Attribute]) -> bool {
     })
 }
 
-pub(crate) fn inspect(source: &str) -> Result<Issues, syn::Error> {
-    let parsed = syn::parse_file(source)?;
-
+pub(crate) fn inspect(source: &str, parsed: &syn::File) -> Issues {
     let mut spacing = Spacing {
         lines: source.lines().collect(),
         insertions: BTreeMap::new(),
+        block_depth: 0,
     };
 
-    spacing.visit_file(&parsed);
+    spacing.visit_file(parsed);
 
-    Ok(spacing.insertions)
+    spacing.insertions
 }
 
 pub(crate) fn apply(source: &str, issues: &Issues) -> Result<String, Box<dyn Error>> {

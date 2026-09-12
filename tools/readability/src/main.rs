@@ -1,3 +1,6 @@
+mod declarations;
+mod spacing;
+
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::io::Write;
@@ -10,8 +13,6 @@ use tempfile::NamedTempFile;
 
 use crate::spacing::{apply, inspect};
 
-mod spacing;
-
 const HELP: &str = "Rust readability checks
 
 Usage: cargo readability --check [PATH ...]
@@ -20,9 +21,10 @@ Usage: cargo readability --check [PATH ...]
 
 Without paths, --check and --fix scan tracked and unignored Rust files in crates/.
 Explicit paths are relative to the current directory and may name directories.
---staged checks changed boundaries in staged crates/ Rust files, without writing.
+--staged checks changed boundaries and declarations in staged crates/ Rust files.
 --fix adds blank lines to working files; it never stages changes.
-Exit codes: 0 clean or fixed, 1 spacing issues, 2 invalid input or tool failure.";
+Declaration position, order, visibility, and attribute issues require manual edits.
+Exit codes: 0 clean or fixed, 1 readability issues, 2 invalid input or tool failure.";
 
 fn main() -> ExitCode {
     match run() {
@@ -139,17 +141,12 @@ fn run() -> Result<bool, Box<dyn Error>> {
     }
 
     let mut count = 0;
+    let mut declaration_count = 0;
     let checked = files.len() + staged.len();
 
     for (path, source, ranges) in staged {
-        let issues = inspect(&source).map_err(|error| {
-            format!(
-                "{}:{}:{}: syntax: {error}",
-                path.display(),
-                error.span().start().line,
-                error.span().start().column + 1
-            )
-        })?;
+        let parsed = parse(&path, &source)?;
+        let issues = inspect(&source, &parsed);
 
         for (line, issue) in issues {
             if ranges
@@ -166,22 +163,30 @@ fn run() -> Result<bool, Box<dyn Error>> {
                 count += 1;
             }
         }
+
+        for issue in declarations::inspect(&parsed.items) {
+            if [issue.span, issue.related].iter().any(|span| {
+                ranges.iter().any(|range| {
+                    *range.start() < span.end().line && *range.end() >= span.start().line - 1
+                })
+            }) {
+                report_declaration(&path, &issue);
+
+                declaration_count += 1;
+            }
+        }
     }
 
     for path in files {
         let source = fs::read_to_string(&path)?;
 
-        let issues = inspect(&source).map_err(|error| {
-            format!(
-                "{}:{}:{}: syntax: {error}",
-                path.display(),
-                error.span().start().line,
-                error.span().start().column + 1
-            )
-        })?;
+        let mut parsed = parse(&path, &source)?;
+        let issues = inspect(&source, &parsed);
 
         if mode == "--fix" && !issues.is_empty() {
             let modified = apply(&source, &issues)?;
+
+            parsed = parse(&path, &modified)?;
 
             let parent = path
                 .parent()
@@ -218,20 +223,49 @@ fn run() -> Result<bool, Box<dyn Error>> {
         }
 
         count += issues.len();
+
+        for issue in declarations::inspect(&parsed.items) {
+            report_declaration(&path, &issue);
+
+            declaration_count += 1;
+        }
     }
 
     println!(
-        "readability: checked {checked} Rust file(s), {count} spacing issue(s){}",
+        "readability: checked {checked} Rust file(s), {count} spacing issue(s){}, {declaration_count} declaration issue(s)",
         if mode == "--fix" { " fixed" } else { "" }
     );
 
-    if count > 0 && mode == "--staged" {
+    if (count > 0 || declaration_count > 0) && mode == "--staged" {
         eprintln!(
-            "readability: run cargo readability --fix <path>, review the diff, then stage the intended changes"
+            "readability: run cargo readability --fix <path> for spacing, correct declaration issues, review the diff, then stage the intended changes"
         );
     }
 
-    Ok(count == 0 || mode == "--fix")
+    Ok((count == 0 || mode == "--fix") && declaration_count == 0)
+}
+
+fn parse(path: &Path, source: &str) -> Result<syn::File, Box<dyn Error>> {
+    syn::parse_file(source).map_err(|error| {
+        format!(
+            "{}:{}:{}: syntax: {error}",
+            path.display(),
+            error.span().start().line,
+            error.span().start().column + 1
+        )
+        .into()
+    })
+}
+
+fn report_declaration(path: &Path, issue: &declarations::Issue) {
+    println!(
+        "{}:{}:{}: declarations/{}: {}",
+        path.display(),
+        issue.span.start().line,
+        issue.span.start().column + 1,
+        issue.rule,
+        issue.message
+    );
 }
 
 fn git(directory: &Path, arguments: &[&str]) -> Result<String, Box<dyn Error>> {
