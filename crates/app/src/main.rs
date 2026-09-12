@@ -1,24 +1,49 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-rust_i18n::i18n!("locales", fallback = "en");
+pub(crate) use crate::i18n::{_rust_i18n_t, _rust_i18n_try_translate};
 
-// The translation macro reads outside Rust's dependency tracking. These inputs
-// let compiler caches invalidate this target when either catalog changes.
-const _: (&str, &str) = (
-    include_str!("../locales/en.toml"),
-    include_str!("../locales/zh-CN.toml"),
-);
+mod agent_updates;
+mod agent_usage;
+mod cli;
+mod daily_usage;
+mod i18n;
+mod ipc;
+mod keymap;
+mod logging;
+#[cfg(target_os = "macos")]
+mod menu;
+mod pane_tree;
+mod profiling;
+#[cfg(windows)]
+mod remote;
+#[cfg(target_os = "macos")]
+mod sparkle;
+mod syntax;
+mod tabs;
+mod ui;
+#[cfg(windows)]
+mod update;
+mod usage_refresh;
+mod usage_sources;
+mod utils;
+mod window;
+mod workspace;
+
+#[cfg(test)]
+mod tests;
 
 use std::ffi::OsString;
+use std::future::{Ready, ready};
 use std::rc::Rc;
 use std::{env, mem, path, process, time};
 
+use app::agent_tab::{AgentThreadDefaults, input_history};
 use clap::{Arg, ArgAction, Command as ClapCommand};
 use futures::StreamExt as _;
 use futures::channel::mpsc::unbounded;
 #[cfg(windows)]
 use gpui::Global;
-use gpui::{Anchor, AnyWindowHandle, App, Application, WeakEntity, px};
+use gpui::{Anchor, AnyWindowHandle, App, Application, WeakEntity, WindowId, px};
 use gpui_component::{Theme as ComponentTheme, init as init_components};
 #[cfg(target_os = "macos")]
 use gpui_macos::MacPlatform as Platform;
@@ -33,42 +58,6 @@ use nmt_platform::window::show_error_dialog;
 use nmt_profiling::allocation::ProfilingAllocator;
 use rust_i18n::t;
 use tracing::warn;
-
-mod agent_updates;
-mod agent_usage;
-mod cli;
-mod ipc;
-mod keymap;
-mod logging;
-mod profiling;
-
-// The menu bar is a macOS surface: on Windows the same commands live in the
-// title bar's menu button and nothing draws a bar above the window.
-#[cfg(target_os = "macos")]
-mod menu;
-mod pane_tree;
-#[cfg(windows)]
-mod remote;
-mod syntax;
-mod tabs;
-mod ui;
-
-// Updating is the one thing with a real implementation on both systems, but no
-// shared code: Windows replaces files under the Restart Manager, macOS hands a
-// signed bundle to Sparkle. Remote sessions, hosted on ConPTY with DPAPI-held
-// keys, still have no counterpart here.
-mod daily_usage;
-#[cfg(target_os = "macos")]
-mod sparkle;
-#[cfg(windows)]
-mod update;
-mod usage_refresh;
-mod usage_sources;
-mod utils;
-mod window;
-mod workspace;
-
-use app::agent_tab::{AgentThreadDefaults, input_history};
 
 use crate::cli::CliAction;
 use crate::ui::{AppAssets, AppSettings};
@@ -114,7 +103,7 @@ fn main() {
         testing,
         profiling,
         await_exit,
-    } = parse_startup_args();
+    } = parse_startup_args_from(env::args_os());
 
     // Only a build that can replace itself has a predecessor to outlive.
     #[cfg(windows)]
@@ -125,83 +114,6 @@ fn main() {
     #[cfg(not(windows))]
     let _ = await_exit;
 
-    run_app(url, testing, profiling);
-}
-
-fn parse_startup_args() -> StartupArgs {
-    parse_startup_args_from(env::args_os())
-}
-
-fn parse_startup_args_from<I, T>(args: I) -> StartupArgs
-where
-    I: IntoIterator<Item = T>,
-    T: Into<OsString>,
-{
-    let args = args.into_iter().map(Into::<OsString>::into);
-
-    let matches = ClapCommand::new("NiumaTerm")
-        .disable_help_flag(true)
-        .arg(
-            Arg::new("testing")
-                .long("testing")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("enable-profiling")
-                .long("enable-profiling")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("await-exit")
-                .long(AWAIT_EXIT_FLAG.trim_start_matches('-'))
-                .value_name("PID")
-                .value_parser(clap::value_parser!(u32))
-                .hide(true),
-        )
-        .arg(
-            Arg::new("new-tab")
-                .long("new-tab")
-                .value_name("PATH")
-                .conflicts_with_all(["new-window", "url"]),
-        )
-        .arg(
-            Arg::new("new-window")
-                .long("new-window")
-                .value_name("PATH")
-                .conflicts_with_all(["new-tab", "url"]),
-        )
-        .arg(
-            Arg::new("url")
-                .index(1)
-                .conflicts_with_all(["new-tab", "new-window"]),
-        )
-        .try_get_matches_from(args)
-        .unwrap_or_else(|err| {
-            eprintln!("{err}");
-            process::exit(2);
-        });
-
-    StartupArgs {
-        testing: matches.get_flag("testing"),
-        profiling: matches.get_flag("enable-profiling"),
-        await_exit: matches.get_one::<u32>("await-exit").copied(),
-        url: matches
-            .get_one::<String>("url")
-            .cloned()
-            .or_else(|| {
-                matches
-                    .get_one::<String>("new-tab")
-                    .map(|path| cli::path_action_url("new_tab", path))
-            })
-            .or_else(|| {
-                matches
-                    .get_one::<String>("new-window")
-                    .map(|path| cli::path_action_url("new_window", path))
-            }),
-    }
-}
-
-fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
     // Builds without performance collection accept these switches through
     // empty hooks and do not install the allocator wrapper.
     nmt_profiling::set_enabled(profiling);
@@ -235,7 +147,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
     // A second launch forwards its action to the existing process so one process
     // URL (or an activate request) to the running instance and exits. A
     // malformed URL degrades to activate — the primary just comes forward.
-    let argv_action = argv_url.map(|url| {
+    let argv_action = url.map(|url| {
         cli::parse_nmt_url(&url).unwrap_or_else(|err| {
             warn!("ignoring command line: {err}");
 
@@ -341,13 +253,13 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
         // Terminal and agent scrolling are their own elements carrying
         // their own switch; this one covers every container that scrolls
         // through a plain scroll handle, which is the rest of the app.
-        let smooth_panels = cx
+        let enable_smooth_scrolling = cx
             .global::<AppSettings>()
             .appearance
             .smooth_scrolling
             .panels_enabled();
 
-        cx.set_smooth_wheel_scrolling(smooth_panels);
+        cx.set_smooth_wheel_scrolling(enable_smooth_scrolling);
 
         // The platform remembers the choice and applies it to the vsync
         // thread when that spawns (after this closure returns).
@@ -361,71 +273,8 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
 
         // Keep live behavior in sync on any settings change. Persistence is
         // deferred to when the settings dialog closes (see Shell::on_show_settings).
-        cx.observe_global::<AppSettings>(|cx| {
-            let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
-
-            agent_updates::reconcile_profiles(&agent_profiles, cx);
-
-            #[cfg(windows)]
-            update::settings_changed(cx);
-
-            #[cfg(target_os = "macos")]
-            sparkle::settings_changed(cx);
-
-            let smooth_panels = cx
-                .global::<AppSettings>()
-                .appearance
-                .smooth_scrolling
-                .panels_enabled();
-
-            cx.set_smooth_wheel_scrolling(smooth_panels);
-
-            // Opacity changes retint the theme and switch each window
-            // between acrylic composition and opaque presentation.
-            ui::apply_window_translucency(cx);
-
-            // The shared locale doubles as the change detector:
-            // the observer fires on every settings edit (including theme
-            // filter keystrokes), and only a real language switch should
-            // pay for a full re-render of every window.
-            let language: &str = cx.global::<AppSettings>().appearance.language.into();
-            let language_changed = &*rust_i18n::locale() != language;
-
-            if language_changed {
-                rust_i18n::set_locale(language);
-
-                // AppKit holds the strings the bar was built from, so it
-                // keeps the previous language until it is rebuilt.
-                #[cfg(target_os = "macos")]
-                menu::refresh(cx);
-            }
-
-            let background = ui::window_background_appearance(cx);
-            let appearance = selected_window_appearance(cx);
-
-            let handles: Vec<_> = cx
-                .global::<ShellRegistry>()
-                .0
-                .iter()
-                .map(|entry| entry.handle)
-                .collect();
-
-            for handle in handles {
-                handle
-                    .update(cx, |_, window, cx| {
-                        window.set_background_appearance(background);
-                        window.set_appearance_override(Some(appearance), cx);
-
-                        if language_changed {
-                            window.refresh();
-                        }
-                    })
-                    .ok();
-            }
-
-            cx.refresh_windows();
-        })
-        .detach();
+        cx.observe_global::<AppSettings>(on_settings_changed)
+            .detach();
 
         keymap::bind(cx);
 
@@ -437,12 +286,12 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
         // Restore local state; first run centers and starts one default tab.
         let remembered_state = startup_files.remembered_state.clone();
 
-        let restore_session = cx
+        let restore_last_session_when_opening = cx
             .global::<AppSettings>()
             .system
             .restore_last_session_when_opening;
 
-        let mut initials: Vec<AppWindow> = if restore_session {
+        let mut initials: Vec<AppWindow> = if restore_last_session_when_opening {
             remembered_state
                 .windows
                 .iter()
@@ -470,7 +319,9 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
 
         // Restore disabled with saved sessions: rewrite the file without
         // them now, so a crash before quit can't resurrect them.
-        if !restore_session && remembered_state.windows.iter().any(|w| w.session.is_some()) {
+        if !restore_last_session_when_opening
+            && remembered_state.windows.iter().any(|w| w.session.is_some())
+        {
             let windows: Vec<_> = initials.iter().map(|w| w.to_local_state(false)).collect();
 
             if let Err(err) = local_state::save_windows(&windows) {
@@ -488,56 +339,9 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
         // Windows that quit is immediate; on macOS the process stays alive,
         // and `reopen_after_last_window_closed` consumes the entry if the
         // user comes back through the Dock first.
-        cx.on_window_closed(|cx, window_id| {
-            if cx.any_window_keeps_app_alive() {
-                cx.global_mut::<WindowRegistry>().remove(window_id);
-            }
+        cx.on_window_closed(on_window_closed).detach();
 
-            cx.global_mut::<ShellRegistry>().remove(window_id);
-
-            let last_active = cx.global_mut::<LastActiveWindow>();
-
-            if last_active.0 == Some(window_id) {
-                last_active.0 = None;
-            }
-        })
-        .detach();
-
-        cx.on_app_quit(|cx| {
-            if let Err(error) = input_history::flush(cx) {
-                warn!("failed to flush Agent input history: {error}");
-            }
-
-            // Settings edits live in the global until something writes
-            // them out. Closing the settings surface does that, and so
-            // does quitting with it still open.
-            if !cx.global::<AppSettings>().editing.discard_on_exit
-                && let Err(error) = cx.global_mut::<AppSettings>().save()
-            {
-                warn!("failed to save settings on application shutdown: {error}");
-            }
-
-            let save_session = cx
-                .global::<AppSettings>()
-                .system
-                .restore_last_session_when_opening;
-
-            let windows: Vec<_> = cx
-                .global::<WindowRegistry>()
-                .0
-                .iter()
-                .map(|(_, w)| w.to_local_state(save_session))
-                .collect();
-
-            if !windows.is_empty()
-                && let Err(err) = local_state::save_windows(&windows)
-            {
-                warn!("failed to save local_state.toml: {err}");
-            }
-
-            async {}
-        })
-        .detach();
+        cx.on_app_quit(on_app_quit).detach();
 
         for initial in initials {
             AppWindow::open(cx, initial);
@@ -553,8 +357,8 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
         cx.spawn(async move |cx| {
             while let Some(action) = cli_rx.next().await {
                 cx.update(|cx| match action {
-                    ipc::IpcAction::Cli(action) => dispatch_cli_action(action, cx),
-                    ipc::IpcAction::Agent(event) => dispatch_agent_event(event, cx),
+                    ipc::IpcAction::Cli(action) => on_ipc_cli(action, cx),
+                    ipc::IpcAction::Agent(event) => on_ipc_agent_hook(event, cx),
                 });
             }
         })
@@ -562,6 +366,189 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
 
         cx.activate(true);
     });
+}
+
+fn parse_startup_args_from<I, T>(args: I) -> StartupArgs
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString>,
+{
+    let args = args.into_iter().map(Into::<OsString>::into);
+
+    let matches = ClapCommand::new("NiumaTerm")
+        .disable_help_flag(true)
+        .arg(
+            Arg::new("testing")
+                .long("testing")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("enable-profiling")
+                .long("enable-profiling")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("await-exit")
+                .long(AWAIT_EXIT_FLAG.trim_start_matches('-'))
+                .value_name("PID")
+                .value_parser(clap::value_parser!(u32))
+                .hide(true),
+        )
+        .arg(
+            Arg::new("new-tab")
+                .long("new-tab")
+                .value_name("PATH")
+                .conflicts_with_all(["new-window", "url"]),
+        )
+        .arg(
+            Arg::new("new-window")
+                .long("new-window")
+                .value_name("PATH")
+                .conflicts_with_all(["new-tab", "url"]),
+        )
+        .arg(
+            Arg::new("url")
+                .index(1)
+                .conflicts_with_all(["new-tab", "new-window"]),
+        )
+        .try_get_matches_from(args)
+        .unwrap_or_else(|err| {
+            eprintln!("{err}");
+            process::exit(2);
+        });
+
+    StartupArgs {
+        testing: matches.get_flag("testing"),
+        profiling: matches.get_flag("enable-profiling"),
+        await_exit: matches.get_one::<u32>("await-exit").copied(),
+        url: matches
+            .get_one::<String>("url")
+            .cloned()
+            .or_else(|| {
+                matches
+                    .get_one::<String>("new-tab")
+                    .map(|path| cli::path_action_url("new_tab", path))
+            })
+            .or_else(|| {
+                matches
+                    .get_one::<String>("new-window")
+                    .map(|path| cli::path_action_url("new_window", path))
+            }),
+    }
+}
+
+fn on_settings_changed(cx: &mut App) {
+    let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
+
+    agent_updates::reconcile_profiles(&agent_profiles, cx);
+
+    #[cfg(windows)]
+    update::settings_changed(cx);
+
+    #[cfg(target_os = "macos")]
+    sparkle::settings_changed(cx);
+
+    let smooth_panels = cx
+        .global::<AppSettings>()
+        .appearance
+        .smooth_scrolling
+        .panels_enabled();
+
+    cx.set_smooth_wheel_scrolling(smooth_panels);
+
+    // Opacity changes retint the theme and switch each window
+    // between acrylic composition and opaque presentation.
+    ui::apply_window_translucency(cx);
+
+    // The shared locale doubles as the change detector:
+    // the observer fires on every settings edit (including theme
+    // filter keystrokes), and only a real language switch should
+    // pay for a full re-render of every window.
+    let language: &str = cx.global::<AppSettings>().appearance.language.into();
+    let language_changed = &*rust_i18n::locale() != language;
+
+    if language_changed {
+        rust_i18n::set_locale(language);
+
+        // AppKit holds the strings the bar was built from, so it
+        // keeps the previous language until it is rebuilt.
+        #[cfg(target_os = "macos")]
+        menu::refresh(cx);
+    }
+
+    let background = ui::window_background_appearance(cx);
+    let appearance = selected_window_appearance(cx);
+
+    let handles: Vec<_> = cx
+        .global::<ShellRegistry>()
+        .0
+        .iter()
+        .map(|entry| entry.handle)
+        .collect();
+
+    for handle in handles {
+        handle
+            .update(cx, |_, window, cx| {
+                window.set_background_appearance(background);
+                window.set_appearance_override(Some(appearance), cx);
+
+                if language_changed {
+                    window.refresh();
+                }
+            })
+            .ok();
+    }
+
+    cx.refresh_windows();
+}
+
+fn on_window_closed(cx: &mut App, window_id: WindowId) {
+    if cx.any_window_keeps_app_alive() {
+        cx.global_mut::<WindowRegistry>().remove(window_id);
+    }
+
+    cx.global_mut::<ShellRegistry>().remove(window_id);
+
+    let last_active = cx.global_mut::<LastActiveWindow>();
+
+    if last_active.0 == Some(window_id) {
+        last_active.0 = None;
+    }
+}
+
+fn on_app_quit(cx: &mut App) -> Ready<()> {
+    if let Err(error) = input_history::flush(cx) {
+        warn!("failed to flush Agent input history: {error}");
+    }
+
+    // Settings edits live in the global until something writes
+    // them out. Closing the settings surface does that, and so
+    // does quitting with it still open.
+    if !cx.global::<AppSettings>().editing.discard_on_exit
+        && let Err(error) = cx.global_mut::<AppSettings>().save()
+    {
+        warn!("failed to save settings on application shutdown: {error}");
+    }
+
+    let save_session = cx
+        .global::<AppSettings>()
+        .system
+        .restore_last_session_when_opening;
+
+    let windows: Vec<_> = cx
+        .global::<WindowRegistry>()
+        .0
+        .iter()
+        .map(|(_, w)| w.to_local_state(save_session))
+        .collect();
+
+    if !windows.is_empty()
+        && let Err(err) = local_state::save_windows(&windows)
+    {
+        warn!("failed to save local_state.toml: {err}");
+    }
+
+    ready(())
 }
 
 fn load_startup_files_or_exit() -> StartupFiles {
@@ -588,12 +575,9 @@ pub(crate) fn show_startup_error_dialog(message: &str) {
     show_error_dialog(&t!("startup-configuration-error"), message);
 }
 
-#[cfg(test)]
-mod tests;
-
 /// The most recently active window's shell, falling back to the newest open
 /// window when none was activated yet (or the active one just closed).
-fn last_active_shell(cx: &App) -> Option<(AnyWindowHandle, WeakEntity<ui::Shell>)> {
+fn get_last_active_shell(cx: &App) -> Option<(AnyWindowHandle, WeakEntity<ui::Shell>)> {
     let registry = cx.global::<ShellRegistry>();
     let last = cx.global::<LastActiveWindow>().0;
 
@@ -606,7 +590,7 @@ fn last_active_shell(cx: &App) -> Option<(AnyWindowHandle, WeakEntity<ui::Shell>
 }
 
 fn foreground_last_active(cx: &mut App) {
-    if let Some((handle, _)) = last_active_shell(cx) {
+    if let Some((handle, _)) = get_last_active_shell(cx) {
         let _ = handle.update(cx, |_, window, _| window.activate_window());
     }
 }
@@ -672,7 +656,7 @@ pub(crate) fn open_window_without_a_source(cx: &mut App) {
 /// directory, then reuse an exact workspace, open it as a tab in the
 /// best-matching workspace, or create a new window. Invalid targets only bring
 /// the app forward.
-fn dispatch_cli_action(action: CliAction, cx: &mut App) {
+fn on_ipc_cli(action: CliAction, cx: &mut App) {
     match action {
         CliAction::FocusNotification {
             route,
@@ -735,7 +719,7 @@ fn dispatch_cli_action(action: CliAction, cx: &mut App) {
             }
 
             // No live window (all closed mid-dispatch): degrade to new_window.
-            let Some((handle, shell)) = last_active_shell(cx) else {
+            let Some((handle, shell)) = get_last_active_shell(cx) else {
                 open_window_at(&path, cx);
 
                 return;
@@ -809,7 +793,7 @@ fn dispatch_focus_notification(route: &AgentRoute, notification_id: &str, cx: &m
     warn!("ignoring stale notification focus action");
 }
 
-fn dispatch_agent_event(event: AgentEvent, cx: &mut App) {
+fn on_ipc_agent_hook(event: AgentEvent, cx: &mut App) {
     if !cx.global::<AppSettings>().agent.enable_agent_hooks {
         return;
     }

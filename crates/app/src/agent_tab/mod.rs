@@ -7,27 +7,32 @@
 //! installs and exposes the pane plus the recovery types the update
 //! coordinator drives across a backend replacement.
 
-use nmt_agent::session::controller::SessionController;
-use nmt_agent::session::history::SessionHistory;
+pub use crate::agent_tab::profile::{AgentKind, AgentKindExt, AgentThreadDefaults, agent_launch};
+pub use crate::agent_tab::session::{
+    RecoveryIdentity, RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
+};
 
+pub mod execution;
 pub mod input_history;
+pub mod profile;
+pub mod settings;
+pub mod team;
+pub mod transcript;
 
 mod capabilities;
 mod commands;
 mod composer;
 mod context_usage;
-pub mod execution;
 mod fade;
 mod pane_state;
-pub mod profile;
 mod questions;
 mod session;
-pub mod settings;
-pub mod team;
 mod thread_controls;
-pub mod transcript;
 mod view;
 mod workflows;
+
+#[cfg(test)]
+mod tests;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -36,6 +41,8 @@ use gpui::{Entity, FocusHandle, Pixels, Point, ScrollHandle, WeakEntity};
 use gpui_component::VirtualListScrollHandle;
 use gpui_component::input::TextareaState;
 use nmt_agent::chat::{SkillCatalog, SkillReference, SlashCommandInfo};
+use nmt_agent::session::controller::SessionController;
+use nmt_agent::session::history::SessionHistory;
 use nmt_agent::{AgentEvent, AgentRoute, AgentWorkspace};
 use nmt_config::profile::AgentProfile;
 use rust_i18n::t;
@@ -48,11 +55,7 @@ use crate::agent_tab::execution::{AgentSession, CommandBinding};
 use crate::agent_tab::fade::Fade;
 use crate::agent_tab::input_history::{InputHistoryNavigation, InputHistoryScope};
 use crate::agent_tab::pane_state::TurnPresentation;
-pub use crate::agent_tab::profile::{AgentKind, AgentKindExt, AgentThreadDefaults, agent_launch};
 use crate::agent_tab::session::prompts::PendingPrompts;
-pub use crate::agent_tab::session::{
-    RecoveryIdentity, RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
-};
 use crate::agent_tab::thread_controls::ThreadControls;
 use crate::agent_tab::transcript::TranscriptView;
 use crate::agent_tab::view::session_state::SessionStateBadge;
@@ -177,9 +180,6 @@ impl GitBranchPoll {
         (label, opacity)
     }
 }
-
-#[cfg(test)]
-mod tests;
 
 /// Recent-session list shown above the composer.
 struct SessionHistoryUi {

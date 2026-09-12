@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "agent_usage_tests.rs"]
+mod agent_usage_tests;
+
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
@@ -608,7 +612,3 @@ impl Render for AgentUsageView {
             .into_any_element()
     }
 }
-
-#[cfg(test)]
-#[path = "agent_usage_tests.rs"]
-mod agent_usage_tests;
