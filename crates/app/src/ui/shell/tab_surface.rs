@@ -1,10 +1,13 @@
 use app::agent_tab::execution::{AgentSession, SessionOwner};
+use app::agent_tab::team::TeamPane;
 use app::agent_tab::{AgentKind, AgentPane};
 use app::terminal_tab::view::TerminalPane;
 use gpui::{App, Entity};
+use gpui_component::{Icon, IconName, Sizable as _};
 use nmt_config::local_state::TabState;
 
 use crate::pane_tree::PaneId;
+use crate::ui::tab_bar::menu::tab_icon;
 use crate::ui::terminal_layout::TerminalLayout;
 
 pub(crate) type TerminalPaneTree = TerminalLayout<Entity<TerminalPane>>;
@@ -29,14 +32,40 @@ pub(crate) enum TabSurface {
     /// The settings UI filling the main area. It is rebuilt from the settings
     /// global on every render, so the variant carries no state of its own.
     Settings,
+
+    Team(Entity<TeamPane>),
+
+    TeamUnavailable {
+        saved: Box<TabState>,
+        message: String,
+    },
 }
 
 impl TabSurface {
+    pub(crate) fn icon(&self, cx: &App) -> Icon {
+        match self {
+            Self::Team(_) | Self::TeamUnavailable { .. } => Icon::new(IconName::Network).xsmall(),
+
+            Self::Pending(state) if state.team_room.is_some() => {
+                Icon::new(IconName::Network).xsmall()
+            }
+
+            _ => tab_icon(self.agent_kind(cx), self.is_settings()),
+        }
+    }
+
+    pub(crate) fn team(&self) -> Option<&Entity<TeamPane>> {
+        match self {
+            Self::Team(pane) => Some(pane),
+            _ => None,
+        }
+    }
+
     pub(crate) fn agent_kind(&self, cx: &App) -> Option<AgentKind> {
         match self {
             Self::Agent(tab) => Some(tab.pane.read(cx).kind()),
             Self::Pending(state) => state.agent.as_deref().and_then(AgentKind::from_id),
-            Self::Live(_) | Self::Settings => None,
+            Self::Live(_) | Self::Settings | Self::Team(_) | Self::TeamUnavailable { .. } => None,
         }
     }
 
@@ -50,7 +79,7 @@ impl TabSurface {
                 .and_then(AgentKind::from_id)
                 .is_some(),
 
-            Self::Live(_) | Self::Settings => false,
+            Self::Live(_) | Self::Settings | Self::Team(_) | Self::TeamUnavailable { .. } => false,
         }
     }
 

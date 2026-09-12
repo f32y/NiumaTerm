@@ -1,0 +1,302 @@
+use std::fs::{self, File};
+use std::io::Write as _;
+
+use tempfile::tempdir;
+
+use crate::AgentWorkspace;
+use crate::chat::SendOutcome;
+use crate::team::attempt::{AttemptState, BudgetScope, DispatchIntent};
+use crate::team::budget::TurnPurpose;
+use crate::team::content::{Author, PublicMessage, Publication, Summary, UserInput};
+use crate::team::discussion::{
+    Arrangement, ArrangementState, DiscussionMode, PauseReason, PublicSnapshot, Stage, StageKind,
+};
+use crate::team::identity::{
+    AttemptId, MessageId, OperationId, OwnershipGeneration, StageId, SummaryId,
+};
+use crate::team::room::Room;
+use crate::team::storage::{RecoveryNotice, RoomStore, StorageError};
+use crate::team::tests::config;
+
+#[test]
+fn restart_retains_sources_scopes_controls_pending_work_and_budget() {
+    let directory = tempdir().unwrap();
+    let mut room = Room::new(AgentWorkspace::single(Some("C:/room".into())));
+    let alice = room.add_member(config("Alice", "C:/frontend")).unwrap();
+    let bob = room.add_member(config("Bob", "C:/backend")).unwrap();
+    let id = room.id();
+    let mut store = RoomStore::create(directory.path(), room.clone()).unwrap();
+
+    let attachment = store
+        .save_attachment("image/png", b"retained image bytes")
+        .unwrap();
+
+    let message = MessageId::new();
+
+    room.messages.push(PublicMessage {
+        id: message,
+        author: Author::Member {
+            id: alice,
+            name: "Alice".into(),
+        },
+        publication: Publication::RootReply,
+        text: "Use separate roots".into(),
+        replies_to: Vec::new(),
+        attachments: vec![attachment.clone()],
+    });
+
+    room.summaries.push(Summary {
+        fragments: Vec::new(),
+        id: SummaryId::new(),
+        version: 1,
+        owner: bob,
+        sources: vec![message],
+        prior_summaries: Vec::new(),
+        goals: "Compare approaches".into(),
+        constraints: "Keep roots separate".into(),
+        agreements: String::new(),
+        disagreements: Vec::new(),
+    });
+
+    room.input_history.push(UserInput {
+        text: "Review this".into(),
+        references: vec![message],
+        attachments: vec![attachment.clone()],
+    });
+
+    room.create_discussion(
+        "Compare".into(),
+        vec![alice, bob],
+        DiscussionMode::Moderated { moderator: bob },
+    )
+    .unwrap();
+
+    room.discussions[0].pause(PauseReason::User);
+
+    let attempt = AttemptId::new();
+
+    room.discussions[0]
+        .budget
+        .reserve(&[(attempt, TurnPurpose::Moderation)])
+        .unwrap();
+
+    room.discussions[0].budget.charge(attempt).unwrap();
+
+    room.discussions[0].stages.push(Stage {
+        decision: None,
+        id: StageId::new(),
+        kind: StageKind::InvitedResponses,
+        arrangements: vec![Arrangement {
+            operation: OperationId::new(),
+            recipient: alice,
+            state: ArrangementState::Pending,
+        }],
+        segments: vec![PublicSnapshot {
+            messages: vec![message],
+            summaries: vec![room.summaries[0].id],
+        }],
+    });
+
+    room.controls.automatic_summaries = false;
+    store.commit(room.clone()).unwrap();
+    store.checkpoint().unwrap();
+    room.rename_member(alice, "Alice frontend").unwrap();
+    store.commit(room.clone()).unwrap();
+    drop(store);
+
+    let (store, notices) = RoomStore::open(directory.path(), id).unwrap();
+
+    assert!(notices.is_empty());
+    assert_eq!(store.room(), &room);
+    assert_eq!(
+        store.read_attachment(&attachment).unwrap(),
+        b"retained image bytes"
+    );
+    assert!(RoomStore::open(directory.path(), id).is_err());
+
+    let metadata = fs::read_to_string(store.directory.join("checkpoint.json")).unwrap();
+
+    for forbidden_field in ["api_key", "api_base_url", "executable", "env"] {
+        assert!(!metadata.contains(&format!("\"{forbidden_field}\"")));
+    }
+}
+
+#[test]
+fn incomplete_final_record_recovers_prefix_and_prior_corruption_blocks_only_that_room() {
+    let directory = tempdir().unwrap();
+    let mut room = Room::new(AgentWorkspace::default());
+    let id = room.id();
+    let mut store = RoomStore::create(directory.path(), room.clone()).unwrap();
+
+    room.controls.automatic_summaries = false;
+    store.commit(room.clone()).unwrap();
+    store.journal.write_all(b"{\"payload\":").unwrap();
+    store.journal.sync_all().unwrap();
+
+    let journal_path = store.directory.join("journal.jsonl");
+
+    drop(store);
+
+    let (store, notices) = RoomStore::open(directory.path(), id).unwrap();
+
+    assert_eq!(notices, [RecoveryNotice::TornFinalRecord]);
+    assert_eq!(store.room(), &room);
+
+    drop(store);
+
+    let mut bytes = fs::read(&journal_path).unwrap();
+
+    bytes[0] = b'!';
+    fs::write(&journal_path, bytes).unwrap();
+
+    assert!(RoomStore::open(directory.path(), id).is_err());
+
+    let other = Room::new(AgentWorkspace::default());
+    let other_id = other.id();
+
+    drop(RoomStore::create(directory.path(), other).unwrap());
+
+    assert!(RoomStore::open(directory.path(), other_id).is_ok());
+}
+
+#[test]
+fn unsupported_version_preserves_saved_bytes() {
+    let directory = tempdir().unwrap();
+    let room = Room::new(AgentWorkspace::default());
+    let id = room.id();
+    let store = RoomStore::create(directory.path(), room).unwrap();
+    let path = store.directory.join("checkpoint.json");
+
+    drop(store);
+
+    let newer = fs::read_to_string(&path)
+        .unwrap()
+        .replacen("\"version\":1", "\"version\":9000", 1);
+
+    fs::write(&path, &newer).unwrap();
+
+    assert!(matches!(
+        RoomStore::open(directory.path(), id),
+        Err(StorageError::UnsupportedVersion(9000))
+    ));
+    assert_eq!(fs::read_to_string(path).unwrap(), newer);
+}
+
+#[test]
+fn storage_failures_preserve_input_and_reservations_without_backend_dispatch() {
+    let directory = tempdir().unwrap();
+    let mut room = Room::new(AgentWorkspace::default());
+    let alice = room.add_member(config("Alice", "C:/a")).unwrap();
+    let room_id = room.id();
+    let mut store = RoomStore::create(directory.path(), room).unwrap();
+    let operation = OperationId::new();
+
+    let input = UserInput {
+        text: "Keep this draft".into(),
+        ..UserInput::default()
+    };
+
+    let intent = DispatchIntent {
+        invocation: Default::default(),
+        attachments: Vec::new(),
+        backend_generation: 1,
+        coverage: Default::default(),
+        recipient: alice,
+        ownership: OwnershipGeneration::default(),
+        operation,
+        stage: None,
+        budget: BudgetScope::Direct(operation),
+        purpose: TurnPurpose::Response,
+        input: input.clone(),
+        prepared_text: input.text.clone(),
+        snapshot: PublicSnapshot::default(),
+    };
+
+    store.journal = File::open(store.directory.join("journal.jsonl")).unwrap();
+
+    let mut sends = 0;
+
+    let result = store
+        .reserve_dispatches(vec![intent.clone()])
+        .and_then(|ids| {
+            store.dispatch(ids[0], |_| {
+                sends += 1;
+
+                SendOutcome::StartedTurn
+            })
+        });
+
+    assert!(result.is_err());
+    assert_eq!(sends, 0);
+    assert!(store.room().attempts().is_empty());
+    assert!(store.room.direct_allowances.is_empty());
+    assert_eq!(input.text, "Keep this draft");
+
+    drop(store);
+
+    let (mut store, _) = RoomStore::open(directory.path(), room_id).unwrap();
+    let ids = store.reserve_dispatches(vec![intent.clone()]).unwrap();
+
+    store.journal = File::open(store.directory.join("journal.jsonl")).unwrap();
+
+    assert!(
+        store
+            .dispatch(ids[0], |_| {
+                sends += 1;
+                SendOutcome::StartedTurn
+            })
+            .is_err()
+    );
+    assert_eq!(sends, 0);
+    assert_eq!(store.room().attempts()[0].state, AttemptState::Reserved);
+    assert_eq!(store.room().attempts()[0].intent.input, input);
+
+    drop(store);
+
+    let (mut store, _) = RoomStore::open(directory.path(), room_id).unwrap();
+
+    assert_eq!(
+        store.room.direct_allowances[&operation]
+            .reservations()
+            .len(),
+        1
+    );
+
+    store
+        .dispatch(ids[0], |_| {
+            sends += 1;
+
+            SendOutcome::StartedTurn
+        })
+        .unwrap();
+
+    assert!(
+        store
+            .dispatch(ids[0], |_| {
+                sends += 1;
+                SendOutcome::StartedTurn
+            })
+            .is_err()
+    );
+    assert_eq!(sends, 1);
+    assert_eq!(
+        store.room.direct_allowances[&operation]
+            .reservations()
+            .len(),
+        1
+    );
+
+    drop(store);
+
+    let (mut store, _) = RoomStore::open(directory.path(), room_id).unwrap();
+
+    assert!(
+        store
+            .dispatch(ids[0], |_| {
+                sends += 1;
+                SendOutcome::StartedTurn
+            })
+            .is_err()
+    );
+    assert_eq!(sends, 1);
+}

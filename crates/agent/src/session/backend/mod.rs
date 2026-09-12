@@ -22,6 +22,8 @@ use crate::workflow::{
 };
 use crate::{AgentWorkspace, LaunchConfig, dsh};
 
+mod team;
+
 /// The conversation a restarted backend should continue, qualified by the
 /// harness that issued the id. Ids are only meaningful to the harness that
 /// minted them, so a mismatched pair starts a fresh conversation instead.

@@ -463,11 +463,38 @@ pub(crate) fn map_session_event(
     match event["type"].as_str() {
         Some("tool/call") => map_tool_call(data, &view["view"], tools),
         Some("tool/result") => map_tool_result(data, &view["view"], tools),
-        Some("turn/start") => vec![Event::TurnStarted],
 
-        Some("turn/end") => vec![Event::TurnCompleted {
-            error: turn_failure(&data["reason"]),
-        }],
+        Some("turn/start") => {
+            let mut events = vec![Event::TurnStarted];
+
+            if let Some(turn) = data["turn"].as_u64() {
+                events.push(Event::ProviderTurnAccepted {
+                    id: format!("turn:{turn}"),
+                });
+            }
+
+            events
+        }
+
+        Some("turn/end") => {
+            let error = turn_failure(&data["reason"]);
+
+            let mut events = vec![Event::TurnCompleted {
+                error: error.clone(),
+            }];
+
+            if let Some(turn) = data["turn"].as_u64() {
+                events.push(Event::ProviderTurnFinished {
+                    id: format!("turn:{turn}"),
+                    error: error.or_else(|| {
+                        (data["reason"]["kind"].as_str() == Some("aborted"))
+                            .then(|| "The provider turn was interrupted.".into())
+                    }),
+                });
+            }
+
+            events
+        }
 
         Some("assistant/chunk") => map_chunk(data),
 

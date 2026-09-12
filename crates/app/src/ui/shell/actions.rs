@@ -26,5 +26,6 @@ actions!(
         ShowSettings,
         NewRemoteTab,
         NewAgentTab,
+        NewTeamTab,
     ]
 );

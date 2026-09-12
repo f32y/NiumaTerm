@@ -4,6 +4,7 @@
 use std::path::Path;
 
 use nmt_platform::filesystem::lexical_path_spelling;
+use serde::{Deserialize, Serialize};
 
 /// The directories an Agent conversation started with. Cloned into a backend
 /// at start and never mutated afterwards: editing the parent workspace must
@@ -12,7 +13,7 @@ use nmt_platform::filesystem::lexical_path_spelling;
 /// `primary` is `None` only where the caller has no directory to offer at all,
 /// which is the same case the single-directory launch path already had to
 /// handle by letting the harness pick its own default.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentWorkspace {
     primary: Option<String>,
     additional: Vec<String>,

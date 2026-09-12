@@ -175,6 +175,26 @@ impl Shell {
     /// The active tab's pane tree as nested resizable groups. The main surface
     /// owns the outer frame, so a single pane renders without another card.
     pub(super) fn render_active_tree(&self, cx: &mut Context<Self>) -> AnyElement {
+        match self.workspaces.active_tabs().active() {
+            TabSurface::Team(pane) => {
+                return div()
+                    .size_full()
+                    .overflow_hidden()
+                    .child(pane.clone())
+                    .into_any_element();
+            }
+
+            TabSurface::TeamUnavailable { message, .. } => {
+                return div()
+                    .size_full()
+                    .p_4()
+                    .child(message.clone())
+                    .into_any_element();
+            }
+
+            _ => {}
+        }
+
         if self.workspaces.active_tabs().active().is_settings() {
             let mut settings = ui::settings::settings_view(cx);
 

@@ -9,6 +9,8 @@ mod questions;
 mod sessions;
 mod usage;
 
+use serde_json::Value;
+
 use crate::background_task::{
     BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscriptUpdate,
 };
@@ -360,6 +362,14 @@ pub enum TurnActivity {
     },
 }
 
+/// A registered scheduling operation delivered through the provider's tool API.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TeamDecisionRequest {
+    pub request_id: u64,
+    pub provider_turn: String,
+    pub arguments: Value,
+}
+
 /// What a chat UI needs to react to, in transcript order.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
@@ -409,6 +419,20 @@ pub enum Event {
     },
 
     TurnStarted,
+
+    /// An opaque provider identifier tied to the accepted root turn. Some
+    /// providers identify the turn itself; others identify its first model
+    /// response. Local transcript counters cannot establish acceptance.
+    ProviderTurnAccepted {
+        id: String,
+    },
+
+    TeamDecision(TeamDecisionRequest),
+
+    ProviderTurnFinished {
+        id: String,
+        error: Option<String>,
+    },
 
     TurnCompleted {
         error: Option<String>,

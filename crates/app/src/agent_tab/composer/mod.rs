@@ -184,6 +184,10 @@ impl AgentPane {
     /// Send what the composer holds, warning first when the conversation has
     /// been idle long enough for the provider's prompt cache to have expired.
     pub(super) fn send_user_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.team_member {
+            return;
+        }
+
         // Slash lines steer the session (`/new`, `/model`, `/status`) rather
         // than continue the conversation, so a warning about what the next
         // answer costs would fire in front of commands that ask for none.
@@ -276,6 +280,10 @@ impl AgentPane {
     }
 
     fn send_user_message_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.team_member {
+            return;
+        }
+
         if self.branch_flow_holds_composer() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,

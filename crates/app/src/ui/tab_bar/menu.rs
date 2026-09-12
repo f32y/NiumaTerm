@@ -4,6 +4,8 @@ use app::agent_tab::{AgentKind, AgentKindExt as _};
 use gpui::{App, Entity, SharedString};
 use gpui_component::modern_menu::ModernMenu;
 use gpui_component::{Icon, IconName, IconNamed, Sizable as _};
+use nmt_agent::team::session::TeamSession;
+use nmt_config::config_dir_path;
 use nmt_config::profile::Profile;
 use rust_i18n::t;
 
@@ -185,6 +187,25 @@ pub(in crate::ui) fn new_tab_menu(
                 item_shell.update(cx, |this, cx| this.open_agent_tab(profile, window, cx));
             })
             .icon(icon);
+    }
+
+    let item_shell = shell.clone();
+
+    menu = menu.separator().item(t!("team-new"), move |window, cx| {
+        item_shell.update(cx, |this, cx| this.open_team_tab(None, window, cx));
+    });
+
+    if let Ok(rooms) = TeamSession::saved_rooms(&config_dir_path()) {
+        for room in rooms {
+            let item_shell = shell.clone();
+
+            menu = menu.item(
+                format!("{} {}", t!("team-reopen"), &room.to_string()[..8]),
+                move |window, cx| {
+                    item_shell.update(cx, |this, cx| this.open_team_tab(Some(room), window, cx));
+                },
+            );
+        }
     }
 
     menu

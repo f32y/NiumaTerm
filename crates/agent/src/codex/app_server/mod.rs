@@ -24,6 +24,8 @@ pub use crate::chat::{
     SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
     TokenUsageBreakdown,
 };
+use crate::codex::app_server::team::TeamState;
+use crate::session::team_capabilities::TeamLaunch;
 use crate::workspace::AgentWorkspace;
 use crate::{CodexProviderConfig, LaunchConfig};
 
@@ -36,6 +38,7 @@ mod options;
 mod protocol;
 mod questions;
 mod skills;
+mod team;
 mod title_generation;
 
 use crate::codex::app_server::background_tasks::{CodexTasks, ThreadScope, notification_thread_id};
@@ -52,9 +55,9 @@ pub use crate::codex::app_server::options::{
 use crate::codex::app_server::protocol::thread_start_params;
 use crate::codex::app_server::protocol::{
     codex_command_request, codex_command_response, codex_user_input, file_change_paths,
-    initial_thread_request, parse_fork_checkpoints, parse_models, parse_replay,
-    parse_thread_settings, parse_thread_summaries, resumed_thread_events, skills_list_request,
-    stringify_command, thread_list_params, thread_resume_params, turn_start_params,
+    parse_fork_checkpoints, parse_models, parse_replay, parse_thread_settings,
+    parse_thread_summaries, resumed_thread_events, skills_list_request, stringify_command,
+    thread_list_params, thread_resume_params, turn_start_params,
 };
 use crate::codex::app_server::questions::QuestionState;
 #[cfg(test)]
@@ -136,6 +139,15 @@ pub struct Session {
 
     /// Descendant-thread tracking for the `Background Tasks` view.
     background: CodexTasks,
+
+    team: Option<TeamState>,
+}
+
+#[derive(Default)]
+struct ConversationStart {
+    resume: Option<String>,
+    suppress_replay: bool,
+    team: Option<TeamLaunch>,
 }
 
 impl Session {
@@ -193,8 +205,7 @@ impl Session {
             launch,
             host_catalog,
             workspace,
-            None,
-            false,
+            ConversationStart::default(),
             deliver,
             on_stderr,
         )
@@ -216,8 +227,11 @@ impl Session {
             launch,
             host_catalog,
             workspace,
-            Some(thread_id),
-            suppress_replay,
+            ConversationStart {
+                resume: Some(thread_id),
+                suppress_replay,
+                team: None,
+            },
             deliver,
             on_stderr,
         )
@@ -227,8 +241,7 @@ impl Session {
         launch: &LaunchConfig,
         host_catalog: &[LaunchConfig],
         workspace: &AgentWorkspace,
-        initial_resume: Option<String>,
-        suppress_resume_replay: bool,
+        start: ConversationStart,
         deliver: impl Fn(Value) + Send + Sync + 'static,
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Self, String> {
@@ -252,26 +265,15 @@ impl Session {
             skill_refresh: SkillRefreshState::default(),
             thread_profile,
             workspace: workspace.clone(),
-            initial_resume,
-            suppress_resume_replay,
+            initial_resume: start.resume,
+            suppress_resume_replay: start.suppress_replay,
             background: CodexTasks::default(),
+            team: start.team.map(TeamState::new),
         };
 
         session.request_skills(false);
 
-        let initial_request = initial_thread_request(
-            session.initial_resume.as_deref(),
-            &session.thread_profile,
-            &session.workspace,
-        );
-
-        let kind = if session.initial_resume.is_some() {
-            QueryKind::Resume
-        } else {
-            QueryKind::Start
-        };
-
-        session.send_query(kind, initial_request);
+        session.start_initial_thread();
 
         Ok(session)
     }
@@ -398,6 +400,12 @@ impl Session {
         skill: Option<&SkillReference>,
         images: &[PathBuf],
     ) -> SendOutcome {
+        if let Some(team) = &self.team
+            && (!team.can_send() || self.conversation.current_turn.is_some())
+        {
+            return SendOutcome::NotReady;
+        }
+
         let Some(thread_id) = self.conversation.thread_id.clone() else {
             return SendOutcome::NotReady;
         };
@@ -826,6 +834,8 @@ impl Session {
 
     fn process_server_request(&mut self, rpc_id: u64, method: &str, message: &Value) -> Vec<Event> {
         match method {
+            "item/tool/call" => self.process_team_decision(rpc_id, &message["params"]),
+
             "item/tool/requestUserInput" => {
                 self.process_question_request(rpc_id, &message["params"])
             }
@@ -1024,7 +1034,7 @@ impl Session {
                 self.request_history(self.history_scope);
                 self.start_descendant_discovery();
 
-                vec![Event::Ready(parse_thread_settings(result))]
+                self.finish_team_start(vec![Event::Ready(parse_thread_settings(result))])
             }
 
             Some(QueryKind::Models) => {
@@ -1076,7 +1086,11 @@ impl Session {
                 // child state the previous one observed.
                 self.start_descendant_discovery();
 
-                resumed_thread_events(result, take(&mut self.suppress_resume_replay))
+                self.retain_team_history(&result["thread"]["turns"]);
+
+                let events = resumed_thread_events(result, take(&mut self.suppress_resume_replay));
+
+                self.finish_team_start(events)
             }
 
             _ => Vec::new(),

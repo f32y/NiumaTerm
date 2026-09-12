@@ -97,6 +97,7 @@ impl Shell {
             .on_action(cx.listener(Self::on_toggle_background_tasks))
             .on_action(cx.listener(Self::on_show_settings))
             .on_action(cx.listener(Self::on_new_agent_tab))
+            .on_action(cx.listener(Self::on_new_team_tab))
     }
 
     fn render_title_bar(
@@ -584,7 +585,7 @@ impl Render for Shell {
                             busy: busy_agent_tabs.contains(&tab.id()),
                             bell: tab.bell(),
                             agent_kind: tab.surface().agent_kind(cx),
-                            settings: tab.surface().is_settings(),
+                            icon: tab.surface().icon(cx),
                             pending: matches!(tab.surface(), TabSurface::Pending(_)),
                             exited: tab.exited(),
                             progress: tab.progress(),

@@ -42,6 +42,7 @@ pub(super) use crate::agent_tab::transcript::render::transcript_column;
 pub(super) use crate::agent_tab::transcript::rows::{Entry, ReadingPosition, RowSpec};
 #[cfg(test)]
 pub(super) use crate::agent_tab::transcript::rows::{TurnSummary, turn_summary};
+pub(in crate::agent_tab) use crate::agent_tab::transcript::view::TranscriptAttribution;
 pub use crate::agent_tab::transcript::view::TranscriptView;
 
 #[cfg(test)]

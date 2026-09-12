@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crate::chat::{
     ForkAnchor, QuestionRequest, SendOutcome, SlashCommandInfo, SlashCommandOutcome,
 };
+use crate::session::team_recovery::RecoveredTeamTurn;
 use crate::session::{AgentKind, RecoveryIdentity, RenameOutcome};
 use crate::workflow::{WorkflowRefreshRequest, WorkflowSource};
 
@@ -29,6 +30,7 @@ pub struct TestBackend {
     pub fork_accepted: bool,
     pub fork_requests: Vec<ForkAnchor>,
     pub file_restore_requests: Vec<String>,
+    pub team_recovered_turns: Vec<RecoveredTeamTurn>,
     pub(super) send_outcomes: VecDeque<SendOutcome>,
     pub(super) slash_outcome: SlashCommandOutcome,
     pub(super) commands: Vec<SlashCommandInfo>,
@@ -62,6 +64,7 @@ impl TestBackend {
             fork_accepted: false,
             fork_requests: Vec::new(),
             file_restore_requests: Vec::new(),
+            team_recovered_turns: Vec::new(),
             send_outcomes: send_outcomes.into_iter().collect(),
             slash_outcome,
             commands,

@@ -490,6 +490,19 @@ impl Shell {
             cx.notify();
         }
 
+        if let Some(team) = self.workspaces.active_tabs().active().team().cloned() {
+            team.update(cx, |pane, cx| pane.focus(window, cx));
+
+            return;
+        }
+
+        if matches!(
+            self.workspaces.active_tabs().active(),
+            TabSurface::TeamUnavailable { .. }
+        ) {
+            return;
+        }
+
         // Agent tabs focus their composer and acknowledge their own monitor
         // route just like a focused terminal pane.
         if let Some(agent) = self.active_agent() {

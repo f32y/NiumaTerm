@@ -45,6 +45,9 @@ impl AgentPane {
 
         match effect {
             SessionEffect::Unchanged => {}
+            SessionEffect::ProviderTurnAccepted { .. } => {}
+            SessionEffect::TeamDecision(_) => {}
+            SessionEffect::ProviderTurnFinished { .. } => {}
             SessionEffect::Changed => cx.notify(),
 
             SessionEffect::Title(title) => {

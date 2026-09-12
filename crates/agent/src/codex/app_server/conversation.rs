@@ -58,7 +58,13 @@ impl ConversationState {
                 self.current_turn = params["turn"]["id"].as_str().map(str::to_owned);
                 self.turn_output_usage.begin_turn();
 
-                vec![Event::TurnStarted]
+                let mut events = vec![Event::TurnStarted];
+
+                if let Some(id) = &self.current_turn {
+                    events.push(Event::ProviderTurnAccepted { id: id.clone() });
+                }
+
+                events
             }
 
             "turn/completed" => {
@@ -76,7 +82,19 @@ impl ConversationState {
 
                 self.compaction.clear_incomplete();
 
-                events.push(Event::TurnCompleted { error });
+                events.push(Event::TurnCompleted {
+                    error: error.clone(),
+                });
+
+                if let Some(id) = params["turn"]["id"].as_str() {
+                    events.push(Event::ProviderTurnFinished {
+                        id: id.to_owned(),
+                        error: error.or_else(|| {
+                            (params["turn"]["status"].as_str() == Some("interrupted"))
+                                .then(|| "The provider turn was interrupted.".into())
+                        }),
+                    });
+                }
 
                 events
             }

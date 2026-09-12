@@ -9,8 +9,10 @@ use std::{fs, thread};
 
 use gpui::{App, AppContext as _, Context, Entity, EventEmitter, Task, WeakEntity};
 use nmt_agent::background_task::BackgroundTaskKey;
+use nmt_agent::chat::TeamDecisionRequest;
 use nmt_agent::session::RecoveryIdentity;
 use nmt_agent::session::controller::{SessionController, SessionEffect};
+use nmt_agent::session::team_capabilities::TeamLaunch;
 use nmt_agent::{AgentRoute, AgentWorkspace, agent_process};
 use nmt_config::profile::AgentProfile;
 use uuid::Uuid;
@@ -52,6 +54,7 @@ pub struct AgentSession {
     pub(in crate::agent_tab) last_completed: Option<(u64, u64)>,
     closed: Rc<Cell<bool>>,
     binding_generation: Rc<Cell<u64>>,
+    pub(in crate::agent_tab) team_launch: Option<TeamLaunch>,
 }
 
 /// Closing this owner releases execution even while observers still exist.
@@ -94,6 +97,28 @@ pub(in crate::agent_tab) struct PresentationEffect {
 impl EventEmitter<PresentationEffect> for AgentSession {}
 
 impl EventEmitter<AgentPaneEvent> for AgentSession {}
+
+#[derive(Clone)]
+pub(in crate::agent_tab) enum ExecutionSignal {
+    Accepted {
+        epoch: u64,
+        id: String,
+    },
+
+    Finished {
+        epoch: u64,
+        id: String,
+        error: Option<String>,
+        text: String,
+    },
+
+    Decision {
+        epoch: u64,
+        request: TeamDecisionRequest,
+    },
+}
+
+impl EventEmitter<ExecutionSignal> for AgentSession {}
 
 impl SessionOwner {
     pub fn session(&self) -> &Entity<AgentSession> {
@@ -158,6 +183,24 @@ impl Drop for SessionOwner {
 
 impl AgentSession {
     pub fn create(profile: AgentProfile, workspace: AgentWorkspace, cx: &mut App) -> SessionOwner {
+        Self::create_with_team(profile, workspace, None, cx)
+    }
+
+    pub(in crate::agent_tab) fn create_team(
+        profile: AgentProfile,
+        workspace: AgentWorkspace,
+        policy: TeamLaunch,
+        cx: &mut App,
+    ) -> SessionOwner {
+        Self::create_with_team(profile, workspace, Some(policy), cx)
+    }
+
+    fn create_with_team(
+        profile: AgentProfile,
+        workspace: AgentWorkspace,
+        team_launch: Option<TeamLaunch>,
+        cx: &mut App,
+    ) -> SessionOwner {
         let kind = AgentKind::from_profile(profile.kind);
         let controller = Rc::new(RefCell::new(SessionController::new(kind)));
         let closed = Rc::new(Cell::new(false));
@@ -178,6 +221,7 @@ impl AgentSession {
             workflow_readers: Rc::new(Cell::new(0)),
             closed: closed.clone(),
             binding_generation: binding_generation.clone(),
+            team_launch,
         });
 
         let registry = cx.default_global::<SessionRegistry>().0.clone();
@@ -225,8 +269,43 @@ impl AgentSession {
     }
 
     pub(in crate::agent_tab) fn publish(&self, effect: SessionEffect, cx: &mut Context<Self>) {
+        let epoch = self.controller.borrow().runtime.epoch();
+
+        match &effect {
+            SessionEffect::ProviderTurnAccepted { id } => cx.emit(ExecutionSignal::Accepted {
+                epoch,
+                id: id.clone(),
+            }),
+
+            SessionEffect::ProviderTurnFinished { id, error } => {
+                let state = self.controller.borrow();
+
+                let text = state
+                    .conversation
+                    .borrow()
+                    .content
+                    .latest_agent_message(state.delivery.turn())
+                    .unwrap_or_default()
+                    .to_owned();
+
+                cx.emit(ExecutionSignal::Finished {
+                    epoch,
+                    id: id.clone(),
+                    error: error.clone(),
+                    text,
+                });
+            }
+
+            SessionEffect::TeamDecision(request) => cx.emit(ExecutionSignal::Decision {
+                epoch,
+                request: request.clone(),
+            }),
+
+            _ => {}
+        }
+
         cx.emit(PresentationEffect {
-            epoch: self.controller.borrow().runtime.epoch(),
+            epoch,
             generation: self.binding_generation.get(),
             effect: RefCell::new(Some(effect)),
         });

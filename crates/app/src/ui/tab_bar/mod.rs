@@ -9,7 +9,7 @@ use gpui::{
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
-use gpui_component::{ActiveTheme, ElementExt as _, IconName, Sizable};
+use gpui_component::{ActiveTheme, ElementExt as _, Icon, IconName, Sizable};
 use nmt_terminal::event::{ProgressReport, ProgressState};
 use rust_i18n::t;
 
@@ -30,7 +30,7 @@ pub(super) mod menu;
 mod tests;
 
 use crate::ui::tab_bar::drag::{TabDrag, TabDragPreview};
-pub(super) use crate::ui::tab_bar::menu::{new_tab_menu, tab_icon};
+pub(super) use crate::ui::tab_bar::menu::new_tab_menu;
 
 pub(super) struct TabStrip {
     /// Scroll position of the tab strip (tabs overflow horizontally once their
@@ -146,7 +146,7 @@ struct TabItem {
     unread: bool,
     busy: bool,
     agent_kind: Option<AgentKind>,
-    settings: bool,
+    icon: Icon,
     bell: bool,
 
     /// Restored but not yet spawned.
@@ -289,7 +289,7 @@ impl TabStrip {
                 unread: unread_tabs.contains(&tab.id()),
                 busy: busy_agent_tabs.contains(&tab.id()),
                 agent_kind: tab.surface().agent_kind(cx),
-                settings: tab.surface().is_settings(),
+                icon: tab.surface().icon(cx),
                 bell: tab.bell(),
                 pending: matches!(tab.surface(), TabSurface::Pending(_)),
                 exited: tab.exited(),
@@ -360,7 +360,7 @@ impl TabStrip {
                     unread,
                     busy,
                     agent_kind,
-                    settings: is_settings,
+                    icon,
                     bell,
                     pending,
                     exited,
@@ -517,8 +517,7 @@ impl TabStrip {
                                                     ))
                                                     .into_any_element()
                                                 } else {
-                                                    tab_icon(agent_kind, is_settings)
-                                                        .into_any_element()
+                                                    icon.clone().into_any_element()
                                                 }),
                                         )
                                         .children(slot_close),
@@ -614,7 +613,7 @@ impl TabStrip {
                                     pending_tab_icon(("tab-pending-icon", id as usize))
                                         .into_any_element()
                                 } else {
-                                    tab_icon(None, is_settings).into_any_element()
+                                    icon.clone().into_any_element()
                                 })
                                 .when_some(
                                     terminal_presentation(terminal),
@@ -652,7 +651,7 @@ impl TabStrip {
                                 ),
                         )
                     })
-                    .when_some(agent_kind.filter(|_| !icon_only), |this, agent_kind| {
+                    .when_some(agent_kind.filter(|_| !icon_only), |this, _| {
                         let indicator = agent_tab_indicator(busy, unread);
 
                         this.prefix(
@@ -667,7 +666,7 @@ impl TabStrip {
                                     pending_tab_icon(("tab-pending-icon", id as usize))
                                         .into_any_element()
                                 } else {
-                                    tab_icon(Some(agent_kind), false).into_any_element()
+                                    icon.clone().into_any_element()
                                 })
                                 .when_some(indicator, |this, indicator| {
                                     this.child(

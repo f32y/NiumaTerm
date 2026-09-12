@@ -1,5 +1,7 @@
 //! Provider selection, message delivery, and session lifecycle without GUI state.
 
+use serde::{Deserialize, Serialize};
+
 use crate::update::ProviderKind;
 
 mod backend;
@@ -15,6 +17,8 @@ pub mod lifecycle;
 pub mod naming;
 pub mod restore;
 pub mod settings;
+pub mod team_capabilities;
+pub mod team_recovery;
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
 pub mod test_support;
@@ -51,7 +55,8 @@ pub enum OperationError {
 
 /// Which agent backs this pane; the persisted tab snapshot stores the agent
 /// name so future kinds can slot in without a schema change.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AgentKind {
     Codex,
     Claude,

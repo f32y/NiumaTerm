@@ -132,6 +132,13 @@ pub struct TranscriptView {
     /// conversation — a child agent's or a workflow member's — where those
     /// actions have no conversation of this pane's to act on.
     owner: Option<gpui::WeakEntity<AgentPane>>,
+
+    pub(in crate::agent_tab) attribution: HashMap<String, TranscriptAttribution>,
+}
+
+pub(in crate::agent_tab) struct TranscriptAttribution {
+    pub(in crate::agent_tab) name: SharedString,
+    pub(in crate::agent_tab) cwd: Option<String>,
 }
 
 impl TranscriptView {
@@ -173,6 +180,7 @@ impl TranscriptView {
             zoom_fade: Fade::lasting(ZOOM_DURATION),
             zoom_origin: None,
             owner: None,
+            attribution: HashMap::new(),
         }
     }
 
@@ -223,6 +231,10 @@ impl TranscriptView {
         self.owner = Some(owner);
     }
 
+    pub(in crate::agent_tab) fn clear_owner(&mut self) {
+        self.owner = None;
+    }
+
     pub(in crate::agent_tab) fn owner(&self) -> Option<&gpui::WeakEntity<AgentPane>> {
         self.owner.as_ref()
     }
@@ -246,6 +258,37 @@ impl TranscriptView {
         self.reset_presentation();
         self.observed_version = self.conversation.borrow().version();
         self.row_cache.invalidate(0);
+
+        cx.notify();
+    }
+
+    pub(in crate::agent_tab) fn show_attributed_entries(
+        &mut self,
+        entries: Vec<Entry>,
+        attribution: HashMap<String, TranscriptAttribution>,
+        first_changed: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let mut conversation = self.conversation.borrow_mut();
+
+        let moved = conversation
+            .content
+            .entries()
+            .iter()
+            .zip(&entries)
+            .any(|(old, new)| old.item.id() != new.item.id());
+
+        conversation.content.replace(entries);
+        conversation.changed(first_changed, None);
+        drop(conversation);
+
+        if moved {
+            self.disclosures.clear();
+            self.image_previews.borrow_mut().clear();
+        }
+
+        self.attribution = attribution;
+        self.sync_content();
 
         cx.notify();
     }

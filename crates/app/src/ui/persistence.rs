@@ -1,11 +1,14 @@
 use std::process;
 
 use app::agent_tab::execution::AgentSession;
+use app::agent_tab::team::{TeamPane, TeamRuntime};
 use app::agent_tab::{AgentKind, AgentKindExt as _, AgentPane};
 use app::terminal_tab::view::TerminalPane;
 use dirs::home_dir;
 use gpui::{App, AppContext, Axis, Context, Entity, Window};
 use gpui_component::resizable::ResizableState;
+use nmt_agent::team::identity::RoomId;
+use nmt_config::config_dir_path;
 use nmt_config::local_state::{
     PaneNodeState, PaneSplitAxis, SessionState, TabState, WorkspaceState,
 };
@@ -314,8 +317,35 @@ pub(super) fn materialize_active_tab(
 ) -> bool {
     let state = match workspaces.active_tabs().active() {
         TabSurface::Pending(state) => (**state).clone(),
-        TabSurface::Live(_) | TabSurface::Agent(_) | TabSurface::Settings => return false,
+
+        TabSurface::Live(_)
+        | TabSurface::Agent(_)
+        | TabSurface::Settings
+        | TabSurface::Team(_)
+        | TabSurface::TeamUnavailable { .. } => return false,
     };
+
+    if let Some(saved_id) = state.team_room.as_deref() {
+        let restored = saved_id
+            .parse::<RoomId>()
+            .map_err(|error| error.to_string())
+            .and_then(|id| {
+                TeamRuntime::open(&config_dir_path(), id, cx).map_err(|error| error.to_string())
+            });
+
+        let surface = match restored {
+            Ok(runtime) => TabSurface::Team(cx.new(|cx| TeamPane::new(runtime, window, cx))),
+
+            Err(message) => TabSurface::TeamUnavailable {
+                saved: Box::new(state),
+                message,
+            },
+        };
+
+        *workspaces.active_tabs_mut().active_mut() = surface;
+
+        return true;
+    }
 
     // An unknown agent kind (a newer snapshot) degrades to the terminal
     // path below rather than losing the tab.
@@ -380,14 +410,14 @@ fn restore_tabs(
     tabs: Vec<TabState>,
     active_tab: usize,
     next_id: &mut u64,
-    cx: &mut Context<Shell>,
+    cx: &App,
 ) -> Option<TabManager<TabSurface>> {
     let mut restored = Vec::new();
 
     for mut tab_state in tabs {
         // Agent tabs carry no launch command; profile resolution only
         // applies to terminal tabs.
-        if tab_state.agent.is_none() {
+        if tab_state.agent.is_none() && tab_state.team_room.is_none() {
             resolve_restored_launch(&mut tab_state, cx.global::<AppSettings>());
         }
 
@@ -400,25 +430,29 @@ fn restore_tabs(
         // The profile-derived title a live pane would report, so pending
         // tabs label identically to spawned ones. Unknown agent kinds
         // materialize as terminals, so they take the profile title too.
-        let default_title = match tab_state.agent.as_deref().and_then(AgentKind::from_id) {
-            Some(kind) => {
-                let name = restored_agent_profile(
-                    tab_state.agent_profile.as_deref(),
-                    kind,
-                    cx.global::<AppSettings>(),
-                )
-                .name;
+        let default_title = if tab_state.team_room.is_some() {
+            t!("team-title").into_owned()
+        } else {
+            match tab_state.agent.as_deref().and_then(AgentKind::from_id) {
+                Some(kind) => {
+                    let name = restored_agent_profile(
+                        tab_state.agent_profile.as_deref(),
+                        kind,
+                        cx.global::<AppSettings>(),
+                    )
+                    .name;
 
-                if name.trim().is_empty() {
-                    kind.display().to_string()
-                } else {
-                    name
+                    if name.trim().is_empty() {
+                        kind.display().to_string()
+                    } else {
+                        name
+                    }
                 }
-            }
 
-            None => cx
-                .global::<AppSettings>()
-                .profile_name_for_command(tab_state.shell.as_deref(), &tab_state.args),
+                None => cx
+                    .global::<AppSettings>()
+                    .profile_name_for_command(tab_state.shell.as_deref(), &tab_state.args),
+            }
         };
 
         restored.push((
@@ -466,6 +500,7 @@ fn restore_pane_node(
             let surface_id = Shell::alloc_id(next_id);
 
             let mut launch = TabState {
+                team_room: None,
                 name: None,
                 user_named: false,
                 shell: shell.clone(),
@@ -672,6 +707,13 @@ fn session_state(
                         // and that workspace is skipped above; the arm
                         // exists so the match stays exhaustive.
                         TabSurface::Settings => TabState::default(),
+
+                        TabSurface::Team(pane) => TabState {
+                            team_room: Some(pane.read(cx).room_id(cx).to_string()),
+                            ..TabState::default()
+                        },
+
+                        TabSurface::TeamUnavailable { saved, .. } => (**saved).clone(),
                     };
 
                     normalize_saved_launch(&mut state, &default_profile);
@@ -704,10 +746,11 @@ impl Shell {
 
 #[cfg(test)]
 mod launch_resolution_tests {
+    use gpui::TestAppContext;
     use nmt_config::local_state::TabState;
 
     use crate::ui::persistence::{
-        legacy_generated_tab_title, normalize_saved_launch, resolve_restored_launch,
+        legacy_generated_tab_title, normalize_saved_launch, resolve_restored_launch, restore_tabs,
     };
     use crate::ui::settings::{AppSettings, Profile};
 
@@ -739,8 +782,32 @@ mod launch_resolution_tests {
             cwd: None,
             agent: None,
             agent_profile: None,
+            team_room: None,
             panes: None,
         }
+    }
+
+    #[gpui::test]
+    fn restored_team_tabs_keep_their_title(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            cx.set_global(settings_with_pwsh_default());
+
+            let saved = TabState {
+                team_room: Some("saved-room".into()),
+                ..TabState::default()
+            };
+
+            let named = TabState {
+                name: Some("Review team".into()),
+                user_named: true,
+                ..saved.clone()
+            };
+
+            let tabs = restore_tabs(vec![saved, named], 0, &mut 0, cx).unwrap();
+
+            assert_eq!(tabs.tabs()[0].title(), rust_i18n::t!("team-title"));
+            assert_eq!(tabs.tabs()[1].title(), "Review team");
+        });
     }
 
     #[test]

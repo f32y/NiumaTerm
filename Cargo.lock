@@ -314,6 +314,7 @@ dependencies = [
  "notify",
  "parking_lot",
  "percent-encoding",
+ "rand 0.10.2",
  "raw-window-handle",
  "reqwest",
  "ropey",

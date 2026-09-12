@@ -632,7 +632,7 @@ impl Sidebar {
                             pending_tab_icon(("sidebar-tab-pending", key)).into_any_element()
                         }
 
-                        (None, false) => tab_icon(tab.agent_kind, tab.settings).into_any_element(),
+                        (None, false) => tab.icon.clone().into_any_element(),
                     }),
             )
             .child(label)

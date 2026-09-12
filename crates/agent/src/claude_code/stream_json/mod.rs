@@ -129,6 +129,8 @@ pub struct Session {
     /// turn-started notification — `result` is the only turn boundary).
     turn_reported: bool,
 
+    accepted_identity: Option<String>,
+
     /// Model and permission selections sent to the backend. Effort changes
     /// additionally need ordered confirmation and are owned by control state.
     applied_model: Option<String>,
@@ -322,6 +324,7 @@ impl Session {
             session_id: resume,
             turn_active: false,
             turn_reported: false,
+            accepted_identity: None,
             applied_model: initial_model,
             applied_permission: None,
             active_slash_command: None,
@@ -400,6 +403,7 @@ impl Session {
         if !self.turn_active && carries_model_output(&message) {
             self.turn_active = true;
             self.turn_reported = false;
+            self.accepted_identity = None;
             self.transcript.begin_turn();
         }
 
@@ -407,6 +411,32 @@ impl Session {
         if self.turn_active && !self.turn_reported {
             self.turn_reported = true;
             events.push(Event::TurnStarted);
+        }
+
+        if self.turn_active
+            && self.accepted_identity.is_none()
+            && message["parent_tool_use_id"].is_null()
+        {
+            let provider_id = match message["type"].as_str() {
+                Some("stream_event") if message["event"]["type"] == "message_start" => {
+                    message["event"]["message"]["id"].as_str()
+                }
+
+                Some("assistant") => message["message"]["id"].as_str(),
+
+                Some("result") if message["is_error"].as_bool() == Some(false) => {
+                    message["uuid"].as_str()
+                }
+
+                _ => None,
+            };
+
+            if let Some(id) = provider_id.filter(|id| !id.is_empty()) {
+                let id = format!("response:{id}");
+
+                self.accepted_identity = Some(id.clone());
+                events.push(Event::ProviderTurnAccepted { id });
+            }
         }
 
         match message["type"].as_str() {
@@ -562,6 +592,7 @@ impl Session {
         } else {
             self.turn_active = true;
             self.turn_reported = false;
+            self.accepted_identity = None;
             self.transcript.begin_turn();
 
             SendOutcome::StartedTurn
@@ -1226,7 +1257,13 @@ impl Session {
 
         events.extend(self.transcript.finish_turn(message));
 
-        events.push(Event::TurnCompleted { error });
+        events.push(Event::TurnCompleted {
+            error: error.clone(),
+        });
+
+        if let Some(id) = self.accepted_identity.take() {
+            events.push(Event::ProviderTurnFinished { id, error });
+        }
 
         // The window only changes as the conversation grows, so a settled turn
         // is the point where a fresh breakdown is worth asking for.

@@ -4,7 +4,8 @@ use crate::codex::app_server::compaction::{
     CompactionState, compaction_completed, compaction_started,
 };
 use crate::codex::app_server::protocol::{
-    command_purpose, parse_context_window_usage, parse_item, turn_start_params,
+    command_purpose, initial_thread_request, parse_context_window_usage, parse_item,
+    turn_start_params,
 };
 use crate::codex::app_server::*;
 use crate::workspace::AgentWorkspace;
@@ -19,7 +20,7 @@ fn replayed_items(turns: &Value) -> Vec<Item> {
         .collect()
 }
 
-fn disconnected_session() -> Session {
+pub(super) fn disconnected_session() -> Session {
     Session {
         host: None,
         conversation: ConversationState::default(),
@@ -37,6 +38,7 @@ fn disconnected_session() -> Session {
         initial_resume: None,
         suppress_resume_replay: false,
         background: CodexTasks::default(),
+        team: None,
     }
 }
 
@@ -539,7 +541,7 @@ fn conversation_turns_and_output_baselines_are_independent() {
             state
                 .process_notification("turn/started", &json!({"turn":{"id":"turn"}}))
                 .as_slice(),
-            [Event::TurnStarted]
+            [Event::TurnStarted, Event::ProviderTurnAccepted { id }] if id == "turn"
         ));
     }
 

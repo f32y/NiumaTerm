@@ -1,13 +1,73 @@
 use app::agent_tab::execution::AgentSession;
+use app::agent_tab::team::{TeamPane, TeamRuntime};
 use app::agent_tab::{AgentKindExt as _, RecoveryIdentity};
+use nmt_agent::team::identity::RoomId;
+use nmt_config::config_dir_path;
+use nmt_config::local_state::TabState;
 use rust_i18n::t;
 
 use crate::ui::persistence::spawn_default_pane;
+use crate::ui::shell::actions::NewTeamTab;
 use crate::ui::shell::tab_surface::AgentTab;
 use crate::ui::shell::*;
 use crate::ui::terminal_launch::attach_remote;
 
 impl Shell {
+    pub(crate) fn open_team_tab(
+        &mut self,
+        saved: Option<RoomId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.leave_settings_workspace();
+
+        let directory = config_dir_path();
+
+        let runtime = match saved {
+            Some(id) => TeamRuntime::open(&directory, id, cx),
+
+            None => TeamRuntime::create(
+                &directory,
+                agent_workspace(self.workspaces.active_roots()),
+                cx,
+            ),
+        };
+
+        let surface = match runtime {
+            Ok(runtime) => TabSurface::Team(cx.new(|cx| TeamPane::new(runtime, window, cx))),
+
+            Err(error) => TabSurface::TeamUnavailable {
+                saved: Box::new(TabState {
+                    team_room: saved.map(|id| id.to_string()),
+                    ..TabState::default()
+                }),
+                message: error.to_string(),
+            },
+        };
+
+        let id = Self::alloc_id(&mut self.next_id);
+
+        self.workspaces.active_tabs_mut().new_tab(
+            surface,
+            TabId(id),
+            t!("team-title").into_owned(),
+        );
+
+        self.focus_active(window, cx);
+        self.sync_session_memory(cx);
+
+        cx.notify();
+    }
+
+    pub(crate) fn on_new_team_tab(
+        &mut self,
+        _: &NewTeamTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_team_tab(None, window, cx);
+    }
+
     pub(super) fn default_profile(cx: &Context<Self>) -> (Option<String>, Vec<String>) {
         cx.global::<AppSettings>().default_profile_command()
     }

@@ -140,6 +140,21 @@ impl AgentPane {
         pane
     }
 
+    pub(in crate::agent_tab) fn attach_team_member(
+        owner: &SessionOwner,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut pane = Self::attach(owner, window, cx);
+
+        pane.team_member = true;
+
+        pane.transcript
+            .update(cx, |transcript, _| transcript.clear_owner());
+
+        pane
+    }
+
     pub fn attach(owner: &SessionOwner, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let host = owner.session();
         let profile = host.read(cx).profile.clone();
@@ -232,6 +247,7 @@ impl AgentPane {
             host: host.downgrade(),
             binding,
             presenting_session_effect: false,
+            team_member: false,
             #[cfg(test)]
             owned_session: None,
             history_ui: SessionHistoryUi::default(),

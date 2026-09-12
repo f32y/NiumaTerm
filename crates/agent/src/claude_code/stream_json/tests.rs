@@ -212,6 +212,72 @@ fn turn_completion_preserves_session_requests_and_retires_prompts() {
 
 #[cfg(windows)]
 #[test]
+fn acceptance_uses_one_root_provider_identity_per_turn() {
+    use std::path::Path;
+
+    use tempfile::tempdir;
+
+    let directory = tempdir().unwrap();
+
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/fake-stream-json.cmd");
+
+    let launch = LaunchConfig {
+        executable: fixture.to_string_lossy().into_owned(),
+        env: vec![(
+            "NMT_FAKE_STREAM_LOG".into(),
+            directory
+                .path()
+                .join("input.jsonl")
+                .to_string_lossy()
+                .into_owned(),
+        )],
+        ..LaunchConfig::default()
+    };
+
+    let mut session =
+        Session::spawn(&launch, &AgentWorkspace::default(), None, |_| {}, |_| {}).unwrap();
+
+    session.ready = true;
+    session.turn_active = true;
+
+    let child = json!({"type":"stream_event", "parent_tool_use_id":"child", "event":{"type":"message_start", "message":{"id":"child-response"}}});
+
+    assert!(
+        !session
+            .process(child)
+            .iter()
+            .any(|event| matches!(event, Event::ProviderTurnAccepted { .. }))
+    );
+
+    let root =
+        |id| json!({"type":"stream_event", "event":{"type":"message_start", "message":{"id":id}}});
+
+    assert!(session.process(root("api-first")).iter().any(
+        |event| matches!(event, Event::ProviderTurnAccepted { id } if id == "response:api-first")
+    ));
+    assert!(
+        !session
+            .process(root("api-tool-followup"))
+            .iter()
+            .any(|event| matches!(event, Event::ProviderTurnAccepted { .. }))
+    );
+
+    session.process(json!({"type":"result", "is_error":false, "uuid":"result-one"}));
+
+    assert!(matches!(
+        session.send_user_message("Next request", &ThreadSettings::default(), &[]),
+        SendOutcome::StartedTurn
+    ));
+    assert!(session.process(root("api-next")).iter().any(
+        |event| matches!(event, Event::ProviderTurnAccepted { id } if id == "response:api-next")
+    ));
+
+    session.shutdown(Duration::from_secs(2), true).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
 fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
     use std::env;
     use std::path::Path;

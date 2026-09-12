@@ -29,6 +29,7 @@ fn session_state() -> SessionState {
                 cwd: Some("C:/Projects/example/repo".into()),
                 agent: None,
                 agent_profile: None,
+                team_room: None,
                 panes: None,
             }],
         }],

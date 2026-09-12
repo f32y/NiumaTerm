@@ -12,6 +12,7 @@ pub mod launcher;
 pub mod message_memory;
 pub mod profile;
 pub mod session;
+pub mod team;
 pub mod transcript;
 pub mod update;
 pub mod usage;

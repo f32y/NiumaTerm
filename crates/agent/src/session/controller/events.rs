@@ -1,6 +1,7 @@
 use crate::chat::{
     ContextComposition, ContextWindowUsage, Event, ForkCheckpoint, GoalStatus, Item, SessionStats,
-    SessionSummary, SkillCatalog, SlashCommandInfo, SlashCommandOutcome, TurnActivity,
+    SessionSummary, SkillCatalog, SlashCommandInfo, SlashCommandOutcome, TeamDecisionRequest,
+    TurnActivity,
 };
 use crate::session::branch::BranchUpdate;
 use crate::session::controller::{SessionController, SessionFailure, SessionReady, SessionReplay};
@@ -25,6 +26,17 @@ pub enum SessionEffect {
 
     TurnStarted {
         opened: bool,
+    },
+
+    ProviderTurnAccepted {
+        id: String,
+    },
+
+    TeamDecision(TeamDecisionRequest),
+
+    ProviderTurnFinished {
+        id: String,
+        error: Option<String>,
     },
 
     TurnCompleted {
@@ -161,6 +173,13 @@ impl SessionController {
             Event::TurnStarted => SessionEffect::TurnStarted {
                 opened: self.turn_started(),
             },
+
+            Event::ProviderTurnAccepted { id } => SessionEffect::ProviderTurnAccepted { id },
+            Event::TeamDecision(request) => SessionEffect::TeamDecision(request),
+
+            Event::ProviderTurnFinished { id, error } => {
+                SessionEffect::ProviderTurnFinished { id, error }
+            }
 
             Event::TurnCompleted { error } => SessionEffect::TurnCompleted {
                 error,

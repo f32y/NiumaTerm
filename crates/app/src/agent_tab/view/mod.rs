@@ -21,9 +21,13 @@ use crate::agent_tab::fade::FrostedLayer;
 use crate::agent_tab::session::Status;
 use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
 use crate::agent_tab::transcript::{LAST_RESPONSE_LIMIT, last_response_label, transcript_column};
+use crate::agent_tab::view::composer_layout::{
+    composer_card, composer_controls_row, composer_input_row,
+};
 use crate::agent_tab::{AgentPane, AgentPaneEvent, RecentSessionsMode};
 
 mod banners;
+pub(in crate::agent_tab) mod composer_layout;
 mod history;
 pub(in crate::agent_tab) mod session_state;
 
@@ -33,18 +37,8 @@ mod tests;
 // The composer sits in the same column as the transcript above it, so the
 // two edges line up at every window width.
 
-/// The composer is the one surface the user types into, so it carries a softer
-/// corner than the cards inside the conversation.
-const COMPOSER_RADIUS: f32 = 16.0;
-
 /// Diameter of the send/stop control that closes the input line.
 const COMPOSER_SEND_BUTTON: f32 = 32.0;
-
-/// Where the card's content starts. The prompt and the settings row under it
-/// are the two things read down the card's leading edge, so they stand on the
-/// same one: the first glyph of the prompt lines up with the outline of the
-/// first pill.
-const COMPOSER_EDGE_INSET: f32 = 10.0;
 
 /// The status footer along the bottom edge of the composer card. It reports
 /// rather than invites input, so it is set below the chrome size to keep the
@@ -54,7 +48,7 @@ pub(super) const COMPOSER_STATUS_PADDING_X: f32 = 14.0;
 pub(super) const COMPOSER_STATUS_PADDING_Y: f32 = 6.0;
 pub(super) const COMPOSER_STATUS_TEXT_SIZE: f32 = 11.5;
 
-struct StopResponseIcon;
+pub(in crate::agent_tab) struct StopResponseIcon;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ComposerEnterBehavior {
@@ -98,6 +92,18 @@ impl gpui::Focusable for AgentPane {
 
 impl Render for AgentPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.team_member {
+            return v_flex()
+                .size_full()
+                .min_h_0()
+                .track_focus(&self.focus)
+                .child(div().flex_1().min_h_0().child(self.transcript.clone()))
+                .children(self.render_approval_panel(cx))
+                .children(self.render_question_panel(window, cx))
+                .child(self.render_composer_status(cx))
+                .into_any_element();
+        }
+
         let command_palette = self.render_command_palette(cx);
 
         let command_feedback = self
@@ -307,14 +313,7 @@ impl Render for AgentPane {
                                 .child(history)
                         }))
                         .child(
-                            v_flex()
-                                .w_full()
-                                .rounded(px(COMPOSER_RADIUS))
-                                .overflow_hidden()
-                                .border_1()
-                                .border_color(cx.theme().border)
-                                .bg(cx.theme().popover)
-                                .shadow_md()
+                            composer_card(cx)
                                 .children(approval)
                                 .children(questions)
                                 .children(command_feedback)
@@ -322,11 +321,7 @@ impl Render for AgentPane {
                                 .children(queued_message)
                                 .children(self.attachments.render(cx))
                                 .child(
-                                    h_flex()
-                                        .w_full()
-                                        .px(px(COMPOSER_EDGE_INSET))
-                                        .pt_3()
-                                        .pb_1()
+                                    composer_input_row()
                                         // GPUI resolves these keystrokes
                                         // into Textarea actions before raw
                                         // key listeners run. Capturing
@@ -422,13 +417,7 @@ impl Render for AgentPane {
                                         )),
                                 )
                                 .child(
-                                    h_flex()
-                                        .w_full()
-                                        .px(px(COMPOSER_EDGE_INSET))
-                                        .pb_2()
-                                        .pt_0p5()
-                                        .items_center()
-                                        .gap_2()
+                                    composer_controls_row()
                                         .child(div().flex_1().min_w_0().child(
                                             self.controls.render_row(
                                                 &self.session.borrow().controls,
@@ -510,6 +499,7 @@ impl Render for AgentPane {
                         .children(blocking_body),
                 )
             })
+            .into_any_element()
     }
 }
 

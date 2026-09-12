@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 
 use gpui::prelude::*;
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, App, Context, Div, ElementId, Hsla, Pixels,
-    RenderOnce, Window, div, ease_in_out, px, relative, rems,
+    Animation, AnimationExt as _, AnyElement, App, Context, Div, ElementId, FontWeight, Hsla,
+    Pixels, RenderOnce, Window, div, ease_in_out, px, relative, rems,
 };
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::shimmer::ShimmerText;
@@ -428,6 +428,16 @@ impl TranscriptView {
         text: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let shared = self.conversation.clone();
+        let conversation = shared.borrow();
+
+        let attribution = conversation.content.entries()[index]
+            .item
+            .id()
+            .and_then(|id| self.attribution.get(id));
+
+        let cwd = attribution.map_or_else(|| self.cwd.clone(), |author| author.cwd.clone());
+
         h_flex()
             .id(("entry", index))
             .group("entry")
@@ -436,11 +446,27 @@ impl TranscriptView {
             .items_end()
             .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(
-                div().flex_1().min_w_0().px_1().child(
-                    markdown_view(("agent-md", index), text, self.cwd.clone())
-                        .style(transcript_text_style(cx))
-                        .selectable(true),
-                ),
+                v_flex()
+                    .debug_selector(move || format!("transcript-agent-{index}"))
+                    .flex_1()
+                    .min_w_0()
+                    .px_1()
+                    .when_some(attribution, |view, author| {
+                        view.child(
+                            div()
+                                .debug_selector(move || format!("transcript-author-{index}"))
+                                .mb_2()
+                                .text_sm()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(cx.theme().muted_foreground)
+                                .child(author.name.clone()),
+                        )
+                    })
+                    .child(
+                        markdown_view(("agent-md", index), text, cwd)
+                            .style(transcript_text_style(cx))
+                            .selectable(true),
+                    ),
             )
             .child(
                 // A stamp in the flow would reserve its width on every row,

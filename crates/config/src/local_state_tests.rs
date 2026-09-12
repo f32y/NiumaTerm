@@ -43,16 +43,23 @@ fn save_load_roundtrip_and_bad_file_defaults() {
                         additional_cwds: vec!["C:/Projects/library".into(), "D:/Docs".into()],
                         pinned: true,
                         active_tab: 9,
-                        tabs: vec![TabState {
-                            name: Some("editor".into()),
-                            user_named: true,
-                            shell: Some("pwsh.exe".into()),
-                            args: vec!["-NoLogo".into()],
-                            cwd: Some("C:/Projects/example/repo".into()),
-                            agent: None,
-                            agent_profile: None,
-                            panes: None,
-                        }],
+                        tabs: vec![
+                            TabState {
+                                name: Some("editor".into()),
+                                user_named: true,
+                                shell: Some("pwsh.exe".into()),
+                                args: vec!["-NoLogo".into()],
+                                cwd: Some("C:/Projects/example/repo".into()),
+                                agent: None,
+                                agent_profile: None,
+                                team_room: None,
+                                panes: None,
+                            },
+                            TabState {
+                                team_room: Some("40000000-0000-4000-8000-000000000000".into()),
+                                ..TabState::default()
+                            },
+                        ],
                     }],
                 }),
                 sidebar_width: Some(220.0),
@@ -254,6 +261,7 @@ fn pane_layout_roundtrips_and_old_snapshots_load_without_it() {
         cwd: Some("C:/a".into()),
         agent: None,
         agent_profile: None,
+        team_room: None,
         panes: Some(PaneNodeState::Split {
             axis: PaneSplitAxis::Horizontal,
             ratios: vec![0.6, 0.4],

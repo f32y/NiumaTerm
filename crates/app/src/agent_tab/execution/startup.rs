@@ -126,7 +126,32 @@ impl AgentSession {
         let (sender, receiver) = channel();
         let mut batches = receiver.ready_chunks(MAX_MESSAGES_PER_BATCH);
 
+        let team_launch = self.team_launch.clone().map(|mut policy| {
+            policy.restore_transcript = self
+                .controller
+                .borrow()
+                .conversation
+                .borrow()
+                .content
+                .entries()
+                .is_empty();
+
+            policy
+        });
+
         let spawned = cx.background_executor().spawn(async move {
+            if let Some(policy) = team_launch {
+                return Backend::spawn_team(
+                    kind,
+                    &launch,
+                    &catalog,
+                    &workspace,
+                    recovery,
+                    policy,
+                    move |message| sender.send(message),
+                );
+            }
+
             Backend::spawn(
                 kind,
                 &launch,

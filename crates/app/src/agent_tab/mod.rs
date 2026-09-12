@@ -23,6 +23,7 @@ pub mod profile;
 mod questions;
 mod session;
 pub mod settings;
+pub mod team;
 mod thread_controls;
 pub mod transcript;
 mod view;
@@ -303,6 +304,7 @@ pub struct AgentPane {
     host: WeakEntity<AgentSession>,
     binding: CommandBinding,
     presenting_session_effect: bool,
+    team_member: bool,
     #[cfg(test)]
     owned_session: Option<SessionOwner>,
 

@@ -309,6 +309,22 @@ fn only_the_users_own_message_becomes_a_transcript_row() {
 }
 
 #[test]
+fn acceptance_uses_the_harness_turn_counter_in_the_correct_session() {
+    let frame = session_frame(json!({"type":"turn/start", "data":{"turn":7}}));
+
+    assert_eq!(
+        map_frame(&frame, SESSION, &mut ToolTracker::default()),
+        vec![
+            Event::TurnStarted,
+            Event::ProviderTurnAccepted {
+                id: "turn:7".into()
+            }
+        ]
+    );
+    assert!(map_frame(&frame, "another-session", &mut ToolTracker::default()).is_empty());
+}
+
+#[test]
 fn turn_end_reasons_separate_a_failure_from_a_stop() {
     let aborted = json!({
         "type": "turn/end",
@@ -321,7 +337,13 @@ fn turn_end_reasons_separate_a_failure_from_a_stop() {
             SESSION,
             &mut ToolTracker::default()
         ),
-        vec![Event::TurnCompleted { error: None }]
+        vec![
+            Event::TurnCompleted { error: None },
+            Event::ProviderTurnFinished {
+                id: "turn:1".into(),
+                error: Some("The provider turn was interrupted.".into())
+            }
+        ]
     );
 
     let completed = json!({
@@ -335,7 +357,13 @@ fn turn_end_reasons_separate_a_failure_from_a_stop() {
             SESSION,
             &mut ToolTracker::default()
         ),
-        vec![Event::TurnCompleted { error: None }]
+        vec![
+            Event::TurnCompleted { error: None },
+            Event::ProviderTurnFinished {
+                id: "turn:1".into(),
+                error: None
+            }
+        ]
     );
 
     let failed = json!({
@@ -345,9 +373,15 @@ fn turn_end_reasons_separate_a_failure_from_a_stop() {
 
     assert_eq!(
         map_frame(&session_frame(failed), SESSION, &mut ToolTracker::default()),
-        vec![Event::TurnCompleted {
-            error: Some("NO_ADAPTER".into()),
-        }]
+        vec![
+            Event::TurnCompleted {
+                error: Some("NO_ADAPTER".into()),
+            },
+            Event::ProviderTurnFinished {
+                id: "turn:1".into(),
+                error: Some("NO_ADAPTER".into())
+            }
+        ]
     );
 }
 

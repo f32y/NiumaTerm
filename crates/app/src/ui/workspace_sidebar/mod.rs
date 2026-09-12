@@ -29,7 +29,7 @@ use crate::ui::shell::{
     InlineRename, InlineRenameSession, InlineRenameStyle, MIN_SIDEBAR_WIDTH, pending_tab_icon,
 };
 use crate::ui::sidebar_resize::{self, ResizeDrag};
-use crate::ui::tab_bar::{new_tab_menu, progress_visual, tab_icon};
+use crate::ui::tab_bar::{new_tab_menu, progress_visual};
 use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::{AppSettings, NewWorkspace, Shell, UI_RADIUS};
@@ -248,7 +248,7 @@ pub(crate) struct SidebarTab {
     pub(crate) busy: bool,
     pub(crate) bell: bool,
     pub(crate) agent_kind: Option<AgentKind>,
-    pub(crate) settings: bool,
+    pub(crate) icon: Icon,
 
     /// Restored but not yet spawned.
     pub(crate) pending: bool,
