@@ -24,7 +24,7 @@ use nmt_config::agent::CollapseRows;
 
 #[path = "../src/ui/assets.rs"]
 mod assets;
-#[path = "../src/syntax/mod.rs"]
+#[path = "../src/syntax.rs"]
 mod syntax;
 #[allow(dead_code)]
 #[path = "../src/utils.rs"]
