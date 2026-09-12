@@ -159,3 +159,6 @@ Co-Authored-By: <MODEL_ID> <noreply@<vendor>.com>
 
 Anthropic models use `noreply@anthropic.com` (e.g.
 `claude-opus-5 <noreply@anthropic.com>`), Codex uses `noreply@openai.com`.
+
+## Local agent instructions
+@AGENTS.local.md

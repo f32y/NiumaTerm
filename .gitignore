@@ -44,3 +44,5 @@ node_modules
 # Rendered by the update-metadata workflow into the Worker asset directory.
 updates/public/appcast.xml
 updates/public/windows/
+
+AGENTS.local.md
