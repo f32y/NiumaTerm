@@ -15,7 +15,7 @@ use nmt_agent::chat::{
 use nmt_agent::claude_code::stream_json;
 use nmt_agent::codex::app_server;
 use nmt_agent::session::commands::CommandAdmission;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::capabilities::AgentCapabilities as _;
 use crate::agent_tab::commands::{
@@ -24,7 +24,7 @@ use crate::agent_tab::commands::{
 use crate::agent_tab::composer::{CommandFeedbackKind, PendingSlashCommand};
 use crate::agent_tab::profile::AgentKind;
 use crate::agent_tab::session::{Backend, Status};
-use crate::agent_tab::{AgentPane, CachedCatalog, RecentSessionsMode, translated};
+use crate::agent_tab::{AgentPane, CachedCatalog, RecentSessionsMode};
 
 impl AgentPane {
     pub(in crate::agent_tab) fn submit_current_slash(
@@ -67,7 +67,7 @@ impl AgentPane {
         if parsed.name.is_empty() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
-                i18n("agent-composer-choose-command").to_string(),
+                t!("agent-composer-choose-command").to_string(),
                 cx,
             );
 
@@ -92,7 +92,7 @@ impl AgentPane {
 
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
-                i18n("agent-composer-unknown-command").replace("{name}", &parsed.name),
+                t!("agent-composer-unknown-command", name = &parsed.name).into_owned(),
                 cx,
             );
 
@@ -104,17 +104,17 @@ impl AgentPane {
         // command or an ordinary user turn.
         if command.arguments == SlashCommandArguments::Skills {
             let message = match self.palette.skill_catalog.as_ref() {
-                None => i18n("agent-composer-skill-discovery-loading-period").to_string(),
+                None => t!("agent-composer-skill-discovery-loading-period").to_string(),
 
                 Some(catalog) if catalog.skills.is_empty() && !catalog.errors.is_empty() => {
                     catalog.errors[0].clone()
                 }
 
                 Some(catalog) if catalog.skills.is_empty() => {
-                    i18n("agent-composer-no-skills-period").to_string()
+                    t!("agent-composer-no-skills-period").to_string()
                 }
 
-                Some(_) => i18n("agent-composer-choose-skill").to_string(),
+                Some(_) => t!("agent-composer-choose-skill").to_string(),
             };
 
             self.palette
@@ -126,7 +126,7 @@ impl AgentPane {
         if command.arguments == SlashCommandArguments::None && !parsed.arguments.trim().is_empty() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
-                i18n("agent-composer-command-no-arguments").replace("{name}", &command.name),
+                t!("agent-composer-command-no-arguments", name = &command.name).into_owned(),
                 cx,
             );
 
@@ -137,7 +137,7 @@ impl AgentPane {
             if parsed.arguments.trim().is_empty() {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,
-                    i18n("agent-composer-choose-value").replace("{name}", &command.name),
+                    t!("agent-composer-choose-value", name = &command.name).into_owned(),
                     cx,
                 );
 
@@ -159,7 +159,7 @@ impl AgentPane {
 
                     self.palette.set_feedback(
                         CommandFeedbackKind::Notice,
-                        i18n("agent-composer-model-set").replace("{value}", &value),
+                        t!("agent-composer-model-set", value = &value).into_owned(),
                         cx,
                     );
 
@@ -186,8 +186,11 @@ impl AgentPane {
 
                     self.palette.set_feedback(
                         CommandFeedbackKind::Notice,
-                        i18n("agent-composer-permissions-set")
-                            .replace("{value}", &setting_value_label(&value)),
+                        t!(
+                            "agent-composer-permissions-set",
+                            value = &setting_value_label(&value)
+                        )
+                        .into_owned(),
                         cx,
                     );
 
@@ -210,7 +213,7 @@ impl AgentPane {
                 if self.is_command_busy() {
                     self.palette.set_feedback(
                         CommandFeedbackKind::Error,
-                        i18n("agent-composer-command-idle-only").replace("{name}", &command.name),
+                        t!("agent-composer-command-idle-only", name = &command.name).into_owned(),
                         cx,
                     );
 
@@ -278,13 +281,16 @@ impl AgentPane {
                 CommandAdmission::Queued { name, count } => {
                     self.palette.set_feedback(
                         CommandFeedbackKind::Queued,
-                        i18n(if count == 1 {
-                            "agent-composer-command-queued-one"
-                        } else {
-                            "agent-composer-command-queued-many"
-                        })
-                        .replace("{name}", &name)
-                        .replace("{count}", &count.to_string()),
+                        t!(
+                            if count == 1 {
+                                "agent-composer-command-queued-one"
+                            } else {
+                                "agent-composer-command-queued-many"
+                            },
+                            name = &name,
+                            count = count
+                        )
+                        .into_owned(),
                         cx,
                     );
 
@@ -294,7 +300,7 @@ impl AgentPane {
                 CommandAdmission::Busy { name } => {
                     self.palette.set_feedback(
                         CommandFeedbackKind::Error,
-                        i18n("agent-composer-command-idle-only").replace("{name}", &name),
+                        t!("agent-composer-command-idle-only", name = &name).into_owned(),
                         cx,
                     );
 
@@ -325,7 +331,7 @@ impl AgentPane {
 
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
-                    i18n("agent-composer-command-starting").replace("{name}", &command.name),
+                    t!("agent-composer-command-starting", name = &command.name).into_owned(),
                     cx,
                 );
 
@@ -336,7 +342,7 @@ impl AgentPane {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
                     message.unwrap_or_else(|| {
-                        i18n("agent-session-command-completed").replace("{name}", &command.name)
+                        t!("agent-session-command-completed", name = &command.name).into_owned()
                     }),
                     cx,
                 );
@@ -354,7 +360,7 @@ impl AgentPane {
             SlashCommandOutcome::NotReady => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,
-                    i18n("agent-session-still-starting").replace("{name}", self.kind.display()),
+                    t!("agent-session-still-starting", name = self.kind.display()).into_owned(),
                     cx,
                 );
 
@@ -375,60 +381,64 @@ impl AgentPane {
 
     pub(super) fn show_status(&mut self, cx: &mut Context<Self>) {
         let status = match self.session.borrow().runtime.status() {
-            Status::Starting => i18n("agent-composer-status-starting"),
-            Status::Idle => i18n("agent-composer-status-idle"),
-            Status::Running => i18n("agent-composer-status-running"),
-            Status::Exited => i18n("agent-composer-status-exited"),
+            Status::Starting => t!("agent-composer-status-starting"),
+            Status::Idle => t!("agent-composer-status-idle"),
+            Status::Running => t!("agent-composer-status-running"),
+            Status::Exited => t!("agent-composer-status-exited"),
         };
 
         let mut fields = vec![
-            i18n("agent-composer-status-field")
-                .replace("{name}", i18n("agent-composer-status-backend"))
-                .replace("{value}", self.kind.display()),
-            i18n("agent-composer-status-field")
-                .replace("{name}", i18n("agent-composer-status-label"))
-                .replace("{value}", status),
+            t!(
+                "agent-composer-status-field",
+                name = t!("agent-composer-status-backend"),
+                value = self.kind.display()
+            )
+            .into_owned(),
+            t!(
+                "agent-composer-status-field",
+                name = t!("agent-composer-status-label"),
+                value = status
+            )
+            .into_owned(),
         ];
 
         for (name, value) in [
             (
-                i18n("agent-setting-model"),
+                t!("agent-setting-model"),
                 self.session.borrow().controls.settings.model.as_deref(),
             ),
             (
-                i18n("agent-setting-permissions"),
+                t!("agent-setting-permissions"),
                 self.session.borrow().controls.settings.approval.as_deref(),
             ),
             (
-                i18n("agent-setting-sandbox"),
+                t!("agent-setting-sandbox"),
                 self.session.borrow().controls.settings.sandbox.as_deref(),
             ),
             (
-                i18n("agent-setting-effort"),
+                t!("agent-setting-effort"),
                 self.session.borrow().controls.settings.effort.as_deref(),
             ),
             (
-                i18n("agent-setting-tier"),
+                t!("agent-setting-tier"),
                 self.session.borrow().controls.settings.tier.as_deref(),
             ),
         ] {
             if let Some(value) = value {
                 fields.push(
-                    i18n("agent-composer-status-field")
-                        .replace("{name}", name)
-                        .replace("{value}", value),
+                    t!("agent-composer-status-field", name = name, value = value).into_owned(),
                 );
             }
         }
 
         if !self.session.borrow().commands.queue.is_empty() {
             fields.push(
-                i18n("agent-composer-status-field")
-                    .replace("{name}", i18n("agent-composer-status-queued"))
-                    .replace(
-                        "{value}",
-                        &self.session.borrow().commands.queue.len().to_string(),
-                    ),
+                t!(
+                    "agent-composer-status-field",
+                    name = t!("agent-composer-status-queued"),
+                    value = self.session.borrow().commands.queue.len()
+                )
+                .into_owned(),
             );
         }
 
@@ -440,26 +450,26 @@ impl AgentPane {
 
     pub(super) fn skill_disabled_reason(&self, skill: &SkillInfo) -> Option<SharedString> {
         if !skill.enabled {
-            Some(translated("agent-composer-disabled-by-codex"))
+            Some(SharedString::from(t!("agent-composer-disabled-by-codex")))
         } else {
             // A skill is invoked through the harness, so it needs a session
             // that has finished starting and has not ended.
             match self.session.borrow().runtime.status() {
-                Status::Starting => Some(translated("agent-composer-agent-starting")),
-                Status::Exited => Some(translated("agent-composer-agent-exited")),
+                Status::Starting => Some(SharedString::from(t!("agent-composer-agent-starting"))),
+                Status::Exited => Some(SharedString::from(t!("agent-composer-agent-exited"))),
                 _ => None,
             }
         }
     }
 
     pub(in crate::agent_tab) fn command_catalog(&mut self) -> Rc<[SlashCommandInfo]> {
-        let language = nmt_i18n::active_language();
+        let language = rust_i18n::locale();
 
         if let Some(cached) = self
             .palette
             .catalog
             .as_ref()
-            .filter(|cached| cached.language == language)
+            .filter(|cached| cached.language == *language)
         {
             return cached.commands.clone();
         }
@@ -480,7 +490,7 @@ impl AgentPane {
         .into();
 
         self.palette.catalog = Some(CachedCatalog {
-            language,
+            language: language.to_string(),
             commands: commands.clone(),
         });
 

@@ -517,7 +517,7 @@ fn presentation_modules_do_not_import_host_services() {
                     && !line.contains("gpui_component")
                     && !line.contains("crate::terminal_tab::view")
                     && !line.contains("crate::terminal_tab::paint")
-                    && !line.contains("nmt_i18n::")
+                    && !line.contains("rust_i18n::")
                     && !line.contains("TerminalSettings")
                     && !line.contains("active_colors"),
                 "host dependency in {}: {line}",

@@ -18,7 +18,7 @@ use gpui::{
 };
 use gpui_component::IconName;
 use gpui_component::button::{Button, ButtonVariants as _};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::fade::FrostedLayer;
 use crate::agent_tab::settings::UI_RADIUS;
@@ -203,8 +203,8 @@ impl TranscriptView {
                                 .size(px(PREVIEW_CLOSE_EDGE))
                                 .rounded_full()
                                 .icon(IconName::Close)
-                                .tooltip(i18n("agent-transcript-image-close"))
-                                .accessibility_label(i18n("agent-transcript-image-close"))
+                                .tooltip(t!("agent-transcript-image-close"))
+                                .accessibility_label(t!("agent-transcript-image-close"))
                                 .on_click(
                                     cx.listener(|this, _, _, cx| this.close_zoomed_image(cx)),
                                 ),

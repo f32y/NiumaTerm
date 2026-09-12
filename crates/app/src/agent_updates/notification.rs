@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use nmt_agent::update::{InstallationKey, InstallationSnapshot, ProviderKind, UpdatePhase};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 use semver::Version;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,14 +79,14 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
     let current = versions
         .and_then(|status| status.current.as_ref())
         .map(ToString::to_string)
-        .unwrap_or_else(|| i18n("agent-update-version-unknown").to_string());
+        .unwrap_or_else(|| t!("agent-update-version-unknown").to_string());
 
     let target = versions.and_then(|status| status.available.clone());
 
     let target_text = target
         .as_ref()
         .map(ToString::to_string)
-        .unwrap_or_else(|| i18n("agent-update-version-unknown").to_string());
+        .unwrap_or_else(|| t!("agent-update-version-unknown").to_string());
 
     let phase = snapshot.state.phase;
 
@@ -110,7 +110,7 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
 
     let (title, message, tone, primary, progress, terminal_timeout) = match phase {
         UpdatePhase::Available => (
-            i18n("agent-update-notice-available-title").replace("{provider}", provider),
+            t!("agent-update-notice-available-title", provider = provider).into_owned(),
             format!("{current} → {target_text}"),
             UpdateNotificationTone::Info,
             versions
@@ -121,8 +121,8 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
         ),
 
         UpdatePhase::WaitingForIdle => (
-            i18n("agent-update-notice-waiting-title").replace("{provider}", provider),
-            i18n("agent-update-notice-waiting-message").to_string(),
+            t!("agent-update-notice-waiting-title", provider = provider).into_owned(),
+            t!("agent-update-notice-waiting-message").to_string(),
             UpdateNotificationTone::Info,
             None,
             NotificationProgress::Indeterminate,
@@ -130,8 +130,8 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
         ),
 
         UpdatePhase::Suspending => (
-            i18n("agent-update-notice-stopping-title").replace("{provider}", provider),
-            i18n("agent-update-notice-stopping-message").to_string(),
+            t!("agent-update-notice-stopping-title", provider = provider).into_owned(),
+            t!("agent-update-notice-stopping-message").to_string(),
             UpdateNotificationTone::Info,
             None,
             progress_view(snapshot),
@@ -139,8 +139,12 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
         ),
 
         UpdatePhase::Updating => (
-            i18n("agent-update-notice-updating-title").replace("{provider}", provider),
-            i18n("agent-update-notice-updating-message").replace("{target}", &target_text),
+            t!("agent-update-notice-updating-title", provider = provider).into_owned(),
+            t!(
+                "agent-update-notice-updating-message",
+                target = &target_text
+            )
+            .into_owned(),
             UpdateNotificationTone::Info,
             None,
             NotificationProgress::Indeterminate,
@@ -148,8 +152,8 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
         ),
 
         UpdatePhase::Verifying => (
-            i18n("agent-update-notice-verifying-title").replace("{provider}", provider),
-            i18n("agent-update-notice-verifying-message").to_string(),
+            t!("agent-update-notice-verifying-title", provider = provider).into_owned(),
+            t!("agent-update-notice-verifying-message").to_string(),
             UpdateNotificationTone::Info,
             None,
             NotificationProgress::Indeterminate,
@@ -157,8 +161,8 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
         ),
 
         UpdatePhase::Restoring => (
-            i18n("agent-update-notice-restoring-title").replace("{provider}", provider),
-            i18n("agent-update-notice-restoring-message").to_string(),
+            t!("agent-update-notice-restoring-title", provider = provider).into_owned(),
+            t!("agent-update-notice-restoring-message").to_string(),
             UpdateNotificationTone::Info,
             None,
             progress_view(snapshot),
@@ -166,8 +170,8 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
         ),
 
         UpdatePhase::Updated => (
-            i18n("agent-update-notice-updated-title").replace("{provider}", provider),
-            i18n("agent-update-notice-updated-message").replace("{version}", &current),
+            t!("agent-update-notice-updated-title", provider = provider).into_owned(),
+            t!("agent-update-notice-updated-message", version = &current).into_owned(),
             UpdateNotificationTone::Success,
             None,
             NotificationProgress::Determinate(100.0),
@@ -175,8 +179,8 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
         ),
 
         UpdatePhase::Unchanged => (
-            i18n("agent-update-notice-unchanged-title").replace("{provider}", provider),
-            bounded_error(snapshot, i18n("agent-update-notice-unchanged-message")),
+            t!("agent-update-notice-unchanged-title", provider = provider).into_owned(),
+            bounded_error(snapshot, &t!("agent-update-notice-unchanged-message")),
             UpdateNotificationTone::Warning,
             Some(NotificationPrimaryAction::Retry),
             NotificationProgress::Determinate(100.0),
@@ -184,8 +188,8 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
         ),
 
         UpdatePhase::Failed => (
-            i18n("agent-update-notice-failed-title").replace("{provider}", provider),
-            bounded_error(snapshot, i18n("agent-update-notice-failed-message")),
+            t!("agent-update-notice-failed-title", provider = provider).into_owned(),
+            bounded_error(snapshot, &t!("agent-update-notice-failed-message")),
             UpdateNotificationTone::Error,
             Some(NotificationPrimaryAction::Retry),
             NotificationProgress::None,

@@ -1,5 +1,7 @@
+use std::borrow::Cow;
+
 use app::agent_tab::{AgentKind, AgentKindExt as _};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::settings::*;
 
@@ -22,15 +24,15 @@ fn profile_effort_options(kind: AgentProfileKind) -> Vec<&'static str> {
         .collect()
 }
 
-fn effort_label(option: &str) -> &'static str {
+fn effort_label(option: &str) -> Cow<'static, str> {
     match option {
-        "low" => i18n("settings-agent-profile-effort-low"),
-        "medium" => i18n("settings-agent-profile-effort-medium"),
-        "high" => i18n("settings-agent-profile-effort-high"),
-        "xhigh" => i18n("settings-agent-profile-effort-xhigh"),
-        "max" => i18n("settings-agent-profile-effort-max"),
-        "ultra" => i18n("settings-agent-profile-effort-ultra"),
-        _ => i18n("settings-agent-profile-effort-default"),
+        "low" => t!("settings-agent-profile-effort-low"),
+        "medium" => t!("settings-agent-profile-effort-medium"),
+        "high" => t!("settings-agent-profile-effort-high"),
+        "xhigh" => t!("settings-agent-profile-effort-xhigh"),
+        "max" => t!("settings-agent-profile-effort-max"),
+        "ultra" => t!("settings-agent-profile-effort-ultra"),
+        _ => t!("settings-agent-profile-effort-default"),
     }
 }
 
@@ -39,12 +41,12 @@ fn effort_label(option: &str) -> &'static str {
 /// profile written before this field existed carries.
 const CACHE_WARN_OPTIONS: [u32; 4] = [0, 5, 30, 60];
 
-fn cache_warn_label(minutes: u32) -> &'static str {
+fn cache_warn_label(minutes: u32) -> Cow<'static, str> {
     match minutes {
-        5 => i18n("settings-agent-profile-cache-warn-5min"),
-        30 => i18n("settings-agent-profile-cache-warn-30min"),
-        60 => i18n("settings-agent-profile-cache-warn-1hour"),
-        _ => i18n("settings-agent-profile-cache-warn-off"),
+        5 => t!("settings-agent-profile-cache-warn-5min"),
+        30 => t!("settings-agent-profile-cache-warn-30min"),
+        60 => t!("settings-agent-profile-cache-warn-1hour"),
+        _ => t!("settings-agent-profile-cache-warn-off"),
     }
 }
 
@@ -99,9 +101,9 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
 
     window.open_dialog(cx, move |dialog, window, _| {
         let title = if target.is_some() {
-            i18n("settings-agent-profile-edit-title")
+            t!("settings-agent-profile-edit-title")
         } else {
-            i18n("settings-agent-profile-add-title")
+            t!("settings-agent-profile-add-title")
         };
 
         let settings_height = window.viewport_size().height;
@@ -115,7 +117,7 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
                 Button::new("agent-profile-save")
                     .min_w(DIALOG_BUTTON_MIN_WIDTH)
                     .primary()
-                    .label(i18n("settings-common-save"))
+                    .label(t!("settings-common-save"))
                     .on_click(|_, window, cx: &mut App| {
                         save_agent_profile_draft(cx);
                         window.close_dialog(cx);
@@ -125,7 +127,7 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
                 DialogClose::new().child(
                     Button::new("agent-profile-cancel")
                         .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                        .label(i18n("settings-common-cancel")),
+                        .label(t!("settings-common-cancel")),
                 ),
             );
 
@@ -221,7 +223,7 @@ fn env_cell(
     row: usize,
     field: EnvField,
     text: &str,
-    placeholder: &'static str,
+    placeholder: Cow<'static, str>,
     editing: bool,
     window: &mut Window,
     cx: &mut App,
@@ -319,19 +321,14 @@ fn env_var_table(env: &[EnvVar], window: &mut Window, cx: &mut App) -> AnyElemen
 
     let mut table = table_frame(cx).child(
         table_header(cx)
-            .child(div().flex_1().min_w_0().child(i18n("settings-common-name")))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .child(i18n("settings-common-value")),
-            )
+            .child(div().flex_1().min_w_0().child(t!("settings-common-name")))
+            .child(div().flex_1().min_w_0().child(t!("settings-common-value")))
             .child(
                 div()
                     .w(ENV_OPERATION_COLUMN)
                     .flex_none()
                     .text_right()
-                    .child(i18n("settings-common-operation")),
+                    .child(t!("settings-common-operation")),
             ),
     );
 
@@ -341,7 +338,7 @@ fn env_var_table(env: &[EnvVar], window: &mut Window, cx: &mut App) -> AnyElemen
                 table_row(false, cx)
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child(i18n("settings-agent-profile-no-variables")),
+                    .child(t!("settings-agent-profile-no-variables")),
             )
             .into_any_element();
     }
@@ -355,7 +352,7 @@ fn env_var_table(env: &[EnvVar], window: &mut Window, cx: &mut App) -> AnyElemen
                     row,
                     EnvField::Name,
                     &var.name,
-                    i18n("settings-common-name"),
+                    t!("settings-common-name"),
                     editing == Some((row, EnvField::Name)),
                     window,
                     cx,
@@ -364,7 +361,7 @@ fn env_var_table(env: &[EnvVar], window: &mut Window, cx: &mut App) -> AnyElemen
                     row,
                     EnvField::Value,
                     &var.value,
-                    i18n("settings-common-value"),
+                    t!("settings-common-value"),
                     editing == Some((row, EnvField::Value)),
                     window,
                     cx,
@@ -381,8 +378,8 @@ fn env_var_table(env: &[EnvVar], window: &mut Window, cx: &mut App) -> AnyElemen
                                 .ghost()
                                 .with_size(TABLE_OPERATION_BUTTON)
                                 .icon(TrashIcon)
-                                .accessibility_label(i18n("settings-common-delete"))
-                                .tooltip(i18n("settings-common-delete"))
+                                .accessibility_label(t!("settings-common-delete"))
+                                .tooltip(t!("settings-common-delete"))
                                 .on_click(move |_, _, cx: &mut App| {
                                     let draft = cx.global_mut::<AgentProfileDraft>();
 
@@ -557,9 +554,9 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
     let launcher = profile.launcher;
 
     let launcher_label = match launcher {
-        AgentProfileLauncher::Custom => i18n("settings-agent-profile-launcher-custom"),
-        AgentProfileLauncher::Npx => i18n("settings-agent-profile-launcher-npx"),
-        AgentProfileLauncher::PnpmDlx => i18n("settings-agent-profile-launcher-pnpm-dlx"),
+        AgentProfileLauncher::Custom => t!("settings-agent-profile-launcher-custom"),
+        AgentProfileLauncher::Npx => t!("settings-agent-profile-launcher-npx"),
+        AgentProfileLauncher::PnpmDlx => t!("settings-agent-profile-launcher-pnpm-dlx"),
     };
 
     let launcher_control = Button::new("agent-profile-dialog-launcher")
@@ -569,7 +566,7 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
         .dropdown_caret(true)
         .dropdown_menu(move |menu, _, _| {
             menu.item(
-                PopupMenuItem::new(i18n("settings-agent-profile-launcher-npx"))
+                PopupMenuItem::new(t!("settings-agent-profile-launcher-npx"))
                     .checked(launcher == AgentProfileLauncher::Npx)
                     .on_click(|_, _, cx: &mut App| {
                         cx.global_mut::<AgentProfileDraft>().profile.launcher =
@@ -577,7 +574,7 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
                     }),
             )
             .item(
-                PopupMenuItem::new(i18n("settings-agent-profile-launcher-pnpm-dlx"))
+                PopupMenuItem::new(t!("settings-agent-profile-launcher-pnpm-dlx"))
                     .checked(launcher == AgentProfileLauncher::PnpmDlx)
                     .on_click(|_, _, cx: &mut App| {
                         cx.global_mut::<AgentProfileDraft>().profile.launcher =
@@ -585,7 +582,7 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
                     }),
             )
             .item(
-                PopupMenuItem::new(i18n("settings-agent-profile-launcher-custom"))
+                PopupMenuItem::new(t!("settings-agent-profile-launcher-custom"))
                     .checked(launcher == AgentProfileLauncher::Custom)
                     .on_click(|_, _, cx: &mut App| {
                         cx.global_mut::<AgentProfileDraft>().profile.launcher =
@@ -623,10 +620,10 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
             h_flex()
                 .gap_1()
                 .items_center()
-                .child(Label::new(i18n("settings-agent-profile-environment")).text_sm())
+                .child(Label::new(t!("settings-agent-profile-environment")).text_sm())
                 .child(description_hint(
                     "environment",
-                    i18n("settings-agent-profile-environment-description").into(),
+                    t!("settings-agent-profile-environment-description").into(),
                     cx,
                 )),
         )
@@ -635,7 +632,7 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
             h_flex().child(
                 Button::new("agent-profile-dialog-env-add")
                     .outline()
-                    .label(i18n("settings-agent-profile-add-variable"))
+                    .label(t!("settings-agent-profile-add-variable"))
                     .on_click(|_, _, cx: &mut App| {
                         cx.global_mut::<AgentProfileDraft>()
                             .profile
@@ -649,21 +646,21 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
         .w_full()
         .gap_4()
         .child(card_row(
-            i18n("settings-common-name"),
-            i18n("settings-agent-profile-name-description"),
+            t!("settings-common-name"),
+            t!("settings-agent-profile-name-description"),
             Input::new(&name_input).w_64(),
             cx,
         ))
         .child(card_row(
-            i18n("settings-agent-profile-base-agent"),
-            i18n("settings-agent-profile-base-agent-description"),
+            t!("settings-agent-profile-base-agent"),
+            t!("settings-agent-profile-base-agent-description"),
             kind_control,
             cx,
         ))
         .when(profile.kind == AgentProfileKind::DeepSeek, |this| {
             this.child(card_row(
-                i18n("settings-agent-profile-launcher"),
-                i18n("settings-agent-profile-launcher-description"),
+                t!("settings-agent-profile-launcher"),
+                t!("settings-agent-profile-launcher-description"),
                 launcher_control,
                 cx,
             ))
@@ -674,24 +671,24 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
             profile.kind != AgentProfileKind::DeepSeek || launcher == AgentProfileLauncher::Custom,
             |this| {
                 this.child(card_row(
-                    i18n("settings-agent-profile-executable"),
-                    i18n("settings-agent-profile-executable-description"),
+                    t!("settings-agent-profile-executable"),
+                    t!("settings-agent-profile-executable-description"),
                     Input::new(&exe_input).w_64(),
                     cx,
                 ))
             },
         )
         .child(card_row(
-            i18n("settings-agent-profile-model"),
+            t!("settings-agent-profile-model"),
             match profile.kind {
                 AgentProfileKind::ClaudeCode => {
-                    i18n("settings-agent-profile-model-claude-description")
+                    t!("settings-agent-profile-model-claude-description")
                 }
 
-                AgentProfileKind::Codex => i18n("settings-agent-profile-model-codex-description"),
+                AgentProfileKind::Codex => t!("settings-agent-profile-model-codex-description"),
 
                 AgentProfileKind::DeepSeek => {
-                    i18n("settings-agent-profile-model-deepseek-description")
+                    t!("settings-agent-profile-model-deepseek-description")
                 }
             },
             Input::new(&model_input).w_64(),
@@ -701,8 +698,8 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
         // Codex has no equivalent setting to redirect.
         .when(profile.kind == AgentProfileKind::ClaudeCode, |this| {
             this.child(card_row(
-                i18n("settings-agent-profile-replace-sub-models"),
-                i18n("settings-agent-profile-replace-sub-models-description"),
+                t!("settings-agent-profile-replace-sub-models"),
+                t!("settings-agent-profile-replace-sub-models-description"),
                 sub_models_switch,
                 cx,
             ))
@@ -712,62 +709,67 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
         // user's harness configuration rather than to this profile alone.
         .when(profile.kind == AgentProfileKind::DeepSeek, |this| {
             this.child(card_row(
-                i18n("settings-agent-profile-vision-model"),
-                i18n("settings-agent-profile-vision-model-description"),
+                t!("settings-agent-profile-vision-model"),
+                t!("settings-agent-profile-vision-model-description"),
                 vision_switch,
                 cx,
             ))
         })
         .child(card_row(
-            i18n("settings-agent-profile-effort"),
-            i18n("settings-agent-profile-effort-description"),
+            t!("settings-agent-profile-effort"),
+            t!("settings-agent-profile-effort-description"),
             effort_control,
             cx,
         ))
         .child(card_row(
-            i18n("settings-agent-profile-custom-endpoint"),
-            i18n("settings-agent-profile-custom-endpoint-description"),
+            t!("settings-agent-profile-custom-endpoint"),
+            t!("settings-agent-profile-custom-endpoint-description"),
             endpoint_switch,
             cx,
         ))
         .child(card_row(
-            i18n("settings-agent-profile-api-url"),
+            t!("settings-agent-profile-api-url"),
             match profile.kind {
                 AgentProfileKind::ClaudeCode => {
-                    i18n("settings-agent-profile-api-url-claude-description")
+                    t!("settings-agent-profile-api-url-claude-description")
                 }
 
-                AgentProfileKind::Codex => i18n("settings-agent-profile-api-url-codex-description"),
+                AgentProfileKind::Codex => t!("settings-agent-profile-api-url-codex-description"),
 
                 AgentProfileKind::DeepSeek => {
-                    i18n("settings-agent-profile-api-url-deepseek-description")
+                    t!("settings-agent-profile-api-url-deepseek-description")
                 }
             },
             Input::new(&url_input).disabled(!endpoint_on).w_64(),
             cx,
         ))
         .child(card_row(
-            i18n("settings-agent-profile-api-key"),
+            t!("settings-agent-profile-api-key"),
             match profile.kind {
-                AgentProfileKind::ClaudeCode => {
-                    i18n("settings-agent-profile-api-key-claude-description")
-                        .replace("{key}", key_env)
-                }
+                AgentProfileKind::ClaudeCode => t!(
+                    "settings-agent-profile-api-key-claude-description",
+                    key = key_env
+                )
+                .into_owned(),
 
-                AgentProfileKind::Codex => i18n("settings-agent-profile-api-key-codex-description")
-                    .replace("{key}", key_env),
+                AgentProfileKind::Codex => t!(
+                    "settings-agent-profile-api-key-codex-description",
+                    key = key_env
+                )
+                .into_owned(),
 
-                AgentProfileKind::DeepSeek => {
-                    i18n("settings-agent-profile-api-key-deepseek-description")
-                        .replace("{key}", key_env)
-                }
+                AgentProfileKind::DeepSeek => t!(
+                    "settings-agent-profile-api-key-deepseek-description",
+                    key = key_env
+                )
+                .into_owned(),
             },
             Input::new(&key_input).disabled(!endpoint_on).w_64(),
             cx,
         ))
         .child(card_row(
-            i18n("settings-agent-profile-cache-warn"),
-            i18n("settings-agent-profile-cache-warn-description"),
+            t!("settings-agent-profile-cache-warn"),
+            t!("settings-agent-profile-cache-warn-description"),
             cache_warn_control,
             cx,
         ))

@@ -14,7 +14,7 @@ use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, IconNamed, WindowExt as _, h_flex, v_flex,
 };
 use nmt_config::system::NewlineShortcut;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::composer::{CommandFeedbackKind, ComposerAction, PaletteControl};
 use crate::agent_tab::fade::FrostedLayer;
@@ -106,17 +106,17 @@ impl Render for AgentPane {
             .map(|feedback| {
                 let (color, label) = match feedback.kind {
                     CommandFeedbackKind::Notice => {
-                        (cx.theme().primary, i18n("agent-feedback-notice"))
+                        (cx.theme().primary, t!("agent-feedback-notice"))
                     }
 
                     CommandFeedbackKind::Status => {
-                        (cx.theme().muted_foreground, i18n("agent-feedback-status"))
+                        (cx.theme().muted_foreground, t!("agent-feedback-status"))
                     }
 
-                    CommandFeedbackKind::Error => (cx.theme().danger, i18n("agent-feedback-error")),
+                    CommandFeedbackKind::Error => (cx.theme().danger, t!("agent-feedback-error")),
 
                     CommandFeedbackKind::Queued => {
-                        (cx.theme().warning, i18n("agent-feedback-queued"))
+                        (cx.theme().warning, t!("agent-feedback-queued"))
                     }
                 };
 
@@ -451,8 +451,8 @@ impl Render for AgentPane {
                                                 .size(px(COMPOSER_SEND_BUTTON))
                                                 .rounded_full()
                                                 .icon(StopResponseIcon)
-                                                .tooltip(i18n("agent-action-stop-response"))
-                                                .accessibility_label(i18n(
+                                                .tooltip(t!("agent-action-stop-response"))
+                                                .accessibility_label(t!(
                                                     "agent-action-stop-response",
                                                 ))
                                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -469,8 +469,8 @@ impl Render for AgentPane {
                                                 .size(px(COMPOSER_SEND_BUTTON))
                                                 .rounded_full()
                                                 .icon(IconName::ArrowUp)
-                                                .tooltip(i18n("agent-action-send-message"))
-                                                .accessibility_label(i18n(
+                                                .tooltip(t!("agent-action-send-message"))
+                                                .accessibility_label(t!(
                                                     "agent-action-send-message",
                                                 ))
                                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -541,11 +541,11 @@ impl AgentPane {
             // the command row reaches them in one horizontal band instead of a
             // stack of labelled rows the pointer has to travel down.
             .commands(|menu| {
-                menu.item(i18n("agent-transcript-copy"), move |_, cx| {
+                menu.item(t!("agent-transcript-copy"), move |_, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
                 })
                 .icon(IconName::Copy)
-                .item(i18n("agent-transcript-quote"), move |window, cx| {
+                .item(t!("agent-transcript-quote"), move |window, cx| {
                     let selected_text = selected_text.clone();
 
                     let _ = pane.update(cx, |pane, cx| {

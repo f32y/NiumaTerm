@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use gpui::prelude::*;
@@ -5,8 +6,8 @@ use gpui::{AnyWindowHandle, App, div};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogClose, DialogFooter};
 use gpui_component::{ActiveTheme as _, WindowExt as _, v_flex};
-use nmt_i18n::i18n;
 use nmt_platform::windows::restart_manager::{AffectedApplication, ApplicationKind};
+use rust_i18n::t;
 
 use crate::update::{self, FileUsePrompt, FileUsePromptReason};
 
@@ -38,6 +39,7 @@ pub(crate) fn open_file_use_prompt(
             window.open_dialog(cx, move |dialog, _, _| {
                 let applications = applications.clone();
                 let manual = manual.clone();
+                let message = message.clone();
                 let mut footer = DialogFooter::new();
 
                 match prompt.reason {
@@ -46,7 +48,7 @@ pub(crate) fn open_file_use_prompt(
                             Button::new("app-update-close-file-users")
                                 .min_w(DIALOG_BUTTON_MIN_WIDTH)
                                 .danger()
-                                .label(i18n("settings-about-file-use-close-update"))
+                                .label(t!("settings-about-file-use-close-update"))
                                 .on_click(|_, window, cx| {
                                     window.close_dialog(cx);
                                     update::close_file_users(cx);
@@ -59,7 +61,7 @@ pub(crate) fn open_file_use_prompt(
                             Button::new("app-update-retry-file-use")
                                 .min_w(DIALOG_BUTTON_MIN_WIDTH)
                                 .primary()
-                                .label(i18n("settings-about-file-use-retry"))
+                                .label(t!("settings-about-file-use-retry"))
                                 .on_click(|_, window, cx| {
                                     window.close_dialog(cx);
                                     update::retry_file_use(cx);
@@ -72,7 +74,7 @@ pub(crate) fn open_file_use_prompt(
 
                 let continue_button = Button::new("app-update-continue-file-use")
                     .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                    .label(i18n("settings-about-file-use-continue"))
+                    .label(t!("settings-about-file-use-continue"))
                     .on_click(|_, window, cx| {
                         window.close_dialog(cx);
                         update::continue_install(cx);
@@ -93,20 +95,20 @@ pub(crate) fn open_file_use_prompt(
                     DialogClose::new().child(
                         Button::new("app-update-cancel-file-use")
                             .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                            .label(i18n("settings-about-file-use-cancel"))
+                            .label(t!("settings-about-file-use-cancel"))
                             .on_click(|_, _, cx| update::cancel_install(cx)),
                     ),
                 );
 
                 dialog
-                    .title(title)
+                    .title(title.clone())
                     .overlay_closable(false)
                     .content(move |content, _, cx| {
                         let mut body = v_flex()
                             .gap_2()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child(message);
+                            .child(message.clone());
 
                         if !applications.is_empty() {
                             body = body.child(
@@ -119,13 +121,16 @@ pub(crate) fn open_file_use_prompt(
                         }
 
                         if has_explorer {
-                            body = body.child(i18n("settings-about-file-use-explorer-warning"));
+                            body = body.child(t!("settings-about-file-use-explorer-warning"));
                         }
 
                         if !manual.is_empty() {
                             body = body.child(
-                                i18n("settings-about-file-use-not-restartable")
-                                    .replace("{applications}", &manual.join(", ")),
+                                t!(
+                                    "settings-about-file-use-not-restartable",
+                                    applications = &manual.join(", ")
+                                )
+                                .into_owned(),
                             );
                         }
 
@@ -145,11 +150,14 @@ pub(crate) fn open_recovery_warning(
     handle
         .update(cx, move |_, window, cx| {
             window.open_dialog(cx, move |dialog, _, _| {
-                let message = i18n("settings-about-recovery-warning-message")
-                    .replace("{applications}", &applications.join(", "));
+                let message = t!(
+                    "settings-about-recovery-warning-message",
+                    applications = &applications.join(", ")
+                )
+                .into_owned();
 
                 dialog
-                    .title(i18n("settings-about-recovery-warning-title"))
+                    .title(t!("settings-about-recovery-warning-title"))
                     .overlay_closable(false)
                     .content(move |content, _, cx| {
                         content.child(
@@ -164,7 +172,7 @@ pub(crate) fn open_recovery_warning(
                             Button::new("app-update-finish-relaunch")
                                 .min_w(DIALOG_BUTTON_MIN_WIDTH)
                                 .primary()
-                                .label(i18n("settings-about-recovery-restart"))
+                                .label(t!("settings-about-recovery-restart"))
                                 .on_click(|_, window, cx| {
                                     window.close_dialog(cx);
                                     update::complete_relaunch(cx);
@@ -176,21 +184,21 @@ pub(crate) fn open_recovery_warning(
         .is_ok()
 }
 
-fn prompt_title(reason: FileUsePromptReason) -> &'static str {
+fn prompt_title(reason: FileUsePromptReason) -> Cow<'static, str> {
     match reason {
-        FileUsePromptReason::InUse => i18n("settings-about-file-use-title"),
-        FileUsePromptReason::CheckFailed => i18n("settings-about-file-use-check-failed-title"),
-        FileUsePromptReason::RebootRequired => i18n("settings-about-file-use-reboot-title"),
-        FileUsePromptReason::RemainingUsers => i18n("settings-about-file-use-remaining-title"),
+        FileUsePromptReason::InUse => t!("settings-about-file-use-title"),
+        FileUsePromptReason::CheckFailed => t!("settings-about-file-use-check-failed-title"),
+        FileUsePromptReason::RebootRequired => t!("settings-about-file-use-reboot-title"),
+        FileUsePromptReason::RemainingUsers => t!("settings-about-file-use-remaining-title"),
     }
 }
 
-fn prompt_message(reason: FileUsePromptReason) -> &'static str {
+fn prompt_message(reason: FileUsePromptReason) -> Cow<'static, str> {
     match reason {
-        FileUsePromptReason::InUse => i18n("settings-about-file-use-message"),
-        FileUsePromptReason::CheckFailed => i18n("settings-about-file-use-check-failed-message"),
-        FileUsePromptReason::RebootRequired => i18n("settings-about-file-use-reboot-message"),
-        FileUsePromptReason::RemainingUsers => i18n("settings-about-file-use-remaining-message"),
+        FileUsePromptReason::InUse => t!("settings-about-file-use-message"),
+        FileUsePromptReason::CheckFailed => t!("settings-about-file-use-check-failed-message"),
+        FileUsePromptReason::RebootRequired => t!("settings-about-file-use-reboot-message"),
+        FileUsePromptReason::RemainingUsers => t!("settings-about-file-use-remaining-message"),
     }
 }
 
@@ -205,8 +213,11 @@ pub(super) fn display_names(applications: &[AffectedApplication]) -> Vec<String>
         .iter()
         .map(|application| {
             let name = if application.name.is_empty() {
-                i18n("settings-about-file-use-unknown")
-                    .replace("{pid}", &application.process_id.to_string())
+                t!(
+                    "settings-about-file-use-unknown",
+                    pid = application.process_id
+                )
+                .into_owned()
             } else {
                 application.name.clone()
             };

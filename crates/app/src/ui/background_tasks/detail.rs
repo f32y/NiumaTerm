@@ -14,8 +14,8 @@ use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
 use nmt_agent::background_task::{
     BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscriptState,
 };
-use nmt_i18n::i18n;
 use nmt_profiling::transcript::{Operation, Probe};
+use rust_i18n::t;
 
 use crate::ui::background_tasks::BackgroundTasksView;
 use crate::ui::background_tasks::rows::{
@@ -140,8 +140,8 @@ impl BackgroundTasksView {
                             .ghost()
                             .xsmall()
                             .icon(IconName::ArrowLeft)
-                            .tooltip(i18n("tasks-background-back-tooltip"))
-                            .accessibility_label(i18n("tasks-background-back-tooltip"))
+                            .tooltip(t!("tasks-background-back-tooltip"))
+                            .accessibility_label(t!("tasks-background-back-tooltip"))
                             .on_click(cx.listener(|this, _, _, cx| this.close_detail(cx))),
                     )
                     .child(
@@ -176,21 +176,23 @@ impl BackgroundTasksView {
 
         let body: AnyElement = match (&state, empty) {
             (BackgroundTaskTranscriptState::Unavailable { message }, _) => empty_state(
-                i18n("tasks-background-transcript-unavailable-title"),
-                &i18n("tasks-background-transcript-unavailable-detail")
-                    .replace("{message}", message),
+                t!("tasks-background-transcript-unavailable-title"),
+                t!(
+                    "tasks-background-transcript-unavailable-detail",
+                    message = message
+                ),
                 cx,
             ),
 
             (BackgroundTaskTranscriptState::Loading, true) => empty_state(
-                i18n("tasks-background-loading-title"),
-                i18n("tasks-background-transcript-loading-detail"),
+                t!("tasks-background-loading-title"),
+                t!("tasks-background-transcript-loading-detail"),
                 cx,
             ),
 
             (_, true) => empty_state(
-                i18n("tasks-background-transcript-empty-title"),
-                i18n("tasks-background-transcript-empty-detail"),
+                t!("tasks-background-transcript-empty-title"),
+                t!("tasks-background-transcript-empty-detail"),
                 cx,
             ),
 
@@ -206,8 +208,8 @@ impl BackgroundTasksView {
                         .text_xs()
                         .text_color(theme.muted_foreground)
                         .child(
-                            i18n("tasks-background-transcript-truncated")
-                                .replace("{count}", &dropped.to_string()),
+                            t!("tasks-background-transcript-truncated", count = dropped)
+                                .into_owned(),
                         )
                 }))
                 .child(transcript)

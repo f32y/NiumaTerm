@@ -1,4 +1,5 @@
 use gpui::{ClipboardItem, Role, relative};
+use rust_i18n::t;
 
 use crate::ui::modern_dropdown;
 use crate::ui::workspace_sidebar::*;
@@ -69,7 +70,7 @@ impl Sidebar {
 
             hover_action(
                 ("workspace-new-tab", idx),
-                i18n("sidebar-tab-new"),
+                t!("sidebar-tab-new"),
                 HoverActionLayout::Bare,
                 HoverActionVisibility::OnGroupHover("ws-item".into()),
                 modern_dropdown(
@@ -79,7 +80,7 @@ impl Sidebar {
                         // it, while the named sizes would pin the height too.
                         .with_size(px(NEW_TAB_GLYPH))
                         .ghost()
-                        .accessibility_label(i18n("sidebar-tab-new"))
+                        .accessibility_label(t!("sidebar-tab-new"))
                         .size(px(NEW_TAB_BUTTON))
                         .child("+"),
                     move |menu, _, cx| new_tab_menu(menu, &menu_shell, cx),
@@ -94,7 +95,7 @@ impl Sidebar {
             }))
             .into_any_element()
         } else if ws.pinned {
-            let label = i18n("sidebar-workspace-menu-unpin");
+            let label = t!("sidebar-workspace-menu-unpin");
 
             hover_action(
                 ("workspace-pin", idx),
@@ -109,7 +110,7 @@ impl Sidebar {
             // tabs (panes/PTYs die with the dropped Workspace).
             hover_action(
                 ("workspace-close", idx),
-                i18n("sidebar-workspace-menu-close"),
+                t!("sidebar-workspace-menu-close"),
                 HoverActionLayout::Inline,
                 HoverActionVisibility::OnGroupHover("ws-item".into()),
                 "×",
@@ -129,8 +130,7 @@ impl Sidebar {
                 div()
                     .id(("workspace-unread", idx))
                     .aria_label(
-                        i18n("sidebar-workspace-unread-label")
-                            .replace("{count}", &ws.unread_count.to_string()),
+                        t!("sidebar-workspace-unread-label", count = ws.unread_count).into_owned(),
                     )
                     .size_5()
                     .flex()
@@ -164,8 +164,11 @@ impl Sidebar {
         let additional_count = ws.additional_cwds.len();
 
         let additional_summary = (additional_count > 0).then(|| {
-            i18n("sidebar-workspace-additional-count")
-                .replace("{count}", &additional_count.to_string())
+            t!(
+                "sidebar-workspace-additional-count",
+                count = additional_count
+            )
+            .into_owned()
         });
 
         let path_budget = (self.width
@@ -247,8 +250,11 @@ impl Sidebar {
                         .flex_none()
                         .text_size(px(WORKSPACE_PATH_TEXT))
                         .aria_label(
-                            i18n("sidebar-workspace-additional-label")
-                                .replace("{count}", &additional_count.to_string()),
+                            t!(
+                                "sidebar-workspace-additional-label",
+                                count = additional_count
+                            )
+                            .into_owned(),
                         )
                         .text_color(cx.theme().sidebar_foreground.opacity(0.4))
                         .child(token)
@@ -273,11 +279,14 @@ impl Sidebar {
             .accessibility_label(if settings_entry {
                 display_label.clone()
             } else {
-                i18n("sidebar-workspace-item-label")
-                    .replace("{name}", &display_label)
-                    .replace("{path}", &dirs_description)
-                    .replace("{status}", &status_label)
-                    .into()
+                t!(
+                    "sidebar-workspace-item-label",
+                    name = &display_label,
+                    path = &dirs_description,
+                    status = &status_label
+                )
+                .into_owned()
+                .into()
             })
             // The active tab's own row is highlighted in the vertical tab-bar
             // style, and it sits under its workspace, so highlighting the
@@ -325,9 +334,9 @@ impl Sidebar {
         let closeable = ws.closeable;
 
         let pin_label = if pinned {
-            i18n("sidebar-workspace-menu-unpin")
+            t!("sidebar-workspace-menu-unpin")
         } else {
-            i18n("sidebar-workspace-menu-pin")
+            t!("sidebar-workspace-menu-pin")
         };
 
         let cwd = ws.cwd.clone();
@@ -403,7 +412,7 @@ impl Sidebar {
                 // line each. The settings entry is dismissible and nothing else.
                 menu.commands(|row| {
                     row.when(!settings_entry, |row| {
-                        row.item(pin_label, move |_, cx| {
+                        row.item(pin_label.clone(), move |_, cx| {
                             pin_shell.update(cx, |this, cx| {
                                 this.set_workspace_pinned(ws_id, !pinned, cx)
                             });
@@ -411,7 +420,7 @@ impl Sidebar {
                         .icon(PinIcon)
                     })
                     .item_disabled(
-                        i18n("sidebar-workspace-menu-close"),
+                        t!("sidebar-workspace-menu-close"),
                         !closeable,
                         move |window, cx| {
                             close_shell.update(cx, |this, cx| {
@@ -424,27 +433,24 @@ impl Sidebar {
                 // Renaming and copying a path both describe a workspace the user
                 // owns, which the settings entry is not.
                 .when(!settings_entry, |menu| {
-                    menu.item(i18n("sidebar-workspace-menu-rename"), move |window, cx| {
+                    menu.item(t!("sidebar-workspace-menu-rename"), move |window, cx| {
                         rename_shell.update(cx, |this, cx| {
                             this.start_workspace_rename(ws_id, window, cx)
                         });
                     })
                     .icon(IconName::PenLine)
-                    .item(
-                        i18n("sidebar-workspace-menu-edit-dirs"),
-                        move |window, cx| {
-                            dirs_shell
-                                .update(cx, |this, cx| this.edit_workspace_dirs(ws_id, window, cx));
-                        },
-                    )
+                    .item(t!("sidebar-workspace-menu-edit-dirs"), move |window, cx| {
+                        dirs_shell
+                            .update(cx, |this, cx| this.edit_workspace_dirs(ws_id, window, cx));
+                    })
                     .icon(IconName::Folder)
-                    .item(i18n("sidebar-workspace-menu-copy-path"), move |_, cx| {
+                    .item(t!("sidebar-workspace-menu-copy-path"), move |_, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(cwd.clone()));
                     })
                     .icon(IconName::Copy)
                     // Only a temporary workspace has anything to adopt.
                     .when(temporary, |menu| {
-                        menu.item(i18n("sidebar-workspace-menu-activate"), move |_, cx| {
+                        menu.item(t!("sidebar-workspace-menu-activate"), move |_, cx| {
                             activate_shell
                                 .update(cx, |this, cx| this.activate_as_workspace(ws_id, cx));
                         })
@@ -479,7 +485,7 @@ impl Sidebar {
 
         let close = hover_action(
             ("sidebar-tab-close", key),
-            i18n("tabbar-menu-close"),
+            t!("tabbar-menu-close"),
             HoverActionLayout::Inline,
             HoverActionVisibility::OnGroupHover("sidebar-tab".into()),
             "\u{00d7}",
@@ -504,7 +510,7 @@ impl Sidebar {
                     px(TAB_ROW_DOT),
                 )
                 .pulse()
-                .label(i18n("sidebar-workspace-status-running"))
+                .label(t!("sidebar-workspace-status-running"))
                 .into_any_element(),
             ),
 
@@ -527,7 +533,7 @@ impl Sidebar {
                             StatusMarkTone::Success,
                             px(TAB_ROW_DOT),
                         )
-                        .label(i18n("sidebar-workspace-unread-label").replace("{count}", "1"))
+                        .label(t!("sidebar-workspace-unread-label", count = "1").into_owned())
                         .into_any_element()
                     })
                 }),
@@ -734,11 +740,11 @@ impl Sidebar {
                 let rename_shell = menu_shell.clone();
                 let close_shell = menu_shell.clone();
 
-                menu.item(i18n("tabbar-menu-rename"), move |window, cx| {
+                menu.item(t!("tabbar-menu-rename"), move |window, cx| {
                     rename_shell.update(cx, |this, cx| this.start_tab_rename(tab_id, window, cx));
                 })
                 .icon(IconName::PenLine)
-                .item_disabled(i18n("tabbar-menu-close"), !closeable, move |window, cx| {
+                .item_disabled(t!("tabbar-menu-close"), !closeable, move |window, cx| {
                     close_shell.update(cx, |this, cx| this.request_close_tab(tab_id, window, cx));
                 })
                 .icon(IconName::Close)

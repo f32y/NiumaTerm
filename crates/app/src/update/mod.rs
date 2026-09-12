@@ -15,12 +15,12 @@ use std::time::Duration;
 
 use gpui::{AnyWindowHandle, App, Global, Window};
 use nmt_config::update::UpdateChannel;
-use nmt_i18n::i18n;
 use nmt_platform::windows::restart_manager::{
     AffectedApplication, FileUsage, RestartManagerError, RestartManagerSession,
 };
 use nmt_platform::windows::window::show_error_dialog;
 use nmt_version::Version;
+use rust_i18n::t;
 use tracing::warn;
 
 use crate::AWAIT_EXIT_FLAG;
@@ -662,10 +662,13 @@ fn show_recovery_warning(applications: Vec<String>, cx: &mut App) {
         }
     }
 
-    let message = i18n("settings-about-recovery-warning-message")
-        .replace("{applications}", &applications.join(", "));
+    let message = t!(
+        "settings-about-recovery-warning-message",
+        applications = &applications.join(", ")
+    )
+    .into_owned();
 
-    show_error_dialog(i18n("settings-about-recovery-warning-title"), &message);
+    show_error_dialog(&t!("settings-about-recovery-warning-title"), &message);
     complete_relaunch(cx);
 }
 

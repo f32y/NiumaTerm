@@ -13,7 +13,7 @@ use gpui_component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex, v_virtual_list,
 };
 use nmt_agent::chat::{QueuedPrompt, SessionScope, SessionSummary};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::composer::visible_prompt;
 use crate::agent_tab::session::{directories_match, directory_label};
@@ -29,7 +29,7 @@ pub(super) fn queued_message_label(prompt: &QueuedPrompt) -> String {
         .collect::<Vec<_>>()
         .join(" ");
 
-    i18n("agent-history-queued-message").replace("{text}", &text)
+    t!("agent-history-queued-message", text = &text).into_owned()
 }
 
 impl SessionHistoryUi {
@@ -107,8 +107,8 @@ impl AgentPane {
                                         .ghost()
                                         .xsmall()
                                         .icon(IconName::Close)
-                                        .tooltip(i18n("agent-history-queued-remove"))
-                                        .accessibility_label(i18n("agent-history-queued-remove"))
+                                        .tooltip(t!("agent-history-queued-remove"))
+                                        .accessibility_label(t!("agent-history-queued-remove"))
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.remove_queued_prompt(&id, cx)
                                         }))
@@ -285,15 +285,15 @@ impl AgentPane {
                                     .text_xs()
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(i18n("agent-history-recent-sessions")),
+                                    .child(t!("agent-history-recent-sessions")),
                             )
                             .child(
                                 Checkbox::new("history-scope")
-                                    .label(i18n("agent-history-show-all-sessions"))
+                                    .label(t!("agent-history-show-all-sessions").into_owned())
                                     .checked(
                                         self.history_ui.data.scope == SessionScope::AllDirectories,
                                     )
-                                    .tooltip(i18n("agent-history-show-all-sessions-tooltip"))
+                                    .tooltip(t!("agent-history-show-all-sessions-tooltip"))
                                     .on_click(
                                         cx.listener(|this, _, _, cx| this.toggle_history_scope(cx)),
                                     ),

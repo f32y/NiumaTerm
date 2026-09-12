@@ -9,7 +9,7 @@ use gpui_component::resizable::ResizableState;
 use nmt_config::local_state::{
     PaneNodeState, PaneSplitAxis, SessionState, TabState, WorkspaceState,
 };
-use nmt_i18n::i18n;
+use rust_i18n::t;
 use tracing::warn;
 
 use crate::pane_tree::{PaneId, PaneNode, PaneTree};
@@ -249,7 +249,7 @@ pub(super) fn restore_session(
         let workspace_id = WorkspaceId(Shell::alloc_id(next_id));
 
         let name = if name.trim().is_empty() {
-            i18n("workspace-restored-default-name").replace("{count}", &restored_count.to_string())
+            t!("workspace-restored-default-name", count = restored_count).into_owned()
         } else {
             name
         };
@@ -569,10 +569,10 @@ pub(super) fn spawn_default_pane(
                     // unavailable) — no terminal can ever open, so tell
                     // the user why before exiting instead of dying with
                     // an invisible panic.
-                    crate::show_startup_error_dialog(
-                        &i18n("startup-terminal-spawn-error")
-                            .replace("{error}", &error.to_string()),
-                    );
+                    crate::show_startup_error_dialog(&t!(
+                        "startup-terminal-spawn-error",
+                        error = error
+                    ));
 
                     process::exit(1);
                 }

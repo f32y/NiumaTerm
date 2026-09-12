@@ -10,7 +10,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use gpui::{Bounds, ClipboardEntry, Context, Image, ImageFormat, Pixels, Window, px, size};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
 use crate::agent_tab::capabilities::AgentCapabilities as _;
@@ -72,7 +72,11 @@ impl AgentPane {
         if !self.kind.caps().image_input {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
-                i18n("agent-composer-images-unsupported").replace("{name}", self.kind.display()),
+                t!(
+                    "agent-composer-images-unsupported",
+                    name = self.kind.display()
+                )
+                .into_owned(),
                 cx,
             );
 
@@ -92,8 +96,7 @@ impl AgentPane {
             Err(AttachError::Full) => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,
-                    i18n("agent-composer-images-full")
-                        .replace("{count}", &MAX_ATTACHMENTS.to_string()),
+                    t!("agent-composer-images-full", count = MAX_ATTACHMENTS).into_owned(),
                     cx,
                 );
 

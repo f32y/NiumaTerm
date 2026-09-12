@@ -1,4 +1,4 @@
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::shell::*;
 
@@ -84,7 +84,7 @@ fn update_notification_card(
 
             Button::new(format!("{settings_key}-settings"))
                 .ghost()
-                .label(i18n("shell-updates-settings"))
+                .label(t!("shell-updates-settings"))
                 .on_click(move |_, window, cx| {
                     let _ = settings_shell.update(cx, |shell, cx| {
                         shell.on_show_settings(&ShowSettings, window, cx)
@@ -114,8 +114,8 @@ fn update_notification_card(
             Button::new(format!("{}-primary", action_key.as_str()))
                 .primary()
                 .label(match primary {
-                    NotificationPrimaryAction::Update => i18n("shell-updates-update"),
-                    NotificationPrimaryAction::Retry => i18n("shell-updates-retry"),
+                    NotificationPrimaryAction::Update => t!("shell-updates-update"),
+                    NotificationPrimaryAction::Retry => t!("shell-updates-retry"),
                 })
                 .on_click({
                     let action_key = action_key.clone();

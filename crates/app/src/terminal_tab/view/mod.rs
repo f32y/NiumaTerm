@@ -21,7 +21,6 @@ use gpui_component::notification::Notification;
 use nmt_agent::AgentRoute;
 use nmt_config::active_colors;
 use nmt_config::local_state::TabState;
-use nmt_i18n::i18n;
 use nmt_terminal::clipboard::{Clipboard, ClipboardType};
 use nmt_terminal::input::WheelDelta;
 use nmt_terminal::session::interaction::PendingCopy;
@@ -29,6 +28,7 @@ use nmt_terminal::session::{
     EngineError, HostEvent, SessionObserver, SurfaceMouseButton, TerminalSession,
     TerminalSessionConfig,
 };
+use rust_i18n::t;
 use tracing::warn;
 
 use crate::terminal_tab::block_list::live::LiveItemState;
@@ -488,7 +488,7 @@ impl TerminalPane {
                     if this.model.finish_copy(text, copy.completion) {
                         window.push_notification(
                             Notification::new()
-                                .message(i18n("terminal-text-copied"))
+                                .message(t!("terminal-text-copied"))
                                 .id::<TextCopiedNotification>()
                                 .autohide_after(Duration::from_millis(1500))
                                 .show_close(false)

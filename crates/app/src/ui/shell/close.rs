@@ -1,6 +1,8 @@
+use std::borrow::Cow;
+
 use gpui_component::StyledExt;
 use gpui_component::dialog::DialogButtonProps;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::shell::*;
 
@@ -77,16 +79,19 @@ impl Shell {
         }
 
         let description = if count > 0 {
-            i18n("shell-close-pane-processes-description")
-                .replace("{processes}", &Self::processes_running(count))
+            t!(
+                "shell-close-pane-processes-description",
+                processes = &Self::processes_running(count)
+            )
+            .into_owned()
         } else {
-            i18n("shell-close-pane-description").to_string()
+            t!("shell-close-pane-description").to_string()
         };
 
         Self::open_close_confirm(
             window,
             cx,
-            i18n("shell-close-pane-title"),
+            t!("shell-close-pane-title"),
             description,
             None,
             move |this, window, cx| this.close_pane_now(id, window, cx),
@@ -118,9 +123,9 @@ impl Shell {
     /// lead-in of every close-confirmation description.
     fn processes_running(count: usize) -> String {
         if count == 1 {
-            i18n("shell-close-one-process-running").to_string()
+            t!("shell-close-one-process-running").to_string()
         } else {
-            i18n("shell-close-many-processes-running").replace("{count}", &count.to_string())
+            t!("shell-close-many-processes-running", count = count).into_owned()
         }
     }
 
@@ -138,11 +143,11 @@ impl Shell {
 
         match count {
             0 => None,
-            1 => Some(i18n("shell-close-one-temporary-workspace").into()),
+            1 => Some(t!("shell-close-one-temporary-workspace").into()),
 
             _ => Some(
-                i18n("shell-close-many-temporary-workspaces")
-                    .replace("{count}", &count.to_string())
+                t!("shell-close-many-temporary-workspaces", count = count)
+                    .into_owned()
                     .into(),
             ),
         }
@@ -165,9 +170,9 @@ impl Shell {
     fn open_close_confirm(
         window: &mut Window,
         cx: &mut Context<Self>,
-        // The catalog outlives the app, so a key-literal lookup yields a
-        // `'static` title without allocating per dialog.
-        title: &'static str,
+        // Dialog callbacks can rebuild their content, so they retain a
+        // translated title that can be reused on each invocation.
+        title: Cow<'static, str>,
         description: String,
         note: Option<SharedString>,
         on_confirm: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
@@ -181,7 +186,7 @@ impl Shell {
 
             alert
                 .confirm()
-                .title(title)
+                .title(title.clone())
                 .description(
                     v_flex()
                         .gap_1()
@@ -269,18 +274,21 @@ impl Shell {
             }
 
             let description = if count > 0 {
-                i18n("shell-close-last-tab-processes-description")
-                    .replace("{processes}", &Self::processes_running(count))
+                t!(
+                    "shell-close-last-tab-processes-description",
+                    processes = &Self::processes_running(count)
+                )
+                .into_owned()
             } else if is_agent {
-                i18n("shell-close-last-tab-agent-description").to_string()
+                t!("shell-close-last-tab-agent-description").to_string()
             } else {
-                i18n("shell-close-last-tab-description").to_string()
+                t!("shell-close-last-tab-description").to_string()
             };
 
             Self::open_close_confirm(
                 window,
                 cx,
-                i18n("shell-close-last-tab-title"),
+                t!("shell-close-last-tab-title"),
                 description,
                 None,
                 move |this, window, cx| this.close_workspace_now(ws_id, window, cx),
@@ -304,18 +312,21 @@ impl Shell {
         }
 
         let description = if is_agent {
-            i18n("shell-close-tab-agent-description").to_string()
+            t!("shell-close-tab-agent-description").to_string()
         } else if count > 0 {
-            i18n("shell-close-tab-processes-description")
-                .replace("{processes}", &Self::processes_running(count))
+            t!(
+                "shell-close-tab-processes-description",
+                processes = &Self::processes_running(count)
+            )
+            .into_owned()
         } else {
-            i18n("shell-close-tab-description").to_string()
+            t!("shell-close-tab-description").to_string()
         };
 
         Self::open_close_confirm(
             window,
             cx,
-            i18n("shell-close-tab-title"),
+            t!("shell-close-tab-title"),
             description,
             None,
             move |this, window, cx| this.close_tab_now(id, window, cx),
@@ -392,16 +403,19 @@ impl Shell {
         }
 
         let description = if count > 0 {
-            i18n("shell-close-workspace-processes-description")
-                .replace("{processes}", &Self::processes_running(count))
+            t!(
+                "shell-close-workspace-processes-description",
+                processes = &Self::processes_running(count)
+            )
+            .into_owned()
         } else {
-            i18n("shell-close-workspace-description").to_string()
+            t!("shell-close-workspace-description").to_string()
         };
 
         Self::open_close_confirm(
             window,
             cx,
-            i18n("shell-close-workspace-title"),
+            t!("shell-close-workspace-title"),
             description,
             None,
             move |this, window, cx| this.close_workspace_now(id, window, cx),
@@ -438,16 +452,19 @@ impl Shell {
         }
 
         let description = if process_count > 0 {
-            i18n("shell-close-temporary-workspaces-processes-description")
-                .replace("{processes}", &Self::processes_running(process_count))
+            t!(
+                "shell-close-temporary-workspaces-processes-description",
+                processes = &Self::processes_running(process_count)
+            )
+            .into_owned()
         } else {
-            i18n("shell-close-temporary-workspaces-description").to_string()
+            t!("shell-close-temporary-workspaces-description").to_string()
         };
 
         Self::open_close_confirm(
             window,
             cx,
-            i18n("shell-close-temporary-workspaces-title"),
+            t!("shell-close-temporary-workspaces-title"),
             description,
             None,
             move |this, window, cx| this.close_temporary_workspaces_now(&ids, window, cx),
@@ -489,10 +506,13 @@ impl Shell {
         let count = self.workspace_process_count(id, cx);
 
         let message = if count > 0 {
-            i18n("shell-close-last-workspace-processes-message")
-                .replace("{processes}", &Self::processes_running(count))
+            t!(
+                "shell-close-last-workspace-processes-message",
+                processes = &Self::processes_running(count)
+            )
+            .into_owned()
         } else {
-            i18n("shell-close-last-workspace-message").to_string()
+            t!("shell-close-last-workspace-message").to_string()
         };
 
         // Quitting from here saves the session, so the same warning the
@@ -508,7 +528,7 @@ impl Shell {
             let note = note.clone();
 
             dialog
-                .title(i18n("shell-close-last-workspace-title"))
+                .title(t!("shell-close-last-workspace-title"))
                 .overlay_closable(false)
                 .content(move |content, _, cx| {
                     content.child(
@@ -525,7 +545,7 @@ impl Shell {
                         .child(
                             Button::new("replace-ws")
                                 .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                .label(i18n("shell-close-new-default-workspace"))
+                                .label(t!("shell-close-new-default-workspace"))
                                 .primary()
                                 .on_click(move |_, window, cx| {
                                     window.close_dialog(cx);
@@ -538,7 +558,7 @@ impl Shell {
                         .child(
                             Button::new("quit-app")
                                 .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                .label(i18n("shell-close-quit"))
+                                .label(t!("shell-close-quit"))
                                 .danger()
                                 .on_click(move |_, window, cx| {
                                     if !ui::settings::save_settings(window, cx) {
@@ -555,7 +575,7 @@ impl Shell {
                             DialogClose::new().child(
                                 Button::new("keep-ws")
                                     .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                    .label(i18n("shell-close-cancel")),
+                                    .label(t!("shell-close-cancel")),
                             ),
                         ),
                 )
@@ -619,15 +639,18 @@ impl Shell {
         }
 
         let mut description = if count > 0 {
-            i18n("shell-close-window-processes-description")
-                .replace("{processes}", &Self::processes_running(count))
+            t!(
+                "shell-close-window-processes-description",
+                processes = &Self::processes_running(count)
+            )
+            .into_owned()
         } else {
-            i18n("shell-close-window-description").to_string()
+            t!("shell-close-window-description").to_string()
         };
 
         if !saved {
             description.push_str("\n\n");
-            description.push_str(i18n("settings-save-failed-close-description"));
+            description.push_str(&t!("settings-save-failed-close-description"));
         }
 
         let note = self.temporary_workspace_note();
@@ -637,7 +660,7 @@ impl Shell {
         if !saved {
             window.open_alert_dialog(cx, move |alert, _, _| {
                 alert
-                    .title(i18n("settings-save-failed-title"))
+                    .title(t!("settings-save-failed-title"))
                     .description(
                         v_flex()
                             .gap_1()
@@ -647,8 +670,8 @@ impl Shell {
                     .button_props(
                         DialogButtonProps::default()
                             .show_cancel(true)
-                            .ok_text(i18n("settings-close-without-saving"))
-                            .cancel_text(i18n("shell-close-cancel")),
+                            .ok_text(t!("settings-close-without-saving"))
+                            .cancel_text(t!("shell-close-cancel")),
                     )
                     .on_ok(|_, window, cx| {
                         if cx.windows().len() == 1 {
@@ -667,7 +690,7 @@ impl Shell {
         Self::open_close_confirm(
             window,
             cx,
-            i18n("shell-close-window-title"),
+            t!("shell-close-window-title"),
             description,
             note,
             |_, window, _| window.remove_window(),

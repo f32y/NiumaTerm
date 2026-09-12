@@ -12,7 +12,7 @@ use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme as _, IconName};
 use nmt_agent::chat::Item as SessionItem;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::transcript::code::is_code_item;
 use crate::agent_tab::transcript::disclosure_row::{
@@ -82,7 +82,7 @@ impl TranscriptView {
                     ..
                 } => (
                     IconName::File,
-                    i18n("agent-transcript-edit-paths").replace("{paths}", paths),
+                    t!("agent-transcript-edit-paths", paths = paths).into_owned(),
                     None,
                     Some(status.as_deref().unwrap_or("inProgress").to_string()),
                     diff.as_deref().filter(|diff| !diff.trim().is_empty()),
@@ -112,7 +112,7 @@ impl TranscriptView {
 
                 SessionItem::Reasoning { summary, .. } => (
                     IconName::Bot,
-                    i18n("agent-transcript-thinking").to_string(),
+                    t!("agent-transcript-thinking").to_string(),
                     None,
                     None,
                     summary.as_deref().filter(|text| !text.trim().is_empty()),
@@ -133,12 +133,12 @@ impl TranscriptView {
         let detail_view = cx.entity().downgrade();
 
         let status_label = match status.as_deref() {
-            Some("failed") => i18n("agent-transcript-status-failed"),
-            Some("declined") => i18n("agent-transcript-status-declined"),
-            Some("completed") => i18n("agent-transcript-status-completed"),
-            Some("inProgress") => i18n("agent-transcript-status-in-progress"),
-            Some(status) => status,
-            None => i18n("agent-transcript-no-status"),
+            Some("failed") => t!("agent-transcript-status-failed"),
+            Some("declined") => t!("agent-transcript-status-declined"),
+            Some("completed") => t!("agent-transcript-status-completed"),
+            Some("inProgress") => t!("agent-transcript-status-in-progress"),
+            Some(status) => status.into(),
+            None => t!("agent-transcript-no-status"),
         };
 
         // The outcome is a mark rather than a word: it lands in the same slot
@@ -161,12 +161,12 @@ impl TranscriptView {
             status_label,
             if expandable {
                 if self.disclosures.is_disclosing(RevealKey::Row(index)) {
-                    i18n("agent-transcript-accessibility-expanded")
+                    t!("agent-transcript-accessibility-expanded")
                 } else {
-                    i18n("agent-transcript-accessibility-collapsed")
+                    t!("agent-transcript-accessibility-collapsed")
                 }
             } else {
-                ""
+                "".into()
             }
         );
 

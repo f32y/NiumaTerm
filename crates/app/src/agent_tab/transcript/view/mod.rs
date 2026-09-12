@@ -15,8 +15,8 @@ use gpui_component::{ActiveTheme as _, ElementExt as _, IconName, Sizable as _};
 use nmt_agent::chat::Item as SessionItem;
 use nmt_agent::transcript::conversation::ConversationState;
 use nmt_config::agent::CollapseRows;
-use nmt_i18n::i18n;
 use nmt_profiling::transcript::{Operation, Probe};
+use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
 use crate::agent_tab::composer::PALETTE_MAX_HEIGHT;
@@ -571,7 +571,7 @@ impl Render for TranscriptView {
                                         .min_h(px(36.))
                                         .rounded(UI_RADIUS)
                                         .icon(IconName::ArrowDown)
-                                        .label(i18n("agent-transcript-scroll-bottom"))
+                                        .label(t!("agent-transcript-scroll-bottom"))
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             // A click arrives outside a frame,
                                             // and the slide only starts on the

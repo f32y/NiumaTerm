@@ -9,7 +9,7 @@ use nmt_agent::chat::{
 };
 use nmt_agent::claude_code::sessions;
 use nmt_agent::session::branch::BranchView;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::capabilities::AgentCapabilities as _;
 use crate::agent_tab::commands::{
@@ -20,7 +20,7 @@ use crate::agent_tab::composer::{CommandFeedbackKind, RewindAction};
 use crate::agent_tab::input_history::InputHistoryDirection;
 use crate::agent_tab::session::Status;
 use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
-use crate::agent_tab::{AgentPane, RecentSessionsMode, translated};
+use crate::agent_tab::{AgentPane, RecentSessionsMode};
 
 /// Tallest the palette grows before its own rows scroll: nine rows and the
 /// note under them. The transcript reads this as the height the picker covers
@@ -84,7 +84,7 @@ impl AgentPane {
         if self.is_command_busy() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
-                translated("agent-composer-resume-idle-only"),
+                SharedString::from(t!("agent-composer-resume-idle-only")),
                 cx,
             );
 
@@ -102,7 +102,7 @@ impl AgentPane {
 
             self.palette.set_feedback(
                 CommandFeedbackKind::Notice,
-                translated("agent-composer-no-recent-sessions"),
+                SharedString::from(t!("agent-composer-no-recent-sessions")),
                 cx,
             );
 
@@ -131,7 +131,9 @@ impl AgentPane {
         let Some(skill_catalog) = self.palette.skill_catalog.as_ref() else {
             return PaletteModel {
                 rows: Vec::new(),
-                note: Some(translated("agent-composer-skill-discovery-loading")),
+                note: Some(SharedString::from(t!(
+                    "agent-composer-skill-discovery-loading"
+                ))),
             };
         };
 
@@ -149,13 +151,13 @@ impl AgentPane {
         let note = if rows.is_empty() && !skill_catalog.errors.is_empty() {
             Some(SharedString::new(&skill_catalog.errors[0]))
         } else if rows.is_empty() && query.is_empty() {
-            Some(translated("agent-composer-no-skills"))
+            Some(SharedString::from(t!("agent-composer-no-skills")))
         } else if rows.is_empty() {
-            Some(translated("agent-composer-no-matching-skills"))
+            Some(SharedString::from(t!("agent-composer-no-matching-skills")))
         } else {
             skill_catalog.errors.first().map(|error| {
-                i18n("agent-composer-skill-load-partial")
-                    .replace("{error}", error)
+                t!("agent-composer-skill-load-partial", error = error)
+                    .into_owned()
                     .into()
             })
         };
@@ -256,7 +258,7 @@ impl AgentPane {
             return Some(PaletteModel {
                 note: rows
                     .is_empty()
-                    .then(|| translated("agent-composer-no-matching-values")),
+                    .then(|| SharedString::from(t!("agent-composer-no-matching-values"))),
                 rows,
             });
         }
@@ -287,13 +289,19 @@ impl AgentPane {
                     let disabled_reason = if command.run_policy == SlashCommandRunPolicy::IdleOnly
                         && self.is_command_busy()
                     {
-                        Some(translated("agent-composer-available-when-idle"))
+                        Some(SharedString::from(t!("agent-composer-available-when-idle")))
                     } else if command.source == SlashCommandSource::Local {
                         None
                     } else {
                         match self.session.borrow().runtime.status() {
-                            Status::Starting => Some(translated("agent-composer-agent-starting")),
-                            Status::Exited => Some(translated("agent-composer-agent-exited")),
+                            Status::Starting => {
+                                Some(SharedString::from(t!("agent-composer-agent-starting")))
+                            }
+
+                            Status::Exited => {
+                                Some(SharedString::from(t!("agent-composer-agent-exited")))
+                            }
+
                             _ => None,
                         }
                     };
@@ -311,8 +319,8 @@ impl AgentPane {
                     label: format!("/{}", skill.name).into(),
                     description: SharedString::new(&skill.description),
                     hint: Some(
-                        i18n("agent-composer-skill-scope")
-                            .replace("{scope}", &skill.scope)
+                        t!("agent-composer-skill-scope", scope = &skill.scope)
+                            .into_owned()
                             .into(),
                     ),
                     disabled_reason: self.skill_disabled_reason(skill),
@@ -323,7 +331,9 @@ impl AgentPane {
 
         let note = if rows.is_empty() {
             if slash_skills && self.palette.skill_catalog.is_none() {
-                Some(translated("agent-composer-skill-discovery-loading"))
+                Some(SharedString::from(t!(
+                    "agent-composer-skill-discovery-loading"
+                )))
             } else if slash_skills
                 && self
                     .palette
@@ -337,23 +347,31 @@ impl AgentPane {
                     .and_then(|catalog| catalog.errors.first())
                     .map(SharedString::new)
             } else if slash_skills {
-                Some(translated("agent-composer-no-matching-commands-skills"))
+                Some(SharedString::from(t!(
+                    "agent-composer-no-matching-commands-skills"
+                )))
             } else {
-                Some(translated("agent-composer-no-matching-commands"))
+                Some(SharedString::from(t!(
+                    "agent-composer-no-matching-commands"
+                )))
             }
         } else if self.kind.caps().async_command_discovery && !self.palette.provider_commands_ready
         {
-            Some(translated("agent-composer-claude-command-loading"))
+            Some(SharedString::from(t!(
+                "agent-composer-claude-command-loading"
+            )))
         } else if slash_skills && self.palette.skill_catalog.is_none() {
-            Some(translated("agent-composer-skill-discovery-loading"))
+            Some(SharedString::from(t!(
+                "agent-composer-skill-discovery-loading"
+            )))
         } else if slash_skills {
             self.palette
                 .skill_catalog
                 .as_ref()
                 .and_then(|catalog| catalog.errors.first())
                 .map(|error| {
-                    i18n("agent-composer-skill-load-partial")
-                        .replace("{error}", error)
+                    t!("agent-composer-skill-load-partial", error = error)
+                        .into_owned()
                         .into()
                 })
         } else {
@@ -590,8 +608,8 @@ impl AgentPane {
                 let Ok((text, binding)) = prepare_skill_selection(&skill) else {
                     self.palette.set_feedback(
                         CommandFeedbackKind::Error,
-                        i18n("agent-command-skill-disabled-by-codex")
-                            .replace("{name}", &skill.name),
+                        t!("agent-command-skill-disabled-by-codex", name = &skill.name)
+                            .into_owned(),
                         cx,
                     );
 

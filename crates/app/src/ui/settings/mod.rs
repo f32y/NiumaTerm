@@ -55,11 +55,11 @@ use nmt_agent::update::{DiscoverySupport, InstallationKey, ProviderKind, UpdateP
 #[cfg(test)]
 use nmt_config::CursorShape;
 use nmt_config::system::{NewlineShortcut, WarnBeforeTerminatingShell};
-use nmt_i18n::i18n;
 use nmt_platform::{
     is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
     shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
 };
+use rust_i18n::t;
 use tracing::warn;
 
 #[cfg(windows)]
@@ -153,15 +153,15 @@ pub(crate) fn save_settings(window: &mut Window, cx: &mut App) -> bool {
                 Notification::new()
                     .id::<SettingsSaveFailure>()
                     .with_type(NotificationType::Error)
-                    .title(i18n("settings-save-failed-title"))
+                    .title(t!("settings-save-failed-title"))
                     .message(format!(
                         "{} {error}",
-                        i18n("settings-save-failed-description")
+                        t!("settings-save-failed-description")
                     ))
                     .autohide(false)
                     .action(|_, _, _| {
                         Button::new("retry-settings-save")
-                            .label(i18n("shell-updates-retry"))
+                            .label(t!("shell-updates-retry"))
                             .on_click(|_, window, cx| {
                                 save_settings(window, cx);
                             })

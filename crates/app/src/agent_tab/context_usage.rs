@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp;
 use std::time::Duration;
 
@@ -9,7 +10,7 @@ use nmt_agent::chat::{
     ContextComposition, ContextSegment, ContextUsageScope, ContextWindowUsage, SessionStats,
     TokenUsageBreakdown,
 };
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::transcript::compact_token_count;
 
@@ -138,9 +139,9 @@ impl RenderOnce for ContextSegmentRow {
     }
 }
 
-#[derive(Clone, Copy, Debug, IntoElement, PartialEq, Eq)]
+#[derive(Clone, Debug, IntoElement, PartialEq, Eq)]
 struct TokenUsageRow {
-    label: &'static str,
+    label: Cow<'static, str>,
     tokens: u64,
     nested: bool,
 }
@@ -184,12 +185,18 @@ fn cache_hit_of(breakdown: TokenUsageBreakdown) -> Option<u64> {
 
 fn context_indicator_label(usage: ContextWindowUsage) -> String {
     match remaining_context_percent(usage) {
-        Some(remaining_percent) => i18n("agent-context-used-left")
-            .replace("{tokens}", &compact_token_count(usage.used_tokens()))
-            .replace("{percent}", &remaining_percent.to_string()),
+        Some(remaining_percent) => t!(
+            "agent-context-used-left",
+            tokens = &compact_token_count(usage.used_tokens()),
+            percent = remaining_percent
+        )
+        .into_owned(),
 
-        None => i18n("agent-context-used")
-            .replace("{tokens}", &compact_token_count(usage.used_tokens())),
+        None => t!(
+            "agent-context-used",
+            tokens = &compact_token_count(usage.used_tokens())
+        )
+        .into_owned(),
     }
 }
 
@@ -201,14 +208,16 @@ fn context_capacity_labels(usage: ContextWindowUsage) -> (String, Option<String>
                 compact_token_count(usage.used_tokens()),
                 compact_token_count(max_tokens)
             ),
-            remaining_context_percent(usage).map(|percent| {
-                i18n("agent-context-percent-left").replace("{percent}", &percent.to_string())
-            }),
+            remaining_context_percent(usage)
+                .map(|percent| t!("agent-context-percent-left", percent = percent).into_owned()),
         ),
 
         None => (
-            i18n("agent-context-used")
-                .replace("{tokens}", &compact_token_count(usage.used_tokens())),
+            t!(
+                "agent-context-used",
+                tokens = &compact_token_count(usage.used_tokens())
+            )
+            .into_owned(),
             None,
         ),
     }
@@ -219,7 +228,7 @@ fn token_usage_rows(usage: TokenUsageBreakdown, include_total: bool) -> Vec<Toke
 
     if include_total {
         rows.push(TokenUsageRow {
-            label: i18n("agent-context-total"),
+            label: t!("agent-context-total"),
             tokens: usage.total_tokens,
             nested: false,
         });
@@ -227,7 +236,7 @@ fn token_usage_rows(usage: TokenUsageBreakdown, include_total: bool) -> Vec<Toke
 
     if let Some(tokens) = usage.input_tokens {
         rows.push(TokenUsageRow {
-            label: i18n("agent-context-input"),
+            label: t!("agent-context-input"),
             tokens,
             nested: false,
         });
@@ -235,7 +244,7 @@ fn token_usage_rows(usage: TokenUsageBreakdown, include_total: bool) -> Vec<Toke
 
     if let Some(tokens) = usage.cache_read_input_tokens {
         rows.push(TokenUsageRow {
-            label: i18n("agent-context-cache-read"),
+            label: t!("agent-context-cache-read"),
             tokens,
             nested: true,
         });
@@ -243,7 +252,7 @@ fn token_usage_rows(usage: TokenUsageBreakdown, include_total: bool) -> Vec<Toke
 
     if let Some(tokens) = usage.cache_write_input_tokens {
         rows.push(TokenUsageRow {
-            label: i18n("agent-context-cache-write"),
+            label: t!("agent-context-cache-write"),
             tokens,
             nested: true,
         });
@@ -251,7 +260,7 @@ fn token_usage_rows(usage: TokenUsageBreakdown, include_total: bool) -> Vec<Toke
 
     if let Some(tokens) = usage.output_tokens {
         rows.push(TokenUsageRow {
-            label: i18n("agent-context-output"),
+            label: t!("agent-context-output"),
             tokens,
             nested: false,
         });
@@ -259,7 +268,7 @@ fn token_usage_rows(usage: TokenUsageBreakdown, include_total: bool) -> Vec<Toke
 
     if let Some(tokens) = usage.reasoning_output_tokens {
         rows.push(TokenUsageRow {
-            label: i18n("agent-context-reasoning"),
+            label: t!("agent-context-reasoning"),
             tokens,
             nested: true,
         });
@@ -268,10 +277,10 @@ fn token_usage_rows(usage: TokenUsageBreakdown, include_total: bool) -> Vec<Toke
     rows
 }
 
-fn cumulative_usage_heading(scope: ContextUsageScope) -> &'static str {
+fn cumulative_usage_heading(scope: ContextUsageScope) -> Cow<'static, str> {
     match scope {
-        ContextUsageScope::Thread => i18n("agent-context-thread-total"),
-        ContextUsageScope::LastTurn => i18n("agent-context-last-turn"),
+        ContextUsageScope::Thread => t!("agent-context-thread-total"),
+        ContextUsageScope::LastTurn => t!("agent-context-last-turn"),
     }
 }
 
@@ -313,7 +322,7 @@ impl RenderOnce for ContextUsageIndicator {
         let indicator_label = context_indicator_label(usage);
 
         let accessibility_label =
-            i18n("agent-context-accessibility").replace("{usage}", &indicator_label);
+            t!("agent-context-accessibility", usage = &indicator_label).into_owned();
 
         let (capacity_label, remaining_label) = context_capacity_labels(usage);
 
@@ -364,7 +373,7 @@ impl RenderOnce for ContextUsageIndicator {
                                     .text_xs()
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(muted.opacity(0.72))
-                                    .child(i18n("agent-context-heading")),
+                                    .child(t!("agent-context-heading")),
                             )
                             .child(
                                 h_flex()
@@ -402,7 +411,7 @@ impl RenderOnce for ContextUsageIndicator {
                                         .text_xs()
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_color(muted.opacity(0.72))
-                                        .child(i18n("agent-context-what-fills-it")),
+                                        .child(t!("agent-context-what-fills-it")),
                                 )
                                 .children(segment_rows.iter().cloned()),
                         )
@@ -419,9 +428,9 @@ impl RenderOnce for ContextUsageIndicator {
                                         .text_xs()
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_color(muted.opacity(0.72))
-                                        .child(i18n("agent-context-current")),
+                                        .child(t!("agent-context-current")),
                                 )
-                                .children(current_rows.iter().copied()),
+                                .children(current_rows.iter().cloned()),
                         )
                     })
                     .when_some(stats, |this, stats| {
@@ -449,7 +458,7 @@ impl RenderOnce for ContextUsageIndicator {
                                         .text_xs()
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_color(muted.opacity(0.72))
-                                        .child(i18n("agent-context-session-heading")),
+                                        .child(t!("agent-context-session-heading")),
                                 )
                                 .children(rows.map(|(label, value)| {
                                     h_flex()
@@ -458,9 +467,7 @@ impl RenderOnce for ContextUsageIndicator {
                                         .gap_3()
                                         .text_xs()
                                         .child(
-                                            div()
-                                                .text_color(muted.opacity(0.86))
-                                                .child(i18n(label)),
+                                            div().text_color(muted.opacity(0.86)).child(t!(label)),
                                         )
                                         .child(
                                             div().text_color(foreground.opacity(0.86)).child(value),

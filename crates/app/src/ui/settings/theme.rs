@@ -15,10 +15,10 @@ use gpui_component::{
 use nmt_config::colors::{ColorArray, Colors};
 use nmt_config::theme::{AppearanceTheme, Theme, UiTheme};
 use nmt_config::{Config, config_dir_path, set_active_colors};
-use nmt_i18n::i18n;
 use notify::{
     Event as NotifyEvent, RecursiveMode, Result as NotifyResult, Watcher as _, recommended_watcher,
 };
+use rust_i18n::t;
 use toml::{Table as TomlTable, Value as TomlValue};
 use tracing::warn;
 
@@ -261,9 +261,9 @@ pub(super) fn theme_list(cx: &mut App) -> Div {
         .into_iter()
         .filter(|(name, theme)| {
             let display_name = if name.is_empty() {
-                i18n("settings-theme-default")
+                t!("settings-theme-default")
             } else {
-                name
+                name.as_str().into()
             };
 
             filter.is_empty()
@@ -283,11 +283,11 @@ pub(super) fn theme_list(cx: &mut App) -> Div {
         .child(
             h_flex()
                 .justify_between()
-                .child(i18n("settings-theme-title"))
+                .child(t!("settings-theme-title"))
                 .child(
                     Button::new("theme-refresh")
                         .outline()
-                        .label(i18n("settings-theme-refresh"))
+                        .label(t!("settings-theme-refresh"))
                         .on_click(|_, _, cx: &mut App| reload_themes(cx)),
                 ),
         )
@@ -296,7 +296,7 @@ pub(super) fn theme_list(cx: &mut App) -> Div {
                 div()
                     .py_4()
                     .text_color(cx.theme().muted_foreground)
-                    .child(i18n("settings-theme-no-matches")),
+                    .child(t!("settings-theme-no-matches")),
             )
         })
         .children(
@@ -308,12 +308,12 @@ pub(super) fn theme_list(cx: &mut App) -> Div {
 
                     let display_name = if theme.name.is_empty() {
                         if name.is_empty() {
-                            i18n("settings-theme-default")
+                            t!("settings-theme-default")
                         } else {
-                            &name
+                            name.as_str().into()
                         }
                     } else {
-                        &theme.name
+                        theme.name.as_str().into()
                     }
                     .to_string();
 
@@ -335,7 +335,7 @@ pub(super) fn theme_list(cx: &mut App) -> Div {
                                 this.child(
                                     div()
                                         .text_color(selected_border)
-                                        .child(i18n("settings-theme-selected")),
+                                        .child(t!("settings-theme-selected")),
                                 )
                             },
                         ))

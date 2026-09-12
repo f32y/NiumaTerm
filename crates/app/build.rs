@@ -4,6 +4,10 @@ use std::path::PathBuf;
 use winres::WindowsResource;
 
 fn main() {
+    // The translation macro reads these files during expansion, so catalog
+    // edits must regenerate the embedded translations even without Rust edits.
+    println!("cargo:rerun-if-changed=locales");
+
     let version = nmt_version::emit();
 
     nmt_version::emit_internal();

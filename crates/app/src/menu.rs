@@ -15,7 +15,7 @@
 //! both.
 
 use gpui::{App, Menu, MenuItem, SystemMenuType, Window, actions};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::settings::save_settings;
 use crate::ui::{
@@ -112,47 +112,47 @@ fn menus() -> Vec<Menu> {
         // Named for the application because macOS shows the first menu's name
         // in bold as the application menu.
         Menu::new("NiumaTerm").items([
-            MenuItem::action(i18n("menu-check-for-updates"), CheckForUpdates),
+            MenuItem::action(t!("menu-check-for-updates"), CheckForUpdates),
             MenuItem::separator(),
-            MenuItem::action(i18n("menu-settings"), ShowSettings),
+            MenuItem::action(t!("menu-settings"), ShowSettings),
             MenuItem::separator(),
-            MenuItem::os_submenu(i18n("menu-services"), SystemMenuType::Services),
+            MenuItem::os_submenu(t!("menu-services"), SystemMenuType::Services),
             MenuItem::separator(),
-            MenuItem::action(i18n("menu-hide"), Hide),
-            MenuItem::action(i18n("menu-hide-others"), HideOthers),
-            MenuItem::action(i18n("menu-show-all"), ShowAll),
+            MenuItem::action(t!("menu-hide"), Hide),
+            MenuItem::action(t!("menu-hide-others"), HideOthers),
+            MenuItem::action(t!("menu-show-all"), ShowAll),
             MenuItem::separator(),
-            MenuItem::action(i18n("menu-quit"), Quit),
+            MenuItem::action(t!("menu-quit"), Quit),
         ]),
-        Menu::new(i18n("menu-shell")).items([
-            MenuItem::action(i18n("shell-menu-new-tab"), NewTab),
-            MenuItem::action(i18n("shell-menu-new-agent-tab"), NewAgentTab),
-            MenuItem::action(i18n("shell-menu-new-window"), NewWindow),
-            MenuItem::action(i18n("shell-workspace-new-title"), NewWorkspace),
+        Menu::new(t!("menu-shell")).items([
+            MenuItem::action(t!("shell-menu-new-tab"), NewTab),
+            MenuItem::action(t!("shell-menu-new-agent-tab"), NewAgentTab),
+            MenuItem::action(t!("shell-menu-new-window"), NewWindow),
+            MenuItem::action(t!("shell-workspace-new-title"), NewWorkspace),
             MenuItem::separator(),
-            MenuItem::action(i18n("menu-close-tab"), CloseTab),
+            MenuItem::action(t!("menu-close-tab"), CloseTab),
         ]),
-        Menu::new(i18n("menu-view")).items([
-            MenuItem::action(i18n("menu-toggle-sidebar"), ToggleSidebar),
+        Menu::new(t!("menu-view")).items([
+            MenuItem::action(t!("menu-toggle-sidebar"), ToggleSidebar),
             MenuItem::separator(),
-            MenuItem::action(i18n("menu-split-up"), SplitUp),
-            MenuItem::action(i18n("menu-split-down"), SplitDown),
-            MenuItem::action(i18n("menu-split-left"), SplitLeft),
-            MenuItem::action(i18n("menu-split-right"), SplitRight),
+            MenuItem::action(t!("menu-split-up"), SplitUp),
+            MenuItem::action(t!("menu-split-down"), SplitDown),
+            MenuItem::action(t!("menu-split-left"), SplitLeft),
+            MenuItem::action(t!("menu-split-right"), SplitRight),
             // AppKit adds Enter Full Screen to a menu it recognizes as the
             // View menu, so there is no item for it here.
         ]),
         // AppKit fills in the list of open windows for a menu it recognizes by
         // the name "Window", which is what the English catalog calls this one.
-        Menu::new(i18n("menu-window")).items([
-            MenuItem::action(i18n("menu-minimize"), Minimize),
-            MenuItem::action(i18n("menu-zoom"), Zoom),
+        Menu::new(t!("menu-window")).items([
+            MenuItem::action(t!("menu-minimize"), Minimize),
+            MenuItem::action(t!("menu-zoom"), Zoom),
             MenuItem::separator(),
-            MenuItem::action(i18n("menu-next-tab"), NextTab),
-            MenuItem::action(i18n("menu-previous-tab"), PrevTab),
+            MenuItem::action(t!("menu-next-tab"), NextTab),
+            MenuItem::action(t!("menu-previous-tab"), PrevTab),
             MenuItem::separator(),
-            MenuItem::action(i18n("menu-next-workspace"), NextWorkspace),
-            MenuItem::action(i18n("menu-previous-workspace"), PrevWorkspace),
+            MenuItem::action(t!("menu-next-workspace"), NextWorkspace),
+            MenuItem::action(t!("menu-previous-workspace"), PrevWorkspace),
         ]),
     ]
 }

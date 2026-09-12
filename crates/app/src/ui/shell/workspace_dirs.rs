@@ -17,7 +17,7 @@ use gpui_component::tooltip::Tooltip;
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::Shell;
 use crate::ui::shell::agent_workspace;
@@ -153,7 +153,7 @@ impl WorkspaceDirsEditor {
                     match entry {
                         Resolved::Unusable(path) => {
                             notice.get_or_insert_with(|| {
-                                i18n("shell-workspace-dirs-unusable").replace("{path}", &path)
+                                t!("shell-workspace-dirs-unusable", path = &path).into_owned()
                             });
                         }
 
@@ -161,8 +161,8 @@ impl WorkspaceDirsEditor {
                             Some(roots) => {
                                 if roots.add(path.clone()) == RootChange::Duplicate {
                                     notice.get_or_insert_with(|| {
-                                        i18n("shell-workspace-dirs-duplicate")
-                                            .replace("{path}", &path)
+                                        t!("shell-workspace-dirs-duplicate", path = &path)
+                                            .into_owned()
                                     });
                                 }
                             }
@@ -190,7 +190,7 @@ impl WorkspaceDirsEditor {
             .map_or(RootChange::NotAttached, |roots| roots.remove(path));
 
         self.notice = match outcome {
-            RootChange::WouldBeEmpty => Some(i18n("shell-workspace-dirs-keep-one").into()),
+            RootChange::WouldBeEmpty => Some(t!("shell-workspace-dirs-keep-one").into()),
             _ => None,
         };
 
@@ -254,7 +254,7 @@ impl WorkspaceDirsEditor {
                     div()
                         .text_xs()
                         .text_color(cx.theme().warning)
-                        .child(i18n("shell-workspace-dirs-unavailable")),
+                        .child(t!("shell-workspace-dirs-unavailable")),
                 )
             })
             .child(if primary {
@@ -268,13 +268,13 @@ impl WorkspaceDirsEditor {
                     .bg(cx.theme().muted)
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(i18n("shell-workspace-dirs-primary"))
+                    .child(t!("shell-workspace-dirs-primary"))
                     .into_any_element()
             } else {
                 Button::new(("workspace-dir-primary", index))
                     .outline()
                     .xsmall()
-                    .label(i18n("shell-workspace-dirs-make-primary"))
+                    .label(t!("shell-workspace-dirs-make-primary"))
                     .on_click(cx.listener(move |editor, _, _, cx| {
                         editor.make_primary(&promote, cx);
                     }))
@@ -284,7 +284,7 @@ impl WorkspaceDirsEditor {
                 Button::new(("workspace-dir-remove", index))
                     .outline()
                     .xsmall()
-                    .label(i18n("shell-workspace-dirs-remove"))
+                    .label(t!("shell-workspace-dirs-remove"))
                     .on_click(cx.listener(move |editor, _, _, cx| {
                         editor.remove(&detach, cx);
                     })),
@@ -318,13 +318,13 @@ impl Render for WorkspaceDirsEditor {
                     .w_full()
                     .justify_between()
                     .items_center()
-                    .child(div().text_sm().child(i18n("shell-workspace-dirs-label")))
+                    .child(div().text_sm().child(t!("shell-workspace-dirs-label")))
                     .child(
                         Button::new("workspace-dir-add")
                             .outline()
                             .icon(IconName::Plus)
                             .small()
-                            .label(i18n("shell-workspace-dirs-add"))
+                            .label(t!("shell-workspace-dirs-add"))
                             .on_click(cx.listener(|_editor, _, _, cx| {
                                 let rx = cx.prompt_for_paths(PathPromptOptions {
                                     files: false,
@@ -365,7 +365,7 @@ impl Render for WorkspaceDirsEditor {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(i18n("shell-workspace-dirs-description")),
+                    .child(t!("shell-workspace-dirs-description")),
             )
     }
 }
@@ -394,13 +394,13 @@ impl Shell {
             let margin_top = ((window.viewport_size().height - px(300.)) * 0.5).max(px(16.));
 
             dialog
-                .title(i18n("shell-workspace-edit-title"))
+                .title(t!("shell-workspace-edit-title"))
                 .overlay_closable(false)
                 .margin_top(margin_top)
                 .button_props(
                     DialogButtonProps::default()
-                        .ok_text(i18n("shell-workspace-save"))
-                        .cancel_text(i18n("shell-workspace-cancel"))
+                        .ok_text(t!("shell-workspace-save"))
+                        .cancel_text(t!("shell-workspace-cancel"))
                         .show_cancel(true),
                 )
                 .footer(
@@ -416,13 +416,13 @@ impl Shell {
                                 .text_xs()
                                 .line_height(relative(1.5))
                                 .text_color(cx.theme().muted_foreground)
-                                .child(i18n("shell-workspace-dirs-applies-next")),
+                                .child(t!("shell-workspace-dirs-applies-next")),
                         )
                         .child(
                             DialogAction::new().child(
                                 Button::new("save-ws-dirs")
                                     .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                    .label(i18n("shell-workspace-save"))
+                                    .label(t!("shell-workspace-save"))
                                     .primary(),
                             ),
                         )
@@ -430,7 +430,7 @@ impl Shell {
                             DialogClose::new().child(
                                 Button::new("cancel-ws-dirs")
                                     .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                    .label(i18n("shell-workspace-cancel")),
+                                    .label(t!("shell-workspace-cancel")),
                             ),
                         ),
                 )

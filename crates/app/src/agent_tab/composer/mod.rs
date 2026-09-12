@@ -35,7 +35,7 @@ use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogClose, DialogFooter}
 use gpui_component::{WindowExt, v_flex};
 use nmt_agent::session::commands::CommandQueue;
 pub(super) use nmt_agent::session::commands::PendingSlashCommand;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::commands::{
     parse_slash_command, reconcile_skill_binding, validate_skill_binding,
@@ -237,7 +237,7 @@ impl AgentPane {
             let idle = idle.clone();
 
             dialog
-                .title(i18n("agent-cache-warning-title"))
+                .title(t!("agent-cache-warning-title"))
                 .overlay_closable(false)
                 .content(move |content, _, cx| {
                     content.child(
@@ -246,7 +246,7 @@ impl AgentPane {
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
                             .child(idle.clone())
-                            .child(i18n("agent-cache-warning-message")),
+                            .child(t!("agent-cache-warning-message")),
                     )
                 })
                 .footer(
@@ -254,7 +254,7 @@ impl AgentPane {
                         .child(
                             Button::new("agent-cache-warning-send")
                                 .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                .label(i18n("agent-cache-warning-send"))
+                                .label(t!("agent-cache-warning-send"))
                                 .on_click(move |_, window, cx| {
                                     window.close_dialog(cx);
 
@@ -268,7 +268,7 @@ impl AgentPane {
                                 Button::new("agent-cache-warning-cancel")
                                     .min_w(DIALOG_BUTTON_MIN_WIDTH)
                                     .primary()
-                                    .label(i18n("agent-cache-warning-cancel")),
+                                    .label(t!("agent-cache-warning-cancel")),
                             ),
                         ),
                 )
@@ -279,7 +279,7 @@ impl AgentPane {
         if self.branch_flow_holds_composer() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
-                i18n("agent-session-rewind-blocks-send").to_string(),
+                t!("agent-session-rewind-blocks-send").to_string(),
                 cx,
             );
 

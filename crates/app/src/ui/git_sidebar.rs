@@ -7,7 +7,7 @@ use gpui::{
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme, IconName, Sizable as _, h_flex, v_flex};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::git_status::{DiffLine, DiffLineKind, GitStatusModel, fetch_file_diff};
 
@@ -141,7 +141,7 @@ impl GitSidebar {
                 .justify_center()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child(i18n("sidebar-git-no-changes"))
+                .child(t!("sidebar-git-no-changes"))
                 .into_any_element();
         }
 
@@ -220,7 +220,7 @@ impl GitSidebar {
                 .justify_center()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child(i18n("sidebar-git-select-file"))
+                .child(t!("sidebar-git-select-file"))
                 .into_any_element();
         }
 
@@ -300,7 +300,7 @@ impl Render for GitSidebar {
             .items_center()
             .border_b_1()
             .border_color(cx.theme().sidebar_border)
-            .child(div().text_sm().child(i18n("sidebar-git-title")))
+            .child(div().text_sm().child(t!("sidebar-git-title")))
             .child(
                 Button::new("git-refresh")
                     .ghost()
@@ -327,7 +327,7 @@ impl Render for GitSidebar {
                 .justify_center()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child(i18n("sidebar-git-not-repo"))
+                .child(t!("sidebar-git-not-repo"))
                 .into_any_element()
         };
 

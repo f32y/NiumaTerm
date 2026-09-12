@@ -4,6 +4,7 @@
 //! full; finished ones are kept because a result is still worth reading, and
 //! collapse behind a count once there are more than the panel has room for.
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::time::SystemTime;
 
@@ -14,7 +15,7 @@ use gpui_component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use nmt_agent::background_task::{
     BackgroundTaskKind, BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskSummary,
 };
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::background_tasks::{BackgroundTasksView, StopTaskIcon};
 
@@ -58,8 +59,8 @@ pub(super) fn render_row(
             .ghost()
             .xsmall()
             .icon(StopTaskIcon)
-            .tooltip(i18n("tasks-background-stop-tooltip"))
-            .accessibility_label(i18n("tasks-background-stop-tooltip"))
+            .tooltip(t!("tasks-background-stop-tooltip"))
+            .accessibility_label(t!("tasks-background-stop-tooltip"))
             .on_click(cx.listener(move |this, _, _, cx| {
                 // The row opens the child's conversation, so a click that was
                 // meant for Stop must not also navigate.
@@ -134,14 +135,17 @@ pub(super) fn row_detail(task: &BackgroundTaskSummary) -> String {
         .or(task.status.as_deref())
         .or(task.last_preview.as_deref())
         .map(str::to_owned)
-        .unwrap_or_else(|| i18n("tasks-background-no-description").to_string())
+        .unwrap_or_else(|| t!("tasks-background-no-description").to_string())
 }
 
 pub(super) fn row_timing(task: &BackgroundTaskSummary, now: SystemTime) -> Option<String> {
     if task.state.is_terminal() {
         return task.completed_at.map(|completed| {
-            i18n("tasks-background-finished-ago")
-                .replace("{duration}", &duration_label(now, completed))
+            t!(
+                "tasks-background-finished-ago",
+                duration = &duration_label(now, completed)
+            )
+            .into_owned()
         });
     }
 
@@ -154,38 +158,35 @@ pub(super) fn duration_label(now: SystemTime, past: SystemTime) -> String {
     let seconds = now.duration_since(past).unwrap_or_default().as_secs();
 
     match seconds {
-        0..60 => i18n("tasks-background-duration-seconds").replace("{count}", &seconds.to_string()),
+        0..60 => t!("tasks-background-duration-seconds", count = seconds).into_owned(),
 
-        60..3600 => i18n("tasks-background-duration-minutes")
-            .replace("{count}", &(seconds / 60).to_string()),
+        60..3600 => t!("tasks-background-duration-minutes", count = (seconds / 60)).into_owned(),
 
-        3600..86400 => i18n("tasks-background-duration-hours")
-            .replace("{count}", &(seconds / 3600).to_string()),
+        3600..86400 => t!("tasks-background-duration-hours", count = (seconds / 3600)).into_owned(),
 
-        _ => i18n("tasks-background-duration-days")
-            .replace("{count}", &(seconds / 86400).to_string()),
+        _ => t!("tasks-background-duration-days", count = (seconds / 86400)).into_owned(),
     }
 }
 
 /// What kind of work a row is. Shown beside the provider because a child agent
 /// and a background command differ in what the row's detail and its output
 /// mean, which the description text alone does not say.
-pub(super) fn background_task_kind_label(kind: BackgroundTaskKind) -> &'static str {
+pub(super) fn background_task_kind_label(kind: BackgroundTaskKind) -> Cow<'static, str> {
     match kind {
-        BackgroundTaskKind::Agent => i18n("tasks-background-kind-agent"),
-        BackgroundTaskKind::Shell => i18n("tasks-background-kind-shell"),
+        BackgroundTaskKind::Agent => t!("tasks-background-kind-agent"),
+        BackgroundTaskKind::Shell => t!("tasks-background-kind-shell"),
     }
 }
 
-pub(super) fn background_task_state_label(state: BackgroundTaskState) -> &'static str {
+pub(super) fn background_task_state_label(state: BackgroundTaskState) -> Cow<'static, str> {
     match state {
-        BackgroundTaskState::Starting => i18n("tasks-background-state-starting"),
-        BackgroundTaskState::Working => i18n("tasks-background-state-working"),
-        BackgroundTaskState::NeedsInput => i18n("tasks-background-state-needs-input"),
-        BackgroundTaskState::Done => i18n("tasks-background-state-done"),
-        BackgroundTaskState::Interrupted => i18n("tasks-background-state-interrupted"),
-        BackgroundTaskState::Stopped => i18n("tasks-background-state-stopped"),
-        BackgroundTaskState::Failed => i18n("tasks-background-state-failed"),
+        BackgroundTaskState::Starting => t!("tasks-background-state-starting"),
+        BackgroundTaskState::Working => t!("tasks-background-state-working"),
+        BackgroundTaskState::NeedsInput => t!("tasks-background-state-needs-input"),
+        BackgroundTaskState::Done => t!("tasks-background-state-done"),
+        BackgroundTaskState::Interrupted => t!("tasks-background-state-interrupted"),
+        BackgroundTaskState::Stopped => t!("tasks-background-state-stopped"),
+        BackgroundTaskState::Failed => t!("tasks-background-state-failed"),
     }
 }
 
@@ -235,10 +236,10 @@ pub(super) fn visible_rows(total: usize, limit: usize, expanded: bool) -> usize 
 
 pub(super) fn section_control_label(hidden: usize, expanded: bool) -> Option<String> {
     if expanded {
-        return Some(i18n("tasks-background-show-fewer").to_string());
+        return Some(t!("tasks-background-show-fewer").to_string());
     }
 
-    (hidden > 0).then(|| i18n("tasks-background-show-more").replace("{count}", &hidden.to_string()))
+    (hidden > 0).then(|| t!("tasks-background-show-more", count = hidden).into_owned())
 }
 
 pub(super) fn running_heading(snapshot: &BackgroundTaskSnapshot) -> String {
@@ -246,15 +247,21 @@ pub(super) fn running_heading(snapshot: &BackgroundTaskSnapshot) -> String {
     let needs_input = snapshot.needs_input_count();
 
     if needs_input > 0 {
-        return i18n("tasks-background-heading-running-needs-input")
-            .replace("{count}", &active.to_string())
-            .replace("{needs}", &needs_input.to_string());
+        return t!(
+            "tasks-background-heading-running-needs-input",
+            count = active,
+            needs = needs_input
+        )
+        .into_owned();
     }
 
-    i18n("tasks-background-heading-running").replace("{count}", &active.to_string())
+    t!("tasks-background-heading-running", count = active).into_owned()
 }
 
 pub(super) fn finished_heading(snapshot: &BackgroundTaskSnapshot) -> String {
-    i18n("tasks-background-heading-finished")
-        .replace("{count}", &snapshot.terminal_count().to_string())
+    t!(
+        "tasks-background-heading-finished",
+        count = snapshot.terminal_count()
+    )
+    .into_owned()
 }

@@ -14,7 +14,6 @@ members = [
     "crates/app",
     "crates/version",
     "crates/config",
-    "crates/i18n",
     "crates/input",
     "crates/platform",
     "crates/profiling",
@@ -79,7 +78,6 @@ disallowed_types = "deny"
 nmt_agent = { path = "crates/agent" }
 nmt_version = { path = "crates/version" }
 nmt_config = { path = "crates/config" }
-nmt_i18n = { path = "crates/i18n" }
 nmt_input = { path = "crates/input" }
 libghostty-vt-sys = { path = "third_party/libghostty-vt-sys" }
 nmt_platform = { path = "crates/platform" }

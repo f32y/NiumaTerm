@@ -5,6 +5,7 @@ use nmt_agent::agent_process;
 use nmt_config::local_state::TabState;
 use nmt_remote_net::net_pty::terminal_session;
 use nmt_terminal::session::TerminalSessionConfig;
+use rust_i18n::t;
 
 pub(super) fn spawn_pane(
     cx: &mut impl AppContext,
@@ -53,7 +54,7 @@ pub(super) fn attach_remote(
     TerminalPane::attach(
         cx,
         id,
-        nmt_i18n::i18n("terminal-remote-profile-name").to_string(),
+        t!("terminal-remote-profile-name").to_string(),
         route,
         move |observer| terminal_session(remote, id, nmt_config::active_colors(), Some(observer)),
     )

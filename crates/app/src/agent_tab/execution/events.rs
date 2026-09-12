@@ -3,7 +3,7 @@ use nmt_agent::chat::{Event, QuestionMode, SlashCommandOutcome, TurnActivity};
 use nmt_agent::session::controller::SessionEffect;
 use nmt_agent::session::lifecycle::RecoverySnapshot;
 use nmt_agent::{AgentEvent, AgentEventKind, normalize_body, normalize_title};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::AgentPaneEvent;
 use crate::agent_tab::execution::AgentSession;
@@ -60,10 +60,13 @@ impl AgentSession {
                     attempt,
                     total,
                     reason,
-                } => i18n("agent-transcript-retrying")
-                    .replace("{attempt}", &attempt.to_string())
-                    .replace("{total}", &total.to_string())
-                    .replace("{reason}", reason),
+                } => t!(
+                    "agent-transcript-retrying",
+                    attempt = attempt,
+                    total = total,
+                    reason = reason
+                )
+                .into_owned(),
             });
 
             let state = self.controller.borrow();
@@ -146,7 +149,7 @@ impl AgentSession {
                             .map(str::to_owned)
                     })
                     .unwrap_or_else(|| {
-                        i18n("agent-session-turn-completed").replace("{name}", self.kind.display())
+                        t!("agent-session-turn-completed", name = self.kind.display()).into_owned()
                     });
 
                 drop(state);
@@ -154,7 +157,10 @@ impl AgentSession {
 
                 self.emit_lifecycle(
                     AgentEventKind::Stopped,
-                    &i18n("agent-session-provider-finished").replace("{name}", self.kind.display()),
+                    &t!(
+                        "agent-session-provider-finished",
+                        name = self.kind.display()
+                    ),
                     &body,
                     cx,
                 );
@@ -171,7 +177,7 @@ impl AgentSession {
 
                 self.emit_lifecycle(
                     AgentEventKind::PermissionRequested,
-                    &i18n("agent-session-needs-input").replace("{name}", self.kind.display()),
+                    &t!("agent-session-needs-input", name = self.kind.display()),
                     &body,
                     cx,
                 );
@@ -196,7 +202,7 @@ impl AgentSession {
 
                 self.emit_lifecycle(
                     AgentEventKind::PermissionRequested,
-                    &i18n("agent-session-needs-input").replace("{name}", self.kind.display()),
+                    &t!("agent-session-needs-input", name = self.kind.display()),
                     &body,
                     cx,
                 );

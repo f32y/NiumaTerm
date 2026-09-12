@@ -4,7 +4,7 @@ use gpui::{App, Context, Task};
 use nmt_agent::launcher::AgentCli;
 use nmt_agent::session::update_readiness::{ConversationWork, Readiness};
 use nmt_agent::update::InstallationKey;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::execution::AgentSession;
 use crate::agent_tab::profile::agent_launch;
@@ -71,17 +71,28 @@ impl AgentSession {
             }),
 
             Readiness::Updating => RecoveryReadiness::Busy(
-                i18n("agent-update-profile-already-updating").replace("{name}", &self.profile.name),
+                t!(
+                    "agent-update-profile-already-updating",
+                    name = &self.profile.name
+                )
+                .into_owned(),
             ),
 
             Readiness::ActiveWork => RecoveryReadiness::Busy(
-                i18n("agent-update-profile-active-work").replace("{name}", &self.profile.name),
+                t!(
+                    "agent-update-profile-active-work",
+                    name = &self.profile.name
+                )
+                .into_owned(),
             ),
 
             Readiness::MissingIdentity => RecoveryReadiness::MissingIdentity(
-                i18n("agent-update-profile-missing-identity")
-                    .replace("{name}", &self.profile.name)
-                    .replace("{provider}", self.kind.display()),
+                t!(
+                    "agent-update-profile-missing-identity",
+                    name = &self.profile.name,
+                    provider = self.kind.display()
+                )
+                .into_owned(),
             ),
         }
     }

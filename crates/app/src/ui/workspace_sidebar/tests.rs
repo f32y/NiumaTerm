@@ -49,7 +49,7 @@ fn both_halves_of_the_column_are_spoken_together() {
 
     assert_eq!(agent, AgentVisual::NeedsInput);
     assert_eq!(
-        status_column_label(Some(agent_label), Some(terminal_label)),
+        status_column_label(Some(&agent_label), Some(&terminal_label)),
         "Needs input, Command failed"
     );
 }

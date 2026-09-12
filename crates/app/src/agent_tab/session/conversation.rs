@@ -4,7 +4,7 @@
 
 use gpui::Context;
 use nmt_agent::chat::SessionSummary;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::composer::CommandFeedbackKind;
 use crate::agent_tab::session::errors::operation_error;
@@ -30,7 +30,7 @@ impl AgentPane {
         if title.is_empty() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
-                i18n("agent-session-rename-needs-title").to_string(),
+                t!("agent-session-rename-needs-title").to_string(),
                 cx,
             );
 
@@ -41,7 +41,7 @@ impl AgentPane {
             Some(session) => session.rename_conversation(title).map_err(operation_error),
 
             None => {
-                Err(i18n("agent-session-still-starting").replace("{name}", self.kind.display()))
+                Err(t!("agent-session-still-starting", name = self.kind.display()).into_owned())
             }
         };
 
@@ -52,7 +52,7 @@ impl AgentPane {
             Ok(accepted) => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
-                    i18n("agent-session-renamed").replace("{title}", &accepted),
+                    t!("agent-session-renamed", title = &accepted).into_owned(),
                     cx,
                 );
 
@@ -87,7 +87,7 @@ impl AgentPane {
         if query.is_empty() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
-                i18n("agent-session-search-needs-query").to_string(),
+                t!("agent-session-search-needs-query").to_string(),
                 cx,
             );
 
@@ -99,7 +99,7 @@ impl AgentPane {
         let Some(session) = state.runtime.backend_mut() else {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
-                i18n("agent-session-still-starting").replace("{name}", self.kind.display()),
+                t!("agent-session-still-starting", name = self.kind.display()).into_owned(),
                 cx,
             );
 
@@ -110,7 +110,7 @@ impl AgentPane {
 
         self.palette.set_feedback(
             CommandFeedbackKind::Notice,
-            i18n("agent-session-searching").replace("{query}", query),
+            t!("agent-session-searching", query = query).into_owned(),
             cx,
         );
 
@@ -131,7 +131,7 @@ impl AgentPane {
         if !self.history_ui.data.search_results(results) {
             self.palette.set_feedback(
                 CommandFeedbackKind::Notice,
-                i18n("agent-session-search-no-matches").to_string(),
+                t!("agent-session-search-no-matches").to_string(),
                 cx,
             );
 
@@ -143,7 +143,7 @@ impl AgentPane {
 
         self.palette.set_feedback(
             CommandFeedbackKind::Notice,
-            i18n("agent-session-search-matches").replace("{count}", &count.to_string()),
+            t!("agent-session-search-matches", count = count).into_owned(),
             cx,
         );
     }
@@ -172,7 +172,7 @@ impl AgentPane {
         if !removed {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
-                i18n("agent-session-queued-remove-failed").to_string(),
+                t!("agent-session-queued-remove-failed").to_string(),
                 cx,
             );
 

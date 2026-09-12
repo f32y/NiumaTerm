@@ -10,7 +10,7 @@ use std::time::Duration;
 use gpui::Context;
 use nmt_agent::chat::{SessionScope, SessionSummary};
 use nmt_agent::session::restore::{ResumeStart, SettingsSeed};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::capabilities::AgentCapabilities as _;
 use crate::agent_tab::composer::CommandFeedbackKind;
@@ -251,7 +251,7 @@ impl AgentPane {
 
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,
-                    i18n("agent-session-codex-recent-not-ready").to_string(),
+                    t!("agent-session-codex-recent-not-ready").to_string(),
                     cx,
                 );
 
@@ -272,7 +272,7 @@ impl AgentPane {
 
         self.palette.set_feedback(
             CommandFeedbackKind::Notice,
-            i18n("agent-session-opening-recent").to_string(),
+            t!("agent-session-opening-recent").to_string(),
             cx,
         );
 

@@ -1,4 +1,4 @@
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::settings::*;
 
@@ -6,13 +6,13 @@ pub(super) fn terminal_page() -> SettingPage {
     let waterfall_key: &str = InputStyle::Waterfall.into();
     let fixed_bottom_key: &str = InputStyle::FixedBottom.into();
 
-    SettingPage::new(i18n("settings-terminal-title"))
+    SettingPage::new(t!("settings-terminal-title"))
         .default_open(true)
         .group(
             SettingGroup::new()
-                .title(i18n("settings-terminal-input"))
+                .title(t!("settings-terminal-input"))
                 .item(SettingItem::new(
-                    i18n("settings-terminal-input-style"),
+                    t!("settings-terminal-input-style"),
                     SettingField::dropdown(
                         vec![
                             (
@@ -38,17 +38,14 @@ pub(super) fn terminal_page() -> SettingPage {
                     .default_value(waterfall_key),
                 ))
                 .item(SettingItem::new(
-                    i18n("settings-terminal-cursor-shape"),
+                    t!("settings-terminal-cursor-shape"),
                     SettingField::dropdown(
                         vec![
-                            (
-                                "block".into(),
-                                i18n("settings-terminal-cursor-block").into(),
-                            ),
-                            ("line".into(), i18n("settings-terminal-cursor-line").into()),
+                            ("block".into(), t!("settings-terminal-cursor-block").into()),
+                            ("line".into(), t!("settings-terminal-cursor-line").into()),
                             (
                                 "underline".into(),
-                                i18n("settings-terminal-cursor-underline").into(),
+                                t!("settings-terminal-cursor-underline").into(),
                             ),
                         ],
                         |cx| {
@@ -63,7 +60,7 @@ pub(super) fn terminal_page() -> SettingPage {
                     .default_value("block"),
                 ))
                 .item(SettingItem::new(
-                    i18n("settings-terminal-command-blocks"),
+                    t!("settings-terminal-command-blocks"),
                     SettingField::switch(
                         |cx| cx.global::<AppSettings>().appearance.command_blocks,
                         |value, cx| {
@@ -72,7 +69,7 @@ pub(super) fn terminal_page() -> SettingPage {
                     ),
                 ))
                 .item(SettingItem::new(
-                    i18n("settings-terminal-scroll-on-typing"),
+                    t!("settings-terminal-scroll-on-typing"),
                     SettingField::switch(
                         |cx| {
                             cx.global::<AppSettings>()

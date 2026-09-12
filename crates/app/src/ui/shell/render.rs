@@ -4,7 +4,7 @@ use app::agent_tab::{AgentKindExt as _, RecoveryIdentity};
 use gpui::KeyDownEvent;
 use gpui_component::Disableable;
 use gpui_component::modern_menu::{ModernMenu, dispatch_modern_menu_key};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::UI_RADIUS;
 use crate::ui::composition::FLOATING_SURFACE_SIDE_INSET;
@@ -178,7 +178,7 @@ impl Shell {
                                 .ghost()
                                 .size(px(TITLE_BAR_BUTTON))
                                 .icon(IconName::Bell)
-                                .tooltip(i18n("shell-next-ready-tab"))
+                                .tooltip(t!("shell-next-ready-tab"))
                                 .disabled(self.next_ready_tab(cx).is_none())
                                 // The target is picked on the click rather
                                 // than captured here, so a tab that went ready
@@ -201,7 +201,7 @@ impl Shell {
                                 .ghost()
                                 .size(px(TITLE_BAR_BUTTON))
                                 .icon(NextBusyTabIcon)
-                                .tooltip(i18n("shell-next-busy-tab"))
+                                .tooltip(t!("shell-next-busy-tab"))
                                 .disabled(self.next_busy_tab(cx).is_none())
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     let Some((workspace_index, tab_index)) = this.next_busy_tab(cx)
@@ -313,8 +313,8 @@ impl Shell {
                 .ghost()
                 .size(px(TITLE_BAR_BUTTON))
                 .icon(IconName::Menu)
-                .tooltip(i18n("shell-app-menu"))
-                .accessibility_label(i18n("shell-app-menu")),
+                .tooltip(t!("shell-app-menu"))
+                .accessibility_label(t!("shell-app-menu")),
             move |menu, _, cx| app_menu(menu, &shell, cx),
         )
     }
@@ -364,7 +364,7 @@ impl Shell {
     /// workflow worth watching without opening the view; a run with nothing in
     /// flight shows the icon alone rather than a zero.
     fn render_workflows_button(&self, running: usize, cx: &mut Context<Self>) -> impl IntoElement {
-        let label = i18n("workflows-running-agents").replace("{count}", &running.to_string());
+        let label = t!("workflows-running-agents", count = running).into_owned();
 
         Toggle::new("toggle-workflows")
             .ghost()
@@ -391,8 +391,9 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let label = match running {
-            0 => i18n("tasks-background-title").to_string(),
-            _ => i18n("tasks-background-running-count").replace("{count}", &running.to_string()),
+            0 => t!("tasks-background-title").to_string(),
+
+            _ => t!("tasks-background-running-count", count = running).into_owned(),
         };
 
         Toggle::new("toggle-background-tasks")
@@ -439,20 +440,20 @@ fn app_menu(menu: ModernMenu, shell: &Entity<Shell>, _cx: &mut App) -> ModernMen
     let settings_shell = shell.clone();
 
     let menu = menu
-        .item(i18n("shell-menu-new-window"), move |window, cx| {
+        .item(t!("shell-menu-new-window"), move |window, cx| {
             window_shell.update(cx, |this, cx| {
                 this.on_new_window(&NewWindow, window, cx);
             });
         })
         .icon(Icon::new(IconName::Frame))
-        .item(i18n("shell-workspace-new-title"), move |window, cx| {
+        .item(t!("shell-workspace-new-title"), move |window, cx| {
             workspace_shell.update(cx, |this, cx| {
                 this.on_new_workspace(&NewWorkspace, window, cx);
             });
         })
         .icon(Icon::new(IconName::Folder))
         .separator()
-        .item(i18n("shell-workspace-settings-title"), move |window, cx| {
+        .item(t!("shell-workspace-settings-title"), move |window, cx| {
             settings_shell.update(cx, |this, cx| {
                 this.on_show_settings(&ShowSettings, window, cx);
             });
@@ -462,7 +463,7 @@ fn app_menu(menu: ModernMenu, shell: &Entity<Shell>, _cx: &mut App) -> ModernMen
     // Only a build that can replace itself offers to check.
     #[cfg(windows)]
     let menu = menu
-        .item(i18n("shell-menu-check-updates"), |_, cx| check_now(cx))
+        .item(t!("shell-menu-check-updates"), |_, cx| check_now(cx))
         .icon(Icon::new(IconName::ArrowDown));
 
     menu

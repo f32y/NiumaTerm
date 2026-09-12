@@ -1,11 +1,11 @@
 use nmt_agent::session::{OperationError, UnsupportedOperation};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 pub(in crate::agent_tab) fn operation_error(error: OperationError) -> String {
     match error {
         OperationError::Failed(message) => message,
 
-        OperationError::Unsupported(operation) => i18n(match operation {
+        OperationError::Unsupported(operation) => t!(match operation {
             UnsupportedOperation::Rename => "agent-session-rename-unsupported",
             UnsupportedOperation::Fork => "agent-session-fork-unsupported",
             UnsupportedOperation::FileRewind => "agent-session-file-rewind-claude-only",

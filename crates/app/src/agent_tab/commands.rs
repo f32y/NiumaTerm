@@ -1,5 +1,7 @@
 //! Pure slash-command parsing and catalog logic for the agent composer.
 
+use std::borrow::Cow;
+
 use nmt_agent::catalog::{
     ChoiceError, SkillError, prepare_skill_selection as prepare_core_skill_selection,
     resolve_choice as resolve_core_choice, validate_skill_binding as validate_core_skill_binding,
@@ -11,7 +13,7 @@ use nmt_agent::chat::{
     SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo,
     SlashCommandRunPolicy, SlashCommandSource,
 };
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 pub(super) fn validate_skill_binding(
     input: &str,
@@ -19,13 +21,13 @@ pub(super) fn validate_skill_binding(
     catalog: Option<&SkillCatalog>,
 ) -> Result<Option<SkillReference>, String> {
     validate_core_skill_binding(input, binding, catalog).map_err(|error| match error {
-        SkillError::Loading => i18n("agent-command-skill-loading").to_owned(),
+        SkillError::Loading => t!("agent-command-skill-loading").into_owned(),
 
         SkillError::Unavailable(name) => {
-            i18n("agent-command-skill-unavailable").replace("{name}", &name)
+            t!("agent-command-skill-unavailable", name = &name).into_owned()
         }
 
-        SkillError::Disabled(name) => i18n("agent-command-skill-disabled").replace("{name}", &name),
+        SkillError::Disabled(name) => t!("agent-command-skill-disabled", name = &name).into_owned(),
     })
 }
 
@@ -33,16 +35,19 @@ pub(super) fn prepare_skill_selection(
     skill: &SkillInfo,
 ) -> Result<(String, SkillReference), String> {
     prepare_core_skill_selection(skill)
-        .map_err(|_| i18n("agent-command-skill-disabled-by-codex").replace("{name}", &skill.name))
+        .map_err(|_| t!("agent-command-skill-disabled-by-codex", name = &skill.name).into_owned())
 }
 
 pub(super) fn resolve_choice(input: &str, choices: &[(String, String)]) -> Result<String, String> {
     resolve_core_choice(input, choices).map_err(|error| {
-        i18n(match error {
-            ChoiceError::Unknown => "agent-command-value-unknown",
-            ChoiceError::Ambiguous => "agent-command-value-ambiguous",
-        })
-        .replace("{value}", input)
+        t!(
+            match error {
+                ChoiceError::Unknown => "agent-command-value-unknown",
+                ChoiceError::Ambiguous => "agent-command-value-ambiguous",
+            },
+            value = input
+        )
+        .into_owned()
     })
 }
 
@@ -50,42 +55,42 @@ pub(super) fn local_commands() -> Vec<SlashCommandInfo> {
     vec![
         command(
             "new",
-            i18n("agent-command-new-description"),
+            t!("agent-command-new-description"),
             None,
             SlashCommandArguments::None,
             SlashCommandRunPolicy::IdleOnly,
         ),
         command(
             "clear",
-            i18n("agent-command-clear-description"),
+            t!("agent-command-clear-description"),
             None,
             SlashCommandArguments::None,
             SlashCommandRunPolicy::IdleOnly,
         ),
         command(
             "resume",
-            i18n("agent-command-resume-description"),
+            t!("agent-command-resume-description"),
             None,
             SlashCommandArguments::None,
             SlashCommandRunPolicy::IdleOnly,
         ),
         command(
             "model",
-            i18n("agent-command-model-description"),
-            Some(i18n("agent-command-model-hint")),
+            t!("agent-command-model-description"),
+            Some(t!("agent-command-model-hint")),
             SlashCommandArguments::Choices,
             SlashCommandRunPolicy::Immediate,
         ),
         command(
             "permissions",
-            i18n("agent-command-permissions-description"),
-            Some(i18n("agent-command-permissions-hint")),
+            t!("agent-command-permissions-description"),
+            Some(t!("agent-command-permissions-hint")),
             SlashCommandArguments::Choices,
             SlashCommandRunPolicy::Immediate,
         ),
         command(
             "status",
-            i18n("agent-command-status-description"),
+            t!("agent-command-status-description"),
             None,
             SlashCommandArguments::None,
             SlashCommandRunPolicy::Immediate,
@@ -121,20 +126,20 @@ pub(super) fn setting_value_label(value: &str) -> String {
         _ => return value.to_string(),
     };
 
-    i18n(key).to_string()
+    t!(key).to_string()
 }
 
 fn command(
     name: &str,
-    description: &str,
-    argument_hint: Option<&str>,
+    description: Cow<'static, str>,
+    argument_hint: Option<Cow<'static, str>>,
     arguments: SlashCommandArguments,
     run_policy: SlashCommandRunPolicy,
 ) -> SlashCommandInfo {
     SlashCommandInfo {
         name: name.to_string(),
-        description: description.to_string(),
-        argument_hint: argument_hint.map(str::to_string),
+        description: description.into_owned(),
+        argument_hint: argument_hint.map(Cow::into_owned),
         source: SlashCommandSource::Local,
         arguments,
         run_policy,

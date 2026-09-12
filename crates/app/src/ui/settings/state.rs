@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::io;
 use std::path::Path;
 
@@ -19,7 +20,7 @@ use nmt_config::system::SystemConfig;
 use nmt_config::theme::Theme;
 use nmt_config::update::UpdateConfig;
 use nmt_config::{Config, CursorShape, SettingsPatch, config_file_path, get, save_settings_to};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::settings::MAX_TAB_WIDTH;
 
@@ -124,10 +125,10 @@ impl Default for AppSettings {
 
 impl Global for AppSettings {}
 
-pub(super) fn input_style_label(style: InputStyle) -> &'static str {
+pub(super) fn input_style_label(style: InputStyle) -> Cow<'static, str> {
     match style {
-        InputStyle::Waterfall => i18n("settings-terminal-input-style-waterfall"),
-        InputStyle::FixedBottom => i18n("settings-terminal-input-style-fixed-bottom"),
+        InputStyle::Waterfall => t!("settings-terminal-input-style-waterfall"),
+        InputStyle::FixedBottom => t!("settings-terminal-input-style-fixed-bottom"),
     }
 }
 
@@ -153,11 +154,11 @@ pub(super) fn agent_kind_label(kind: AgentProfileKind) -> &'static str {
     }
 }
 
-pub(super) fn agent_kind_display_label(kind: AgentProfileKind) -> &'static str {
+pub(super) fn agent_kind_display_label(kind: AgentProfileKind) -> Cow<'static, str> {
     match kind {
-        AgentProfileKind::ClaudeCode => i18n("settings-agent-kind-claude-code"),
-        AgentProfileKind::Codex => i18n("settings-agent-kind-codex"),
-        AgentProfileKind::DeepSeek => i18n("settings-agent-kind-deepseek"),
+        AgentProfileKind::ClaudeCode => t!("settings-agent-kind-claude-code"),
+        AgentProfileKind::Codex => t!("settings-agent-kind-codex"),
+        AgentProfileKind::DeepSeek => t!("settings-agent-kind-deepseek"),
     }
 }
 
@@ -379,7 +380,7 @@ impl AppSettings {
         let mut n = self.profiles.len() + 1;
 
         let name = loop {
-            let candidate = i18n("settings-profiles-new-name").replace("{n}", &n.to_string());
+            let candidate = t!("settings-profiles-new-name", n = n).into_owned();
 
             if !self.profiles.iter().any(|p| p.name == candidate) {
                 break candidate;

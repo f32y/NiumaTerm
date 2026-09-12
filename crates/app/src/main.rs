@@ -1,5 +1,14 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+rust_i18n::i18n!("locales", fallback = "en");
+
+// The translation macro reads outside Rust's dependency tracking. These inputs
+// let compiler caches invalidate this target when either catalog changes.
+const _: (&str, &str) = (
+    include_str!("../locales/en.toml"),
+    include_str!("../locales/zh-CN.toml"),
+);
+
 use std::ffi::OsString;
 use std::rc::Rc;
 use std::{env, mem, path, process, time};
@@ -22,6 +31,7 @@ use nmt_platform::ipc as platform_ipc;
 use nmt_platform::window::show_error_dialog;
 #[cfg(enable_profiling)]
 use nmt_profiling::allocation::ProfilingAllocator;
+use rust_i18n::t;
 use tracing::warn;
 
 mod agent_updates;
@@ -220,7 +230,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
 
     // Translations must be ready before any view exists so the first frame
     // already renders in the configured language.
-    nmt_i18n::init(get().appearance.language.into());
+    rust_i18n::set_locale(get().appearance.language.into());
 
     // A second launch forwards its action to the existing process so one process
     // URL (or an activate request) to the running instance and exits. A
@@ -265,7 +275,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
     // one names the effect shown by the Explorer drag cursor, the other raises
     // the render and vsync threads against the Windows scheduler.
     #[cfg(windows)]
-    platform.set_file_drop_description(nmt_i18n::i18n("app-drop-paste-path"));
+    platform.set_file_drop_description(t!("app-drop-paste-path"));
 
     #[cfg(windows)]
     let platform_handle = platform.clone();
@@ -298,11 +308,6 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
         if let Err(error) = syntax::register_languages() {
             warn!("syntax highlighting is limited to built-in languages: {error}");
         }
-
-        // The component library localizes its own chrome (dialog buttons,
-        // search placeholders) through a separate catalog; keep it on the
-        // app language.
-        gpui_component::set_locale(get().appearance.language.into());
 
         ui::apply_ui_theme(get().ui_theme.as_ref(), cx);
 
@@ -379,16 +384,15 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             // between acrylic composition and opaque presentation.
             ui::apply_window_translucency(cx);
 
-            // The component-library locale doubles as the change detector:
+            // The shared locale doubles as the change detector:
             // the observer fires on every settings edit (including theme
             // filter keystrokes), and only a real language switch should
             // pay for a full re-render of every window.
             let language: &str = cx.global::<AppSettings>().appearance.language.into();
-            let language_changed = &*gpui_component::locale() != language;
+            let language_changed = &*rust_i18n::locale() != language;
 
             if language_changed {
-                nmt_i18n::set_language(language);
-                gpui_component::set_locale(language);
+                rust_i18n::set_locale(language);
 
                 // AppKit holds the strings the bar was built from, so it
                 // keeps the previous language until it is rebuilt.
@@ -575,17 +579,13 @@ fn load_startup_files_or_exit() -> StartupFiles {
 }
 
 fn startup_error_and_exit(file: &str, error: &str) -> ! {
-    show_startup_error_dialog(
-        &nmt_i18n::i18n("startup-parse-error")
-            .replace("{file}", file)
-            .replace("{error}", error),
-    );
+    show_startup_error_dialog(&t!("startup-parse-error", file = file, error = error));
 
     process::exit(1);
 }
 
 pub(crate) fn show_startup_error_dialog(message: &str) {
-    show_error_dialog(nmt_i18n::i18n("startup-configuration-error"), message);
+    show_error_dialog(&t!("startup-configuration-error"), message);
 }
 
 #[cfg(test)]

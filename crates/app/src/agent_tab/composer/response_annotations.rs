@@ -3,6 +3,7 @@ use gpui_base::TextSelection;
 pub(in crate::agent_tab) use nmt_agent::annotations::{
     parse_annotated_prompt, prompt_with_response_annotations, visible_prompt,
 };
+use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
 
@@ -13,7 +14,7 @@ pub(in crate::agent_tab) fn annotation_count_label(count: usize) -> String {
         "agent-composer-annotation-count-other"
     };
 
-    nmt_i18n::i18n(key).replace("{count}", &count.to_string())
+    t!(key, count = count).into_owned()
 }
 
 impl AgentPane {

@@ -14,7 +14,7 @@ use gpui_component::shimmer::ShimmerText;
 use gpui_component::spinner::Spinner;
 use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
 use nmt_agent::chat::Item as SessionItem;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
 use crate::agent_tab::transcript::disclosure_row::{
@@ -313,7 +313,7 @@ impl TranscriptView {
                             div()
                                 .text_xs()
                                 .text_color(accent)
-                                .child(i18n("agent-transcript-compacting")),
+                                .child(t!("agent-transcript-compacting")),
                         )
                         .child(
                             div()
@@ -503,9 +503,9 @@ fn render_turn_fold(
     let disclosing = disclosures.is_disclosing(RevealKey::Turn(turn));
 
     let label = if disclosing {
-        i18n("agent-transcript-turn-work-hide").to_string()
+        t!("agent-transcript-turn-work-hide").to_string()
     } else {
-        i18n("agent-transcript-turn-work").replace("{count}", &row_count.to_string())
+        t!("agent-transcript-turn-work", count = row_count).into_owned()
     };
 
     agent_card()
@@ -517,9 +517,9 @@ fn render_turn_fold(
                 .accessible_label(format!(
                     "{label}. {}",
                     if disclosing {
-                        i18n("agent-transcript-expanded")
+                        t!("agent-transcript-expanded")
                     } else {
-                        i18n("agent-transcript-collapsed")
+                        t!("agent-transcript-collapsed")
                     }
                 ))
                 .render(cx)
@@ -587,9 +587,9 @@ fn render_run_toggle(
     let disclosing = disclosures.is_disclosing(RevealKey::Group(run_start));
 
     let label = if disclosing {
-        i18n("agent-transcript-show-fewer-tool-calls").to_string()
+        t!("agent-transcript-show-fewer-tool-calls").to_string()
     } else {
-        i18n("agent-transcript-tool-calls").replace("{count}", &tool_count.to_string())
+        t!("agent-transcript-tool-calls", count = tool_count).into_owned()
     };
 
     agent_card()
@@ -602,9 +602,9 @@ fn render_run_toggle(
                 .accessible_label(format!(
                     "{label}. {}",
                     if disclosing {
-                        i18n("agent-transcript-expanded")
+                        t!("agent-transcript-expanded")
                     } else {
-                        i18n("agent-transcript-collapsed")
+                        t!("agent-transcript-collapsed")
                     }
                 ))
                 .render(cx)

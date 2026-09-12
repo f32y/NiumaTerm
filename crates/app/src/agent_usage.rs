@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -8,7 +9,7 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::hover_card::HoverCard;
 use gpui_component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use nmt_agent::usage::{UsageSnapshot, UsageWindow, now_unix_millis};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 use tracing::warn;
 
 use crate::ui::AppSettings;
@@ -34,7 +35,7 @@ const QUOTA_FILL_OPACITY: f32 = 0.7;
 /// nothing was measured against.
 fn quota_gauge(
     id: &'static str,
-    label: &'static str,
+    label: Cow<'static, str>,
     icon: Icon,
     usage: &UsageSnapshot,
     cx: &App,
@@ -166,17 +167,20 @@ impl AgentUsageView {
         let [claude_five_hour, claude_week] = self.providers[1].value.compact_values();
 
         let refreshing = if self.providers[0].refreshing() || self.providers[1].refreshing() {
-            i18n("agent-usage-accessibility-refreshing")
+            t!("agent-usage-accessibility-refreshing")
         } else {
-            ""
+            "".into()
         };
 
-        i18n("agent-usage-accessibility")
-            .replace("{codex_session}", &codex_five_hour)
-            .replace("{codex_week}", &codex_week)
-            .replace("{claude_session}", &claude_five_hour)
-            .replace("{claude_week}", &claude_week)
-            .replace("{refreshing}", refreshing)
+        t!(
+            "agent-usage-accessibility",
+            codex_session = &codex_five_hour,
+            codex_week = &codex_week,
+            claude_session = &claude_five_hour,
+            claude_week = &claude_week,
+            refreshing = refreshing
+        )
+        .into_owned()
     }
 }
 
@@ -192,7 +196,7 @@ struct UsagePanelColors {
 }
 
 struct UsageWindowRow<'a> {
-    label: &'static str,
+    label: Cow<'static, str>,
     window: &'a UsageWindow,
 }
 
@@ -201,21 +205,21 @@ fn usage_window_rows(usage: &UsageSnapshot) -> Vec<UsageWindowRow<'_>> {
 
     if let Some(window) = usage.five_hour.as_ref() {
         rows.push(UsageWindowRow {
-            label: i18n("agent-usage-session"),
+            label: t!("agent-usage-session"),
             window,
         });
     }
 
     if let Some(window) = usage.weekly.as_ref() {
         rows.push(UsageWindowRow {
-            label: i18n("agent-usage-weekly"),
+            label: t!("agent-usage-weekly"),
             window,
         });
     }
 
     if let Some(window) = usage.fable_weekly.as_ref() {
         rows.push(UsageWindowRow {
-            label: i18n("agent-usage-fable-weekly"),
+            label: t!("agent-usage-fable-weekly"),
             window,
         });
     }
@@ -225,12 +229,15 @@ fn usage_window_rows(usage: &UsageSnapshot) -> Vec<UsageWindowRow<'_>> {
 
 fn format_window_duration(window_minutes: u32) -> String {
     if window_minutes.is_multiple_of(24 * 60) {
-        i18n("agent-usage-duration-days")
-            .replace("{count}", &(window_minutes / (24 * 60)).to_string())
+        t!(
+            "agent-usage-duration-days",
+            count = (window_minutes / (24 * 60))
+        )
+        .into_owned()
     } else if window_minutes.is_multiple_of(60) {
-        i18n("agent-usage-duration-hours").replace("{count}", &(window_minutes / 60).to_string())
+        t!("agent-usage-duration-hours", count = (window_minutes / 60)).into_owned()
     } else {
-        i18n("agent-usage-duration-minutes").replace("{count}", &window_minutes.to_string())
+        t!("agent-usage-duration-minutes", count = window_minutes).into_owned()
     }
 }
 
@@ -238,13 +245,13 @@ fn format_duration_until(timestamp: i64, now: i64) -> String {
     let remaining = timestamp.saturating_sub(now);
 
     if remaining <= 0 {
-        return i18n("agent-usage-duration-now").to_string();
+        return t!("agent-usage-duration-now").to_string();
     }
 
     let total_minutes = remaining.saturating_add(59_999) / 60_000;
 
     if total_minutes < 60 {
-        return i18n("agent-usage-duration-minutes").replace("{count}", &total_minutes.to_string());
+        return t!("agent-usage-duration-minutes", count = total_minutes).into_owned();
     }
 
     let total_hours = total_minutes / 60;
@@ -252,11 +259,14 @@ fn format_duration_until(timestamp: i64, now: i64) -> String {
 
     if total_hours < 24 {
         return if minutes == 0 {
-            i18n("agent-usage-duration-hours").replace("{count}", &total_hours.to_string())
+            t!("agent-usage-duration-hours", count = total_hours).into_owned()
         } else {
-            i18n("agent-usage-duration-hours-minutes")
-                .replace("{hours}", &total_hours.to_string())
-                .replace("{minutes}", &minutes.to_string())
+            t!(
+                "agent-usage-duration-hours-minutes",
+                hours = total_hours,
+                minutes = minutes
+            )
+            .into_owned()
         };
     }
 
@@ -264,11 +274,14 @@ fn format_duration_until(timestamp: i64, now: i64) -> String {
     let hours = total_hours % 24;
 
     if hours == 0 {
-        i18n("agent-usage-duration-days").replace("{count}", &days.to_string())
+        t!("agent-usage-duration-days", count = days).into_owned()
     } else {
-        i18n("agent-usage-duration-days-hours")
-            .replace("{days}", &days.to_string())
-            .replace("{hours}", &hours.to_string())
+        t!(
+            "agent-usage-duration-days-hours",
+            days = days,
+            hours = hours
+        )
+        .into_owned()
     }
 }
 
@@ -276,42 +289,42 @@ fn format_reset_label(window: &UsageWindow, now: i64) -> Option<String> {
     window
         .resets_at
         .map(|timestamp| match format_duration_until(timestamp, now) {
-            duration if duration == i18n("agent-usage-duration-now") => {
-                i18n("agent-usage-resets-now").to_string()
+            duration if duration == t!("agent-usage-duration-now") => {
+                t!("agent-usage-resets-now").to_string()
             }
 
-            duration => i18n("agent-usage-resets-in").replace("{duration}", &duration),
+            duration => t!("agent-usage-resets-in", duration = &duration).into_owned(),
         })
         .or_else(|| window.reset_description.clone())
 }
 
 fn format_updated_label(usage: &UsageSnapshot, refreshing: bool, failed: bool, now: i64) -> String {
     if refreshing {
-        return i18n("agent-usage-refreshing").to_string();
+        return t!("agent-usage-refreshing").to_string();
     }
 
     if failed && usage.updated_at.is_none() {
-        return i18n("agent-usage-unavailable").to_string();
+        return t!("agent-usage-unavailable").to_string();
     }
 
     let Some(updated_at) = usage.updated_at else {
-        return i18n("agent-usage-waiting").to_string();
+        return t!("agent-usage-waiting").to_string();
     };
 
     let elapsed = now.saturating_sub(updated_at);
 
     let age = if elapsed < 60_000 {
-        i18n("agent-usage-just-now").to_string()
+        t!("agent-usage-just-now").to_string()
     } else if elapsed < 60 * 60_000 {
-        i18n("agent-usage-minutes-ago").replace("{count}", &(elapsed / 60_000).to_string())
+        t!("agent-usage-minutes-ago", count = (elapsed / 60_000)).into_owned()
     } else {
-        i18n("agent-usage-hours-ago").replace("{count}", &(elapsed / (60 * 60_000)).to_string())
+        t!("agent-usage-hours-ago", count = (elapsed / (60 * 60_000))).into_owned()
     };
 
     if failed {
-        i18n("agent-usage-refresh-failed").replace("{age}", &age)
+        t!("agent-usage-refresh-failed", age = &age).into_owned()
     } else {
-        i18n("agent-usage-updated").replace("{age}", &age)
+        t!("agent-usage-updated", age = &age).into_owned()
     }
 }
 
@@ -319,19 +332,23 @@ fn reset_credit_label(usage: &UsageSnapshot, now: i64) -> Option<String> {
     let credits = usage.reset_credits.as_ref()?;
 
     let count_label = match credits.available_count {
-        1 => i18n("agent-usage-one-reset-available").to_string(),
-        count => i18n("agent-usage-many-resets-available").replace("{count}", &count.to_string()),
+        1 => t!("agent-usage-one-reset-available").to_string(),
+
+        count => t!("agent-usage-many-resets-available", count = count).into_owned(),
     };
 
     Some(match credits.next_expires_at {
         Some(expires_at) => match format_duration_until(expires_at, now) {
-            duration if duration == i18n("agent-usage-duration-now") => {
-                i18n("agent-usage-next-expires-now").replace("{count}", &count_label)
+            duration if duration == t!("agent-usage-duration-now") => {
+                t!("agent-usage-next-expires-now", count = &count_label).into_owned()
             }
 
-            duration => i18n("agent-usage-next-expires-in")
-                .replace("{count}", &count_label)
-                .replace("{duration}", &duration),
+            duration => t!(
+                "agent-usage-next-expires-in",
+                count = &count_label,
+                duration = &duration
+            )
+            .into_owned(),
         },
 
         None => count_label,
@@ -365,17 +382,21 @@ fn render_usage_window(row: UsageWindowRow<'_>, now: i64, colors: UsagePanelColo
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(colors.foreground)
                         .child(
-                            i18n("agent-usage-window-label")
-                                .replace("{name}", row.label)
-                                .replace(
-                                    "{duration}",
-                                    &format_window_duration(row.window.window_minutes),
-                                ),
+                            t!(
+                                "agent-usage-window-label",
+                                name = row.label,
+                                duration = &format_window_duration(row.window.window_minutes)
+                            )
+                            .into_owned(),
                         ),
                 )
-                .child(div().flex_none().text_xs().text_color(colors.muted).child(
-                    i18n("agent-usage-percent-left").replace("{percent}", &remaining.to_string()),
-                )),
+                .child(
+                    div()
+                        .flex_none()
+                        .text_xs()
+                        .text_color(colors.muted)
+                        .child(t!("agent-usage-percent-left", percent = remaining).into_owned()),
+                ),
         )
         .child(
             div()
@@ -406,7 +427,7 @@ fn render_usage_window(row: UsageWindowRow<'_>, now: i64, colors: UsagePanelColo
 }
 
 fn render_provider_panel(
-    name: &'static str,
+    name: Cow<'static, str>,
     icon: AnyElement,
     usage: &UsageSnapshot,
     refreshing: bool,
@@ -420,7 +441,7 @@ fn render_provider_panel(
     let plan = usage
         .plan_type
         .as_ref()
-        .map(|plan| i18n("agent-usage-plan").replace("{name}", plan));
+        .map(|plan| t!("agent-usage-plan", name = plan).into_owned());
 
     v_flex()
         .w_full()
@@ -456,7 +477,7 @@ fn render_provider_panel(
                     .py_1()
                     .text_xs()
                     .text_color(colors.muted)
-                    .child(i18n("agent-usage-no-limits")),
+                    .child(t!("agent-usage-no-limits")),
             )
         })
         .children(
@@ -472,7 +493,7 @@ impl Render for AgentUsageView {
 
         let codex_gauge = quota_gauge(
             "agent-usage-codex",
-            i18n("agent-provider-codex"),
+            t!("agent-provider-codex"),
             Icon::new(CodexIcon),
             &self.providers[0].value,
             cx,
@@ -480,7 +501,7 @@ impl Render for AgentUsageView {
 
         let claude_gauge = quota_gauge(
             "agent-usage-claude",
-            i18n("agent-provider-claude"),
+            t!("agent-provider-claude"),
             Icon::new(ClaudeIcon),
             &self.providers[1].value,
             cx,
@@ -559,7 +580,7 @@ impl Render for AgentUsageView {
                             .w(px(272.))
                             .gap_3()
                             .child(render_provider_panel(
-                                i18n("agent-provider-codex"),
+                                t!("agent-provider-codex"),
                                 Icon::new(CodexIcon).small().into_any_element(),
                                 &codex,
                                 codex_refreshing,
@@ -574,7 +595,7 @@ impl Render for AgentUsageView {
                                     .border_color(colors.border.opacity(0.65)),
                             )
                             .child(render_provider_panel(
-                                i18n("agent-provider-claude"),
+                                t!("agent-provider-claude"),
                                 Icon::new(ClaudeIcon).small().into_any_element(),
                                 &claude,
                                 claude_refreshing,

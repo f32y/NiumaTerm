@@ -46,7 +46,7 @@ pub(super) use nmt_agent::session::lifecycle::{Status, UpdateSuspension};
 pub(in crate::agent_tab) use nmt_agent::session::test_support::TestBackend;
 use nmt_agent::{AgentEventKind, AgentRoute, AgentWorkspace, git};
 use nmt_config::profile::AgentProfile;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::commands::reconcile_skill_binding;
 use crate::agent_tab::composer::attachments::{ComposerAttachments, scratch_dir};
@@ -70,7 +70,7 @@ fn branch_label(cwd: &str, max_age: Duration) -> Option<String> {
         git::CheckedOut::Branch(branch) => branch,
 
         git::CheckedOut::Detached(commit) => {
-            i18n("git-status-detached").replace("{commit}", &commit)
+            t!("git-status-detached", commit = &commit).into_owned()
         }
     })
 }
@@ -159,7 +159,7 @@ impl AgentPane {
             TextareaState::new(window, cx)
                 .auto_grow(1, 8)
                 .submit_on_enter(true)
-                .placeholder(i18n("agent-session-message-placeholder").replace("{name}", name))
+                .placeholder(t!("agent-session-message-placeholder", name = name).into_owned())
         });
 
         cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
@@ -595,8 +595,8 @@ impl AgentPane {
             Ok(Submission::NotReady) => {
                 self.push_item(
                     SessionItem::Error {
-                        text: i18n("agent-session-still-starting")
-                            .replace("{name}", self.kind.display()),
+                        text: t!("agent-session-still-starting", name = self.kind.display())
+                            .into_owned(),
                     },
                     cx,
                 );
@@ -626,7 +626,7 @@ impl AgentPane {
                     }
                 };
 
-                self.palette.set_feedback(kind, i18n(message), cx);
+                self.palette.set_feedback(kind, t!(message), cx);
 
                 return false;
             }

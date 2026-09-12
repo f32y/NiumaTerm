@@ -11,7 +11,7 @@ use gpui_component::button::Button;
 use gpui_component::popover::Popover;
 use gpui_component::{ActiveTheme as _, Icon, IconName, h_flex, v_flex};
 use nmt_agent::claude_code::stream_json;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
 use crate::agent_tab::commands::setting_value_label;
@@ -74,7 +74,7 @@ pub(super) fn effort_panel(
     set: fn(&mut AgentPane, String, &mut Context<AgentPane>),
 ) -> impl IntoElement + use<> {
     let pane = cx.entity();
-    let name = i18n("agent-setting-effort");
+    let name = t!("agent-setting-effort");
 
     let current_label = current
         .as_ref()
@@ -95,7 +95,7 @@ pub(super) fn effort_panel(
         .and_then(|value| options.iter().position(|(option, _)| option == value));
 
     let trigger = settings_pill(Button::new("agent-effort"))
-        .tooltip(name)
+        .tooltip(name.clone())
         .accessibility_label(format!("{name}: {current_label}"))
         .child(
             h_flex()
@@ -142,7 +142,7 @@ pub(super) fn effort_panel(
                             div()
                                 .text_sm()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(i18n("agent-effort-panel-title")),
+                                .child(t!("agent-effort-panel-title")),
                         )
                         .child(
                             div()
@@ -157,8 +157,8 @@ pub(super) fn effort_panel(
                         .justify_between()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(i18n("agent-effort-faster"))
-                        .child(i18n("agent-effort-smarter")),
+                        .child(t!("agent-effort-faster"))
+                        .child(t!("agent-effort-smarter")),
                 )
                 .child(
                     div()

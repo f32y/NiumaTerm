@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use nmt_agent::session::settings::ConversationSettings;
 
 mod defaults;
@@ -14,7 +16,7 @@ use gpui::{AnyElement, App, Context, Div, IntoElement, Pixels, SharedString, Sta
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::{ActiveTheme as _, Icon, IconName, IconNamed, Sizable as _, h_flex};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
 use crate::agent_tab::commands::setting_value_label;
@@ -62,7 +64,7 @@ impl IconNamed for EffortGaugeIcon {
 /// alone, and a pill each for them crowds the two that are actually read.
 #[derive(Clone)]
 pub(super) struct FoldedSetting {
-    name: &'static str,
+    name: Cow<'static, str>,
     icon: IconName,
     current: Option<String>,
     options: Vec<(String, String)>,
@@ -133,10 +135,10 @@ pub(super) fn folded_settings_pill(
     }
 
     let pane = cx.entity();
-    let name = i18n("agent-settings-folded");
+    let name = t!("agent-settings-folded");
 
     let pill = settings_pill(Button::new("agent-folded-settings"))
-        .tooltip(name)
+        .tooltip(name.clone())
         .accessibility_label(name)
         .child(
             h_flex()
@@ -175,9 +177,12 @@ pub(super) fn folded_settings_pill(
                     })
                     .unwrap_or_else(|| "—".to_string());
 
-                let label = i18n("agent-settings-folded-entry")
-                    .replace("{name}", setting.name)
-                    .replace("{value}", &value);
+                let label = t!(
+                    "agent-settings-folded-entry",
+                    name = setting.name,
+                    value = &value
+                )
+                .into_owned();
 
                 let pane = pane.clone();
 
@@ -225,9 +230,11 @@ pub(super) fn folded_settings_pill(
 /// technology. Purely a grouping: the pills inside it are spaced exactly
 /// like the pills on either side of it, so the row reads as one line of
 /// independent settings.
-pub(super) fn settings_group(label: &'static str, controls: Vec<AnyElement>) -> Stateful<Div> {
+pub(super) fn settings_group(label: Cow<'static, str>, controls: Vec<AnyElement>) -> Stateful<Div> {
+    let label = SharedString::from(label);
+
     h_flex()
-        .id(label)
+        .id(label.clone())
         .aria_label(label)
         .gap(px(SETTINGS_PILL_GAP))
         .children(controls)
@@ -271,7 +278,7 @@ pub(super) fn settings_pill_frame(pill: impl IntoElement, cx: &App) -> Div {
 pub(super) fn setting_picker(
     cx: &mut Context<AgentPane>,
     id: &'static str,
-    name: &'static str,
+    name: Cow<'static, str>,
     icon: IconName,
     current: Option<String>,
     options: Vec<(String, String)>,
@@ -293,7 +300,7 @@ pub(super) fn setting_picker(
 
     let pill = settings_pill(Button::new(id))
         .min_w(px(120.))
-        .tooltip(name)
+        .tooltip(name.clone())
         .accessibility_label(format!("{name}: {current_label}"))
         .child(
             h_flex()
@@ -317,7 +324,7 @@ pub(super) fn setting_picker(
             let mut menu = menu;
 
             if options.is_empty() {
-                menu = menu.label(i18n("agent-setting-loading"));
+                menu = menu.label(t!("agent-setting-loading"));
             }
 
             for (value, label) in options.clone() {

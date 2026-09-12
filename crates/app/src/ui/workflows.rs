@@ -14,8 +14,8 @@ use gpui::{AnyElement, Context, Entity, Hsla, ScrollHandle, WeakEntity, Window, 
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::{ActiveTheme as _, IconName, Sizable as _, StyledExt as _, h_flex, v_flex};
 use nmt_agent::workflow::{WorkflowAgent, WorkflowAgentState, WorkflowRun, WorkflowRunState};
-use nmt_i18n::i18n;
 use nmt_profiling::transcript::{Operation, Probe};
+use rust_i18n::t;
 
 use crate::ui::AppSettings;
 use crate::ui::composition::{empty_state, panel_header};
@@ -154,7 +154,7 @@ impl Render for WorkflowsView {
             .children((!showing_conversation).then(|| {
                 h_flex()
                     .refine_style(&panel_header(cx))
-                    .child(div().text_sm().child(i18n("workflows-title")))
+                    .child(div().text_sm().child(t!("workflows-title")))
             }))
             .child(self.render_body(cx))
     }
@@ -164,8 +164,8 @@ impl WorkflowsView {
     fn render_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let Some(pane) = self.target.as_ref().and_then(WeakEntity::upgrade) else {
             return empty_state(
-                i18n("workflows-no-session"),
-                i18n("workflows-no-session-detail"),
+                t!("workflows-no-session"),
+                t!("workflows-no-session-detail"),
                 cx,
             );
         };
@@ -173,8 +173,8 @@ impl WorkflowsView {
         // Only Claude Code reports workflows; every other pane has none.
         if pane.read(cx).workflow_session_id().is_none() {
             return empty_state(
-                i18n("workflows-no-session"),
-                i18n("workflows-no-session-detail"),
+                t!("workflows-no-session"),
+                t!("workflows-no-session-detail"),
                 cx,
             );
         }
@@ -186,7 +186,7 @@ impl WorkflowsView {
         let runs = self.runs(cx);
 
         if runs.is_empty() {
-            return empty_state(i18n("workflows-empty"), i18n("workflows-empty-detail"), cx);
+            return empty_state(t!("workflows-empty"), t!("workflows-empty-detail"), cx);
         }
 
         v_flex()
@@ -276,7 +276,7 @@ impl WorkflowsView {
                     .min_w_0()
                     .text_xs()
                     .text_color(muted)
-                    .child(i18n("workflows-refresh-failed").to_string())
+                    .child(t!("workflows-refresh-failed").to_string())
             }))
             .children(sections)
             .children(run.result.as_ref().map(|result| {
@@ -322,17 +322,15 @@ impl WorkflowsView {
         }
 
         if let Some(tokens) = agent.tokens {
-            detail.push(i18n("workflows-agent-tokens").replace("{count}", &tokens.to_string()));
+            detail.push(t!("workflows-agent-tokens", count = tokens).into_owned());
         }
 
         if let Some(tool_calls) = agent.tool_calls {
-            detail.push(
-                i18n("workflows-agent-tool-calls").replace("{count}", &tool_calls.to_string()),
-            );
+            detail.push(t!("workflows-agent-tool-calls", count = tool_calls).into_owned());
         }
 
         if agent.reused {
-            detail.push(i18n("workflows-agent-reused").to_string());
+            detail.push(t!("workflows-agent-reused").to_string());
         }
 
         let row = v_flex()
@@ -418,8 +416,8 @@ impl WorkflowsView {
 
         let body: AnyElement = if empty && unavailable {
             empty_state(
-                i18n("workflows-conversation-unavailable"),
-                i18n("workflows-conversation-unavailable-detail"),
+                t!("workflows-conversation-unavailable"),
+                t!("workflows-conversation-unavailable-detail"),
                 cx,
             )
         } else {
@@ -525,37 +523,36 @@ fn group_agents_by_phase(run: &WorkflowRun) -> Vec<(Option<&str>, Vec<&WorkflowA
 
 fn run_state_label(run: &WorkflowRun) -> String {
     match run.state {
-        WorkflowRunState::Starting => i18n("workflows-state-starting"),
-        WorkflowRunState::Running => i18n("workflows-state-running"),
-        WorkflowRunState::Done => i18n("workflows-state-done"),
-        WorkflowRunState::Failed => i18n("workflows-state-failed"),
-        WorkflowRunState::Stopped => i18n("workflows-state-stopped"),
+        WorkflowRunState::Starting => t!("workflows-state-starting"),
+        WorkflowRunState::Running => t!("workflows-state-running"),
+        WorkflowRunState::Done => t!("workflows-state-done"),
+        WorkflowRunState::Failed => t!("workflows-state-failed"),
+        WorkflowRunState::Stopped => t!("workflows-state-stopped"),
     }
     .to_string()
 }
 
 fn agent_state_label(state: WorkflowAgentState) -> String {
     match state {
-        WorkflowAgentState::Queued => i18n("workflows-agent-queued"),
-        WorkflowAgentState::Running => i18n("workflows-agent-running"),
-        WorkflowAgentState::Done => i18n("workflows-agent-done"),
-        WorkflowAgentState::Failed => i18n("workflows-agent-failed"),
-        WorkflowAgentState::Stopped => i18n("workflows-agent-stopped"),
+        WorkflowAgentState::Queued => t!("workflows-agent-queued"),
+        WorkflowAgentState::Running => t!("workflows-agent-running"),
+        WorkflowAgentState::Done => t!("workflows-agent-done"),
+        WorkflowAgentState::Failed => t!("workflows-agent-failed"),
+        WorkflowAgentState::Stopped => t!("workflows-agent-stopped"),
     }
     .to_string()
 }
 
 /// Run-level totals, omitting any the provider has not reported.
 fn run_totals(run: &WorkflowRun) -> String {
-    let mut parts =
-        vec![i18n("workflows-run-agents").replace("{count}", &run.agent_count().to_string())];
+    let mut parts = vec![t!("workflows-run-agents", count = run.agent_count()).into_owned()];
 
     if let Some(tokens) = run.total_tokens {
-        parts.push(i18n("workflows-run-tokens").replace("{count}", &tokens.to_string()));
+        parts.push(t!("workflows-run-tokens", count = tokens).into_owned());
     }
 
     if let Some(tool_calls) = run.total_tool_calls {
-        parts.push(i18n("workflows-run-tool-calls").replace("{count}", &tool_calls.to_string()));
+        parts.push(t!("workflows-run-tool-calls", count = tool_calls).into_owned());
     }
 
     parts.join(" · ")

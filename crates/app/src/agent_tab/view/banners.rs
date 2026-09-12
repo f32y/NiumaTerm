@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::time::Duration;
 
 use gpui::prelude::*;
@@ -7,7 +8,7 @@ use gpui_component::progress::ProgressCircle;
 use gpui_component::spinner::Spinner;
 use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use nmt_agent::{AgentWorkspace, MultiRootAccess};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::capabilities::AgentCapabilities as _;
 use crate::agent_tab::context_usage::{ContextUsageIndicator, cache_hit_percent};
@@ -27,11 +28,11 @@ pub(super) enum UpdateOverlayPhase {
 }
 
 impl UpdateOverlayPhase {
-    fn label(self) -> &'static str {
+    fn label(self) -> Cow<'static, str> {
         match self {
-            Self::Stopping => i18n("agent-update-stopping-label"),
-            Self::Updating => i18n("agent-update-updating-label"),
-            Self::Reconnecting => i18n("agent-update-reconnecting-label"),
+            Self::Stopping => t!("agent-update-stopping-label"),
+            Self::Updating => t!("agent-update-updating-label"),
+            Self::Reconnecting => t!("agent-update-reconnecting-label"),
         }
     }
 }
@@ -70,20 +71,24 @@ pub(super) fn composer_stats_label(
         return None;
     }
 
-    let mut parts = vec![i18n("agent-status-turns").replace("{count}", &turns.to_string())];
+    let mut parts = vec![t!("agent-status-turns", count = turns).into_owned()];
 
     if steps > 0 {
-        parts.push(i18n("agent-status-steps").replace("{count}", &steps.to_string()));
+        parts.push(t!("agent-status-steps", count = steps).into_owned());
     }
 
     if let Some(first_output) = first_output {
         parts.push(
-            i18n("agent-status-first-output").replace("{value}", &latency_readout(first_output)),
+            t!(
+                "agent-status-first-output",
+                value = &latency_readout(first_output)
+            )
+            .into_owned(),
         );
     }
 
     if let Some(percent) = cache_hit {
-        parts.push(i18n("agent-status-cache-hit").replace("{percent}", &percent.to_string()));
+        parts.push(t!("agent-status-cache-hit", percent = percent).into_owned());
     }
 
     Some(parts.join(" · "))
@@ -110,7 +115,7 @@ impl AgentPane {
                             .text_xs()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(cx.theme().muted_foreground)
-                            .child(i18n("agent-approval-pending")),
+                            .child(t!("agent-approval-pending")),
                     )
                     .child(
                         div()
@@ -138,7 +143,7 @@ impl AgentPane {
                             .child(
                                 Button::new("approval-cancel")
                                     .ghost()
-                                    .label(i18n("agent-approval-cancel-turn"))
+                                    .label(t!("agent-approval-cancel-turn"))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.respond_approval("cancel", cx)
                                     })),
@@ -146,7 +151,7 @@ impl AgentPane {
                             .child(
                                 Button::new("approval-decline")
                                     .outline()
-                                    .label(i18n("agent-approval-decline"))
+                                    .label(t!("agent-approval-decline"))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.respond_approval("decline", cx)
                                     })),
@@ -158,7 +163,7 @@ impl AgentPane {
                                 this.child(
                                     Button::new("approval-session")
                                         .outline()
-                                        .label(i18n("agent-approval-allow-session"))
+                                        .label(t!("agent-approval-allow-session"))
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.respond_approval("acceptForSession", cx)
                                         })),
@@ -167,7 +172,7 @@ impl AgentPane {
                             .child(
                                 Button::new("approval-accept")
                                     .primary()
-                                    .label(i18n("agent-approval-approve-once"))
+                                    .label(t!("agent-approval-approve-once"))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.respond_approval("accept", cx)
                                     })),
@@ -216,14 +221,14 @@ impl AgentPane {
                 // covers the two states the tab stays usable in.
                 let (label, detail, failed) = match state {
                     UpdateSuspension::Waiting => (
-                        i18n("agent-update-waiting-label"),
-                        i18n("agent-update-waiting-detail"),
+                        t!("agent-update-waiting-label"),
+                        t!("agent-update-waiting-detail"),
                         false,
                     ),
 
                     UpdateSuspension::Failed(message) => (
-                        i18n("agent-update-reconnect-failed-label"),
-                        message.as_str(),
+                        t!("agent-update-reconnect-failed-label"),
+                        message.as_str().into(),
                         true,
                     ),
 
@@ -268,7 +273,7 @@ impl AgentPane {
                             Button::new("agent-update-retry")
                                 .outline()
                                 .small()
-                                .label(i18n("agent-update-retry"))
+                                .label(t!("agent-update-retry"))
                                 .on_click(
                                     cx.listener(|this, _, _, cx| this.retry_update_recovery(cx)),
                                 ),
@@ -277,7 +282,7 @@ impl AgentPane {
                             Button::new("agent-update-new-session")
                                 .danger()
                                 .small()
-                                .label(i18n("agent-update-start-new-session"))
+                                .label(t!("agent-update-start-new-session"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.start_new_after_update_failure(cx)
                                 })),
@@ -352,7 +357,7 @@ impl AgentPane {
                             Button::new("agent-start-retry")
                                 .primary()
                                 .small()
-                                .label(i18n("agent-start-retry"))
+                                .label(t!("agent-start-retry"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.start_session(None, cx);
                                 })),
@@ -361,7 +366,7 @@ impl AgentPane {
                             Button::new("agent-start-close-tab")
                                 .outline()
                                 .small()
-                                .label(i18n("agent-start-close-tab"))
+                                .label(t!("agent-start-close-tab"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.emit_event(AgentPaneEvent::CloseRequested, cx);
                                 })),
@@ -383,7 +388,7 @@ impl AgentPane {
                         .text_sm()
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(cx.theme().foreground)
-                        .child(i18n("agent-start-starting")),
+                        .child(t!("agent-start-starting")),
                 ),
         };
 
@@ -463,7 +468,7 @@ impl AgentPane {
                         div()
                             .id("agent-composer-stats")
                             .aria_label(
-                                i18n("agent-status-accessibility").replace("{stats}", &stats),
+                                t!("agent-status-accessibility", stats = &stats).into_owned(),
                             )
                             .text_color(cx.theme().muted_foreground.opacity(0.72))
                             .child(stats)
@@ -486,9 +491,12 @@ pub(super) fn multi_root_notice(kind: AgentKind, workspace: &AgentWorkspace) -> 
     }
 
     Some(
-        i18n("agent-multi-root-primary-only")
-            .replace("{agent}", kind.display())
-            .replace("{path}", workspace.primary().unwrap_or_default())
-            .replace("{count}", &workspace.additional().len().to_string()),
+        t!(
+            "agent-multi-root-primary-only",
+            agent = kind.display(),
+            path = workspace.primary().unwrap_or_default(),
+            count = workspace.additional().len()
+        )
+        .into_owned(),
     )
 }

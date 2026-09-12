@@ -6,7 +6,7 @@ use gpui::{AnyElement, Bounds, Context, FontWeight, ObjectFit, SharedString, div
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{ActiveTheme as _, ElementExt as _, IconName, Sizable as _, h_flex, v_flex};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
 use crate::agent_tab::composer::attachments::{Attachment, ComposerAttachments};
@@ -32,7 +32,7 @@ impl ComposerAttachments {
         Some(
             h_flex()
                 .id("agent-attachments")
-                .aria_label(i18n("agent-composer-context-label"))
+                .aria_label(t!("agent-composer-context-label"))
                 .w_full()
                 .px_3()
                 .pt_3()
@@ -108,7 +108,7 @@ impl ComposerAttachments {
                             .ghost()
                             .xsmall()
                             .icon(IconName::Close)
-                            .accessibility_label(i18n("agent-composer-image-remove"))
+                            .accessibility_label(t!("agent-composer-image-remove"))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 // The control sits on the thumbnail, which
                                 // opens the image; taking the image off is not
@@ -142,8 +142,7 @@ impl ComposerAttachments {
             preview.push('…');
         }
 
-        let label =
-            i18n("agent-composer-annotation-item").replace("{index}", &(index + 1).to_string());
+        let label = t!("agent-composer-annotation-item", index = (index + 1)).into_owned();
 
         let group: SharedString = format!("agent-response-annotation-{index}").into();
         let full: SharedString = text.to_string().into();
@@ -192,7 +191,7 @@ impl ComposerAttachments {
                             .ghost()
                             .xsmall()
                             .icon(IconName::Close)
-                            .accessibility_label(i18n("agent-composer-annotations-remove"))
+                            .accessibility_label(t!("agent-composer-annotations-remove"))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.remove_response_annotation(index, cx)
                             })),

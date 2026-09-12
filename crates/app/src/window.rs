@@ -5,7 +5,7 @@ use gpui::{
 };
 use gpui_component::{Root, Theme as ComponentTheme};
 use nmt_config::local_state::{SessionState, WindowLocalState, WindowState};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::{self, Shell};
 
@@ -30,7 +30,7 @@ const TRAFFIC_LIGHT_INSET_X: f32 = 9.0;
 fn titlebar_options() -> TitlebarOptions {
     #[allow(unused_mut)]
     let mut titlebar = TitlebarOptions {
-        title: Some(i18n("app-window-title").into()),
+        title: Some(t!("app-window-title").into()),
         appears_transparent: true,
         ..Default::default()
     };

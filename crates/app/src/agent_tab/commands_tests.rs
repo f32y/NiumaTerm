@@ -224,7 +224,7 @@ fn clear_resets_discovery_without_owning_history_state() {
     };
 
     palette.catalog = Some(CachedCatalog {
-        language: 0,
+        language: "en".into(),
         commands: palette.provider_commands.clone().into(),
     });
 

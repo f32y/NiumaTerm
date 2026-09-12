@@ -1,4 +1,4 @@
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::persistence::spawn_default_pane;
 use crate::ui::shell::*;
@@ -166,7 +166,7 @@ impl Shell {
     ) {
         let name_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .default_value(i18n("shell-workspace-default-name").to_string())
+                .default_value(t!("shell-workspace-default-name").to_string())
         });
 
         // A new workspace starts with no directory at all, which the editor's
@@ -185,13 +185,13 @@ impl Shell {
             let margin_top = ((window.viewport_size().height - px(300.)) * 0.5).max(px(16.));
 
             dialog
-                .title(i18n("shell-workspace-new-title"))
+                .title(t!("shell-workspace-new-title"))
                 .overlay_closable(false)
                 .margin_top(margin_top)
                 .button_props(
                     DialogButtonProps::default()
-                        .ok_text(i18n("shell-workspace-create"))
-                        .cancel_text(i18n("shell-workspace-cancel"))
+                        .ok_text(t!("shell-workspace-create"))
+                        .cancel_text(t!("shell-workspace-cancel"))
                         .show_cancel(true),
                 )
                 // Plain `Dialog` never renders `button_props` buttons (only
@@ -203,7 +203,7 @@ impl Shell {
                             DialogAction::new().child(
                                 Button::new("create-ws")
                                     .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                    .label(i18n("shell-workspace-create"))
+                                    .label(t!("shell-workspace-create"))
                                     .primary(),
                             ),
                         )
@@ -211,7 +211,7 @@ impl Shell {
                             DialogClose::new().child(
                                 Button::new("cancel-ws")
                                     .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                    .label(i18n("shell-workspace-cancel")),
+                                    .label(t!("shell-workspace-cancel")),
                             ),
                         ),
                 )
@@ -219,7 +219,7 @@ impl Shell {
                     content.child(
                         v_flex()
                             .gap_2()
-                            .child(div().text_sm().child(i18n("shell-workspace-name-label")))
+                            .child(div().text_sm().child(t!("shell-workspace-name-label")))
                             .child(Input::new(&content_name))
                             .child(content_dirs.clone()),
                     )
@@ -283,7 +283,7 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> WorkspaceId {
         let name = if name.is_empty() {
-            i18n("shell-workspace-default-name").to_string()
+            t!("shell-workspace-default-name").to_string()
         } else {
             name
         };

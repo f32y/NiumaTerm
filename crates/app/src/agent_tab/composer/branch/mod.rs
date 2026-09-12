@@ -5,12 +5,13 @@ pub(super) mod rewind;
 #[cfg(test)]
 mod tests;
 
-use gpui::Context;
+use gpui::{Context, SharedString};
 use nmt_agent::session::branch::FileProgress;
 use nmt_agent::session::controller::SessionBranch;
+use rust_i18n::t;
 
 use crate::agent_tab::composer::CommandFeedbackKind;
-use crate::agent_tab::{AgentPane, RecentSessionsMode, translated};
+use crate::agent_tab::{AgentPane, RecentSessionsMode};
 
 #[derive(Default)]
 pub(in crate::agent_tab) struct BranchFlow {
@@ -56,8 +57,11 @@ impl AgentPane {
             prompt: completion.prompt,
         });
 
-        self.palette
-            .set_feedback(CommandFeedbackKind::Notice, translated(message), cx);
+        self.palette.set_feedback(
+            CommandFeedbackKind::Notice,
+            SharedString::from(t!(message)),
+            cx,
+        );
 
         cx.notify();
     }

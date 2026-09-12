@@ -1,10 +1,11 @@
+use std::borrow::Cow;
 use std::path::Path;
 use std::time::{Duration, Instant, SystemTime};
 
 use gpui::{Pixels, px};
 use gpui_component::IconName;
 use nmt_agent::chat::{Compaction, CompactionTrigger, Item as SessionItem};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::composer::visible_prompt;
 use crate::agent_tab::profile::AgentKind;
@@ -46,14 +47,17 @@ pub(super) fn working_status_label(
     output_tokens: Option<u64>,
     detail: Option<&str>,
 ) -> String {
-    let status = timed_token_label(i18n("agent-transcript-working"), seconds, output_tokens);
+    let status = timed_token_label(&t!("agent-transcript-working"), seconds, output_tokens);
 
     // The detail leads, because it is the part that changed and the part the
     // user has to react to; the elapsed time is the same every second.
     match detail {
-        Some(detail) => i18n("agent-transcript-status-detail")
-            .replace("{detail}", detail)
-            .replace("{status}", &status),
+        Some(detail) => t!(
+            "agent-transcript-status-detail",
+            detail = detail,
+            status = &status
+        )
+        .into_owned(),
 
         None => status,
     }
@@ -69,34 +73,47 @@ pub(super) fn working_status_label(
 /// changing altogether.
 pub(in crate::agent_tab) fn last_response_label(seconds: u64) -> String {
     if seconds >= LAST_RESPONSE_LIMIT.as_secs() {
-        return i18n("agent-composer-last-response-old").to_string();
+        return t!("agent-composer-last-response-old").to_string();
     }
 
-    i18n("agent-composer-last-response").replace("{duration}", &elapsed_label(seconds))
+    t!(
+        "agent-composer-last-response",
+        duration = &elapsed_label(seconds)
+    )
+    .into_owned()
 }
 
 pub(super) fn worked_status_label(seconds: u64, output_tokens: Option<u64>) -> String {
-    timed_token_label(i18n("agent-transcript-worked"), seconds, output_tokens)
+    timed_token_label(&t!("agent-transcript-worked"), seconds, output_tokens)
 }
 
 pub(super) fn interrupted_status_label(output_tokens: Option<u64>) -> String {
     match output_tokens {
-        Some(tokens) => i18n("agent-transcript-interrupted-tokens")
-            .replace("{tokens}", &compact_token_count(tokens)),
+        Some(tokens) => t!(
+            "agent-transcript-interrupted-tokens",
+            tokens = &compact_token_count(tokens)
+        )
+        .into_owned(),
 
-        None => i18n("agent-transcript-interrupted").to_string(),
+        None => t!("agent-transcript-interrupted").to_string(),
     }
 }
 
 pub(super) fn timed_token_label(verb: &str, seconds: u64, output_tokens: Option<u64>) -> String {
-    let duration = i18n("agent-transcript-timed-status")
-        .replace("{verb}", verb)
-        .replace("{duration}", &elapsed_label(seconds));
+    let duration = t!(
+        "agent-transcript-timed-status",
+        verb = verb,
+        duration = &elapsed_label(seconds)
+    )
+    .into_owned();
 
     match output_tokens {
-        Some(tokens) => i18n("agent-transcript-status-tokens")
-            .replace("{status}", &duration)
-            .replace("{tokens}", &compact_token_count(tokens)),
+        Some(tokens) => t!(
+            "agent-transcript-status-tokens",
+            status = &duration,
+            tokens = &compact_token_count(tokens)
+        )
+        .into_owned(),
 
         None => duration,
     }
@@ -129,12 +146,12 @@ pub(super) fn elapsed_label(total_seconds: u64) -> String {
         .into_iter()
         .filter(|(value, _, _)| *value > 0)
         .map(|(value, singular, plural)| {
-            i18n(if value == 1 { singular } else { plural }).replace("{count}", &value.to_string())
+            t!(if value == 1 { singular } else { plural }, count = value).into_owned()
         })
         .collect::<Vec<_>>();
 
     if seconds > 0 || parts.is_empty() {
-        parts.push(i18n("agent-duration-seconds").replace("{count}", &seconds.to_string()));
+        parts.push(t!("agent-duration-seconds", count = seconds).into_owned());
     }
 
     parts.join(" ")
@@ -246,10 +263,11 @@ pub(in crate::agent_tab) fn file_extension_lang(path: &str) -> String {
         .to_ascii_lowercase()
 }
 
-pub(in crate::agent_tab) fn command_execution_heading(purpose: Option<&str>) -> &str {
+pub(in crate::agent_tab) fn command_execution_heading(purpose: Option<&str>) -> Cow<'_, str> {
     purpose
         .filter(|purpose| !purpose.trim().is_empty())
-        .unwrap_or_else(|| i18n("agent-transcript-run-command"))
+        .map(Cow::Borrowed)
+        .unwrap_or_else(|| t!("agent-transcript-run-command"))
 }
 
 pub(in crate::agent_tab) fn command_execution_detail(
@@ -314,14 +332,20 @@ pub(in crate::agent_tab) fn entry_copy_text(item: &SessionItem) -> String {
             status,
             ..
         } => match diff {
-            Some(diff) => i18n("agent-transcript-file-edit-detail")
-                .replace("{paths}", paths)
-                .replace("{status}", status.as_deref().unwrap_or("inProgress"))
-                .replace("{diff}", &clean_output(diff)),
+            Some(diff) => t!(
+                "agent-transcript-file-edit-detail",
+                paths = paths,
+                status = status.as_deref().unwrap_or("inProgress"),
+                diff = &clean_output(diff)
+            )
+            .into_owned(),
 
-            None => i18n("agent-transcript-file-edit")
-                .replace("{paths}", paths)
-                .replace("{status}", status.as_deref().unwrap_or("inProgress")),
+            None => t!(
+                "agent-transcript-file-edit",
+                paths = paths,
+                status = status.as_deref().unwrap_or("inProgress")
+            )
+            .into_owned(),
         },
 
         SessionItem::Other {
@@ -360,10 +384,10 @@ pub(in crate::agent_tab) fn entry_copy_text(item: &SessionItem) -> String {
 
 /// Heading of a compaction row. An unprompted compaction is named as such
 /// because it explains a context-gauge jump the user did not ask for.
-pub(in crate::agent_tab) fn compaction_label(detail: &Compaction) -> &'static str {
+pub(in crate::agent_tab) fn compaction_label(detail: &Compaction) -> Cow<'static, str> {
     match detail.trigger {
-        Some(CompactionTrigger::Automatic) => i18n("agent-transcript-context-auto-compacted"),
-        Some(CompactionTrigger::Manual) | None => i18n("agent-transcript-context-compacted"),
+        Some(CompactionTrigger::Automatic) => t!("agent-transcript-context-auto-compacted"),
+        Some(CompactionTrigger::Manual) | None => t!("agent-transcript-context-compacted"),
     }
 }
 
@@ -371,10 +395,12 @@ pub(in crate::agent_tab) fn compaction_row_is_expandable(kind: AgentKind) -> boo
     matches!(kind, AgentKind::Claude | AgentKind::DeepSeek)
 }
 
-pub(in crate::agent_tab) fn compaction_trigger_label(trigger: CompactionTrigger) -> &'static str {
+pub(in crate::agent_tab) fn compaction_trigger_label(
+    trigger: CompactionTrigger,
+) -> Cow<'static, str> {
     match trigger {
-        CompactionTrigger::Automatic => i18n("agent-transcript-trigger-automatic"),
-        CompactionTrigger::Manual => i18n("agent-transcript-trigger-manual"),
+        CompactionTrigger::Automatic => t!("agent-transcript-trigger-automatic"),
+        CompactionTrigger::Manual => t!("agent-transcript-trigger-manual"),
     }
 }
 
@@ -392,11 +418,19 @@ pub(in crate::agent_tab) fn compaction_accounting(detail: &Compaction) -> Vec<St
         )),
 
         (Some(pre), None) => parts.push(
-            i18n("agent-transcript-compaction-from").replace("{tokens}", &compact_token_count(pre)),
+            t!(
+                "agent-transcript-compaction-from",
+                tokens = &compact_token_count(pre)
+            )
+            .into_owned(),
         ),
 
         (None, Some(post)) => parts.push(
-            i18n("agent-transcript-compaction-to").replace("{tokens}", &compact_token_count(post)),
+            t!(
+                "agent-transcript-compaction-to",
+                tokens = &compact_token_count(post)
+            )
+            .into_owned(),
         ),
 
         (None, None) => {}
@@ -407,15 +441,16 @@ pub(in crate::agent_tab) fn compaction_accounting(detail: &Compaction) -> Vec<St
         && let Some(freed) = pre.checked_sub(post).filter(|freed| *freed > 0)
     {
         parts.push(
-            i18n("agent-transcript-compaction-freed")
-                .replace("{tokens}", &compact_token_count(freed)),
+            t!(
+                "agent-transcript-compaction-freed",
+                tokens = &compact_token_count(freed)
+            )
+            .into_owned(),
         );
     }
 
     if let Some(messages) = detail.messages_summarized {
-        parts.push(
-            i18n("agent-transcript-compaction-messages").replace("{count}", &messages.to_string()),
-        );
+        parts.push(t!("agent-transcript-compaction-messages", count = messages).into_owned());
     }
 
     if let Some(trigger) = detail.trigger {
@@ -430,14 +465,12 @@ pub(in crate::agent_tab) fn relative_time(at: SystemTime) -> String {
     let seconds = at.elapsed().map(|d| d.as_secs()).unwrap_or(0);
 
     match seconds {
-        0..60 => i18n("agent-history-now").to_string(),
-        60..3600 => i18n("agent-history-minutes").replace("{count}", &(seconds / 60).to_string()),
+        0..60 => t!("agent-history-now").to_string(),
+        60..3600 => t!("agent-history-minutes", count = (seconds / 60)).into_owned(),
 
-        3600..86400 => {
-            i18n("agent-history-hours").replace("{count}", &(seconds / 3600).to_string())
-        }
+        3600..86400 => t!("agent-history-hours", count = (seconds / 3600)).into_owned(),
 
-        _ => i18n("agent-history-days").replace("{count}", &(seconds / 86400).to_string()),
+        _ => t!("agent-history-days", count = (seconds / 86400)).into_owned(),
     }
 }
 

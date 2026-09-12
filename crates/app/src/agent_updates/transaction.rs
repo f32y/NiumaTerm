@@ -14,7 +14,7 @@ use nmt_agent::update::{
     UpdateProgress, VersionStatus,
 };
 use nmt_config::profile::AgentProfileKind;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_updates::AgentUpdates;
 use crate::agent_updates::maintenance::{
@@ -32,14 +32,14 @@ pub(super) fn combine_transaction_error(
     Some(UpdateError::new(
         UpdateErrorKind::Recovery,
         operation_error.map_or_else(
-            || {
-                i18n("agent-update-reconnect-failures")
-                    .replace("{count}", &restore_failures.to_string())
-            },
+            || t!("agent-update-reconnect-failures", count = restore_failures).into_owned(),
             |error| {
-                i18n("agent-update-error-with-reconnect-failures")
-                    .replace("{error}", error.message())
-                    .replace("{count}", &restore_failures.to_string())
+                t!(
+                    "agent-update-error-with-reconnect-failures",
+                    error = error.message(),
+                    count = restore_failures
+                )
+                .into_owned()
             },
         ),
     ))
@@ -69,17 +69,14 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
         let stop_key = key.clone();
 
         dialog
-            .title(i18n("agent-update-dialog-title"))
+            .title(t!("agent-update-dialog-title"))
             .overlay_closable(false)
             .content(move |content, _, cx| {
                 content.child(
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child(
-                            i18n("agent-update-dialog-active-work")
-                                .replace("{count}", &busy.to_string()),
-                        ),
+                        .child(t!("agent-update-dialog-active-work", count = busy).into_owned()),
                 )
             })
             .footer(
@@ -88,7 +85,7 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
                         Button::new("agent-update-when-idle")
                             .min_w(DIALOG_BUTTON_MIN_WIDTH)
                             .primary()
-                            .label(i18n("agent-update-dialog-when-idle"))
+                            .label(t!("agent-update-dialog-when-idle"))
                             .on_click(move |_, window, cx| {
                                 window.close_dialog(cx);
 
@@ -106,7 +103,7 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
                         Button::new("agent-update-stop-now")
                             .min_w(DIALOG_BUTTON_MIN_WIDTH)
                             .danger()
-                            .label(i18n("agent-update-dialog-stop-now"))
+                            .label(t!("agent-update-dialog-stop-now"))
                             .on_click(move |_, window, cx| {
                                 window.close_dialog(cx);
 
@@ -124,7 +121,7 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
                         DialogClose::new().child(
                             Button::new("agent-update-cancel")
                                 .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                .label(i18n("agent-update-dialog-cancel")),
+                                .label(t!("agent-update-dialog-cancel")),
                         ),
                     ),
             )
@@ -199,7 +196,7 @@ fn start_transaction(
                     PreflightFailure::MissingIdentity(message) => message,
 
                     PreflightFailure::InterruptionTimeout => {
-                        i18n("agent-update-interruption-timeout").to_string()
+                        t!("agent-update-interruption-timeout").to_string()
                     }
                 };
 
@@ -335,7 +332,7 @@ impl UpdateEnvironment for SessionUpdateEnvironment<'_> {
             for &index in pending {
                 self.sessions[index].update(cx, |session, cx| {
                     session
-                        .fail_update_recovery(i18n("agent-update-recovery-timeout").to_string(), cx)
+                        .fail_update_recovery(t!("agent-update-recovery-timeout").to_string(), cx)
                 });
             }
         });

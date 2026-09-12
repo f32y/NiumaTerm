@@ -12,7 +12,7 @@ use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme as _, IconName, h_flex, v_flex};
 use nmt_agent::chat::Compaction;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::profile::AgentKind;
 use crate::agent_tab::settings::UI_RADIUS;
@@ -45,7 +45,7 @@ pub(super) fn render_compaction_row(
     let expanded = expandable && disclosures.row_expanded(index);
     let accent = cx.theme().info;
 
-    let mut header_row = AgentDisclosureRow::new(("compaction-head", index), label)
+    let mut header_row = AgentDisclosureRow::new(("compaction-head", index), label.as_ref())
         .type_icon(IconName::Minimize)
         .preview(preview.clone())
         .accent(accent);
@@ -60,9 +60,9 @@ pub(super) fn render_compaction_row(
         format!(
             "{label}. {preview}. {}",
             if disclosures.is_disclosing(RevealKey::Row(index)) {
-                i18n("agent-transcript-expanded")
+                t!("agent-transcript-expanded")
             } else {
-                i18n("agent-transcript-collapsed")
+                t!("agent-transcript-collapsed")
             }
         )
     } else {
@@ -108,25 +108,25 @@ fn render_compaction_detail(
 ) -> AnyElement {
     let accounting_rows = [
         (
-            i18n("agent-transcript-before"),
+            t!("agent-transcript-before"),
             detail.pre_tokens.map(compact_token_count),
         ),
         (
-            i18n("agent-transcript-after"),
+            t!("agent-transcript-after"),
             detail.post_tokens.map(compact_token_count),
         ),
         (
-            i18n("agent-transcript-messages-summarized"),
+            t!("agent-transcript-messages-summarized"),
             detail.messages_summarized.map(|count| count.to_string()),
         ),
         (
-            i18n("agent-transcript-trigger"),
+            t!("agent-transcript-trigger"),
             detail
                 .trigger
                 .map(|trigger| compaction_trigger_label(trigger).to_string()),
         ),
         (
-            i18n("agent-transcript-instructions"),
+            t!("agent-transcript-instructions"),
             detail.user_context.clone(),
         ),
     ];

@@ -15,6 +15,7 @@ use nmt_agent::session::lifecycle::{StartOutcome, Status};
 use nmt_agent::session::test_support::TestBackend;
 use nmt_agent::session::{AgentKind, Backend};
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
+use rust_i18n::t;
 
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::{AgentPane, AgentThreadDefaults, RecentSessionsMode};
@@ -373,7 +374,7 @@ fn local_start_failure_keeps_old_rows_and_reports_files_already_restored(cx: &mu
 
             assert_eq!(
                 feedback.message.as_ref(),
-                nmt_i18n::i18n("agent-rewind-start-failed-after-files")
+                t!("agent-rewind-start-failed-after-files")
             );
         })
     });
@@ -455,7 +456,7 @@ fn partial_success_picker_disables_repeating_files_but_allows_continuing_the_con
 
             assert_eq!(
                 model.rows[0].disabled_reason.as_deref(),
-                Some(nmt_i18n::i18n("agent-rewind-files-restored"))
+                Some(t!("agent-rewind-files-restored").as_ref())
             );
             assert!(model.rows[1].disabled_reason.is_none());
             assert!(model.rows[2].disabled_reason.is_none());

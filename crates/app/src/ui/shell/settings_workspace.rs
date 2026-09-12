@@ -4,9 +4,11 @@
 //! tabs while it is up, which means it also has to be retired again and the
 //! previous workspace restored when the user leaves.
 
+use std::borrow::Cow;
+
 use gpui::{Context, Entity, Task, Window};
 use gpui_component::setting::{SelectIndex, SettingsState};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::tabs::{TabId, TabManager};
 use crate::ui;
@@ -18,8 +20,8 @@ use crate::workspace::{WorkspaceId, WorkspaceKind};
 /// Sidebar entry name and tab title of the settings pseudo workspace, in the
 /// active language. Looked up at creation time; the entry is never persisted,
 /// so a stale-language name cannot leak into local_state.
-pub(super) fn settings_title() -> &'static str {
-    i18n("shell-workspace-settings-title")
+pub(super) fn settings_title() -> Cow<'static, str> {
+    t!("shell-workspace-settings-title")
 }
 
 /// Everything the settings surface owns while it is on screen: the page and

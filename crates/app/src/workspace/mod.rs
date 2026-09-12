@@ -3,10 +3,11 @@
 //! active, and the set is never empty — `close_workspace` refuses the last one, so
 //! `active` always points at a real workspace (mirrors `TabManager`'s invariant).
 //!
+use std::borrow::Cow;
 use std::{iter, path};
 
 use nmt_agent::AgentRuntimeStatus;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::tabs::{CommandOutcome, TabId, TabManager};
 use crate::ui::{ActiveList, HasId, TabSurface};
@@ -141,8 +142,8 @@ pub struct WorkspaceManager {
     workspaces: ActiveList<Workspace>,
 }
 
-pub fn default_workspace_name() -> &'static str {
-    i18n("shell-workspace-default-name")
+pub fn default_workspace_name() -> Cow<'static, str> {
+    t!("shell-workspace-default-name")
 }
 
 /// Every directory a summary owns, primary first, skipping placeholder

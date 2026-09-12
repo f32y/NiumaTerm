@@ -1,4 +1,4 @@
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::settings::*;
 
@@ -8,13 +8,13 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
 
     let ctrl_enter_key: &str = NewlineShortcut::CtrlEnter.into();
 
-    SettingPage::new(i18n("settings-system-title"))
+    SettingPage::new(t!("settings-system-title"))
         .default_open(true)
         .group(
             SettingGroup::new()
-                .title(i18n("settings-system-session"))
+                .title(t!("settings-system-session"))
                 .item(SettingItem::new(
-                    i18n("settings-system-restore-session"),
+                    t!("settings-system-restore-session"),
                     SettingField::switch(
                         |cx| {
                             cx.global::<AppSettings>()
@@ -29,7 +29,7 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                     ),
                 ))
                 .item(SettingItem::new(
-                    i18n("settings-system-confirm-closing"),
+                    t!("settings-system-confirm-closing"),
                     SettingField::switch(
                         |cx| {
                             cx.global::<AppSettings>()
@@ -44,18 +44,18 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                     ),
                 ))
                 .item(SettingItem::new(
-                    i18n("settings-system-warn-terminate"),
+                    t!("settings-system-warn-terminate"),
                     SettingField::dropdown(
                         vec![
                             (
                                 "disabled".into(),
-                                i18n("settings-system-warn-disabled").into(),
+                                t!("settings-system-warn-disabled").into(),
                             ),
                             (
                                 "when-child-processes-running".into(),
-                                i18n("settings-system-warn-when-children").into(),
+                                t!("settings-system-warn-when-children").into(),
                             ),
-                            ("always".into(), i18n("settings-system-warn-always").into()),
+                            ("always".into(), t!("settings-system-warn-always").into()),
                         ],
                         |cx| {
                             let key: &str = cx
@@ -77,12 +77,12 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
         )
         .group(
             SettingGroup::new()
-                .title(i18n("settings-system-windows"))
+                .title(t!("settings-system-windows"))
                 .item(SettingItem::new(
                     if shell_integration_mismatched {
-                        i18n("settings-system-context-menu-warning")
+                        t!("settings-system-context-menu-warning")
                     } else {
-                        i18n("settings-system-context-menu")
+                        t!("settings-system-context-menu")
                     },
                     SettingField::switch(
                         |_| is_shell_integration_registered(),
@@ -100,7 +100,7 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                     ),
                 ))
                 .item(SettingItem::new(
-                    i18n("settings-system-notification"),
+                    t!("settings-system-notification"),
                     SettingField::switch(
                         |_| system_notification_enabled(),
                         |value, _| {
@@ -112,7 +112,7 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                 ))
                 .item(
                     SettingItem::new(
-                        i18n("settings-system-open-best-workspace"),
+                        t!("settings-system-open-best-workspace"),
                         SettingField::switch(
                             |cx| cx.global::<AppSettings>().system.open_in_best_workspace,
                             |value, cx| {
@@ -121,11 +121,13 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                             },
                         ),
                     )
-                    .description(i18n("settings-system-open-best-workspace-description")),
+                    .description(
+                        t!("settings-system-open-best-workspace-description").into_owned(),
+                    ),
                 )
                 .item(
                     SettingItem::new(
-                        i18n("settings-system-manage-job"),
+                        t!("settings-system-manage-job"),
                         SettingField::switch(
                             |cx| cx.global::<AppSettings>().system.manage_subprocess_job,
                             |value, cx| {
@@ -133,14 +135,14 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                             },
                         ),
                     )
-                    .description(i18n("settings-system-manage-job-description")),
+                    .description(t!("settings-system-manage-job-description").into_owned()),
                 ),
         )
         .group(
             SettingGroup::new()
-                .title(i18n("settings-system-performance"))
+                .title(t!("settings-system-performance"))
                 .item(SettingItem::new(
-                    i18n("settings-system-prioritize-ui"),
+                    t!("settings-system-prioritize-ui"),
                     SettingField::switch(
                         |cx| cx.global::<AppSettings>().system.prioritize_ui_threads,
                         |value, cx| {
@@ -156,14 +158,14 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
         )
         .group(
             SettingGroup::new()
-                .title(i18n("settings-system-input"))
+                .title(t!("settings-system-input"))
                 .item(SettingItem::new(
-                    i18n("settings-system-newline-shortcut"),
+                    t!("settings-system-newline-shortcut"),
                     SettingField::dropdown(
                         vec![
                             ("ctrl-enter".into(), "Ctrl-Enter".into()),
                             ("shift-enter".into(), "Shift-Enter".into()),
-                            ("off".into(), i18n("settings-common-off").into()),
+                            ("off".into(), t!("settings-common-off").into()),
                         ],
                         |cx| {
                             let key: &str =

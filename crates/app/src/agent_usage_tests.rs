@@ -53,7 +53,11 @@ fn detail_rows_include_the_optional_fable_window() {
             .into_iter()
             .map(|row| (row.label, row.window.remaining_percentage))
             .collect::<Vec<_>>(),
-        [("Session", 75), ("Weekly", 55), ("Fable weekly", 35),]
+        [
+            ("Session".into(), 75),
+            ("Weekly".into(), 55),
+            ("Fable weekly".into(), 35),
+        ]
     );
     assert_eq!(format_window_duration(300), "5h");
     assert_eq!(format_window_duration(10_080), "7d");

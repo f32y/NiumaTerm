@@ -2,10 +2,12 @@
 //! tab it belongs to. Both surfaces grade the same state, so the color and
 //! wording live here rather than being spelled out twice.
 
+use std::borrow::Cow;
+
 use gpui::prelude::*;
 use gpui::{AnyElement, App, div, px};
 use gpui_component::ActiveTheme;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::tabs::CommandOutcome;
 use crate::workspace::TerminalActivity;
@@ -21,22 +23,21 @@ pub(crate) enum TerminalVisual {
 /// finished unseen.
 pub(crate) fn terminal_presentation(
     terminal: TerminalActivity,
-) -> Option<(TerminalVisual, &'static str)> {
+) -> Option<(TerminalVisual, Cow<'static, str>)> {
     match terminal {
         TerminalActivity::Running => Some((
             TerminalVisual::Running,
-            i18n("terminal-status-command-running"),
+            t!("terminal-status-command-running"),
         )),
 
         TerminalActivity::Finished(CommandOutcome::Succeeded) => Some((
             TerminalVisual::Succeeded,
-            i18n("terminal-status-command-succeeded"),
+            t!("terminal-status-command-succeeded"),
         )),
 
-        TerminalActivity::Finished(CommandOutcome::Failed) => Some((
-            TerminalVisual::Failed,
-            i18n("terminal-status-command-failed"),
-        )),
+        TerminalActivity::Finished(CommandOutcome::Failed) => {
+            Some((TerminalVisual::Failed, t!("terminal-status-command-failed")))
+        }
 
         TerminalActivity::Idle => None,
     }

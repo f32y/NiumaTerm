@@ -7,7 +7,7 @@ use nmt_agent::session::controller::{SessionEffect, SessionFailure, SessionReady
 pub(super) use nmt_agent::session::settings::resolve_ready_settings;
 #[cfg(test)]
 use nmt_agent::transcript::TextField;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 use tracing::info;
 
 use crate::agent_tab::composer::CommandFeedbackKind;
@@ -100,7 +100,7 @@ impl AgentPane {
             SessionEffect::ApprovalRequested => {
                 self.emit_lifecycle(
                     AgentEventKind::PermissionRequested,
-                    &i18n("agent-session-needs-input").replace("{name}", self.kind.display()),
+                    &t!("agent-session-needs-input", name = self.kind.display()),
                     self.session.borrow().input.approval().unwrap_or_default(),
                     cx,
                 );
@@ -117,7 +117,7 @@ impl AgentPane {
             SessionEffect::QuestionsRequested { index } => {
                 self.emit_lifecycle(
                     AgentEventKind::PermissionRequested,
-                    &i18n("agent-session-needs-input").replace("{name}", self.kind.display()),
+                    &t!("agent-session-needs-input", name = self.kind.display()),
                     self.session.borrow().input.batches()[index]
                         .questions()
                         .first()
@@ -284,7 +284,7 @@ impl AgentPane {
             SlashCommandOutcome::Accepted => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
-                    i18n("agent-session-command-accepted").replace("{name}", name),
+                    t!("agent-session-command-accepted", name = name).into_owned(),
                     cx,
                 );
             }
@@ -293,7 +293,7 @@ impl AgentPane {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
                     message.unwrap_or_else(|| {
-                        i18n("agent-session-command-completed").replace("{name}", name)
+                        t!("agent-session-command-completed", name = name).into_owned()
                     }),
                     cx,
                 );
@@ -307,7 +307,11 @@ impl AgentPane {
             SlashCommandOutcome::NotReady => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,
-                    i18n("agent-session-provider-not-ready").replace("{name}", self.kind.display()),
+                    t!(
+                        "agent-session-provider-not-ready",
+                        name = self.kind.display()
+                    )
+                    .into_owned(),
                     cx,
                 );
 
@@ -352,7 +356,7 @@ impl AgentPane {
             .clone()
             .or_else(|| self.latest_agent_message(cx))
             .unwrap_or_else(|| {
-                i18n("agent-session-turn-completed").replace("{name}", self.kind.display())
+                t!("agent-session-turn-completed", name = self.kind.display()).into_owned()
             });
 
         self.turn.refresh_timer(cx);
@@ -360,7 +364,10 @@ impl AgentPane {
 
         self.emit_lifecycle(
             AgentEventKind::Stopped,
-            &i18n("agent-session-provider-finished").replace("{name}", self.kind.display()),
+            &t!(
+                "agent-session-provider-finished",
+                name = self.kind.display()
+            ),
             &completion_body,
             cx,
         );
@@ -386,7 +393,7 @@ impl AgentPane {
 
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
-                i18n("agent-session-open-failed").replace("{error}", &message),
+                t!("agent-session-open-failed", error = &message).into_owned(),
                 cx,
             );
         }
@@ -406,7 +413,7 @@ impl AgentPane {
         if failure.cancelled_commands {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
-                i18n("agent-session-queued-cancelled-failed").to_string(),
+                t!("agent-session-queued-cancelled-failed").to_string(),
                 cx,
             );
         } else if !fatal {

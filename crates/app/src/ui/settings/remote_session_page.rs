@@ -1,19 +1,19 @@
 use gpui::ClipboardItem;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::remote::reconcile as reconcile_remote_session;
 use crate::ui::settings::*;
 
 pub(super) fn remote_session_page() -> SettingPage {
-    SettingPage::new(i18n("settings-remote-title"))
+    SettingPage::new(t!("settings-remote-title"))
         .default_open(true)
-        .description(i18n("settings-remote-description"))
+        .description(t!("settings-remote-description").into_owned())
         .group(
             SettingGroup::new()
-                .title(i18n("settings-remote-host-service"))
+                .title(t!("settings-remote-host-service"))
                 .item(
                     SettingItem::new(
-                        i18n("settings-remote-enable-host"),
+                        t!("settings-remote-enable-host"),
                         SettingField::switch(
                             |cx| cx.global::<AppSettings>().remote_session.host_enabled,
                             |value, cx| {
@@ -22,11 +22,11 @@ pub(super) fn remote_session_page() -> SettingPage {
                             },
                         ),
                     )
-                    .description(i18n("settings-remote-enable-host-description")),
+                    .description(t!("settings-remote-enable-host-description").into_owned()),
                 )
                 .item(
                     SettingItem::new(
-                        i18n("settings-remote-relay-url"),
+                        t!("settings-remote-relay-url"),
                         SettingField::input(
                             |cx| {
                                 cx.global::<AppSettings>()
@@ -41,11 +41,11 @@ pub(super) fn remote_session_page() -> SettingPage {
                             },
                         ),
                     )
-                    .description(i18n("settings-remote-relay-url-description")),
+                    .description(t!("settings-remote-relay-url-description").into_owned()),
                 )
                 .item(
                     SettingItem::new(
-                        i18n("settings-remote-access-token"),
+                        t!("settings-remote-access-token"),
                         SettingField::input(
                             |cx| {
                                 cx.global::<AppSettings>()
@@ -60,21 +60,21 @@ pub(super) fn remote_session_page() -> SettingPage {
                             },
                         ),
                     )
-                    .description(i18n("settings-remote-access-token-description")),
+                    .description(t!("settings-remote-access-token-description").into_owned()),
                 ),
         )
         .group(
             SettingGroup::new()
-                .title(i18n("settings-remote-pairing-devices"))
+                .title(t!("settings-remote-pairing-devices"))
                 .item(SettingItem::render(|_, _, cx| remote_host_status(cx))),
         )
         .group(
             SettingGroup::new()
-                .title(i18n("settings-remote-connect-host"))
-                .description(i18n("settings-remote-connect-host-description"))
+                .title(t!("settings-remote-connect-host"))
+                .description(t!("settings-remote-connect-host-description").into_owned())
                 .item(
                     SettingItem::new(
-                        i18n("settings-remote-pairing-code"),
+                        t!("settings-remote-pairing-code"),
                         SettingField::input(
                             |cx| {
                                 cx.global::<AppSettings>()
@@ -87,7 +87,7 @@ pub(super) fn remote_session_page() -> SettingPage {
                             },
                         ),
                     )
-                    .description(i18n("settings-remote-pairing-code-description")),
+                    .description(t!("settings-remote-pairing-code-description").into_owned()),
                 )
                 .item(SettingItem::render(|_, _, cx| remote_client_status(cx))),
         )
@@ -118,7 +118,7 @@ fn remote_host_status(cx: &mut App) -> Div {
             div()
                 .py_2()
                 .text_color(muted)
-                .child(i18n("settings-remote-host-disabled")),
+                .child(t!("settings-remote-host-disabled")),
         );
     }
 
@@ -136,24 +136,21 @@ fn remote_host_status(cx: &mut App) -> Div {
         .w_full()
         .gap_3()
         .child(
-            h_flex()
-                .gap_2()
-                .child(i18n("settings-remote-host-id"))
-                .child(
-                    div()
-                        .font_family("monospace")
-                        .text_color(muted)
-                        .child(host_id),
-                ),
+            h_flex().gap_2().child(t!("settings-remote-host-id")).child(
+                div()
+                    .font_family("monospace")
+                    .text_color(muted)
+                    .child(host_id),
+            ),
         )
         .child(
             h_flex()
                 .justify_between()
-                .child(i18n("settings-remote-pair-new-device"))
+                .child(t!("settings-remote-pair-new-device"))
                 .child(
                     Button::new("remote-generate-pairing")
                         .outline()
-                        .label(i18n("settings-remote-generate-pairing-code"))
+                        .label(t!("settings-remote-generate-pairing-code"))
                         .on_click(|_, _, cx: &mut App| {
                             if let Some(code) = remote::begin_pairing() {
                                 cx.global_mut::<AppSettings>().editing.remote_pairing_code =
@@ -174,13 +171,13 @@ fn remote_host_status(cx: &mut App) -> Div {
                     .child(
                         div()
                             .text_color(muted)
-                            .child(i18n("settings-remote-pairing-code-instruction")),
+                            .child(t!("settings-remote-pairing-code-instruction")),
                     )
                     .child(div().font_family("monospace").child(code.clone()))
                     .child(
                         Button::new("remote-copy-pairing")
                             .outline()
-                            .label(i18n("settings-common-copy"))
+                            .label(t!("settings-common-copy"))
                             .on_click(move |_, _, cx: &mut App| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(code.clone()));
                             }),
@@ -191,14 +188,14 @@ fn remote_host_status(cx: &mut App) -> Div {
             div()
                 .mt_2()
                 .text_color(muted)
-                .child(i18n("settings-remote-authorized-devices")),
+                .child(t!("settings-remote-authorized-devices")),
         )
         .when(devices.is_empty(), |this| {
             this.child(
                 div()
                     .py_2()
                     .text_color(muted)
-                    .child(i18n("settings-remote-no-devices")),
+                    .child(t!("settings-remote-no-devices")),
             )
         })
         .children(devices.into_iter().enumerate().map(|(index, device)| {
@@ -214,7 +211,7 @@ fn remote_host_status(cx: &mut App) -> Div {
                 .child(
                     Button::new(("remote-revoke", index))
                         .outline()
-                        .label(i18n("settings-remote-revoke"))
+                        .label(t!("settings-remote-revoke"))
                         .on_click(move |_, _, cx: &mut App| {
                             remote::revoke_device(&key);
                             cx.refresh_windows();
@@ -225,7 +222,7 @@ fn remote_host_status(cx: &mut App) -> Div {
 
 #[cfg(not(windows))]
 fn remote_host_status(_cx: &mut App) -> Div {
-    v_flex().child(div().child(i18n("settings-remote-windows-only")))
+    v_flex().child(div().child(t!("settings-remote-windows-only")))
 }
 
 #[cfg(windows)]
@@ -249,11 +246,11 @@ fn remote_client_status(cx: &mut App) -> Div {
         .child(
             h_flex()
                 .justify_between()
-                .child(i18n("settings-remote-pair-with-code"))
+                .child(t!("settings-remote-pair-with-code"))
                 .child(
                     Button::new("remote-pair")
                         .outline()
-                        .label(i18n("settings-remote-pair"))
+                        .label(t!("settings-remote-pair"))
                         .on_click(|_, _, cx: &mut App| {
                             let code = cx
                                 .global::<AppSettings>()
@@ -263,13 +260,13 @@ fn remote_client_status(cx: &mut App) -> Div {
 
                             if code.trim().is_empty() {
                                 cx.global_mut::<AppSettings>().editing.remote_client_status =
-                                    Some(i18n("settings-remote-enter-code-first").to_owned());
+                                    Some(t!("settings-remote-enter-code-first").into_owned());
 
                                 return;
                             }
 
                             cx.global_mut::<AppSettings>().editing.remote_client_status =
-                                Some(i18n("settings-remote-pairing").to_owned());
+                                Some(t!("settings-remote-pairing").into_owned());
 
                             // Pairing is a network round trip: running it inline
                             // would freeze the window until the relay answers or
@@ -280,7 +277,7 @@ fn remote_client_status(cx: &mut App) -> Div {
                                     .spawn(async move {
                                         remote::pair_with_code(
                                             &code,
-                                            i18n("settings-remote-default-host-name"),
+                                            &t!("settings-remote-default-host-name"),
                                         )
                                     })
                                     .await;
@@ -291,13 +288,16 @@ fn remote_client_status(cx: &mut App) -> Div {
                                             settings.editing.remote_pairing_input =
                                                 SharedString::default();
 
-                                            i18n("settings-remote-paired-success")
-                                                .replace("{name}", &host.name)
-                                                .replace("{id}", &host.host_id)
+                                            t!(
+                                                "settings-remote-paired-success",
+                                                name = &host.name,
+                                                id = &host.host_id
+                                            )
+                                            .into_owned()
                                         }
 
-                                        Err(e) => i18n("settings-remote-pairing-failed")
-                                            .replace("{error}", &e.to_string()),
+                                        Err(e) => t!("settings-remote-pairing-failed", error = e)
+                                            .into_owned(),
                                     };
 
                                     settings.editing.remote_client_status = Some(message);
@@ -314,14 +314,14 @@ fn remote_client_status(cx: &mut App) -> Div {
             div()
                 .mt_2()
                 .text_color(muted)
-                .child(i18n("settings-remote-paired-hosts")),
+                .child(t!("settings-remote-paired-hosts")),
         )
         .when(hosts.is_empty(), |this| {
             this.child(
                 div()
                     .py_2()
                     .text_color(muted)
-                    .child(i18n("settings-remote-no-hosts")),
+                    .child(t!("settings-remote-no-hosts")),
             )
         })
         .children(hosts.into_iter().enumerate().map(|(index, host)| {
@@ -344,7 +344,7 @@ fn remote_client_status(cx: &mut App) -> Div {
                 .child(
                     Button::new(("remote-forget", index))
                         .outline()
-                        .label(i18n("settings-remote-forget"))
+                        .label(t!("settings-remote-forget"))
                         .on_click(move |_, _, cx: &mut App| {
                             remote::forget_host(&host_id);
                             cx.refresh_windows();

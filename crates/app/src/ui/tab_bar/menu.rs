@@ -5,7 +5,7 @@ use gpui::{App, Entity, SharedString};
 use gpui_component::modern_menu::ModernMenu;
 use gpui_component::{Icon, IconName, IconNamed, Sizable as _};
 use nmt_config::profile::Profile;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::{AppSettings, Shell};
 
@@ -84,9 +84,12 @@ pub(in crate::ui) fn profile_root_choices(
 
         for (cwd, available) in roots {
             choices.push(ProfileRootChoice {
-                label: i18n("tabbar-menu-profile-in-directory")
-                    .replace("{profile}", &profile.name)
-                    .replace("{path}", cwd),
+                label: t!(
+                    "tabbar-menu-profile-in-directory",
+                    profile = &profile.name,
+                    path = cwd
+                )
+                .into_owned(),
                 launch: launch.clone(),
                 cwd: cwd.clone(),
                 enabled: *available,
@@ -167,7 +170,7 @@ pub(in crate::ui) fn new_tab_menu(
 
     for (ix, profile) in agent_profiles.into_iter().enumerate() {
         let label = if profile.name.trim().is_empty() {
-            i18n("tabbar-menu-agent-profile").replace("{index}", &(ix + 1).to_string())
+            t!("tabbar-menu-agent-profile", index = (ix + 1)).into_owned()
         } else {
             profile.name.clone()
         };

@@ -98,7 +98,7 @@ fn the_live_context_and_the_last_turn_report_the_same_categories() {
     // each other rather than one omitting a figure the other shows.
     let labels: Vec<_> = token_usage_rows(usage, true)
         .iter()
-        .map(|row| row.label)
+        .map(|row| row.label.clone())
         .collect();
 
     assert_eq!(
@@ -204,22 +204,22 @@ fn token_rows_keep_available_categories_and_their_hierarchy() {
         rows,
         vec![
             TokenUsageRow {
-                label: "Input",
+                label: "Input".into(),
                 tokens: 15_500,
                 nested: false,
             },
             TokenUsageRow {
-                label: "Cache read",
+                label: "Cache read".into(),
                 tokens: 2_000,
                 nested: true,
             },
             TokenUsageRow {
-                label: "Cache write",
+                label: "Cache write".into(),
                 tokens: 5_000,
                 nested: true,
             },
             TokenUsageRow {
-                label: "Output",
+                label: "Output".into(),
                 tokens: 1_200,
                 nested: false,
             },

@@ -11,13 +11,13 @@ use std::fs;
 use std::path::PathBuf;
 
 use nmt_config::remote_session::RemoteSessionConfig;
-use nmt_i18n::i18n;
 use nmt_platform::windows::environment::computer_name;
 use nmt_remote_net::{
     AttachTarget, HostConfig, HostHandle, PairingCode, ProtocolSessionOptions, RemoteSession,
     hex_decode, hex_encode, load_or_create_keypair, open_remote_session,
 };
 use parking_lot::Mutex;
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -211,5 +211,5 @@ pub fn connect_new_session(host: &KnownHost) -> Result<RemoteSession, String> {
 }
 
 fn hostname() -> String {
-    computer_name().unwrap_or_else(|| i18n("remote-default-client-name").to_owned())
+    computer_name().unwrap_or_else(|| t!("remote-default-client-name").into_owned())
 }

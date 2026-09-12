@@ -4,6 +4,7 @@
 //! compact total while the hover card shows exact totals and per-model input,
 //! output, cache creation, cache-read counts, and prices.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,7 +19,7 @@ use gpui_component::list::{List, ListDelegate, ListItem, ListState};
 use gpui_component::{
     ActiveTheme as _, Icon, IconNamed, IndexPath, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
-use nmt_i18n::i18n;
+use rust_i18n::t;
 use tracing::warn;
 
 use crate::daily_usage::{DailyTokenUsage, TokenCounts};
@@ -136,12 +137,15 @@ impl TokenUsageView {
 
     fn accessibility_label(&self) -> String {
         let Some(usage) = self.refresh.value.as_ref() else {
-            return i18n("usage-token-unavailable").to_string();
+            return t!("usage-token-unavailable").to_string();
         };
 
-        let mut label = i18n("usage-token-summary")
-            .replace("{total}", &format_token_count(usage.counts.total()))
-            .replace("{price}", &format_price(usage.price_usd));
+        let mut label = t!(
+            "usage-token-summary",
+            total = &format_token_count(usage.counts.total()),
+            price = &format_price(usage.price_usd)
+        )
+        .into_owned();
 
         for model in &usage.model_breakdowns {
             label.push_str(&format!(
@@ -215,7 +219,7 @@ fn model_usage_rows(usage: &DailyTokenUsage) -> Vec<ModelUsageRow> {
     let mut rows = Vec::with_capacity(usage.model_breakdowns.len() + 1);
 
     rows.push(ModelUsageRow {
-        label: i18n("usage-token-today-total").to_string(),
+        label: t!("usage-token-today-total").to_string(),
         counts: usage.counts,
         price_usd: usage.price_usd,
         is_daily_total: true,
@@ -358,7 +362,7 @@ fn price_value_cell(price_usd: f64, width: Pixels, color: gpui::Hsla) -> gpui::D
         .child(format_price(price_usd))
 }
 
-fn usage_header_cell(label: &'static str, width: Pixels) -> gpui::Div {
+fn usage_header_cell(label: Cow<'static, str>, width: Pixels) -> gpui::Div {
     div().w(width).flex_none().text_right().child(label)
 }
 
@@ -371,30 +375,30 @@ fn model_usage_header(cx: &App) -> gpui::Div {
             div()
                 .flex_1()
                 .min_w_0()
-                .child(i18n("usage-token-header-model")),
+                .child(t!("usage-token-header-model")),
         )
         .child(usage_header_cell(
-            i18n("usage-token-header-input"),
+            t!("usage-token-header-input"),
             INPUT_COLUMN,
         ))
         .child(usage_header_cell(
-            i18n("usage-token-header-output"),
+            t!("usage-token-header-output"),
             OUTPUT_COLUMN,
         ))
         .child(usage_header_cell(
-            i18n("usage-token-header-cache-create"),
+            t!("usage-token-header-cache-create"),
             CACHE_CREATION_COLUMN,
         ))
         .child(usage_header_cell(
-            i18n("usage-token-header-cache-read"),
+            t!("usage-token-header-cache-read"),
             CACHE_READ_COLUMN,
         ))
         .child(usage_header_cell(
-            i18n("usage-token-header-total"),
+            t!("usage-token-header-total"),
             TOTAL_COLUMN,
         ))
         .child(usage_header_cell(
-            i18n("usage-token-header-price"),
+            t!("usage-token-header-price"),
             PRICE_COLUMN,
         ))
 }
@@ -458,14 +462,14 @@ fn render_usage_panel(
                         div()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(foreground)
-                            .child(i18n("usage-token-panel-title")),
+                            .child(t!("usage-token-panel-title")),
                     )
                     .child(div().flex_none().text_color(muted).child(usage.date)),
             )
             .child(list)
         })
         .when(waiting, |this| {
-            this.child(div().text_color(muted).child(i18n("usage-token-waiting")))
+            this.child(div().text_color(muted).child(t!("usage-token-waiting")))
         })
         .into_any_element()
 }

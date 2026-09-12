@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use chrono::Local;
 use gpui::{Context, SharedString};
 use nmt_agent::claude_code::sessions;
@@ -5,19 +7,21 @@ pub(in crate::agent_tab) use nmt_agent::session::branch::RewindAction;
 use nmt_agent::session::branch::{
     BranchError, BranchFailure, BranchUpdate, BranchView, FailureStage, FileProgress, PromptTarget,
 };
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::composer::{CommandFeedbackKind, PaletteAction, PaletteModel, PaletteRow};
 use crate::agent_tab::session::Status;
 use crate::agent_tab::session::errors::operation_error;
-use crate::agent_tab::{AgentPane, RecentSessionsMode, translated};
+use crate::agent_tab::{AgentPane, RecentSessionsMode};
 
 pub(in crate::agent_tab) fn rewind_prompt_label(prompt: &str) -> String {
     let line = prompt
         .lines()
         .find(|line| !line.trim().is_empty())
-        .unwrap_or_else(|| i18n("agent-rewind-untitled-prompt"))
-        .trim();
+        .map(Cow::Borrowed)
+        .unwrap_or_else(|| t!("agent-rewind-untitled-prompt"));
+
+    let line = line.trim();
 
     let mut label = line.chars().take(72).collect::<String>();
 
@@ -66,7 +70,7 @@ impl AgentPane {
         if self.session.borrow().runtime.status() != Status::Idle || self.is_command_busy() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
-                translated("agent-rewind-idle-only"),
+                SharedString::from(t!("agent-rewind-idle-only")),
                 cx,
             );
 
@@ -101,7 +105,7 @@ impl AgentPane {
 
         self.palette.set_feedback(
             CommandFeedbackKind::Status,
-            translated("agent-rewind-loading-checkpoints"),
+            SharedString::from(t!("agent-rewind-loading-checkpoints")),
             cx,
         );
 
@@ -123,13 +127,13 @@ impl AgentPane {
         match state {
             BranchView::LoadingRewind => Some(PaletteModel {
                 rows: vec![PaletteRow {
-                    label: translated("agent-rewind-cancel"),
-                    description: translated("agent-rewind-cancel-description"),
+                    label: SharedString::from(t!("agent-rewind-cancel")),
+                    description: SharedString::from(t!("agent-rewind-cancel-description")),
                     hint: None,
                     disabled_reason: None,
                     action: PaletteAction::RewindAction(RewindAction::Cancel),
                 }],
-                note: Some(translated("agent-rewind-loading-active-branch")),
+                note: Some(SharedString::from(t!("agent-rewind-loading-active-branch"))),
             }),
 
             BranchView::RewindCheckpoints(checkpoints) => {
@@ -138,7 +142,7 @@ impl AgentPane {
                     .cloned()
                     .map(|checkpoint| PaletteRow {
                         label: rewind_prompt_label(&checkpoint.prompt).into(),
-                        description: translated("agent-rewind-return-before-prompt"),
+                        description: SharedString::from(t!("agent-rewind-return-before-prompt")),
                         hint: rewind_timestamp(checkpoint.timestamp.as_deref()).map(Into::into),
                         disabled_reason: None,
                         action: PaletteAction::RewindCheckpoint(checkpoint),
@@ -146,8 +150,8 @@ impl AgentPane {
                     .collect::<Vec<_>>();
 
                 rows.push(PaletteRow {
-                    label: translated("agent-rewind-cancel"),
-                    description: translated("agent-rewind-cancel-description"),
+                    label: SharedString::from(t!("agent-rewind-cancel")),
+                    description: SharedString::from(t!("agent-rewind-cancel-description")),
                     hint: None,
                     disabled_reason: None,
                     action: PaletteAction::RewindAction(RewindAction::Cancel),
@@ -155,73 +159,85 @@ impl AgentPane {
 
                 Some(PaletteModel {
                     rows,
-                    note: Some(translated("agent-rewind-choose-prompt")),
+                    note: Some(SharedString::from(t!("agent-rewind-choose-prompt"))),
                 })
             }
 
             BranchView::RewindAction(checkpoint, files) => {
                 let file_disabled = match checkpoint.file_restore_availability {
-                    sessions::FileRestoreAvailability::Unavailable => {
-                        Some(translated("agent-rewind-file-checkpoint-unavailable"))
-                    }
+                    sessions::FileRestoreAvailability::Unavailable => Some(SharedString::from(t!(
+                        "agent-rewind-file-checkpoint-unavailable"
+                    ))),
 
                     _ => None,
                 };
 
                 let file_description = match checkpoint.file_restore_availability {
                     sessions::FileRestoreAvailability::Available => {
-                        i18n("agent-rewind-files-description-available")
+                        t!("agent-rewind-files-description-available")
                     }
 
                     sessions::FileRestoreAvailability::Unknown => {
-                        i18n("agent-rewind-files-description-unknown")
+                        t!("agent-rewind-files-description-unknown")
                     }
 
                     sessions::FileRestoreAvailability::Unavailable => {
-                        i18n("agent-rewind-files-description-unavailable")
+                        t!("agent-rewind-files-description-unavailable")
                     }
                 };
 
                 let files_only_disabled = match files {
-                    FileProgress::Restored => Some(translated("agent-rewind-files-restored")),
+                    FileProgress::Restored => {
+                        Some(SharedString::from(t!("agent-rewind-files-restored")))
+                    }
+
                     FileProgress::NotConfirmed => file_disabled.clone(),
                 };
 
                 Some(PaletteModel {
                     rows: vec![
                         PaletteRow {
-                            label: translated("agent-rewind-restore-files"),
-                            description: SharedString::new_static(file_description),
-                            hint: Some(translated("agent-rewind-files-only")),
+                            label: SharedString::from(t!("agent-rewind-restore-files")),
+                            description: SharedString::from(file_description),
+                            hint: Some(SharedString::from(t!("agent-rewind-files-only"))),
                             disabled_reason: files_only_disabled,
                             action: PaletteAction::RewindAction(RewindAction::Files),
                         },
                         PaletteRow {
-                            label: translated("agent-rewind-restore-conversation"),
-                            description: translated("agent-rewind-conversation-description"),
-                            hint: Some(translated("agent-rewind-conversation-only")),
+                            label: SharedString::from(t!("agent-rewind-restore-conversation")),
+                            description: SharedString::from(t!(
+                                "agent-rewind-conversation-description"
+                            )),
+                            hint: Some(SharedString::from(t!("agent-rewind-conversation-only"))),
                             disabled_reason: None,
                             action: PaletteAction::RewindAction(RewindAction::Conversation),
                         },
                         PaletteRow {
-                            label: translated("agent-rewind-restore-files-conversation"),
-                            description: translated("agent-rewind-combined-description"),
-                            hint: Some(translated("agent-rewind-combined")),
+                            label: SharedString::from(t!(
+                                "agent-rewind-restore-files-conversation"
+                            )),
+                            description: SharedString::from(t!(
+                                "agent-rewind-combined-description"
+                            )),
+                            hint: Some(SharedString::from(t!("agent-rewind-combined"))),
                             disabled_reason: file_disabled,
                             action: PaletteAction::RewindAction(RewindAction::FilesAndConversation),
                         },
                         PaletteRow {
-                            label: translated("agent-rewind-cancel"),
-                            description: translated("agent-rewind-cancel-description"),
+                            label: SharedString::from(t!("agent-rewind-cancel")),
+                            description: SharedString::from(t!("agent-rewind-cancel-description")),
                             hint: None,
                             disabled_reason: None,
                             action: PaletteAction::RewindAction(RewindAction::Cancel),
                         },
                     ],
                     note: Some(
-                        i18n("agent-rewind-selected")
-                            .replace("{prompt}", &rewind_prompt_label(&checkpoint.prompt))
-                            .into(),
+                        t!(
+                            "agent-rewind-selected",
+                            prompt = &rewind_prompt_label(&checkpoint.prompt)
+                        )
+                        .into_owned()
+                        .into(),
                     ),
                 })
             }
@@ -267,7 +283,7 @@ impl AgentPane {
 
             BranchUpdate::Empty => self.palette.set_feedback(
                 CommandFeedbackKind::Error,
-                translated("agent-rewind-no-prompts"),
+                SharedString::from(t!("agent-rewind-no-prompts")),
                 cx,
             ),
 
@@ -278,7 +294,7 @@ impl AgentPane {
                 if unresolved {
                     self.palette.set_feedback(
                         CommandFeedbackKind::Error,
-                        translated("agent-rewind-prompt-not-a-checkpoint"),
+                        SharedString::from(t!("agent-rewind-prompt-not-a-checkpoint")),
                         cx,
                     );
                 }
@@ -294,10 +310,10 @@ impl AgentPane {
                     CommandFeedbackKind::Status,
                     match action {
                         RewindAction::FilesAndConversation => {
-                            translated("agent-rewind-restoring-before-fork")
+                            SharedString::from(t!("agent-rewind-restoring-before-fork"))
                         }
 
-                        _ => translated("agent-rewind-restoring-files"),
+                        _ => SharedString::from(t!("agent-rewind-restoring-files")),
                     },
                     cx,
                 );
@@ -318,7 +334,7 @@ impl AgentPane {
 
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
-                    translated("agent-rewind-files-restored"),
+                    SharedString::from(t!("agent-rewind-files-restored")),
                     cx,
                 );
             }
@@ -330,20 +346,20 @@ impl AgentPane {
 
     pub(in crate::agent_tab) fn branch_error_message(&self, error: BranchError) -> String {
         match error {
-            BranchError::Busy => i18n("agent-rewind-idle-only").to_string(),
+            BranchError::Busy => t!("agent-rewind-idle-only").to_string(),
 
             BranchError::NotReady => {
-                i18n("agent-session-still-starting").replace("{name}", self.kind.display())
+                t!("agent-session-still-starting", name = self.kind.display()).into_owned()
             }
 
-            BranchError::MissingSession => i18n("agent-rewind-no-session-id").to_string(),
+            BranchError::MissingSession => t!("agent-rewind-no-session-id").to_string(),
 
             BranchError::FilesUnavailable => {
-                i18n("agent-rewind-file-checkpoint-unavailable").to_string()
+                t!("agent-rewind-file-checkpoint-unavailable").to_string()
             }
 
             BranchError::InvalidFileResult(message) => {
-                message.unwrap_or_else(|| i18n("agent-rewind-invalid-file-state").to_string())
+                message.unwrap_or_else(|| t!("agent-rewind-invalid-file-state").to_string())
             }
 
             BranchError::Operation(error) => operation_error(error),
@@ -360,22 +376,24 @@ impl AgentPane {
 
         let message = match (failure.stage, failure.files) {
             (FailureStage::Checkpoints | FailureStage::ProtocolFork, _) => error,
-            (FailureStage::Files, _) => i18n("agent-rewind-file-failed").replace("{error}", &error),
+            (FailureStage::Files, _) => t!("agent-rewind-file-failed", error = &error).into_owned(),
 
-            (FailureStage::Conversation, FileProgress::Restored) => {
-                i18n("agent-rewind-conversation-failed-after-files").replace("{error}", &error)
-            }
+            (FailureStage::Conversation, FileProgress::Restored) => t!(
+                "agent-rewind-conversation-failed-after-files",
+                error = &error
+            )
+            .into_owned(),
 
             (FailureStage::Conversation, FileProgress::NotConfirmed) => {
-                i18n("agent-rewind-conversation-failed").replace("{error}", &error)
+                t!("agent-rewind-conversation-failed", error = &error).into_owned()
             }
 
             (FailureStage::Startup, FileProgress::Restored) => {
-                i18n("agent-rewind-start-failed-after-files").to_string()
+                t!("agent-rewind-start-failed-after-files").to_string()
             }
 
             (FailureStage::Startup, FileProgress::NotConfirmed) => {
-                i18n("agent-rewind-start-failed").to_string()
+                t!("agent-rewind-start-failed").to_string()
             }
         };
 

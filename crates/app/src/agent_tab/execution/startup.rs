@@ -8,7 +8,7 @@ use nmt_agent::session::lifecycle::StartOutcome;
 use nmt_agent::session::restore::SettingsSeed;
 use nmt_agent::session::{Backend, RecoveryIdentity};
 use nmt_config::profile::AgentProfileKind;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::AgentPaneEvent;
 use crate::agent_tab::capabilities::AgentCapabilities as _;
@@ -243,7 +243,7 @@ impl AgentSession {
                 this.apply_event(
                     epoch,
                     Event::Error {
-                        message: i18n("agent-session-exited").replace("{name}", name),
+                        message: t!("agent-session-exited", name = name).into_owned(),
                         fatal: true,
                     },
                     cx,
@@ -278,9 +278,7 @@ impl AgentSession {
         cx: &mut Context<Self>,
     ) -> Option<bool> {
         let spawned = spawned.map_err(|error| {
-            i18n("agent-session-start-failed")
-                .replace("{name}", name)
-                .replace("{error}", &error)
+            t!("agent-session-start-failed", name = name, error = &error).into_owned()
         });
 
         let outcome = self.controller.borrow_mut().install(epoch, spawned);

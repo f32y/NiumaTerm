@@ -1,4 +1,4 @@
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::settings::*;
 
@@ -7,7 +7,7 @@ use crate::ui::settings::*;
 /// inside each group instead of as their own groups, which would otherwise
 /// add one sidebar entry per profile under `single_group_pages`.
 pub(super) fn profiles_page(profiles: &[Profile], agent_profiles: &[AgentProfile]) -> SettingPage {
-    SettingPage::new(i18n("settings-profiles-title"))
+    SettingPage::new(t!("settings-profiles-title"))
         .default_open(true)
         .group(terminal_profiles_group(profiles))
         .group(agent_profiles_group(agent_profiles))
@@ -21,7 +21,7 @@ fn terminal_profiles_group(profiles: &[Profile]) -> SettingGroup {
         .enumerate()
         .map(|(ix, p)| {
             let label = if p.name.is_empty() {
-                i18n("settings-profiles-unnamed").replace("{n}", &(ix + 1).to_string())
+                t!("settings-profiles-unnamed", n = (ix + 1)).into_owned()
             } else {
                 p.name.clone()
             };
@@ -31,9 +31,9 @@ fn terminal_profiles_group(profiles: &[Profile]) -> SettingGroup {
         .collect();
 
     let mut group = SettingGroup::new()
-        .title(i18n("settings-profiles-terminal-group"))
+        .title(t!("settings-profiles-terminal-group"))
         .item(SettingItem::new(
-            i18n("settings-profiles-default"),
+            t!("settings-profiles-default"),
             SettingField::dropdown(
                 options,
                 |cx| cx.global::<AppSettings>().default_profile.clone().into(),
@@ -43,11 +43,11 @@ fn terminal_profiles_group(profiles: &[Profile]) -> SettingGroup {
             ),
         ))
         .item(SettingItem::new(
-            i18n("settings-profiles-add"),
+            t!("settings-profiles-add"),
             SettingField::render(|_, _, _| {
                 Button::new("profile-add")
                     .outline()
-                    .label(i18n("settings-common-add"))
+                    .label(t!("settings-common-add"))
                     .on_click(|_, _, cx: &mut App| {
                         cx.global_mut::<AppSettings>().add_profile();
                     })
@@ -75,7 +75,7 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
             .unwrap_or_default();
 
         let title = if profile.name.is_empty() {
-            i18n("settings-profiles-unnamed").replace("{n}", &(ix + 1).to_string())
+            t!("settings-profiles-unnamed", n = (ix + 1)).into_owned()
         } else {
             profile.name.clone()
         };
@@ -133,7 +133,7 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
                 h_flex().w_full().justify_end().child(
                     Button::new(("profile-shell-browse", ix))
                         .outline()
-                        .label(i18n("settings-common-browse"))
+                        .label(t!("settings-common-browse"))
                         .disabled(disabled)
                         .w(relative(1. / 3.))
                         .on_click(move |_, window, cx| {
@@ -141,9 +141,9 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
                                 files: true,
                                 directories: false,
                                 multiple: false,
-                                prompt: Some(i18n("settings-profiles-select-shell").into()),
+                                prompt: Some(t!("settings-profiles-select-shell").into()),
                                 file_types: vec![FileDialogFilter {
-                                    name: i18n("settings-profiles-executables-filter").into(),
+                                    name: t!("settings-profiles-executables-filter").into(),
                                     extensions: vec!["exe".into()],
                                 }],
                             });
@@ -177,7 +177,7 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
 
         let remove_button = Button::new(("profile-remove", ix))
             .danger()
-            .label(i18n("settings-common-remove"))
+            .label(t!("settings-common-remove"))
             .disabled(disabled || count <= 1)
             .on_click(move |_, window, cx: &mut App| {
                 let name = cx
@@ -188,17 +188,17 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
                     .unwrap_or_default();
 
                 let subject = if name.is_empty() {
-                    i18n("settings-profiles-this-profile").to_string()
+                    t!("settings-profiles-this-profile").to_string()
                 } else {
-                    i18n("settings-profiles-named-profile").replace("{name}", &name)
+                    t!("settings-profiles-named-profile", name = &name).into_owned()
                 };
 
                 window.open_alert_dialog(cx, move |alert, _, _| {
                     alert
                         .confirm()
-                        .title(i18n("settings-profiles-remove-title"))
+                        .title(t!("settings-profiles-remove-title"))
                         .description(
-                            i18n("settings-profiles-remove-confirm").replace("{subject}", &subject),
+                            t!("settings-profiles-remove-confirm", subject = &subject).into_owned(),
                         )
                         .on_ok(move |_, _, cx| {
                             cx.global_mut::<AppSettings>().remove_profile(ix);
@@ -213,7 +213,7 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
                 .w_full()
                 .gap_4()
                 .child(card_row(
-                    i18n("settings-common-name"),
+                    t!("settings-common-name"),
                     "",
                     Input::new(&name_input)
                         .disabled(disabled)
@@ -222,13 +222,13 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
                     cx,
                 ))
                 .child(card_row(
-                    i18n("settings-profiles-shell-path"),
+                    t!("settings-profiles-shell-path"),
                     "",
                     shell_control,
                     cx,
                 ))
                 .child(card_row(
-                    i18n("settings-profiles-arguments"),
+                    t!("settings-profiles-arguments"),
                     "",
                     Input::new(&args_input)
                         .disabled(disabled)
@@ -237,7 +237,7 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
                     cx,
                 ))
                 .child(card_row(
-                    i18n("settings-profiles-remove-title"),
+                    t!("settings-profiles-remove-title"),
                     "",
                     remove_button,
                     cx,
@@ -252,7 +252,7 @@ fn agent_profiles_group(agent_profiles: &[AgentProfile]) -> SettingGroup {
         .enumerate()
         .map(|(ix, p)| {
             let label = if p.name.is_empty() {
-                i18n("settings-profiles-agent-unnamed").replace("{n}", &(ix + 1).to_string())
+                t!("settings-profiles-agent-unnamed", n = (ix + 1)).into_owned()
             } else {
                 p.name.clone()
             };
@@ -262,9 +262,9 @@ fn agent_profiles_group(agent_profiles: &[AgentProfile]) -> SettingGroup {
         .collect();
 
     let group = SettingGroup::new()
-        .title(i18n("settings-profiles-agent-group"))
+        .title(t!("settings-profiles-agent-group"))
         .item(SettingItem::new(
-            i18n("settings-profiles-default"),
+            t!("settings-profiles-default"),
             SettingField::dropdown(
                 options,
                 |cx| {
@@ -279,11 +279,11 @@ fn agent_profiles_group(agent_profiles: &[AgentProfile]) -> SettingGroup {
             ),
         ))
         .item(SettingItem::new(
-            i18n("settings-profiles-add"),
+            t!("settings-profiles-add"),
             SettingField::render(|_, _, _| {
                 Button::new("agent-profile-add")
                     .outline()
-                    .label(i18n("settings-common-add"))
+                    .label(t!("settings-common-add"))
                     .on_click(|_, window, cx: &mut App| {
                         open_agent_profile_dialog(None, window, cx);
                     })

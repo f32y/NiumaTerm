@@ -22,7 +22,7 @@ use gpui_component::{ActiveTheme as _, IconNamed, Sizable as _, StyledExt as _, 
 use nmt_agent::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskSummary,
 };
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::AppSettings;
 use crate::ui::background_tasks::rows::{
@@ -296,7 +296,7 @@ impl Render for BackgroundTasksView {
             .children(matches!(self.mode, PanelMode::List).then(|| {
                 h_flex()
                     .refine_style(&panel_header(cx))
-                    .child(div().text_sm().child(i18n("tasks-background-title")))
+                    .child(div().text_sm().child(t!("tasks-background-title")))
             }))
             .child(self.render_body(cx))
     }
@@ -334,14 +334,14 @@ impl BackgroundTasksView {
             // still starting up rather than looking at the wrong kind of tab.
             return match self.target.is_some() {
                 true => empty_state(
-                    i18n("tasks-background-loading-title"),
-                    i18n("tasks-background-loading-detail"),
+                    t!("tasks-background-loading-title"),
+                    t!("tasks-background-loading-detail"),
                     cx,
                 ),
 
                 false => empty_state(
-                    i18n("tasks-background-no-session-title"),
-                    i18n("tasks-background-no-session-detail"),
+                    t!("tasks-background-no-session-title"),
+                    t!("tasks-background-no-session-detail"),
                     cx,
                 ),
             };
@@ -359,21 +359,23 @@ impl BackgroundTasksView {
         if running.is_empty() && finished.is_empty() {
             return match &snapshot.discovery {
                 BackgroundTaskDiscoveryState::Unavailable { message } => empty_state(
-                    i18n("tasks-background-status-unavailable-title"),
-                    &i18n("tasks-background-status-unavailable-detail")
-                        .replace("{message}", message),
+                    t!("tasks-background-status-unavailable-title"),
+                    t!(
+                        "tasks-background-status-unavailable-detail",
+                        message = message
+                    ),
                     cx,
                 ),
 
                 BackgroundTaskDiscoveryState::Loading => empty_state(
-                    i18n("tasks-background-loading-title"),
-                    i18n("tasks-background-loading-detail"),
+                    t!("tasks-background-loading-title"),
+                    t!("tasks-background-loading-detail"),
                     cx,
                 ),
 
                 _ => empty_state(
-                    i18n("tasks-background-empty-title"),
-                    i18n("tasks-background-empty-detail"),
+                    t!("tasks-background-empty-title"),
+                    t!("tasks-background-empty-detail"),
                     cx,
                 ),
             };

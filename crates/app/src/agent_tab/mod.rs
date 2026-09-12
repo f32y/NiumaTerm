@@ -31,13 +31,13 @@ mod workflows;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use gpui::{Entity, FocusHandle, Pixels, Point, ScrollHandle, SharedString, WeakEntity};
+use gpui::{Entity, FocusHandle, Pixels, Point, ScrollHandle, WeakEntity};
 use gpui_component::VirtualListScrollHandle;
 use gpui_component::input::TextareaState;
 use nmt_agent::chat::{SkillCatalog, SkillReference, SlashCommandInfo};
 use nmt_agent::{AgentEvent, AgentRoute, AgentWorkspace};
 use nmt_config::profile::AgentProfile;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::composer::attachments::ComposerAttachments;
 use crate::agent_tab::composer::{BranchFlow, CommandFeedback};
@@ -165,9 +165,9 @@ impl GitBranchPoll {
     fn presentation(&self) -> (String, f32) {
         let label = self.branch.clone().unwrap_or_else(|| {
             if self.ready {
-                i18n("agent-git-no-branch").to_string()
+                t!("agent-git-no-branch").to_string()
             } else {
-                i18n("agent-git-detecting-branch").to_string()
+                t!("agent-git-detecting-branch").to_string()
             }
         });
 
@@ -222,20 +222,12 @@ impl Default for SessionHistoryUi {
     }
 }
 
-/// Translated text as a `SharedString` that borrows rather than copies. Both
-/// catalogs are parsed once into maps that are never dropped, so the text stays
-/// valid for the life of the process and a view rebuilt every frame pays
-/// nothing per label.
-pub(in crate::agent_tab) fn translated(key: &'static str) -> SharedString {
-    SharedString::new_static(i18n(key))
-}
-
 /// The merged `/` catalog, held so it is not rebuilt from the local, adapter,
 /// and provider lists on every frame the palette paints. `language` is part of
 /// the key because local entries carry translated descriptions and the user can
 /// switch language while a pane is open.
 struct CachedCatalog {
-    language: u8,
+    language: String,
     commands: Rc<[SlashCommandInfo]>,
 }
 

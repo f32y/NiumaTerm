@@ -12,6 +12,7 @@ use gpui::{Font, FontFallbacks, Global, Pixels, SharedString, font};
 use nmt_config::appearance::InputStyle;
 use nmt_config::system::NewlineShortcut;
 use nmt_config::{CursorShape, with_active_colors};
+use rust_i18n::t;
 
 use crate::terminal_tab::block_list::ITEM_PAD_ROWS;
 use crate::terminal_tab::block_list::chrome::DurationLabels;
@@ -91,8 +92,8 @@ pub fn theme_default_background() -> TerminalColor {
 
 pub(in crate::terminal_tab) fn duration_labels() -> DurationLabels {
     DurationLabels {
-        minutes_seconds: nmt_i18n::i18n("terminal-duration-minutes-seconds").to_string(),
-        seconds: nmt_i18n::i18n("terminal-duration-seconds").to_string(),
-        milliseconds: nmt_i18n::i18n("terminal-duration-milliseconds").to_string(),
+        minutes_seconds: t!("terminal-duration-minutes-seconds").to_string(),
+        seconds: t!("terminal-duration-seconds").to_string(),
+        milliseconds: t!("terminal-duration-milliseconds").to_string(),
     }
 }

@@ -7,7 +7,7 @@ use nmt_agent::AgentEventKind;
 use nmt_agent::chat::{Question, QuestionInput, QuestionMode};
 use nmt_agent::session::controller::QuestionSubmission;
 use nmt_agent::session::input::{QuestionAction, QuestionCompletion, QuestionKey};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
 use crate::agent_tab::composer::PaletteControl;
@@ -31,7 +31,7 @@ impl AgentPane {
         if waiting {
             self.emit_lifecycle(
                 AgentEventKind::PermissionRequested,
-                &i18n("agent-session-needs-input").replace("{name}", self.kind.display()),
+                &t!("agent-session-needs-input", name = self.kind.display()),
                 &description,
                 cx,
             );
@@ -281,7 +281,7 @@ impl AgentPane {
                 let state = cx.new(|cx| {
                     InputState::new(window, cx)
                         .masked(true)
-                        .placeholder(i18n("agent-question-free-text"))
+                        .placeholder(t!("agent-question-free-text"))
                         .default_value(text)
                 });
 
@@ -296,7 +296,7 @@ impl AgentPane {
                 let state = cx.new(|cx| {
                     TextareaState::new(window, cx)
                         .auto_grow(1, 4)
-                        .placeholder(i18n("agent-question-free-text"))
+                        .placeholder(t!("agent-question-free-text"))
                         .default_value(text)
                 });
 

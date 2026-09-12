@@ -14,7 +14,7 @@ use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, IndexPath, Sizable as _, WindowExt as _, h_flex,
 };
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::settings::agent_profile_dialog::open_agent_profile_dialog;
 use crate::ui::settings::state::{AgentProfile, AppSettings};
@@ -67,7 +67,7 @@ fn agent_icon(profile: &AgentProfile) -> Icon {
 
 fn profile_label(ix: usize, profile: &AgentProfile) -> String {
     if profile.name.trim().is_empty() {
-        i18n("settings-agent-profile-unnamed").replace("{n}", &(ix + 1).to_string())
+        t!("settings-agent-profile-unnamed", n = (ix + 1)).into_owned()
     } else {
         profile.name.clone()
     }
@@ -79,13 +79,13 @@ fn delete_profile(ix: usize, window: &mut Window, cx: &mut App) {
         .agent_profiles
         .get(ix)
         .map(|profile| profile_label(ix, profile))
-        .map(|label| i18n("settings-agent-profile-delete-named").replace("{name}", &label))
-        .unwrap_or_else(|| i18n("settings-agent-profile-delete-current").to_string());
+        .map(|label| t!("settings-agent-profile-delete-named", name = &label).into_owned())
+        .unwrap_or_else(|| t!("settings-agent-profile-delete-current").to_string());
 
     window.open_alert_dialog(cx, move |alert, _, _| {
         alert
             .confirm()
-            .title(i18n("settings-agent-profile-delete-title"))
+            .title(t!("settings-agent-profile-delete-title"))
             .description(description.clone())
             .on_ok(move |_, _, cx| {
                 cx.global_mut::<AppSettings>().remove_agent_profile(ix);
@@ -273,15 +273,15 @@ impl ListDelegate for AgentProfileList {
                         // rarely enough that a third icon would cost the name
                         // column more width than it is worth.
                         .modern_context_menu(move |menu, _, _| {
-                            menu.item(i18n("settings-common-edit"), move |window, cx| {
+                            menu.item(t!("settings-common-edit"), move |window, cx| {
                                 open_agent_profile_dialog(Some(row), window, cx);
                             })
                             .icon(IconName::PenLine)
-                            .item(i18n("settings-common-duplicate"), move |_, cx| {
+                            .item(t!("settings-common-duplicate"), move |_, cx| {
                                 duplicate_profile(row, cx);
                             })
                             .icon(IconName::Copy)
-                            .item(i18n("settings-common-delete"), move |window, cx| {
+                            .item(t!("settings-common-delete"), move |window, cx| {
                                 delete_profile(row, window, cx);
                             })
                             .icon(IconName::Delete)
@@ -305,8 +305,8 @@ impl ListDelegate for AgentProfileList {
                                         .ghost()
                                         .with_size(TABLE_OPERATION_BUTTON)
                                         .icon(IconName::PenLine)
-                                        .accessibility_label(i18n("settings-common-edit"))
-                                        .tooltip(i18n("settings-common-edit"))
+                                        .accessibility_label(t!("settings-common-edit"))
+                                        .tooltip(t!("settings-common-edit"))
                                         .on_click(move |_, window, cx: &mut App| {
                                             open_agent_profile_dialog(Some(row), window, cx);
                                         }),
@@ -316,8 +316,8 @@ impl ListDelegate for AgentProfileList {
                                         .ghost()
                                         .with_size(TABLE_OPERATION_BUTTON)
                                         .icon(TrashIcon)
-                                        .accessibility_label(i18n("settings-common-delete"))
-                                        .tooltip(i18n("settings-common-delete"))
+                                        .accessibility_label(t!("settings-common-delete"))
+                                        .tooltip(t!("settings-common-delete"))
                                         .on_click(move |_, window, cx: &mut App| {
                                             delete_profile(row, window, cx);
                                         }),
@@ -339,16 +339,16 @@ impl ListDelegate for AgentProfileList {
                     div()
                         .w(TYPE_COLUMN)
                         .flex_none()
-                        .child(i18n("settings-common-type")),
+                        .child(t!("settings-common-type")),
                 )
-                .child(div().flex_1().min_w_0().child(i18n("settings-common-name")))
+                .child(div().flex_1().min_w_0().child(t!("settings-common-name")))
                 .child(
                     div()
                         .w(OPERATION_COLUMN)
                         .flex_none()
                         .text_right()
                         .whitespace_nowrap()
-                        .child(i18n("settings-common-operation")),
+                        .child(t!("settings-common-operation")),
                 ),
         )
     }

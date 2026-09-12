@@ -10,7 +10,7 @@ use gpui_component::{ActiveTheme as _, IconName, h_flex};
 use nmt_agent::claude_code::stream_json;
 use nmt_agent::codex::app_server;
 use nmt_agent::session::settings::ConversationSettings;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
 use crate::agent_tab::commands::setting_value_label;
@@ -54,7 +54,7 @@ impl ThreadControls {
         let model = setting_picker(
             cx,
             "agent-model",
-            i18n("agent-setting-model"),
+            t!("agent-setting-model"),
             IconName::Cpu,
             state.settings.model.clone(),
             model_options,
@@ -72,7 +72,7 @@ impl ThreadControls {
         .into_any_element();
 
         let folded = vec![FoldedSetting {
-            name: i18n("agent-setting-permissions"),
+            name: t!("agent-setting-permissions"),
             icon: permission_icon(state.settings.approval.as_deref()),
             current: state.settings.approval.clone(),
             options: permission_options,
@@ -92,7 +92,7 @@ impl ThreadControls {
             .gap(px(SETTINGS_PILL_GAP))
             .flex_wrap()
             .text_color(cx.theme().muted_foreground)
-            .child(settings_group(i18n("agent-settings-model"), vec![model]));
+            .child(settings_group(t!("agent-settings-model"), vec![model]));
 
         if supports_effort {
             let effort = effort_panel(
@@ -120,7 +120,7 @@ impl ThreadControls {
             .into_any_element();
 
             row = row.child(settings_group(
-                i18n("agent-settings-quality-cost"),
+                t!("agent-settings-quality-cost"),
                 vec![effort],
             ));
         }
@@ -156,7 +156,7 @@ impl ThreadControls {
         let model = setting_picker(
             cx,
             "agent-model",
-            i18n("agent-setting-model"),
+            t!("agent-setting-model"),
             IconName::Cpu,
             state.settings.model.clone(),
             model_options,
@@ -181,7 +181,7 @@ impl ThreadControls {
         // conversation, so the control would offer a choice that does not exist.
         if !state.agent_presets.is_empty() {
             folded.push(FoldedSetting {
-                name: i18n("agent-setting-agent-preset"),
+                name: t!("agent-setting-agent-preset"),
                 icon: IconName::Bot,
                 current: state.agent_preset.clone(),
                 options: state
@@ -195,7 +195,7 @@ impl ThreadControls {
 
         if !state.approval_presets.is_empty() {
             folded.push(FoldedSetting {
-                name: i18n("agent-setting-permissions"),
+                name: t!("agent-setting-permissions"),
                 icon: permission_icon(state.settings.approval.as_deref()),
                 current: state.settings.approval.clone(),
                 options: state
@@ -217,7 +217,7 @@ impl ThreadControls {
             .gap(px(SETTINGS_PILL_GAP))
             .flex_wrap()
             .text_color(cx.theme().muted_foreground)
-            .child(settings_group(i18n("agent-settings-model"), vec![model]));
+            .child(settings_group(t!("agent-settings-model"), vec![model]));
 
         if supports_effort {
             let effort = effort_panel(
@@ -240,7 +240,7 @@ impl ThreadControls {
             .into_any_element();
 
             row = row.child(settings_group(
-                i18n("agent-settings-quality-cost"),
+                t!("agent-settings-quality-cost"),
                 vec![effort],
             ));
         }
@@ -293,7 +293,7 @@ impl ThreadControls {
         let model = setting_picker(
             cx,
             "agent-model",
-            i18n("agent-setting-model"),
+            t!("agent-setting-model"),
             IconName::Cpu,
             state.settings.model.clone(),
             model_options,
@@ -333,7 +333,7 @@ impl ThreadControls {
 
         let folded = vec![
             FoldedSetting {
-                name: i18n("agent-setting-approval"),
+                name: t!("agent-setting-approval"),
                 icon: permission_icon(state.settings.approval.as_deref()),
                 current: state.settings.approval.clone(),
                 options: approval_options,
@@ -348,7 +348,7 @@ impl ThreadControls {
                 },
             },
             FoldedSetting {
-                name: i18n("agent-setting-approval-reviewer"),
+                name: t!("agent-setting-approval-reviewer"),
                 icon: IconName::User,
                 current: state.settings.approvals_reviewer.clone(),
                 options: reviewer_options,
@@ -367,7 +367,7 @@ impl ThreadControls {
                 },
             },
             FoldedSetting {
-                name: i18n("agent-setting-sandbox"),
+                name: t!("agent-setting-sandbox"),
                 icon: IconName::Shield,
                 current: state.settings.sandbox.clone(),
                 options: sandbox_options,
@@ -382,7 +382,7 @@ impl ThreadControls {
                 },
             },
             FoldedSetting {
-                name: i18n("agent-setting-tier"),
+                name: t!("agent-setting-tier"),
                 icon: IconName::Zap,
                 current: Some(state.settings.tier.clone().unwrap_or_default()),
                 options: tier_options,
@@ -421,9 +421,9 @@ impl ThreadControls {
             .gap(px(SETTINGS_PILL_GAP))
             .flex_wrap()
             .text_color(cx.theme().muted_foreground)
-            .child(settings_group(i18n("agent-settings-model"), vec![model]))
+            .child(settings_group(t!("agent-settings-model"), vec![model]))
             .child(settings_group(
-                i18n("agent-settings-quality-cost"),
+                t!("agent-settings-quality-cost"),
                 vec![effort],
             ))
             .children(folded_settings_pill(cx, folded))

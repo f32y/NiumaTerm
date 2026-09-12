@@ -1,6 +1,6 @@
 use app::agent_tab::execution::AgentSession;
 use app::agent_tab::{AgentKindExt as _, RecoveryIdentity};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::persistence::spawn_default_pane;
 use crate::ui::shell::tab_surface::AgentTab;
@@ -110,7 +110,7 @@ impl Shell {
         let hosts = remote::known_hosts();
 
         let Some(host) = hosts.into_iter().next() else {
-            window.push_notification(i18n("shell-remote-no-hosts"), cx);
+            window.push_notification(t!("shell-remote-no-hosts"), cx);
 
             return;
         };
@@ -134,7 +134,7 @@ impl Shell {
                         this.workspaces.active_tabs_mut().new_tab(
                             TabSurface::Live(TerminalLayout::new_leaf(PaneId(id), pane)),
                             TabId(id),
-                            i18n("shell-remote-tab-title").to_string(),
+                            t!("shell-remote-tab-title").to_string(),
                         );
 
                         this.focus_active(window, cx);
@@ -144,8 +144,8 @@ impl Shell {
 
                     Err(e) => {
                         window.push_notification(
-                            i18n("shell-remote-session-failed")
-                                .replace("{error}", &e.to_string())
+                            t!("shell-remote-session-failed", error = e)
+                                .into_owned()
                                 .as_str(),
                             cx,
                         );
@@ -154,8 +154,8 @@ impl Shell {
 
                 Err(e) => {
                     window.push_notification(
-                        i18n("shell-remote-connect-failed")
-                            .replace("{error}", &e.to_string())
+                        t!("shell-remote-connect-failed", error = e)
+                            .into_owned()
                             .as_str(),
                         cx,
                     );
@@ -274,7 +274,7 @@ impl Shell {
 
         let Some(ws_id) = containing else {
             self.create_temporary_workspace(
-                i18n("shell-workspace-default-name").into(),
+                t!("shell-workspace-default-name").into(),
                 WorkspaceRoots::single(target),
                 window,
                 cx,

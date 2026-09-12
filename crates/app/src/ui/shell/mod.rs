@@ -53,10 +53,10 @@ use nmt_agent::{
 };
 use nmt_config::local_state::WindowState;
 use nmt_config::system::WarnBeforeTerminatingShell;
-use nmt_i18n::i18n;
 use nmt_platform::{
     NativeNotification, remove_notification, show_notification, system_notification_enabled,
 };
+use rust_i18n::t;
 use tracing::warn;
 
 use crate::agent_updates::{
@@ -639,7 +639,7 @@ impl Shell {
         };
 
         if tab.exited() {
-            i18n("shell-tab-exited-title").replace("{title}", base)
+            t!("shell-tab-exited-title", title = base).into_owned()
         } else {
             base.to_string()
         }

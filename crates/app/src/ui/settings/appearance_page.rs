@@ -1,4 +1,4 @@
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::ui::settings::*;
 
@@ -8,13 +8,13 @@ pub(super) fn appearance_page(
     tab_auto_size: bool,
     show_git_status: bool,
 ) -> SettingPage {
-    SettingPage::new(i18n("settings-appearance-title"))
+    SettingPage::new(t!("settings-appearance-title"))
         .default_open(true)
         .group(
             SettingGroup::new()
-                .title(i18n("settings-appearance-language"))
+                .title(t!("settings-appearance-language"))
                 .item(SettingItem::new(
-                    i18n("settings-appearance-language"),
+                    t!("settings-appearance-language"),
                     SettingField::dropdown(
                         vec![
                             // Language names are proper nouns shown in their
@@ -37,9 +37,9 @@ pub(super) fn appearance_page(
         )
         .group(
             SettingGroup::new()
-                .title(i18n("settings-appearance-theme"))
+                .title(t!("settings-appearance-theme"))
                 .item(SettingItem::new(
-                    i18n("settings-appearance-agent-pane-terminal-background"),
+                    t!("settings-appearance-agent-pane-terminal-background"),
                     SettingField::switch(
                         |cx| {
                             cx.global::<AppSettings>()
@@ -54,7 +54,7 @@ pub(super) fn appearance_page(
                     ),
                 ))
                 .item(SettingItem::new(
-                    i18n("settings-appearance-theme-search"),
+                    t!("settings-appearance-theme-search"),
                     SettingField::input(
                         |cx| {
                             cx.global::<AppSettings>()
@@ -69,31 +69,31 @@ pub(super) fn appearance_page(
                     ),
                 ))
                 .item(SettingItem::render(|_, _, cx| theme_list(cx)).keywords([
-                    i18n("settings-appearance-keyword-theme"),
-                    i18n("settings-appearance-keyword-colors"),
-                    i18n("settings-appearance-keyword-palette"),
+                    t!("settings-appearance-keyword-theme"),
+                    t!("settings-appearance-keyword-colors"),
+                    t!("settings-appearance-keyword-palette"),
                 ])),
         )
         .group(
             SettingGroup::new()
-                .title(i18n("settings-appearance-window"))
+                .title(t!("settings-appearance-window"))
                 .item(SettingItem::new(
-                    i18n("settings-appearance-window-backdrop"),
+                    t!("settings-appearance-window-backdrop"),
                     SettingField::dropdown(
                         vec![
                             (
                                 "mica-alt".into(),
-                                i18n("settings-appearance-window-backdrop-mica-alt").into(),
+                                t!("settings-appearance-window-backdrop-mica-alt").into(),
                             ),
                             (
                                 "mica".into(),
-                                i18n("settings-appearance-window-backdrop-mica").into(),
+                                t!("settings-appearance-window-backdrop-mica").into(),
                             ),
                             (
                                 "acrylic".into(),
-                                i18n("settings-appearance-window-backdrop-acrylic").into(),
+                                t!("settings-appearance-window-backdrop-acrylic").into(),
                             ),
-                            ("off".into(), i18n("settings-common-off").into()),
+                            ("off".into(), t!("settings-common-off").into()),
                         ],
                         |cx| {
                             let key: &str =
@@ -109,7 +109,7 @@ pub(super) fn appearance_page(
                     .default_value("acrylic"),
                 ))
                 .item(SettingItem::new(
-                    i18n("settings-appearance-effect-on-content-area"),
+                    t!("settings-appearance-effect-on-content-area"),
                     SettingField::switch(
                         |cx| cx.global::<AppSettings>().appearance.transparent_main_view,
                         |value, cx| {
@@ -121,7 +121,7 @@ pub(super) fn appearance_page(
                 ))
                 .item(
                     SettingItem::new(
-                        i18n("settings-appearance-background-opacity"),
+                        t!("settings-appearance-background-opacity"),
                         background_opacity_field(),
                     )
                     // The Mica materials replace the background with what DWM
@@ -132,33 +132,30 @@ pub(super) fn appearance_page(
                     )),
                 )
                 .item(SettingItem::new(
-                    i18n("settings-appearance-background-image"),
+                    t!("settings-appearance-background-image"),
                     background_image_field(),
                 ))
                 .item(
                     SettingItem::new(
-                        i18n("settings-appearance-background-image-opacity"),
+                        t!("settings-appearance-background-image-opacity"),
                         background_image_opacity_field(),
                     )
                     .disabled(!background_image_enabled),
                 )
                 .item(SettingItem::new(
-                    i18n("settings-appearance-smooth-scrolling"),
+                    t!("settings-appearance-smooth-scrolling"),
                     SettingField::dropdown(
                         vec![
-                            (
-                                "all".into(),
-                                i18n("settings-appearance-scrolling-all").into(),
-                            ),
+                            ("all".into(), t!("settings-appearance-scrolling-all").into()),
                             (
                                 "only-terminal".into(),
-                                i18n("settings-appearance-scrolling-only-terminal").into(),
+                                t!("settings-appearance-scrolling-only-terminal").into(),
                             ),
                             (
                                 "only-agent".into(),
-                                i18n("settings-appearance-scrolling-only-agent").into(),
+                                t!("settings-appearance-scrolling-only-agent").into(),
                             ),
-                            ("off".into(), i18n("settings-common-off").into()),
+                            ("off".into(), t!("settings-common-off").into()),
                         ],
                         |cx| {
                             let key: &str = cx
@@ -177,7 +174,7 @@ pub(super) fn appearance_page(
                     .default_value("all"),
                 ))
                 .item(SettingItem::new(
-                    i18n("settings-appearance-reduce-motion"),
+                    t!("settings-appearance-reduce-motion"),
                     SettingField::switch(
                         |cx| cx.global::<AppSettings>().appearance.reduce_motion,
                         |value, cx| {
@@ -187,7 +184,7 @@ pub(super) fn appearance_page(
                 ))
                 .item(
                     SettingItem::new(
-                        i18n("settings-appearance-human-friendly-agent-ui-layout"),
+                        t!("settings-appearance-human-friendly-agent-ui-layout"),
                         SettingField::switch(
                             |cx| {
                                 cx.global::<AppSettings>()
@@ -201,24 +198,25 @@ pub(super) fn appearance_page(
                             },
                         ),
                     )
-                    .description(i18n(
-                        "settings-appearance-human-friendly-agent-ui-layout-description",
-                    )),
+                    .description(
+                        t!("settings-appearance-human-friendly-agent-ui-layout-description")
+                            .into_owned(),
+                    ),
                 ),
         )
         .group(
             SettingGroup::new()
-                .title(i18n("settings-appearance-font"))
+                .title(t!("settings-appearance-font"))
                 .item(SettingItem::new(
-                    i18n("settings-appearance-ui-font"),
+                    t!("settings-appearance-ui-font"),
                     ui::font_picker::font_family_field(ui::font_picker::FontTarget::Ui),
                 ))
                 .item(SettingItem::new(
-                    i18n("settings-appearance-terminal-font"),
+                    t!("settings-appearance-terminal-font"),
                     ui::font_picker::font_family_field(ui::font_picker::FontTarget::Terminal),
                 ))
                 .item(SettingItem::new(
-                    i18n("settings-appearance-terminal-font-size"),
+                    t!("settings-appearance-terminal-font-size"),
                     SettingField::number_input(
                         NumberFieldOptions {
                             min: 6.0,
@@ -232,7 +230,7 @@ pub(super) fn appearance_page(
                     ),
                 ))
                 .item(SettingItem::new(
-                    i18n("settings-appearance-terminal-line-height"),
+                    t!("settings-appearance-terminal-line-height"),
                     SettingField::number_input(
                         NumberFieldOptions {
                             min: 0.8,
@@ -248,11 +246,11 @@ pub(super) fn appearance_page(
                     ),
                 ))
                 .item(SettingItem::new(
-                    i18n("settings-appearance-agent-font"),
+                    t!("settings-appearance-agent-font"),
                     ui::font_picker::font_family_field(ui::font_picker::FontTarget::Agent),
                 ))
                 .item(SettingItem::new(
-                    i18n("settings-appearance-agent-font-size"),
+                    t!("settings-appearance-agent-font-size"),
                     SettingField::number_input(
                         NumberFieldOptions {
                             min: 6.0,
@@ -266,7 +264,7 @@ pub(super) fn appearance_page(
                     ),
                 ))
                 .item(SettingItem::new(
-                    i18n("settings-appearance-monospace-only"),
+                    t!("settings-appearance-monospace-only"),
                     SettingField::switch(
                         |cx| cx.global::<AppSettings>().appearance.monospace_only,
                         |value, cx| {
@@ -275,13 +273,13 @@ pub(super) fn appearance_page(
                     ),
                 ))
                 .item(SettingItem::new(
-                    i18n("settings-appearance-agent-transcript-font"),
+                    t!("settings-appearance-agent-transcript-font"),
                     ui::font_picker::font_family_field(
                         ui::font_picker::FontTarget::AgentTranscript,
                     ),
                 ))
                 .item(SettingItem::new(
-                    i18n("settings-appearance-agent-transcript-font-size"),
+                    t!("settings-appearance-agent-transcript-font-size"),
                     SettingField::number_input(
                         NumberFieldOptions {
                             min: 6.0,
@@ -303,19 +301,19 @@ pub(super) fn appearance_page(
         )
         .group(
             SettingGroup::new()
-                .title(i18n("settings-appearance-tab-bar"))
+                .title(t!("settings-appearance-tab-bar"))
                 .item(
                     SettingItem::new(
-                        i18n("settings-appearance-tab-bar-style"),
+                        t!("settings-appearance-tab-bar-style"),
                         SettingField::dropdown(
                             vec![
                                 (
                                     "horizontal".into(),
-                                    i18n("settings-appearance-tab-bar-style-horizontal").into(),
+                                    t!("settings-appearance-tab-bar-style-horizontal").into(),
                                 ),
                                 (
                                     "vertical".into(),
-                                    i18n("settings-appearance-tab-bar-style-vertical").into(),
+                                    t!("settings-appearance-tab-bar-style-vertical").into(),
                                 ),
                             ],
                             |cx| {
@@ -331,10 +329,10 @@ pub(super) fn appearance_page(
                         )
                         .default_value("horizontal"),
                     )
-                    .description(i18n("settings-appearance-tab-bar-style-description")),
+                    .description(t!("settings-appearance-tab-bar-style-description").into_owned()),
                 )
                 .item(SettingItem::new(
-                    i18n("settings-appearance-tab-auto-size"),
+                    t!("settings-appearance-tab-auto-size"),
                     SettingField::switch(
                         |cx| cx.global::<AppSettings>().appearance.tab_auto_size,
                         |value, cx| {
@@ -344,7 +342,7 @@ pub(super) fn appearance_page(
                 ))
                 .item(
                     SettingItem::new(
-                        i18n("settings-appearance-tab-width"),
+                        t!("settings-appearance-tab-width"),
                         SettingField::number_input(
                             NumberFieldOptions {
                                 min: MIN_TAB_WIDTH,
@@ -365,10 +363,10 @@ pub(super) fn appearance_page(
         )
         .group(
             SettingGroup::new()
-                .title(i18n("settings-appearance-title-bar"))
+                .title(t!("settings-appearance-title-bar"))
                 .item(
                     SettingItem::new(
-                        i18n("settings-appearance-daily-token-usage"),
+                        t!("settings-appearance-daily-token-usage"),
                         SettingField::switch(
                             |cx| cx.global::<AppSettings>().appearance.show_daily_token_usage,
                             |value, cx| {
@@ -378,10 +376,12 @@ pub(super) fn appearance_page(
                             },
                         ),
                     )
-                    .description(i18n("settings-appearance-daily-token-usage-description")),
+                    .description(
+                        t!("settings-appearance-daily-token-usage-description").into_owned(),
+                    ),
                 )
                 .item(SettingItem::new(
-                    i18n("settings-appearance-git-status"),
+                    t!("settings-appearance-git-status"),
                     SettingField::switch(
                         |cx| {
                             cx.global::<AppSettings>()
@@ -397,24 +397,24 @@ pub(super) fn appearance_page(
                 ))
                 .item(
                     SettingItem::new(
-                        i18n("settings-appearance-git-interval"),
+                        t!("settings-appearance-git-interval"),
                         SettingField::dropdown(
                             vec![
                                 (
                                     "10".into(),
-                                    i18n("settings-appearance-git-interval-10").into(),
+                                    t!("settings-appearance-git-interval-10").into(),
                                 ),
                                 (
                                     "15".into(),
-                                    i18n("settings-appearance-git-interval-15").into(),
+                                    t!("settings-appearance-git-interval-15").into(),
                                 ),
                                 (
                                     "30".into(),
-                                    i18n("settings-appearance-git-interval-30").into(),
+                                    t!("settings-appearance-git-interval-30").into(),
                                 ),
                                 (
                                     "60".into(),
-                                    i18n("settings-appearance-git-interval-60").into(),
+                                    t!("settings-appearance-git-interval-60").into(),
                                 ),
                             ],
                             |cx| {

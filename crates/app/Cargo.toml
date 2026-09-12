@@ -16,7 +16,6 @@ path = "src/main.rs"
 nmt_profiling.workspace = true
 nmt_agent.workspace = true
 nmt_config.workspace = true
-nmt_i18n.workspace = true
 nmt_terminal.workspace = true
 nmt_platform.workspace = true
 nmt_version.workspace = true
@@ -63,6 +62,7 @@ ropey.workspace = true
 vte.workspace = true
 tempfile.workspace = true
 uuid.workspace = true
+rust-i18n.workspace = true
 
 [build-dependencies]
 nmt_version.workspace = true

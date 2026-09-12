@@ -19,7 +19,7 @@ use gpui_component::modern_menu::{ModernMenu, ModernMenuExt as _};
 use gpui_component::{
     ActiveTheme as _, ElementExt as _, Icon, IconName, Sizable as _, h_flex, text, v_flex,
 };
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::capabilities::AgentCapabilities as _;
 use crate::agent_tab::composer::attachments::MAX_ATTACHMENTS;
@@ -74,7 +74,7 @@ impl TranscriptView {
 
             match copy_text {
                 Some(copy_text) => menu
-                    .item(i18n("agent-transcript-copy"), move |_, cx| {
+                    .item(t!("agent-transcript-copy"), move |_, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
                     })
                     .icon(IconName::Copy),
@@ -118,7 +118,7 @@ impl TranscriptView {
 
             if caps.session_fork {
                 menu.separator()
-                    .item(i18n("agent-transcript-fork-from-here"), move |_, cx| {
+                    .item(t!("agent-transcript-fork-from-here"), move |_, cx| {
                         let target = target.clone();
 
                         pane.update(cx, |pane, cx| pane.fork_from_prompt(target, cx))
@@ -127,7 +127,7 @@ impl TranscriptView {
                     .icon(IconName::GitBranch)
             } else {
                 menu.separator()
-                    .item(i18n("agent-transcript-rewind-to-here"), move |_, cx| {
+                    .item(t!("agent-transcript-rewind-to-here"), move |_, cx| {
                         let target = target.clone();
 
                         pane.update(cx, |pane, cx| pane.rewind_to_prompt(target, cx))
@@ -175,9 +175,9 @@ impl TranscriptView {
                 .text_color(cx.theme().primary)
                 .cursor_pointer()
                 .child(if expanded {
-                    i18n("agent-transcript-show-less").to_string()
+                    t!("agent-transcript-show-less").to_string()
                 } else {
-                    i18n("agent-transcript-show-full-message").to_string()
+                    t!("agent-transcript-show-full-message").to_string()
                 })
                 .id(("user-expand", index))
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -207,9 +207,9 @@ impl TranscriptView {
         let annotations = parsed.as_ref().and_then(|parsed| {
             (!parsed.annotations.is_empty()).then(|| {
                 let action_label = if annotations_disclosing {
-                    i18n("agent-transcript-annotations-collapse")
+                    t!("agent-transcript-annotations-collapse")
                 } else {
-                    i18n("agent-transcript-annotations-expand")
+                    t!("agent-transcript-annotations-expand")
                 };
 
                 let content = annotations_shown.then(|| {
@@ -419,7 +419,7 @@ impl TranscriptView {
                         // to only recognize the image by, so opening it is the
                         // only way to read what was sent.
                         .cursor_pointer()
-                        .aria_label(i18n("agent-transcript-image-open"))
+                        .aria_label(t!("agent-transcript-image-open"))
                         .on_prepaint({
                             let placed = placed.clone();
 

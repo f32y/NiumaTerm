@@ -1,9 +1,11 @@
-use nmt_i18n::i18n;
+use std::borrow::Cow;
+
+use rust_i18n::t;
 
 use crate::ui::settings::*;
 
 fn agent_hook_item(
-    name: &'static str,
+    name: Cow<'static, str>,
     detection_path: Option<path::PathBuf>,
     hooks_path: Option<path::PathBuf>,
     status: fn(&path::Path) -> HookInstallStatus,
@@ -15,7 +17,7 @@ fn agent_hook_item(
     let action_path = hooks_path;
 
     SettingItem::new(
-        name,
+        name.clone(),
         SettingField::checkbox(
             // Settings renders only the active page, so a disk-backed getter
             // refreshes Hook state whenever the user enters the Agent page.
@@ -58,9 +60,9 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
     let installations = agent_updates::installations_for_profiles(agent_profiles, cx);
 
     let general = SettingGroup::new()
-        .title(i18n("settings-agent-general"))
+        .title(t!("settings-agent-general"))
         .item(SettingItem::new(
-            i18n("settings-agent-show-usage"),
+            t!("settings-agent-show-usage"),
             SettingField::switch(
                 |cx| cx.global::<AppSettings>().agent.show_agent_usage,
                 |value, cx| {
@@ -70,18 +72,18 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
         ))
         .item(
             SettingItem::new(
-                i18n("settings-agent-collapse-tool-calls"),
+                t!("settings-agent-collapse-tool-calls"),
                 SettingField::dropdown(
                     vec![
                         (
                             work_and_tool_calls_key.into(),
-                            i18n("settings-agent-collapse-work-and-tool-calls").into(),
+                            t!("settings-agent-collapse-work-and-tool-calls").into(),
                         ),
                         (
                             tool_calls_key.into(),
-                            i18n("settings-agent-collapse-only-tool-calls").into(),
+                            t!("settings-agent-collapse-only-tool-calls").into(),
                         ),
-                        (off_key.into(), i18n("settings-common-off").into()),
+                        (off_key.into(), t!("settings-common-off").into()),
                     ],
                     |cx| {
                         let key: &str = cx.global::<AppSettings>().agent.collapse_tool_calls.into();
@@ -94,11 +96,11 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                     },
                 ),
             )
-            .description(i18n("settings-agent-collapse-tool-calls-description")),
+            .description(t!("settings-agent-collapse-tool-calls-description").into_owned()),
         )
         .item(
             SettingItem::new(
-                i18n("settings-agent-codex-skill-compat"),
+                t!("settings-agent-codex-skill-compat"),
                 SettingField::switch(
                     |cx| cx.global::<AppSettings>().agent.codex_skill_command_compat,
                     |value, cx| {
@@ -108,28 +110,28 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                     },
                 ),
             )
-            .description(i18n("settings-agent-codex-skill-compat-description")),
+            .description(t!("settings-agent-codex-skill-compat-description").into_owned()),
         )
         .item(
             SettingItem::new(
-                i18n("settings-agent-model-list-style"),
+                t!("settings-agent-model-list-style"),
                 SettingField::dropdown(
                     vec![
                         (
                             name_and_id_key.into(),
-                            i18n("settings-agent-model-list-style-name-and-id").into(),
+                            t!("settings-agent-model-list-style-name-and-id").into(),
                         ),
                         (
                             id_and_name_key.into(),
-                            i18n("settings-agent-model-list-style-id-and-name").into(),
+                            t!("settings-agent-model-list-style-id-and-name").into(),
                         ),
                         (
                             name_only_key.into(),
-                            i18n("settings-agent-model-list-style-name-only").into(),
+                            t!("settings-agent-model-list-style-name-only").into(),
                         ),
                         (
                             id_only_key.into(),
-                            i18n("settings-agent-model-list-style-id-only").into(),
+                            t!("settings-agent-model-list-style-id-only").into(),
                         ),
                     ],
                     |cx| {
@@ -143,13 +145,13 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                     },
                 ),
             )
-            .description(i18n("settings-agent-model-list-style-description")),
+            .description(t!("settings-agent-model-list-style-description").into_owned()),
         );
 
     let mut cli_updates = SettingGroup::new()
-        .title(i18n("settings-agent-cli-updates"))
+        .title(t!("settings-agent-cli-updates"))
         .item(SettingItem::new(
-            i18n("settings-agent-check-updates"),
+            t!("settings-agent-check-updates"),
             SettingField::switch(
                 |cx| cx.global::<AppSettings>().agent.check_agent_updates,
                 |value, cx| {
@@ -179,15 +181,15 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
         ));
     }
 
-    SettingPage::new(i18n("settings-agent-title"))
+    SettingPage::new(t!("settings-agent-title"))
         .default_open(true)
         .group(general)
         .group(
             SettingGroup::new()
-                .title(i18n("settings-agent-hooks"))
+                .title(t!("settings-agent-hooks"))
                 .item(
                     SettingItem::new(
-                        i18n("settings-agent-enable-hooks"),
+                        t!("settings-agent-enable-hooks"),
                         SettingField::switch(
                             |cx| cx.global::<AppSettings>().agent.enable_agent_hooks,
                             |value, cx| {
@@ -195,10 +197,10 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                             },
                         ),
                     )
-                    .description(i18n("settings-agent-enable-hooks-description")),
+                    .description(t!("settings-agent-enable-hooks-description").into_owned()),
                 )
                 .item(agent_hook_item(
-                    i18n("settings-agent-kind-claude-code"),
+                    t!("settings-agent-kind-claude-code"),
                     claude_hook::settings_path(),
                     claude_hook::settings_path(),
                     claude_hook::hooks_status,
@@ -206,7 +208,7 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                     claude_hook::uninstall_hooks,
                 ))
                 .item(agent_hook_item(
-                    i18n("settings-agent-kind-codex"),
+                    t!("settings-agent-kind-codex"),
                     codex_hook::config_path(),
                     codex_hook::hooks_path(),
                     codex_hook::hooks_status,
@@ -223,11 +225,18 @@ pub(super) fn installation_update_title(
     provider_total: usize,
 ) -> String {
     if provider_total > 1 {
-        i18n("settings-agent-updates-title-numbered")
-            .replace("{provider}", provider.display())
-            .replace("{ordinal}", &provider_ordinal.to_string())
+        t!(
+            "settings-agent-updates-title-numbered",
+            provider = provider.display(),
+            ordinal = provider_ordinal
+        )
+        .into_owned()
     } else {
-        i18n("settings-agent-updates-title").replace("{provider}", provider.display())
+        t!(
+            "settings-agent-updates-title",
+            provider = provider.display()
+        )
+        .into_owned()
     }
 }
 
@@ -237,7 +246,7 @@ pub(super) fn installation_version_text(
     available: &str,
 ) -> String {
     if phase == UpdatePhase::Unknown {
-        i18n("settings-agent-not-checked").to_string()
+        t!("settings-agent-not-checked").to_string()
     } else {
         format!("{current} → {available}")
     }
@@ -253,16 +262,16 @@ fn agent_update_check_item() -> SettingItem {
         let check = Button::new("agent-updates-check-all")
             .outline()
             .label(if busy {
-                i18n("settings-agent-working")
+                t!("settings-agent-working")
             } else {
-                i18n("settings-agent-check-button")
+                t!("settings-agent-check-button")
             })
             .disabled(options.is_disabled() || busy || installations.is_empty())
             .on_click(move |_, _, cx| {
                 agent_updates::manual_check_profiles(&check_profiles, cx);
             });
 
-        card_row(i18n("settings-agent-check-for-updates"), "", check, cx).into_any_element()
+        card_row(t!("settings-agent-check-for-updates"), "", check, cx).into_any_element()
     })
 }
 
@@ -273,7 +282,7 @@ fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> S
         let (detail, busy, can_update) = snapshot.map_or_else(
             || {
                 (
-                    i18n("settings-agent-status-unavailable").to_string(),
+                    t!("settings-agent-status-unavailable").to_string(),
                     false,
                     false,
                 )
@@ -284,12 +293,12 @@ fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> S
                 let current = versions
                     .and_then(|status| status.current.as_ref())
                     .map(ToString::to_string)
-                    .unwrap_or_else(|| i18n("settings-agent-version-unknown").to_string());
+                    .unwrap_or_else(|| t!("settings-agent-version-unknown").to_string());
 
                 let available = versions
                     .and_then(|status| status.available.as_ref())
                     .map(ToString::to_string)
-                    .unwrap_or_else(|| i18n("settings-agent-version-unknown").to_string());
+                    .unwrap_or_else(|| t!("settings-agent-version-unknown").to_string());
 
                 let labels = versions
                     .map(|status| {
@@ -306,8 +315,11 @@ fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> S
                 let checked = snapshot
                     .last_checked
                     .map(|time| {
-                        i18n("settings-agent-checked-at")
-                            .replace("{time}", &time.format("%Y-%m-%d %H:%M").to_string())
+                        t!(
+                            "settings-agent-checked-at",
+                            time = time.format("%Y-%m-%d %H:%M")
+                        )
+                        .into_owned()
                     })
                     .unwrap_or_default();
 
@@ -326,19 +338,19 @@ fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> S
                     .unwrap_or_default();
 
                 let phase = match snapshot.state.phase {
-                    UpdatePhase::Unknown => i18n("settings-agent-phase-not-checked"),
-                    UpdatePhase::Checking => i18n("settings-agent-phase-checking"),
-                    UpdatePhase::Current => i18n("settings-agent-phase-current"),
-                    UpdatePhase::Available => i18n("settings-agent-phase-available"),
-                    UpdatePhase::WaitingForIdle => i18n("settings-agent-phase-waiting-idle"),
-                    UpdatePhase::Suspending => i18n("settings-agent-phase-suspending"),
-                    UpdatePhase::Updating => i18n("settings-agent-phase-updating"),
-                    UpdatePhase::Verifying => i18n("settings-agent-phase-verifying"),
-                    UpdatePhase::Restoring => i18n("settings-agent-phase-restoring"),
-                    UpdatePhase::Updated => i18n("settings-agent-phase-updated"),
-                    UpdatePhase::Unchanged => i18n("settings-agent-phase-unchanged"),
-                    UpdatePhase::Unsupported => i18n("settings-agent-phase-unsupported"),
-                    UpdatePhase::Failed => i18n("settings-agent-phase-failed"),
+                    UpdatePhase::Unknown => t!("settings-agent-phase-not-checked"),
+                    UpdatePhase::Checking => t!("settings-agent-phase-checking"),
+                    UpdatePhase::Current => t!("settings-agent-phase-current"),
+                    UpdatePhase::Available => t!("settings-agent-phase-available"),
+                    UpdatePhase::WaitingForIdle => t!("settings-agent-phase-waiting-idle"),
+                    UpdatePhase::Suspending => t!("settings-agent-phase-suspending"),
+                    UpdatePhase::Updating => t!("settings-agent-phase-updating"),
+                    UpdatePhase::Verifying => t!("settings-agent-phase-verifying"),
+                    UpdatePhase::Restoring => t!("settings-agent-phase-restoring"),
+                    UpdatePhase::Updated => t!("settings-agent-phase-updated"),
+                    UpdatePhase::Unchanged => t!("settings-agent-phase-unchanged"),
+                    UpdatePhase::Unsupported => t!("settings-agent-phase-unsupported"),
+                    UpdatePhase::Failed => t!("settings-agent-phase-failed"),
                 };
 
                 let can_update =
@@ -360,7 +372,7 @@ fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> S
 
         let update = Button::new(("agent-update-install", ix))
             .primary()
-            .label(i18n("settings-agent-update-button"))
+            .label(t!("settings-agent-update-button"))
             .disabled(options.is_disabled() || busy || !can_update)
             .on_click(move |_, window, cx| {
                 agent_updates::request_update(update_key.clone(), window, cx);

@@ -334,6 +334,30 @@ mod conversation_title_tests {
     }
 
     #[gpui::test]
+    fn command_catalog_rebuilds_when_the_cached_language_changes(cx: &mut TestAppContext) {
+        let (pane, _) = open_pane(cx, AgentProfileKind::Codex, None);
+
+        cx.update(|cx| {
+            pane.update(cx, |pane, _| {
+                let initial = pane.command_catalog();
+
+                assert!(Rc::ptr_eq(&initial, &pane.command_catalog()));
+
+                pane.palette.catalog.as_mut().unwrap().language = "previous-language".into();
+
+                let refreshed = pane.command_catalog();
+
+                assert!(!Rc::ptr_eq(&initial, &refreshed));
+                assert_eq!(initial.as_ref(), refreshed.as_ref());
+                assert_eq!(
+                    pane.palette.catalog.as_ref().unwrap().language,
+                    &*rust_i18n::locale()
+                );
+            });
+        });
+    }
+
+    #[gpui::test]
     fn output_failure_retires_backend_and_marks_session_exited(cx: &mut TestAppContext) {
         let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
         let mut cx = VisualTestContext::from_window(window.into(), cx);

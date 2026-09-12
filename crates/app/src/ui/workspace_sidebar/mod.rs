@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use app::agent_tab::AgentKind;
 use gpui::prelude::*;
 use gpui::{
@@ -12,8 +14,8 @@ use gpui_component::{
 };
 use nmt_agent::AgentRuntimeStatus;
 use nmt_config::appearance::TabBarStyle;
-use nmt_i18n::i18n;
 use nmt_terminal::event::ProgressReport;
+use rust_i18n::t;
 
 use crate::agent_usage::AgentUsageView;
 use crate::tabs::TabId;
@@ -75,16 +77,15 @@ enum AgentVisual {
 }
 
 /// The agent half of the status column, absent while the agent is idle.
-fn agent_presentation(status: AgentRuntimeStatus) -> Option<(AgentVisual, &'static str)> {
+fn agent_presentation(status: AgentRuntimeStatus) -> Option<(AgentVisual, Cow<'static, str>)> {
     match status {
-        AgentRuntimeStatus::Running => Some((
-            AgentVisual::Running,
-            i18n("sidebar-workspace-status-running"),
-        )),
+        AgentRuntimeStatus::Running => {
+            Some((AgentVisual::Running, t!("sidebar-workspace-status-running")))
+        }
 
         AgentRuntimeStatus::NeedsInput => Some((
             AgentVisual::NeedsInput,
-            i18n("sidebar-workspace-status-needs-input"),
+            t!("sidebar-workspace-status-needs-input"),
         )),
 
         AgentRuntimeStatus::Idle => None,
@@ -93,14 +94,17 @@ fn agent_presentation(status: AgentRuntimeStatus) -> Option<(AgentVisual, &'stat
 
 /// One accessible label for whatever the column holds. The two halves report
 /// independent things, so both are named when both are showing.
-fn status_column_label(agent: Option<&'static str>, terminal: Option<&'static str>) -> String {
+fn status_column_label(agent: Option<&str>, terminal: Option<&str>) -> String {
     match (agent, terminal) {
-        (Some(agent), Some(terminal)) => i18n("sidebar-workspace-status-pair")
-            .replace("{agent}", agent)
-            .replace("{terminal}", terminal),
+        (Some(agent), Some(terminal)) => t!(
+            "sidebar-workspace-status-pair",
+            agent = agent,
+            terminal = terminal
+        )
+        .into_owned(),
 
         (Some(label), None) | (None, Some(label)) => label.to_string(),
-        (None, None) => i18n("sidebar-workspace-status-idle").to_string(),
+        (None, None) => t!("sidebar-workspace-status-idle").to_string(),
     }
 }
 
@@ -116,8 +120,8 @@ fn workspace_status_glyphs(
     let terminal = terminal_presentation(terminal);
 
     let label = status_column_label(
-        agent.map(|(_, label)| label),
-        terminal.map(|(_, label)| label),
+        agent.as_ref().map(|(_, label)| label.as_ref()),
+        terminal.as_ref().map(|(_, label)| label.as_ref()),
     );
 
     let busy_id = busy_id.into();
@@ -163,7 +167,7 @@ fn workspace_progress_bar(fraction: f32, cx: &gpui::App) -> AnyElement {
 }
 
 fn workspace_display_label(name: &str, cwd: &str) -> String {
-    if name != "New Workspace" && name != i18n("shell-workspace-default-name") {
+    if name != "New Workspace" && name != t!("shell-workspace-default-name") {
         return name.to_string();
     }
 
@@ -179,7 +183,7 @@ fn workspace_display_label(name: &str, cwd: &str) -> String {
 /// and accessibility text: the primary path first, marked as primary, then
 /// every additional path in workspace order.
 fn workspace_dirs_description(cwd: &str, additional: &[String]) -> String {
-    let mut description = i18n("sidebar-workspace-primary-label").replace("{path}", cwd);
+    let mut description = t!("sidebar-workspace-primary-label", path = cwd).into_owned();
 
     for path in additional {
         description.push('\n');
@@ -449,7 +453,7 @@ impl Sidebar {
                             // from the workspace names by case rather than by
                             // weight, which the names now use to mark the
                             // active one. Scripts without case are unchanged.
-                            .child(i18n("sidebar-workspaces-title").to_uppercase()),
+                            .child(t!("sidebar-workspaces-title").to_uppercase()),
                     )
                     .child(
                         h_flex()
@@ -459,8 +463,8 @@ impl Sidebar {
                                     .ghost()
                                     .size(px(SIDEBAR_SECTION_BUTTON))
                                     .icon(IconName::Plus)
-                                    .accessibility_label(i18n("shell-workspace-new-title"))
-                                    .tooltip(i18n("shell-workspace-new-title"))
+                                    .accessibility_label(t!("shell-workspace-new-title"))
+                                    .tooltip(t!("shell-workspace-new-title"))
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.on_new_workspace(&NewWorkspace, window, cx)
                                     })),
@@ -470,8 +474,8 @@ impl Sidebar {
                                     .ghost()
                                     .size(px(SIDEBAR_SECTION_BUTTON))
                                     .icon(CloseTemporaryWorkspacesIcon)
-                                    .accessibility_label(i18n("sidebar-workspace-close-temporary"))
-                                    .tooltip(i18n("sidebar-workspace-close-temporary"))
+                                    .accessibility_label(t!("sidebar-workspace-close-temporary"))
+                                    .tooltip(t!("sidebar-workspace-close-temporary"))
                                     .disabled(!has_temporary_workspaces)
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.request_close_temporary_workspaces(window, cx)

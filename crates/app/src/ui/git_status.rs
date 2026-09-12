@@ -8,7 +8,7 @@ use gpui::prelude::*;
 use gpui::{Context, Entity, SharedString, Window, div};
 use gpui_component::{ActiveTheme, h_flex};
 use nmt_agent::git::{CheckedOut, current_branch, run_git};
-use nmt_i18n::i18n;
+use rust_i18n::t;
 use tracing::warn;
 
 use crate::ui::AppSettings;
@@ -172,15 +172,12 @@ pub(crate) fn fetch_file_diff(root: &str, path: &str, untracked: bool) -> Vec<Di
         let Ok(bytes) = fs::read(path::Path::new(root).join(path)) else {
             return vec![line(
                 DiffLineKind::FileHeader,
-                i18n("git-status-unreadable-file"),
+                t!("git-status-unreadable-file"),
             )];
         };
 
         if bytes.contains(&0) {
-            return vec![line(
-                DiffLineKind::FileHeader,
-                i18n("git-status-binary-file"),
-            )];
+            return vec![line(DiffLineKind::FileHeader, t!("git-status-binary-file"))];
         }
 
         let text = String::from_utf8_lossy(&bytes);

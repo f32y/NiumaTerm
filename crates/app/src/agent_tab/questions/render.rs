@@ -8,7 +8,7 @@ use gpui_component::radio::Radio;
 use gpui_component::{ActiveTheme as _, Disableable as _, Sizable as _, h_flex, v_flex};
 use nmt_agent::chat::{QuestionInput, QuestionMode};
 use nmt_agent::session::input::QuestionError;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
 use crate::agent_tab::questions::QuestionStatus;
@@ -61,7 +61,7 @@ impl AgentPane {
             QuestionStatus::History => "agent-question-history",
         };
 
-        let count_label = i18n("agent-question-count").replace("{count}", &count.to_string());
+        let count_label = t!("agent-question-count", count = count).into_owned();
 
         let mut heading = h_flex().w_full().items_center().gap_2().child(
             div()
@@ -72,7 +72,7 @@ impl AgentPane {
                 .child(if count > 0 {
                     count_label
                 } else {
-                    i18n(status).to_string()
+                    t!(status).to_string()
                 }),
         );
 
@@ -131,7 +131,7 @@ impl AgentPane {
             Button::new("question-collapse")
                 .ghost()
                 .small()
-                .label(i18n(if collapsed {
+                .label(t!(if collapsed {
                     "agent-question-open"
                 } else {
                     "agent-question-collapse"
@@ -252,7 +252,7 @@ impl AgentPane {
                 if !question.options.is_empty() {
                     row = row.child(
                         Radio::new((group.clone(), question.options.len()))
-                            .label(i18n("agent-question-custom"))
+                            .label(t!("agent-question-custom").into_owned())
                             .checked(prompt.is_custom(index))
                             .disabled(!enabled)
                             .on_click(cx.listener(move |this, _, window, cx| {
@@ -287,7 +287,7 @@ impl AgentPane {
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
                             .child(if question.input == QuestionInput::Secret {
-                                i18n("agent-question-secret-submitted").to_string()
+                                t!("agent-question-secret-submitted").to_string()
                             } else {
                                 prompt.text(index).to_string()
                             }),
@@ -310,7 +310,7 @@ impl AgentPane {
 
         if let Some(error) = prompt.error() {
             let error = match error {
-                QuestionError::Disconnected => i18n("agent-question-disconnected").to_string(),
+                QuestionError::Disconnected => t!("agent-question-disconnected").to_string(),
                 QuestionError::Rejected(message) => message.clone(),
             };
 
@@ -326,8 +326,7 @@ impl AgentPane {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(
-                        i18n("agent-question-timeout")
-                            .replace("{seconds}", &remaining.as_secs().to_string()),
+                        t!("agent-question-timeout", seconds = remaining.as_secs()).into_owned(),
                     ),
             );
         }
@@ -337,7 +336,7 @@ impl AgentPane {
                 .flex_1()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child(i18n(status)),
+                .child(t!(status)),
         );
 
         if pending {
@@ -346,7 +345,7 @@ impl AgentPane {
                     Button::new("question-skip")
                         .ghost()
                         .disabled(!enabled)
-                        .label(i18n(if prompt.mode() == QuestionMode::Async {
+                        .label(t!(if prompt.mode() == QuestionMode::Async {
                             "agent-question-dismiss"
                         } else {
                             "agent-question-skip"
@@ -357,7 +356,7 @@ impl AgentPane {
                     Button::new("question-submit")
                         .primary()
                         .disabled(!enabled || !prompt.is_complete())
-                        .label(i18n("agent-question-submit"))
+                        .label(t!("agent-question-submit"))
                         .on_click(cx.listener(|this, _, _, cx| this.submit_current_questions(cx))),
                 );
         }

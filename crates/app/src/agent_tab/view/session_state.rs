@@ -2,7 +2,7 @@ use gpui::prelude::*;
 use gpui::{Context, IntoElement, div};
 use gpui_component::{ActiveTheme as _, Icon, IconName, h_flex};
 use nmt_agent::chat::GoalStatus;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
 
@@ -35,7 +35,7 @@ impl SessionStateBadge {
                 .items_center()
                 .text_color(cx.theme().warning)
                 .child(Icon::new(IconName::Map).size_3())
-                .child(i18n("agent-session-plan-mode"))
+                .child(t!("agent-session-plan-mode"))
         });
 
         // The round counter is what says how much of the goal's own budget is
@@ -44,9 +44,12 @@ impl SessionStateBadge {
         let goal = goal.as_ref().map(|goal| {
             let rounds = if goal.max_rounds > 0 {
                 {
-                    i18n("agent-session-goal-rounds")
-                        .replace("{used}", &goal.rounds_started.to_string())
-                        .replace("{total}", &goal.max_rounds.to_string())
+                    t!(
+                        "agent-session-goal-rounds",
+                        used = goal.rounds_started,
+                        total = goal.max_rounds
+                    )
+                    .into_owned()
                 }
             } else {
                 Default::default()

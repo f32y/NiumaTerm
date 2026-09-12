@@ -10,8 +10,8 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
 use gpui_component::{ActiveTheme, ElementExt as _, IconName, Sizable};
-use nmt_i18n::i18n;
 use nmt_terminal::event::{ProgressReport, ProgressState};
+use rust_i18n::t;
 
 use crate::tabs::{TabId, TabManager};
 use crate::ui::composition::{
@@ -389,7 +389,7 @@ impl TabStrip {
 
                 let close = hover_action(
                     ("tab-close", id as usize),
-                    i18n("tabbar-menu-close"),
+                    t!("tabbar-menu-close"),
                     close_layout,
                     close_visibility,
                     "×",
@@ -456,14 +456,14 @@ impl TabStrip {
                             let rename_shell = menu_shell.clone();
                             let close_shell = menu_shell.clone();
 
-                            menu.item(i18n("tabbar-menu-rename"), move |window, cx| {
+                            menu.item(t!("tabbar-menu-rename"), move |window, cx| {
                                 rename_shell.update(cx, |this, cx| {
                                     this.start_tab_rename(TabId(id), window, cx)
                                 });
                             })
                             .icon(IconName::PenLine)
                             .item_disabled(
-                                i18n("tabbar-menu-close"),
+                                t!("tabbar-menu-close"),
                                 !closeable,
                                 move |window, cx| {
                                     close_shell.update(cx, |this, cx| {
@@ -546,7 +546,7 @@ impl TabStrip {
                                     px(TAB_DOT),
                                 )
                                 .label(
-                                    i18n("sidebar-workspace-unread-label").replace("{count}", "1"),
+                                    t!("sidebar-workspace-unread-label", count = "1").into_owned(),
                                 )
                             }))
                             // Bell dot, in the warning color so it reads
@@ -675,11 +675,11 @@ impl TabStrip {
                                             .id(("tab-agent-indicator", id as usize))
                                             .aria_label(match indicator {
                                                 AgentTabIndicator::Busy => {
-                                                    i18n("tabbar-tooltip-agent-busy")
+                                                    t!("tabbar-tooltip-agent-busy")
                                                 }
 
                                                 AgentTabIndicator::Ready => {
-                                                    i18n("tabbar-tooltip-agent-ready")
+                                                    t!("tabbar-tooltip-agent-ready")
                                                 }
                                             })
                                             .size_4()
@@ -707,7 +707,7 @@ impl TabStrip {
                                                     StatusMarkTone::Success,
                                                     px(TAB_DOT),
                                                 )
-                                                .label(i18n("tabbar-tooltip-agent-ready"))
+                                                .label(t!("tabbar-tooltip-agent-ready"))
                                                 .into_any_element(),
                                             }),
                                     )

@@ -3,7 +3,7 @@ use gpui::{AnyElement, Context, div};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::{ActiveTheme as _, Sizable as _, v_flex};
 use nmt_agent::chat::Question;
-use nmt_i18n::i18n;
+use rust_i18n::t;
 
 use crate::agent_tab::settings::UI_RADIUS;
 use crate::agent_tab::transcript::TranscriptView;
@@ -31,7 +31,7 @@ impl TranscriptView {
                 Button::new(("message-questions", index))
                     .ghost()
                     .small()
-                    .label(i18n("agent-question-open"))
+                    .label(t!("agent-question-open"))
                     .on_click(move |_, _, cx| {
                         let _ = owner.update(cx, |pane, cx| {
                             pane.open_message_questions(&id, questions.clone(), cx)
