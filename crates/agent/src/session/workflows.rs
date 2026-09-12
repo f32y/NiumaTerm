@@ -1,12 +1,15 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::chat::Item as SessionItem;
-use crate::claude_code::workflows::{WorkflowRefreshRequest, WorkflowRefreshResult};
 use crate::session::lifecycle::SessionRuntime;
 use crate::transcript::conversation::ConversationState;
-use crate::workflow::{WorkflowAgentState, WorkflowRun, WorkflowSnapshot};
+use crate::workflow::{
+    WorkflowAgentState, WorkflowRefreshRequest, WorkflowRefreshResult, WorkflowRun,
+    WorkflowSnapshot, WorkflowSource,
+};
 
 /// The agent conversation the user has open, and what has been read of it.
 #[derive(Default)]
@@ -16,9 +19,8 @@ pub struct OpenWorkflowAgent {
     pub conversation: Rc<RefCell<ConversationState>>,
     readers: Rc<Cell<usize>>,
 
-    /// Size the transcript had when `items` was parsed, so an unchanged file
-    /// is never re-parsed.
-    len: Option<u64>,
+    /// Last source revision accepted for this conversation.
+    source_revision: Option<u64>,
 
     /// The provider has not persisted this agent's transcript; the row stays
     /// listed and the conversation reports itself unavailable.
@@ -218,7 +220,7 @@ impl WorkflowData {
                     task_id: request.task_id.clone(),
                     agent_ids: request.agent_ids.clone(),
                     open_agent: Some(open.agent_id.clone()),
-                    open_agent_len: open.len,
+                    transcript_revision: open.source_revision,
                 });
             }
         }
@@ -226,9 +228,8 @@ impl WorkflowData {
         scoped
     }
 
-    /// Record how much of the open transcript a tick read, so an unchanged
-    /// file is never re-parsed.
-    pub fn note_open_len(&mut self, result: &WorkflowRefreshResult) {
+    /// Acknowledge only results accepted for the current session and reader.
+    pub fn accept_revision(&mut self, result: &WorkflowRefreshResult) {
         let Some(transcript) = result.transcript.as_ref() else {
             return;
         };
@@ -241,7 +242,7 @@ impl WorkflowData {
         };
 
         if open.task_id == result.task_id && open.agent_id == transcript.agent_id {
-            open.len = Some(transcript.len);
+            open.source_revision = Some(transcript.revision);
         }
     }
 
@@ -264,10 +265,23 @@ impl WorkflowData {
 }
 
 pub struct RefreshPlan {
-    pub cwd: Option<String>,
-    pub session_id: String,
+    cwd: Option<String>,
+    session_id: String,
     pub epoch: u64,
-    pub requests: Vec<WorkflowRefreshRequest>,
+    requests: Vec<WorkflowRefreshRequest>,
+    source: Arc<dyn WorkflowSource>,
+}
+
+impl RefreshPlan {
+    pub fn read(self) -> Vec<WorkflowRefreshResult> {
+        self.requests
+            .iter()
+            .map(|request| {
+                self.source
+                    .refresh(self.cwd.as_deref(), &self.session_id, request)
+            })
+            .collect()
+    }
 }
 
 impl WorkflowData {
@@ -278,6 +292,7 @@ impl WorkflowData {
     ) -> Option<RefreshPlan> {
         let session = runtime.backend()?;
         let session_id = session.session_id()?.to_owned();
+        let source = session.workflow_source()?;
         let requests = self.scope_requests(session.workflow_refresh_requests());
 
         (!requests.is_empty()).then_some(RefreshPlan {
@@ -285,6 +300,7 @@ impl WorkflowData {
             session_id,
             epoch: runtime.epoch(),
             requests,
+            source,
         })
     }
 }

@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::Value;
@@ -12,13 +13,13 @@ use crate::chat::{
 };
 use crate::claude_code::sessions::RestoredTask;
 use crate::claude_code::stream_json;
-use crate::claude_code::workflows::{
-    RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
-};
 use crate::codex::app_server;
 #[cfg(any(test, feature = "test-support"))]
 use crate::session::test_support::{InputResponse, TestBackend};
 use crate::session::{AgentKind, ImageAttachment, OperationError, UnsupportedOperation};
+use crate::workflow::{
+    RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult, WorkflowSource,
+};
 use crate::{AgentWorkspace, LaunchConfig, deepseek};
 
 /// The conversation a restarted backend should continue, qualified by the
@@ -652,15 +653,26 @@ impl Backend {
         }
     }
 
+    /// Providers can supply a background reader alongside their live events.
+    pub fn workflow_source(&self) -> Option<Arc<dyn WorkflowSource>> {
+        match self {
+            Backend::Claude(session) => Some(session.workflow_source()),
+            Backend::Codex(_) | Backend::DeepSeek(_) => None,
+
+            #[cfg(any(test, feature = "test-support"))]
+            Backend::Test(session) => session.workflow_source.clone(),
+        }
+    }
+
     /// What each still-running workflow run needs read on the next refresh
-    /// tick. Only Claude reports workflows, so Codex has nothing to read.
+    /// tick. Providers that publish live events need no background reads.
     pub fn workflow_refresh_requests(&self) -> Vec<WorkflowRefreshRequest> {
         match self {
             Backend::Claude(session) => session.workflow_refresh_requests(),
             Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
 
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(_) => Vec::new(),
+            Backend::Test(session) => session.workflow_requests.clone(),
         }
     }
 

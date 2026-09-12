@@ -1,8 +1,9 @@
 use gpui::AssetSource as _;
 
+use crate::daily_usage::parse_usage;
 use crate::ui::assets::AppAssets;
 use crate::ui::token_usage::{
-    TokenIcon, compact, format_price, format_token_count, model_usage_rows, parse_usage,
+    TokenIcon, compact, format_price, format_token_count, model_usage_rows,
 };
 
 #[test]

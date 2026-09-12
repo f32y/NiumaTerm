@@ -1,10 +1,14 @@
 use std::sync::Arc;
 
+use futures::executor::block_on;
 use nmt_input::keyboard::ModifiersState;
 use nmt_terminal::block_store::BlockStore;
 use nmt_terminal::ghostty::ScrollbarInfo;
 use nmt_terminal::input::{TerminalKey, WheelDelta};
-use nmt_terminal::session::{SurfaceCell, SurfaceCellSide, SurfaceMouseButton};
+use nmt_terminal::selection::SelectionType;
+use nmt_terminal::session::{
+    SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
+};
 
 use crate::block_list::FrozenView;
 use crate::block_list::live::LiveItemState;
@@ -16,8 +20,99 @@ use crate::pane_model::list_mirror::{BlockListMirror, ListOp, ListPosition};
 use crate::pane_model::mouse::{MouseInput, MouseOutcome};
 use crate::pane_model::scroll::ScrollOutcome;
 use crate::pane_model::selection_geometry::{block_gutter_hit, selection_drag_started};
-use crate::pane_model::test_session::{assert_input, controller};
+use crate::pane_model::test_session::{TestClipboard, assert_input, controller};
 use crate::pane_model::viewport::{LocalPoint, Viewport};
+
+#[test]
+fn paste_uses_the_supplied_clipboard_and_respects_input_rejection() {
+    let (mut model, input) = controller(b"\x1b[?2004h", false);
+    let clipboard = TestClipboard::default();
+
+    model.clipboard = Box::new(clipboard.clone());
+
+    let paste = TerminalKey {
+        key: "v",
+        key_char: None,
+        modifiers: if cfg!(target_os = "macos") {
+            ModifiersState::SUPER
+        } else {
+            ModifiersState::CONTROL
+        },
+        function: false,
+    };
+
+    assert!(matches!(model.send_key(&paste), KeyOutcome::Ignored));
+    assert!(input.lock().is_empty());
+
+    *clipboard.text.lock() = Some("clipboard text".into());
+
+    assert!(matches!(model.send_key(&paste), KeyOutcome::Written));
+
+    assert_input(&input, b"\x1b[200~clipboard text\x1b[201~");
+    input.lock().clear();
+    model.source.session.mark_read_only();
+
+    assert!(matches!(model.send_key(&paste), KeyOutcome::Ignored));
+    assert!(input.lock().is_empty());
+}
+
+#[test]
+fn copy_failure_preserves_selection_and_success_preserves_a_newer_gesture() {
+    for (reject_writes, newer_gesture) in [(true, false), (false, false), (false, true)] {
+        let (mut model, _) = controller(b"hello world", false);
+
+        let clipboard = TestClipboard {
+            reject_writes,
+            ..TestClipboard::default()
+        };
+
+        model.clipboard = Box::new(clipboard.clone());
+
+        model.source.session.apply_screen_selection(
+            SurfaceScreenCell { row: 0, col: 0 },
+            SurfaceCellSide::Left,
+            SurfaceMouseEventKind::Down,
+            SelectionType::Simple,
+        );
+
+        model.source.session.apply_screen_selection(
+            SurfaceScreenCell { row: 0, col: 4 },
+            SurfaceCellSide::Right,
+            SurfaceMouseEventKind::Move,
+            SelectionType::Simple,
+        );
+
+        model.refresh_frame();
+
+        let copy = model
+            .interaction
+            .copy_selection(&model.source.session, &model.source.snapshot)
+            .unwrap();
+
+        let text = block_on(copy.request).unwrap().unwrap();
+
+        if newer_gesture {
+            model.interaction.begin_pointer();
+        }
+
+        assert_eq!(
+            model.finish_copy(text.clone(), copy.completion),
+            !reject_writes
+        );
+        assert_eq!(
+            clipboard.text.lock().as_ref(),
+            (!reject_writes).then_some(&text)
+        );
+        assert_eq!(
+            model
+                .source
+                .session
+                .selection_range_in(&model.source.snapshot)
+                .is_some(),
+            reject_writes || newer_gesture
+        );
+    }
+}
 
 #[test]
 fn resize_updates_content_geometry_and_only_invalidates_for_a_new_grid() {

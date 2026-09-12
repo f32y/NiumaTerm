@@ -47,10 +47,13 @@ mod ui;
 // shared code: Windows replaces files under the Restart Manager, macOS hands a
 // signed bundle to Sparkle. Remote sessions, hosted on ConPTY with DPAPI-held
 // keys, still have no counterpart here.
+mod daily_usage;
 #[cfg(target_os = "macos")]
 mod sparkle;
 #[cfg(windows)]
 mod update;
+mod usage_refresh;
+mod usage_sources;
 mod utils;
 mod window;
 mod workspace;

@@ -17,7 +17,7 @@ use parking_lot::Mutex;
 use crate::block_list::chrome::DurationLabels;
 use crate::frame_source::TerminalFrameSource;
 use crate::metrics::CellMetrics;
-use crate::pane_model::{FrameTheme, PaneController, PaneSettings};
+use crate::pane_model::{ClipboardAccess, FrameTheme, PaneController, PaneSettings};
 use crate::wake::wake_channel;
 
 struct TestPty {
@@ -26,6 +26,28 @@ struct TestPty {
     read_token: Token,
     write_token: Token,
     child_token: Token,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct TestClipboard {
+    pub text: Arc<Mutex<Option<String>>>,
+    pub reject_writes: bool,
+}
+
+impl ClipboardAccess for TestClipboard {
+    fn read(&mut self) -> Option<String> {
+        self.text.lock().clone()
+    }
+
+    fn write(&mut self, text: String) -> bool {
+        if self.reject_writes {
+            return false;
+        }
+
+        *self.text.lock() = Some(text);
+
+        true
+    }
 }
 
 impl Read for TestPty {
@@ -184,6 +206,7 @@ pub(crate) fn controller(vt: &[u8], engine_blocks: bool) -> (PaneController, Arc
         settings,
         FrameTheme::default(),
         DurationLabels::default(),
+        Box::<TestClipboard>::default(),
     );
 
     controller.cell_metrics = Some(CellMetrics {

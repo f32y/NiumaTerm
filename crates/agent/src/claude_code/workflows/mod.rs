@@ -16,17 +16,13 @@ use serde_json::Value;
 use crate::background_task::replace_text;
 use crate::json::text_field;
 use crate::workflow::{
-    WorkflowAgent, WorkflowAgentState, WorkflowPhase, WorkflowRun, WorkflowRunState,
-    WorkflowSnapshot,
+    RestoredWorkflowRun, WorkflowAgent, WorkflowAgentState, WorkflowPhase, WorkflowRefresh,
+    WorkflowRun, WorkflowRunState, WorkflowSnapshot,
 };
 
 mod disk;
 
-pub use crate::claude_code::workflows::disk::{
-    RestoredWorkflowRun, WorkflowJournalEntry, WorkflowRefreshRequest, WorkflowRefreshResult,
-    WorkflowTranscriptRead, agent_transcript_len, read_agent_transcript, read_journal,
-    read_run_snapshots, refresh_run, resolve_run_directory,
-};
+pub(crate) use crate::claude_code::workflows::disk::ClaudeWorkflowSource;
 
 /// Reduces the Claude stream into workflow runs. Mirrors the shape of the
 /// child-agent reducer so both are driven from the same place.
@@ -207,7 +203,7 @@ impl ClaudeWorkflows {
 
         // The journal reports an agent's own completion, which can land while
         // the stream is quiet; it never walks a row backwards.
-        for entry in refresh.journal {
+        for entry in refresh.agents {
             let Some(agent) = run
                 .agents
                 .iter_mut()
@@ -216,10 +212,7 @@ impl ClaudeWorkflows {
                 continue;
             };
 
-            let observed = match entry.result {
-                Some(_) => WorkflowAgentState::Done,
-                None => WorkflowAgentState::Running,
-            };
+            let observed = entry.state;
 
             if agent.state == WorkflowAgentState::Queued
                 || (agent.state == WorkflowAgentState::Running
@@ -254,15 +247,6 @@ impl ClaudeWorkflows {
 
         changed
     }
-}
-
-/// What one disk refresh learned. Kept separate from the run so a failed read
-/// cannot erase provider-reported state.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct WorkflowRefresh {
-    pub run_id: Option<String>,
-    pub journal: Vec<WorkflowJournalEntry>,
-    pub failed: bool,
 }
 
 /// Run lifecycle a record reports. A start or progress record means only

@@ -6,6 +6,7 @@ use crate::chat::{
     ForkAnchor, QuestionRequest, SendOutcome, SlashCommandInfo, SlashCommandOutcome,
 };
 use crate::session::{AgentKind, RecoveryIdentity, RenameOutcome};
+use crate::workflow::{WorkflowRefreshRequest, WorkflowSource};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct InputResponse {
@@ -14,6 +15,8 @@ pub struct InputResponse {
 }
 
 pub struct TestBackend {
+    pub workflow_source: Option<Arc<dyn WorkflowSource>>,
+    pub workflow_requests: Vec<WorkflowRefreshRequest>,
     pub approval_accepted: bool,
     pub approval_waits: bool,
     pub approval_responses: Vec<String>,
@@ -45,6 +48,8 @@ impl TestBackend {
         commands: Vec<SlashCommandInfo>,
     ) -> Self {
         Self {
+            workflow_source: None,
+            workflow_requests: Vec::new(),
             approval_accepted: false,
             approval_waits: false,
             approval_responses: Vec::new(),

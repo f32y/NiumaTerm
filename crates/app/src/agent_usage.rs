@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use gpui::prelude::*;
@@ -7,14 +6,13 @@ use gpui::{AnyElement, App, Context, FontWeight, Hsla, Window, div, px, relative
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::hover_card::HoverCard;
 use gpui_component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
-use nmt_agent::claude_code::usage_fetcher::{self as claude_usage, UsageFetchError};
-use nmt_agent::codex::usage_fetcher as codex_usage;
 use nmt_agent::usage::{UsageSnapshot, UsageWindow, now_unix_millis};
 use nmt_agent_ui::profile::{ClaudeIcon, CodexIcon};
 use nmt_i18n::i18n;
 use tracing::warn;
 
 use crate::ui::AppSettings;
+use crate::usage_refresh::{Completion, Refresh, UsageSource};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
@@ -75,188 +73,99 @@ fn quota_gauge(
     )
 }
 
-#[derive(Default)]
-struct ProviderRefresh {
-    refreshing: bool,
-    failed: bool,
-}
-
 pub(crate) struct AgentUsageView {
-    codex: UsageSnapshot,
-    claude: UsageSnapshot,
-    codex_refresh: ProviderRefresh,
-    claude_refresh: ProviderRefresh,
-
-    /// Abandons the in-flight Claude fetch. Only Claude has one: it drives an
-    /// interactive CLI session for up to 25 seconds, while the Codex fetch
-    /// reads local state and returns before a cancellation could reach it.
-    claude_cancel: Arc<AtomicBool>,
-
+    providers: [Refresh<UsageSnapshot>; 2],
     enabled: bool,
 }
 
-impl Drop for AgentUsageView {
-    fn drop(&mut self) {
-        self.claude_cancel.store(true, Ordering::Relaxed);
-    }
-}
-
 impl AgentUsageView {
-    pub(crate) fn new(cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(
+        sources: [Arc<dyn UsageSource<UsageSnapshot>>; 2],
+        cx: &mut Context<Self>,
+    ) -> Self {
         let enabled = cx.global::<AppSettings>().agent.show_agent_usage;
 
         let mut this = Self {
-            codex: UsageSnapshot::default(),
-            claude: UsageSnapshot::default(),
-            codex_refresh: ProviderRefresh::default(),
-            claude_refresh: ProviderRefresh::default(),
-            claude_cancel: Arc::new(AtomicBool::new(false)),
+            providers: sources
+                .map(|source| Refresh::new(UsageSnapshot::default(), source, enabled)),
             enabled,
         };
 
         cx.observe_global::<AppSettings>(|this: &mut Self, cx| {
             let enabled = cx.global::<AppSettings>().agent.show_agent_usage;
 
-            if enabled && !this.enabled {
-                this.enabled = true;
+            if enabled == this.enabled {
+                return;
+            }
+
+            this.enabled = enabled;
+
+            for provider in &mut this.providers {
+                provider.set_enabled(enabled);
+            }
+
+            if enabled {
                 this.refresh_all(cx);
-            } else if !enabled && this.enabled {
-                this.enabled = false;
-                this.claude_cancel.store(true, Ordering::Relaxed);
             }
         })
         .detach();
 
-        cx.spawn(
-            async move |view: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| loop {
+        cx.spawn(async move |view, cx| {
+            loop {
                 cx.background_executor().timer(REFRESH_INTERVAL).await;
 
-                if view
-                    .update(cx, |this, cx| {
-                        if this.enabled {
-                            this.refresh_all(cx);
-                        }
-                    })
-                    .is_err()
-                {
+                if view.update(cx, |this, cx| this.refresh_all(cx)).is_err() {
                     break;
                 }
-            },
-        )
+            }
+        })
         .detach();
 
-        if enabled {
-            this.refresh_all(cx);
-        }
+        this.refresh_all(cx);
 
         this
     }
 
     fn refresh_all(&mut self, cx: &mut Context<Self>) {
-        self.refresh_codex(cx);
-        self.refresh_claude(cx);
+        for index in 0..self.providers.len() {
+            self.refresh_provider(index, cx);
+        }
     }
 
-    fn refresh_codex(&mut self, cx: &mut Context<Self>) {
-        if self.codex_refresh.refreshing {
+    fn refresh_provider(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(fetch) = self.providers[index].begin() else {
             return;
-        }
-
-        self.codex_refresh.refreshing = true;
+        };
 
         cx.notify();
 
-        let fetch = cx
-            .background_executor()
-            .spawn(async move { codex_usage::fetch() });
+        let worker = cx.background_executor().spawn(async move { fetch.run() });
 
-        cx.spawn(
-            async move |view: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
-                let output = fetch.await;
+        cx.spawn(async move |view, cx| {
+            let fetched = worker.await;
 
-                view.update(cx, |this, cx| {
-                    this.codex_refresh.refreshing = false;
+            let _ = view.update(cx, |this, cx| {
+                match this.providers[index].complete(fetched) {
+                    Completion::Retry => this.refresh_provider(index, cx),
 
-                    match output {
-                        Ok(usage) => {
-                            this.codex = usage;
-                            this.codex_refresh.failed = false;
-                        }
-
-                        Err(err) => {
-                            this.codex_refresh.failed = true;
-                            warn!("Codex usage refresh failed: {err}");
-                        }
+                    Completion::Failed(message) => {
+                        warn!(provider = index, "account usage refresh failed: {message}")
                     }
 
-                    cx.notify();
-                })
-                .ok();
-            },
-        )
-        .detach();
-    }
+                    Completion::Updated | Completion::Discarded => {}
+                }
 
-    fn refresh_claude(&mut self, cx: &mut Context<Self>) {
-        if self.claude_refresh.refreshing {
-            return;
-        }
-
-        self.claude_refresh.refreshing = true;
-        self.claude_cancel.store(true, Ordering::Relaxed);
-        self.claude_cancel = Arc::new(AtomicBool::new(false));
-
-        let cancelled = self.claude_cancel.clone();
-
-        cx.notify();
-
-        let fetch = cx
-            .background_executor()
-            .spawn(async move { claude_usage::fetch_with_cancel(&cancelled) });
-
-        cx.spawn(
-            async move |view: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
-                let output = fetch.await;
-
-                view.update(cx, |this, cx| {
-                    this.claude_refresh.refreshing = false;
-
-                    match output {
-                        Ok(usage) => {
-                            this.claude = usage;
-                            this.claude_refresh.failed = false;
-                        }
-
-                        // A cancelled fetch was abandoned because the view was
-                        // switched off mid-flight; if it has since been switched
-                        // back on, nothing else will start the fetch it skipped.
-                        Err(UsageFetchError::Cancelled) => {
-                            this.claude_refresh.failed = true;
-
-                            if this.enabled {
-                                this.refresh_claude(cx);
-                            }
-                        }
-
-                        Err(UsageFetchError::Failed(message)) => {
-                            this.claude_refresh.failed = true;
-                            warn!("Claude usage refresh failed: {message}");
-                        }
-                    }
-
-                    cx.notify();
-                })
-                .ok();
-            },
-        )
+                cx.notify();
+            });
+        })
         .detach();
     }
 
     fn accessibility_label(&self) -> String {
-        let [codex_five_hour, codex_week] = self.codex.compact_values();
-        let [claude_five_hour, claude_week] = self.claude.compact_values();
+        let [codex_five_hour, codex_week] = self.providers[0].value.compact_values();
+        let [claude_five_hour, claude_week] = self.providers[1].value.compact_values();
 
-        let refreshing = if self.codex_refresh.refreshing || self.claude_refresh.refreshing {
+        let refreshing = if self.providers[0].refreshing() || self.providers[1].refreshing() {
             i18n("agent-usage-accessibility-refreshing")
         } else {
             ""
@@ -559,13 +468,13 @@ fn render_provider_panel(
 
 impl Render for AgentUsageView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let refreshing = self.codex_refresh.refreshing || self.claude_refresh.refreshing;
+        let refreshing = self.providers[0].refreshing() || self.providers[1].refreshing();
 
         let codex_gauge = quota_gauge(
             "agent-usage-codex",
             i18n("agent-provider-codex"),
             Icon::new(CodexIcon),
-            &self.codex,
+            &self.providers[0].value,
             cx,
         );
 
@@ -573,7 +482,7 @@ impl Render for AgentUsageView {
             "agent-usage-claude",
             i18n("agent-provider-claude"),
             Icon::new(ClaudeIcon),
-            &self.claude,
+            &self.providers[1].value,
             cx,
         );
 
@@ -594,12 +503,12 @@ impl Render for AgentUsageView {
                 .bg(cx.theme().sidebar_foreground.opacity(0.15))
         });
 
-        let codex = self.codex.clone();
-        let claude = self.claude.clone();
-        let codex_refreshing = self.codex_refresh.refreshing;
-        let claude_refreshing = self.claude_refresh.refreshing;
-        let codex_failed = self.codex_refresh.failed;
-        let claude_failed = self.claude_refresh.failed;
+        let codex = self.providers[0].value.clone();
+        let claude = self.providers[1].value.clone();
+        let codex_refreshing = self.providers[0].refreshing();
+        let claude_refreshing = self.providers[1].refreshing();
+        let codex_failed = self.providers[0].failed;
+        let claude_failed = self.providers[1].failed;
 
         let trigger = Button::new("agent-usage")
             .ghost()

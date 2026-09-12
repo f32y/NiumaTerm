@@ -10,37 +10,36 @@
 //!   after the run ends. It is the only direct `taskId` -> `runId` mapping and
 //!   the restoration source, and it is useless for live refreshing.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use parking_lot::Mutex;
 use serde_json::Value;
 
 use crate::chat::Item;
 use crate::claude_code::sessions::{parse_child_replay, project_dir};
-use crate::claude_code::workflows::{WorkflowRefresh, parse_progress};
+use crate::claude_code::workflows::parse_progress;
 use crate::json::text_field;
-use crate::workflow::{WorkflowAgent, WorkflowAgentState, WorkflowRun, WorkflowRunState};
+use crate::workflow::{
+    RestoredWorkflowRun, WorkflowAgent, WorkflowAgentProgress, WorkflowAgentState,
+    WorkflowRefreshRequest, WorkflowRefreshResult, WorkflowRun, WorkflowRunState, WorkflowSource,
+    WorkflowTranscriptRead,
+};
 
 /// One agent's line in a run journal. `result` is present once the agent has
 /// finished, which is what makes the journal worth polling: it reports a
 /// completion the stream may not mention for another few seconds.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WorkflowJournalEntry {
-    pub agent_id: String,
-    pub result: Option<String>,
-}
-
-/// A run rebuilt from its completion snapshot.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RestoredWorkflowRun {
-    pub run: WorkflowRun,
+pub(super) struct WorkflowJournalEntry {
+    pub(super) agent_id: String,
+    pub(super) result: Option<String>,
 }
 
 /// Directory holding one run's per-agent transcripts and journal.
-pub fn resolve_run_directory(
+fn resolve_run_directory(
     cwd: Option<&str>,
     session_id: &str,
     task_id: &str,
@@ -51,7 +50,7 @@ pub fn resolve_run_directory(
     resolve_run_directory_at(&project, session_id, task_id, agent_ids)
 }
 
-pub(crate) fn resolve_run_directory_at(
+pub(super) fn resolve_run_directory_at(
     project: &Path,
     session_id: &str,
     task_id: &str,
@@ -116,7 +115,7 @@ fn run_id_for_task(session: &Path, task_id: &str) -> Option<String> {
 /// A journal being appended to as this reads can end mid-line; the records
 /// read so far are still valid, so a trailing partial line is dropped rather
 /// than failing the refresh.
-pub fn read_journal(dir: &Path) -> Result<Vec<WorkflowJournalEntry>, String> {
+pub(super) fn read_journal(dir: &Path) -> Result<Vec<WorkflowJournalEntry>, String> {
     let path = dir.join("journal.jsonl");
     let file = fs::File::open(&path).map_err(|error| format!("{}: {error}", path.display()))?;
 
@@ -154,7 +153,7 @@ pub fn read_journal(dir: &Path) -> Result<Vec<WorkflowJournalEntry>, String> {
 }
 
 /// One agent's own conversation, in the items the parent transcript renders.
-pub fn read_agent_transcript(dir: &Path, agent_id: &str) -> Result<Vec<Item>, String> {
+pub(super) fn read_agent_transcript(dir: &Path, agent_id: &str) -> Result<Vec<Item>, String> {
     let path = dir.join(format!("agent-{agent_id}.jsonl"));
     let file = fs::File::open(&path).map_err(|error| format!("{}: {error}", path.display()))?;
 
@@ -163,99 +162,136 @@ pub fn read_agent_transcript(dir: &Path, agent_id: &str) -> Result<Vec<Item>, St
 
 /// Size of an agent transcript, so a caller can skip re-parsing a file that
 /// has not grown since it last read it.
-pub fn agent_transcript_len(dir: &Path, agent_id: &str) -> Option<u64> {
+pub(super) fn agent_transcript_len(dir: &Path, agent_id: &str) -> Option<u64> {
     fs::metadata(dir.join(format!("agent-{agent_id}.jsonl")))
         .ok()
         .map(|metadata| metadata.len())
 }
 
-/// What one run needs read on a refresh tick.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct WorkflowRefreshRequest {
-    pub task_id: String,
-
-    /// Agent ids the run has reported, used to find its directory while the
-    /// run is still live.
-    pub agent_ids: Vec<String>,
-
-    /// The agent whose conversation is open, when it belongs to this run.
-    pub open_agent: Option<String>,
-
-    /// Size that transcript had when it was last parsed, so an unchanged file
-    /// costs a stat rather than a parse.
-    pub open_agent_len: Option<u64>,
+/// File observations remain private to the reader. A consumer acknowledges a
+/// revision only after accepting the result, so discarded reads can be retried.
+#[derive(Default)]
+pub(crate) struct ClaudeWorkflowSource {
+    cache: Mutex<TranscriptCache>,
 }
 
-/// One agent conversation read from disk.
-#[derive(Clone, Debug, PartialEq)]
-pub struct WorkflowTranscriptRead {
-    pub agent_id: String,
-    pub items: Vec<Item>,
-    pub len: u64,
+#[derive(Default)]
+struct TranscriptCache {
+    next_revision: u64,
+    transcripts: HashMap<PathBuf, (u64, u64)>,
 }
 
-/// Everything one refresh tick learned about one run.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct WorkflowRefreshResult {
-    pub task_id: String,
-    pub refresh: WorkflowRefresh,
-    pub transcript: Option<WorkflowTranscriptRead>,
-}
-
-/// Read one run's live record. Meant for a background thread: it performs
-/// every file access a tick needs for this run and returns what changed.
-///
-/// A run whose directory cannot be resolved yet is not a failure — the
-/// provider simply has not written it — so it reports nothing rather than
-/// flagging the run.
-pub fn refresh_run(
-    cwd: Option<&str>,
-    session_id: &str,
-    request: &WorkflowRefreshRequest,
-) -> WorkflowRefreshResult {
-    let mut result = WorkflowRefreshResult {
-        task_id: request.task_id.clone(),
-        ..WorkflowRefreshResult::default()
-    };
-
-    let Some(dir) = resolve_run_directory(cwd, session_id, &request.task_id, &request.agent_ids)
-    else {
-        return result;
-    };
-
-    result.refresh.run_id = dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(str::to_owned);
-
-    match read_journal(&dir) {
-        Ok(journal) => result.refresh.journal = journal,
-        // The directory exists but its journal does not read; that is the
-        // refresh failing, never the run.
-        Err(_) => result.refresh.failed = true,
+impl WorkflowSource for ClaudeWorkflowSource {
+    fn restore(
+        &self,
+        cwd: Option<&str>,
+        session_id: &str,
+    ) -> Result<Vec<RestoredWorkflowRun>, String> {
+        read_run_snapshots(cwd, session_id)
     }
 
-    if let Some(agent_id) = request.open_agent.as_deref() {
-        let len = agent_transcript_len(&dir, agent_id);
+    fn refresh(
+        &self,
+        cwd: Option<&str>,
+        session_id: &str,
+        request: &WorkflowRefreshRequest,
+    ) -> WorkflowRefreshResult {
+        let dir = resolve_run_directory(cwd, session_id, &request.task_id, &request.agent_ids);
 
-        // Re-parse only a file that grew; an unchanged one is already shown.
-        if len.is_some()
-            && len != request.open_agent_len
-            && let Ok(items) = read_agent_transcript(&dir, agent_id)
-        {
-            result.transcript = Some(WorkflowTranscriptRead {
-                agent_id: agent_id.to_owned(),
-                items,
-                len: len.unwrap_or_default(),
-            });
+        self.refresh_directory(dir.as_deref(), request)
+    }
+}
+
+impl ClaudeWorkflowSource {
+    pub(super) fn refresh_directory(
+        &self,
+        dir: Option<&Path>,
+        request: &WorkflowRefreshRequest,
+    ) -> WorkflowRefreshResult {
+        let mut result = WorkflowRefreshResult {
+            task_id: request.task_id.clone(),
+            ..WorkflowRefreshResult::default()
+        };
+
+        let Some(dir) = dir else {
+            return result;
+        };
+
+        result.refresh.run_id = dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_owned);
+
+        match read_journal(dir) {
+            Ok(journal) => {
+                result.refresh.agents = journal
+                    .into_iter()
+                    .map(|entry| WorkflowAgentProgress {
+                        agent_id: entry.agent_id,
+                        state: if entry.result.is_some() {
+                            WorkflowAgentState::Done
+                        } else {
+                            WorkflowAgentState::Running
+                        },
+                        result: entry.result,
+                    })
+                    .collect()
+            }
+
+            Err(_) => result.refresh.failed = true,
         }
+
+        if let Some(agent_id) = request.open_agent.as_deref() {
+            result.transcript = self.read_transcript(dir, agent_id, request.transcript_revision);
+        }
+
+        result
     }
 
-    result
+    fn read_transcript(
+        &self,
+        dir: &Path,
+        agent_id: &str,
+        accepted_revision: Option<u64>,
+    ) -> Option<WorkflowTranscriptRead> {
+        let path = dir.join(format!("agent-{agent_id}.jsonl"));
+        let len = agent_transcript_len(dir, agent_id)?;
+        let mut cache = self.cache.lock();
+        let previous = cache.transcripts.get(&path).copied();
+
+        if let Some((previous_len, revision)) = previous
+            && previous_len == len
+            && accepted_revision == Some(revision)
+        {
+            return None;
+        }
+
+        let items = read_agent_transcript(dir, agent_id).ok()?;
+
+        let revision = match previous {
+            Some((previous_len, revision)) if previous_len == len => revision,
+
+            _ => {
+                cache.next_revision += 1;
+
+                let revision = cache.next_revision;
+
+                cache.transcripts.insert(path, (len, revision));
+
+                revision
+            }
+        };
+
+        Some(WorkflowTranscriptRead {
+            agent_id: agent_id.to_owned(),
+            items,
+            revision,
+        })
+    }
 }
 
 /// Every run a resumed session completed, newest last.
-pub fn read_run_snapshots(
+fn read_run_snapshots(
     cwd: Option<&str>,
     session_id: &str,
 ) -> Result<Vec<RestoredWorkflowRun>, String> {
@@ -265,7 +301,7 @@ pub fn read_run_snapshots(
     read_run_snapshots_at(&project, session_id)
 }
 
-pub(crate) fn read_run_snapshots_at(
+pub(super) fn read_run_snapshots_at(
     project: &Path,
     session_id: &str,
 ) -> Result<Vec<RestoredWorkflowRun>, String> {

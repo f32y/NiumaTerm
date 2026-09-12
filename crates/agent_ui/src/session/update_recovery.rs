@@ -1,14 +1,7 @@
 use gpui::{App, Context};
+use nmt_agent::session::lifecycle::RecoveryReadiness;
 
 use crate::AgentPane;
-use crate::session::RecoverySnapshot;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RecoveryReadiness {
-    Ready(RecoverySnapshot),
-    Busy(String),
-    MissingIdentity(String),
-}
 
 impl AgentPane {
     pub fn recovery_readiness(&self, cx: &App) -> RecoveryReadiness {

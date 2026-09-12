@@ -8,7 +8,9 @@ use std::{error, fmt, io, thread};
 use nmt_config::{CursorShape, active_colors};
 use nmt_platform::windows::powershell::DEFAULT_SHELL;
 use nmt_platform::windows::process::ProcessTree;
-use nmt_platform::{PtyOptions, WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env};
+use nmt_platform::{
+    EventedPty, Pty, PtyOptions, WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env,
+};
 use nmt_terminal::event::{EventListener, Msg, MsgSender, TerminalEvent, WindowId};
 use nmt_terminal::pty_pipe::{SessionOptions as PipeOptions, start_session};
 use nmt_terminal::session::request::CheckpointRequest;
@@ -285,22 +287,30 @@ impl Drop for RemoteSession {
 }
 
 #[derive(Default)]
-pub struct RemoteSessionHub {
+pub struct RemoteSessionHub<S = WindowsPtySource> {
     next_session_id: AtomicU64,
     sessions: Mutex<HashMap<SessionId, Arc<RemoteSession>>>,
+    source: S,
 }
 
-impl RemoteSessionHub {
-    pub fn new() -> Self {
-        Self::default()
-    }
+pub struct OpenedPty<T> {
+    pub pty: T,
+    pub process_tree: Option<ProcessTree>,
+}
 
-    pub fn open(&self, options: SessionOptions) -> Result<SessionId, HubError> {
-        validate_size(options.cols, options.rows)?;
+pub trait PtySource {
+    type Pty: EventedPty + Send + 'static;
 
-        let id = SessionId(self.next_session_id.fetch_add(1, Ordering::Relaxed) + 1);
-        let stream = Arc::new(Mutex::new(StreamState::default()));
+    fn open(&self, options: &SessionOptions) -> io::Result<OpenedPty<Self::Pty>>;
+}
 
+#[derive(Default)]
+pub struct WindowsPtySource;
+
+impl PtySource for WindowsPtySource {
+    type Pty = Pty;
+
+    fn open(&self, options: &SessionOptions) -> io::Result<OpenedPty<Pty>> {
         let pty_options = PtyOptions {
             shell: &options.shell,
             args: &options.args,
@@ -316,10 +326,37 @@ impl RemoteSessionHub {
             create_managed_pty_with_env(pty_options)
         } else {
             create_pty_with_env(pty_options)
-        }
-        .map_err(HubError::Spawn)?;
+        }?;
 
         let process_tree = pty.process_tree();
+
+        Ok(OpenedPty { pty, process_tree })
+    }
+}
+
+impl RemoteSessionHub<WindowsPtySource> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl<S: PtySource> RemoteSessionHub<S> {
+    pub fn with_pty_source(source: S) -> Self {
+        Self {
+            next_session_id: AtomicU64::new(0),
+            sessions: Mutex::new(HashMap::new()),
+            source,
+        }
+    }
+
+    pub fn open(&self, options: SessionOptions) -> Result<SessionId, HubError> {
+        validate_size(options.cols, options.rows)?;
+
+        let id = SessionId(self.next_session_id.fetch_add(1, Ordering::Relaxed) + 1);
+        let stream = Arc::new(Mutex::new(StreamState::default()));
+
+        let OpenedPty { pty, process_tree } =
+            self.source.open(&options).map_err(HubError::Spawn)?;
 
         let output_stream = Arc::clone(&stream);
 

@@ -6,7 +6,8 @@ use uuid::Uuid;
 
 use crate::claude_code::tasks::ClaudeTasks;
 use crate::claude_code::workflows::disk::{
-    read_agent_transcript, read_run_snapshots_at, resolve_run_directory_at,
+    agent_transcript_len, read_agent_transcript, read_journal, read_run_snapshots_at,
+    resolve_run_directory_at,
 };
 use crate::claude_code::workflows::*;
 use crate::workflow::*;
@@ -431,6 +432,68 @@ fn a_grown_transcript_is_detectable_without_reparsing() {
 }
 
 #[test]
+fn source_retries_unaccepted_reads_and_invalidates_grown_transcripts() {
+    let root = run_tree();
+    let dir = run_dir_of(&root);
+    let source = ClaudeWorkflowSource::default();
+
+    let mut request = WorkflowRefreshRequest {
+        task_id: TASK.into(),
+        open_agent: Some(AGENT_TWO.into()),
+        ..Default::default()
+    };
+
+    let first = source.refresh_directory(Some(&dir), &request);
+    let transcript = first.transcript.expect("initial transcript");
+
+    assert!(!transcript.items.is_empty());
+    assert_eq!(first.refresh.agents.len(), 2);
+    assert!(
+        first
+            .refresh
+            .agents
+            .iter()
+            .all(|agent| agent.state == WorkflowAgentState::Done)
+    );
+
+    let retry = source.refresh_directory(Some(&dir), &request);
+
+    assert_eq!(retry.transcript, Some(transcript.clone()));
+
+    request.transcript_revision = Some(transcript.revision);
+
+    assert!(
+        source
+            .refresh_directory(Some(&dir), &request)
+            .transcript
+            .is_none()
+    );
+
+    fs::write(
+        dir.join(format!("agent-{AGENT_TWO}.jsonl")),
+        format!("{TRANSCRIPT}\n"),
+    )
+    .expect("grow transcript");
+
+    let grown = source
+        .refresh_directory(Some(&dir), &request)
+        .transcript
+        .unwrap();
+
+    assert_ne!(grown.revision, transcript.revision);
+
+    request.transcript_revision = Some(grown.revision);
+    fs::remove_file(dir.join("journal.jsonl")).expect("remove journal");
+
+    let failed = source.refresh_directory(Some(&dir), &request);
+
+    assert!(failed.refresh.failed);
+    assert!(failed.transcript.is_none());
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
 fn a_resumed_session_restores_its_completed_runs() {
     let root = run_tree();
     let restored = read_run_snapshots_at(&root, SESSION).expect("snapshots read");
@@ -484,13 +547,15 @@ fn a_journal_refresh_advances_agents_the_stream_has_not_settled() {
         TASK,
         WorkflowRefresh {
             run_id: Some(RUN_ID.to_owned()),
-            journal: vec![
-                WorkflowJournalEntry {
+            agents: vec![
+                WorkflowAgentProgress {
                     agent_id: AGENT_ONE.to_owned(),
+                    state: WorkflowAgentState::Done,
                     result: Some("ok".to_owned()),
                 },
-                WorkflowJournalEntry {
+                WorkflowAgentProgress {
                     agent_id: AGENT_TWO.to_owned(),
+                    state: WorkflowAgentState::Running,
                     result: None,
                 },
             ],

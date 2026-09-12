@@ -22,6 +22,7 @@ use nmt_agent::AgentRoute;
 use nmt_config::active_colors;
 use nmt_config::local_state::TabState;
 use nmt_i18n::i18n;
+use nmt_terminal::clipboard::{Clipboard, ClipboardType};
 use nmt_terminal::input::WheelDelta;
 use nmt_terminal::session::interaction::PendingCopy;
 use nmt_terminal::session::{
@@ -39,7 +40,7 @@ use crate::pane_model::list_mirror::ListPosition;
 use crate::pane_model::mouse::{MouseInput, MouseOutcome};
 use crate::pane_model::scroll::ScrollOutcome;
 use crate::pane_model::viewport::LocalPoint;
-use crate::pane_model::{PaneController, PaneSettings};
+use crate::pane_model::{ClipboardAccess, PaneController, PaneSettings};
 use crate::scrollbar::geometry::SCROLLBAR_AUTO_HIDE_DELAY;
 use crate::scrollbar::scrollbar_element;
 use crate::settings::{TerminalSettings, duration_labels};
@@ -103,6 +104,20 @@ pub struct TerminalPane {
 pub struct AgentInterrupted;
 
 struct TextCopiedNotification;
+
+struct DesktopClipboard;
+
+impl ClipboardAccess for DesktopClipboard {
+    fn read(&mut self) -> Option<String> {
+        let text = Clipboard::default().get(ClipboardType::Clipboard);
+
+        (!text.is_empty()).then_some(text)
+    }
+
+    fn write(&mut self, text: String) -> bool {
+        Clipboard::default().set(ClipboardType::Clipboard, text)
+    }
+}
 
 impl EventEmitter<AgentInterrupted> for TerminalPane {}
 
@@ -223,6 +238,7 @@ impl TerminalPane {
                 settings.into(),
                 (&active_colors()).into(),
                 duration_labels(),
+                Box::new(DesktopClipboard),
             ),
             content_bounds: None,
             wake,

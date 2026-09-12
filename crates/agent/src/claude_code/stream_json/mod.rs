@@ -63,12 +63,13 @@ use crate::claude_code::stream_json::parse::{
 use crate::claude_code::tasks::ClaudeTasks;
 #[cfg(test)]
 use crate::claude_code::tool_items::{edit_diff, input_detail, tool_item};
-use crate::claude_code::workflows::{
-    ClaudeWorkflows, RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
-};
+use crate::claude_code::workflows::{ClaudeWorkflowSource, ClaudeWorkflows};
 use crate::launcher::AgentCli;
 use crate::request_policy::RequestClass;
 use crate::subprocess::JsonLineProcess;
+use crate::workflow::{
+    RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult, WorkflowSource,
+};
 use crate::workspace::AgentWorkspace;
 
 mod control;
@@ -151,6 +152,8 @@ pub struct Session {
     /// Workflow runs, reduced from the same records the child-agent reducer
     /// rejects. The two views never share a row.
     workflows: ClaudeWorkflows,
+
+    workflow_source: Arc<dyn WorkflowSource>,
 }
 
 impl Session {
@@ -326,6 +329,7 @@ impl Session {
             compacting: false,
             tasks: ClaudeTasks::default(),
             workflows: ClaudeWorkflows::default(),
+            workflow_source: Arc::new(ClaudeWorkflowSource::default()),
         };
 
         session.control.set_timer(timer);
@@ -1012,6 +1016,11 @@ impl Session {
         true
     }
 
+    /// The background reader shares this session's transcript revisions.
+    pub fn workflow_source(&self) -> Arc<dyn WorkflowSource> {
+        self.workflow_source.clone()
+    }
+
     /// What each still-running workflow run needs read on the next refresh
     /// tick. A terminal run is left out: its record can no longer change.
     pub fn workflow_refresh_requests(&self) -> Vec<WorkflowRefreshRequest> {
@@ -1031,7 +1040,7 @@ impl Session {
                     .filter_map(|agent| agent.agent_id)
                     .collect(),
                 open_agent: None,
-                open_agent_len: None,
+                transcript_revision: None,
             })
             .collect()
     }

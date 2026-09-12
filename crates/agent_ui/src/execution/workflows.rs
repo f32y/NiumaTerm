@@ -1,13 +1,10 @@
 use std::time::Duration;
 
 use gpui::Context;
-use nmt_agent::claude_code::workflows::{
-    self, RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
-};
 use nmt_agent::session::Backend;
 use nmt_agent::session::workflows::RefreshPlan;
+use nmt_agent::workflow::{RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult};
 
-use crate::capabilities::AgentCapabilities as _;
 use crate::execution::AgentSession;
 
 impl AgentSession {
@@ -22,9 +19,16 @@ impl AgentSession {
     pub(crate) fn restore_workflows(&mut self, cx: &mut Context<Self>) {
         // A harness that reports its runs live replays them with the rest of
         // the conversation, so there is no stored record to go looking for.
-        if !self.kind.caps().workflows_read_from_disk {
+        let source = self
+            .controller
+            .borrow()
+            .runtime
+            .backend()
+            .and_then(Backend::workflow_source);
+
+        let Some(source) = source else {
             return;
-        }
+        };
 
         let Some(session_id) = self
             .controller
@@ -51,7 +55,7 @@ impl AgentSession {
 
         let read = cx
             .background_executor()
-            .spawn(async move { workflows::read_run_snapshots(cwd.as_deref(), &session_id) });
+            .spawn(async move { source.restore(cwd.as_deref(), &session_id) });
 
         cx.spawn(async move |this, cx| {
             let restored = read.await;
@@ -120,26 +124,17 @@ impl AgentSession {
                     break;
                 };
 
-                let cwd = plan.cwd;
-                let session_id = plan.session_id;
-                let requests = plan.requests;
+                let epoch = plan.epoch;
 
                 // A tick does its own reads before the next beat, so ticks can
                 // fall behind but never overlap or queue up.
                 let results = cx
                     .background_executor()
-                    .spawn(async move {
-                        requests
-                            .iter()
-                            .map(|request| {
-                                workflows::refresh_run(cwd.as_deref(), &session_id, request)
-                            })
-                            .collect::<Vec<_>>()
-                    })
+                    .spawn(async move { plan.read() })
                     .await;
 
                 let applied = this.update(cx, |this, cx| {
-                    this.apply_workflow_refresh_results(plan.epoch, results, cx)
+                    this.apply_workflow_refresh_results(epoch, results, cx)
                 });
 
                 if !matches!(applied, Ok(true)) {
@@ -154,7 +149,13 @@ impl AgentSession {
     fn should_refresh_workflows(&self) -> bool {
         !self.is_closed()
             && self.workflow_readers.get() > 0
-            && self.kind.caps().workflows_read_from_disk
+            && self
+                .controller
+                .borrow()
+                .runtime
+                .backend()
+                .and_then(Backend::workflow_source)
+                .is_some()
             && self.controller.borrow().workflows.has_active_run()
     }
 
@@ -185,7 +186,7 @@ impl AgentSession {
             self.controller
                 .borrow_mut()
                 .workflows
-                .note_open_len(&result);
+                .accept_revision(&result);
 
             let events = {
                 let mut state = self.controller.borrow_mut();
@@ -229,13 +230,20 @@ impl AgentSession {
         // A harness that reports its runs live has no stored record to read:
         // the member is a conversation of its own on the host, and asking for
         // it is one request whose answer arrives as an ordinary event.
-        if !self.kind.caps().workflows_read_from_disk {
+        let source = self
+            .controller
+            .borrow()
+            .runtime
+            .backend()
+            .and_then(Backend::workflow_source);
+
+        let Some(source) = source else {
             if let Some(session) = self.controller.borrow_mut().runtime.backend_mut() {
                 session.request_workflow_agent_transcript(&task_id, &agent_id);
             }
 
             return;
-        }
+        };
 
         let Some(session_id) = self
             .controller
@@ -252,7 +260,7 @@ impl AgentSession {
             task_id: task_id.clone(),
             agent_ids: self.controller.borrow().workflows.agent_ids(&task_id),
             open_agent: Some(agent_id),
-            open_agent_len: None,
+            transcript_revision: None,
         };
 
         let cwd = self.active_workspace.primary().map(str::to_owned);
@@ -260,7 +268,7 @@ impl AgentSession {
 
         let read = cx
             .background_executor()
-            .spawn(async move { workflows::refresh_run(cwd.as_deref(), &session_id, &request) });
+            .spawn(async move { source.refresh(cwd.as_deref(), &session_id, &request) });
 
         cx.spawn(async move |this, cx| {
             let result = read.await;

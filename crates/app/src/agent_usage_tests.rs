@@ -1,20 +1,35 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
 use crate::agent_usage::*;
+use crate::usage_refresh::FetchError;
 
 #[test]
 fn compact_projection_keeps_provider_and_window_order() {
     let view = AgentUsageView {
-        codex: UsageSnapshot {
-            five_hour: Some(UsageWindow::new(25, 300)),
-            weekly: Some(UsageWindow::new(80, 10_080)),
-            ..UsageSnapshot::default()
-        },
-        claude: UsageSnapshot {
-            five_hour: Some(UsageWindow::new(3, 300)),
-            ..UsageSnapshot::default()
-        },
-        codex_refresh: ProviderRefresh::default(),
-        claude_refresh: ProviderRefresh::default(),
-        claude_cancel: Arc::new(AtomicBool::new(false)),
+        providers: [
+            Refresh::new(
+                UsageSnapshot {
+                    five_hour: Some(UsageWindow::new(25, 300)),
+                    weekly: Some(UsageWindow::new(80, 10_080)),
+                    ..UsageSnapshot::default()
+                },
+                Arc::new(|_: &AtomicBool| -> Result<UsageSnapshot, FetchError> {
+                    panic!("presentation does not fetch")
+                }),
+                true,
+            ),
+            Refresh::new(
+                UsageSnapshot {
+                    five_hour: Some(UsageWindow::new(3, 300)),
+                    ..UsageSnapshot::default()
+                },
+                Arc::new(|_: &AtomicBool| -> Result<UsageSnapshot, FetchError> {
+                    panic!("presentation does not fetch")
+                }),
+                true,
+            ),
+        ],
         enabled: true,
     };
 

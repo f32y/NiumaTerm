@@ -5,7 +5,6 @@ mod settings;
 
 use nmt_config::colors::Colors;
 use nmt_input::keyboard::ModifiersState;
-use nmt_terminal::clipboard::{Clipboard, ClipboardType};
 use nmt_terminal::input::{TerminalKey, WheelDelta, should_defer_to_ime};
 use nmt_terminal::links::{follows_link, resolve_link};
 use nmt_terminal::selection::SelectionType;
@@ -60,6 +59,12 @@ use crate::pane_model::viewport::{LocalPoint, Viewport};
 
 const BLOCK_GUTTER_SELECTION_ENABLED: bool = false;
 
+pub(crate) trait ClipboardAccess {
+    fn read(&mut self) -> Option<String>;
+
+    fn write(&mut self, text: String) -> bool;
+}
+
 pub(crate) struct PaneController {
     pub source: TerminalFrameSource,
     pub interaction: TerminalInteraction,
@@ -82,6 +87,7 @@ pub(crate) struct PaneController {
     pub scrollbar: ScrollbarActivity,
     links: LinkHover,
     pub viewport: Viewport,
+    clipboard: Box<dyn ClipboardAccess>,
 }
 
 impl PaneController {
@@ -90,6 +96,7 @@ impl PaneController {
         settings: PaneSettings,
         theme: FrameTheme,
         duration_labels: DurationLabels,
+        clipboard: Box<dyn ClipboardAccess>,
     ) -> Self {
         Self {
             source,
@@ -110,6 +117,7 @@ impl PaneController {
             scrollbar: ScrollbarActivity::default(),
             links: LinkHover::default(),
             viewport: Viewport::default(),
+            clipboard,
         }
     }
 
@@ -349,7 +357,9 @@ impl PaneController {
             InputOutcome::CopyPending(copy) => KeyOutcome::CopyPending(copy),
 
             InputOutcome::PasteRequested => {
-                let text = Clipboard::default().get(ClipboardType::Clipboard);
+                let Some(text) = self.clipboard.read() else {
+                    return KeyOutcome::Ignored;
+                };
 
                 if self.source.session.paste_text(&text) {
                     KeyOutcome::Written
@@ -372,8 +382,8 @@ impl PaneController {
         }
     }
 
-    pub(crate) fn copy_text_to_clipboard(&self, text: String) -> bool {
-        !text.is_empty() && Clipboard::default().set(ClipboardType::Clipboard, text)
+    pub(crate) fn copy_text_to_clipboard(&mut self, text: String) -> bool {
+        !text.is_empty() && self.clipboard.write(text)
     }
 
     pub(crate) fn finish_copy(&mut self, text: String, completion: CopyCompletion) -> bool {

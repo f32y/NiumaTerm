@@ -103,6 +103,7 @@ use crate::ui::terminal_layout::TerminalLayout;
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workflows::WorkflowsView;
 use crate::ui::workspace_sidebar::{self, Sidebar, SidebarTab, SidebarUsage};
+use crate::usage_sources::{account_sources, daily_source};
 use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
 use crate::workspace::{
     self, ProgressTally, TerminalActivity, WorkspaceId, WorkspaceKind, WorkspaceManager,
@@ -359,8 +360,8 @@ impl Shell {
             settings: SettingsSurface::default(),
             focus: cx.focus_handle(),
             window_id,
-            token_usage: cx.new(TokenUsageView::new),
-            agent_usage: cx.new(AgentUsageView::new),
+            token_usage: cx.new(|cx| TokenUsageView::new(daily_source(), cx)),
+            agent_usage: cx.new(|cx| AgentUsageView::new(account_sources(), cx)),
             git_status: cx.new(|cx| GitStatusView::new(git_model.clone(), cx)),
             panels: {
                 let git = cx.new(|cx| GitSidebar::new(git_model.clone(), cx));

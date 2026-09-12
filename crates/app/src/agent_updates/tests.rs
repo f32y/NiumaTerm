@@ -232,8 +232,7 @@ fn preflight_waits_or_interrupts_without_skipping_recovery_validation() {
             UpdateMode::StopNow,
             true,
         ),
-        PreflightResolution::Failed(message)
-            if message.contains("recoverable interruption boundary")
+        PreflightResolution::Failed(PreflightFailure::InterruptionTimeout)
     ));
     assert!(matches!(
         resolve_preflight(
@@ -241,7 +240,7 @@ fn preflight_waits_or_interrupts_without_skipping_recovery_validation() {
             UpdateMode::StopNow,
             false,
         ),
-        PreflightResolution::Failed(message) if message == "missing session id"
+        PreflightResolution::Failed(PreflightFailure::MissingIdentity(message)) if message == "missing session id"
     ));
 }
 

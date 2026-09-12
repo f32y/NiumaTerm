@@ -3,72 +3,23 @@ use std::time::{Duration, Instant};
 
 use futures::future::join_all;
 use gpui::prelude::*;
-use gpui::{App, Entity, Window, div};
+use gpui::{App, AsyncApp, Entity, Window, div};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogClose, DialogFooter};
 use gpui_component::{ActiveTheme as _, WindowExt as _};
+use nmt_agent::session::lifecycle::{RecoveryReadiness, RecoverySnapshot, RestorationReadiness};
 use nmt_agent::update::{
     InstallationKey, ProviderKind, UpdateCoordinator, UpdateError, UpdateErrorKind, UpdatePhase,
-    UpdateProgress,
+    UpdateProgress, VersionStatus,
 };
 use nmt_agent_ui::execution::{AgentSession, SessionRegistry};
-use nmt_agent_ui::{RecoveryReadiness, RecoverySnapshot, RestorationReadiness};
 use nmt_config::profile::AgentProfileKind;
 use nmt_i18n::i18n;
 
 use crate::agent_updates::AgentUpdates;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum UpdateMode {
-    WhenIdle,
-    StopNow,
-}
-
-impl UpdateMode {
-    pub(super) fn interrupts_active_work(self) -> bool {
-        self == Self::StopNow
-    }
-}
-
-pub(super) enum PreflightResolution {
-    Ready(Vec<RecoverySnapshot>),
-    Wait,
-    Failed(String),
-}
-
-pub(super) fn resolve_preflight(
-    assessments: Vec<RecoveryReadiness>,
-    mode: UpdateMode,
-    stop_timeout_elapsed: bool,
-) -> PreflightResolution {
-    if let Some(message) = assessments.iter().find_map(|assessment| match assessment {
-        RecoveryReadiness::MissingIdentity(message) => Some(message.clone()),
-        _ => None,
-    }) {
-        return PreflightResolution::Failed(message);
-    }
-
-    if assessments
-        .iter()
-        .all(|assessment| matches!(assessment, RecoveryReadiness::Ready(_)))
-    {
-        return PreflightResolution::Ready(
-            assessments
-                .into_iter()
-                .filter_map(|assessment| match assessment {
-                    RecoveryReadiness::Ready(snapshot) => Some(snapshot),
-                    _ => None,
-                })
-                .collect(),
-        );
-    }
-
-    if mode.interrupts_active_work() && stop_timeout_elapsed {
-        return PreflightResolution::Failed(i18n("agent-update-interruption-timeout").to_string());
-    }
-
-    PreflightResolution::Wait
-}
+use crate::agent_updates::maintenance::{
+    PreflightFailure, UpdateEnvironment, UpdateMode, run_transaction,
+};
 
 pub(super) fn combine_transaction_error(
     operation_error: Option<UpdateError>,
@@ -226,81 +177,100 @@ fn start_transaction(
         return;
     }
 
-    if mode.interrupts_active_work()
-        && let Some(message) = sessions.iter().find_map(|session| {
-            match session.read(cx).recovery_identity_snapshot(cx) {
-                RecoveryReadiness::MissingIdentity(message) => Some(message),
-                _ => None,
-            }
-        })
-    {
-        coordinator.finish_update(
-            &key,
-            None,
-            Some(UpdateError::new(UpdateErrorKind::Recovery, message)),
-            0,
-        );
-
-        cx.refresh_windows();
-
-        return;
-    }
-
-    for session in &sessions {
-        session.update(cx, |session, cx| {
-            if mode.interrupts_active_work() {
-                session.stop_active_work_for_update(cx);
-            } else {
-                session.prepare_update_wait(cx);
-            }
-        });
-    }
-
     cx.refresh_windows();
 
     cx.spawn(async move |cx| {
-        let wait_started = Instant::now();
-
-        let snapshots = loop {
-            let assessments = cx.update(|cx| {
-                sessions
-                    .iter()
-                    .map(|session| session.read(cx).recovery_readiness(cx))
-                    .collect::<Vec<_>>()
-            });
-
-            match resolve_preflight(
-                assessments,
-                mode,
-                wait_started.elapsed() >= Duration::from_secs(15),
-            ) {
-                PreflightResolution::Ready(snapshots) => break snapshots,
-
-                PreflightResolution::Failed(message) => {
-                    finish_preflight_failure(&coordinator, &key, &sessions, message, cx);
-
-                    return;
-                }
-
-                PreflightResolution::Wait => {}
-            }
-
-            cx.background_executor()
-                .timer(Duration::from_millis(100))
-                .await;
+        let mut environment = SessionUpdateEnvironment {
+            sessions,
+            coordinator: coordinator.clone(),
+            key: key.clone(),
+            started: Instant::now(),
+            cx,
         };
 
-        coordinator.transition(
-            &key,
-            UpdatePhase::Suspending,
-            Some(UpdateProgress {
-                completed: 0,
-                total: sessions.len(),
-            }),
-        );
+        let (verified, error) = match run_transaction(&mut environment, mode).await {
+            Ok(outcome) => (
+                outcome.verified,
+                combine_transaction_error(outcome.operation_error, outcome.restore_failures),
+            ),
 
-        let suspension_tasks = cx.update(|cx| {
-            sessions
+            Err(error) => {
+                let message = match error {
+                    PreflightFailure::MissingIdentity(message) => message,
+
+                    PreflightFailure::InterruptionTimeout => {
+                        i18n("agent-update-interruption-timeout").to_string()
+                    }
+                };
+
+                (
+                    None,
+                    Some(UpdateError::new(UpdateErrorKind::Recovery, message)),
+                )
+            }
+        };
+
+        coordinator.finish_update(&key, verified, error, 0);
+        environment.cx.update(|cx| cx.refresh_windows());
+    })
+    .detach();
+}
+
+struct SessionUpdateEnvironment<'a> {
+    sessions: Vec<Entity<AgentSession>>,
+    coordinator: UpdateCoordinator,
+    key: InstallationKey,
+    started: Instant,
+    cx: &'a mut AsyncApp,
+}
+
+impl UpdateEnvironment for SessionUpdateEnvironment<'_> {
+    fn identity_failure(&mut self) -> Option<String> {
+        self.cx.update(|cx| {
+            self.sessions.iter().find_map(|session| {
+                match session.read(cx).recovery_identity_snapshot(cx) {
+                    RecoveryReadiness::MissingIdentity(message) => Some(message),
+                    _ => None,
+                }
+            })
+        })
+    }
+
+    fn prepare(&mut self, mode: UpdateMode) {
+        self.cx.update(|cx| {
+            for session in &self.sessions {
+                session.update(cx, |session, cx| match mode {
+                    UpdateMode::StopNow => session.stop_active_work_for_update(cx),
+                    UpdateMode::WhenIdle => session.prepare_update_wait(cx),
+                });
+            }
+
+            cx.refresh_windows();
+        });
+    }
+
+    fn readiness(&mut self) -> Vec<RecoveryReadiness> {
+        self.cx.update(|cx| {
+            self.sessions
+                .iter()
+                .map(|session| session.read(cx).recovery_readiness(cx))
+                .collect()
+        })
+    }
+
+    fn cancel_wait(&mut self) {
+        self.cx.update(|cx| {
+            for session in &self.sessions {
+                session.update(cx, |session, cx| session.cancel_update_wait(cx));
+            }
+
+            cx.refresh_windows();
+        });
+    }
+
+    async fn suspend(&mut self, mode: UpdateMode) -> Vec<Result<(), String>> {
+        let tasks = self.cx.update(|cx| {
+            self.sessions
                 .iter()
                 .map(|session| {
                     session.update(cx, |session, cx| {
@@ -310,199 +280,79 @@ fn start_transaction(
                 .collect::<Vec<_>>()
         });
 
-        let suspension_results = join_all(suspension_tasks).await;
+        join_all(tasks).await
+    }
 
-        let suspended = suspension_results
-            .iter()
-            .enumerate()
-            .filter_map(|(index, result)| result.is_ok().then_some(index))
-            .collect::<Vec<_>>();
-
-        if let Some(error) = suspension_results
-            .iter()
-            .find_map(|result| result.as_ref().err())
-        {
-            let error = UpdateError::new(UpdateErrorKind::Recovery, error);
-
-            restore_tabs(&coordinator, &key, &sessions, &snapshots, &suspended, cx).await;
-            coordinator.finish_update(&key, None, Some(error), 0);
-            cx.update(|cx| cx.refresh_windows());
-
-            return;
-        }
-
-        coordinator.transition(&key, UpdatePhase::Updating, None);
-
-        cx.update(|cx| {
-            for session in &sessions {
+    async fn update(&mut self) -> Result<(), UpdateError> {
+        self.cx.update(|cx| {
+            for session in &self.sessions {
                 session.update(cx, |session, cx| session.mark_provider_updating(cx));
             }
 
             cx.refresh_windows();
         });
 
-        let update_coordinator = coordinator.clone();
-        let update_key = key.clone();
+        let coordinator = self.coordinator.clone();
+        let key = self.key.clone();
 
-        let update_result = cx
+        self.cx
             .background_executor()
-            .spawn(async move { update_coordinator.run_vendor_update(&update_key) })
-            .await;
+            .spawn(async move { coordinator.run_vendor_update(&key).map(|_| ()) })
+            .await
+    }
 
-        let (verified, mut operation_error) = if let Err(error) = update_result {
-            (None, Some(error))
-        } else {
-            coordinator.transition(&key, UpdatePhase::Verifying, None);
+    async fn verify(&mut self) -> Result<VersionStatus, UpdateError> {
+        let coordinator = self.coordinator.clone();
+        let key = self.key.clone();
 
-            let verify_coordinator = coordinator.clone();
-            let verify_key = key.clone();
+        self.cx
+            .background_executor()
+            .spawn(async move { coordinator.verify(&key) })
+            .await
+    }
 
-            match cx
-                .background_executor()
-                .spawn(async move { verify_coordinator.verify(&verify_key) })
-                .await
-            {
-                Ok(status) => (Some(status), None),
-                Err(error) => (None, Some(error)),
+    fn restore(&mut self, snapshots: &[RecoverySnapshot], suspended: &[usize]) {
+        self.cx.update(|cx| {
+            for &index in suspended {
+                self.sessions[index].update(cx, |session, cx| {
+                    session.restore_after_update(&snapshots[index], cx)
+                });
             }
-        };
-
-        let restore_failures =
-            restore_tabs(&coordinator, &key, &sessions, &snapshots, &suspended, cx).await;
-
-        operation_error = combine_transaction_error(operation_error, restore_failures);
-        coordinator.finish_update(&key, verified, operation_error, 0);
-        cx.update(|cx| cx.refresh_windows());
-    })
-    .detach();
-}
-
-fn finish_preflight_failure(
-    coordinator: &UpdateCoordinator,
-    key: &InstallationKey,
-    sessions: &[Entity<AgentSession>],
-    message: String,
-    cx: &mut gpui::AsyncApp,
-) {
-    coordinator.finish_update(
-        key,
-        None,
-        Some(UpdateError::new(UpdateErrorKind::Recovery, message)),
-        0,
-    );
-
-    cx.update(|cx| {
-        for session in sessions {
-            session.update(cx, |session, cx| session.cancel_update_wait(cx));
-        }
-
-        cx.refresh_windows();
-    });
-}
-
-async fn restore_tabs(
-    coordinator: &UpdateCoordinator,
-    key: &InstallationKey,
-    sessions: &[Entity<AgentSession>],
-    snapshots: &[RecoverySnapshot],
-    suspended: &[usize],
-    cx: &mut gpui::AsyncApp,
-) -> usize {
-    coordinator.transition(
-        key,
-        UpdatePhase::Restoring,
-        Some(UpdateProgress {
-            completed: 0,
-            total: suspended.len(),
-        }),
-    );
-
-    // A restart failure now surfaces through `restoration_readiness` below,
-    // because the backend process comes up off the UI thread.
-    let mut failures = 0;
-
-    for index in suspended.iter().copied() {
-        cx.update(|cx| {
-            sessions[index].update(cx, |session, cx| {
-                session.restore_after_update(&snapshots[index], cx)
-            })
         });
     }
 
-    let started = Instant::now();
-
-    loop {
-        let readiness = cx.update(|cx| {
+    fn restoration_readiness(&mut self, suspended: &[usize]) -> Vec<RestorationReadiness> {
+        self.cx.update(|cx| {
             suspended
                 .iter()
-                .copied()
-                .map(|index| sessions[index].read(cx).restoration_readiness())
-                .collect::<Vec<_>>()
-        });
-
-        let pending = readiness
-            .iter()
-            .filter(|state| matches!(state, RestorationReadiness::Pending))
-            .count();
-
-        let reported_failures = readiness
-            .iter()
-            .filter(|state| matches!(state, RestorationReadiness::Failed(_)))
-            .count();
-
-        failures = failures.max(reported_failures);
-
-        coordinator.transition(
-            key,
-            UpdatePhase::Restoring,
-            Some(UpdateProgress {
-                completed: suspended.len() - pending,
-                total: suspended.len(),
-            }),
-        );
-
-        cx.update(|cx| cx.refresh_windows());
-
-        if pending == 0 {
-            break;
-        }
-
-        if started.elapsed() >= Duration::from_secs(30) {
-            cx.update(|cx| {
-                for (position, state) in readiness.iter().enumerate() {
-                    if matches!(state, RestorationReadiness::Pending) {
-                        let index = suspended[position];
-
-                        sessions[index].update(cx, |session, cx| {
-                            session.fail_update_recovery(
-                                i18n("agent-update-recovery-timeout").to_string(),
-                                cx,
-                            )
-                        });
-                    }
-                }
-            });
-
-            failures += pending;
-
-            coordinator.transition(
-                key,
-                UpdatePhase::Restoring,
-                Some(UpdateProgress {
-                    completed: suspended.len(),
-                    total: suspended.len(),
-                }),
-            );
-
-            break;
-        }
-
-        cx.background_executor()
-            .timer(Duration::from_millis(100))
-            .await;
+                .map(|&index| self.sessions[index].read(cx).restoration_readiness())
+                .collect()
+        })
     }
 
-    failures
+    fn recovery_timed_out(&mut self, pending: &[usize]) {
+        self.cx.update(|cx| {
+            for &index in pending {
+                self.sessions[index].update(cx, |session, cx| {
+                    session
+                        .fail_update_recovery(i18n("agent-update-recovery-timeout").to_string(), cx)
+                });
+            }
+        });
+    }
+
+    fn publish(&mut self, phase: UpdatePhase, progress: Option<UpdateProgress>) {
+        self.coordinator.transition(&self.key, phase, progress);
+        self.cx.update(|cx| cx.refresh_windows());
+    }
+
+    fn now(&self) -> Duration {
+        self.started.elapsed()
+    }
+
+    async fn wait(&mut self, duration: Duration) {
+        self.cx.background_executor().timer(duration).await;
+    }
 }
 
 /// The updatable installation this profile resolves to. `None` means the

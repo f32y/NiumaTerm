@@ -1,10 +1,8 @@
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use crate::chat::{
     Item, SessionSummary, SlashCommandOutcome, SlashCommandRunPolicy, ThreadSettings,
-};
-use crate::claude_code::workflows::{
-    WorkflowRefreshRequest, WorkflowRefreshResult, WorkflowTranscriptRead,
 };
 use crate::session::commands::{CommandAdmission, CommandQueue, PendingSlashCommand};
 use crate::session::delivery::MessageDelivery;
@@ -16,6 +14,10 @@ use crate::session::test_support::TestBackend;
 use crate::session::update_readiness::{ConversationWork, Readiness};
 use crate::session::workflows::WorkflowData;
 use crate::session::{AgentKind, Backend, RenameOutcome};
+use crate::workflow::{
+    RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult, WorkflowSource,
+    WorkflowTranscriptRead,
+};
 
 #[test]
 fn queued_commands_wait_for_real_turn_and_exit_discards_pending_work() {
@@ -180,7 +182,7 @@ fn search_retires_disk_reads_and_next_history_page_replaces_matches() {
 }
 
 #[test]
-fn workflow_readers_keep_separate_content_and_preserve_file_length_cache() {
+fn workflow_readers_keep_separate_content_and_acknowledge_source_revisions() {
     let mut workflows = WorkflowData::default();
 
     assert!(workflows.claim_restore("session"));
@@ -192,12 +194,12 @@ fn workflow_readers_keep_separate_content_and_preserve_file_length_cache() {
     assert!(workflows.apply_transcript("run", "first", vec![Item::Error { text: "old".into() }]));
     assert!(workflows.apply_transcript("run", "second", vec![Item::Error { text: "new".into() }]));
 
-    workflows.note_open_len(&WorkflowRefreshResult {
+    workflows.accept_revision(&WorkflowRefreshResult {
         task_id: "run".into(),
         transcript: Some(WorkflowTranscriptRead {
             agent_id: "second".into(),
             items: Vec::new(),
-            len: 128,
+            revision: 128,
         }),
         ..Default::default()
     });
@@ -208,11 +210,11 @@ fn workflow_readers_keep_separate_content_and_preserve_file_length_cache() {
         task_id: "run".into(),
         agent_ids: vec![],
         open_agent: None,
-        open_agent_len: None,
+        transcript_revision: None,
     }]);
 
     assert_eq!(requests[0].open_agent.as_deref(), Some("second"));
-    assert_eq!(requests[0].open_agent_len, Some(128));
+    assert_eq!(requests[0].transcript_revision, Some(128));
     assert_eq!(
         workflows.conversation("run", "second").unwrap().revision(),
         1
@@ -222,6 +224,84 @@ fn workflow_readers_keep_separate_content_and_preserve_file_length_cache() {
 
     assert!(workflows.conversation("run", "second").is_none());
     assert!(workflows.claim_restore("session"));
+}
+
+#[test]
+fn workflow_refresh_uses_the_supplied_source_and_keeps_its_session_epoch() {
+    struct MemorySource;
+
+    impl WorkflowSource for MemorySource {
+        fn restore(&self, _: Option<&str>, _: &str) -> Result<Vec<RestoredWorkflowRun>, String> {
+            Ok(Vec::new())
+        }
+
+        fn refresh(
+            &self,
+            cwd: Option<&str>,
+            session_id: &str,
+            request: &WorkflowRefreshRequest,
+        ) -> WorkflowRefreshResult {
+            assert_eq!(cwd, Some("workspace"));
+            assert_eq!(session_id, "session");
+            assert_eq!(request.open_agent.as_deref(), Some("member"));
+
+            WorkflowRefreshResult {
+                task_id: request.task_id.clone(),
+                transcript: Some(WorkflowTranscriptRead {
+                    agent_id: "member".into(),
+                    items: vec![Item::Error {
+                        text: "source response".into(),
+                    }],
+                    revision: 7,
+                }),
+                ..Default::default()
+            }
+        }
+    }
+
+    let mut backend = TestBackend::new([], SlashCommandOutcome::NotReady, vec![])
+        .with_recovery(AgentKind::DeepSeek, "session");
+
+    backend.workflow_source = Some(Arc::new(MemorySource));
+
+    backend.workflow_requests = vec![WorkflowRefreshRequest {
+        task_id: "run".into(),
+        ..Default::default()
+    }];
+
+    let mut runtime = SessionRuntime::default();
+
+    runtime.install(runtime.epoch(), Ok(Backend::Test(backend)));
+
+    let mut workflows = WorkflowData::default();
+    let _reader = workflows.open_agent("run", "member");
+
+    let plan = workflows
+        .refresh_plan(&runtime, Some("workspace".into()))
+        .unwrap();
+
+    let epoch = plan.epoch;
+    let mut results = plan.read();
+    let result = results.remove(0);
+
+    assert!(runtime.is_current(epoch));
+
+    workflows.accept_revision(&result);
+
+    let transcript = result.transcript.unwrap();
+
+    assert!(workflows.apply_transcript(&result.task_id, &transcript.agent_id, transcript.items));
+
+    let requests = workflows.scope_requests(vec![WorkflowRefreshRequest {
+        task_id: "run".into(),
+        ..Default::default()
+    }]);
+
+    assert_eq!(requests[0].transcript_revision, Some(7));
+
+    runtime.suspend_for_update();
+
+    assert!(!runtime.is_current(epoch));
 }
 
 #[test]

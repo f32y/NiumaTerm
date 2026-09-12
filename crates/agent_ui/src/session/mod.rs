@@ -38,7 +38,9 @@ pub(super) use nmt_agent::session::Backend;
 #[cfg(test)]
 use nmt_agent::session::ConversationTitleRequest;
 pub use nmt_agent::session::RecoveryIdentity;
-pub use nmt_agent::session::lifecycle::{RecoverySnapshot, RestorationReadiness};
+pub use nmt_agent::session::lifecycle::{
+    RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
+};
 pub(super) use nmt_agent::session::lifecycle::{Status, UpdateSuspension};
 #[cfg(test)]
 pub(crate) use nmt_agent::session::test_support::TestBackend;
@@ -52,7 +54,6 @@ use crate::composer::{BranchFlow, CommandFeedbackKind, prompt_with_response_anno
 use crate::fade::Fade;
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
 use crate::profile::AgentKind;
-pub use crate::session::update_recovery::RecoveryReadiness;
 use crate::settings::AgentSettings;
 use crate::transcript::TranscriptView;
 use crate::workflows::WorkflowUi;

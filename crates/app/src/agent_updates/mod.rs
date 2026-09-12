@@ -1,6 +1,7 @@
 //! Provider update registration, test isolation, and presentation reduction.
 
 mod doubles;
+mod maintenance;
 mod notification;
 mod transaction;
 
@@ -23,15 +24,16 @@ use nmt_agent_ui::agent_launch;
 use nmt_config::profile::AgentProfile;
 
 use crate::agent_updates::doubles::{FakeMaintenance, UnavailableMaintenance};
+#[cfg(test)]
+use crate::agent_updates::maintenance::{
+    PreflightFailure, PreflightResolution, UpdateMode, resolve_preflight,
+};
 pub(crate) use crate::agent_updates::notification::{
     FocusedVisibleLifetime, NotificationPrimaryAction, NotificationProgress,
     UpdateNotificationTone, UpdateNotificationView, notification_view,
 };
 #[cfg(test)]
-use crate::agent_updates::transaction::{
-    PreflightResolution, UpdateMode, affected_installation_indices, combine_transaction_error,
-    resolve_preflight,
-};
+use crate::agent_updates::transaction::{affected_installation_indices, combine_transaction_error};
 pub(crate) use crate::agent_updates::transaction::{provider_for_profile, request_update};
 use crate::ui::AppSettings;
 

@@ -4,9 +4,9 @@
 //! compact total while the hover card shows exact totals and per-model input,
 //! output, cache creation, cache-read counts, and prices.
 
+use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::Local;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Context, Entity, FontWeight, IntoElement, Pixels, SharedString, Window, div,
@@ -19,13 +19,12 @@ use gpui_component::{
     ActiveTheme as _, Icon, IconNamed, IndexPath, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
 use nmt_i18n::i18n;
-use nmt_platform::process::{decode_child_output, hidden_cmd_command};
-use serde::Deserialize;
-use serde_json::from_slice;
 use tracing::warn;
 
+use crate::daily_usage::{DailyTokenUsage, TokenCounts};
 use crate::ui::AppSettings;
 use crate::ui::composition::{framed_region, table_header as table_header_style};
+use crate::usage_refresh::{Completion, Refresh, UsageSource};
 
 /// Shown before the first successful fetch and retained after fetch errors.
 const PLACEHOLDER: &str = "-";
@@ -57,126 +56,86 @@ impl IconNamed for TokenIcon {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-struct TokenCounts {
-    #[serde(default)]
-    input_tokens: u64,
-    #[serde(default)]
-    output_tokens: u64,
-    #[serde(default)]
-    cache_creation_tokens: u64,
-    #[serde(default)]
-    cache_read_tokens: u64,
-    #[serde(default)]
-    total_tokens: u64,
-}
-
-impl TokenCounts {
-    fn total(self) -> u64 {
-        if self.total_tokens > 0 {
-            self.total_tokens
-        } else {
-            self.input_tokens
-                .saturating_add(self.output_tokens)
-                .saturating_add(self.cache_creation_tokens)
-                .saturating_add(self.cache_read_tokens)
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-struct ModelTokenUsage {
-    model_name: String,
-    #[serde(flatten)]
-    counts: TokenCounts,
-    #[serde(default, rename = "cost")]
-    price_usd: f64,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct DailyTokenUsage {
-    #[serde(alias = "period")]
-    date: String,
-    #[serde(flatten)]
-    counts: TokenCounts,
-    #[serde(default, rename = "totalCost")]
-    price_usd: f64,
-    #[serde(default)]
-    model_breakdowns: Vec<ModelTokenUsage>,
-}
-
-#[derive(Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ReportTotals {
-    #[serde(flatten)]
-    counts: TokenCounts,
-    #[serde(default, rename = "totalCost")]
-    price_usd: f64,
-}
-
-#[derive(Deserialize)]
-struct CcusageReport {
-    #[serde(default)]
-    daily: Vec<DailyTokenUsage>,
-    #[serde(default)]
-    totals: ReportTotals,
-}
-
 pub(crate) struct TokenUsageView {
-    usage: Option<DailyTokenUsage>,
-    state: RefreshState,
-}
-
-impl AutoRefresh for TokenUsageView {
-    type Output = Result<DailyTokenUsage, String>;
-
-    const INTERVAL: Duration = Duration::from_secs(60);
-
-    fn enabled(settings: &AppSettings) -> bool {
-        settings.appearance.show_daily_token_usage
-    }
-
-    fn state(&mut self) -> &mut RefreshState {
-        &mut self.state
-    }
-
-    fn fetch() -> Self::Output {
-        let now = Local::now();
-        let since = now.format("%Y%m%d").to_string();
-        let date = now.format("%Y-%m-%d").to_string();
-
-        fetch_usage(&since, &date)
-    }
-
-    fn apply(&mut self, output: Self::Output) {
-        match output {
-            Ok(usage) => self.usage = Some(usage),
-            Err(err) => warn!("token usage refresh failed: {err}"),
-        }
-    }
+    refresh: Refresh<Option<DailyTokenUsage>>,
+    enabled: bool,
+    user_requested: bool,
 }
 
 impl TokenUsageView {
-    pub(crate) fn new(cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(
+        source: Arc<dyn UsageSource<Option<DailyTokenUsage>>>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let enabled = cx.global::<AppSettings>().appearance.show_daily_token_usage;
+
         let mut this = Self {
-            usage: None,
-            state: RefreshState {
-                refreshing: false,
-                user_requested: false,
-                enabled: Self::enabled(cx.global::<AppSettings>()),
-            },
+            refresh: Refresh::new(None, source, enabled),
+            enabled,
+            user_requested: false,
         };
 
-        start(&mut this, cx);
+        cx.observe_global::<AppSettings>(|this: &mut Self, cx| {
+            let enabled = cx.global::<AppSettings>().appearance.show_daily_token_usage;
+
+            if enabled != this.enabled {
+                this.enabled = enabled;
+                this.refresh.set_enabled(enabled);
+
+                if enabled {
+                    this.refresh(cx);
+                }
+            }
+        })
+        .detach();
+
+        cx.spawn(async move |view, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_secs(60))
+                    .await;
+
+                if view.update(cx, |this, cx| this.refresh(cx)).is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
+
+        this.refresh(cx);
 
         this
     }
 
+    fn refresh(&mut self, cx: &mut Context<Self>) {
+        let Some(fetch) = self.refresh.begin() else {
+            return;
+        };
+
+        cx.notify();
+
+        let worker = cx.background_executor().spawn(async move { fetch.run() });
+
+        cx.spawn(async move |view, cx| {
+            let fetched = worker.await;
+
+            let _ = view.update(cx, |this, cx| {
+                this.user_requested = false;
+
+                match this.refresh.complete(fetched) {
+                    Completion::Retry => this.refresh(cx),
+                    Completion::Failed(message) => warn!("daily usage refresh failed: {message}"),
+                    Completion::Updated | Completion::Discarded => {}
+                }
+
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn accessibility_label(&self) -> String {
-        let Some(usage) = self.usage.as_ref() else {
+        let Some(usage) = self.refresh.value.as_ref() else {
             return i18n("usage-token-unavailable").to_string();
         };
 
@@ -200,13 +159,14 @@ impl TokenUsageView {
 impl Render for TokenUsageView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let label: SharedString = self
-            .usage
+            .refresh
+            .value
             .as_ref()
             .map(|usage| compact(usage.counts.total()))
             .unwrap_or_else(|| PLACEHOLDER.to_string())
             .into();
 
-        let usage = self.usage.clone();
+        let usage = self.refresh.value.clone();
 
         let trigger = Button::new("token-usage")
             .ghost()
@@ -216,7 +176,7 @@ impl Render for TokenUsageView {
             .px_1()
             .justify_start()
             .accessibility_label(self.accessibility_label())
-            .loading(self.state.user_requested)
+            .loading(self.user_requested)
             .child(
                 h_flex()
                     .w_full()
@@ -228,7 +188,11 @@ impl Render for TokenUsageView {
                     .child(Icon::new(TokenIcon).xsmall().opacity(STATUS_ICON_OPACITY))
                     .child(label),
             )
-            .on_click(cx.listener(|this, _, _, cx| refresh_from_user(this, cx)));
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.user_requested = true;
+
+                this.refresh(cx);
+            }));
 
         HoverCard::new("token-usage-details")
             .anchor(gpui::Anchor::BottomLeft)
@@ -506,40 +470,6 @@ fn render_usage_panel(
         .into_any_element()
 }
 
-/// Run ccusage for `since` (yyyymmdd) and parse the requested day.
-fn fetch_usage(since: &str, date: &str) -> Result<DailyTokenUsage, String> {
-    let output = hidden_cmd_command("npx")
-        .args(["ccusage@latest", "-j", "--since", since])
-        .output()
-        .map_err(|err| format!("failed to run ccusage: {err}"))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "ccusage exited with {}: {}",
-            output.status,
-            decode_child_output(&output.stderr).trim()
-        ));
-    }
-
-    parse_usage(&output.stdout, date)
-}
-
-fn parse_usage(bytes: &[u8], date: &str) -> Result<DailyTokenUsage, String> {
-    let mut report: CcusageReport =
-        from_slice(bytes).map_err(|err| format!("ccusage output is not valid JSON: {err}"))?;
-
-    if let Some(usage) = report.daily.drain(..).find(|usage| usage.date == date) {
-        return Ok(usage);
-    }
-
-    Ok(DailyTokenUsage {
-        date: date.to_string(),
-        counts: report.totals.counts,
-        price_usd: report.totals.price_usd,
-        model_breakdowns: Vec::new(),
-    })
-}
-
 fn format_price(price_usd: f64) -> String {
     format!("${price_usd:.2}")
 }
@@ -572,99 +502,3 @@ fn compact(n: u64) -> String {
 #[cfg(test)]
 #[path = "token_usage_tests.rs"]
 mod token_usage_tests;
-
-// Refresh on the settings toggle's off-to-on transition and every interval
-// while enabled. Unrelated settings edits do not trigger another refresh;
-// overlapping requests are ignored, and errors preserve the displayed data.
-#[derive(Default)]
-struct RefreshState {
-    refreshing: bool,
-
-    /// Whether the in-flight fetch was started by the user. A widget shows a
-    /// spinner only for those: one appearing on its own every interval draws
-    /// the eye to a background task nobody asked about.
-    user_requested: bool,
-
-    /// Previous toggle value, so unrelated settings edits cannot start a fetch.
-    enabled: bool,
-}
-
-trait AutoRefresh: Sized + 'static {
-    type Output: Send + 'static;
-
-    const INTERVAL: Duration;
-
-    fn enabled(settings: &AppSettings) -> bool;
-
-    fn state(&mut self) -> &mut RefreshState;
-
-    fn fetch() -> Self::Output;
-
-    fn apply(&mut self, output: Self::Output);
-}
-
-fn start<V: AutoRefresh>(view: &mut V, cx: &mut Context<V>) {
-    cx.observe_global::<AppSettings>(|this: &mut V, cx| {
-        let enabled = V::enabled(cx.global::<AppSettings>());
-
-        if enabled && !this.state().enabled {
-            refresh(this, cx);
-        }
-
-        this.state().enabled = enabled;
-    })
-    .detach();
-
-    cx.spawn(async move |this, cx| {
-        loop {
-            cx.background_executor().timer(V::INTERVAL).await;
-
-            let alive = this.update(cx, |this, cx| {
-                if this.state().enabled {
-                    refresh(this, cx);
-                }
-            });
-
-            if alive.is_err() {
-                break;
-            }
-        }
-    })
-    .detach();
-
-    if view.state().enabled {
-        refresh(view, cx);
-    }
-}
-
-/// Refresh in response to a click, so the widget can show it is working.
-fn refresh_from_user<V: AutoRefresh>(view: &mut V, cx: &mut Context<V>) {
-    view.state().user_requested = true;
-    refresh(view, cx);
-}
-
-fn refresh<V: AutoRefresh>(view: &mut V, cx: &mut Context<V>) {
-    if view.state().refreshing {
-        return;
-    }
-
-    view.state().refreshing = true;
-
-    cx.notify();
-
-    let fetch = cx.background_executor().spawn(async move { V::fetch() });
-
-    cx.spawn(async move |this, cx| {
-        let output = fetch.await;
-
-        this.update(cx, |this, cx| {
-            this.state().refreshing = false;
-            this.state().user_requested = false;
-            this.apply(output);
-
-            cx.notify();
-        })
-        .ok();
-    })
-    .detach();
-}

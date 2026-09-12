@@ -1,10 +1,9 @@
 //! Backend-neutral model for a Dynamic Workflow run: the phases it moves
 //! through, the agents it fans out to, and their progress.
 //!
-//! Only Claude Code reports workflows today, so this module has one producer.
-//! It still sits beside the provider adapters rather than inside one, because
-//! the shared chat vocabulary carries these types and must not depend on a
-//! provider module to do it.
+//! Providers supply progress and conversations through this shared vocabulary.
+
+use crate::chat::Item;
 
 /// Lifecycle of a whole run, as the view groups it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,8 +50,7 @@ pub struct WorkflowAgent {
     /// agent id has been assigned yet.
     pub index: u64,
 
-    /// Names the agent's persisted transcript file, so it is what links a row
-    /// to its conversation.
+    /// Provider identity linking this row to its conversation.
     pub agent_id: Option<String>,
 
     pub label: Option<String>,
@@ -80,8 +78,7 @@ pub struct WorkflowRun {
     /// Stream identity, and the only identity a live run has.
     pub task_id: String,
 
-    /// Directory identity, resolved from disk. A run has none until either its
-    /// completion snapshot exists or one of its agents has been persisted.
+    /// Provider run identity, when distinct from its live task identity.
     pub run_id: Option<String>,
 
     pub name: Option<String>,
@@ -95,8 +92,8 @@ pub struct WorkflowRun {
     /// The run's own final text, once it has one.
     pub result: Option<String>,
 
-    /// Set when the run's on-disk record could not be read. It reports a
-    /// refresh problem and never means the run itself failed.
+    /// Set when a source read failed. It reports a refresh problem and never
+    /// means the run itself failed.
     pub refresh_failed: bool,
 }
 
@@ -157,4 +154,64 @@ impl From<WorkflowAgentState> for &'static str {
             WorkflowAgentState::Stopped => "Stopped",
         }
     }
+}
+
+/// Blocking reads owned by a provider and scheduled by the session executor.
+pub trait WorkflowSource: Send + Sync {
+    fn restore(
+        &self,
+        cwd: Option<&str>,
+        session_id: &str,
+    ) -> Result<Vec<RestoredWorkflowRun>, String>;
+
+    fn refresh(
+        &self,
+        cwd: Option<&str>,
+        session_id: &str,
+        request: &WorkflowRefreshRequest,
+    ) -> WorkflowRefreshResult;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RestoredWorkflowRun {
+    pub run: WorkflowRun,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WorkflowRefreshRequest {
+    pub task_id: String,
+    pub agent_ids: Vec<String>,
+    pub open_agent: Option<String>,
+
+    /// Last revision accepted by the conversation owner. Sources choose the
+    /// revision; consumers only compare it or return it on the next read.
+    pub transcript_revision: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct WorkflowTranscriptRead {
+    pub agent_id: String,
+    pub items: Vec<Item>,
+    pub revision: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkflowAgentProgress {
+    pub agent_id: String,
+    pub state: WorkflowAgentState,
+    pub result: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WorkflowRefresh {
+    pub run_id: Option<String>,
+    pub agents: Vec<WorkflowAgentProgress>,
+    pub failed: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WorkflowRefreshResult {
+    pub task_id: String,
+    pub refresh: WorkflowRefresh,
+    pub transcript: Option<WorkflowTranscriptRead>,
 }
