@@ -4,7 +4,8 @@ Repo-level guidance for AI coding agents working in this repository.
 
 ## Basic rules
 
-- You are not the only agent that works in this repo. Do not touch files that you don't need to modify. Do not restore changes that are not made by you.
+- Limit edits to files needed for the user's request. Other contributors may
+  have work in progress; preserve their changes when editing shared files.
 - YOU ARE FORBIDDEN TO USE FOLLOWING AI SLOP WORDS: ponytail, seam, fact, parity, envelope, wire, contract
 - Always write documents, specs, tests and comments in English.
 
@@ -30,30 +31,17 @@ opening that reference.
 
 ## Module organization and imports
 
-Split source files by responsibility, and keep the production code of a file
-under roughly 800 lines. A cohesive state machine or hot loop may exceed the
-guideline; splitting one merely to satisfy a line count hides its control
-flow. Inline `#[cfg(test)]` test modules belong in their own child file
-(`#[cfg(test)] mod tests;` resolving to `<module>/tests.rs`).
-
-Multi-file modules use the directory form with `mod.rs` as the module root.
-Never keep `foo.rs` next to a `foo/` directory; when splitting an existing
-file, `git mv foo.rs foo/mod.rs` first so file history stays traceable.
-`mod.rs` declares the child modules and re-exports moved public items so
-existing import paths keep compiling.
-
-Anchor every `use` line at the crate root: `use crate::...` or an external
-crate name. `use super::...`, `use self::...`, and bare relative module
-paths are forbidden in new or edited code; import lines in files a change
-does not otherwise touch stay as they are. This rule governs import paths
-only; visibility markers such as `pub(super)` and `pub(in ...)` remain the
-correct tools. Widen visibility one step at a time (private, `pub(super)`,
-`pub(crate)`, `pub`) and never further than a real caller requires.
+In Rust files you add or edit, anchor every `use` path at `crate` or an
+external crate name. `use super::...`, `use self::...`, and bare relative
+module paths are forbidden. Leave imports in untouched files unchanged.
+This rule applies to import paths; visibility markers such as `pub(super)`
+and `pub(in ...)` are allowed. Use the narrowest visibility a real caller
+needs: private, `pub(super)`, `pub(crate)`, or `pub`.
 
 ## Technical taste
 
-Each layer answers its own questions and returns honest results; callers
-decide how to react.
+Each layer returns the outcome of its own work; callers decide how to
+respond.
 
 - Command-style functions (PTY writes, clipboard operations, state mutations)
   return what actually happened as a domain result: a `bool` for
@@ -61,9 +49,8 @@ decide how to react.
   (scrolling, focus moves, notifications, repaints) belong to the view layer
   that owns the settings and widgets involved; never bury them as hidden side
   effects inside the command path.
-- Do not add a boolean parameter that a helper re-checks when every call site
-  already knows the answer; branch at the call site instead. A literal `true`
-  or `false` argument in a call is the tell.
+- When every call site already knows a condition's value, branch there
+  instead of adding a boolean parameter for the helper to re-check.
 - Do not extract a trivial expression (a bare `&&`, a single comparison) into
   a free function merely to unit-test it, and do not write tests that only
   exercise such a wrapper.
@@ -99,7 +86,7 @@ The repository uses hooks from `.githooks`. Do not bypass them with
 `--no-verify`; fix the reported issue or split the commit along the required
 boundary.
 
-The pre-commit hook enforces these commit boundaries:
+The pre-commit hook enforces these rules:
 
 - Files under `.agents`, `.claude`, `.codex`, `.scratch`, `openspec`, `spec`,
   `docs/adr`, `docs/agents`, and `docs/superpowers` must not be committed with
@@ -146,25 +133,20 @@ The pre-push hook rejects pushing the local `dev` branch to `origin`; push that
 branch to the `private` remote instead.
 
 For non-trivial commits, include a body that explains the reason for the change
-and the important implementation details. Bullet lists are common. Keep the
-subject focused on the user-visible or architectural effect, not just the files
-touched.
+and the important implementation details. Keep the subject focused on the
+user-visible or architectural effect.
 
-A `Verification` section must identify the specific changed behavior that was
-tested and the observed result. Passing `cargo test`, even for a selected
-package or module, is not sufficient by itself because it does not state which
-behavior the test exercises. Do not mention `cargo check`, `cargo test`, `cargo
-fmt`, `cargo clippy`, compilation, or analogous build and lint commands in that
-section.
+Include a `Verification` section only when completed validation directly
+exercised the changed behavior or measured its performance. Describe the
+scenario, the behavior tested, and the observed result. Suitable evidence
+includes manual use, an automated functional or regression test, or concrete
+before-and-after performance measurements.
 
-Include a `Verification` section only when the change itself was meaningfully
-validated, such as by manually exercising the affected behavior, describing the
-scenario and outcome of an automated functional or regression test that directly
-covers it, or collecting concrete before-and-after performance data. If no such
-validation was performed, omit the section instead of substituting routine tool
-output as boilerplate. The commit-msg hook rejects a `Verification` section that
-mentions `cargo check`, `cargo test`, `cargo fmt`, `cargo clippy`, `cargo build`,
-rustfmt, or compiling.
+If no such validation was performed, omit the section. A successful build,
+lint run, or test command alone does not describe which behavior was exercised.
+Do not list build or lint commands in this section. The commit-msg hook also
+rejects mentions of `cargo check`, `cargo test`, `cargo fmt`, `cargo clippy`,
+`cargo build`, rustfmt, or compiling.
 
 When an AI coding agent materially contributes to the change, end the
 commit message with a `Co-Authored-By` trailer naming the model that
