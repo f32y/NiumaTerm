@@ -6,12 +6,12 @@ use crate::agent_tab::AgentPane;
 use crate::agent_tab::session::turn::response_age_tick;
 
 #[derive(Default)]
-pub(in crate::agent_tab) struct TurnPresentation {
+pub(super) struct TurnPresentation {
     timer: Option<Task<()>>,
 }
 
 impl TurnPresentation {
-    pub(in crate::agent_tab) fn refresh_timer(&mut self, cx: &mut Context<AgentPane>) {
+    pub(super) fn refresh_timer(&mut self, cx: &mut Context<AgentPane>) {
         if self.timer.is_some() {
             return;
         }

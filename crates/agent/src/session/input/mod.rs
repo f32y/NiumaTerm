@@ -1,14 +1,18 @@
 //! User input requests, response admission, and reconnect recovery.
 
+pub use crate::session::input::approval::ApprovalOutcome;
+pub use crate::session::input::draft::{QuestionDraft, QuestionStatus};
+
 mod approval;
 mod draft;
+
+#[cfg(test)]
+mod tests;
 
 use std::time::Instant;
 
 use crate::chat::{Question, QuestionMode, QuestionRequest, QuestionResolution, ThreadSettings};
 use crate::session::SessionRuntime;
-pub use crate::session::input::approval::ApprovalOutcome;
-pub use crate::session::input::draft::{QuestionDraft, QuestionStatus};
 use crate::session::lifecycle::Status;
 
 /// Distinguishes a draft from a later request reusing its provider ID or list position.
@@ -385,6 +389,3 @@ impl SessionInput {
         self.batches.clear();
     }
 }
-
-#[cfg(test)]
-mod tests;

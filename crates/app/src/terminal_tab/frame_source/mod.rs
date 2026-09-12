@@ -1,3 +1,13 @@
+pub(super) use crate::terminal_tab::frame_source::items::ItemViewport;
+
+mod items;
+
+#[cfg(test)]
+#[cfg(all(test, windows, enable_profiling))]
+mod profile_tests;
+#[cfg(test)]
+mod tests;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -19,22 +29,15 @@ use tracing::trace;
 use crate::terminal_tab::block_list::FrozenView;
 use crate::terminal_tab::block_list::chrome::DurationLabels;
 use crate::terminal_tab::frame::{TerminalColor, TerminalFrame};
-pub(in crate::terminal_tab) use crate::terminal_tab::frame_source::items::ItemViewport;
 use crate::terminal_tab::graphics::{FrozenImageCache, GenerationStore, prune_frozen_images};
 use crate::terminal_tab::pane_model::FrameTheme;
 use crate::terminal_tab::wake::{Wake, WakeSender, WakeSignal};
 use crate::terminal_tab::{block_list, frame, graphics, metrics};
 
-mod items;
-#[cfg(all(test, windows, enable_profiling))]
-mod profile_tests;
-#[cfg(test)]
-mod tests;
-
 pub struct TerminalFrameSource {
-    pub(in crate::terminal_tab) session: TerminalSession,
-    pub(in crate::terminal_tab) images: Arc<SessionBridge>,
-    pub(in crate::terminal_tab) snapshot: Arc<RenderBuffer>,
+    pub(super) session: TerminalSession,
+    pub(super) images: Arc<SessionBridge>,
+    pub(super) snapshot: Arc<RenderBuffer>,
     grid_size: (u16, u16),
 }
 
@@ -59,7 +62,7 @@ impl TerminalFrameSource {
         })
     }
 
-    pub(in crate::terminal_tab) fn for_gpui(
+    pub(super) fn for_gpui(
         wake: WakeSignal,
         surface_id: u64,
         launch: TerminalSessionConfig,
@@ -81,7 +84,7 @@ impl TerminalFrameSource {
         Self::new(config, surface_id, Some(wake_sender), colors)
     }
 
-    pub(in crate::terminal_tab) fn attach(
+    pub(super) fn attach(
         wake: WakeSignal,
         id: u64,
         connect: impl FnOnce(Arc<dyn SessionObserver>) -> Result<TerminalSession, EngineError>,
@@ -107,7 +110,7 @@ impl TerminalFrameSource {
         })
     }
 
-    pub(in crate::terminal_tab) fn resize_for_content(
+    pub(super) fn resize_for_content(
         &mut self,
         width_px: f32,
         height_px: f32,
@@ -133,7 +136,7 @@ impl TerminalFrameSource {
         accepted
     }
 
-    pub(in crate::terminal_tab) fn frame(
+    pub(super) fn frame(
         &mut self,
         previous: Option<&TerminalFrame>,
         theme: &FrameTheme,
@@ -190,7 +193,7 @@ impl TerminalFrameSource {
         frame
     }
 
-    pub(in crate::terminal_tab) fn frozen_block_view(
+    pub(super) fn frozen_block_view(
         &self,
         item_idx: usize,
         viewport: &ItemViewport,
@@ -266,7 +269,7 @@ impl TerminalFrameSource {
         view
     }
 
-    pub(in crate::terminal_tab) fn live_history_view(
+    pub(super) fn live_history_view(
         &self,
         history_rows: u64,
         cols: u32,
@@ -294,7 +297,7 @@ impl TerminalFrameSource {
         )
     }
 
-    pub(in crate::terminal_tab) fn frozen_image(
+    pub(super) fn frozen_image(
         &self,
         page: &RowPage,
         image_id: u32,
@@ -322,7 +325,7 @@ impl TerminalFrameSource {
         Some(generation)
     }
 
-    pub(in crate::terminal_tab) fn live_history_lines(
+    pub(super) fn live_history_lines(
         &self,
         rows: ops::Range<u64>,
         default_fg: frame::TerminalColor,
@@ -351,16 +354,16 @@ impl TerminalFrameSource {
     }
 }
 
-pub(in crate::terminal_tab) struct SessionBridge {
-    pub(in crate::terminal_tab) generations: Mutex<GenerationStore>,
-    pub(in crate::terminal_tab) frozen: FrozenImageCache,
+pub(super) struct SessionBridge {
+    pub(super) generations: Mutex<GenerationStore>,
+    pub(super) frozen: FrozenImageCache,
     live_count: AtomicUsize,
     id: u64,
     wake: Option<WakeSender>,
 }
 
 impl SessionBridge {
-    pub(in crate::terminal_tab) fn new(id: u64, wake: Option<WakeSender>) -> Self {
+    pub(super) fn new(id: u64, wake: Option<WakeSender>) -> Self {
         Self {
             generations: Mutex::new(GenerationStore::default()),
             frozen: Arc::default(),
@@ -370,7 +373,7 @@ impl SessionBridge {
         }
     }
 
-    pub(in crate::terminal_tab) fn has_live_images(&self) -> bool {
+    pub(super) fn has_live_images(&self) -> bool {
         self.live_count.load(Ordering::Relaxed) != 0
     }
 }

@@ -21,7 +21,7 @@ use crate::terminal_tab::{block_list, metrics};
 
 type SharedBlockStore = sync::Arc<Mutex<BlockStore>>;
 
-pub(in crate::terminal_tab) enum BlockListItem {
+pub(crate) enum BlockListItem {
     Frozen {
         item_idx: usize,
         store: SharedBlockStore,
@@ -54,7 +54,7 @@ impl IntoElement for BlockListItem {
     }
 }
 
-pub(in crate::terminal_tab) enum BlockListItemPrepaint {
+pub(crate) enum BlockListItemPrepaint {
     Frozen {
         view: block_list::FrozenView,
         shaped: Vec<ShapedLine>,

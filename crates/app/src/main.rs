@@ -18,14 +18,12 @@ mod profiling;
 mod remote;
 #[cfg(target_os = "macos")]
 mod sparkle;
-mod syntax;
 mod tabs;
 mod ui;
 #[cfg(windows)]
 mod update;
 mod usage_refresh;
 mod usage_sources;
-mod utils;
 mod window;
 mod workspace;
 
@@ -38,6 +36,8 @@ use std::rc::Rc;
 use std::{env, mem, path, process, time};
 
 use app::agent_tab::{AgentThreadDefaults, input_history};
+use app::assets::AppAssets;
+use app::{syntax, utils};
 use clap::{Arg, ArgAction, Command as ClapCommand};
 use futures::StreamExt as _;
 use futures::channel::mpsc::unbounded;
@@ -60,7 +60,7 @@ use rust_i18n::t;
 use tracing::warn;
 
 use crate::cli::CliAction;
-use crate::ui::{AppAssets, AppSettings};
+use crate::ui::AppSettings;
 use crate::window::{
     AppWindow, LastActiveWindow, ShellRegistry, WindowRegistry, selected_window_appearance,
 };

@@ -7,7 +7,7 @@ use crate::terminal_tab::frame::TerminalLine;
 /// immutable block coordinates; the active block's history keeps the engine's
 /// absolute SCREEN row so selection and copy remain owned by Ghostty.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::terminal_tab) enum BlockListPoint {
+pub(crate) enum BlockListPoint {
     Frozen(FrozenPoint),
     LiveHistory { row: u32, col: u16 },
 }

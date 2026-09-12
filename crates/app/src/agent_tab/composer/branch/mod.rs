@@ -2,6 +2,7 @@
 
 pub(super) mod fork;
 pub(super) mod rewind;
+
 #[cfg(test)]
 mod tests;
 
@@ -14,7 +15,7 @@ use crate::agent_tab::composer::CommandFeedbackKind;
 use crate::agent_tab::{AgentPane, RecentSessionsMode};
 
 #[derive(Default)]
-pub(in crate::agent_tab) struct BranchFlow {
+pub(crate) struct BranchFlow {
     draft: Option<String>,
     pending_prompt: Option<PendingBranchPrompt>,
 }
@@ -25,22 +26,18 @@ struct PendingBranchPrompt {
 }
 
 impl BranchFlow {
-    pub(in crate::agent_tab) fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.draft = None;
         self.pending_prompt = None;
     }
 }
 
 impl AgentPane {
-    pub(in crate::agent_tab) fn branch_flow_holds_composer(&self) -> bool {
+    pub(crate) fn branch_flow_holds_composer(&self) -> bool {
         self.session.borrow().branch.holds_composer()
     }
 
-    pub(in crate::agent_tab) fn complete_branch(
-        &mut self,
-        completion: SessionBranch,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn complete_branch(&mut self, completion: SessionBranch, cx: &mut Context<Self>) {
         let message = match (completion.replayed, completion.files) {
             (_, FileProgress::Restored) => "agent-rewind-complete-with-files",
             (true, FileProgress::NotConfirmed) => "agent-rewind-complete",

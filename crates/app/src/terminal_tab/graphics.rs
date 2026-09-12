@@ -8,6 +8,10 @@
 //! share generations by `Arc`, so a generation lives exactly as long as something can
 //! still paint it.
 
+#[cfg(test)]
+#[path = "graphics_tests.rs"]
+mod graphics_tests;
+
 use std::collections::{self, HashMap};
 #[cfg(test)]
 use std::mem;
@@ -53,9 +57,7 @@ impl ImageReleases {
         }
     }
 
-    pub(in crate::terminal_tab) fn attach(
-        &mut self,
-    ) -> Option<UnboundedReceiver<Arc<RenderImage>>> {
+    pub(super) fn attach(&mut self) -> Option<UnboundedReceiver<Arc<RenderImage>>> {
         if self.sender.is_some() {
             return None;
         }
@@ -222,17 +224,13 @@ pub fn graphic_to_generation(
 /// own per-block image ownership, which the engine block budget bounds.
 /// Lives beside the (gpui-free) `BlockStore` rather than inside it because
 /// the values are gpui images.
-pub(in crate::terminal_tab) type FrozenImageCache =
-    Arc<Mutex<HashMap<(u64, u32), Arc<ImageGeneration>>>>;
+pub(super) type FrozenImageCache = Arc<Mutex<HashMap<(u64, u32), Arc<ImageGeneration>>>>;
 
 /// Mirror block lifecycle events into the frozen-image cache: entries of
 /// evicted blocks die on `EngineBlocksSync`, and a user clear (`;K`) drops
 /// everything. Called on the PTY-event path, right where the same batch
 /// feeds the block store.
-pub(in crate::terminal_tab) fn prune_frozen_images(
-    cache: &FrozenImageCache,
-    events: &[BlockEvent],
-) {
+pub(super) fn prune_frozen_images(cache: &FrozenImageCache, events: &[BlockEvent]) {
     for event in events {
         match event {
             BlockEvent::EngineBlocksSync(live) => {
@@ -315,7 +313,3 @@ impl GenerationStore {
         self.generations.is_empty()
     }
 }
-
-#[cfg(test)]
-#[path = "graphics_tests.rs"]
-mod graphics_tests;

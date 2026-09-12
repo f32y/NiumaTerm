@@ -35,21 +35,21 @@ pub struct AcceptedCoverage {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Member {
-    pub(in crate::team) id: MemberId,
-    pub(in crate::team) name: String,
-    pub(in crate::team) profile: ProfileReference,
-    pub(in crate::team) conversation: ConversationId,
-    pub(in crate::team) ownership: OwnershipGeneration,
-    pub(in crate::team) roots: AgentWorkspace,
-    pub(in crate::team) settings: ThreadSettings,
-    pub(in crate::team) role: String,
-    pub(in crate::team) history: HistoryScope,
-    pub(in crate::team) coverage: AcceptedCoverage,
-    pub(in crate::team) excluded: bool,
+    pub(super) id: MemberId,
+    pub(super) name: String,
+    pub(super) profile: ProfileReference,
+    pub(super) conversation: ConversationId,
+    pub(super) ownership: OwnershipGeneration,
+    pub(super) roots: AgentWorkspace,
+    pub(super) settings: ThreadSettings,
+    pub(super) role: String,
+    pub(super) history: HistoryScope,
+    pub(super) coverage: AcceptedCoverage,
+    pub(super) excluded: bool,
     #[serde(default)]
-    pub(in crate::team) provider_id: Option<String>,
+    pub(super) provider_id: Option<String>,
     #[serde(default)]
-    pub(in crate::team) moderator_registered: bool,
+    pub(super) moderator_registered: bool,
 }
 
 /// New members receive their own copy of settings; profile defaults stay shared

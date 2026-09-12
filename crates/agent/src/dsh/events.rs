@@ -1,5 +1,9 @@
 //! The Remote WebSocket carries independent log, control, and interaction streams.
 
+#[cfg(test)]
+#[path = "events_tests.rs"]
+mod events_tests;
+
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::net::TcpStream;
@@ -15,10 +19,6 @@ use tungstenite::{Error, Message, WebSocket, connect};
 
 use crate::dsh::api::{ApiClient, CallError};
 use crate::dsh::host::Host;
-
-#[cfg(test)]
-#[path = "events_tests.rs"]
-mod events_tests;
 
 const RECONNECT_DELAY: Duration = Duration::from_millis(500);
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(200);

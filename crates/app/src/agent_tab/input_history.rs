@@ -1,4 +1,4 @@
-use nmt_agent::input_history::AgentInputHistory as InputHistoryService;
+pub(super) use nmt_agent::input_history::InputHistoryScope;
 
 #[cfg(test)]
 #[path = "input_history_tests.rs"]
@@ -11,11 +11,11 @@ use std::{env, io, process};
 
 use gpui::{App, Context, Entity, Global, Window};
 use gpui_component::input::TextareaState;
-pub(in crate::agent_tab) use nmt_agent::input_history::InputHistoryScope;
+use nmt_agent::input_history::AgentInputHistory as InputHistoryService;
 
 use crate::agent_tab::AgentPane;
 
-pub(in crate::agent_tab) struct AgentInputHistory(InputHistoryService);
+pub(super) struct AgentInputHistory(InputHistoryService);
 
 impl Global for AgentInputHistory {}
 
@@ -51,7 +51,7 @@ fn history_file_path(testing: bool) -> PathBuf {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::agent_tab) enum InputHistoryDirection {
+pub(super) enum InputHistoryDirection {
     Older,
     Newer,
 }
@@ -65,13 +65,13 @@ enum InputHistoryAction {
 }
 
 #[derive(Default)]
-pub(in crate::agent_tab) struct InputHistoryNavigation {
+pub(super) struct InputHistoryNavigation {
     entries: Arc<[String]>,
     index: Option<usize>,
 }
 
 impl InputHistoryNavigation {
-    pub(in crate::agent_tab) fn reset(&mut self) {
+    pub(super) fn reset(&mut self) {
         self.entries = [].into();
         self.index = None;
     }
@@ -144,7 +144,7 @@ impl InputHistoryNavigation {
 }
 
 impl AgentPane {
-    pub(in crate::agent_tab) fn handle_input_history_control(
+    pub(super) fn handle_input_history_control(
         &mut self,
         direction: InputHistoryDirection,
         window: &mut Window,

@@ -1,5 +1,9 @@
 //! Fetches the active Codex account's remaining rate limits through the Codex CLI.
 
+#[cfg(test)]
+#[path = "usage_fetcher_tests.rs"]
+mod usage_fetcher_tests;
+
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::process::Stdio;
 use std::sync::mpsc;
@@ -218,7 +222,3 @@ fn parse_reset_credits(value: &Value) -> Option<UsageResetCredits> {
         next_expires_at,
     })
 }
-
-#[cfg(test)]
-#[path = "usage_fetcher_tests.rs"]
-mod usage_fetcher_tests;

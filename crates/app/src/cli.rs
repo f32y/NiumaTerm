@@ -4,6 +4,10 @@
 //! directory; `nmt://action/activate` (internal, sent by an argument-less
 //! second launch) only foregrounds the running instance.
 
+#[cfg(test)]
+#[path = "cli_tests.rs"]
+mod cli_tests;
+
 use std::path::{self, Path, PathBuf};
 
 use nmt_agent::AgentRoute;
@@ -106,10 +110,6 @@ pub(crate) fn parse_nmt_url(url: &str) -> Result<CliAction, String> {
         other => Err(format!("unknown action {other:?} in {url}")),
     }
 }
-
-#[cfg(test)]
-#[path = "cli_tests.rs"]
-mod cli_tests;
 
 impl From<&CliAction> for String {
     /// The action as an `nmt://` URL, for forwarding over the IPC pipe. The

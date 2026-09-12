@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
@@ -10,9 +13,6 @@ use crate::session::AgentKind;
 use crate::session::team_capabilities::{ModeratorAdmission, TeamCapabilities, TeamLaunch};
 use crate::session::team_recovery::RecoveredTeamTurn;
 use crate::{AgentWorkspace, LaunchConfig};
-
-#[cfg(test)]
-mod tests;
 
 pub(super) struct TeamState {
     pub(super) launch: Box<TeamLaunch>,

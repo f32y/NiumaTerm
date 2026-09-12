@@ -44,11 +44,7 @@ impl AgentPane {
     /// paste was consumed. A paste this leaves alone falls through to the
     /// composer's own text handling, which is what a clipboard holding text
     /// should get.
-    pub(in crate::agent_tab) fn paste_image(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub(crate) fn paste_image(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         // An image reaches the clipboard two ways: as pixels, from a capture
         // tool or a browser, and as a file, from a file manager. Both are the
         // same gesture to the person doing it.
@@ -109,7 +105,7 @@ impl AgentPane {
         }
     }
 
-    pub(in crate::agent_tab) fn remove_attachment(
+    pub(crate) fn remove_attachment(
         &mut self,
         index: usize,
         window: &mut Window,
@@ -123,7 +119,7 @@ impl AgentPane {
         }
     }
 
-    pub(in crate::agent_tab) fn sync_attachments(
+    pub(crate) fn sync_attachments(
         &mut self,
         text: &str,
         window: &mut Window,
@@ -138,7 +134,7 @@ impl AgentPane {
     /// image opens in: an attachment is read at full size the same way
     /// wherever the reader meets it. `origin` is the thumbnail it was opened
     /// from, when it was opened from one, for the preview to grow out of.
-    pub(in crate::agent_tab) fn open_image(
+    pub(crate) fn open_image(
         &mut self,
         image: Arc<Image>,
         origin: Option<Bounds<Pixels>>,
@@ -152,7 +148,7 @@ impl AgentPane {
     /// Open the image a composer placeholder names. The placeholder is the
     /// only thing in the pending message that stands for an image, so
     /// following it shows what it stands for.
-    pub(in crate::agent_tab) fn open_attached_image(
+    pub(crate) fn open_attached_image(
         &mut self,
         range: Range<usize>,
         window: &Window,

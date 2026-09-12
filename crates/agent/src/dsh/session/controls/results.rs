@@ -5,7 +5,7 @@ use crate::dsh::session::Session;
 use crate::dsh::session::controls::{Operation, question_id};
 
 impl Session {
-    pub(in crate::dsh::session) fn expire_questions(&mut self) -> Vec<Event> {
+    pub(crate) fn expire_questions(&mut self) -> Vec<Event> {
         self.controls.retire_questions();
 
         self.pending_questions
@@ -18,7 +18,7 @@ impl Session {
             .collect()
     }
 
-    pub(in crate::dsh::session) fn control_completed(&mut self, payload: &Value) -> Vec<Event> {
+    pub(crate) fn control_completed(&mut self, payload: &Value) -> Vec<Event> {
         let Some(operation) = payload["id"]
             .as_u64()
             .and_then(|id| self.controls.complete(id))

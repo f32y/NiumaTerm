@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "shell_integration_tests.rs"]
+mod shell_integration_tests;
+
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -185,7 +189,3 @@ fn context_menu_registered_registry_roots() -> Vec<String> {
 fn path_string(path: &Path) -> String {
     path.as_os_str().to_string_lossy().into_owned()
 }
-
-#[cfg(test)]
-#[path = "shell_integration_tests.rs"]
-mod shell_integration_tests;

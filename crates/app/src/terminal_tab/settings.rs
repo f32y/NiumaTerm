@@ -90,7 +90,7 @@ pub fn theme_default_background() -> TerminalColor {
     with_active_colors(|colors| colors.background.0.into())
 }
 
-pub(in crate::terminal_tab) fn duration_labels() -> DurationLabels {
+pub(super) fn duration_labels() -> DurationLabels {
     DurationLabels {
         minutes_seconds: t!("terminal-duration-minutes-seconds").to_string(),
         seconds: t!("terminal-duration-seconds").to_string(),

@@ -1,6 +1,10 @@
 // Content was originally taken from https://github.com/alacritty/alacritty/blob/e35e5ad14fce8456afdd89f2b392b9924bb27471/alacritty_terminal/src/term/mod.rs
 // which is licensed under Apache 2.0 license.
 
+pub use crate::terminal::grid::row::Row;
+pub use crate::terminal::pos::{Column, Cursor, Line, Pos};
+pub use crate::terminal::square::Square;
+
 pub mod grid;
 pub mod pos;
 pub mod square;
@@ -11,10 +15,7 @@ pub mod style;
 use std::ops;
 
 use bitflags::bitflags;
-pub use grid::row::Row;
 use nmt_config::colors;
-pub use pos::{Column, Cursor, Line, Pos};
-pub use square::Square;
 
 // Ghostty plus RenderBuffer replaced the `Crosswords` VT engine. This module now
 // only provides the VT-mode bitflags (`Mode`,

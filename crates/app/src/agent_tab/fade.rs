@@ -27,7 +27,7 @@ fn smoothstep(t: f32) -> f32 {
 /// arriving retreats from the value actually on screen instead of snapping to
 /// full first.
 #[derive(Clone, Copy)]
-pub(in crate::agent_tab) struct Fade {
+pub(super) struct Fade {
     from: f32,
     to: f32,
     start: Instant,
@@ -41,7 +41,7 @@ impl Fade {
     /// opacity is done in the default; one that also travels across the pane
     /// needs longer, since the eye follows a moving edge and reads the same
     /// span as a jump.
-    pub(in crate::agent_tab) fn lasting(duration: Duration) -> Self {
+    pub(super) fn lasting(duration: Duration) -> Self {
         Self {
             duration,
             ..Self::default()
@@ -59,7 +59,7 @@ impl Fade {
     /// to remember to. Under reduced motion it is still retargeted, so a
     /// layer dismissed while motion is on and reopened after it is off
     /// resumes from what is on screen; only the travel is skipped.
-    pub(in crate::agent_tab) fn drive(
+    pub(super) fn drive(
         &mut self,
         open: bool,
         now: Instant,
@@ -112,7 +112,7 @@ impl Default for Fade {
 /// One frame of a fading layer: whether it is up, and how much of it shows.
 /// The two are separate because a layer on its way out still shows.
 #[derive(Clone, Copy)]
-pub(in crate::agent_tab) struct FadeFrame {
+pub(super) struct FadeFrame {
     open: bool,
     opacity: f32,
 }
@@ -120,14 +120,14 @@ pub(in crate::agent_tab) struct FadeFrame {
 impl FadeFrame {
     /// Nothing of the layer is on screen: it can be left out of the frame,
     /// and whatever was kept for its fade-out can go.
-    pub(in crate::agent_tab) fn gone(self) -> bool {
+    pub(super) fn gone(self) -> bool {
         !self.open && self.opacity <= 0.0
     }
 
     /// How far along its ramp the layer is, for content that travels with the
     /// fade rather than only showing through it. The same number as the
     /// opacity, so the travel and the fade settle on the same frame.
-    pub(in crate::agent_tab) fn progress(self) -> f32 {
+    pub(super) fn progress(self) -> f32 {
         self.opacity
     }
 }
@@ -147,7 +147,7 @@ type ClickListener = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 /// as it fades, after whatever it covered for has ended, would read as the
 /// pane having hung.
 #[derive(IntoElement)]
-pub(in crate::agent_tab) struct FrostedLayer {
+pub(super) struct FrostedLayer {
     frame: FadeFrame,
     blur: Pixels,
     tint: f32,
@@ -157,7 +157,7 @@ pub(in crate::agent_tab) struct FrostedLayer {
 }
 
 impl FrostedLayer {
-    pub(in crate::agent_tab) fn new(frame: FadeFrame) -> Self {
+    pub(super) fn new(frame: FadeFrame) -> Self {
         Self {
             frame,
             blur: px(24.),
@@ -170,7 +170,7 @@ impl FrostedLayer {
 
     /// A lighter frost, for a layer that pushes content back rather than
     /// covering it.
-    pub(in crate::agent_tab) fn light(mut self) -> Self {
+    pub(super) fn light(mut self) -> Self {
         self.blur = px(16.);
         self.tint = 0.25;
 
@@ -179,14 +179,14 @@ impl FrostedLayer {
 
     /// Room between the children and narrow pane edges, for content that
     /// wraps.
-    pub(in crate::agent_tab) fn padded(mut self) -> Self {
+    pub(super) fn padded(mut self) -> Self {
         self.padded = true;
 
         self
     }
 
     /// What a click on the layer itself does while it is up.
-    pub(in crate::agent_tab) fn on_click(
+    pub(super) fn on_click(
         mut self,
         listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {

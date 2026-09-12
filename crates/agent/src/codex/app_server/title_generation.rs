@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "title_generation_tests.rs"]
+mod title_generation_tests;
+
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
@@ -562,7 +566,3 @@ fn truncate_with_ellipsis(text: &str, limit: usize) -> Option<String> {
 
     Some(truncated)
 }
-
-#[cfg(test)]
-#[path = "title_generation_tests.rs"]
-mod title_generation_tests;

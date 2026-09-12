@@ -13,9 +13,9 @@ use crate::agent_tab::transcript::code::clean_output;
 
 /// Where the last-response reading stops counting and becomes "more than an
 /// hour".
-pub(in crate::agent_tab) const LAST_RESPONSE_LIMIT: Duration = Duration::from_secs(60 * 60);
+pub(crate) const LAST_RESPONSE_LIMIT: Duration = Duration::from_secs(60 * 60);
 
-pub(in crate::agent_tab) fn should_show_jump_to_latest(
+pub(crate) fn should_show_jump_to_latest(
     is_following_tail: bool,
     is_scrolled_to_end: Option<bool>,
     max_scroll_offset: Pixels,
@@ -34,7 +34,7 @@ pub(in crate::agent_tab) fn should_show_jump_to_latest(
 }
 
 /// The live turn-duration and generated-token label.
-pub(in crate::agent_tab) fn working_label(
+pub(crate) fn working_label(
     started: Instant,
     output_tokens: Option<u64>,
     detail: Option<&str>,
@@ -71,7 +71,7 @@ pub(super) fn working_status_label(
 /// just settle, or has it been sitting"; once the answer is "it has been
 /// sitting", a more precise number says nothing more, and the label can stop
 /// changing altogether.
-pub(in crate::agent_tab) fn last_response_label(seconds: u64) -> String {
+pub(crate) fn last_response_label(seconds: u64) -> String {
     if seconds >= LAST_RESPONSE_LIMIT.as_secs() {
         return t!("agent-composer-last-response-old").to_string();
     }
@@ -161,7 +161,7 @@ pub(super) fn elapsed_label(total_seconds: u64) -> String {
 /// or a reasoning item that never streamed a summary. They render no row and
 /// are transparent to work-run grouping, so an invisible entry can't split a
 /// run of tool calls into two summary lines.
-pub(in crate::agent_tab) fn hidden(item: &SessionItem) -> bool {
+pub(crate) fn hidden(item: &SessionItem) -> bool {
     match item {
         SessionItem::UserMessage { text }
         | SessionItem::AgentMessage { text, .. }
@@ -177,7 +177,7 @@ pub(in crate::agent_tab) fn hidden(item: &SessionItem) -> bool {
 /// possible, or `None` when the whole prompt fits under the caps. The character
 /// cap bounds visual wrapping for giant single-line pastes; a byte cap alone
 /// can still produce dozens of wrapped lines in a narrow bubble.
-pub(in crate::agent_tab) fn truncated_user_prompt(text: &str) -> Option<&str> {
+pub(crate) fn truncated_user_prompt(text: &str) -> Option<&str> {
     const MAX_SOURCE_LINES: usize = 3;
     const MAX_CHARS: usize = 512;
 
@@ -204,7 +204,7 @@ pub(in crate::agent_tab) fn truncated_user_prompt(text: &str) -> Option<&str> {
 
 /// Recognize structured output without treating bracketed log levels as JSON.
 /// Incomplete objects and arrays remain eligible while their contents stream.
-pub(in crate::agent_tab) fn detect_output_language(output: &str) -> &'static str {
+pub(crate) fn detect_output_language(output: &str) -> &'static str {
     let trimmed = output.trim_start();
 
     if trimmed.starts_with("diff --git")
@@ -234,7 +234,7 @@ pub(in crate::agent_tab) fn detect_output_language(output: &str) -> &'static str
 /// Claude's Read tool returns cat -n style lines ("   12→text"); strip the
 /// gutter so the source underneath highlights as its own language. Any line
 /// without the gutter leaves the text untouched (format drift safety).
-pub(in crate::agent_tab) fn strip_read_gutter(output: &str) -> Option<String> {
+pub(crate) fn strip_read_gutter(output: &str) -> Option<String> {
     let mut body = String::with_capacity(output.len());
 
     for line in output.lines() {
@@ -255,7 +255,7 @@ pub(in crate::agent_tab) fn strip_read_gutter(output: &str) -> Option<String> {
 /// Fence-language tag for a file path. The highlight registry accepts file
 /// extensions as language aliases (rs, py, yml, …) and resolves unknown ones
 /// to plain, so the extension itself is the tag.
-pub(in crate::agent_tab) fn file_extension_lang(path: &str) -> String {
+pub(crate) fn file_extension_lang(path: &str) -> String {
     Path::new(path)
         .extension()
         .and_then(|ext| ext.to_str())
@@ -263,17 +263,14 @@ pub(in crate::agent_tab) fn file_extension_lang(path: &str) -> String {
         .to_ascii_lowercase()
 }
 
-pub(in crate::agent_tab) fn command_execution_heading(purpose: Option<&str>) -> Cow<'_, str> {
+pub(crate) fn command_execution_heading(purpose: Option<&str>) -> Cow<'_, str> {
     purpose
         .filter(|purpose| !purpose.trim().is_empty())
         .map(Cow::Borrowed)
         .unwrap_or_else(|| t!("agent-transcript-run-command"))
 }
 
-pub(in crate::agent_tab) fn command_execution_detail(
-    command: &str,
-    aggregated_output: Option<&str>,
-) -> String {
+pub(crate) fn command_execution_detail(command: &str, aggregated_output: Option<&str>) -> String {
     let mut detail = String::with_capacity(
         command.len() + aggregated_output.map_or(0, str::len) + "$ \n\n".len(),
     );
@@ -293,9 +290,7 @@ pub(in crate::agent_tab) fn command_execution_detail(
 /// itself. A reader deciding what to do next needs the first thing that went
 /// wrong, and the lines after it are usually the same failure restated as a
 /// stack or a usage dump; the whole output stays one click away.
-pub(in crate::agent_tab) fn command_failure_reason(
-    aggregated_output: Option<&str>,
-) -> Option<String> {
+pub(crate) fn command_failure_reason(aggregated_output: Option<&str>) -> Option<String> {
     aggregated_output?.lines().find_map(|line| {
         let line = clean_output(line);
         let line = line.trim();
@@ -306,7 +301,7 @@ pub(in crate::agent_tab) fn command_failure_reason(
 
 /// Full text of an entry for the right-click Copy action — the whole message,
 /// independent of any partial selection or truncated preview.
-pub(in crate::agent_tab) fn entry_copy_text(item: &SessionItem) -> String {
+pub(crate) fn entry_copy_text(item: &SessionItem) -> String {
     match item {
         SessionItem::UserMessage { text } => text
             .as_deref()
@@ -384,20 +379,18 @@ pub(in crate::agent_tab) fn entry_copy_text(item: &SessionItem) -> String {
 
 /// Heading of a compaction row. An unprompted compaction is named as such
 /// because it explains a context-gauge jump the user did not ask for.
-pub(in crate::agent_tab) fn compaction_label(detail: &Compaction) -> Cow<'static, str> {
+pub(crate) fn compaction_label(detail: &Compaction) -> Cow<'static, str> {
     match detail.trigger {
         Some(CompactionTrigger::Automatic) => t!("agent-transcript-context-auto-compacted"),
         Some(CompactionTrigger::Manual) | None => t!("agent-transcript-context-compacted"),
     }
 }
 
-pub(in crate::agent_tab) fn compaction_row_is_expandable(kind: AgentKind) -> bool {
+pub(crate) fn compaction_row_is_expandable(kind: AgentKind) -> bool {
     matches!(kind, AgentKind::Claude | AgentKind::DeepSeek)
 }
 
-pub(in crate::agent_tab) fn compaction_trigger_label(
-    trigger: CompactionTrigger,
-) -> Cow<'static, str> {
+pub(crate) fn compaction_trigger_label(trigger: CompactionTrigger) -> Cow<'static, str> {
     match trigger {
         CompactionTrigger::Automatic => t!("agent-transcript-trigger-automatic"),
         CompactionTrigger::Manual => t!("agent-transcript-trigger-manual"),
@@ -407,7 +400,7 @@ pub(in crate::agent_tab) fn compaction_trigger_label(
 /// Token and message accounting of a compaction, as display-ready fragments.
 /// Only what the backend actually reported appears, so a partially described
 /// compaction shows fewer fragments instead of zeros.
-pub(in crate::agent_tab) fn compaction_accounting(detail: &Compaction) -> Vec<String> {
+pub(crate) fn compaction_accounting(detail: &Compaction) -> Vec<String> {
     let mut parts = Vec::new();
 
     match (detail.pre_tokens, detail.post_tokens) {
@@ -461,7 +454,7 @@ pub(in crate::agent_tab) fn compaction_accounting(detail: &Compaction) -> Vec<St
 }
 
 /// Compact "how long ago" label for a history row ("now", "5m", "3h", "2d").
-pub(in crate::agent_tab) fn relative_time(at: SystemTime) -> String {
+pub(crate) fn relative_time(at: SystemTime) -> String {
     let seconds = at.elapsed().map(|d| d.as_secs()).unwrap_or(0);
 
     match seconds {
@@ -474,7 +467,7 @@ pub(in crate::agent_tab) fn relative_time(at: SystemTime) -> String {
     }
 }
 
-pub(in crate::agent_tab) fn compact_token_count(tokens: u64) -> String {
+pub(crate) fn compact_token_count(tokens: u64) -> String {
     match tokens {
         0..=999 => tokens.to_string(),
         1_000..=9_999 => format!("{:.1}k", tokens as f64 / 1_000.0).replace(".0k", "k"),
@@ -487,7 +480,7 @@ pub(in crate::agent_tab) fn compact_token_count(tokens: u64) -> String {
 /// mode iconography): closed lock = prompts on, pen = edits auto-approved,
 /// pencil-ruler = plan mode, open lock = no prompts. Covers both Claude's
 /// permission modes and Codex's approval policies.
-pub(in crate::agent_tab) fn permission_icon(value: Option<&str>) -> IconName {
+pub(crate) fn permission_icon(value: Option<&str>) -> IconName {
     match value {
         Some("acceptEdits") => IconName::PenLine,
         Some("plan") => IconName::PencilRuler,

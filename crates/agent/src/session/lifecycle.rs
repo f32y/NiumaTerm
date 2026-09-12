@@ -3,6 +3,10 @@
 //! Async work carries an epoch. Only this module advances it or admits a
 //! completed start, incoming output, or shutdown result into the live session.
 
+#[cfg(test)]
+#[path = "lifecycle_tests.rs"]
+mod lifecycle_tests;
+
 use serde_json::Value;
 
 use crate::chat::{Event, SendOutcome};
@@ -325,7 +329,3 @@ impl SessionRuntime {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "lifecycle_tests.rs"]
-mod lifecycle_tests;

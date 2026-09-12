@@ -1,10 +1,37 @@
+/// Engine handle of a finished command block (per-block grid). Plain value
+/// type; lookup is by id, `generation` is the data version for cache keys.
+pub use libghostty_vt_sys::BlockHandle;
+
+pub use crate::ghostty::block::{AcquiredBlock, BlockRef};
+pub use crate::ghostty::error::{Error, Result};
+pub use crate::ghostty::types::{
+    CellText, CellWide, Color, Palette, PlacementScreenPos, RowCell, ScreenRowMeta, ScreenRowRead,
+    ScrollbarInfo, SnapshotColors, SnapshotCursor, SnapshotPlacement, SnapshotStyle, Underline,
+};
+
+/// VT mode identifiers for [`GhosttyTerminal::mode`].
+///
+/// Values mirror Ghostty's `ModeTag` (packed `u16`): a DEC private mode uses its
+/// raw number; an ANSI mode sets bit 15. See Ghostty `src/terminal/modes.zig`.
+pub mod mode;
+
+mod block;
+mod callbacks;
+mod error;
+mod format;
+mod grid_read;
+mod kitty;
+mod render_state;
+
+mod types;
+
+#[cfg(test)]
+mod tests;
+
 #[cfg(test)]
 use std::sync;
 use std::{array, mem, os, path, ptr, slice};
 
-/// Engine handle of a finished command block (per-block grid). Plain value
-/// type; lookup is by id, `generation` is the data version for cache keys.
-pub use libghostty_vt_sys::BlockHandle;
 #[cfg(test)]
 use libghostty_vt_sys::RowSemanticPrompt as VtRowSemanticPrompt;
 use libghostty_vt_sys::{
@@ -32,42 +59,17 @@ use libghostty_vt_sys::{
 use nmt_config::colors::ColorRgb;
 use nmt_config::colors::Colors;
 
-use crate::ghostty::format::format_terminal;
-use crate::ghostty::grid_read::visit_row_cells;
-use crate::ghostty::kitty::kitty_image_graphic_data;
-use crate::pwd::pwd_to_path;
-use crate::render_buffer::RenderBuffer;
-use crate::{ansi, clipboard, graphics, terminal};
-
-mod block;
-mod callbacks;
-mod error;
-mod format;
-mod grid_read;
-mod kitty;
-mod render_state;
-
-use crate::ghostty::kitty::KittyState;
-use crate::ghostty::render_state::RenderStateReader;
-
-mod types;
-
-pub use crate::ghostty::block::{AcquiredBlock, BlockRef};
 use crate::ghostty::callbacks::{
     Callbacks, KITTY_IMAGE_STORAGE_LIMIT_BYTES, bell_cb, clipboard_write_cb, register_png_decoder,
     write_pty_cb,
 };
-pub use crate::ghostty::error::{Error, Result};
-pub use crate::ghostty::types::{
-    CellText, CellWide, Color, Palette, PlacementScreenPos, RowCell, ScreenRowMeta, ScreenRowRead,
-    ScrollbarInfo, SnapshotColors, SnapshotCursor, SnapshotPlacement, SnapshotStyle, Underline,
-};
-
-/// VT mode identifiers for [`GhosttyTerminal::mode`].
-///
-/// Values mirror Ghostty's `ModeTag` (packed `u16`): a DEC private mode uses its
-/// raw number; an ANSI mode sets bit 15. See Ghostty `src/terminal/modes.zig`.
-pub mod mode;
+use crate::ghostty::format::format_terminal;
+use crate::ghostty::grid_read::visit_row_cells;
+use crate::ghostty::kitty::{KittyState, kitty_image_graphic_data};
+use crate::ghostty::render_state::RenderStateReader;
+use crate::pwd::pwd_to_path;
+use crate::render_buffer::RenderBuffer;
+use crate::{ansi, clipboard, graphics, terminal};
 
 /// What the engine last reported for the title and the working directory.
 ///
@@ -1195,6 +1197,3 @@ impl Drop for GhosttyTerminal {
         unsafe { ghostty_terminal_free(self.terminal) };
     }
 }
-
-#[cfg(test)]
-mod tests;

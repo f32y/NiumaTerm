@@ -1,3 +1,9 @@
+#[cfg(test)]
+mod fixtures;
+
+#[cfg(test)]
+mod typewriter_tests;
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -41,16 +47,16 @@ use crate::agent_tab::transcript::{CodeTranscriptCache, Entry, ReadingPosition};
 /// own conversation and a child agent's conversation render through here, which
 /// is what keeps their presentation from drifting apart.
 pub struct TranscriptView {
-    pub(in crate::agent_tab) conversation: Rc<RefCell<ConversationState>>,
-    pub(in crate::agent_tab) image_previews: RefCell<HashMap<(usize, usize), Arc<Image>>>,
+    pub(crate) conversation: Rc<RefCell<ConversationState>>,
+    pub(crate) image_previews: RefCell<HashMap<(usize, usize), Arc<Image>>>,
     pub(super) row_cache: RowCache,
 
     /// Virtualized transcript: only visible rows build elements each frame.
     /// `rows` mirrors the list's item count; render() rebuilds the changed
     /// turn suffix and splices/remeasures just the changed range.
-    pub(in crate::agent_tab) transcript_list: ListState,
+    pub(crate) transcript_list: ListState,
 
-    pub(in crate::agent_tab) rows: Vec<TranscriptRow>,
+    pub(crate) rows: Vec<TranscriptRow>,
 
     /// Row heights depend on the prose and technical-content fonts, which the
     /// specs can't see; the last-seen values trigger a full remeasure on change.
@@ -86,11 +92,11 @@ pub struct TranscriptView {
 
     /// Which parts of the transcript are open, how far through their motion
     /// they are, and how tall each one lays out to.
-    pub(in crate::agent_tab) disclosures: Disclosures,
+    pub(crate) disclosures: Disclosures,
 
     /// Expanded technical output retains its parsed source and scroll position.
     /// Collapsing a row releases the extra source, syntax trees, and worker.
-    pub(in crate::agent_tab) code_transcripts: CodeTranscriptCache,
+    pub(crate) code_transcripts: CodeTranscriptCache,
 
     /// The reply being let onto the screen a character at a time, while one
     /// is. Only text that streams in through this view is typed: a restored
@@ -99,9 +105,9 @@ pub struct TranscriptView {
 
     /// Presentation inputs rather than owned state: the working directory
     /// resolves transcript links, and the provider decides a few labels.
-    pub(in crate::agent_tab) cwd: Option<String>,
+    pub(crate) cwd: Option<String>,
 
-    pub(in crate::agent_tab) kind: AgentKind,
+    pub(crate) kind: AgentKind,
 
     /// Revision of the conversation this view was last filled from, for a view
     /// that mirrors content someone else owns rather than accumulating its own.
@@ -113,18 +119,18 @@ pub struct TranscriptView {
     /// conversation rather than per pane so a child agent's transcript
     /// enlarges its own images inside its own bounds. Stays through the
     /// layer's fade-out, which needs something to fade.
-    pub(in crate::agent_tab) zoomed_image: Option<Arc<Image>>,
+    pub(crate) zoomed_image: Option<Arc<Image>>,
 
     /// Whether the preview layer is up or on its way out; the image alone
     /// cannot say, because it outlives the dismissal by the fade.
-    pub(in crate::agent_tab) zoom_open: bool,
+    pub(crate) zoom_open: bool,
 
-    pub(in crate::agent_tab) zoom_fade: Fade,
+    pub(super) zoom_fade: Fade,
 
     /// The thumbnail the open image grew out of, in window coordinates, so
     /// the preview can shrink back into it. Absent when the image was opened
     /// from something with no place on screen, such as a link in the composer.
-    pub(in crate::agent_tab) zoom_origin: Option<Bounds<Pixels>>,
+    pub(crate) zoom_origin: Option<Bounds<Pixels>>,
 
     /// The pane whose conversation this is, for the row actions that address
     /// the conversation rather than the row: branching in front of a prompt,
@@ -133,12 +139,12 @@ pub struct TranscriptView {
     /// actions have no conversation of this pane's to act on.
     owner: Option<gpui::WeakEntity<AgentPane>>,
 
-    pub(in crate::agent_tab) attribution: HashMap<String, TranscriptAttribution>,
+    pub(crate) attribution: HashMap<String, TranscriptAttribution>,
 }
 
-pub(in crate::agent_tab) struct TranscriptAttribution {
-    pub(in crate::agent_tab) name: SharedString,
-    pub(in crate::agent_tab) cwd: Option<String>,
+pub(crate) struct TranscriptAttribution {
+    pub(crate) name: SharedString,
+    pub(crate) cwd: Option<String>,
 }
 
 impl TranscriptView {
@@ -186,7 +192,7 @@ impl TranscriptView {
 
     /// Claim this view as one pane's own conversation, which is what makes its
     /// rows offer the actions that address the conversation.
-    pub(in crate::agent_tab) fn sync_content(&mut self) {
+    pub(crate) fn sync_content(&mut self) {
         let shared = self.conversation.clone();
         let conversation = shared.borrow();
         let version = conversation.version();
@@ -227,19 +233,19 @@ impl TranscriptView {
         self.observed_version = version;
     }
 
-    pub(in crate::agent_tab) fn set_owner(&mut self, owner: gpui::WeakEntity<AgentPane>) {
+    pub(crate) fn set_owner(&mut self, owner: gpui::WeakEntity<AgentPane>) {
         self.owner = Some(owner);
     }
 
-    pub(in crate::agent_tab) fn clear_owner(&mut self) {
+    pub(crate) fn clear_owner(&mut self) {
         self.owner = None;
     }
 
-    pub(in crate::agent_tab) fn owner(&self) -> Option<&gpui::WeakEntity<AgentPane>> {
+    pub(crate) fn owner(&self) -> Option<&gpui::WeakEntity<AgentPane>> {
         self.owner.as_ref()
     }
 
-    pub(in crate::agent_tab) fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.conversation.borrow().content.entries().is_empty()
     }
 
@@ -262,7 +268,7 @@ impl TranscriptView {
         cx.notify();
     }
 
-    pub(in crate::agent_tab) fn show_attributed_entries(
+    pub(crate) fn show_attributed_entries(
         &mut self,
         entries: Vec<Entry>,
         attribution: HashMap<String, TranscriptAttribution>,
@@ -293,7 +299,7 @@ impl TranscriptView {
         cx.notify();
     }
 
-    pub(in crate::agent_tab) fn reset_presentation(&mut self) {
+    pub(crate) fn reset_presentation(&mut self) {
         self.image_previews.borrow_mut().clear();
         self.row_cache.invalidate(0);
         self.source_revision = None;
@@ -307,7 +313,7 @@ impl TranscriptView {
 
     /// The part of reply `index` the reader sees this frame: the whole of it
     /// unless its edge is still crossing the text.
-    pub(in crate::agent_tab) fn shown_reply<'a>(&self, index: usize, text: &'a str) -> &'a str {
+    pub(crate) fn shown_reply<'a>(&self, index: usize, text: &'a str) -> &'a str {
         match &self.typewriter {
             Some(typewriter) if typewriter.index() == index => {
                 shown_prefix(text, typewriter.shown())
@@ -321,7 +327,7 @@ impl TranscriptView {
     /// height-relevant part of that row's signature. The row lays out to what
     /// the edge lets through, so the signature has to move with the edge for
     /// the list to remeasure the row as it grows.
-    pub(in crate::agent_tab) fn typed_edge(&self, index: usize) -> Option<usize> {
+    pub(crate) fn typed_edge(&self, index: usize) -> Option<usize> {
         self.typewriter
             .as_ref()
             .filter(|typewriter| typewriter.index() == index)
@@ -360,7 +366,7 @@ impl TranscriptView {
     }
 
     /// Latest non-empty assistant reply of `turn`, for notification bodies.
-    pub(in crate::agent_tab) fn latest_agent_message(&self, turn: u64) -> Option<String> {
+    pub(crate) fn latest_agent_message(&self, turn: u64) -> Option<String> {
         self.conversation
             .borrow()
             .content
@@ -371,22 +377,22 @@ impl TranscriptView {
     /// How many actions `turn` has taken: the tool calls, file changes and
     /// thinking passes it logged. Conversation text is the turn talking rather
     /// than working, so it does not count.
-    pub(in crate::agent_tab) fn turn_steps(&self, turn: u64) -> usize {
+    pub(crate) fn turn_steps(&self, turn: u64) -> usize {
         self.conversation.borrow().content.turn_steps(turn)
     }
 
     /// Completed and total entries of the task list the agent is working from.
     /// Only the newest list counts: a task list is republished in full whenever
     /// it changes, so the earlier ones describe states the agent has left.
-    pub(in crate::agent_tab) fn task_tally(&self) -> Option<(u32, u32)> {
+    pub(crate) fn task_tally(&self) -> Option<(u32, u32)> {
         self.conversation.borrow().content.task_tally()
     }
 
-    pub(in crate::agent_tab) fn is_working(&self) -> bool {
+    pub(crate) fn is_working(&self) -> bool {
         self.conversation.borrow().live.is_working()
     }
 
-    pub(in crate::agent_tab) fn start_working(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn start_working(&mut self, cx: &mut Context<Self>) {
         if !self.conversation.borrow().live.is_working() {
             self.conversation.borrow_mut().start();
         }
@@ -399,7 +405,7 @@ impl TranscriptView {
 
     /// Discard a turn that never produced visible output, so an immediate stop
     /// leaves no elapsed-time row behind for work that did not happen.
-    pub(in crate::agent_tab) fn discard_turn(&mut self, turn: u64, cx: &mut Context<Self>) {
+    pub(crate) fn discard_turn(&mut self, turn: u64, cx: &mut Context<Self>) {
         self.conversation.borrow_mut().live.discard();
         self.conversation.borrow_mut().turns.forget(turn);
         self.invalidate_turn_rows(turn);
@@ -723,9 +729,3 @@ fn shown_prefix(text: &str, chars: usize) -> &str {
         .nth(chars)
         .map_or(text, |(end, _)| &text[..end])
 }
-
-#[cfg(test)]
-mod typewriter_tests;
-
-#[cfg(test)]
-mod fixtures;

@@ -246,14 +246,14 @@ fn overlay_styles(
 
 const VIRTUAL_TRANSCRIPT_MIN_BYTES: usize = 16 * 1024;
 const VIRTUAL_TRANSCRIPT_MIN_ROWS: usize = 128;
-pub(in crate::agent_tab::transcript) const VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES: usize = 4 * 1024;
+pub(crate) const VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES: usize = 4 * 1024;
 
-pub(in crate::agent_tab::transcript) fn should_virtualize_transcript(text: &str) -> bool {
+pub(crate) fn should_virtualize_transcript(text: &str) -> bool {
     text.len() >= VIRTUAL_TRANSCRIPT_MIN_BYTES
         || text.lines().take(VIRTUAL_TRANSCRIPT_MIN_ROWS + 1).count() > VIRTUAL_TRANSCRIPT_MIN_ROWS
 }
 
-pub(in crate::agent_tab::transcript) fn transcript_segments(text: &str) -> Vec<Range<usize>> {
+pub(crate) fn transcript_segments(text: &str) -> Vec<Range<usize>> {
     let mut segments = Vec::new();
     let mut line_start = 0;
 

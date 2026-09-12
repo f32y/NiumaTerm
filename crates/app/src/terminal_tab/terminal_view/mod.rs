@@ -1,3 +1,7 @@
+#[cfg(test)]
+pub(super) use crate::terminal_tab::paint::frame::cursor_bounds;
+pub(super) use crate::terminal_tab::terminal_view::item::BlockListItem;
+
 mod item;
 
 #[cfg(test)]
@@ -15,10 +19,7 @@ use gpui::{
 use crate::terminal_tab::block_list::FrozenItemChrome;
 use crate::terminal_tab::frame::TerminalFrame;
 use crate::terminal_tab::metrics;
-#[cfg(test)]
-pub(in crate::terminal_tab) use crate::terminal_tab::paint::frame::cursor_bounds;
 use crate::terminal_tab::paint::frame::{paint_frame, shape_frame};
-pub(in crate::terminal_tab) use crate::terminal_tab::terminal_view::item::BlockListItem;
 use crate::terminal_tab::theme::{
     BLOCK_GUTTER_GAP, BLOCK_GUTTER_WIDTH, BLOCK_SELECTED_TINT, SEPARATOR_COLOR,
 };
@@ -27,7 +28,7 @@ use crate::terminal_tab::view::TerminalPane;
 /// The terminal viewport as a custom GPUI leaf element: prepaint shapes the
 /// visible rows (multi-run, per-cell foreground), paint draws backgrounds, the
 /// styled glyphs, and the cursor. Mirrors GPUI's `Canvas` element shape.
-pub(in crate::terminal_tab) struct TerminalView {
+pub(super) struct TerminalView {
     frame: TerminalFrame,
     cell: metrics::CellMetrics,
     focus: FocusHandle,
@@ -35,7 +36,7 @@ pub(in crate::terminal_tab) struct TerminalView {
 }
 
 impl TerminalView {
-    pub(in crate::terminal_tab) fn new(
+    pub(super) fn new(
         frame: TerminalFrame,
         cell: metrics::CellMetrics,
         focus: FocusHandle,
@@ -58,7 +59,7 @@ impl IntoElement for TerminalView {
     }
 }
 
-pub(in crate::terminal_tab) struct TerminalPrepaint {
+pub(super) struct TerminalPrepaint {
     shaped: Vec<ShapedLine>,
     row_offsets: Arc<[f32]>,
 }
@@ -150,12 +151,12 @@ impl Element for TerminalView {
 /// Block-split list wrapper: the child is a real `gpui::list`; this wrapper
 /// only feeds pane bounds, paints chrome that extends into the left padding,
 /// and keeps the IME handler attached to the full terminal content rect.
-pub(in crate::terminal_tab) struct BlockListView {
-    pub(in crate::terminal_tab) cell: metrics::CellMetrics,
-    pub(in crate::terminal_tab) focus: FocusHandle,
-    pub(in crate::terminal_tab) pane: Entity<TerminalPane>,
-    pub(in crate::terminal_tab) list: AnyElement,
-    pub(in crate::terminal_tab) show_chrome: bool,
+pub(super) struct BlockListView {
+    pub(super) cell: metrics::CellMetrics,
+    pub(super) focus: FocusHandle,
+    pub(super) pane: Entity<TerminalPane>,
+    pub(super) list: AnyElement,
+    pub(super) show_chrome: bool,
 }
 
 impl IntoElement for BlockListView {

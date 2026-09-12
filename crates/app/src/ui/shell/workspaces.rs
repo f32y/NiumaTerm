@@ -35,7 +35,7 @@ impl Shell {
 
     /// Move a tab within the workspace that owns it. The tab id picks the tab
     /// manager, so this reaches a workspace the user is not currently in.
-    pub(in crate::ui) fn reorder_tab(
+    pub(crate) fn reorder_tab(
         &mut self,
         tab: TabId,
         from: usize,

@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "window_tests.rs"]
+mod window_tests;
+
 use gpui::{
     AnyView, AnyWindowHandle, App, AppContext, Bounds, Global, Styled as _, TitlebarOptions,
     WeakEntity, WindowAppearance, WindowBounds, WindowDecorations, WindowHandle, WindowId,
@@ -205,7 +209,3 @@ impl AppWindow {
         .expect("open GPUI terminal window")
     }
 }
-
-#[cfg(test)]
-#[path = "window_tests.rs"]
-mod window_tests;

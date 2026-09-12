@@ -14,16 +14,16 @@ use crate::team::member::{AcceptedCoverage, Member, MemberConfig};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Room {
-    pub(in crate::team) id: RoomId,
-    pub(in crate::team) workspace: AgentWorkspace,
-    pub(in crate::team) members: Vec<Member>,
-    pub(in crate::team) discussions: Vec<Discussion>,
-    pub(in crate::team) messages: Vec<PublicMessage>,
-    pub(in crate::team) summaries: Vec<Summary>,
-    pub(in crate::team) input_history: Vec<UserInput>,
-    pub(in crate::team) controls: RoomControls,
-    pub(in crate::team) attempts: Vec<Attempt>,
-    pub(in crate::team) direct_allowances: BTreeMap<OperationId, Budget>,
+    pub(super) id: RoomId,
+    pub(super) workspace: AgentWorkspace,
+    pub(super) members: Vec<Member>,
+    pub(super) discussions: Vec<Discussion>,
+    pub(super) messages: Vec<PublicMessage>,
+    pub(super) summaries: Vec<Summary>,
+    pub(super) input_history: Vec<UserInput>,
+    pub(super) controls: RoomControls,
+    pub(super) attempts: Vec<Attempt>,
+    pub(super) direct_allowances: BTreeMap<OperationId, Budget>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

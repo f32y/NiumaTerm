@@ -142,7 +142,7 @@ pub(super) fn agent_card() -> Div {
 /// the quieter runs that qualify it. A row without an expanded state renders
 /// the same header without the disclosure hint, so a plain step and an
 /// expandable one keep one shape.
-pub(in crate::agent_tab) struct AgentDisclosureRow {
+pub(crate) struct AgentDisclosureRow {
     id: ElementId,
     expanded: Option<bool>,
 

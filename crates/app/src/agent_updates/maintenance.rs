@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "maintenance_tests.rs"]
+mod maintenance_tests;
+
 use std::time::Duration;
 
 use nmt_agent::session::lifecycle::{RecoveryReadiness, RecoverySnapshot, RestorationReadiness};
@@ -236,7 +240,3 @@ async fn restore_sessions(
         environment.wait(Duration::from_millis(100)).await;
     }
 }
-
-#[cfg(test)]
-#[path = "maintenance_tests.rs"]
-mod maintenance_tests;

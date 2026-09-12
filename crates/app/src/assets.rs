@@ -11,7 +11,7 @@ struct ProjectAssets;
 
 /// Registered with the `Application` so `svg().path(..)` resolves both project
 /// icons and gpui-component icons.
-pub(crate) struct AppAssets;
+pub struct AppAssets;
 
 impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {

@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "hook_command_tests.rs"]
+mod hook_command_tests;
+
 use std::io;
 
 /// Characters a POSIX shell passes through verbatim in an unquoted word.
@@ -58,7 +62,3 @@ pub(super) fn single_quoted(value: &str) -> String {
 pub fn hook_command_contains(command: &str, marker: &str) -> bool {
     command.contains(marker)
 }
-
-#[cfg(test)]
-#[path = "hook_command_tests.rs"]
-mod hook_command_tests;

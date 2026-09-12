@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "pairing_tests.rs"]
+mod pairing_tests;
+
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -65,10 +69,6 @@ pub fn new_pairing_token() -> [u8; 16] {
 
     token
 }
-
-#[cfg(test)]
-#[path = "pairing_tests.rs"]
-mod pairing_tests;
 
 impl From<&PairingCode> for String {
     fn from(value: &PairingCode) -> Self {

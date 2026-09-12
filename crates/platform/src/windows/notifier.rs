@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "notifier_tests.rs"]
+mod notifier_tests;
+
 use std::path::{Path, PathBuf};
 use std::{env, fs, io};
 
@@ -170,7 +174,3 @@ fn escape_xml(value: &str, attribute: bool) -> String {
 
     escaped
 }
-
-#[cfg(test)]
-#[path = "notifier_tests.rs"]
-mod notifier_tests;

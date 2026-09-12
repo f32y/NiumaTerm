@@ -27,7 +27,7 @@ pub(super) fn projects_root() -> Option<PathBuf> {
 
 /// The transcript directory for `cwd` (falling back to the process cwd, which
 /// is what a spawned `claude` without an explicit working directory uses).
-pub(in crate::claude_code) fn project_dir(cwd: Option<&str>) -> Option<PathBuf> {
+pub(crate) fn project_dir(cwd: Option<&str>) -> Option<PathBuf> {
     let cwd = match cwd {
         Some(cwd) => cwd.to_string(),
         None => env::current_dir().ok()?.to_string_lossy().into_owned(),

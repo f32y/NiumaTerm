@@ -18,12 +18,12 @@
 //! ships. [`crate_revision`] answers a different question, for a binary an
 //! update leaves in place unless it changed.
 
+pub use crate::build::{crate_revision, emit, emit_internal};
+
 mod build;
 
 #[cfg(test)]
 mod tests;
-
-pub use crate::build::{crate_revision, emit, emit_internal};
 
 /// One version label, parsed into the parts a comparison needs.
 #[derive(Clone, Debug, PartialEq, Eq)]

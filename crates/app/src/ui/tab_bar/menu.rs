@@ -26,7 +26,7 @@ impl IconNamed for TerminalIcon {
 
 /// The glyph a tab leads with: the agent's own mark on an agent tab, a gear on
 /// the settings tab, and a shell prompt otherwise.
-pub(in crate::ui) fn tab_icon(agent_kind: Option<AgentKind>, settings: bool) -> Icon {
+pub(crate) fn tab_icon(agent_kind: Option<AgentKind>, settings: bool) -> Icon {
     match agent_kind {
         Some(kind) => kind.icon(),
         None if settings => Icon::new(IconName::Settings),
@@ -39,7 +39,7 @@ pub(in crate::ui) fn tab_icon(agent_kind: Option<AgentKind>, settings: bool) -> 
 type LaunchCommand = (Option<String>, Vec<String>);
 
 /// One terminal Profile and workspace-directory pair offered by its submenu.
-pub(in crate::ui) struct ProfileRootChoice {
+pub(crate) struct ProfileRootChoice {
     pub label: String,
     pub launch: LaunchCommand,
     pub cwd: String,
@@ -73,7 +73,7 @@ fn launch_command(profile: &Profile) -> Option<LaunchCommand> {
 /// only narrows it, so grouping the other way would scatter the entries they
 /// are scanning for. Each label carries the Profile name and the directory's
 /// full path, because two attached directories can share a final component.
-pub(in crate::ui) fn profile_root_choices(
+pub(crate) fn profile_root_choices(
     profiles: &[Profile],
     roots: &[(String, bool)],
 ) -> Vec<ProfileRootChoice> {
@@ -104,7 +104,7 @@ pub(in crate::ui) fn profile_root_choices(
 
 /// The title-bar and sidebar entry points share one menu so both tab layouts
 /// expose terminal and agent profiles in the same order.
-pub(in crate::ui) fn new_tab_menu(
+pub(crate) fn new_tab_menu(
     mut menu: ModernMenu,
     shell: &Entity<Shell>,
     cx: &mut App,

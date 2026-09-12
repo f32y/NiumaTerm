@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "reveal_tests.rs"]
+mod reveal_tests;
+
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -12,7 +16,7 @@ use crate::agent_tab::transcript::{RowSpec, TranscriptView};
 /// The four variants key four different collections of expanded state, and
 /// a single map over this enum is what lets one toggle path serve all of them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(in crate::agent_tab) enum RevealKey {
+pub(crate) enum RevealKey {
     /// A work-log row's detail body, keyed by transcript index.
     Row(usize),
 
@@ -34,7 +38,7 @@ pub(in crate::agent_tab) enum RevealKey {
 /// steps and a turn's folded work open as list rows of their own, so they are
 /// measured apart even when one toggle is moving all of them at once.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(in crate::agent_tab) enum RevealedPart {
+pub(crate) enum RevealedPart {
     /// A disclosure's block, opened under its own header.
     Block(RevealKey),
 
@@ -51,7 +55,7 @@ pub(in crate::agent_tab) enum RevealedPart {
 
 /// The list row a piece of the transcript measures as, for the rows that a
 /// disclosure can splice in.
-pub(in crate::agent_tab) fn revealed_part(spec: &RowSpec) -> Option<RevealedPart> {
+pub(crate) fn revealed_part(spec: &RowSpec) -> Option<RevealedPart> {
     match spec {
         RowSpec::Work { index, .. } | RowSpec::Entry { index, .. } => {
             Some(RevealedPart::Entry(*index))
@@ -106,7 +110,7 @@ struct Reveal {
 /// shut it, because the content it hides has to stay on screen for the exit to
 /// have anything to move.
 #[derive(Default)]
-pub(in crate::agent_tab) struct Reveals {
+pub(crate) struct Reveals {
     active: HashMap<RevealKey, Reveal>,
 }
 
@@ -114,11 +118,11 @@ impl Reveals {
     /// Start one disclosure opening at `now`. The instant is passed in rather
     /// than read here so a caller that also reports progress does both against
     /// one reading of the clock.
-    pub(in crate::agent_tab) fn open(&mut self, key: RevealKey, now: Instant) {
+    pub(crate) fn open(&mut self, key: RevealKey, now: Instant) {
         self.start(key, Direction::Opening, now);
     }
 
-    pub(in crate::agent_tab) fn close(&mut self, key: RevealKey, now: Instant) {
+    pub(crate) fn close(&mut self, key: RevealKey, now: Instant) {
         self.start(key, Direction::Closing, now);
     }
 
@@ -151,11 +155,11 @@ impl Reveals {
         );
     }
 
-    pub(in crate::agent_tab) fn end(&mut self, key: RevealKey) {
+    pub(crate) fn end(&mut self, key: RevealKey) {
         self.active.remove(&key);
     }
 
-    pub(in crate::agent_tab) fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.active.clear();
     }
 
@@ -165,7 +169,7 @@ impl Reveals {
     ///
     /// Content whose disclosure is not moving reports 1: a row the reader
     /// scrolled to long after opening it renders at rest, not mid-entrance.
-    pub(in crate::agent_tab) fn progress(&self, key: RevealKey, now: Instant) -> f32 {
+    pub(crate) fn progress(&self, key: RevealKey, now: Instant) -> f32 {
         let Some(reveal) = self.active.get(&key) else {
             return 1.0;
         };
@@ -181,7 +185,7 @@ impl Reveals {
 
     /// Whether every moving disclosure has finished, which is what decides if
     /// the transcript still needs frames of its own.
-    pub(in crate::agent_tab) fn settled(&self, now: Instant) -> bool {
+    pub(crate) fn settled(&self, now: Instant) -> bool {
         self.active
             .values()
             .all(|reveal| now.saturating_duration_since(reveal.started) >= REVEAL_DURATION)
@@ -189,7 +193,7 @@ impl Reveals {
 
     /// Disclosures that have finished shutting, which is when the content they
     /// were hiding can finally be taken down.
-    pub(in crate::agent_tab) fn shut(&self, now: Instant) -> Vec<RevealKey> {
+    pub(crate) fn shut(&self, now: Instant) -> Vec<RevealKey> {
         self.active
             .iter()
             .filter(|(_, reveal)| reveal.direction == Direction::Closing)
@@ -200,7 +204,7 @@ impl Reveals {
 
     /// Whether this disclosure is on its way out, whatever stage it has
     /// reached.
-    pub(in crate::agent_tab) fn is_closing(&self, key: RevealKey) -> bool {
+    pub(crate) fn is_closing(&self, key: RevealKey) -> bool {
         self.active
             .get(&key)
             .is_some_and(|reveal| reveal.direction == Direction::Closing)
@@ -209,14 +213,14 @@ impl Reveals {
     /// Whether this disclosure is part-way through its motion, either way.
     /// An entry that has run its course reports false even though it is kept,
     /// which is what tells a settled disclosure from one still travelling.
-    pub(in crate::agent_tab) fn moving(&self, key: RevealKey, now: Instant) -> bool {
+    pub(crate) fn moving(&self, key: RevealKey, now: Instant) -> bool {
         self.active
             .get(&key)
             .is_some_and(|reveal| now.saturating_duration_since(reveal.started) < REVEAL_DURATION)
     }
 
     /// Every disclosure currently shutting, whatever stage it has reached.
-    pub(in crate::agent_tab) fn closing(&self) -> Vec<RevealKey> {
+    pub(crate) fn closing(&self) -> Vec<RevealKey> {
         self.active
             .iter()
             .filter(|(_, reveal)| reveal.direction == Direction::Closing)
@@ -255,7 +259,7 @@ fn ease_out_inverse(covered: f32) -> f32 {
 /// the set makes visible, and the height is what that ramp interpolates
 /// towards. Taking a disclosure down has to retire all three together, which
 /// is why they are held here rather than as six fields on the view.
-pub(in crate::agent_tab) struct Disclosures {
+pub(crate) struct Disclosures {
     /// Work-log rows whose detail (command output, reasoning text) is
     /// expanded, keyed by transcript index.
     expanded_rows: HashSet<usize>,
@@ -293,7 +297,7 @@ pub(in crate::agent_tab) struct Disclosures {
 impl Disclosures {
     /// Start with nothing open, under a collapse setting that either folds a
     /// settled turn's work by default or leaves it on screen.
-    pub(in crate::agent_tab) fn new(turns_fold_by_default: bool) -> Self {
+    pub(crate) fn new(turns_fold_by_default: bool) -> Self {
         Self {
             expanded_rows: HashSet::new(),
             expanded_groups: HashSet::new(),
@@ -308,7 +312,7 @@ impl Disclosures {
     /// Whether the disclosure is open or heading there, which is what its
     /// wording reports: a click that starts an exit has already answered the
     /// reader, whatever is still leaving the screen behind it.
-    pub(in crate::agent_tab) fn is_disclosing(&self, key: RevealKey) -> bool {
+    pub(crate) fn is_disclosing(&self, key: RevealKey) -> bool {
         self.is_disclosed(key) && !self.reveals.is_closing(key)
     }
 
@@ -323,22 +327,22 @@ impl Disclosures {
         }
     }
 
-    pub(in crate::agent_tab) fn row_expanded(&self, index: usize) -> bool {
+    pub(crate) fn row_expanded(&self, index: usize) -> bool {
         self.expanded_rows.contains(&index)
     }
 
-    pub(in crate::agent_tab) fn annotation_expanded(&self, index: usize) -> bool {
+    pub(crate) fn annotation_expanded(&self, index: usize) -> bool {
         self.expanded_annotations.contains(&index)
     }
 
-    pub(in crate::agent_tab) fn group_expanded(&self, run_start: usize) -> bool {
+    pub(crate) fn group_expanded(&self, run_start: usize) -> bool {
         self.expanded_groups.contains(&run_start)
     }
 
     /// Whether the user has flipped this turn away from the collapse
     /// setting's default. The rows are built under that setting, so they read
     /// the departure and apply the default themselves.
-    pub(in crate::agent_tab) fn turn_toggled(&self, turn: u64) -> bool {
+    pub(crate) fn turn_toggled(&self, turn: u64) -> bool {
         self.toggled_turns.contains(&turn)
     }
 
@@ -353,7 +357,7 @@ impl Disclosures {
 
     /// Put the disclosure's content on screen and start it opening. Ending the
     /// motion immediately is what reduced motion asks for.
-    pub(in crate::agent_tab) fn open(&mut self, key: RevealKey, now: Instant, animate: bool) {
+    pub(crate) fn open(&mut self, key: RevealKey, now: Instant, animate: bool) {
         match key {
             RevealKey::Row(index) => {
                 self.expanded_rows.insert(index);
@@ -378,7 +382,7 @@ impl Disclosures {
 
     /// Start the exit. The content stays until [`Self::take_down`] runs, which
     /// is what gives the exit something to move.
-    pub(in crate::agent_tab) fn begin_close(&mut self, key: RevealKey, now: Instant) {
+    pub(crate) fn begin_close(&mut self, key: RevealKey, now: Instant) {
         self.reveals.close(key, now);
     }
 
@@ -386,11 +390,7 @@ impl Disclosures {
     /// Returns the transcript index of a collapsed row, whose segmented source
     /// the caller drops; `parts` are the list rows the disclosure spliced in,
     /// whose measured heights leave the list with them.
-    pub(in crate::agent_tab) fn take_down(
-        &mut self,
-        key: RevealKey,
-        parts: &[RevealedPart],
-    ) -> Option<usize> {
+    pub(crate) fn take_down(&mut self, key: RevealKey, parts: &[RevealedPart]) -> Option<usize> {
         self.reveals.end(key);
         self.revealed_heights.remove(&RevealedPart::Block(key));
 
@@ -426,40 +426,40 @@ impl Disclosures {
     }
 
     /// How far through its motion one disclosure is.
-    pub(in crate::agent_tab) fn progress(&self, key: RevealKey, now: Instant) -> f32 {
+    pub(crate) fn progress(&self, key: RevealKey, now: Instant) -> f32 {
         self.reveals.progress(key, now)
     }
 
     /// Whether one disclosure is still travelling, either way.
-    pub(in crate::agent_tab) fn moving(&self, key: RevealKey, now: Instant) -> bool {
+    pub(crate) fn moving(&self, key: RevealKey, now: Instant) -> bool {
         self.reveals.moving(key, now)
     }
 
     /// The measured full height of one piece, once it has been on screen.
-    pub(in crate::agent_tab) fn height(&self, part: RevealedPart) -> Option<Pixels> {
+    pub(crate) fn height(&self, part: RevealedPart) -> Option<Pixels> {
         self.revealed_heights.get(&part).copied()
     }
 
-    pub(in crate::agent_tab) fn record_height(&mut self, part: RevealedPart, height: Pixels) {
+    pub(crate) fn record_height(&mut self, part: RevealedPart, height: Pixels) {
         self.revealed_heights.insert(part, height);
     }
 
-    pub(in crate::agent_tab) fn settled(&self, now: Instant) -> bool {
+    pub(crate) fn settled(&self, now: Instant) -> bool {
         self.reveals.settled(now)
     }
 
     /// The disclosures whose exit has finished and whose content can go.
-    pub(in crate::agent_tab) fn shut(&self, now: Instant) -> Vec<RevealKey> {
+    pub(crate) fn shut(&self, now: Instant) -> Vec<RevealKey> {
         self.reveals.shut(now)
     }
 
-    pub(in crate::agent_tab) fn closing(&self) -> Vec<RevealKey> {
+    pub(crate) fn closing(&self) -> Vec<RevealKey> {
         self.reveals.closing()
     }
 
     /// Forget every expansion and every motion, as a replaced conversation
     /// does.
-    pub(in crate::agent_tab) fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.expanded_rows.clear();
         self.expanded_groups.clear();
         self.expanded_annotations.clear();
@@ -472,7 +472,7 @@ impl Disclosures {
     /// which a change to the collapse setting asks for, and take the default
     /// the new setting folds turns by. The per-row and per-annotation
     /// expansions are not departures from that setting, so they stay.
-    pub(in crate::agent_tab) fn forget_departures(&mut self, turns_fold_by_default: bool) {
+    pub(crate) fn forget_departures(&mut self, turns_fold_by_default: bool) {
         self.expanded_groups.clear();
         self.toggled_turns.clear();
         self.turns_fold_by_default = turns_fold_by_default;
@@ -483,24 +483,24 @@ impl Disclosures {
 
 #[cfg(test)]
 impl Disclosures {
-    pub(in crate::agent_tab) fn expanded_rows(&self) -> &HashSet<usize> {
+    pub(crate) fn expanded_rows(&self) -> &HashSet<usize> {
         &self.expanded_rows
     }
 
-    pub(in crate::agent_tab) fn expanded_groups(&self) -> &HashSet<usize> {
+    pub(crate) fn expanded_groups(&self) -> &HashSet<usize> {
         &self.expanded_groups
     }
 
-    pub(in crate::agent_tab) fn toggled_turns(&self) -> &HashSet<u64> {
+    pub(crate) fn toggled_turns(&self) -> &HashSet<u64> {
         &self.toggled_turns
     }
 
-    pub(in crate::agent_tab) fn expanded_annotations(&self) -> &HashSet<usize> {
+    pub(crate) fn expanded_annotations(&self) -> &HashSet<usize> {
         &self.expanded_annotations
     }
 
     /// Every piece a height has been measured for.
-    pub(in crate::agent_tab) fn measured_parts(&self) -> Vec<RevealedPart> {
+    pub(crate) fn measured_parts(&self) -> Vec<RevealedPart> {
         self.revealed_heights.keys().copied().collect()
     }
 }
@@ -519,11 +519,7 @@ impl TranscriptView {
     /// Shutting leaves the expanded state in place and only starts the exit;
     /// [`Self::settle_shut_disclosures`] takes the content down once there is
     /// no exit left to run.
-    pub(in crate::agent_tab) fn toggle_disclosure(
-        &mut self,
-        key: RevealKey,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn toggle_disclosure(&mut self, key: RevealKey, cx: &mut Context<Self>) {
         self.invalidate_disclosure_rows(key);
 
         if !self.transcript_list.is_following_tail() {
@@ -552,7 +548,7 @@ impl TranscriptView {
     /// Remove a shut disclosure's content and everything measured or cached
     /// for it. Splitting this from the click is what gives the exit something
     /// to move; by the time it runs there is nothing left on screen to lose.
-    pub(in crate::agent_tab) fn take_down_disclosure(&mut self, key: RevealKey) {
+    pub(crate) fn take_down_disclosure(&mut self, key: RevealKey) {
         self.invalidate_disclosure_rows(key);
 
         // The rows a run or a fold spliced in are measured a row at a time,
@@ -598,7 +594,7 @@ impl TranscriptView {
     /// leave the list here rather than there, and the reader may have scrolled
     /// in between. Naming the position against the layout this frame is built
     /// on is what keeps that removal from moving it.
-    pub(in crate::agent_tab) fn settle_shut_disclosures(&mut self, now: Instant) {
+    pub(crate) fn settle_shut_disclosures(&mut self, now: Instant) {
         let shut = self.disclosures.shut(now);
 
         if shut.is_empty() {
@@ -621,7 +617,7 @@ impl TranscriptView {
     /// once; it follows the fold while the fold is moving, because the fold is
     /// then moving everything under it, and its run the rest of the time, so
     /// a run opened inside a resting turn still travels.
-    pub(in crate::agent_tab) fn revealed_by(&self, ix: usize, now: Instant) -> Option<RevealKey> {
+    pub(crate) fn revealed_by(&self, ix: usize, now: Instant) -> Option<RevealKey> {
         let fold = self.fold_over(ix).map(RevealKey::Turn);
         let run = self.run_over(ix).map(RevealKey::Group);
 
@@ -734,7 +730,7 @@ impl TranscriptView {
 /// A free function rather than a method because the callers build the content
 /// out of a borrow of the entry it belongs to, which a second borrow of the
 /// view would conflict with.
-pub(in crate::agent_tab) fn revealed_block(
+pub(crate) fn revealed_block(
     body: Div,
     part: RevealedPart,
     progress: f32,
@@ -779,13 +775,9 @@ pub(in crate::agent_tab) fn revealed_block(
 /// content without changing the height around it. This is what content opens
 /// with when a clip box cannot hold it — a rounded bubble, whose corner a
 /// rectangular clip would square off for as long as the ramp ran.
-pub(in crate::agent_tab) fn revealed(element: Div, progress: f32) -> Div {
+pub(crate) fn revealed(element: Div, progress: f32) -> Div {
     element
         .relative()
         .top(px(-REVEAL_RISE * (1.0 - progress)))
         .opacity(progress)
 }
-
-#[cfg(test)]
-#[path = "reveal_tests.rs"]
-mod reveal_tests;

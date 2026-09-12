@@ -3,6 +3,14 @@
 //! active, and the set is never empty — `close_workspace` refuses the last one, so
 //! `active` always points at a real workspace (mirrors `TabManager`'s invariant).
 //!
+
+pub use crate::workspace::roots::{RootChange, WorkspaceRoots, root_identity};
+
+mod roots;
+
+#[cfg(test)]
+mod tests;
+
 use std::borrow::Cow;
 use std::{iter, path};
 
@@ -12,10 +20,6 @@ use rust_i18n::t;
 use crate::tabs::{CommandOutcome, TabId, TabManager};
 use crate::ui::{ActiveList, HasId, TabSurface};
 use crate::workspace::roots::path_identity;
-
-mod roots;
-
-pub use crate::workspace::roots::{RootChange, WorkspaceRoots, root_identity};
 
 /// What a workspace entry reports about the terminals inside it, folded over
 /// every tab it owns.
@@ -598,6 +602,3 @@ impl WorkspaceManager {
         self.workspaces.active_id()
     }
 }
-
-#[cfg(test)]
-mod tests;

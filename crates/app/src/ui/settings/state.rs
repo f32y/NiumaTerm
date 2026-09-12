@@ -1,3 +1,9 @@
+pub use nmt_config::agent::{CollapseRows, ModelListStyle};
+pub use nmt_config::appearance::{InputStyle, TabBarStyle, WindowBackdrop};
+pub use nmt_config::profile::{
+    AgentProfile, AgentProfileKind, AgentProfileLauncher, EnvVar, Profile,
+};
+
 use std::borrow::Cow;
 use std::io;
 use std::path::Path;
@@ -8,13 +14,8 @@ use gpui::Global;
 use gpui::SharedString;
 use nmt_agent::dsh;
 use nmt_config::agent::AgentConfig;
-pub use nmt_config::agent::{CollapseRows, ModelListStyle};
 use nmt_config::appearance::AppearanceConfig;
-pub use nmt_config::appearance::{InputStyle, TabBarStyle, WindowBackdrop};
 use nmt_config::defaults::default_theme;
-pub use nmt_config::profile::{
-    AgentProfile, AgentProfileKind, AgentProfileLauncher, EnvVar, Profile,
-};
 use nmt_config::remote_session::RemoteSessionConfig;
 use nmt_config::system::SystemConfig;
 use nmt_config::theme::Theme;

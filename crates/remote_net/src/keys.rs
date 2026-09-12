@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "keys_tests.rs"]
+mod keys_tests;
+
 use std::path::Path;
 use std::{fs, io};
 
@@ -71,7 +75,3 @@ pub fn load_or_create_keypair(path: &Path) -> Result<StaticKeypair, KeyStoreErro
         Err(e) => Err(e.into()),
     }
 }
-
-#[cfg(test)]
-#[path = "keys_tests.rs"]
-mod keys_tests;

@@ -9,13 +9,13 @@
 //!
 //! `build_key_sequence` was originally taken from alacritty (Apache 2.0).
 
+pub mod event;
+pub mod keyboard;
+
 use std::borrow::Cow;
 
 use bitflags::bitflags;
 use smol_str::SmolStr;
-
-pub mod event;
-pub mod keyboard;
 
 use crate::event::ElementState;
 use crate::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};

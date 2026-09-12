@@ -1,10 +1,15 @@
-use gpui::Context;
-use nmt_agent::AgentEventKind;
-use nmt_agent::chat::{SessionSummary, SlashCommandOutcome};
-use nmt_agent::session::branch::BranchUpdate;
-use nmt_agent::session::controller::{SessionEffect, SessionFailure, SessionReady};
 #[cfg(test)]
 pub(super) use nmt_agent::session::settings::resolve_ready_settings;
+
+use gpui::Context;
+use nmt_agent::AgentEventKind;
+#[cfg(test)]
+use nmt_agent::chat::{Event as SessionEvent, Item as SessionItem, ReplayTurn};
+use nmt_agent::chat::{SessionSummary, SlashCommandOutcome};
+use nmt_agent::session::branch::BranchUpdate;
+#[cfg(test)]
+use nmt_agent::session::controller::ReadyDefaults;
+use nmt_agent::session::controller::{SessionEffect, SessionFailure, SessionReady};
 #[cfg(test)]
 use nmt_agent::transcript::TextField;
 use rust_i18n::t;
@@ -20,11 +25,7 @@ use crate::agent_tab::{AgentPane, AgentPaneEvent, RecentSessionsMode};
 impl AgentPane {
     /// Apply provider state before presenting its effects in transcript order.
     #[cfg(test)]
-    pub(in crate::agent_tab) fn apply_event(
-        &mut self,
-        event: SessionEvent,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn apply_event(&mut self, event: SessionEvent, cx: &mut Context<Self>) {
         self.prepare_ready_defaults(cx);
 
         let effect = {
@@ -437,11 +438,7 @@ impl AgentPane {
     /// conversation. Replay entries share one turn and carry no fold header,
     /// so they render as a plain chronological stream above the new turns.
     #[cfg(test)]
-    pub(in crate::agent_tab) fn apply_replay(
-        &mut self,
-        replay: Vec<ReplayTurn>,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn apply_replay(&mut self, replay: Vec<ReplayTurn>, cx: &mut Context<Self>) {
         let answered_at = replay
             .iter()
             .flat_map(|turn| turn.items.iter())
@@ -476,7 +473,7 @@ impl AgentPane {
     }
 
     #[cfg(test)]
-    pub(in crate::agent_tab) fn start_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
+    pub(crate) fn start_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
         self.session.borrow_mut().start_item(item);
 
         self.transcript
@@ -493,7 +490,7 @@ impl AgentPane {
     }
 
     #[cfg(test)]
-    pub(in crate::agent_tab) fn append_delta(
+    pub(crate) fn append_delta(
         &mut self,
         item_id: &str,
         delta: &str,
@@ -510,8 +507,3 @@ impl AgentPane {
         cx.notify();
     }
 }
-
-#[cfg(test)]
-use nmt_agent::chat::{Event as SessionEvent, Item as SessionItem, ReplayTurn};
-#[cfg(test)]
-use nmt_agent::session::controller::ReadyDefaults;

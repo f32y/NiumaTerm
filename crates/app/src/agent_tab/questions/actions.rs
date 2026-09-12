@@ -14,7 +14,7 @@ use crate::agent_tab::composer::PaletteControl;
 use crate::agent_tab::questions::{QuestionEditor, QuestionEditorState, QuestionStatus};
 
 impl AgentPane {
-    pub(in crate::agent_tab) fn present_questions(&mut self, index: usize, cx: &mut Context<Self>) {
+    pub(crate) fn present_questions(&mut self, index: usize, cx: &mut Context<Self>) {
         self.prompts.reveal(&self.session.borrow().input, index);
 
         let shared = self.session.clone();
@@ -40,7 +40,7 @@ impl AgentPane {
         cx.notify();
     }
 
-    pub(in crate::agent_tab) fn present_question_completion(
+    pub(crate) fn present_question_completion(
         &mut self,
         completion: QuestionCompletion,
         cx: &mut Context<Self>,
@@ -61,7 +61,7 @@ impl AgentPane {
         cx.notify();
     }
 
-    pub(in crate::agent_tab) fn open_message_questions(
+    pub(crate) fn open_message_questions(
         &mut self,
         item_id: &str,
         questions: Vec<Question>,
@@ -77,7 +77,7 @@ impl AgentPane {
         cx.notify();
     }
 
-    pub(in crate::agent_tab) fn toggle_question_option(
+    pub(crate) fn toggle_question_option(
         &mut self,
         question: usize,
         option: usize,
@@ -101,7 +101,7 @@ impl AgentPane {
         }
     }
 
-    pub(in crate::agent_tab) fn handle_question_control(
+    pub(crate) fn handle_question_control(
         &mut self,
         control: PaletteControl,
         cx: &mut Context<Self>,
@@ -165,7 +165,7 @@ impl AgentPane {
         handled
     }
 
-    pub(in crate::agent_tab) fn submit_current_questions(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn submit_current_questions(&mut self, cx: &mut Context<Self>) {
         let key = self
             .prompts
             .questions(&self.session.borrow().input)
@@ -176,7 +176,7 @@ impl AgentPane {
         }
     }
 
-    pub(in crate::agent_tab) fn skip_current_questions(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn skip_current_questions(&mut self, cx: &mut Context<Self>) {
         let key = self
             .prompts
             .questions(&self.session.borrow().input)
@@ -220,16 +220,12 @@ impl AgentPane {
     }
 
     #[cfg(test)]
-    pub(in crate::agent_tab) fn restore_question_drafts(&mut self) {
+    pub(crate) fn restore_question_drafts(&mut self) {
         self.session.borrow_mut().restore_questions();
         self.prompts.reset_editors();
     }
 
-    pub(in crate::agent_tab) fn prepare_question_editors(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn prepare_question_editors(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.prompts.collapsed {
             return;
         }

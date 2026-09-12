@@ -1,9 +1,10 @@
 //! Transcript hooks with no clocks, counters, or reporting task.
 
-#[path = "operation.rs"]
-mod operation;
+#[cfg(test)]
+#[path = "disabled_tests.rs"]
+mod tests;
 
-pub use crate::transcript::operation::Operation;
+use crate::transcript::Operation;
 
 /// No measurement state is carried by ordinary builds.
 #[must_use]
@@ -20,7 +21,3 @@ impl Probe {
 /// No samples are retained without performance collection.
 #[inline(always)]
 pub fn flush() {}
-
-#[cfg(test)]
-#[path = "disabled_tests.rs"]
-mod tests;

@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "shell_tests.rs"]
+mod shell_tests;
+
 use std::path::{Path, PathBuf};
 use std::process::id;
 use std::sync::OnceLock;
@@ -196,7 +200,3 @@ fn write_atomically(path: &Path, contents: &str) -> io::Result<()> {
         let _ = fs::remove_file(&staging);
     })
 }
-
-#[cfg(test)]
-#[path = "shell_tests.rs"]
-mod shell_tests;

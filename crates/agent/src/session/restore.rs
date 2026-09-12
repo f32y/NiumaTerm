@@ -1,5 +1,9 @@
 //! Conversation selection and replay admission without list or widget state.
 
+#[cfg(test)]
+#[path = "restore_tests.rs"]
+mod restore_tests;
+
 use std::path::Path;
 
 use nmt_platform::filesystem::path_identity;
@@ -8,10 +12,6 @@ use crate::chat::{ReplayTurn, SessionSummary};
 use crate::claude_code::sessions;
 use crate::session::lifecycle::{SessionRuntime, Status};
 use crate::session::{AgentKind, RecoveryIdentity};
-
-#[cfg(test)]
-#[path = "restore_tests.rs"]
-mod restore_tests;
 
 /// Only controls absent from the provider's resumed settings are seeded locally.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

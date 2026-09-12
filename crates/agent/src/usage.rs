@@ -1,5 +1,9 @@
 //! Provider-neutral subscription-limit data used by compact usage surfaces.
 
+#[cfg(test)]
+#[path = "usage_tests.rs"]
+mod usage_tests;
+
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::DateTime;
@@ -127,7 +131,3 @@ pub fn format_remaining(window: Option<&UsageWindow>) -> String {
         |window| format!("{}%", window.remaining_percentage),
     )
 }
-
-#[cfg(test)]
-#[path = "usage_tests.rs"]
-mod usage_tests;

@@ -8,12 +8,30 @@
 //! recognize — an unparseable session degrades to an id-prefix title instead of
 //! failing the list.
 
+pub use crate::claude_code::sessions::fork::{ClaudeFork, fork_session_before};
+pub use crate::claude_code::sessions::replay::{load_checkpoints, load_replay, try_load_replay};
+pub use crate::claude_code::sessions::task_history::{
+    RestoredTask, load_child_transcript, load_task_history,
+};
+pub use crate::claude_code::sessions::titles::{
+    count_all_sessions, count_sessions, list_all_sessions, list_sessions,
+    provisional_title_from_prompt,
+};
+
+/// The workflow reader resolves the same project directory and parses the same
+/// child transcript shape, so both are shared rather than reimplemented.
+pub(super) use crate::claude_code::sessions::paths::project_dir;
+pub(super) use crate::claude_code::sessions::replay::parse_child_replay;
+
 mod fork;
 mod index;
 mod paths;
 mod replay;
 mod task_history;
 mod titles;
+
+#[cfg(test)]
+mod tests;
 
 #[cfg(test)]
 use std::collections::HashSet;
@@ -27,23 +45,14 @@ use uuid::Uuid;
 
 #[cfg(test)]
 use crate::chat::Compaction;
-pub use crate::claude_code::sessions::fork::{ClaudeFork, fork_session_before};
 #[cfg(test)]
 use crate::claude_code::sessions::fork::{build_fork_records, write_fork_file};
 #[cfg(test)]
 use crate::claude_code::sessions::index::{TranscriptIndex, is_transcript_entry};
 #[cfg(test)]
 use crate::claude_code::sessions::paths::munge_cwd;
-/// The workflow reader resolves the same project directory and parses the same
-/// child transcript shape, so both are shared rather than reimplemented.
-pub(super) use crate::claude_code::sessions::paths::project_dir;
-pub(super) use crate::claude_code::sessions::replay::parse_child_replay;
 #[cfg(test)]
 use crate::claude_code::sessions::replay::parse_replay;
-pub use crate::claude_code::sessions::replay::{load_checkpoints, load_replay, try_load_replay};
-pub use crate::claude_code::sessions::task_history::{
-    RestoredTask, load_child_transcript, load_task_history,
-};
 #[cfg(test)]
 use crate::claude_code::sessions::task_history::{
     load_child_transcript_at, load_task_history_at, parse_task_history,
@@ -51,10 +60,6 @@ use crate::claude_code::sessions::task_history::{
 #[cfg(test)]
 use crate::claude_code::sessions::titles::{
     compaction_summary_text, recorded_title, resolved_session_title, title_line, user_prompt_text,
-};
-pub use crate::claude_code::sessions::titles::{
-    count_all_sessions, count_sessions, list_all_sessions, list_sessions,
-    provisional_title_from_prompt,
 };
 
 /// Whether the selected user message has a persisted file-history snapshot.
@@ -76,6 +81,3 @@ pub struct ClaudeCheckpoint {
     pub timestamp: Option<String>,
     pub file_restore_availability: FileRestoreAvailability,
 }
-
-#[cfg(test)]
-mod tests;

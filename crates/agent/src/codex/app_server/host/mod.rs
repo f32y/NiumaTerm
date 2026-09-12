@@ -1,5 +1,8 @@
 mod router;
 
+#[cfg(test)]
+mod tests;
+
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::atomic::Ordering;
@@ -505,6 +508,3 @@ fn message_thread_id(message: &Value) -> Option<&str> {
         .as_str()
         .or_else(|| message["params"]["thread"]["id"].as_str())
 }
-
-#[cfg(test)]
-mod tests;

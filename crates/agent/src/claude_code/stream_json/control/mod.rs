@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod effort_tests;
+
 use std::collections::{HashMap, VecDeque};
 use std::mem::take;
 use std::time::Instant;
@@ -616,6 +619,3 @@ impl EffortState {
         })
     }
 }
-
-#[cfg(test)]
-mod effort_tests;

@@ -4,7 +4,7 @@ use crate::terminal_tab::block_list::{BlockListPoint, FrozenItemChrome, FrozenPo
 /// Rows, chrome and separators recorded during one prepaint for later
 /// pointer mapping and painting. Persistent selection is stored separately.
 #[derive(Default)]
-pub(in crate::terminal_tab) struct FrozenHitMap {
+pub(crate) struct FrozenHitMap {
     /// Hit-test data recorded from the last native list prepaint.
     hit: FrozenHitInfo,
 
@@ -17,56 +17,50 @@ pub(in crate::terminal_tab) struct FrozenHitMap {
 
 impl FrozenHitMap {
     /// Drop last frame's record; the prepaint that follows rebuilds it.
-    pub(in crate::terminal_tab) fn begin_frame(&mut self, active_top: f32) {
+    pub(crate) fn begin_frame(&mut self, active_top: f32) {
         self.hit.clear();
         self.hit.set_active_top(active_top);
         self.chrome.clear();
         self.separators.clear();
     }
 
-    pub(in crate::terminal_tab) fn set_active_top(&mut self, active_top: f32) {
+    pub(crate) fn set_active_top(&mut self, active_top: f32) {
         self.hit.set_active_top(active_top);
     }
 
     /// Element-local top of the live grid; rows at or below it belong to the
     /// engine viewport rather than to the frozen region.
-    pub(in crate::terminal_tab) fn active_top(&self) -> f32 {
+    pub(crate) fn active_top(&self) -> f32 {
         self.hit.active_top
     }
 
-    pub(in crate::terminal_tab) fn push_separator(&mut self, y: f32) {
+    pub(crate) fn push_separator(&mut self, y: f32) {
         self.separators.push(y);
     }
 
-    pub(in crate::terminal_tab) fn push_row(
-        &mut self,
-        y: f32,
-        item: usize,
-        row: usize,
-        cell_count: u32,
-    ) {
+    pub(crate) fn push_row(&mut self, y: f32, item: usize, row: usize, cell_count: u32) {
         self.hit.push_row(y, item, row, cell_count);
     }
 
-    pub(in crate::terminal_tab) fn push_chrome(&mut self, chrome: FrozenItemChrome, item_top: f32) {
+    pub(crate) fn push_chrome(&mut self, chrome: FrozenItemChrome, item_top: f32) {
         self.chrome.push(offset_frozen_chrome(chrome, item_top));
     }
 
-    pub(in crate::terminal_tab) fn chrome(&self) -> &[FrozenItemChrome] {
+    pub(crate) fn chrome(&self) -> &[FrozenItemChrome] {
         &self.chrome
     }
 
-    pub(in crate::terminal_tab) fn separators(&self) -> &[f32] {
+    pub(crate) fn separators(&self) -> &[f32] {
         &self.separators
     }
 
     /// The content-local y of one visible row; `None` when it is scrolled out
     /// of view.
-    pub(in crate::terminal_tab) fn row_top(&self, item: usize, row: usize) -> Option<f32> {
+    pub(crate) fn row_top(&self, item: usize, row: usize) -> Option<f32> {
         self.hit.row_top(item, row)
     }
 
-    pub(in crate::terminal_tab) fn hit_test(
+    pub(crate) fn hit_test(
         &self,
         x: f32,
         y: f32,
@@ -80,7 +74,7 @@ impl FrozenHitMap {
     }
 
     /// The item whose gutter row covers `y`, if any.
-    pub(in crate::terminal_tab) fn item_at(&self, y: f32) -> Option<usize> {
+    pub(crate) fn item_at(&self, y: f32) -> Option<usize> {
         self.chrome
             .iter()
             .find(|chrome| (chrome.top..chrome.bottom).contains(&y))
@@ -91,7 +85,7 @@ impl FrozenHitMap {
 /// Pane-side hit-test data for rows rendered above the active grid (small
 /// copy; the full view moves into the element).
 #[derive(Default, Clone)]
-pub(in crate::terminal_tab) struct FrozenHitInfo {
+pub(crate) struct FrozenHitInfo {
     /// `(y, item, row, cell_count)` per visible block or live-history row;
     /// `usize::MAX` marks a live SCREEN row because it cannot be a list index.
     rows: Vec<(f32, usize, usize, u32)>,
@@ -100,29 +94,23 @@ pub(in crate::terminal_tab) struct FrozenHitInfo {
 }
 
 impl FrozenHitInfo {
-    pub(in crate::terminal_tab) fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.rows.clear();
         self.active_top = 0.0;
     }
 
-    pub(in crate::terminal_tab) fn push_row(
-        &mut self,
-        y: f32,
-        item: usize,
-        row: usize,
-        cell_count: u32,
-    ) {
+    pub(crate) fn push_row(&mut self, y: f32, item: usize, row: usize, cell_count: u32) {
         self.rows.push((y, item, row, cell_count));
     }
 
-    pub(in crate::terminal_tab) fn set_active_top(&mut self, active_top: f32) {
+    pub(crate) fn set_active_top(&mut self, active_top: f32) {
         self.active_top = active_top;
     }
 
     /// The content-local y of one visible row (`usize::MAX` item = a live
     /// SCREEN row); `None` when the row is scrolled out of view. Link-hover
     /// underlines use this to place rects on frozen rows.
-    pub(in crate::terminal_tab) fn row_top(&self, item: usize, row: usize) -> Option<f32> {
+    pub(crate) fn row_top(&self, item: usize, row: usize) -> Option<f32> {
         self.rows
             .iter()
             .find(|(_, i, r, _)| *i == item && *r == row)
@@ -132,7 +120,7 @@ impl FrozenHitInfo {
     /// Map an element-local pixel position to a frozen point. `None` above
     /// the first visible row; positions in inter-item gaps resolve to the
     /// nearest row above (drag comfort).
-    pub(in crate::terminal_tab) fn hit_test(
+    pub(crate) fn hit_test(
         &self,
         x: f32,
         y: f32,

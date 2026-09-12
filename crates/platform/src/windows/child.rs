@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "child_tests.rs"]
+mod child_tests;
+
 use std::ffi::c_void;
 use std::io::Error;
 use std::ptr;
@@ -133,7 +137,3 @@ impl Drop for ChildExitWatcher {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "child_tests.rs"]
-mod child_tests;

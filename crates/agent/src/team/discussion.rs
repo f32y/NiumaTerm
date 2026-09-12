@@ -108,16 +108,16 @@ pub struct Stage {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Discussion {
-    pub(in crate::team) id: DiscussionId,
-    pub(in crate::team) objective: String,
-    pub(in crate::team) participants: Vec<MemberId>,
-    pub(in crate::team) mode: DiscussionMode,
-    pub(in crate::team) state: DiscussionState,
-    pub(in crate::team) pauses: BTreeSet<PauseReason>,
-    pub(in crate::team) stages: Vec<Stage>,
-    pub(in crate::team) budget: Budget,
+    pub(super) id: DiscussionId,
+    pub(super) objective: String,
+    pub(super) participants: Vec<MemberId>,
+    pub(super) mode: DiscussionMode,
+    pub(super) state: DiscussionState,
+    pub(super) pauses: BTreeSet<PauseReason>,
+    pub(super) stages: Vec<Stage>,
+    pub(super) budget: Budget,
     #[serde(default)]
-    pub(in crate::team) request: UserInput,
+    pub(super) request: UserInput,
 }
 
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
@@ -136,7 +136,7 @@ pub enum DiscussionError {
 }
 
 impl Discussion {
-    pub(in crate::team) fn new(
+    pub(super) fn new(
         objective: String,
         participants: Vec<MemberId>,
         mode: DiscussionMode,
@@ -207,7 +207,7 @@ impl Discussion {
         inserted
     }
 
-    pub(in crate::team) fn settle_pause(&mut self) {
+    pub(super) fn settle_pause(&mut self) {
         self.state = if self.has_active_work() {
             DiscussionState::Pausing
         } else {
@@ -220,10 +220,7 @@ impl Discussion {
         self.pauses.remove(reason)
     }
 
-    pub(in crate::team) fn change_mode(
-        &mut self,
-        mode: DiscussionMode,
-    ) -> Result<(), DiscussionError> {
+    pub(super) fn change_mode(&mut self, mode: DiscussionMode) -> Result<(), DiscussionError> {
         if self.state == DiscussionState::Completed {
             return Err(DiscussionError::Completed);
         }

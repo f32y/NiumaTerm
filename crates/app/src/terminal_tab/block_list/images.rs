@@ -7,7 +7,7 @@ use crate::terminal_tab::graphics;
 /// A frozen Kitty image band positioned inside one block-list item: one
 /// cell-row-high slice of a placement, with the generation shared
 /// by `Arc` from the store's lazy `(block_id, image_id)` cache.
-pub(in crate::terminal_tab) struct FrozenImage {
+pub(crate) struct FrozenImage {
     pub generation: sync::Arc<graphics::ImageGeneration>,
     pub z: i32,
 
@@ -29,7 +29,7 @@ pub(in crate::terminal_tab) struct FrozenImage {
 /// (boundary-difference math — no cumulative rounding gaps). Placement
 /// positions are block-relative rows straight from the engine; generations
 /// come from the store's `(block_id, image_id)` lazy cache.
-pub(in crate::terminal_tab) fn frozen_block_images(
+pub(crate) fn frozen_block_images(
     placements: &[PlacementScreenPos],
     generations: &collections::HashMap<u32, sync::Arc<graphics::ImageGeneration>>,
     visible: &ops::Range<usize>,

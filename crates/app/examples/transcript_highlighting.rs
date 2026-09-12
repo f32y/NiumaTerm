@@ -7,6 +7,8 @@ use std::rc::Rc;
 use app::agent_tab::profile::AgentKind;
 use app::agent_tab::settings::AgentSettings;
 use app::agent_tab::transcript::TranscriptView;
+use app::assets::AppAssets;
+use app::syntax;
 use gpui::prelude::*;
 use gpui::{
     App, Application, Bounds, Context, Entity, Render, Window, WindowBounds, WindowOptions, div,
@@ -21,16 +23,6 @@ use gpui_windows::WindowsPlatform as Platform;
 use nmt_agent::chat::Item;
 use nmt_agent::transcript::conversation::ConversationState;
 use nmt_config::agent::CollapseRows;
-
-#[path = "../src/ui/assets.rs"]
-mod assets;
-#[path = "../src/syntax.rs"]
-mod syntax;
-#[allow(dead_code)]
-#[path = "../src/utils.rs"]
-mod utils;
-
-use crate::assets::AppAssets;
 
 struct Preview {
     transcript: Entity<TranscriptView>,

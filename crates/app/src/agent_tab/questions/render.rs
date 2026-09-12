@@ -15,7 +15,7 @@ use crate::agent_tab::questions::QuestionStatus;
 use crate::agent_tab::settings::UI_RADIUS;
 
 impl AgentPane {
-    pub(in crate::agent_tab) fn render_question_panel(
+    pub(crate) fn render_question_panel(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,

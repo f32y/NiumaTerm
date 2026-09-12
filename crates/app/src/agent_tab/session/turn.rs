@@ -40,7 +40,7 @@ pub(super) fn replayed_response_age(at_unix: i64, now_unix: i64) -> Duration {
     Duration::from_secs(seconds).min(LAST_RESPONSE_LIMIT)
 }
 
-pub(in crate::agent_tab) fn response_age_tick(age: Duration) -> Option<Duration> {
+pub(crate) fn response_age_tick(age: Duration) -> Option<Duration> {
     const MINUTE: u64 = 60;
 
     match age.as_secs() {
@@ -53,7 +53,7 @@ pub(in crate::agent_tab) fn response_age_tick(age: Duration) -> Option<Duration>
 impl AgentPane {
     /// Start the turn clock and drive the once-a-second repaint of the live
     /// progress row; the ticker stops itself once `finish_working` clears it.
-    pub(in crate::agent_tab) fn start_working(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn start_working(&mut self, cx: &mut Context<Self>) {
         self.transcript
             .update(cx, |transcript, cx| transcript.start_working(cx));
 
@@ -101,11 +101,7 @@ impl AgentPane {
         self.turn.refresh_timer(cx);
     }
 
-    pub(in crate::agent_tab) fn interrupt_from_ui(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn interrupt_from_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.binding.is_current() {
             return;
         }
@@ -156,11 +152,7 @@ impl AgentPane {
         }
     }
 
-    pub(in crate::agent_tab) fn respond_approval(
-        &mut self,
-        decision: &str,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn respond_approval(&mut self, decision: &str, cx: &mut Context<Self>) {
         if !self.binding.is_current() {
             return;
         }

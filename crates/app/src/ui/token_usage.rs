@@ -4,6 +4,10 @@
 //! compact total while the hover card shows exact totals and per-model input,
 //! output, cache creation, cache-read counts, and prices.
 
+#[cfg(test)]
+#[path = "token_usage_tests.rs"]
+mod token_usage_tests;
+
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
@@ -502,7 +506,3 @@ fn compact(n: u64) -> String {
         _ => format!("{:.2}B", n as f64 / 1e9),
     }
 }
-
-#[cfg(test)]
-#[path = "token_usage_tests.rs"]
-mod token_usage_tests;

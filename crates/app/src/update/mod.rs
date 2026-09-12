@@ -1,6 +1,8 @@
 //! Checking whether the selected channel has published something newer than
 //! the running build, on a schedule and on demand.
 
+pub(crate) use crate::update::releases::CheckError;
+
 mod download;
 mod file_users;
 mod install;
@@ -25,7 +27,6 @@ use tracing::warn;
 
 use crate::AWAIT_EXIT_FLAG;
 use crate::ui::AppSettings;
-pub(crate) use crate::update::releases::CheckError;
 use crate::update::releases::{Release, supersedes};
 use crate::utils::get_exe_dir;
 use crate::window::ShellRegistry;

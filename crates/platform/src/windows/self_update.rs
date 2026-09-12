@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "self_update_tests.rs"]
+mod self_update_tests;
+
 use std::error::Error;
 use std::path::Path;
 use std::{fmt, fs, io};
@@ -135,7 +139,3 @@ pub fn discard_previous(install: &Path) {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "self_update_tests.rs"]
-mod self_update_tests;

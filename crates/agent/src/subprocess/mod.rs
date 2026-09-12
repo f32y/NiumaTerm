@@ -2,6 +2,16 @@
 //! Job Object containment and the newline-delimited-JSON process shape used
 //! by the chat sessions.
 
+pub(crate) use crate::subprocess::input::{InputError, InputTicket};
+
+mod input;
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+mod output_tests;
+
 use std::io::{BufRead, BufReader, Write as _};
 use std::process::{Child, Command, Stdio};
 use std::str::from_utf8;
@@ -16,9 +26,6 @@ use tracing::warn;
 
 use crate::message_memory::OUTPUT_FAILURE_METHOD;
 use crate::subprocess::input::InputQueue;
-pub(crate) use crate::subprocess::input::{InputError, InputTicket};
-
-mod input;
 
 /// A spawned agent CLI with piped stdio, kill-on-close containment, and
 /// newline-delimited JSON output. Stdout lines that parse as JSON are handed
@@ -270,9 +277,6 @@ impl Drop for JsonLineProcess {
     }
 }
 
-#[cfg(test)]
-mod tests;
-
 /// Startup wrappers may print plain-text notices before the first protocol
 /// object. Once the protocol starts, skipping a malformed line could lose a
 /// response or transcript item, so decoding failure ends the stream.
@@ -361,6 +365,3 @@ fn read_messages(
         }
     }
 }
-
-#[cfg(test)]
-mod output_tests;

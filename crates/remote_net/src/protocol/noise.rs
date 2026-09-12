@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "noise_tests.rs"]
+mod noise_tests;
+
 use snow::{Builder, HandshakeState, TransportState};
 
 /// ChaChaPoly avoids pulling an AES implementation and is constant-time in
@@ -182,7 +186,3 @@ pub fn handshake_step(
 
     Ok(Some(handshake.write_message()?))
 }
-
-#[cfg(test)]
-#[path = "noise_tests.rs"]
-mod noise_tests;

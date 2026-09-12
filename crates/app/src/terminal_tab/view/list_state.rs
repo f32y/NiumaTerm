@@ -2,13 +2,13 @@ use gpui::{FollowMode, ListAlignment, ListOffset, ListState, px};
 
 use crate::terminal_tab::pane_model::list_mirror::ListOp;
 
-pub(in crate::terminal_tab) struct BlockListState {
+pub(crate) struct BlockListState {
     pub list: ListState,
     pub scroll_handler_set: bool,
 }
 
 impl BlockListState {
-    pub(in crate::terminal_tab) fn new(alignment: ListAlignment) -> Self {
+    pub(crate) fn new(alignment: ListAlignment) -> Self {
         let list = ListState::new(1, alignment, px(240.0));
 
         list.set_follow_mode(FollowMode::Tail);
@@ -19,7 +19,7 @@ impl BlockListState {
         }
     }
 
-    pub(in crate::terminal_tab) fn apply(&mut self, op: ListOp) {
+    pub(crate) fn apply(&mut self, op: ListOp) {
         match op {
             ListOp::Reset(count) => self.list.reset(count),
             ListOp::Splice(range, count) => self.list.splice(range, count),
@@ -36,7 +36,7 @@ impl BlockListState {
     }
 }
 
-pub(in crate::terminal_tab) fn block_list_alignment(fixed_bottom: bool) -> ListAlignment {
+pub(crate) fn block_list_alignment(fixed_bottom: bool) -> ListAlignment {
     if fixed_bottom {
         ListAlignment::Bottom
     } else {

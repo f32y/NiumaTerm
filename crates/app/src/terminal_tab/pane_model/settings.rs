@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "settings_tests.rs"]
+mod settings_tests;
+
 use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
 use nmt_config::colors::term::List;
@@ -6,18 +10,18 @@ use nmt_terminal::session::request::Request;
 
 use crate::terminal_tab::frame::TerminalColor;
 
-pub(in crate::terminal_tab) struct CursorShapeUpdate {
+pub(crate) struct CursorShapeUpdate {
     pub(super) request: Request<()>,
     pub(super) failure: CursorShapeFailure,
 }
 
-pub(in crate::terminal_tab) struct CursorShapeFailure {
+pub(crate) struct CursorShapeFailure {
     pub(super) previous: CursorShape,
     pub(super) requested: CursorShape,
 }
 
 impl CursorShapeUpdate {
-    pub(in crate::terminal_tab) async fn failure(self) -> Option<CursorShapeFailure> {
+    pub(crate) async fn failure(self) -> Option<CursorShapeFailure> {
         match self.request.await {
             Ok(Ok(())) => None,
             _ => Some(self.failure),
@@ -26,7 +30,7 @@ impl CursorShapeUpdate {
 }
 
 #[derive(Clone, Copy)]
-pub(in crate::terminal_tab) struct PaneSettings {
+pub(crate) struct PaneSettings {
     pub fixed_bottom: bool,
     pub pad_rows: f32,
     pub show_block_chrome: bool,
@@ -37,7 +41,7 @@ pub(in crate::terminal_tab) struct PaneSettings {
 }
 
 #[derive(Clone, Copy)]
-pub(in crate::terminal_tab) struct FrameTheme {
+pub(crate) struct FrameTheme {
     pub foreground: TerminalColor,
     pub background: TerminalColor,
     pub selection_background: TerminalColor,
@@ -61,7 +65,3 @@ impl Default for FrameTheme {
         (&Colors::default()).into()
     }
 }
-
-#[cfg(test)]
-#[path = "settings_tests.rs"]
-mod settings_tests;

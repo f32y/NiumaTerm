@@ -13,6 +13,9 @@ use crate::terminal_tab::frame::{
     cursor_for_row, extract_frame_images, extract_row, extract_row_with_colors, frame_cursor,
     line_from_parts,
 };
+// --- Kitty image frame extraction ---
+use crate::terminal_tab::graphics;
+use crate::terminal_tab::graphics::graphic_to_generation;
 use crate::terminal_tab::pane_model::FrameTheme;
 use crate::terminal_tab::pane_model::frame_cache::TerminalFrameCache;
 
@@ -595,11 +598,6 @@ fn extracts_cursor_shape_without_mutating_row_text() {
     assert!(row.text().as_ref().starts_with("A\u{00a0}"));
     assert_eq!(row.runs()[0].fg, FrameTheme::default().foreground);
 }
-
-// --- Kitty image frame extraction ---
-
-use crate::terminal_tab::graphics;
-use crate::terminal_tab::graphics::graphic_to_generation;
 
 /// Run `vt` through the engine, mirror it into a `RenderBuffer`, and build a live
 /// generation map from the shipped image deltas — the same inputs frame extraction

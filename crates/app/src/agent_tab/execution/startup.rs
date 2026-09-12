@@ -21,7 +21,7 @@ use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::thread_controls::{launch_effort, launch_model, stored_thread_settings};
 
 impl AgentSession {
-    pub(in crate::agent_tab) fn reset(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn reset(&mut self, cx: &mut Context<Self>) {
         if self.is_closed() {
             return;
         }
@@ -44,7 +44,7 @@ impl AgentSession {
         self.start(None, false, move |_, _| drop(retiring), cx);
     }
 
-    pub(in crate::agent_tab) fn start(
+    pub(crate) fn start(
         &mut self,
         recovery: Option<RecoveryIdentity>,
         preserve_settings: bool,
@@ -280,7 +280,7 @@ impl AgentSession {
         cx.notify();
     }
 
-    pub(in crate::agent_tab) fn prepare_defaults(&self, cx: &Context<Self>) {
+    pub(crate) fn prepare_defaults(&self, cx: &Context<Self>) {
         let mut session = self.controller.borrow_mut();
         let seed = session.controls.seed_thread_defaults;
 
@@ -295,7 +295,7 @@ impl AgentSession {
         };
     }
 
-    pub(in crate::agent_tab) fn install(
+    pub(crate) fn install(
         &mut self,
         spawned: Result<Backend, String>,
         epoch: u64,
@@ -360,11 +360,7 @@ impl AgentSession {
         }
     }
 
-    pub(in crate::agent_tab) fn stop_for_output_failure(
-        &mut self,
-        error: String,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn stop_for_output_failure(&mut self, error: String, cx: &mut Context<Self>) {
         let backend = self.controller.borrow_mut().runtime.retire();
         let epoch = self.controller.borrow().runtime.epoch();
 

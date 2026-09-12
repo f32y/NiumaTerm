@@ -1,13 +1,14 @@
-use gpui::{Context, Window};
-use gpui_base::TextSelection;
-pub(in crate::agent_tab) use nmt_agent::annotations::{
+pub(crate) use nmt_agent::annotations::{
     parse_annotated_prompt, prompt_with_response_annotations, visible_prompt,
 };
+
+use gpui::{Context, Window};
+use gpui_base::TextSelection;
 use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
 
-pub(in crate::agent_tab) fn annotation_count_label(count: usize) -> String {
+pub(crate) fn annotation_count_label(count: usize) -> String {
     let key = if count == 1 {
         "agent-composer-annotation-count-one"
     } else {
@@ -18,7 +19,7 @@ pub(in crate::agent_tab) fn annotation_count_label(count: usize) -> String {
 }
 
 impl AgentPane {
-    pub(in crate::agent_tab) fn add_response_annotation(
+    pub(crate) fn add_response_annotation(
         &mut self,
         text: String,
         window: &mut Window,
@@ -34,11 +35,7 @@ impl AgentPane {
         cx.notify();
     }
 
-    pub(in crate::agent_tab) fn remove_response_annotation(
-        &mut self,
-        index: usize,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn remove_response_annotation(&mut self, index: usize, cx: &mut Context<Self>) {
         if self.attachments.remove_annotation(index) {
             cx.notify();
         }

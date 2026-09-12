@@ -3,9 +3,9 @@ use crate::terminal_tab::pane_model::viewport::{LocalPoint, LocalRect};
 /// A link resolved under the pointer: the URL plus underline rects relative
 /// to the content origin (only the visible rows of a wrapped URL get rects).
 #[derive(Clone, Debug, PartialEq)]
-pub(in crate::terminal_tab) struct LinkHit {
-    pub(in crate::terminal_tab) url: String,
-    pub(in crate::terminal_tab) rects: Vec<LocalRect>,
+pub(crate) struct LinkHit {
+    pub(crate) url: String,
+    pub(crate) rects: Vec<LocalRect>,
 }
 
 /// The Ctrl-hover link underline and the pointer position it was resolved

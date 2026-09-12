@@ -1,3 +1,41 @@
+#[cfg(test)]
+pub(super) use crate::terminal_tab::frame::images::FrameImageKind;
+pub(super) use crate::terminal_tab::frame::images::{FrameImage, ZLayer};
+#[cfg(test)]
+pub(super) use crate::terminal_tab::frame::line::line_from_parts;
+pub(super) use crate::terminal_tab::frame::line::{
+    LineBuilder, StyleRun, TerminalCell, TerminalColor, TerminalLine,
+};
+
+mod colors;
+mod images;
+mod line;
+
+/// Full-pipeline performance profile (manual, release-only). Puts every stage of
+/// a fast-scrollback frame on ONE scale so engine-side costs can be compared
+/// against the real render-thread cost.
+///
+/// ```text
+/// ./scripts/profiling.ps1 test --release -p app --lib full_frame_profile '--' --ignored --nocapture
+/// ```
+///
+/// Stages, in pipeline order:
+///   1. parse — `engine.write_vt` of 20k distinct 72-col lines (runs on the
+///      PTY thread today, off the frame critical path).
+///   2. snapshot — `engine.snapshot` of the live viewport (once per rendered frame).
+///   3. extract — forced full extraction plus a one-row incremental update of
+///      the viewport (the live-region materialization, render thread).
+///   4. shape — real DirectWrite `layout_line` of NOVEL lines (render thread,
+///      cache-miss cost). Production caches shaped lines by hash, so
+///      repeated output is ~free; novel output pays this per line.
+///
+/// GPU submission is excluded (GPUI's own bench harness excludes it off-macOS).
+#[cfg(all(test, enable_profiling))]
+mod full_frame_profile;
+
+#[cfg(test)]
+mod tests;
+
 use std::iter;
 use std::sync::Arc;
 
@@ -11,25 +49,13 @@ use nmt_terminal::terminal::square::{ContentTag, Wide};
 use nmt_terminal::terminal::style::StyleFlags;
 
 use crate::terminal_tab::frame::colors::BackgroundColors;
-#[cfg(test)]
-pub(in crate::terminal_tab) use crate::terminal_tab::frame::images::FrameImageKind;
-pub(in crate::terminal_tab) use crate::terminal_tab::frame::images::{FrameImage, ZLayer};
 use crate::terminal_tab::frame::images::{empty_images, extract_frame_images};
 use crate::terminal_tab::frame::line::display_char;
-#[cfg(test)]
-pub(in crate::terminal_tab) use crate::terminal_tab::frame::line::line_from_parts;
-pub(in crate::terminal_tab) use crate::terminal_tab::frame::line::{
-    LineBuilder, StyleRun, TerminalCell, TerminalColor, TerminalLine,
-};
 use crate::terminal_tab::pane_model::FrameTheme;
 use crate::terminal_tab::pane_model::frame_cache::GenerationMap;
 
-mod colors;
-mod images;
-mod line;
-
 #[derive(Clone, Default)]
-pub(in crate::terminal_tab) struct TerminalFrame {
+pub(super) struct TerminalFrame {
     lines: Arc<[TerminalLine]>,
     line_states: Arc<[TerminalLineState]>,
     cols: usize,
@@ -42,38 +68,38 @@ pub(in crate::terminal_tab) struct TerminalFrame {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::terminal_tab) struct TerminalCursor {
-    pub(in crate::terminal_tab) col: u16,
-    pub(in crate::terminal_tab) row: u16,
-    pub(in crate::terminal_tab) shape: CursorShape,
-    pub(in crate::terminal_tab) color: TerminalColor,
+pub(super) struct TerminalCursor {
+    pub(super) col: u16,
+    pub(super) row: u16,
+    pub(super) shape: CursorShape,
+    pub(super) color: TerminalColor,
 }
 
 impl TerminalFrame {
-    pub(in crate::terminal_tab) fn lines(&self) -> &[TerminalLine] {
+    pub(super) fn lines(&self) -> &[TerminalLine] {
         &self.lines
     }
 
     /// Paintable Kitty image placements for this frame.
-    pub(in crate::terminal_tab) fn images(&self) -> &[FrameImage] {
+    pub(super) fn images(&self) -> &[FrameImage] {
         &self.images
     }
 
-    pub(in crate::terminal_tab) fn cursor(&self) -> Option<TerminalCursor> {
+    pub(super) fn cursor(&self) -> Option<TerminalCursor> {
         self.cursor
     }
 
-    pub(in crate::terminal_tab) fn scrollbar(&self) -> ScrollbarInfo {
+    pub(super) fn scrollbar(&self) -> ScrollbarInfo {
         self.scrollbar
     }
 
     #[cfg(test)]
-    pub(in crate::terminal_tab) fn from_render_buffer(buf: &RenderBuffer) -> Self {
+    pub(super) fn from_render_buffer(buf: &RenderBuffer) -> Self {
         Self::from_render_buffer_with_selection(buf, None, &GenerationMap::new())
     }
 
     #[cfg(test)]
-    pub(in crate::terminal_tab) fn from_render_buffer_with_selection(
+    pub(super) fn from_render_buffer_with_selection(
         buf: &RenderBuffer,
         selection: Option<SelectionRange>,
         generations: &GenerationMap,
@@ -81,7 +107,7 @@ impl TerminalFrame {
         Self::from_render_buffer_reusing(buf, selection, generations, None, &FrameTheme::default())
     }
 
-    pub(in crate::terminal_tab) fn from_render_buffer_reusing(
+    pub(super) fn from_render_buffer_reusing(
         buf: &RenderBuffer,
         selection: Option<SelectionRange>,
         generations: &GenerationMap,
@@ -146,31 +172,6 @@ impl TerminalFrame {
     }
 }
 
-#[cfg(test)]
-mod tests;
-
-/// Full-pipeline performance profile (manual, release-only). Puts every stage of
-/// a fast-scrollback frame on ONE scale so engine-side costs can be compared
-/// against the real render-thread cost.
-///
-/// ```text
-/// ./scripts/profiling.ps1 test --release -p app --lib full_frame_profile '--' --ignored --nocapture
-/// ```
-///
-/// Stages, in pipeline order:
-///   1. parse — `engine.write_vt` of 20k distinct 72-col lines (runs on the
-///      PTY thread today, off the frame critical path).
-///   2. snapshot — `engine.snapshot` of the live viewport (once per rendered frame).
-///   3. extract — forced full extraction plus a one-row incremental update of
-///      the viewport (the live-region materialization, render thread).
-///   4. shape — real DirectWrite `layout_line` of NOVEL lines (render thread,
-///      cache-miss cost). Production caches shaped lines by hash, so
-///      repeated output is ~free; novel output pays this per line.
-///
-/// GPU submission is excluded (GPUI's own bench harness excludes it off-macOS).
-#[cfg(all(test, enable_profiling))]
-mod full_frame_profile;
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct TerminalLineState {
     version: u64,
@@ -178,7 +179,7 @@ struct TerminalLineState {
 }
 
 #[cfg(test)]
-pub(in crate::terminal_tab) fn extract_row(
+pub(super) fn extract_row(
     buf: &RenderBuffer,
     row: usize,
     cursor: Option<TerminalCursor>,

@@ -7,23 +7,18 @@ use nmt_terminal::block_store::{BlockItem, BlockStore};
 /// read as content / blank / rule / blank / content. Compact presentation
 /// (Command Blocks off) passes `pad_rows = 0.0` through the geometry
 /// functions instead, packing rows contiguously like a classic grid.
-pub(in crate::terminal_tab) const ITEM_PAD_ROWS: f32 = 1.0;
+pub(crate) const ITEM_PAD_ROWS: f32 = 1.0;
 
 /// Row count of one item — the cached engine row count (already wrapped at
 /// the current width; the engine reflows blocks eagerly on resize).
-pub(in crate::terminal_tab) fn item_rows(item: &BlockItem, _cols: u32) -> u32 {
+pub(crate) fn item_rows(item: &BlockItem, _cols: u32) -> u32 {
     item.engine_rows().min(u32::MAX as usize) as u32
 }
 
 /// Pixel height of one item: content rows plus `pad_rows` blank rows above
 /// and below. Empty items (empty commands never freeze, but a stale cache can
 /// briefly report 0) are invisible — no rows, no pads.
-pub(in crate::terminal_tab) fn item_px(
-    item: &BlockItem,
-    cols: u32,
-    cell_h: f32,
-    pad_rows: f32,
-) -> f32 {
+pub(crate) fn item_px(item: &BlockItem, cols: u32, cell_h: f32, pad_rows: f32) -> f32 {
     match item_rows(item, cols) {
         0 => 0.0,
         rows => (rows as f32 + 2.0 * pad_rows) * cell_h,
@@ -33,19 +28,14 @@ pub(in crate::terminal_tab) fn item_px(
 /// Pixel height of the live item: pads + the active grid's scrolled-out
 /// history rows + the live grid's content rows. Shared by the item element's
 /// layout and the render metrics so the two cannot drift.
-pub(in crate::terminal_tab) fn live_item_px(
-    history_rows: u64,
-    live_rows: usize,
-    cell_h: f32,
-    pad_rows: f32,
-) -> f32 {
+pub(crate) fn live_item_px(history_rows: u64, live_rows: usize, cell_h: f32, pad_rows: f32) -> f32 {
     history_rows as f32 * cell_h + (live_rows as f32 + 2.0 * pad_rows) * cell_h
 }
 
 /// The item-local row range intersecting the window viewport (plus the list's
 /// overdraw margin), so a huge block materializes only its visible rows
 /// while reading only the visible row range.
-pub(in crate::terminal_tab) fn visible_rows(
+pub(crate) fn visible_rows(
     item_top_in_window: f32,
     item_rows: usize,
     viewport_h: f32,
@@ -70,7 +60,7 @@ pub(in crate::terminal_tab) fn visible_rows(
 
 /// The list-top y of the previous (`direction < 0`) or next item relative to
 /// the current scroll position; `None` at the edges.
-pub(in crate::terminal_tab) fn nav_item_top(
+pub(crate) fn nav_item_top(
     store: &BlockStore,
     cols: u32,
     cell_h: f32,
@@ -100,7 +90,7 @@ pub(in crate::terminal_tab) fn nav_item_top(
 /// Element-local top of the live grid: frozen items, then the live item's
 /// top pad and tail rows. Computed from the per-frame metrics so it stays
 /// valid even when the live item is outside List's prepaint overdraw.
-pub(in crate::terminal_tab) fn block_list_active_top_px(
+pub(crate) fn block_list_active_top_px(
     frozen_px: f32,
     tail_px: f32,
     cell_h: f32,

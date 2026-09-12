@@ -7,9 +7,7 @@ use gpui::{App, Entity, Global, WeakEntity};
 use crate::agent_tab::execution::{AgentSession, SessionId};
 
 #[derive(Default)]
-pub struct SessionRegistry(
-    pub(in crate::agent_tab) Rc<RefCell<HashMap<SessionId, WeakEntity<AgentSession>>>>,
-);
+pub struct SessionRegistry(pub(crate) Rc<RefCell<HashMap<SessionId, WeakEntity<AgentSession>>>>);
 
 impl Global for SessionRegistry {}
 

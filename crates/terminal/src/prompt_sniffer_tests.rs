@@ -1,5 +1,7 @@
 use std::cell;
 
+// ---- command-blocks: exit-code extraction + completed-command capture ----
+use crate::event::CommandCapture;
 use crate::prompt_sniffer::{
     ProgressReport, ProgressState, PromptRegion, PromptSniffer, SniffedOsc, parse_sniffed_osc,
 };
@@ -292,10 +294,6 @@ fn ordinary_escape_split_across_reads_keeps_trust() {
         assert_eq!(fwd, joined, "split escape bytes must forward verbatim");
     }
 }
-
-// ---- command-blocks: exit-code extraction + completed-command capture ----
-
-use crate::event::CommandCapture;
 
 /// Feed `input` and collect the completed-command captures the `on_mark` hook
 /// delivers (in stream order — multiple completions per read stay ordered).

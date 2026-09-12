@@ -1,3 +1,9 @@
+#[cfg(test)]
+mod inbox_tests;
+
+#[cfg(test)]
+mod output_tests;
+
 use std::time::Duration;
 
 use futures::channel::mpsc;
@@ -6,22 +12,21 @@ use nmt_agent::message_memory::OUTPUT_FAILURE_METHOD;
 use parking_lot::Mutex;
 use serde_json::Value;
 
-pub(in crate::agent_tab) struct Message {
+pub(crate) struct Message {
     value: Option<Value>,
 }
 
 impl Message {
-    pub(in crate::agent_tab) fn take(&mut self) -> Value {
+    pub(crate) fn take(&mut self) -> Value {
         self.value.take().expect("queued message is consumed once")
     }
 }
 
-pub(in crate::agent_tab) struct Sender {
+pub(crate) struct Sender {
     sender: Mutex<Option<mpsc::UnboundedSender<Result<Message, String>>>>,
 }
 
-pub(in crate::agent_tab) fn channel() -> (Sender, mpsc::UnboundedReceiver<Result<Message, String>>)
-{
+pub(crate) fn channel() -> (Sender, mpsc::UnboundedReceiver<Result<Message, String>>) {
     let (sender, receiver) = mpsc::unbounded();
 
     (
@@ -33,7 +38,7 @@ pub(in crate::agent_tab) fn channel() -> (Sender, mpsc::UnboundedReceiver<Result
 }
 
 impl Sender {
-    pub(in crate::agent_tab) fn send(&self, value: Value) {
+    pub(crate) fn send(&self, value: Value) {
         // Serialize admission and terminal failure so no later producer can
         // publish a message after the stream has become incomplete.
         let mut sender = self.sender.lock();
@@ -61,22 +66,19 @@ impl Sender {
     }
 }
 
-#[cfg(test)]
-mod inbox_tests;
-
-pub(in crate::agent_tab) const MAX_MESSAGES_PER_BATCH: usize = 64;
-pub(in crate::agent_tab) const MAX_UPDATE_TIME: Duration = Duration::from_millis(2);
+pub(crate) const MAX_MESSAGES_PER_BATCH: usize = 64;
+pub(crate) const MAX_UPDATE_TIME: Duration = Duration::from_millis(2);
 
 /// Only adjacent deltas can share an update. Every other event is applied
 /// immediately, so approvals and turn transitions retain their side effects
 /// before the next backend message is processed.
 #[derive(Default)]
-pub(in crate::agent_tab) struct EventBatch {
+pub(crate) struct EventBatch {
     pending: Option<Event>,
 }
 
 impl EventBatch {
-    pub(in crate::agent_tab) fn push(&mut self, event: Event, mut apply: impl FnMut(Event)) {
+    pub(crate) fn push(&mut self, event: Event, mut apply: impl FnMut(Event)) {
         match (&mut self.pending, event) {
             (
                 Some(Event::AgentMessageDelta { item_id, delta }),
@@ -114,12 +116,9 @@ impl EventBatch {
         }
     }
 
-    pub(in crate::agent_tab) fn flush(&mut self, mut apply: impl FnMut(Event)) {
+    pub(crate) fn flush(&mut self, mut apply: impl FnMut(Event)) {
         if let Some(event) = self.pending.take() {
             apply(event);
         }
     }
 }
-
-#[cfg(test)]
-mod output_tests;

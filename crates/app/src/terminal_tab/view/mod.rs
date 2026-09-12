@@ -1,5 +1,6 @@
 mod key;
 mod list_state;
+
 #[cfg(test)]
 mod tests;
 
@@ -89,7 +90,7 @@ struct PaneIdentity {
 pub struct TerminalPane {
     pub focus: FocusHandle,
     identity: PaneIdentity,
-    pub(in crate::terminal_tab) model: PaneController,
+    pub(super) model: PaneController,
 
     /// The terminal leaf's laid-out content rect (window coords, padding
     /// excluded), set from the element's paint. Resize and pointer hit-testing use
@@ -270,7 +271,7 @@ impl TerminalPane {
 
     /// Store the terminal leaf's laid-out content rect and resize the surface to
     /// it. Called from the element's paint, where actual bounds are known.
-    pub(in crate::terminal_tab) fn set_content_bounds(
+    pub(super) fn set_content_bounds(
         &mut self,
         bounds: Bounds<Pixels>,
         cell: metrics::CellMetrics,
@@ -331,7 +332,7 @@ impl TerminalPane {
         state
     }
 
-    pub(in crate::terminal_tab) fn begin_block_list_frame(
+    pub(super) fn begin_block_list_frame(
         &mut self,
         bounds: Bounds<Pixels>,
         cell: CellMetrics,
@@ -550,11 +551,7 @@ impl TerminalPane {
     }
 
     /// Route a keystroke straight to the terminal PTY.
-    pub(in crate::terminal_tab) fn feed_terminal_key(
-        &mut self,
-        keystroke: &Keystroke,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn feed_terminal_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
         match self.model.send_key(&terminal_key(keystroke)) {
             KeyOutcome::Ignored => return,
 
@@ -636,7 +633,7 @@ impl TerminalPane {
         }
     }
 
-    pub(in crate::terminal_tab) fn local_position(&self, position: Point<Pixels>) -> LocalPoint {
+    pub(super) fn local_position(&self, position: Point<Pixels>) -> LocalPoint {
         let origin = self.content_origin();
 
         LocalPoint {
@@ -719,7 +716,7 @@ impl TerminalPane {
         self.apply_mouse_outcome(release.outcome, cx);
     }
 
-    pub(in crate::terminal_tab) fn on_mouse_move(
+    pub(super) fn on_mouse_move(
         &mut self,
         event: &MouseMoveEvent,
         window: &mut Window,
@@ -765,7 +762,7 @@ impl TerminalPane {
         }
     }
 
-    pub(in crate::terminal_tab) fn mark_scrollbar_activity(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn mark_scrollbar_activity(&mut self, cx: &mut Context<Self>) {
         let generation = self.model.scrollbar.mark_activity();
 
         cx.spawn(async move |this, cx| {
@@ -784,7 +781,7 @@ impl TerminalPane {
         cx.notify();
     }
 
-    pub(in crate::terminal_tab) fn apply_scroll_outcome(
+    pub(super) fn apply_scroll_outcome(
         &mut self,
         outcome: ScrollOutcome,
         cx: &mut Context<Self>,

@@ -1,9 +1,9 @@
 //! Directory ownership for one normal workspace: a primary directory plus an
 //! ordered list of additional directories.
 
-use std::{iter, mem, path};
-
 pub use nmt_platform::filesystem::path_identity;
+
+use std::{iter, mem, path};
 
 /// Identity of a stored root string, or `None` when the string is a
 /// placeholder that does not name a concrete filesystem location.

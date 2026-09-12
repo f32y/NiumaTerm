@@ -1,2 +1,2 @@
-pub(in crate::terminal_tab) mod frame;
-pub(in crate::terminal_tab) mod text;
+pub(super) mod frame;
+pub(super) mod text;

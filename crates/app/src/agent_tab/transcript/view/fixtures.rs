@@ -44,7 +44,7 @@ impl TranscriptView {
     /// Drop the conversation and every piece of view state derived from it.
     /// Used when the owning view switches to a different conversation, so one
     /// conversation's expansion and scroll position cannot leak into another's.
-    pub(in crate::agent_tab) fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.conversation.borrow_mut().clear();
         self.reset_presentation();
     }
@@ -55,12 +55,7 @@ impl TranscriptView {
     /// Its duration is a separate question: the transcript file records none,
     /// so a replayed turn usually closes without an elapsed-time line rather
     /// than stating a time the session never reported.
-    pub(in crate::agent_tab) fn append_replay(
-        &mut self,
-        turn: u64,
-        replay: ReplayTurn,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn append_replay(&mut self, turn: u64, replay: ReplayTurn, cx: &mut Context<Self>) {
         let _profile = Probe::start(Operation::Replay);
 
         if replay.items.is_empty() {
@@ -90,7 +85,7 @@ impl TranscriptView {
 
     /// Append one entry with an explicit stamp, for content this view records
     /// outside the normal push path.
-    pub(in crate::agent_tab) fn push_stamped(&mut self, turn: u64, item: SessionItem) {
+    pub(crate) fn push_stamped(&mut self, turn: u64, item: SessionItem) {
         self.append_entry(Entry {
             turn,
             item,
@@ -101,12 +96,12 @@ impl TranscriptView {
         });
     }
 
-    pub(in crate::agent_tab) fn contains_item(&self, id: &str) -> bool {
+    pub(crate) fn contains_item(&self, id: &str) -> bool {
         self.conversation.borrow().content.contains_item(id)
     }
 
     /// Fold an authoritative completed payload into the entry that streamed it.
-    pub(in crate::agent_tab) fn merge_completed(&mut self, item: &SessionItem) {
+    pub(crate) fn merge_completed(&mut self, item: &SessionItem) {
         let _profile = Probe::start(Operation::MergeCompleted);
 
         if let Some(index) = self.conversation.borrow_mut().content.merge_completed(item) {
@@ -117,12 +112,7 @@ impl TranscriptView {
 
     /// Extend a streamed item's text. Returns whether the result is non-empty,
     /// which is what tells the caller the row became visible.
-    pub(in crate::agent_tab) fn append_delta(
-        &mut self,
-        item_id: &str,
-        delta: &str,
-        field: TextField,
-    ) -> bool {
+    pub(crate) fn append_delta(&mut self, item_id: &str, delta: &str, field: TextField) -> bool {
         let _profile = Probe::start(Operation::AppendDelta);
 
         let Some(update) = self
@@ -165,11 +155,7 @@ impl TranscriptView {
         update.non_blank
     }
 
-    pub(in crate::agent_tab) fn set_compacting(
-        &mut self,
-        compacting: bool,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn set_compacting(&mut self, compacting: bool, cx: &mut Context<Self>) {
         self.conversation
             .borrow_mut()
             .live
@@ -181,11 +167,11 @@ impl TranscriptView {
         cx.notify();
     }
 
-    pub(in crate::agent_tab) fn was_interrupted(&self, turn: u64) -> bool {
+    pub(crate) fn was_interrupted(&self, turn: u64) -> bool {
         self.conversation.borrow().turns.was_interrupted(turn)
     }
 
-    pub(in crate::agent_tab) fn mark_interrupted(&mut self, turn: u64) {
+    pub(crate) fn mark_interrupted(&mut self, turn: u64) {
         self.conversation.borrow_mut().turns.mark_interrupted(turn);
         self.invalidate_turn_rows(turn);
     }
@@ -193,7 +179,7 @@ impl TranscriptView {
     /// Settle the running turn's duration and output usage for its status row.
     /// These are view state rather than provider transcript content, so they
     /// stay outside the shared item stream.
-    pub(in crate::agent_tab) fn settle_turn(&mut self, turn: u64, cx: &mut Context<Self>) {
+    pub(crate) fn settle_turn(&mut self, turn: u64, cx: &mut Context<Self>) {
         let Some((started, output_tokens)) = self.conversation.borrow_mut().live.finish() else {
             return;
         };

@@ -1,65 +1,6 @@
 // From: https://github.com/alacritty/alacritty/blob/04ea367e3baa7e51933e9a595da793b4c8a4aa8f/alacritty/src/macos/proc.rs
 
-use std::ffi::{CStr, CString, IntoStringError, OsStr};
-use std::fmt::{self, Display, Formatter};
-use std::mem::MaybeUninit;
-use std::os::raw::c_int;
-use std::path::{Path, PathBuf};
-use std::{error, io, ptr};
-
-use libc::c_void;
-
 pub(crate) mod login_shell;
-
-/// Error during working directory retrieval.
-#[derive(Debug)]
-pub enum Error {
-    Io(io::Error),
-
-    /// Error converting into utf8 string.
-    IntoString(IntoStringError),
-
-    /// Expected return size didn't match libproc's.
-    InvalidSize,
-}
-
-impl error::Error for Error {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        match self {
-            Error::InvalidSize => None,
-            Error::Io(err) => err.source(),
-            Error::IntoString(err) => err.source(),
-        }
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::InvalidSize => write!(f, "Invalid proc_pidinfo return size"),
-
-            Error::Io(err) => {
-                write!(f, "Error getting current working directory: {err}")
-            }
-
-            Error::IntoString(err) => {
-                write!(f, "Error when parsing current working directory: {err}")
-            }
-        }
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(val: io::Error) -> Self {
-        Error::Io(val)
-    }
-}
-
-impl From<IntoStringError> for Error {
-    fn from(val: IntoStringError) -> Self {
-        Error::IntoString(val)
-    }
-}
 
 /// Bindings for libproc.
 #[allow(non_camel_case_types)]
@@ -146,6 +87,68 @@ mod sys {
     }
 }
 
+#[cfg(test)]
+mod tests;
+
+use std::ffi::{CStr, CString, IntoStringError, OsStr};
+use std::fmt::{self, Display, Formatter};
+use std::mem::MaybeUninit;
+use std::os::raw::c_int;
+use std::path::{Path, PathBuf};
+use std::{error, io, ptr};
+
+use libc::c_void;
+
+/// Error during working directory retrieval.
+#[derive(Debug)]
+pub enum Error {
+    Io(io::Error),
+
+    /// Error converting into utf8 string.
+    IntoString(IntoStringError),
+
+    /// Expected return size didn't match libproc's.
+    InvalidSize,
+}
+
+impl error::Error for Error {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            Error::InvalidSize => None,
+            Error::Io(err) => err.source(),
+            Error::IntoString(err) => err.source(),
+        }
+    }
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::InvalidSize => write!(f, "Invalid proc_pidinfo return size"),
+
+            Error::Io(err) => {
+                write!(f, "Error getting current working directory: {err}")
+            }
+
+            Error::IntoString(err) => {
+                write!(f, "Error when parsing current working directory: {err}")
+            }
+        }
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(val: io::Error) -> Self {
+        Error::Io(val)
+    }
+}
+
+impl From<IntoStringError> for Error {
+    fn from(val: IntoStringError) -> Self {
+        Error::IntoString(val)
+    }
+}
+
 /// The number of live processes in the process group `pgid`.
 ///
 /// `proc_listpgrppids` reports the byte length it would fill when handed a
@@ -227,6 +230,3 @@ pub fn macos_cwd(pid: c_int) -> Result<PathBuf, Error> {
 
     Ok(c_string.into_string().map(Into::into)?)
 }
-
-#[cfg(test)]
-mod tests;

@@ -5,13 +5,14 @@
 //! is scoped to the session's own key and a snapshot from a replaced
 //! conversation reaches nothing.
 
+#[cfg(test)]
+pub(super) use nmt_agent::session::children::scoped_background_tasks;
+
 use std::cell::Ref;
 
 use gpui::Context;
 use nmt_agent::background_task::{BackgroundTaskKey, BackgroundTaskSnapshot};
 use nmt_agent::session::children::ChildTranscript;
-#[cfg(test)]
-pub(super) use nmt_agent::session::children::scoped_background_tasks;
 
 use crate::agent_tab::AgentPane;
 use crate::agent_tab::execution::ChildReader;

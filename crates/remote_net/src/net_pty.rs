@@ -12,6 +12,10 @@
 //! drain thread pushes network bytes into a shared buffer and wakes the event
 //! loop, because there is no real OS readiness source for the network stream.
 
+#[cfg(test)]
+#[path = "net_pty_tests.rs"]
+mod net_pty_tests;
+
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::sync::Arc;
@@ -277,10 +281,6 @@ impl EventedPty for NetPty {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "net_pty_tests.rs"]
-mod net_pty_tests;
 
 /// Attach the client engine with terminal responses enabled; the remote host
 /// owns command history while this engine displays its streamed viewport.

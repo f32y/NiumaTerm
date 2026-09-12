@@ -1,9 +1,10 @@
+pub(crate) use nmt_agent::session::branch::RewindAction;
+
 use std::borrow::Cow;
 
 use chrono::Local;
 use gpui::{Context, SharedString};
 use nmt_agent::claude_code::sessions;
-pub(in crate::agent_tab) use nmt_agent::session::branch::RewindAction;
 use nmt_agent::session::branch::{
     BranchError, BranchFailure, BranchUpdate, BranchView, FailureStage, FileProgress, PromptTarget,
 };
@@ -14,7 +15,7 @@ use crate::agent_tab::session::Status;
 use crate::agent_tab::session::errors::operation_error;
 use crate::agent_tab::{AgentPane, RecentSessionsMode};
 
-pub(in crate::agent_tab) fn rewind_prompt_label(prompt: &str) -> String {
+pub(crate) fn rewind_prompt_label(prompt: &str) -> String {
     let line = prompt
         .lines()
         .find(|line| !line.trim().is_empty())
@@ -32,7 +33,7 @@ pub(in crate::agent_tab) fn rewind_prompt_label(prompt: &str) -> String {
     label
 }
 
-pub(in crate::agent_tab) fn rewind_timestamp(timestamp: Option<&str>) -> Option<String> {
+pub(crate) fn rewind_timestamp(timestamp: Option<&str>) -> Option<String> {
     let timestamp = timestamp?;
 
     chrono::DateTime::parse_from_rfc3339(timestamp)
@@ -46,7 +47,7 @@ pub(in crate::agent_tab) fn rewind_timestamp(timestamp: Option<&str>) -> Option<
 }
 
 impl AgentPane {
-    pub(in crate::agent_tab) fn rewind_to_prompt(
+    pub(crate) fn rewind_to_prompt(
         &mut self,
         target: PromptTarget,
         cx: &mut Context<Self>,
@@ -54,7 +55,7 @@ impl AgentPane {
         self.load_rewind_checkpoints(Some(target), cx)
     }
 
-    pub(in crate::agent_tab) fn open_rewind(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(crate) fn open_rewind(&mut self, cx: &mut Context<Self>) -> bool {
         self.load_rewind_checkpoints(None, cx)
     }
 
@@ -116,14 +117,11 @@ impl AgentPane {
         true
     }
 
-    pub(in crate::agent_tab) fn cancel_rewind_picker(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn cancel_rewind_picker(&mut self, cx: &mut Context<Self>) {
         self.cancel_branch_picker(cx);
     }
 
-    pub(in crate::agent_tab) fn rewind_palette_model(
-        &self,
-        state: BranchView<'_>,
-    ) -> Option<PaletteModel> {
+    pub(crate) fn rewind_palette_model(&self, state: BranchView<'_>) -> Option<PaletteModel> {
         match state {
             BranchView::LoadingRewind => Some(PaletteModel {
                 rows: vec![PaletteRow {
@@ -246,11 +244,7 @@ impl AgentPane {
         }
     }
 
-    pub(in crate::agent_tab) fn activate_rewind_action(
-        &mut self,
-        action: RewindAction,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn activate_rewind_action(&mut self, action: RewindAction, cx: &mut Context<Self>) {
         if !self.binding.is_current() {
             return;
         }
@@ -273,11 +267,7 @@ impl AgentPane {
         self.apply_rewind_update(update, cx);
     }
 
-    pub(in crate::agent_tab) fn apply_rewind_update(
-        &mut self,
-        update: BranchUpdate,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn apply_rewind_update(&mut self, update: BranchUpdate, cx: &mut Context<Self>) {
         match update {
             BranchUpdate::Ignored => {}
 
@@ -344,7 +334,7 @@ impl AgentPane {
         }
     }
 
-    pub(in crate::agent_tab) fn branch_error_message(&self, error: BranchError) -> String {
+    pub(crate) fn branch_error_message(&self, error: BranchError) -> String {
         match error {
             BranchError::Busy => t!("agent-rewind-idle-only").to_string(),
 
@@ -367,11 +357,7 @@ impl AgentPane {
         }
     }
 
-    pub(in crate::agent_tab) fn report_branch_failure(
-        &mut self,
-        failure: BranchFailure,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn report_branch_failure(&mut self, failure: BranchFailure, cx: &mut Context<Self>) {
         let error = self.branch_error_message(failure.error);
 
         let message = match (failure.stage, failure.files) {

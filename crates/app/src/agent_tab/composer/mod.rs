@@ -1,15 +1,4 @@
-use gpui::prelude::*;
-use gpui_component::ActiveTheme as _;
-use gpui_component::button::ButtonVariants as _;
-
-use crate::agent_tab::capabilities::AgentCapabilities as _;
-
-pub(in crate::agent_tab) mod attachments;
-mod branch;
-pub(super) mod images;
-mod palette;
-mod response_annotations;
-mod slash;
+pub(super) use nmt_agent::session::commands::PendingSlashCommand;
 
 pub(super) use crate::agent_tab::composer::branch::BranchFlow;
 pub(super) use crate::agent_tab::composer::branch::fork::PromptTarget;
@@ -19,24 +8,35 @@ pub(super) use crate::agent_tab::composer::branch::rewind::RewindAction;
 pub(super) use crate::agent_tab::composer::palette::{
     PALETTE_MAX_HEIGHT, PaletteAction, PaletteControl, PaletteModel, PaletteRow,
 };
-pub(in crate::agent_tab) use crate::agent_tab::composer::response_annotations::{
+pub(super) use crate::agent_tab::composer::response_annotations::{
     annotation_count_label, parse_annotated_prompt, prompt_with_response_annotations,
     visible_prompt,
 };
+
+pub(super) mod attachments;
+
+pub(super) mod images;
+
+mod branch;
+
+mod palette;
+mod response_annotations;
+mod slash;
 
 #[cfg(test)]
 mod tests;
 
 use std::time::Duration;
 
+use gpui::prelude::*;
 use gpui::{Context, SharedString, Window};
-use gpui_component::button::Button;
+use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogClose, DialogFooter};
-use gpui_component::{WindowExt, v_flex};
+use gpui_component::{ActiveTheme as _, WindowExt, v_flex};
 use nmt_agent::session::commands::CommandQueue;
-pub(super) use nmt_agent::session::commands::PendingSlashCommand;
 use rust_i18n::t;
 
+use crate::agent_tab::capabilities::AgentCapabilities as _;
 use crate::agent_tab::commands::{
     parse_slash_command, reconcile_skill_binding, validate_skill_binding,
 };
@@ -111,7 +111,7 @@ pub(super) fn restored_input_after_interruption(submitted: &str, current: &str) 
 impl SlashPalette {
     /// Provider commands and their cached catalog belong to one session, so
     /// resetting discovery must invalidate both together.
-    pub(in crate::agent_tab) fn reset_discovery(&mut self, commands_ready: bool) {
+    pub(super) fn reset_discovery(&mut self, commands_ready: bool) {
         self.provider_commands.clear();
         self.provider_commands_ready = commands_ready;
         self.catalog = None;
@@ -122,7 +122,7 @@ impl SlashPalette {
     /// Stand down for text the composer did not type. A recalled entry is a
     /// whole message, so a skill bound to what was there no longer applies and
     /// the palette must not reopen on the leading `/` the entry may carry.
-    pub(in crate::agent_tab) fn reset_for_recall(&mut self) {
+    pub(super) fn reset_for_recall(&mut self) {
         self.skill_binding = None;
         self.dismissed = true;
         self.selected = 0;
@@ -130,7 +130,7 @@ impl SlashPalette {
 
     /// Show a one-line result above the composer, replacing whatever was
     /// there.
-    pub(in crate::agent_tab) fn set_feedback(
+    pub(super) fn set_feedback(
         &mut self,
         kind: CommandFeedbackKind,
         message: impl Into<SharedString>,
@@ -170,10 +170,7 @@ impl SlashPalette {
     }
 
     /// The message worth showing right now, if any.
-    pub(in crate::agent_tab) fn visible_feedback(
-        &self,
-        commands: &CommandQueue,
-    ) -> Option<&CommandFeedback> {
+    pub(super) fn visible_feedback(&self, commands: &CommandQueue) -> Option<&CommandFeedback> {
         self.feedback
             .as_ref()
             .filter(|feedback| feedback_is_current(feedback.kind, commands.queue.is_empty()))

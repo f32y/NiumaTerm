@@ -33,7 +33,7 @@ impl TranscriptView {
     /// reasoning text) expand on click into a bounded transcript surface with
     /// its own scroll position, drawn inside the same card so the detail stays
     /// visibly attached to the step it belongs to.
-    pub(in crate::agent_tab) fn render_work_row(
+    pub(crate) fn render_work_row(
         &mut self,
         index: usize,
         window: &mut Window,

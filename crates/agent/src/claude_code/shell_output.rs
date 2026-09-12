@@ -8,16 +8,16 @@
 //! screen: the file is appended to while the command runs, and the transcript
 //! update replaces the card only when the text actually differs.
 
+#[cfg(test)]
+#[path = "shell_output_tests.rs"]
+mod shell_output_tests;
+
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
 use crate::background_task::BackgroundTaskState;
 use crate::chat::Item;
 use crate::claude_code::tasks::ShellDetail;
-
-#[cfg(test)]
-#[path = "shell_output_tests.rs"]
-mod shell_output_tests;
 
 /// How much of the output file to show. A background command can be a server
 /// or a watch loop that never stops writing, and the end is the part worth

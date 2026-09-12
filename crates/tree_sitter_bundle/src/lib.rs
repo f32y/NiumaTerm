@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use std::ptr;
 
 const ABI_VERSION: u32 = 1;
@@ -483,9 +486,6 @@ pub unsafe extern "system" fn nmt_tree_sitter_language(
 
     1
 }
-
-#[cfg(test)]
-mod tests;
 
 impl From<&'static str> for RawSlice {
     fn from(value: &'static str) -> Self {

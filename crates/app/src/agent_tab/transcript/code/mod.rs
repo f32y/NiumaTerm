@@ -1,13 +1,14 @@
-mod ansi;
-mod prepared;
-
 #[cfg(test)]
 pub(super) use crate::agent_tab::transcript::code::prepared::{
     VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, should_virtualize_transcript, transcript_segments,
 };
 
+mod ansi;
+mod prepared;
+
 mod render;
 mod source;
+
 #[cfg(test)]
 mod tests;
 
@@ -26,7 +27,7 @@ use crate::agent_tab::transcript::code::prepared::PreparedCode;
 use crate::agent_tab::transcript::code::source::CodeSource;
 use crate::agent_tab::transcript::rows::RowSpec;
 
-pub(in crate::agent_tab) fn is_code_item(item: &Item) -> bool {
+pub(crate) fn is_code_item(item: &Item) -> bool {
     match item {
         Item::CommandExecution { .. } | Item::FileChange { .. } => true,
         Item::Other { kind, .. } => !matches!(kind.as_str(), "TodoWrite" | "ExitPlanMode" | "Task"),
@@ -34,12 +35,12 @@ pub(in crate::agent_tab) fn is_code_item(item: &Item) -> bool {
     }
 }
 
-pub(in crate::agent_tab) fn clean_output(text: &str) -> String {
+pub(crate) fn clean_output(text: &str) -> String {
     ansi::AnsiText::parse(text).text
 }
 
 #[derive(Default)]
-pub(in crate::agent_tab) struct CodeTranscriptCache {
+pub(crate) struct CodeTranscriptCache {
     entries: HashMap<usize, CachedCode>,
 }
 
@@ -50,7 +51,7 @@ struct CachedCode {
 }
 
 impl CodeTranscriptCache {
-    pub(in crate::agent_tab) fn ensure(
+    pub(crate) fn ensure(
         &mut self,
         index: usize,
         item: &Item,
@@ -97,13 +98,13 @@ impl CodeTranscriptCache {
         view
     }
 
-    pub(in crate::agent_tab) fn invalidate(&mut self, index: usize) {
+    pub(crate) fn invalidate(&mut self, index: usize) {
         if let Some(cached) = self.entries.get_mut(&index) {
             cached.dirty = true;
         }
     }
 
-    pub(in crate::agent_tab) fn invalidate_from(&mut self, first: usize) {
+    pub(crate) fn invalidate_from(&mut self, first: usize) {
         for (index, cached) in &mut self.entries {
             if *index >= first {
                 cached.dirty = true;
@@ -112,22 +113,22 @@ impl CodeTranscriptCache {
     }
 
     #[cfg(test)]
-    pub(in crate::agent_tab) fn invalidate_all(&mut self) {
+    pub(crate) fn invalidate_all(&mut self) {
         for cached in self.entries.values_mut() {
             cached.dirty = true;
         }
     }
 
-    pub(in crate::agent_tab) fn drop_row(&mut self, index: usize) {
+    pub(crate) fn drop_row(&mut self, index: usize) {
         self.entries.remove(&index);
     }
 
-    pub(in crate::agent_tab) fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.entries.clear();
     }
 }
 
-pub(in crate::agent_tab) struct CodeView {
+pub(crate) struct CodeView {
     source: Arc<CodeSource>,
     revision: u64,
     prepared: Option<Arc<PreparedCode>>,

@@ -1,5 +1,3 @@
-use tracing::trace;
-
 pub mod defaults;
 pub mod term;
 
@@ -11,6 +9,7 @@ use std::sync::OnceLock;
 use regex::Regex;
 use serde::de::Error as DeError;
 use serde::{Deserialize, Serialize, de};
+use tracing::trace;
 
 use crate::colors::defaults::*;
 use crate::render_types;

@@ -3,6 +3,10 @@
 //! live in [`ActiveList`]; this module adds the tab-specific parts (titles,
 //! exit flags, surface access).
 
+#[cfg(test)]
+#[path = "tabs_tests.rs"]
+mod tabs_tests;
+
 use nmt_terminal::event::{ProgressReport, ProgressState};
 
 use crate::ui::{ActiveList, HasId};
@@ -266,10 +270,6 @@ impl<S> TabManager<S> {
         self.tabs.find_mut(id)
     }
 }
-
-#[cfg(test)]
-#[path = "tabs_tests.rs"]
-mod tabs_tests;
 
 impl From<Option<i32>> for CommandOutcome {
     /// Grade an OSC 133 `;D` exit code. A shell that reports no code offers no

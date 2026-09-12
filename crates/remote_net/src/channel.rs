@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "channel_tests.rs"]
+mod channel_tests;
+
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
@@ -271,7 +275,3 @@ async fn connect_pair(
         ))),
     }
 }
-
-#[cfg(test)]
-#[path = "channel_tests.rs"]
-mod channel_tests;

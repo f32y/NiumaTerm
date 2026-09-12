@@ -1,5 +1,25 @@
 //! Session execution and logical lifetime, independent of presentation entities.
 
+pub use crate::agent_tab::execution::children::ChildReader;
+pub use crate::agent_tab::execution::registry::SessionRegistry;
+
+pub(super) mod inbox;
+
+mod branch;
+mod children;
+mod events;
+mod history;
+
+mod maintenance;
+mod questions;
+mod registry;
+mod startup;
+
+mod workflows;
+
+#[cfg(test)]
+mod tests;
+
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -19,42 +39,27 @@ use uuid::Uuid;
 
 use crate::agent_tab::AgentPaneEvent;
 use crate::agent_tab::composer::attachments::scratch_dir;
-pub use crate::agent_tab::execution::children::ChildReader;
-pub use crate::agent_tab::execution::registry::SessionRegistry;
 use crate::agent_tab::profile::{AgentKind, AgentKindExt as _};
-
-mod branch;
-mod children;
-mod events;
-mod history;
-pub(in crate::agent_tab) mod inbox;
-mod maintenance;
-mod questions;
-mod registry;
-mod startup;
-#[cfg(test)]
-mod tests;
-mod workflows;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SessionId(Uuid);
 
 pub struct AgentSession {
-    pub(in crate::agent_tab) child_refresh: Option<Task<()>>,
-    pub(in crate::agent_tab) child_readers: Rc<RefCell<HashMap<(u64, BackgroundTaskKey), usize>>>,
-    pub(in crate::agent_tab) workflow_refresh: Option<Task<()>>,
-    pub(in crate::agent_tab) workflow_readers: Rc<Cell<usize>>,
-    pub(in crate::agent_tab) controller: Rc<RefCell<SessionController>>,
-    pub(in crate::agent_tab) profile: AgentProfile,
-    pub(in crate::agent_tab) workspace: AgentWorkspace,
-    pub(in crate::agent_tab) active_workspace: AgentWorkspace,
-    pub(in crate::agent_tab) route: AgentRoute,
-    pub(in crate::agent_tab) kind: AgentKind,
+    pub(super) child_refresh: Option<Task<()>>,
+    pub(super) child_readers: Rc<RefCell<HashMap<(u64, BackgroundTaskKey), usize>>>,
+    pub(super) workflow_refresh: Option<Task<()>>,
+    pub(super) workflow_readers: Rc<Cell<usize>>,
+    pub(super) controller: Rc<RefCell<SessionController>>,
+    pub(super) profile: AgentProfile,
+    pub(super) workspace: AgentWorkspace,
+    pub(super) active_workspace: AgentWorkspace,
+    pub(super) route: AgentRoute,
+    pub(super) kind: AgentKind,
     id: SessionId,
-    pub(in crate::agent_tab) last_completed: Option<(u64, u64)>,
+    pub(super) last_completed: Option<(u64, u64)>,
     closed: Rc<Cell<bool>>,
     binding_generation: Rc<Cell<u64>>,
-    pub(in crate::agent_tab) team_launch: Option<TeamLaunch>,
+    pub(super) team_launch: Option<TeamLaunch>,
 }
 
 /// Closing this owner releases execution even while observers still exist.
@@ -68,14 +73,14 @@ pub struct SessionOwner {
     scratch: PathBuf,
 }
 
-pub(in crate::agent_tab) struct CommandBinding {
+pub(super) struct CommandBinding {
     closed: Rc<Cell<bool>>,
     current: Rc<Cell<u64>>,
-    pub(in crate::agent_tab) generation: u64,
+    pub(super) generation: u64,
 }
 
 impl CommandBinding {
-    pub(in crate::agent_tab) fn is_current(&self) -> bool {
+    pub(super) fn is_current(&self) -> bool {
         !self.closed.get() && self.current.get() == self.generation
     }
 }
@@ -88,10 +93,10 @@ impl Drop for CommandBinding {
     }
 }
 
-pub(in crate::agent_tab) struct PresentationEffect {
-    pub(in crate::agent_tab) epoch: u64,
-    pub(in crate::agent_tab) generation: u64,
-    pub(in crate::agent_tab) effect: RefCell<Option<SessionEffect>>,
+pub(super) struct PresentationEffect {
+    pub(super) epoch: u64,
+    pub(super) generation: u64,
+    pub(super) effect: RefCell<Option<SessionEffect>>,
 }
 
 impl EventEmitter<PresentationEffect> for AgentSession {}
@@ -99,7 +104,7 @@ impl EventEmitter<PresentationEffect> for AgentSession {}
 impl EventEmitter<AgentPaneEvent> for AgentSession {}
 
 #[derive(Clone)]
-pub(in crate::agent_tab) enum ExecutionSignal {
+pub(super) enum ExecutionSignal {
     Accepted {
         epoch: u64,
         id: String,
@@ -133,7 +138,7 @@ impl SessionOwner {
         });
     }
 
-    pub(in crate::agent_tab) fn bind(&self) -> CommandBinding {
+    pub(super) fn bind(&self) -> CommandBinding {
         self.binding_generation
             .set(self.binding_generation.get() + 1);
 
@@ -186,7 +191,7 @@ impl AgentSession {
         Self::create_with_team(profile, workspace, None, cx)
     }
 
-    pub(in crate::agent_tab) fn create_team(
+    pub(super) fn create_team(
         profile: AgentProfile,
         workspace: AgentWorkspace,
         policy: TeamLaunch,
@@ -268,7 +273,7 @@ impl AgentSession {
         owner.session.downgrade()
     }
 
-    pub(in crate::agent_tab) fn publish(&self, effect: SessionEffect, cx: &mut Context<Self>) {
+    pub(super) fn publish(&self, effect: SessionEffect, cx: &mut Context<Self>) {
         let epoch = self.controller.borrow().runtime.epoch();
 
         match &effect {

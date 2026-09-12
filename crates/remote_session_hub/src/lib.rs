@@ -5,7 +5,7 @@
 //! belong to the process that hosts this crate.
 
 #[cfg(windows)]
-mod windows;
+pub use crate::windows::*;
 
 #[cfg(windows)]
-pub use crate::windows::*;
+mod windows;

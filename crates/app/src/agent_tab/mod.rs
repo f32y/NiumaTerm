@@ -264,7 +264,7 @@ struct SlashPalette {
 }
 
 pub struct AgentPane {
-    pub(in crate::agent_tab) focus: FocusHandle,
+    focus: FocusHandle,
     agent_route: AgentRoute,
     kind: AgentKind,
 

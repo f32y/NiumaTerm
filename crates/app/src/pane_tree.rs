@@ -6,6 +6,10 @@
 //! Invariant: a `PaneTree` always has at least one leaf, and `focused` always
 //! names an existing leaf. `remove` refuses the last leaf.
 
+#[cfg(test)]
+#[path = "pane_tree_tests.rs"]
+mod pane_tree_tests;
+
 use std::mem;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -447,10 +451,6 @@ impl<L, S: Clone> PaneTree<L, S> {
         PaneNode::Leaf { id, pane }
     }
 }
-
-#[cfg(test)]
-#[path = "pane_tree_tests.rs"]
-mod pane_tree_tests;
 
 impl<L, S> From<PaneNode<L, S>> for PaneTree<L, S> {
     /// Build from a restored root; focus falls to the first leaf.

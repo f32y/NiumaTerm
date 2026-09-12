@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "incremental_tests.rs"]
+mod incremental_tests;
+
 use std::mem;
 
 use nmt_config::agent::CollapseRows;
@@ -123,7 +127,3 @@ impl TranscriptView {
         self.row_cache.specs = specs;
     }
 }
-
-#[cfg(test)]
-#[path = "incremental_tests.rs"]
-mod incremental_tests;

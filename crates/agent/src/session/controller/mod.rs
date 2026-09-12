@@ -3,6 +3,21 @@
 //! The host schedules blocking work and displays returned outcomes. Runtime,
 //! delivery, recovery, and interactions advance together under one owner.
 
+pub use crate::session::controller::events::SessionEffect;
+pub use crate::session::controller::input::{QuestionSubmission, UserInterruption};
+pub use crate::session::controller::readiness::{SessionBranch, SessionReady, SessionReplay};
+pub use crate::session::controller::transitions::{SessionFailure, SessionStart};
+
+mod activity;
+mod content;
+mod events;
+mod input;
+mod readiness;
+mod transitions;
+
+#[cfg(test)]
+mod tests;
+
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -24,21 +39,6 @@ use crate::session::settings::ConversationSettings;
 use crate::session::workflows::WorkflowData;
 use crate::session::{AgentKind, Backend, RecoveryIdentity};
 use crate::transcript::conversation::{ConversationImage, ConversationState};
-
-mod activity;
-mod content;
-mod events;
-mod input;
-mod readiness;
-mod transitions;
-
-#[cfg(test)]
-mod tests;
-
-pub use crate::session::controller::events::SessionEffect;
-pub use crate::session::controller::input::{QuestionSubmission, UserInterruption};
-pub use crate::session::controller::readiness::{SessionBranch, SessionReady, SessionReplay};
-pub use crate::session::controller::transitions::{SessionFailure, SessionStart};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SubmissionBlock {

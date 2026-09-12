@@ -9,6 +9,10 @@
 // data now lives in per-grid side tables (`StyleSet`, `ExtrasTable`); the
 // cell itself is 8 bytes.
 
+#[cfg(test)]
+#[path = "square_tests.rs"]
+mod square_tests;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -398,10 +402,6 @@ impl Square {
         self.contains_cell_flag(CellFlags::HYPERLINK)
     }
 }
-
-#[cfg(test)]
-#[path = "square_tests.rs"]
-mod square_tests;
 
 impl From<char> for Square {
     /// Create a cell with the given codepoint and the default style/extras.

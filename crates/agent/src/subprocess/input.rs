@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "input_tests.rs"]
+mod input_tests;
+
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Weak, mpsc};
@@ -210,7 +214,3 @@ impl InputQueue {
         Ok(ticket)
     }
 }
-
-#[cfg(test)]
-#[path = "input_tests.rs"]
-mod input_tests;

@@ -1,5 +1,9 @@
 //! Retained conversation data, independent of any attached renderer.
 
+#[cfg(test)]
+#[path = "conversation_tests.rs"]
+mod conversation_tests;
+
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -262,7 +266,3 @@ pub fn hidden(item: &Item) -> bool {
         _ => false,
     }
 }
-
-#[cfg(test)]
-#[path = "conversation_tests.rs"]
-mod conversation_tests;

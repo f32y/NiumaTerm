@@ -29,7 +29,7 @@ struct TestPty {
 }
 
 #[derive(Clone, Default)]
-pub(in crate::terminal_tab) struct TestClipboard {
+pub(crate) struct TestClipboard {
     pub text: Arc<Mutex<Option<String>>>,
     pub reject_writes: bool,
 }
@@ -146,10 +146,7 @@ impl EventedPty for TestPty {
     }
 }
 
-pub(in crate::terminal_tab) fn controller(
-    vt: &[u8],
-    engine_blocks: bool,
-) -> (PaneController, Arc<Mutex<Vec<u8>>>) {
+pub(crate) fn controller(vt: &[u8], engine_blocks: bool) -> (PaneController, Arc<Mutex<Vec<u8>>>) {
     let input = Arc::new(Mutex::new(Vec::new()));
     let mut output = vt.to_vec();
 
@@ -223,7 +220,7 @@ pub(in crate::terminal_tab) fn controller(
     (controller, input)
 }
 
-pub(in crate::terminal_tab) fn assert_input(input: &Mutex<Vec<u8>>, expected: &[u8]) {
+pub(crate) fn assert_input(input: &Mutex<Vec<u8>>, expected: &[u8]) {
     let deadline = Instant::now() + Duration::from_secs(2);
 
     while input.lock().len() < expected.len() {

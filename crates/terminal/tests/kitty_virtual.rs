@@ -1,4 +1,4 @@
-use nmt_config::colors::{AnsiColor, ColorRgb};
+use nmt_config::colors::{AnsiColor, ColorRgb, NamedColor};
 use nmt_terminal::ansi::kitty_virtual::*;
 
 #[test]
@@ -59,8 +59,6 @@ fn test_encode_decode_roundtrip() {
 
     assert_eq!(decoded, (5, 10, Some(42)));
 }
-
-use nmt_config::colors::NamedColor;
 
 #[test]
 fn from_cell_indexed_fg_two_diacritics() {

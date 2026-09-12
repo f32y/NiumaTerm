@@ -1,7 +1,31 @@
-pub(in crate::terminal_tab) mod frame_cache;
-pub(in crate::terminal_tab) mod frame_record;
-pub(in crate::terminal_tab) mod key_action;
+pub(super) use crate::terminal_tab::pane_model::settings::{FrameTheme, PaneSettings};
+
+pub(super) mod frame_cache;
+pub(super) mod frame_record;
+pub(super) mod key_action;
+
+pub(super) mod frozen_hit_map;
+
+pub(super) mod list_mirror;
+pub(super) mod mouse;
+pub(super) mod scroll;
+
+pub(super) mod selection_geometry;
+pub(super) mod viewport;
+
 mod settings;
+
+mod blocks;
+
+mod gutter_selection;
+mod links;
+
+mod scrollbar_activity;
+
+#[cfg(test)]
+pub(super) mod test_session;
+#[cfg(test)]
+mod tests;
 
 use nmt_config::colors::Colors;
 use nmt_input::keyboard::ModifiersState;
@@ -9,69 +33,49 @@ use nmt_terminal::input::{TerminalKey, WheelDelta, should_defer_to_ime};
 use nmt_terminal::links::{follows_link, resolve_link};
 use nmt_terminal::selection::SelectionType;
 use nmt_terminal::session::interaction::{
-    CopyCompletion, InputOutcome, PendingCopy, selection_type_for_click_count,
+    CopyCompletion, InputOutcome, PendingCopy, TerminalInteraction, selection_type_for_click_count,
 };
-use nmt_terminal::session::{SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell};
+use nmt_terminal::session::{
+    HostEvent, InFlightBlock, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
+};
 
+use crate::terminal_tab::block_list::chrome::DurationLabels;
 use crate::terminal_tab::block_list::{
     BlockListPoint, block_list_active_top_px, block_list_render_metrics, nav_item_top,
 };
+use crate::terminal_tab::dirty::DirtyState;
 use crate::terminal_tab::frame::TerminalFrame;
-use crate::terminal_tab::layout::{frame_content_rows, live_frame_text};
+use crate::terminal_tab::frame_source::TerminalFrameSource;
+use crate::terminal_tab::layout::{bottom_anchor_offsets, frame_content_rows, live_frame_text};
+use crate::terminal_tab::metrics::CellMetrics;
 use crate::terminal_tab::pane_model::blocks::ListPlan;
+use crate::terminal_tab::pane_model::frame_cache::TerminalFrameCache;
 use crate::terminal_tab::pane_model::frame_record::FrameRecord;
+use crate::terminal_tab::pane_model::frozen_hit_map::FrozenHitMap;
+use crate::terminal_tab::pane_model::gutter_selection::GutterSelection;
 use crate::terminal_tab::pane_model::key_action::{KeyOutcome, TextInput};
-use crate::terminal_tab::pane_model::links::LinkHit;
-use crate::terminal_tab::pane_model::list_mirror::{ListOp, ListPosition};
+use crate::terminal_tab::pane_model::links::{LinkHit, LinkHover};
+use crate::terminal_tab::pane_model::list_mirror::{BlockListMirror, ListOp, ListPosition};
 use crate::terminal_tab::pane_model::mouse::{
     MouseInput, MouseOutcome, MouseRelease, WheelOutcome,
 };
 use crate::terminal_tab::pane_model::scroll::ScrollOutcome;
+use crate::terminal_tab::pane_model::scrollbar_activity::ScrollbarActivity;
 use crate::terminal_tab::pane_model::selection_geometry::{
     block_gutter_hit, selection_drag_started,
 };
 use crate::terminal_tab::pane_model::settings::{CursorShapeFailure, CursorShapeUpdate};
-pub(in crate::terminal_tab) use crate::terminal_tab::pane_model::settings::{
-    FrameTheme, PaneSettings,
-};
-use crate::terminal_tab::pane_model::viewport::LocalRect;
-
-mod blocks;
-pub(in crate::terminal_tab) mod frozen_hit_map;
-mod gutter_selection;
-mod links;
-pub(in crate::terminal_tab) mod list_mirror;
-pub(in crate::terminal_tab) mod mouse;
-pub(in crate::terminal_tab) mod scroll;
-mod scrollbar_activity;
-pub(in crate::terminal_tab) mod selection_geometry;
-pub(in crate::terminal_tab) mod viewport;
-
-use nmt_terminal::session::interaction::TerminalInteraction;
-use nmt_terminal::session::{HostEvent, InFlightBlock};
-
-use crate::terminal_tab::block_list::chrome::DurationLabels;
-use crate::terminal_tab::dirty::DirtyState;
-use crate::terminal_tab::frame_source::TerminalFrameSource;
-use crate::terminal_tab::layout::bottom_anchor_offsets;
-use crate::terminal_tab::metrics::CellMetrics;
-use crate::terminal_tab::pane_model::frame_cache::TerminalFrameCache;
-use crate::terminal_tab::pane_model::frozen_hit_map::FrozenHitMap;
-use crate::terminal_tab::pane_model::gutter_selection::GutterSelection;
-use crate::terminal_tab::pane_model::links::LinkHover;
-use crate::terminal_tab::pane_model::list_mirror::BlockListMirror;
-use crate::terminal_tab::pane_model::scrollbar_activity::ScrollbarActivity;
-use crate::terminal_tab::pane_model::viewport::{LocalPoint, Viewport};
+use crate::terminal_tab::pane_model::viewport::{LocalPoint, LocalRect, Viewport};
 
 const BLOCK_GUTTER_SELECTION_ENABLED: bool = false;
 
-pub(in crate::terminal_tab) trait ClipboardAccess {
+pub(super) trait ClipboardAccess {
     fn read(&mut self) -> Option<String>;
 
     fn write(&mut self, text: String) -> bool;
 }
 
-pub(in crate::terminal_tab) struct PaneController {
+pub(super) struct PaneController {
     pub source: TerminalFrameSource,
     pub interaction: TerminalInteraction,
     pub settings: PaneSettings,
@@ -97,7 +101,7 @@ pub(in crate::terminal_tab) struct PaneController {
 }
 
 impl PaneController {
-    pub(in crate::terminal_tab) fn new(
+    pub(super) fn new(
         source: TerminalFrameSource,
         settings: PaneSettings,
         theme: FrameTheme,
@@ -127,17 +131,17 @@ impl PaneController {
         }
     }
 
-    pub(in crate::terminal_tab) fn block_list_mode(&self) -> bool {
+    pub(super) fn block_list_mode(&self) -> bool {
         self.source.session.engine_blocks() && !self.source.session.alt_screen()
     }
 
-    pub(in crate::terminal_tab) fn content_cols(&self) -> u32 {
+    pub(super) fn content_cols(&self) -> u32 {
         self.cell_metrics.map_or(80, |cell| {
             (self.content_size.0 / cell.width_px).floor().max(1.0) as u32
         })
     }
 
-    pub(in crate::terminal_tab) fn refresh_frame(&mut self) {
+    pub(super) fn refresh_frame(&mut self) {
         self.interaction.poll_expansion(&self.source.session);
 
         let previous = self.frame_cache.reusable_frame();
@@ -156,7 +160,7 @@ impl PaneController {
         }
     }
 
-    pub(in crate::terminal_tab) fn update_viewport(&mut self) {
+    pub(super) fn update_viewport(&mut self) {
         self.viewport = if self.block_list_mode() {
             Viewport::BlockList {
                 scroll_px: self.block_list.scrollbar.0,
@@ -179,7 +183,7 @@ impl PaneController {
         };
     }
 
-    pub(in crate::terminal_tab) fn drain_host_events(&mut self) -> Vec<HostEvent> {
+    pub(super) fn drain_host_events(&mut self) -> Vec<HostEvent> {
         let events = self.source.session.poll_events();
 
         for event in &events {
@@ -206,7 +210,7 @@ impl PaneController {
         self.open_prompt = self.source.session.open_prompt_region();
     }
 
-    pub(in crate::terminal_tab) fn live_history_rows(&self, frame: &TerminalFrame) -> u64 {
+    pub(super) fn live_history_rows(&self, frame: &TerminalFrame) -> u64 {
         if !self.source.session.engine_blocks() {
             return 0;
         }
@@ -216,10 +220,7 @@ impl PaneController {
         sb.total.saturating_sub(sb.len)
     }
 
-    pub(in crate::terminal_tab) fn block_list_point_at(
-        &self,
-        local: LocalPoint,
-    ) -> Option<BlockListPoint> {
+    pub(super) fn block_list_point_at(&self, local: LocalPoint) -> Option<BlockListPoint> {
         if !self.block_list_mode() || local.y >= self.frozen.active_top() {
             return None;
         }
@@ -236,11 +237,11 @@ impl PaneController {
         )
     }
 
-    pub(in crate::terminal_tab) fn selected_block_command(&self) -> Option<String> {
+    pub(super) fn selected_block_command(&self) -> Option<String> {
         self.source.session.block_command(self.gutter.selected()?)
     }
 
-    pub(in crate::terminal_tab) fn selected_block_output(&self) -> Option<PendingCopy> {
+    pub(super) fn selected_block_output(&self) -> Option<PendingCopy> {
         let item = self.gutter.selected()?;
         let live = item == self.source.session.block_store().lock().items().len();
 
@@ -254,7 +255,7 @@ impl PaneController {
         }
     }
 
-    pub(in crate::terminal_tab) fn prepare_block_list(
+    pub(super) fn prepare_block_list(
         &mut self,
         frame: &TerminalFrame,
         cell: CellMetrics,
@@ -316,7 +317,7 @@ impl PaneController {
         })
     }
 
-    pub(in crate::terminal_tab) fn record_frame(&mut self, record: FrameRecord) {
+    pub(super) fn record_frame(&mut self, record: FrameRecord) {
         for (y, item, row, cols) in record.rows {
             self.frozen.push_row(y, item, row, cols);
         }
@@ -335,7 +336,7 @@ impl PaneController {
         }
     }
 
-    pub(in crate::terminal_tab) fn key_down(&mut self, key: &TerminalKey<'_>) -> KeyOutcome {
+    pub(super) fn key_down(&mut self, key: &TerminalKey<'_>) -> KeyOutcome {
         if !self.source.session.alt_screen()
             && key.modifiers.is_empty()
             && !key.function
@@ -354,7 +355,7 @@ impl PaneController {
         self.send_key(key)
     }
 
-    pub(in crate::terminal_tab) fn send_key(&mut self, key: &TerminalKey<'_>) -> KeyOutcome {
+    pub(super) fn send_key(&mut self, key: &TerminalKey<'_>) -> KeyOutcome {
         match self.interaction.send_key(
             &self.source.session,
             &self.source.snapshot,
@@ -379,7 +380,7 @@ impl PaneController {
         }
     }
 
-    pub(in crate::terminal_tab) fn write_text_input(&mut self, input: TextInput<'_>) -> bool {
+    pub(super) fn write_text_input(&mut self, input: TextInput<'_>) -> bool {
         match input {
             TextInput::Commit(text) => self.source.session.write_text(text),
             TextInput::DropPaths(paths) => self.source.session.paste_paths(paths),
@@ -391,15 +392,11 @@ impl PaneController {
         }
     }
 
-    pub(in crate::terminal_tab) fn copy_text_to_clipboard(&mut self, text: String) -> bool {
+    pub(super) fn copy_text_to_clipboard(&mut self, text: String) -> bool {
         !text.is_empty() && self.clipboard.write(text)
     }
 
-    pub(in crate::terminal_tab) fn finish_copy(
-        &mut self,
-        text: String,
-        completion: CopyCompletion,
-    ) -> bool {
+    pub(super) fn finish_copy(&mut self, text: String, completion: CopyCompletion) -> bool {
         if !self.copy_text_to_clipboard(text) {
             return false;
         }
@@ -410,19 +407,14 @@ impl PaneController {
         true
     }
 
-    pub(in crate::terminal_tab) fn cell_metrics_or_measure(
+    pub(super) fn cell_metrics_or_measure(
         &mut self,
         measure: impl FnOnce() -> CellMetrics,
     ) -> CellMetrics {
         *self.cell_metrics.get_or_insert_with(measure)
     }
 
-    pub(in crate::terminal_tab) fn resize_content(
-        &mut self,
-        width: f32,
-        height: f32,
-        cell: CellMetrics,
-    ) -> bool {
+    pub(super) fn resize_content(&mut self, width: f32, height: f32, cell: CellMetrics) -> bool {
         self.content_size = (width, height);
         self.cell_metrics = Some(cell);
         self.update_viewport();
@@ -438,13 +430,13 @@ impl PaneController {
 
     /// Retain the displayed frame and its coordinates until the next render.
     /// The return value reports a clean-to-dirty transition for wake coalescing.
-    pub(in crate::terminal_tab) fn invalidate(&mut self) -> bool {
+    pub(super) fn invalidate(&mut self) -> bool {
         self.frame_cache.invalidate();
 
         self.dirty.mark()
     }
 
-    pub(in crate::terminal_tab) fn begin_frame(&mut self) -> TerminalFrame {
+    pub(super) fn begin_frame(&mut self) -> TerminalFrame {
         self.dirty.begin_frame();
 
         if self.frame_cache.needs_rebuild() {
@@ -454,26 +446,23 @@ impl PaneController {
         self.frame_cache.current().unwrap_or_default()
     }
 
-    pub(in crate::terminal_tab) fn begin_block_list_frame(&mut self) {
+    pub(super) fn begin_block_list_frame(&mut self) {
         self.frozen.begin_frame(self.block_list.active_top);
         self.update_viewport();
     }
 
-    pub(in crate::terminal_tab) fn hovered_link(&self) -> Option<&LinkHit> {
+    pub(super) fn hovered_link(&self) -> Option<&LinkHit> {
         self.links.current()
     }
 
-    pub(in crate::terminal_tab) fn pointer_left(&mut self) -> bool {
+    pub(super) fn pointer_left(&mut self) -> bool {
         self.links.enabled = false;
         self.links.forget_position();
 
         self.links.clear()
     }
 
-    pub(in crate::terminal_tab) fn hover_modifiers_changed(
-        &mut self,
-        modifiers: ModifiersState,
-    ) -> bool {
+    pub(super) fn hover_modifiers_changed(&mut self, modifiers: ModifiersState) -> bool {
         self.links.enabled = follows_link(modifiers);
 
         let Some(position) = self.links.position() else {
@@ -507,10 +496,7 @@ impl PaneController {
     /// covers the pointed-at cell, else a URL-shaped token in the row text.
     /// Soft-wrapped neighbor rows are joined so long URLs match whole. Also
     /// yields underline rects (content-origin-relative) for hover feedback.
-    pub(in crate::terminal_tab) fn link_at_position(
-        &self,
-        position: LocalPoint,
-    ) -> Option<LinkHit> {
+    pub(super) fn link_at_position(&self, position: LocalPoint) -> Option<LinkHit> {
         let cell_metrics = self.cell_metrics?;
 
         enum RowSource {
@@ -605,7 +591,7 @@ impl PaneController {
         })
     }
 
-    pub(in crate::terminal_tab) fn mouse_down(&mut self, input: MouseInput) -> MouseOutcome {
+    pub(super) fn mouse_down(&mut self, input: MouseInput) -> MouseOutcome {
         self.interaction.begin_pointer();
         self.selection_origin = None;
 
@@ -666,7 +652,7 @@ impl PaneController {
         }
     }
 
-    pub(in crate::terminal_tab) fn mouse_up(&mut self, input: MouseInput) -> MouseRelease {
+    pub(super) fn mouse_up(&mut self, input: MouseInput) -> MouseRelease {
         let scrollbar_released = self.scrollbar.end_drag();
 
         self.selection_origin = None;
@@ -683,7 +669,7 @@ impl PaneController {
         }
     }
 
-    pub(in crate::terminal_tab) fn mouse_move(&mut self, input: MouseInput) -> MouseOutcome {
+    pub(super) fn mouse_move(&mut self, input: MouseInput) -> MouseOutcome {
         let hover_changed = if input.button.is_none() {
             self.hover_at(input.position, input.modifiers)
         } else {
@@ -811,7 +797,7 @@ impl PaneController {
         }
     }
 
-    pub(in crate::terminal_tab) fn scroll_wheel(
+    pub(super) fn scroll_wheel(
         &mut self,
         position: LocalPoint,
         delta: WheelDelta,
@@ -840,7 +826,7 @@ impl PaneController {
         outcome
     }
 
-    pub(in crate::terminal_tab) fn scrollbar_mouse_down(
+    pub(super) fn scrollbar_mouse_down(
         &mut self,
         position: LocalPoint,
         thumb_top: f32,
@@ -859,7 +845,7 @@ impl PaneController {
         }
     }
 
-    pub(in crate::terminal_tab) fn scroll_to_latest(&mut self) -> ScrollOutcome {
+    pub(super) fn scroll_to_latest(&mut self) -> ScrollOutcome {
         if !self.viewport.is_scrolled() {
             return ScrollOutcome::Ignored;
         }
@@ -876,7 +862,7 @@ impl PaneController {
         }
     }
 
-    pub(in crate::terminal_tab) fn scroll_thumb_to(&mut self, thumb_top: f32) -> ScrollOutcome {
+    pub(super) fn scroll_thumb_to(&mut self, thumb_top: f32) -> ScrollOutcome {
         let Some(target) = self.viewport.thumb_target(thumb_top) else {
             return ScrollOutcome::Ignored;
         };
@@ -923,7 +909,7 @@ impl PaneController {
         ScrollOutcome::List(op)
     }
 
-    pub(in crate::terminal_tab) fn jump_to_block(&mut self, direction: i8) -> ScrollOutcome {
+    pub(super) fn jump_to_block(&mut self, direction: i8) -> ScrollOutcome {
         let Some(cell) = self.cell_metrics else {
             return ScrollOutcome::Ignored;
         };
@@ -942,7 +928,7 @@ impl PaneController {
         target.map_or(ScrollOutcome::Ignored, |target| self.scroll_list_to(target))
     }
 
-    pub(in crate::terminal_tab) fn update_settings(
+    pub(super) fn update_settings(
         &mut self,
         settings: PaneSettings,
         colors: &Colors,
@@ -968,10 +954,7 @@ impl PaneController {
         cursor_update
     }
 
-    pub(in crate::terminal_tab) fn cursor_shape_failed(
-        &mut self,
-        failure: CursorShapeFailure,
-    ) -> bool {
+    pub(super) fn cursor_shape_failed(&mut self, failure: CursorShapeFailure) -> bool {
         if self.settings.cursor_shape != failure.requested {
             return false;
         }
@@ -982,8 +965,3 @@ impl PaneController {
         true
     }
 }
-
-#[cfg(test)]
-pub(in crate::terminal_tab) mod test_session;
-#[cfg(test)]
-mod tests;

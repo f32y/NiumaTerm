@@ -8,7 +8,7 @@ use nmt_terminal::ansi::kitty_virtual::PLACEHOLDER;
 use nmt_terminal::terminal::square::Wide;
 
 #[derive(Clone)]
-pub(in crate::terminal_tab) struct TerminalLine(Arc<TerminalLineData>);
+pub(crate) struct TerminalLine(Arc<TerminalLineData>);
 
 struct TerminalLineData {
     text: SharedString,
@@ -20,50 +20,50 @@ struct TerminalLineData {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::terminal_tab) struct TerminalCell {
-    pub(in crate::terminal_tab) col: u16,
-    pub(in crate::terminal_tab) ch: char,
-    pub(in crate::terminal_tab) style_id: u16,
-    pub(in crate::terminal_tab) background: Option<TerminalColor>,
-    pub(in crate::terminal_tab) wide: Wide,
-    pub(in crate::terminal_tab) extras: Vec<char>,
-    pub(in crate::terminal_tab) has_cursor: bool,
+pub(crate) struct TerminalCell {
+    pub(crate) col: u16,
+    pub(crate) ch: char,
+    pub(crate) style_id: u16,
+    pub(crate) background: Option<TerminalColor>,
+    pub(crate) wide: Wide,
+    pub(crate) extras: Vec<char>,
+    pub(crate) has_cursor: bool,
 }
 
-pub(in crate::terminal_tab) type TerminalColor = ColorRgb;
+pub(crate) type TerminalColor = ColorRgb;
 
 /// A run of consecutive cells sharing one foreground style, in row order.
 /// `len` is the UTF-8 byte length this run contributes to the row text, so the
 /// runs line up 1:1 with the shaped line's bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::terminal_tab) struct StyleRun {
-    pub(in crate::terminal_tab) len: usize,
-    pub(in crate::terminal_tab) fg: TerminalColor,
-    pub(in crate::terminal_tab) bold: bool,
-    pub(in crate::terminal_tab) italic: bool,
-    pub(in crate::terminal_tab) underline: bool,
-    pub(in crate::terminal_tab) strikethrough: bool,
+pub(crate) struct StyleRun {
+    pub(crate) len: usize,
+    pub(crate) fg: TerminalColor,
+    pub(crate) bold: bool,
+    pub(crate) italic: bool,
+    pub(crate) underline: bool,
+    pub(crate) strikethrough: bool,
 }
 
 impl TerminalLine {
-    pub(in crate::terminal_tab) fn text(&self) -> &SharedString {
+    pub(crate) fn text(&self) -> &SharedString {
         &self.0.text
     }
 
-    pub(in crate::terminal_tab) fn cells(&self) -> &[TerminalCell] {
+    pub(crate) fn cells(&self) -> &[TerminalCell] {
         &self.0.cells
     }
 
-    pub(in crate::terminal_tab) fn runs(&self) -> &[StyleRun] {
+    pub(crate) fn runs(&self) -> &[StyleRun] {
         &self.0.runs
     }
 
-    pub(in crate::terminal_tab) fn text_hash(&self) -> u64 {
+    pub(crate) fn text_hash(&self) -> u64 {
         self.0.text_hash
     }
 
     #[cfg(test)]
-    pub(in crate::terminal_tab) fn cursor_col(&self) -> Option<u16> {
+    pub(crate) fn cursor_col(&self) -> Option<u16> {
         self.0.cursor_col
     }
 
@@ -96,7 +96,7 @@ impl TerminalLine {
 /// the cells were harvested with resolved colors, so no RenderBuffer/engine
 /// lookup is involved). The hash folds text + runs, so frozen lines hit the
 /// shaped-line cache forever.
-pub(in crate::terminal_tab) fn line_from_parts(
+pub(crate) fn line_from_parts(
     text: String,
     cells: Vec<TerminalCell>,
     runs: Vec<StyleRun>,
@@ -110,14 +110,14 @@ pub(in crate::terminal_tab) fn line_from_parts(
 /// glyphs an NBSP placeholder column (GPUI's force-width layout snaps one
 /// glyph per cell, so without it a wide glyph overlaps the next cell).
 #[derive(Default)]
-pub(in crate::terminal_tab) struct LineBuilder {
+pub(crate) struct LineBuilder {
     text: String,
     cells: Vec<TerminalCell>,
     runs: Vec<StyleRun>,
 }
 
 impl LineBuilder {
-    pub(in crate::terminal_tab) fn with_capacity(cols: usize) -> Self {
+    pub(crate) fn with_capacity(cols: usize) -> Self {
         Self {
             text: String::with_capacity(cols),
             cells: Vec::with_capacity(cols),
@@ -128,7 +128,7 @@ impl LineBuilder {
     /// Append one cell's display text; `wide` adds the placeholder column,
     /// covered by the same run. `style.len` is ignored — the run length is
     /// the appended byte count, merged into the previous run on equal style.
-    pub(in crate::terminal_tab) fn push_segment(
+    pub(crate) fn push_segment(
         &mut self,
         display: impl Iterator<Item = char>,
         style: StyleRun,
@@ -164,7 +164,7 @@ impl LineBuilder {
     /// Record the cell for background/hit lookups. Separate from
     /// `push_segment` because filler columns (gaps between sparse engine
     /// cells) contribute text but no cell.
-    pub(in crate::terminal_tab) fn push_cell(&mut self, cell: TerminalCell) {
+    pub(crate) fn push_cell(&mut self, cell: TerminalCell) {
         self.cells.push(cell);
     }
 

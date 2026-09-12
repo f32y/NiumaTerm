@@ -1,3 +1,4 @@
+#[cfg(test)]
 mod prompt_truncation_tests {
     use gpui::{FontFallbacks, px};
     use nmt_agent::chat::{Compaction, CompactionTrigger, Item as SessionItem};
@@ -329,6 +330,7 @@ mod prompt_truncation_tests {
     }
 }
 
+#[cfg(test)]
 mod read_gutter_tests {
     use crate::agent_tab::transcript::{file_extension_lang, strip_read_gutter};
 
@@ -349,6 +351,7 @@ mod read_gutter_tests {
     }
 }
 
+#[cfg(test)]
 /// Two conversations rendered by the same component must not share view state.
 /// The Agent pane's own conversation and a child agent's conversation are both
 /// `TranscriptView`s, so anything held on the type rather than per instance
@@ -474,6 +477,7 @@ mod separate_view_state_tests {
     }
 }
 
+#[cfg(test)]
 /// A settled turn leads with the prompt that opened it. Claude never echoes a
 /// message steered into a running turn, so the pane publishes it from its own
 /// queue partway through the turn; row order has to keep it where it happened
@@ -668,6 +672,7 @@ mod steered_prompt_rows_tests {
     }
 }
 
+#[cfg(test)]
 /// The collapse setting has to reach a conversation the tab restored, not only
 /// the turns it watched happen: a resumed turn arrives already settled, which
 /// is the state the setting decides the folding of.
@@ -758,6 +763,7 @@ mod resumed_collapse_tests {
     }
 }
 
+#[cfg(test)]
 /// A prompt right-clicked in the transcript has to name the same branch point
 /// the backend would, and the two lists are only counted from the newest end.
 mod branch_point_targeting_tests {
@@ -1068,6 +1074,7 @@ mod branch_point_targeting_tests {
     }
 }
 
+#[cfg(test)]
 /// Vertical space belongs to the boundary between two rows. A rank read off
 /// the upper row alone cannot hold a run of work off the prose on both sides
 /// of it: the run's last row reports the tight step rhythm it owes the run
@@ -1657,6 +1664,7 @@ mod row_rhythm_tests {
     }
 }
 
+#[cfg(test)]
 mod typed_reply_tests {
     use gpui::{AppContext as _, TestAppContext};
     use nmt_agent::chat::Item as SessionItem;
@@ -1728,6 +1736,7 @@ mod typed_reply_tests {
     }
 }
 
+#[cfg(test)]
 mod surface_palette_tests {
     use std::sync::Arc;
 

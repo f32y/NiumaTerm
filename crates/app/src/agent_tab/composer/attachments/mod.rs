@@ -10,6 +10,13 @@
 //! thumbnail deletes its placeholder and reconciles, so both routes share one
 //! rule rather than two that can disagree.
 
+pub(crate) use nmt_agent::images::{AttachError, MAX_ATTACHMENTS};
+
+pub(super) mod render;
+
+#[cfg(test)]
+mod tests;
+
 use std::env;
 use std::ops::Range;
 use std::path::PathBuf;
@@ -20,19 +27,16 @@ use gpui_component::input::TextareaState;
 use nmt_agent::images::{
     Attachment as CoreAttachment, PendingAttachments as CorePendingAttachments,
 };
+#[cfg(test)]
+use nmt_agent::images::{MAX_IMAGE_EDGE, placeholder_text};
 
 use crate::agent_tab::AgentPane;
-
-pub(super) mod render;
 
 /// The placeholder as it is written into the composer. A space on each side
 /// keeps it a word of its own, so the prompt around it does not run into the
 /// marker. The leading one is dropped where there is nothing to separate it
 /// from: the start of the text, or whitespace the caret already sits after.
-pub(in crate::agent_tab) fn spaced_placeholder(
-    preceding: Option<char>,
-    placeholder: &str,
-) -> String {
+pub(crate) fn spaced_placeholder(preceding: Option<char>, placeholder: &str) -> String {
     match preceding {
         Some(character) if !character.is_whitespace() => format!(" {placeholder} "),
         _ => format!("{placeholder} "),
@@ -44,7 +48,7 @@ pub(in crate::agent_tab) fn spaced_placeholder(
 /// it. Both are cleared by the same send and drawn on the same strip above
 /// the composer, so they travel together.
 #[derive(Default)]
-pub(in crate::agent_tab) struct ComposerAttachments {
+pub(crate) struct ComposerAttachments {
     images: PendingAttachments,
 
     /// Earlier agent response text attached to the pending message.
@@ -52,32 +56,32 @@ pub(in crate::agent_tab) struct ComposerAttachments {
 }
 
 impl ComposerAttachments {
-    pub(in crate::agent_tab) fn images(&self) -> &PendingAttachments {
+    pub(crate) fn images(&self) -> &PendingAttachments {
         &self.images
     }
 
-    pub(in crate::agent_tab) fn annotations(&self) -> &[String] {
+    pub(crate) fn annotations(&self) -> &[String] {
         &self.annotations
     }
 
-    pub(in crate::agent_tab) fn clear_images(&mut self) {
+    pub(crate) fn clear_images(&mut self) {
         self.images.clear();
     }
 
-    pub(in crate::agent_tab) fn clear_annotations(&mut self) {
+    pub(crate) fn clear_annotations(&mut self) {
         self.annotations.clear();
     }
 
     /// Put annotations back in front of the ones already pending, which is
     /// what an interrupted message restores.
-    pub(in crate::agent_tab) fn restore_annotations(&mut self, mut earlier: Vec<String>) {
+    pub(crate) fn restore_annotations(&mut self, mut earlier: Vec<String>) {
         earlier.append(&mut self.annotations);
         self.annotations = earlier;
     }
 
     /// Quote an earlier response into the pending message, reporting whether
     /// there was anything to quote.
-    pub(in crate::agent_tab) fn add_annotation(&mut self, text: String) -> bool {
+    pub(crate) fn add_annotation(&mut self, text: String) -> bool {
         let text = text.trim().to_string();
 
         if text.is_empty() {
@@ -92,7 +96,7 @@ impl ComposerAttachments {
     /// Take one annotation back off the pending message. The rest keep their
     /// order, so the numbers the remaining chips carry stay the numbers the
     /// prompt will send them under.
-    pub(in crate::agent_tab) fn remove_annotation(&mut self, index: usize) -> bool {
+    pub(crate) fn remove_annotation(&mut self, index: usize) -> bool {
         if index >= self.annotations.len() {
             return false;
         }
@@ -104,7 +108,7 @@ impl ComposerAttachments {
 
     /// Attach a decoded image and write its placeholder at the cursor, so the
     /// text keeps the record of where the image belongs.
-    pub(in crate::agent_tab) fn attach_image(
+    pub(crate) fn attach_image(
         &mut self,
         image: &Image,
         input: &Entity<TextareaState>,
@@ -125,7 +129,7 @@ impl ComposerAttachments {
     /// Drop the attachment at `index` by deleting its placeholder, then let
     /// reconciliation renumber what is left. Removal and a hand-edited
     /// deletion therefore take the same path.
-    pub(in crate::agent_tab) fn remove_image(
+    pub(crate) fn remove_image(
         &mut self,
         index: usize,
         input: &Entity<TextareaState>,
@@ -148,7 +152,7 @@ impl ComposerAttachments {
     /// is the record of which images the message still carries, so this runs
     /// after every edit that could have changed its placeholders. Reports
     /// whether the strip needs redrawing.
-    pub(in crate::agent_tab) fn sync(
+    pub(crate) fn sync(
         &mut self,
         text: &str,
         input: &Entity<TextareaState>,
@@ -194,69 +198,61 @@ impl ComposerAttachments {
     }
 }
 
-pub(in crate::agent_tab) use nmt_agent::images::{AttachError, MAX_ATTACHMENTS};
-#[cfg(test)]
-use nmt_agent::images::{MAX_IMAGE_EDGE, placeholder_text};
-
-pub(in crate::agent_tab) struct Attachment<'a>(&'a CoreAttachment<Arc<Image>>);
+pub(crate) struct Attachment<'a>(&'a CoreAttachment<Arc<Image>>);
 
 impl<'a> Attachment<'a> {
-    pub(in crate::agent_tab) fn bytes(&self) -> &'a [u8] {
+    pub(crate) fn bytes(&self) -> &'a [u8] {
         self.0.image.bytes()
     }
 
-    pub(in crate::agent_tab) fn format(&self) -> ImageFormat {
+    pub(crate) fn format(&self) -> ImageFormat {
         self.0.image.format()
     }
 
-    pub(in crate::agent_tab) fn placeholder(&self) -> &'a str {
+    pub(crate) fn placeholder(&self) -> &'a str {
         self.0.placeholder()
     }
 
-    pub(in crate::agent_tab) fn image(&self) -> Arc<Image> {
+    pub(crate) fn image(&self) -> Arc<Image> {
         self.0.image.clone()
     }
 }
 
 #[derive(Default)]
-pub(in crate::agent_tab) struct PendingAttachments(CorePendingAttachments<Arc<Image>>);
+pub(crate) struct PendingAttachments(CorePendingAttachments<Arc<Image>>);
 
 impl PendingAttachments {
-    pub(in crate::agent_tab) fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
-    pub(in crate::agent_tab) fn iter(&self) -> impl Iterator<Item = Attachment<'_>> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = Attachment<'_>> {
         self.0.iter().map(Attachment)
     }
 
-    pub(in crate::agent_tab) fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.0.clear();
     }
 
-    pub(in crate::agent_tab) fn attach(&mut self, image: &Image) -> Result<String, AttachError> {
+    pub(crate) fn attach(&mut self, image: &Image) -> Result<String, AttachError> {
         self.0.attach(image.bytes(), |bytes| {
             Arc::new(Image::from_bytes(ImageFormat::Png, bytes))
         })
     }
 
-    pub(in crate::agent_tab) fn placeholder_links(&self, text: &str) -> Vec<Range<usize>> {
+    pub(crate) fn placeholder_links(&self, text: &str) -> Vec<Range<usize>> {
         self.0.placeholder_links(text)
     }
 
-    pub(in crate::agent_tab) fn linked_image(
-        &self,
-        text: &str,
-        range: Range<usize>,
-    ) -> Option<Arc<Image>> {
+    pub(crate) fn linked_image(&self, text: &str, range: Range<usize>) -> Option<Arc<Image>> {
         self.0.linked_image(text, range).cloned()
     }
 
-    pub(in crate::agent_tab) fn placeholder_at(&self, index: usize) -> Option<&str> {
+    pub(crate) fn placeholder_at(&self, index: usize) -> Option<&str> {
         self.0.placeholder_at(index)
     }
 
-    pub(in crate::agent_tab) fn reconcile(&mut self, text: &str) -> Option<String> {
+    pub(crate) fn reconcile(&mut self, text: &str) -> Option<String> {
         self.0.reconcile(text)
     }
 }
@@ -264,7 +260,7 @@ impl PendingAttachments {
 /// Where a pane writes the attachment files a harness reads by path. Keyed by
 /// the pane's route so two panes cannot collide, and removed with the pane, so
 /// nothing outlives the tab that pasted it.
-pub(in crate::agent_tab) fn scratch_dir(route: &str) -> PathBuf {
+pub(crate) fn scratch_dir(route: &str) -> PathBuf {
     let key: String = route
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
@@ -272,6 +268,3 @@ pub(in crate::agent_tab) fn scratch_dir(route: &str) -> PathBuf {
 
     env::temp_dir().join(format!("niumaterm-agent-{key}"))
 }
-
-#[cfg(test)]
-mod tests;

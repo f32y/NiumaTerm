@@ -1,6 +1,9 @@
 //! How transcript prose and code are styled, from the configured font down to
 //! the markdown view every text row is built on.
 
+#[cfg(test)]
+mod link_tests;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -14,10 +17,7 @@ use crate::agent_tab::settings::AgentSettings;
 
 /// Assistant reply: bare markdown — no bubble, no border; alignment and
 /// surface carry the distinction.
-pub(in crate::agent_tab) fn transcript_code_block_style(
-    font: Font,
-    font_size: f32,
-) -> StyleRefinement {
+pub(crate) fn transcript_code_block_style(font: Font, font_size: f32) -> StyleRefinement {
     StyleRefinement::default()
         .font(font)
         .text_size(px(font_size))
@@ -47,7 +47,7 @@ fn transcript_table_style(cx: &App) -> StyleRefinement {
 /// the UI surface, so on a surface of the opposite brightness the component
 /// library's built-in palette for that brightness stands in; the theme's own
 /// palette is kept whenever the two agree.
-pub(in crate::agent_tab) fn transcript_highlight_theme(cx: &App) -> Arc<HighlightTheme> {
+pub(crate) fn transcript_highlight_theme(cx: &App) -> Arc<HighlightTheme> {
     let themed = cx.theme().highlight_theme.clone();
 
     if !cx
@@ -62,7 +62,7 @@ pub(in crate::agent_tab) fn transcript_highlight_theme(cx: &App) -> Arc<Highligh
     highlight_theme_for_surface(themed, is_dark_surface(surface))
 }
 
-pub(in crate::agent_tab) fn highlight_theme_for_surface(
+pub(crate) fn highlight_theme_for_surface(
     themed: Arc<HighlightTheme>,
     surface_is_dark: bool,
 ) -> Arc<HighlightTheme> {
@@ -78,11 +78,11 @@ pub(in crate::agent_tab) fn highlight_theme_for_surface(
 /// Mid-gray in HSL lightness splits dark surfaces from light ones. A theme
 /// file's mode is checked against its palette with the same measure, so a
 /// palette and the surface it lands on agree on which side they are on.
-pub(in crate::agent_tab) fn is_dark_surface(color: Hsla) -> bool {
+pub(crate) fn is_dark_surface(color: Hsla) -> bool {
     color.l < 0.5
 }
 
-pub(in crate::agent_tab) fn transcript_text_style(cx: &App) -> TextViewStyle {
+pub(crate) fn transcript_text_style(cx: &App) -> TextViewStyle {
     let mut style = TextViewStyle::default()
         .code_block(configured_transcript_code_block_style(cx))
         .table(transcript_table_style(cx));
@@ -92,7 +92,7 @@ pub(in crate::agent_tab) fn transcript_text_style(cx: &App) -> TextViewStyle {
     style
 }
 
-pub(in crate::agent_tab) fn markdown_view(
+pub(crate) fn markdown_view(
     id: impl Into<ElementId>,
     markdown: impl Into<SharedString>,
     cwd: Option<String>,
@@ -181,6 +181,3 @@ fn strip_extra_drive_slash(target: &str) -> &str {
         target
     }
 }
-
-#[cfg(test)]
-mod link_tests;

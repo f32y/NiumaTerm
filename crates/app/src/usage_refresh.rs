@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "usage_refresh_tests.rs"]
+mod usage_refresh_tests;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -148,7 +152,3 @@ impl<T> Drop for Refresh<T> {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "usage_refresh_tests.rs"]
-mod usage_refresh_tests;

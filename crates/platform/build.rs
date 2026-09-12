@@ -3,6 +3,7 @@
 //! startup and requires them: the in-box system ConPTY repaints the whole buffer on
 //! resize and corrupts scrollback, while the bundled WT ConPTY implements the
 //! no-repaint resize quirk.
+
 use std::path::PathBuf;
 use std::{env, fs};
 

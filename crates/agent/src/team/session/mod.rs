@@ -1,5 +1,21 @@
 //! Durable room operations and live dispatch readiness owned by one Team.
 
+pub use crate::team::session::outcomes::AttemptEventKey;
+pub use crate::team::session::summaries::{SummaryRequest, SummaryText};
+
+mod controls;
+mod members;
+mod recovery;
+mod summaries;
+
+mod outcomes;
+mod planning;
+
+#[cfg(test)]
+mod planning_tests;
+#[cfg(test)]
+mod tests;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
@@ -22,22 +38,6 @@ pub struct TeamSession {
     slots: ExecutionSlots,
     restored_uncertainty: BTreeSet<AttemptId>,
 }
-
-mod controls;
-mod members;
-mod recovery;
-mod summaries;
-
-pub use crate::team::session::summaries::{SummaryRequest, SummaryText};
-
-mod outcomes;
-mod planning;
-#[cfg(test)]
-mod planning_tests;
-#[cfg(test)]
-mod tests;
-
-pub use crate::team::session::outcomes::AttemptEventKey;
 
 struct MemberReadiness {
     ownership: OwnershipGeneration,
@@ -79,7 +79,7 @@ pub enum TeamError {
 }
 
 impl TeamSession {
-    pub(in crate::team) fn commit_room(&mut self, room: Room) -> Result<(), TeamError> {
+    pub(super) fn commit_room(&mut self, room: Room) -> Result<(), TeamError> {
         self.store.commit(room)?;
 
         Ok(())
@@ -325,7 +325,7 @@ impl TeamSession {
         self.validate_member(intent.recipient)
     }
 
-    pub(in crate::team) fn validate_member(&self, id: MemberId) -> Result<(), TeamError> {
+    pub(super) fn validate_member(&self, id: MemberId) -> Result<(), TeamError> {
         if !self.restored_uncertainty.is_empty() {
             return Err(TeamError::Unavailable);
         }

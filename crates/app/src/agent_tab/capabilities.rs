@@ -1,1 +1,1 @@
-pub(in crate::agent_tab) use nmt_agent::session::capabilities::AgentCapabilities;
+pub(super) use nmt_agent::session::capabilities::AgentCapabilities;

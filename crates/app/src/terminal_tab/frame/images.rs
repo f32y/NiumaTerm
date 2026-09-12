@@ -13,14 +13,14 @@ use crate::terminal_tab::graphics;
 /// it; final pixel geometry is computed at paint from the active cell metrics and grid
 /// bounds. Ordinary and virtual placements normalize to this one descriptor.
 #[derive(Clone)]
-pub(in crate::terminal_tab) struct FrameImage {
-    pub(in crate::terminal_tab) generation: Arc<graphics::ImageGeneration>,
-    pub(in crate::terminal_tab) z: i32,
-    pub(in crate::terminal_tab) kind: FrameImageKind,
+pub(crate) struct FrameImage {
+    pub(crate) generation: Arc<graphics::ImageGeneration>,
+    pub(crate) z: i32,
+    pub(crate) kind: FrameImageKind,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(in crate::terminal_tab) enum FrameImageKind {
+pub(crate) enum FrameImageKind {
     /// Ordinary overlay placement: Ghostty viewport cell position + grid span + sub-
     /// cell offsets, with a normalized source rectangle into the full image.
     Ordinary {
@@ -50,7 +50,7 @@ pub(in crate::terminal_tab) enum FrameImageKind {
 /// The three Kitty protocol paint layers. Preserved from the placement's
 /// z-index; paint buckets by this and keeps engine order within a bucket.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::terminal_tab) enum ZLayer {
+pub(crate) enum ZLayer {
     /// `z < i32::MIN / 2`: below cell backgrounds.
     BelowBackground,
 
@@ -72,7 +72,7 @@ pub(super) fn empty_images() -> Arc<[FrameImage]> {
 impl FrameImage {
     /// The image's top viewport row, for computing its row displacement (fixed-bottom
     /// / block-list) before geometry.
-    pub(in crate::terminal_tab) fn top_row(&self) -> i32 {
+    pub(crate) fn top_row(&self) -> i32 {
         match self.kind {
             FrameImageKind::Ordinary { viewport_row, .. } => viewport_row,
             FrameImageKind::Virtual { screen_line, .. } => screen_line as i32,
@@ -85,7 +85,7 @@ impl FrameImage {
     /// image's top row (`top_row`). Ordinary placements map viewport cells + sub-cell
     /// offsets directly; virtual runs go through `compute_run_geometry` (aspect-fit).
     /// Returns `None` for degenerate geometry (paint skips it).
-    pub(in crate::terminal_tab) fn destination(
+    pub(crate) fn destination(
         &self,
         cell_w: f32,
         cell_h: f32,
@@ -150,7 +150,7 @@ impl FrameImage {
         }
     }
 
-    pub(in crate::terminal_tab) fn z_layer(&self) -> ZLayer {
+    pub(crate) fn z_layer(&self) -> ZLayer {
         if self.z < i32::MIN / 2 {
             ZLayer::BelowBackground
         } else if self.z < 0 {
@@ -165,7 +165,7 @@ impl FrameImage {
 /// virtual placements against the pre-cloned live generation map; a placement whose
 /// image is not cached is skipped (a later update wakes a rebuild). Preserves engine
 /// placement order, ordinary before virtual. Metrics-independent — no cell sizing here.
-pub(in crate::terminal_tab) fn extract_frame_images(
+pub(crate) fn extract_frame_images(
     buf: &RenderBuffer,
     generations: &collections::HashMap<u32, Arc<graphics::ImageGeneration>>,
 ) -> Vec<FrameImage> {

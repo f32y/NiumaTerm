@@ -1,5 +1,9 @@
 //! Tracks OSC 133 shell lifecycle metadata and OSC 9;4 progress reports.
 
+#[cfg(test)]
+#[path = "prompt_sniffer_tests.rs"]
+mod prompt_sniffer_tests;
+
 use std::{env, mem, str, sync, time};
 
 use memchr::memchr;
@@ -542,10 +546,6 @@ fn prompt_trace_enabled() -> bool {
 
     *EN.get_or_init(|| env::var_os("NMT_PROMPT_TRACE").is_some())
 }
-
-#[cfg(test)]
-#[path = "prompt_sniffer_tests.rs"]
-mod prompt_sniffer_tests;
 
 /// Render the command-echo region's bytes (`;B`→`;C`) into the final command line
 /// (command-blocks). A plain control-strip is not enough here: PSReadLine redraws the

@@ -3,15 +3,18 @@
 //! reports them as Task tool calls plus sidechain records; both reduce into the
 //! same summary so the UI never parses a provider protocol.
 
-use std::collections::HashMap;
-use std::time::SystemTime;
-
-mod transcript;
-
 pub use crate::background_task::transcript::{
     BackgroundTaskTranscript, BackgroundTaskTranscriptState, BackgroundTaskTranscriptUpdate,
     MAX_TRANSCRIPT_ITEMS,
 };
+
+mod transcript;
+
+#[cfg(test)]
+mod tests;
+
+use std::collections::HashMap;
+use std::time::SystemTime;
 
 /// Which agent backend owns a task. Two providers can emit the same local id
 /// string, so every identity in this module is qualified by the provider.
@@ -607,9 +610,6 @@ pub(crate) fn replace_text(current: &mut Option<String>, incoming: &Option<Strin
 
     true
 }
-
-#[cfg(test)]
-mod tests;
 
 impl From<BackgroundTaskProvider> for &'static str {
     fn from(value: BackgroundTaskProvider) -> Self {

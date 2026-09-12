@@ -1,15 +1,18 @@
 //! Owned conversation entries and their indexed content updates, independent of
 //! rendering, scroll position, and the provider that produced the messages.
 
+pub mod conversation;
+pub mod turns;
+
+#[cfg(test)]
+mod tests;
+
 use std::collections::HashMap;
 use std::mem;
 
 use smallvec::SmallVec;
 
 use crate::chat::Item;
-
-pub mod conversation;
-pub mod turns;
 
 /// One conversation entry. The caller supplies metadata such as a local display
 /// stamp or attachment handles; content updates leave it untouched.
@@ -231,6 +234,3 @@ pub fn is_work_item(item: &Item) -> bool {
             | Item::Reasoning { .. }
     )
 }
-
-#[cfg(test)]
-mod tests;

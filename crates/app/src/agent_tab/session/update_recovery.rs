@@ -11,7 +11,7 @@ impl AgentPane {
         )
     }
 
-    pub(in crate::agent_tab) fn retry_update_recovery(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn retry_update_recovery(&mut self, cx: &mut Context<Self>) {
         if !self.binding.is_current() {
             return;
         }
@@ -21,7 +21,7 @@ impl AgentPane {
         }
     }
 
-    pub(in crate::agent_tab) fn start_new_after_update_failure(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn start_new_after_update_failure(&mut self, cx: &mut Context<Self>) {
         if !self.binding.is_current() {
             return;
         }

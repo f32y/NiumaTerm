@@ -13,7 +13,7 @@ use crate::terminal_tab::theme::{
 /// selection state. Element coords (scroll already subtracted); may extend
 /// past the visible window — the paint's content mask clips.
 #[derive(Clone)]
-pub(in crate::terminal_tab) struct FrozenItemChrome {
+pub(crate) struct FrozenItemChrome {
     pub item: usize,
     pub top: f32,
     pub bottom: f32,
@@ -63,7 +63,7 @@ pub(super) fn item_header(meta: &SegmentMeta, labels: &DurationLabels) -> Option
 /// Chrome of the live item: a running command uses the running accent, while
 /// the idle input region uses the input accent. Headers appear only after the
 /// item is finished. `rows == 0` → invisible.
-pub(in crate::terminal_tab) fn live_chrome(
+pub(crate) fn live_chrome(
     item: usize,
     rows: usize,
     cell_h: f32,
@@ -92,10 +92,7 @@ pub(in crate::terminal_tab) fn live_chrome(
 }
 
 /// `1.2s` / `815ms` / `2m05s` — the header's duration label.
-pub(in crate::terminal_tab) fn format_duration(
-    d: time::Duration,
-    labels: &DurationLabels,
-) -> String {
+pub(crate) fn format_duration(d: time::Duration, labels: &DurationLabels) -> String {
     let secs = d.as_secs();
 
     if secs >= 60 {
@@ -114,7 +111,7 @@ pub(in crate::terminal_tab) fn format_duration(
     }
 }
 
-pub(in crate::terminal_tab) fn block_list_live_chrome(
+pub(crate) fn block_list_live_chrome(
     live_index: usize,
     live_rows: usize,
     cell_h: f32,
@@ -131,7 +128,7 @@ pub(in crate::terminal_tab) fn block_list_live_chrome(
     block_list::live_chrome(live_index, live_rows, cell_h, running, selected)
 }
 
-pub(in crate::terminal_tab) fn offset_frozen_chrome(
+pub(crate) fn offset_frozen_chrome(
     mut chrome: block_list::FrozenItemChrome,
     item_top: f32,
 ) -> block_list::FrozenItemChrome {
@@ -143,7 +140,7 @@ pub(in crate::terminal_tab) fn offset_frozen_chrome(
 }
 
 #[derive(Clone)]
-pub(in crate::terminal_tab) struct DurationLabels {
+pub(crate) struct DurationLabels {
     pub minutes_seconds: String,
     pub seconds: String,
     pub milliseconds: String,

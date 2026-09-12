@@ -1,11 +1,15 @@
 #![cfg(unix)]
+pub use crate::unix::process_exit::wait_for_exit;
+pub use crate::unix::shell_integration::{
+    is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
+    shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
+};
 
-use dirs::home_dir;
-use tracing::info;
-
-#[cfg(feature = "clipboard")]
-mod clipboard;
-pub(crate) mod library;
+pub(crate) use crate::unix::hook_command::{build_hook_command, hook_command_contains};
+#[cfg(target_os = "macos")]
+pub(crate) use crate::unix::notifier::request_authorization;
+pub(crate) use crate::unix::notifier::{remove, show};
+pub(crate) use crate::unix::shell::{default_shell, prompt_integration};
 
 pub mod environment;
 pub mod filesystem;
@@ -13,6 +17,11 @@ pub mod ipc;
 pub mod process;
 pub mod shell;
 pub mod window;
+
+pub(crate) mod library;
+
+#[cfg(feature = "clipboard")]
+mod clipboard;
 
 mod process_exit;
 mod shell_integration;
@@ -36,24 +45,16 @@ use std::process::{Child as ChildProcess, Command, Stdio};
 use std::sync::Arc;
 use std::{env, error, io, ptr, str};
 
+use dirs::home_dir;
 use mio::unix::SourceFd;
 use mio::{Interest, Poll, Token, Waker};
 use signal_hook::consts as sigconsts;
+use tracing::info;
 
 use crate::unix::hook_command::single_quoted;
-pub(crate) use crate::unix::hook_command::{build_hook_command, hook_command_contains};
 #[cfg(target_os = "macos")]
 use crate::unix::macos::*;
-#[cfg(target_os = "macos")]
-pub(crate) use crate::unix::notifier::request_authorization;
-pub(crate) use crate::unix::notifier::{remove, show};
 use crate::unix::process::{KillOnCloseJob, ProcessTree};
-pub use crate::unix::process_exit::wait_for_exit;
-pub(crate) use crate::unix::shell::{default_shell, prompt_integration};
-pub use crate::unix::shell_integration::{
-    is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
-    shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
-};
 use crate::unix::signals::Signals;
 use crate::{
     APP_ID, ChildEvent, EventedPty, ProcessReadWrite, PtyOptions, Winsize, WinsizeBuilder,

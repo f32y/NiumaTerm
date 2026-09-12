@@ -4,6 +4,10 @@
 //! Unlike `config.toml` this file is not meant for hand editing: it is
 //! rewritten wholesale on save.
 
+#[cfg(test)]
+#[path = "local_state_tests.rs"]
+mod local_state_tests;
+
 use std::collections::BTreeMap;
 #[cfg(test)]
 use std::fs;
@@ -277,7 +281,3 @@ fn save_to(path: &Path, state: &LocalState) -> io::Result<()> {
         serialize_toml(state).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     })
 }
-
-#[cfg(test)]
-#[path = "local_state_tests.rs"]
-mod local_state_tests;

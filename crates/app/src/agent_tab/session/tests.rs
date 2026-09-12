@@ -217,13 +217,7 @@ and the retry loop"
     // A slash command instructs the CLI instead of stating a subject, and the
     // settings controls send some of them for the user.
     assert_eq!(tab_title_from_prompt("/effort high"), None);
-    assert_eq!(
-        tab_title_from_prompt(
-            "   
-	 "
-        ),
-        None
-    );
+    assert_eq!(tab_title_from_prompt("   \n\t "), None);
 
     let long = "x".repeat(200);
 
@@ -280,6 +274,66 @@ fn claude_provisional_titles_match_the_desktop_projection() {
 
     assert_eq!(title.chars().count(), 60);
     assert!(title.ends_with('…'));
+}
+
+#[test]
+#[cfg(windows)]
+fn a_recorded_directory_is_matched_against_the_tab_across_writers() {
+    // The tab's configuration and the agent's own record disagree about
+    // separators and case, and neither is wrong.
+    assert!(directories_match(
+        Some(r"C:\Workspace\NiumaTerm"),
+        Some("c:/workspace/niumaterm")
+    ));
+    assert!(directories_match(
+        Some(r"C:\Workspace\NiumaTerm\"),
+        Some(r"C:\Workspace\NiumaTerm")
+    ));
+    assert!(!directories_match(Some(r"C:\A"), Some(r"C:\B")));
+
+    // A row that records nothing claims nothing, so it stays resumable here.
+    assert!(directories_match(None, Some(r"C:\A")));
+}
+
+#[test]
+#[cfg(unix)]
+fn recorded_unix_directories_preserve_case_and_backslashes() {
+    assert!(!directories_match(Some("/work/Foo"), Some("/work/foo")));
+    assert!(!directories_match(Some(r"/work/a\b"), Some("/work/a/b")));
+    assert!(directories_match(Some("/work/Foo/"), Some("/work/Foo")));
+    assert!(!directories_match(Some("/"), Some("")));
+    assert!(directories_match(None, Some("/work/Foo")));
+}
+
+#[test]
+fn a_directory_reads_as_its_last_two_components() {
+    assert_eq!(
+        directory_label(r"C:\Workspace\NiumaTerm"),
+        "Workspace/NiumaTerm"
+    );
+    assert_eq!(directory_label("/home/u/projects/app/"), "projects/app");
+    assert_eq!(directory_label("C:/only"), "C:/only");
+}
+
+#[test]
+fn a_replayed_answer_is_read_as_old_as_the_provider_recorded_it() {
+    let now = 1_700_000_000;
+
+    assert_eq!(
+        replayed_response_age(now - 20 * 60, now),
+        Duration::from_secs(20 * 60),
+        "a stamp from twenty minutes ago reads as twenty minutes of idling"
+    );
+    assert_eq!(
+        replayed_response_age(now - 5 * 24 * 60 * 60, now),
+        LAST_RESPONSE_LIMIT,
+        "conversations older than the label's longest reading all read the same"
+    );
+    assert_eq!(
+        replayed_response_age(now + 30, now),
+        Duration::ZERO,
+        "a clock the provider ran ahead of never reads as a future answer"
+    );
 }
 
 mod conversation_title_tests {
@@ -673,45 +727,6 @@ mod conversation_title_tests {
 
         assert!(titles.borrow().is_empty());
     }
-}
-
-#[test]
-#[cfg(windows)]
-fn a_recorded_directory_is_matched_against_the_tab_across_writers() {
-    // The tab's configuration and the agent's own record disagree about
-    // separators and case, and neither is wrong.
-    assert!(directories_match(
-        Some(r"C:\Workspace\NiumaTerm"),
-        Some("c:/workspace/niumaterm")
-    ));
-    assert!(directories_match(
-        Some(r"C:\Workspace\NiumaTerm\"),
-        Some(r"C:\Workspace\NiumaTerm")
-    ));
-    assert!(!directories_match(Some(r"C:\A"), Some(r"C:\B")));
-
-    // A row that records nothing claims nothing, so it stays resumable here.
-    assert!(directories_match(None, Some(r"C:\A")));
-}
-
-#[test]
-#[cfg(unix)]
-fn recorded_unix_directories_preserve_case_and_backslashes() {
-    assert!(!directories_match(Some("/work/Foo"), Some("/work/foo")));
-    assert!(!directories_match(Some(r"/work/a\b"), Some("/work/a/b")));
-    assert!(directories_match(Some("/work/Foo/"), Some("/work/Foo")));
-    assert!(!directories_match(Some("/"), Some("")));
-    assert!(directories_match(None, Some("/work/Foo")));
-}
-
-#[test]
-fn a_directory_reads_as_its_last_two_components() {
-    assert_eq!(
-        directory_label(r"C:\Workspace\NiumaTerm"),
-        "Workspace/NiumaTerm"
-    );
-    assert_eq!(directory_label("/home/u/projects/app/"), "projects/app");
-    assert_eq!(directory_label("C:/only"), "C:/only");
 }
 
 /// Where a prompt appears between the moment it is submitted and the moment
@@ -1241,27 +1256,6 @@ mod shared_host_recovery_tests {
             });
         });
     }
-}
-
-#[test]
-fn a_replayed_answer_is_read_as_old_as_the_provider_recorded_it() {
-    let now = 1_700_000_000;
-
-    assert_eq!(
-        replayed_response_age(now - 20 * 60, now),
-        Duration::from_secs(20 * 60),
-        "a stamp from twenty minutes ago reads as twenty minutes of idling"
-    );
-    assert_eq!(
-        replayed_response_age(now - 5 * 24 * 60 * 60, now),
-        LAST_RESPONSE_LIMIT,
-        "conversations older than the label's longest reading all read the same"
-    );
-    assert_eq!(
-        replayed_response_age(now + 30, now),
-        Duration::ZERO,
-        "a clock the provider ran ahead of never reads as a future answer"
-    );
 }
 
 /// The merged `/` catalog is held between frames rather than rebuilt on each

@@ -5,7 +5,7 @@ use crate::terminal_tab::frame::TerminalFrame;
 use crate::terminal_tab::graphics;
 
 #[derive(Default)]
-pub(in crate::terminal_tab) struct TerminalFrameCache {
+pub(crate) struct TerminalFrameCache {
     frame: Option<TerminalFrame>,
 
     /// The frame no longer matches the surface and must be rebuilt on the next
@@ -17,36 +17,35 @@ pub(in crate::terminal_tab) struct TerminalFrameCache {
     full_invalidation: bool,
 }
 
-pub(in crate::terminal_tab) type GenerationMap =
-    collections::HashMap<u32, Arc<graphics::ImageGeneration>>;
+pub(crate) type GenerationMap = collections::HashMap<u32, Arc<graphics::ImageGeneration>>;
 
 impl TerminalFrameCache {
     /// The last built frame — served even when stale, so consumers between an
     /// invalidation and the next render keep mapping against what is displayed.
-    pub(in crate::terminal_tab) fn current(&self) -> Option<TerminalFrame> {
+    pub(crate) fn current(&self) -> Option<TerminalFrame> {
         self.frame.clone()
     }
 
-    pub(in crate::terminal_tab) fn needs_rebuild(&self) -> bool {
+    pub(crate) fn needs_rebuild(&self) -> bool {
         self.stale || self.frame.is_none()
     }
 
-    pub(in crate::terminal_tab) fn rebuild(&mut self, frame: TerminalFrame) {
+    pub(crate) fn rebuild(&mut self, frame: TerminalFrame) {
         self.frame = Some(frame);
         self.stale = false;
         self.full_invalidation = false;
     }
 
-    pub(in crate::terminal_tab) fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.stale = true;
     }
 
-    pub(in crate::terminal_tab) fn invalidate_full(&mut self) {
+    pub(crate) fn invalidate_full(&mut self) {
         self.stale = true;
         self.full_invalidation = true;
     }
 
-    pub(in crate::terminal_tab) fn reusable_frame(&self) -> Option<TerminalFrame> {
+    pub(crate) fn reusable_frame(&self) -> Option<TerminalFrame> {
         (!self.full_invalidation)
             .then(|| self.frame.clone())
             .flatten()

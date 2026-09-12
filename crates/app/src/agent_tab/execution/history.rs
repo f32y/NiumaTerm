@@ -5,11 +5,7 @@ use nmt_agent::session::restore::{ReplayLoaded, ReplayRead};
 use crate::agent_tab::execution::AgentSession;
 
 impl AgentSession {
-    pub(in crate::agent_tab) fn read_resume(
-        &mut self,
-        request: ReplayRead,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn read_resume(&mut self, request: ReplayRead, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             let (request, replay) = cx
                 .background_executor()

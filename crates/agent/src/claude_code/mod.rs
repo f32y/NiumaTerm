@@ -1,10 +1,16 @@
-mod compaction;
 pub mod hook;
 pub mod sessions;
-mod shell_output;
+
 pub mod stream_json;
-pub(crate) mod tasks;
-mod tool_items;
+
 pub mod update;
 pub mod usage_fetcher;
 pub mod workflows;
+
+pub(crate) mod tasks;
+
+mod compaction;
+
+mod shell_output;
+
+mod tool_items;

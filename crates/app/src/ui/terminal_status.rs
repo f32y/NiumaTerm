@@ -2,6 +2,10 @@
 //! tab it belongs to. Both surfaces grade the same state, so the color and
 //! wording live here rather than being spelled out twice.
 
+#[cfg(test)]
+#[path = "terminal_status_tests.rs"]
+mod terminal_status_tests;
+
 use std::borrow::Cow;
 
 use gpui::prelude::*;
@@ -60,7 +64,3 @@ pub(crate) fn terminal_dot(visual: TerminalVisual, size: f32, cx: &App) -> AnyEl
         .bg(color)
         .into_any_element()
 }
-
-#[cfg(test)]
-#[path = "terminal_status_tests.rs"]
-mod terminal_status_tests;

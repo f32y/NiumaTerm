@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "conpty_tests.rs"]
+mod conpty_tests;
+
 use std::ffi::{self, OsString};
 use std::io::{Error, Result};
 use std::os::windows::ffi::OsStrExt as _;
@@ -451,7 +455,3 @@ impl From<Winsize> for COORD {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "conpty_tests.rs"]
-mod conpty_tests;

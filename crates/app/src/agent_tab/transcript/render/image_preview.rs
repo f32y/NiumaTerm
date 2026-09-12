@@ -8,6 +8,10 @@
 //! clicked and shrinks back into it, which is what ties the two together as
 //! one picture rather than a thumbnail and an unrelated dialog.
 
+#[cfg(test)]
+#[path = "image_preview_tests.rs"]
+mod image_preview_tests;
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -28,7 +32,7 @@ use crate::agent_tab::transcript::TranscriptView;
 /// size. Brisk: the reader asked for the image and is waiting on it, and the
 /// moving edges give the eye enough to follow even over a short span. Kept
 /// as its own setting so the travel can be tuned apart from the fades.
-pub(in crate::agent_tab) const ZOOM_DURATION: Duration = Duration::from_millis(150);
+pub(crate) const ZOOM_DURATION: Duration = Duration::from_millis(150);
 
 /// Share of the message stream an enlarged image may take. Short of the whole
 /// area so the blurred conversation stays visible around it, which is what
@@ -48,7 +52,7 @@ impl TranscriptView {
     /// opened from, in window coordinates, for the image to grow out of; an
     /// image opened from something with no place on screen fades in where it
     /// ends up.
-    pub(in crate::agent_tab) fn zoom_image(
+    pub(crate) fn zoom_image(
         &mut self,
         image: Arc<Image>,
         origin: Option<Bounds<Pixels>>,
@@ -61,7 +65,7 @@ impl TranscriptView {
         cx.notify();
     }
 
-    pub(in crate::agent_tab) fn close_zoomed_image(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn close_zoomed_image(&mut self, cx: &mut Context<Self>) {
         if self.zoom_open {
             self.zoom_open = false;
 
@@ -74,7 +78,7 @@ impl TranscriptView {
     /// sibling of the mask rather than a child, so it stays solid while the
     /// mask underneath is still fading: a picture growing out of a thumbnail
     /// is what ties them together, and a ghost of one does not.
-    pub(in crate::agent_tab) fn render_zoomed_image(
+    pub(crate) fn render_zoomed_image(
         &mut self,
         now: Instant,
         window: &mut Window,
@@ -247,7 +251,3 @@ fn preview_bounds(from: Bounds<Pixels>, to: Bounds<Pixels>, progress: f32) -> Bo
         },
     }
 }
-
-#[cfg(test)]
-#[path = "image_preview_tests.rs"]
-mod image_preview_tests;

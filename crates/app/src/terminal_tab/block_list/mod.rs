@@ -5,37 +5,45 @@
 //! Scrolling is pure UI state over the list — the engine viewport stays
 //! pinned at the bottom.
 
-pub(in crate::terminal_tab) use nmt_terminal::session::BlockPoint as FrozenPoint;
+pub(super) use nmt_terminal::session::BlockPoint as FrozenPoint;
 
-pub(in crate::terminal_tab) mod chrome;
-mod geometry;
-mod images;
-pub(in crate::terminal_tab) mod live;
-pub(in crate::terminal_tab) mod reconcile;
-mod rows;
-mod selection;
-
-pub(in crate::terminal_tab) use crate::terminal_tab::block_list::chrome::{
+pub(super) use crate::terminal_tab::block_list::chrome::{
     FrozenItemChrome, block_list_live_chrome, live_chrome,
 };
-pub(in crate::terminal_tab) use crate::terminal_tab::block_list::geometry::{
+pub(super) use crate::terminal_tab::block_list::geometry::{
     ITEM_PAD_ROWS, block_list_active_top_px, item_px, live_item_px, nav_item_top, visible_rows,
 };
-pub(in crate::terminal_tab) use crate::terminal_tab::block_list::images::{
-    FrozenImage, frozen_block_images,
-};
-pub(in crate::terminal_tab) use crate::terminal_tab::block_list::reconcile::{
+pub(super) use crate::terminal_tab::block_list::images::{FrozenImage, frozen_block_images};
+pub(super) use crate::terminal_tab::block_list::reconcile::{
     BlockListMeasureKey, ListReconcile, RemeasureScope, block_list_render_metrics,
     plan_list_reconcile,
 };
-pub(in crate::terminal_tab) use crate::terminal_tab::block_list::rows::{
+pub(super) use crate::terminal_tab::block_list::rows::{
     EngineRowBuilder, frozen_block_view, handle_item_info, live_history_view,
 };
-pub(in crate::terminal_tab) use crate::terminal_tab::block_list::selection::BlockListPoint;
+pub(super) use crate::terminal_tab::block_list::selection::BlockListPoint;
+
+pub(super) mod chrome;
+
+pub(super) mod live;
+pub(super) mod reconcile;
+
+mod geometry;
+mod images;
+
+mod rows;
+mod selection;
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+mod layout_tests;
+
 use crate::terminal_tab::frame::TerminalLine;
 
 /// One visible frozen row, positioned in element-local pixels.
-pub(in crate::terminal_tab) struct FrozenRow {
+pub(super) struct FrozenRow {
     pub y: f32,
     pub line: TerminalLine,
 
@@ -60,7 +68,7 @@ pub(in crate::terminal_tab) struct FrozenRow {
 /// Item-local frozen rows and chrome for one list item. GPUI's native list
 /// decides which items are visible and where they sit.
 #[derive(Default)]
-pub(in crate::terminal_tab) struct FrozenView {
+pub(super) struct FrozenView {
     pub rows: Vec<FrozenRow>,
 
     /// Chrome for each visible non-empty item.
@@ -75,9 +83,3 @@ pub(in crate::terminal_tab) struct FrozenView {
     /// Where the active region (live engine viewport) starts.
     pub active_top: f32,
 }
-
-#[cfg(test)]
-mod tests;
-
-#[cfg(test)]
-mod layout_tests;

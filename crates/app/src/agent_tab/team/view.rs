@@ -1,3 +1,11 @@
+mod membership;
+mod options;
+
+mod timeline;
+
+#[cfg(test)]
+mod tests;
+
 use std::collections::BTreeSet;
 
 use gpui::prelude::*;
@@ -21,12 +29,6 @@ use crate::agent_tab::view::composer_layout::{
     composer_card, composer_controls_row, composer_input_row,
 };
 use crate::agent_tab::view::{ComposerEnterBehavior, StopResponseIcon, composer_enter_behavior};
-
-mod membership;
-mod options;
-#[cfg(test)]
-mod tests;
-mod timeline;
 
 pub struct TeamPane {
     runtime: Entity<TeamRuntime>,

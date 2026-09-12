@@ -1,6 +1,17 @@
 //! Terminal input and selection rules in cell coordinates. Hosts own pointer
 //! geometry, clipboard access, and reactions to completed operations.
 
+pub use crate::session::interaction::copy::{CopyCompletion, PendingCopy};
+pub use crate::session::interaction::selection::{
+    block_selection_span, selection_type_for_click_count,
+};
+
+mod copy;
+mod selection;
+
+#[cfg(test)]
+mod tests;
+
 use nmt_config::system::NewlineShortcut;
 
 use crate::input::{TerminalKey, TerminalKeyAction, key_action};
@@ -9,14 +20,6 @@ use crate::selection::SelectionType;
 use crate::session::interaction::copy::CopiedSelection;
 use crate::session::interaction::selection::{FrozenSelection, PendingExpansion};
 use crate::session::{BlockPoint, TerminalSession};
-
-mod copy;
-mod selection;
-
-pub use crate::session::interaction::copy::{CopyCompletion, PendingCopy};
-pub use crate::session::interaction::selection::{
-    block_selection_span, selection_type_for_click_count,
-};
 
 #[derive(Default)]
 pub struct TerminalInteraction {
@@ -211,6 +214,3 @@ impl TerminalInteraction {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

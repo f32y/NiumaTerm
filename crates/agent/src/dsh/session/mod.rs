@@ -4,6 +4,20 @@
 //! outlives every tab, and this holds a session id on it plus the reader
 //! threads feeding the pane.
 
+pub(crate) use crate::dsh::session::loads::queued_prompts;
+
+#[cfg(test)]
+pub(super) use crate::dsh::session::actions::{CloseAction, run_close_actions};
+#[cfg(test)]
+pub(super) use crate::dsh::session::loads::models_with_image;
+pub(super) use crate::dsh::session::loads::{
+    fork_checkpoint_events, history_events, search_events, workflow_transcript_events,
+};
+
+mod actions;
+mod controls;
+mod loads;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -22,26 +36,13 @@ use crate::dsh::host::{self, Host, HostError};
 use crate::dsh::mapping::{self, ApprovalRequest, QuestionRequest, ToolTracker};
 use crate::dsh::models::ModelDirectory;
 use crate::dsh::projections::ProjectionTracker;
-use crate::dsh::workflows::WorkflowTracker;
-use crate::dsh::{commands, frames, history, presets, subagents};
-use crate::workspace::AgentWorkspace;
-
-mod actions;
-mod controls;
-mod loads;
-
-#[cfg(test)]
-pub(super) use crate::dsh::session::actions::{CloseAction, run_close_actions};
 use crate::dsh::session::controls::{COMPLETED_FRAME, Controls, question_id};
-#[cfg(test)]
-pub(super) use crate::dsh::session::loads::models_with_image;
-pub(crate) use crate::dsh::session::loads::queued_prompts;
-pub(super) use crate::dsh::session::loads::{
-    fork_checkpoint_events, history_events, search_events, workflow_transcript_events,
-};
 use crate::dsh::session::loads::{
     load_agent_presets, load_commands, load_models, load_sessions, load_skills,
 };
+use crate::dsh::workflows::WorkflowTracker;
+use crate::dsh::{commands, frames, history, presets, subagents};
+use crate::workspace::AgentWorkspace;
 
 pub struct Session {
     client: ApiClient,

@@ -8,13 +8,13 @@ use crate::terminal_tab::block_list::{
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(in crate::terminal_tab) struct ListPosition {
+pub(crate) struct ListPosition {
     pub item_ix: usize,
     pub offset_px: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(in crate::terminal_tab) enum ListOp {
+pub(crate) enum ListOp {
     Reset(usize),
     Splice(Range<usize>, usize),
     RemeasureAll,
@@ -23,7 +23,7 @@ pub(in crate::terminal_tab) enum ListOp {
     ScrollToEnd,
 }
 
-pub(in crate::terminal_tab) struct BlockListMirror {
+pub(crate) struct BlockListMirror {
     pub item_count: usize,
     pub evicted_items: u64,
     pub scrollbar: (f32, f32),
@@ -44,7 +44,7 @@ impl Default for BlockListMirror {
 }
 
 impl BlockListMirror {
-    pub(in crate::terminal_tab) fn sync(
+    pub(crate) fn sync(
         &mut self,
         metrics: &BlockListRenderMetrics,
         layout: (u32, f32, f32),
@@ -96,7 +96,7 @@ impl BlockListMirror {
         ops
     }
 
-    pub(in crate::terminal_tab) fn scroll_to_px(
+    pub(crate) fn scroll_to_px(
         store: &BlockStore,
         history_rows: u64,
         live_rows: usize,

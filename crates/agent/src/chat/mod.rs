@@ -3,22 +3,26 @@
 //! these types, so the chat UI renders one transcript model
 //! and never touches protocol strings.
 
+pub use crate::chat::commands::*;
+pub use crate::chat::controls::*;
+pub use crate::chat::questions::*;
+pub use crate::chat::sessions::*;
+pub use crate::chat::usage::*;
+
 mod commands;
 mod controls;
 mod questions;
 mod sessions;
 mod usage;
 
+#[cfg(test)]
+mod tests;
+
 use serde_json::Value;
 
 use crate::background_task::{
     BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscriptUpdate,
 };
-pub use crate::chat::commands::*;
-pub use crate::chat::controls::*;
-pub use crate::chat::questions::*;
-pub use crate::chat::sessions::*;
-pub use crate::chat::usage::*;
 use crate::workflow::WorkflowSnapshot;
 
 /// Why a context compaction ran.
@@ -620,9 +624,6 @@ pub enum SendOutcome {
     /// pipe learns nothing at send time and never reports it.
     Rejected { message: String },
 }
-
-#[cfg(test)]
-mod tests;
 
 impl From<CompactionTrigger> for &'static str {
     fn from(value: CompactionTrigger) -> Self {

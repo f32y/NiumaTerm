@@ -1,12 +1,16 @@
 //! Editors and keyboard focus for core-owned question drafts.
 
+pub(super) use nmt_agent::session::input::QuestionStatus;
+
 mod actions;
 mod render;
+
+#[cfg(test)]
+mod tests;
 
 use gpui::{AnyElement, App, Entity, IntoElement as _, Subscription, Window};
 use gpui_component::input::{Input, InputState, Textarea, TextareaState};
 use nmt_agent::session::input::QuestionDraft;
-pub(in crate::agent_tab) use nmt_agent::session::input::QuestionStatus;
 
 pub(super) struct QuestionEditor {
     state: QuestionEditorState,
@@ -34,28 +38,24 @@ impl QuestionEditorState {
     }
 }
 
-pub(in crate::agent_tab) struct QuestionPresentation {
-    pub(in crate::agent_tab) editors: Vec<Option<QuestionEditor>>,
-    pub(in crate::agent_tab) focus: (usize, usize),
+pub(super) struct QuestionPresentation {
+    pub(super) editors: Vec<Option<QuestionEditor>>,
+    pub(super) focus: (usize, usize),
 }
 
 impl QuestionPresentation {
-    pub(in crate::agent_tab) fn new(draft: &QuestionDraft) -> Self {
+    pub(super) fn new(draft: &QuestionDraft) -> Self {
         Self {
             editors: (0..draft.questions().len()).map(|_| None).collect(),
             focus: (0, 0),
         }
     }
 
-    pub(in crate::agent_tab) fn is_focused(&self, question: usize, option: usize) -> bool {
+    pub(super) fn is_focused(&self, question: usize, option: usize) -> bool {
         self.focus == (question, option)
     }
 
-    pub(in crate::agent_tab) fn move_focus(
-        &mut self,
-        draft: &mut QuestionDraft,
-        forward: bool,
-    ) -> bool {
+    pub(super) fn move_focus(&mut self, draft: &mut QuestionDraft, forward: bool) -> bool {
         if draft.status() != QuestionStatus::Pending {
             return false;
         }
@@ -92,6 +92,3 @@ impl QuestionPresentation {
         true
     }
 }
-
-#[cfg(test)]
-mod tests;

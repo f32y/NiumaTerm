@@ -11,21 +11,23 @@
 //! `--allow-dangerously-skip-permissions` present — that flag only unlocks
 //! switching into `bypassPermissions` mode).
 
+mod control;
+mod launch;
+mod parse;
+mod transcript;
+
+#[cfg(test)]
+mod tests;
+
 #[cfg(all(test, windows))]
 use std::fs;
 use std::process::Command;
 use std::sync::Arc;
-
-use parking_lot::Mutex;
-
-use crate::deadline_timer::DeadlineTimer;
-
-const TIMEOUT_METHOD: &str = "nmt/claudeRequestDeadline";
-
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use parking_lot::Mutex;
 use serde_json::{Value, json};
 
 use crate::LaunchConfig;
@@ -52,6 +54,8 @@ use crate::claude_code::stream_json::launch::{
     configured_permission_mode, enable_file_checkpointing, file_rewind_request,
     initial_ready_model, launch_model,
 };
+#[cfg(test)]
+use crate::claude_code::stream_json::parse::parse_claude_usage;
 use crate::claude_code::stream_json::parse::{
     approval_description, claude_result_error, compaction_progress, initialize_command_catalog,
     legacy_command_catalog, parse_models, slash_command_text, ui_owns_slash_command,
@@ -60,10 +64,14 @@ use crate::claude_code::stream_json::parse::{
 use crate::claude_code::stream_json::parse::{
     context_window_usage, parse_slash_commands, update_claude_output,
 };
+use crate::claude_code::stream_json::transcript::TranscriptState;
+#[cfg(test)]
+use crate::claude_code::stream_json::transcript::{TurnOutputUsage, window_from_composition};
 use crate::claude_code::tasks::ClaudeTasks;
 #[cfg(test)]
 use crate::claude_code::tool_items::{edit_diff, input_detail, tool_item};
 use crate::claude_code::workflows::{ClaudeWorkflowSource, ClaudeWorkflows};
+use crate::deadline_timer::DeadlineTimer;
 use crate::launcher::AgentCli;
 use crate::request_policy::RequestClass;
 use crate::subprocess::JsonLineProcess;
@@ -72,16 +80,7 @@ use crate::workflow::{
 };
 use crate::workspace::AgentWorkspace;
 
-mod control;
-mod launch;
-mod parse;
-mod transcript;
-
-#[cfg(test)]
-use crate::claude_code::stream_json::parse::parse_claude_usage;
-use crate::claude_code::stream_json::transcript::TranscriptState;
-#[cfg(test)]
-use crate::claude_code::stream_json::transcript::{TurnOutputUsage, window_from_composition};
+const TIMEOUT_METHOD: &str = "nmt/claudeRequestDeadline";
 
 /// Effort level standing for Claude Code's ultracode mode. The CLI does not
 /// take it as a level: it is xhigh effort plus standing dynamic-workflow
@@ -1429,6 +1428,3 @@ impl Session {
 fn carries_model_output(message: &Value) -> bool {
     matches!(message["type"].as_str(), Some("assistant" | "stream_event"))
 }
-
-#[cfg(test)]
-mod tests;

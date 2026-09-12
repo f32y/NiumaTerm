@@ -1,5 +1,9 @@
 //! Owns pane structure together with the matching resizable groups.
 
+#[cfg(test)]
+#[path = "terminal_layout_tests.rs"]
+mod terminal_layout_tests;
+
 use gpui::{App, AppContext, Entity, Pixels, Window};
 use gpui_component::resizable::{PANEL_MIN_SIZE, ResizableState};
 
@@ -161,10 +165,6 @@ impl<L> TerminalLayout<L> {
         });
     }
 }
-
-#[cfg(test)]
-#[path = "terminal_layout_tests.rs"]
-mod terminal_layout_tests;
 
 impl<L> From<PaneNode<L, Entity<ResizableState>>> for TerminalLayout<L> {
     fn from(root: PaneNode<L, Entity<ResizableState>>) -> Self {

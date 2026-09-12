@@ -1,5 +1,9 @@
 //! Fetching a published package and unpacking it where the swap can reach it.
 
+#[cfg(test)]
+#[path = "download_tests.rs"]
+mod download_tests;
+
 use std::fs::{self, File};
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -225,7 +229,3 @@ fn sanitized(label: &str) -> String {
         })
         .collect()
 }
-
-#[cfg(test)]
-#[path = "download_tests.rs"]
-mod download_tests;

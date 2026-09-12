@@ -10,15 +10,11 @@ use crate::agent_tab::AgentPane;
 use crate::agent_tab::profile::AgentKind;
 
 impl AgentPane {
-    pub(in crate::agent_tab) fn shows_start_overlay(&self) -> bool {
+    pub(crate) fn shows_start_overlay(&self) -> bool {
         self.session.borrow().runtime.status() == Status::Starting
     }
 
-    pub(in crate::agent_tab) fn start_session(
-        &mut self,
-        resume: Option<String>,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn start_session(&mut self, resume: Option<String>, cx: &mut Context<Self>) {
         self.start_session_with_options(
             resume.map(|id| RecoveryIdentity::new(AgentKind::Claude, id)),
             false,
@@ -27,7 +23,7 @@ impl AgentPane {
         );
     }
 
-    pub(in crate::agent_tab) fn start_session_with_options(
+    pub(crate) fn start_session_with_options(
         &mut self,
         recovery: Option<RecoveryIdentity>,
         preserve_settings: bool,

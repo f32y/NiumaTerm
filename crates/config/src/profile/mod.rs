@@ -1,6 +1,9 @@
 //! Shell profiles, persisted as top-level `[[profiles]]` entries in
 //! `config.toml` by the settings dialog.
 
+#[cfg(test)]
+mod credential_tests;
+
 use aes_gcm::aead::rand_core::RngCore;
 use aes_gcm::aead::{Aead, KeyInit, OsRng, Payload};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
@@ -464,6 +467,3 @@ fn decrypt_credentials(stored: &str) -> Result<(String, String), String> {
 
     Ok((payload.api_base_url, payload.api_key))
 }
-
-#[cfg(test)]
-mod credential_tests;

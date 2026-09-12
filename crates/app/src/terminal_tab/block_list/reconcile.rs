@@ -6,34 +6,34 @@ use crate::terminal_tab::block_list;
 use crate::terminal_tab::pane_model::list_mirror::ListPosition;
 
 #[derive(Clone, Copy, PartialEq)]
-pub(in crate::terminal_tab) struct BlockListMeasureKey {
+pub(crate) struct BlockListMeasureKey {
     /// (cols, cell height, pad rows) — pad rows toggling (Command Blocks
     /// on/off) changes every item height, so it must force a full remeasure.
-    pub(in crate::terminal_tab) layout: (u32, f32, f32),
+    pub(crate) layout: (u32, f32, f32),
 
-    pub(in crate::terminal_tab) store_len: usize,
-    pub(in crate::terminal_tab) evicted_items: u64,
-    pub(in crate::terminal_tab) last_item_px: f32,
-    pub(in crate::terminal_tab) tail_px: f32,
-    pub(in crate::terminal_tab) live_rows: usize,
+    pub(crate) store_len: usize,
+    pub(crate) evicted_items: u64,
+    pub(crate) last_item_px: f32,
+    pub(crate) tail_px: f32,
+    pub(crate) live_rows: usize,
 }
 
-pub(in crate::terminal_tab) struct BlockListRenderMetrics {
-    pub(in crate::terminal_tab) store_len: usize,
-    pub(in crate::terminal_tab) evicted_items: u64,
-    pub(in crate::terminal_tab) item_count: usize,
-    pub(in crate::terminal_tab) frozen_px: f32,
+pub(crate) struct BlockListRenderMetrics {
+    pub(crate) store_len: usize,
+    pub(crate) evicted_items: u64,
+    pub(crate) item_count: usize,
+    pub(crate) frozen_px: f32,
 
     /// The live item's history rows in pixels (active-grid scrollback above
     /// the live grid) — the "tail" position in scroll/active-top math.
-    pub(in crate::terminal_tab) tail_px: f32,
+    pub(crate) tail_px: f32,
 
-    pub(in crate::terminal_tab) total_px: f32,
-    pub(in crate::terminal_tab) offset_px: f32,
-    pub(in crate::terminal_tab) last_item_px: f32,
+    pub(crate) total_px: f32,
+    pub(crate) offset_px: f32,
+    pub(crate) last_item_px: f32,
 }
 
-pub(in crate::terminal_tab) fn block_list_render_metrics(
+pub(crate) fn block_list_render_metrics(
     store: &BlockStore,
     live_rows: usize,
     history_rows: u64,
@@ -84,7 +84,7 @@ pub(in crate::terminal_tab) fn block_list_render_metrics(
     }
 }
 
-pub(in crate::terminal_tab) fn shift_selected_item_for_eviction(
+pub(crate) fn shift_selected_item_for_eviction(
     selected: Option<usize>,
     evicted_delta: usize,
     store_len: usize,
@@ -104,7 +104,7 @@ pub(in crate::terminal_tab) fn shift_selected_item_for_eviction(
 /// front evictions and tail growth. Pure so the index arithmetic is testable
 /// away from `ListState`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::terminal_tab) enum ListReconcile {
+pub(crate) enum ListReconcile {
     /// Replace the mirror wholesale with the new item count.
     Reset,
 
@@ -116,7 +116,7 @@ pub(in crate::terminal_tab) enum ListReconcile {
     },
 }
 
-pub(in crate::terminal_tab) fn plan_list_reconcile(
+pub(crate) fn plan_list_reconcile(
     mirrored_count: usize,
     evicted_delta: usize,
     item_count: usize,
@@ -158,7 +158,7 @@ pub(in crate::terminal_tab) fn plan_list_reconcile(
 
 /// What the mirrored list must remeasure after this frame's metrics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::terminal_tab) enum RemeasureScope {
+pub(crate) enum RemeasureScope {
     /// Layout inputs (cols/cell/pad) changed: every item height is stale.
     All,
 
@@ -168,7 +168,7 @@ pub(in crate::terminal_tab) enum RemeasureScope {
     None,
 }
 
-pub(in crate::terminal_tab) fn plan_remeasure(
+pub(crate) fn plan_remeasure(
     prev: Option<BlockListMeasureKey>,
     next: BlockListMeasureKey,
 ) -> RemeasureScope {

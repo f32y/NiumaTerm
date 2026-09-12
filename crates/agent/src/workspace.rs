@@ -1,6 +1,10 @@
 //! The directories one Agent conversation may use, in a shape every harness
 //! adapter can read without knowing anything about NiumaTerm's Workspace model.
 
+#[cfg(test)]
+#[path = "workspace_tests.rs"]
+mod workspace_tests;
+
 use std::path::Path;
 
 use nmt_platform::filesystem::lexical_path_spelling;
@@ -97,7 +101,3 @@ pub enum MultiRootAccess {
     /// directory reaches it and the rest must be disclosed as unavailable.
     PrimaryOnly,
 }
-
-#[cfg(test)]
-#[path = "workspace_tests.rs"]
-mod workspace_tests;

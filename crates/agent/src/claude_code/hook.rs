@@ -7,6 +7,10 @@
 //! NiumaTerm hook binary are ever touched, and a settings file that fails to
 //! parse is never rewritten.
 
+#[cfg(test)]
+#[path = "hook_tests.rs"]
+mod hook_tests;
+
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -152,7 +156,3 @@ fn read_settings(settings_path: &Path) -> io::Result<Value> {
 fn write_settings(settings_path: &Path, settings: &Value) -> io::Result<()> {
     hook_store::write(settings_path, settings)
 }
-
-#[cfg(test)]
-#[path = "hook_tests.rs"]
-mod hook_tests;

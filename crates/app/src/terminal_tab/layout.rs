@@ -1,6 +1,6 @@
 use crate::terminal_tab::frame::TerminalFrame;
 
-pub(in crate::terminal_tab) fn frame_content_rows(frame: &TerminalFrame) -> usize {
+pub(super) fn frame_content_rows(frame: &TerminalFrame) -> usize {
     let lines = frame.lines();
 
     let mut content_end = 0;
@@ -24,7 +24,7 @@ pub(in crate::terminal_tab) fn frame_content_rows(frame: &TerminalFrame) -> usiz
     content_end.min(lines.len())
 }
 
-pub(in crate::terminal_tab) fn bottom_anchor_offsets(
+pub(super) fn bottom_anchor_offsets(
     frame: &TerminalFrame,
     cell_height: f32,
     fixed_bottom: bool,
@@ -44,7 +44,7 @@ pub(in crate::terminal_tab) fn bottom_anchor_offsets(
     }
 }
 
-pub(in crate::terminal_tab) fn live_frame_text(frame: &TerminalFrame) -> Option<String> {
+pub(super) fn live_frame_text(frame: &TerminalFrame) -> Option<String> {
     let rows = frame_content_rows(frame);
 
     if rows == 0 {
@@ -66,13 +66,13 @@ pub(in crate::terminal_tab) fn live_frame_text(frame: &TerminalFrame) -> Option<
 }
 
 /// The pixel y-offset for a viewport row (0 with no gaps / out of range).
-pub(in crate::terminal_tab) fn row_y_offset(offsets: &[f32], row: usize) -> f32 {
+pub(super) fn row_y_offset(offsets: &[f32], row: usize) -> f32 {
     offsets.get(row).copied().unwrap_or(0.0)
 }
 
 /// Inverse of the offset mapping: the viewport row under a content-relative
 /// pixel y. A pointer inside the gap above a block maps to the block's first row.
-pub(in crate::terminal_tab) fn terminal_row_at_y(y: f32, cell_height: f32, offsets: &[f32]) -> u16 {
+pub(super) fn terminal_row_at_y(y: f32, cell_height: f32, offsets: &[f32]) -> u16 {
     if offsets.is_empty() {
         return (y / cell_height).floor().max(0.0) as u16;
     }
@@ -87,7 +87,7 @@ pub(in crate::terminal_tab) fn terminal_row_at_y(y: f32, cell_height: f32, offse
 }
 
 /// First `max` chars of the command for the header label.
-pub(in crate::terminal_tab) fn truncate_command(command: &str, max: usize) -> String {
+pub(super) fn truncate_command(command: &str, max: usize) -> String {
     if command.chars().count() <= max {
         command.to_string()
     } else {

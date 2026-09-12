@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "term_tests.rs"]
+mod term_tests;
+
 use std::ops::{Index, IndexMut};
 
 use crate::Colors;
@@ -280,7 +284,3 @@ impl IndexMut<NamedColor> for List {
         &mut self.0[idx as usize]
     }
 }
-
-#[cfg(test)]
-#[path = "term_tests.rs"]
-mod term_tests;

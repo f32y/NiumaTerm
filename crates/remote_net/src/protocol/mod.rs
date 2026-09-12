@@ -8,12 +8,12 @@
 //! Socket handling and device-authorization policy live in the surrounding
 //! crate.
 
+pub use crate::protocol::frames::*;
+pub use crate::protocol::noise::*;
+pub use crate::protocol::pairing::*;
+pub use crate::protocol::types::*;
+
 pub mod frames;
 pub mod noise;
 pub mod pairing;
 pub mod types;
-
-pub use frames::*;
-pub use noise::*;
-pub use pairing::*;
-pub use types::*;

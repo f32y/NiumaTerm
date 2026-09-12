@@ -1,7 +1,8 @@
 use std::time::Duration;
 
+use crate::frame_stats::enabled::STATS;
 use crate::frame_stats::{
-    STATS, enabled, record_draw, record_main_thread_task, record_redraws_requested, set_enabled,
+    enabled, record_draw, record_main_thread_task, record_redraws_requested, set_enabled,
     start_timer,
 };
 

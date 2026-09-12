@@ -10,7 +10,7 @@ use gpui_component::input::{Input, InputState};
 type CancelRename = Box<dyn Fn(&mut Window, &mut App)>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::ui) enum InlineRenameStyle {
+pub(crate) enum InlineRenameStyle {
     HorizontalTab,
     SidebarTab,
     Workspace,
@@ -20,7 +20,7 @@ pub(in crate::ui) enum InlineRenameStyle {
 /// the input subscription; this element only protects row activation and sends
 /// Escape to the caller's cancellation path.
 #[derive(IntoElement)]
-pub(in crate::ui) struct InlineRename {
+pub(crate) struct InlineRename {
     id: ElementId,
     label: SharedString,
     input: Entity<InputState>,
@@ -29,7 +29,7 @@ pub(in crate::ui) struct InlineRename {
 }
 
 impl InlineRename {
-    pub(in crate::ui) fn new(
+    pub(crate) fn new(
         id: impl Into<ElementId>,
         label: impl Into<SharedString>,
         input: Entity<InputState>,

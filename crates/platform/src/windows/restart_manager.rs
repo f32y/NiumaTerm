@@ -1,5 +1,9 @@
 //! Finding and managing applications that use files an update will replace.
 
+#[cfg(test)]
+#[path = "restart_manager_tests.rs"]
+mod restart_manager_tests;
+
 use std::error::Error;
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt as _;
@@ -14,10 +18,6 @@ use windows_sys::Win32::System::RestartManager::{
     RmRebootReasonPermissionDenied, RmRebootReasonSessionMismatch, RmRegisterResources, RmRestart,
     RmService, RmShutdown, RmStartSession,
 };
-
-#[cfg(test)]
-#[path = "restart_manager_tests.rs"]
-mod restart_manager_tests;
 
 const LIST_RETRIES: usize = 3;
 

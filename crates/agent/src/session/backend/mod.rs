@@ -1,3 +1,8 @@
+mod team;
+
+#[cfg(test)]
+mod attachment_tests;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -21,8 +26,6 @@ use crate::workflow::{
     RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult, WorkflowSource,
 };
 use crate::{AgentWorkspace, LaunchConfig, dsh};
-
-mod team;
 
 /// The conversation a restarted backend should continue, qualified by the
 /// harness that issued the id. Ids are only meaningful to the harness that
@@ -831,6 +834,3 @@ fn write_attachments<'a>(
         })
         .collect()
 }
-
-#[cfg(test)]
-mod attachment_tests;

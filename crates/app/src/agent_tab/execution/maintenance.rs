@@ -210,7 +210,7 @@ impl AgentSession {
         cx.notify();
     }
 
-    pub(in crate::agent_tab) fn retry_update_recovery(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn retry_update_recovery(&mut self, cx: &mut Context<Self>) {
         let snapshot = self
             .controller
             .borrow()
@@ -236,7 +236,7 @@ impl AgentSession {
         cx.notify();
     }
 
-    pub(in crate::agent_tab) fn start_new_after_update_failure(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn start_new_after_update_failure(&mut self, cx: &mut Context<Self>) {
         self.controller.borrow_mut().runtime.reconnect(None);
 
         self.start(None, true, |_, _| {}, cx);

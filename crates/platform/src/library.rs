@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "library_tests.rs"]
+mod library_tests;
+
 use std::ffi::{CStr, c_void};
 use std::io;
 use std::path::Path;
@@ -36,7 +40,3 @@ impl ResidentLibrary {
         unsafe { symbol(self.handle, name) }
     }
 }
-
-#[cfg(test)]
-#[path = "library_tests.rs"]
-mod library_tests;

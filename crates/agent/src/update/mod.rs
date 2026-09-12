@@ -1,5 +1,16 @@
 //! Provider-neutral discovery, update coordination, caching, and maintenance contracts.
 
+pub use crate::claude_code::update::{
+    ClaudeMaintenance, ClaudeReleaseChannel, HttpClaudeReleaseChannel, parse_claude_doctor,
+};
+pub use crate::codex::update::{CodexMaintenance, parse_codex_doctor};
+
+#[cfg(test)]
+mod coordinator_tests;
+
+#[cfg(test)]
+mod tests;
+
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -14,10 +25,6 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-pub use crate::claude_code::update::{
-    ClaudeMaintenance, ClaudeReleaseChannel, HttpClaudeReleaseChannel, parse_claude_doctor,
-};
-pub use crate::codex::update::{CodexMaintenance, parse_codex_doctor};
 use crate::launcher::{AgentCli, ProcessError, ProcessLimits, ProcessOutput, run_bounded};
 
 pub(crate) const PROBE_LIMITS: ProcessLimits =
@@ -357,7 +364,7 @@ pub(crate) fn bounded_label(value: &str, max_chars: usize) -> String {
 }
 
 fn hex_digest(bytes: &[u8]) -> String {
-    use fmt::Write as _;
+    use std::fmt::Write as _;
 
     let mut output = String::with_capacity(bytes.len() * 2);
 
@@ -834,12 +841,6 @@ fn write_cache(path: &Path, cache: &CacheFile) {
         let _ = fs::rename(temporary, path);
     }
 }
-
-#[cfg(test)]
-mod coordinator_tests;
-
-#[cfg(test)]
-mod tests;
 
 impl From<VersionStatus> for InstallationUpdateState {
     fn from(status: VersionStatus) -> Self {

@@ -1,6 +1,9 @@
 //! Built-in theme sources compiled into the binary so a fresh install renders
 //! with a full palette before any user theme file exists.
 
+#[cfg(test)]
+mod tests;
+
 pub struct BuiltinTheme {
     pub name: &'static str,
     pub source: &'static str,
@@ -43,6 +46,3 @@ pub fn get(name: &str) -> Option<&'static str> {
         .find(|theme| theme.name == name)
         .map(|theme| theme.source)
 }
-
-#[cfg(test)]
-mod tests;

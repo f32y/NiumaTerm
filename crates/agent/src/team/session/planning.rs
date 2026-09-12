@@ -407,7 +407,7 @@ impl TeamSession {
         Ok(())
     }
 
-    pub(in crate::team) fn validate_mode(&self, mode: DiscussionMode) -> Result<(), TeamError> {
+    pub(crate) fn validate_mode(&self, mode: DiscussionMode) -> Result<(), TeamError> {
         let member = self
             .room()
             .member(mode.report_author())

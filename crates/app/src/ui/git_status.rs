@@ -1,5 +1,9 @@
 //! All git invocations run on the background executor without opening a console.
 
+#[cfg(test)]
+#[path = "git_status_tests.rs"]
+mod git_status_tests;
+
 use std::collections::HashMap;
 use std::time::Duration;
 use std::{fs, io, path};
@@ -571,7 +575,3 @@ impl Render for GitStatusView {
             .into_any_element()
     }
 }
-
-#[cfg(test)]
-#[path = "git_status_tests.rs"]
-mod git_status_tests;

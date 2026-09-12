@@ -5,11 +5,7 @@ use nmt_agent::session::controller::SessionEffect;
 use crate::agent_tab::execution::AgentSession;
 
 impl AgentSession {
-    pub(in crate::agent_tab) fn read_checkpoints(
-        &mut self,
-        request: CheckpointRead,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn read_checkpoints(&mut self, request: CheckpointRead, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             let (request, result) = cx
                 .background_executor()
@@ -38,11 +34,7 @@ impl AgentSession {
         .detach();
     }
 
-    pub(in crate::agent_tab) fn apply_branch_update(
-        &mut self,
-        update: BranchUpdate,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn apply_branch_update(&mut self, update: BranchUpdate, cx: &mut Context<Self>) {
         if self.is_closed() {
             return;
         }

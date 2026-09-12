@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "wake_tests.rs"]
+mod wake_tests;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -35,19 +39,19 @@ impl WakeSender {
     }
 }
 
-pub(in crate::terminal_tab) type WakeReceiver = UnboundedReceiver<Wake>;
+pub(super) type WakeReceiver = UnboundedReceiver<Wake>;
 
 /// The GPUI-side wakeup handle. Content wakes coalesce until the pane renders;
 /// chrome wakes bypass that pending bit because a background pane may not render
 /// but its tab and workspace indicators must still update.
 #[derive(Clone)]
-pub(in crate::terminal_tab) struct WakeSignal {
+pub(super) struct WakeSignal {
     queued: Arc<AtomicBool>,
     resignal: Arc<AtomicBool>,
     tx: UnboundedSender<Wake>,
 }
 
-pub(in crate::terminal_tab) fn wake_channel() -> (WakeSignal, WakeReceiver) {
+pub(super) fn wake_channel() -> (WakeSignal, WakeReceiver) {
     let (tx, rx) = unbounded();
 
     (
@@ -61,7 +65,7 @@ pub(in crate::terminal_tab) fn wake_channel() -> (WakeSignal, WakeReceiver) {
 }
 
 impl WakeSignal {
-    pub(in crate::terminal_tab) fn signal(&self, wake: Wake) -> bool {
+    pub(super) fn signal(&self, wake: Wake) -> bool {
         if matches!(wake, Wake::Chrome(_)) {
             let _ = self.tx.unbounded_send(wake);
 
@@ -79,7 +83,7 @@ impl WakeSignal {
         true
     }
 
-    pub(in crate::terminal_tab) fn mark_delivered(&self, surface_id: u64) {
+    pub(super) fn mark_delivered(&self, surface_id: u64) {
         self.queued.store(false, Ordering::Release);
 
         if self.resignal.swap(false, Ordering::AcqRel) {
@@ -87,7 +91,3 @@ impl WakeSignal {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "wake_tests.rs"]
-mod wake_tests;

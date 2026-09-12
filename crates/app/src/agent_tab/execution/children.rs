@@ -13,7 +13,7 @@ impl AgentSession {
     /// Rebuild Claude child agents from the session's persisted history. The
     /// read runs on a background thread and its failure never blocks the
     /// parent transcript or composer.
-    pub(in crate::agent_tab) fn restore_background_tasks(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn restore_background_tasks(&mut self, cx: &mut Context<Self>) {
         let Some(session_id) = self
             .controller
             .borrow()
@@ -98,7 +98,7 @@ impl Drop for ChildReader {
 }
 
 impl AgentSession {
-    pub(in crate::agent_tab) fn watch_child(
+    pub(crate) fn watch_child(
         &mut self,
         key: &BackgroundTaskKey,
         cx: &mut Context<Self>,

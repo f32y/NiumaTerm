@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "update_tests.rs"]
+mod update_tests;
+
 use std::time::Duration;
 
 use reqwest::blocking::{Client, Response};
@@ -252,7 +256,3 @@ fn nonempty_label(value: &str) -> Option<String> {
 
     (!value.is_empty()).then_some(value)
 }
-
-#[cfg(test)]
-#[path = "update_tests.rs"]
-mod update_tests;

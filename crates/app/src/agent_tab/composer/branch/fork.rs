@@ -8,11 +8,12 @@
 //! backend which prompts it can branch in front of, show them, and hand the
 //! chosen one back so the branch starts where it was cut.
 
+pub(crate) use nmt_agent::session::branch::PromptTarget;
+#[cfg(test)]
+pub(crate) use nmt_agent::session::branch::checkpoint_at_depth;
+
 use gpui::{Context, SharedString, Window};
 use nmt_agent::chat::ForkCheckpoint;
-pub(in crate::agent_tab) use nmt_agent::session::branch::PromptTarget;
-#[cfg(test)]
-pub(in crate::agent_tab) use nmt_agent::session::branch::checkpoint_at_depth;
 use nmt_agent::session::branch::{BranchError, BranchUpdate, BranchView};
 use rust_i18n::t;
 
@@ -28,10 +29,7 @@ use crate::agent_tab::{AgentPane, RecentSessionsMode};
 /// row last, which is the same order `depth` counts in, so a row's own index
 /// is the depth of the prompt it offers. The text travels with it, so the
 /// transcript can refuse to move if the two lists have drifted apart.
-pub(in crate::agent_tab) fn row_prompt_target(
-    row: usize,
-    action: &PaletteAction,
-) -> Option<PromptTarget> {
+pub(crate) fn row_prompt_target(row: usize, action: &PaletteAction) -> Option<PromptTarget> {
     let prompt = match action {
         PaletteAction::RewindCheckpoint(checkpoint) => checkpoint.prompt.clone(),
         PaletteAction::ForkCheckpoint(checkpoint) => checkpoint.prompt.clone(),
@@ -44,25 +42,25 @@ pub(in crate::agent_tab) fn row_prompt_target(
 impl AgentPane {
     /// Whether such a flow is past its picker and working. Until then the
     /// input still holds text worth editing, so only sending is refused.
-    pub(in crate::agent_tab) fn branch_flow_is_working(&self) -> bool {
+    pub(crate) fn branch_flow_is_working(&self) -> bool {
         self.session.borrow().branch.is_working()
     }
 
     /// Whether a list of branch points is on screen, which is what makes the
     /// palette's highlight something the transcript follows.
-    pub(in crate::agent_tab) fn branch_picker_is_open(&self) -> bool {
+    pub(crate) fn branch_picker_is_open(&self) -> bool {
         self.session.borrow().branch.picker_is_open()
     }
 
     /// Hand the transcript to a picker that is about to scroll it to the
     /// prompt it highlights.
-    pub(in crate::agent_tab) fn hold_transcript_for_picker(&self, cx: &mut Context<Self>) {
+    pub(crate) fn hold_transcript_for_picker(&self, cx: &mut Context<Self>) {
         self.transcript
             .update(cx, |transcript, _| transcript.hold_for_picker());
     }
 
     /// Give it back, for a picker closing without having cut anything.
-    pub(in crate::agent_tab) fn release_transcript_from_picker(&self, cx: &mut Context<Self>) {
+    pub(crate) fn release_transcript_from_picker(&self, cx: &mut Context<Self>) {
         self.transcript
             .update(cx, |transcript, cx| transcript.release_from_picker(cx));
     }
@@ -71,7 +69,7 @@ impl AgentPane {
     /// the conversation shows what the cut would keep and what it would drop.
     /// Following the smooth-scrolling setting keeps the jump between two
     /// distant prompts readable where the user asked for animated scrolling.
-    pub(in crate::agent_tab) fn follow_branch_selection(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn follow_branch_selection(&mut self, cx: &mut Context<Self>) {
         let selected = self.palette.selected;
 
         let Some(target) = self
@@ -89,7 +87,7 @@ impl AgentPane {
         });
     }
 
-    pub(in crate::agent_tab) fn cancel_branch_picker(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(crate) fn cancel_branch_picker(&mut self, cx: &mut Context<Self>) -> bool {
         if !self.binding.is_current() {
             return false;
         }
@@ -108,7 +106,7 @@ impl AgentPane {
         true
     }
 
-    pub(in crate::agent_tab) fn fork_from_prompt(
+    pub(crate) fn fork_from_prompt(
         &mut self,
         target: PromptTarget,
         cx: &mut Context<Self>,
@@ -116,7 +114,7 @@ impl AgentPane {
         self.request_fork_checkpoints(Some(target), cx)
     }
 
-    pub(in crate::agent_tab) fn open_fork(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(crate) fn open_fork(&mut self, cx: &mut Context<Self>) -> bool {
         self.request_fork_checkpoints(None, cx)
     }
 
@@ -169,7 +167,7 @@ impl AgentPane {
         true
     }
 
-    pub(in crate::agent_tab) fn show_fork_checkpoints(
+    pub(crate) fn show_fork_checkpoints(
         &mut self,
         checkpoints: Result<Vec<ForkCheckpoint>, String>,
         cx: &mut Context<Self>,
@@ -186,11 +184,7 @@ impl AgentPane {
         self.apply_fork_update(update, cx);
     }
 
-    pub(in crate::agent_tab) fn apply_fork_update(
-        &mut self,
-        update: BranchUpdate,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn apply_fork_update(&mut self, update: BranchUpdate, cx: &mut Context<Self>) {
         match update {
             BranchUpdate::Empty => self.palette.set_feedback(
                 CommandFeedbackKind::Error,
@@ -243,14 +237,11 @@ impl AgentPane {
         }
     }
 
-    pub(in crate::agent_tab) fn cancel_fork_picker(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn cancel_fork_picker(&mut self, cx: &mut Context<Self>) {
         self.cancel_branch_picker(cx);
     }
 
-    pub(in crate::agent_tab) fn fork_palette_model(
-        &self,
-        state: BranchView<'_>,
-    ) -> Option<PaletteModel> {
+    pub(crate) fn fork_palette_model(&self, state: BranchView<'_>) -> Option<PaletteModel> {
         match state {
             BranchView::LoadingFork => Some(PaletteModel {
                 rows: vec![cancel_row()],
@@ -282,7 +273,7 @@ impl AgentPane {
         }
     }
 
-    pub(in crate::agent_tab) fn start_conversation_branch(
+    pub(crate) fn start_conversation_branch(
         &mut self,
         checkpoint: ForkCheckpoint,
         cx: &mut Context<Self>,
@@ -303,11 +294,7 @@ impl AgentPane {
 
     /// Ready may arrive without a window. The next render applies the prompt
     /// only if the editor still contains the draft captured for this operation.
-    pub(in crate::agent_tab) fn fill_branch_prompt(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn fill_branch_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(pending) = self.branch.pending_prompt.take() else {
             return;
         };

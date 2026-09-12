@@ -20,6 +20,9 @@
 
 #![cfg(target_os = "macos")]
 
+#[cfg(test)]
+mod tests;
+
 use std::cell::Cell;
 use std::error::Error;
 use std::{fmt, ptr};
@@ -28,9 +31,6 @@ use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::{AnyClass, AnyObject, NSObject, NSObjectProtocol};
 use objc2::{AnyThread, DefinedClass, MainThreadMarker, define_class, msg_send};
 use objc2_foundation::{NSBundle, NSError, NSSet, NSString, ns_string};
-
-#[cfg(test)]
-mod tests;
 
 /// Which published channel this build follows.
 ///

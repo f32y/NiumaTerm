@@ -4,14 +4,14 @@ use nmt_terminal::session::SurfaceMouseButton;
 use crate::terminal_tab::pane_model::scroll::ScrollOutcome;
 use crate::terminal_tab::pane_model::viewport::LocalPoint;
 
-pub(in crate::terminal_tab) struct MouseInput {
+pub(crate) struct MouseInput {
     pub position: LocalPoint,
     pub button: Option<SurfaceMouseButton>,
     pub modifiers: ModifiersState,
     pub click_count: usize,
 }
 
-pub(in crate::terminal_tab) enum MouseOutcome {
+pub(crate) enum MouseOutcome {
     Ignored,
     OpenUrl(String),
     SelectionChanged,
@@ -21,12 +21,12 @@ pub(in crate::terminal_tab) enum MouseOutcome {
     HoverChanged,
 }
 
-pub(in crate::terminal_tab) struct MouseRelease {
+pub(crate) struct MouseRelease {
     pub outcome: MouseOutcome,
     pub scrollbar_released: bool,
 }
 
-pub(in crate::terminal_tab) struct WheelOutcome {
+pub(crate) struct WheelOutcome {
     pub handled: bool,
     pub hover_changed: bool,
 }

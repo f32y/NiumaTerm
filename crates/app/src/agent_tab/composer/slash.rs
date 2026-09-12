@@ -27,11 +27,7 @@ use crate::agent_tab::session::{Backend, Status};
 use crate::agent_tab::{AgentPane, CachedCatalog, RecentSessionsMode};
 
 impl AgentPane {
-    pub(in crate::agent_tab) fn submit_current_slash(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn submit_current_slash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let input = self.input.read(cx).text().to_string();
 
         if self.submit_slash_input(&input, cx) {
@@ -314,7 +310,7 @@ impl AgentPane {
         self.execute_backend_command(command, cx)
     }
 
-    pub(in crate::agent_tab) fn execute_backend_command(
+    pub(crate) fn execute_backend_command(
         &mut self,
         command: PendingSlashCommand,
         cx: &mut Context<Self>,
@@ -369,7 +365,7 @@ impl AgentPane {
         }
     }
 
-    pub(in crate::agent_tab) fn run_next_queued_command(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn run_next_queued_command(&mut self, cx: &mut Context<Self>) {
         if self.presenting_session_effect {
             return;
         }
@@ -462,7 +458,7 @@ impl AgentPane {
         }
     }
 
-    pub(in crate::agent_tab) fn command_catalog(&mut self) -> Rc<[SlashCommandInfo]> {
+    pub(crate) fn command_catalog(&mut self) -> Rc<[SlashCommandInfo]> {
         let language = rust_i18n::locale();
 
         if let Some(cached) = self

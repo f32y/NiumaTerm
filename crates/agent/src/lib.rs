@@ -1,3 +1,20 @@
+pub use crate::codex::ProviderConfig as CodexProviderConfig;
+pub use crate::event::{
+    AgentEvent, AgentEventInput, AgentEventKind, AgentOwner, AgentRuntimeStatus,
+    AgentValidationError, RawAgentHookMessage, normalize_body, normalize_title,
+};
+pub use crate::hook_command::{HookInstallStatus, build_hook_command, hook_command_contains};
+pub use crate::monitor::{
+    ACTIVE_STATE_STALE_AFTER, AgentActivityPolicy, AgentMonitor, AgentNotification, AgentPaneState,
+    AgentProjection, COMPLETION_QUIET_WINDOW, MonitorMutation, PendingCompletion,
+    request_native_delivery,
+};
+pub use crate::process::{
+    AGENT_HOOK_EXE_ENV, AGENT_HOOK_PROTOCOL_VERSION, AGENT_HOOK_TOKEN_ENV, AGENT_HOOK_VERSION_ENV,
+    AGENT_ROUTE_ENV, AGENT_TESTING_ENV, AgentProcess, agent_process,
+};
+pub use crate::workspace::{AgentWorkspace, MultiRootAccess};
+
 pub mod annotations;
 pub mod background_task;
 pub mod catalog;
@@ -30,25 +47,12 @@ mod json;
 mod monitor;
 mod process;
 
-pub use crate::codex::ProviderConfig as CodexProviderConfig;
+#[cfg(test)]
+mod tests;
+
 #[cfg(test)]
 use crate::event::MAX_TITLE_CHARS;
-pub use crate::event::{
-    AgentEvent, AgentEventInput, AgentEventKind, AgentOwner, AgentRuntimeStatus,
-    AgentValidationError, RawAgentHookMessage, normalize_body, normalize_title,
-};
 use crate::event::{MAX_ROUTE_BYTES, validate_identity};
-pub use crate::hook_command::{HookInstallStatus, build_hook_command, hook_command_contains};
-pub use crate::monitor::{
-    ACTIVE_STATE_STALE_AFTER, AgentActivityPolicy, AgentMonitor, AgentNotification, AgentPaneState,
-    AgentProjection, COMPLETION_QUIET_WINDOW, MonitorMutation, PendingCompletion,
-    request_native_delivery,
-};
-pub use crate::process::{
-    AGENT_HOOK_EXE_ENV, AGENT_HOOK_PROTOCOL_VERSION, AGENT_HOOK_TOKEN_ENV, AGENT_HOOK_VERSION_ENV,
-    AGENT_ROUTE_ENV, AGENT_TESTING_ENV, AgentProcess, agent_process,
-};
-pub use crate::workspace::{AgentWorkspace, MultiRootAccess};
 
 /// How to launch an agent CLI. Protocol-specific settings are carried here so
 /// adapters can map them onto their native environment or RPC surfaces.
@@ -92,6 +96,3 @@ impl AgentRoute {
         &self.0
     }
 }
-
-#[cfg(test)]
-mod tests;

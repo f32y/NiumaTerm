@@ -25,13 +25,13 @@ use crate::terminal_tab::frame::{
 /// run merging) come from the shared `LineBuilder`, so frozen rows shape and
 /// paint exactly like live ones.
 #[derive(Default)]
-pub(in crate::terminal_tab) struct EngineRowBuilder {
+pub(crate) struct EngineRowBuilder {
     line: LineBuilder,
     col: u16,
 }
 
 impl EngineRowBuilder {
-    pub(in crate::terminal_tab) fn push(
+    pub(crate) fn push(
         &mut self,
         x: u16,
         cell_text: CellText,
@@ -109,7 +109,7 @@ impl EngineRowBuilder {
 /// Metadata determines the item's height even while its visible pages are
 /// still being materialized by the engine owner.
 #[derive(Clone)]
-pub(in crate::terminal_tab) struct HandleItemInfo {
+pub(crate) struct HandleItemInfo {
     /// Cached engine row count — the layout height source.
     pub rows: usize,
 
@@ -117,7 +117,7 @@ pub(in crate::terminal_tab) struct HandleItemInfo {
     pub header: Option<String>,
 }
 
-pub(in crate::terminal_tab) fn handle_item_info(
+pub(crate) fn handle_item_info(
     item: &BlockItem,
     labels: &DurationLabels,
 ) -> Option<HandleItemInfo> {
@@ -133,7 +133,7 @@ pub(in crate::terminal_tab) fn handle_item_info(
 /// Build visible rows from immutable pages. Missing pages keep their layout
 /// space until the asynchronous read completes and wakes the pane.
 #[allow(clippy::too_many_arguments)]
-pub(in crate::terminal_tab) fn frozen_block_view(
+pub(crate) fn frozen_block_view(
     pages: &[Arc<RowPage>],
     info: &HandleItemInfo,
     item_idx: usize,
@@ -247,7 +247,7 @@ fn block_row_shape_key(handle: BlockHandle, theme: u64, row: usize) -> u64 {
 /// physical lines rendered above the live grid. Rows carry
 /// an out-of-band item index that the hit map converts back to their absolute
 /// SCREEN row; selection remains in the pane session rather than BlockStore.
-pub(in crate::terminal_tab) fn live_history_view(
+pub(crate) fn live_history_view(
     lines: Vec<(u64, TerminalLine)>,
     total_rows: u64,
     cols: u32,

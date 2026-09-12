@@ -22,7 +22,7 @@ use crate::agent_tab::thread_controls::ThreadControls;
 
 /// The picks remembered for this profile, falling back to the bucket its
 /// agent kind shares with unnamed profiles.
-pub(in crate::agent_tab) fn stored_thread_settings<'a>(
+pub(crate) fn stored_thread_settings<'a>(
     kind: AgentKind,
     profile: &AgentProfile,
     cx: &'a App,
@@ -35,17 +35,14 @@ pub(in crate::agent_tab) fn stored_thread_settings<'a>(
 /// Effective startup model after protocol mapping and user environment
 /// overrides. Claude resolves `ANTHROPIC_MODEL` with last-value-wins
 /// semantics; Codex receives the profile field over app-server RPC.
-pub(in crate::agent_tab) fn launch_model(
-    kind: AgentKind,
-    profile: &AgentProfile,
-) -> Option<String> {
+pub(crate) fn launch_model(kind: AgentKind, profile: &AgentProfile) -> Option<String> {
     effective_launch_model(kind, agent_launch(profile))
 }
 
 /// The reasoning effort this pane's profile pins. Claude receives it as a
 /// launch flag and Codex as a thread-start parameter; the picker shows it
 /// either way.
-pub(in crate::agent_tab) fn launch_effort(profile: &AgentProfile) -> Option<String> {
+pub(crate) fn launch_effort(profile: &AgentProfile) -> Option<String> {
     agent_launch(profile).effort
 }
 
@@ -53,7 +50,7 @@ impl ThreadControls {
     /// Remember the current thread settings as the defaults for future
     /// conversations launched from this profile. Called after every
     /// user-driven settings change (dropdowns and slash commands).
-    pub(in crate::agent_tab) fn remember_defaults(
+    pub(crate) fn remember_defaults(
         &self,
         state: &ConversationSettings,
         kind: AgentKind,
@@ -87,7 +84,7 @@ impl AgentPane {
     /// A refusal restores both pickers from what the session is actually set
     /// to, because a picker left showing a value the harness never adopted
     /// would misreport which model the next turn runs on.
-    pub(in crate::agent_tab) fn apply_model_selection(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn apply_model_selection(&mut self, cx: &mut Context<Self>) {
         if !self.binding.is_current() {
             return;
         }
@@ -122,11 +119,7 @@ impl AgentPane {
     /// because the logged history was produced under the previous composition's
     /// tools. That rule is not repeated here: the picker reports whatever the
     /// harness answers, and the row stays on the preset still in force.
-    pub(in crate::agent_tab) fn apply_agent_preset(
-        &mut self,
-        preset: String,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn apply_agent_preset(&mut self, preset: String, cx: &mut Context<Self>) {
         if !self.binding.is_current() {
             return;
         }

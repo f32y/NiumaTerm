@@ -3,14 +3,14 @@ use crate::terminal_tab::theme::{BLOCK_GUTTER_GAP, BLOCK_GUTTER_WIDTH};
 
 /// A pointer x hits the block gutter when it falls in the strip painted in the
 /// left padding, with a small tolerance into column 0.
-pub(in crate::terminal_tab) fn block_gutter_hit(x: f32, origin_x: f32) -> bool {
+pub(crate) fn block_gutter_hit(x: f32, origin_x: f32) -> bool {
     let left = origin_x - BLOCK_GUTTER_GAP - BLOCK_GUTTER_WIDTH - 2.0;
     let right = origin_x + 3.0;
 
     (left..=right).contains(&x)
 }
 
-pub(in crate::terminal_tab) fn selection_drag_started(
+pub(crate) fn selection_drag_started(
     origin: LocalPoint,
     position: LocalPoint,
     cell_width: f32,

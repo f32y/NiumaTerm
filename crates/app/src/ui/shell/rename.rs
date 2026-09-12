@@ -131,7 +131,7 @@ impl Shell {
     /// End the in-flight workspace rename. Enter and blur commit the entered
     /// name (blank names are dropped by the manager); Escape reaches this
     /// with `commit` false, keeping the original name.
-    pub(in crate::ui) fn finish_workspace_rename(
+    pub(crate) fn finish_workspace_rename(
         &mut self,
         commit: bool,
         window: &mut Window,
@@ -178,7 +178,7 @@ impl Shell {
 
     /// End the in-flight tab rename; same semantics as the workspace rename
     /// (Enter/blur commit, Escape cancels, blank names are dropped).
-    pub(in crate::ui) fn finish_tab_rename(
+    pub(crate) fn finish_tab_rename(
         &mut self,
         commit: bool,
         window: &mut Window,

@@ -1,3 +1,14 @@
+pub(super) mod composer_layout;
+
+pub(super) mod session_state;
+
+mod banners;
+
+mod history;
+
+#[cfg(test)]
+mod tests;
+
 use std::time::Instant;
 
 use gpui::prelude::*;
@@ -26,14 +37,6 @@ use crate::agent_tab::view::composer_layout::{
 };
 use crate::agent_tab::{AgentPane, AgentPaneEvent, RecentSessionsMode};
 
-mod banners;
-pub(in crate::agent_tab) mod composer_layout;
-mod history;
-pub(in crate::agent_tab) mod session_state;
-
-#[cfg(test)]
-mod tests;
-
 // The composer sits in the same column as the transcript above it, so the
 // two edges line up at every window width.
 
@@ -48,7 +51,7 @@ pub(super) const COMPOSER_STATUS_PADDING_X: f32 = 14.0;
 pub(super) const COMPOSER_STATUS_PADDING_Y: f32 = 6.0;
 pub(super) const COMPOSER_STATUS_TEXT_SIZE: f32 = 11.5;
 
-pub(in crate::agent_tab) struct StopResponseIcon;
+pub(super) struct StopResponseIcon;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ComposerEnterBehavior {

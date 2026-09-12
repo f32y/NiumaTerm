@@ -58,7 +58,7 @@ impl RoomStore {
     /// The caller supplies a ready, idle session. Persistence precedes every
     /// external send, including the durable change from reserved to charged.
     /// A transport-level start is still awaiting provider acceptance evidence.
-    pub(in crate::team) fn dispatch(
+    pub(crate) fn dispatch(
         &mut self,
         id: AttemptId,
         send: impl FnOnce(&DispatchIntent) -> SendOutcome,

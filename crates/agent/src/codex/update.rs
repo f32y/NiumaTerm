@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "update_tests.rs"]
+mod update_tests;
+
 use serde_json::Value;
 
 use crate::launcher::{AgentCli, run_bounded};
@@ -116,7 +120,3 @@ fn version_fallback(launcher: &AgentCli, reason: &str) -> Result<VersionStatus, 
 fn detail_string<'a>(details: &'a Value, key: &str) -> Option<&'a str> {
     details.as_object()?.get(key)?.as_str()
 }
-
-#[cfg(test)]
-#[path = "update_tests.rs"]
-mod update_tests;

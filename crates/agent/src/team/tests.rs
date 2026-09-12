@@ -12,7 +12,7 @@ use crate::team::identity::{
 use crate::team::member::{HistoryScope, MemberConfig, ProfileReference};
 use crate::team::room::{MemberError, Room};
 
-pub(in crate::team) fn config(name: &str, root: &str) -> MemberConfig {
+pub(super) fn config(name: &str, root: &str) -> MemberConfig {
     MemberConfig {
         name: name.into(),
         profile: ProfileReference {

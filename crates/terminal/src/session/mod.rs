@@ -1,6 +1,45 @@
 //! One terminal surface's runtime state: libghostty-vt engine, render buffer, and
 //! the ConPTY-backed PTY worker so platform details stay outside the UI layer.
 
+pub use crate::session::blocks::BlockPoint;
+pub use crate::session::config::TerminalSessionConfig;
+pub use crate::session::error::{EngineError, EngineErrorCode};
+pub use crate::session::mouse::{
+    SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
+};
+pub use crate::session::observer::{SessionChange, SessionObserver};
+pub use crate::session::rows::RowText;
+
+pub mod page;
+pub mod request;
+
+pub mod interaction;
+
+pub(crate) mod selection;
+
+mod blocks;
+
+mod rows;
+
+mod config;
+mod error;
+
+mod mouse;
+mod observer;
+mod proxy;
+
+#[cfg(test)]
+mod interaction_tests;
+#[cfg(test)]
+mod state_tests;
+#[cfg(test)]
+mod tests;
+#[cfg(test)]
+mod vtebench_tests;
+
+#[cfg(test)]
+mod block_tests;
+
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -27,37 +66,16 @@ use crate::pty_pipe::{SessionOptions, start_session};
 use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
 use crate::selection::{SelectionRange, SelectionType, WORD_DELIMITERS};
-pub use crate::session::blocks::BlockPoint;
 use crate::session::blocks::frozen_selection_pieces;
-pub use crate::session::config::TerminalSessionConfig;
 use crate::session::config::default_shell;
-pub use crate::session::error::{EngineError, EngineErrorCode};
-pub use crate::session::mouse::{
-    SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
-};
 use crate::session::mouse::{mouse_button_code, mouse_motion_code, mouse_report_mods};
-pub use crate::session::observer::{SessionChange, SessionObserver};
 use crate::session::page::{PageCache, PageSource, RowPage};
 use crate::session::proxy::TerminalEventProxy;
 use crate::session::request::{BlockRange, Query, Request, TextPiece, TextSource};
-pub use crate::session::rows::RowText;
 use crate::session::rows::materialized_pointer_row;
 use crate::session::selection::{SurfaceSelection, selection_screen_range};
 use crate::terminal::Mode;
 use crate::terminal::pos::{Column, Line, Pos};
-
-mod blocks;
-pub mod page;
-pub mod request;
-mod rows;
-
-mod config;
-mod error;
-pub mod interaction;
-mod mouse;
-mod observer;
-mod proxy;
-pub(crate) mod selection;
 
 type SessionBuffer = Arc<FrameStore>;
 
@@ -765,18 +783,6 @@ impl Drop for TerminalSession {
         let _ = self.messenger.send(Msg::Shutdown);
     }
 }
-
-#[cfg(test)]
-mod interaction_tests;
-#[cfg(test)]
-mod state_tests;
-#[cfg(test)]
-mod tests;
-#[cfg(test)]
-mod vtebench_tests;
-
-#[cfg(test)]
-mod block_tests;
 
 fn paste_payload(text: &str, bracketed: bool) -> Option<Vec<u8>> {
     if text.is_empty() {

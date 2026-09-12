@@ -9,6 +9,19 @@
 //! the first Noise handshake message; the host picks its responder pattern
 //! from that byte. Every later message is exactly one Noise ciphertext.
 
+pub use crate::channel::*;
+pub use crate::client::*;
+pub use crate::devices::*;
+#[cfg(windows)]
+pub use crate::host::*;
+#[cfg(windows)]
+pub use crate::keys::*;
+pub use crate::protocol::*;
+
+#[cfg(windows)]
+pub mod net_pty;
+pub mod protocol;
+
 mod channel;
 mod client;
 mod devices;
@@ -16,15 +29,3 @@ mod devices;
 mod host;
 #[cfg(windows)]
 mod keys;
-#[cfg(windows)]
-pub mod net_pty;
-pub mod protocol;
-
-pub use channel::*;
-pub use client::*;
-pub use devices::*;
-#[cfg(windows)]
-pub use host::*;
-#[cfg(windows)]
-pub use keys::*;
-pub use protocol::*;

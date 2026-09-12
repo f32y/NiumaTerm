@@ -1,10 +1,10 @@
 //! Provider selection, message delivery, and session lifecycle without GUI state.
 
-use serde::{Deserialize, Serialize};
+pub use crate::session::backend::{
+    Backend, ConversationTitleRequest, RecoveryIdentity, RenameOutcome,
+};
+pub use crate::session::lifecycle::{RecoverySnapshot, RestorationReadiness, SessionRuntime};
 
-use crate::update::ProviderKind;
-
-mod backend;
 pub mod branch;
 pub mod capabilities;
 pub mod children;
@@ -19,19 +19,25 @@ pub mod restore;
 pub mod settings;
 pub mod team_capabilities;
 pub mod team_recovery;
-#[cfg(any(test, feature = "test-support"))]
-#[doc(hidden)]
-pub mod test_support;
+
 pub mod update_readiness;
 pub mod workflows;
 
-pub use crate::session::backend::{
-    Backend, ConversationTitleRequest, RecoveryIdentity, RenameOutcome,
-};
-pub use crate::session::lifecycle::{RecoverySnapshot, RestorationReadiness, SessionRuntime};
+mod backend;
+
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+pub mod test_support;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod ui_split_tests;
+
+use serde::{Deserialize, Serialize};
+
+use crate::update::ProviderKind;
 
 /// Encoded image data borrowed from a composed message.
 #[derive(Clone, Copy)]
@@ -100,9 +106,6 @@ impl AgentKind {
         }
     }
 }
-
-#[cfg(test)]
-mod ui_split_tests;
 
 impl From<AgentKind> for &'static str {
     fn from(value: AgentKind) -> Self {

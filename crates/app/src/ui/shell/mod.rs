@@ -1,3 +1,24 @@
+#[cfg(windows)]
+pub(crate) use crate::ui::shell::actions::NewRemoteTab;
+pub(crate) use crate::ui::shell::actions::{
+    CloseTab, NewAgentTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace, PrevTab,
+    PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp, ShowSettings,
+    SplitDown, SplitLeft, SplitRight, SplitUp, ToggleBackgroundTasks, ToggleGitSidebar,
+    ToggleSidebar, ToggleWorkflows,
+};
+pub(crate) use crate::ui::shell::render::MIN_SIDEBAR_WIDTH;
+// Only the macOS backend re-anchors its window buttons against the bar's
+// height; the other backends draw their controls inside the bar itself.
+#[cfg(target_os = "macos")]
+pub(crate) use crate::ui::shell::render::TITLE_BAR_HEIGHT;
+pub(crate) use crate::ui::shell::tab_surface::TabSurface;
+
+pub(super) use crate::ui::shell::inline_rename::{InlineRename, InlineRenameStyle};
+pub(super) use crate::ui::shell::rename::InlineRenameSession;
+pub(super) use crate::ui::shell::tab_presentation::pending_tab_icon;
+
+pub(crate) mod tab_surface;
+
 mod actions;
 mod agent_notifications;
 mod close;
@@ -8,11 +29,9 @@ mod pump;
 mod rename;
 mod render;
 
-pub(crate) use crate::ui::shell::render::MIN_SIDEBAR_WIDTH;
-
 mod settings_workspace;
 mod tab_presentation;
-pub(crate) mod tab_surface;
+
 mod tabs_open;
 mod updates_layer;
 mod workspace_dirs;
@@ -76,26 +95,10 @@ use crate::ui::git_status::{GitStatusModel, GitStatusView};
 use crate::ui::persistence::{default_session, materialize_active_tab, restore_session};
 use crate::ui::right_panel::{RightPanel, RightPanelKind};
 use crate::ui::settings::{AgentProfile, AppSettings, TabBarStyle};
-#[cfg(windows)]
-pub(crate) use crate::ui::shell::actions::NewRemoteTab;
-pub(crate) use crate::ui::shell::actions::{
-    CloseTab, NewAgentTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace, PrevTab,
-    PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp, ShowSettings,
-    SplitDown, SplitLeft, SplitRight, SplitUp, ToggleBackgroundTasks, ToggleGitSidebar,
-    ToggleSidebar, ToggleWorkflows,
-};
 #[cfg(test)]
 use crate::ui::shell::close::{should_confirm_close, should_confirm_tab_close};
-pub(super) use crate::ui::shell::inline_rename::{InlineRename, InlineRenameStyle};
 use crate::ui::shell::panels::RightPanelController;
-pub(super) use crate::ui::shell::rename::InlineRenameSession;
-// Only the macOS backend re-anchors its window buttons against the bar's
-// height; the other backends draw their controls inside the bar itself.
-#[cfg(target_os = "macos")]
-pub(crate) use crate::ui::shell::render::TITLE_BAR_HEIGHT;
 use crate::ui::shell::settings_workspace::SettingsSurface;
-pub(super) use crate::ui::shell::tab_presentation::pending_tab_icon;
-pub(crate) use crate::ui::shell::tab_surface::TabSurface;
 use crate::ui::shell::updates_layer::UpdateNotificationLayer;
 use crate::ui::shell::workspace_dirs::{RootAvailability, WorkspaceDirsEditor};
 use crate::ui::tab_bar::TabStrip;

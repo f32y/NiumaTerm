@@ -8,19 +8,19 @@ use crate::terminal_tab::metrics::CellMetrics;
 use crate::terminal_tab::scrollbar::geometry::scrollbar_offset_for_thumb;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(in crate::terminal_tab) struct LocalPoint {
+pub(crate) struct LocalPoint {
     pub x: f32,
     pub y: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(in crate::terminal_tab) struct LocalRect {
+pub(crate) struct LocalRect {
     pub origin: LocalPoint,
     pub width: f32,
     pub height: f32,
 }
 
-pub(in crate::terminal_tab) enum Viewport {
+pub(crate) enum Viewport {
     Grid {
         scrollbar: ScrollbarInfo,
         row_offsets: Arc<[f32]>,
@@ -44,14 +44,14 @@ impl Default for Viewport {
 }
 
 impl Viewport {
-    pub(in crate::terminal_tab) fn row_offsets(&self) -> Arc<[f32]> {
+    pub(crate) fn row_offsets(&self) -> Arc<[f32]> {
         match self {
             Self::Grid { row_offsets, .. } => row_offsets.clone(),
             Self::BlockList { .. } => Arc::default(),
         }
     }
 
-    pub(in crate::terminal_tab) fn is_scrolled(&self) -> bool {
+    pub(crate) fn is_scrolled(&self) -> bool {
         match self {
             Self::Grid { scrollbar, .. } => {
                 scrollbar.offset < scrollbar.total.saturating_sub(scrollbar.len)
@@ -65,7 +65,7 @@ impl Viewport {
         }
     }
 
-    pub(in crate::terminal_tab) fn scrollbar_info(&self) -> ScrollbarInfo {
+    pub(crate) fn scrollbar_info(&self) -> ScrollbarInfo {
         match self {
             Self::Grid { scrollbar, .. } => *scrollbar,
 
@@ -82,7 +82,7 @@ impl Viewport {
         }
     }
 
-    pub(in crate::terminal_tab) fn thumb_target(&self, thumb_top: f32) -> Option<f64> {
+    pub(crate) fn thumb_target(&self, thumb_top: f32) -> Option<f64> {
         match self {
             Self::Grid { scrollbar, .. } => {
                 scrollbar_offset_for_thumb(scrollbar.total as f64, scrollbar.len as f64, thumb_top)
@@ -100,7 +100,7 @@ impl Viewport {
         }
     }
 
-    pub(in crate::terminal_tab) fn cell_at(
+    pub(crate) fn cell_at(
         &self,
         local: LocalPoint,
         cell: CellMetrics,
@@ -124,7 +124,7 @@ impl Viewport {
         (SurfaceCell { col, row }, side)
     }
 
-    pub(in crate::terminal_tab) fn cursor_y(&self, row: u16, cell_h: f32) -> f32 {
+    pub(crate) fn cursor_y(&self, row: u16, cell_h: f32) -> f32 {
         let offset = match self {
             Self::Grid { row_offsets, .. } => row_y_offset(row_offsets, row as usize),
             Self::BlockList { active_top, .. } => *active_top,

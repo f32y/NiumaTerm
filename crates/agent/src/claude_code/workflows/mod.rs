@@ -9,6 +9,14 @@
 //! Only `task_started` carries `task_type`; the `task_progress` records that
 //! follow identify their run by `task_id` alone, so a run must be remembered
 //! from its start for its own updates to be recognized.
+
+pub(crate) use crate::claude_code::workflows::disk::ClaudeWorkflowSource;
+
+mod disk;
+
+#[cfg(test)]
+mod tests;
+
 use std::collections::HashMap;
 
 use serde_json::Value;
@@ -19,10 +27,6 @@ use crate::workflow::{
     RestoredWorkflowRun, WorkflowAgent, WorkflowAgentState, WorkflowPhase, WorkflowRefresh,
     WorkflowRun, WorkflowRunState, WorkflowSnapshot,
 };
-
-mod disk;
-
-pub(crate) use crate::claude_code::workflows::disk::ClaudeWorkflowSource;
 
 /// Reduces the Claude stream into workflow runs. Mirrors the shape of the
 /// child-agent reducer so both are driven from the same place.
@@ -351,6 +355,3 @@ fn replace_number(current: &mut Option<u64>, incoming: Option<u64>) -> bool {
 
     true
 }
-
-#[cfg(test)]
-mod tests;

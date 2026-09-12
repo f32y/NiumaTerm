@@ -1,17 +1,18 @@
+pub use crate::team::content::SourceFragment;
+
+mod coverage;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub use crate::team::content::SourceFragment;
 use crate::team::content::{AttachmentReference, PublicMessage, Summary, UserInput};
 use crate::team::context::coverage::{complete_sources, include_summary};
 use crate::team::discussion::PublicSnapshot;
 use crate::team::identity::{MemberId, MessageId, SummaryId};
 use crate::team::member::{AcceptedCoverage, HistoryScope};
 use crate::team::room::Room;
-
-mod coverage;
 
 pub struct ContextLimits {
     pub max_bytes: usize,

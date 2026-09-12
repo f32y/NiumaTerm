@@ -5,24 +5,24 @@
 //! transcripts on disk is read here instead, which is why the list has a
 //! loading shape of its own rather than simply arriving.
 
-use std::time::Duration;
-
-use gpui::Context;
-use nmt_agent::chat::{SessionScope, SessionSummary};
-use nmt_agent::session::restore::{ResumeStart, SettingsSeed};
-use rust_i18n::t;
-
-use crate::agent_tab::capabilities::AgentCapabilities as _;
-use crate::agent_tab::composer::CommandFeedbackKind;
-use crate::agent_tab::{AgentPane, AgentPaneEvent, RecentSessionsMode, SessionHistoryUi};
+pub(crate) use nmt_agent::session::history::FilesystemHistoryRequest;
 
 #[cfg(test)]
 mod restore_tests;
 #[cfg(test)]
 mod tests;
 
-pub(in crate::agent_tab) use nmt_agent::session::history::FilesystemHistoryRequest;
+use std::time::Duration;
+
+use gpui::Context;
+use nmt_agent::chat::{SessionScope, SessionSummary};
 use nmt_agent::session::history::{CountPublication, count_scoped_sessions, list_scoped_sessions};
+use nmt_agent::session::restore::{ResumeStart, SettingsSeed};
+use rust_i18n::t;
+
+use crate::agent_tab::capabilities::AgentCapabilities as _;
+use crate::agent_tab::composer::CommandFeedbackKind;
+use crate::agent_tab::{AgentPane, AgentPaneEvent, RecentSessionsMode, SessionHistoryUi};
 
 impl SessionHistoryUi {
     pub(super) fn invalidate_filesystem_history(&mut self) {
@@ -80,7 +80,7 @@ impl AgentPane {
     /// reload republishes what the new one covers. A backend that lists over
     /// the protocol is asked again, one that reads its own transcripts is
     /// rescanned.
-    pub(in crate::agent_tab) fn toggle_history_scope(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_history_scope(&mut self, cx: &mut Context<Self>) {
         self.history_ui.invalidate_filesystem_history();
 
         self.history_ui.data.scope = match self.history_ui.data.scope {
@@ -204,7 +204,7 @@ impl AgentPane {
     }
 
     /// Keep the displayed conversation until the replacement supplies its replay.
-    pub(in crate::agent_tab) fn resume_session(&mut self, index: usize, cx: &mut Context<Self>) {
+    pub(crate) fn resume_session(&mut self, index: usize, cx: &mut Context<Self>) {
         if !self.binding.is_current() {
             return;
         }

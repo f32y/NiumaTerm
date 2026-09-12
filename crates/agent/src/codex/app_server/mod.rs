@@ -5,15 +5,6 @@
 //! third-party UIs (it powers the VS Code extension). Each `Session` owns one
 //! conversation thread and shares its app-server host with other sessions.
 
-use std::mem::take;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
-#[cfg(test)]
-use std::time::UNIX_EPOCH;
-
-use serde_json::{Value, json};
-
 pub use crate::background_task::{
     BackgroundTaskKey, BackgroundTaskTranscriptState, BackgroundTaskTranscriptUpdate,
 };
@@ -24,10 +15,10 @@ pub use crate::chat::{
     SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
     TokenUsageBreakdown,
 };
-use crate::codex::app_server::team::TeamState;
-use crate::session::team_capabilities::TeamLaunch;
-use crate::workspace::AgentWorkspace;
-use crate::{CodexProviderConfig, LaunchConfig};
+pub use crate::codex::app_server::options::{
+    APPROVAL_OPTIONS, APPROVAL_REVIEWER_OPTIONS, SANDBOX_OPTIONS,
+};
+pub use crate::codex::app_server::title_generation::provisional_title_from_prompt;
 
 mod background_tasks;
 mod compaction;
@@ -41,6 +32,18 @@ mod skills;
 mod team;
 mod title_generation;
 
+#[cfg(test)]
+mod tests;
+
+use std::mem::take;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+#[cfg(test)]
+use std::time::UNIX_EPOCH;
+
+use serde_json::{Value, json};
+
 use crate::codex::app_server::background_tasks::{CodexTasks, ThreadScope, notification_thread_id};
 use crate::codex::app_server::compaction::is_legacy_compaction_notification;
 use crate::codex::app_server::control::{ControlOperation, ControlState, QueryKind};
@@ -48,9 +51,6 @@ use crate::codex::app_server::conversation::ConversationState;
 #[cfg(test)]
 use crate::codex::app_server::conversation::TurnOutputUsage;
 use crate::codex::app_server::host::{CodexHost, HOST_EXIT_METHOD, RegistrationId};
-pub use crate::codex::app_server::options::{
-    APPROVAL_OPTIONS, APPROVAL_REVIEWER_OPTIONS, SANDBOX_OPTIONS,
-};
 #[cfg(test)]
 use crate::codex::app_server::protocol::thread_start_params;
 use crate::codex::app_server::protocol::{
@@ -63,10 +63,13 @@ use crate::codex::app_server::questions::QuestionState;
 #[cfg(test)]
 use crate::codex::app_server::skills::parse_skill_catalog;
 use crate::codex::app_server::skills::{SkillRefreshState, skill_catalog_from_response};
-pub use crate::codex::app_server::title_generation::provisional_title_from_prompt;
+use crate::codex::app_server::team::TeamState;
 use crate::codex::app_server::title_generation::{
     TITLE_GENERATION_RESULT_METHOD, TitleGenerationHandle,
 };
+use crate::session::team_capabilities::TeamLaunch;
+use crate::workspace::AgentWorkspace;
+use crate::{CodexProviderConfig, LaunchConfig};
 
 const FIRST_TURN_RPC_ID: u64 = 100;
 const PROVIDER_API_FIELD: &str = concat!("wi", "re_api");
@@ -1189,6 +1192,3 @@ impl Drop for Session {
         self.detach();
     }
 }
-
-#[cfg(test)]
-mod tests;

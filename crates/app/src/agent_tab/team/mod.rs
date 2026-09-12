@@ -1,3 +1,13 @@
+pub use crate::agent_tab::team::controls::TeamCommand;
+pub use crate::agent_tab::team::view::TeamPane;
+
+mod controls;
+mod dispatch;
+mod events;
+mod recovery;
+
+mod view;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -15,17 +25,6 @@ use nmt_config::profile::AgentProfile;
 use crate::agent_tab::execution::{AgentSession, SessionOwner};
 use crate::agent_tab::profile::AgentKindExt as _;
 use crate::agent_tab::settings::AgentSettings;
-
-mod controls;
-mod dispatch;
-mod events;
-mod recovery;
-
-pub use crate::agent_tab::team::controls::TeamCommand;
-
-mod view;
-
-pub use crate::agent_tab::team::view::TeamPane;
 
 struct MemberHost {
     owner: SessionOwner,

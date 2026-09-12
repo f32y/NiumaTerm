@@ -1,3 +1,5 @@
+pub(crate) use nmt_agent::transcript::conversation::EntryMetadata as EntryPresentation;
+
 use std::collections::HashSet;
 use std::mem;
 use std::sync::Arc;
@@ -7,7 +9,6 @@ use gpui::{Context, FollowMode, Image, ListOffset, px};
 use nmt_agent::chat::Item as SessionItem;
 use nmt_agent::transcript::TranscriptEntry;
 use nmt_agent::transcript::conversation::ConversationImage;
-pub(in crate::agent_tab) use nmt_agent::transcript::conversation::EntryMetadata as EntryPresentation;
 use nmt_config::agent::CollapseRows;
 
 use crate::agent_tab::composer::PromptTarget;
@@ -16,14 +17,14 @@ use crate::agent_tab::transcript::{
     compaction_accounting, hidden, is_work_row, should_show_jump_to_latest,
 };
 
-pub(in crate::agent_tab) type Entry = TranscriptEntry<EntryPresentation>;
+pub(crate) type Entry = TranscriptEntry<EntryPresentation>;
 
 /// One transcript row for the virtualized list. `PartialEq` powers the
 /// render-time diff: kind + indices catch structural changes (fold, collapse,
 /// appended rows), the fingerprint catches in-place content changes that move
 /// a row's height (streamed text, status flips, detail expansion).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::agent_tab) enum RowSpec {
+pub(crate) enum RowSpec {
     Entry {
         index: usize,
         fingerprint: u64,
@@ -71,7 +72,7 @@ pub(in crate::agent_tab) enum RowSpec {
 /// Whether a row belongs to a run of work steps, and so is drawn inside the
 /// run's grouping rule. The turn fold heads the whole turn rather than one
 /// run, so it stays outside.
-pub(in crate::agent_tab) fn is_run_row(spec: &RowSpec) -> bool {
+pub(crate) fn is_run_row(spec: &RowSpec) -> bool {
     matches!(spec, RowSpec::Work { .. } | RowSpec::RunToggle { .. })
 }
 
@@ -80,7 +81,7 @@ pub(in crate::agent_tab) fn is_run_row(spec: &RowSpec) -> bool {
 /// module decides; how many pixels a rank is worth belongs to the renderer
 /// that owns the transcript's geometry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::agent_tab) enum RowGap {
+pub(crate) enum RowGap {
     /// Inside one block: between the steps of a run of work, and under the
     /// disclosure that heads them.
     Step,
@@ -102,9 +103,9 @@ pub(in crate::agent_tab) enum RowGap {
 /// neighbour changed rank has to be remeasured even though what the row
 /// itself says is unchanged.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::agent_tab) struct TranscriptRow {
-    pub(in crate::agent_tab) spec: RowSpec,
-    pub(in crate::agent_tab) gap: RowGap,
+pub(crate) struct TranscriptRow {
+    pub(crate) spec: RowSpec,
+    pub(crate) gap: RowGap,
 }
 
 /// Whether a row reports on how the turn was worked rather than on what it
@@ -134,11 +135,7 @@ fn is_turn_edge(items: &[Entry], spec: &RowSpec) -> bool {
 /// follows the run, and a rank read off the upper row alone cannot say both.
 /// The last row is spaced as though a turn followed it, so gaining a row
 /// beneath it leaves its height alone.
-pub(in crate::agent_tab) fn row_gap(
-    items: &[Entry],
-    above: &RowSpec,
-    below: Option<&RowSpec>,
-) -> RowGap {
+pub(crate) fn row_gap(items: &[Entry], above: &RowSpec, below: Option<&RowSpec>) -> RowGap {
     let Some(below) = below else {
         return RowGap::Group;
     };
@@ -171,27 +168,24 @@ fn spaced_rows(items: &[Entry], specs: &[RowSpec], rows: &mut Vec<TranscriptRow>
 /// them. The live end is recorded as such rather than as the offset it stands
 /// at, because the end moves as the conversation grows.
 #[derive(Clone, Copy, Debug)]
-pub(in crate::agent_tab) enum ReadingPosition {
+pub(crate) enum ReadingPosition {
     Tail,
     At(ListOffset),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::agent_tab) enum TurnSummary {
+pub(crate) enum TurnSummary {
     Worked(u64),
     Interrupted,
 }
 
 /// Whether the collapse setting folds a settled turn's work away by default.
 /// Only the mode that names work does; the other two leave it on screen.
-pub(in crate::agent_tab) fn folds_turns(collapse: CollapseRows) -> bool {
+pub(crate) fn folds_turns(collapse: CollapseRows) -> bool {
     matches!(collapse, CollapseRows::WorkAndToolCalls)
 }
 
-pub(in crate::agent_tab) fn turn_summary(
-    interrupted: bool,
-    seconds: Option<u64>,
-) -> Option<TurnSummary> {
+pub(crate) fn turn_summary(interrupted: bool, seconds: Option<u64>) -> Option<TurnSummary> {
     if interrupted {
         Some(TurnSummary::Interrupted)
     } else {
@@ -203,7 +197,7 @@ pub(in crate::agent_tab) fn turn_summary(
 /// instead of hashing full text: O(1) per row per frame, and every real
 /// mutation (streamed append, status transition, exit code, expansion) moves
 /// at least one component.
-pub(in crate::agent_tab) fn entry_fingerprint(
+pub(crate) fn entry_fingerprint(
     item: &SessionItem,
     detail_expanded: bool,
     annotations_expanded: bool,
@@ -276,7 +270,7 @@ pub(in crate::agent_tab) fn entry_fingerprint(
 }
 
 impl TranscriptView {
-    pub(in crate::agent_tab) fn transcript_has_hidden_content_below(&self) -> bool {
+    pub(crate) fn transcript_has_hidden_content_below(&self) -> bool {
         should_show_jump_to_latest(
             self.transcript_list.is_following_tail(),
             self.transcript_list.is_scrolled_to_end(),
@@ -286,7 +280,7 @@ impl TranscriptView {
 
     /// Re-engaging tail mode also scrolls to the very end (past the last
     /// item), which stays correct while the last row is still growing.
-    pub(in crate::agent_tab) fn scroll_to_bottom(&self) {
+    pub(crate) fn scroll_to_bottom(&self) {
         self.transcript_list.set_follow_mode(FollowMode::Tail);
     }
 
@@ -294,13 +288,13 @@ impl TranscriptView {
     /// reader who was catching up on an earlier turn sees which direction the
     /// conversation moved instead of finding a different screen of text in
     /// front of them. The list takes the tail back once the slide lands.
-    pub(in crate::agent_tab) fn glide_to_bottom(&self) {
+    pub(crate) fn glide_to_bottom(&self) {
         self.transcript_list.scroll_to_end_smooth();
     }
 
     /// Append an item and the images it carries, which only a user message
     /// has any of.
-    pub(in crate::agent_tab) fn push(
+    pub(crate) fn push(
         &mut self,
         turn: u64,
         item: SessionItem,
@@ -332,7 +326,7 @@ impl TranscriptView {
     /// Render one turn: the opening prompt, the work disclosure and the rows
     /// it hides, the final reply, and last the "Worked for Ns" summary.
     /// Running turns render chronologically.
-    pub(in crate::agent_tab) fn entry_spec(&self, index: usize) -> RowSpec {
+    pub(crate) fn entry_spec(&self, index: usize) -> RowSpec {
         let fingerprint = entry_fingerprint(
             &self.conversation.borrow().content.entries()[index].item,
             self.disclosures.row_expanded(index),
@@ -351,7 +345,7 @@ impl TranscriptView {
         RowSpec::Entry { index, fingerprint }
     }
 
-    pub(in crate::agent_tab) fn work_spec(&self, index: usize) -> RowSpec {
+    pub(crate) fn work_spec(&self, index: usize) -> RowSpec {
         RowSpec::Work {
             index,
             fingerprint: entry_fingerprint(
@@ -366,7 +360,7 @@ impl TranscriptView {
     /// is the single source of truth for the transcript's structure; the
     /// virtualized list builds elements only for the visible slice of it.
     #[cfg(test)]
-    pub(in crate::agent_tab) fn build_row_specs(&self, collapse: CollapseRows) -> Vec<RowSpec> {
+    pub(crate) fn build_row_specs(&self, collapse: CollapseRows) -> Vec<RowSpec> {
         let mut rows = Vec::new();
         let mut start = 0;
         let shared = self.conversation.clone();
@@ -396,7 +390,7 @@ impl TranscriptView {
         rows
     }
 
-    pub(in crate::agent_tab) fn turn_specs(
+    pub(crate) fn turn_specs(
         &self,
         turn: u64,
         start: usize,
@@ -501,7 +495,7 @@ impl TranscriptView {
     /// consecutive work-log rows into a "+N tool calls" toggle (unless the
     /// collapse setting is off). Hidden entries are transparent: they neither
     /// render nor split a run.
-    pub(in crate::agent_tab) fn stream_specs(
+    pub(crate) fn stream_specs(
         &self,
         start: usize,
         end: usize,
@@ -575,7 +569,7 @@ impl TranscriptView {
     /// moved, because visible events can still arrive after it while the
     /// turn closes; everything between the prompt and that answer is what the
     /// fold hides.
-    pub(in crate::agent_tab) fn survives_fold(&self, index: usize) -> bool {
+    pub(crate) fn survives_fold(&self, index: usize) -> bool {
         let shared = self.conversation.clone();
         let conversation = shared.borrow();
         let items = conversation.content.entries();
@@ -611,7 +605,7 @@ impl TranscriptView {
     /// remeasuring, which preserves the scroll position exactly; a count
     /// change is a real splice.
     #[cfg(test)]
-    pub(in crate::agent_tab) fn sync_transcript_list(&mut self, new: Vec<RowSpec>) {
+    pub(crate) fn sync_transcript_list(&mut self, new: Vec<RowSpec>) {
         self.sync_transcript_tail(0, &new);
     }
 
@@ -680,7 +674,7 @@ impl TranscriptView {
     /// Name the branch point one transcript row points at, for the row's own
     /// menu. `None` where the row is not a prompt that opened a turn, which is
     /// a row no cut can be anchored on.
-    pub(in crate::agent_tab) fn prompt_target(&self, index: usize) -> Option<PromptTarget> {
+    pub(crate) fn prompt_target(&self, index: usize) -> Option<PromptTarget> {
         let conversation = self.conversation.borrow();
 
         let SessionItem::UserMessage { text: Some(prompt) } =
@@ -702,7 +696,7 @@ impl TranscriptView {
     /// names one: counted back from the newest turn-opening prompt, with the
     /// text confirming the count landed on the same message. `None` where the
     /// two disagree, which is a row the transcript should not be moved to.
-    pub(in crate::agent_tab) fn prompt_row(&self, target: &PromptTarget) -> Option<usize> {
+    pub(crate) fn prompt_row(&self, target: &PromptTarget) -> Option<usize> {
         let openings = turn_opening_prompts(self.conversation.borrow().content.entries());
         let index = *openings.get(openings.len().checked_sub(target.depth + 1)?)?;
 
@@ -730,7 +724,7 @@ impl TranscriptView {
     /// transcript, so a prompt revealed at the lower edge would be hidden
     /// behind the list naming it — and the turns the cut would discard are
     /// what the user is deciding about, which is what sits below it.
-    pub(in crate::agent_tab) fn scroll_to_prompt(
+    pub(crate) fn scroll_to_prompt(
         &self,
         target: &PromptTarget,
         smooth: bool,
@@ -765,7 +759,7 @@ impl TranscriptView {
     /// The newer hold replaces any older one: a picker that closed by cutting
     /// the conversation rather than by being cancelled leaves its own behind,
     /// and that position describes a conversation the user has since left.
-    pub(in crate::agent_tab) fn hold_for_picker(&mut self) {
+    pub(crate) fn hold_for_picker(&mut self) {
         self.stashed_position = Some(if self.transcript_list.is_following_tail() {
             ReadingPosition::Tail
         } else {
@@ -785,7 +779,7 @@ impl TranscriptView {
     /// on a prompt near the end is already outside the range an animation
     /// could start from; easing from where it lands after that would read as a
     /// jump followed by a slide.
-    pub(in crate::agent_tab) fn release_from_picker(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn release_from_picker(&mut self, cx: &mut Context<Self>) {
         self.reserve_below = false;
 
         match self.stashed_position.take() {

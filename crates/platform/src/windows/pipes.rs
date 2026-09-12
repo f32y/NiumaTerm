@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "pipes_tests.rs"]
+mod pipes_tests;
+
 use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::sync::Arc;
@@ -391,7 +395,3 @@ impl Drop for EventedAnonWrite {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "pipes_tests.rs"]
-mod pipes_tests;

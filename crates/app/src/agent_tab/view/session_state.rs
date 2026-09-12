@@ -15,10 +15,10 @@ use crate::agent_tab::AgentPane;
 /// governed by, which is the question the composer is asking. They are set and
 /// cleared together, and drawn nowhere else.
 #[derive(Default)]
-pub(in crate::agent_tab) struct SessionStateBadge;
+pub(crate) struct SessionStateBadge;
 
 impl SessionStateBadge {
-    pub(in crate::agent_tab) fn render(
+    pub(crate) fn render(
         &self,
         goal: &Option<GoalStatus>,
         plan_mode: bool,

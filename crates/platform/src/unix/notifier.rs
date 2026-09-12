@@ -1,4 +1,6 @@
-use crate::NativeNotification;
+#[cfg(target_os = "macos")]
+pub(crate) use crate::unix::notifier::platform::request_authorization;
+pub(crate) use crate::unix::notifier::platform::show;
 
 #[cfg(target_os = "macos")]
 mod platform {
@@ -12,7 +14,7 @@ mod platform {
         UNUserNotificationCenter,
     };
 
-    use super::NativeNotification;
+    use crate::NativeNotification;
 
     /// User notifications are delivered on behalf of a bundle identifier, so a
     /// binary run outside an application bundle has nothing to post them as and
@@ -70,7 +72,7 @@ mod platform {
     use zbus::blocking::{Connection, Proxy};
     use zbus::zvariant::Value;
 
-    use super::NativeNotification;
+    use crate::NativeNotification;
 
     pub(crate) fn show(notification: &NativeNotification) -> Result<(), String> {
         let Ok(connection) = Connection::session() else {
@@ -105,10 +107,6 @@ mod platform {
         Ok(())
     }
 }
-
-#[cfg(target_os = "macos")]
-pub(crate) use platform::request_authorization;
-pub(crate) use platform::show;
 
 pub(crate) fn remove(_tag: &str, _group: &str) -> Result<(), String> {
     Ok(())

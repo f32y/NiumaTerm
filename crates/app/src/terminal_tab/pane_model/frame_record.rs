@@ -3,7 +3,7 @@ use crate::terminal_tab::block_list::live::LiveItemLayout;
 use crate::terminal_tab::block_list::{FrozenItemChrome, FrozenView};
 
 /// The small hit-test record retained after the element keeps its shaped rows.
-pub(in crate::terminal_tab) struct FrameRecord {
+pub(crate) struct FrameRecord {
     pub(super) rows: Vec<(f32, usize, usize, u32)>,
     pub(super) separators: Vec<f32>,
     pub(super) chrome: Vec<FrozenItemChrome>,
@@ -11,7 +11,7 @@ pub(in crate::terminal_tab) struct FrameRecord {
 }
 
 impl FrameRecord {
-    pub(in crate::terminal_tab) fn from_view(view: &FrozenView, item_top: f32) -> Self {
+    pub(crate) fn from_view(view: &FrozenView, item_top: f32) -> Self {
         Self {
             rows: view
                 .rows
@@ -29,7 +29,7 @@ impl FrameRecord {
         }
     }
 
-    pub(in crate::terminal_tab) fn from_live_view(
+    pub(crate) fn from_live_view(
         view: &FrozenView,
         layout: &LiveItemLayout,
         item_top: f32,

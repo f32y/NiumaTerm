@@ -1,16 +1,17 @@
 //! Branch and rewind operations independent of picker widgets and executors.
 
+pub use crate::session::branch::local::{CheckpointRead, ForkRequest};
+
+mod local;
+mod protocol;
+
+#[cfg(test)]
+mod tests;
+
 use crate::chat::{ForkCheckpoint, ReplayTurn};
 use crate::claude_code::sessions::{ClaudeCheckpoint, ClaudeFork};
 use crate::session::lifecycle::{SessionRuntime, Status};
 use crate::session::{OperationError, RecoveryIdentity};
-
-mod local;
-mod protocol;
-#[cfg(test)]
-mod tests;
-
-pub use crate::session::branch::local::{CheckpointRead, ForkRequest};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PromptTarget {

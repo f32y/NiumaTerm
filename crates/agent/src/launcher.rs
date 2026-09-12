@@ -1,5 +1,9 @@
 //! Shared Windows launcher semantics for agent sessions and maintenance commands.
 
+#[cfg(test)]
+#[path = "launcher_tests.rs"]
+mod launcher_tests;
+
 use std::cmp::Reverse;
 use std::collections::VecDeque;
 use std::error::Error;
@@ -478,7 +482,3 @@ fn redact_common_credentials(text: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
-
-#[cfg(test)]
-#[path = "launcher_tests.rs"]
-mod launcher_tests;

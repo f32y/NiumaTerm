@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "client_tests.rs"]
+mod client_tests;
+
 use std::sync::mpsc as std_mpsc;
 use std::thread;
 use std::time::Duration;
@@ -14,10 +18,6 @@ use crate::protocol::{
     ProtocolSessionSnapshot, StaticKeypair,
 };
 use crate::{FrameChannel, NET_TIMEOUT, NetError, client_connect_ik, with_timeout};
-
-#[cfg(test)]
-#[path = "client_tests.rs"]
-mod client_tests;
 
 /// One remote session's byte stream as the terminal engine wants to consume
 /// it: opaque output bytes plus a terminal exit. Mirrors the hub's

@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "deadline_timer_tests.rs"]
+mod deadline_timer_tests;
+
 use std::sync::Arc;
 use std::time::Instant;
 use std::{io, thread};
@@ -88,7 +92,3 @@ impl Drop for DeadlineTimer {
         self.handle.stop();
     }
 }
-
-#[cfg(test)]
-#[path = "deadline_timer_tests.rs"]
-mod deadline_timer_tests;

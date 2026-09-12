@@ -1,3 +1,8 @@
+#[cfg(test)]
+#[cfg(all(test, enable_profiling))]
+#[path = "profiling_tests.rs"]
+mod profiling_tests;
+
 #[cfg(enable_profiling)]
 use std::time::Duration;
 
@@ -34,7 +39,3 @@ pub(crate) fn initialize(cx: &mut App) {
     #[cfg(not(enable_profiling))]
     let _ = cx;
 }
-
-#[cfg(all(test, enable_profiling))]
-#[path = "profiling_tests.rs"]
-mod profiling_tests;

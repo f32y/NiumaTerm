@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "input_tests.rs"]
+mod input_tests;
+
 use nmt_config::system::NewlineShortcut;
 use nmt_input::event::ElementState;
 use nmt_input::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
@@ -244,10 +248,6 @@ impl WheelDelta {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "input_tests.rs"]
-mod input_tests;
 
 impl From<&TerminalKey<'_>> for KeyInput {
     fn from(event: &TerminalKey<'_>) -> Self {

@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "context_usage_tests.rs"]
+mod context_usage_tests;
+
 use std::borrow::Cow;
 use std::cmp;
 use std::time::Duration;
@@ -497,7 +501,3 @@ impl RenderOnce for ContextUsageIndicator {
             })
     }
 }
-
-#[cfg(test)]
-#[path = "context_usage_tests.rs"]
-mod context_usage_tests;

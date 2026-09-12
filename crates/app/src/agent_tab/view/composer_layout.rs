@@ -4,7 +4,7 @@ use gpui_component::{ActiveTheme as _, h_flex, v_flex};
 
 /// Ordinary and Team conversations share the input card so font and spacing
 /// changes stay aligned with the transcript in both views.
-pub(in crate::agent_tab) fn composer_card(cx: &App) -> Div {
+pub(crate) fn composer_card(cx: &App) -> Div {
     v_flex()
         .w_full()
         .rounded(px(16.))
@@ -15,11 +15,11 @@ pub(in crate::agent_tab) fn composer_card(cx: &App) -> Div {
         .shadow_md()
 }
 
-pub(in crate::agent_tab) fn composer_input_row() -> Div {
+pub(crate) fn composer_input_row() -> Div {
     h_flex().w_full().px(px(10.)).pt_3().pb_1()
 }
 
-pub(in crate::agent_tab) fn composer_controls_row() -> Div {
+pub(crate) fn composer_controls_row() -> Div {
     h_flex()
         .w_full()
         .px(px(10.))

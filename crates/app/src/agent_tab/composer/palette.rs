@@ -25,10 +25,10 @@ use crate::agent_tab::{AgentPane, RecentSessionsMode};
 /// Tallest the palette grows before its own rows scroll: nine rows and the
 /// note under them. The transcript reads this as the height the picker covers
 /// when it floats over the bottom of the pane.
-pub(in crate::agent_tab) const PALETTE_MAX_HEIGHT: Pixels = px(9. * 48. + 36.);
+pub(crate) const PALETTE_MAX_HEIGHT: Pixels = px(9. * 48. + 36.);
 
 #[derive(Clone)]
-pub(in crate::agent_tab) enum PaletteAction {
+pub(crate) enum PaletteAction {
     Command(SlashCommandInfo),
     Choice { command: String, value: String },
     Skill(SkillInfo),
@@ -43,21 +43,21 @@ pub(in crate::agent_tab) enum PaletteAction {
 /// the translation catalogs borrows instead of copying, and text that is
 /// composed still reaches `child` without a second copy.
 #[derive(Clone)]
-pub(in crate::agent_tab) struct PaletteRow {
-    pub(in crate::agent_tab) label: SharedString,
-    pub(in crate::agent_tab) description: SharedString,
-    pub(in crate::agent_tab) hint: Option<SharedString>,
-    pub(in crate::agent_tab) disabled_reason: Option<SharedString>,
-    pub(in crate::agent_tab) action: PaletteAction,
+pub(crate) struct PaletteRow {
+    pub(crate) label: SharedString,
+    pub(crate) description: SharedString,
+    pub(crate) hint: Option<SharedString>,
+    pub(crate) disabled_reason: Option<SharedString>,
+    pub(crate) action: PaletteAction,
 }
 
-pub(in crate::agent_tab) struct PaletteModel {
-    pub(in crate::agent_tab) rows: Vec<PaletteRow>,
-    pub(in crate::agent_tab) note: Option<SharedString>,
+pub(crate) struct PaletteModel {
+    pub(crate) rows: Vec<PaletteRow>,
+    pub(crate) note: Option<SharedString>,
 }
 
 #[derive(Clone, Copy)]
-pub(in crate::agent_tab) enum PaletteControl {
+pub(crate) enum PaletteControl {
     Previous,
     Next,
     Activate,
@@ -80,7 +80,7 @@ impl PaletteControl {
 }
 
 impl AgentPane {
-    pub(in crate::agent_tab) fn open_recent_sessions(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(crate) fn open_recent_sessions(&mut self, cx: &mut Context<Self>) -> bool {
         if self.is_command_busy() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,
@@ -165,10 +165,7 @@ impl AgentPane {
         PaletteModel { rows, note }
     }
 
-    pub(in crate::agent_tab) fn palette_model(
-        &mut self,
-        cx: &Context<Self>,
-    ) -> Option<PaletteModel> {
+    pub(crate) fn palette_model(&mut self, cx: &Context<Self>) -> Option<PaletteModel> {
         match (&self.session.borrow().branch).into() {
             view @ (BranchView::LoadingRewind
             | BranchView::RewindCheckpoints(_)
@@ -381,7 +378,7 @@ impl AgentPane {
         Some(PaletteModel { rows, note })
     }
 
-    pub(in crate::agent_tab) fn handle_palette_control(
+    pub(crate) fn handle_palette_control(
         &mut self,
         control: PaletteControl,
         window: &mut Window,
@@ -544,7 +541,7 @@ impl AgentPane {
         cx.notify();
     }
 
-    pub(in crate::agent_tab) fn activate_palette_index(
+    pub(crate) fn activate_palette_index(
         &mut self,
         index: usize,
         execute: bool,
@@ -682,10 +679,7 @@ impl AgentPane {
         }
     }
 
-    pub(in crate::agent_tab) fn render_command_palette(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    pub(crate) fn render_command_palette(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let model = self.palette_model(cx)?;
 
         let selected = self

@@ -9,11 +9,7 @@ use nmt_agent::session::input::QuestionAction;
 use crate::agent_tab::execution::AgentSession;
 
 impl AgentSession {
-    pub(in crate::agent_tab) fn expire_optional_question(
-        &mut self,
-        index: usize,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn expire_optional_question(&mut self, index: usize, cx: &mut Context<Self>) {
         let (optional, key) = {
             let state = self.controller.borrow();
             let prompt = &state.input.batches()[index];

@@ -5,6 +5,10 @@
 //! NiumaTerm-owned entries in `~/.codex/hooks.json`, preserves unrelated
 //! values, and never rewrites a file that fails to parse.
 
+#[cfg(test)]
+#[path = "hook_tests.rs"]
+mod hook_tests;
+
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -176,7 +180,3 @@ fn write_hooks(hooks_path: &Path, settings: &Value) -> io::Result<()> {
 fn invalid(message: &str) -> io::Error {
     hook_store::invalid(message)
 }
-
-#[cfg(test)]
-#[path = "hook_tests.rs"]
-mod hook_tests;

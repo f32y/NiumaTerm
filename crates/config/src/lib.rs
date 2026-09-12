@@ -4,13 +4,18 @@ pub mod builtin_themes;
 pub mod colors;
 pub mod defaults;
 pub mod local_state;
-mod persistence;
+
 pub mod profile;
 pub mod remote_session;
 pub mod render_types;
 pub mod system;
 pub mod theme;
 pub mod update;
+
+mod persistence;
+
+#[cfg(test)]
+mod tests;
 
 use std::default::Default;
 use std::path::{Path, PathBuf};
@@ -490,9 +495,6 @@ pub(crate) fn ensure_explicit_table(doc: &mut DocumentMut, key: &str) {
         *item = Item::Table(previous.into_table().unwrap_or_default());
     }
 }
-
-#[cfg(test)]
-mod tests;
 
 impl From<CursorShape> for &'static str {
     fn from(value: CursorShape) -> Self {

@@ -1,9 +1,8 @@
-use std::io::Cursor;
-
 #[cfg(test)]
 #[path = "images_tests.rs"]
 mod images_tests;
 
+use std::io::Cursor;
 use std::ops::Range;
 
 use image_rs::GenericImageView as _;

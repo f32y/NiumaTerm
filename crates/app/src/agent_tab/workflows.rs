@@ -11,11 +11,12 @@
 //! conversation the user has open. That bound is the reason the poll is cheap
 //! enough to run every second regardless of how many agents a run fans out to.
 
+pub use nmt_agent::session::workflows::OpenWorkflowAgent;
+
 use std::cell::{Cell, Ref};
 use std::rc::Rc;
 
 use gpui::Context;
-pub use nmt_agent::session::workflows::OpenWorkflowAgent;
 use nmt_agent::session::workflows::WorkflowReader;
 use nmt_agent::workflow::WorkflowRun;
 
@@ -24,7 +25,7 @@ use crate::agent_tab::capabilities::AgentCapabilities as _;
 use crate::agent_tab::session::Backend;
 
 #[derive(Default)]
-pub(in crate::agent_tab) struct WorkflowUi {
+pub(super) struct WorkflowUi {
     visible: bool,
     reader: Option<WorkflowReader>,
     interest: Option<Rc<Cell<usize>>>,

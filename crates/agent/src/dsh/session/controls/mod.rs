@@ -1,5 +1,10 @@
 //! Bounded background execution of interactive control calls.
 
+mod results;
+
+#[cfg(test)]
+mod tests;
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -10,11 +15,6 @@ use serde_json::{Value, json};
 
 use crate::dsh::api::ApiClient;
 use crate::dsh::mapping::{ApprovalRequest, QuestionRequest};
-
-mod results;
-
-#[cfg(test)]
-mod tests;
 
 pub(super) const COMPLETED_FRAME: &str = "nmt/control-completed";
 const CALL_DEADLINE: Duration = Duration::from_secs(15);

@@ -1,6 +1,10 @@
 //! Fetches remaining Claude Code subscription limits through OAuth with an
 //! interactive Claude usage-panel fallback.
 
+#[cfg(test)]
+#[path = "usage_fetcher_tests.rs"]
+mod usage_fetcher_tests;
+
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{ErrorKind, Read, Write};
@@ -748,7 +752,3 @@ fn read_bounded_bytes(
 
     Ok(bytes)
 }
-
-#[cfg(test)]
-#[path = "usage_fetcher_tests.rs"]
-mod usage_fetcher_tests;

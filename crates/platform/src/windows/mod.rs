@@ -1,7 +1,3 @@
-pub(crate) use crate::windows::notifier::{remove, show};
-pub(crate) use crate::windows::powershell::{
-    build_hook_command, default_shell, hook_command_contains, prompt_integration,
-};
 pub use crate::windows::process_exit::wait_for_exit;
 pub use crate::windows::readiness::SoftReady;
 pub use crate::windows::shell_integration::{
@@ -9,9 +5,10 @@ pub use crate::windows::shell_integration::{
     shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
 };
 
-#[cfg(feature = "clipboard")]
-mod clipboard;
-pub(crate) mod library;
+pub(crate) use crate::windows::notifier::{remove, show};
+pub(crate) use crate::windows::powershell::{
+    build_hook_command, default_shell, hook_command_contains, prompt_integration,
+};
 
 pub mod data_protection;
 pub mod environment;
@@ -25,6 +22,11 @@ pub mod self_update;
 pub mod shell_extension;
 pub mod window;
 
+pub(crate) mod library;
+
+#[cfg(feature = "clipboard")]
+mod clipboard;
+
 mod child;
 mod conpty;
 mod notifier;
@@ -33,6 +35,9 @@ mod process_exit;
 mod readiness;
 mod shell_integration;
 mod spsc;
+
+#[cfg(test)]
+mod tests;
 
 use std::ffi::OsStr;
 use std::io::{self};
@@ -330,6 +335,3 @@ where
         .spawn()
         .map(|_| ())
 }
-
-#[cfg(test)]
-mod tests;

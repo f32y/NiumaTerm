@@ -15,7 +15,7 @@ use crate::agent_tab::settings::UI_RADIUS;
 /// Edge of a thumbnail. Large enough to recognize a screenshot by, small
 /// enough that a full message's worth of them does not push the composer off
 /// the pane.
-pub(in crate::agent_tab::composer) const THUMBNAIL: f32 = 56.0;
+pub(crate) const THUMBNAIL: f32 = 56.0;
 
 const ANNOTATION_WIDTH: f32 = 240.0;
 const ANNOTATION_PREVIEW_CHARS: usize = 160;
@@ -24,7 +24,7 @@ impl ComposerAttachments {
     /// The images the pending message carries, above the composer text they
     /// are anchored in. Absent while nothing is attached, so an ordinary
     /// message keeps the composer where it has always been.
-    pub(in crate::agent_tab) fn render(&self, cx: &mut Context<AgentPane>) -> Option<AnyElement> {
+    pub(crate) fn render(&self, cx: &mut Context<AgentPane>) -> Option<AnyElement> {
         if self.images().is_empty() && self.annotations().is_empty() {
             return None;
         }

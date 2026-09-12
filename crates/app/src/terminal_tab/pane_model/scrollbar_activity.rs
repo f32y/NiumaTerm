@@ -6,7 +6,7 @@ use crate::terminal_tab::scrollbar::geometry::scrollbar_opacity;
 /// and for a linger window after the last scroll, then fades out, so the drag
 /// flag and the activity clock have to be read together to paint a frame.
 #[derive(Default)]
-pub(in crate::terminal_tab) struct ScrollbarActivity {
+pub(crate) struct ScrollbarActivity {
     /// True while the scrollbar thumb is being dragged (mouse-move then scrolls
     /// to the pointer instead of selecting text).
     dragging: bool,
@@ -24,20 +24,20 @@ pub(in crate::terminal_tab) struct ScrollbarActivity {
 }
 
 impl ScrollbarActivity {
-    pub(in crate::terminal_tab) fn mark_activity(&mut self) -> u64 {
+    pub(crate) fn mark_activity(&mut self) -> u64 {
         self.last_activity = Some(time::Instant::now());
         self.activity_gen = self.activity_gen.wrapping_add(1);
 
         self.activity_gen
     }
 
-    pub(in crate::terminal_tab) fn should_fade(&self, generation: u64) -> bool {
+    pub(crate) fn should_fade(&self, generation: u64) -> bool {
         self.activity_gen == generation && !self.dragging
     }
 
     /// Start a thumb drag, remembering where inside the thumb the pointer
     /// landed as a track fraction.
-    pub(in crate::terminal_tab) fn begin_drag(&mut self, grab: f32) {
+    pub(crate) fn begin_drag(&mut self, grab: f32) {
         self.dragging = true;
         self.grab = grab;
     }
@@ -46,19 +46,19 @@ impl ScrollbarActivity {
         mem::take(&mut self.dragging)
     }
 
-    pub(in crate::terminal_tab) fn is_dragging(&self) -> bool {
+    pub(crate) fn is_dragging(&self) -> bool {
         self.dragging
     }
 
     /// Where the thumb top belongs for a pointer at `fraction` of the track,
     /// so the grabbed point stays under the pointer for the whole drag.
-    pub(in crate::terminal_tab) fn thumb_top_for(&self, fraction: f32) -> f32 {
+    pub(crate) fn thumb_top_for(&self, fraction: f32) -> f32 {
         fraction - self.grab
     }
 
     /// Opacity for this frame, or `None` once the bar has faded out completely
     /// and should not be painted at all.
-    pub(in crate::terminal_tab) fn opacity(&self) -> Option<f32> {
+    pub(crate) fn opacity(&self) -> Option<f32> {
         scrollbar_opacity(self.dragging, self.last_activity.map(|at| at.elapsed()))
     }
 }

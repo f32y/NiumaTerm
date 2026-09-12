@@ -1,63 +1,69 @@
-use gpui::prelude::*;
-use nmt_agent::session::ImageAttachment;
-use nmt_agent::session::controller::SubmissionBlock;
-use nmt_agent::session::delivery::{RecoverablePrompt, Submission};
-#[cfg(test)]
-use nmt_agent::session::naming::conversation_title_request as build_title_request;
-pub(in crate::agent_tab) use nmt_agent::session::restore::directories_match;
-use nmt_agent::transcript::conversation::ConversationImage;
+pub use nmt_agent::session::RecoveryIdentity;
+pub use nmt_agent::session::lifecycle::{
+    RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
+};
 
-use crate::agent_tab::capabilities::AgentCapabilities as _;
-use crate::agent_tab::execution::{AgentSession, PresentationEffect, SessionOwner};
-use crate::agent_tab::pane_state::TurnPresentation;
-use crate::agent_tab::profile::AgentKindExt as _;
-use crate::agent_tab::session::prompts::PendingPrompts;
-use crate::agent_tab::thread_controls::ThreadControls;
-use crate::agent_tab::view::session_state::SessionStateBadge;
+pub(super) use nmt_agent::session::Backend;
+pub(super) use nmt_agent::session::lifecycle::{Status, UpdateSuspension};
+pub(super) use nmt_agent::session::restore::directories_match;
+#[cfg(test)]
+pub(super) use nmt_agent::session::test_support::TestBackend;
+
+pub(super) mod errors;
+
+pub(super) mod history;
+pub(super) mod prompts;
+
+pub(super) mod turn;
 
 mod background_tasks;
 mod conversation;
-pub(in crate::agent_tab) mod errors;
+
 mod events;
-pub(in crate::agent_tab) mod history;
-pub(in crate::agent_tab) mod prompts;
+
 mod startup;
+
+mod update_recovery;
+
 #[cfg(test)]
 mod tests;
-pub(in crate::agent_tab) mod turn;
-mod update_recovery;
 
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
+use gpui::prelude::*;
 use gpui::{App, Context, Entity, Image, Window};
 use gpui_component::input::{InputEvent, TextareaState};
 use nmt_agent::chat::{Item as SessionItem, SkillReference};
-pub(super) use nmt_agent::session::Backend;
 #[cfg(test)]
 use nmt_agent::session::ConversationTitleRequest;
-pub use nmt_agent::session::RecoveryIdentity;
-pub use nmt_agent::session::lifecycle::{
-    RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
-};
-pub(super) use nmt_agent::session::lifecycle::{Status, UpdateSuspension};
+use nmt_agent::session::ImageAttachment;
+use nmt_agent::session::controller::SubmissionBlock;
+use nmt_agent::session::delivery::{RecoverablePrompt, Submission};
 #[cfg(test)]
-pub(in crate::agent_tab) use nmt_agent::session::test_support::TestBackend;
+use nmt_agent::session::naming::conversation_title_request as build_title_request;
+use nmt_agent::transcript::conversation::ConversationImage;
 use nmt_agent::{AgentEventKind, AgentRoute, AgentWorkspace, git};
 use nmt_config::profile::AgentProfile;
 use rust_i18n::t;
 
+use crate::agent_tab::capabilities::AgentCapabilities as _;
 use crate::agent_tab::commands::reconcile_skill_binding;
 use crate::agent_tab::composer::attachments::{ComposerAttachments, scratch_dir};
 use crate::agent_tab::composer::{
     BranchFlow, CommandFeedbackKind, prompt_with_response_annotations,
 };
+use crate::agent_tab::execution::{AgentSession, PresentationEffect, SessionOwner};
 use crate::agent_tab::fade::Fade;
 use crate::agent_tab::input_history::{InputHistoryNavigation, InputHistoryScope};
-use crate::agent_tab::profile::AgentKind;
+use crate::agent_tab::pane_state::TurnPresentation;
+use crate::agent_tab::profile::{AgentKind, AgentKindExt as _};
+use crate::agent_tab::session::prompts::PendingPrompts;
 use crate::agent_tab::settings::AgentSettings;
+use crate::agent_tab::thread_controls::ThreadControls;
 use crate::agent_tab::transcript::TranscriptView;
+use crate::agent_tab::view::session_state::SessionStateBadge;
 use crate::agent_tab::workflows::WorkflowUi;
 use crate::agent_tab::{
     AgentPane, AgentPaneEvent, GitBranchPoll, RecentSessionsMode, SessionHistoryUi, SlashPalette,
@@ -75,7 +81,7 @@ fn branch_label(cwd: &str, max_age: Duration) -> Option<String> {
     })
 }
 
-pub(in crate::agent_tab) fn directory_label(cwd: &str) -> String {
+pub(super) fn directory_label(cwd: &str) -> String {
     let parts: Vec<&str> = cwd
         .trim_end_matches(['/', '\\'])
         .split(['/', '\\'])
@@ -140,7 +146,7 @@ impl AgentPane {
         pane
     }
 
-    pub(in crate::agent_tab) fn attach_team_member(
+    pub(super) fn attach_team_member(
         owner: &SessionOwner,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -355,19 +361,19 @@ impl AgentPane {
 
     /// The tab's primary directory: where its process runs, what its provider
     /// session history is scoped to, and what a relative path resolves against.
-    pub(in crate::agent_tab) fn cwd(&self) -> Option<String> {
+    pub(super) fn cwd(&self) -> Option<String> {
         self.workspace.primary().map(str::to_string)
     }
 
     /// The directories this tab is currently configured with. A conversation
     /// started from now on receives these.
-    pub(in crate::agent_tab) fn configured_workspace(&self) -> &AgentWorkspace {
+    pub(super) fn configured_workspace(&self) -> &AgentWorkspace {
         &self.workspace
     }
 
     /// The directories the running conversation was started with.
     #[cfg(test)]
-    pub(in crate::agent_tab) fn active_workspace(&self) -> &AgentWorkspace {
+    pub(super) fn active_workspace(&self) -> &AgentWorkspace {
         &self.active_workspace
     }
 
@@ -403,13 +409,13 @@ impl AgentPane {
 
     /// Append one item to the conversation, tagged with the current turn so
     /// settled turns fold as one unit.
-    pub(in crate::agent_tab) fn push_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
+    pub(super) fn push_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
         self.push_item_with_images(item, Vec::new(), cx);
     }
 
     /// Append an item along with the images it carried, which only a sent
     /// user message has.
-    pub(in crate::agent_tab) fn push_item_with_images(
+    pub(super) fn push_item_with_images(
         &mut self,
         item: SessionItem,
         images: Vec<Arc<Image>>,

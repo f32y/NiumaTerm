@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "frames_tests.rs"]
+mod frames_tests;
+
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -233,7 +237,3 @@ fn read_u16(buf: &[u8]) -> Result<(u16, &[u8]), FrameError> {
 
     Ok((u16::from_le_bytes(head.try_into().unwrap()), rest))
 }
-
-#[cfg(test)]
-#[path = "frames_tests.rs"]
-mod frames_tests;

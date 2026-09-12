@@ -1,5 +1,9 @@
 //! Authenticated calls to the Harness Remote API.
 
+#[cfg(test)]
+#[path = "api_tests.rs"]
+mod api_tests;
+
 use std::time::Duration;
 
 use reqwest::blocking::Client;
@@ -11,10 +15,6 @@ use serde_json::{Value, json};
 use tungstenite::client::IntoClientRequest as _;
 use tungstenite::handshake::client::Request;
 use uuid::Uuid;
-
-#[cfg(test)]
-#[path = "api_tests.rs"]
-mod api_tests;
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 

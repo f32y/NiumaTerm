@@ -11,6 +11,10 @@
 //!
 //! Asking the user's login shell what it exports recovers those variables.
 
+#[cfg(test)]
+#[path = "login_shell_tests.rs"]
+mod login_shell_tests;
+
 use std::io::Read as _;
 use std::os::unix::process::CommandExt as _;
 use std::process::{Command, Stdio};
@@ -205,7 +209,3 @@ fn importable(
         .filter(|(name, _)| name == "PATH" || !is_set(name))
         .collect()
 }
-
-#[cfg(test)]
-#[path = "login_shell_tests.rs"]
-mod login_shell_tests;

@@ -3,14 +3,14 @@
 //! Every binary this workspace links carries one, and an updater uses it to
 //! decide whether a file on disk is already the one it was about to install.
 
+#[cfg(test)]
+#[path = "file_version_tests.rs"]
+mod file_version_tests;
+
 use std::ffi::{OsStr, c_void};
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::{ptr, slice};
-
-#[cfg(test)]
-#[path = "file_version_tests.rs"]
-mod file_version_tests;
 
 use windows_sys::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,

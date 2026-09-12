@@ -1,21 +1,21 @@
-use std::borrow::Cow;
-
-use nmt_agent::session::settings::ConversationSettings;
-
-mod defaults;
-pub(in crate::agent_tab) mod effort;
-
-pub(in crate::agent_tab) use crate::agent_tab::thread_controls::defaults::{
+pub(super) use crate::agent_tab::thread_controls::defaults::{
     launch_effort, launch_model, stored_thread_settings,
 };
 
+pub(super) mod effort;
+
+mod defaults;
+
 mod harness_rows;
+
+use std::borrow::Cow;
 
 use gpui::prelude::*;
 use gpui::{AnyElement, App, Context, Div, IntoElement, Pixels, SharedString, Stateful, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::{ActiveTheme as _, Icon, IconName, IconNamed, Sizable as _, h_flex};
+use nmt_agent::session::settings::ConversationSettings;
 use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
@@ -25,8 +25,8 @@ use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::thread_controls::effort::EffortGaugeIcon;
 
 /// Widget interaction state; the session owns settings and provider catalogs.
-pub(in crate::agent_tab) struct ThreadControls {
-    pub(in crate::agent_tab) effort_drag: Option<usize>,
+pub(super) struct ThreadControls {
+    pub(super) effort_drag: Option<usize>,
 }
 
 /// One composer setting, drawn as its own pill. Each pill opens its own menu
@@ -86,7 +86,7 @@ pub(super) const EFFORT_THUMB_INSET: Pixels = px(3.0);
 
 impl ThreadControls {
     /// The dropdown row under the input, per agent kind.
-    pub(in crate::agent_tab) fn render_row(
+    pub(super) fn render_row(
         &self,
         state: &ConversationSettings,
         kind: AgentKind,

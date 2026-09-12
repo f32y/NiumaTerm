@@ -31,7 +31,7 @@ pub(super) struct EffortGaugeIcon(pub(super) usize);
 /// cheapest still moves the needle off the empty face — that face is reserved
 /// for a session whose level has not been reported, which Claude never does
 /// until the user picks one.
-pub(in crate::agent_tab) fn effort_gauge_step(level: Option<usize>, stops: usize) -> usize {
+pub(crate) fn effort_gauge_step(level: Option<usize>, stops: usize) -> usize {
     let Some(level) = level.filter(|_| stops > 0) else {
         return 0;
     };

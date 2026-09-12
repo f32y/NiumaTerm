@@ -12,23 +12,32 @@
 //! and exposes the pane, its metrics, and its host events. Modules that only
 //! serve the pane internally stay private to this module.
 
-pub(in crate::terminal_tab) mod block_list;
-pub(in crate::terminal_tab) mod dirty;
-pub mod frame;
-pub(in crate::terminal_tab) mod graphics;
-pub(in crate::terminal_tab) mod layout;
-pub mod metrics;
-pub(in crate::terminal_tab) mod paint;
-pub(in crate::terminal_tab) mod scrollbar;
-
 pub use nmt_terminal::session;
 
-pub(in crate::terminal_tab) mod frame_source;
-pub(in crate::terminal_tab) mod pane_model;
+pub mod frame;
+
+pub mod metrics;
+
+pub mod settings;
+
+pub mod view;
+
+mod block_list;
+mod dirty;
+
+mod graphics;
+mod layout;
+
+mod paint;
+mod scrollbar;
+
+mod frame_source;
+mod pane_model;
+
+mod terminal_view;
+mod theme;
+
+mod wake;
+
 #[cfg(test)]
 mod remote_tests;
-pub mod settings;
-pub(in crate::terminal_tab) mod terminal_view;
-pub(in crate::terminal_tab) mod theme;
-pub mod view;
-pub(in crate::terminal_tab) mod wake;

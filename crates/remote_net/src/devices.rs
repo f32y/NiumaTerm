@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "devices_tests.rs"]
+mod devices_tests;
+
 use std::path::PathBuf;
 use std::{fs, io};
 
@@ -99,7 +103,3 @@ impl AuthorizedDevices {
         )
     }
 }
-
-#[cfg(test)]
-#[path = "devices_tests.rs"]
-mod devices_tests;

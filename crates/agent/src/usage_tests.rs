@@ -1,3 +1,5 @@
+use crate::usage::*;
+
 #[test]
 fn filling_adds_missing_windows_and_keeps_the_ones_already_read() {
     let panel = super::UsageSnapshot {
@@ -19,8 +21,6 @@ fn filling_adds_missing_windows_and_keeps_the_ones_already_read() {
     assert_eq!(filled.weekly, panel.weekly);
     assert_eq!(filled.fable_weekly, panel.fable_weekly);
 }
-
-use crate::usage::*;
 
 #[test]
 fn projects_available_and_missing_windows_for_compact_display() {

@@ -1,3 +1,9 @@
+mod drag;
+mod rows;
+
+#[cfg(test)]
+mod tests;
+
 use std::borrow::Cow;
 
 use app::agent_tab::AgentKind;
@@ -32,18 +38,12 @@ use crate::ui::sidebar_resize::{self, ResizeDrag};
 use crate::ui::tab_bar::{new_tab_menu, progress_visual};
 use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
 use crate::ui::token_usage::TokenUsageView;
-use crate::ui::{AppSettings, NewWorkspace, Shell, UI_RADIUS};
-use crate::window::WindowRegistry;
-use crate::workspace::{TerminalActivity, WorkspaceKind, WorkspaceSummary};
-
-mod drag;
-mod rows;
-#[cfg(test)]
-mod tests;
-
 use crate::ui::workspace_sidebar::drag::{
     SidebarTabDrag, SidebarTabDragPreview, WorkspaceDrag, WorkspaceDragPreview,
 };
+use crate::ui::{AppSettings, NewWorkspace, Shell, UI_RADIUS};
+use crate::window::WindowRegistry;
+use crate::workspace::{TerminalActivity, WorkspaceKind, WorkspaceSummary};
 
 /// Default expanded width of the workspace sidebar, in pixels; the user can
 /// drag the right edge to resize.

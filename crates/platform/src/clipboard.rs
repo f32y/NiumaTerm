@@ -1,6 +1,10 @@
 // clipboard.rs was retired originally from https://github.com/alacritty/alacritty/blob/e35e5ad14fce8456afdd89f2b392b9924bb27471/alacritty/src/clipboard.rs
 // which is licensed under Apache 2.0 license.
 
+#[cfg(test)]
+#[path = "clipboard_tests.rs"]
+mod clipboard_tests;
+
 use copypasta::ClipboardProvider;
 use copypasta::nop_clipboard::NopClipboardContext;
 use tracing::warn;
@@ -61,7 +65,3 @@ impl Clipboard {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "clipboard_tests.rs"]
-mod clipboard_tests;

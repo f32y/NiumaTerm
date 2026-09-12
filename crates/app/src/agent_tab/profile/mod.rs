@@ -1,9 +1,20 @@
+pub use nmt_agent::profile::{ANTHROPIC_MODEL_ENV, launch_env_value};
+pub use nmt_agent::session::AgentKind;
+
+#[cfg(test)]
+mod agent_profile_launch_tests;
+
 use std::collections::BTreeMap;
 
 use gpui::{Global, SharedString};
 use gpui_component::{Icon, IconNamed};
 use nmt_agent::LaunchConfig;
 use nmt_agent::chat::ThreadSettings;
+#[cfg(test)]
+use nmt_agent::profile::{
+    ANTHROPIC_SUB_MODEL_ENVS, CODEX_CREDENTIAL_ENV_PREFIX, DEEPSEEK_API_KEY_ENV,
+    DEEPSEEK_BASE_URL_ENV, OPENAI_API_KEY_ENV,
+};
 use nmt_agent::profile::{LaunchProfile, ProfileLauncher, agent_launch as build_launch};
 use nmt_agent::session::settings::RememberedSettings;
 use nmt_config::local_state::AgentDefaults as StoredAgentDefaults;
@@ -34,8 +45,6 @@ impl IconNamed for DeepSeekIcon {
         "icons/deepseek.svg".into()
     }
 }
-
-pub use nmt_agent::session::AgentKind;
 
 /// Application configuration and presentation for an agent kind.
 pub trait AgentKindExt {
@@ -74,13 +83,6 @@ impl AgentKindExt for AgentKind {
     }
 }
 
-pub use nmt_agent::profile::{ANTHROPIC_MODEL_ENV, launch_env_value};
-#[cfg(test)]
-use nmt_agent::profile::{
-    ANTHROPIC_SUB_MODEL_ENVS, CODEX_CREDENTIAL_ENV_PREFIX, DEEPSEEK_API_KEY_ENV,
-    DEEPSEEK_BASE_URL_ENV, OPENAI_API_KEY_ENV,
-};
-
 pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
     let source = LaunchProfile {
         kind: AgentKind::from_profile(profile.kind),
@@ -115,12 +117,9 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
 /// Codex threads. Loaded from local_state.toml at startup, saved after user
 /// changes, and included in the final quit snapshot.
 #[derive(Default)]
-pub struct AgentThreadDefaults(pub(in crate::agent_tab) RememberedSettings);
+pub struct AgentThreadDefaults(pub(super) RememberedSettings);
 
 impl Global for AgentThreadDefaults {}
-
-#[cfg(test)]
-mod agent_profile_launch_tests;
 
 impl From<&BTreeMap<String, StoredAgentDefaults>> for AgentThreadDefaults {
     fn from(stored: &BTreeMap<String, StoredAgentDefaults>) -> Self {

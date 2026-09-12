@@ -16,7 +16,7 @@ impl AgentSession {
     /// conversation surface the title-bar control at all — the view cannot be
     /// opened before the control exists, so waiting for it would strand every
     /// run recorded before this tab opened.
-    pub(in crate::agent_tab) fn restore_workflows(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn restore_workflows(&mut self, cx: &mut Context<Self>) {
         // A harness that reports its runs live replays them with the rest of
         // the conversation, so there is no stored record to go looking for.
         let source = self
@@ -105,7 +105,7 @@ impl AgentSession {
     }
 
     /// Start the poll when there is something to poll, stop it otherwise.
-    pub(in crate::agent_tab) fn sync_workflow_refresh(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn sync_workflow_refresh(&mut self, cx: &mut Context<Self>) {
         if !self.should_refresh_workflows() {
             self.workflow_refresh = None;
 
@@ -218,7 +218,7 @@ impl AgentSession {
     }
 
     /// Read the open conversation once, outside the tick cadence.
-    pub(in crate::agent_tab) fn read_open_workflow_agent(
+    pub(crate) fn read_open_workflow_agent(
         &mut self,
         task_id: &str,
         agent_id: &str,

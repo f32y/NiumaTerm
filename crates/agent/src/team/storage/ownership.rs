@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 
@@ -246,6 +249,3 @@ fn validate(record: &OwnershipRecord) -> Result<(), StorageError> {
 
     Ok(())
 }
-
-#[cfg(test)]
-mod tests;

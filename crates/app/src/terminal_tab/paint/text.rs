@@ -9,7 +9,7 @@ use crate::terminal_tab::metrics;
 
 /// Shape terminal lines with per-cell forced width, cached by the caller's
 /// key — the one shaping path for live-frame rows and frozen block rows.
-pub(in crate::terminal_tab) fn shape_lines<'a>(
+pub(crate) fn shape_lines<'a>(
     lines: impl Iterator<Item = (u64, &'a TerminalLine)>,
     cell_w: f32,
     window: &mut Window,
@@ -36,10 +36,7 @@ pub(in crate::terminal_tab) fn shape_lines<'a>(
 
 /// Build one styled `TextRun` per foreground run, inheriting font/size from the
 /// base run and overriding only the color. Run byte-lengths sum to the row text.
-pub(in crate::terminal_tab) fn terminal_text_runs(
-    line: &TerminalLine,
-    base: &TextRun,
-) -> Vec<TextRun> {
+pub(crate) fn terminal_text_runs(line: &TerminalLine, base: &TextRun) -> Vec<TextRun> {
     if line.runs().is_empty() {
         // Blank row: keep the single zero/whitespace run path GPUI already handles.
         let mut run = base.clone();
@@ -89,7 +86,7 @@ pub(in crate::terminal_tab) fn terminal_text_runs(
 /// Paint shaped glyph rows at caller-supplied element-local y offsets — the
 /// one glyph-paint convention (left-aligned, no wrap, cell-height lines) for
 /// live-frame rows and frozen block rows.
-pub(in crate::terminal_tab) fn paint_glyph_rows<'a>(
+pub(crate) fn paint_glyph_rows<'a>(
     bounds: Bounds<Pixels>,
     rows: impl Iterator<Item = (f32, &'a ShapedLine)>,
     cell_h: f32,
@@ -111,7 +108,7 @@ pub(in crate::terminal_tab) fn paint_glyph_rows<'a>(
 /// Paint one line's background color runs at an element-local pixel `y`,
 /// merging contiguous cells of equal background into single quads. Shared by
 /// the live grid and the frozen block rows.
-pub(in crate::terminal_tab) fn paint_line_backgrounds_at(
+pub(crate) fn paint_line_backgrounds_at(
     bounds: Bounds<Pixels>,
     line: &TerminalLine,
     y: f32,

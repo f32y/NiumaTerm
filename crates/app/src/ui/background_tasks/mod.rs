@@ -5,8 +5,12 @@
 //! to a row beyond the one operation a snapshot reports as available — a row
 //! offers Stop only while its adapter says that task can be stopped.
 
-mod detail;
 pub(super) mod rows;
+
+mod detail;
+
+#[cfg(test)]
+mod tests;
 
 use std::time::{Duration, SystemTime};
 
@@ -412,6 +416,3 @@ impl BackgroundTasksView {
             .into_any_element()
     }
 }
-
-#[cfg(test)]
-mod tests;

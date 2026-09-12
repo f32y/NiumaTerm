@@ -2,6 +2,10 @@
 //!
 //! The Windows mutex and Named Pipe implementation live in `nmt_platform`.
 
+#[cfg(test)]
+#[path = "ipc_tests.rs"]
+mod ipc_tests;
+
 use std::str;
 
 use futures::channel::mpsc::UnboundedSender;
@@ -66,7 +70,3 @@ fn parse_message(bytes: &[u8], expected_token: &str) -> Result<IpcAction, String
             .map_err(|_| "invalid nmt URL".into())
     }
 }
-
-#[cfg(test)]
-#[path = "ipc_tests.rs"]
-mod ipc_tests;

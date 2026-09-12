@@ -7,6 +7,10 @@
 //! fields. Reading both spellings from one parser keeps a resumed boundary as
 //! detailed as a live one.
 
+#[cfg(test)]
+#[path = "compaction_tests.rs"]
+mod compaction_tests;
+
 use serde_json::Value;
 
 use crate::chat::{Compaction, CompactionTrigger};
@@ -52,7 +56,3 @@ fn text(metadata: &Value, snake: &str, camel: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
 }
-
-#[cfg(test)]
-#[path = "compaction_tests.rs"]
-mod compaction_tests;

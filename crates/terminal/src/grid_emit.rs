@@ -5,6 +5,10 @@
 //! the old renderer path; the GPUI shell paints from `RenderBuffer` directly and
 //! needs only this row-selection helper.
 
+#[cfg(test)]
+#[path = "grid_emit_tests.rs"]
+mod grid_emit_tests;
+
 use crate::selection::SelectionRange;
 use crate::terminal::pos::Line;
 
@@ -67,7 +71,3 @@ pub fn row_selection_for(
         hi: hi.min(cols_max) as u16,
     })
 }
-
-#[cfg(test)]
-#[path = "grid_emit_tests.rs"]
-mod grid_emit_tests;

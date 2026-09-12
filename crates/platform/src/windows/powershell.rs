@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "powershell_tests.rs"]
+mod powershell_tests;
+
 use std::path::Path;
 use std::sync::OnceLock;
 use std::{env, fs, io};
@@ -159,7 +163,3 @@ fn decode_command_argument(command: &str) -> Option<String> {
 
     String::from_utf16(&units).ok()
 }
-
-#[cfg(test)]
-#[path = "powershell_tests.rs"]
-mod powershell_tests;

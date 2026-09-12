@@ -16,11 +16,7 @@ impl AgentPane {
     /// An empty title is refused here rather than sent, because a backend that
     /// normalizes it away answers the same refusal after a round trip and the
     /// composer would have discarded the line in the meantime.
-    pub(in crate::agent_tab) fn rename_conversation(
-        &mut self,
-        title: &str,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub(crate) fn rename_conversation(&mut self, title: &str, cx: &mut Context<Self>) -> bool {
         if !self.binding.is_current() {
             return false;
         }
@@ -73,11 +69,7 @@ impl AgentPane {
     /// The answer replaces the recent list, so the list is opened here and the
     /// arriving results land in a surface the user is already looking at
     /// rather than one they would have to go and find.
-    pub(in crate::agent_tab) fn search_conversations(
-        &mut self,
-        query: &str,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub(crate) fn search_conversations(&mut self, query: &str, cx: &mut Context<Self>) -> bool {
         if !self.binding.is_current() {
             return false;
         }
@@ -121,7 +113,7 @@ impl AgentPane {
     ///
     /// An empty result set keeps the list closed and says so, because opening
     /// an empty strip would read as a list that failed to load.
-    pub(in crate::agent_tab) fn show_search_results(
+    pub(crate) fn show_search_results(
         &mut self,
         results: Vec<SessionSummary>,
         cx: &mut Context<Self>,
@@ -153,11 +145,7 @@ impl AgentPane {
     /// The row stays until the backend confirms the removal: a message it has
     /// already claimed is one the transcript is about to show as sent, and
     /// removing the row first would make it look like it never went.
-    pub(in crate::agent_tab) fn remove_queued_prompt(
-        &mut self,
-        item_id: &str,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn remove_queued_prompt(&mut self, item_id: &str, cx: &mut Context<Self>) {
         if !self.binding.is_current() {
             return;
         }

@@ -1,6 +1,19 @@
-mod compaction_row;
+#[cfg(test)]
+pub(super) use crate::agent_tab::transcript::render::text_style::{
+    highlight_theme_for_surface, is_dark_surface, transcript_code_block_style,
+};
+
 pub(super) mod image_preview;
 pub(super) mod text_style;
+
+mod compaction_row;
+
+mod questions;
+mod user_row;
+mod work_row;
+
+#[cfg(test)]
+mod working_indicator_tests;
 
 use std::time::{Duration, Instant};
 
@@ -22,18 +35,10 @@ use crate::agent_tab::transcript::disclosure_row::{
     AgentDisclosureRow, agent_card,
 };
 use crate::agent_tab::transcript::format::{interrupted_status_label, worked_status_label};
-#[cfg(test)]
-pub(in crate::agent_tab) use crate::agent_tab::transcript::render::text_style::{
-    highlight_theme_for_surface, is_dark_surface, transcript_code_block_style,
-};
 use crate::agent_tab::transcript::render::text_style::{markdown_view, transcript_text_style};
 use crate::agent_tab::transcript::reveal::{Disclosures, RevealKey, revealed_block, revealed_part};
 use crate::agent_tab::transcript::rows::{RowGap, TranscriptRow, is_run_row, row_gap};
 use crate::agent_tab::transcript::{RowSpec, TranscriptView, is_work_row, working_label};
-
-mod questions;
-mod user_row;
-mod work_row;
 
 /// Edge of a transcript thumbnail, matching the composer strip so an image
 /// does not change size when the message it belongs to is sent.
@@ -73,7 +78,7 @@ const TRANSCRIPT_LOOSE_MARGIN: f32 = 40.0;
 /// line. Block layout hands the box its definite width straight down.
 ///
 /// With it off the column is the pane less a fixed margin each side.
-pub(in crate::agent_tab) fn transcript_column(body: impl IntoElement, cx: &App) -> Div {
+pub(crate) fn transcript_column(body: impl IntoElement, cx: &App) -> Div {
     if !cx.global::<AgentSettings>().human_friendly_layout {
         return div().w_full().px(px(TRANSCRIPT_LOOSE_MARGIN)).child(body);
     }
@@ -131,7 +136,7 @@ impl TranscriptView {
     /// Build the element for one visible row. Row indices come from the list
     /// element during layout/paint, resolved through the spec snapshot taken
     /// in the current render pass.
-    pub(in crate::agent_tab) fn render_row(
+    pub(crate) fn render_row(
         &mut self,
         ix: usize,
         window: &mut Window,
@@ -275,7 +280,7 @@ impl TranscriptView {
     /// The live progress line. While the backend is compacting it names that
     /// explicitly and spins: compaction produces no streamed output, so a bare
     /// seconds counter would read as a hung turn for as long as a minute.
-    pub(in crate::agent_tab) fn render_working_row(
+    pub(crate) fn render_working_row(
         &self,
         compacting: bool,
         cx: &mut Context<Self>,
@@ -376,7 +381,7 @@ impl TranscriptView {
             .into_any_element()
     }
 
-    pub(in crate::agent_tab) fn render_entry_row(
+    pub(crate) fn render_entry_row(
         &mut self,
         index: usize,
         window: &mut Window,
@@ -422,7 +427,7 @@ impl TranscriptView {
         }
     }
 
-    pub(in crate::agent_tab) fn render_agent_row(
+    pub(crate) fn render_agent_row(
         &self,
         index: usize,
         text: String,
@@ -485,7 +490,7 @@ impl TranscriptView {
             .into_any_element()
     }
 
-    pub(in crate::agent_tab) fn render_error_row(
+    pub(crate) fn render_error_row(
         &self,
         index: usize,
         text: String,
@@ -714,6 +719,3 @@ fn dot_pulse(delta: f32, index: usize) -> f32 {
 
     ease_in_out(pulse)
 }
-
-#[cfg(test)]
-mod working_indicator_tests;

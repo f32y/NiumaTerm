@@ -1,5 +1,11 @@
 //! Provider update registration, test isolation, and presentation reduction.
 
+pub(crate) use crate::agent_updates::notification::{
+    FocusedVisibleLifetime, NotificationPrimaryAction, NotificationProgress,
+    UpdateNotificationTone, UpdateNotificationView, notification_view,
+};
+pub(crate) use crate::agent_updates::transaction::{provider_for_profile, request_update};
+
 mod doubles;
 mod maintenance;
 mod notification;
@@ -28,13 +34,8 @@ use crate::agent_updates::doubles::{FakeMaintenance, UnavailableMaintenance};
 use crate::agent_updates::maintenance::{
     PreflightFailure, PreflightResolution, UpdateMode, resolve_preflight,
 };
-pub(crate) use crate::agent_updates::notification::{
-    FocusedVisibleLifetime, NotificationPrimaryAction, NotificationProgress,
-    UpdateNotificationTone, UpdateNotificationView, notification_view,
-};
 #[cfg(test)]
 use crate::agent_updates::transaction::{affected_installation_indices, combine_transaction_error};
-pub(crate) use crate::agent_updates::transaction::{provider_for_profile, request_update};
 use crate::ui::AppSettings;
 
 pub(crate) struct AgentUpdates {

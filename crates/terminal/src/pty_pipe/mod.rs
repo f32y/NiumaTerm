@@ -1,3 +1,19 @@
+pub use crate::pty_pipe::session::{OutputSink, SessionHandles, SessionOptions, start_session};
+pub use crate::pty_pipe::write_queue::PtyState;
+
+pub(crate) mod requests;
+
+mod marks;
+
+mod session;
+mod write_queue;
+
+#[cfg(test)]
+mod scrollback_tests;
+
+#[cfg(test)]
+mod ghostty_mirror_tests;
+
 use std::io::{self, ErrorKind, Read, Write};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{self, Arc, mpsc};
@@ -6,6 +22,10 @@ use std::{cell, error, fmt, path, time};
 
 #[cfg(target_os = "linux")]
 use libc::EIO;
+use nmt_platform::conpty_realign::{
+    is_conpty_resize_echo_input, is_conpty_resize_repaint, rewrite_conpty_resize_echo_cup_rows,
+    su_realign_count,
+};
 use nmt_platform::{ChildEvent, EventedPty, Events, Interest, Poll, Token, Waker};
 #[cfg(enable_profiling)]
 use nmt_profiling::pty::{BatchEnd, PtyProfiler, Stage};
@@ -14,25 +34,12 @@ use tracing::{error, warn};
 use crate::event::{self, EventListener, Msg, MsgSender, TerminalEvent, WindowId};
 use crate::ghostty::{self, GhosttyTerminal, mode};
 use crate::prompt_sniffer::PromptSniffer;
+use crate::pty_pipe::marks::{apply_sniffer_mark, engine_blocks_live_list};
 use crate::pty_pipe::requests::answer_query;
 use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
 use crate::session::request::{Checkpoint, RequestError};
 use crate::{terminal, vt_trace};
-
-mod marks;
-pub(crate) mod requests;
-mod session;
-mod write_queue;
-
-use nmt_platform::conpty_realign::{
-    is_conpty_resize_echo_input, is_conpty_resize_repaint, rewrite_conpty_resize_echo_cup_rows,
-    su_realign_count,
-};
-
-use crate::pty_pipe::marks::{apply_sniffer_mark, engine_blocks_live_list};
-pub use crate::pty_pipe::session::{OutputSink, SessionHandles, SessionOptions, start_session};
-pub use crate::pty_pipe::write_queue::PtyState;
 
 /// Reserved `Poll` token for the loop's `Waker`. PTY source tokens start above it.
 const WAKER_TOKEN: Token = Token(0);
@@ -1404,9 +1411,3 @@ where
         }
     }
 }
-
-#[cfg(test)]
-mod scrollback_tests;
-
-#[cfg(test)]
-mod ghostty_mirror_tests;

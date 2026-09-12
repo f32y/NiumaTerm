@@ -1,5 +1,9 @@
 //! Empty frame-statistics hooks for builds without performance collection.
 
+#[cfg(test)]
+#[path = "disabled_tests.rs"]
+mod tests;
+
 use std::time::Duration;
 
 /// No clock can exist without `enable_profiling`.
@@ -87,7 +91,3 @@ pub fn record_vsync_tick(_short_wait: bool) {}
 /// Records redraws the frame pump requested from armed windows on one tick.
 #[inline(always)]
 pub fn record_redraws_requested(_count: usize) {}
-
-#[cfg(test)]
-#[path = "disabled_tests.rs"]
-mod tests;

@@ -90,7 +90,7 @@ impl Budget {
             .saturating_sub(u32::from(report))
     }
 
-    pub(in crate::team) fn validate(&self) -> bool {
+    pub(super) fn validate(&self) -> bool {
         let needs_report = self.report_reserved
             && !self
                 .reservations
@@ -169,7 +169,7 @@ impl Budget {
         }
     }
 
-    pub(in crate::team) fn release_rejected(&mut self, id: AttemptId) -> Result<(), BudgetError> {
+    pub(super) fn release_rejected(&mut self, id: AttemptId) -> Result<(), BudgetError> {
         self.reservations
             .remove(&id)
             .ok_or(BudgetError::MissingAttempt)?;

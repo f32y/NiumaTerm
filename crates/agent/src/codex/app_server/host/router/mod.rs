@@ -6,6 +6,9 @@
 //! claimed it is held until the claim arrives, because the two orders are both
 //! legal and dropping the early traffic would lose the opening of a turn.
 
+#[cfg(test)]
+mod early_tests;
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -705,6 +708,3 @@ impl EarlyMessages {
         self.threads.clear();
     }
 }
-
-#[cfg(test)]
-mod early_tests;

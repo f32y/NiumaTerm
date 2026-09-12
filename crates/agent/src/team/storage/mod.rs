@@ -1,3 +1,18 @@
+pub use crate::team::storage::dispatch::DispatchError;
+
+pub mod ownership;
+
+mod attachments;
+mod dispatch;
+
+mod records;
+mod replay;
+
+mod validation;
+
+#[cfg(test)]
+mod tests;
+
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -8,17 +23,7 @@ use thiserror::Error;
 
 use crate::team::identity::RoomId;
 use crate::team::room::Room;
-pub use crate::team::storage::dispatch::DispatchError;
 use crate::team::storage::records::{Checkpoint, JournalRecord, RoomDelta, decode, encode};
-
-mod attachments;
-mod dispatch;
-pub mod ownership;
-mod records;
-mod replay;
-#[cfg(test)]
-mod tests;
-mod validation;
 
 const VERSION: u32 = 1;
 
@@ -147,7 +152,7 @@ impl RoomStore {
         &self.room
     }
 
-    pub(in crate::team) fn revision(&self) -> u64 {
+    pub(super) fn revision(&self) -> u64 {
         self.sequence
     }
 

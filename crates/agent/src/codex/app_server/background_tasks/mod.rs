@@ -8,6 +8,9 @@
 
 mod launch_messages;
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -884,6 +887,3 @@ fn unix_seconds(value: &Value, keys: &[&str]) -> Option<SystemTime> {
         .filter(|seconds| *seconds > 0)
         .map(|seconds| UNIX_EPOCH + Duration::from_secs(seconds))
 }
-
-#[cfg(test)]
-mod tests;

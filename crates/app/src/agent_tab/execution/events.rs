@@ -9,12 +9,7 @@ use crate::agent_tab::AgentPaneEvent;
 use crate::agent_tab::execution::AgentSession;
 
 impl AgentSession {
-    pub(in crate::agent_tab) fn apply_event(
-        &mut self,
-        epoch: u64,
-        event: Event,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn apply_event(&mut self, epoch: u64, event: Event, cx: &mut Context<Self>) {
         if self.is_closed() || !self.controller.borrow().runtime.is_current(epoch) {
             return;
         }
@@ -93,7 +88,7 @@ impl AgentSession {
         self.advance_commands(cx);
     }
 
-    pub(in crate::agent_tab) fn advance_commands(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn advance_commands(&mut self, cx: &mut Context<Self>) {
         if self.is_closed() {
             return;
         }
@@ -232,7 +227,7 @@ impl AgentSession {
         }
     }
 
-    pub(in crate::agent_tab) fn emit_lifecycle(
+    pub(crate) fn emit_lifecycle(
         &self,
         kind: AgentEventKind,
         title: &str,

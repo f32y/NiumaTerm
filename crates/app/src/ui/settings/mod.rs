@@ -3,6 +3,28 @@
 //! workspace is left or closed. Field edits mutate the global live for preview;
 //! failed writes retain those edits and expose a retry action.
 
+pub use crate::ui::settings::state::{
+    AgentProfile, AgentProfileKind, AgentProfileLauncher, AppSettings, CollapseRows, EnvVar,
+    InputStyle, MIN_TAB_WIDTH, ModelListStyle, Profile, TabBarStyle, WindowBackdrop,
+};
+
+pub(crate) use crate::ui::settings::opacity::{
+    background_image_layer_opacity, main_view_background_opacity, window_background_appearance,
+};
+#[cfg(windows)]
+pub(crate) use crate::ui::settings::remote_session_page::reconcile_remote_host;
+pub(crate) use crate::ui::settings::state::builtin_agent_profile;
+#[cfg(test)]
+pub(crate) use crate::ui::settings::state::{
+    DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_UI_FONT,
+};
+pub(crate) use crate::ui::settings::terminal_bridge::{
+    install_agent_settings, install_terminal_settings,
+};
+pub(crate) use crate::ui::settings::theme::{
+    apply_ui_theme, apply_window_translucency, watch_themes,
+};
+
 mod about_page;
 mod agent_page;
 mod agent_profile_dialog;
@@ -20,6 +42,9 @@ mod table;
 mod terminal_bridge;
 mod terminal_page;
 mod theme;
+
+#[cfg(test)]
+mod tests;
 
 use std::{io, path};
 
@@ -79,9 +104,6 @@ use crate::ui::settings::card::{card_row, card_text_input, description_hint};
 use crate::ui::settings::fields::{
     background_image_field, background_image_opacity_field, background_opacity_field,
 };
-pub(crate) use crate::ui::settings::opacity::{
-    background_image_layer_opacity, main_view_background_opacity, window_background_appearance,
-};
 #[cfg(test)]
 use crate::ui::settings::opacity::{
     effective_background_image_layer_opacity, effective_background_opacity,
@@ -90,24 +112,13 @@ use crate::ui::settings::opacity::{
 };
 use crate::ui::settings::profiles_page::profiles_page;
 #[cfg(windows)]
-pub(crate) use crate::ui::settings::remote_session_page::reconcile_remote_host;
-#[cfg(windows)]
 use crate::ui::settings::remote_session_page::remote_session_page;
-pub(crate) use crate::ui::settings::state::builtin_agent_profile;
-pub use crate::ui::settings::state::{
-    AgentProfile, AgentProfileKind, AgentProfileLauncher, AppSettings, CollapseRows, EnvVar,
-    InputStyle, MIN_TAB_WIDTH, ModelListStyle, Profile, TabBarStyle, WindowBackdrop,
-};
 #[cfg(test)]
 use crate::ui::settings::state::{
     DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE, DEFAULT_BACKGROUND_IMAGE_OPACITY, DEFAULT_TAB_WIDTH,
     clamp_agent_transcript_font_size, clamp_background_image_opacity, clamp_background_opacity,
     clamp_terminal_font_size, clamp_terminal_line_height, terminal_font_or_default,
     ui_font_or_default,
-};
-#[cfg(test)]
-pub(crate) use crate::ui::settings::state::{
-    DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_UI_FONT,
 };
 use crate::ui::settings::state::{
     agent_kind_display_label, clamp_git_interval, clamp_tab_width, input_style_label,
@@ -116,16 +127,10 @@ use crate::ui::settings::system_page::system_page;
 use crate::ui::settings::table::{
     ENV_OPERATION_COLUMN, TABLE_OPERATION_BUTTON, TrashIcon, table_frame, table_header, table_row,
 };
-pub(crate) use crate::ui::settings::terminal_bridge::{
-    install_agent_settings, install_terminal_settings,
-};
 use crate::ui::settings::terminal_page::terminal_page;
 #[cfg(test)]
 use crate::ui::settings::theme::tab_background_opacity;
 use crate::ui::settings::theme::theme_list;
-pub(crate) use crate::ui::settings::theme::{
-    apply_ui_theme, apply_window_translucency, watch_themes,
-};
 use crate::{agent_updates, ui};
 
 const APP_VERSION: &str = env!("NIUMATERM_VERSION");
@@ -215,6 +220,3 @@ pub fn settings_view(cx: &App) -> Settings {
 
     settings.page(about_page())
 }
-
-#[cfg(test)]
-mod tests;

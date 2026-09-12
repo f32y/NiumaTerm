@@ -49,7 +49,7 @@ struct RawLanguageDescriptor {
     locals: RawSlice,
 }
 
-pub(crate) fn register_languages() -> Result<usize> {
+pub fn register_languages() -> Result<usize> {
     let path = get_exe_dir().join(BUNDLE_FILE);
 
     // The installed bundle is trusted executable code, and its parser tables

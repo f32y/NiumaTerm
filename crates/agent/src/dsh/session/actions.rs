@@ -482,7 +482,7 @@ impl Drop for Session {
 const CLOSE_CALL_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::dsh) enum CloseAction {
+pub(crate) enum CloseAction {
     RemoveQueued(String),
     CancelTurn,
 }
@@ -490,7 +490,7 @@ pub(in crate::dsh) enum CloseAction {
 /// Apply the remote work needed before a tab forgets its session. Queue entries
 /// are removed before the active turn is cancelled because the Harness keeps
 /// its inbox on cancellation and would otherwise start another invisible turn.
-pub(in crate::dsh) fn run_close_actions(
+pub(crate) fn run_close_actions(
     client: &ApiClient,
     session_id: &str,
     actions: &[CloseAction],

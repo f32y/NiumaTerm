@@ -1,9 +1,9 @@
-/// The `mio` types this crate's `ProcessReadWrite`/`EventedPty` surface is built
-/// on, re-exported so consumers drive the PTY event loop through
-/// `nmt_platform::{Poll, ...}` without taking their own (possibly mismatched)
-/// `mio` dependency.
-use libc::c_ushort;
 pub use mio::{Events, Interest, Poll, Token, Waker};
+
+#[cfg(not(windows))]
+pub use crate::unix::*;
+#[cfg(windows)]
+pub use crate::windows::*;
 
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
@@ -16,23 +16,24 @@ pub mod clipboard;
 pub mod conpty_realign;
 pub mod library;
 
-#[cfg(not(windows))]
-mod unix;
-
-#[cfg(not(windows))]
-use crate::unix as platform;
-#[cfg(not(windows))]
-pub use crate::unix::*;
-
 #[cfg(windows)]
 pub mod windows;
 
+#[cfg(not(windows))]
+mod unix;
+
 use std::{io, sync};
 
+/// The `mio` types this crate's `ProcessReadWrite`/`EventedPty` surface is built
+/// on, re-exported so consumers drive the PTY event loop through
+/// `nmt_platform::{Poll, ...}` without taking their own (possibly mismatched)
+/// `mio` dependency.
+use libc::c_ushort;
+
+#[cfg(not(windows))]
+use crate::unix as platform;
 #[cfg(windows)]
 use crate::windows as platform;
-#[cfg(windows)]
-pub use crate::windows::*;
 
 /// Borrowed launch settings shared by local sessions and background PTYs.
 #[derive(Clone, Copy)]

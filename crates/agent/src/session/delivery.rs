@@ -1,5 +1,9 @@
 //! User-message admission, confirmation, and recovery independent of presentation.
 
+#[cfg(test)]
+#[path = "delivery_tests.rs"]
+mod delivery_tests;
+
 use std::collections::VecDeque;
 
 use crate::chat::{QueuedPrompt, SendOutcome, SkillReference};
@@ -279,7 +283,3 @@ impl MessageDelivery {
         self.confirmed = 0;
     }
 }
-
-#[cfg(test)]
-#[path = "delivery_tests.rs"]
-mod delivery_tests;

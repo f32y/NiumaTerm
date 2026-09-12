@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "persistence_tests.rs"]
+mod persistence_tests;
+
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write as _};
 use std::path::Path;
@@ -63,7 +67,3 @@ pub(crate) fn update(
 
     replace_file(&temporary, path)
 }
-
-#[cfg(test)]
-#[path = "persistence_tests.rs"]
-mod persistence_tests;

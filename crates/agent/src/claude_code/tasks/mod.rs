@@ -24,6 +24,9 @@ mod observe;
 mod records;
 mod shells;
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::{HashMap, VecDeque};
 use std::mem::take;
 use std::time::SystemTime;
@@ -377,9 +380,6 @@ impl ClaudeTasks {
         registry.apply(BackgroundTaskKey::claude_code(canonical), update)
     }
 }
-
-#[cfg(test)]
-mod tests;
 
 // Identifier aliases for one session.
 //

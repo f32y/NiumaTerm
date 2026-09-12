@@ -35,7 +35,7 @@ use crate::agent_tab::transcript::{TranscriptView, entry_copy_text, truncated_us
 
 impl TranscriptView {
     /// Hover-revealed timestamp; the row declares `.group("entry")`.
-    pub(in crate::agent_tab) fn hover_stamp(&self, index: usize, cx: &mut Context<Self>) -> Div {
+    pub(crate) fn hover_stamp(&self, index: usize, cx: &mut Context<Self>) -> Div {
         div()
             .flex_none()
             .text_xs()
@@ -52,7 +52,7 @@ impl TranscriptView {
             )
     }
 
-    pub(in crate::agent_tab) fn copy_menu(
+    pub(crate) fn copy_menu(
         pane: gpui::WeakEntity<Self>,
         index: usize,
     ) -> impl Fn(ModernMenu, &mut Window, &mut App) -> ModernMenu + 'static {
@@ -144,7 +144,7 @@ impl TranscriptView {
     /// a visible row re-lays-out its full text every frame, so an unbounded
     /// prompt would make every frame O(paste size). Expansion is an explicit
     /// per-row choice, and the right-click Copy always carries the full text.
-    pub(in crate::agent_tab) fn render_user_row(
+    pub(crate) fn render_user_row(
         &self,
         index: usize,
         text: &str,

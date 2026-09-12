@@ -1,11 +1,13 @@
+pub(super) mod geometry;
+
+#[cfg(test)]
+mod tests;
+
 use gpui::prelude::*;
 use gpui::{
     Context, Div, DragMoveEvent, Empty, MouseButton, MouseDownEvent, Stateful, div, px, relative,
 };
 use gpui_component::ActiveTheme;
-
-pub(in crate::terminal_tab) mod geometry;
-
 use nmt_terminal::ghostty::ScrollbarInfo;
 
 use crate::terminal_tab::scrollbar::geometry::scrollbar_thumb_geometry;
@@ -71,6 +73,3 @@ pub(super) fn scrollbar_element(
             ),
     )
 }
-
-#[cfg(test)]
-mod tests;

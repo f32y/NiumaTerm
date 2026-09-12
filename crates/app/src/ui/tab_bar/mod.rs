@@ -1,3 +1,12 @@
+pub(super) use crate::ui::tab_bar::menu::new_tab_menu;
+
+pub(super) mod menu;
+
+mod drag;
+
+#[cfg(test)]
+mod tests;
+
 use std::{cell, collections, rc};
 
 use app::agent_tab::AgentKind;
@@ -20,17 +29,10 @@ use crate::ui::composition::{
 use crate::ui::shell::{
     InlineRename, InlineRenameSession, InlineRenameStyle, TabSurface, pending_tab_icon,
 };
+use crate::ui::tab_bar::drag::{TabDrag, TabDragPreview};
 use crate::ui::terminal_status::{TerminalVisual, terminal_dot, terminal_presentation};
 use crate::ui::{AppSettings, Shell, UI_RADIUS, modern_dropdown};
 use crate::workspace::TerminalActivity;
-
-mod drag;
-pub(super) mod menu;
-#[cfg(test)]
-mod tests;
-
-use crate::ui::tab_bar::drag::{TabDrag, TabDragPreview};
-pub(super) use crate::ui::tab_bar::menu::new_tab_menu;
 
 pub(super) struct TabStrip {
     /// Scroll position of the tab strip (tabs overflow horizontally once their

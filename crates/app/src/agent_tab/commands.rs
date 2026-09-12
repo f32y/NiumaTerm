@@ -1,13 +1,18 @@
 //! Pure slash-command parsing and catalog logic for the agent composer.
 
+pub(super) use nmt_agent::catalog::{
+    merge_catalog, parse_skill_prefix, parse_slash_command, reconcile_skill_binding,
+};
+
+#[cfg(test)]
+#[path = "commands_tests.rs"]
+mod commands_tests;
+
 use std::borrow::Cow;
 
 use nmt_agent::catalog::{
     ChoiceError, SkillError, prepare_skill_selection as prepare_core_skill_selection,
     resolve_choice as resolve_core_choice, validate_skill_binding as validate_core_skill_binding,
-};
-pub(super) use nmt_agent::catalog::{
-    merge_catalog, parse_skill_prefix, parse_slash_command, reconcile_skill_binding,
 };
 use nmt_agent::chat::{
     SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo,
@@ -276,7 +281,3 @@ pub(super) fn move_palette_selection(
         PaletteDirection::Next => (current + 1) % row_count,
     })
 }
-
-#[cfg(test)]
-#[path = "commands_tests.rs"]
-mod commands_tests;

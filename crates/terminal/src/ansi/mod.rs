@@ -1,11 +1,11 @@
-use bitflags::bitflags;
-
-pub mod kitty_virtual;
-
 // CursorShape moved to the `config` crate (it is a deserialized config value);
 // re-exported here so `nmt_terminal::ansi::CursorShape` and `crate::ansi::CursorShape`
 // keep working.
 pub use nmt_config::CursorShape;
+
+pub mod kitty_virtual;
+
+use bitflags::bitflags;
 
 bitflags! {
     /// A set of [`kitty keyboard protocol'] modes.

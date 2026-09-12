@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "links_tests.rs"]
+mod links_tests;
+
 use std::ops::Range;
 
 use nmt_input::keyboard::ModifiersState;
@@ -177,7 +181,3 @@ pub fn follows_link(modifiers: ModifiersState) -> bool {
 
     modifiers == expected
 }
-
-#[cfg(test)]
-#[path = "links_tests.rs"]
-mod links_tests;

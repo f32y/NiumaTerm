@@ -7,6 +7,10 @@
 //! old files mapped — this one, and Explorer for the context-menu extension —
 //! keeps running from the renamed file until it exits.
 
+#[cfg(test)]
+#[path = "install_tests.rs"]
+mod install_tests;
+
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -233,7 +237,3 @@ pub(crate) fn relaunch(install: &Path, testing: bool) -> Result<(), InstallError
         InstallError::Relaunch
     })
 }
-
-#[cfg(test)]
-#[path = "install_tests.rs"]
-mod install_tests;

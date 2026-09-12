@@ -7,6 +7,10 @@
 //! pane owns the run model and the refresh; this component only reads it and
 //! never drives a run.
 
+#[cfg(test)]
+#[path = "workflows_tests.rs"]
+mod workflows_tests;
+
 use app::agent_tab::AgentPane;
 use app::agent_tab::transcript::TranscriptView;
 use gpui::prelude::*;
@@ -557,7 +561,3 @@ fn run_totals(run: &WorkflowRun) -> String {
 
     parts.join(" · ")
 }
-
-#[cfg(test)]
-#[path = "workflows_tests.rs"]
-mod workflows_tests;
