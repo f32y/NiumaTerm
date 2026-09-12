@@ -8,10 +8,10 @@
 //! one modifier for the other would produce Cmd-Shift-T for a new tab, which is
 //! not what any macOS application does.
 
-use gpui::{App, KeyBinding};
-use nmt_terminal_ui::view::{
+use app::terminal_tab::view::{
     CopyBlockCommand, CopyBlockOutput, NextBlock, PreviousBlock, RerunBlock, SendShiftTab, SendTab,
 };
+use gpui::{App, KeyBinding};
 
 #[cfg(target_os = "macos")]
 use crate::menu::{Hide, HideOthers, Minimize, Quit};

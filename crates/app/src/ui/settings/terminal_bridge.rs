@@ -8,9 +8,9 @@
 //! path. Panes observe their snapshot global, which puts the rebuild ahead
 //! of their reaction by construction.
 
+use app::agent_tab::settings::AgentSettings;
+use app::terminal_tab::settings::{TerminalSettings, theme_default_background};
 use gpui::{App, rgb};
-use nmt_agent_ui::settings::AgentSettings;
-use nmt_terminal_ui::settings::{TerminalSettings, theme_default_background};
 
 use crate::ui::settings::opacity::main_view_background_opacity;
 use crate::ui::settings::state::AppSettings;

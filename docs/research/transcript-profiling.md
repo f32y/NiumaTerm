@@ -23,8 +23,8 @@ The `nmt_profiling` crate owns allocation counting, transcript operation totals,
 and NiumaTerm's per-second frame statistics. It does not depend on GPUI.
 GPUI re-exports the frame-statistics interface for the existing NiumaTerm probes;
 both the application and those probes use the same counters. Transcript content
-and its update rules remain in the existing Agent crates. The application owns
-the reporting timer and shutdown callback.
+and its update rules live in `nmt_agent` and `app::agent_tab`. The application
+owns the reporting timer and shutdown callback.
 
 Upstream task/action/window profilers, hang detection, journal collection, and
 GPUI/GPUI Kit measurement helpers remain in their original libraries with their
@@ -104,7 +104,7 @@ They must install `ProfilingAllocator` and enable it to obtain allocation sample
 The ignored test uses the same update methods as the UI with synthetic data:
 
 ```powershell
-.\scripts\profiling.ps1 test -p nmt_agent_ui --release --lib transcript::profiling_tests::long_transcript_profile '--' --ignored --exact --nocapture --test-threads=1
+.\scripts\profiling.ps1 test -p app --release --lib agent_tab::transcript::profiling_tests::long_transcript_profile '--' --ignored --exact --nocapture --test-threads=1
 ```
 
 Quote `'--'` when passing test-runner arguments through PowerShell scripts.
@@ -311,14 +311,14 @@ outside the measurement.
 
 The measured sequence contains:
 
-1. `TranscriptView::append_delta` in [view.rs](../../crates/agent_ui/src/transcript/view.rs):
+1. `TranscriptView::append_delta` in [view/mod.rs](../../crates/app/src/agent_tab/transcript/view/mod.rs):
    `TranscriptContent::append_delta` looks up the message ID, selects the reasoning
    field, appends text, and checks whether the resulting text is non-blank. The
    view then invalidates the affected code and row caches.
-2. `TranscriptView::refresh_rows` in [incremental/mod.rs](../../crates/agent_ui/src/transcript/incremental/mod.rs):
+2. `TranscriptView::refresh_rows` in [incremental.rs](../../crates/app/src/agent_tab/transcript/incremental.rs):
    locate the earliest changed turn, preserve the unchanged prefix, reconsider
    the preceding row's spacing, and regenerate the affected row specifications.
-3. Row generation and `sync_transcript_tail` in [rows.rs](../../crates/agent_ui/src/transcript/rows.rs):
+3. Row generation and `sync_transcript_tail` in [rows.rs](../../crates/app/src/agent_tab/transcript/rows.rs):
    classify entries, calculate row fingerprints and spacing, compare the changed
    suffix, and update the virtual list's cached measurement state as needed.
    Actual text layout and painting are not part of this timing.
@@ -335,7 +335,7 @@ stage time: they come from separate fixtures and timing batches.
 `background-snapshot-changed=true/512` times 20 synchronizations of a 512-entry
 background-agent detail conversation. Each synchronization advances the source
 revision while leaving the message values unchanged. Its measured sequence in
-[profiling/tests.rs](../../crates/agent_ui/src/transcript/profiling/tests.rs) is:
+[profiling/tests.rs](../../crates/app/src/agent_tab/transcript/profiling/tests.rs) is:
 
 1. Clone the source entries into a temporary snapshot, before any revision check.
 2. Call `TranscriptView::show_items`: accept the new revision, invalidate display

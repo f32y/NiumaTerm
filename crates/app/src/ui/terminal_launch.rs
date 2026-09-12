@@ -1,10 +1,10 @@
+use app::terminal_tab::settings::TerminalSettings;
+use app::terminal_tab::view::{TerminalLaunch, TerminalPane};
 use gpui::{AppContext, Entity};
 use nmt_agent::agent_process;
 use nmt_config::local_state::TabState;
 use nmt_remote_net::net_pty::terminal_session;
 use nmt_terminal::session::TerminalSessionConfig;
-use nmt_terminal_ui::settings::TerminalSettings;
-use nmt_terminal_ui::view::{TerminalLaunch, TerminalPane};
 
 pub(super) fn spawn_pane(
     cx: &mut impl AppContext,

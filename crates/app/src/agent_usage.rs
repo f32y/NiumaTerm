@@ -1,13 +1,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use app::agent_tab::profile::{ClaudeIcon, CodexIcon};
 use gpui::prelude::*;
 use gpui::{AnyElement, App, Context, FontWeight, Hsla, Window, div, px, relative};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::hover_card::HoverCard;
 use gpui_component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use nmt_agent::usage::{UsageSnapshot, UsageWindow, now_unix_millis};
-use nmt_agent_ui::profile::{ClaudeIcon, CodexIcon};
 use nmt_i18n::i18n;
 use tracing::warn;
 

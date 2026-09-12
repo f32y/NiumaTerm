@@ -7,13 +7,13 @@
 //! pane owns the run model and the refresh; this component only reads it and
 //! never drives a run.
 
+use app::agent_tab::AgentPane;
+use app::agent_tab::transcript::TranscriptView;
 use gpui::prelude::*;
 use gpui::{AnyElement, Context, Entity, Hsla, ScrollHandle, WeakEntity, Window, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::{ActiveTheme as _, IconName, Sizable as _, StyledExt as _, h_flex, v_flex};
 use nmt_agent::workflow::{WorkflowAgent, WorkflowAgentState, WorkflowRun, WorkflowRunState};
-use nmt_agent_ui::AgentPane;
-use nmt_agent_ui::transcript::TranscriptView;
 use nmt_i18n::i18n;
 use nmt_profiling::transcript::{Operation, Probe};
 

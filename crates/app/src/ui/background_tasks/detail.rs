@@ -6,6 +6,7 @@
 
 use std::time::SystemTime;
 
+use app::agent_tab::transcript::TranscriptView;
 use gpui::prelude::*;
 use gpui::{AnyElement, Context, Entity, WeakEntity, div};
 use gpui_component::button::{Button, ButtonVariants as _};
@@ -13,7 +14,6 @@ use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
 use nmt_agent::background_task::{
     BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscriptState,
 };
-use nmt_agent_ui::transcript::TranscriptView;
 use nmt_i18n::i18n;
 use nmt_profiling::transcript::{Operation, Probe};
 

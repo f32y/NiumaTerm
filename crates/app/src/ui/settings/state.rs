@@ -1,11 +1,11 @@
 use std::io;
 use std::path::Path;
 
+use app::agent_tab::{AgentKind, AgentKindExt as _};
 use gpui::Global;
 #[cfg(windows)]
 use gpui::SharedString;
 use nmt_agent::dsh;
-use nmt_agent_ui::{AgentKind, AgentKindExt as _};
 use nmt_config::agent::AgentConfig;
 pub use nmt_config::agent::{CollapseRows, ModelListStyle};
 use nmt_config::appearance::AppearanceConfig;

@@ -4,6 +4,9 @@ use std::cell::RefCell;
 use std::env;
 use std::rc::Rc;
 
+use app::agent_tab::profile::AgentKind;
+use app::agent_tab::settings::AgentSettings;
+use app::agent_tab::transcript::TranscriptView;
 use gpui::prelude::*;
 use gpui::{
     App, Application, Bounds, Context, Entity, Render, Window, WindowBounds, WindowOptions, div,
@@ -17,9 +20,6 @@ use gpui_macos::MacPlatform as Platform;
 use gpui_windows::WindowsPlatform as Platform;
 use nmt_agent::chat::Item;
 use nmt_agent::transcript::conversation::ConversationState;
-use nmt_agent_ui::profile::AgentKind;
-use nmt_agent_ui::settings::AgentSettings;
-use nmt_agent_ui::transcript::TranscriptView;
 use nmt_config::agent::CollapseRows;
 
 #[path = "../src/ui/assets.rs"]

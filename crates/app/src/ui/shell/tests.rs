@@ -1,9 +1,9 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use app::agent_tab::AgentKind;
 use gpui::{Bounds, Pixels, TestAppContext};
 use gpui_component::input::InputState;
-use nmt_agent_ui::AgentKind;
 use nmt_config::local_state::TabState;
 use nmt_config::system::WarnBeforeTerminatingShell;
 

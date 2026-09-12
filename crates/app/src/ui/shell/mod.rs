@@ -24,6 +24,9 @@ mod tests;
 use std::rc::Rc;
 use std::{collections, path, thread, time};
 
+use app::agent_tab::{AgentKind, AgentPane, AgentPaneEvent};
+use app::terminal_tab::session::HostEvent;
+use app::terminal_tab::view::{AgentInterrupted, TerminalPane};
 use dirs::home_dir;
 use gpui::prelude::*;
 use gpui::{
@@ -48,15 +51,12 @@ use nmt_agent::{
     AgentActivityPolicy, AgentEvent, AgentMonitor, AgentNotification, AgentRoute,
     AgentRuntimeStatus, AgentWorkspace, agent_process, request_native_delivery,
 };
-use nmt_agent_ui::{AgentKind, AgentPane, AgentPaneEvent};
 use nmt_config::local_state::WindowState;
 use nmt_config::system::WarnBeforeTerminatingShell;
 use nmt_i18n::i18n;
 use nmt_platform::{
     NativeNotification, remove_notification, show_notification, system_notification_enabled,
 };
-use nmt_terminal_ui::session::HostEvent;
-use nmt_terminal_ui::view::{AgentInterrupted, TerminalPane};
 use tracing::warn;
 
 use crate::agent_updates::{

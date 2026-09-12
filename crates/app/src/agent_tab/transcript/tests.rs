@@ -1,0 +1,1887 @@
+mod prompt_truncation_tests {
+    use gpui::{FontFallbacks, px};
+    use nmt_agent::chat::{Compaction, CompactionTrigger, Item as SessionItem};
+
+    use crate::agent_tab::composer::{ComposerAction, prompt_with_response_annotations};
+    use crate::agent_tab::profile::AgentKind;
+    use crate::agent_tab::session::Status;
+    use crate::agent_tab::settings::AgentSettings;
+    use crate::agent_tab::transcript::render::transcript_code_block_style;
+    use crate::agent_tab::transcript::{
+        AGENT_CARD_GAP, AGENT_CARD_ICON_BLOCK, AGENT_CARD_PADDING_X, AGENT_DISCLOSURE_DETAIL_INSET,
+        TurnSummary, VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, command_execution_detail,
+        command_execution_heading, compaction_accounting, compaction_label,
+        compaction_row_is_expandable, elapsed_label, entry_copy_text, interrupted_status_label,
+        is_work_row, last_response_label, should_show_jump_to_latest, should_virtualize_transcript,
+        transcript_segments, truncated_user_prompt, turn_summary, worked_status_label,
+        working_status_label,
+    };
+
+    #[test]
+    fn transcript_code_style_uses_configured_font_and_size() {
+        let settings = AgentSettings {
+            font_fallbacks: FontFallbacks::from_fonts(vec!["Microsoft YaHei".into()]),
+            ..AgentSettings::default()
+        };
+
+        let font = settings.font_with_fallbacks("JetBrains Mono".into());
+        let style = transcript_code_block_style(font, 12.5);
+
+        let fallbacks = style
+            .text
+            .font_fallbacks
+            .expect("transcript font should retain the application fallback");
+
+        assert_eq!(style.text.font_family.as_deref(), Some("JetBrains Mono"));
+        assert_eq!(style.text.font_size, Some(px(12.5).into()));
+        assert_eq!(fallbacks.fallback_list(), ["Microsoft YaHei"]);
+    }
+
+    #[test]
+    fn disclosure_detail_matches_the_title_start() {
+        assert_eq!(
+            AGENT_DISCLOSURE_DETAIL_INSET,
+            AGENT_CARD_PADDING_X + AGENT_CARD_ICON_BLOCK + AGENT_CARD_GAP
+        );
+    }
+
+    #[test]
+    fn composer_replaces_send_with_stop_only_while_running() {
+        let action: ComposerAction = Status::Running.into();
+
+        assert_eq!(action, ComposerAction::Stop);
+
+        for status in [Status::Starting, Status::Idle, Status::Exited] {
+            let action: ComposerAction = status.into();
+
+            assert_eq!(action, ComposerAction::Send);
+        }
+    }
+
+    #[test]
+    fn copying_an_annotated_user_message_omits_hidden_context() {
+        let submitted =
+            prompt_with_response_annotations("Explain this", &["selected response text".into()]);
+
+        let item = SessionItem::UserMessage {
+            text: Some(submitted),
+        };
+
+        assert_eq!(entry_copy_text(&item), "Explain this");
+    }
+
+    #[test]
+    fn interruption_replaces_the_elapsed_turn_summary() {
+        assert_eq!(turn_summary(true, Some(12)), Some(TurnSummary::Interrupted));
+        assert_eq!(turn_summary(false, Some(12)), Some(TurnSummary::Worked(12)));
+        assert_eq!(turn_summary(false, None), None);
+    }
+
+    #[test]
+    fn working_status_adds_compact_live_output_tokens() {
+        assert_eq!(working_status_label(4, None, None), "Working for 4 s");
+        assert_eq!(
+            working_status_label(12, Some(1_250), None),
+            "Working for 12 s · 1.2k tokens"
+        );
+    }
+
+    #[test]
+    fn a_reported_activity_leads_the_working_row() {
+        // The elapsed time reads the same every second, so what changed is
+        // what belongs first.
+        assert_eq!(
+            working_status_label(12, Some(1_250), Some("Retrying 1/2 after 429 rate limited")),
+            "Retrying 1/2 after 429 rate limited · Working for 12 s · 1.2k tokens"
+        );
+    }
+
+    #[test]
+    fn elapsed_time_reads_as_a_duration_rather_than_a_seconds_count() {
+        assert_eq!(elapsed_label(0), "0 s");
+        assert_eq!(elapsed_label(45), "45 s");
+        assert_eq!(elapsed_label(125), "2 mins 5 s");
+        assert_eq!(elapsed_label(3_721), "1 hour 2 mins 1 s");
+        assert_eq!(elapsed_label(90_061), "1 day 1 hour 1 min 1 s");
+        assert_eq!(elapsed_label(3_605), "1 hour 5 s");
+        assert_eq!(elapsed_label(86_400), "1 day");
+
+        assert_eq!(
+            worked_status_label(3_721, Some(12_400)),
+            "Worked for 1 hour 2 mins 1 s · 12k tokens"
+        );
+    }
+
+    #[test]
+    fn worked_status_keeps_the_final_output_tokens() {
+        assert_eq!(worked_status_label(8, None), "Worked for 8 s");
+        assert_eq!(
+            worked_status_label(21, Some(12_400)),
+            "Worked for 21 s · 12k tokens"
+        );
+    }
+
+    #[test]
+    fn interrupted_status_only_adds_available_output_tokens() {
+        assert_eq!(interrupted_status_label(None), "Interrupted");
+        assert_eq!(
+            interrupted_status_label(Some(1_250)),
+            "Interrupted · 1.2k tokens"
+        );
+    }
+
+    #[test]
+    fn jump_to_latest_requires_hidden_content_below_the_viewport() {
+        assert!(!should_show_jump_to_latest(false, None, px(0.)));
+        assert!(!should_show_jump_to_latest(false, Some(true), px(200.)));
+        assert!(should_show_jump_to_latest(false, Some(false), px(200.)));
+        assert!(!should_show_jump_to_latest(true, Some(false), px(200.)));
+        assert!(!should_show_jump_to_latest(true, None, px(200.)));
+        assert!(should_show_jump_to_latest(false, None, px(200.)));
+    }
+
+    #[test]
+    fn compaction_rows_name_the_trigger_and_report_only_known_numbers() {
+        let full = Compaction {
+            trigger: Some(CompactionTrigger::Automatic),
+            pre_tokens: Some(154_000),
+            post_tokens: Some(32_000),
+            messages_summarized: Some(87),
+            user_context: None,
+            summary: None,
+        };
+
+        assert_eq!(compaction_label(&full), "Context auto-compacted");
+        assert_eq!(
+            compaction_accounting(&full),
+            vec![
+                "154k → 32k".to_string(),
+                "122k freed".to_string(),
+                "87 messages summarized".to_string(),
+                "automatic".to_string(),
+            ]
+        );
+
+        // A boundary the backend described only partially must not invent
+        // zeroes for the fields it never reported.
+        let sparse = Compaction {
+            pre_tokens: Some(90_000),
+            ..Compaction::default()
+        };
+
+        assert_eq!(compaction_label(&sparse), "Context compacted");
+        assert_eq!(compaction_accounting(&sparse), vec!["from 90k".to_string()]);
+        assert!(compaction_accounting(&Compaction::default()).is_empty());
+    }
+
+    #[test]
+    fn a_compaction_row_is_a_divider_and_copies_its_summary() {
+        let item = SessionItem::Compaction {
+            id: "compaction-1".into(),
+            detail: Compaction {
+                trigger: Some(CompactionTrigger::Manual),
+                pre_tokens: Some(120_000),
+                post_tokens: Some(40_000),
+                summary: Some("what happened so far".into()),
+                ..Compaction::default()
+            },
+        };
+
+        // Work rows collapse into "+N tool calls" runs; a structural
+        // break must never be swallowed by one.
+        assert!(!is_work_row(&item));
+        assert_eq!(
+            entry_copy_text(&item),
+            "Context compacted\n120k → 40k · 80k freed · manual\n\nwhat happened so far"
+        );
+    }
+
+    #[test]
+    fn compaction_disclosure_matches_provider_capabilities() {
+        assert!(!compaction_row_is_expandable(AgentKind::Codex));
+        assert!(compaction_row_is_expandable(AgentKind::Claude));
+    }
+
+    #[test]
+    fn command_tool_moves_the_full_command_and_output_into_detail() {
+        assert_eq!(
+            command_execution_heading(Some("Inspect repository status")),
+            "Inspect repository status"
+        );
+        assert_eq!(command_execution_heading(Some("  ")), "Run Command");
+        assert_eq!(
+            command_execution_detail("cargo test --workspace", Some("running 42 tests\nok")),
+            "$ cargo test --workspace\n\nrunning 42 tests\nok"
+        );
+        assert_eq!(
+            command_execution_detail("cargo check", None),
+            "$ cargo check"
+        );
+    }
+
+    #[test]
+    fn shared_tool_items_keep_transcript_details_intact() {
+        let item = SessionItem::Other {
+            id: "tool-1".into(),
+            kind: "Read".into(),
+            title: "src/lib.rs".into(),
+            output: Some("contents".into()),
+            status: Some("completed".into()),
+        };
+
+        let SessionItem::Other {
+            id,
+            kind,
+            title,
+            output,
+            status,
+        } = item
+        else {
+            panic!("expected a tool item");
+        };
+
+        assert_eq!(id, "tool-1");
+        assert_eq!(kind, "Read");
+        assert_eq!(title, "src/lib.rs");
+        assert_eq!(output.as_deref(), Some("contents"));
+        assert_eq!(status.as_deref(), Some("completed"));
+    }
+
+    #[test]
+    fn short_prompts_pass_through_and_long_ones_cut_at_boundaries() {
+        assert_eq!(truncated_user_prompt("hello\nworld"), None);
+
+        let four_lines = "line\n".repeat(4);
+        let head = truncated_user_prompt(&four_lines).expect("over the line cap");
+
+        assert_eq!(head.lines().count(), 3);
+        assert!(head.ends_with('\n'));
+
+        let exact_char_cap = "x".repeat(512);
+
+        assert_eq!(truncated_user_prompt(&exact_char_cap), None);
+
+        let giant_line = "\u{4f60}".repeat(3000);
+        let head = truncated_user_prompt(&giant_line).expect("over the character cap");
+
+        assert_eq!(head.chars().count(), 512);
+        assert!(giant_line.is_char_boundary(head.len()));
+    }
+
+    #[test]
+    fn long_code_transcripts_switch_to_virtual_rows() {
+        let many_rows = "output\n".repeat(129);
+        let large_single_row = "x".repeat(16 * 1024);
+
+        assert!(should_virtualize_transcript(&many_rows));
+        assert!(should_virtualize_transcript(&large_single_row));
+        assert!(!should_virtualize_transcript("short output"));
+    }
+
+    #[test]
+    fn virtual_transcript_segments_preserve_rows_and_utf8_boundaries() {
+        let source = format!("alpha\r\n\n{}\nend", "你".repeat(2_000));
+        let segments = transcript_segments(&source);
+
+        assert_eq!(&source[segments[0].clone()], "alpha");
+        assert_eq!(&source[segments[1].clone()], "");
+        assert_eq!(&source[segments.last().expect("final row").clone()], "end");
+        assert!(
+            segments
+                .iter()
+                .all(|range| source.is_char_boundary(range.start)
+                    && source.is_char_boundary(range.end)
+                    && range.len() <= VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES)
+        );
+        assert!(segments.iter().filter(|range| !range.is_empty()).count() > 3);
+    }
+
+    #[test]
+    fn virtual_transcript_keeps_one_segment_per_short_logical_row() {
+        let source = "row\n".repeat(10_000);
+        let segments = transcript_segments(&source);
+
+        assert_eq!(segments.len(), 10_000);
+        assert!(segments.iter().all(|range| &source[range.clone()] == "row"));
+    }
+
+    #[test]
+    fn a_last_response_reading_speaks_a_turn_duration() {
+        // Same units as "Worked for", so the two clocks in the pane agree.
+        assert_eq!(last_response_label(0), "Last response: 0 s ago");
+        assert_eq!(last_response_label(45), "Last response: 45 s ago");
+        assert_eq!(last_response_label(90), "Last response: 1 min 30 s ago");
+        assert_eq!(
+            last_response_label(3_599),
+            "Last response: 59 mins 59 s ago"
+        );
+
+        // Past an hour the reading stops counting: "it has been sitting" is
+        // the whole answer, and the label never changes again.
+        assert_eq!(
+            last_response_label(3_600),
+            "Last response: more than 1 hour ago"
+        );
+        assert_eq!(
+            last_response_label(90_061),
+            "Last response: more than 1 hour ago"
+        );
+    }
+}
+
+mod read_gutter_tests {
+    use crate::agent_tab::transcript::{file_extension_lang, strip_read_gutter};
+
+    #[test]
+    fn gutter_strips_only_when_every_line_matches() {
+        assert_eq!(
+            strip_read_gutter("     1\u{2192}fn main() {\n     2\u{2192}}").as_deref(),
+            Some("fn main() {\n}\n")
+        );
+        assert_eq!(strip_read_gutter("plain output"), None);
+        assert_eq!(strip_read_gutter("     1\u{2192}ok\nno gutter"), None);
+    }
+
+    #[test]
+    fn extension_is_the_language_tag() {
+        assert_eq!(file_extension_lang("C:\\src\\main.RS"), "rs");
+        assert_eq!(file_extension_lang("noext"), "");
+    }
+}
+
+/// Two conversations rendered by the same component must not share view state.
+/// The Agent pane's own conversation and a child agent's conversation are both
+/// `TranscriptView`s, so anything held on the type rather than per instance
+/// would leak one conversation's reading position into the other.
+mod separate_view_state_tests {
+    use std::time::Instant;
+
+    use gpui::{AppContext as _, TestAppContext};
+    use nmt_agent::chat::Item as SessionItem;
+    use nmt_config::agent::CollapseRows;
+
+    use crate::agent_tab::profile::AgentKind;
+    use crate::agent_tab::transcript::TranscriptView;
+    use crate::agent_tab::transcript::reveal::RevealKey;
+
+    fn message(id: &str, text: &str) -> SessionItem {
+        SessionItem::AgentMessage {
+            id: id.into(),
+            text: Some(text.into()),
+            questions: None,
+        }
+    }
+
+    #[gpui::test]
+    fn expansion_and_turn_accounting_stay_per_conversation(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let parent = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+            let child = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+
+            parent.update(cx, |transcript, cx| {
+                transcript.push(1, message("a", "parent reply"), Vec::new(), cx);
+
+                transcript
+                    .disclosures
+                    .open(RevealKey::Row(0), Instant::now(), false);
+
+                transcript
+                    .disclosures
+                    .open(RevealKey::Annotation(0), Instant::now(), false);
+
+                transcript
+                    .disclosures
+                    .open(RevealKey::Turn(1), Instant::now(), false);
+
+                transcript
+                    .disclosures
+                    .open(RevealKey::Group(0), Instant::now(), false);
+
+                transcript.mark_interrupted(1);
+            });
+
+            child.update(cx, |transcript, cx| {
+                transcript.push(1, message("b", "child reply"), Vec::new(), cx);
+
+                assert!(
+                    transcript.disclosures.expanded_rows().is_empty(),
+                    "row expansion belongs to one conversation"
+                );
+                assert!(transcript.disclosures.expanded_annotations().is_empty());
+                assert!(transcript.disclosures.toggled_turns().is_empty());
+                assert!(transcript.disclosures.expanded_groups().is_empty());
+                assert!(
+                    !transcript.was_interrupted(1),
+                    "turn accounting belongs to one conversation"
+                );
+            });
+
+            // The parent keeps everything it had after the child was touched.
+            parent.update(cx, |transcript, _| {
+                assert!(transcript.disclosures.row_expanded(0));
+                assert!(transcript.disclosures.annotation_expanded(0));
+                assert!(transcript.was_interrupted(1));
+                assert!(!transcript.is_empty());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn each_conversation_measures_its_own_rows(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let parent = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+            let child = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+
+            parent.update(cx, |transcript, cx| {
+                for index in 0..4 {
+                    transcript.push(1, message(&format!("p{index}"), "row"), Vec::new(), cx);
+                }
+
+                transcript.sync_transcript_list(transcript.build_row_specs(CollapseRows::Off));
+            });
+
+            child.update(cx, |transcript, cx| {
+                transcript.push(1, message("c0", "row"), Vec::new(), cx);
+                transcript.sync_transcript_list(transcript.build_row_specs(CollapseRows::Off));
+            });
+
+            // A shared list state would report one conversation's row count for
+            // both, which is what makes measured heights unusable across them.
+            assert_eq!(parent.read(cx).transcript_list.item_count(), 4);
+            assert_eq!(child.read(cx).transcript_list.item_count(), 1);
+        });
+    }
+
+    #[gpui::test]
+    fn clearing_one_conversation_leaves_the_other_intact(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let parent = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+            let child = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+
+            parent.update(cx, |transcript, cx| {
+                transcript.push(1, message("a", "parent"), Vec::new(), cx)
+            });
+
+            child.update(cx, |transcript, cx| {
+                transcript.push(1, message("b", "child"), Vec::new(), cx)
+            });
+
+            child.update(cx, |transcript, _| transcript.clear());
+
+            assert!(child.read(cx).is_empty());
+            assert!(!parent.read(cx).is_empty());
+        });
+    }
+}
+
+/// A settled turn leads with the prompt that opened it. Claude never echoes a
+/// message steered into a running turn, so the pane publishes it from its own
+/// queue partway through the turn; row order has to keep it where it happened
+/// rather than lifting it to the head of the turn it interrupted.
+mod steered_prompt_rows_tests {
+    use std::time::Instant;
+
+    use gpui::{AppContext as _, TestAppContext};
+    use nmt_agent::chat::Item as SessionItem;
+    use nmt_config::agent::CollapseRows;
+
+    use crate::agent_tab::profile::AgentKind;
+    use crate::agent_tab::transcript::reveal::RevealKey;
+    use crate::agent_tab::transcript::{RowSpec, TranscriptView};
+
+    fn reply(id: &str) -> SessionItem {
+        SessionItem::AgentMessage {
+            id: id.into(),
+            text: Some(format!("reply {id}")),
+            questions: None,
+        }
+    }
+
+    fn prompt(text: &str) -> SessionItem {
+        SessionItem::UserMessage {
+            text: Some(text.into()),
+        }
+    }
+
+    /// Settle a turn the way a turn completed in this process does: finished,
+    /// with the duration the session reported for it.
+    fn settle(transcript: &mut TranscriptView, turn: u64, seconds: u64) {
+        transcript
+            .conversation
+            .borrow_mut()
+            .turns
+            .replay(turn, false, Some(seconds), None);
+    }
+
+    /// Render order as entry indexes, with the turn's two chrome rows named.
+    fn order(transcript: &TranscriptView) -> Vec<String> {
+        transcript
+            .build_row_specs(CollapseRows::WorkAndToolCalls)
+            .into_iter()
+            .map(|spec| match spec {
+                RowSpec::Entry { index, .. } | RowSpec::Work { index, .. } => index.to_string(),
+                RowSpec::TurnFold { row_count, .. } => format!("fold({row_count})"),
+                RowSpec::TurnSummary { .. } => "summary".to_string(),
+                _ => "?".to_string(),
+            })
+            .collect()
+    }
+
+    #[gpui::test]
+    fn a_steered_prompt_keeps_its_place_in_the_turn(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let transcript = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+
+            transcript.update(cx, |transcript, cx| {
+                transcript.push(1, prompt("open the turn"), Vec::new(), cx);
+                transcript.push(1, reply("a"), Vec::new(), cx);
+                transcript.push(1, prompt("steered mid-turn"), Vec::new(), cx);
+                transcript.push(1, reply("b"), Vec::new(), cx);
+                settle(transcript, 1, 12);
+
+                // Folded: the work between prompt and answer is hidden, while
+                // the user's own steered words stay readable above the reply.
+                // The disclosure heads the rows it hides; the summary closes
+                // the turn below the reply.
+                assert_eq!(order(transcript), vec!["0", "fold(1)", "2", "3", "summary"]);
+
+                transcript
+                    .disclosures
+                    .open(RevealKey::Turn(1), Instant::now(), false);
+
+                assert_eq!(
+                    order(transcript),
+                    vec!["0", "fold(1)", "1", "2", "3", "summary"],
+                    "expanding inserts the work below the disclosure, above the reply"
+                );
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn a_turn_with_nothing_to_hide_gets_no_disclosure(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let transcript = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+
+            transcript.update(cx, |transcript, cx| {
+                transcript.push(1, prompt("ask"), Vec::new(), cx);
+                transcript.push(1, reply("answer"), Vec::new(), cx);
+                settle(transcript, 1, 3);
+
+                // A control that would disclose nothing is not rendered; the
+                // summary still closes the turn.
+                assert_eq!(order(transcript), vec!["0", "1", "summary"]);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn a_failure_after_the_reply_stays_below_it(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let transcript = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+
+            transcript.update(cx, |transcript, cx| {
+                transcript.push(1, prompt("ask"), Vec::new(), cx);
+
+                transcript.push(
+                    1,
+                    SessionItem::Reasoning {
+                        id: "work".into(),
+                        summary: Some("working".into()),
+                    },
+                    Vec::new(),
+                    cx,
+                );
+
+                transcript.push(1, reply("answer"), Vec::new(), cx);
+
+                transcript.push(
+                    1,
+                    SessionItem::Error {
+                        text: "model unavailable".into(),
+                    },
+                    Vec::new(),
+                    cx,
+                );
+
+                settle(transcript, 1, 3);
+
+                assert_eq!(order(transcript), vec!["0", "fold(1)", "2", "3", "summary"]);
+
+                transcript
+                    .disclosures
+                    .open(RevealKey::Turn(1), Instant::now(), false);
+
+                assert_eq!(
+                    order(transcript),
+                    vec!["0", "fold(1)", "1", "2", "3", "summary"]
+                );
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn a_replayed_turn_folds_without_claiming_a_duration(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let transcript = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+
+            transcript.update(cx, |transcript, cx| {
+                transcript.push(1, prompt("ask"), Vec::new(), cx);
+                transcript.push(1, reply("a"), Vec::new(), cx);
+                transcript.push(1, reply("b"), Vec::new(), cx);
+
+                // What a resumed conversation looks like: the turn is over, but
+                // the transcript file recorded no wall time for it.
+                transcript
+                    .conversation
+                    .borrow_mut()
+                    .turns
+                    .replay(1, false, None, None);
+
+                // It folds like any settled turn, and closes after its reply
+                // rather than stating a duration the session never reported.
+                assert_eq!(order(transcript), vec!["0", "fold(1)", "2"]);
+
+                transcript
+                    .disclosures
+                    .open(RevealKey::Turn(1), Instant::now(), false);
+
+                assert_eq!(order(transcript), vec!["0", "fold(1)", "1", "2"]);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn a_running_turn_stays_chronological(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let transcript = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+
+            transcript.update(cx, |transcript, cx| {
+                transcript.push(1, prompt("ask"), Vec::new(), cx);
+                transcript.push(1, reply("a"), Vec::new(), cx);
+                transcript.push(1, reply("b"), Vec::new(), cx);
+
+                // Nothing is hidden while the work is still happening.
+                assert_eq!(order(transcript), vec!["0", "1", "2"]);
+            });
+        });
+    }
+}
+
+/// The collapse setting has to reach a conversation the tab restored, not only
+/// the turns it watched happen: a resumed turn arrives already settled, which
+/// is the state the setting decides the folding of.
+mod resumed_collapse_tests {
+    use gpui::{AppContext as _, TestAppContext};
+    use nmt_agent::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
+    use nmt_config::agent::CollapseRows;
+
+    use crate::agent_tab::profile::AgentKind;
+    use crate::agent_tab::transcript::{RowSpec, TranscriptView};
+
+    fn replayed(items: Vec<SessionItem>) -> ReplayTurn {
+        ReplayTurn {
+            items: items
+                .into_iter()
+                .map(|item| ReplayItem { item, at: None })
+                .collect(),
+            seconds: None,
+            output_tokens: None,
+            interrupted: false,
+        }
+    }
+
+    fn row_count(transcript: &TranscriptView, collapse: CollapseRows) -> usize {
+        transcript
+            .build_row_specs(collapse)
+            .into_iter()
+            .filter(|spec| matches!(spec, RowSpec::Entry { .. } | RowSpec::Work { .. }))
+            .count()
+    }
+
+    #[gpui::test]
+    fn a_resumed_turn_answers_to_the_collapse_setting(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let transcript = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+
+            transcript.update(cx, |transcript, cx| {
+                transcript.append_replay(
+                    1,
+                    replayed(vec![
+                        SessionItem::UserMessage {
+                            text: Some("ask".into()),
+                        },
+                        SessionItem::CommandExecution {
+                            id: "c1".into(),
+                            command: "ls".into(),
+                            purpose: None,
+                            aggregated_output: None,
+                            status: Some("completed".into()),
+                            exit_code: Some(0),
+                        },
+                        SessionItem::CommandExecution {
+                            id: "c2".into(),
+                            command: "cat".into(),
+                            purpose: None,
+                            aggregated_output: None,
+                            status: Some("completed".into()),
+                            exit_code: Some(0),
+                        },
+                        SessionItem::AgentMessage {
+                            id: "a".into(),
+                            text: Some("answer".into()),
+                            questions: None,
+                        },
+                    ]),
+                    cx,
+                );
+
+                // Folded away: only the prompt and the answer remain.
+                assert_eq!(row_count(transcript, CollapseRows::WorkAndToolCalls), 2);
+
+                // The work returns, with its two commands behind one run line.
+                assert_eq!(row_count(transcript, CollapseRows::ToolCalls), 2);
+
+                // Every row on its own line.
+                assert_eq!(row_count(transcript, CollapseRows::Off), 4);
+
+                // Reading work inline is the point of "only tool calls", so
+                // the turn carries no fold disclosure to hide it again.
+                assert!(
+                    !transcript
+                        .build_row_specs(CollapseRows::ToolCalls)
+                        .iter()
+                        .any(|spec| matches!(spec, RowSpec::TurnFold { .. }))
+                );
+            });
+        });
+    }
+}
+
+/// A prompt right-clicked in the transcript has to name the same branch point
+/// the backend would, and the two lists are only counted from the newest end.
+mod branch_point_targeting_tests {
+    use gpui::{AppContext as _, ListOffset, TestAppContext, px};
+    use nmt_agent::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
+    use nmt_config::agent::CollapseRows;
+
+    use crate::agent_tab::composer::{PromptTarget, checkpoint_at_depth};
+    use crate::agent_tab::profile::AgentKind;
+    use crate::agent_tab::transcript::TranscriptView;
+
+    fn user(text: &str) -> ReplayItem {
+        ReplayItem {
+            item: SessionItem::UserMessage {
+                text: Some(text.to_string()),
+            },
+            at: None,
+        }
+    }
+
+    fn agent(text: &str) -> ReplayItem {
+        ReplayItem {
+            item: SessionItem::AgentMessage {
+                id: text.to_string(),
+                text: Some(text.to_string()),
+                questions: None,
+            },
+            at: None,
+        }
+    }
+
+    /// A conversation of three turns, the middle one steered mid-flight, with
+    /// its turn grouping intact. Transcript indices of "first", "second",
+    /// "steered" and "third" are 0, 2, 3 and 5.
+    fn transcript(cx: &mut gpui::App) -> gpui::Entity<TranscriptView> {
+        let view = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+
+        view.update(cx, |view, cx| {
+            for (turn, items) in [
+                (1, vec![user("first"), agent("a")]),
+                // "steered" shares turn 2 with the prompt that opened it, so
+                // it names no cut of its own.
+                (2, vec![user("second"), user("steered"), agent("b")]),
+                (3, vec![user("third"), agent("c")]),
+            ] {
+                view.append_replay(
+                    turn,
+                    ReplayTurn {
+                        items,
+                        ..ReplayTurn::default()
+                    },
+                    cx,
+                );
+            }
+        });
+
+        view
+    }
+
+    /// Two turns where the first one ran a command, so its work folds behind
+    /// a disclosure row and the prompts no longer sit at their entry indices.
+    fn transcript_with_work(cx: &mut gpui::App) -> gpui::Entity<TranscriptView> {
+        let view = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+
+        view.update(cx, |view, cx| {
+            for (turn, items) in [
+                (1, vec![user("first"), command("ls"), agent("a")]),
+                (2, vec![user("second"), agent("b")]),
+            ] {
+                view.append_replay(
+                    turn,
+                    ReplayTurn {
+                        items,
+                        ..ReplayTurn::default()
+                    },
+                    cx,
+                );
+            }
+        });
+
+        view
+    }
+
+    fn command(command: &str) -> ReplayItem {
+        ReplayItem {
+            item: SessionItem::CommandExecution {
+                id: command.to_string(),
+                command: command.to_string(),
+                purpose: None,
+                aggregated_output: None,
+                status: None,
+                exit_code: Some(0),
+            },
+            at: None,
+        }
+    }
+
+    #[gpui::test]
+    fn a_prompt_is_located_by_how_many_turns_follow_it(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript(cx);
+            let index = [0, 2, 3, 5];
+
+            view.read_with(cx, |view, _| {
+                assert_eq!(
+                    view.prompt_target(index[3]),
+                    Some(PromptTarget {
+                        prompt: "third".into(),
+                        depth: 0,
+                    })
+                );
+                assert_eq!(
+                    view.prompt_target(index[1]),
+                    Some(PromptTarget {
+                        prompt: "second".into(),
+                        depth: 1,
+                    })
+                );
+                assert_eq!(
+                    view.prompt_target(index[0]),
+                    Some(PromptTarget {
+                        prompt: "first".into(),
+                        depth: 2,
+                    })
+                );
+
+                // A message steered into a running turn shares that turn with
+                // the prompt ahead of it and anchors nothing.
+                assert_eq!(view.prompt_target(index[2]), None);
+            })
+        });
+    }
+
+    #[gpui::test]
+    fn an_agent_message_names_no_branch_point(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript(cx);
+
+            view.read_with(cx, |view, _| assert_eq!(view.prompt_target(1), None));
+        });
+    }
+
+    #[test]
+    fn the_depth_indexes_the_backend_list_and_the_text_confirms_it() {
+        // The branch points a backend would report for the same conversation,
+        // newest first, and excluding the first prompt.
+        let checkpoints = ["third".to_string(), "second".to_string()];
+        let text = String::as_str;
+
+        assert_eq!(
+            checkpoint_at_depth(
+                &checkpoints,
+                &PromptTarget {
+                    prompt: "third".into(),
+                    depth: 0
+                },
+                text
+            ),
+            Some(&"third".to_string())
+        );
+        assert_eq!(
+            checkpoint_at_depth(
+                &checkpoints,
+                &PromptTarget {
+                    prompt: "second".into(),
+                    depth: 1
+                },
+                text
+            ),
+            Some(&"second".to_string())
+        );
+
+        // The oldest prompt is past the end of a list that does not offer it.
+        assert_eq!(
+            checkpoint_at_depth(
+                &checkpoints,
+                &PromptTarget {
+                    prompt: "first".into(),
+                    depth: 2
+                },
+                text
+            ),
+            None
+        );
+    }
+
+    /// The picker highlights a branch point; the transcript has to find the
+    /// row showing it, which is not the entry's own index once folded work
+    /// and disclosures sit between the prompts.
+    #[gpui::test]
+    fn a_branch_point_finds_the_row_showing_its_prompt(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_work(cx);
+
+            view.update(cx, |view, _| {
+                let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+
+                view.sync_transcript_list(specs);
+
+                // Rows: prompt, work disclosure, reply, prompt, reply.
+                assert_eq!(
+                    view.prompt_row(&PromptTarget {
+                        prompt: "first".into(),
+                        depth: 1,
+                    }),
+                    Some(0)
+                );
+                assert_eq!(
+                    view.prompt_row(&PromptTarget {
+                        prompt: "second".into(),
+                        depth: 0,
+                    }),
+                    Some(3)
+                );
+
+                // A depth landing on a different prompt names a list the
+                // transcript disagrees with, and moving to it would put the
+                // user in front of a turn they did not point at.
+                assert_eq!(
+                    view.prompt_row(&PromptTarget {
+                        prompt: "second".into(),
+                        depth: 1,
+                    }),
+                    None
+                );
+            })
+        });
+    }
+
+    /// Following the picker's highlight moves the transcript for the user;
+    /// cancelling it has to give that position back.
+    #[gpui::test]
+    fn a_cancelled_picker_returns_the_reader_to_where_they_were(cx: &mut TestAppContext) {
+        let first = PromptTarget {
+            prompt: "first".into(),
+            depth: 1,
+        };
+
+        cx.update(|cx| {
+            let view = transcript_with_work(cx);
+
+            view.update(cx, |view, cx| {
+                let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+
+                view.sync_transcript_list(specs);
+
+                // Reading the live end: what is restored is the tail itself,
+                // not the offset the tail happened to stand at.
+                view.hold_for_picker();
+
+                assert!(
+                    view.reserve_below,
+                    "a held transcript can scroll past its last row"
+                );
+                assert!(
+                    !view.transcript_list.is_following_tail(),
+                    "the hold pins the view before the reserve opens below it"
+                );
+
+                view.scroll_to_prompt(&first, false, cx);
+                view.release_from_picker(cx);
+
+                assert!(view.transcript_list.is_following_tail());
+                assert!(!view.reserve_below);
+
+                // Reading an earlier turn: that offset comes back.
+                view.transcript_list.scroll_to(ListOffset {
+                    item_ix: 3,
+                    offset_in_item: px(0.),
+                });
+
+                view.hold_for_picker();
+                view.scroll_to_prompt(&first, false, cx);
+
+                assert_eq!(view.transcript_list.logical_scroll_top().item_ix, 0);
+
+                view.release_from_picker(cx);
+
+                assert_eq!(view.transcript_list.logical_scroll_top().item_ix, 3);
+
+                // Nothing left stashed, so a later cancel cannot drag the
+                // conversation back to a position from this one.
+                view.release_from_picker(cx);
+
+                assert_eq!(view.transcript_list.logical_scroll_top().item_ix, 3);
+            })
+        });
+    }
+
+    #[test]
+    fn a_count_landing_on_another_prompt_names_nothing() {
+        // The backend left a branch point out — a cut it cannot make — so the
+        // depths no longer line up. The text comparison catches it rather than
+        // letting the cut land a turn away from where the user pointed.
+        let checkpoints = ["third".to_string(), "first".to_string()];
+
+        assert_eq!(
+            checkpoint_at_depth(
+                &checkpoints,
+                &PromptTarget {
+                    prompt: "second".into(),
+                    depth: 1
+                },
+                String::as_str
+            ),
+            None
+        );
+    }
+}
+
+/// Vertical space belongs to the boundary between two rows. A rank read off
+/// the upper row alone cannot hold a run of work off the prose on both sides
+/// of it: the run's last row reports the tight step rhythm it owes the run
+/// above it, and whatever follows the run inherits it.
+mod row_rhythm_tests {
+    use std::time::{Duration, Instant};
+
+    use gpui::{AppContext as _, ListOffset, TestAppContext, px};
+    use nmt_agent::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
+    use nmt_config::agent::CollapseRows;
+
+    use crate::agent_tab::profile::AgentKind;
+    use crate::agent_tab::settings::AgentSettings;
+    use crate::agent_tab::transcript::reveal::{RevealKey, RevealedPart};
+    use crate::agent_tab::transcript::rows::RowGap;
+    use crate::agent_tab::transcript::{RowSpec, TranscriptView};
+
+    fn replay(items: Vec<ReplayItem>) -> ReplayTurn {
+        ReplayTurn {
+            items,
+            seconds: None,
+            output_tokens: None,
+            interrupted: false,
+        }
+    }
+
+    fn user(text: &str) -> ReplayItem {
+        ReplayItem {
+            item: SessionItem::UserMessage {
+                text: Some(text.to_string()),
+            },
+            at: None,
+        }
+    }
+
+    fn agent(text: &str) -> ReplayItem {
+        ReplayItem {
+            item: SessionItem::AgentMessage {
+                id: text.to_string(),
+                text: Some(text.to_string()),
+                questions: None,
+            },
+            at: None,
+        }
+    }
+
+    fn command(command: &str) -> ReplayItem {
+        ReplayItem {
+            item: SessionItem::CommandExecution {
+                id: command.to_string(),
+                command: command.to_string(),
+                purpose: None,
+                aggregated_output: None,
+                status: None,
+                exit_code: Some(0),
+            },
+            at: None,
+        }
+    }
+
+    /// Row kinds and the rank of the space each holds below it, in render
+    /// order.
+    fn rhythm(view: &TranscriptView) -> Vec<(&'static str, RowGap)> {
+        view.rows
+            .iter()
+            .map(|row| {
+                let kind = match row.spec {
+                    RowSpec::Entry { .. } => "entry",
+                    RowSpec::Work { .. } => "work",
+                    RowSpec::RunToggle { .. } => "run",
+                    RowSpec::TurnFold { .. } => "fold",
+                    RowSpec::TurnSummary { .. } => "summary",
+                    RowSpec::Interrupted { .. } => "interrupted",
+                    RowSpec::Working { .. } => "working",
+                };
+
+                (kind, row.gap)
+            })
+            .collect()
+    }
+
+    /// A settled turn that answers, runs two commands, then answers again.
+    /// "Only tool calls" reads the work inline, so the run collapses to its
+    /// toggle with no turn fold above it.
+    fn transcript_with_a_collapsed_run(cx: &mut gpui::App) -> gpui::Entity<TranscriptView> {
+        // A pane always renders against installed settings; a bare test app
+        // has none, and the disclosures read the reduced-motion switch.
+        cx.set_global(AgentSettings::default());
+
+        let view = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+
+        view.update(cx, |view, cx| {
+            view.append_replay(
+                1,
+                replay(vec![
+                    user("ask"),
+                    agent("first"),
+                    command("ls"),
+                    command("cat"),
+                    agent("second"),
+                ]),
+                cx,
+            );
+        });
+
+        view
+    }
+
+    /// The run and the two replies around it are one answer, so they are held
+    /// apart by the middle rank; only the prompt that opened the turn keeps
+    /// the full one.
+    #[gpui::test]
+    fn a_collapsed_run_is_held_off_the_prose_on_both_sides(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, _| {
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
+                view.sync_transcript_list(specs);
+
+                assert_eq!(
+                    rhythm(view),
+                    vec![
+                        ("entry", RowGap::Group),
+                        ("entry", RowGap::Work),
+                        ("run", RowGap::Work),
+                        ("entry", RowGap::Group),
+                    ]
+                );
+            });
+        });
+    }
+
+    /// The steps of an expanded run report the toggle that opened them, which
+    /// is what puts them on its ramp. The toggle itself and the prose around
+    /// the run report nothing, because neither arrived when the run opened.
+    #[gpui::test]
+    fn an_expanded_runs_steps_report_the_toggle_that_opened_them(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, cx| {
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
+                view.sync_transcript_list(specs);
+
+                let now = Instant::now();
+
+                assert_eq!(
+                    rhythm(view)
+                        .iter()
+                        .map(|(kind, _)| *kind)
+                        .collect::<Vec<_>>(),
+                    vec!["entry", "entry", "run", "work", "work", "entry"]
+                );
+                assert_eq!(
+                    view.revealed_by(2, now),
+                    None,
+                    "the toggle was already there"
+                );
+                assert_eq!(view.revealed_by(3, now), Some(RevealKey::Group(2)));
+                assert_eq!(view.revealed_by(4, now), Some(RevealKey::Group(2)));
+                assert_eq!(
+                    view.revealed_by(5, now),
+                    None,
+                    "the reply was already there"
+                );
+            });
+        });
+    }
+
+    /// A bottom-aligned list stores its live end as a sentinel meaning
+    /// "wherever the end now is", so rows appearing above it would carry the
+    /// view down and take the row the reader clicked off their screen. Opening
+    /// a disclosure names the position first. A reader sitting at the live end
+    /// keeps following it, because a conversation growing under an open
+    /// disclosure should still scroll itself.
+    #[gpui::test]
+    fn opening_a_disclosure_holds_the_readers_place(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, cx| {
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
+                view.sync_transcript_list(specs);
+
+                assert!(view.transcript_list.is_following_tail());
+
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+
+                assert!(
+                    view.transcript_list.is_following_tail(),
+                    "a view at the live end keeps following it"
+                );
+
+                view.transcript_list.scroll_to(ListOffset {
+                    item_ix: 1,
+                    offset_in_item: px(0.),
+                });
+
+                view.toggle_disclosure(RevealKey::Row(3), cx);
+
+                assert!(
+                    !view.transcript_list.is_following_tail(),
+                    "a view reading an earlier turn is pinned where it sits"
+                );
+            });
+        });
+    }
+
+    /// Reduced motion is read where a disclosure opens rather than where its
+    /// progress is reported, so nothing is ever in flight: the content is on
+    /// screen at once and the transcript asks for no frames of its own.
+    #[gpui::test]
+    fn reduced_motion_opens_a_disclosure_with_nothing_in_flight(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            cx.global_mut::<AgentSettings>().reduce_motion = true;
+
+            view.update(cx, |view, cx| {
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
+                view.sync_transcript_list(specs);
+
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+
+                let now = Instant::now();
+
+                assert!(view.disclosures.group_expanded(2), "the run still opens");
+                assert!(view.disclosures.settled(now));
+                assert_eq!(view.disclosures.progress(RevealKey::Group(2), now), 1.0);
+            });
+        });
+    }
+
+    /// Shutting a disclosure starts an exit rather than finishing one: the
+    /// steps stay on the list while they leave, and only come off it once
+    /// there is nothing left on screen to lose.
+    #[gpui::test]
+    fn a_shutting_run_keeps_its_steps_until_the_exit_finishes(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, cx| {
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
+                view.sync_transcript_list(specs);
+
+                assert!(
+                    view.disclosures.group_expanded(2),
+                    "the run is still on its way out"
+                );
+                assert_eq!(
+                    rhythm(view)
+                        .iter()
+                        .map(|(kind, _)| *kind)
+                        .collect::<Vec<_>>(),
+                    vec!["entry", "entry", "run", "work", "work", "entry"]
+                );
+
+                view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
+
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
+                view.sync_transcript_list(specs);
+
+                assert!(view.disclosures.expanded_groups().is_empty());
+                assert_eq!(
+                    rhythm(view)
+                        .iter()
+                        .map(|(kind, _)| *kind)
+                        .collect::<Vec<_>>(),
+                    vec!["entry", "entry", "run", "entry"]
+                );
+            });
+        });
+    }
+
+    /// The space under a run's last step and the space under the toggle once
+    /// the run is gone are the same boundary read off the same pair of rows,
+    /// so they are worth the same rank. The exit leans on that: it holds back
+    /// exactly the difference between that rank and the step rhythm the
+    /// toggle sits on while the run is open, which is what makes the run's
+    /// removal move nothing.
+    #[gpui::test]
+    fn a_run_leaves_behind_the_space_its_toggle_takes_over(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, cx| {
+                view.disclosures
+                    .open(RevealKey::Group(2), Instant::now(), false);
+
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
+                view.sync_transcript_list(specs);
+
+                let open = rhythm(view);
+
+                assert_eq!(open[2].0, "run");
+                assert_eq!(open[2].1, RowGap::Step, "the toggle heads its steps");
+
+                let last_step = open[4];
+
+                assert_eq!(last_step.0, "work");
+
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+                view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
+
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
+                view.sync_transcript_list(specs);
+
+                let shut = rhythm(view);
+
+                assert_eq!(shut[2].0, "run");
+                assert_eq!(shut[2].1, last_step.1);
+            });
+        });
+    }
+
+    /// A run's steps each ramp their own height, so each carries a measured
+    /// height of its own. Those measurements leave with the rows they were
+    /// taken from; a disclosure the run has nothing to do with keeps its own.
+    #[gpui::test]
+    fn a_shut_run_drops_the_heights_measured_for_its_steps(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, cx| {
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
+                view.sync_transcript_list(specs);
+
+                let elsewhere = RevealedPart::Block(RevealKey::Row(0));
+
+                view.disclosures
+                    .record_height(RevealedPart::Entry(2), px(40.));
+
+                view.disclosures
+                    .record_height(RevealedPart::Entry(3), px(40.));
+
+                view.disclosures.record_height(elsewhere, px(80.));
+
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+                view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
+
+                assert_eq!(view.disclosures.measured_parts(), vec![elsewhere]);
+            });
+        });
+    }
+
+    /// A click landing part-way through an exit asks for the content back.
+    /// Reading the click against the expanded state alone would restart the
+    /// exit instead, so the block would go on shutting under a second click
+    /// meant to stop it.
+    #[gpui::test]
+    fn clicking_a_shutting_disclosure_brings_it_back(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, cx| {
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+
+                view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
+
+                assert!(
+                    view.disclosures.group_expanded(2),
+                    "the run stayed open rather than finishing the exit"
+                );
+            });
+        });
+    }
+
+    /// Reduced motion takes the same path in both directions: with nothing in
+    /// flight there is no exit to wait out, so the content goes at the click.
+    #[gpui::test]
+    fn reduced_motion_shuts_a_disclosure_at_the_click(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            cx.global_mut::<AgentSettings>().reduce_motion = true;
+
+            view.update(cx, |view, cx| {
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+
+                assert!(view.disclosures.expanded_groups().is_empty());
+                assert!(view.disclosures.settled(Instant::now()));
+            });
+        });
+    }
+
+    /// Unfolding a turn splices its work in under the "Show work" row, and
+    /// every row it splices in reports the fold, which is what puts them on
+    /// its ramp. The fold itself and the reply that was on screen while the
+    /// turn was folded report nothing.
+    #[gpui::test]
+    fn an_unfolded_turns_work_reports_the_fold_that_opened_it(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, cx| {
+                let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+
+                view.sync_transcript_list(specs);
+
+                assert_eq!(
+                    rhythm(view)
+                        .iter()
+                        .map(|(kind, _)| *kind)
+                        .collect::<Vec<_>>(),
+                    vec!["entry", "fold", "entry"]
+                );
+
+                view.toggle_disclosure(RevealKey::Turn(1), cx);
+
+                let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+
+                view.sync_transcript_list(specs);
+
+                let now = Instant::now();
+
+                assert_eq!(
+                    rhythm(view)
+                        .iter()
+                        .map(|(kind, _)| *kind)
+                        .collect::<Vec<_>>(),
+                    vec!["entry", "fold", "entry", "run", "entry"]
+                );
+                assert_eq!(view.revealed_by(1, now), None, "the fold was already there");
+                assert_eq!(view.revealed_by(2, now), Some(RevealKey::Turn(1)));
+                assert_eq!(view.revealed_by(3, now), Some(RevealKey::Turn(1)));
+                assert_eq!(
+                    view.revealed_by(4, now),
+                    None,
+                    "the reply was already there"
+                );
+            });
+        });
+    }
+
+    /// Folding a turn back starts an exit rather than finishing one: its work
+    /// stays on the list while it leaves, and comes off only once there is
+    /// nothing left on screen to lose.
+    #[gpui::test]
+    fn a_folding_turn_keeps_its_work_until_the_exit_finishes(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, cx| {
+                view.toggle_disclosure(RevealKey::Turn(1), cx);
+                view.toggle_disclosure(RevealKey::Turn(1), cx);
+
+                let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+
+                view.sync_transcript_list(specs);
+
+                assert_eq!(rhythm(view).len(), 5, "the work is still on its way out");
+                assert!(
+                    !view.disclosures.is_disclosing(RevealKey::Turn(1)),
+                    "the row already reads as folded"
+                );
+
+                view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
+
+                let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+
+                view.sync_transcript_list(specs);
+
+                assert!(view.disclosures.toggled_turns().is_empty());
+                assert_eq!(rhythm(view).len(), 3);
+            });
+        });
+    }
+
+    /// A step of a run inside an unfolded turn is on screen by two
+    /// disclosures at once. It follows its run while the fold rests, so a run
+    /// opened inside a settled turn still travels, and the fold as soon as
+    /// the fold moves, because the fold is then moving everything under it.
+    #[gpui::test]
+    fn a_step_follows_its_run_until_its_fold_moves(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, cx| {
+                view.disclosures
+                    .open(RevealKey::Turn(1), Instant::now(), false);
+
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+
+                let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+
+                view.sync_transcript_list(specs);
+
+                let now = Instant::now();
+
+                assert_eq!(rhythm(view)[4].0, "work");
+                assert_eq!(view.revealed_by(4, now), Some(RevealKey::Group(2)));
+
+                view.toggle_disclosure(RevealKey::Turn(1), cx);
+
+                let now = Instant::now();
+
+                assert_eq!(view.revealed_by(4, now), Some(RevealKey::Turn(1)));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn an_expanded_run_keeps_its_steps_tight_and_its_edges_open(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, _| {
+                view.disclosures
+                    .open(RevealKey::Group(2), Instant::now(), false);
+
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+
+                view.sync_transcript_list(specs);
+
+                assert_eq!(
+                    rhythm(view),
+                    vec![
+                        ("entry", RowGap::Group),
+                        ("entry", RowGap::Work),
+                        ("run", RowGap::Step),
+                        ("work", RowGap::Step),
+                        ("work", RowGap::Work),
+                        ("entry", RowGap::Group),
+                    ]
+                );
+            });
+        });
+    }
+
+    /// A row's height depends on the row under it, so a rank that changes has
+    /// to reach the list as a changed row; a diff that compared only what a
+    /// row says would leave the first step of a growing run measured at the
+    /// height it had while it was the last row of the transcript.
+    #[gpui::test]
+    fn a_row_whose_neighbour_changed_rank_is_remeasured(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+
+            view.update(cx, |view, cx| {
+                view.push(1, user("ask").item, Vec::new(), cx);
+                view.push(1, command("ls").item, Vec::new(), cx);
+
+                let specs = view.build_row_specs(CollapseRows::Off);
+
+                view.sync_transcript_list(specs);
+
+                let before = view.rows.clone();
+
+                assert_eq!(
+                    rhythm(view),
+                    vec![("entry", RowGap::Group), ("work", RowGap::Group)]
+                );
+
+                view.push(1, command("cat").item, Vec::new(), cx);
+
+                let specs = view.build_row_specs(CollapseRows::Off);
+
+                view.sync_transcript_list(specs);
+
+                // The first step says exactly what it said before; what
+                // changed is that the run now continues under it.
+                assert_eq!(before[1].spec, view.rows[1].spec);
+                assert_ne!(before[1], view.rows[1]);
+                assert_eq!(view.rows[1].gap, RowGap::Step);
+            });
+        });
+    }
+}
+
+mod typed_reply_tests {
+    use gpui::{AppContext as _, TestAppContext};
+    use nmt_agent::chat::Item as SessionItem;
+    use nmt_agent::transcript::TextField;
+
+    use crate::agent_tab::profile::AgentKind;
+    use crate::agent_tab::transcript::TranscriptView;
+
+    /// Text a reply already showed when the stream reached it stays on screen;
+    /// only the arrival waits behind the typed edge.
+    #[gpui::test]
+    fn a_streamed_reply_types_from_what_it_already_showed(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+
+            view.update(cx, |transcript, cx| {
+                transcript.push(
+                    1,
+                    SessionItem::AgentMessage {
+                        id: "a".into(),
+                        text: Some("Hello 世界".into()),
+                        questions: None,
+                    },
+                    Vec::new(),
+                    cx,
+                );
+
+                transcript.append_delta("a", " world", TextField::Reply);
+
+                assert_eq!(transcript.shown_reply(0, "Hello 世界 world"), "Hello 世界");
+                assert_eq!(transcript.typed_edge(0), Some(8));
+
+                transcript.append_delta("a", " again", TextField::Reply);
+
+                assert_eq!(transcript.typed_edge(0), Some(8));
+                assert!(!transcript.append_delta("a", "ignored", TextField::ReasoningSummary));
+                assert_eq!(transcript.typed_edge(0), Some(8));
+
+                transcript.clear();
+
+                assert_eq!(transcript.typed_edge(0), None);
+            });
+        });
+    }
+
+    /// Only the reply is typed. Reasoning streams into a row the reader
+    /// opens on request, which shows whatever has arrived.
+    #[gpui::test]
+    fn streamed_reasoning_is_shown_as_it_arrives(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+
+            view.update(cx, |transcript, cx| {
+                transcript.push(
+                    1,
+                    SessionItem::Reasoning {
+                        id: "r".into(),
+                        summary: None,
+                    },
+                    Vec::new(),
+                    cx,
+                );
+
+                transcript.append_delta("r", "thinking", TextField::ReasoningSummary);
+
+                assert_eq!(transcript.typed_edge(0), None);
+            });
+        });
+    }
+}
+
+mod surface_palette_tests {
+    use std::sync::Arc;
+
+    use gpui::{TestAppContext, rgb};
+    use gpui_component::highlighter::HighlightTheme;
+    use gpui_component::{ActiveTheme as _, Theme, ThemeMode};
+
+    use crate::agent_tab::settings::AgentSettings;
+    use crate::agent_tab::transcript::render::text_style::transcript_highlight_theme;
+    use crate::agent_tab::transcript::render::{highlight_theme_for_surface, is_dark_surface};
+
+    #[gpui::test]
+    fn transcript_palette_tracks_background_snapshot_and_pane_choice(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            Theme::global_mut(cx).highlight_theme = HighlightTheme::default_light();
+
+            let themed = cx.theme().highlight_theme.clone();
+
+            cx.set_global(AgentSettings {
+                pane_background_follows_terminal: true,
+                terminal_background: rgb(0x101010).into(),
+                background_opacity: 0.25,
+                ..AgentSettings::default()
+            });
+
+            assert_eq!(transcript_highlight_theme(cx).appearance, ThemeMode::Dark);
+
+            cx.global_mut::<AgentSettings>().terminal_background = rgb(0xeeeeee).into();
+
+            assert!(Arc::ptr_eq(&transcript_highlight_theme(cx), &themed));
+
+            let settings = cx.global_mut::<AgentSettings>();
+
+            settings.terminal_background = rgb(0x101010).into();
+            settings.pane_background_follows_terminal = false;
+
+            assert!(Arc::ptr_eq(&transcript_highlight_theme(cx), &themed));
+        });
+    }
+
+    #[test]
+    fn palette_is_kept_when_it_matches_the_surface() {
+        let dark = HighlightTheme::default_dark();
+        let light = HighlightTheme::default_light();
+
+        let own = Arc::new(HighlightTheme {
+            name: "Own Dark".to_string(),
+            appearance: ThemeMode::Dark,
+            style: Default::default(),
+        });
+
+        assert!(Arc::ptr_eq(
+            &highlight_theme_for_surface(dark.clone(), true),
+            &dark
+        ));
+        assert!(Arc::ptr_eq(
+            &highlight_theme_for_surface(light.clone(), false),
+            &light
+        ));
+        assert!(Arc::ptr_eq(
+            &highlight_theme_for_surface(own.clone(), true),
+            &own
+        ));
+    }
+
+    #[test]
+    fn palette_follows_a_surface_on_the_other_side_of_mid_gray() {
+        let dark = HighlightTheme::default_dark();
+        let light = HighlightTheme::default_light();
+
+        assert_eq!(
+            highlight_theme_for_surface(light, true).appearance,
+            ThemeMode::Dark
+        );
+        assert_eq!(
+            highlight_theme_for_surface(dark, false).appearance,
+            ThemeMode::Light
+        );
+    }
+
+    #[test]
+    fn surfaces_split_at_mid_gray() {
+        assert!(is_dark_surface(rgb(0x300A24).into()));
+        assert!(is_dark_surface(rgb(0x1C1C1C).into()));
+        assert!(!is_dark_surface(rgb(0xE0E0E0).into()));
+        assert!(!is_dark_surface(rgb(0xFCFBFA).into()));
+    }
+}
+
+#[cfg(test)]
+mod reading_column_tests {
+    use gpui::{
+        Context, InteractiveElement as _, IntoElement, ParentElement as _, Render, Styled as _,
+        TestAppContext, VisualTestContext, Window, div, px, relative,
+    };
+    use gpui_component::text::TextView;
+    use gpui_component::{h_flex, v_flex};
+
+    use crate::agent_tab::settings::AgentSettings;
+    use crate::agent_tab::transcript::transcript_column;
+
+    /// A prompt bubble sizes to its own words under a fractional cap, the
+    /// same shape as the transcript's user row. Under the reading column it
+    /// has to keep its single line: a column whose width went indefinite
+    /// would wrap CJK prose one glyph per line.
+    #[gpui::test]
+    fn reading_column_keeps_a_shrink_to_fit_bubble_on_one_line(cx: &mut TestAppContext) {
+        struct ColumnRoot;
+
+        impl Render for ColumnRoot {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                div().w(px(1400.)).h(px(400.)).child(transcript_column(
+                    h_flex().w_full().justify_end().child(
+                        v_flex().max_w(relative(0.6)).min_w_0().items_end().child(
+                            div()
+                                .debug_selector(|| "bubble".into())
+                                .min_w_0()
+                                .px(px(12.))
+                                .child(TextView::plain("bubble-text", "提交吧")),
+                        ),
+                    ),
+                    cx,
+                ))
+            }
+        }
+
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.set_global(AgentSettings::default());
+        });
+
+        let (_, cx) = cx.add_window_view(|_, _| ColumnRoot);
+        let cx: &mut VisualTestContext = cx;
+
+        cx.run_until_parked();
+
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+
+        let bubble = cx.debug_bounds("bubble").unwrap();
+
+        assert!(
+            bubble.size.width > bubble.size.height,
+            "bubble should stay on one line, got {bubble:?}"
+        );
+
+        // 1400px less the 10% margins leaves 1120px, more than the 880px
+        // measure, so the column is centred in that space and the bubble
+        // ends on its trailing edge: 140 + (1120 - 880) / 2 + 880.
+        assert!(
+            (bubble.right() - px(1140.)).abs() < px(1.),
+            "bubble should end on the centred column's edge, got {bubble:?}"
+        );
+    }
+}

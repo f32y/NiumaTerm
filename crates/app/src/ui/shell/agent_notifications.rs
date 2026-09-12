@@ -1,4 +1,4 @@
-use nmt_agent_ui::execution::AgentSession;
+use app::agent_tab::execution::AgentSession;
 
 use crate::ui::shell::*;
 

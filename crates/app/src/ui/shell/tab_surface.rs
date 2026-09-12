@@ -1,8 +1,8 @@
+use app::agent_tab::execution::{AgentSession, SessionOwner};
+use app::agent_tab::{AgentKind, AgentPane};
+use app::terminal_tab::view::TerminalPane;
 use gpui::{App, Entity};
-use nmt_agent_ui::execution::{AgentSession, SessionOwner};
-use nmt_agent_ui::{AgentKind, AgentPane};
 use nmt_config::local_state::TabState;
-use nmt_terminal_ui::view::TerminalPane;
 
 use crate::pane_tree::PaneId;
 use crate::ui::terminal_layout::TerminalLayout;

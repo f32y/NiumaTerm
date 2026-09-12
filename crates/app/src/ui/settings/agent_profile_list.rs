@@ -1,6 +1,7 @@
 //! Agent profiles rendered as a three-column list: the agent's own mark, the
 //! profile name, and the per-row edit and delete controls.
 
+use app::agent_tab::{AgentKind, AgentKindExt as _};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Div, DragMoveEvent, Entity, Hsla,
@@ -13,7 +14,6 @@ use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, IndexPath, Sizable as _, WindowExt as _, h_flex,
 };
-use nmt_agent_ui::{AgentKind, AgentKindExt as _};
 use nmt_i18n::i18n;
 
 use crate::ui::settings::agent_profile_dialog::open_agent_profile_dialog;

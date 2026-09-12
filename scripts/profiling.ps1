@@ -9,7 +9,7 @@ The application still needs --enable-profiling to activate runtime-gated probes.
 
     ./scripts/profiling.ps1 build -p app --release
     ./scripts/profiling.ps1 test -p nmt_profiling
-    ./scripts/profiling.ps1 test -p nmt_agent_ui transcript::profiling
+    ./scripts/profiling.ps1 test -p app --lib agent_tab::transcript::profiling
 
 Quote '--' when forwarding arguments to the Rust test runner or Clippy.
 PowerShell consumes an unquoted -- before the script can receive it.

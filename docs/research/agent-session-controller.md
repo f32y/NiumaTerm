@@ -1,6 +1,6 @@
 # Agent Session Ownership
 
-Updated: 2026-09-11
+Updated: 2026-09-12
 
 ## Implemented ownership
 
@@ -10,7 +10,7 @@ and workflows. Its shared `ConversationState` owns indexed entries, turn
 outcomes, timing, usage, compaction, and accepted immutable image references.
 The core crate has no GPUI dependency.
 
-`nmt_agent_ui::execution::AgentSession` owns asynchronous execution. An ordinary
+`app::agent_tab::execution::AgentSession` owns asynchronous execution. An ordinary
 tab retains its `SessionOwner`; `AgentPane::attach` creates presentation against
 that owner. Attaching does not start or resume a provider. Replacing a composer
 invalidates the preceding command binding. A detached pane cannot send through
@@ -78,10 +78,10 @@ conversation content.
 | `crates/agent/src/transcript/conversation/` | Shared content, images, revisions, and retention |
 | `crates/agent/src/transcript/turns.rs` | Live and retained turn accounting |
 | `crates/agent/src/session/children.rs` and `workflows.rs` | Scoped retained detail data |
-| `crates/agent_ui/src/execution/` | Owner, registry, startup, inbox, lifecycle, recovery, and filesystem work |
-| `crates/agent_ui/src/session/` | Composer attachment, guarded commands, and presentation of outcomes |
-| `crates/agent_ui/src/transcript/` | Independent rendering and presentation caches |
-| `crates/agent_ui/src/workflows.rs` | Selected workflow reader and visibility interest |
+| `crates/app/src/agent_tab/execution/` | Owner, registry, startup, inbox, lifecycle, recovery, and filesystem work |
+| `crates/app/src/agent_tab/session/` | Composer attachment, guarded commands, and presentation of outcomes |
+| `crates/app/src/agent_tab/transcript/` | Independent rendering and presentation caches |
+| `crates/app/src/agent_tab/workflows.rs` | Selected workflow reader and visibility interest |
 | `crates/app/src/ui/shell/tab_surface.rs` | Ordinary tab retains owner and current pane |
 | `crates/app/src/ui/shell/agent_notifications.rs` | Session subscriptions, preferences, and current-tab navigation |
 | `crates/app/src/agent_updates/transaction.rs` | Registry-based installation participants |

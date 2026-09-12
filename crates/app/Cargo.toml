@@ -15,8 +15,6 @@ path = "src/main.rs"
 [dependencies]
 nmt_profiling.workspace = true
 nmt_agent.workspace = true
-nmt_agent_ui.workspace = true
-nmt_terminal_ui.workspace = true
 nmt_config.workspace = true
 nmt_i18n.workspace = true
 nmt_terminal.workspace = true
@@ -60,6 +58,11 @@ sha2.workspace = true
 zip.workspace = true
 tree-sitter.workspace = true
 tree-sitter-language.workspace = true
+gpui-base.workspace = true
+ropey.workspace = true
+vte.workspace = true
+tempfile.workspace = true
+uuid.workspace = true
 
 [build-dependencies]
 nmt_version.workspace = true
@@ -78,9 +81,13 @@ gpui_macos.workspace = true
 nmt_sparkle.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 tokio.workspace = true
 # The same font source GPUI's text system selects families through, so a
 # default face can be checked against what the host actually has.
 font-kit.workspace = true
+nmt_agent = { workspace = true, features = ["test-support"] }
+tree-sitter-bash.workspace = true
+tree-sitter-diff.workspace = true
+tree-sitter-powershell.workspace = true
+tree-sitter-rust.workspace = true

@@ -10,6 +10,9 @@ pub(super) mod rows;
 
 use std::time::{Duration, SystemTime};
 
+use app::agent_tab::AgentPane;
+use app::agent_tab::execution::ChildReader;
+use app::agent_tab::transcript::TranscriptView;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, Context, Entity, ScrollHandle, SharedString, Task, WeakEntity, Window, div, px,
@@ -19,9 +22,6 @@ use gpui_component::{ActiveTheme as _, IconNamed, Sizable as _, StyledExt as _, 
 use nmt_agent::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskSummary,
 };
-use nmt_agent_ui::AgentPane;
-use nmt_agent_ui::execution::ChildReader;
-use nmt_agent_ui::transcript::TranscriptView;
 use nmt_i18n::i18n;
 
 use crate::ui::AppSettings;

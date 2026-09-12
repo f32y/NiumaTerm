@@ -1,5 +1,5 @@
-use nmt_agent_ui::execution::AgentSession;
-use nmt_agent_ui::{AgentKindExt as _, RecoveryIdentity};
+use app::agent_tab::execution::AgentSession;
+use app::agent_tab::{AgentKindExt as _, RecoveryIdentity};
 use nmt_i18n::i18n;
 
 use crate::ui::persistence::spawn_default_pane;

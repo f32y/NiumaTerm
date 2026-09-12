@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
+use app::agent_tab::execution::{AgentSession, SessionRegistry};
 use futures::future::join_all;
 use gpui::prelude::*;
 use gpui::{App, AsyncApp, Entity, Window, div};
@@ -12,7 +13,6 @@ use nmt_agent::update::{
     InstallationKey, ProviderKind, UpdateCoordinator, UpdateError, UpdateErrorKind, UpdatePhase,
     UpdateProgress, VersionStatus,
 };
-use nmt_agent_ui::execution::{AgentSession, SessionRegistry};
 use nmt_config::profile::AgentProfileKind;
 use nmt_i18n::i18n;
 

@@ -1,13 +1,13 @@
 use std::time::Duration;
 use std::{env, process};
 
+use app::agent_tab::{AgentKind, RecoveryIdentity, RecoveryReadiness, RecoverySnapshot};
 use chrono::Utc;
 use nmt_agent::launcher::AgentCli;
 use nmt_agent::update::{
     DiscoverySupport, InstallationKey, InstallationSnapshot, InstallationUpdateState, ProviderKind,
     ProviderMaintenance, UpdateError, UpdateErrorKind, UpdatePhase, UpdateProgress, VersionStatus,
 };
-use nmt_agent_ui::{AgentKind, RecoveryIdentity, RecoveryReadiness, RecoverySnapshot};
 use semver::Version;
 
 use crate::agent_updates::*;

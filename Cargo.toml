@@ -12,8 +12,6 @@ members = [
     "crates/agent",
     "crates/agent_hook_cli",
     "crates/app",
-    "crates/agent_ui",
-    "crates/terminal_ui",
     "crates/version",
     "crates/config",
     "crates/i18n",
@@ -79,8 +77,6 @@ disallowed_types = "deny"
 
 [workspace.dependencies]
 nmt_agent = { path = "crates/agent" }
-nmt_agent_ui = { path = "crates/agent_ui" }
-nmt_terminal_ui = { path = "crates/terminal_ui" }
 nmt_version = { path = "crates/version" }
 nmt_config = { path = "crates/config" }
 nmt_i18n = { path = "crates/i18n" }

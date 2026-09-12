@@ -14,13 +14,13 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{env, process};
 
+use app::agent_tab::agent_launch;
 use gpui::{App, Global};
 use nmt_agent::launcher::AgentCli;
 use nmt_agent::update::{
     ClaudeMaintenance, CodexMaintenance, HttpClaudeReleaseChannel, InstallationKey,
     InstallationSnapshot, ProviderKind, ProviderMaintenance, UpdateCoordinator,
 };
-use nmt_agent_ui::agent_launch;
 use nmt_config::profile::AgentProfile;
 
 use crate::agent_updates::doubles::{FakeMaintenance, UnavailableMaintenance};
