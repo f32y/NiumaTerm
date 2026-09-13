@@ -144,7 +144,7 @@ struct SettingsSaveFailure;
 /// Keep failed edits in memory and offer another write after the user fixes
 /// the configuration file or its permissions.
 pub(crate) fn save_settings(window: &mut Window, cx: &mut App) -> bool {
-    match cx.global_mut::<AppSettings>().save() {
+    match cx.global::<AppSettings>().save() {
         Ok(()) => {
             window.remove_notification::<SettingsSaveFailure>(cx);
 

@@ -426,7 +426,7 @@ fn defaults_have_one_powershell_profile() {
 }
 
 #[test]
-fn failed_settings_save_keeps_edits_and_retry_clears_error() {
+fn failed_settings_save_keeps_edits_for_retry() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
 
@@ -443,7 +443,6 @@ fn failed_settings_save_keeps_edits_and_retry_clears_error() {
     let error = settings.save_to(&path).unwrap_err();
 
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-    assert!(settings.editing.save_error.is_some());
     assert!(settings.appearance.reduce_motion);
     assert!(!settings.appearance.scroll_to_bottom_when_typing);
     assert_eq!(
@@ -453,8 +452,6 @@ fn failed_settings_save_keeps_edits_and_retry_clears_error() {
 
     fs::write(&path, "# keep this\n[appearance]\nfuture-setting = 42\n").unwrap();
     settings.save_to(&path).unwrap();
-
-    assert!(settings.editing.save_error.is_none());
 
     let saved = fs::read_to_string(&path).unwrap();
 
@@ -483,14 +480,11 @@ fn settings_io_failure_preserves_edits_until_the_path_is_repaired() {
     settings.system.confirm_before_closing_workspace = false;
 
     assert!(settings.save_to(&path).is_err());
-    assert!(settings.editing.save_error.is_some());
     assert!(!settings.system.confirm_before_closing_workspace);
     assert!(path.is_dir());
 
     fs::remove_dir(&path).unwrap();
     settings.save_to(&path).unwrap();
-
-    assert!(settings.editing.save_error.is_none());
 
     let config: Config = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
 

@@ -529,7 +529,7 @@ fn on_app_quit(cx: &mut App) -> Ready<()> {
     // them out. Closing the settings surface does that, and so
     // does quitting with it still open.
     if !cx.global::<AppSettings>().editing.discard_on_exit
-        && let Err(error) = cx.global_mut::<AppSettings>().save()
+        && let Err(error) = cx.global::<AppSettings>().save()
     {
         warn!("failed to save settings on application shutdown: {error}");
     }

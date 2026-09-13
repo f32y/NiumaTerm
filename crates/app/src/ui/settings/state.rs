@@ -41,7 +41,7 @@ pub fn default_shell_for_tests() -> String {
 }
 
 /// Persistent settings are shared with the configuration reader and writer.
-/// Picker state and save errors live separately and never enter a pane snapshot.
+/// Picker state lives separately and never enters a pane snapshot.
 pub struct AppSettings {
     /// File stem selected from the per-user themes directory.
     pub theme: String,
@@ -71,9 +71,6 @@ pub struct SettingsEditing {
 
     /// Parsed theme files refreshed by the settings surface's watcher.
     pub themes: Vec<(String, Theme)>,
-
-    /// Cleared only after another save succeeds.
-    pub save_error: Option<String>,
 
     /// The last window's explicit choice must also bypass the final quit hook.
     pub discard_on_exit: bool,
@@ -404,12 +401,12 @@ impl AppSettings {
 
     /// Persist the current edits without replacing unrelated TOML content.
     /// On failure the edited values remain available for another attempt.
-    pub fn save(&mut self) -> io::Result<()> {
+    pub fn save(&self) -> io::Result<()> {
         self.save_to(&config_file_path())
     }
 
-    pub(super) fn save_to(&mut self, path: &Path) -> io::Result<()> {
-        let result = save_settings_to(
+    pub(super) fn save_to(&self, path: &Path) -> io::Result<()> {
+        save_settings_to(
             path,
             &SettingsPatch {
                 theme: &self.theme,
@@ -424,10 +421,6 @@ impl AppSettings {
                 agent_profiles: &self.agent_profiles,
                 default_agent_profile: &self.default_agent_profile,
             },
-        );
-
-        self.editing.save_error = result.as_ref().err().map(ToString::to_string);
-
-        result
+        )
     }
 }
