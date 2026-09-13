@@ -110,6 +110,13 @@ fn session_title_description(description: &str) -> String {
         .collect()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TurnState {
+    Idle,
+    Pending,
+    Running,
+}
+
 pub struct Session {
     process: JsonLineProcess,
     transcript: TranscriptState,
@@ -120,12 +127,9 @@ pub struct Session {
     /// needs to `--resume` this conversation.
     session_id: Option<String>,
 
-    turn_active: bool,
-
-    /// The turn was started locally but no output has arrived yet; the first
-    /// message after a send emits `TurnStarted` (the protocol has no explicit
-    /// turn-started notification — `result` is the only turn boundary).
-    turn_reported: bool,
+    /// A locally sent turn becomes running when the first output arrives;
+    /// the CLI announces completion but has no explicit start notification.
+    turn: TurnState,
 
     accepted_identity: Option<String>,
 
@@ -320,8 +324,7 @@ impl Session {
             // same cwd's history, so it is immediately valid for local
             // checkpoint lookup; a later init can still confirm or replace it.
             session_id: resume,
-            turn_active: false,
-            turn_reported: false,
+            turn: TurnState::Idle,
             accepted_identity: None,
             applied_model: initial_model,
             applied_permission: None,
@@ -358,7 +361,7 @@ impl Session {
     }
 
     pub fn has_active_operation(&self) -> bool {
-        self.turn_active || self.control.has_active_request() || self.compacting
+        self.turn != TurnState::Idle || self.control.has_active_request() || self.compacting
     }
 
     /// Request EOF shutdown and wait for the launcher plus every contained
@@ -398,20 +401,24 @@ impl Session {
         // side. Model output is the only announcement that turn makes, so it
         // has to be adopted here; otherwise it is never reported as started,
         // and everything it produces is filed under the turn that preceded it.
-        if !self.turn_active && carries_model_output(&message) {
-            self.turn_active = true;
-            self.turn_reported = false;
-            self.accepted_identity = None;
-            self.transcript.begin_turn();
-        }
+        let started = match self.turn {
+            TurnState::Idle if carries_model_output(&message) => {
+                self.accepted_identity = None;
+                self.transcript.begin_turn();
 
-        // First sign of life after a send: the turn is actually running.
-        if self.turn_active && !self.turn_reported {
-            self.turn_reported = true;
+                true
+            }
+
+            TurnState::Pending => true,
+            TurnState::Idle | TurnState::Running => false,
+        };
+
+        if started {
+            self.turn = TurnState::Running;
             events.push(Event::TurnStarted);
         }
 
-        if self.turn_active
+        if self.turn != TurnState::Idle
             && self.accepted_identity.is_none()
             && message["parent_tool_use_id"].is_null()
         {
@@ -585,11 +592,10 @@ impl Session {
             self.control.record_effort(request_id, effort);
         }
 
-        if self.turn_active {
+        if self.turn != TurnState::Idle {
             SendOutcome::Steered
         } else {
-            self.turn_active = true;
-            self.turn_reported = false;
+            self.turn = TurnState::Pending;
             self.accepted_identity = None;
             self.transcript.begin_turn();
 
@@ -611,7 +617,7 @@ impl Session {
             return SlashCommandOutcome::NotReady;
         }
 
-        if self.turn_active {
+        if self.turn != TurnState::Idle {
             return SlashCommandOutcome::Rejected {
                 message: "Claude is already running a turn.".to_string(),
             };
@@ -628,8 +634,7 @@ impl Session {
             };
         }
 
-        self.turn_active = true;
-        self.turn_reported = false;
+        self.turn = TurnState::Pending;
         self.transcript.begin_turn();
         self.active_slash_command = Some(name.to_string());
 
@@ -740,7 +745,7 @@ impl Session {
             return SlashCommandOutcome::NotReady;
         }
 
-        if self.turn_active || self.control.pending_approval.is_some() {
+        if self.turn != TurnState::Idle || self.control.pending_approval.is_some() {
             return SlashCommandOutcome::Rejected {
                 message: "Claude must be idle before restoring files.".to_string(),
             };
@@ -897,8 +902,7 @@ impl Session {
 
     pub fn on_exit(&mut self) -> Vec<Event> {
         self.ready = false;
-        self.turn_active = false;
-        self.turn_reported = false;
+        self.turn = TurnState::Idle;
 
         let message = "Claude exited before the control request completed.";
         let mut events = self.control.close(message);
@@ -1225,8 +1229,7 @@ impl Session {
     }
 
     fn on_result(&mut self, message: &Value) -> Vec<Event> {
-        self.turn_active = false;
-        self.turn_reported = false;
+        self.turn = TurnState::Idle;
 
         let mut events = self.control.finish_turn();
 
