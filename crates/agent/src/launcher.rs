@@ -97,7 +97,7 @@ impl AgentCli {
     /// Resolve the launcher for installation identity without changing how it
     /// is subsequently started. Resolution failures retain the configured
     /// spelling so a missing binary still receives a stable diagnostic key.
-    pub fn resolved_executable(&self) -> PathBuf {
+    pub(crate) fn resolved_executable(&self) -> PathBuf {
         let configured = Path::new(&self.executable);
 
         let resolved = if configured.components().count() > 1 || configured.is_absolute() {
@@ -168,7 +168,7 @@ impl AgentCli {
 
 /// Resource bounds for non-interactive probes and vendor update commands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ProcessLimits {
+pub(crate) struct ProcessLimits {
     pub timeout: Duration,
     pub max_output_bytes: usize,
 }
@@ -188,7 +188,7 @@ impl Default for ProcessLimits {
     }
 }
 
-pub struct ProcessOutput {
+pub(crate) struct ProcessOutput {
     pub status: ExitStatus,
     pub stdout: String,
     pub stderr: String,
@@ -259,7 +259,7 @@ impl ProcessOutput {
 }
 
 #[derive(Debug)]
-pub enum ProcessError {
+pub(crate) enum ProcessError {
     Spawn(String),
     Containment(String),
     Wait(String),
@@ -294,7 +294,7 @@ impl Error for ProcessError {}
 /// draining after their retained suffix is full so a verbose child cannot
 /// deadlock on a pipe; the Job Object kills the complete owned process tree on
 /// timeout or early error.
-pub fn run_bounded<I, S>(
+pub(crate) fn run_bounded<I, S>(
     launcher: &AgentCli,
     arguments: I,
     limits: ProcessLimits,
