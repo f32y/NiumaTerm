@@ -10,7 +10,7 @@ pub const PLACEHOLDER: char = '\u{10EEEE}';
 /// Diacritics used for row/column encoding in Kitty virtual placements
 /// Index in array = the value being encoded
 /// Derived from: https://sw.kovidgoyal.net/kitty/_downloads/f0a0de9ec8d9ff4456206db8e0814937/rowcolumn-diacritics.txt
-pub const DIACRITICS: &[char] = &[
+const DIACRITICS: &[char] = &[
     '\u{0305}',
     '\u{030D}',
     '\u{030E}',
@@ -310,75 +310,10 @@ pub const DIACRITICS: &[char] = &[
     '\u{1D244}',
 ];
 
-/// Convert an index (0-based) to a diacritic character
-/// Returns None if index is out of range
-pub fn index_to_diacritic(index: u32) -> Option<char> {
-    DIACRITICS.get(index as usize).copied()
-}
-
 /// Convert a diacritic character to an index (0-based)
 /// Returns None if not a valid diacritic
-pub fn diacritic_to_index(c: char) -> Option<u32> {
+fn diacritic_to_index(c: char) -> Option<u32> {
     DIACRITICS.iter().position(|&d| d == c).map(|i| i as u32)
-}
-
-/// Encode virtual placement data into a string with placeholder + diacritics
-///
-/// Kitty placeholder encoding:
-/// - Base character: U+10EEEE (placeholder)
-/// - 1st diacritic: Row index (0-based)
-/// - 2nd diacritic: Column index (0-based)
-/// - 3rd diacritic: High 8 bits of image_id (optional, for IDs > 16M)
-///
-/// Image ID (lower 24 bits) is encoded in foreground color
-/// Placement ID is encoded in underline color
-pub fn encode_placeholder(row: u32, col: u32, image_id_high: Option<u8>) -> String {
-    let mut result: String = '\u{10EEEE}'.into();
-
-    // Add row diacritic
-    if let Some(d) = index_to_diacritic(row) {
-        result.push(d);
-    }
-
-    // Add column diacritic
-    if let Some(d) = index_to_diacritic(col) {
-        result.push(d);
-    }
-
-    // Add high byte diacritic if needed
-    if let Some(high) = image_id_high
-        && let Some(d) = index_to_diacritic(high as u32)
-    {
-        result.push(d);
-    }
-
-    result
-}
-
-/// Decode placement information from a placeholder character string with diacritics
-///
-/// Returns (row_index, col_index, image_id_high) if successfully decoded
-/// The base character should be U+10EEEE
-pub fn decode_placeholder(s: &str) -> Option<(u32, u32, Option<u8>)> {
-    let mut chars = s.chars();
-
-    // First character should be the placeholder
-    if chars.next()? != '\u{10EEEE}' {
-        return None;
-    }
-
-    // 1st diacritic: row index
-    let row = chars.next().and_then(diacritic_to_index)?;
-
-    // 2nd diacritic: column index
-    let col = chars.next().and_then(diacritic_to_index)?;
-
-    // 3rd diacritic (optional): high 8 bits of image_id
-    let high = chars.next().and_then(|c| {
-        diacritic_to_index(c).and_then(|idx| if idx <= 255 { Some(idx as u8) } else { None })
-    });
-
-    Some((row, col, high))
 }
 
 /// Map an `AnsiColor` to a 24-bit id used by the placeholder protocol.

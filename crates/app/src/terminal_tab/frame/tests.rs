@@ -1,7 +1,6 @@
 use nmt_config::colors::term::TermColors;
 use nmt_config::colors::{ColorArray, Colors, NamedColor};
 use nmt_terminal::ansi::CursorShape;
-use nmt_terminal::ansi::kitty_virtual::DIACRITICS;
 use nmt_terminal::ghostty::GhosttyTerminal;
 use nmt_terminal::render_buffer::RenderBuffer;
 use nmt_terminal::selection::SelectionRange;
@@ -713,7 +712,7 @@ fn extracts_contiguous_virtual_run() {
     // cells that inherit column from the first → one run of width 2.
     // Placement id 0 (no `p=`, no underline color) so the run's decoded
     // placement id (from underline) matches the placement metadata.
-    let d0 = DIACRITICS[0];
+    let d0 = '\u{0305}';
     let cell0 = format!("\x1b[38;2;0;0;7m{}{}", '\u{10EEEE}', d0); // row=0,col=0
     let cell1 = format!("{}", '\u{10EEEE}'); // inherit row/col
     let mut vt = Vec::new();
@@ -750,7 +749,7 @@ fn extracts_contiguous_virtual_run() {
 fn unmatched_placeholder_is_skipped() {
     // Placeholder cells reference image id 9, but no image 9 was transmitted, so
     // there is no matching virtual placement and no cached image → skipped.
-    let d0 = DIACRITICS[0];
+    let d0 = '\u{0305}';
     let cell = format!("\x1b[38;2;0;0;9m{}{}{}", '\u{10EEEE}', d0, d0);
     let (buf, generations) = buf_and_generations(20, 5, cell.as_bytes());
 
@@ -762,7 +761,7 @@ fn unmatched_placeholder_is_skipped() {
 
 #[test]
 fn placeholder_codepoint_is_suppressed_from_text() {
-    let d0 = DIACRITICS[0];
+    let d0 = '\u{0305}';
     let mut vt = Vec::new();
 
     vt.extend_from_slice(b"\x1b_Ga=T,U=1,f=32,s=1,v=1,i=7,p=3,c=1,r=1;/wAA/w==\x1b\\");

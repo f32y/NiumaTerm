@@ -2,19 +2,6 @@ use nmt_config::colors::{AnsiColor, ColorRgb, NamedColor};
 use nmt_terminal::ansi::kitty_virtual::*;
 
 #[test]
-fn test_diacritic_conversion() {
-    // First diacritic should encode 0
-    assert_eq!(index_to_diacritic(0), Some('\u{0305}'));
-    assert_eq!(diacritic_to_index('\u{0305}'), Some(0));
-
-    // Last diacritic
-    let last_idx = (DIACRITICS.len() - 1) as u32;
-
-    assert_eq!(index_to_diacritic(last_idx), Some('\u{1D244}'));
-    assert_eq!(diacritic_to_index('\u{1D244}'), Some(last_idx));
-}
-
-#[test]
 fn rgb_placeholder_id_round_trip() {
     let rgb = ColorRgb {
         r: 0x12,
@@ -32,39 +19,10 @@ fn rgb_placeholder_id_round_trip() {
 }
 
 #[test]
-fn test_encode_placeholder() {
-    // Encode row=0, col=0
-    let s = encode_placeholder(0, 0, None);
-
-    assert!(s.starts_with('\u{10EEEE}'));
-    assert_eq!(s.chars().count(), 3); // placeholder + 2 diacritics
-
-    // With high byte
-    let s = encode_placeholder(0, 0, Some(1));
-
-    assert_eq!(s.chars().count(), 4); // placeholder + 3 diacritics
-}
-
-#[test]
-fn test_encode_decode_roundtrip() {
-    // Test encoding and decoding
-    let encoded = encode_placeholder(5, 10, None);
-    let decoded = decode_placeholder(&encoded).unwrap();
-
-    assert_eq!(decoded, (5, 10, None));
-
-    // With high byte
-    let encoded = encode_placeholder(5, 10, Some(42));
-    let decoded = decode_placeholder(&encoded).unwrap();
-
-    assert_eq!(decoded, (5, 10, Some(42)));
-}
-
-#[test]
 fn from_cell_indexed_fg_two_diacritics() {
     // kitten icat with palette IDs ≤ 255: image_id_low = palette
     // index, no high byte, no placement_id.
-    let combining = [DIACRITICS[3], DIACRITICS[7]]; // row=3, col=7
+    let combining = ['\u{0310}', '\u{033F}']; // row=3, col=7
     let p = IncompletePlacement::from_cell(AnsiColor::Indexed(42), None, &combining);
 
     assert_eq!(p.image_id_low, 42);
@@ -92,7 +50,7 @@ fn from_cell_rgb_fg_three_diacritics() {
         b: 0xEF,
     };
 
-    let combining = [DIACRITICS[0], DIACRITICS[1], DIACRITICS[2]];
+    let combining = ['\u{0305}', '\u{030D}', '\u{030E}'];
 
     // 1st = row=0, 2nd = col=1, 3rd = high=2
     let p = IncompletePlacement::from_cell(AnsiColor::Spec(rgb), None, &combining);
@@ -111,7 +69,7 @@ fn from_cell_rgb_fg_three_diacritics() {
 fn from_cell_with_placement_id_underline() {
     let fg_rgb = ColorRgb { r: 1, g: 2, b: 3 };
     let ul_rgb = ColorRgb { r: 0, g: 0, b: 99 };
-    let combining = [DIACRITICS[0], DIACRITICS[0]];
+    let combining = ['\u{0305}', '\u{0305}'];
 
     let p = IncompletePlacement::from_cell(
         AnsiColor::Spec(fg_rgb),
@@ -134,7 +92,7 @@ fn from_cell_missing_diacritics_yields_none_fields() {
     assert_eq!(p.image_id_high, None);
     assert_eq!(p.image_id_low, 1);
 
-    let p = IncompletePlacement::from_cell(AnsiColor::Indexed(1), None, &[DIACRITICS[5]]);
+    let p = IncompletePlacement::from_cell(AnsiColor::Indexed(1), None, &['\u{033D}']);
 
     assert_eq!(p.row, Some(5));
     assert_eq!(p.col, None);
@@ -148,7 +106,7 @@ fn from_cell_missing_diacritics_yields_none_fields() {
 
 #[test]
 fn from_cell_named_fg_yields_zero_id() {
-    let combining = [DIACRITICS[0], DIACRITICS[0]];
+    let combining = ['\u{0305}', '\u{0305}'];
 
     let p =
         IncompletePlacement::from_cell(AnsiColor::Named(NamedColor::Foreground), None, &combining);
@@ -419,7 +377,7 @@ fn run_of_three_cells_with_only_first_diacritics() {
     let mut run = IncompletePlacement::from_cell(
         AnsiColor::Indexed(7),
         None,
-        &[DIACRITICS[0], DIACRITICS[0]], // row=0, col=0
+        &['\u{0305}', '\u{0305}'], // row=0, col=0
     );
 
     for _ in 0..2 {
