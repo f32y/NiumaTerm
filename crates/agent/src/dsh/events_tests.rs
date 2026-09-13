@@ -1,13 +1,99 @@
 use std::cell::RefCell;
+use std::io::{BufRead as _, BufReader, Read as _};
+use std::net::TcpListener;
+use std::sync::{Arc, Weak, mpsc};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use tungstenite::{Message, accept};
 
 use crate::dsh::api::ApiClient;
-use crate::dsh::events::Streams;
+use crate::dsh::events::{Downlinks, Streams};
 use crate::dsh::mapping::{approval_request, question_request};
 
 fn item(stream: &str, value: Value) -> Value {
     json!({ "type": "item", "streamId": stream, "value": value })
+}
+
+#[test]
+fn closing_downlinks_interrupts_handshakes_and_idle_reads_and_joins_delivery() {
+    for ready in [false, true] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = ApiClient::new(format!("http://{}", listener.local_addr().unwrap())).unwrap();
+        let (reading, entered) = mpsc::channel();
+
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+
+            if ready {
+                let mut socket = accept(stream).unwrap();
+
+                for _ in 0..3 {
+                    socket.read().unwrap();
+                }
+
+                for frame in [
+                    item(
+                        "events",
+                        json!({ "type": "ready", "clientId": "generation" }),
+                    ),
+                    item("control", json!({ "type": "baseline", "value": {} })),
+                    item("follow", json!({ "type": "snapshot", "records": [] })),
+                ] {
+                    socket
+                        .send(Message::Text(frame.to_string().into()))
+                        .unwrap();
+                }
+
+                reading.send(()).unwrap();
+
+                let _ = socket.read();
+            } else {
+                let mut reader = BufReader::new(stream);
+
+                reader.read_line(&mut String::new()).unwrap();
+                reading.send(()).unwrap();
+
+                let _ = reader.read_to_end(&mut Vec::new());
+            }
+        });
+
+        let retained = Arc::new(());
+        let delivery = Arc::clone(&retained);
+
+        let (downlinks, connected) = Downlinks::spawn(
+            client,
+            Weak::new(),
+            "session-1".into(),
+            Arc::new(move |_| {
+                let _ = &delivery;
+            }),
+        )
+        .unwrap();
+
+        entered.recv_timeout(Duration::from_secs(3)).unwrap();
+
+        if ready {
+            connected
+                .recv_timeout(Duration::from_secs(3))
+                .unwrap()
+                .unwrap();
+        }
+
+        let started = Instant::now();
+
+        drop(downlinks);
+
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(Arc::strong_count(&retained), 1, "delivery must have exited");
+
+        server.join().unwrap();
+    }
 }
 
 #[test]

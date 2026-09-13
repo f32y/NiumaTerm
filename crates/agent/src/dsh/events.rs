@@ -6,16 +6,18 @@ mod events_tests;
 
 use std::collections::HashMap;
 use std::io::ErrorKind;
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use parking_lot::Mutex;
+use reqwest::Url;
 use serde_json::{Value, json};
 use tracing::warn;
 use tungstenite::stream::MaybeTlsStream;
-use tungstenite::{Error, Message, WebSocket, connect};
+use tungstenite::{Error, Message, WebSocket, client, connect};
 
 use crate::dsh::api::{ApiClient, CallError};
 use crate::dsh::host::Host;
@@ -27,7 +29,14 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 type Socket = WebSocket<MaybeTlsStream<TcpStream>>;
 
 pub(crate) struct Downlinks {
-    stopped: Arc<AtomicBool>,
+    control: Arc<DownlinkControl>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
+#[derive(Default)]
+struct DownlinkControl {
+    stopped: AtomicBool,
+    socket: Mutex<Option<TcpStream>>,
 }
 
 impl Downlinks {
@@ -40,34 +49,46 @@ impl Downlinks {
         session_id: String,
         deliver: Arc<dyn Fn(Value) + Send + Sync>,
     ) -> Result<(Self, Value), String> {
-        let stopped = Arc::new(AtomicBool::new(false));
-        let worker_stopped = Arc::clone(&stopped);
-        let (connected_tx, connected) = mpsc::channel();
-
-        thread::spawn(move || {
-            run_downlink(
-                client,
-                host,
-                session_id,
-                deliver,
-                worker_stopped,
-                connected_tx,
-            )
-        });
+        let (downlinks, connected) = Self::spawn(client, host, session_id, deliver)?;
 
         match connected.recv_timeout(CONNECT_TIMEOUT) {
-            Ok(Ok(snapshot)) => Ok((Self { stopped }, snapshot)),
-
-            outcome => {
-                stopped.store(true, Ordering::Relaxed);
-
-                Err(match outcome {
-                    Ok(Err(message)) => message,
-                    Err(_) => "the harness streams did not become ready in time".to_string(),
-                    Ok(Ok(_)) => unreachable!(),
-                })
-            }
+            Ok(Ok(snapshot)) => Ok((downlinks, snapshot)),
+            Ok(Err(message)) => Err(message),
+            Err(_) => Err("the harness streams did not become ready in time".to_string()),
         }
+    }
+
+    fn spawn(
+        client: ApiClient,
+        host: Weak<Host>,
+        session_id: String,
+        deliver: Arc<dyn Fn(Value) + Send + Sync>,
+    ) -> Result<(Self, mpsc::Receiver<Result<Value, String>>), String> {
+        let control = Arc::new(DownlinkControl::default());
+        let worker_control = Arc::clone(&control);
+        let (connected_tx, connected) = mpsc::channel();
+
+        let worker = thread::Builder::new()
+            .name("deepseek-downlink".into())
+            .spawn(move || {
+                run_downlink(
+                    client,
+                    host,
+                    session_id,
+                    deliver,
+                    worker_control,
+                    connected_tx,
+                )
+            })
+            .map_err(|error| error.to_string())?;
+
+        Ok((
+            Self {
+                control,
+                worker: Some(worker),
+            },
+            connected,
+        ))
     }
 }
 
@@ -76,17 +97,17 @@ fn run_downlink(
     host: Weak<Host>,
     session_id: String,
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
-    worker_stopped: Arc<AtomicBool>,
+    control: Arc<DownlinkControl>,
     connected_tx: mpsc::Sender<Result<Value, String>>,
 ) {
     let mut connected_tx = Some(connected_tx);
 
-    while !worker_stopped.load(Ordering::Relaxed) {
+    while !control.stopped.load(Ordering::Relaxed) {
         let result = read_downlink(
             &client,
             &session_id,
             deliver.as_ref(),
-            &worker_stopped,
+            &control,
             &mut connected_tx,
         );
 
@@ -97,12 +118,12 @@ fn run_downlink(
                 return;
             }
 
-            if !worker_stopped.load(Ordering::Relaxed) {
+            if !control.stopped.load(Ordering::Relaxed) {
                 warn!("deepseek stream disconnected: {message}");
             }
         }
 
-        if worker_stopped.load(Ordering::Relaxed)
+        if control.stopped.load(Ordering::Relaxed)
             || !host.upgrade().is_some_and(|host| host.is_running())
         {
             return;
@@ -112,24 +133,102 @@ fn run_downlink(
             "type": "nmt/connection-reset", "sessionId": session_id,
         } }));
 
-        thread::sleep(RECONNECT_DELAY);
+        thread::park_timeout(RECONNECT_DELAY);
     }
 }
 
 impl Drop for Downlinks {
     fn drop(&mut self) {
-        self.stopped.store(true, Ordering::Relaxed);
+        self.control.stopped.store(true, Ordering::Relaxed);
+
+        if let Some(socket) = self.control.socket.lock().take() {
+            let _ = socket.shutdown(Shutdown::Both);
+        }
+
+        if let Some(worker) = self.worker.take() {
+            worker.thread().unpark();
+
+            if worker.join().is_err() {
+                warn!("deepseek downlink thread panicked");
+            }
+        }
     }
+}
+
+fn connect_downlink(api: &ApiClient, control: &DownlinkControl) -> Result<Socket, String> {
+    let request = api.stream_request()?;
+    let url = Url::parse(&request.uri().to_string()).map_err(|error| error.to_string())?;
+
+    if url.scheme() != "ws" {
+        return Err("the local harness requires a ws address".into());
+    }
+
+    let addresses = url
+        .socket_addrs(|| Some(80))
+        .map_err(|error| error.to_string())?;
+
+    let deadline = Instant::now() + CONNECT_TIMEOUT;
+    let mut last_error = "the harness address has no usable socket".to_string();
+
+    for address in addresses {
+        loop {
+            if control.stopped.load(Ordering::Relaxed) {
+                return Err("the harness stream was stopped".into());
+            }
+
+            let remaining = deadline.saturating_duration_since(Instant::now());
+
+            if remaining.is_zero() {
+                return Err(last_error);
+            }
+
+            match TcpStream::connect_timeout(&address, remaining.min(STOP_POLL_INTERVAL)) {
+                Ok(stream) => {
+                    stream
+                        .set_read_timeout(Some(remaining))
+                        .map_err(|error| error.to_string())?;
+
+                    stream
+                        .set_write_timeout(Some(remaining))
+                        .map_err(|error| error.to_string())?;
+
+                    let mut registered = control.socket.lock();
+
+                    if control.stopped.load(Ordering::Relaxed) {
+                        return Err("the harness stream was stopped".into());
+                    }
+
+                    *registered = Some(stream.try_clone().map_err(|error| error.to_string())?);
+
+                    drop(registered);
+
+                    return client(request, MaybeTlsStream::Plain(stream))
+                        .map(|(socket, _)| socket)
+                        .map_err(|error| error.to_string());
+                }
+
+                Err(error) => {
+                    last_error = error.to_string();
+
+                    if error.kind() != ErrorKind::TimedOut {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    Err(last_error)
 }
 
 fn read_downlink(
     client: &ApiClient,
     session_id: &str,
     deliver: &dyn Fn(Value),
-    stopped: &AtomicBool,
+    control: &DownlinkControl,
     connected: &mut Option<mpsc::Sender<Result<Value, String>>>,
 ) -> Result<(), String> {
-    let (mut socket, _) = connect(client.stream_request()?).map_err(|error| error.to_string())?;
+    let mut socket = connect_downlink(client, control)?;
 
     for (id, endpoint, args) in [
         ("events", "$events", json!({})),
@@ -145,7 +244,7 @@ fn read_downlink(
 
     let mut streams = Streams::new(session_id);
 
-    pump(&mut socket, stopped, None, |frame| {
+    pump(&mut socket, &control.stopped, None, |frame| {
         streams.process(frame, client, deliver)?;
 
         if let Some(snapshot) = streams.ready_snapshot()
