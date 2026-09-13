@@ -107,6 +107,8 @@ pub(crate) struct ModelsFrame {
     pub(crate) models: Value,
     #[serde(default)]
     pub(crate) error: Option<String>,
+    #[serde(default)]
+    pub(crate) read_error: Option<String>,
 }
 
 #[derive(Deserialize)]

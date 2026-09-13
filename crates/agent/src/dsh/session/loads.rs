@@ -1,11 +1,18 @@
 //! Background catalog and history reads for a session.
 
+#[cfg(test)]
+#[path = "loads_tests.rs"]
+mod tests;
+
 use std::sync::Arc;
 use std::thread;
 
 use serde_json::{Value, json};
 
-use crate::chat::{Event, QueuedPrompt};
+use crate::background_task::{
+    BackgroundTaskKey, BackgroundTaskTranscriptState, BackgroundTaskTranscriptUpdate,
+};
+use crate::chat::{Event, Item, QueuedPrompt};
 use crate::dsh::api::{ApiClient, CallError};
 use crate::dsh::events::session_address;
 use crate::dsh::models::ModelDirectory;
@@ -15,6 +22,57 @@ use crate::dsh::session::{
     SUBAGENTS_FRAME, WORKFLOW_TRANSCRIPT_FRAME,
 };
 use crate::dsh::{commands, events, frames, history};
+
+fn deliver_read(
+    mut payload: Value,
+    field: &str,
+    result: Result<Value, CallError>,
+    deliver: &dyn Fn(Value),
+) {
+    match result {
+        Ok(value) => payload[field] = value,
+        Err(error) => payload["readError"] = json!(error.message()),
+    }
+
+    deliver(json!({ "payload": payload }));
+}
+
+pub(super) fn failed_read_events(payload: &Value, session_id: &str) -> Option<Vec<Event>> {
+    let message = payload["readError"].as_str()?;
+
+    if payload["sessionId"]
+        .as_str()
+        .is_some_and(|id| id != session_id)
+    {
+        return Some(Vec::new());
+    }
+
+    let mut events = match payload["type"].as_str()? {
+        MODELS_FRAME => return None,
+        COMMANDS_FRAME => vec![Event::Commands(Vec::new())],
+        SKILLS_FRAME => vec![Event::Skills(commands::skills(&Value::Null))],
+
+        SUBAGENT_TRANSCRIPT_FRAME => vec![Event::BackgroundTaskTranscript {
+            key: BackgroundTaskKey::deepseek(payload["childSessionId"].as_str()?),
+            update: BackgroundTaskTranscriptUpdate::state(
+                BackgroundTaskTranscriptState::Unavailable {
+                    message: message.to_string(),
+                },
+            ),
+        }],
+
+        HISTORY_FRAME | PRESETS_FRAME | SUBAGENTS_FRAME | WORKFLOW_TRANSCRIPT_FRAME => Vec::new(),
+        _ => return None,
+    };
+
+    // A catalog failure is visible without settling an unrelated prompt,
+    // branch, or conversation restore that is still in flight.
+    events.push(Event::ItemStarted(Item::Error {
+        text: message.to_string(),
+    }));
+
+    Some(events)
+}
 
 /// Read the conversations this tab's directory can continue.
 ///
@@ -26,18 +84,14 @@ pub(super) fn load_sessions(
     cwd: Option<String>,
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
-    thread::spawn(
-        move || match client.call("session/list", json!({ "_request": {} })) {
-            Ok(listed) => deliver(json!({
-                "payload": { "type": HISTORY_FRAME, "sessions": listed, "cwd": cwd },
-            })),
-
-            Err(error) => tracing::warn!(
-                "deepseek recent conversations could not be read: {}",
-                error.message()
-            ),
-        },
-    );
+    thread::spawn(move || {
+        deliver_read(
+            json!({ "type": HISTORY_FRAME, "cwd": cwd }),
+            "sessions",
+            client.call("session/list", json!({ "_request": {} })),
+            deliver.as_ref(),
+        );
+    });
 }
 
 /// Read a pending-inbox snapshot into the prompts a composer can show.
@@ -174,15 +228,12 @@ pub(super) fn load_commands(
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
     thread::spawn(move || {
-        match client.call(commands::LIST_METHOD, commands::agent_args(&session_id)) {
-            Ok(listed) => deliver(json!({
-                "payload": { "type": COMMANDS_FRAME, "sessionId": session_id, "commands": listed },
-            })),
-
-            Err(error) => {
-                tracing::warn!("deepseek commands could not be listed: {}", error.message())
-            }
-        }
+        deliver_read(
+            json!({ "type": COMMANDS_FRAME, "sessionId": session_id }),
+            "commands",
+            client.call(commands::LIST_METHOD, commands::agent_args(&session_id)),
+            deliver.as_ref(),
+        );
     });
 }
 
@@ -193,15 +244,12 @@ pub(super) fn load_skills(
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
     thread::spawn(move || {
-        match client.request("skills/list", json!({ "sessionId": session_id.clone() })) {
-            Ok(listed) => deliver(json!({
-                "payload": { "type": SKILLS_FRAME, "sessionId": session_id, "skills": listed },
-            })),
-
-            Err(error) => {
-                tracing::warn!("deepseek skills could not be listed: {}", error.message())
-            }
-        }
+        deliver_read(
+            json!({ "type": SKILLS_FRAME, "sessionId": session_id }),
+            "skills",
+            client.request("skills/list", json!({ "sessionId": session_id })),
+            deliver.as_ref(),
+        );
     });
 }
 
@@ -217,22 +265,15 @@ pub(super) fn load_agent_presets(
     current: Option<String>,
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
-    thread::spawn(move || match client.call("agentPresets/list", json!({})) {
-        Ok(listed) => deliver(json!({
-            "payload": {
-                "type": PRESETS_FRAME,
-                "sessionId": session_id,
-                "presets": listed["presets"],
-                "current": current,
-            },
-        })),
-
-        Err(error) => {
-            tracing::warn!(
-                "deepseek agent presets could not be listed: {}",
-                error.message()
-            )
-        }
+    thread::spawn(move || {
+        deliver_read(
+            json!({ "type": PRESETS_FRAME, "sessionId": session_id, "current": current }),
+            "presets",
+            client
+                .call("agentPresets/list", json!({}))
+                .map(|listed| listed["presets"].clone()),
+            deliver.as_ref(),
+        );
     });
 }
 
@@ -246,21 +287,12 @@ pub(super) fn load_subagents(
     thread::spawn(move || {
         let payload = json!({ "parentSessionId": session_id });
 
-        match client.call("subagents/list", payload) {
-            Ok(catalog) => deliver(json!({
-                "payload": {
-                    "type": SUBAGENTS_FRAME,
-                    "sessionId": session_id,
-                    "catalog": catalog,
-                    "activity": activity,
-                },
-            })),
-
-            Err(error) => tracing::warn!(
-                "deepseek child agents could not be listed: {}",
-                error.message()
-            ),
-        }
+        deliver_read(
+            json!({ "type": SUBAGENTS_FRAME, "sessionId": session_id, "activity": activity }),
+            "catalog",
+            client.call("subagents/list", payload),
+            deliver.as_ref(),
+        );
     });
 }
 
@@ -280,21 +312,12 @@ pub(super) fn load_subagent_transcript(
             "mode": if continuable { "continuable" } else { "one-shot" },
         });
 
-        match events::snapshot(&client, address, REPLAY_MESSAGES) {
-            Ok(page) => deliver(json!({
-                "payload": {
-                    "type": SUBAGENT_TRANSCRIPT_FRAME,
-                    "sessionId": parent_session_id,
-                    "childSessionId": child,
-                    "page": page,
-                },
-            })),
-
-            Err(error) => tracing::warn!(
-                "deepseek child conversation could not be read: {}",
-                error.message()
-            ),
-        }
+        deliver_read(
+            json!({ "type": SUBAGENT_TRANSCRIPT_FRAME, "sessionId": parent_session_id, "childSessionId": child }),
+            "page",
+            events::snapshot(&client, address, REPLAY_MESSAGES),
+            deliver.as_ref(),
+        );
     });
 }
 
@@ -312,21 +335,12 @@ pub(super) fn load_workflow_transcript(
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
     thread::spawn(move || {
-        match events::snapshot(&client, session_address(&child), REPLAY_MESSAGES) {
-            Ok(page) => deliver(json!({
-                "payload": {
-                    "type": WORKFLOW_TRANSCRIPT_FRAME,
-                    "taskId": task_id,
-                    "agentId": child,
-                    "page": page,
-                },
-            })),
-
-            Err(error) => tracing::warn!(
-                "deepseek workflow member conversation could not be read: {}",
-                error.message()
-            ),
-        }
+        deliver_read(
+            json!({ "type": WORKFLOW_TRANSCRIPT_FRAME, "taskId": task_id, "agentId": child }),
+            "page",
+            events::snapshot(&client, session_address(&child), REPLAY_MESSAGES),
+            deliver.as_ref(),
+        );
     });
 }
 
@@ -380,16 +394,14 @@ pub(super) fn load_models(
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
     thread::spawn(move || {
-        let Some(payload) = reconcile_models(
+        let payload = reconcile_models(
             &client,
             &session_id,
             &selected,
             wanted_model,
             wanted_effort,
             declares_image_input,
-        ) else {
-            return;
-        };
+        );
 
         deliver(json!({ "payload": payload }));
     });
@@ -402,17 +414,15 @@ fn reconcile_models(
     wanted_model: Option<String>,
     wanted_effort: Option<String>,
     declares_image_input: bool,
-) -> Option<Value> {
+) -> Value {
     let mut catalog = match read_model_catalog(client, selected) {
         Ok(catalog) => catalog,
 
         Err(error) => {
-            tracing::warn!(
-                "deepseek model directory could not be read: {}",
-                error.message()
-            );
-
-            return None;
+            return json!({
+                "type": MODELS_FRAME, "sessionId": session_id,
+                "models": { "current": selected }, "readError": error.message(),
+            });
         }
     };
 
@@ -487,7 +497,7 @@ fn reconcile_models(
         payload["error"] = json!(message);
     }
 
-    Some(payload)
+    payload
 }
 
 fn read_model_catalog(client: &ApiClient, selected: &Value) -> Result<Value, CallError> {

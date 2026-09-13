@@ -27,8 +27,9 @@ use crate::background_task::{
     BackgroundTaskKey, BackgroundTaskRefs, BackgroundTaskTranscriptUpdate,
 };
 use crate::chat::{
-    Event, Question, QuestionMode, QuestionRequest as ChatQuestionRequest, SlashCommandArguments,
-    SlashCommandInfo, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
+    Event, Item, Question, QuestionMode, QuestionRequest as ChatQuestionRequest,
+    SlashCommandArguments, SlashCommandInfo, SlashCommandRunPolicy, SlashCommandSource,
+    ThreadSettings,
 };
 use crate::dsh::api::ApiClient;
 use crate::dsh::events::Downlinks;
@@ -38,7 +39,7 @@ use crate::dsh::models::ModelDirectory;
 use crate::dsh::projections::ProjectionTracker;
 use crate::dsh::session::controls::{COMPLETED_FRAME, Controls, question_id};
 use crate::dsh::session::loads::{
-    load_agent_presets, load_commands, load_models, load_sessions, load_skills,
+    failed_read_events, load_agent_presets, load_commands, load_models, load_sessions, load_skills,
 };
 use crate::dsh::workflows::WorkflowTracker;
 use crate::dsh::{commands, frames, history, presets, subagents};
@@ -459,6 +460,10 @@ impl Session {
     /// Map one delivered frame into transcript events. Frames for other
     /// sessions and types this build does not know produce nothing.
     pub fn process(&mut self, frame: Value) -> Vec<Event> {
+        if let Some(events) = failed_read_events(&frame["payload"], &self.session_id) {
+            return events;
+        }
+
         if frame["payload"]["type"] == COMPLETED_FRAME {
             return self.control_completed(&frame["payload"]);
         }
@@ -838,6 +843,10 @@ impl Session {
                 message,
                 effort: self.models.effort().map(str::to_string),
             });
+        }
+
+        if let Some(message) = frame.read_error {
+            events.push(Event::ItemStarted(Item::Error { text: message }));
         }
 
         events
