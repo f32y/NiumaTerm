@@ -138,14 +138,18 @@ pub(crate) fn block_selection_range(
         last += 1;
     }
 
-    if selection_type == SelectionType::Lines {
-        return Some(((first, 0), (last, cols.saturating_sub(1) as u32)));
-    }
+    match selection_type {
+        SelectionType::Lines => {
+            return Some(((first, 0), (last, cols.saturating_sub(1) as u32)));
+        }
 
-    if selection_type != SelectionType::Semantic {
-        let col = col.min(cols.saturating_sub(1) as u32);
+        SelectionType::Simple | SelectionType::Block => {
+            let col = col.min(cols.saturating_sub(1) as u32);
 
-        return Some(((line, col), (line, col)));
+            return Some(((line, col), (line, col)));
+        }
+
+        SelectionType::Semantic => {}
     }
 
     // Class 0 = whitespace, 1 = punctuation delimiter, 2 = word content.
