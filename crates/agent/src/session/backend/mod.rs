@@ -12,6 +12,7 @@ use serde_json::Value;
 use tracing::trace;
 
 use crate::background_task::{BackgroundTaskKey, BackgroundTaskProvider};
+use crate::catalog::adapter_commands;
 use crate::chat::{
     Event as SessionEvent, ForkAnchor, MessageImage, QuestionRequest, QuestionResponse,
     SendOutcome, SessionScope, SkillReference, SlashCommandInfo, SlashCommandOutcome,
@@ -224,14 +225,16 @@ impl Backend {
     }
 
     pub fn adapter_commands(&self) -> Vec<SlashCommandInfo> {
-        match self {
-            Backend::Codex(_) => app_server::Session::adapter_commands(),
-            Backend::Claude(_) => stream_json::Session::adapter_commands(),
-            Backend::DeepSeek(_) => dsh::Session::adapter_commands(),
+        let kind = match self {
+            Backend::Codex(_) => AgentKind::Codex,
+            Backend::Claude(_) => AgentKind::Claude,
+            Backend::DeepSeek(_) => AgentKind::DeepSeek,
 
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(session) => session.commands.clone(),
-        }
+            Backend::Test(session) => return session.commands.clone(),
+        };
+
+        adapter_commands(kind)
     }
 
     /// Drop one prompt the backend accepted but has not started. Answers
