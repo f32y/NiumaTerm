@@ -27,7 +27,6 @@ use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use parking_lot::Mutex;
 use serde_json::{Value, json};
 
 use crate::LaunchConfig;
@@ -277,7 +276,7 @@ impl Session {
         launch: &LaunchConfig,
         workspace: &AgentWorkspace,
         resume: Option<String>,
-        deliver: impl Fn(Value) + Send + 'static,
+        deliver: impl Fn(Value) + Send + Sync + 'static,
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Self, String> {
         let initial_model = launch_model(launch);
@@ -292,11 +291,11 @@ impl Session {
             &initial_model,
         );
 
-        let deliver = Arc::new(Mutex::new(deliver));
+        let deliver = Arc::new(deliver);
         let timer_delivery = Arc::clone(&deliver);
 
         let timer = DeadlineTimer::new(move || {
-            (timer_delivery.lock())(json!({"method": TIMEOUT_METHOD}));
+            timer_delivery(json!({"method": TIMEOUT_METHOD}));
         })
         .map_err(|error| format!("could not start Claude deadline timer: {error}"))?;
 
@@ -306,7 +305,7 @@ impl Session {
             command,
             &executable,
             "Claude",
-            move |message| (deliver.lock())(message),
+            move |message| deliver(message),
             on_stderr,
             move || stop.stop(),
         )?;

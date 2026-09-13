@@ -103,6 +103,73 @@ fn request_deadlines_wake_without_output_and_release_the_delivery_on_close() {
     );
 }
 
+#[cfg(windows)]
+#[test]
+fn a_blocked_stdout_delivery_does_not_block_request_deadlines() {
+    use std::path::Path;
+    use std::sync::mpsc;
+
+    use parking_lot::Mutex;
+    use tempfile::tempdir;
+
+    let directory = tempdir().unwrap();
+
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/fake-stream-json.cmd");
+
+    let launch = LaunchConfig {
+        executable: fixture.to_string_lossy().into_owned(),
+        env: vec![(
+            "NMT_FAKE_STREAM_LOG".into(),
+            directory
+                .path()
+                .join("input.jsonl")
+                .to_string_lossy()
+                .into_owned(),
+        )],
+        ..LaunchConfig::default()
+    };
+
+    let (entered, reading) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    let released = Mutex::new(released);
+    let (expired, deadlines) = mpsc::channel();
+
+    let mut session = Session::spawn(
+        &launch,
+        &AgentWorkspace::default(),
+        None,
+        move |message| {
+            if message["method"] == TIMEOUT_METHOD {
+                let _ = expired.send(());
+            } else {
+                let _ = entered.send(());
+                let _ = released.lock().recv_timeout(Duration::from_secs(5));
+            }
+        },
+        |_| {},
+    )
+    .unwrap();
+
+    reading.recv_timeout(Duration::from_secs(3)).unwrap();
+
+    session.control.record_admitted(
+        "overdue".into(),
+        RequestClass::Query,
+        Instant::now() - Duration::from_secs(31),
+    );
+
+    let delivered = deadlines.recv_timeout(Duration::from_secs(1));
+
+    release.send(()).unwrap();
+    drop(session);
+
+    assert!(
+        delivered.is_ok(),
+        "stdout delivery must not serialize the timer"
+    );
+}
+
 #[test]
 fn large_pending_control_sets_keep_independent_deadlines() {
     let now = Instant::now();
