@@ -27,7 +27,7 @@ use windows_sys::{s, w};
 use crate::windows::child::ChildExitWatcher;
 use crate::windows::pipes::{EventedAnonRead, EventedAnonWrite};
 use crate::windows::process::{KillOnCloseJob, ProcessTree};
-use crate::windows::{Pty, cmdline, win32_string};
+use crate::windows::{Pty, win32_string};
 use crate::{PtyOptions, Winsize};
 
 /// Load the pseudoconsole API from conpty.dll if possible, otherwise use the
@@ -317,7 +317,7 @@ pub fn new(shell: &str, options: PtyOptions<'_>, manage_process_tree: bool) -> R
         }
     }
 
-    let cmdline = win32_string(&cmdline(shell));
+    let cmdline = win32_string(shell);
     let cwd = working_directory.map(win32_string);
 
     let mut environment = build_environment_block(environment_overrides);

@@ -3,27 +3,28 @@
 
 #![cfg(windows)]
 
-use nmt_platform::{PtyOptions, create_managed_pty_with_env, create_pty};
+use nmt_platform::{PtyOptions, create_managed_pty_with_env, create_pty_with_env};
 
 #[test]
 fn managed_pty_controls_shell_process_tree() {
-    let pty = create_pty("cmd.exe", Vec::new(), &None, 80, 24).expect("failed to create ConPTY");
-
-    assert!(pty.process_tree().is_none());
-
-    drop(pty);
-
-    let pty = create_managed_pty_with_env(PtyOptions {
+    let options = PtyOptions {
         shell: "cmd.exe",
         args: &[],
         working_directory: None,
         columns: 80,
         rows: 24,
         environment_overrides: &[],
-        starting_title: Some("managed test"),
+        starting_title: Some("job test"),
         bootstrap: None,
-    })
-    .expect("failed to create managed ConPTY");
+    };
+
+    let pty = create_pty_with_env(options).expect("failed to create ConPTY");
+
+    assert!(pty.process_tree().is_none());
+
+    drop(pty);
+
+    let pty = create_managed_pty_with_env(options).expect("failed to create managed ConPTY");
 
     assert!(
         pty.process_tree().is_some(),

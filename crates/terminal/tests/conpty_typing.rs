@@ -6,10 +6,24 @@ use std::time::Duration;
 
 use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
-use nmt_platform::{Pty, WinsizeBuilder, create_pty};
+use nmt_platform::{Pty, PtyOptions, WinsizeBuilder, create_pty_with_env};
 use nmt_terminal::event::{Msg, VoidListener};
 use nmt_terminal::pty_pipe::{SessionHandles, SessionOptions, start_session};
 use nmt_terminal::publication::FrameStore;
+use std::io;
+
+fn powershell_pty(columns: u16, rows: u16) -> io::Result<Pty> {
+    create_pty_with_env(PtyOptions {
+        shell: "powershell.exe",
+        args: &[],
+        working_directory: None,
+        columns,
+        rows,
+        environment_overrides: &[],
+        starting_title: None,
+        bootstrap: None,
+    })
+}
 
 fn start(pty: Pty, cols: u16, rows: u16) -> SessionHandles {
     start_session(
@@ -53,7 +67,7 @@ fn typing_past_right_edge_does_not_duplicate() {
     let cols: u16 = 80;
     let rows: u16 = 24;
 
-    let pty = match create_pty("powershell.exe", vec![], &None, cols, rows) {
+    let pty = match powershell_pty(cols, rows) {
         Ok(p) => p,
 
         Err(e) => {
@@ -94,7 +108,7 @@ fn typing_past_right_edge_does_not_duplicate() {
 /// the window). Mirrors `nmt_render_host_resize` -> `Msg::Resize`.
 #[test]
 fn typing_after_resize_does_not_duplicate() {
-    let pty = match create_pty("powershell.exe", vec![], &None, 80, 24) {
+    let pty = match powershell_pty(80, 24) {
         Ok(p) => p,
 
         Err(e) => {
@@ -144,7 +158,7 @@ fn typing_after_resize_does_not_duplicate() {
 /// and is the suspected source of the frantic-repeat bug.
 #[test]
 fn per_keystroke_typing_does_not_duplicate() {
-    let pty = match create_pty("powershell.exe", vec![], &None, 80, 24) {
+    let pty = match powershell_pty(80, 24) {
         Ok(p) => p,
 
         Err(e) => {
@@ -211,7 +225,7 @@ fn per_keystroke_typing_does_not_duplicate() {
 /// observed in the live app for 120 typed).
 #[test]
 fn resize_then_fast_per_keystroke_does_not_duplicate() {
-    let pty = match create_pty("powershell.exe", vec![], &None, 80, 24) {
+    let pty = match powershell_pty(80, 24) {
         Ok(p) => p,
 
         Err(e) => {

@@ -43,12 +43,8 @@ use std::ffi::OsStr;
 use std::io::{self};
 use std::iter::{self, once};
 use std::os::windows::ffi::OsStrExt;
-use std::os::windows::process::CommandExt;
-use std::process::{Command, Stdio};
 use std::sync::mpsc::TryRecvError;
 use std::sync::{self};
-
-use windows_sys::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
 
 use crate::windows::child::ChildExitWatcher;
 use crate::windows::conpty::Conpty as Backend;
@@ -69,25 +65,6 @@ pub struct Pty {
     write_token: Token,
     child_event_token: Token,
     child_watcher: ChildExitWatcher,
-}
-
-pub fn create_pty(
-    shell: &str,
-    args: Vec<String>,
-    working_directory: &Option<String>,
-    columns: u16,
-    rows: u16,
-) -> Result<Pty, io::Error> {
-    create_pty_with_env(PtyOptions {
-        shell,
-        args: &args,
-        working_directory: working_directory.as_deref(),
-        columns,
-        rows,
-        environment_overrides: &[],
-        starting_title: None,
-        bootstrap: None,
-    })
 }
 
 /// Create a ConPTY shell with child-only environment overrides.
@@ -311,27 +288,8 @@ fn quote_command_arg(arg: &str) -> String {
     out
 }
 
-fn cmdline(shell: &str) -> String {
-    shell.to_string()
-}
-
 /// Converts the string slice into a Windows-standard representation for "W"-
 /// suffixed function variants, which accept UTF-16 encoded string values.
 pub fn win32_string<S: AsRef<OsStr> + ?Sized>(value: &S) -> Vec<u16> {
     OsStr::new(value).encode_wide().chain(once(0)).collect()
-}
-
-pub fn spawn_daemon<I, S>(program: &str, args: I) -> io::Result<()>
-where
-    I: IntoIterator<Item = S> + Copy,
-    S: AsRef<OsStr>,
-{
-    Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW)
-        .spawn()
-        .map(|_| ())
 }
