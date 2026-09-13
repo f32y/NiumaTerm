@@ -85,9 +85,7 @@ impl AgentPane {
 
             SessionEffect::TurnStarted { opened } => self.on_turn_started(opened, cx),
 
-            SessionEffect::TurnCompleted { error, interrupted } => {
-                self.on_turn_completed(error, interrupted, cx)
-            }
+            SessionEffect::TurnCompleted { error, .. } => self.on_turn_completed(error, cx),
 
             SessionEffect::OutputTokens(_)
             | SessionEffect::ContextWindow(_)
@@ -329,12 +327,7 @@ impl AgentPane {
     /// backend actually ended the turn, so a backend that keeps streaming
     /// never shows an "Interrupted" row above live output. A stale request
     /// for an earlier turn is dropped at this boundary.
-    fn on_turn_completed(
-        &mut self,
-        error: Option<String>,
-        _interrupted: bool,
-        cx: &mut Context<Self>,
-    ) {
+    fn on_turn_completed(&mut self, error: Option<String>, cx: &mut Context<Self>) {
         let completion_body = error
             .clone()
             .or_else(|| self.latest_agent_message(cx))
