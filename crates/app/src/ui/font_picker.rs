@@ -1,6 +1,5 @@
-//! The `Select` entity and the font scan are cached in a gpui global for the
-//! app lifetime, because the settings view (and its field closures) is rebuilt
-//! on every render.
+//! Font metadata is shared, while each window owns its picker controls.
+//! Keyed state keeps those controls stable across settings-view renders.
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -58,7 +57,6 @@ pub enum FontTarget {
 
 struct FontPicker {
     select: Entity<FontSelectState>,
-    fonts: Vec<(SharedString, bool)>,
 
     /// The `monospace_only` value the current item set was built with.
     applied_monospace_only: bool,
@@ -66,16 +64,9 @@ struct FontPicker {
     _confirm: Subscription,
 }
 
-/// One cached picker per target (built lazily on first use of each).
-#[derive(Default)]
-struct FontPickerGlobal {
-    terminal: Option<FontPicker>,
-    ui: Option<FontPicker>,
-    agent: Option<FontPicker>,
-    agent_transcript: Option<FontPicker>,
-}
+struct FontCatalog(Vec<(SharedString, bool)>);
 
-impl Global for FontPickerGlobal {}
+impl Global for FontCatalog {}
 
 fn current_family(target: FontTarget, cx: &App) -> SharedString {
     let settings = cx.global::<AppSettings>();
@@ -98,28 +89,6 @@ fn monospace_filter(target: FontTarget, cx: &App) -> bool {
         && cx.global::<AppSettings>().appearance.monospace_only
 }
 
-fn slot(target: FontTarget, cx: &App) -> &Option<FontPicker> {
-    let global = cx.global::<FontPickerGlobal>();
-
-    match target {
-        FontTarget::Terminal => &global.terminal,
-        FontTarget::Ui => &global.ui,
-        FontTarget::Agent => &global.agent,
-        FontTarget::AgentTranscript => &global.agent_transcript,
-    }
-}
-
-fn slot_mut(target: FontTarget, cx: &mut App) -> &mut Option<FontPicker> {
-    let global = cx.global_mut::<FontPickerGlobal>();
-
-    match target {
-        FontTarget::Terminal => &mut global.terminal,
-        FontTarget::Ui => &mut global.ui,
-        FontTarget::Agent => &mut global.agent,
-        FontTarget::AgentTranscript => &mut global.agent_transcript,
-    }
-}
-
 pub fn font_family_field(target: FontTarget) -> SettingField<SharedString> {
     SettingField::render(move |options, window, cx| {
         let select = ensure_picker(target, window, cx);
@@ -131,14 +100,15 @@ pub fn font_family_field(target: FontTarget) -> SettingField<SharedString> {
 }
 
 fn ensure_picker(target: FontTarget, window: &mut Window, cx: &mut App) -> Entity<FontSelectState> {
-    cx.default_global::<FontPickerGlobal>();
+    if !cx.has_global::<FontCatalog>() {
+        cx.set_global(FontCatalog(scan_fonts(window)));
+    }
 
     let monospace_only = monospace_filter(target, cx);
     let family = current_family(target, cx);
 
-    if slot(target, cx).is_none() {
-        let fonts = scan_fonts(window);
-        let items = font_items(&fonts, monospace_only);
+    let picker = window.use_keyed_state(("font-picker", target as usize), cx, |window, cx| {
+        let items = font_items(&cx.global::<FontCatalog>().0, monospace_only);
 
         let select = cx.new(|cx| {
             SelectState::new(SearchableVec::new(items), None, window, cx).searchable(true)
@@ -148,7 +118,7 @@ fn ensure_picker(target: FontTarget, window: &mut Window, cx: &mut App) -> Entit
             state.set_selected_value(&family, window, cx);
         });
 
-        let confirm = cx.subscribe(&select, move |_, event: &SelectEvent<_>, cx| {
+        let confirm = cx.subscribe(&select, move |_, _, event: &SelectEvent<_>, cx| {
             if let SelectEvent::Confirm(Some(name)) = event {
                 let settings = cx.global_mut::<AppSettings>();
 
@@ -167,29 +137,32 @@ fn ensure_picker(target: FontTarget, window: &mut Window, cx: &mut App) -> Entit
             }
         });
 
-        *slot_mut(target, cx) = Some(FontPicker {
+        FontPicker {
             select,
-            fonts,
             applied_monospace_only: monospace_only,
             _confirm: confirm,
-        });
-    }
+        }
+    });
 
-    let picker = slot(target, cx).as_ref().expect("set above");
-    let select = picker.select.clone();
+    let select = picker.read(cx).select.clone();
 
-    if picker.applied_monospace_only != monospace_only {
-        let items = font_items(&picker.fonts, monospace_only);
+    if picker.read(cx).applied_monospace_only != monospace_only {
+        let items = font_items(&cx.global::<FontCatalog>().0, monospace_only);
 
         select.update(cx, |state, cx| {
             state.set_items(SearchableVec::new(items), window, cx);
             state.set_selected_value(&family, window, cx);
         });
 
-        slot_mut(target, cx)
-            .as_mut()
-            .expect("set above")
-            .applied_monospace_only = monospace_only;
+        picker.update(cx, |picker, _| {
+            picker.applied_monospace_only = monospace_only
+        });
+    }
+
+    if select.read(cx).selected_value() != Some(&family) {
+        select.update(cx, |state, cx| {
+            state.set_selected_value(&family, window, cx)
+        });
     }
 
     select
@@ -241,4 +214,124 @@ fn is_monospace(family: &str, window: &mut Window) -> bool {
     let m_width = (line.x_for_index(2) - line.x_for_index(1)).as_f32();
 
     i_width > 0.0 && (i_width - m_width).abs() < 0.5
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{
+        AppContext as _, Context, IntoElement, Render, TestAppContext, VisualTestContext,
+        WeakEntity, Window, div,
+    };
+
+    use crate::ui::AppSettings;
+    use crate::ui::font_picker::{FontCatalog, FontSelectState, FontTarget, ensure_picker};
+
+    #[derive(Default)]
+    struct PickerHost {
+        select: Option<WeakEntity<FontSelectState>>,
+        hidden: bool,
+    }
+
+    impl Render for PickerHost {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            if !self.hidden {
+                self.select = Some(ensure_picker(FontTarget::Ui, window, cx).downgrade());
+            }
+
+            div()
+        }
+    }
+
+    #[gpui::test]
+    fn font_pickers_are_local_to_rendered_windows(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.set_global(AppSettings::default());
+
+            cx.set_global(FontCatalog(vec![
+                ("First".into(), true),
+                ("Second".into(), false),
+            ]));
+
+            cx.global_mut::<AppSettings>().appearance.ui_font = "First".into();
+        });
+
+        let first = cx.update(|cx| {
+            cx.open_window(Default::default(), |_, cx| {
+                cx.new(|_| PickerHost::default())
+            })
+            .unwrap()
+        });
+
+        let second = cx.update(|cx| {
+            cx.open_window(Default::default(), |_, cx| {
+                cx.new(|_| PickerHost::default())
+            })
+            .unwrap()
+        });
+
+        cx.run_until_parked();
+
+        let first_select = first
+            .read_with(cx, |host, _| host.select.clone().unwrap())
+            .unwrap();
+
+        let second_select = second
+            .read_with(cx, |host, _| host.select.clone().unwrap())
+            .unwrap();
+
+        assert_ne!(first_select.entity_id(), second_select.entity_id());
+
+        cx.update(|cx| cx.global_mut::<AppSettings>().appearance.ui_font = "Second".into());
+
+        let mut cx = VisualTestContext::from_window(first.into(), cx);
+
+        first.update(&mut cx, |_, _, cx| cx.notify()).unwrap();
+        cx.run_until_parked();
+
+        cx.refresh().unwrap();
+
+        cx.update(|_, cx| {
+            assert_eq!(
+                first_select
+                    .upgrade()
+                    .unwrap()
+                    .read(cx)
+                    .selected_value()
+                    .unwrap()
+                    .as_ref(),
+                "Second"
+            );
+            assert_eq!(
+                second_select
+                    .upgrade()
+                    .unwrap()
+                    .read(cx)
+                    .selected_value()
+                    .unwrap()
+                    .as_ref(),
+                "First"
+            );
+        });
+
+        first
+            .update(&mut cx, |host, _, cx| {
+                host.hidden = true;
+
+                cx.notify();
+            })
+            .unwrap();
+
+        cx.run_until_parked();
+        cx.refresh().unwrap();
+        cx.run_until_parked();
+
+        first.update(&mut cx, |_, _, cx| cx.notify()).unwrap();
+        cx.run_until_parked();
+        cx.refresh().unwrap();
+        cx.run_until_parked();
+
+        assert!(first_select.upgrade().is_none());
+        assert!(second_select.upgrade().is_some());
+    }
 }
