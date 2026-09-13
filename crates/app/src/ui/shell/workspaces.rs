@@ -60,6 +60,7 @@ impl Shell {
     pub(super) fn on_next_tab(&mut self, _: &NextTab, window: &mut Window, cx: &mut Context<Self>) {
         self.workspaces.active_tabs_mut().focus_next();
 
+        self.on_active_tab_changed(window, cx);
         self.focus_active(window, cx);
 
         self.sync_session_memory(cx);
@@ -70,6 +71,7 @@ impl Shell {
     pub(super) fn on_prev_tab(&mut self, _: &PrevTab, window: &mut Window, cx: &mut Context<Self>) {
         self.workspaces.active_tabs_mut().focus_prev();
 
+        self.on_active_tab_changed(window, cx);
         self.focus_active(window, cx);
 
         self.sync_session_memory(cx);
@@ -149,6 +151,7 @@ impl Shell {
         self.workspaces.activate(workspace_index);
         self.workspaces.active_tabs_mut().activate(tab_index);
 
+        self.on_active_tab_changed(window, cx);
         self.focus_active(window, cx);
 
         self.sync_session_memory(cx);
@@ -255,6 +258,7 @@ impl Shell {
             WorkspaceKind::Normal,
         );
 
+        self.on_active_tab_changed(window, cx);
         self.focus_active(window, cx);
 
         self.refresh_root_availability(cx);
@@ -276,6 +280,7 @@ impl Shell {
 
         self.workspaces.activate(next);
 
+        self.on_active_tab_changed(window, cx);
         self.focus_active(window, cx);
 
         self.sync_session_memory(cx);
@@ -294,6 +299,7 @@ impl Shell {
 
         self.workspaces.activate(prev);
 
+        self.on_active_tab_changed(window, cx);
         self.focus_active(window, cx);
 
         self.sync_session_memory(cx);

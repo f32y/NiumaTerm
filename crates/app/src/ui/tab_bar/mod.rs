@@ -628,6 +628,7 @@ impl TabStrip {
             }))
             .on_click(cx.listener(|this, ix: &usize, window, cx| {
                 this.workspaces.active_tabs_mut().activate(*ix);
+                this.on_active_tab_changed(window, cx);
 
                 this.focus_active(window, cx);
                 this.sync_session_memory(cx);

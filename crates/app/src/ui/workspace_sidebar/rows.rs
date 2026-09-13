@@ -88,6 +88,7 @@ impl Sidebar {
             )
             .capture_any_mouse_down(cx.listener(move |this, _, window, cx| {
                 this.workspaces.activate(idx);
+                this.on_active_tab_changed(window, cx);
                 this.focus_active(window, cx);
                 this.sync_session_memory(cx);
 
@@ -320,6 +321,7 @@ impl Sidebar {
             )
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.workspaces.activate(idx);
+                this.on_active_tab_changed(window, cx);
                 this.focus_active(window, cx);
                 this.sync_session_memory(cx);
 
@@ -666,6 +668,7 @@ impl Sidebar {
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.workspaces.activate(ws_idx);
                 this.workspaces.active_tabs_mut().activate(tab_idx);
+                this.on_active_tab_changed(window, cx);
                 this.focus_active(window, cx);
                 this.sync_session_memory(cx);
 

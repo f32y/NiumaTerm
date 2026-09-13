@@ -53,6 +53,7 @@ impl Shell {
             t!("team-title").into_owned(),
         );
 
+        self.on_active_tab_changed(window, cx);
         self.focus_active(window, cx);
         self.sync_session_memory(cx);
 
@@ -151,6 +152,7 @@ impl Shell {
             title,
         );
 
+        self.on_active_tab_changed(window, cx);
         self.focus_active(window, cx);
 
         self.sync_session_memory(cx);
@@ -197,6 +199,7 @@ impl Shell {
                             t!("shell-remote-tab-title").to_string(),
                         );
 
+                        this.on_active_tab_changed(window, cx);
                         this.focus_active(window, cx);
 
                         cx.notify();
@@ -277,6 +280,7 @@ impl Shell {
             title,
         );
 
+        self.on_active_tab_changed(window, cx);
         self.focus_active(window, cx);
         self.sync_session_memory(cx);
 
@@ -315,6 +319,7 @@ impl Shell {
             // restoring the tab the user last used without spawning a shell.
             self.workspaces.activate(index);
             window.activate_window();
+            self.on_active_tab_changed(window, cx);
             self.focus_active(window, cx);
             self.sync_session_memory(cx);
 

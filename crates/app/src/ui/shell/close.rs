@@ -114,6 +114,7 @@ impl Shell {
         // and ConPTY handle (same Drop chain as a tab close).
         drop(pane);
 
+        self.on_active_tab_changed(window, cx);
         self.focus_active(window, cx);
         self.sync_session_memory(cx);
 
@@ -335,6 +336,8 @@ impl Shell {
     }
 
     fn close_tab_now(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
+        let was_active = self.workspaces.active_tabs().active_id() == id;
+
         // `close` refuses the last tab of its workspace and returns the removed
         // pane entity; dropping it drops the pane's surface and PTY.
         let removed = self
@@ -351,6 +354,10 @@ impl Shell {
         }
 
         drop(tree);
+
+        if was_active {
+            self.on_active_tab_changed(window, cx);
+        }
 
         self.focus_active(window, cx);
         self.sync_session_memory(cx);
@@ -671,6 +678,8 @@ impl Shell {
             return;
         }
 
+        let was_active = self.workspaces.active_id() == id;
+
         if self.workspaces.close_workspace(id).is_some() {
             for route in routes {
                 self.remove_agent_route(&route, cx);
@@ -678,6 +687,10 @@ impl Shell {
 
             if settings {
                 self.retire_settings_workspace(cx);
+            }
+
+            if was_active {
+                self.on_active_tab_changed(window, cx);
             }
 
             self.focus_active(window, cx);

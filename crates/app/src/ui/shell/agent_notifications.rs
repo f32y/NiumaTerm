@@ -269,6 +269,7 @@ impl Shell {
             }
         }
 
+        self.on_active_tab_changed(window, cx);
         self.acknowledge_notification(route, notification_id, cx);
 
         true

@@ -469,32 +469,25 @@ impl Shell {
         tabs.set_title(tab_id, title);
     }
 
-    pub(crate) fn focus_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn on_active_tab_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.ensure_active_tab_live(window, cx);
-
-        let settings_active = self.workspaces.active_tabs().active().is_settings();
-
-        if self.settings.note_active(settings_active) {
-            ui::settings::save_settings(window, cx);
-        }
-
-        // The settings surface owns its inner focus (its search field and
-        // controls), and it has no pane to hand the keyboard to, so focus
-        // stops at the shell.
-        if settings_active {
-            window.focus(&self.focus, cx);
-
-            return;
-        }
-
         self.sync_active_terminal_title(cx);
 
-        // Every activation path funnels through here, so this is the one place
-        // that acknowledges the tab's bell and its last command's result.
         let tabs = self.workspaces.active_tabs_mut();
 
         if tabs.clear_active_bell() | tabs.clear_active_outcome() {
             cx.notify();
+        }
+
+        self.acknowledge_visible(window, true, cx);
+    }
+
+    pub(crate) fn focus_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Settings owns its controls' focus and has no pane to focus.
+        if self.workspaces.active_tabs().active().is_settings() {
+            window.focus(&self.focus, cx);
+
+            return;
         }
 
         if let Some(team) = self.workspaces.active_tabs().active().team().cloned() {
@@ -510,11 +503,8 @@ impl Shell {
             return;
         }
 
-        // Agent tabs focus their composer and acknowledge their own monitor
-        // route just like a focused terminal pane.
         if let Some(agent) = self.active_agent() {
             agent.update(cx, |pane, cx| pane.focus(window, cx));
-            self.acknowledge_visible(window, true, cx);
 
             return;
         }
@@ -522,8 +512,6 @@ impl Shell {
         let handle = self.active_pane().read(cx).focus.clone();
 
         window.focus(&handle, cx);
-
-        self.acknowledge_visible(window, true, cx);
     }
 
     fn acknowledge_visible(

@@ -26,8 +26,7 @@ pub(super) fn settings_title() -> Cow<'static, str> {
 
 /// Everything the settings surface owns while it is on screen: the page and
 /// search state that outlives a repaint, the themes-directory watcher that
-/// makes theme edits preview live, and whether the surface was the active tab
-/// last time focus moved.
+/// makes theme edits preview live.
 #[derive(Default)]
 pub(super) struct SettingsSurface {
     /// Selected page and search query. The shell owns it so switching to
@@ -38,9 +37,6 @@ pub(super) struct SettingsSurface {
 
     /// Alive only while this shell's settings entry is open.
     theme_watcher: Option<Task<()>>,
-
-    /// Whether the surface was the active tab at the last activation.
-    was_active: bool,
 }
 
 impl SettingsSurface {
@@ -60,26 +56,10 @@ impl SettingsSurface {
 
     /// Drop the machinery the surface owns.
     pub(super) fn retire(&mut self) {
-        // The surface is gone, so the next activation has nothing to flush.
-        self.was_active = false;
-
         self.theme_watcher = None;
 
         // Reopening starts on the first page, matching what the modal did.
         self.state = None;
-    }
-
-    /// Record whether the surface is the active tab, reporting the activation
-    /// that leaves it. Settings edits only live in the global until something
-    /// writes them out, and switching to another workspace leaves the surface
-    /// on screen for an unbounded time, so the departure is the commit point
-    /// rather than the close.
-    pub(super) fn note_active(&mut self, active: bool) -> bool {
-        let left = self.was_active && !active;
-
-        self.was_active = active;
-
-        left
     }
 
     /// The page state to hand the settings widget, once one exists.
@@ -111,6 +91,7 @@ impl Shell {
                 .position(|ws| ws.id == id)
             {
                 self.workspaces.activate(index);
+                self.on_active_tab_changed(window, cx);
                 self.focus_active(window, cx);
 
                 cx.notify();
@@ -141,6 +122,7 @@ impl Shell {
             WorkspaceKind::Settings,
         );
 
+        self.on_active_tab_changed(window, cx);
         self.focus_active(window, cx);
 
         cx.notify();

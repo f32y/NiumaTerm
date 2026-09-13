@@ -79,6 +79,7 @@ impl Shell {
 
         self.register_agent_pane(&pane, cx);
 
+        self.on_active_tab_changed(window, cx);
         self.focus_active(window, cx);
 
         self.sync_session_memory(cx);
@@ -155,6 +156,7 @@ impl Shell {
             return;
         }
 
+        self.on_active_tab_changed(window, cx);
         self.focus_active(window, cx);
 
         self.sync_session_memory(cx);

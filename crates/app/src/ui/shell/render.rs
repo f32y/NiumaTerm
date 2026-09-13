@@ -74,6 +74,7 @@ impl Render for Shell {
 
         if self.needs_focus {
             self.needs_focus = false;
+            self.on_active_tab_changed(window, cx);
             self.focus_active(window, cx);
         }
 
