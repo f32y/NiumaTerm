@@ -27,8 +27,8 @@ fn process_routes_are_unique_and_environment_is_exact() {
     );
     assert_eq!(environment[2], (AGENT_HOOK_VERSION_ENV.into(), "1".into()));
 
-    process.set_hook_executable("C:\\NiumaTerm\\NmtAgentHook.exe".into());
-    process.set_hook_executable("C:\\ignored\\second\\call.exe".into());
+    assert!(process.set_hook_executable("C:\\NiumaTerm\\NmtAgentHook.exe".into()));
+    assert!(!process.set_hook_executable("C:\\ignored\\second\\call.exe".into()));
 
     assert_eq!(
         process.environment_for(&first)[3],

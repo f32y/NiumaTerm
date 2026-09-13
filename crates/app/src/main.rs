@@ -120,7 +120,7 @@ fn main() {
 
     agent_process().set_testing(testing);
 
-    agent_process().set_hook_executable(
+    let hook_initialized = agent_process().set_hook_executable(
         utils::get_exe_dir()
             .join("NmtAgentHook.exe")
             .display()
@@ -133,6 +133,10 @@ fn main() {
 
     // Hold the appender guard for the whole app lifetime; `main` blocks until exit.
     let _log_guard = logging::init_logging(testing).expect("init logging");
+
+    if !hook_initialized {
+        warn!("hook executable was already initialized; keeping the existing path");
+    }
 
     if profiling && !cfg!(enable_profiling) {
         warn!("--enable-profiling requires a build with --cfg enable_profiling");

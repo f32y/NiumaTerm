@@ -66,8 +66,9 @@ impl AgentProcess {
     /// Absolute path of the hook CLI binary, exported to every pane so
     /// externally configured agent hooks can locate it via `$NMT_AGENT_HOOK_EXE`
     /// without baking an install path into their configuration.
-    pub fn set_hook_executable(&self, path: String) {
-        let _ = self.hook_executable.set(path);
+    #[must_use]
+    pub fn set_hook_executable(&self, path: String) -> bool {
+        self.hook_executable.set(path).is_ok()
     }
 
     /// Installers use the same absolute binary path exported to pane children,
