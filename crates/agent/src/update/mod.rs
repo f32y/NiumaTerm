@@ -452,10 +452,7 @@ impl UpdateCoordinator {
         Self::with_clock(cache_path, Arc::new(Utc::now))
     }
 
-    pub fn with_clock(
-        cache_path: PathBuf,
-        now: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
-    ) -> Self {
+    fn with_clock(cache_path: PathBuf, now: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>) -> Self {
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 records: HashMap::new(),
