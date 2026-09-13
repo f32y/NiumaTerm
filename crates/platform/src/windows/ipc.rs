@@ -1,5 +1,7 @@
+pub use crate::ipc_message::MAX_MESSAGE_BYTES;
+
 use std::fs::{self, File};
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::os::windows::io::FromRawHandle;
 use std::time::{Duration, Instant};
 use std::{ptr, thread};
@@ -15,11 +17,12 @@ use windows_sys::Win32::System::Pipes::{
 };
 use windows_sys::Win32::System::Threading::CreateMutexW;
 
+use crate::ipc_message::read_message;
+
 const MUTEX_NAME: &str = "Local\\NiumaTerm.SingleInstance";
 const PIPE_NAME: &str = "\\\\.\\pipe\\NiumaTerm.Ipc";
 const TESTING_MUTEX_NAME: &str = "Local\\NiumaTerm.Testing.Ipc";
 const TESTING_PIPE_NAME: &str = "\\\\.\\pipe\\NiumaTerm.Testing.Ipc";
-pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 
 fn mutex_name(testing: bool) -> &'static str {
     if testing {
@@ -121,15 +124,9 @@ fn serve_pipe(testing: bool, mut on_message: impl FnMut(Vec<u8>) -> bool) {
             continue;
         }
 
-        let mut bytes = Vec::new();
-
-        if Read::take(&mut pipe, (MAX_MESSAGE_BYTES + 1) as u64)
-            .read_to_end(&mut bytes)
-            .is_err()
-            || bytes.len() > MAX_MESSAGE_BYTES
-        {
+        let Some(bytes) = read_message(&mut pipe) else {
             continue;
-        }
+        };
 
         if !on_message(bytes) {
             return;

@@ -1,5 +1,7 @@
+pub use crate::ipc_message::MAX_MESSAGE_BYTES;
+
 use std::fs::{self, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::os::fd::AsRawFd as _;
 use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -9,7 +11,7 @@ use std::{env, mem, thread};
 
 use tracing::warn;
 
-pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
+use crate::ipc_message::read_message;
 
 /// Per-user directory holding the socket and the single-instance lock.
 ///
@@ -146,15 +148,9 @@ fn serve_socket(listener: UnixListener, mut on_message: impl FnMut(Vec<u8>) -> b
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
 
-        let mut bytes = Vec::new();
-
-        if Read::take(stream, (MAX_MESSAGE_BYTES + 1) as u64)
-            .read_to_end(&mut bytes)
-            .is_err()
-            || bytes.len() > MAX_MESSAGE_BYTES
-        {
+        let Some(bytes) = read_message(stream) else {
             continue;
-        }
+        };
 
         if !on_message(bytes) {
             return;

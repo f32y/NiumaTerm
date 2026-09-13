@@ -23,6 +23,7 @@ pub mod windows;
 mod unix;
 
 mod environment_override;
+mod ipc_message;
 
 use std::{io, sync};
 
