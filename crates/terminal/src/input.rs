@@ -7,6 +7,8 @@ use nmt_input::event::ElementState;
 use nmt_input::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
 use nmt_input::{KeyEncodeFlags, KeyInput, encode_terminal_input};
 
+use crate::terminal::Mode;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TerminalKeyAction {
     Write(Vec<u8>),
@@ -28,7 +30,7 @@ pub(crate) fn pty_bytes_for_key(
     event: &TerminalKey<'_>,
     newline_shortcut: NewlineShortcut,
 ) -> Option<Vec<u8>> {
-    match key_action(event, newline_shortcut) {
+    match key_action(event, newline_shortcut, Mode::empty()) {
         TerminalKeyAction::Write(bytes) => Some(bytes),
 
         TerminalKeyAction::CopyOrWrite(_)
@@ -52,6 +54,7 @@ pub fn should_defer_to_ime(event: &TerminalKey<'_>) -> bool {
 pub(crate) fn key_action(
     event: &TerminalKey<'_>,
     newline_shortcut: NewlineShortcut,
+    mode: Mode,
 ) -> TerminalKeyAction {
     if let Some(action) = modified_enter_action(event, newline_shortcut) {
         return action;
@@ -62,16 +65,15 @@ pub(crate) fn key_action(
     }
 
     let input: KeyInput = event.into();
+    let mut flags = KeyEncodeFlags::empty();
 
-    encode_terminal_input(
-        &input,
-        event.modifiers,
-        KeyEncodeFlags::empty(),
-        fallback_text(event),
-    )
-    .map(TerminalKeyAction::Write)
-    .or_else(|| legacy_ctrl_byte(event).map(|b| TerminalKeyAction::Write(vec![b])))
-    .unwrap_or(TerminalKeyAction::Ignore)
+    flags.set(KeyEncodeFlags::APP_CURSOR, mode.contains(Mode::APP_CURSOR));
+    flags.set(KeyEncodeFlags::APP_KEYPAD, mode.contains(Mode::APP_KEYPAD));
+
+    encode_terminal_input(&input, event.modifiers, flags, fallback_text(event))
+        .map(TerminalKeyAction::Write)
+        .or_else(|| legacy_ctrl_byte(event).map(|b| TerminalKeyAction::Write(vec![b])))
+        .unwrap_or(TerminalKeyAction::Ignore)
 }
 
 fn modified_enter_action(

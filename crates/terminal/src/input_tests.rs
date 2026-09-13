@@ -1,6 +1,8 @@
 use nmt_config::system::NewlineShortcut;
 use nmt_input::keyboard::ModifiersState;
 
+use crate::terminal::Mode;
+
 use crate::input::{
     TerminalKey, TerminalKeyAction, WheelDelta, key_action, pty_bytes_for_key, should_defer_to_ime,
 };
@@ -36,7 +38,11 @@ fn modified<'a>(
 }
 
 fn bytes(name: &str, key_char: Option<&str>) -> Vec<u8> {
-    match key_action(&key(name, key_char), NewlineShortcut::CtrlEnter) {
+    match key_action(
+        &key(name, key_char),
+        NewlineShortcut::CtrlEnter,
+        Mode::empty(),
+    ) {
         TerminalKeyAction::Write(bytes) => bytes,
         action => panic!("expected write action, got {action:?}"),
     }
@@ -214,11 +220,11 @@ fn copy_paste_shortcuts_are_actions_not_pty_bytes() {
     let paste = modified("v", Some("v"), ModifiersState::CONTROL);
 
     assert_eq!(
-        key_action(&copy, NewlineShortcut::CtrlEnter),
+        key_action(&copy, NewlineShortcut::CtrlEnter, Mode::empty()),
         TerminalKeyAction::CopyOrWrite(vec![0x03])
     );
     assert_eq!(
-        key_action(&paste, NewlineShortcut::CtrlEnter),
+        key_action(&paste, NewlineShortcut::CtrlEnter, Mode::empty()),
         TerminalKeyAction::Paste
     );
     assert_eq!(pty_bytes_for_key(&copy, NewlineShortcut::CtrlEnter), None);
@@ -240,11 +246,11 @@ fn ctrl_shift_copy_paste_are_no_longer_app_shortcuts() {
     );
 
     assert_eq!(
-        key_action(&copy, NewlineShortcut::CtrlEnter),
+        key_action(&copy, NewlineShortcut::CtrlEnter, Mode::empty()),
         TerminalKeyAction::Ignore
     );
     assert_eq!(
-        key_action(&paste, NewlineShortcut::CtrlEnter),
+        key_action(&paste, NewlineShortcut::CtrlEnter, Mode::empty()),
         TerminalKeyAction::Ignore
     );
 }
@@ -257,12 +263,12 @@ fn command_copy_paste_are_actions_not_pty_bytes() {
     let paste = modified("v", None, ModifiersState::SUPER);
 
     assert_eq!(
-        key_action(&copy, NewlineShortcut::CtrlEnter),
+        key_action(&copy, NewlineShortcut::CtrlEnter, Mode::empty()),
         TerminalKeyAction::CopyOrWrite(Vec::new()),
         "Command-C copies, and has no byte to send when nothing is selected"
     );
     assert_eq!(
-        key_action(&paste, NewlineShortcut::CtrlEnter),
+        key_action(&paste, NewlineShortcut::CtrlEnter, Mode::empty()),
         TerminalKeyAction::Paste
     );
     assert_eq!(pty_bytes_for_key(&copy, NewlineShortcut::CtrlEnter), None);
@@ -276,5 +282,27 @@ fn control_c_stays_the_interrupt_byte_beside_command_c() {
     assert_eq!(
         pty_bytes_for_key(&interrupt, NewlineShortcut::CtrlEnter),
         Some(vec![0x03])
+    );
+}
+
+#[test]
+fn application_cursor_mode_changes_only_unmodified_cursor_sequences() {
+    let up = key("up", None);
+
+    assert_eq!(
+        key_action(&up, NewlineShortcut::CtrlEnter, Mode::empty()),
+        TerminalKeyAction::Write(b"\x1b[A".to_vec())
+    );
+    assert_eq!(
+        key_action(&up, NewlineShortcut::CtrlEnter, Mode::APP_CURSOR),
+        TerminalKeyAction::Write(b"\x1bOA".to_vec())
+    );
+    assert_eq!(
+        key_action(
+            &modified("up", None, ModifiersState::SHIFT),
+            NewlineShortcut::CtrlEnter,
+            Mode::APP_CURSOR
+        ),
+        TerminalKeyAction::Write(b"\x1b[1;2A".to_vec())
     );
 }

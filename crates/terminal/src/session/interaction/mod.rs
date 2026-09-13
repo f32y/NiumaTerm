@@ -44,7 +44,7 @@ impl TerminalInteraction {
         key: &TerminalKey<'_>,
         newline_shortcut: NewlineShortcut,
     ) -> InputOutcome {
-        match key_action(key, newline_shortcut) {
+        match key_action(key, newline_shortcut, session.modes()) {
             TerminalKeyAction::CopyOrWrite(bytes) => {
                 if let Some(copy) = self.copy_selection(session, snapshot) {
                     return InputOutcome::CopyPending(copy);
