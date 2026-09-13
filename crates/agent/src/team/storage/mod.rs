@@ -1,7 +1,5 @@
 pub use crate::team::storage::dispatch::DispatchError;
 
-pub mod ownership;
-
 mod attachments;
 mod dispatch;
 
