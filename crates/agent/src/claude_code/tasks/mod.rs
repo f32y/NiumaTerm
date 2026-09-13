@@ -181,9 +181,9 @@ impl ClaudeTasks {
         restored: Result<Vec<RestoredTask>, String>,
         starting_sequence: u64,
     ) -> bool {
-        if self.registry.is_none() {
+        let Some(registry) = self.registry.as_mut() else {
             return false;
-        }
+        };
 
         match restored {
             Ok(tasks) => {
@@ -200,19 +200,13 @@ impl ClaudeTasks {
                         self.children.push_restored(key.clone(), task.items);
                     }
 
-                    if let Some(registry) = self.registry.as_mut() {
-                        changed |= registry.merge_restored(key, task.update, starting_sequence);
-                    }
+                    changed |= registry.merge_restored(key, task.update, starting_sequence);
                 }
-
-                let registry = self.registry.as_mut().expect("registry exists");
 
                 changed | registry.set_discovery(BackgroundTaskDiscoveryState::Ready)
             }
 
             Err(message) => {
-                let registry = self.registry.as_mut().expect("registry exists");
-
                 if registry.is_empty() {
                     registry.set_discovery(BackgroundTaskDiscoveryState::Unavailable { message })
                 } else {
