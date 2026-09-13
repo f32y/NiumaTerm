@@ -73,6 +73,7 @@ impl Global for WindowRegistry {}
 
 /// One open window's shell, reachable from the CLI dispatch task. Registered
 /// by `Shell::new`, pruned alongside `WindowRegistry` on window close.
+#[derive(Clone)]
 pub(crate) struct ShellEntry {
     pub(crate) window_id: WindowId,
     pub(crate) handle: AnyWindowHandle,
@@ -84,6 +85,15 @@ pub(crate) struct ShellRegistry(pub(crate) Vec<ShellEntry>);
 impl Global for ShellRegistry {}
 
 impl ShellRegistry {
+    pub(crate) fn dispatch(
+        cx: &mut App,
+        mut action: impl FnMut(&ShellEntry, &mut App) -> bool,
+    ) -> bool {
+        let entries = cx.global::<Self>().0.clone();
+
+        entries.iter().any(|entry| action(entry, cx))
+    }
+
     pub(crate) fn prioritized(&self, last: Option<WindowId>) -> impl Iterator<Item = &ShellEntry> {
         self.0
             .iter()

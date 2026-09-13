@@ -782,27 +782,22 @@ fn openable_directory(path: path::PathBuf, cx: &mut App) -> Option<path::PathBuf
 }
 
 fn on_ipc_focus_notification(route: &AgentRoute, notification_id: &str, cx: &mut App) {
-    let targets: Vec<_> = cx
-        .global::<ShellRegistry>()
-        .0
-        .iter()
-        .map(|entry| (entry.handle, entry.shell.clone()))
-        .collect();
-
-    for (handle, shell) in targets {
-        let focused = handle
+    let focused = ShellRegistry::dispatch(cx, |entry, cx| {
+        entry
+            .handle
             .update(cx, |_, window, cx| {
-                shell
+                entry
+                    .shell
                     .update(cx, |shell, cx| {
                         shell.focus_notification(route, notification_id, window, cx)
                     })
                     .unwrap_or(false)
             })
-            .unwrap_or(false);
+            .unwrap_or(false)
+    });
 
-        if focused {
-            return;
-        }
+    if focused {
+        return;
     }
 
     warn!("ignoring stale notification focus action");
@@ -813,22 +808,13 @@ fn on_ipc_agent_hook(event: AgentEvent, cx: &mut App) {
         return;
     }
 
-    let shells: Vec<_> = cx
-        .global::<ShellRegistry>()
-        .0
-        .iter()
-        .map(|entry| entry.shell.clone())
-        .collect();
-
-    for shell in shells {
-        let event = event.clone();
-
-        if shell
-            .update(cx, |shell, cx| shell.on_agent_event(event, cx))
+    if ShellRegistry::dispatch(cx, |entry, cx| {
+        entry
+            .shell
+            .update(cx, |shell, cx| shell.on_agent_event(event.clone(), cx))
             .unwrap_or(false)
-        {
-            return;
-        }
+    }) {
+        return;
     }
 
     warn!("ignoring agent event for unknown or closed route");
