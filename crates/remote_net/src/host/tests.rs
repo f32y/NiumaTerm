@@ -1,13 +1,40 @@
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 use std::{env, fs, process};
 
 use futures::StreamExt;
+use nmt_remote_session_hub::SessionEvent;
 use tokio::net::TcpListener;
+use tokio::sync::mpsc::unbounded_channel;
 use tokio::time::timeout;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::host::forward_events;
 use crate::{HostConfig, HostHandle};
+
+#[test]
+fn a_detached_subscription_reports_stream_loss_after_queued_output() {
+    let (sender, receiver) = mpsc::channel();
+    let (events, mut forwarded) = unbounded_channel();
+
+    sender
+        .send(SessionEvent::Output {
+            seq: 1,
+            data: Arc::from(b"last".as_slice()),
+        })
+        .unwrap();
+
+    drop(sender);
+    forward_events(&receiver, 42, events, Arc::new(AtomicBool::new(false)));
+
+    assert!(matches!(
+        forwarded.try_recv(),
+        Ok((42, Some(SessionEvent::Output { seq: 1, .. })))
+    ));
+    assert!(matches!(forwarded.try_recv(), Ok((42, None))));
+}
 
 #[tokio::test]
 async fn shutdown_disconnects_an_idle_relay() {

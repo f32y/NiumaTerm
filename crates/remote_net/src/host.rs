@@ -6,7 +6,7 @@ use std::fmt::Display;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 use std::{io, thread};
 
@@ -490,42 +490,44 @@ struct SubscriptionBridge {
 
 impl SubscriptionBridge {
     fn spawn(
-        subscription: nmt_remote_session_hub::SessionSubscription,
+        subscription: SessionSubscription,
         session_id: u64,
-        events: mpsc::UnboundedSender<(u64, SessionEvent)>,
+        events: mpsc::UnboundedSender<(u64, Option<SessionEvent>)>,
     ) -> Self {
         let cancel = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&cancel);
 
-        thread::spawn(move || forward_events(subscription, session_id, events, flag));
+        thread::spawn(move || forward_events(subscription.events(), session_id, events, flag));
 
         Self { cancel }
     }
 }
 
 fn forward_events(
-    subscription: SessionSubscription,
+    receiver: &Receiver<SessionEvent>,
     session_id: u64,
-    events: mpsc::UnboundedSender<(u64, SessionEvent)>,
+    events: mpsc::UnboundedSender<(u64, Option<SessionEvent>)>,
     flag: Arc<AtomicBool>,
 ) {
     while !flag.load(Ordering::Relaxed) {
-        match subscription
-            .events()
-            .recv_timeout(Duration::from_millis(500))
-        {
+        match receiver.recv_timeout(Duration::from_millis(500)) {
             Ok(event) => {
-                if events.send((session_id, event)).is_err() {
+                if events.send((session_id, Some(event))).is_err() {
                     break;
                 }
             }
 
             Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => break,
+
+            Err(RecvTimeoutError::Disconnected) => {
+                if !flag.load(Ordering::Relaxed) {
+                    let _ = events.send((session_id, None));
+                }
+
+                break;
+            }
         }
     }
-    // `subscription` drops here, unregistering the subscriber while
-    // leaving the shell running (detach semantics).
 }
 
 impl Drop for SubscriptionBridge {
@@ -541,7 +543,7 @@ async fn serve_session(
     mut cancel: watch::Receiver<bool>,
 ) -> Result<(), NetError> {
     let (mut sink, mut stream) = ws.split();
-    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<(u64, SessionEvent)>();
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<(u64, Option<SessionEvent>)>();
     let mut bridges: HashMap<u64, SubscriptionBridge> = HashMap::new();
 
     loop {
@@ -560,6 +562,10 @@ async fn serve_session(
             event = event_rx.recv() => {
                 // Sender lives in this scope, so the channel can't close.
                 let Some((session_id, event)) = event else { return Ok(()) };
+
+                // A detached subscriber has lost output. Closing the connection
+                // lets the client recover from a new checkpoint on reconnect.
+                let event = event.ok_or(NetError::Closed)?;
 
                 on_session_event(&mut sink, &mut chan, &mut bridges, session_id, event).await?;
             }
@@ -633,7 +639,7 @@ async fn send_split(
 fn handle_frame(
     shared: &Arc<Shared>,
     frame: Frame,
-    event_tx: &mpsc::UnboundedSender<(u64, SessionEvent)>,
+    event_tx: &mpsc::UnboundedSender<(u64, Option<SessionEvent>)>,
     bridges: &mut HashMap<u64, SubscriptionBridge>,
 ) -> Option<Result<Frame, NetError>> {
     let reply = |msg: &ClientBound| Some(Frame::control(msg).map_err(Into::into));
