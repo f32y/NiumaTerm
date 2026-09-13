@@ -13,6 +13,25 @@ use crate::ui::shell::*;
 use crate::ui::terminal_launch::attach_remote;
 
 impl Shell {
+    fn insert_tab(
+        &mut self,
+        id: TabId,
+        surface: TabSurface,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.workspaces
+            .active_tabs_mut()
+            .new_tab(surface, id, title);
+
+        self.on_active_tab_changed(window, cx);
+        self.focus_active(window, cx);
+        self.sync_session_memory(cx);
+
+        cx.notify();
+    }
+
     pub(crate) fn open_team_tab(
         &mut self,
         saved: Option<RoomId>,
@@ -47,17 +66,13 @@ impl Shell {
 
         let id = Self::alloc_id(&mut self.next_id);
 
-        self.workspaces.active_tabs_mut().new_tab(
-            surface,
+        self.insert_tab(
             TabId(id),
+            surface,
             t!("team-title").into_owned(),
+            window,
+            cx,
         );
-
-        self.on_active_tab_changed(window, cx);
-        self.focus_active(window, cx);
-        self.sync_session_memory(cx);
-
-        cx.notify();
     }
 
     pub(crate) fn on_new_team_tab(
@@ -146,18 +161,13 @@ impl Shell {
 
         let title = pane.read(cx).profile_name().to_string();
 
-        self.workspaces.active_tabs_mut().new_tab(
-            TabSurface::Live(TerminalLayout::new_leaf(PaneId(id), pane)),
+        self.insert_tab(
             TabId(id),
+            TabSurface::Live(TerminalLayout::new_leaf(PaneId(id), pane)),
             title,
+            window,
+            cx,
         );
-
-        self.on_active_tab_changed(window, cx);
-        self.focus_active(window, cx);
-
-        self.sync_session_memory(cx);
-
-        cx.notify();
     }
 
     /// Open a remote-session tab: connect to a paired host in the background,
@@ -193,16 +203,13 @@ impl Shell {
                         this.leave_settings_workspace();
                         this.register_agent_pane(&pane, cx);
 
-                        this.workspaces.active_tabs_mut().new_tab(
-                            TabSurface::Live(TerminalLayout::new_leaf(PaneId(id), pane)),
+                        this.insert_tab(
                             TabId(id),
+                            TabSurface::Live(TerminalLayout::new_leaf(PaneId(id), pane)),
                             t!("shell-remote-tab-title").to_string(),
+                            window,
+                            cx,
                         );
-
-                        this.on_active_tab_changed(window, cx);
-                        this.focus_active(window, cx);
-
-                        cx.notify();
                     }
 
                     Err(e) => {
@@ -274,17 +281,13 @@ impl Shell {
 
         owner.start(resume, cx);
 
-        self.workspaces.active_tabs_mut().new_tab(
-            TabSurface::Agent(AgentTab { owner, pane }),
+        self.insert_tab(
             TabId(id),
+            TabSurface::Agent(AgentTab { owner, pane }),
             title,
+            window,
+            cx,
         );
-
-        self.on_active_tab_changed(window, cx);
-        self.focus_active(window, cx);
-        self.sync_session_memory(cx);
-
-        cx.notify();
     }
 
     pub(crate) fn on_new_agent_tab(
