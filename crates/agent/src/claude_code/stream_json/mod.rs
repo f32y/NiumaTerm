@@ -647,7 +647,7 @@ impl Session {
     /// Ask the CLI how the context window is currently filled. This is a local
     /// computation rather than a model call, so it is cheap enough to refresh
     /// whenever the conversation grows; the answer arrives as an event.
-    pub fn request_context_composition(&mut self) -> bool {
+    pub(crate) fn request_context_composition(&mut self) -> bool {
         if !self.ready || !self.process.has_stdin() {
             return false;
         }
@@ -680,7 +680,7 @@ impl Session {
     /// The CLI answers with a null title when `description` is under ten
     /// characters, and a build without this request answers with an error;
     /// both leave the conversation unnamed rather than reporting anything.
-    pub fn request_session_title(&mut self, description: &str) -> bool {
+    pub(crate) fn request_session_title(&mut self, description: &str) -> bool {
         if !self.ready || !self.process.has_stdin() {
             return false;
         }
@@ -741,7 +741,7 @@ impl Session {
         true
     }
 
-    pub fn rewind_files(&mut self, user_message_id: &str) -> SlashCommandOutcome {
+    pub(crate) fn rewind_files(&mut self, user_message_id: &str) -> SlashCommandOutcome {
         if !self.ready || !self.process.has_stdin() {
             return SlashCommandOutcome::NotReady;
         }
@@ -841,7 +841,7 @@ impl Session {
     }
 
     /// Expire unanswered protocol requests without retrying side effects.
-    pub fn poll_timeouts(&mut self, now: Instant) -> Vec<Event> {
+    pub(crate) fn poll_timeouts(&mut self, now: Instant) -> Vec<Event> {
         let mut events = Vec::new();
 
         for (id, class, ticket) in self.control.expired(now) {
@@ -901,7 +901,7 @@ impl Session {
         events
     }
 
-    pub fn on_exit(&mut self) -> Vec<Event> {
+    pub(crate) fn on_exit(&mut self) -> Vec<Event> {
         self.ready = false;
         self.turn = TurnState::Idle;
 
@@ -1066,7 +1066,7 @@ impl Session {
 
     /// What each still-running workflow run needs read on the next refresh
     /// tick. A terminal run is left out: its record can no longer change.
-    pub fn workflow_refresh_requests(&self) -> Vec<WorkflowRefreshRequest> {
+    pub(crate) fn workflow_refresh_requests(&self) -> Vec<WorkflowRefreshRequest> {
         let Some(snapshot) = self.workflows.snapshot() else {
             return Vec::new();
         };

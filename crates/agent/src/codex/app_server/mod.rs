@@ -18,7 +18,8 @@ pub use crate::chat::{
 pub use crate::codex::app_server::options::{
     APPROVAL_OPTIONS, APPROVAL_REVIEWER_OPTIONS, SANDBOX_OPTIONS,
 };
-pub use crate::codex::app_server::title_generation::provisional_title_from_prompt;
+
+pub(crate) use crate::codex::app_server::title_generation::provisional_title_from_prompt;
 
 mod background_tasks;
 mod compaction;
@@ -385,7 +386,7 @@ impl Session {
     /// and the local images the message carries. The server reads each image
     /// from the path given, so the caller keeps the file readable until the
     /// request has been written.
-    pub fn send_user_message_with_skill(
+    pub(crate) fn send_user_message_with_skill(
         &mut self,
         text: &str,
         settings: &ThreadSettings,
@@ -438,7 +439,7 @@ impl Session {
 
     /// Submit the first primary prompt and start its isolated title request
     /// only after the primary thread accepts the prompt.
-    pub fn send_user_message_with_generated_title(
+    pub(crate) fn send_user_message_with_generated_title(
         &mut self,
         text: &str,
         settings: &ThreadSettings,
@@ -572,7 +573,7 @@ impl Session {
     /// `thread/resume` answers with, so it is read by the same handler and the
     /// tab lands in the branch exactly as it lands in a resumed conversation.
     /// The source thread is left untouched.
-    pub fn fork_thread(&mut self, anchor: &ForkAnchor) -> Result<(), String> {
+    pub(crate) fn fork_thread(&mut self, anchor: &ForkAnchor) -> Result<(), String> {
         let ForkAnchor::CodexThrough(last_turn_id) = anchor else {
             return Err("that branch point belongs to another agent".to_string());
         };

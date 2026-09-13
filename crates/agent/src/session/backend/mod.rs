@@ -291,7 +291,7 @@ impl Backend {
 
     /// Branch the conversation in front of `anchor` and move this session into
     /// the copy, leaving the conversation it branched from as it was.
-    pub fn fork_conversation(&mut self, anchor: &ForkAnchor) -> Result<(), OperationError> {
+    pub(crate) fn fork_conversation(&mut self, anchor: &ForkAnchor) -> Result<(), OperationError> {
         match self {
             Backend::Codex(session) => session.fork_thread(anchor).map_err(OperationError::Failed),
 
@@ -341,7 +341,7 @@ impl Backend {
         }
     }
 
-    pub fn rewind_files(
+    pub(crate) fn rewind_files(
         &mut self,
         user_message_id: &str,
     ) -> Result<SlashCommandOutcome, OperationError> {
@@ -696,7 +696,7 @@ impl Backend {
 
     /// What each still-running workflow run needs read on the next refresh
     /// tick. Providers that publish live events need no background reads.
-    pub fn workflow_refresh_requests(&self) -> Vec<WorkflowRefreshRequest> {
+    pub(crate) fn workflow_refresh_requests(&self) -> Vec<WorkflowRefreshRequest> {
         match self {
             Backend::Claude(session) => session.workflow_refresh_requests(),
             Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
@@ -729,7 +729,7 @@ impl Backend {
     /// Point the session at another model. Only DeepSeek applies a pick as its
     /// own request: Codex carries thread settings as overrides on the next
     /// turn, and Claude bakes the model into the launch.
-    pub fn select_model(&mut self, model: &str, effort: Option<&str>) -> Result<(), String> {
+    pub(crate) fn select_model(&mut self, model: &str, effort: Option<&str>) -> Result<(), String> {
         match self {
             Backend::DeepSeek(session) => session.select_model(model, effort),
             Backend::Codex(_) | Backend::Claude(_) => Ok(()),
@@ -764,7 +764,7 @@ impl Backend {
         }
     }
 
-    pub fn restore_question_requests(&mut self, requests: Vec<QuestionRequest>) {
+    pub(crate) fn restore_question_requests(&mut self, requests: Vec<QuestionRequest>) {
         match self {
             Backend::Codex(session) => session.restore_question_requests(requests),
 

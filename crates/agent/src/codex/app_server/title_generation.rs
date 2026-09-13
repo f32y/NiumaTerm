@@ -84,7 +84,7 @@ impl TitleGenerationResult {
 impl Session {
     /// A user-authored name invalidates any generated replacement before the
     /// provider write is queued, so a late worker result cannot rename it.
-    pub fn rename_thread(&mut self, name: &str) -> bool {
+    pub(crate) fn rename_thread(&mut self, name: &str) -> bool {
         self.cancel_title_generation();
 
         let Some(thread_id) = self.conversation.thread_id.clone() else {
@@ -103,7 +103,7 @@ impl Session {
             .is_ok()
     }
 
-    pub fn cancel_title_generation(&mut self) {
+    pub(crate) fn cancel_title_generation(&mut self) {
         if let Some(generation) = self.title_generation.take() {
             generation.cancel();
         }
@@ -426,7 +426,7 @@ fn finish_title_thread(
 /// Derive the immediate local title from the first ordinary prompt. Commands
 /// leave the conversation unnamed because they describe an operation rather
 /// than the subject the user wants to discuss.
-pub fn provisional_title_from_prompt(prompt: &str) -> Option<String> {
+pub(crate) fn provisional_title_from_prompt(prompt: &str) -> Option<String> {
     let first_line = prompt.lines().find(|line| !line.trim().is_empty())?.trim();
 
     if first_line.starts_with('/') {

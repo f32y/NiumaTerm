@@ -166,7 +166,7 @@ impl Session {
     /// An absent `effort` is how the adapter's own default is asked for, which
     /// is what a model switch wants: the levels belong to the exact model, so
     /// carrying the previous one over could pin a level this route rejects.
-    pub fn select_model(&mut self, model: &str, effort: Option<&str>) -> Result<(), String> {
+    pub(crate) fn select_model(&mut self, model: &str, effort: Option<&str>) -> Result<(), String> {
         let (provider, id) = self.models.route(model);
 
         let mut payload = json!({

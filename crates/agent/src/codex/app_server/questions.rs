@@ -188,7 +188,7 @@ impl QuestionState {
 }
 
 impl Session {
-    pub fn restore_question_requests(&mut self, requests: Vec<QuestionRequest>) {
+    pub(crate) fn restore_question_requests(&mut self, requests: Vec<QuestionRequest>) {
         for request in requests {
             if request.mode != QuestionMode::Async
                 || self
