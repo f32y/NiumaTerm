@@ -66,12 +66,6 @@ pub enum SessionEffect {
     ApprovalRequested,
     ApprovalResolved,
 
-    QuestionsRequested {
-        index: usize,
-    },
-
-    QuestionsResolved,
-
     InputRequested {
         index: usize,
     },
@@ -231,18 +225,6 @@ impl SessionController {
             Event::ApprovalResolved => {
                 if self.input.resolve_approval(epoch) {
                     SessionEffect::ApprovalResolved
-                } else {
-                    SessionEffect::Unchanged
-                }
-            }
-
-            Event::QuestionsRequested { questions } => SessionEffect::QuestionsRequested {
-                index: self.input.receive_legacy(questions),
-            },
-
-            Event::QuestionsResolved => {
-                if self.input.resolve_legacy(epoch) {
-                    SessionEffect::QuestionsResolved
                 } else {
                     SessionEffect::Unchanged
                 }

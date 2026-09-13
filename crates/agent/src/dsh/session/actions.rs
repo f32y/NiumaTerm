@@ -9,7 +9,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::chat::{ForkAnchor, MessageImage, SendOutcome, SlashCommandOutcome};
+use crate::chat::{ForkAnchor, MessageImage, QuestionResponse, SendOutcome, SlashCommandOutcome};
 use crate::dsh::api::{ApiClient, CallError};
 use crate::dsh::commands;
 use crate::dsh::session::Session;
@@ -46,10 +46,16 @@ impl Session {
     }
 
     /// Admission leaves the original request answerable until its result arrives.
-    pub fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) -> bool {
-        let Some(request) = self.pending_questions.as_ref() else {
-            return false;
-        };
+    pub fn respond_input(
+        &mut self,
+        id: &str,
+        answers: Option<Vec<Vec<String>>>,
+    ) -> Result<QuestionResponse, String> {
+        let request = self
+            .pending_questions
+            .as_ref()
+            .filter(|request| question_id(request) == id)
+            .ok_or("This question is no longer pending.")?;
 
         let skipped = answers.is_none();
 
@@ -65,7 +71,7 @@ impl Session {
                 json!({"kind": "result", "value": {"answers": answers}})
             }
 
-            Some(_) => return false,
+            Some(_) => return Err("Complete every question before submitting.".into()),
 
             None => json!({"kind": "rejected", "error": {
                 "name": "Error", "code": "cancelled", "message": "the user dismissed the question"
@@ -80,24 +86,7 @@ impl Session {
             "$events/result",
             json!({"clientId": request.client_id, "eventId": request.event_id, "outcome": outcome}),
             None,
-        )
-    }
-
-    pub fn respond_input(
-        &mut self,
-        id: &str,
-        answers: Option<Vec<Vec<String>>>,
-    ) -> Result<(), String> {
-        if !self
-            .pending_questions
-            .as_ref()
-            .is_some_and(|request| question_id(request) == id)
-        {
-            return Err("This question is no longer pending.".to_string());
-        }
-
-        self.respond_questions(answers)
-            .then_some(())
+        ).then_some(QuestionResponse::Pending)
             .ok_or_else(|| "The question response could not be queued.".to_string())
     }
 

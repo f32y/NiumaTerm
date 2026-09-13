@@ -252,9 +252,7 @@ impl SessionController {
                 SessionEffect::Changed
             }
 
-            effect @ (SessionEffect::ApprovalRequested
-            | SessionEffect::QuestionsRequested { .. }
-            | SessionEffect::InputRequested { .. }) => {
+            effect @ (SessionEffect::ApprovalRequested | SessionEffect::InputRequested { .. }) => {
                 self.note_visible_output();
 
                 effect

@@ -237,7 +237,10 @@ fn control_cancellation_matches_prompt_ids_and_close_settles_once() {
     assert_eq!(
         control.close("stopped"),
         vec![
-            Event::QuestionsResolved,
+            Event::InputResolved {
+                id: "questions".into(),
+                resolution: QuestionResolution::Expired
+            },
             Event::FileRewindCompleted {
                 error: Some("stopped".into())
             }
@@ -266,7 +269,13 @@ fn turn_completion_preserves_session_requests_and_retires_prompts() {
 
     control.track(id.clone(), PendingControlOperation::SessionTitle);
 
-    assert_eq!(control.finish_turn(), vec![Event::QuestionsResolved]);
+    assert_eq!(
+        control.finish_turn(),
+        vec![Event::InputResolved {
+            id: "questions".into(),
+            resolution: QuestionResolution::Expired
+        }]
+    );
     assert!(control.finish_turn().is_empty());
     assert_eq!(
         control.resolve(
@@ -275,6 +284,74 @@ fn turn_completion_preserves_session_requests_and_retires_prompts() {
         Some(Event::TitleUpdated("Session title".into()))
     );
     assert!(!control.has_active_request());
+}
+
+#[cfg(windows)]
+#[test]
+fn question_ids_reject_stale_answers_and_settle_accepted_responses() {
+    use std::path::Path;
+
+    use tempfile::tempdir;
+
+    let directory = tempdir().unwrap();
+
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/fake-stream-json.cmd");
+
+    let launch = LaunchConfig {
+        executable: fixture.to_string_lossy().into_owned(),
+        env: vec![(
+            "NMT_FAKE_STREAM_LOG".into(),
+            directory
+                .path()
+                .join("input.jsonl")
+                .to_string_lossy()
+                .into_owned(),
+        )],
+        ..LaunchConfig::default()
+    };
+
+    let mut session =
+        Session::spawn(&launch, &AgentWorkspace::default(), None, |_| {}, |_| {}).unwrap();
+
+    let request = |id| {
+        json!({
+            "type": "control_request",
+            "request_id": id,
+            "request": {
+                "subtype": "can_use_tool", "tool_name": "AskUserQuestion",
+                "input": {"questions": [{"question": "Continue?", "options": [
+                    {"label": "Yes"}, {"label": "No"}
+                ]}]}
+            }
+        })
+    };
+
+    let events = session.process(request("old"));
+
+    assert!(matches!(&events[..], [Event::InputRequested(request)]
+        if request.id == "old" && request.mode == QuestionMode::Blocking));
+    assert!(session.process(request("old")).is_empty());
+
+    let events = session.process(request("current"));
+
+    assert!(matches!(&events[..], [Event::InputResolved {
+        id, resolution: QuestionResolution::Expired,
+    }, Event::InputRequested(request)] if id == "old" && request.id == "current"));
+    assert!(
+        session
+            .respond_input("old", Some(vec![vec!["Yes".into()]]))
+            .is_err()
+    );
+    assert!(session.control.cancel_prompt("old").is_empty());
+    assert!(session.respond_input("current", Some(Vec::new())).is_err());
+    assert_eq!(
+        session.respond_input("current", Some(vec![vec!["Yes".into()]])),
+        Ok(QuestionResponse::Settled)
+    );
+    assert!(session.control.pending_questions.is_none());
+    assert!(session.respond_input("current", None).is_err());
+    assert!(session.control.finish_turn().is_empty());
 }
 
 #[cfg(windows)]
@@ -507,7 +584,7 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
     });
 
     assert!(!session.respond_approval("accept"));
-    assert!(!session.respond_questions(None));
+    assert!(session.respond_input("blocked-questions", None).is_err());
     assert!(session.control.pending_approval.is_some());
     assert!(session.control.pending_questions.is_some());
     assert!(!session.interrupt());

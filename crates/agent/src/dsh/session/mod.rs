@@ -513,6 +513,10 @@ impl Session {
         }
 
         match payload["type"].as_str() {
+            Some("question/resolved") if self.is_current_session(payload) => {
+                return self.expire_questions();
+            }
+
             Some("nmt/connection-reset") if self.is_current_session(payload) => {
                 return self.on_connection_reset();
             }
@@ -583,7 +587,6 @@ impl Session {
                     self.pending_approval = None;
                 }
 
-                Event::QuestionsResolved => resolved.extend(self.expire_questions()),
                 _ => {}
             }
         }

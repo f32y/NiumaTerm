@@ -51,3 +51,10 @@ pub enum QuestionResolution {
     Skipped,
     Expired,
 }
+
+/// Whether the provider will report completion in a later event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QuestionResponse {
+    Settled,
+    Pending,
+}

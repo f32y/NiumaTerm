@@ -3,7 +3,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::chat::{
-    ForkAnchor, QuestionRequest, SendOutcome, SlashCommandInfo, SlashCommandOutcome,
+    ForkAnchor, QuestionRequest, QuestionResponse, SendOutcome, SlashCommandInfo,
+    SlashCommandOutcome,
 };
 use crate::session::team_recovery::RecoveredTeamTurn;
 use crate::session::{AgentKind, RecoveryIdentity, RenameOutcome};
@@ -11,7 +12,7 @@ use crate::workflow::{WorkflowRefreshRequest, WorkflowSource};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct InputResponse {
-    pub id: Option<String>,
+    pub id: String,
     pub answers: Option<Vec<Vec<String>>>,
 }
 
@@ -21,7 +22,7 @@ pub struct TestBackend {
     pub approval_accepted: bool,
     pub approval_waits: bool,
     pub approval_responses: Vec<String>,
-    pub input_result: Result<(), String>,
+    pub input_result: Result<QuestionResponse, String>,
     pub input_responses: Vec<InputResponse>,
     pub restored_questions: Vec<QuestionRequest>,
     pub rename_outcome: RenameOutcome,
@@ -55,7 +56,7 @@ impl TestBackend {
             approval_accepted: false,
             approval_waits: false,
             approval_responses: Vec::new(),
-            input_result: Ok(()),
+            input_result: Ok(QuestionResponse::Pending),
             input_responses: Vec::new(),
             restored_questions: Vec::new(),
             rename_outcome: RenameOutcome::Unsupported,

@@ -178,8 +178,7 @@ impl AgentSession {
                 );
             }
 
-            SessionEffect::InputRequested { index }
-            | SessionEffect::QuestionsRequested { index } => {
+            SessionEffect::InputRequested { index } => {
                 let state = self.controller.borrow();
                 let prompt = &state.input.batches()[*index];
 
@@ -203,7 +202,7 @@ impl AgentSession {
                 );
             }
 
-            SessionEffect::ApprovalResolved | SessionEffect::QuestionsResolved => {
+            SessionEffect::ApprovalResolved => {
                 self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx)
             }
 

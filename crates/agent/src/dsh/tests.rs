@@ -1511,28 +1511,6 @@ fn a_question_request_carries_the_ids_an_answer_is_matched_against() {
 }
 
 #[test]
-fn a_resolved_question_takes_the_card_down() {
-    let frame = json!({
-        "type": "server-request",
-        "payload": {
-            "type": "question/resolved",
-            "sessionId": SESSION,
-            "questionRpcId": "0f21a6f2",
-            "outcome": "answered",
-        },
-    });
-
-    assert_eq!(
-        map_frame(&frame, SESSION, &mut ToolTracker::default()),
-        vec![Event::QuestionsResolved]
-    );
-    assert_eq!(
-        map_frame(&frame, "session-other", &mut ToolTracker::default()),
-        Vec::new()
-    );
-}
-
-#[test]
 fn a_resolved_approval_takes_the_card_down() {
     let frame = json!({
         "type": "server-request",

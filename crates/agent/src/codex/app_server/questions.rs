@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use crate::chat::{
     Event, Question, QuestionInput, QuestionMode, QuestionOption, QuestionRequest,
-    QuestionResolution, ThreadSettings,
+    QuestionResolution, QuestionResponse, ThreadSettings,
 };
 use crate::codex::app_server::Session;
 use crate::codex::app_server::protocol::{codex_user_input, turn_start_params};
@@ -320,13 +320,13 @@ impl Session {
         vec![Event::InputRequested(batch)]
     }
 
-    /// A successful return means an attempt was written. Resolution arrives as an event.
+    /// Message dismissal settles locally; submitted answers resolve through later events.
     pub fn respond_input(
         &mut self,
         id: &str,
         answers: Option<Vec<Vec<String>>>,
         settings: &ThreadSettings,
-    ) -> Result<(), String> {
+    ) -> Result<QuestionResponse, String> {
         let pending = self
             .conversation
             .questions
@@ -407,14 +407,14 @@ impl Session {
                     *submitted = Some(resolution);
                 }
 
-                Ok(())
+                Ok(QuestionResponse::Pending)
             }
 
             QuestionSource::Message => {
                 let Some(answers) = answers else {
                     self.conversation.questions.pending.remove(id);
 
-                    return Ok(());
+                    return Ok(QuestionResponse::Settled);
                 };
 
                 let mut text: String = "Answers to your questions:\n".into();
@@ -438,6 +438,7 @@ impl Session {
                 };
 
                 self.send_question_message(submission)
+                    .map(|()| QuestionResponse::Pending)
             }
         }
     }

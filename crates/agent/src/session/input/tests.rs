@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::chat::{
     Question, QuestionInput, QuestionMode, QuestionOption, QuestionRequest, QuestionResolution,
-    SlashCommandOutcome, ThreadSettings,
+    QuestionResponse, SlashCommandOutcome, ThreadSettings,
 };
 use crate::session::input::{
     ApprovalOutcome, QuestionAction, QuestionDraft, QuestionError, QuestionKey, QuestionStatus,
@@ -92,10 +92,13 @@ fn submit(
 
 #[test]
 fn single_select_replaces_and_multi_select_answers_follow_option_order() {
-    let mut draft = QuestionDraft::new(vec![
-        question("Database", false, &["Postgres", "SQLite"]),
-        question("Extras", true, &["Metrics", "Tracing", "Audit"]),
-    ]);
+    let mut draft = QuestionDraft::new(
+        "draft".into(),
+        vec![
+            question("Database", false, &["Postgres", "SQLite"]),
+            question("Extras", true, &["Metrics", "Tracing", "Audit"]),
+        ],
+    );
 
     assert!(!draft.is_complete());
 
@@ -192,7 +195,7 @@ fn rejected_queue_write_keeps_the_draft_pending() {
         Some(&QuestionError::Rejected("not connected".into()))
     );
 
-    backend(&mut runtime).input_result = Ok(());
+    backend(&mut runtime).input_result = Ok(QuestionResponse::Pending);
 
     assert_eq!(
         submit(&mut input, &mut runtime, key, QuestionAction::Answer),
@@ -228,15 +231,6 @@ fn duplicate_requests_preserve_drafts_and_replaced_positions_reject_old_keys() {
         submit(&mut input, &mut runtime, key, QuestionAction::Answer),
         Submission::Ignored
     );
-
-    let index = input.receive_legacy(vec![question("Old", false, &["one"])]);
-    let old = input.batches()[index].key();
-
-    assert_eq!(
-        input.receive_legacy(vec![question("New", false, &["two"])]),
-        index
-    );
-    assert!(input.draft_mut(old).is_none());
 }
 
 #[test]
@@ -256,6 +250,9 @@ fn async_defaults_do_not_send_until_explicit_submission_and_blocking_requires_an
         submit(&mut input, &mut runtime, blocking, QuestionAction::Answer),
         Submission::Ignored
     );
+
+    backend(&mut runtime).input_result = Ok(QuestionResponse::Settled);
+
     assert_eq!(
         submit(&mut input, &mut runtime, asynchronous, QuestionAction::Skip),
         Submission::Settled
@@ -315,7 +312,7 @@ fn optional_timeout_only_skips_untouched_pending_requests_after_the_deadline() {
     assert_eq!(
         backend(&mut runtime).input_responses,
         vec![InputResponse {
-            id: Some("untouched".into()),
+            id: "untouched".into(),
             answers: None
         }]
     );
@@ -331,7 +328,7 @@ fn reconnect_restores_only_async_drafts_for_the_same_provider_and_thread() {
     let key = receive(&mut input, &runtime, "async", QuestionMode::Async);
 
     receive(&mut input, &runtime, "blocking", QuestionMode::Blocking);
-    input.receive_legacy(vec![question("Legacy", false, &["yes"])]);
+    receive(&mut input, &runtime, "optional", QuestionMode::Optional);
 
     input
         .draft_mut(key)
@@ -566,4 +563,44 @@ fn disconnect_clears_approval_and_prevents_writes_to_a_retired_backend() {
         Submission::Ignored
     );
     assert!(backend(&mut runtime).input_responses.is_empty());
+}
+
+#[test]
+fn synchronous_question_responses_settle_once_and_clear_secrets() {
+    let mut runtime = runtime(AgentKind::Claude, "thread");
+    let mut input = SessionInput::default();
+
+    input.restore(&mut runtime);
+    backend(&mut runtime).input_result = Ok(QuestionResponse::Settled);
+
+    let mut request = request("secret", QuestionMode::Blocking);
+
+    request.questions[0].input = QuestionInput::Secret;
+
+    let index = input.receive(&runtime, request).unwrap();
+    let key = input.batches()[index].key();
+
+    input
+        .draft_mut(key)
+        .unwrap()
+        .set_text(0, "temporary value".into());
+
+    assert_eq!(
+        submit(&mut input, &mut runtime, key, QuestionAction::Answer),
+        Submission::Settled
+    );
+    assert_eq!(input.batches()[index].status(), QuestionStatus::Submitted);
+    assert_eq!(input.batches()[index].text(0), "");
+    assert!(!input.waiting());
+    assert_eq!(
+        submit(&mut input, &mut runtime, key, QuestionAction::Answer),
+        Submission::Ignored
+    );
+    assert_eq!(
+        backend(&mut runtime).input_responses,
+        vec![InputResponse {
+            id: "secret".into(),
+            answers: Some(vec![vec!["temporary value".into()]]),
+        }]
+    );
 }

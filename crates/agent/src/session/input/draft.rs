@@ -17,7 +17,7 @@ pub enum QuestionStatus {
 }
 
 pub struct QuestionDraft {
-    pub(super) id: Option<String>,
+    pub(super) id: String,
     pub(super) identity: Option<RecoveryIdentity>,
     pub(super) questions: Vec<Question>,
     pub(super) mode: QuestionMode,
@@ -36,8 +36,8 @@ impl QuestionDraft {
         self.key
     }
 
-    pub fn id(&self) -> Option<&str> {
-        self.id.as_deref()
+    pub fn id(&self) -> &str {
+        &self.id
     }
 
     pub fn questions(&self) -> &[Question] {
@@ -90,11 +90,11 @@ impl QuestionDraft {
         true
     }
 
-    pub fn new(questions: Vec<Question>) -> Self {
+    pub fn new(id: String, questions: Vec<Question>) -> Self {
         let count = questions.len();
 
         Self {
-            id: None,
+            id,
             identity: None,
             questions,
             mode: QuestionMode::Blocking,
@@ -217,9 +217,8 @@ impl QuestionDraft {
 
 impl From<QuestionRequest> for QuestionDraft {
     fn from(request: QuestionRequest) -> Self {
-        let mut prompt = Self::new(request.questions);
+        let mut prompt = Self::new(request.id, request.questions);
 
-        prompt.id = Some(request.id);
         prompt.mode = request.mode;
 
         if request.mode == QuestionMode::Async {

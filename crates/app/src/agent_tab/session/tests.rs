@@ -529,7 +529,7 @@ mod conversation_title_tests {
 
     #[gpui::test]
     fn rejected_control_replies_keep_interaction_cards(cx: &mut TestAppContext) {
-        use nmt_agent::chat::{Event, Question, QuestionInput};
+        use nmt_agent::chat::{Event, Question, QuestionInput, QuestionMode, QuestionRequest};
 
         let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
@@ -579,7 +579,9 @@ mod conversation_title_tests {
                 }
 
                 pane.on_event(
-                    Event::QuestionsRequested {
+                    Event::InputRequested(QuestionRequest {
+                        id: "declined".into(),
+                        mode: QuestionMode::Blocking,
                         questions: vec![Question {
                             input: QuestionInput::Text,
                             header: None,
@@ -587,7 +589,7 @@ mod conversation_title_tests {
                             multi_select: false,
                             options: Vec::new(),
                         }],
-                    },
+                    }),
                     cx,
                 );
 

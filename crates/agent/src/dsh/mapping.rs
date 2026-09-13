@@ -180,10 +180,6 @@ pub(crate) fn map_frame(frame: &Value, session_id: &str, tools: &mut ToolTracker
             vec![Event::ApprovalResolved]
         }
 
-        Some("question/resolved") if payload["sessionId"].as_str() == Some(session_id) => {
-            vec![Event::QuestionsResolved]
-        }
-
         Some("stream/error") => match payload["error"]["message"].as_str() {
             Some(message) => vec![Event::ItemStarted(Item::Error {
                 text: message.to_string(),

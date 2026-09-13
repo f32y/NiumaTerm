@@ -11,7 +11,9 @@ mod tests;
 
 use std::time::Instant;
 
-use crate::chat::{Question, QuestionMode, QuestionRequest, QuestionResolution, ThreadSettings};
+use crate::chat::{
+    Question, QuestionMode, QuestionRequest, QuestionResolution, QuestionResponse, ThreadSettings,
+};
 use crate::session::SessionRuntime;
 use crate::session::lifecycle::Status;
 
@@ -100,10 +102,7 @@ impl SessionInput {
     }
 
     pub fn receive(&mut self, runtime: &SessionRuntime, request: QuestionRequest) -> Option<usize> {
-        let existing = self
-            .batches
-            .iter()
-            .position(|draft| draft.id.as_deref() == Some(request.id.as_str()));
+        let existing = self.batches.iter().position(|draft| draft.id == request.id);
 
         if let Some(index) = existing
             && self.batches[index].status != QuestionStatus::History
@@ -118,13 +117,6 @@ impl SessionInput {
             .and_then(|backend| backend.recovery_identity());
 
         Some(self.insert(draft, existing))
-    }
-
-    /// Legacy requests have no provider ID; only the latest can be answered.
-    pub fn receive_legacy(&mut self, questions: Vec<Question>) -> usize {
-        let existing = self.batches.iter().position(|draft| draft.id.is_none());
-
-        self.insert(QuestionDraft::new(questions), existing)
     }
 
     fn insert(&mut self, mut draft: QuestionDraft, existing: Option<usize>) -> usize {
@@ -144,17 +136,12 @@ impl SessionInput {
     pub fn history(&mut self, item_id: &str, questions: Vec<Question>) -> usize {
         let id = format!("message:{item_id}");
 
-        if let Some(index) = self
-            .batches
-            .iter()
-            .position(|draft| draft.id.as_deref() == Some(&id))
-        {
+        if let Some(index) = self.batches.iter().position(|draft| draft.id == id) {
             return index;
         }
 
-        let mut draft = QuestionDraft::new(questions);
+        let mut draft = QuestionDraft::new(id, questions);
 
-        draft.id = Some(id);
         draft.mode = QuestionMode::Async;
         draft.status = QuestionStatus::History;
         draft.key = self.next_key(self.batches.len());
@@ -211,37 +198,26 @@ impl SessionInput {
             return Submission::Ignored;
         };
 
-        let result = match draft.id.as_deref() {
-            Some(id) => backend.respond_input(id, answers, settings),
-
-            None => backend
-                .respond_questions(answers)
-                .then_some(())
-                .ok_or_else(|| "The question response could not be queued.".to_string()),
-        };
+        let result = backend.respond_input(&draft.id, answers, settings);
 
         draft.touch();
 
         match result {
-            Ok(()) => {
-                draft.error = None;
-
-                // Legacy replies and async dismissals have no later submission acknowledgement.
-                if draft.id.is_none()
-                    || (draft.mode == QuestionMode::Async && action != QuestionAction::Answer)
-                {
-                    draft.settle(if action == QuestionAction::Answer {
-                        QuestionStatus::Submitted
-                    } else {
-                        QuestionStatus::Skipped
-                    });
-
-                    Submission::Settled
+            Ok(QuestionResponse::Settled) => {
+                draft.settle(if action == QuestionAction::Answer {
+                    QuestionStatus::Submitted
                 } else {
-                    draft.status = QuestionStatus::Submitting;
+                    QuestionStatus::Skipped
+                });
 
-                    Submission::Waiting
-                }
+                Submission::Settled
+            }
+
+            Ok(QuestionResponse::Pending) => {
+                draft.error = None;
+                draft.status = QuestionStatus::Submitting;
+
+                Submission::Waiting
             }
 
             Err(message) => {
@@ -265,7 +241,7 @@ impl SessionInput {
         let draft = self
             .batches
             .iter_mut()
-            .find(|draft| draft.id.as_deref() == Some(id) && draft.pending())?;
+            .find(|draft| draft.id == id && draft.pending())?;
 
         let waiting = draft.mode != QuestionMode::Async;
 
@@ -293,9 +269,11 @@ impl SessionInput {
             return false;
         }
 
-        let Some(draft) = self.batches.iter_mut().find(|draft| {
-            draft.id.as_deref() == Some(id) && draft.status == QuestionStatus::Submitting
-        }) else {
+        let Some(draft) = self
+            .batches
+            .iter_mut()
+            .find(|draft| draft.id == id && draft.status == QuestionStatus::Submitting)
+        else {
             return false;
         };
 
@@ -304,24 +282,6 @@ impl SessionInput {
         draft.touch();
 
         true
-    }
-
-    pub fn resolve_legacy(&mut self, epoch: u64) -> bool {
-        if epoch != self.epoch || self.disconnected {
-            return false;
-        }
-
-        if let Some(draft) = self
-            .batches
-            .iter_mut()
-            .find(|draft| draft.id.is_none() && draft.pending())
-        {
-            draft.settle(QuestionStatus::Expired);
-
-            return true;
-        }
-
-        false
     }
 
     pub fn starting(&mut self, epoch: u64) {
@@ -338,7 +298,7 @@ impl SessionInput {
                 continue;
             }
 
-            if draft.mode == QuestionMode::Async && draft.id.is_some() {
+            if draft.mode == QuestionMode::Async {
                 draft.status = QuestionStatus::Pending;
                 draft.error = Some(QuestionError::Disconnected);
             } else {
@@ -374,7 +334,7 @@ impl SessionInput {
             }
 
             requests.push(QuestionRequest {
-                id: draft.id.clone().unwrap_or_default(),
+                id: draft.id.clone(),
                 mode: draft.mode,
                 questions: draft.questions.clone(),
             });

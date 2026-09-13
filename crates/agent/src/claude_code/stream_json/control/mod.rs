@@ -8,7 +8,9 @@ use std::time::Instant;
 use serde_json::{Value, json};
 use tracing::debug;
 
-use crate::chat::{ContextComposition, ContextSegment, Event, Question, QuestionOption};
+use crate::chat::{
+    ContextComposition, ContextSegment, Event, Question, QuestionOption, QuestionResolution,
+};
 use crate::deadline_timer::DeadlineTimer;
 use crate::request_policy::RequestClass;
 use crate::subprocess::InputTicket;
@@ -218,7 +220,11 @@ impl ControlState {
             .is_some_and(|pending| pending.request_id == id)
         {
             self.pending_questions = None;
-            events.push(Event::QuestionsResolved);
+
+            events.push(Event::InputResolved {
+                id: id.to_owned(),
+                resolution: QuestionResolution::Expired,
+            });
         }
 
         events
@@ -231,8 +237,11 @@ impl ControlState {
             events.push(Event::ApprovalResolved);
         }
 
-        if self.pending_questions.take().is_some() {
-            events.push(Event::QuestionsResolved);
+        if let Some(pending) = self.pending_questions.take() {
+            events.push(Event::InputResolved {
+                id: pending.request_id,
+                resolution: QuestionResolution::Expired,
+            });
         }
 
         events

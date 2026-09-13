@@ -13,8 +13,9 @@ use tracing::trace;
 
 use crate::background_task::{BackgroundTaskKey, BackgroundTaskProvider};
 use crate::chat::{
-    Event as SessionEvent, ForkAnchor, MessageImage, QuestionRequest, SendOutcome, SessionScope,
-    SkillReference, SlashCommandInfo, SlashCommandOutcome, ThreadSettings,
+    Event as SessionEvent, ForkAnchor, MessageImage, QuestionRequest, QuestionResponse,
+    SendOutcome, SessionScope, SkillReference, SlashCommandInfo, SlashCommandOutcome,
+    ThreadSettings,
 };
 use crate::claude_code::sessions::RestoredTask;
 use crate::claude_code::stream_json;
@@ -746,7 +747,7 @@ impl Backend {
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => session.restored_questions = requests,
 
-            _ => {}
+            Backend::Claude(_) | Backend::DeepSeek(_) => {}
         }
     }
 
@@ -755,45 +756,22 @@ impl Backend {
         id: &str,
         answers: Option<Vec<Vec<String>>>,
         settings: &ThreadSettings,
-    ) -> Result<(), String> {
+    ) -> Result<QuestionResponse, String> {
         match self {
             Backend::Codex(session) => session.respond_input(id, answers, settings),
+            Backend::Claude(session) => session.respond_input(id, answers),
             Backend::DeepSeek(session) => session.respond_input(id, answers),
 
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => {
-                session.input_result.clone()?;
+                let outcome = session.input_result.clone()?;
 
                 session.input_responses.push(InputResponse {
-                    id: Some(id.to_owned()),
+                    id: id.to_owned(),
                     answers,
                 });
 
-                Ok(())
-            }
-
-            _ => Err("This session cannot answer that question".to_string()),
-        }
-    }
-
-    /// Answer a provider's selection request using its original response format.
-    pub fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) -> bool {
-        match self {
-            Backend::Claude(session) => session.respond_questions(answers),
-            Backend::DeepSeek(session) => session.respond_questions(answers),
-            Backend::Codex(_) => false,
-
-            #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(session) => {
-                if session.input_result.is_ok() {
-                    session
-                        .input_responses
-                        .push(InputResponse { id: None, answers });
-
-                    true
-                } else {
-                    false
-                }
+                Ok(outcome)
             }
         }
     }

@@ -34,7 +34,8 @@ use crate::background_task::{BackgroundTaskKey, BackgroundTaskTranscriptUpdate};
 #[cfg(test)]
 use crate::chat::ContextUsageScope;
 use crate::chat::{
-    Event, MessageImage, SendOutcome, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
+    Event, MessageImage, QuestionMode, QuestionRequest, QuestionResolution, QuestionResponse,
+    SendOutcome, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
     SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
 use crate::claude_code::sessions::{RestoredTask, load_child_transcript};
@@ -1009,10 +1010,24 @@ impl Session {
     /// option labels per question, in question order; `None` declines. The CLI
     /// re-runs the tool with the merged input and writes the tool result
     /// itself, so nothing further is sent for this tool call.
-    pub fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) -> bool {
-        let Some(pending) = self.control.pending_questions.as_ref() else {
-            return false;
-        };
+    pub fn respond_input(
+        &mut self,
+        id: &str,
+        answers: Option<Vec<Vec<String>>>,
+    ) -> Result<QuestionResponse, String> {
+        let pending = self
+            .control
+            .pending_questions
+            .as_ref()
+            .filter(|pending| pending.request_id == id)
+            .ok_or("This question is no longer pending.")?;
+
+        if answers
+            .as_ref()
+            .is_some_and(|answers| answers.len() != pending.questions.len())
+        {
+            return Err("Complete every question before submitting.".into());
+        }
 
         let response = match answers {
             Some(answers) if answers.iter().any(|labels| !labels.is_empty()) => {
@@ -1030,23 +1045,18 @@ impl Session {
             }),
         };
 
-        if self
-            .try_send(json!({
-                "type": "control_response",
-                "response": {
-                    "subtype": "success",
-                    "request_id": pending.request_id,
-                    "response": response,
-                },
-            }))
-            .is_err()
-        {
-            return false;
-        }
+        self.try_send(json!({
+            "type": "control_response",
+            "response": {
+                "subtype": "success",
+                "request_id": pending.request_id,
+                "response": response,
+            },
+        }))?;
 
         self.control.pending_questions = None;
 
-        true
+        Ok(QuestionResponse::Settled)
     }
 
     /// The background reader shares this session's transcript revisions.
@@ -1322,13 +1332,35 @@ impl Session {
                 return Vec::new();
             }
 
-            self.control.pending_questions = Some(PendingQuestions {
-                request_id,
+            if self
+                .control
+                .pending_questions
+                .as_ref()
+                .is_some_and(|pending| pending.request_id == request_id)
+            {
+                return Vec::new();
+            }
+
+            let mut events = Vec::new();
+
+            if let Some(previous) = self.control.pending_questions.replace(PendingQuestions {
+                request_id: request_id.clone(),
                 input: request["input"].clone(),
                 questions: questions.clone(),
-            });
+            }) {
+                events.push(Event::InputResolved {
+                    id: previous.request_id,
+                    resolution: QuestionResolution::Expired,
+                });
+            }
 
-            return vec![Event::QuestionsRequested { questions }];
+            events.push(Event::InputRequested(QuestionRequest {
+                id: request_id,
+                mode: QuestionMode::Blocking,
+                questions,
+            }));
+
+            return events;
         }
 
         let description = approval_description(tool_name, &request["input"]);

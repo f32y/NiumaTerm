@@ -120,29 +120,6 @@ impl AgentPane {
                 cx.notify();
             }
 
-            SessionEffect::QuestionsRequested { index } => {
-                self.emit_lifecycle(
-                    AgentEventKind::PermissionRequested,
-                    &t!("agent-session-needs-input", name = self.kind.display()),
-                    self.session.borrow().input.batches()[index]
-                        .questions()
-                        .first()
-                        .map_or("", |question| question.question.as_str()),
-                    cx,
-                );
-
-                self.prompts.reveal(&self.session.borrow().input, index);
-
-                cx.notify();
-            }
-
-            SessionEffect::QuestionsResolved => {
-                self.prompts.hide_settled(&self.session.borrow().input);
-                self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
-
-                cx.notify();
-            }
-
             SessionEffect::InputRequested { index } => self.present_questions(index, cx),
 
             SessionEffect::InputResolved(completion) => {

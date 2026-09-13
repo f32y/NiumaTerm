@@ -83,9 +83,11 @@ fn question_editors_keep_multiline_text_and_mask_secrets(cx: &mut TestAppContext
             secret.input = QuestionInput::Secret;
 
             pane.on_event(
-                Event::QuestionsRequested {
+                Event::InputRequested(QuestionRequest {
+                    id: "editors".into(),
+                    mode: QuestionMode::Blocking,
                     questions: vec![plain, secret],
-                },
+                }),
                 cx,
             );
 
@@ -153,10 +155,13 @@ fn question(text: &str, multi_select: bool, labels: &[&str]) -> Question {
 
 #[test]
 fn the_highlight_walks_every_option_across_questions_and_wraps() {
-    let mut prompt = QuestionDraft::new(vec![
-        question("Which database?", false, &["Postgres", "SQLite"]),
-        question("Which extras?", true, &["Metrics", "Tracing"]),
-    ]);
+    let mut prompt = QuestionDraft::new(
+        "draft".into(),
+        vec![
+            question("Which database?", false, &["Postgres", "SQLite"]),
+            question("Which extras?", true, &["Metrics", "Tracing"]),
+        ],
+    );
 
     let mut presentation = QuestionPresentation::new(&prompt);
 
@@ -185,10 +190,13 @@ fn a_question_with_no_options_cannot_trap_the_highlight() {
     // The provider caps options at four but does not promise a minimum, and
     // a card that swallows the arrow keys would leave the user no way to
     // reach the options that do exist.
-    let mut prompt = QuestionDraft::new(vec![
-        question("Nothing to pick", false, &[]),
-        question("Which database?", false, &["Postgres", "SQLite"]),
-    ]);
+    let mut prompt = QuestionDraft::new(
+        "draft".into(),
+        vec![
+            question("Nothing to pick", false, &[]),
+            question("Which database?", false, &["Postgres", "SQLite"]),
+        ],
+    );
 
     // The first press reaches the first drawn option rather than stepping
     // over it, which is what an out-of-range starting highlight would do.
@@ -199,7 +207,8 @@ fn a_question_with_no_options_cannot_trap_the_highlight() {
 
     // A card with nothing to pick consumes no keys, so they still reach
     // whatever else is listening.
-    let empty = &mut QuestionDraft::new(vec![question("Nothing at all", false, &[])]);
+    let empty =
+        &mut QuestionDraft::new("draft".into(), vec![question("Nothing at all", false, &[])]);
 
     let mut presentation = QuestionPresentation::new(empty);
 
@@ -359,9 +368,7 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
 }
 
 #[gpui::test]
-fn replacing_a_legacy_batch_rebuilds_editors_without_reusing_the_old_answer(
-    cx: &mut TestAppContext,
-) {
+fn a_new_request_does_not_reuse_the_expired_answer(cx: &mut TestAppContext) {
     let (pane, window) = open_pane(cx);
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
@@ -372,9 +379,11 @@ fn replacing_a_legacy_batch_rebuilds_editors_without_reusing_the_old_answer(
             question.input = QuestionInput::Text;
 
             pane.on_event(
-                Event::QuestionsRequested {
+                Event::InputRequested(QuestionRequest {
+                    id: "old".into(),
+                    mode: QuestionMode::Blocking,
                     questions: vec![question.clone()],
-                },
+                }),
                 cx,
             );
 
@@ -392,9 +401,19 @@ fn replacing_a_legacy_batch_rebuilds_editors_without_reusing_the_old_answer(
                 .key();
 
             pane.on_event(
-                Event::QuestionsRequested {
-                    questions: vec![question],
+                Event::InputResolved {
+                    id: "old".into(),
+                    resolution: QuestionResolution::Expired,
                 },
+                cx,
+            );
+
+            pane.on_event(
+                Event::InputRequested(QuestionRequest {
+                    id: "new".into(),
+                    mode: QuestionMode::Blocking,
+                    questions: vec![question],
+                }),
                 cx,
             );
 
@@ -405,11 +424,11 @@ fn replacing_a_legacy_batch_rebuilds_editors_without_reusing_the_old_answer(
                     .key(),
                 old_key
             );
-            assert!(pane.prompts.presentations[0].editors[0].is_none());
+            assert!(pane.prompts.presentations[1].editors[0].is_none());
 
             pane.prepare_question_editors(window, cx);
 
-            let QuestionEditorState::Text(editor) = &pane.prompts.presentations[0].editors[0]
+            let QuestionEditorState::Text(editor) = &pane.prompts.presentations[1].editors[0]
                 .as_ref()
                 .unwrap()
                 .state

@@ -260,9 +260,7 @@ fn independent_sessions_route_approval_and_question_answers_to_their_own_backend
 
     assert!(matches!(
         bob.submit_question(key, QuestionAction::Skip, Instant::now()),
-        QuestionSubmission::Settled {
-            waiting_finished: false
-        }
+        QuestionSubmission::Waiting
     ));
     assert!(alice.input.approval().is_some());
     assert_eq!(alice.respond_approval("accept"), ApprovalOutcome::Settled);
@@ -279,7 +277,7 @@ fn independent_sessions_route_approval_and_question_answers_to_their_own_backend
     assert!(alice_backend.input_responses.is_empty());
     assert!(bob_backend.approval_responses.is_empty());
     assert_eq!(bob_backend.input_responses.len(), 1);
-    assert_eq!(bob_backend.input_responses[0].id.as_deref(), Some("choose"));
+    assert_eq!(bob_backend.input_responses[0].id, "choose");
 
     apply(
         &mut bob,

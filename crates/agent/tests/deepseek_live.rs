@@ -600,18 +600,28 @@ fn a_question_is_answered_and_the_turn_continues() {
     let (before, _) = collect_until(&mut session, &frames, Duration::from_secs(60), |event| {
         matches!(
             event,
-            Event::QuestionsRequested { .. } | Event::TurnCompleted { .. }
+            Event::InputRequested(_) | Event::TurnCompleted { .. }
         )
     });
 
     assert!(
         before.iter().any(
-            |event| matches!(event, Event::QuestionsRequested { questions } if questions.len() == 1)
+            |event| matches!(event, Event::InputRequested(request) if request.questions.len() == 1)
         ),
         "no question arrived: {before:?}"
     );
 
-    session.respond_questions(Some(vec![vec!["Yes".into()]]));
+    let id = before
+        .iter()
+        .find_map(|event| match event {
+            Event::InputRequested(request) => Some(request.id.as_str()),
+            _ => None,
+        })
+        .unwrap();
+
+    session
+        .respond_input(id, Some(vec![vec!["Yes".into()]]))
+        .unwrap();
 
     let (after, ended) = collect_until(&mut session, &frames, Duration::from_secs(60), |event| {
         matches!(event, Event::TurnCompleted { .. })
@@ -621,7 +631,7 @@ fn a_question_is_answered_and_the_turn_continues() {
     assert!(
         after
             .iter()
-            .any(|event| matches!(event, Event::QuestionsResolved))
+            .any(|event| matches!(event, Event::InputResolved { .. }))
     );
     assert!(after.iter().any(|event| matches!(event, Event::ItemCompleted(Item::Other { output: Some(output), .. }) if output.contains("Yes"))));
 }

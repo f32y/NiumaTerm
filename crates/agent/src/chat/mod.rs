@@ -496,15 +496,6 @@ pub enum Event {
     /// The pending approval was answered or cleared by turn lifecycle.
     ApprovalResolved,
 
-    /// The model asked the user to choose between options before continuing;
-    /// answer with the session's `respond_questions`.
-    QuestionsRequested {
-        questions: Vec<Question>,
-    },
-
-    /// The pending questions were answered or cleared by turn lifecycle.
-    QuestionsResolved,
-
     InputRequested(QuestionRequest),
 
     InputResolved {
