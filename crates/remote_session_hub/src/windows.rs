@@ -12,7 +12,7 @@ use nmt_platform::{
     EventedPty, Pty, PtyOptions, WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env,
 };
 use nmt_terminal::event::{EventListener, Msg, MsgSender, TerminalEvent, WindowId};
-use nmt_terminal::pty_pipe::{SessionOptions as PipeOptions, start_session};
+use nmt_terminal::pty_pipe::{SessionOptions as PipeOptions, SessionWorker, start_session};
 use nmt_terminal::session::request::{Checkpoint, CheckpointRequest};
 use parking_lot::Mutex;
 
@@ -259,6 +259,7 @@ impl EventListener for HubEventProxy {
 }
 
 struct RemoteSession {
+    _worker: SessionWorker,
     id: SessionId,
     shell: String,
     title: Option<String>,
@@ -394,6 +395,7 @@ impl<S: PtySource> RemoteSessionHub<S> {
         .map_err(|error| HubError::Engine(error.to_string()))?;
 
         let session = Arc::new(RemoteSession {
+            _worker: handles.worker,
             id,
             shell: options.shell,
             title: options.starting_title,

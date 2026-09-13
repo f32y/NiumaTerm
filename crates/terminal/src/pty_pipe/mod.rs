@@ -1,4 +1,6 @@
-pub use crate::pty_pipe::session::{OutputSink, SessionHandles, SessionOptions, start_session};
+pub use crate::pty_pipe::session::{
+    OutputSink, SessionHandles, SessionOptions, SessionWorker, start_session,
+};
 pub use crate::pty_pipe::write_queue::PtyState;
 
 pub(crate) mod requests;
@@ -18,7 +20,6 @@ use std::borrow::Cow;
 use std::io::{self, ErrorKind, Read, Write};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{self, Arc, mpsc};
-use std::thread::{Builder, JoinHandle};
 use std::{cell, error, fmt, path, time};
 
 #[cfg(target_os = "linux")]
@@ -1293,13 +1294,6 @@ where
         self.profile.flush();
 
         (self, state)
-    }
-
-    pub(crate) fn spawn(self) -> JoinHandle<(Self, PtyState)> {
-        Builder::new()
-            .name("PTY reader".into())
-            .spawn(move || self.run_event_loop())
-            .expect("thread spawn works")
     }
 
     fn on_request(&mut self, request: Msg) {

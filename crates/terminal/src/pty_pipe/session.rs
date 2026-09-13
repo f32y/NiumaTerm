@@ -1,12 +1,13 @@
 use std::error;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
+use std::thread::{Builder, JoinHandle};
 
 use nmt_config::colors::Colors;
 use nmt_platform::EventedPty;
 
 use crate::ansi::CursorShape;
-use crate::event::{EventListener, MsgSender, WindowId};
+use crate::event::{EventListener, Msg, MsgSender, WindowId};
 use crate::pty_pipe::PtyPipe;
 use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
@@ -46,6 +47,8 @@ pub struct SessionOptions {
 
 /// Shared handles to one running terminal session, returned by [`start_session`].
 pub struct SessionHandles {
+    pub worker: SessionWorker,
+
     /// Immutable viewport publications, retained independently by each reader.
     pub render_buffer: Arc<FrameStore>,
 
@@ -54,6 +57,35 @@ pub struct SessionHandles {
 
     /// Sender for input, resize, and shutdown messages to the PTY thread.
     pub messenger: MsgSender,
+}
+
+/// Keeps the PTY worker alive until its owner closes the session, then waits
+/// for final frame publication and PTY cleanup before releasing shared state.
+pub struct SessionWorker {
+    messenger: MsgSender,
+    thread: Option<JoinHandle<()>>,
+}
+
+#[cfg(test)]
+impl SessionWorker {
+    pub(crate) fn without_thread_for_test(messenger: MsgSender) -> Self {
+        Self {
+            messenger,
+            thread: None,
+        }
+    }
+}
+
+impl Drop for SessionWorker {
+    fn drop(&mut self) {
+        let _ = self.messenger.send(Msg::Shutdown);
+
+        if let Some(thread) = self.thread.take()
+            && thread.join().is_err()
+        {
+            tracing::warn!("PTY worker panicked");
+        }
+    }
 }
 
 /// Build the engine and render buffer, configure the pipe, and start the PTY
@@ -102,9 +134,15 @@ where
 
     let messenger = pipe.channel();
 
-    drop(pipe.spawn());
+    let thread = Builder::new().name("PTY reader".into()).spawn(move || {
+        pipe.run_event_loop();
+    })?;
 
     Ok(SessionHandles {
+        worker: SessionWorker {
+            messenger: messenger.clone(),
+            thread: Some(thread),
+        },
         render_buffer,
         vt_modes,
         messenger,

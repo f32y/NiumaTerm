@@ -12,7 +12,7 @@ use parking_lot::Mutex;
 use crate::event::{self, VoidListener};
 use crate::pty_pipe::{
     Interest, Poll, PtyPipe, PtyState, READ_BUFFER_SIZE, SNAPSHOT_MIN_INTERVAL,
-    SYNC_OUTPUT_TIMEOUT, SessionOptions, Token, Waker, mode, publish_render_buffer,
+    SYNC_OUTPUT_TIMEOUT, SessionOptions, Token, Waker, mode, publish_render_buffer, start_session,
 };
 use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
@@ -310,6 +310,41 @@ fn terminal_replies_resume_after_partial_writes_in_input_order() {
 
     assert_eq!(machine.pty.writer.data, b"in\x1b[1;1R");
     assert!(!state.needs_write());
+}
+
+#[test]
+fn dropping_session_handles_releases_worker_resources_before_returning() {
+    let lifetime = Arc::new(());
+    let released = Arc::downgrade(&lifetime);
+
+    let handles = start_session(
+        FakePty {
+            reader: FakeReader { data: Vec::new() },
+            writer: FakeWriter::default(),
+        },
+        VoidListener {},
+        SessionOptions {
+            cols: 20,
+            rows: 3,
+            route_id: 0,
+            colors: Colors::default(),
+            cursor_shape: ansi::CursorShape::Block,
+            scrollback_lines: 1000,
+            engine_blocks: false,
+            terminal_responses: true,
+            output_sink: Some(Arc::new(move |_| {
+                let _ = &lifetime;
+            })),
+        },
+    )
+    .unwrap();
+
+    drop(handles);
+
+    assert!(
+        released.upgrade().is_none(),
+        "worker resources must be released before close returns"
+    );
 }
 
 #[test]

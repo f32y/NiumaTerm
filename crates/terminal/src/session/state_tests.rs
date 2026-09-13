@@ -9,6 +9,7 @@ use crate::event::{
     BlockEvent, CommandCapture, EventListener, Msg, MsgSender, TerminalEvent, WindowId,
 };
 use crate::ghostty::{BlockHandle, GhosttyTerminal};
+use crate::pty_pipe::SessionWorker;
 use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
 use crate::selection::SelectionType;
@@ -81,12 +82,15 @@ pub(super) fn session_from_engine(
 
     engine.snapshot_into(&mut buffer).unwrap();
 
+    let messenger = MsgSender::new(tx, waker);
+
     (
         TerminalSession {
+            _worker: SessionWorker::without_thread_for_test(messenger.clone()),
             pages: Mutex::new(PageCache::default()),
             render_buffer: Arc::new(FrameStore::new(buffer)),
             vt_modes: Arc::new(AtomicU32::new(0)),
-            messenger: MsgSender::new(tx, waker),
+            messenger,
             shared: Arc::new(SessionSharedState::default()),
             process_tree: None,
             engine_blocks: false,

@@ -62,7 +62,7 @@ use crate::block_store::{BlockItem, BlockStore};
 use crate::event::{BlockEvent, Msg, MsgSender, ProgressReport};
 use crate::ghostty::BlockHandle;
 use crate::graphics::GraphicData;
-use crate::pty_pipe::{SessionOptions, start_session};
+use crate::pty_pipe::{SessionOptions, SessionWorker, start_session};
 use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
 use crate::selection::{SelectionRange, SelectionType, WORD_DELIMITERS};
@@ -135,6 +135,7 @@ pub struct InFlightBlock {
 /// The host's session handle: commands, immutable frame publications, and
 /// asynchronous reads. The PTY event loop exclusively owns the engine.
 pub struct TerminalSession {
+    _worker: SessionWorker,
     pages: Mutex<PageCache>,
     render_buffer: SessionBuffer,
     vt_modes: Arc<AtomicU32>,
@@ -251,6 +252,7 @@ impl TerminalSession {
         })?;
 
         Ok(Self {
+            _worker: handles.worker,
             pages: Mutex::new(PageCache::default()),
             render_buffer: handles.render_buffer,
             vt_modes: handles.vt_modes,
@@ -753,12 +755,6 @@ impl TerminalSession {
 
     pub fn clear_selection(&self) {
         self.shared.selection.clear();
-    }
-}
-
-impl Drop for TerminalSession {
-    fn drop(&mut self) {
-        let _ = self.messenger.send(Msg::Shutdown);
     }
 }
 
