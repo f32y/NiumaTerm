@@ -1,7 +1,13 @@
+#[cfg(test)]
+#[path = "agent_profile_dialog_tests.rs"]
+mod tests;
+
 use gpui_component::dialog::Dialog;
 use std::borrow::Cow;
 
 use app::agent_tab::{AgentKind, AgentKindExt as _};
+use gpui::{AppContext as _, ClickEvent, Context, Entity, IntoElement, Render};
+use gpui_component::input::InputState;
 use rust_i18n::t;
 
 use crate::ui::settings::*;
@@ -72,7 +78,11 @@ struct AgentProfileDraft {
     editing_env: Option<(usize, EnvField)>,
 }
 
-impl Global for AgentProfileDraft {}
+impl Render for AgentProfileDraft {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        agent_profile_dialog_content(self, window, cx)
+    }
+}
 
 /// Open the add/edit dialog for an agent profile. `target` is the index in
 /// `AppSettings::agent_profiles` for edit mode, `None` for a new profile.
@@ -94,18 +104,26 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
         },
     };
 
-    cx.set_global(AgentProfileDraft {
+    let draft = cx.new(|_| AgentProfileDraft {
         target,
         profile,
         editing_env: None,
     });
 
     window.open_dialog(cx, move |dialog, window, _| {
-        agent_profile_dialog(dialog, target, window)
+        agent_profile_dialog(dialog, &draft, target, window)
     });
 }
 
-fn agent_profile_dialog(dialog: Dialog, target: Option<usize>, window: &Window) -> Dialog {
+fn agent_profile_dialog(
+    dialog: Dialog,
+    draft: &Entity<AgentProfileDraft>,
+    target: Option<usize>,
+    window: &Window,
+) -> Dialog {
+    let saved_draft = draft.clone();
+    let content_draft = draft.clone();
+
     let title = if target.is_some() {
         t!("settings-agent-profile-edit-title")
     } else {
@@ -124,8 +142,8 @@ fn agent_profile_dialog(dialog: Dialog, target: Option<usize>, window: &Window) 
                 .min_w(DIALOG_BUTTON_MIN_WIDTH)
                 .primary()
                 .label(t!("settings-common-save"))
-                .on_click(|_, window, cx: &mut App| {
-                    save_agent_profile_draft(cx);
+                .on_click(move |_, window, cx: &mut App| {
+                    save_agent_profile_draft(&saved_draft, cx);
                     window.close_dialog(cx);
                 }),
         )
@@ -143,13 +161,13 @@ fn agent_profile_dialog(dialog: Dialog, target: Option<usize>, window: &Window) 
         .margin_top(dialog_top)
         .w(px(1000.))
         .h(dialog_height)
-        .content(|content, window, cx| {
+        .content(move |content, _, _| {
             content.overflow_hidden().child(
                 div().flex_1().overflow_hidden().child(
                     v_flex()
                         .size_full()
                         .overflow_y_scrollbar()
-                        .child(div().pr_2().child(agent_profile_dialog_content(window, cx))),
+                        .child(div().pr_2().child(content_draft.clone())),
                 ),
             )
         })
@@ -158,9 +176,9 @@ fn agent_profile_dialog(dialog: Dialog, target: Option<usize>, window: &Window) 
 
 /// Commit the dialog draft into `AppSettings`: dedupe the name, then update
 /// the edited entry or append a new one.
-fn save_agent_profile_draft(cx: &mut App) {
-    let target = cx.global::<AgentProfileDraft>().target;
-    let mut profile = cx.global::<AgentProfileDraft>().profile.clone();
+fn save_agent_profile_draft(draft: &Entity<AgentProfileDraft>, cx: &mut App) {
+    let target = draft.read(cx).target;
+    let mut profile = draft.read(cx).profile.clone();
 
     // A variable with no name cannot be exported, and an entry the user added
     // but never filled in would otherwise persist as noise in config.toml.
@@ -190,9 +208,7 @@ fn save_agent_profile_draft(cx: &mut App) {
 }
 
 /// Point the draft at another agent type, as picked in the add dialog.
-fn select_profile_kind(profile_kind: AgentProfileKind, cx: &mut App) {
-    let draft = cx.global_mut::<AgentProfileDraft>();
-
+fn select_profile_kind(draft: &mut AgentProfileDraft, profile_kind: AgentProfileKind) {
     if draft.profile.kind == profile_kind {
         return;
     }
@@ -221,6 +237,31 @@ fn select_profile_kind(profile_kind: AgentProfileKind, cx: &mut App) {
     draft.profile.kind = profile_kind;
 }
 
+fn draft_text_input(
+    key: String,
+    value: SharedString,
+    apply: impl Fn(&mut AgentProfileDraft, String) + 'static,
+    window: &mut Window,
+    cx: &mut Context<AgentProfileDraft>,
+) -> Entity<InputState> {
+    let draft = cx.weak_entity();
+
+    card_text_input(
+        key,
+        value,
+        false,
+        move |value, cx| {
+            let _ = draft.update(cx, |draft, cx| {
+                apply(draft, value);
+
+                cx.notify();
+            });
+        },
+        window,
+        cx,
+    )
+}
+
 /// One editable cell of the environment-variable table. It shows plain text
 /// until double-clicked, then swaps in an input that writes straight into the
 /// draft; leaving the field closes the editor, so there is nothing to commit.
@@ -231,7 +272,7 @@ fn env_cell(
     placeholder: Cow<'static, str>,
     editing: bool,
     window: &mut Window,
-    cx: &mut App,
+    cx: &mut Context<AgentProfileDraft>,
 ) -> AnyElement {
     let key = match field {
         EnvField::Name => "name",
@@ -239,17 +280,11 @@ fn env_cell(
     };
 
     if editing {
-        let input = card_text_input(
+        let input = draft_text_input(
             format!("agent-profile-dialog-env-{row}-{key}"),
             text.to_string().into(),
-            false,
-            move |value, cx| {
-                if let Some(var) = cx
-                    .global_mut::<AgentProfileDraft>()
-                    .profile
-                    .env
-                    .get_mut(row)
-                {
+            move |draft, value| {
+                if let Some(var) = draft.profile.env.get_mut(row) {
                     match field {
                         EnvField::Name => var.name = value,
                         EnvField::Value => var.value = value,
@@ -264,13 +299,20 @@ fn env_cell(
         // draft, so closing the editor is all that is left to do. The
         // subscription is held in its own keyed slot, which lives exactly as
         // long as this cell is the one being edited.
+        let draft = cx.weak_entity();
+        let subscribed_input = input.clone();
+
         window.use_keyed_state(
             format!("agent-profile-dialog-env-{row}-{key}-close"),
             cx,
-            |_, cx| {
-                cx.subscribe(&input, |_, _, event: &InputEvent, cx| {
+            move |_, cx| {
+                cx.subscribe(&subscribed_input, move |_, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Blur | InputEvent::PressEnter { .. }) {
-                        cx.global_mut::<AgentProfileDraft>().editing_env = None;
+                        let _ = draft.update(cx, |draft, cx| {
+                            draft.editing_env = None;
+
+                            cx.notify();
+                        });
                     }
                 })
             },
@@ -311,19 +353,24 @@ fn env_cell(
             this.text_color(cx.theme().muted_foreground.opacity(0.6))
         })
         .child(label)
-        .on_click(move |event, _, cx: &mut App| {
+        .on_click(cx.listener(move |draft, event: &ClickEvent, _, cx| {
             if event.click_count() == 2 {
-                cx.global_mut::<AgentProfileDraft>().editing_env = Some((row, field));
+                draft.editing_env = Some((row, field));
+
+                cx.notify();
             }
-        })
+        }))
         .into_any_element()
 }
 
 /// The environment variables of the draft as a Name / Value / Operation
 /// table, matching the agent-profile table on the Profiles page.
-fn env_var_table(env: &[EnvVar], window: &mut Window, cx: &mut App) -> AnyElement {
-    let editing = cx.global::<AgentProfileDraft>().editing_env;
-
+fn env_var_table(
+    env: &[EnvVar],
+    editing: Option<(usize, EnvField)>,
+    window: &mut Window,
+    cx: &mut Context<AgentProfileDraft>,
+) -> AnyElement {
     let mut table = table_frame(cx).child(
         table_header(cx)
             .child(div().flex_1().min_w_0().child(t!("settings-common-name")))
@@ -385,9 +432,7 @@ fn env_var_table(env: &[EnvVar], window: &mut Window, cx: &mut App) -> AnyElemen
                                 .icon(TrashIcon)
                                 .accessibility_label(t!("settings-common-delete"))
                                 .tooltip(t!("settings-common-delete"))
-                                .on_click(move |_, _, cx: &mut App| {
-                                    let draft = cx.global_mut::<AgentProfileDraft>();
-
+                                .on_click(cx.listener(move |draft, _, _, cx| {
                                     if row < draft.profile.env.len() {
                                         draft.profile.env.remove(row);
                                     }
@@ -395,7 +440,9 @@ fn env_var_table(env: &[EnvVar], window: &mut Window, cx: &mut App) -> AnyElemen
                                     // Indices shift under the editor, so the open
                                     // cell would follow the wrong variable.
                                     draft.editing_env = None;
-                                }),
+
+                                    cx.notify();
+                                })),
                         ),
                 ),
         );
@@ -404,9 +451,13 @@ fn env_var_table(env: &[EnvVar], window: &mut Window, cx: &mut App) -> AnyElemen
     table.into_any_element()
 }
 
-fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
-    let profile = cx.global::<AgentProfileDraft>().profile.clone();
-    let is_edit = cx.global::<AgentProfileDraft>().target.is_some();
+fn agent_profile_dialog_content(
+    draft: &AgentProfileDraft,
+    window: &mut Window,
+    cx: &mut Context<AgentProfileDraft>,
+) -> Div {
+    let profile = draft.profile.clone();
+    let is_edit = draft.target.is_some();
 
     let kind_label = agent_kind_display_label(profile.kind);
 
@@ -418,47 +469,42 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
 
     let endpoint_on = profile.use_custom_endpoint;
 
-    let name_input = card_text_input(
+    let name_input = draft_text_input(
         "agent-profile-dialog-name".to_string(),
         profile.name.clone().into(),
-        false,
-        |value, cx| cx.global_mut::<AgentProfileDraft>().profile.name = value,
+        |draft, value| draft.profile.name = value,
         window,
         cx,
     );
 
-    let exe_input = card_text_input(
+    let exe_input = draft_text_input(
         "agent-profile-dialog-exe".to_string(),
         profile.executable.clone().into(),
-        false,
-        |value, cx| cx.global_mut::<AgentProfileDraft>().profile.executable = value,
+        |draft, value| draft.profile.executable = value,
         window,
         cx,
     );
 
-    let model_input = card_text_input(
+    let model_input = draft_text_input(
         "agent-profile-dialog-model".to_string(),
         profile.model.clone().into(),
-        false,
-        |value, cx| cx.global_mut::<AgentProfileDraft>().profile.model = value,
+        |draft, value| draft.profile.model = value,
         window,
         cx,
     );
 
-    let url_input = card_text_input(
+    let url_input = draft_text_input(
         "agent-profile-dialog-url".to_string(),
         profile.api_base_url.clone().into(),
-        false,
-        |value, cx| cx.global_mut::<AgentProfileDraft>().profile.api_base_url = value,
+        |draft, value| draft.profile.api_base_url = value,
         window,
         cx,
     );
 
-    let key_input = card_text_input(
+    let key_input = draft_text_input(
         "agent-profile-dialog-key".to_string(),
         profile.api_key.clone().into(),
-        false,
-        |value, cx| cx.global_mut::<AgentProfileDraft>().profile.api_key = value,
+        |draft, value| draft.profile.api_key = value,
         window,
         cx,
     );
@@ -473,23 +519,32 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
         // front of the user; a hand-written list here is why one could be
         // selectable everywhere else and still impossible to create.
         let current = profile.kind;
+        let owner = cx.weak_entity();
 
         Button::new("agent-profile-dialog-kind")
             .outline()
             .w_64()
             .label(kind_label)
             .dropdown_caret(true)
-            .dropdown_menu(move |menu, _, _| {
-                AgentKind::ALL.into_iter().fold(menu, |menu, kind| {
-                    let profile_kind = kind.profile_kind();
+            .dropdown_menu(move |menu, _, cx| {
+                let Some(owner) = owner.upgrade() else {
+                    return menu;
+                };
 
-                    menu.item(
-                        PopupMenuItem::new(agent_kind_display_label(profile_kind))
-                            .checked(profile_kind == current)
-                            .on_click(move |_, _, cx: &mut App| {
-                                select_profile_kind(profile_kind, cx)
-                            }),
-                    )
+                owner.update(cx, |_, cx| {
+                    AgentKind::ALL.into_iter().fold(menu, |menu, kind| {
+                        let profile_kind = kind.profile_kind();
+
+                        menu.item(
+                            PopupMenuItem::new(agent_kind_display_label(profile_kind))
+                                .checked(profile_kind == current)
+                                .on_click(cx.listener(move |draft, _, _, cx| {
+                                    select_profile_kind(draft, profile_kind);
+
+                                    cx.notify();
+                                })),
+                        )
+                    })
                 })
             })
             .into_any_element()
@@ -503,53 +558,70 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
         profile.effort.trim().to_string()
     };
 
+    let effort_owner = cx.weak_entity();
+
     let effort_control = Button::new("agent-profile-dialog-effort")
         .outline()
         .w_64()
         .label(effort_label(&selected_effort))
         .dropdown_caret(true)
-        .dropdown_menu(move |menu, _, _| {
-            let selected = selected_effort.clone();
+        .dropdown_menu(move |menu, _, cx| {
+            let Some(owner) = effort_owner.upgrade() else {
+                return menu;
+            };
 
-            profile_effort_options(profile.kind)
-                .into_iter()
-                .fold(menu, |menu, option| {
-                    menu.item(
-                        PopupMenuItem::new(effort_label(option))
-                            .checked(option == selected)
-                            .on_click(move |_, _, cx: &mut App| {
-                                // `default` is the absence of a choice, so it
-                                // is stored empty rather than as a level the
-                                // agent would be asked to honor.
-                                cx.global_mut::<AgentProfileDraft>().profile.effort =
-                                    if option == PROFILE_EFFORT_OPTIONS[0] {
+            owner.update(cx, |_, cx| {
+                let selected = selected_effort.clone();
+
+                profile_effort_options(profile.kind)
+                    .into_iter()
+                    .fold(menu, |menu, option| {
+                        menu.item(
+                            PopupMenuItem::new(effort_label(option))
+                                .checked(option == selected)
+                                .on_click(cx.listener(move |draft, _, _, cx| {
+                                    // `default` is the absence of a choice, so it
+                                    // is stored empty rather than as a level the
+                                    // agent would be asked to honor.
+                                    draft.profile.effort = if option == PROFILE_EFFORT_OPTIONS[0] {
                                         String::new()
                                     } else {
                                         option.to_string()
                                     };
-                            }),
-                    )
-                })
+
+                                    cx.notify();
+                                })),
+                        )
+                    })
+            })
         });
 
     let cache_warn_minutes = profile.cache_warn_minutes;
+
+    let cache_owner = cx.weak_entity();
 
     let cache_warn_control = Button::new("agent-profile-dialog-cache-warn")
         .outline()
         .w_64()
         .label(cache_warn_label(cache_warn_minutes))
         .dropdown_caret(true)
-        .dropdown_menu(move |menu, _, _| {
-            CACHE_WARN_OPTIONS.into_iter().fold(menu, |menu, minutes| {
-                menu.item(
-                    PopupMenuItem::new(cache_warn_label(minutes))
-                        .checked(minutes == cache_warn_minutes)
-                        .on_click(move |_, _, cx: &mut App| {
-                            cx.global_mut::<AgentProfileDraft>()
-                                .profile
-                                .cache_warn_minutes = minutes;
-                        }),
-                )
+        .dropdown_menu(move |menu, _, cx| {
+            let Some(owner) = cache_owner.upgrade() else {
+                return menu;
+            };
+
+            owner.update(cx, |_, cx| {
+                CACHE_WARN_OPTIONS.into_iter().fold(menu, |menu, minutes| {
+                    menu.item(
+                        PopupMenuItem::new(cache_warn_label(minutes))
+                            .checked(minutes == cache_warn_minutes)
+                            .on_click(cx.listener(move |draft, _, _, cx| {
+                                draft.profile.cache_warn_minutes = minutes;
+
+                                cx.notify();
+                            })),
+                    )
+                })
             })
         });
 
@@ -564,59 +636,72 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
         AgentProfileLauncher::PnpmDlx => t!("settings-agent-profile-launcher-pnpm-dlx"),
     };
 
+    let launcher_owner = cx.weak_entity();
+
     let launcher_control = Button::new("agent-profile-dialog-launcher")
         .outline()
         .w_64()
         .label(launcher_label)
         .dropdown_caret(true)
-        .dropdown_menu(move |menu, _, _| {
-            menu.item(
-                PopupMenuItem::new(t!("settings-agent-profile-launcher-npx"))
-                    .checked(launcher == AgentProfileLauncher::Npx)
-                    .on_click(|_, _, cx: &mut App| {
-                        cx.global_mut::<AgentProfileDraft>().profile.launcher =
-                            AgentProfileLauncher::Npx;
-                    }),
-            )
-            .item(
-                PopupMenuItem::new(t!("settings-agent-profile-launcher-pnpm-dlx"))
-                    .checked(launcher == AgentProfileLauncher::PnpmDlx)
-                    .on_click(|_, _, cx: &mut App| {
-                        cx.global_mut::<AgentProfileDraft>().profile.launcher =
-                            AgentProfileLauncher::PnpmDlx;
-                    }),
-            )
-            .item(
-                PopupMenuItem::new(t!("settings-agent-profile-launcher-custom"))
-                    .checked(launcher == AgentProfileLauncher::Custom)
-                    .on_click(|_, _, cx: &mut App| {
-                        cx.global_mut::<AgentProfileDraft>().profile.launcher =
-                            AgentProfileLauncher::Custom;
-                    }),
-            )
+        .dropdown_menu(move |menu, _, cx| {
+            let Some(owner) = launcher_owner.upgrade() else {
+                return menu;
+            };
+
+            owner.update(cx, |_, cx| {
+                menu.item(
+                    PopupMenuItem::new(t!("settings-agent-profile-launcher-npx"))
+                        .checked(launcher == AgentProfileLauncher::Npx)
+                        .on_click(cx.listener(|draft, _, _, cx| {
+                            draft.profile.launcher = AgentProfileLauncher::Npx;
+
+                            cx.notify();
+                        })),
+                )
+                .item(
+                    PopupMenuItem::new(t!("settings-agent-profile-launcher-pnpm-dlx"))
+                        .checked(launcher == AgentProfileLauncher::PnpmDlx)
+                        .on_click(cx.listener(|draft, _, _, cx| {
+                            draft.profile.launcher = AgentProfileLauncher::PnpmDlx;
+
+                            cx.notify();
+                        })),
+                )
+                .item(
+                    PopupMenuItem::new(t!("settings-agent-profile-launcher-custom"))
+                        .checked(launcher == AgentProfileLauncher::Custom)
+                        .on_click(cx.listener(|draft, _, _, cx| {
+                            draft.profile.launcher = AgentProfileLauncher::Custom;
+
+                            cx.notify();
+                        })),
+                )
+            })
         });
 
     let sub_models_switch = Switch::new("agent-profile-dialog-sub-models")
         .checked(profile.replace_sub_models)
-        .on_click(|checked: &bool, _, cx: &mut App| {
-            cx.global_mut::<AgentProfileDraft>()
-                .profile
-                .replace_sub_models = *checked;
-        });
+        .on_click(cx.listener(|draft, checked: &bool, _, cx| {
+            draft.profile.replace_sub_models = *checked;
+
+            cx.notify();
+        }));
 
     let vision_switch = Switch::new("agent-profile-dialog-vision-model")
         .checked(profile.vision_model)
-        .on_click(|checked: &bool, _, cx: &mut App| {
-            cx.global_mut::<AgentProfileDraft>().profile.vision_model = *checked;
-        });
+        .on_click(cx.listener(|draft, checked: &bool, _, cx| {
+            draft.profile.vision_model = *checked;
+
+            cx.notify();
+        }));
 
     let endpoint_switch = Switch::new("agent-profile-dialog-endpoint")
         .checked(endpoint_on)
-        .on_click(|checked: &bool, _, cx: &mut App| {
-            cx.global_mut::<AgentProfileDraft>()
-                .profile
-                .use_custom_endpoint = *checked;
-        });
+        .on_click(cx.listener(|draft, checked: &bool, _, cx| {
+            draft.profile.use_custom_endpoint = *checked;
+
+            cx.notify();
+        }));
 
     let env_section = v_flex()
         .w_full()
@@ -632,18 +717,17 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
                     cx,
                 )),
         )
-        .child(env_var_table(&profile.env, window, cx))
+        .child(env_var_table(&profile.env, draft.editing_env, window, cx))
         .child(
             h_flex().child(
                 Button::new("agent-profile-dialog-env-add")
                     .outline()
                     .label(t!("settings-agent-profile-add-variable"))
-                    .on_click(|_, _, cx: &mut App| {
-                        cx.global_mut::<AgentProfileDraft>()
-                            .profile
-                            .env
-                            .push(EnvVar::default());
-                    }),
+                    .on_click(cx.listener(|draft, _, _, cx| {
+                        draft.profile.env.push(EnvVar::default());
+
+                        cx.notify();
+                    })),
             ),
         );
 

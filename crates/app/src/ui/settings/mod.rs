@@ -54,7 +54,7 @@ use gpui::AppContext as _;
 use gpui::WindowBackgroundAppearance;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, Div, FileDialogFilter, Global, InteractiveElement as _, IntoElement as _,
+    AnyElement, App, Div, FileDialogFilter, InteractiveElement as _, IntoElement as _,
     ParentElement as _, PathPromptOptions, SharedString, StatefulInteractiveElement as _,
     Styled as _, Window, div, px, relative,
 };
