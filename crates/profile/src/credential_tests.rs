@@ -1,7 +1,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 
-use crate::profile::{PREFIX, decrypt_credentials as decrypt, encrypt_credentials as encrypt};
+use crate::{PREFIX, decrypt_credentials as decrypt, encrypt_credentials as encrypt};
 
 const URL: &str = "https://proxy.example.com/v1";
 const KEY: &str = "sk-test-1234";

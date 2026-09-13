@@ -1,14 +1,18 @@
+#[cfg(feature = "application")]
 use nmt_platform::environment::DEFAULT_EDITOR;
-#[cfg(target_os = "windows")]
+#[cfg(all(feature = "application", target_os = "windows"))]
 use nmt_platform::windows::powershell::DEFAULT_CONFIG_SHELL;
 
-use crate::{CursorShape, Shell};
+use crate::CursorShape;
+#[cfg(feature = "application")]
+use crate::Shell;
 
 #[inline]
 pub fn default_bool_true() -> bool {
     true
 }
 
+#[cfg(feature = "application")]
 #[inline]
 pub fn default_shell() -> Shell {
     #[cfg(not(target_os = "windows"))]
@@ -43,6 +47,7 @@ pub fn default_theme() -> String {
     "modern_dark".into()
 }
 
+#[cfg(feature = "application")]
 #[inline]
 pub fn default_editor() -> Shell {
     Shell {

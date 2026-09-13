@@ -4267,10 +4267,9 @@ dependencies = [
 name = "nmt_config"
 version = "1.3.4"
 dependencies = [
- "aes-gcm",
- "base64",
  "dirs",
  "nmt_platform",
+ "nmt_profile",
  "serde",
  "tempfile",
  "toml 1.1.3+spec-1.1.0",
@@ -4314,6 +4313,17 @@ dependencies = [
  "windows-registry",
  "windows-sys 0.61.2",
  "zbus",
+]
+
+[[package]]
+name = "nmt_profile"
+version = "1.3.4"
+dependencies = [
+ "aes-gcm",
+ "base64",
+ "serde",
+ "toml 1.1.3+spec-1.1.0",
+ "toml_edit 0.25.13+spec-1.1.0",
 ]
 
 [[package]]

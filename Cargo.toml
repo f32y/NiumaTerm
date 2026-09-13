@@ -17,6 +17,7 @@ members = [
     "crates/input",
     "crates/platform",
     "crates/profiling",
+    "crates/profile",
     "crates/remote_net",
     "crates/shell_extension",
     "crates/terminal",
@@ -74,11 +75,13 @@ disallowed_types = "deny"
 [workspace.dependencies]
 nmt_agent = { path = "crates/agent" }
 nmt_version = { path = "crates/version" }
-nmt_config = { path = "crates/config" }
+# Only the app enables configuration file storage and profile credentials.
+nmt_config = { path = "crates/config", default-features = false }
 nmt_input = { path = "crates/input" }
 libghostty-vt-sys = { path = "third_party/libghostty-vt-sys" }
 nmt_platform = { path = "crates/platform" }
 nmt_profiling = { path = "crates/profiling" }
+nmt_profile = { path = "crates/profile" }
 nmt_remote_net = { path = "crates/remote_net" }
 nmt_terminal = { path = "crates/terminal" }
 nmt_sparkle = { path = "crates/sparkle" }

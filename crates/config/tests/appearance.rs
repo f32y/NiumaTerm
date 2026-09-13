@@ -1,3 +1,5 @@
+#![cfg(feature = "application")]
+
 use nmt_config::Config;
 use nmt_config::appearance::{AppearanceConfig, InputStyle, SmoothScrollingMode, WindowBackdrop};
 use toml::from_str;

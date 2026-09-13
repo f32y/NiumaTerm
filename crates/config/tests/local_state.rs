@@ -1,3 +1,5 @@
+#![cfg(feature = "application")]
+
 use nmt_config::local_state::{SessionState, TabState, WorkspaceState};
 
 #[test]

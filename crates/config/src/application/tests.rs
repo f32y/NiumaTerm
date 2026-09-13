@@ -1,8 +1,7 @@
 use tempfile::Builder as TempDirBuilder;
 
-use crate::colors::hex_to_color_arr;
-use crate::profile::encrypt_credentials;
-use crate::*;
+use crate::application::*;
+use crate::colors::{self, hex_to_color_arr};
 
 fn sample_appearance() -> AppearanceConfig {
     AppearanceConfig {
@@ -337,7 +336,12 @@ fn empty_agent_credentials_are_omitted() {
 
     let mut doc = DocumentMut::new();
 
-    profile::patch_agent_document(&mut doc, &profiles, "Plain").unwrap();
+    profile::patch_agent_table(
+        ensure_explicit_table(&mut doc, "agent-profiles"),
+        &profiles,
+        "Plain",
+    )
+    .unwrap();
 
     let out = doc.to_string();
 
@@ -363,8 +367,12 @@ via-npx = true
 
     let mut doc = legacy.parse::<DocumentMut>().unwrap();
 
-    profile::patch_agent_document(&mut doc, &config.agent_profiles.list, "DeepSeek Harness")
-        .unwrap();
+    profile::patch_agent_table(
+        ensure_explicit_table(&mut doc, "agent-profiles"),
+        &config.agent_profiles.list,
+        "DeepSeek Harness",
+    )
+    .unwrap();
 
     let saved = doc.to_string();
 
@@ -391,8 +399,12 @@ launcher = "pnpm-dlx"
 
     let mut doc = DocumentMut::new();
 
-    profile::patch_agent_document(&mut doc, &config.agent_profiles.list, "DeepSeek Harness")
-        .unwrap();
+    profile::patch_agent_table(
+        ensure_explicit_table(&mut doc, "agent-profiles"),
+        &config.agent_profiles.list,
+        "DeepSeek Harness",
+    )
+    .unwrap();
 
     let restored: Config = parse_toml(&doc.to_string()).unwrap();
 
@@ -433,7 +445,12 @@ fn legacy_plaintext_credentials_migrate_on_save() {
     let config: Config = parse_toml(LEGACY_PROFILE_TOML).unwrap();
     let mut doc = LEGACY_PROFILE_TOML.parse::<DocumentMut>().unwrap();
 
-    profile::patch_agent_document(&mut doc, &config.agent_profiles.list, "Legacy").unwrap();
+    profile::patch_agent_table(
+        ensure_explicit_table(&mut doc, "agent-profiles"),
+        &config.agent_profiles.list,
+        "Legacy",
+    )
+    .unwrap();
 
     let out = doc.to_string();
 
@@ -833,4 +850,21 @@ fn a_model_entry_carries_the_names_the_style_asks_for() {
     assert_eq!(ModelListStyle::NameAndId.label("gpt-5", "gpt-5"), "gpt-5");
     assert_eq!(ModelListStyle::IdAndName.label("", "gpt-5"), "gpt-5");
     assert_eq!(ModelListStyle::NameOnly.label("  ", "gpt-5"), "gpt-5");
+}
+
+fn encrypt_credentials(api_base_url: &str, api_key: &str) -> Result<String, String> {
+    let mut table = Table::new();
+
+    let profile = profile::AgentProfile {
+        api_base_url: api_base_url.into(),
+        api_key: api_key.into(),
+        ..profile::AgentProfile::default()
+    };
+
+    profile::patch_agent_table(&mut table, &[profile], "")?;
+
+    Ok(table["list"][0]["api-credentials"]
+        .as_str()
+        .unwrap()
+        .to_owned())
 }

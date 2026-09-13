@@ -1,3 +1,5 @@
+#![cfg(feature = "application")]
+
 use nmt_config::Config;
 use nmt_config::agent::AgentConfig;
 use toml::from_str;

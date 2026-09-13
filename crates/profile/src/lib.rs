@@ -10,9 +10,7 @@ use aes_gcm::{Aes256Gcm, Key, Nonce};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
-use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, value};
-
-use crate::ensure_explicit_table;
+use toml_edit::{Array, ArrayOfTables, InlineTable, Item, Table, value};
 
 /// The `[profiles]` section: the default-profile name plus the profile
 /// entries (`[[profiles.list]]`). TOML cannot mix a scalar key with
@@ -248,10 +246,9 @@ impl TryFrom<PersistedAgentProfile> for AgentProfile {
 }
 
 /// Write the `[profiles]` section (`default` plus the `[[profiles.list]]`
-/// entries) into a parsed `config.toml` document, replacing any existing one.
-pub(crate) fn patch_document(doc: &mut DocumentMut, profiles: &[Profile], default_profile: &str) {
-    ensure_explicit_table(doc, "profiles");
-    doc["profiles"]["default"] = value(default_profile);
+/// entries) into its existing TOML table, replacing the managed entries.
+pub fn patch_table(table: &mut Table, profiles: &[Profile], default_profile: &str) {
+    table["default"] = value(default_profile);
 
     let mut tables = ArrayOfTables::new();
 
@@ -264,27 +261,26 @@ pub(crate) fn patch_document(doc: &mut DocumentMut, profiles: &[Profile], defaul
         tables.push(table);
     }
 
-    doc["profiles"]["list"] = Item::ArrayOfTables(tables);
+    table["list"] = Item::ArrayOfTables(tables);
 }
 
 /// Write the `[agent-profiles]` section (`default` plus the
-/// `[[agent-profiles.list]]` entries) into a parsed `config.toml` document,
-/// replacing any existing one. Credentials are written only as the encrypted
+/// `[[agent-profiles.list]]` entries) into its existing TOML table. Credentials
+/// are written only as the encrypted
 /// `api-credentials` value; rebuilding every entry from the runtime type is
 /// what removes legacy plaintext fields on the first save after migration.
 /// An encryption failure aborts the whole patch so the caller never persists
 /// a document with missing credentials.
-pub(crate) fn patch_agent_document(
-    doc: &mut DocumentMut,
+pub fn patch_agent_table(
+    table: &mut Table,
     profiles: &[AgentProfile],
     default_profile: &str,
 ) -> Result<(), String> {
-    ensure_explicit_table(doc, "agent-profiles");
-    doc["agent-profiles"]["default"] = value(default_profile);
+    table["default"] = value(default_profile);
 
     // Saving means the dialog managed this section; from now on an empty
     // list is a deliberate state, never re-seeded.
-    doc["agent-profiles"]["initialized"] = value(true);
+    table["initialized"] = value(true);
 
     let mut tables = ArrayOfTables::new();
 
@@ -313,10 +309,10 @@ pub(crate) fn patch_agent_document(
             table["api-credentials"] = value(stored);
         }
 
-        let mut env = toml_edit::Array::new();
+        let mut env = Array::new();
 
         for var in &profile.env {
-            let mut entry = toml_edit::InlineTable::new();
+            let mut entry = InlineTable::new();
 
             entry.insert("name", var.name.as_str().into());
             entry.insert("value", var.value.as_str().into());
@@ -329,7 +325,7 @@ pub(crate) fn patch_agent_document(
         tables.push(table);
     }
 
-    doc["agent-profiles"]["list"] = Item::ArrayOfTables(tables);
+    table["list"] = Item::ArrayOfTables(tables);
 
     Ok(())
 }
@@ -398,7 +394,7 @@ struct CredentialPayload {
 /// Encrypt a custom API URL and API key into one `aes256gcm-v1:` value.
 /// Every call draws a fresh nonce, so repeated encryption of the same input
 /// produces different output. Errors never contain the input values.
-pub(super) fn encrypt_credentials(api_base_url: &str, api_key: &str) -> Result<String, String> {
+fn encrypt_credentials(api_base_url: &str, api_key: &str) -> Result<String, String> {
     let payload = toml::to_string(&CredentialPayload {
         api_base_url: api_base_url.to_string(),
         api_key: api_key.to_string(),
