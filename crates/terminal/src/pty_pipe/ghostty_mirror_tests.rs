@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 use std::{io, sync, time};
@@ -657,8 +659,14 @@ fn conpty_resize_echo_realigns_machine_pty_read_to_cursor_row() {
         engine.write_vt(b"\x1b[2J\x1b[10;1HHISTORY\x1b[42;1HC:\\Workspace\\NiumaTerm>");
     }
 
-    machine.conpty_resize_echo_realign = true;
-    machine.conpty_resize_echo_pending = true;
+    machine.conpty_resize.on_resize(
+        machine.ghostty.cols(),
+        machine.ghostty.rows(),
+        None,
+        Instant::now(),
+    );
+
+    machine.conpty_resize.on_input(b"x", Instant::now());
 
     let mut state = PtyState::default();
     let mut read_buf = [0u8; READ_BUFFER_SIZE];
@@ -716,8 +724,12 @@ fn conpty_resize_repaint_realigns_clear_without_new_input() {
         engine.write_vt(b"\x1b[2J\x1b[10;1HHISTORY\x1b[42;1HC:\\Workspace\\NiumaTerm>");
     }
 
-    machine.conpty_resize_echo_realign = true;
-    machine.conpty_resize_repaint_reads_remaining = 1;
+    machine.conpty_resize.on_resize(
+        machine.ghostty.cols(),
+        machine.ghostty.rows(),
+        None,
+        Instant::now(),
+    );
 
     let mut state = PtyState::default();
     let mut read_buf = [0u8; READ_BUFFER_SIZE];
@@ -789,8 +801,12 @@ fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
         );
     }
 
-    machine.conpty_resize_echo_realign = true;
-    machine.conpty_resize_repaint_reads_remaining = 1;
+    machine.conpty_resize.on_resize(
+        machine.ghostty.cols(),
+        machine.ghostty.rows(),
+        None,
+        Instant::now(),
+    );
 
     let mut state = PtyState::default();
     let mut read_buf = [0u8; READ_BUFFER_SIZE];
@@ -875,8 +891,14 @@ fn conpty_resize_echo_routes_to_active_cursor_when_scrolled_typing() {
     }
 
     // echo_pending = this read is a ConPTY echo of user input.
-    machine.conpty_resize_echo_realign = true;
-    machine.conpty_resize_echo_pending = true;
+    machine.conpty_resize.on_resize(
+        machine.ghostty.cols(),
+        machine.ghostty.rows(),
+        None,
+        Instant::now(),
+    );
+
+    machine.conpty_resize.on_input(b"x", Instant::now());
 
     let mut state = PtyState::default();
     let mut read_buf = [0u8; READ_BUFFER_SIZE];

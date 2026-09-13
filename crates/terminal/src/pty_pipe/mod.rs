@@ -5,6 +5,7 @@ pub use crate::pty_pipe::write_queue::PtyState;
 
 pub(crate) mod requests;
 
+mod conpty_resize;
 mod marks;
 
 mod session;
@@ -24,10 +25,6 @@ use std::{cell, error, fmt, path, time};
 
 #[cfg(target_os = "linux")]
 use libc::EIO;
-use nmt_platform::conpty_realign::{
-    is_conpty_resize_echo_input, is_conpty_resize_repaint, rewrite_conpty_resize_echo_cup_rows,
-    su_realign_count,
-};
 use nmt_platform::{ChildEvent, EventedPty, Events, Interest, Poll, Token, Waker, WinsizeBuilder};
 #[cfg(enable_profiling)]
 use nmt_profiling::pty::{BatchEnd, PtyProfiler, Stage};
@@ -36,6 +33,7 @@ use tracing::{error, warn};
 use crate::event::{self, EventListener, Msg, MsgSender, TerminalEvent, WindowId};
 use crate::ghostty::{self, GhosttyTerminal, mode};
 use crate::prompt_sniffer::PromptSniffer;
+use crate::pty_pipe::conpty_resize::{ConptyResize, ResizeRead};
 use crate::pty_pipe::marks::{apply_sniffer_mark, engine_blocks_live_list};
 use crate::pty_pipe::requests::answer_query;
 use crate::publication::FrameStore;
@@ -132,25 +130,7 @@ pub struct PtyPipe<T: EventedPty, U: EventListener> {
     event_proxy: U,
     window_id: WindowId,
     route_id: usize,
-    conpty_resize_echo_realign: bool,
-    conpty_resize_echo_pending: bool,
-    conpty_resize_repaint_reads_remaining: u8,
-
-    /// When the last resize happened. The `conpty_resize_echo_realign` input
-    /// gate only fires for a brief window after a resize — input typed *during*
-    /// the resize repaint, whose ConPTY echo lands at a stale CUP. Without a time
-    /// bound, ordinary typing long after a resize keeps tripping the gate and
-    /// accumulates (the "type 120 x's after a resize and the prompt repeats" bug).
-    conpty_resize_at: Option<time::Instant>,
-
-    /// SU-realign latch. `active_cursor_row()` is captured at resize time
-    /// (it flips within one frame during the ConPTY repaint storm, so it can't be read
-    /// live). `*_cols/_rows` let the first repaint sanity-check it answers this resize.
-    conpty_resize_prompt_row: u16,
-
-    conpty_resize_cols: u16,
-    conpty_resize_rows: u16,
-    su_realign_armed: bool,
+    conpty_resize: ConptyResize,
 
     /// OSC 133 region state; only touched on the PTY thread.
     sniffer: PromptSniffer,
@@ -324,14 +304,7 @@ where
             event_proxy,
             window_id,
             route_id: options.route_id,
-            conpty_resize_echo_realign: false,
-            conpty_resize_echo_pending: false,
-            conpty_resize_repaint_reads_remaining: 0,
-            conpty_resize_at: None,
-            conpty_resize_prompt_row: 0,
-            conpty_resize_cols: 0,
-            conpty_resize_rows: 0,
-            su_realign_armed: false,
+            conpty_resize: ConptyResize::default(),
             sniffer: PromptSniffer::default(),
             launch_cwd: None,
             engine_blocks: options.engine_blocks,
@@ -481,89 +454,13 @@ where
 
         let engine = &mut self.ghostty;
 
-        let echo_pending_at_entry = nmt_platform::USES_CONPTY && self.conpty_resize_echo_pending;
-
-        let mut rewritten = None;
-        let mut synthetic_prefix = None;
-
-        // Some(R_conpty) means SU realignment ran during this read.
-        let mut su_realigned_to: Option<u16> = None;
-
-        let repaint_window =
-            nmt_platform::USES_CONPTY && self.conpty_resize_repaint_reads_remaining > 0;
-
-        if repaint_window {
-            self.conpty_resize_repaint_reads_remaining =
-                self.conpty_resize_repaint_reads_remaining.saturating_sub(1);
-        }
-
-        // SU realignment runs before and instead of the legacy CUP rewrite.
-        // On the first repaint of a resize, push ghostty's active-top history rows
-        // into scrollback so its prompt rises to ConPTY's row; then ConPTY's own
-        // CUP in the ORIGINAL repaint lands on the prompt (no 0005 rewrite). The
-        // `su_realign_count` pre-check (latched size correspondence + N>0) and the
-        // post-write assertion below guard against a mis-latched resize.
-        if nmt_platform::USES_CONPTY && self.su_realign_armed && repaint_window {
-            self.su_realign_armed = false;
-
-            if !engine.mode(mode::ALT_SCREEN)
-                && let Some((n, r_conpty)) = su_realign_count(
-                    input,
-                    self.conpty_resize_prompt_row,
-                    self.conpty_resize_cols,
-                    self.conpty_resize_rows,
-                    engine.cols(),
-                    engine.rows(),
-                )
-            {
-                let realign = format!("\x1b[{n}S").into_bytes();
-
-                engine.write_vt(&realign);
-
-                synthetic_prefix = Some(realign);
-
-                su_realigned_to = Some(r_conpty);
-
-                self.conpty_resize_echo_pending = false;
-            }
-        }
-
-        if nmt_platform::USES_CONPTY
-            && su_realigned_to.is_none()
-            && (self.conpty_resize_echo_pending || repaint_window)
-        {
-            if engine.mode(mode::ALT_SCREEN) {
-                self.conpty_resize_echo_pending = false;
-                self.conpty_resize_repaint_reads_remaining = 0;
-            } else if let Some(active_row) = engine.active_cursor_row() {
-                // Realign ConPTY's resize echo/repaint to the engine's ACTIVE
-                // cursor row. `active_cursor_row()` reads the active-screen
-                // cursor (the frame CUP addresses) straight from the engine, so
-                // it stays correct regardless of viewport scroll or blank rows
-                // below the prompt — unlike the render-state
-                // `snapshot.cursor.y`, which is viewport-relative and reads as
-                // row 0 when scrolled (forcing the echo+erase onto a visible
-                // history row). With a reliable target there's no need for the
-                // old at-bottom gate or the PTY-thread snap-to-bottom; the echo
-                // always routes to the true prompt row (the frontend still
-                // snaps the *view* to the bottom on keypress for UX).
-                let target_row = active_row.saturating_add(1);
-
-                let repaint_pending = repaint_window && is_conpty_resize_repaint(input, target_row);
-
-                if self.conpty_resize_echo_pending || repaint_pending {
-                    rewritten = rewrite_conpty_resize_echo_cup_rows(input, target_row);
-                }
-
-                if rewritten.is_some() || repaint_pending {
-                    self.conpty_resize_echo_pending = false;
-
-                    if repaint_pending {
-                        self.conpty_resize_repaint_reads_remaining = 0;
-                    }
-                }
-            }
-        }
+        let ResizeRead {
+            rewritten,
+            synthetic_prefix,
+            expected_cursor: su_realigned_to,
+            repaint_window,
+            echo_pending: echo_pending_at_entry,
+        } = self.conpty_resize.on_read(input, engine);
 
         let bytes = rewritten.as_deref().unwrap_or(input);
 
@@ -918,24 +815,8 @@ where
     }
 
     fn on_input(&mut self, input: Cow<'static, [u8]>, state: &mut PtyState) {
-        // Only treat input as a resize echo for a brief window after a
-        // resize (the keystroke typed *during* the repaint, whose ConPTY
-        // echo lands at a stale CUP). The `reads_remaining` countdown
-        // doesn't close this window when the user is idle then types a
-        // fast burst (one channel drain → one `pty_read`), so bound it by
-        // time. Without this, ordinary typing after a resize keeps being
-        // realigned and the input/prompt accumulates.
-        const RESIZE_ECHO_WINDOW: time::Duration = time::Duration::from_millis(150);
-
-        if nmt_platform::USES_CONPTY
-            && self.conpty_resize_echo_realign
-            && self
-                .conpty_resize_at
-                .is_some_and(|t| t.elapsed() < RESIZE_ECHO_WINDOW)
-            && is_conpty_resize_echo_input(input.as_ref())
-        {
-            self.conpty_resize_echo_pending = true;
-        }
+        self.conpty_resize
+            .on_input(input.as_ref(), time::Instant::now());
 
         state.write_list.push_back(input)
     }
@@ -1035,21 +916,8 @@ where
             );
         }
 
-        if nmt_platform::USES_CONPTY {
-            self.conpty_resize_echo_realign = true;
-            self.conpty_resize_at = Some(time::Instant::now());
-            self.conpty_resize_repaint_reads_remaining = 8;
-
-            // Latch the prompt row and size now so SU realignment uses the
-            // pre-resize cursor position.
-            // `active_cursor_row()` is on the prompt row here, but flips
-            // within one frame once ConPTY's first repaint CUP lands, so it
-            // must be captured at resize time, not read live in the storm.
-            self.conpty_resize_prompt_row = active_row.unwrap_or(0);
-            self.conpty_resize_cols = cols;
-            self.conpty_resize_rows = rows;
-            self.su_realign_armed = active_row.is_some();
-        }
+        self.conpty_resize
+            .on_resize(cols, rows, active_row, time::Instant::now());
 
         if let Err(err) = self.pty.set_winsize(window_size) {
             warn!("pty set_winsize failed: {err}");
