@@ -490,9 +490,6 @@ pub(super) unsafe fn kitty_image_graphic_data(
         color_type,
         pixels,
         is_opaque,
-        resize: None,
-        display_width: None,
-        display_height: None,
         transmit_time: time::Instant::now(),
     })
 }

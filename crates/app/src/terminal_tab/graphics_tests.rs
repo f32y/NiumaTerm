@@ -12,9 +12,6 @@ fn data(id: u32, w: usize, h: usize, color_type: ColorType, pixels: Vec<u8>) -> 
         color_type,
         pixels,
         is_opaque: true,
-        resize: None,
-        display_width: None,
-        display_height: None,
         transmit_time: time::Instant::now(),
     }
 }
