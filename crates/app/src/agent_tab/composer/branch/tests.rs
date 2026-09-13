@@ -107,7 +107,7 @@ fn fork(pane: &mut AgentPane, cx: &mut Context<AgentPane>) {
         anchor: ForkAnchor::CodexThrough("turn".into()),
     };
 
-    pane.apply_event(Event::ForkCheckpoints(Ok(vec![checkpoint.clone()])), cx);
+    pane.on_event(Event::ForkCheckpoints(Ok(vec![checkpoint.clone()])), cx);
     pane.start_conversation_branch(checkpoint, cx);
 
     assert!(pane.session.borrow().branch.is_working());
@@ -197,7 +197,7 @@ fn prepare_local(pane: &mut AgentPane, action: RewindAction, cx: &mut Context<Ag
 
     assert!(matches!(update, BranchUpdate::StartSession(_)));
 
-    pane.apply_rewind_update(update, cx);
+    pane.on_rewind_update(update, cx);
 }
 
 #[gpui::test]
@@ -208,15 +208,15 @@ fn protocol_branch_keeps_old_rows_until_replay_and_fills_the_prompt_once(cx: &mu
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
             install(pane);
-            pane.apply_replay(replay("current"), cx);
+            pane.on_replay(replay("current"), cx);
             fork(pane, cx);
             pane.fill_branch_prompt(window, cx);
 
             assert_eq!(rows(pane, cx), ["current"]);
             assert!(pane.input.read(cx).text().len() == 0);
 
-            pane.apply_event(Event::Ready(ThreadSettings::default()), cx);
-            pane.apply_event(Event::Replay(replay("copy")), cx);
+            pane.on_event(Event::Ready(ThreadSettings::default()), cx);
+            pane.on_event(Event::Replay(replay("copy")), cx);
 
             assert_eq!(rows(pane, cx), ["copy"]);
             assert!(!pane.session.borrow().branch.holds_composer());
@@ -248,7 +248,7 @@ fn late_protocol_replay_does_not_overwrite_a_new_draft(cx: &mut TestAppContext) 
             pane.input
                 .update(cx, |input, cx| input.set_value("new draft", window, cx));
 
-            pane.apply_event(Event::Replay(replay("copy")), cx);
+            pane.on_event(Event::Replay(replay("copy")), cx);
             pane.fill_branch_prompt(window, cx);
 
             assert_eq!(pane.input.read(cx).text().to_string(), "new draft");
@@ -265,10 +265,10 @@ fn protocol_failure_preserves_conversation_and_does_not_refill_the_prompt(cx: &m
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
             install(pane);
-            pane.apply_replay(replay("current"), cx);
+            pane.on_replay(replay("current"), cx);
             fork(pane, cx);
 
-            pane.apply_event(
+            pane.on_event(
                 Event::Error {
                     message: "fork rejected".into(),
                     fatal: false,
@@ -294,7 +294,7 @@ fn local_branch_waits_for_ready_preserves_controls_and_keeps_later_drafts(cx: &m
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
             install(pane);
-            pane.apply_replay(replay("current"), cx);
+            pane.on_replay(replay("current"), cx);
             pane.session.borrow_mut().controls.settings.model = Some("selected-model".into());
             prepare_local(pane, RewindAction::Conversation, cx);
 
@@ -304,7 +304,7 @@ fn local_branch_waits_for_ready_preserves_controls_and_keeps_later_drafts(cx: &m
             pane.input
                 .update(cx, |input, cx| input.set_value("later draft", window, cx));
 
-            pane.apply_event(Event::Ready(ThreadSettings::default()), cx);
+            pane.on_event(Event::Ready(ThreadSettings::default()), cx);
             pane.fill_branch_prompt(window, cx);
 
             assert_eq!(rows(pane, cx), ["kept prefix"]);
@@ -314,9 +314,9 @@ fn local_branch_waits_for_ready_preserves_controls_and_keeps_later_drafts(cx: &m
             );
             assert_eq!(pane.input.read(cx).text().to_string(), "later draft");
 
-            pane.apply_replay(replay("later turn"), cx);
+            pane.on_replay(replay("later turn"), cx);
 
-            pane.apply_event(
+            pane.on_event(
                 Event::Ready(ThreadSettings {
                     model: Some("selected-model".into()),
                     ..ThreadSettings::default()
@@ -337,7 +337,7 @@ fn local_start_failure_keeps_old_rows_and_reports_files_already_restored(cx: &mu
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
             install(pane);
-            pane.apply_replay(replay("current"), cx);
+            pane.on_replay(replay("current"), cx);
             prepare_local(pane, RewindAction::FilesAndConversation, cx);
 
             assert!(matches!(
@@ -351,7 +351,7 @@ fn local_start_failure_keeps_old_rows_and_reports_files_already_restored(cx: &mu
                 StartOutcome::Failed(_)
             ));
 
-            pane.apply_event(
+            pane.on_event(
                 Event::Error {
                     message: "cannot start".into(),
                     fatal: true,
@@ -448,7 +448,7 @@ fn partial_success_picker_disables_repeating_files_but_allows_continuing_the_con
                     .fork_created(state.runtime.epoch(), request, Err("disk full".into()))
             };
 
-            pane.apply_rewind_update(update, cx);
+            pane.on_rewind_update(update, cx);
 
             let model = pane
                 .palette_model(cx)

@@ -33,7 +33,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::prelude::*;
-use gpui::{App, Context, Entity, Image, Window};
+use gpui::{App, AsyncApp, Context, Entity, Image, WeakEntity, Window};
 use gpui_component::input::{InputEvent, TextareaState};
 use nmt_agent::chat::{Item as SessionItem, SkillReference};
 #[cfg(test)]
@@ -137,7 +137,7 @@ impl AgentPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let owner = AgentSession::create(profile, workspace, cx);
+        let owner = AgentSession::create(profile, workspace, None, cx);
         let mut pane = Self::attach(&owner, window, cx);
 
         pane.owned_session = Some(owner);
@@ -319,31 +319,32 @@ impl AgentPane {
 
         this.refresh_git_branch(cx);
 
-        cx.spawn(async move |this, cx| {
-            loop {
-                let Ok(interval) = this.update(cx, |_, cx| {
-                    cx.global::<AgentSettings>().git_status_refresh_interval
-                }) else {
-                    break;
-                };
-
-                cx.background_executor()
-                    .timer(Duration::from_secs(interval.max(1)))
-                    .await;
-
-                if this
-                    .update(cx, |this, cx| this.refresh_git_branch(cx))
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
+        cx.spawn(Self::poll_git_branch).detach();
 
         this.load_filesystem_history(cx);
 
         this
+    }
+
+    async fn poll_git_branch(this: WeakEntity<Self>, cx: &mut AsyncApp) {
+        loop {
+            let Ok(interval) = this.update(cx, |_, cx| {
+                cx.global::<AgentSettings>().git_status_refresh_interval
+            }) else {
+                break;
+            };
+
+            cx.background_executor()
+                .timer(Duration::from_secs(interval.max(1)))
+                .await;
+
+            if this
+                .update(cx, |this, cx| this.refresh_git_branch(cx))
+                .is_err()
+            {
+                break;
+            }
+        }
     }
 
     pub fn agent_route(&self) -> &AgentRoute {
@@ -534,13 +535,6 @@ impl AgentPane {
         &self.profile.name
     }
 
-    /// Send one user message through the session with full turn bookkeeping;
-    /// also used for UI-generated messages such as the `/effort` command.
-    /// Returns false when the session isn't ready yet.
-    pub(super) fn send_text(&mut self, text: String, cx: &mut Context<Self>) -> bool {
-        self.send_text_inner(text, None, None, cx)
-    }
-
     pub(super) fn send_text_with_skill(
         &mut self,
         text: String,
@@ -553,7 +547,7 @@ impl AgentPane {
         self.send_text_inner(submitted, skill, Some((text, response_annotations)), cx)
     }
 
-    fn send_text_inner(
+    pub(super) fn send_text_inner(
         &mut self,
         text: String,
         skill: Option<&SkillReference>,

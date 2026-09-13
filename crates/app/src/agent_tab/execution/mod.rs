@@ -187,20 +187,16 @@ impl Drop for SessionOwner {
 }
 
 impl AgentSession {
-    pub fn create(profile: AgentProfile, workspace: AgentWorkspace, cx: &mut App) -> SessionOwner {
-        Self::create_with_team(profile, workspace, None, cx)
-    }
-
     pub(super) fn create_team(
         profile: AgentProfile,
         workspace: AgentWorkspace,
         policy: TeamLaunch,
         cx: &mut App,
     ) -> SessionOwner {
-        Self::create_with_team(profile, workspace, Some(policy), cx)
+        Self::create(profile, workspace, Some(policy), cx)
     }
 
-    fn create_with_team(
+    pub fn create(
         profile: AgentProfile,
         workspace: AgentWorkspace,
         team_launch: Option<TeamLaunch>,

@@ -535,10 +535,10 @@ fn create_pty_with_management(
     let (width, height) = (UNKNOWN_PIXEL_SIZE, UNKNOWN_PIXEL_SIZE);
 
     #[cfg(not(any(target_os = "macos", target_os = "freebsd")))]
-    let mut is_controling_terminal = true;
+    let mut take_controlling_terminal = true;
 
     #[cfg(any(target_os = "macos", target_os = "freebsd"))]
-    let is_controling_terminal = true;
+    let take_controlling_terminal = true;
 
     let mut main: libc::c_int = 0;
     let mut child: libc::c_int = 0;
@@ -682,7 +682,7 @@ fn create_pty_with_management(
 
             builder.args(with_args);
 
-            is_controling_terminal = false;
+            take_controlling_terminal = false;
         }
     }
 
@@ -715,31 +715,7 @@ fn create_pty_with_management(
     builder.envs(environment_overrides.iter().map(|(k, v)| (k, v)));
 
     unsafe {
-        builder.pre_exec(move || {
-            // Create a new process group.
-            let err = libc::setsid();
-
-            if err == -1 {
-                return Err(Error::last_os_error());
-            }
-
-            if is_controling_terminal {
-                set_controlling_terminal(child)?;
-            }
-
-            // No longer need child/main fds.
-            libc::close(child);
-            libc::close(main);
-
-            libc::signal(libc::SIGCHLD, libc::SIG_DFL);
-            libc::signal(libc::SIGHUP, libc::SIG_DFL);
-            libc::signal(libc::SIGINT, libc::SIG_DFL);
-            libc::signal(libc::SIGQUIT, libc::SIG_DFL);
-            libc::signal(libc::SIGTERM, libc::SIG_DFL);
-            libc::signal(libc::SIGALRM, libc::SIG_DFL);
-
-            Ok(())
-        });
+        builder.pre_exec(move || prepare_pty_child(child, main, take_controlling_terminal));
     }
 
     // Handle set working directory option.
@@ -789,6 +765,38 @@ fn create_pty_with_management(
                 err
             ),
         )),
+    }
+}
+
+unsafe fn prepare_pty_child(
+    child: RawFd,
+    main: RawFd,
+    take_controlling_terminal: bool,
+) -> io::Result<()> {
+    unsafe {
+        // Create a new process group.
+        let err = libc::setsid();
+
+        if err == -1 {
+            return Err(Error::last_os_error());
+        }
+
+        if take_controlling_terminal {
+            set_controlling_terminal(child)?;
+        }
+
+        // No longer need child/main fds.
+        libc::close(child);
+        libc::close(main);
+
+        libc::signal(libc::SIGCHLD, libc::SIG_DFL);
+        libc::signal(libc::SIGHUP, libc::SIG_DFL);
+        libc::signal(libc::SIGINT, libc::SIG_DFL);
+        libc::signal(libc::SIGQUIT, libc::SIG_DFL);
+        libc::signal(libc::SIGTERM, libc::SIG_DFL);
+        libc::signal(libc::SIGALRM, libc::SIG_DFL);
+
+        Ok(())
     }
 }
 

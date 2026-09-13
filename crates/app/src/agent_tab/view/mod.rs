@@ -238,20 +238,7 @@ impl Render for AgentPane {
             // consume it (inline completion, IME), and transcript clicks focus
             // the pane below. A pending approval is cancelled (deny +
             // interrupt), while a running turn is interrupted directly.
-            .on_action(cx.listener(|this, _: &Escape, window, cx| {
-                // A branch or rewind picker owns Escape ahead of anything
-                // under it, and closing one changes nothing else.
-                if this.cancel_branch_picker(cx) {
-                } else if this.session.borrow().input.approval().is_some() {
-                    this.respond_approval("cancel", cx);
-                } else if this.prompts.questions_open(&this.session.borrow().input) {
-                    this.prompts.collapsed = true;
-
-                    cx.notify();
-                } else if this.session.borrow().runtime.status() == Status::Running {
-                    this.interrupt_from_ui(window, cx);
-                }
-            }))
+            .on_action(cx.listener(Self::on_escape))
             // The agent tab is a terminal surface stand-in, so it overrides the
             // chrome's UI font with its own configured font (Settings → Agent
             // Font), same as the terminal pane does with the terminal font.
@@ -266,25 +253,7 @@ impl Render for AgentPane {
                     // Selectable transcript text claims focus during mouse-down
                     // dispatch, so restore the composer on release. Escape then
                     // reaches the pane-level interrupt handler through the input.
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(|this, event: &MouseUpEvent, window, cx| {
-                            this.focus(window, cx);
-
-                            let pane = cx.entity().downgrade();
-
-                            // Kept as the fallback anchor for a selection whose
-                            // rect cannot be resolved, so the menu still opens
-                            // somewhere the pointer just was.
-                            let released_at = event.position;
-
-                            window.on_next_frame(move |window, cx| {
-                                Self::show_selected_text_menu(pane, released_at, window, cx);
-                            });
-
-                            cx.notify();
-                        }),
-                    )
+                    .on_mouse_up(MouseButton::Left, cx.listener(Self::on_transcript_mouse_up))
                     .relative()
                     .child(self.transcript.clone())
                     // The layer swallows clicks aimed at the transcript; the
@@ -548,6 +517,43 @@ impl AgentPane {
                 .icon(IconName::TextSelect)
             })
             .show_above(anchor, window, cx);
+    }
+
+    fn on_escape(&mut self, _: &Escape, window: &mut Window, cx: &mut Context<Self>) {
+        // A branch or rewind picker owns Escape ahead of anything
+        // under it, and closing one changes nothing else.
+        if self.cancel_branch_picker(cx) {
+        } else if self.session.borrow().input.approval().is_some() {
+            self.respond_approval("cancel", cx);
+        } else if self.prompts.questions_open(&self.session.borrow().input) {
+            self.prompts.collapsed = true;
+
+            cx.notify();
+        } else if self.session.borrow().runtime.status() == Status::Running {
+            self.interrupt_from_ui(window, cx);
+        }
+    }
+
+    fn on_transcript_mouse_up(
+        &mut self,
+        event: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.focus(window, cx);
+
+        let pane = cx.entity().downgrade();
+
+        // Kept as the fallback anchor for a selection whose
+        // rect cannot be resolved, so the menu still opens
+        // somewhere the pointer just was.
+        let released_at = event.position;
+
+        window.on_next_frame(move |window, cx| {
+            Self::show_selected_text_menu(pane, released_at, window, cx);
+        });
+
+        cx.notify();
     }
 }
 

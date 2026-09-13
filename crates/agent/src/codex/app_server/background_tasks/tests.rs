@@ -132,7 +132,7 @@ fn a_child_turn_completion_reports_a_terminal_state_and_an_explicit_resume_reope
 
     tasks.observe_parent_item(&spawn_item("thr_child"));
 
-    assert!(tasks.apply_descendant_notification(
+    assert!(tasks.observe_descendant_notification(
         "thr_child",
         "turn/completed",
         &json!({"turn": {"status": "completed"}}),
@@ -143,7 +143,7 @@ fn a_child_turn_completion_reports_a_terminal_state_and_an_explicit_resume_reope
     );
 
     // Codex can hand more work to a finished child, so terminal is not final.
-    assert!(tasks.apply_descendant_notification("thr_child", "turn/started", &json!({})));
+    assert!(tasks.observe_descendant_notification("thr_child", "turn/started", &json!({})));
     assert_eq!(
         state_of(&tasks, "thr_child"),
         Some(BackgroundTaskState::Working)
@@ -157,7 +157,7 @@ fn live_events_apply_in_arrival_order() {
     tasks.observe_parent_item(&spawn_item("thr_child"));
 
     // A loaded child waiting on the user reads as Needs Input.
-    tasks.apply_descendant_notification(
+    tasks.observe_descendant_notification(
         "thr_child",
         "thread/status/changed",
         &json!({"status": {"type": "active", "activeFlags": ["waitingOnUserInput"]}}),
@@ -175,7 +175,7 @@ fn live_events_apply_in_arrival_order() {
         1
     );
 
-    tasks.apply_descendant_notification(
+    tasks.observe_descendant_notification(
         "thr_child",
         "thread/status/changed",
         &json!({"status": {"type": "active", "activeFlags": []}}),
@@ -188,7 +188,7 @@ fn live_events_apply_in_arrival_order() {
 
     // `idle` only means the thread stopped running; it is not an outcome, so
     // the known lifecycle stays put until the parent reports one.
-    tasks.apply_descendant_notification(
+    tasks.observe_descendant_notification(
         "thr_child",
         "thread/status/changed",
         &json!({"status": {"type": "idle"}}),
@@ -199,7 +199,7 @@ fn live_events_apply_in_arrival_order() {
         Some(BackgroundTaskState::Working)
     );
 
-    tasks.apply_descendant_notification(
+    tasks.observe_descendant_notification(
         "thr_child",
         "thread/status/changed",
         &json!({"status": {"type": "systemError"}}),
@@ -246,7 +246,7 @@ fn codex_states_map_onto_the_shared_lifecycle() {
     assert_eq!(snapshot.tasks[0].status.as_deref(), Some("sandbox denied"));
 
     // A child system error is a failure even without a collaboration item.
-    tasks.apply_descendant_notification(
+    tasks.observe_descendant_notification(
         "thr_child",
         "error",
         &json!({"error": {"message": "child crashed"}}),
@@ -338,7 +338,7 @@ fn a_child_is_stoppable_only_while_its_active_turn_is_known() {
 
     // The turn arriving is a change even though the state does not move, or the
     // panel would keep rendering a row it could now stop.
-    assert!(tasks.apply_descendant_notification(
+    assert!(tasks.observe_descendant_notification(
         "thr_child",
         "turn/started",
         &json!({"threadId": "thr_child", "turn": {"id": "turn-1", "status": "inProgress"}}),
@@ -355,7 +355,7 @@ fn a_child_is_stoppable_only_while_its_active_turn_is_known() {
     assert_eq!(request["params"]["turnId"], "turn-1");
 
     // A child waiting on an approval is still mid-turn, so Stop still applies.
-    assert!(tasks.apply_descendant_notification(
+    assert!(tasks.observe_descendant_notification(
         "thr_child",
         "thread/status/changed",
         &json!({"status": {"type": "active", "activeFlags": ["waitingOnApproval"]}}),
@@ -366,7 +366,7 @@ fn a_child_is_stoppable_only_while_its_active_turn_is_known() {
     );
     assert!(can_stop(&tasks, "thr_child"));
 
-    assert!(tasks.apply_descendant_notification(
+    assert!(tasks.observe_descendant_notification(
         "thr_child",
         "turn/completed",
         &json!({"turn": {"status": "interrupted"}}),
@@ -387,7 +387,7 @@ fn an_idle_child_keeps_its_state_and_loses_its_stop_control() {
 
     tasks.observe_parent_item(&spawn_item("thr_child"));
 
-    tasks.apply_descendant_notification(
+    tasks.observe_descendant_notification(
         "thr_child",
         "turn/started",
         &json!({"threadId": "thr_child", "turn": {"id": "turn-1", "status": "inProgress"}}),
@@ -396,7 +396,7 @@ fn an_idle_child_keeps_its_state_and_loses_its_stop_control() {
     assert!(can_stop(&tasks, "thr_child"));
 
     assert!(
-        tasks.apply_descendant_notification(
+        tasks.observe_descendant_notification(
             "thr_child",
             "thread/status/changed",
             &json!({"status": {"type": "idle"}}),
@@ -416,7 +416,7 @@ fn child_transcript_items_only_update_the_row_preview() {
 
     tasks.observe_parent_item(&spawn_item("thr_child"));
 
-    assert!(tasks.apply_descendant_notification(
+    assert!(tasks.observe_descendant_notification(
         "thr_child",
         "item/completed",
         &json!({"item": {"type": "agentMessage", "id": "i1", "text": "found  three   issues"}}),
@@ -606,7 +606,7 @@ fn a_delayed_query_response_cannot_replace_a_newer_live_state() {
     tasks.descendant_request(7, None);
 
     // The child finishes live while the query is still in flight.
-    tasks.apply_descendant_notification(
+    tasks.observe_descendant_notification(
         "thr_child",
         "turn/completed",
         &json!({"turn": {"status": "completed"}}),

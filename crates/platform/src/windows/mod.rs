@@ -235,7 +235,7 @@ impl ProcessReadWrite for Pty {
     fn set_winsize(&mut self, winsize_builder: WinsizeBuilder) -> Result<(), io::Error> {
         let winsize: Winsize = (&winsize_builder).into();
 
-        self.backend.on_resize(winsize);
+        self.backend.set_winsize(winsize);
 
         Ok(())
     }

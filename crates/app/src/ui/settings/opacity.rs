@@ -47,13 +47,9 @@ pub(super) fn effective_main_view_background_opacity(
     if effect_on_content_area { opacity } else { 1.0 }
 }
 
-fn effect_on_content_area(cx: &App) -> bool {
-    cx.global::<AppSettings>().appearance.transparent_main_view
-}
-
 pub(crate) fn main_view_background_opacity(cx: &App) -> f32 {
     effective_main_view_background_opacity(
-        effect_on_content_area(cx),
+        cx.global::<AppSettings>().appearance.transparent_main_view,
         surface_background_opacity(cx),
     )
 }

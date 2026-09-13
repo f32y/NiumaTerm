@@ -614,10 +614,6 @@ impl TerminalSession {
             .take_image(handle, image_id, &self.messenger)
     }
 
-    pub fn screen_page(&self, row: usize) -> Option<Arc<RowPage>> {
-        self.screen_page_at(self.snapshot().revision, row)
-    }
-
     pub fn screen_page_at(&self, revision: u64, row: usize) -> Option<Arc<RowPage>> {
         self.pages
             .lock()
@@ -632,10 +628,6 @@ impl TerminalSession {
         };
 
         self.pages.lock().read(source, row, &self.messenger)
-    }
-
-    pub fn screen_row_text(&self, row: u32) -> Option<RowText> {
-        self.screen_row_text_in(&self.snapshot(), row)
     }
 
     pub fn screen_row_text_in(&self, snapshot: &RenderBuffer, row: u32) -> Option<RowText> {
@@ -700,10 +692,6 @@ impl TerminalSession {
         self.messenger.send(Msg::Scroll(-(lines as isize))).is_ok()
     }
 
-    pub fn selected_text(&self) -> Option<Request<String>> {
-        self.selected_text_in(&self.snapshot())
-    }
-
     pub fn selected_text_in(&self, snapshot: &RenderBuffer) -> Option<Request<String>> {
         let selection = self.shared.selection.selection.lock();
 
@@ -731,10 +719,6 @@ impl TerminalSession {
         }))
     }
 
-    pub fn selection_range(&self) -> Option<SelectionRange> {
-        self.selection_range_in(&self.snapshot())
-    }
-
     pub fn selection_range_in(&self, snapshot: &RenderBuffer) -> Option<SelectionRange> {
         let selection = self.shared.selection.selection.lock();
 
@@ -755,12 +739,6 @@ impl TerminalSession {
         self.shared
             .selection
             .apply_screen(cell, side, kind, selection_type)
-    }
-
-    pub fn selection_screen_range(&self) -> Option<SelectionRange> {
-        let snapshot = self.snapshot();
-
-        self.selection_screen_range_in(&snapshot)
     }
 
     pub fn selection_screen_range_in(&self, snapshot: &RenderBuffer) -> Option<SelectionRange> {

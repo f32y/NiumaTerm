@@ -1,7 +1,9 @@
 use std::time::{Duration, Instant};
 
 use futures::StreamExt as _;
-use gpui::Context;
+use futures::channel::mpsc::UnboundedReceiver;
+use futures::stream::ReadyChunks;
+use gpui::{AsyncApp, Context, Task, WeakEntity};
 use nmt_agent::chat::{Event, Item, ThreadSettings};
 use nmt_agent::session::controller::{ReadyDefaults, SessionEffect};
 use nmt_agent::session::lifecycle::StartOutcome;
@@ -14,7 +16,7 @@ use crate::agent_tab::AgentPaneEvent;
 use crate::agent_tab::capabilities::AgentCapabilities as _;
 use crate::agent_tab::execution::AgentSession;
 use crate::agent_tab::execution::inbox::{
-    EventBatch, MAX_MESSAGES_PER_BATCH, MAX_UPDATE_TIME, channel,
+    EventBatch, MAX_MESSAGES_PER_BATCH, MAX_UPDATE_TIME, Message, channel,
 };
 use crate::agent_tab::profile::{AgentKind, agent_launch};
 use crate::agent_tab::settings::AgentSettings;
@@ -124,7 +126,7 @@ impl AgentSession {
         };
 
         let (sender, receiver) = channel();
-        let mut batches = receiver.ready_chunks(MAX_MESSAGES_PER_BATCH);
+        let batches = receiver.ready_chunks(MAX_MESSAGES_PER_BATCH);
 
         let team_launch = self.team_launch.clone().map(|mut policy| {
             policy.restore_transcript = self
@@ -163,121 +165,133 @@ impl AgentSession {
         });
 
         cx.spawn(async move |this, cx| {
-            let spawned = spawned.await;
-
-            let installed = this
-                .update(cx, |this, cx| {
-                    let installed = this.install(spawned, epoch, name, cx);
-
-                    if let Some(started) = installed {
-                        on_result(started, cx);
-                    }
-
-                    installed == Some(true)
-                })
-                .unwrap_or(false);
-
-            if !installed {
-                return;
-            }
-
-            while let Some(messages) = batches.next().await {
-                let mut messages = messages.into_iter();
-
-                while messages.len() > 0 {
-                    let alive = this
-                        .update(cx, |this, cx| {
-                            let started = Instant::now();
-                            let mut events = EventBatch::default();
-
-                            for message in messages.by_ref() {
-                                if this.is_closed()
-                                    || !this.controller.borrow().runtime.is_current(epoch)
-                                {
-                                    return false;
-                                }
-
-                                let mut message = match message {
-                                    Ok(message) => message,
-
-                                    Err(error) => {
-                                        events.flush(|event| this.apply_event(epoch, event, cx));
-
-                                        if this.controller.borrow().runtime.is_current(epoch) {
-                                            this.stop_for_output_failure(error, cx);
-                                        }
-
-                                        return false;
-                                    }
-                                };
-
-                                let next = this
-                                    .controller
-                                    .borrow_mut()
-                                    .runtime
-                                    .process(epoch, message.take());
-
-                                let Some(next) = next else {
-                                    return false;
-                                };
-
-                                for event in next {
-                                    events.push(event, |event| this.apply_event(epoch, event, cx));
-                                }
-
-                                if started.elapsed() >= MAX_UPDATE_TIME {
-                                    break;
-                                }
-                            }
-
-                            events.flush(|event| this.apply_event(epoch, event, cx));
-
-                            true
-                        })
-                        .unwrap_or(false);
-
-                    if !alive {
-                        return;
-                    }
-
-                    cx.background_executor()
-                        .timer(Duration::from_millis(1))
-                        .await;
-                }
-            }
-
-            let _ = this.update(cx, |this, cx| {
-                if this.is_closed() {
-                    return;
-                }
-
-                let events = this.controller.borrow_mut().runtime.process_exit(epoch);
-
-                let Some(events) = events else {
-                    return;
-                };
-
-                for event in events {
-                    this.apply_event(epoch, event, cx);
-                }
-
-                if !this.controller.borrow().runtime.is_current(epoch) {
-                    return;
-                }
-
-                this.apply_event(
-                    epoch,
-                    Event::Error {
-                        message: t!("agent-session-exited", name = name).into_owned(),
-                        fatal: true,
-                    },
-                    cx,
-                );
-            });
+            Self::pump_backend_messages(this, batches, spawned, epoch, name, on_result, cx).await
         })
         .detach();
 
         cx.notify();
+    }
+
+    async fn pump_backend_messages(
+        this: WeakEntity<Self>,
+        mut batches: ReadyChunks<UnboundedReceiver<Result<Message, String>>>,
+        spawned: Task<Result<Backend, String>>,
+        epoch: u64,
+        name: &str,
+        on_result: impl FnOnce(bool, &mut Context<Self>),
+        cx: &mut AsyncApp,
+    ) {
+        let spawned = spawned.await;
+
+        let installed = this
+            .update(cx, |this, cx| {
+                let installed = this.install(spawned, epoch, name, cx);
+
+                if let Some(started) = installed {
+                    on_result(started, cx);
+                }
+
+                installed == Some(true)
+            })
+            .unwrap_or(false);
+
+        if !installed {
+            return;
+        }
+
+        while let Some(messages) = batches.next().await {
+            let mut messages = messages.into_iter();
+
+            while messages.len() > 0 {
+                let alive = this
+                    .update(cx, |this, cx| {
+                        let started = Instant::now();
+                        let mut events = EventBatch::default();
+
+                        for message in messages.by_ref() {
+                            if this.is_closed()
+                                || !this.controller.borrow().runtime.is_current(epoch)
+                            {
+                                return false;
+                            }
+
+                            let mut message = match message {
+                                Ok(message) => message,
+
+                                Err(error) => {
+                                    events.flush(|event| this.on_event(epoch, event, cx));
+
+                                    if this.controller.borrow().runtime.is_current(epoch) {
+                                        this.stop_for_output_failure(error, cx);
+                                    }
+
+                                    return false;
+                                }
+                            };
+
+                            let next = this
+                                .controller
+                                .borrow_mut()
+                                .runtime
+                                .process(epoch, message.take());
+
+                            let Some(next) = next else {
+                                return false;
+                            };
+
+                            for event in next {
+                                events.push(event, |event| this.on_event(epoch, event, cx));
+                            }
+
+                            if started.elapsed() >= MAX_UPDATE_TIME {
+                                break;
+                            }
+                        }
+
+                        events.flush(|event| this.on_event(epoch, event, cx));
+
+                        true
+                    })
+                    .unwrap_or(false);
+
+                if !alive {
+                    return;
+                }
+
+                cx.background_executor()
+                    .timer(Duration::from_millis(1))
+                    .await;
+            }
+        }
+
+        let _ = this.update(cx, |this, cx| {
+            if this.is_closed() {
+                return;
+            }
+
+            let events = this.controller.borrow_mut().runtime.process_exit(epoch);
+
+            let Some(events) = events else {
+                return;
+            };
+
+            for event in events {
+                this.on_event(epoch, event, cx);
+            }
+
+            if !this.controller.borrow().runtime.is_current(epoch) {
+                return;
+            }
+
+            this.on_event(
+                epoch,
+                Event::Error {
+                    message: t!("agent-session-exited", name = name).into_owned(),
+                    fatal: true,
+                },
+                cx,
+            );
+        });
     }
 
     pub(crate) fn prepare_defaults(&self, cx: &Context<Self>) {
@@ -366,7 +380,7 @@ impl AgentSession {
 
         if let Some(mut backend) = backend {
             for event in backend.process_exit() {
-                self.apply_event(epoch, event, cx);
+                self.on_event(epoch, event, cx);
             }
 
             cx.background_executor()
@@ -376,7 +390,7 @@ impl AgentSession {
                 .detach();
         }
 
-        self.apply_event(
+        self.on_event(
             epoch,
             Event::Error {
                 message: error,

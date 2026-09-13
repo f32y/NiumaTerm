@@ -28,47 +28,7 @@ pub(crate) fn snapshot(
         .into_iter()
         .flatten()
         .filter(|entry| entry["kind"].as_str() == Some("child"))
-        .filter_map(|entry| {
-            let id = entry["id"].as_str()?;
-            let continuable = entry["mode"].as_str() == Some("continuable");
-
-            // The harness samples whether the child's driver is running; it
-            // reports no failure state, so an inactive child reads as finished
-            // rather than as one whose outcome is known.
-            let running = entry["activity"].as_str() == Some("running");
-
-            Some(BackgroundTaskSummary {
-                key: BackgroundTaskKey::deepseek(id),
-                parent_session: parent_session.clone(),
-                refs: BackgroundTaskRefs::DeepSeek {
-                    parent_session_id: parent_session_id.to_string(),
-                    continuable,
-                },
-                kind: BackgroundTaskKind::Agent,
-                display_name: entry["label"].as_str().map(str::to_string),
-                agent_type: None,
-                objective: None,
-                status: None,
-                state: if running {
-                    BackgroundTaskState::Working
-                } else {
-                    BackgroundTaskState::Done
-                },
-                sequence: activity,
-                started_at: None,
-                updated_at: None,
-                completed_at: None,
-                model: None,
-                // The catalog covers the direct level only, so every row here
-                // is one step below the conversation that asked for it.
-                depth: Some(1),
-                last_preview: None,
-                // Interrupting reaches a continuable child through its parent's
-                // authority; a one-shot child is one execution with nothing to
-                // stop between its start and its result.
-                can_stop: continuable && running,
-            })
-        })
+        .filter_map(|entry| task_summary(entry, &parent_session, parent_session_id, activity))
         .collect();
 
     BackgroundTaskSnapshot {
@@ -77,4 +37,51 @@ pub(crate) fn snapshot(
         discovery: BackgroundTaskDiscoveryState::Ready,
         activity,
     }
+}
+
+fn task_summary(
+    entry: &Value,
+    parent_session: &BackgroundTaskKey,
+    parent_session_id: &str,
+    activity: u64,
+) -> Option<BackgroundTaskSummary> {
+    let id = entry["id"].as_str()?;
+    let continuable = entry["mode"].as_str() == Some("continuable");
+
+    // The harness samples whether the child's driver is running; it
+    // reports no failure state, so an inactive child reads as finished
+    // rather than as one whose outcome is known.
+    let running = entry["activity"].as_str() == Some("running");
+
+    Some(BackgroundTaskSummary {
+        key: BackgroundTaskKey::deepseek(id),
+        parent_session: parent_session.clone(),
+        refs: BackgroundTaskRefs::DeepSeek {
+            parent_session_id: parent_session_id.to_string(),
+            continuable,
+        },
+        kind: BackgroundTaskKind::Agent,
+        display_name: entry["label"].as_str().map(str::to_string),
+        agent_type: None,
+        objective: None,
+        status: None,
+        state: if running {
+            BackgroundTaskState::Working
+        } else {
+            BackgroundTaskState::Done
+        },
+        sequence: activity,
+        started_at: None,
+        updated_at: None,
+        completed_at: None,
+        model: None,
+        // The catalog covers the direct level only, so every row here
+        // is one step below the conversation that asked for it.
+        depth: Some(1),
+        last_preview: None,
+        // Interrupting reaches a continuable child through its parent's
+        // authority; a one-shot child is one execution with nothing to
+        // stop between its start and its result.
+        can_stop: continuable && running,
+    })
 }

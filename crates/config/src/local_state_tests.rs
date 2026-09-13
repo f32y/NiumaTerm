@@ -5,13 +5,13 @@ use tempfile::tempdir;
 use crate::local_state::*;
 
 #[test]
-fn save_load_roundtrip_and_bad_file_defaults() {
+fn save_load_roundtrip_and_legacy_file_defaults() {
     let dir = env::temp_dir().join("NiumaTerm-local-state-test");
     let _ = fs::remove_dir_all(&dir);
     let path = dir.join("local_state.toml");
 
     // Missing file: default state.
-    assert_eq!(load_from(&path), LocalState::default());
+    assert_eq!(try_load_from(&path).unwrap(), LocalState::default());
 
     let state = LocalState {
         agent_defaults: [(
@@ -80,7 +80,7 @@ fn save_load_roundtrip_and_bad_file_defaults() {
 
     save_to(&path, &state).unwrap();
 
-    assert_eq!(load_from(&path), state);
+    assert_eq!(try_load_from(&path).unwrap(), state);
     assert!(fs::read_to_string(&path).unwrap().contains("pinned = true"));
     assert!(
         fs::read_to_string(&path)
@@ -96,12 +96,7 @@ fn save_load_roundtrip_and_bad_file_defaults() {
     )
     .unwrap();
 
-    assert_eq!(load_from(&path), LocalState::default());
-
-    // Corrupt file: default state instead of an error.
-    fs::write(&path, "not [ valid").unwrap();
-
-    assert_eq!(load_from(&path), LocalState::default());
+    assert_eq!(try_load_from(&path).unwrap(), LocalState::default());
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -312,7 +307,7 @@ fn pane_layout_roundtrips_and_old_snapshots_load_without_it() {
 
     save_to(&path, &state).unwrap();
 
-    assert_eq!(load_from(&path), state);
+    assert_eq!(try_load_from(&path).unwrap(), state);
 
     // A single-pane tab serializes without any `panes` key at all.
     let flat = LocalState {
@@ -355,7 +350,7 @@ shell = "pwsh.exe"
     )
     .unwrap();
 
-    let loaded = load_from(&path);
+    let loaded = try_load_from(&path).unwrap();
     let tab = &loaded.windows[0].session.as_ref().unwrap().workspaces[0].tabs[0];
 
     assert_eq!(tab.name.as_deref(), Some("Tab 1"));
@@ -388,7 +383,7 @@ active_tab = 0
     )
     .unwrap();
 
-    let workspace = load_from(&path).windows[0]
+    let workspace = try_load_from(&path).unwrap().windows[0]
         .session
         .clone()
         .unwrap()
@@ -426,7 +421,7 @@ active_tab = 0
             .unwrap()
             .contains("additional_cwds")
     );
-    assert_eq!(load_from(&path), single);
+    assert_eq!(try_load_from(&path).unwrap(), single);
 
     // Ordered additions round-trip, and an older build that ignores the
     // key still restores the primary directory and the tabs.
@@ -437,7 +432,7 @@ active_tab = 0
 
     save_to(&path, &multi).unwrap();
 
-    assert_eq!(load_from(&path), multi);
+    assert_eq!(try_load_from(&path).unwrap(), multi);
 
     #[derive(Debug, Deserialize)]
     struct LegacyWorkspace {

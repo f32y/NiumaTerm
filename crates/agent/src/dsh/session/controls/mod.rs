@@ -69,44 +69,7 @@ impl Controls {
             .name("deepseek-controls".to_string())
             .spawn(move || {
                 for call in receiver {
-                    if call.cancelled.load(Ordering::Acquire) {
-                        continue;
-                    }
-
-                    let result = match call.deadline.checked_duration_since(Instant::now()) {
-                        Some(timeout) => client
-                            .call_with_timeout(call.method, call.args, timeout)
-                            .map(|_| ())
-                            .map_err(|error| format!(
-                                "DeepSeek control failed; a transport failure may have an unknown outcome: {}",
-                                error.message()
-                            )),
-
-                        None => Err("DeepSeek control expired before sending; please retry.".to_string()),
-                    };
-
-                    if call.cancelled.load(Ordering::Acquire) {
-                        continue;
-                    }
-
-                    // Refusal and stopping are separate outcomes: a failed stop
-                    // cannot make an accepted refusal retryable again.
-                    let stop_error = if result.is_ok() && let Some(session_id) = call.cancel_after {
-                        match call.deadline.checked_duration_since(Instant::now()) {
-                            Some(timeout) => client.call_with_timeout(
-                                "session/cancel", json!({"request": {"sessionId": session_id}}), timeout,
-                            ).err().map(|error| error.message().to_string()),
-
-                            None => Some("The approval was refused, but the stop expired before sending.".to_string()),
-                        }
-                    } else { None };
-
-                    if !call.cancelled.load(Ordering::Acquire) {
-                        (deliver)(json!({"payload": {
-                            "type": COMPLETED_FRAME, "id": call.id,
-                            "error": result.as_ref().err(), "stopError": stop_error,
-                        }}));
-                    }
+                    Self::run_control(&client, call, deliver.as_ref());
                 }
             })
             .map_err(|error| format!("could not start DeepSeek control worker: {error}"))?;
@@ -116,6 +79,58 @@ impl Controls {
             pending: HashMap::new(),
             next_id: 0,
         })
+    }
+
+    fn run_control(client: &ApiClient, call: Call, deliver: &dyn Fn(Value)) {
+        if call.cancelled.load(Ordering::Acquire) {
+            return;
+        }
+
+        let result = match call.deadline.checked_duration_since(Instant::now()) {
+            Some(timeout) => client
+                .call_with_timeout(call.method, call.args, timeout)
+                .map(|_| ())
+                .map_err(|error| format!(
+                    "DeepSeek control failed; a transport failure may have an unknown outcome: {}",
+                    error.message()
+                )),
+
+            None => Err("DeepSeek control expired before sending; please retry.".to_string()),
+        };
+
+        if call.cancelled.load(Ordering::Acquire) {
+            return;
+        }
+
+        // Refusal and stopping are separate outcomes: a failed stop
+        // cannot make an accepted refusal retryable again.
+        let stop_error = if result.is_ok()
+            && let Some(session_id) = call.cancel_after
+        {
+            match call.deadline.checked_duration_since(Instant::now()) {
+                Some(timeout) => client
+                    .call_with_timeout(
+                        "session/cancel",
+                        json!({"request": {"sessionId": session_id}}),
+                        timeout,
+                    )
+                    .err()
+                    .map(|error| error.message().to_string()),
+
+                None => Some(
+                    "The approval was refused, but the stop expired before sending.".to_string(),
+                ),
+            }
+        } else {
+            None
+        };
+
+        if !call.cancelled.load(Ordering::Acquire) {
+            (deliver)(json!({"payload": {
+                "type": COMPLETED_FRAME, "id": call.id,
+                "error": result.as_ref().err(), "stopError": stop_error,
+            }}));
+        }
     }
 
     pub(super) fn submit(

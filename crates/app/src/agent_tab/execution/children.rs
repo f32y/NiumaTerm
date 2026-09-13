@@ -1,3 +1,4 @@
+use gpui::{AsyncApp, WeakEntity};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -69,7 +70,7 @@ impl AgentSession {
                 };
 
                 for event in events {
-                    this.apply_event(epoch, event, cx);
+                    this.on_event(epoch, event, cx);
                 }
             });
         })
@@ -123,52 +124,56 @@ impl AgentSession {
         }
 
         if self.child_refresh.is_none() {
-            self.child_refresh = Some(cx.spawn(async move |this, cx| {
-                loop {
-                    cx.background_executor().timer(Duration::from_secs(1)).await;
-
-                    let alive = this.update(cx, |this, cx| {
-                        if this.is_closed() || this.child_readers.borrow().is_empty() {
-                            return false;
-                        }
-
-                        let keys: Vec<_> = this.child_readers.borrow().keys().cloned().collect();
-
-                        for (epoch, key) in keys {
-                            if !this.controller.borrow().runtime.is_current(epoch) {
-                                continue;
-                            }
-
-                            let active = this.controller.borrow().background_tasks().is_some_and(
-                                |snapshot| {
-                                    snapshot
-                                        .tasks
-                                        .iter()
-                                        .any(|task| task.key == key && task.state.is_active())
-                                },
-                            );
-
-                            if active {
-                                this.load_child(&key, cx);
-                            }
-                        }
-
-                        true
-                    });
-
-                    if !alive.unwrap_or(false) {
-                        break;
-                    }
-                }
-
-                let _ = this.update(cx, |this, _| this.child_refresh = None);
-            }));
+            self.child_refresh = Some(cx.spawn(Self::poll_watched_children));
         }
 
         Some(ChildReader {
             key: reader_key,
             readers: self.child_readers.clone(),
         })
+    }
+
+    async fn poll_watched_children(this: WeakEntity<Self>, cx: &mut AsyncApp) {
+        loop {
+            cx.background_executor().timer(Duration::from_secs(1)).await;
+
+            let alive = this.update(cx, |this, cx| {
+                if this.is_closed() || this.child_readers.borrow().is_empty() {
+                    return false;
+                }
+
+                let keys: Vec<_> = this.child_readers.borrow().keys().cloned().collect();
+
+                for (epoch, key) in keys {
+                    if !this.controller.borrow().runtime.is_current(epoch) {
+                        continue;
+                    }
+
+                    let active =
+                        this.controller
+                            .borrow()
+                            .background_tasks()
+                            .is_some_and(|snapshot| {
+                                snapshot
+                                    .tasks
+                                    .iter()
+                                    .any(|task| task.key == key && task.state.is_active())
+                            });
+
+                    if active {
+                        this.load_child(&key, cx);
+                    }
+                }
+
+                true
+            });
+
+            if !alive.unwrap_or(false) {
+                break;
+            }
+        }
+
+        let _ = this.update(cx, |this, _| this.child_refresh = None);
     }
 
     fn load_child(&mut self, key: &BackgroundTaskKey, cx: &mut Context<Self>) {
@@ -187,7 +192,7 @@ impl AgentSession {
         };
 
         for event in events {
-            self.apply_event(epoch, event, cx);
+            self.on_event(epoch, event, cx);
         }
     }
 }

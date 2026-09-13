@@ -94,135 +94,6 @@ enum TabDensity {
     IconOnly,
 }
 
-fn tab_density(tab_width: f32) -> TabDensity {
-    if tab_width >= FULL_TAB_WIDTH {
-        TabDensity::Full
-    } else if tab_width >= COMPACT_TAB_WIDTH {
-        TabDensity::Compact
-    } else {
-        TabDensity::IconOnly
-    }
-}
-
-/// Gap the tab bar leaves between neighbouring pills, and around the whole
-/// strip. `TabVariant::Modern` fixes both at 4px, and the tab widths have to
-/// be reduced by that much to keep the row from overflowing.
-const TAB_GAP: f32 = 4.0;
-
-const TAB_BAR_PADDING: f32 = TAB_GAP * 2.0;
-
-/// Room held back for the trailing new-tab button, which shares the row with
-/// the tabs.
-const NEW_TAB_BUTTON_WIDTH: f32 = 28.0;
-
-/// Width one tab takes under `Auto Size`. Tabs hold `configured` while the row
-/// has room and then shrink together, never past the point where the leading
-/// icon would be clipped. Below that the row overflows and the strip's
-/// horizontal scroll takes over.
-fn auto_tab_width(strip_width: f32, tab_count: usize, configured: f32) -> f32 {
-    let floor = MIN_AUTO_TAB_WIDTH.min(configured);
-
-    // A strip that has never been laid out reports no width. Starting from the
-    // configured width keeps the first frame at full size rather than flashing
-    // every tab down to the floor and back.
-    if tab_count == 0 || strip_width <= 0.0 {
-        return configured;
-    }
-
-    // One gap per tab: between neighbours, plus one before the new-tab button.
-    let reserved = TAB_BAR_PADDING + NEW_TAB_BUTTON_WIDTH + TAB_GAP * tab_count as f32;
-    let share = (strip_width - reserved) / tab_count as f32;
-
-    if share.is_finite() {
-        share.clamp(floor, configured)
-    } else {
-        configured
-    }
-}
-
-/// One tab's render inputs, snapshotted out of the manager before the closure
-/// borrows the shell.
-struct TabItem {
-    id: u64,
-    label: String,
-    unread: bool,
-    busy: bool,
-    agent_kind: Option<AgentKind>,
-    icon: Icon,
-    bell: bool,
-
-    /// Restored but not yet spawned.
-    pending: bool,
-
-    exited: bool,
-    progress: Option<ProgressReport>,
-    terminal: TerminalActivity,
-}
-
-/// Diameter of a tab's status dot, matching the unread and bell marks that
-/// share the strip.
-const TAB_DOT: f32 = 6.0;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AgentTabIndicator {
-    Busy,
-    Ready,
-}
-
-fn agent_tab_indicator(busy: bool, unread: bool) -> Option<AgentTabIndicator> {
-    if busy {
-        Some(AgentTabIndicator::Busy)
-    } else if unread {
-        Some(AgentTabIndicator::Ready)
-    } else {
-        None
-    }
-}
-
-fn progress_bar_width(tab_width: Pixels) -> Pixels {
-    (tab_width - UI_RADIUS * 2.0).max(Pixels::ZERO)
-}
-
-/// Color and fill of an OSC 9;4 progress track. Shared by the title-bar strip
-/// and the sidebar's tab rows so one report reads the same in either style.
-pub(super) fn progress_visual(report: ProgressReport, cx: &App) -> (Hsla, f32) {
-    let percent = |default: u8| report.progress.unwrap_or(default) as f32 / 100.0;
-
-    match report.state {
-        ProgressState::Set => (cx.theme().primary, percent(0)),
-        ProgressState::Error => (cx.theme().danger, percent(100)),
-        ProgressState::Pause => (cx.theme().warning, percent(100)),
-        // Indeterminate reports carry no percentage: a full-width muted bar
-        // reads as "running, no ETA" and stays distinguishable from a finished
-        // determinate bar, which is full-width in the accent color. No pulse
-        // animation — the strip would then repaint every frame for as long as
-        // any background command runs.
-        ProgressState::Indeterminate => (cx.theme().muted_foreground, 1.0),
-        ProgressState::Remove => (cx.theme().primary, 0.0),
-    }
-}
-
-/// Progress bar along the bottom edge of a tab, driven by OSC 9;4. One corner
-/// radius of space at each side keeps the track on the straight bottom edge.
-fn progress_bar(report: ProgressReport, tab_width: f32, cx: &App) -> AnyElement {
-    let (color, fraction) = progress_visual(report, cx);
-
-    div()
-        .absolute()
-        .bottom_0()
-        .right(UI_RADIUS)
-        .w(progress_bar_width(px(tab_width)))
-        .h(px(2.0))
-        .child(
-            div()
-                .h_full()
-                .w(relative(fraction))
-                .rounded_full()
-                .bg(color),
-        )
-        .into_any_element()
-}
-
 impl TabStrip {
     pub(super) fn new() -> Self {
         Self {
@@ -804,4 +675,133 @@ impl TabStrip {
             .child(bar)
             .into_any_element()
     }
+}
+
+fn tab_density(tab_width: f32) -> TabDensity {
+    if tab_width >= FULL_TAB_WIDTH {
+        TabDensity::Full
+    } else if tab_width >= COMPACT_TAB_WIDTH {
+        TabDensity::Compact
+    } else {
+        TabDensity::IconOnly
+    }
+}
+
+/// Gap the tab bar leaves between neighbouring pills, and around the whole
+/// strip. `TabVariant::Modern` fixes both at 4px, and the tab widths have to
+/// be reduced by that much to keep the row from overflowing.
+const TAB_GAP: f32 = 4.0;
+
+const TAB_BAR_PADDING: f32 = TAB_GAP * 2.0;
+
+/// Room held back for the trailing new-tab button, which shares the row with
+/// the tabs.
+const NEW_TAB_BUTTON_WIDTH: f32 = 28.0;
+
+/// Width one tab takes under `Auto Size`. Tabs hold `configured` while the row
+/// has room and then shrink together, never past the point where the leading
+/// icon would be clipped. Below that the row overflows and the strip's
+/// horizontal scroll takes over.
+fn auto_tab_width(strip_width: f32, tab_count: usize, configured: f32) -> f32 {
+    let floor = MIN_AUTO_TAB_WIDTH.min(configured);
+
+    // A strip that has never been laid out reports no width. Starting from the
+    // configured width keeps the first frame at full size rather than flashing
+    // every tab down to the floor and back.
+    if tab_count == 0 || strip_width <= 0.0 {
+        return configured;
+    }
+
+    // One gap per tab: between neighbours, plus one before the new-tab button.
+    let reserved = TAB_BAR_PADDING + NEW_TAB_BUTTON_WIDTH + TAB_GAP * tab_count as f32;
+    let share = (strip_width - reserved) / tab_count as f32;
+
+    if share.is_finite() {
+        share.clamp(floor, configured)
+    } else {
+        configured
+    }
+}
+
+/// One tab's render inputs, snapshotted out of the manager before the closure
+/// borrows the shell.
+struct TabItem {
+    id: u64,
+    label: String,
+    unread: bool,
+    busy: bool,
+    agent_kind: Option<AgentKind>,
+    icon: Icon,
+    bell: bool,
+
+    /// Restored but not yet spawned.
+    pending: bool,
+
+    exited: bool,
+    progress: Option<ProgressReport>,
+    terminal: TerminalActivity,
+}
+
+/// Diameter of a tab's status dot, matching the unread and bell marks that
+/// share the strip.
+const TAB_DOT: f32 = 6.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AgentTabIndicator {
+    Busy,
+    Ready,
+}
+
+fn agent_tab_indicator(busy: bool, unread: bool) -> Option<AgentTabIndicator> {
+    if busy {
+        Some(AgentTabIndicator::Busy)
+    } else if unread {
+        Some(AgentTabIndicator::Ready)
+    } else {
+        None
+    }
+}
+
+fn progress_bar_width(tab_width: Pixels) -> Pixels {
+    (tab_width - UI_RADIUS * 2.0).max(Pixels::ZERO)
+}
+
+/// Color and fill of an OSC 9;4 progress track. Shared by the title-bar strip
+/// and the sidebar's tab rows so one report reads the same in either style.
+pub(super) fn progress_visual(report: ProgressReport, cx: &App) -> (Hsla, f32) {
+    let percent = |default: u8| report.progress.unwrap_or(default) as f32 / 100.0;
+
+    match report.state {
+        ProgressState::Set => (cx.theme().primary, percent(0)),
+        ProgressState::Error => (cx.theme().danger, percent(100)),
+        ProgressState::Pause => (cx.theme().warning, percent(100)),
+        // Indeterminate reports carry no percentage: a full-width muted bar
+        // reads as "running, no ETA" and stays distinguishable from a finished
+        // determinate bar, which is full-width in the accent color. No pulse
+        // animation — the strip would then repaint every frame for as long as
+        // any background command runs.
+        ProgressState::Indeterminate => (cx.theme().muted_foreground, 1.0),
+        ProgressState::Remove => (cx.theme().primary, 0.0),
+    }
+}
+
+/// Progress bar along the bottom edge of a tab, driven by OSC 9;4. One corner
+/// radius of space at each side keeps the track on the straight bottom edge.
+fn progress_bar(report: ProgressReport, tab_width: f32, cx: &App) -> AnyElement {
+    let (color, fraction) = progress_visual(report, cx);
+
+    div()
+        .absolute()
+        .bottom_0()
+        .right(UI_RADIUS)
+        .w(progress_bar_width(px(tab_width)))
+        .h(px(2.0))
+        .child(
+            div()
+                .h_full()
+                .w(relative(fraction))
+                .rounded_full()
+                .bg(color),
+        )
+        .into_any_element()
 }

@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
-use tokio::runtime::Builder as RuntimeBuilder;
+use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 use tokio::sync::mpsc;
 use tokio::time;
 use tokio_tungstenite::tungstenite::protocol::Message;
@@ -15,7 +15,7 @@ use tracing::{info, warn};
 
 use crate::protocol::{
     ClientBound, Frame, HostBound, PairingCode, ProtocolSessionInfo, ProtocolSessionOptions,
-    ProtocolSessionSnapshot, StaticKeypair,
+    ProtocolSessionSnapshot, SecureChannel, StaticKeypair,
 };
 use crate::{FrameChannel, NET_TIMEOUT, NetError, client_connect_ik, with_timeout};
 
@@ -90,31 +90,18 @@ pub fn open_remote_session(
     let (output_tx, output_rx) = std_mpsc::channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
 
-    thread::Builder::new()
-        .name("remote-client".into())
-        .spawn(move || {
-            let runtime = match RuntimeBuilder::new_current_thread().enable_all().build() {
-                Ok(rt) => rt,
-
-                Err(e) => {
-                    let _ = ready_tx.send(Err(NetError::Internal(e.to_string())));
-
-                    return;
-                }
-            };
-
-            runtime.block_on(session_thread(
-                relay_url,
-                host_id,
-                host_public_key,
-                device,
-                target,
-                ready_tx,
-                output_tx,
-                command_rx,
-            ));
-        })
-        .map_err(|e| NetError::Internal(e.to_string()))?;
+    on_worker_thread("remote-client", ready_tx, move |runtime, ready_tx| {
+        runtime.block_on(session_thread(
+            relay_url,
+            host_id,
+            host_public_key,
+            device,
+            target,
+            ready_tx,
+            output_tx,
+            command_rx,
+        ));
+    })?;
 
     // The thread bounds its own waits, so this only has to outlast them; a
     // hard bound here is what keeps a wedged connect from parking the caller.
@@ -128,6 +115,27 @@ pub fn open_remote_session(
         output: output_rx,
         commands: command_tx,
     })
+}
+
+fn on_worker_thread<T: Send + 'static>(
+    name: &'static str,
+    sender: std_mpsc::Sender<Result<T, NetError>>,
+    body: impl FnOnce(Runtime, std_mpsc::Sender<Result<T, NetError>>) + Send + 'static,
+) -> Result<(), NetError> {
+    thread::Builder::new()
+        .name(name.into())
+        .spawn(move || {
+            // Runtime startup errors must reach the caller before the worker exits.
+            match RuntimeBuilder::new_current_thread().enable_all().build() {
+                Ok(runtime) => body(runtime, sender),
+
+                Err(error) => {
+                    let _ = sender.send(Err(NetError::Internal(error.to_string())));
+                }
+            }
+        })
+        .map(|_| ())
+        .map_err(|error| NetError::Internal(error.to_string()))
 }
 
 pub enum AttachTarget {
@@ -353,30 +361,45 @@ async fn pump(
                     Some(Err(_)) => return PumpExit::Disconnected,
                 };
 
-                // A decrypt failure means the stream is desynchronized or
-                // tampered with: the Noise channel is unusable from here on.
-                let Ok(plaintext) = chan.open(&data) else { return PumpExit::Disconnected };
-
-                match Frame::decode(&plaintext) {
-                    Ok(Frame::Output { seq, data, .. }) => {
-                        if seq <= resume_after {
-                            continue;
-                        }
-
-                        if output.send(SessionByteEvent::Output(data)).is_err() {
-                            return PumpExit::Local;
-                        }
-                    }
-
-                    Ok(Frame::Exited { .. }) => return PumpExit::SessionEnded,
-                    // Control replies to mid-session requests are not used by
-                    // the byte-stream consumer; ignore rather than error.
-                    Ok(_) => continue,
-                    Err(_) => return PumpExit::Disconnected,
+                if let Some(exit) = on_inbound_frame(&mut chan, &data, output, resume_after) {
+                    return exit;
                 }
             }
         }
     }
+}
+
+fn on_inbound_frame(
+    chan: &mut SecureChannel,
+    data: &[u8],
+    output: &std_mpsc::Sender<SessionByteEvent>,
+    resume_after: u64,
+) -> Option<PumpExit> {
+    // A decrypt failure means the stream is desynchronized or
+    // tampered with: the Noise channel is unusable from here on.
+    let Ok(plaintext) = chan.open(data) else {
+        return Some(PumpExit::Disconnected);
+    };
+
+    match Frame::decode(&plaintext) {
+        Ok(Frame::Output { seq, data, .. }) => {
+            if seq <= resume_after {
+                return None;
+            }
+
+            if output.send(SessionByteEvent::Output(data)).is_err() {
+                return Some(PumpExit::Local);
+            }
+        }
+
+        Ok(Frame::Exited { .. }) => return Some(PumpExit::SessionEnded),
+        // Control replies to mid-session requests are not used by
+        // the byte-stream consumer; ignore rather than error.
+        Ok(_) => return None,
+        Err(_) => return Some(PumpExit::Disconnected),
+    }
+
+    None
 }
 
 /// Redeem a pairing code from this device (blocking). On success the host has
@@ -389,31 +412,15 @@ pub fn pair_device(
 ) -> Result<(), NetError> {
     let (tx, rx) = std_mpsc::channel();
 
-    thread::Builder::new()
-        .name("remote-pair".into())
-        .spawn(move || {
-            // A runtime that fails to build is a local resource problem, not a
-            // peer rejection; report it instead of panicking the worker thread
-            // (which would surface to the caller as an opaque Closed).
-            let runtime = match RuntimeBuilder::new_current_thread().enable_all().build() {
-                Ok(rt) => rt,
+    on_worker_thread("remote-pair", tx, move |runtime, tx| {
+        let result = runtime.block_on(async {
+            crate::client_connect_pair(&code, &device, &device_name)
+                .await
+                .map(|_| ())
+        });
 
-                Err(e) => {
-                    let _ = tx.send(Err(NetError::Internal(e.to_string())));
-
-                    return;
-                }
-            };
-
-            let result = runtime.block_on(async {
-                crate::client_connect_pair(&code, &device, &device_name)
-                    .await
-                    .map(|_| ())
-            });
-
-            let _ = tx.send(result);
-        })
-        .map_err(|e| NetError::Internal(e.to_string()))?;
+        let _ = tx.send(result);
+    })?;
 
     rx.recv().map_err(|_| NetError::Closed)?
 }
@@ -427,48 +434,43 @@ pub fn list_remote_sessions(
 ) -> Result<Vec<ProtocolSessionInfo>, NetError> {
     let (tx, rx) = std_mpsc::channel();
 
-    thread::Builder::new()
-        .name("remote-list".into())
-        .spawn(move || {
-            // A runtime that fails to build is a local resource problem, not a
-            // peer rejection; report it instead of panicking the worker thread
-            // (which would surface to the caller as an opaque Closed).
-            let runtime = match RuntimeBuilder::new_current_thread().enable_all().build() {
-                Ok(rt) => rt,
+    on_worker_thread("remote-list", tx, move |runtime, tx| {
+        let result = runtime.block_on(fetch_session_list(
+            &relay_url,
+            &host_id,
+            &host_public_key,
+            &device,
+        ));
 
-                Err(e) => {
-                    let _ = tx.send(Err(NetError::Internal(e.to_string())));
-
-                    return;
-                }
-            };
-
-            let result = runtime.block_on(async {
-                let mut channel =
-                    client_connect_ik(&relay_url, &host_id, &host_public_key, &device).await?;
-
-                channel.send_control(&HostBound::ListSessions).await?;
-
-                // Bound the wait so a silent host can't hang the caller. A
-                // silent host is indistinguishable from a slow one, so this is
-                // Timeout (retryable), not a protocol violation.
-                match time::timeout(Duration::from_secs(10), channel.recv_control()).await {
-                    Ok(Ok(ClientBound::SessionList(list))) => Ok(list),
-
-                    Ok(Ok(other)) => Err(NetError::Protocol(format!(
-                        "expected SessionList, got {other:?}"
-                    ))),
-
-                    Ok(Err(e)) => Err(e),
-                    Err(_) => Err(NetError::Timeout),
-                }
-            });
-
-            let _ = tx.send(result);
-        })
-        .map_err(|e| NetError::Internal(e.to_string()))?;
+        let _ = tx.send(result);
+    })?;
 
     rx.recv().map_err(|_| NetError::Closed)?
+}
+
+async fn fetch_session_list(
+    relay_url: &str,
+    host_id: &str,
+    host_public_key: &[u8],
+    device: &StaticKeypair,
+) -> Result<Vec<ProtocolSessionInfo>, NetError> {
+    let mut channel = client_connect_ik(relay_url, host_id, host_public_key, device).await?;
+
+    channel.send_control(&HostBound::ListSessions).await?;
+
+    // Bound the wait so a silent host can't hang the caller. A
+    // silent host is indistinguishable from a slow one, so this is
+    // Timeout (retryable), not a protocol violation.
+    match time::timeout(Duration::from_secs(10), channel.recv_control()).await {
+        Ok(Ok(ClientBound::SessionList(list))) => Ok(list),
+
+        Ok(Ok(other)) => Err(NetError::Protocol(format!(
+            "expected SessionList, got {other:?}"
+        ))),
+
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err(NetError::Timeout),
+    }
 }
 
 impl From<RemoteSession>

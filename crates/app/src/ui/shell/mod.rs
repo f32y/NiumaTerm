@@ -242,22 +242,8 @@ impl Shell {
         // event after the window's entry is removed is a no-op.
         let window_id = window.window_handle().window_id();
 
-        cx.observe_window_bounds(window, |_, window, cx| {
-            let id = window.window_handle().window_id();
-            let window_bounds = window.window_bounds();
-            let bounds = window_bounds.get_bounds();
-
-            if let Some(entry) = cx.global_mut::<WindowRegistry>().get_mut(id) {
-                entry.bounds = Some(WindowState {
-                    x: bounds.origin.x.as_f32(),
-                    y: bounds.origin.y.as_f32(),
-                    width: bounds.size.width.as_f32(),
-                    height: bounds.size.height.as_f32(),
-                    maximized: matches!(window_bounds, WindowBounds::Maximized(_)),
-                });
-            }
-        })
-        .detach();
+        cx.observe_window_bounds(window, Self::on_window_bounds_changed)
+            .detach();
 
         // Expose this shell to the CLI dispatch task and track which window
         // was focused last (the `new_tab`/`activate` URL target).
@@ -279,24 +265,8 @@ impl Shell {
                 .unwrap_or(true)
         });
 
-        cx.observe_window_activation(window, |this, window, cx| {
-            this.window_active = Self::exact_window_active(window);
-
-            if this.window_active {
-                cx.global_mut::<LastActiveWindow>().0 = Some(this.window_id);
-                this.acknowledge_visible(window, true, cx);
-            } else {
-                // A context menu drawn in its own window never takes activation,
-                // so it has none of its own to lose. This window losing it is
-                // what says the user has moved on from the menu.
-                ui::dismiss_modern_menu(cx);
-            }
-
-            this.process_native_notifications(cx);
-
-            cx.notify();
-        })
-        .detach();
+        cx.observe_window_activation(window, Self::on_window_activation)
+            .detach();
 
         let default_profile = cx.global::<AppSettings>().default_profile_command();
         let registry_entry = cx.global::<WindowRegistry>().get(window_id);
@@ -383,6 +353,40 @@ impl Shell {
         this.refresh_root_availability(cx);
 
         this
+    }
+
+    fn on_window_bounds_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let id = window.window_handle().window_id();
+        let window_bounds = window.window_bounds();
+        let bounds = window_bounds.get_bounds();
+
+        if let Some(entry) = cx.global_mut::<WindowRegistry>().get_mut(id) {
+            entry.bounds = Some(WindowState {
+                x: bounds.origin.x.as_f32(),
+                y: bounds.origin.y.as_f32(),
+                width: bounds.size.width.as_f32(),
+                height: bounds.size.height.as_f32(),
+                maximized: matches!(window_bounds, WindowBounds::Maximized(_)),
+            });
+        }
+    }
+
+    fn on_window_activation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.window_active = Self::exact_window_active(window);
+
+        if self.window_active {
+            cx.global_mut::<LastActiveWindow>().0 = Some(self.window_id);
+            self.acknowledge_visible(window, true, cx);
+        } else {
+            // A context menu drawn in its own window never takes activation,
+            // so it has none of its own to lose. This window losing it is
+            // what says the user has moved on from the menu.
+            ui::dismiss_modern_menu(cx);
+        }
+
+        self.process_native_notifications(cx);
+
+        cx.notify();
     }
 
     pub(crate) fn alloc_id(next_id: &mut u64) -> u64 {

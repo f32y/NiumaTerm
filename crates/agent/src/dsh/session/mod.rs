@@ -27,7 +27,7 @@ use crate::background_task::{
     BackgroundTaskKey, BackgroundTaskRefs, BackgroundTaskTranscriptUpdate,
 };
 use crate::chat::{
-    Event, QuestionMode, QuestionRequest as ChatQuestionRequest, SlashCommandArguments,
+    Event, Question, QuestionMode, QuestionRequest as ChatQuestionRequest, SlashCommandArguments,
     SlashCommandInfo, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
 use crate::dsh::api::ApiClient;
@@ -468,39 +468,13 @@ impl Session {
         // reconnects, and re-raising the card from the replay is what lets a
         // tab that lost its socket mid-question still be answered.
         if let Some(request) = mapping::approval_request(&frame, &self.session_id) {
-            if self.pending_approval.as_ref() != Some(&request) {
-                self.controls.retire_approval();
-            }
-
-            let description = request.description.clone();
-
-            self.pending_approval = Some(request);
-
-            return vec![Event::ApprovalRequested { description }];
+            return self.on_approval_request(request);
         }
 
         // Questions replay on reconnect exactly as approvals do, so the same
         // rule applies: recognizing the frame is what makes it answerable.
         if let Some((request, questions)) = mapping::question_request(&frame, &self.session_id) {
-            let mut events = Vec::new();
-
-            if self
-                .pending_questions
-                .as_ref()
-                .is_some_and(|old| old != &request)
-            {
-                events.extend(self.expire_questions());
-            }
-
-            events.push(Event::InputRequested(ChatQuestionRequest {
-                id: question_id(&request),
-                mode: QuestionMode::Blocking,
-                questions,
-            }));
-
-            self.pending_questions = Some(request);
-
-            return events;
+            return self.on_question_request(request, questions);
         }
 
         // A projection frame carries one unit's whole value, and the snapshots
@@ -535,14 +509,7 @@ impl Session {
 
         match payload["type"].as_str() {
             Some("nmt/connection-reset") if self.is_current_session(payload) => {
-                self.controls.clear();
-                self.pending_approval = None;
-
-                let mut events = self.expire_questions();
-
-                events.push(Event::ApprovalResolved);
-
-                return events;
+                return self.on_connection_reset();
             }
 
             Some(SUBAGENTS_FRAME) => return self.on_subagents(payload),
@@ -617,6 +584,55 @@ impl Session {
         }
 
         events.extend(resolved);
+
+        events
+    }
+
+    fn on_approval_request(&mut self, request: ApprovalRequest) -> Vec<Event> {
+        if self.pending_approval.as_ref() != Some(&request) {
+            self.controls.retire_approval();
+        }
+
+        let description = request.description.clone();
+
+        self.pending_approval = Some(request);
+
+        vec![Event::ApprovalRequested { description }]
+    }
+
+    fn on_question_request(
+        &mut self,
+        request: QuestionRequest,
+        questions: Vec<Question>,
+    ) -> Vec<Event> {
+        let mut events = Vec::new();
+
+        if self
+            .pending_questions
+            .as_ref()
+            .is_some_and(|old| old != &request)
+        {
+            events.extend(self.expire_questions());
+        }
+
+        events.push(Event::InputRequested(ChatQuestionRequest {
+            id: question_id(&request),
+            mode: QuestionMode::Blocking,
+            questions,
+        }));
+
+        self.pending_questions = Some(request);
+
+        events
+    }
+
+    fn on_connection_reset(&mut self) -> Vec<Event> {
+        self.controls.clear();
+        self.pending_approval = None;
+
+        let mut events = self.expire_questions();
+
+        events.push(Event::ApprovalResolved);
 
         events
     }

@@ -1,7 +1,8 @@
 use std::time::Duration;
 
-use gpui::{App, Context, Task};
+use gpui::{App, AsyncApp, Context, Task, WeakEntity};
 use nmt_agent::launcher::AgentCli;
+use nmt_agent::session::Backend;
 use nmt_agent::session::update_readiness::{ConversationWork, Readiness};
 use nmt_agent::update::InstallationKey;
 use rust_i18n::t;
@@ -160,30 +161,37 @@ impl AgentSession {
             (backend, result)
         });
 
-        cx.spawn(async move |this, cx| {
-            let (backend, result) = worker.await;
+        cx.spawn(async move |this, cx| Self::finish_suspension(this, worker, epoch, cx).await)
+    }
 
-            if result.is_err() {
-                let _ = this.update(cx, |this, cx| {
-                    if let Err(mut orphan) = this
-                        .controller
-                        .borrow_mut()
-                        .runtime
-                        .shutdown_failed(epoch, backend)
-                    {
-                        cx.background_executor()
-                            .spawn(async move {
-                                let _ = orphan.shutdown(Duration::from_secs(5), true);
-                            })
-                            .detach();
-                    }
+    async fn finish_suspension(
+        this: WeakEntity<Self>,
+        worker: Task<(Backend, Result<(), String>)>,
+        epoch: u64,
+        cx: &mut AsyncApp,
+    ) -> Result<(), String> {
+        let (backend, result) = worker.await;
 
-                    cx.notify();
-                });
-            }
+        if result.is_err() {
+            let _ = this.update(cx, |this, cx| {
+                if let Err(mut orphan) = this
+                    .controller
+                    .borrow_mut()
+                    .runtime
+                    .shutdown_failed(epoch, backend)
+                {
+                    cx.background_executor()
+                        .spawn(async move {
+                            let _ = orphan.shutdown(Duration::from_secs(5), true);
+                        })
+                        .detach();
+                }
 
-            result
-        })
+                cx.notify();
+            });
+        }
+
+        result
     }
 
     pub fn mark_provider_updating(&mut self, cx: &mut Context<Self>) {

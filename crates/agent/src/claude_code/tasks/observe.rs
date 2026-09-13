@@ -58,7 +58,7 @@ impl ClaudeTasks {
             "init" => self.advance_epoch(),
             "hook_started" | "hook_response" => self.observe_hook(message),
             "background_tasks_changed" => self.observe_background_snapshot(message),
-            _ if LIFECYCLE_RECORDS.contains(&subtype) => self.apply_lifecycle(subtype, message),
+            _ if LIFECYCLE_RECORDS.contains(&subtype) => self.observe_lifecycle(subtype, message),
             _ => false,
         }
     }
@@ -114,7 +114,7 @@ impl ClaudeTasks {
             return false;
         }
 
-        self.apply_subagent_stop(message)
+        self.observe_subagent_stop(message)
     }
 
     /// Parent assistant messages carry the `Task`/`Agent` tool-use blocks that

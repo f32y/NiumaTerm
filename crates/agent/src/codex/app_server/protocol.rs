@@ -399,45 +399,7 @@ pub(super) fn parse_models(result: &Value, selected_model: Option<&str>) -> Vec<
         .map(|data| {
             data.iter()
                 .filter(|m| !m["hidden"].as_bool().unwrap_or(false))
-                .filter_map(|m| {
-                    let model = m["model"].as_str()?.to_string();
-
-                    let display = m["displayName"]
-                        .as_str()
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or(&model)
-                        .to_string();
-
-                    let tiers = m["serviceTiers"]
-                        .as_array()
-                        .map(|tiers| {
-                            tiers
-                                .iter()
-                                .filter_map(|tier| {
-                                    let id = tier["id"].as_str()?.to_string();
-
-                                    let name = tier["name"]
-                                        .as_str()
-                                        .filter(|s| !s.is_empty())
-                                        .unwrap_or(&id)
-                                        .to_string();
-
-                                    Some((id, name))
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-
-                    let default_tier = m["defaultServiceTier"].as_str().map(str::to_owned);
-
-                    Some(ModelInfo {
-                        model,
-                        display,
-                        tiers,
-                        default_tier,
-                        efforts: Vec::new(),
-                    })
-                })
+                .filter_map(parse_model)
                 .collect()
         })
         .unwrap_or_default();
@@ -462,6 +424,43 @@ pub(super) fn parse_models(result: &Value, selected_model: Option<&str>) -> Vec<
     models
 }
 
+fn parse_model(m: &Value) -> Option<ModelInfo> {
+    let model = m["model"].as_str()?.to_string();
+
+    let display = m["displayName"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&model)
+        .to_string();
+
+    let tiers = m["serviceTiers"]
+        .as_array()
+        .map(|tiers| tiers.iter().filter_map(parse_service_tier).collect())
+        .unwrap_or_default();
+
+    let default_tier = m["defaultServiceTier"].as_str().map(str::to_owned);
+
+    Some(ModelInfo {
+        model,
+        display,
+        tiers,
+        default_tier,
+        efforts: Vec::new(),
+    })
+}
+
+fn parse_service_tier(tier: &Value) -> Option<(String, String)> {
+    let id = tier["id"].as_str()?.to_string();
+
+    let name = tier["name"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&id)
+        .to_string();
+
+    Some((id, name))
+}
+
 /// One `thread/list` page as backend-neutral summaries, skipping
 /// `own_thread` (the listing includes the thread this session just started).
 pub(super) fn parse_thread_summaries(
@@ -472,48 +471,50 @@ pub(super) fn parse_thread_summaries(
         .as_array()
         .map(|data| {
             data.iter()
-                .filter_map(|thread| {
-                    let id = thread["id"].as_str()?.to_string();
-
-                    if Some(id.as_str()) == own_thread {
-                        return None;
-                    }
-
-                    let title = thread["name"]
-                        .as_str()
-                        .or_else(|| thread["preview"].as_str())
-                        .map(|title| title.split_whitespace().collect::<Vec<_>>().join(" "))
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or_else(|| id.chars().take(8).collect());
-
-                    // Backend timestamps are unix seconds; `recencyAt` advances
-                    // when a turn starts, which matches "last active" better
-                    // than `updatedAt` (background mutations move that).
-                    let seconds = thread["recencyAt"]
-                        .as_u64()
-                        .or_else(|| thread["updatedAt"].as_u64())
-                        .unwrap_or_default();
-
-                    let branch = thread["gitInfo"]["branch"]
-                        .as_str()
-                        .filter(|s| !s.is_empty())
-                        .map(str::to_owned);
-
-                    Some(SessionSummary {
-                        id,
-                        title,
-                        branch,
-                        cwd: thread["cwd"]
-                            .as_str()
-                            .filter(|cwd| !cwd.is_empty())
-                            .map(str::to_owned),
-                        last_active: UNIX_EPOCH + Duration::from_secs(seconds),
-                        snippet: None,
-                    })
-                })
+                .filter_map(|thread| parse_thread_summary(thread, own_thread))
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn parse_thread_summary(thread: &Value, own_thread: Option<&str>) -> Option<SessionSummary> {
+    let id = thread["id"].as_str()?.to_string();
+
+    if Some(id.as_str()) == own_thread {
+        return None;
+    }
+
+    let title = thread["name"]
+        .as_str()
+        .or_else(|| thread["preview"].as_str())
+        .map(|title| title.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| id.chars().take(8).collect());
+
+    // Backend timestamps are unix seconds; `recencyAt` advances
+    // when a turn starts, which matches "last active" better
+    // than `updatedAt` (background mutations move that).
+    let seconds = thread["recencyAt"]
+        .as_u64()
+        .or_else(|| thread["updatedAt"].as_u64())
+        .unwrap_or_default();
+
+    let branch = thread["gitInfo"]["branch"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
+
+    Some(SessionSummary {
+        id,
+        title,
+        branch,
+        cwd: thread["cwd"]
+            .as_str()
+            .filter(|cwd| !cwd.is_empty())
+            .map(str::to_owned),
+        last_active: UNIX_EPOCH + Duration::from_secs(seconds),
+        snippet: None,
+    })
 }
 
 /// Flatten a resumed thread's `turns[].items` into replay entries while using

@@ -47,33 +47,7 @@ impl DeadlineTimer {
 
         thread::Builder::new()
             .name("agent-deadlines".into())
-            .spawn(move || {
-                let (state, wake) = &*worker.0;
-                let mut state = state.lock();
-
-                loop {
-                    if state.stopped {
-                        break;
-                    }
-
-                    match state.next {
-                        None => wake.wait(&mut state),
-
-                        Some(next) if next > Instant::now() => {
-                            wake.wait_until(&mut state, next);
-                        }
-
-                        Some(_) => {
-                            state.next = None;
-
-                            // The callback can re-arm the timer while resolving requests.
-                            drop(state);
-                            callback();
-                            state = worker.0.0.lock();
-                        }
-                    }
-                }
-            })?;
+            .spawn(move || run_deadlines(worker, callback))?;
 
         Ok(Self { handle })
     }
@@ -84,6 +58,34 @@ impl DeadlineTimer {
 
     pub(crate) fn set(&self, next: Option<Instant>) {
         self.handle.set(next);
+    }
+}
+
+fn run_deadlines(worker: TimerHandle, callback: impl Fn()) {
+    let (state, wake) = &*worker.0;
+    let mut state = state.lock();
+
+    loop {
+        if state.stopped {
+            break;
+        }
+
+        match state.next {
+            None => wake.wait(&mut state),
+
+            Some(next) if next > Instant::now() => {
+                wake.wait_until(&mut state, next);
+            }
+
+            Some(_) => {
+                state.next = None;
+
+                // The callback can re-arm the timer while resolving requests.
+                drop(state);
+                callback();
+                state = worker.0.0.lock();
+            }
+        }
     }
 }
 

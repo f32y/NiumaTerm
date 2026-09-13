@@ -111,17 +111,17 @@ pub fn agent_launch<'a>(
             AgentKind::Codex => None,
         };
 
-        let url = profile.api_base_url.trim();
+        let api_base_url = profile.api_base_url.trim();
 
         if let Some(name) = base_url_env
-            && !url.is_empty()
+            && !api_base_url.is_empty()
         {
-            env.push((name.to_string(), url.to_string()));
+            env.push((name.to_string(), api_base_url.to_string()));
         }
 
-        let key = profile.api_key.trim();
+        let api_key = profile.api_key.trim();
 
-        if !key.is_empty() {
+        if !api_key.is_empty() {
             let key_env = match profile.kind {
                 AgentKind::Claude => "ANTHROPIC_API_KEY",
 
@@ -132,7 +132,7 @@ pub fn agent_launch<'a>(
                 AgentKind::DeepSeek => DEEPSEEK_API_KEY_ENV,
             };
 
-            env.push((key_env.to_string(), key.to_string()));
+            env.push((key_env.to_string(), api_key.to_string()));
         }
     }
 

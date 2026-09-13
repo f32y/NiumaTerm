@@ -138,7 +138,7 @@ fn runtime_transitions_do_not_require_host_event_consumption() {
         SelectionType::Semantic,
     );
 
-    assert!(session.selection_range().is_some());
+    assert!(session.selection_range_in(&session.snapshot()).is_some());
 
     let now = SystemTime::now();
 
@@ -154,7 +154,7 @@ fn runtime_transitions_do_not_require_host_event_consumption() {
         window,
     );
 
-    assert!(session.selection_range().is_none());
+    assert!(session.selection_range_in(&session.snapshot()).is_none());
 
     proxy.send_event(TerminalEvent::CloseTerminal(0), window);
 

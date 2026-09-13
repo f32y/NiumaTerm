@@ -274,7 +274,7 @@ impl Shell {
         true
     }
 
-    pub(crate) fn apply_agent_event(&mut self, event: AgentEvent, cx: &mut Context<Self>) -> bool {
+    pub(crate) fn on_agent_event(&mut self, event: AgentEvent, cx: &mut Context<Self>) -> bool {
         if !self.owns_agent_route(&event.route, cx) {
             return false;
         }
@@ -309,23 +309,27 @@ impl Shell {
             cx.background_executor().timer(delay).await;
 
             let _ = this.update(cx, |this, cx| {
-                if this.agent_timer_generation != generation {
-                    return;
-                }
-
-                let mutation = this.agent_monitor.process_due(time::Instant::now());
-
-                Self::remove_native_notifications(&mutation.removed_notifications);
-
-                if mutation.visible_changed {
-                    cx.notify();
-                }
-
-                this.reschedule_agent_timer(cx);
-                this.process_native_notifications(cx);
+                this.process_due_agent_deadlines(generation, cx)
             });
         })
         .detach();
+    }
+
+    fn process_due_agent_deadlines(&mut self, generation: u64, cx: &mut Context<Self>) {
+        if self.agent_timer_generation != generation {
+            return;
+        }
+
+        let mutation = self.agent_monitor.process_due(time::Instant::now());
+
+        Self::remove_native_notifications(&mutation.removed_notifications);
+
+        if mutation.visible_changed {
+            cx.notify();
+        }
+
+        self.reschedule_agent_timer(cx);
+        self.process_native_notifications(cx);
     }
 
     /// The tab holding this agent pane. A pane knows its route but not its
@@ -343,91 +347,97 @@ impl Shell {
             return;
         };
 
-        cx.subscribe(&session, |this, session, event: &AgentPaneEvent, cx| {
-            let route = session.read(cx).agent_route().clone();
+        cx.subscribe(&session, Self::on_agent_pane_event).detach();
+    }
 
-            let mutation = match event {
-                AgentPaneEvent::Lifecycle(event) if event.route == route => this
-                    .agent_monitor
-                    .apply(event.clone(), time::Instant::now()),
+    fn on_agent_pane_event(
+        &mut self,
+        session: Entity<AgentSession>,
+        event: &AgentPaneEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let route = session.read(cx).agent_route().clone();
 
-                AgentPaneEvent::Lifecycle(_) => return,
+        let mutation = match event {
+            AgentPaneEvent::Lifecycle(event) if event.route == route => self
+                .agent_monitor
+                .apply(event.clone(), time::Instant::now()),
 
-                AgentPaneEvent::WorkflowActivity => {
-                    // Sticky: a finished run stays reachable, so the control
-                    // never goes away once it has appeared. The running count
-                    // is read at render time, so this only has to repaint.
-                    this.panels.note_workflow_seen();
+            AgentPaneEvent::Lifecycle(_) => return,
 
-                    cx.notify();
+            AgentPaneEvent::WorkflowActivity => {
+                // Sticky: a finished run stays reachable, so the control
+                // never goes away once it has appeared. The running count
+                // is read at render time, so this only has to repaint.
+                self.panels.note_workflow_seen();
 
-                    return;
-                }
-
-                AgentPaneEvent::BackgroundTaskActivity => {
-                    // Sticky: a finished child stays reachable, so the control
-                    // never goes away once it has appeared. The running count
-                    // is read at render time, so this only has to repaint the
-                    // title bar.
-                    this.panels
-                        .note_background_task_seen(session.read(cx).background_task_count() > 0);
-
-                    cx.notify();
-
-                    return;
-                }
-
-                AgentPaneEvent::ResumeElsewhere { cwd, session_id } => {
-                    // Opening a tab needs a window, which an event
-                    // subscription has none of; the next render has one.
-                    this.pending_agent_resume = Some(PendingAgentResume {
-                        profile: session.read(cx).profile().clone(),
-                        cwd: cwd.clone(),
-                        session_id: session_id.clone(),
-                    });
-
-                    cx.notify();
-
-                    return;
-                }
-
-                AgentPaneEvent::TitleSuggested(title) => {
-                    // A user-authored rename outranks this, so a tab the user
-                    // has named keeps its name.
-                    if let Some(tab_id) = this.tab_for_agent_session(&session)
-                        && let Some(tabs) = this.workspaces.tab_manager_for_mut(tab_id)
-                        && tabs.set_title(tab_id, title.clone())
-                    {
-                        cx.notify();
-                    }
-
-                    return;
-                }
-
-                AgentPaneEvent::CloseRequested => {
-                    // Same reason as the resume above: closing a tab needs a
-                    // window, and the next render has one.
-                    this.pending_agent_close = this.tab_for_agent_session(&session);
-
-                    cx.notify();
-
-                    return;
-                }
-
-                AgentPaneEvent::Interrupted => {
-                    this.agent_monitor.interrupt(&route, time::Instant::now())
-                }
-            };
-
-            Self::remove_native_notifications(&mutation.removed_notifications);
-
-            if mutation.visible_changed {
                 cx.notify();
+
+                return;
             }
 
-            this.reschedule_agent_timer(cx);
-            this.process_native_notifications(cx);
-        })
-        .detach();
+            AgentPaneEvent::BackgroundTaskActivity => {
+                // Sticky: a finished child stays reachable, so the control
+                // never goes away once it has appeared. The running count
+                // is read at render time, so this only has to repaint the
+                // title bar.
+                self.panels
+                    .note_background_task_seen(session.read(cx).background_task_count() > 0);
+
+                cx.notify();
+
+                return;
+            }
+
+            AgentPaneEvent::ResumeElsewhere { cwd, session_id } => {
+                // Opening a tab needs a window, which an event
+                // subscription has none of; the next render has one.
+                self.pending_agent_resume = Some(PendingAgentResume {
+                    profile: session.read(cx).profile().clone(),
+                    cwd: cwd.clone(),
+                    session_id: session_id.clone(),
+                });
+
+                cx.notify();
+
+                return;
+            }
+
+            AgentPaneEvent::TitleSuggested(title) => {
+                // A user-authored rename outranks this, so a tab the user
+                // has named keeps its name.
+                if let Some(tab_id) = self.tab_for_agent_session(&session)
+                    && let Some(tabs) = self.workspaces.tabs_for_tab_mut(tab_id)
+                    && tabs.set_title(tab_id, title.clone())
+                {
+                    cx.notify();
+                }
+
+                return;
+            }
+
+            AgentPaneEvent::CloseRequested => {
+                // Same reason as the resume above: closing a tab needs a
+                // window, and the next render has one.
+                self.pending_agent_close = self.tab_for_agent_session(&session);
+
+                cx.notify();
+
+                return;
+            }
+
+            AgentPaneEvent::Interrupted => {
+                self.agent_monitor.interrupt(&route, time::Instant::now())
+            }
+        };
+
+        Self::remove_native_notifications(&mutation.removed_notifications);
+
+        if mutation.visible_changed {
+            cx.notify();
+        }
+
+        self.reschedule_agent_timer(cx);
+        self.process_native_notifications(cx);
     }
 }

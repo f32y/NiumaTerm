@@ -5,10 +5,14 @@
 //! share or a sleeping disk, so every one of them runs on the background
 //! executor and only its result reaches the view.
 
+use gpui_component::dialog::Dialog;
+
 use std::{collections, fs, iter, path};
 
 use gpui::prelude::*;
-use gpui::{Context, Div, PathPromptOptions, Render, SharedString, Window, div, px, relative};
+use gpui::{
+    App, Context, Div, Entity, PathPromptOptions, Render, SharedString, Window, div, px, relative,
+};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dialog::{
     DIALOG_BUTTON_MIN_WIDTH, DialogAction, DialogButtonProps, DialogClose, DialogFooter,
@@ -388,62 +392,7 @@ impl Shell {
         let shell = cx.entity();
 
         window.open_dialog(cx, move |dialog, window, cx| {
-            let editor = editor.clone();
-            let content_editor = editor.clone();
-            let shell = shell.clone();
-            let margin_top = ((window.viewport_size().height - px(300.)) * 0.5).max(px(16.));
-
-            dialog
-                .title(t!("shell-workspace-edit-title"))
-                .overlay_closable(false)
-                .margin_top(margin_top)
-                .button_props(
-                    DialogButtonProps::default()
-                        .ok_text(t!("shell-workspace-save"))
-                        .cancel_text(t!("shell-workspace-cancel"))
-                        .show_cancel(true),
-                )
-                .footer(
-                    DialogFooter::new()
-                        .w_full()
-                        .border_t_1()
-                        .border_color(cx.theme().border)
-                        .pt_4()
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .text_xs()
-                                .line_height(relative(1.5))
-                                .text_color(cx.theme().muted_foreground)
-                                .child(t!("shell-workspace-dirs-applies-next")),
-                        )
-                        .child(
-                            DialogAction::new().child(
-                                Button::new("save-ws-dirs")
-                                    .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                    .label(t!("shell-workspace-save"))
-                                    .primary(),
-                            ),
-                        )
-                        .child(
-                            DialogClose::new().child(
-                                Button::new("cancel-ws-dirs")
-                                    .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                    .label(t!("shell-workspace-cancel")),
-                            ),
-                        ),
-                )
-                .content(move |content, _, _| content.child(content_editor.clone()))
-                .on_ok(move |_, _, cx| {
-                    let Some(roots) = editor.read(cx).roots().cloned() else {
-                        return false;
-                    };
-
-                    shell.update(cx, |this, cx| this.replace_workspace_roots(id, roots, cx));
-
-                    true
-                })
+            workspace_dirs_dialog(dialog, &editor, &shell, id, window, cx)
         });
     }
 
@@ -487,6 +436,72 @@ impl Shell {
             });
         }
     }
+}
+
+fn workspace_dirs_dialog(
+    dialog: Dialog,
+    editor: &Entity<WorkspaceDirsEditor>,
+    shell: &Entity<Shell>,
+    id: WorkspaceId,
+    window: &Window,
+    cx: &App,
+) -> Dialog {
+    let editor = editor.clone();
+    let content_editor = editor.clone();
+    let shell = shell.clone();
+    let margin_top = ((window.viewport_size().height - px(300.)) * 0.5).max(px(16.));
+
+    dialog
+        .title(t!("shell-workspace-edit-title"))
+        .overlay_closable(false)
+        .margin_top(margin_top)
+        .button_props(
+            DialogButtonProps::default()
+                .ok_text(t!("shell-workspace-save"))
+                .cancel_text(t!("shell-workspace-cancel"))
+                .show_cancel(true),
+        )
+        .footer(
+            DialogFooter::new()
+                .w_full()
+                .border_t_1()
+                .border_color(cx.theme().border)
+                .pt_4()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_xs()
+                        .line_height(relative(1.5))
+                        .text_color(cx.theme().muted_foreground)
+                        .child(t!("shell-workspace-dirs-applies-next")),
+                )
+                .child(
+                    DialogAction::new().child(
+                        Button::new("save-ws-dirs")
+                            .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                            .label(t!("shell-workspace-save"))
+                            .primary(),
+                    ),
+                )
+                .child(
+                    DialogClose::new().child(
+                        Button::new("cancel-ws-dirs")
+                            .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                            .label(t!("shell-workspace-cancel")),
+                    ),
+                ),
+        )
+        .content(move |content, _, _| content.child(content_editor.clone()))
+        .on_ok(move |_, _, cx| {
+            let Some(roots) = editor.read(cx).roots().cloned() else {
+                return false;
+            };
+
+            shell.update(cx, |this, cx| this.replace_workspace_roots(id, roots, cx));
+
+            true
+        })
 }
 
 /// Workspace directories the last background check could not reach, keyed by

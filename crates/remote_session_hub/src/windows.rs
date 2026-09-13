@@ -13,7 +13,7 @@ use nmt_platform::{
 };
 use nmt_terminal::event::{EventListener, Msg, MsgSender, TerminalEvent, WindowId};
 use nmt_terminal::pty_pipe::{SessionOptions as PipeOptions, start_session};
-use nmt_terminal::session::request::CheckpointRequest;
+use nmt_terminal::session::request::{Checkpoint, CheckpointRequest};
 use parking_lot::Mutex;
 
 const SUBSCRIBER_QUEUE_CAPACITY: usize = 128;
@@ -411,42 +411,7 @@ impl<S: PtySource> RemoteSessionHub<S> {
             move |result| {
                 let result = result
                     .map_err(|error| HubError::Engine(format!("{error:?}")))
-                    .and_then(|checkpoint| {
-                        let mut state = stream.lock();
-
-                        if state.exited {
-                            return Err(HubError::SessionExited(id));
-                        }
-
-                        let subscriber_id = state.next_subscriber_id;
-
-                        state.next_subscriber_id = state.next_subscriber_id.saturating_add(1);
-
-                        let base_seq = state.next_seq.saturating_sub(1);
-
-                        state.subscribers.insert(
-                            subscriber_id,
-                            Subscriber {
-                                sender,
-                                wake_thread: None,
-                            },
-                        );
-
-                        drop(state);
-
-                        Ok(SessionSubscription {
-                            snapshot: SessionSnapshot {
-                                session_id: id,
-                                base_seq,
-                                vt: checkpoint.vt,
-                                cols: checkpoint.cols,
-                                rows: checkpoint.rows,
-                            },
-                            receiver,
-                            subscriber_id,
-                            stream,
-                        })
-                    });
+                    .and_then(|checkpoint| on_checkpoint(checkpoint, id, stream, sender, receiver));
 
                 let _ = completed.send(result);
             },
@@ -519,6 +484,49 @@ impl<S: PtySource> RemoteSessionHub<S> {
             .cloned()
             .ok_or(HubError::SessionNotFound(id))
     }
+}
+
+fn on_checkpoint(
+    checkpoint: Checkpoint,
+    id: SessionId,
+    stream: Arc<Mutex<StreamState>>,
+    sender: SyncSender<SessionEvent>,
+    receiver: Receiver<SessionEvent>,
+) -> Result<SessionSubscription, HubError> {
+    let mut state = stream.lock();
+
+    if state.exited {
+        return Err(HubError::SessionExited(id));
+    }
+
+    let subscriber_id = state.next_subscriber_id;
+
+    state.next_subscriber_id = state.next_subscriber_id.saturating_add(1);
+
+    let base_seq = state.next_seq.saturating_sub(1);
+
+    state.subscribers.insert(
+        subscriber_id,
+        Subscriber {
+            sender,
+            wake_thread: None,
+        },
+    );
+
+    drop(state);
+
+    Ok(SessionSubscription {
+        snapshot: SessionSnapshot {
+            session_id: id,
+            base_seq,
+            vt: checkpoint.vt,
+            cols: checkpoint.cols,
+            rows: checkpoint.rows,
+        },
+        receiver,
+        subscriber_id,
+        stream,
+    })
 }
 
 fn validate_size(cols: u16, rows: u16) -> Result<(), HubError> {

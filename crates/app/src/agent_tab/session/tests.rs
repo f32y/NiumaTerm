@@ -557,7 +557,7 @@ mod conversation_title_tests {
                     state.input.restore(&mut state.runtime)
                 };
 
-                pane.apply_event(
+                pane.on_event(
                     Event::ApprovalRequested {
                         description: "Run a command".into(),
                     },
@@ -568,7 +568,7 @@ mod conversation_title_tests {
 
                 assert!(pane.session.borrow().input.approval().is_some());
 
-                pane.apply_event(Event::ApprovalResolved, cx);
+                pane.on_event(Event::ApprovalResolved, cx);
                 pane.session.borrow_mut().runtime.ready();
                 pane.restore_question_drafts();
 
@@ -578,7 +578,7 @@ mod conversation_title_tests {
                     backend.input_result = Err("The question response could not be queued.".into());
                 }
 
-                pane.apply_event(
+                pane.on_event(
                     Event::QuestionsRequested {
                         questions: vec![Question {
                             input: QuestionInput::Text,
@@ -629,9 +629,12 @@ mod conversation_title_tests {
 
                 pane.session.borrow_mut().runtime.ready();
 
-                assert!(
-                    pane.send_text("  Inspect title generation\n and its fallback  ".into(), cx)
-                );
+                assert!(pane.send_text_inner(
+                    "  Inspect title generation\n and its fallback  ".into(),
+                    None,
+                    None,
+                    cx
+                ));
                 assert!(pane.session.borrow().naming.named);
             });
         });
@@ -672,9 +675,19 @@ mod conversation_title_tests {
 
                 pane.session.borrow_mut().runtime.ready();
 
-                assert!(pane.send_text("one two three four five six seven eight".into(), cx));
+                assert!(pane.send_text_inner(
+                    "one two three four five six seven eight".into(),
+                    None,
+                    None,
+                    cx
+                ));
                 assert!(pane.session.borrow().naming.named);
-                assert!(pane.send_text("a later prompt cannot rename this".into(), cx));
+                assert!(pane.send_text_inner(
+                    "a later prompt cannot rename this".into(),
+                    None,
+                    None,
+                    cx
+                ));
             });
         });
 
@@ -719,7 +732,12 @@ mod conversation_title_tests {
 
                 pane.session.borrow_mut().runtime.ready();
 
-                assert!(pane.send_text("follow up on the restored session".into(), cx));
+                assert!(pane.send_text_inner(
+                    "follow up on the restored session".into(),
+                    None,
+                    None,
+                    cx
+                ));
             });
         });
 
@@ -828,14 +846,14 @@ mod queued_prompt_placement_tests {
 
                 assert!(!pane.transcript.read(cx).is_working());
 
-                pane.apply_event(SessionEvent::TurnStarted, cx);
+                pane.on_event(SessionEvent::TurnStarted, cx);
 
                 assert!(!pane.session.borrow().commands.awaiting_turn);
                 assert_eq!(pane.session.borrow().delivery.turn(), previous_turn + 1);
                 assert_eq!(pane.session.borrow().runtime.status(), Status::Running);
                 assert!(pane.transcript.read(cx).is_working());
 
-                pane.apply_event(SessionEvent::TurnStarted, cx);
+                pane.on_event(SessionEvent::TurnStarted, cx);
 
                 assert_eq!(
                     pane.session.borrow().delivery.turn(),
@@ -869,15 +887,15 @@ mod queued_prompt_placement_tests {
 
                 pane.session.borrow_mut().runtime.ready();
 
-                assert!(pane.send_text("open the turn".into(), cx));
+                assert!(pane.send_text_inner("open the turn".into(), None, None, cx));
 
-                pane.apply_event(SessionEvent::TurnStarted, cx);
+                pane.on_event(SessionEvent::TurnStarted, cx);
 
                 let first_turn = pane.session.borrow().delivery.turn();
 
-                assert!(pane.send_text("queued behind it".into(), cx));
+                assert!(pane.send_text_inner("queued behind it".into(), None, None, cx));
 
-                pane.apply_event(
+                pane.on_event(
                     SessionEvent::ItemStarted(SessionItem::AgentMessage {
                         id: "msg-1".into(),
                         text: Some("the first answer".into()),
@@ -886,7 +904,7 @@ mod queued_prompt_placement_tests {
                     cx,
                 );
 
-                pane.apply_event(SessionEvent::TurnCompleted { error: None }, cx);
+                pane.on_event(SessionEvent::TurnCompleted { error: None }, cx);
 
                 assert_eq!(
                     user_rows(pane, cx),
@@ -895,7 +913,7 @@ mod queued_prompt_placement_tests {
                 );
 
                 // The CLI answers the held prompt in a turn nothing here sent.
-                pane.apply_event(SessionEvent::TurnStarted, cx);
+                pane.on_event(SessionEvent::TurnStarted, cx);
 
                 assert_eq!(
                     pane.session.borrow().delivery.turn(),
@@ -945,12 +963,12 @@ mod queued_prompt_placement_tests {
 
                 let text = "Reply with exactly: ok".to_string();
 
-                assert!(pane.send_text(text.clone(), cx));
+                assert!(pane.send_text_inner(text.clone(), None, None, cx));
 
                 // What the harness reports, in the order it reports it: the
                 // prompt queued, the turn opened, the queue emptied, and the
                 // harness's own echo of the message it took.
-                pane.apply_event(
+                pane.on_event(
                     SessionEvent::QueuedPrompts(vec![QueuedPrompt {
                         id: Some("afd4d197".into()),
                         text: text.clone(),
@@ -963,10 +981,10 @@ mod queued_prompt_placement_tests {
                     "a prompt already in the transcript is not also waiting"
                 );
 
-                pane.apply_event(SessionEvent::TurnStarted, cx);
-                pane.apply_event(SessionEvent::QueuedPrompts(Vec::new()), cx);
+                pane.on_event(SessionEvent::TurnStarted, cx);
+                pane.on_event(SessionEvent::QueuedPrompts(Vec::new()), cx);
 
-                pane.apply_event(
+                pane.on_event(
                     SessionEvent::ItemStarted(SessionItem::UserMessage {
                         text: Some(text.clone()),
                     }),
@@ -1031,9 +1049,9 @@ mod turn_error_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                pane.apply_event(SessionEvent::TurnStarted, cx);
+                pane.on_event(SessionEvent::TurnStarted, cx);
 
-                pane.apply_event(
+                pane.on_event(
                     SessionEvent::ItemStarted(SessionItem::AgentMessage {
                         id: "message".into(),
                         text: Some("partial answer".into()),
@@ -1042,7 +1060,7 @@ mod turn_error_tests {
                     cx,
                 );
 
-                pane.apply_event(
+                pane.on_event(
                     SessionEvent::Error {
                         message: "model unavailable".into(),
                         fatal: false,
@@ -1050,7 +1068,7 @@ mod turn_error_tests {
                     cx,
                 );
 
-                pane.apply_event(
+                pane.on_event(
                     SessionEvent::TurnCompleted {
                         error: Some("model unavailable".into()),
                     },
@@ -1224,7 +1242,7 @@ mod shared_host_recovery_tests {
 
                 pane.session.borrow_mut().runtime.ready();
 
-                pane.apply_event(
+                pane.on_event(
                     SessionEvent::HostExited {
                         message: "Codex app-server stopped unexpectedly".into(),
                     },
@@ -1356,13 +1374,13 @@ mod command_catalog_cache_tests {
             pane.update(cx, |pane, cx| {
                 assert!(!offers(pane, "deploy"), "nothing published this yet");
 
-                pane.apply_event(SessionEvent::Commands(vec![discovered("deploy")]), cx);
+                pane.on_event(SessionEvent::Commands(vec![discovered("deploy")]), cx);
 
                 assert!(offers(pane, "deploy"), "a published command must show up");
 
                 // Discovery is a replacement snapshot, so a later one that
                 // omits the command withdraws it.
-                pane.apply_event(SessionEvent::Commands(vec![discovered("status")]), cx);
+                pane.on_event(SessionEvent::Commands(vec![discovered("status")]), cx);
 
                 assert!(!offers(pane, "deploy"), "a withdrawn command must go");
             });

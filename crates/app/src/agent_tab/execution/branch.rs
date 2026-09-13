@@ -28,13 +28,13 @@ impl AgentSession {
                     state.branch.checkpoints_loaded(epoch, request, result)
                 };
 
-                this.apply_branch_update(update, cx);
+                this.on_branch_update(update, cx);
             });
         })
         .detach();
     }
 
-    pub(crate) fn apply_branch_update(&mut self, update: BranchUpdate, cx: &mut Context<Self>) {
+    pub(crate) fn on_branch_update(&mut self, update: BranchUpdate, cx: &mut Context<Self>) {
         if self.is_closed() {
             return;
         }
@@ -63,7 +63,7 @@ impl AgentSession {
                             state.branch.fork_created(epoch, request, result)
                         };
 
-                        this.apply_branch_update(update, cx);
+                        this.on_branch_update(update, cx);
                     });
                 })
                 .detach();

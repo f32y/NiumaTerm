@@ -50,7 +50,7 @@ pub fn dll_main(instance: *mut ffi::c_void, reason: u32) -> bool {
     true
 }
 
-fn get_exe_path() -> String {
+fn exe_path() -> String {
     dll_path()
         .and_then(|path| path.parent().map(|dir| dir.join("NiumaTerm.exe")))
         .map(|path| path.to_string_lossy().into_owned())
@@ -82,7 +82,7 @@ fn alloc_co_task_str(s: &str) -> PWSTR {
     }
 }
 
-fn get_folder_path(items: Option<&IShellItemArray>) -> Option<String> {
+fn folder_path(items: Option<&IShellItemArray>) -> Option<String> {
     let items = items?;
 
     unsafe {
@@ -123,7 +123,7 @@ impl IExplorerCommand_Impl for NiumaTermNewTabCommand_Impl {
     }
 
     fn GetIcon(&self, _items: Ref<'_, IShellItemArray>) -> Result<PWSTR> {
-        let icon = format!("{},0", get_exe_path());
+        let icon = format!("{},0", exe_path());
 
         Ok(alloc_co_task_str(&icon))
     }
@@ -141,9 +141,9 @@ impl IExplorerCommand_Impl for NiumaTermNewTabCommand_Impl {
     }
 
     fn Invoke(&self, items: Ref<'_, IShellItemArray>, _bind_ctx: Ref<'_, IBindCtx>) -> Result<()> {
-        let exe = get_exe_path();
+        let exe = exe_path();
 
-        let path = get_folder_path(items.as_ref()).unwrap_or_default();
+        let path = folder_path(items.as_ref()).unwrap_or_default();
 
         let uri = format!(
             "nmt://action/new_tab?path={}",

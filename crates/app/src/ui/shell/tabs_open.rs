@@ -263,7 +263,7 @@ impl Shell {
             profile.name.clone()
         };
 
-        let owner = AgentSession::create(profile.clone(), workspace, cx);
+        let owner = AgentSession::create(profile.clone(), workspace, None, cx);
         let pane = cx.new(|cx| AgentPane::attach(&owner, window, cx));
 
         Self::watch_agent_tab(&pane, cx);

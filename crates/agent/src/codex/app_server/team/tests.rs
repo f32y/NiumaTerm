@@ -61,7 +61,7 @@ fn team_members_keep_native_settings_and_approval_requests() {
     );
     assert_eq!(session.control.next_id(), next_request);
 
-    let events = session.process_server_request(
+    let events = session.on_server_request(
         4,
         "item/fileChange/requestApproval",
         &json!({"params": {"changes": {"main.rs": {"type": "modify"}}}}),
@@ -92,18 +92,18 @@ fn moderator_calls_require_the_registered_parent_and_current_provider_turn() {
 
     let mut params = json!({"threadId": "child", "turnId": "turn-4", "tool": "team_decide", "arguments": {"action": "report"}});
 
-    assert!(session.process_team_decision(9, &params).is_empty());
+    assert!(session.on_team_decision(9, &params).is_empty());
 
     params["threadId"] = json!("moderator");
 
-    let events = session.process_team_decision(10, &params);
+    let events = session.on_team_decision(10, &params);
 
     assert!(
         matches!(events.as_slice(), [Event::TeamDecision(request)] if request.request_id == 10 && request.provider_turn == "turn-4")
     );
-    assert!(session.process_team_decision(10, &params).is_empty());
+    assert!(session.on_team_decision(10, &params).is_empty());
 
     params["turnId"] = json!("old-turn");
 
-    assert!(session.process_team_decision(11, &params).is_empty());
+    assert!(session.on_team_decision(11, &params).is_empty());
 }

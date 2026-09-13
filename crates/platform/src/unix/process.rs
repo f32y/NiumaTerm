@@ -9,7 +9,7 @@ use std::{env, io};
 #[cfg(target_os = "macos")]
 use crate::unix::macos::login_shell;
 #[cfg(target_os = "macos")]
-use crate::unix::macos::process_group_count;
+use crate::unix::macos::process_group_count as group_process_count;
 
 /// A command that leads its own process group.
 ///
@@ -166,11 +166,6 @@ impl ProcessTree {
     pub fn other_process_count(&self) -> usize {
         self.process_count().saturating_sub(1)
     }
-}
-
-#[cfg(target_os = "macos")]
-fn group_process_count(pgid: libc::pid_t) -> usize {
-    process_group_count(pgid)
 }
 
 /// Linux exposes the group of a process only through `/proc/<pid>/stat`, so

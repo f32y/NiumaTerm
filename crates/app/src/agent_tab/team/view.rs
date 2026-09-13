@@ -275,14 +275,14 @@ impl Render for TeamPane {
 
         let font = settings.font();
         let font_size = settings.font_size;
-        let opacity = settings.background_opacity;
+        let background_opacity = settings.background_opacity;
 
         let surface = v_flex()
             .debug_selector(|| "team-surface".into())
             .size_full()
             .relative()
             .min_h_0()
-            .bg(background.alpha(opacity))
+            .bg(background.alpha(background_opacity))
             .rounded(UI_RADIUS - px(1.))
             .overflow_hidden()
             .font(font)

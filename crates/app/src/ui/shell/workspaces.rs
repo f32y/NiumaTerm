@@ -1,3 +1,4 @@
+use gpui_component::dialog::Dialog;
 use rust_i18n::t;
 
 use crate::ui::persistence::spawn_default_pane;
@@ -43,7 +44,7 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(tabs) = self.workspaces.tab_manager_for_mut(tab) else {
+        let Some(tabs) = self.workspaces.tabs_for_tab_mut(tab) else {
             return;
         };
 
@@ -177,66 +178,7 @@ impl Shell {
         let shell = cx.entity();
 
         window.open_dialog(cx, move |dialog, window, _| {
-            let name_input = name_input.clone();
-            let dirs = dirs.clone();
-            let content_name = name_input.clone();
-            let content_dirs = dirs.clone();
-            let shell = shell.clone();
-            let margin_top = ((window.viewport_size().height - px(300.)) * 0.5).max(px(16.));
-
-            dialog
-                .title(t!("shell-workspace-new-title"))
-                .overlay_closable(false)
-                .margin_top(margin_top)
-                .button_props(
-                    DialogButtonProps::default()
-                        .ok_text(t!("shell-workspace-create"))
-                        .cancel_text(t!("shell-workspace-cancel"))
-                        .show_cancel(true),
-                )
-                // Plain `Dialog` never renders `button_props` buttons (only
-                // `AlertDialog` does), so the footer supplies them; the
-                // wrappers dispatch Confirm/CancelDialog into on_ok/on_cancel.
-                .footer(
-                    DialogFooter::new()
-                        .child(
-                            DialogAction::new().child(
-                                Button::new("create-ws")
-                                    .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                    .label(t!("shell-workspace-create"))
-                                    .primary(),
-                            ),
-                        )
-                        .child(
-                            DialogClose::new().child(
-                                Button::new("cancel-ws")
-                                    .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                    .label(t!("shell-workspace-cancel")),
-                            ),
-                        ),
-                )
-                .content(move |content, _, _| {
-                    content.child(
-                        v_flex()
-                            .gap_2()
-                            .child(div().text_sm().child(t!("shell-workspace-name-label")))
-                            .child(Input::new(&content_name))
-                            .child(content_dirs.clone()),
-                    )
-                })
-                .on_ok(move |_, window, cx| {
-                    let name = name_input.read(cx).value().trim().to_string();
-
-                    let Some(roots) = dirs.read(cx).roots().cloned() else {
-                        return false;
-                    };
-
-                    shell.update(cx, |this, cx| {
-                        this.create_workspace(name, roots, window, cx);
-                    });
-
-                    true
-                })
+            new_workspace_dialog(dialog, &name_input, &dirs, &shell, window)
         });
     }
 
@@ -305,9 +247,13 @@ impl Shell {
 
         let ws_id = Self::alloc_id(&mut self.next_id);
 
-        let ws_id = self
-            .workspaces
-            .new_workspace(tabs, WorkspaceId(ws_id), name, roots);
+        let ws_id = self.workspaces.new_workspace_of_kind(
+            tabs,
+            WorkspaceId(ws_id),
+            name,
+            Some(roots),
+            WorkspaceKind::Normal,
+        );
 
         self.focus_active(window, cx);
 
@@ -354,6 +300,75 @@ impl Shell {
 
         cx.notify();
     }
+}
+
+fn new_workspace_dialog(
+    dialog: Dialog,
+    name_input: &Entity<InputState>,
+    dirs: &Entity<WorkspaceDirsEditor>,
+    shell: &Entity<Shell>,
+    window: &Window,
+) -> Dialog {
+    let name_input = name_input.clone();
+    let dirs = dirs.clone();
+    let content_name = name_input.clone();
+    let content_dirs = dirs.clone();
+    let shell = shell.clone();
+    let margin_top = ((window.viewport_size().height - px(300.)) * 0.5).max(px(16.));
+
+    dialog
+        .title(t!("shell-workspace-new-title"))
+        .overlay_closable(false)
+        .margin_top(margin_top)
+        .button_props(
+            DialogButtonProps::default()
+                .ok_text(t!("shell-workspace-create"))
+                .cancel_text(t!("shell-workspace-cancel"))
+                .show_cancel(true),
+        )
+        // Plain `Dialog` never renders `button_props` buttons (only
+        // `AlertDialog` does), so the footer supplies them; the
+        // wrappers dispatch Confirm/CancelDialog into on_ok/on_cancel.
+        .footer(
+            DialogFooter::new()
+                .child(
+                    DialogAction::new().child(
+                        Button::new("create-ws")
+                            .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                            .label(t!("shell-workspace-create"))
+                            .primary(),
+                    ),
+                )
+                .child(
+                    DialogClose::new().child(
+                        Button::new("cancel-ws")
+                            .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                            .label(t!("shell-workspace-cancel")),
+                    ),
+                ),
+        )
+        .content(move |content, _, _| {
+            content.child(
+                v_flex()
+                    .gap_2()
+                    .child(div().text_sm().child(t!("shell-workspace-name-label")))
+                    .child(Input::new(&content_name))
+                    .child(content_dirs.clone()),
+            )
+        })
+        .on_ok(move |_, window, cx| {
+            let name = name_input.read(cx).value().trim().to_string();
+
+            let Some(roots) = dirs.read(cx).roots().cloned() else {
+                return false;
+            };
+
+            shell.update(cx, |this, cx| {
+                this.create_workspace(name, roots, window, cx);
+            });
+
+            true
+        })
 }
 
 /// Walk from just after `active` and wrap around, returning the first marked

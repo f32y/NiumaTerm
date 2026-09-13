@@ -210,15 +210,6 @@ pub fn local_state_file_path() -> PathBuf {
     config_dir_path().join("local_state.toml")
 }
 
-/// A missing or invalid file loads as the default (empty) state.
-pub fn load() -> LocalState {
-    load_from(&local_state_file_path())
-}
-
-fn load_from(path: &Path) -> LocalState {
-    try_load_from(path).unwrap_or_default()
-}
-
 /// A missing file loads as default; read and decoding failures reach startup.
 pub fn try_load() -> io::Result<LocalState> {
     try_load_from(&local_state_file_path())
@@ -235,11 +226,6 @@ fn decode(content: Option<&str>) -> io::Result<LocalState> {
             parse_toml(content).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
         },
     )
-}
-
-/// Atomic write (temp file + rename).
-pub fn save(state: &LocalState) -> io::Result<()> {
-    save_to(&local_state_file_path(), state)
 }
 
 /// Update only the supplied profiles, preserving windows and other profiles
@@ -276,6 +262,7 @@ fn update_state(path: &Path, edit: impl FnOnce(&mut LocalState)) -> io::Result<(
     })
 }
 
+#[cfg(test)]
 fn save_to(path: &Path, state: &LocalState) -> io::Result<()> {
     persistence::update(path, |_| {
         serialize_toml(state).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))

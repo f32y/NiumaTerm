@@ -108,7 +108,7 @@ fn update_check_item() -> SettingItem {
                 t!("settings-about-check-button")
             })
             .disabled(options.is_disabled() || busy)
-            .on_click(|_, _, cx: &mut App| update::check_now(cx));
+            .on_click(|_, _, cx: &mut App| update::check(cx));
 
         // The channel resolved a specific release, so the link goes to that
         // one rather than to the list the user would have to find it in. It

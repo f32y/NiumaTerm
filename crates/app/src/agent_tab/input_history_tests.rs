@@ -362,7 +362,7 @@ fn accepted_new_turn_and_steering_record_only_typed_input(cx: &mut TestAppContex
 
             pane.send_user_message(window, cx);
 
-            assert!(pane.send_text("/effort high".into(), cx));
+            assert!(pane.send_text_inner("/effort high".into(), None, None, cx));
 
             assert_eq!(
                 &*cx.global::<AgentInputHistory>()
@@ -703,7 +703,7 @@ fn interruption_restores_only_unanswered_input_and_preserves_new_drafts(cx: &mut
                     assert!(pane.attachments.annotations().is_empty());
                     assert!(pane.session.borrow().delivery.is_active());
 
-                    pane.apply_event(Event::TurnStarted, cx);
+                    pane.on_event(Event::TurnStarted, cx);
 
                     assert_eq!(pane.session.borrow().delivery.turn(), turn);
                 } else {
@@ -713,7 +713,7 @@ fn interruption_restores_only_unanswered_input_and_preserves_new_drafts(cx: &mut
                     assert!(!pane.transcript.read(cx).is_working());
                     assert!(!pane.session.borrow().delivery.is_active());
 
-                    pane.apply_event(Event::TurnStarted, cx);
+                    pane.on_event(Event::TurnStarted, cx);
 
                     assert_eq!(pane.session.borrow().delivery.turn(), turn + 1);
                     assert!(pane.transcript.read(cx).is_working());

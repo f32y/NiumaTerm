@@ -17,10 +17,10 @@ use crate::ui::settings::state::AppSettings;
 use crate::ui::{UI_RADIUS, default_font_fallbacks};
 
 pub(crate) fn install_terminal_settings(cx: &mut App) {
-    cx.set_global(snapshot(cx));
+    cx.set_global(terminal_snapshot(cx));
 
     cx.observe_global::<AppSettings>(|cx| {
-        let snapshot = snapshot(cx);
+        let snapshot = terminal_snapshot(cx);
 
         cx.set_global(snapshot);
     })
@@ -66,7 +66,7 @@ fn agent_snapshot(cx: &App) -> AgentSettings {
     }
 }
 
-fn snapshot(cx: &App) -> TerminalSettings {
+fn terminal_snapshot(cx: &App) -> TerminalSettings {
     let settings = cx.global::<AppSettings>();
 
     TerminalSettings {

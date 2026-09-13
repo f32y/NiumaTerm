@@ -4,7 +4,7 @@
 #[path = "usage_fetcher_tests.rs"]
 mod usage_fetcher_tests;
 
-use std::io::{BufRead as _, BufReader, Read as _, Write as _};
+use std::io::{self, BufRead as _, BufReader, Read as _, Write};
 use std::process::Stdio;
 use std::sync::mpsc;
 use std::thread;
@@ -70,61 +70,7 @@ pub fn fetch() -> Result<UsageSnapshot, String> {
         decode_child_output(&bytes)
     });
 
-    let result = (|| {
-        writeln!(
-            stdin,
-            "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"clientInfo\":{{\"name\":\"NiumaTerm\",\"version\":\"0.1.0\"}}}}}}",
-        )
-        .map_err(|err| format!("failed to initialize Codex app-server: {err}"))?;
-
-        stdin
-            .flush()
-            .map_err(|err| format!("failed to flush Codex request: {err}"))?;
-
-        let deadline = Instant::now() + FETCH_TIMEOUT;
-
-        let mut requested_limits = false;
-
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-
-            if remaining.is_zero() {
-                return Err("Codex app-server timed out".to_string());
-            }
-
-            let line = line_rx
-                .recv_timeout(remaining)
-                .map_err(|_| "Codex app-server timed out".to_string())?
-                .map_err(|err| format!("failed to read Codex response: {err}"))?;
-
-            let Ok(message) = from_str::<Value>(&line) else {
-                continue;
-            };
-
-            match message["id"].as_u64() {
-                Some(1) if !requested_limits => {
-                    writeln!(
-                        stdin,
-                        "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}",
-                    )
-                    .and_then(|_| {
-                        writeln!(
-                            stdin,
-                            "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"account/rateLimits/read\",\"params\":{{}}}}",
-                        )
-                    })
-                    .and_then(|_| stdin.flush())
-                    .map_err(|err| format!("failed to request Codex rate limits: {err}"))?;
-
-                    requested_limits = true;
-                }
-
-                Some(2) => return parse_rate_limits(&message),
-                _ => {}
-            }
-        }
-    })()
-    .map(UsageSnapshot::with_updated_now);
+    let result = read_rate_limits(&mut stdin, &line_rx).map(UsageSnapshot::with_updated_now);
 
     // Closing stdin lets app-server observe EOF and exit cleanly together
     // with its shim; the bounded wait gives it that chance before force
@@ -159,6 +105,64 @@ pub fn fetch() -> Result<UsageSnapshot, String> {
             format!("{err}: {stderr}")
         }
     })
+}
+
+fn read_rate_limits(
+    stdin: &mut impl Write,
+    line_rx: &mpsc::Receiver<io::Result<String>>,
+) -> Result<UsageSnapshot, String> {
+    writeln!(
+        stdin,
+        "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"clientInfo\":{{\"name\":\"NiumaTerm\",\"version\":\"0.1.0\"}}}}}}",
+    )
+    .map_err(|err| format!("failed to initialize Codex app-server: {err}"))?;
+
+    stdin
+        .flush()
+        .map_err(|err| format!("failed to flush Codex request: {err}"))?;
+
+    let deadline = Instant::now() + FETCH_TIMEOUT;
+
+    let mut requested_limits = false;
+
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+
+        if remaining.is_zero() {
+            return Err("Codex app-server timed out".to_string());
+        }
+
+        let line = line_rx
+            .recv_timeout(remaining)
+            .map_err(|_| "Codex app-server timed out".to_string())?
+            .map_err(|err| format!("failed to read Codex response: {err}"))?;
+
+        let Ok(message) = from_str::<Value>(&line) else {
+            continue;
+        };
+
+        match message["id"].as_u64() {
+            Some(1) if !requested_limits => {
+                writeln!(
+                    stdin,
+                    "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}",
+                )
+                .and_then(|_| {
+                    writeln!(
+                        stdin,
+                        "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"account/rateLimits/read\",\"params\":{{}}}}",
+                    )
+                })
+                .and_then(|_| stdin.flush())
+                .map_err(|err| format!("failed to request Codex rate limits: {err}"))?;
+
+                requested_limits = true;
+            }
+
+            Some(2) => return parse_rate_limits(&message),
+            _ => {}
+        }
+    }
 }
 
 fn parse_rate_limits(message: &Value) -> Result<UsageSnapshot, String> {

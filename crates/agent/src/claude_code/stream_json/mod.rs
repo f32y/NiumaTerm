@@ -369,7 +369,7 @@ impl Session {
         if force {
             // Forced closure retires requests before EOF can drain queued
             // side effects. Graceful shutdown still drains accepted input.
-            self.process_exit();
+            self.on_exit();
         }
 
         self.process.shutdown(timeout, force)
@@ -439,13 +439,13 @@ impl Session {
         }
 
         match message["type"].as_str() {
-            Some("system") => events.extend(self.process_system(&message)),
-            Some("stream_event") => events.extend(self.transcript.process_stream_event(&message)),
-            Some("assistant") => events.extend(self.transcript.process_assistant(&message)),
-            Some("user") => events.extend(self.transcript.process_tool_results(&message)),
-            Some("result") => events.extend(self.process_result(&message)),
-            Some("control_request") => events.extend(self.process_control_request(&message)),
-            Some("control_response") => events.extend(self.process_control_response(&message)),
+            Some("system") => events.extend(self.on_system(&message)),
+            Some("stream_event") => events.extend(self.transcript.on_stream_event(&message)),
+            Some("assistant") => events.extend(self.transcript.on_assistant(&message)),
+            Some("user") => events.extend(self.transcript.on_tool_results(&message)),
+            Some("result") => events.extend(self.on_result(&message)),
+            Some("control_request") => events.extend(self.on_control_request(&message)),
+            Some("control_response") => events.extend(self.on_control_response(&message)),
 
             Some("control_cancel_request") => {
                 if let Some(id) = message["request_id"].as_str() {
@@ -501,11 +501,11 @@ impl Session {
         }
 
         if settings.approval.is_some() && settings.approval != self.applied_permission {
-            let mode = settings.approval.clone().unwrap_or_default();
+            let approval = settings.approval.clone().unwrap_or_default();
 
             messages.push(
                 self.control
-                    .request(json!({"subtype": "set_permission_mode", "mode": mode}))
+                    .request(json!({"subtype": "set_permission_mode", "mode": approval}))
                     .1,
             );
         }
@@ -879,7 +879,7 @@ impl Session {
                 continue;
             }
 
-            let result = self.process_control_response(
+            let result = self.on_control_response(
                 &json!({"response": {"request_id": id, "subtype": "error", "error": message}}),
             );
 
@@ -896,7 +896,7 @@ impl Session {
         events
     }
 
-    pub fn process_exit(&mut self) -> Vec<Event> {
+    pub fn on_exit(&mut self) -> Vec<Event> {
         self.ready = false;
         self.turn_active = false;
         self.turn_reported = false;
@@ -1153,15 +1153,15 @@ impl Session {
         let _ = self.process.write_line(message);
     }
 
-    fn process_system(&mut self, message: &Value) -> Vec<Event> {
+    fn on_system(&mut self, message: &Value) -> Vec<Event> {
         match message["subtype"].as_str() {
-            Some("init") => self.process_init(message),
+            Some("init") => self.on_init(message),
             Some("status") => compaction_progress(&mut self.compacting, message),
 
             Some("compact_boundary") => {
                 self.compacting = false;
 
-                self.transcript.process_compact_boundary(message)
+                self.transcript.on_compact_boundary(message)
             }
 
             // Every other subtype (hook_*, thinking_tokens, informational, …)
@@ -1170,7 +1170,7 @@ impl Session {
         }
     }
 
-    fn process_init(&mut self, message: &Value) -> Vec<Event> {
+    fn on_init(&mut self, message: &Value) -> Vec<Event> {
         self.control.complete(INIT_REQUEST_ID);
 
         // The session id makes this conversation resumable by a future tab
@@ -1225,7 +1225,7 @@ impl Session {
         events
     }
 
-    fn process_result(&mut self, message: &Value) -> Vec<Event> {
+    fn on_result(&mut self, message: &Value) -> Vec<Event> {
         self.turn_active = false;
         self.turn_reported = false;
 
@@ -1271,7 +1271,7 @@ impl Session {
         events
     }
 
-    fn process_control_request(&mut self, message: &Value) -> Vec<Event> {
+    fn on_control_request(&mut self, message: &Value) -> Vec<Event> {
         let request_id = message["request_id"]
             .as_str()
             .unwrap_or_default()
@@ -1341,7 +1341,7 @@ impl Session {
         vec![Event::ApprovalRequested { description }]
     }
 
-    fn process_control_response(&mut self, message: &Value) -> Vec<Event> {
+    fn on_control_response(&mut self, message: &Value) -> Vec<Event> {
         let response = &message["response"];
 
         if let Some(id) = response["request_id"].as_str() {

@@ -1,3 +1,4 @@
+use gpui_component::dialog::Dialog;
 use std::borrow::Cow;
 
 use app::agent_tab::{AgentKind, AgentKindExt as _};
@@ -100,55 +101,59 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
     });
 
     window.open_dialog(cx, move |dialog, window, _| {
-        let title = if target.is_some() {
-            t!("settings-agent-profile-edit-title")
-        } else {
-            t!("settings-agent-profile-add-title")
-        };
-
-        let settings_height = window.viewport_size().height;
-        let dialog_height = settings_height * 0.72;
-        let dialog_top = (settings_height - dialog_height) * 0.5;
-
-        // Deleting lives in the profile list's own row control, so this
-        // dialog stays an editor: everything in it is reversible by cancelling.
-        let footer = DialogFooter::new()
-            .child(
-                Button::new("agent-profile-save")
-                    .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                    .primary()
-                    .label(t!("settings-common-save"))
-                    .on_click(|_, window, cx: &mut App| {
-                        save_agent_profile_draft(cx);
-                        window.close_dialog(cx);
-                    }),
-            )
-            .child(
-                DialogClose::new().child(
-                    Button::new("agent-profile-cancel")
-                        .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                        .label(t!("settings-common-cancel")),
-                ),
-            );
-
-        dialog
-            .title(title)
-            .overlay_closable(false)
-            .margin_top(dialog_top)
-            .w(px(1000.))
-            .h(dialog_height)
-            .content(|content, window, cx| {
-                content.overflow_hidden().child(
-                    div().flex_1().overflow_hidden().child(
-                        v_flex()
-                            .size_full()
-                            .overflow_y_scrollbar()
-                            .child(div().pr_2().child(agent_profile_dialog_content(window, cx))),
-                    ),
-                )
-            })
-            .footer(footer)
+        agent_profile_dialog(dialog, target, window)
     });
+}
+
+fn agent_profile_dialog(dialog: Dialog, target: Option<usize>, window: &Window) -> Dialog {
+    let title = if target.is_some() {
+        t!("settings-agent-profile-edit-title")
+    } else {
+        t!("settings-agent-profile-add-title")
+    };
+
+    let settings_height = window.viewport_size().height;
+    let dialog_height = settings_height * 0.72;
+    let dialog_top = (settings_height - dialog_height) * 0.5;
+
+    // Deleting lives in the profile list's own row control, so this
+    // dialog stays an editor: everything in it is reversible by cancelling.
+    let footer = DialogFooter::new()
+        .child(
+            Button::new("agent-profile-save")
+                .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                .primary()
+                .label(t!("settings-common-save"))
+                .on_click(|_, window, cx: &mut App| {
+                    save_agent_profile_draft(cx);
+                    window.close_dialog(cx);
+                }),
+        )
+        .child(
+            DialogClose::new().child(
+                Button::new("agent-profile-cancel")
+                    .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                    .label(t!("settings-common-cancel")),
+            ),
+        );
+
+    dialog
+        .title(title)
+        .overlay_closable(false)
+        .margin_top(dialog_top)
+        .w(px(1000.))
+        .h(dialog_height)
+        .content(|content, window, cx| {
+            content.overflow_hidden().child(
+                div().flex_1().overflow_hidden().child(
+                    v_flex()
+                        .size_full()
+                        .overflow_y_scrollbar()
+                        .child(div().pr_2().child(agent_profile_dialog_content(window, cx))),
+                ),
+            )
+        })
+        .footer(footer)
 }
 
 /// Commit the dialog draft into `AppSettings`: dedupe the name, then update

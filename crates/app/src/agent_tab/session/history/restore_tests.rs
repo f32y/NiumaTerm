@@ -146,7 +146,7 @@ fn failed_resume_keeps_the_transcript_and_current_controls(cx: &mut TestAppConte
     cx.update(|_, cx| {
         pane.update(cx, |pane, cx| {
             install_backend(pane);
-            pane.apply_replay(replay("current"), cx);
+            pane.on_replay(replay("current"), cx);
             pane.session.borrow_mut().controls.settings.model = Some("current-model".into());
 
             let settings = pane.session.borrow().controls.settings.clone();
@@ -159,7 +159,7 @@ fn failed_resume_keeps_the_transcript_and_current_controls(cx: &mut TestAppConte
             assert_eq!(pane.history_ui.mode, RecentSessionsMode::Loading);
             assert_eq!(user_rows(pane, cx), ["current"]);
 
-            pane.apply_event(
+            pane.on_event(
                 Event::Error {
                     message: "resume rejected".into(),
                     fatal: false,
@@ -183,7 +183,7 @@ fn failed_replacement_keeps_old_rows_and_never_publishes_pending_history(cx: &mu
     cx.update(|_, cx| {
         pane.update(cx, |pane, cx| {
             install_backend(pane);
-            pane.apply_replay(replay("current"), cx);
+            pane.on_replay(replay("current"), cx);
 
             let identity = prepare_local_replay(pane);
             let epoch = pane.session.borrow_mut().runtime.begin_start();
@@ -225,7 +225,7 @@ fn local_history_waits_for_ready_and_repeated_ready_does_not_erase_new_rows(
     cx.update(|_, cx| {
         pane.update(cx, |pane, cx| {
             install_backend(pane);
-            pane.apply_replay(replay("current"), cx);
+            pane.on_replay(replay("current"), cx);
 
             let identity = prepare_local_replay(pane);
             let epoch = pane.session.borrow_mut().runtime.begin_start();
@@ -237,13 +237,13 @@ fn local_history_waits_for_ready_and_repeated_ready_does_not_erase_new_rows(
 
             assert_eq!(user_rows(pane, cx), ["current"]);
 
-            pane.apply_event(Event::Ready(ThreadSettings::default()), cx);
+            pane.on_event(Event::Ready(ThreadSettings::default()), cx);
 
             assert_eq!(user_rows(pane, cx), ["restored"]);
             assert_eq!(pane.history_ui.mode, RecentSessionsMode::Hidden);
 
-            pane.apply_replay(replay("new prompt"), cx);
-            pane.apply_event(Event::Ready(ThreadSettings::default()), cx);
+            pane.on_replay(replay("new prompt"), cx);
+            pane.on_event(Event::Ready(ThreadSettings::default()), cx);
 
             assert_eq!(user_rows(pane, cx), ["restored", "new prompt"]);
         })
@@ -271,8 +271,8 @@ fn resumed_codex_controls_keep_provider_values_instead_of_local_defaults(cx: &mu
                 ..ThreadSettings::default()
             };
 
-            pane.apply_event(Event::Ready(settings), cx);
-            pane.apply_event(Event::Replay(replay("restored")), cx);
+            pane.on_event(Event::Ready(settings), cx);
+            pane.on_event(Event::Replay(replay("restored")), cx);
 
             assert_eq!(
                 pane.session.borrow().controls.settings.model.as_deref(),
@@ -298,7 +298,7 @@ fn old_backend_events_during_disk_read_leave_visible_rows_and_settings_untouched
     cx.update(|_, cx| {
         pane.update(cx, |pane, cx| {
             install_backend(pane);
-            pane.apply_replay(replay("current"), cx);
+            pane.on_replay(replay("current"), cx);
             pane.session.borrow_mut().controls.settings.model = Some("current-model".into());
 
             let settings = pane.session.borrow().controls.settings.clone();
@@ -320,7 +320,7 @@ fn old_backend_events_during_disk_read_leave_visible_rows_and_settings_untouched
 
             pane.history_ui.mode = RecentSessionsMode::Loading;
 
-            pane.apply_event(
+            pane.on_event(
                 Event::Ready(ThreadSettings {
                     model: Some("old-handshake".into()),
                     ..ThreadSettings::default()
@@ -328,7 +328,7 @@ fn old_backend_events_during_disk_read_leave_visible_rows_and_settings_untouched
                 cx,
             );
 
-            pane.apply_event(Event::Replay(replay("old-handshake")), cx);
+            pane.on_event(Event::Replay(replay("old-handshake")), cx);
 
             assert_eq!(pane.session.borrow().runtime.status(), Status::Starting);
             assert_eq!(pane.history_ui.mode, RecentSessionsMode::Loading);

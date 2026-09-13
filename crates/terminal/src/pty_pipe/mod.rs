@@ -14,6 +14,7 @@ mod scrollback_tests;
 #[cfg(test)]
 mod ghostty_mirror_tests;
 
+use std::borrow::Cow;
 use std::io::{self, ErrorKind, Read, Write};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{self, Arc, mpsc};
@@ -26,7 +27,7 @@ use nmt_platform::conpty_realign::{
     is_conpty_resize_echo_input, is_conpty_resize_repaint, rewrite_conpty_resize_echo_cup_rows,
     su_realign_count,
 };
-use nmt_platform::{ChildEvent, EventedPty, Events, Interest, Poll, Token, Waker};
+use nmt_platform::{ChildEvent, EventedPty, Events, Interest, Poll, Token, Waker, WinsizeBuilder};
 #[cfg(enable_profiling)]
 use nmt_profiling::pty::{BatchEnd, PtyProfiler, Stage};
 use tracing::{error, warn};
@@ -415,7 +416,7 @@ where
                 },
             }
 
-            self.process_pty_chunk(&buf[..unprocessed]);
+            self.on_pty_chunk(&buf[..unprocessed]);
 
             // Content changed, so invalidate the cached deep-search corpus.
             self.content_version
@@ -461,7 +462,7 @@ where
     }
 
     #[inline]
-    fn process_pty_chunk(&mut self, input: &[u8]) {
+    fn on_pty_chunk(&mut self, input: &[u8]) {
         #[cfg(enable_profiling)]
         let ingest_started = self.profile.start();
 
@@ -896,153 +897,15 @@ where
 
             match msg {
                 Msg::Input(input) => {
-                    // Only treat input as a resize echo for a brief window after a
-                    // resize (the keystroke typed *during* the repaint, whose ConPTY
-                    // echo lands at a stale CUP). The `reads_remaining` countdown
-                    // doesn't close this window when the user is idle then types a
-                    // fast burst (one channel drain → one `pty_read`), so bound it by
-                    // time. Without this, ordinary typing after a resize keeps being
-                    // realigned and the input/prompt accumulates.
-                    const RESIZE_ECHO_WINDOW: time::Duration = time::Duration::from_millis(150);
-
-                    if nmt_platform::USES_CONPTY
-                        && self.conpty_resize_echo_realign
-                        && self
-                            .conpty_resize_at
-                            .is_some_and(|t| t.elapsed() < RESIZE_ECHO_WINDOW)
-                        && is_conpty_resize_echo_input(input.as_ref())
-                    {
-                        self.conpty_resize_echo_pending = true;
-                    }
-
-                    state.write_list.push_back(input)
+                    self.on_input(input, state);
                 }
 
                 Msg::Resize(window_size) => {
-                    // Keep the Ghostty engine sized to match the PTY/Crosswords.
-                    let cols = window_size.cols.max(1);
-                    let rows = window_size.rows.max(1);
-                    let cell_w = (window_size.width / cols).max(1) as u32;
-                    let cell_h = (window_size.height / rows).max(1) as u32;
-                    let mut blocks_sync: Option<Vec<(ghostty::BlockHandle, usize)>> = None;
-
-                    let (snapshot, active_row) = {
-                        let engine = &mut self.ghostty;
-
-                        if vt_trace::enabled() {
-                            vt_trace::trace(
-                                "perf_resize_before",
-                                engine,
-                                &format!(
-                                    "request cols={} rows={} px={}x{} cell={}x{}",
-                                    cols,
-                                    rows,
-                                    window_size.width,
-                                    window_size.height,
-                                    cell_w,
-                                    cell_h
-                                ),
-                            );
-                        }
-
-                        if let Err(err) = engine.resize(cols, rows, cell_w, cell_h) {
-                            warn!("engine resize failed: {err:?}");
-                        }
-
-                        #[cfg(enable_profiling)]
-                        self.profile.set_grid(engine.cols(), engine.rows());
-
-                        if vt_trace::enabled() {
-                            vt_trace::trace(
-                                "perf_resize_after_engine",
-                                engine,
-                                &format!(
-                                    "applied cols={} rows={} cell={}x{}",
-                                    cols, rows, cell_w, cell_h
-                                ),
-                            );
-                        }
-
-                        // Engine-blocks: resize eagerly reflowed every finished
-                        // block (new generations + row counts) — ship the fresh
-                        // list so the store's cached layout follows the engine reflow.
-                        if self.engine_blocks && engine.block_count() > 0 {
-                            blocks_sync = Some(engine_blocks_live_list(engine));
-                        }
-
-                        #[cfg(enable_profiling)]
-                        let capture_started = self.profile.start();
-
-                        let capture = engine.snapshot_into(&mut self.back_buffer);
-
-                        #[cfg(enable_profiling)]
-                        self.profile.record(Stage::CaptureResize, capture_started);
-
-                        (capture, engine.active_cursor_row())
-                    };
-
-                    if let Some(live) = blocks_sync {
-                        self.event_proxy.send_event(
-                            TerminalEvent::BlockBatch(vec![event::BlockEvent::EngineBlocksSync(
-                                live,
-                            )]),
-                            self.window_id,
-                        );
-                    }
-
-                    self.back_buffer.revision = self
-                        .content_version
-                        .fetch_add(1, sync::atomic::Ordering::Relaxed)
-                        + 1;
-
-                    self.back_buffer.theme_revision = self.theme_revision;
-                    self.last_snapshot_at = Some(time::Instant::now());
-
-                    #[cfg(enable_profiling)]
-                    let publish_started = self.profile.start();
-
-                    let published = publish_render_buffer(
-                        &self.render_buffer,
-                        &mut self.back_buffer,
-                        snapshot,
-                        self.sniffer.progress_active(),
-                    );
-
-                    #[cfg(enable_profiling)]
-                    self.profile.record(Stage::Publish, publish_started);
-
-                    if published {
-                        // VT modes do not change on resize, so the lock-free
-                        // atomic remains valid from the last PTY read.
-                        self.event_proxy.send_event(
-                            TerminalEvent::TerminalDamaged(self.route_id),
-                            self.window_id,
-                        );
-                    }
-
-                    if nmt_platform::USES_CONPTY {
-                        self.conpty_resize_echo_realign = true;
-                        self.conpty_resize_at = Some(time::Instant::now());
-                        self.conpty_resize_repaint_reads_remaining = 8;
-
-                        // Latch the prompt row and size now so SU realignment uses the
-                        // pre-resize cursor position.
-                        // `active_cursor_row()` is on the prompt row here, but flips
-                        // within one frame once ConPTY's first repaint CUP lands, so it
-                        // must be captured at resize time, not read live in the storm.
-                        self.conpty_resize_prompt_row = active_row.unwrap_or(0);
-                        self.conpty_resize_cols = cols;
-                        self.conpty_resize_rows = rows;
-                        self.su_realign_armed = active_row.is_some();
-                    }
-
-                    if let Err(err) = self.pty.set_winsize(window_size) {
-                        warn!("pty set_winsize failed: {err}");
-                    }
+                    self.on_resize(window_size);
                 }
 
                 Msg::Shutdown => return false,
-                request => self.handle_request(request),
+                request => self.on_request(request),
             }
         }
 
@@ -1050,6 +913,145 @@ where
         let _ = self.waker.wake();
 
         true
+    }
+
+    fn on_input(&mut self, input: Cow<'static, [u8]>, state: &mut PtyState) {
+        // Only treat input as a resize echo for a brief window after a
+        // resize (the keystroke typed *during* the repaint, whose ConPTY
+        // echo lands at a stale CUP). The `reads_remaining` countdown
+        // doesn't close this window when the user is idle then types a
+        // fast burst (one channel drain → one `pty_read`), so bound it by
+        // time. Without this, ordinary typing after a resize keeps being
+        // realigned and the input/prompt accumulates.
+        const RESIZE_ECHO_WINDOW: time::Duration = time::Duration::from_millis(150);
+
+        if nmt_platform::USES_CONPTY
+            && self.conpty_resize_echo_realign
+            && self
+                .conpty_resize_at
+                .is_some_and(|t| t.elapsed() < RESIZE_ECHO_WINDOW)
+            && is_conpty_resize_echo_input(input.as_ref())
+        {
+            self.conpty_resize_echo_pending = true;
+        }
+
+        state.write_list.push_back(input)
+    }
+
+    fn on_resize(&mut self, window_size: WinsizeBuilder) {
+        // Keep the Ghostty engine sized to match the PTY/Crosswords.
+        let cols = window_size.cols.max(1);
+        let rows = window_size.rows.max(1);
+        let cell_w = (window_size.width / cols).max(1) as u32;
+        let cell_h = (window_size.height / rows).max(1) as u32;
+        let mut blocks_sync: Option<Vec<(ghostty::BlockHandle, usize)>> = None;
+
+        let (snapshot, active_row) = {
+            let engine = &mut self.ghostty;
+
+            if vt_trace::enabled() {
+                vt_trace::trace(
+                    "perf_resize_before",
+                    engine,
+                    &format!(
+                        "request cols={} rows={} px={}x{} cell={}x{}",
+                        cols, rows, window_size.width, window_size.height, cell_w, cell_h
+                    ),
+                );
+            }
+
+            if let Err(err) = engine.resize(cols, rows, cell_w, cell_h) {
+                warn!("engine resize failed: {err:?}");
+            }
+
+            #[cfg(enable_profiling)]
+            self.profile.set_grid(engine.cols(), engine.rows());
+
+            if vt_trace::enabled() {
+                vt_trace::trace(
+                    "perf_resize_after_engine",
+                    engine,
+                    &format!(
+                        "applied cols={} rows={} cell={}x{}",
+                        cols, rows, cell_w, cell_h
+                    ),
+                );
+            }
+
+            // Engine-blocks: resize eagerly reflowed every finished
+            // block (new generations + row counts) — ship the fresh
+            // list so the store's cached layout follows the engine reflow.
+            if self.engine_blocks && engine.block_count() > 0 {
+                blocks_sync = Some(engine_blocks_live_list(engine));
+            }
+
+            #[cfg(enable_profiling)]
+            let capture_started = self.profile.start();
+
+            let capture = engine.snapshot_into(&mut self.back_buffer);
+
+            #[cfg(enable_profiling)]
+            self.profile.record(Stage::CaptureResize, capture_started);
+
+            (capture, engine.active_cursor_row())
+        };
+
+        if let Some(live) = blocks_sync {
+            self.event_proxy.send_event(
+                TerminalEvent::BlockBatch(vec![event::BlockEvent::EngineBlocksSync(live)]),
+                self.window_id,
+            );
+        }
+
+        self.back_buffer.revision = self
+            .content_version
+            .fetch_add(1, sync::atomic::Ordering::Relaxed)
+            + 1;
+
+        self.back_buffer.theme_revision = self.theme_revision;
+        self.last_snapshot_at = Some(time::Instant::now());
+
+        #[cfg(enable_profiling)]
+        let publish_started = self.profile.start();
+
+        let published = publish_render_buffer(
+            &self.render_buffer,
+            &mut self.back_buffer,
+            snapshot,
+            self.sniffer.progress_active(),
+        );
+
+        #[cfg(enable_profiling)]
+        self.profile.record(Stage::Publish, publish_started);
+
+        if published {
+            // VT modes do not change on resize, so the lock-free
+            // atomic remains valid from the last PTY read.
+            self.event_proxy.send_event(
+                TerminalEvent::TerminalDamaged(self.route_id),
+                self.window_id,
+            );
+        }
+
+        if nmt_platform::USES_CONPTY {
+            self.conpty_resize_echo_realign = true;
+            self.conpty_resize_at = Some(time::Instant::now());
+            self.conpty_resize_repaint_reads_remaining = 8;
+
+            // Latch the prompt row and size now so SU realignment uses the
+            // pre-resize cursor position.
+            // `active_cursor_row()` is on the prompt row here, but flips
+            // within one frame once ConPTY's first repaint CUP lands, so it
+            // must be captured at resize time, not read live in the storm.
+            self.conpty_resize_prompt_row = active_row.unwrap_or(0);
+            self.conpty_resize_cols = cols;
+            self.conpty_resize_rows = rows;
+            self.su_realign_armed = active_row.is_some();
+        }
+
+        if let Err(err) = self.pty.set_winsize(window_size) {
+            warn!("pty set_winsize failed: {err}");
+        }
     }
 
     #[inline]
@@ -1300,7 +1302,7 @@ where
             .expect("thread spawn works")
     }
 
-    fn handle_request(&mut self, request: Msg) {
+    fn on_request(&mut self, request: Msg) {
         match request {
             Msg::Scroll(delta) => {
                 self.ghostty.scroll_viewport_delta(delta);

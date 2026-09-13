@@ -46,6 +46,188 @@ impl ContextUsageIndicator {
     }
 }
 
+impl RenderOnce for ContextUsageIndicator {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let usage = self.usage;
+        let indicator_label = context_indicator_label(usage);
+
+        let accessibility_label =
+            t!("agent-context-accessibility", usage = &indicator_label).into_owned();
+
+        let (capacity_label, remaining_label) = context_capacity_labels(usage);
+
+        // Both sections report the same categories, so the live context and
+        // the last turn can be read against each other. A conversation
+        // restored from history knows only its total, and that alone keeps the
+        // section present until the first reply reports the categories.
+        let current_rows = token_usage_rows(usage.current, /*include_total*/ true);
+        let cumulative = usage.cumulative;
+
+        let segment_rows = self
+            .composition
+            .as_ref()
+            .map(context_segment_rows)
+            .unwrap_or_default();
+
+        // A conversation that has not closed a step yet reports zeroes, which
+        // describe nothing; the section appears once there is something in it.
+        let stats = self.stats.filter(|stats| stats.steps > 0);
+
+        let trigger = h_flex()
+            .id("agent-context-trigger")
+            .flex_none()
+            .gap_1p5()
+            .items_center()
+            .aria_label(accessibility_label)
+            .text_color(cx.theme().muted_foreground.opacity(0.72))
+            .child(Icon::new(IconName::ChartPie).size_3())
+            .child(div().child(indicator_label));
+
+        HoverCard::new("agent-context-usage")
+            .anchor(gpui::Anchor::BottomRight)
+            .open_delay(Duration::from_millis(250))
+            .close_delay(Duration::from_millis(150))
+            .trigger(trigger)
+            .content(move |_, _, cx| {
+                let foreground = cx.theme().foreground;
+                let muted = cx.theme().muted_foreground;
+
+                v_flex()
+                    .w(px(248.))
+                    .gap_2()
+                    .child(
+                        v_flex()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(muted.opacity(0.72))
+                                    .child(t!("agent-context-heading")),
+                            )
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .items_center()
+                                    .justify_between()
+                                    .gap_3()
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(foreground)
+                                            .child(capacity_label.clone()),
+                                    )
+                                    .when_some(remaining_label.clone(), |this, label| {
+                                        this.child(
+                                            div()
+                                                .flex_none()
+                                                .text_xs()
+                                                .text_color(cx.theme().primary)
+                                                .child(label),
+                                        )
+                                    }),
+                            ),
+                    )
+                    .when(!segment_rows.is_empty(), |this| {
+                        this.child(
+                            v_flex()
+                                .gap_1()
+                                .pt_2()
+                                .border_t_1()
+                                .border_color(cx.theme().border.opacity(0.6))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(muted.opacity(0.72))
+                                        .child(t!("agent-context-what-fills-it")),
+                                )
+                                .children(segment_rows.iter().cloned()),
+                        )
+                    })
+                    .when(!current_rows.is_empty(), |this| {
+                        this.child(
+                            v_flex()
+                                .gap_1()
+                                .pt_2()
+                                .border_t_1()
+                                .border_color(cx.theme().border.opacity(0.6))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(muted.opacity(0.72))
+                                        .child(t!("agent-context-current")),
+                                )
+                                .children(current_rows.iter().cloned()),
+                        )
+                    })
+                    .when_some(stats, |this, stats| {
+                        let rows = [
+                            ("agent-context-session-turns", stats.turns.to_string()),
+                            ("agent-context-session-steps", stats.steps.to_string()),
+                            (
+                                "agent-context-session-model-time",
+                                wall_time_readout(stats.model_ms),
+                            ),
+                            (
+                                "agent-context-session-tool-time",
+                                wall_time_readout(stats.tool_ms),
+                            ),
+                        ];
+
+                        this.child(
+                            v_flex()
+                                .gap_1()
+                                .pt_2()
+                                .border_t_1()
+                                .border_color(cx.theme().border.opacity(0.6))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(muted.opacity(0.72))
+                                        .child(t!("agent-context-session-heading")),
+                                )
+                                .children(rows.map(|(label, value)| {
+                                    h_flex()
+                                        .w_full()
+                                        .justify_between()
+                                        .gap_3()
+                                        .text_xs()
+                                        .child(
+                                            div().text_color(muted.opacity(0.86)).child(t!(label)),
+                                        )
+                                        .child(
+                                            div().text_color(foreground.opacity(0.86)).child(value),
+                                        )
+                                })),
+                        )
+                    })
+                    .when_some(cumulative, |this, cumulative| {
+                        let rows = token_usage_rows(cumulative.breakdown, true);
+
+                        this.child(
+                            v_flex()
+                                .gap_1()
+                                .pt_2()
+                                .border_t_1()
+                                .border_color(cx.theme().border.opacity(0.6))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(muted.opacity(0.72))
+                                        .child(cumulative_usage_heading(cumulative.scope)),
+                                )
+                                .children(rows),
+                        )
+                    })
+            })
+    }
+}
+
 /// Wall time as the largest unit that still reads as a duration rather than as
 /// a number: a tool that ran for two minutes is more legible as `2m 5s` than as
 /// either `125s` or `0.03h`.
@@ -317,187 +499,5 @@ impl RenderOnce for TokenUsageRow {
                     })
                     .child(compact_token_count(self.tokens)),
             )
-    }
-}
-
-impl RenderOnce for ContextUsageIndicator {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let usage = self.usage;
-        let indicator_label = context_indicator_label(usage);
-
-        let accessibility_label =
-            t!("agent-context-accessibility", usage = &indicator_label).into_owned();
-
-        let (capacity_label, remaining_label) = context_capacity_labels(usage);
-
-        // Both sections report the same categories, so the live context and
-        // the last turn can be read against each other. A conversation
-        // restored from history knows only its total, and that alone keeps the
-        // section present until the first reply reports the categories.
-        let current_rows = token_usage_rows(usage.current, /*include_total*/ true);
-        let cumulative = usage.cumulative;
-
-        let segment_rows = self
-            .composition
-            .as_ref()
-            .map(context_segment_rows)
-            .unwrap_or_default();
-
-        // A conversation that has not closed a step yet reports zeroes, which
-        // describe nothing; the section appears once there is something in it.
-        let stats = self.stats.filter(|stats| stats.steps > 0);
-
-        let trigger = h_flex()
-            .id("agent-context-trigger")
-            .flex_none()
-            .gap_1p5()
-            .items_center()
-            .aria_label(accessibility_label)
-            .text_color(cx.theme().muted_foreground.opacity(0.72))
-            .child(Icon::new(IconName::ChartPie).size_3())
-            .child(div().child(indicator_label));
-
-        HoverCard::new("agent-context-usage")
-            .anchor(gpui::Anchor::BottomRight)
-            .open_delay(Duration::from_millis(250))
-            .close_delay(Duration::from_millis(150))
-            .trigger(trigger)
-            .content(move |_, _, cx| {
-                let foreground = cx.theme().foreground;
-                let muted = cx.theme().muted_foreground;
-
-                v_flex()
-                    .w(px(248.))
-                    .gap_2()
-                    .child(
-                        v_flex()
-                            .gap_0p5()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(muted.opacity(0.72))
-                                    .child(t!("agent-context-heading")),
-                            )
-                            .child(
-                                h_flex()
-                                    .w_full()
-                                    .items_center()
-                                    .justify_between()
-                                    .gap_3()
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(foreground)
-                                            .child(capacity_label.clone()),
-                                    )
-                                    .when_some(remaining_label.clone(), |this, label| {
-                                        this.child(
-                                            div()
-                                                .flex_none()
-                                                .text_xs()
-                                                .text_color(cx.theme().primary)
-                                                .child(label),
-                                        )
-                                    }),
-                            ),
-                    )
-                    .when(!segment_rows.is_empty(), |this| {
-                        this.child(
-                            v_flex()
-                                .gap_1()
-                                .pt_2()
-                                .border_t_1()
-                                .border_color(cx.theme().border.opacity(0.6))
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(muted.opacity(0.72))
-                                        .child(t!("agent-context-what-fills-it")),
-                                )
-                                .children(segment_rows.iter().cloned()),
-                        )
-                    })
-                    .when(!current_rows.is_empty(), |this| {
-                        this.child(
-                            v_flex()
-                                .gap_1()
-                                .pt_2()
-                                .border_t_1()
-                                .border_color(cx.theme().border.opacity(0.6))
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(muted.opacity(0.72))
-                                        .child(t!("agent-context-current")),
-                                )
-                                .children(current_rows.iter().cloned()),
-                        )
-                    })
-                    .when_some(stats, |this, stats| {
-                        let rows = [
-                            ("agent-context-session-turns", stats.turns.to_string()),
-                            ("agent-context-session-steps", stats.steps.to_string()),
-                            (
-                                "agent-context-session-model-time",
-                                wall_time_readout(stats.model_ms),
-                            ),
-                            (
-                                "agent-context-session-tool-time",
-                                wall_time_readout(stats.tool_ms),
-                            ),
-                        ];
-
-                        this.child(
-                            v_flex()
-                                .gap_1()
-                                .pt_2()
-                                .border_t_1()
-                                .border_color(cx.theme().border.opacity(0.6))
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(muted.opacity(0.72))
-                                        .child(t!("agent-context-session-heading")),
-                                )
-                                .children(rows.map(|(label, value)| {
-                                    h_flex()
-                                        .w_full()
-                                        .justify_between()
-                                        .gap_3()
-                                        .text_xs()
-                                        .child(
-                                            div().text_color(muted.opacity(0.86)).child(t!(label)),
-                                        )
-                                        .child(
-                                            div().text_color(foreground.opacity(0.86)).child(value),
-                                        )
-                                })),
-                        )
-                    })
-                    .when_some(cumulative, |this, cumulative| {
-                        let rows = token_usage_rows(cumulative.breakdown, true);
-
-                        this.child(
-                            v_flex()
-                                .gap_1()
-                                .pt_2()
-                                .border_t_1()
-                                .border_color(cx.theme().border.opacity(0.6))
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(muted.opacity(0.72))
-                                        .child(cumulative_usage_heading(cumulative.scope)),
-                                )
-                                .children(rows),
-                        )
-                    })
-            })
     }
 }

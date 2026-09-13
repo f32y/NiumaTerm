@@ -472,7 +472,7 @@ impl Render for TranscriptView {
         }
 
         let settings = cx.global::<AgentSettings>();
-        let collapse = settings.collapse_tool_calls;
+        let collapse_tool_calls = settings.collapse_tool_calls;
         let smooth_wheel = settings.smooth_wheel;
 
         let font = (
@@ -488,8 +488,8 @@ impl Render for TranscriptView {
         // open exactly the turns the user had folded and fold the ones they
         // had opened, which reads as the setting doing the opposite of what it
         // says.
-        if self.collapse_mode != collapse {
-            self.collapse_mode = collapse;
+        if self.collapse_mode != collapse_tool_calls {
+            self.collapse_mode = collapse_tool_calls;
 
             // Anything mid-exit goes with its own state: dropping the reveal
             // alone would strand the disclosure open with nothing left to
@@ -498,7 +498,8 @@ impl Render for TranscriptView {
                 self.take_down_disclosure(key);
             }
 
-            self.disclosures.forget_departures(folds_turns(collapse));
+            self.disclosures
+                .forget_departures(folds_turns(collapse_tool_calls));
         }
 
         self.transcript_list.set_smooth_wheel_enabled(smooth_wheel);
@@ -507,7 +508,7 @@ impl Render for TranscriptView {
         // tagged with a monotonic turn id, so turns are contiguous slices).
         // Only the visible slice becomes elements; the spec diff tells the
         // list which rows changed shape.
-        self.refresh_rows(collapse);
+        self.refresh_rows(collapse_tool_calls);
 
         if self.transcript_font != font {
             self.transcript_font = font;

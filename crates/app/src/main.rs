@@ -51,7 +51,7 @@ use gpui_macos::MacPlatform as Platform;
 use gpui_windows::WindowsPlatform as Platform;
 use nmt_agent::{AgentEvent, AgentRoute, agent_process};
 use nmt_config::local_state::{self, LocalState};
-use nmt_config::{Config, enable_testing_mode, get, init};
+use nmt_config::{Config, config_dir_path, config_file_path, enable_testing_mode, get, init};
 use nmt_platform::ipc as platform_ipc;
 use nmt_platform::window::show_error_dialog;
 #[cfg(enable_profiling)]
@@ -443,18 +443,18 @@ fn on_settings_changed(cx: &mut App) {
     agent_updates::reconcile_profiles(&agent_profiles, cx);
 
     #[cfg(windows)]
-    update::settings_changed(cx);
+    update::on_settings_changed(cx);
 
     #[cfg(target_os = "macos")]
-    sparkle::settings_changed(cx);
+    sparkle::on_settings_changed(cx);
 
-    let smooth_panels = cx
+    let enable_smooth_scrolling = cx
         .global::<AppSettings>()
         .appearance
         .smooth_scrolling
         .panels_enabled();
 
-    cx.set_smooth_wheel_scrolling(smooth_panels);
+    cx.set_smooth_wheel_scrolling(enable_smooth_scrolling);
 
     // Opacity changes retint the theme and switch each window
     // between acrylic composition and opaque presentation.
@@ -530,7 +530,7 @@ fn on_app_quit(cx: &mut App) -> Ready<()> {
         warn!("failed to save settings on application shutdown: {error}");
     }
 
-    let save_session = cx
+    let restore_last_session_when_opening = cx
         .global::<AppSettings>()
         .system
         .restore_last_session_when_opening;
@@ -539,7 +539,7 @@ fn on_app_quit(cx: &mut App) -> Ready<()> {
         .global::<WindowRegistry>()
         .0
         .iter()
-        .map(|(_, w)| w.to_local_state(save_session))
+        .map(|(_, w)| w.to_local_state(restore_last_session_when_opening))
         .collect();
 
     if !windows.is_empty()
@@ -552,9 +552,10 @@ fn on_app_quit(cx: &mut App) -> Ready<()> {
 }
 
 fn load_startup_files_or_exit() -> StartupFiles {
-    let config = Config::load_for_startup().unwrap_or_else(|err| {
-        startup_error_and_exit("config.toml", &err.to_string());
-    });
+    let config = Config::load_for_startup_from(&config_file_path(), &config_dir_path())
+        .unwrap_or_else(|err| {
+            startup_error_and_exit("config.toml", &err.to_string());
+        });
 
     init(config);
 
@@ -661,7 +662,7 @@ fn on_ipc_cli(action: CliAction, cx: &mut App) {
         CliAction::FocusNotification {
             route,
             notification_id,
-        } => dispatch_focus_notification(&route, &notification_id, cx),
+        } => on_ipc_focus_notification(&route, &notification_id, cx),
 
         CliAction::Activate => foreground_last_active(cx),
 
@@ -766,7 +767,7 @@ fn openable_directory(path: path::PathBuf, cx: &mut App) -> Option<path::PathBuf
     None
 }
 
-fn dispatch_focus_notification(route: &AgentRoute, notification_id: &str, cx: &mut App) {
+fn on_ipc_focus_notification(route: &AgentRoute, notification_id: &str, cx: &mut App) {
     let targets: Vec<_> = cx
         .global::<ShellRegistry>()
         .0
@@ -809,7 +810,7 @@ fn on_ipc_agent_hook(event: AgentEvent, cx: &mut App) {
         let event = event.clone();
 
         if shell
-            .update(cx, |shell, cx| shell.apply_agent_event(event, cx))
+            .update(cx, |shell, cx| shell.on_agent_event(event, cx))
             .unwrap_or(false)
         {
             return;

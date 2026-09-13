@@ -14,7 +14,7 @@ mod tests;
 
 use std::time::Duration;
 
-use gpui::Context;
+use gpui::{AsyncApp, Context, WeakEntity};
 use nmt_agent::chat::{SessionScope, SessionSummary};
 use nmt_agent::session::history::{CountPublication, count_scoped_sessions, list_scoped_sessions};
 use nmt_agent::session::restore::{ResumeStart, SettingsSeed};
@@ -121,71 +121,81 @@ impl AgentPane {
         cx.notify();
 
         cx.spawn(async move |this, cx| {
-            let count_cwd = cwd.clone();
+            Self::load_history_passes(this, request, scope, cwd, cx).await
+        })
+        .detach();
+    }
 
-            let count = cx
-                .background_executor()
-                .spawn(async move { count_scoped_sessions(scope, count_cwd.as_deref()) })
-                .await;
+    async fn load_history_passes(
+        this: WeakEntity<Self>,
+        request: FilesystemHistoryRequest,
+        scope: SessionScope,
+        cwd: Option<String>,
+        cx: &mut AsyncApp,
+    ) {
+        let count_cwd = cwd.clone();
 
-            let proceed = this
-                .update(cx, |this, cx| {
-                    let cwd = this.cwd();
+        let count = cx
+            .background_executor()
+            .spawn(async move { count_scoped_sessions(scope, count_cwd.as_deref()) })
+            .await;
 
-                    match this.history_ui.publish_filesystem_count(
-                        &request,
-                        cwd.as_deref(),
-                        this.session.borrow().runtime.epoch(),
-                        count,
-                    ) {
-                        CountPublication::Stale => false,
-
-                        CountPublication::Empty => {
-                            cx.notify();
-
-                            false
-                        }
-
-                        CountPublication::LoadRows => {
-                            cx.notify();
-
-                            true
-                        }
-                    }
-                })
-                .unwrap_or(false);
-
-            if !proceed {
-                return;
-            }
-
-            // Title parsing races a short hold: on a warm SSD it finishes
-            // within a frame, so without the hold the skeleton rows would
-            // never be visible and the swap would read as a flicker.
-            let load = cx
-                .background_executor()
-                .spawn(async move { list_scoped_sessions(scope, cwd.as_deref()) });
-
-            cx.background_executor()
-                .timer(Duration::from_millis(250))
-                .await;
-
-            let sessions = load.await;
-
-            let _ = this.update(cx, |this, cx| {
+        let proceed = this
+            .update(cx, |this, cx| {
                 let cwd = this.cwd();
 
-                if this.history_ui.publish_filesystem_rows(
+                match this.history_ui.publish_filesystem_count(
                     &request,
                     cwd.as_deref(),
                     this.session.borrow().runtime.epoch(),
-                    sessions,
+                    count,
                 ) {
-                    cx.notify();
+                    CountPublication::Stale => false,
+
+                    CountPublication::Empty => {
+                        cx.notify();
+
+                        false
+                    }
+
+                    CountPublication::LoadRows => {
+                        cx.notify();
+
+                        true
+                    }
                 }
-            });
-        })
-        .detach();
+            })
+            .unwrap_or(false);
+
+        if !proceed {
+            return;
+        }
+
+        // Title parsing races a short hold: on a warm SSD it finishes
+        // within a frame, so without the hold the skeleton rows would
+        // never be visible and the swap would read as a flicker.
+        let load = cx
+            .background_executor()
+            .spawn(async move { list_scoped_sessions(scope, cwd.as_deref()) });
+
+        cx.background_executor()
+            .timer(Duration::from_millis(250))
+            .await;
+
+        let sessions = load.await;
+
+        let _ = this.update(cx, |this, cx| {
+            let cwd = this.cwd();
+
+            if this.history_ui.publish_filesystem_rows(
+                &request,
+                cwd.as_deref(),
+                this.session.borrow().runtime.epoch(),
+                sessions,
+            ) {
+                cx.notify();
+            }
+        });
     }
 
     pub(super) fn seed_restored_settings(&mut self, seed: SettingsSeed) {

@@ -145,7 +145,7 @@ impl Session {
         events
     }
 
-    pub(super) fn process_team_decision(&mut self, request_id: u64, params: &Value) -> Vec<Event> {
+    pub(super) fn on_team_decision(&mut self, request_id: u64, params: &Value) -> Vec<Event> {
         let valid = params["tool"].as_str() == Some("team_decide")
             && params["threadId"].as_str() == self.thread_id()
             && params["turnId"].as_str() == self.conversation.current_turn.as_deref()

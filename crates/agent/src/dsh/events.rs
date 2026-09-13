@@ -45,41 +45,14 @@ impl Downlinks {
         let (connected_tx, connected) = mpsc::channel();
 
         thread::spawn(move || {
-            let mut connected_tx = Some(connected_tx);
-
-            while !worker_stopped.load(Ordering::Relaxed) {
-                let result = read_downlink(
-                    &client,
-                    &session_id,
-                    deliver.as_ref(),
-                    &worker_stopped,
-                    &mut connected_tx,
-                );
-
-                if let Err(message) = result {
-                    if let Some(sender) = connected_tx.take() {
-                        let _ = sender.send(Err(message));
-
-                        return;
-                    }
-
-                    if !worker_stopped.load(Ordering::Relaxed) {
-                        warn!("deepseek stream disconnected: {message}");
-                    }
-                }
-
-                if worker_stopped.load(Ordering::Relaxed)
-                    || !host.upgrade().is_some_and(|host| host.is_running())
-                {
-                    return;
-                }
-
-                deliver(json!({ "payload": {
-                    "type": "nmt/connection-reset", "sessionId": session_id,
-                } }));
-
-                thread::sleep(RECONNECT_DELAY);
-            }
+            run_downlink(
+                client,
+                host,
+                session_id,
+                deliver,
+                worker_stopped,
+                connected_tx,
+            )
         });
 
         match connected.recv_timeout(CONNECT_TIMEOUT) {
@@ -95,6 +68,51 @@ impl Downlinks {
                 })
             }
         }
+    }
+}
+
+fn run_downlink(
+    client: ApiClient,
+    host: Weak<Host>,
+    session_id: String,
+    deliver: Arc<dyn Fn(Value) + Send + Sync>,
+    worker_stopped: Arc<AtomicBool>,
+    connected_tx: mpsc::Sender<Result<Value, String>>,
+) {
+    let mut connected_tx = Some(connected_tx);
+
+    while !worker_stopped.load(Ordering::Relaxed) {
+        let result = read_downlink(
+            &client,
+            &session_id,
+            deliver.as_ref(),
+            &worker_stopped,
+            &mut connected_tx,
+        );
+
+        if let Err(message) = result {
+            if let Some(sender) = connected_tx.take() {
+                let _ = sender.send(Err(message));
+
+                return;
+            }
+
+            if !worker_stopped.load(Ordering::Relaxed) {
+                warn!("deepseek stream disconnected: {message}");
+            }
+        }
+
+        if worker_stopped.load(Ordering::Relaxed)
+            || !host.upgrade().is_some_and(|host| host.is_running())
+        {
+            return;
+        }
+
+        deliver(json!({ "payload": {
+            "type": "nmt/connection-reset", "sessionId": session_id,
+        } }));
+
+        thread::sleep(RECONNECT_DELAY);
     }
 }
 
@@ -338,24 +356,10 @@ impl Streams {
         let value = &frame["value"];
 
         match id {
-            "events" => self.event(value, client, deliver)?,
-            "control" => self.control(value, deliver),
+            "events" => self.on_event(value, client, deliver)?,
+            "control" => self.on_control(value, deliver),
 
-            "follow" => match value["type"].as_str() {
-                Some("snapshot") => {
-                    deliver(json!({ "payload": {
-                        "type": "nmt/replay", "sessionId": self.session_id, "page": value,
-                    } }));
-
-                    self.snapshot = Some(value.clone());
-                }
-
-                Some("event") => deliver(json!({ "payload": {
-                    "type": "session/event", "sessionId": self.session_id, "event": value["event"],
-                } })),
-
-                _ => {}
-            },
+            "follow" => self.on_follow(value, deliver),
 
             _ => {}
         }
@@ -363,7 +367,25 @@ impl Streams {
         Ok(())
     }
 
-    fn control(&mut self, value: &Value, deliver: &dyn Fn(Value)) {
+    fn on_follow(&mut self, value: &Value, deliver: &dyn Fn(Value)) {
+        match value["type"].as_str() {
+            Some("snapshot") => {
+                deliver(json!({ "payload": {
+                                "type": "nmt/replay", "sessionId": self.session_id, "page": value,
+                            } }));
+
+                self.snapshot = Some(value.clone());
+            }
+
+            Some("event") => deliver(json!({ "payload": {
+                            "type": "session/event", "sessionId": self.session_id, "event": value["event"],
+                        } })),
+
+            _ => {}
+        }
+    }
+
+    fn on_control(&mut self, value: &Value, deliver: &dyn Fn(Value)) {
         match value["type"].as_str() {
             Some("baseline") => {
                 let baseline = &value["value"];
@@ -406,7 +428,7 @@ impl Streams {
         } }));
     }
 
-    fn event(
+    fn on_event(
         &mut self,
         value: &Value,
         client: &ApiClient,

@@ -452,7 +452,7 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
 
     session.active_slash_command = Some("compact".into());
 
-    let events = session.process_exit();
+    let events = session.on_exit();
 
     assert!(
         events
@@ -467,7 +467,7 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
         }
     )));
     assert!(!session.has_active_operation());
-    assert!(session.process_exit().is_empty());
+    assert!(session.on_exit().is_empty());
     assert!(
         session
             .process(json!({"type": "system", "subtype": "init", "session_id": "late"}))
@@ -489,11 +489,11 @@ fn transcript_snapshots_complete_their_streamed_items() {
 
     transcript.begin_turn();
 
-    transcript.process_stream_event(
+    transcript.on_stream_event(
         &json!({"event":{"type":"message_start","message":{"usage":{"output_tokens":0}}}}),
     );
 
-    let started = transcript.process_stream_event(
+    let started = transcript.on_stream_event(
         &json!({"event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}),
     );
 
@@ -501,14 +501,14 @@ fn transcript_snapshots_complete_their_streamed_items() {
         panic!("text block should start a transcript item");
     };
 
-    let deltas = transcript.process_stream_event(&json!({"event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}}));
+    let deltas = transcript.on_stream_event(&json!({"event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}}));
 
     assert!(
         matches!(deltas.as_slice(), [Event::AgentMessageDelta { item_id, delta }] if item_id == id && delta == "hello")
     );
 
     let completed = transcript
-        .process_assistant(&json!({"message":{"content":[{"type":"text","text":"hello world"}]}}));
+        .on_assistant(&json!({"message":{"content":[{"type":"text","text":"hello world"}]}}));
 
     assert!(
         matches!(completed.as_slice(), [Event::ItemCompleted(Item::AgentMessage { id: completed_id, text: Some(text), .. })] if completed_id == id && text == "hello world")
@@ -524,17 +524,17 @@ fn transcript_state_isolates_children_and_tool_results() {
 
     child["parent_tool_use_id"] = json!("child");
 
-    assert!(parent.process_assistant(&child).is_empty());
-    assert_eq!(parent.process_assistant(&tool).len(), 1);
+    assert!(parent.on_assistant(&child).is_empty());
+    assert_eq!(parent.on_assistant(&tool).len(), 1);
 
     let result = json!({"message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"done"}]}});
 
-    assert!(other.process_tool_results(&result).is_empty());
+    assert!(other.on_tool_results(&result).is_empty());
     assert!(matches!(
-        parent.process_tool_results(&result).as_slice(),
+        parent.on_tool_results(&result).as_slice(),
         [Event::ItemCompleted(_)]
     ));
-    assert!(parent.process_tool_results(&result).is_empty());
+    assert!(parent.on_tool_results(&result).is_empty());
 }
 
 #[test]

@@ -51,11 +51,12 @@ fn manager(normal: u64, settings: bool) -> WorkspaceManager {
     );
 
     for id in 2..=normal {
-        manager.new_workspace(
+        manager.new_workspace_of_kind(
             tabs(),
             WorkspaceId(id),
             format!("Workspace {id}"),
-            WorkspaceRoots::single(format!("C:/{id}")),
+            Some(WorkspaceRoots::single(format!("C:/{id}"))),
+            WorkspaceKind::Normal,
         );
     }
 

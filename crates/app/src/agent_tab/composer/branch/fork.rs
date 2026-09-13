@@ -67,7 +67,7 @@ impl AgentPane {
 
     /// Move the transcript to the prompt the highlighted picker row names, so
     /// the conversation shows what the cut would keep and what it would drop.
-    /// Following the smooth-scrolling setting keeps the jump between two
+    /// Following the smooth_wheel-scrolling setting keeps the jump between two
     /// distant prompts readable where the user asked for animated scrolling.
     pub(crate) fn follow_branch_selection(&mut self, cx: &mut Context<Self>) {
         let selected = self.palette.selected;
@@ -80,10 +80,10 @@ impl AgentPane {
             return;
         };
 
-        let smooth = cx.global::<AgentSettings>().smooth_wheel;
+        let smooth_wheel = cx.global::<AgentSettings>().smooth_wheel;
 
         self.transcript.update(cx, |transcript, cx| {
-            transcript.scroll_to_prompt(&target, smooth, cx)
+            transcript.scroll_to_prompt(&target, smooth_wheel, cx)
         });
     }
 
@@ -181,10 +181,10 @@ impl AgentPane {
                 .fork_checkpoints(&mut state.runtime, checkpoints)
         };
 
-        self.apply_fork_update(update, cx);
+        self.on_fork_update(update, cx);
     }
 
-    pub(crate) fn apply_fork_update(&mut self, update: BranchUpdate, cx: &mut Context<Self>) {
+    pub(crate) fn on_fork_update(&mut self, update: BranchUpdate, cx: &mut Context<Self>) {
         match update {
             BranchUpdate::Empty => self.palette.set_feedback(
                 CommandFeedbackKind::Error,
@@ -289,7 +289,7 @@ impl AgentPane {
             state.branch.fork(&mut state.runtime, checkpoint)
         };
 
-        self.apply_fork_update(update, cx);
+        self.on_fork_update(update, cx);
     }
 
     /// Ready may arrive without a window. The next render applies the prompt

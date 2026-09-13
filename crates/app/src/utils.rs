@@ -1,14 +1,6 @@
 use std::env;
 use std::path::PathBuf;
 
-use nmt_platform::environment::data_dir;
-
-/// The NiumaTerm per-user data directory: `%LOCALAPPDATA%\NiumaTerm`, falling back to
-/// `%TEMP%` if `LOCALAPPDATA` is unset or uncreatable.
-pub fn get_data_dir() -> PathBuf {
-    data_dir()
-}
-
 pub fn get_exe_dir() -> PathBuf {
     env::current_exe()
         .expect("locate current executable")

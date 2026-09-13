@@ -1,3 +1,4 @@
+use gpui::{AsyncApp, WeakEntity};
 use std::time::Duration;
 
 use gpui::Context;
@@ -100,7 +101,7 @@ impl AgentSession {
         for event in events {
             let epoch = self.controller.borrow().runtime.epoch();
 
-            self.apply_event(epoch, event, cx);
+            self.on_event(epoch, event, cx);
         }
     }
 
@@ -116,34 +117,36 @@ impl AgentSession {
             return;
         }
 
-        self.workflow_refresh = Some(cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(Duration::from_secs(1)).await;
+        self.workflow_refresh = Some(cx.spawn(Self::poll_workflow_refresh));
+    }
 
-                let Ok(Some(plan)) = this.update(cx, |this, _| this.workflow_refresh_plan()) else {
-                    break;
-                };
+    async fn poll_workflow_refresh(this: WeakEntity<Self>, cx: &mut AsyncApp) {
+        loop {
+            cx.background_executor().timer(Duration::from_secs(1)).await;
 
-                let epoch = plan.epoch;
+            let Ok(Some(plan)) = this.update(cx, |this, _| this.workflow_refresh_plan()) else {
+                break;
+            };
 
-                // A tick does its own reads before the next beat, so ticks can
-                // fall behind but never overlap or queue up.
-                let results = cx
-                    .background_executor()
-                    .spawn(async move { plan.read() })
-                    .await;
+            let epoch = plan.epoch;
 
-                let applied = this.update(cx, |this, cx| {
-                    this.apply_workflow_refresh_results(epoch, results, cx)
-                });
+            // A tick does its own reads before the next beat, so ticks can
+            // fall behind but never overlap or queue up.
+            let results = cx
+                .background_executor()
+                .spawn(async move { plan.read() })
+                .await;
 
-                if !matches!(applied, Ok(true)) {
-                    break;
-                }
+            let applied = this.update(cx, |this, cx| {
+                this.on_workflow_refresh_results(epoch, results, cx)
+            });
+
+            if !matches!(applied, Ok(true)) {
+                break;
             }
+        }
 
-            let _ = this.update(cx, |this, _| this.workflow_refresh = None);
-        }));
+        let _ = this.update(cx, |this, _| this.workflow_refresh = None);
     }
 
     fn should_refresh_workflows(&self) -> bool {
@@ -171,7 +174,7 @@ impl AgentSession {
     }
 
     /// Fold a tick's reads in. Returns whether the loop should keep running.
-    fn apply_workflow_refresh_results(
+    fn on_workflow_refresh_results(
         &mut self,
         epoch: u64,
         results: Vec<WorkflowRefreshResult>,
@@ -201,7 +204,7 @@ impl AgentSession {
             for event in events {
                 let epoch = self.controller.borrow().runtime.epoch();
 
-                self.apply_event(epoch, event, cx);
+                self.on_event(epoch, event, cx);
             }
         }
 
@@ -278,7 +281,7 @@ impl AgentSession {
                     return;
                 }
 
-                this.apply_workflow_refresh_results(epoch, vec![result], cx);
+                this.on_workflow_refresh_results(epoch, vec![result], cx);
             })
             .ok();
         })

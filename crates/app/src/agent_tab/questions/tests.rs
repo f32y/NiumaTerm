@@ -82,7 +82,7 @@ fn question_editors_keep_multiline_text_and_mask_secrets(cx: &mut TestAppContext
 
             secret.input = QuestionInput::Secret;
 
-            pane.apply_event(
+            pane.on_event(
                 Event::QuestionsRequested {
                     questions: vec![plain, secret],
                 },
@@ -217,7 +217,7 @@ fn confirmed_secret_answer_releases_its_widget_and_reveals_the_next_batch(cx: &m
 
             secret.input = QuestionInput::Secret;
 
-            pane.apply_event(
+            pane.on_event(
                 Event::InputRequested(QuestionRequest {
                     id: "secret".into(),
                     mode: QuestionMode::Blocking,
@@ -235,7 +235,7 @@ fn confirmed_secret_answer_releases_its_widget_and_reveals_the_next_batch(cx: &m
 
             assert!(pane.prompts.presentations[0].editors[0].is_some());
 
-            pane.apply_event(
+            pane.on_event(
                 Event::InputRequested(QuestionRequest {
                     id: "next".into(),
                     mode: QuestionMode::Async,
@@ -253,7 +253,7 @@ fn confirmed_secret_answer_releases_its_widget_and_reveals_the_next_batch(cx: &m
                 QuestionStatus::Submitting
             );
 
-            pane.apply_event(
+            pane.on_event(
                 Event::InputResolved {
                     id: "secret".into(),
                     resolution: QuestionResolution::Submitted {
@@ -290,7 +290,7 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
                 }],
             };
 
-            pane.apply_event(Event::InputRequested(asynchronous.clone()), cx);
+            pane.on_event(Event::InputRequested(asynchronous.clone()), cx);
 
             pane.prompts
                 .questions_mut(&mut pane.session.borrow_mut().input)
@@ -309,7 +309,7 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
 
             let editor = editor.clone();
 
-            pane.apply_event(Event::InputRequested(asynchronous), cx);
+            pane.on_event(Event::InputRequested(asynchronous), cx);
 
             let QuestionEditorState::Text(current) = &pane.prompts.presentations[0].editors[0]
                 .as_ref()
@@ -321,7 +321,7 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
 
             assert_eq!(editor, *current);
 
-            pane.apply_event(
+            pane.on_event(
                 Event::InputRequested(QuestionRequest {
                     id: "blocking".into(),
                     mode: QuestionMode::Blocking,
@@ -338,7 +338,7 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
 
             pane.skip_current_questions(cx);
 
-            pane.apply_event(
+            pane.on_event(
                 Event::InputResolved {
                     id: "blocking".into(),
                     resolution: QuestionResolution::Skipped,
@@ -371,7 +371,7 @@ fn replacing_a_legacy_batch_rebuilds_editors_without_reusing_the_old_answer(
 
             question.input = QuestionInput::Text;
 
-            pane.apply_event(
+            pane.on_event(
                 Event::QuestionsRequested {
                     questions: vec![question.clone()],
                 },
@@ -391,7 +391,7 @@ fn replacing_a_legacy_batch_rebuilds_editors_without_reusing_the_old_answer(
                 .unwrap()
                 .key();
 
-            pane.apply_event(
+            pane.on_event(
                 Event::QuestionsRequested {
                     questions: vec![question],
                 },

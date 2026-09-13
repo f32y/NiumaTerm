@@ -76,6 +76,284 @@ enum AgentVisual {
     NeedsInput,
 }
 
+/// Workspace-sidebar view state: collapse/expand plus the persisted expanded
+/// width. Rendered against the workspace summaries the shell passes in.
+pub(super) struct Sidebar {
+    /// Collapsed (width animates to 0) vs expanded.
+    pub(super) collapsed: bool,
+
+    /// False until the first `ToggleSidebar`: the startup render draws the
+    /// sidebar at its resting width with no slide-in animation.
+    pub(super) animated: bool,
+
+    /// Expanded width in pixels; dragging the right edge adjusts it, persisted
+    /// per window in `local_state.toml`.
+    pub(super) width: f32,
+
+    scroll: ScrollHandle,
+
+    /// Item position a workspace drag currently hovers: that item shifts down
+    /// to open an insertion gap ("make way"). Only overwritten when the
+    /// pointer enters another item — clearing on exit would oscillate, because
+    /// opening the gap moves the hovered item out from under the pointer.
+    drag_over: Option<usize>,
+
+    /// Source item hidden with zero opacity during a drag so its layout slot
+    /// remains stable while the floating preview follows the pointer.
+    dragging: Option<usize>,
+
+    /// The same make-way/hide pair for tab rows, keyed by workspace position
+    /// and row position so rows of different workspaces cannot collide.
+    tab_drag_over: Option<(usize, usize)>,
+
+    tab_dragging: Option<(usize, usize)>,
+}
+
+impl Sidebar {
+    pub(super) fn new(width: f32) -> Self {
+        Self {
+            collapsed: false,
+            animated: false,
+            width,
+            scroll: ScrollHandle::new(),
+            drag_over: None,
+            dragging: None,
+            tab_drag_over: None,
+            tab_dragging: None,
+        }
+    }
+
+    /// The workspace sidebar: one themed button per workspace (active = selected),
+    /// plus a new-workspace button and bottom status bar. Toggled by
+    /// `ToggleSidebar` (Ctrl+Shift+B).
+    pub(super) fn render(
+        &mut self,
+        summaries: Vec<WorkspaceSummary>,
+        // One entry per summary in the vertical tab-bar style, empty in the
+        // horizontal one where the title bar still owns the tabs.
+        tabs: Vec<Vec<SidebarTab>>,
+        renames: &InlineRenameSession,
+        usage: SidebarUsage,
+        cx: &mut Context<Shell>,
+    ) -> AnyElement {
+        // Runs every render: close the make-way gap once the drag is gone
+        // without a drop on the list (cancelled via Escape, or released
+        // elsewhere) — the cancel itself refreshes the window, so this always
+        // gets a chance to run.
+        if !cx.has_active_drag() {
+            self.drag_over = None;
+            self.dragging = None;
+            self.tab_drag_over = None;
+            self.tab_dragging = None;
+        }
+
+        let width = self.width;
+        let has_temporary_workspaces = summaries.iter().any(|workspace| workspace.temporary);
+        let show_daily_token_usage = cx.global::<AppSettings>().appearance.show_daily_token_usage;
+        let show_agent_usage = cx.global::<AppSettings>().agent.show_agent_usage;
+
+        // Fixed-width content; the animated wrapper below clips it so the buttons
+        // don't reflow while the sidebar slides. The transparent panel inherits
+        // the window background while the drag and animation math keeps operating
+        // on the full `width`.
+        let panel = div()
+            .size_full()
+            .overflow_hidden()
+            .flex()
+            .flex_col()
+            .px(px(SIDEBAR_PADDING_X))
+            .pt(px(SIDEBAR_PADDING_TOP))
+            .gap(px(SIDEBAR_GROUP_GAP))
+            .child(
+                h_flex()
+                    .w_full()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(px(SIDEBAR_SECTION_TEXT))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(cx.theme().sidebar_foreground.opacity(0.5))
+                            // Set as a caps label so the heading is told apart
+                            // from the workspace names by case rather than by
+                            // weight, which the names now use to mark the
+                            // active one. Scripts without case are unchanged.
+                            .child(t!("sidebar-workspaces-title").to_uppercase()),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .child(
+                                Button::new("new-workspace")
+                                    .ghost()
+                                    .size(px(SIDEBAR_SECTION_BUTTON))
+                                    .icon(IconName::Plus)
+                                    .accessibility_label(t!("shell-workspace-new-title"))
+                                    .tooltip(t!("shell-workspace-new-title"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.on_new_workspace(&NewWorkspace, window, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("close-temporary-workspaces")
+                                    .ghost()
+                                    .size(px(SIDEBAR_SECTION_BUTTON))
+                                    .icon(CloseTemporaryWorkspacesIcon)
+                                    .accessibility_label(t!("sidebar-workspace-close-temporary"))
+                                    .tooltip(t!("sidebar-workspace-close-temporary"))
+                                    .disabled(!has_temporary_workspaces)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.request_close_temporary_workspaces(window, cx)
+                                    })),
+                            ),
+                    ),
+            )
+            .child(
+                // The scrollbar sits in this non-scrolling wrapper: an absolute
+                // child of the scrolling list would be laid out against the
+                // content origin and slide out of the viewport as the list
+                // scrolls.
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(
+                        v_flex()
+                            .id("workspace-list")
+                            .size_full()
+                            .gap(px(WORKSPACE_LIST_GAP))
+                            // Pulled back over the panel's inset so a row's
+                            // fill can reach into it. The list clips its own
+                            // children horizontally, so a row cannot overhang
+                            // this box; the box has to move instead.
+                            .ml(px(-SIDEBAR_ROW_GUTTER))
+                            .pr_3()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll)
+                            // Fallback drop target for the whole list: a drop released
+                            // over the make-way gap (a margin, outside every item's
+                            // hitbox) still lands on the tracked insertion position
+                            // instead of silently ending the drag.
+                            .on_drop(cx.listener(|this, drag: &WorkspaceDrag, window, cx| {
+                                this.sidebar.dragging = None;
+
+                                if let Some(to) = this.sidebar.drag_over.take() {
+                                    this.reorder_workspaces(drag.from, to, window, cx);
+                                }
+
+                                cx.notify();
+                            }))
+                            .on_drop(cx.listener(|this, drag: &SidebarTabDrag, window, cx| {
+                                this.sidebar.tab_dragging = None;
+
+                                if let Some((ws, to)) = this.sidebar.tab_drag_over.take()
+                                    && drag.workspace == ws
+                                {
+                                    this.reorder_tab(drag.tab, drag.from, to, window, cx);
+                                }
+
+                                cx.notify();
+                            }))
+                            .children(summaries.iter().enumerate().map(|(idx, ws)| {
+                                // A workspace heads its own tab rows, and the
+                                // list gap is what separates one such block
+                                // from the next; a rule between them would
+                                // draw a second boundary inside the same gap.
+                                let mut rows = Vec::new();
+
+                                rows.push(self.render_item(idx, ws, renames, cx));
+
+                                let ws_tabs = tabs.get(idx).map(Vec::as_slice).unwrap_or_default();
+
+                                // Closing a workspace's last tab falls through to
+                                // closing the workspace, so the row keeps its
+                                // control as long as one of the two would take
+                                // effect. A pinned or sole workspace refuses both,
+                                // and the row withholds a control that would do
+                                // nothing.
+                                let closeable = ws_tabs.len() > 1 || ws.closeable;
+
+                                rows.extend(ws_tabs.iter().enumerate().map(|(tab_idx, tab)| {
+                                    self.render_tab_row(idx, tab_idx, tab, closeable, renames, cx)
+                                }));
+
+                                v_flex().w_full().children(rows)
+                            })),
+                    )
+                    .child(workspace_list_scrollbar(&self.scroll)),
+            )
+            .children((show_daily_token_usage || show_agent_usage).then(|| {
+                v_flex()
+                    .id("workspace-sidebar-status")
+                    .w_full()
+                    .flex_none()
+                    .gap(px(SIDEBAR_STATUS_ROW_GAP))
+                    .py(px(SIDEBAR_STATUS_PADDING_Y))
+                    .border_t_1()
+                    .border_color(cx.theme().sidebar_border)
+                    .children(show_daily_token_usage.then_some(usage.daily))
+                    .children(show_agent_usage.then_some(usage.quotas))
+            }));
+
+        // The terminal column's left gutter forms the gap between panels and
+        // keeps the resize handle at the panel edge, so no right inset is needed.
+        let content = div()
+            .w(px(width))
+            .h_full()
+            .pl(px(FLOATING_SURFACE_SIDE_INSET))
+            .pt(px(FLOATING_SURFACE_TOP_INSET))
+            .pb(px(FLOATING_SURFACE_BOTTOM_INSET))
+            .child(panel);
+
+        let collapsed = self.collapsed;
+
+        // Not rendered while collapsed, so the collapsed sidebar can't resize.
+        let resize_handle =
+            (!collapsed).then(|| sidebar_resize::resize_handle(RESIZE_HANDLE, false, cx));
+
+        let wrapper = div()
+            .h_full()
+            .flex_none()
+            .relative()
+            .overflow_hidden()
+            .on_drag_move(cx.listener(|this, e: &DragMoveEvent<ResizeDrag>, _, cx| {
+                // The panel on the other side drags the same type, and these
+                // events carry no bounds test, so a gesture that did not start
+                // here would otherwise resize this column too.
+                if !e.drag(cx).is_from(RESIZE_HANDLE) {
+                    return;
+                }
+
+                // The sidebar's left edge is pinned, so the new width is the
+                // pointer x minus the left edge, clamped to the drag limits.
+                let width = (e.event.position.x - e.bounds.left())
+                    .as_f32()
+                    .clamp(MIN_WIDTH, MAX_WIDTH);
+
+                if width != this.sidebar.width {
+                    this.sidebar.width = width;
+
+                    // Render at the live width; the next toggle re-arms the
+                    // slide animation.
+
+                    this.sidebar.animated = false;
+
+                    // Stash in the registry; the quit hook persists it.
+                    if let Some(entry) = cx.global_mut::<WindowRegistry>().get_mut(this.window_id) {
+                        entry.sidebar_width = Some(width);
+                    }
+
+                    cx.notify();
+                }
+            }))
+            .child(content)
+            .children(resize_handle);
+
+        // Until the first toggle, render at the resting width — no slide-in on
+        // startup.
+        sidebar_resize::slide_width(wrapper, "sidebar", !collapsed, px(width), self.animated)
+    }
+}
+
 /// The agent half of the status column, absent while the agent is idle.
 fn agent_presentation(status: AgentRuntimeStatus) -> Option<(AgentVisual, Cow<'static, str>)> {
     match status {
@@ -348,287 +626,9 @@ pub(crate) struct SidebarUsage {
     pub(crate) quotas: Entity<AgentUsageView>,
 }
 
-/// Workspace-sidebar view state: collapse/expand plus the persisted expanded
-/// width. Rendered against the workspace summaries the shell passes in.
-pub(super) struct Sidebar {
-    /// Collapsed (width animates to 0) vs expanded.
-    pub(super) collapsed: bool,
-
-    /// False until the first `ToggleSidebar`: the startup render draws the
-    /// sidebar at its resting width with no slide-in animation.
-    pub(super) animated: bool,
-
-    /// Expanded width in pixels; dragging the right edge adjusts it, persisted
-    /// per window in `local_state.toml`.
-    pub(super) width: f32,
-
-    scroll: ScrollHandle,
-
-    /// Item position a workspace drag currently hovers: that item shifts down
-    /// to open an insertion gap ("make way"). Only overwritten when the
-    /// pointer enters another item — clearing on exit would oscillate, because
-    /// opening the gap moves the hovered item out from under the pointer.
-    drag_over: Option<usize>,
-
-    /// Source item hidden with zero opacity during a drag so its layout slot
-    /// remains stable while the floating preview follows the pointer.
-    dragging: Option<usize>,
-
-    /// The same make-way/hide pair for tab rows, keyed by workspace position
-    /// and row position so rows of different workspaces cannot collide.
-    tab_drag_over: Option<(usize, usize)>,
-
-    tab_dragging: Option<(usize, usize)>,
-}
-
 /// How far a workspace item slides down to open the insertion gap while a
 /// drag hovers it.
 const WS_MAKE_WAY_PX: f32 = 36.0;
-
-impl Sidebar {
-    pub(super) fn new(width: f32) -> Self {
-        Self {
-            collapsed: false,
-            animated: false,
-            width,
-            scroll: ScrollHandle::new(),
-            drag_over: None,
-            dragging: None,
-            tab_drag_over: None,
-            tab_dragging: None,
-        }
-    }
-
-    /// The workspace sidebar: one themed button per workspace (active = selected),
-    /// plus a new-workspace button and bottom status bar. Toggled by
-    /// `ToggleSidebar` (Ctrl+Shift+B).
-    pub(super) fn render(
-        &mut self,
-        summaries: Vec<WorkspaceSummary>,
-        // One entry per summary in the vertical tab-bar style, empty in the
-        // horizontal one where the title bar still owns the tabs.
-        tabs: Vec<Vec<SidebarTab>>,
-        renames: &InlineRenameSession,
-        usage: SidebarUsage,
-        cx: &mut Context<Shell>,
-    ) -> AnyElement {
-        // Runs every render: close the make-way gap once the drag is gone
-        // without a drop on the list (cancelled via Escape, or released
-        // elsewhere) — the cancel itself refreshes the window, so this always
-        // gets a chance to run.
-        if !cx.has_active_drag() {
-            self.drag_over = None;
-            self.dragging = None;
-            self.tab_drag_over = None;
-            self.tab_dragging = None;
-        }
-
-        let width = self.width;
-        let has_temporary_workspaces = summaries.iter().any(|workspace| workspace.temporary);
-        let show_daily_usage = cx.global::<AppSettings>().appearance.show_daily_token_usage;
-        let show_quotas = cx.global::<AppSettings>().agent.show_agent_usage;
-
-        // Fixed-width content; the animated wrapper below clips it so the buttons
-        // don't reflow while the sidebar slides. The transparent panel inherits
-        // the window background while the drag and animation math keeps operating
-        // on the full `width`.
-        let panel = div()
-            .size_full()
-            .overflow_hidden()
-            .flex()
-            .flex_col()
-            .px(px(SIDEBAR_PADDING_X))
-            .pt(px(SIDEBAR_PADDING_TOP))
-            .gap(px(SIDEBAR_GROUP_GAP))
-            .child(
-                h_flex()
-                    .w_full()
-                    .justify_between()
-                    .child(
-                        div()
-                            .text_size(px(SIDEBAR_SECTION_TEXT))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(cx.theme().sidebar_foreground.opacity(0.5))
-                            // Set as a caps label so the heading is told apart
-                            // from the workspace names by case rather than by
-                            // weight, which the names now use to mark the
-                            // active one. Scripts without case are unchanged.
-                            .child(t!("sidebar-workspaces-title").to_uppercase()),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .child(
-                                Button::new("new-workspace")
-                                    .ghost()
-                                    .size(px(SIDEBAR_SECTION_BUTTON))
-                                    .icon(IconName::Plus)
-                                    .accessibility_label(t!("shell-workspace-new-title"))
-                                    .tooltip(t!("shell-workspace-new-title"))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.on_new_workspace(&NewWorkspace, window, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new("close-temporary-workspaces")
-                                    .ghost()
-                                    .size(px(SIDEBAR_SECTION_BUTTON))
-                                    .icon(CloseTemporaryWorkspacesIcon)
-                                    .accessibility_label(t!("sidebar-workspace-close-temporary"))
-                                    .tooltip(t!("sidebar-workspace-close-temporary"))
-                                    .disabled(!has_temporary_workspaces)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.request_close_temporary_workspaces(window, cx)
-                                    })),
-                            ),
-                    ),
-            )
-            .child(
-                // The scrollbar sits in this non-scrolling wrapper: an absolute
-                // child of the scrolling list would be laid out against the
-                // content origin and slide out of the viewport as the list
-                // scrolls.
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_h_0()
-                    .child(
-                        v_flex()
-                            .id("workspace-list")
-                            .size_full()
-                            .gap(px(WORKSPACE_LIST_GAP))
-                            // Pulled back over the panel's inset so a row's
-                            // fill can reach into it. The list clips its own
-                            // children horizontally, so a row cannot overhang
-                            // this box; the box has to move instead.
-                            .ml(px(-SIDEBAR_ROW_GUTTER))
-                            .pr_3()
-                            .overflow_y_scroll()
-                            .track_scroll(&self.scroll)
-                            // Fallback drop target for the whole list: a drop released
-                            // over the make-way gap (a margin, outside every item's
-                            // hitbox) still lands on the tracked insertion position
-                            // instead of silently ending the drag.
-                            .on_drop(cx.listener(|this, drag: &WorkspaceDrag, window, cx| {
-                                this.sidebar.dragging = None;
-
-                                if let Some(to) = this.sidebar.drag_over.take() {
-                                    this.reorder_workspaces(drag.from, to, window, cx);
-                                }
-
-                                cx.notify();
-                            }))
-                            .on_drop(cx.listener(|this, drag: &SidebarTabDrag, window, cx| {
-                                this.sidebar.tab_dragging = None;
-
-                                if let Some((ws, to)) = this.sidebar.tab_drag_over.take()
-                                    && drag.workspace == ws
-                                {
-                                    this.reorder_tab(drag.tab, drag.from, to, window, cx);
-                                }
-
-                                cx.notify();
-                            }))
-                            .children(summaries.iter().enumerate().map(|(idx, ws)| {
-                                // A workspace heads its own tab rows, and the
-                                // list gap is what separates one such block
-                                // from the next; a rule between them would
-                                // draw a second boundary inside the same gap.
-                                let mut rows = Vec::new();
-
-                                rows.push(self.render_item(idx, ws, renames, cx));
-
-                                let ws_tabs = tabs.get(idx).map(Vec::as_slice).unwrap_or_default();
-
-                                // Closing a workspace's last tab falls through to
-                                // closing the workspace, so the row keeps its
-                                // control as long as one of the two would take
-                                // effect. A pinned or sole workspace refuses both,
-                                // and the row withholds a control that would do
-                                // nothing.
-                                let closeable = ws_tabs.len() > 1 || ws.closeable;
-
-                                rows.extend(ws_tabs.iter().enumerate().map(|(tab_idx, tab)| {
-                                    self.render_tab_row(idx, tab_idx, tab, closeable, renames, cx)
-                                }));
-
-                                v_flex().w_full().children(rows)
-                            })),
-                    )
-                    .child(workspace_list_scrollbar(&self.scroll)),
-            )
-            .children((show_daily_usage || show_quotas).then(|| {
-                v_flex()
-                    .id("workspace-sidebar-status")
-                    .w_full()
-                    .flex_none()
-                    .gap(px(SIDEBAR_STATUS_ROW_GAP))
-                    .py(px(SIDEBAR_STATUS_PADDING_Y))
-                    .border_t_1()
-                    .border_color(cx.theme().sidebar_border)
-                    .children(show_daily_usage.then_some(usage.daily))
-                    .children(show_quotas.then_some(usage.quotas))
-            }));
-
-        // The terminal column's left gutter forms the gap between panels and
-        // keeps the resize handle at the panel edge, so no right inset is needed.
-        let content = div()
-            .w(px(width))
-            .h_full()
-            .pl(px(FLOATING_SURFACE_SIDE_INSET))
-            .pt(px(FLOATING_SURFACE_TOP_INSET))
-            .pb(px(FLOATING_SURFACE_BOTTOM_INSET))
-            .child(panel);
-
-        let collapsed = self.collapsed;
-
-        // Not rendered while collapsed, so the collapsed sidebar can't resize.
-        let resize_handle =
-            (!collapsed).then(|| sidebar_resize::resize_handle(RESIZE_HANDLE, false, cx));
-
-        let wrapper = div()
-            .h_full()
-            .flex_none()
-            .relative()
-            .overflow_hidden()
-            .on_drag_move(cx.listener(|this, e: &DragMoveEvent<ResizeDrag>, _, cx| {
-                // The panel on the other side drags the same type, and these
-                // events carry no bounds test, so a gesture that did not start
-                // here would otherwise resize this column too.
-                if !e.drag(cx).is_from(RESIZE_HANDLE) {
-                    return;
-                }
-
-                // The sidebar's left edge is pinned, so the new width is the
-                // pointer x minus the left edge, clamped to the drag limits.
-                let width = (e.event.position.x - e.bounds.left())
-                    .as_f32()
-                    .clamp(MIN_WIDTH, MAX_WIDTH);
-
-                if width != this.sidebar.width {
-                    this.sidebar.width = width;
-
-                    // Render at the live width; the next toggle re-arms the
-                    // slide animation.
-
-                    this.sidebar.animated = false;
-
-                    // Stash in the registry; the quit hook persists it.
-                    if let Some(entry) = cx.global_mut::<WindowRegistry>().get_mut(this.window_id) {
-                        entry.sidebar_width = Some(width);
-                    }
-
-                    cx.notify();
-                }
-            }))
-            .child(content)
-            .children(resize_handle);
-
-        // Until the first toggle, render at the resting width — no slide-in on
-        // startup.
-        sidebar_resize::slide_width(wrapper, "sidebar", !collapsed, px(width), self.animated)
-    }
-}
 
 fn workspace_list_scrollbar(handle: &ScrollHandle) -> impl IntoElement {
     div()

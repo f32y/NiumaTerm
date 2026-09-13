@@ -24,7 +24,7 @@ use nmt_config::active_colors;
 use nmt_config::local_state::TabState;
 use nmt_terminal::clipboard::{Clipboard, ClipboardType};
 use nmt_terminal::input::WheelDelta;
-use nmt_terminal::session::interaction::PendingCopy;
+use nmt_terminal::session::interaction::{CopyCompletion, PendingCopy};
 use nmt_terminal::session::{
     EngineError, HostEvent, SessionObserver, SurfaceMouseButton, TerminalSession,
     TerminalSessionConfig,
@@ -178,50 +178,12 @@ impl TerminalPane {
     ) -> Self {
         // Apply terminal presentation settings to existing panes and invalidate
         // measurements that depend on font metrics.
-        cx.observe_global::<TerminalSettings>(|this, cx| {
-            let settings: PaneSettings = cx.global::<TerminalSettings>().into();
-            let colors = active_colors();
-
-            this.block_list
-                .list
-                .set_alignment(block_list_alignment(settings.fixed_bottom));
-
-            if let Some(update) = this
-                .model
-                .update_settings(settings, &colors, duration_labels())
-            {
-                cx.spawn(async move |this, cx| {
-                    if let Some(failure) = update.failure().await {
-                        let _ = this.update(cx, |this, cx| {
-                            if this.model.cursor_shape_failed(failure) {
-                                cx.notify();
-                            }
-                        });
-                    }
-                })
-                .detach();
-            }
-
-            cx.notify();
-        })
-        .detach();
+        cx.observe_global::<TerminalSettings>(Self::on_terminal_settings_changed)
+            .detach();
 
         cx.spawn(async move |this, cx| {
             while let Some(wake) = wake_rx.next().await {
-                if this
-                    .update(cx, |this, cx| match wake {
-                        wake::Wake::Content(_) => this.invalidate(cx),
-
-                        wake::Wake::Chrome(_) => {
-                            this.model.invalidate();
-
-                            // Background panes cannot clear their dirty bit by rendering, but the
-                            // shell observer still needs every chrome wake to refresh tab state.
-                            cx.notify();
-                        }
-                    })
-                    .is_err()
-                {
+                if this.update(cx, |this, cx| this.on_wake(wake, cx)).is_err() {
                     break;
                 }
             }
@@ -245,6 +207,47 @@ impl TerminalPane {
             wake,
             image_releases_attached: false,
             block_list: BlockListState::new(block_list_alignment(fixed_bottom_requested)),
+        }
+    }
+
+    fn on_terminal_settings_changed(&mut self, cx: &mut Context<Self>) {
+        let settings: PaneSettings = cx.global::<TerminalSettings>().into();
+        let colors = active_colors();
+
+        self.block_list
+            .list
+            .set_alignment(block_list_alignment(settings.fixed_bottom));
+
+        if let Some(update) = self
+            .model
+            .update_settings(settings, &colors, duration_labels())
+        {
+            cx.spawn(async move |this, cx| {
+                if let Some(failure) = update.failure().await {
+                    let _ = this.update(cx, |this, cx| {
+                        if this.model.cursor_shape_failed(failure) {
+                            cx.notify();
+                        }
+                    });
+                }
+            })
+            .detach();
+        }
+
+        cx.notify();
+    }
+
+    fn on_wake(&mut self, wake: wake::Wake, cx: &mut Context<Self>) {
+        match wake {
+            wake::Wake::Content(_) => self.invalidate(cx),
+
+            wake::Wake::Chrome(_) => {
+                self.model.invalidate();
+
+                // Background panes cannot clear their dirty bit by rendering, but the
+                // shell observer still needs every chrome wake to refresh tab state.
+                cx.notify();
+            }
         }
     }
 
@@ -486,29 +489,65 @@ impl TerminalPane {
         cx.spawn_in(window, async move |this, cx| match copy.request.await {
             Ok(Ok(text)) => {
                 let _ = this.update_in(cx, |this, window, cx| {
-                    if this.model.finish_copy(text, copy.completion) {
-                        window.push_notification(
-                            Notification::new()
-                                .message(t!("terminal-text-copied"))
-                                .id::<TextCopiedNotification>()
-                                .autohide_after(Duration::from_millis(1500))
-                                .show_close(false)
-                                .w_auto()
-                                .px_3()
-                                .py_2(),
-                            cx,
-                        );
-
-                        this.invalidate(cx);
-
-                        cx.notify();
-                    }
+                    this.on_copy_finished(text, copy.completion, window, cx)
                 });
             }
 
             result => warn!("terminal copy did not complete: {result:?}"),
         })
         .detach();
+    }
+
+    fn on_copy_finished(
+        &mut self,
+        text: String,
+        completion: CopyCompletion,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.model.finish_copy(text, completion) {
+            window.push_notification(
+                Notification::new()
+                    .message(t!("terminal-text-copied"))
+                    .id::<TextCopiedNotification>()
+                    .autohide_after(Duration::from_millis(1500))
+                    .show_close(false)
+                    .w_auto()
+                    .px_3()
+                    .py_2(),
+                cx,
+            );
+
+            self.invalidate(cx);
+
+            cx.notify();
+        }
+    }
+
+    fn attach_image_releases(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let queue = self.model.source.images.generations.lock().release_queue();
+
+        if let Some(mut releases) = queue.lock().attach() {
+            let handle = window.window_handle();
+
+            // The task owns no pane or generation references. It drains through
+            // the original window until the final generation releases its sender.
+            cx.spawn(async move |_, cx| {
+                while let Some(image) = releases.next().await {
+                    if handle
+                        .update(cx, |_, window, _| {
+                            let _ = window.drop_image(image);
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .detach();
+        }
+
+        self.image_releases_attached = true;
     }
 
     /// UI reaction to input reaching the PTY: optionally snap the view back
@@ -909,29 +948,7 @@ impl Focusable for TerminalPane {
 impl Render for TerminalPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.image_releases_attached {
-            let queue = self.model.source.images.generations.lock().release_queue();
-
-            if let Some(mut releases) = queue.lock().attach() {
-                let handle = window.window_handle();
-
-                // The task owns no pane or generation references. It drains through
-                // the original window until the final generation releases its sender.
-                cx.spawn(async move |_, cx| {
-                    while let Some(image) = releases.next().await {
-                        if handle
-                            .update(cx, |_, window, _| {
-                                let _ = window.drop_image(image);
-                            })
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                })
-                .detach();
-            }
-
-            self.image_releases_attached = true;
+            self.attach_image_releases(window, cx);
         }
 
         self.wake.mark_delivered(self.identity.id);

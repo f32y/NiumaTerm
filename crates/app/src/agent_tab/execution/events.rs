@@ -9,7 +9,7 @@ use crate::agent_tab::AgentPaneEvent;
 use crate::agent_tab::execution::AgentSession;
 
 impl AgentSession {
-    pub(crate) fn apply_event(&mut self, epoch: u64, event: Event, cx: &mut Context<Self>) {
+    pub(crate) fn on_event(&mut self, epoch: u64, event: Event, cx: &mut Context<Self>) {
         if self.is_closed() || !self.controller.borrow().runtime.is_current(epoch) {
             return;
         }
@@ -44,7 +44,7 @@ impl AgentSession {
         let effect = self.controller.borrow_mut().apply_event(epoch, event);
 
         if let SessionEffect::Branch(update) = effect {
-            self.apply_branch_update(update, cx);
+            self.on_branch_update(update, cx);
 
             return;
         }

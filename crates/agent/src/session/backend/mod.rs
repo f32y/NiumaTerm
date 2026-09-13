@@ -606,7 +606,7 @@ impl Backend {
 
     pub fn process_exit(&mut self) -> Vec<SessionEvent> {
         match self {
-            Backend::Claude(session) => session.process_exit(),
+            Backend::Claude(session) => session.on_exit(),
             Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
 
             #[cfg(any(test, feature = "test-support"))]

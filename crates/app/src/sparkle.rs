@@ -42,11 +42,11 @@ pub(crate) fn initialize(testing: bool, cx: &mut App) {
     }
 
     let settings = cx.global::<AppSettings>();
-    let (enabled, channel) = (settings.update.check_updates, channel(settings));
+    let (check_updates, channel) = (settings.update.check_updates, channel(settings));
 
     match Updater::start(channel) {
         Ok(updater) => {
-            updater.set_automatic_checks(enabled);
+            updater.set_automatic_checks(check_updates);
             cx.set_global(AppUpdate(updater));
         }
 
@@ -61,12 +61,12 @@ pub(crate) fn initialize(testing: bool, cx: &mut App) {
 }
 
 /// Mirror the application's own settings onto Sparkle.
-pub(crate) fn settings_changed(cx: &mut App) {
+pub(crate) fn on_settings_changed(cx: &mut App) {
     let settings = cx.global::<AppSettings>();
-    let (enabled, channel) = (settings.update.check_updates, channel(settings));
+    let (check_updates, channel) = (settings.update.check_updates, channel(settings));
 
     if let Some(update) = cx.try_global::<AppUpdate>() {
-        update.0.set_automatic_checks(enabled);
+        update.0.set_automatic_checks(check_updates);
         update.0.set_channel(channel);
     }
 }

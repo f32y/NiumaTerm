@@ -219,7 +219,7 @@ impl Session {
         }
     }
 
-    pub(super) fn process_question_request(&mut self, rpc_id: u64, params: &Value) -> Vec<Event> {
+    pub(super) fn on_question_request(&mut self, rpc_id: u64, params: &Value) -> Vec<Event> {
         let parsed = serde_json::from_value::<InputRequest>(params.clone())
             .map_err(|error| format!("Invalid user-input request: {error}"))
             .and_then(|request| {
@@ -485,7 +485,7 @@ impl Session {
         Ok(())
     }
 
-    pub(super) fn process_question_response(
+    pub(super) fn on_question_response(
         &mut self,
         rpc_id: u64,
         message: &Value,

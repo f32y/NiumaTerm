@@ -37,63 +37,6 @@ impl UpdateOverlayPhase {
     }
 }
 
-pub(super) fn update_overlay_phase(state: &UpdateSuspension) -> Option<UpdateOverlayPhase> {
-    match state {
-        UpdateSuspension::Stopping => Some(UpdateOverlayPhase::Stopping),
-        UpdateSuspension::Updating => Some(UpdateOverlayPhase::Updating),
-        UpdateSuspension::Reconnecting => Some(UpdateOverlayPhase::Reconnecting),
-        UpdateSuspension::Waiting | UpdateSuspension::Failed(_) => None,
-    }
-}
-
-/// Sub-second latencies are the interesting ones, and a reading like `0.8s`
-/// hides how much of a second it was; past a second the tenth is enough.
-fn latency_readout(latency: Duration) -> String {
-    if latency < Duration::from_secs(1) {
-        format!("{}ms", latency.as_millis())
-    } else {
-        format!("{:.1}s", latency.as_secs_f64())
-    }
-}
-
-/// The composer's one-line account of the conversation: how many turns it has
-/// run, how many actions the newest turn took, how long that turn waited for
-/// its first output, and how much of the input the provider had cached. Each
-/// part is dropped rather than shown as a zero when nothing reports it, and a
-/// conversation that has not run a turn yet reports nothing at all.
-pub(super) fn composer_stats_label(
-    turns: u64,
-    steps: usize,
-    first_output: Option<Duration>,
-    cache_hit: Option<u64>,
-) -> Option<String> {
-    if turns == 0 {
-        return None;
-    }
-
-    let mut parts = vec![t!("agent-status-turns", count = turns).into_owned()];
-
-    if steps > 0 {
-        parts.push(t!("agent-status-steps", count = steps).into_owned());
-    }
-
-    if let Some(first_output) = first_output {
-        parts.push(
-            t!(
-                "agent-status-first-output",
-                value = &latency_readout(first_output)
-            )
-            .into_owned(),
-        );
-    }
-
-    if let Some(percent) = cache_hit {
-        parts.push(t!("agent-status-cache-hit", percent = percent).into_owned());
-    }
-
-    Some(parts.join(" · "))
-}
-
 impl AgentPane {
     pub(super) fn render_approval_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.session
@@ -476,6 +419,63 @@ impl AgentPane {
                     .children(usage),
             )
             .into_any_element()
+    }
+}
+
+/// The composer's one-line account of the conversation: how many turns it has
+/// run, how many actions the newest turn took, how long that turn waited for
+/// its first output, and how much of the input the provider had cached. Each
+/// part is dropped rather than shown as a zero when nothing reports it, and a
+/// conversation that has not run a turn yet reports nothing at all.
+pub(super) fn composer_stats_label(
+    turns: u64,
+    steps: usize,
+    first_output: Option<Duration>,
+    cache_hit: Option<u64>,
+) -> Option<String> {
+    if turns == 0 {
+        return None;
+    }
+
+    let mut parts = vec![t!("agent-status-turns", count = turns).into_owned()];
+
+    if steps > 0 {
+        parts.push(t!("agent-status-steps", count = steps).into_owned());
+    }
+
+    if let Some(first_output) = first_output {
+        parts.push(
+            t!(
+                "agent-status-first-output",
+                value = &latency_readout(first_output)
+            )
+            .into_owned(),
+        );
+    }
+
+    if let Some(percent) = cache_hit {
+        parts.push(t!("agent-status-cache-hit", percent = percent).into_owned());
+    }
+
+    Some(parts.join(" · "))
+}
+
+/// Sub-second latencies are the interesting ones, and a reading like `0.8s`
+/// hides how much of a second it was; past a second the tenth is enough.
+fn latency_readout(latency: Duration) -> String {
+    if latency < Duration::from_secs(1) {
+        format!("{}ms", latency.as_millis())
+    } else {
+        format!("{:.1}s", latency.as_secs_f64())
+    }
+}
+
+pub(super) fn update_overlay_phase(state: &UpdateSuspension) -> Option<UpdateOverlayPhase> {
+    match state {
+        UpdateSuspension::Stopping => Some(UpdateOverlayPhase::Stopping),
+        UpdateSuspension::Updating => Some(UpdateOverlayPhase::Updating),
+        UpdateSuspension::Reconnecting => Some(UpdateOverlayPhase::Reconnecting),
+        UpdateSuspension::Waiting | UpdateSuspension::Failed(_) => None,
     }
 }
 

@@ -10,7 +10,7 @@ use crate::ui::UI_RADIUS;
 use crate::ui::composition::FLOATING_SURFACE_SIDE_INSET;
 use crate::ui::shell::*;
 #[cfg(windows)]
-use crate::update::check_now;
+use crate::update::check;
 
 /// Width the tab strip keeps once the title bar runs out of room: about one
 /// truncated tab plus the new-tab button, so the strip stays visible and its
@@ -58,6 +58,253 @@ const TITLE_BAR_CHIP_RADIUS: f32 = 6.0;
 const TITLE_BAR_CHIP_PADDING_X: f32 = 8.0;
 const TITLE_BAR_CHIP_PADDING_Y: f32 = 2.0;
 const TITLE_BAR_CHIP_ICON: f32 = 11.0;
+
+impl Render for Shell {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Safety net for any activation path that reaches a render without
+        // passing `focus_active`: the visible tab must be live before anything
+        // below reads the active pane.
+        self.ensure_active_tab_live(window, cx);
+
+        self.window_active = Self::exact_window_active(window);
+
+        self.acknowledge_visible(window, false, cx);
+
+        window.set_window_title(&self.active_tab_title());
+
+        if self.needs_focus {
+            self.needs_focus = false;
+            self.focus_active(window, cx);
+        }
+
+        if let Some(request) = self.pending_agent_resume.take() {
+            // The conversation ran in a directory of its own. Where a
+            // workspace owns that directory, the reopened tab gets that
+            // workspace's whole directory list; otherwise the conversation's
+            // own directory is all this tab can honestly claim.
+            let workspace =
+                exact_match(&self.workspaces.summaries(), path::Path::new(&request.cwd))
+                    .and_then(|id| self.workspaces.roots_of(id))
+                    .map_or_else(
+                        || AgentWorkspace::single(Some(request.cwd.clone())),
+                        |roots| agent_workspace(Some(roots)),
+                    );
+
+            self.open_agent_tab_in(
+                &request.profile,
+                workspace,
+                Some(RecoveryIdentity::new(
+                    AgentKind::from_profile(request.profile.kind),
+                    request.session_id,
+                )),
+                window,
+                cx,
+            );
+        }
+
+        if let Some(tab) = self.pending_agent_close.take() {
+            self.request_close_tab(tab, window, cx);
+        }
+
+        self.process_native_notifications(cx);
+
+        ui::sync_modern_menu(cx);
+
+        // Any workspace/tab switch re-renders the shell, so this render-time
+        // compare-and-set catches every switch path.
+        self.sync_git_target(cx);
+        self.panels.sync_task_target(self.active_agent(), cx);
+
+        // The sidebar is always mounted so it can animate its width open/closed.
+        let summaries = self.projected_workspace_summaries(cx);
+
+        // Vertical style folds the tab strip into the sidebar as child rows of
+        // each workspace, leaving the title bar's strip slot empty.
+        let vertical_tabs =
+            cx.global::<AppSettings>().appearance.tab_bar_style == TabBarStyle::Vertical;
+
+        let (unread_tabs, busy_agent_tabs) = self.tab_agent_indicators(cx);
+
+        let sidebar_tabs: Vec<Vec<SidebarTab>> = match vertical_tabs {
+            false => Vec::new(),
+
+            true => summaries
+                .iter()
+                .map(|ws| {
+                    let Some(tabs) = self.workspaces.tabs_of(ws.id) else {
+                        return Vec::new();
+                    };
+
+                    let active_id = tabs.active_id();
+
+                    tabs.tabs()
+                        .iter()
+                        .map(|tab| SidebarTab {
+                            id: tab.id(),
+                            label: match tab.title().is_empty() {
+                                true => SharedString::new_static("PowerShell"),
+                                false => tab.title().to_string().into(),
+                            },
+                            // Every workspace keeps its own active tab, but
+                            // only one of them is the tab on screen. Marking
+                            // the others would put a selection highlight on
+                            // every workspace's list at once.
+                            active: ws.active && tab.id() == active_id,
+                            unread: unread_tabs.contains(&tab.id()),
+                            busy: busy_agent_tabs.contains(&tab.id()),
+                            bell: tab.bell(),
+                            agent_kind: tab.surface().agent_kind(cx),
+                            icon: tab.surface().icon(cx),
+                            pending: matches!(tab.surface(), TabSurface::Pending(_)),
+                            exited: tab.exited(),
+                            progress: tab.progress(),
+                            terminal: Self::tab_terminal_activity(tab, cx),
+                        })
+                        .collect()
+                })
+                .collect(),
+        };
+
+        let sidebar = self.sidebar.render(
+            summaries,
+            sidebar_tabs,
+            &self.renames,
+            SidebarUsage {
+                daily: self.token_usage.clone(),
+                quotas: self.agent_usage.clone(),
+            },
+            cx,
+        );
+
+        // Re-render the shell whenever the wrapping Root changes (dialog
+        // open/close), since the shell draws the dialog layer.
+        if !self.root_observed
+            && let Some(Some(root)) = window.root::<Root>()
+        {
+            cx.observe(&root, |_, _, cx| cx.notify()).detach();
+            self.root_observed = true;
+        }
+
+        // Root stores opened dialogs but does not draw them; the app renders the
+        // dialog overlay itself.
+        let dialog_layer = Root::render_dialog_layer(window, cx);
+        let notification_layer = Root::render_notification_layer(window, cx);
+        let update_notification_layer = self.update_notifications.render(cx);
+
+        // Scroll the newly active tab into view on any switch path.
+        let active_id = self.workspaces.active_tabs().active_id();
+        let active_index = self.workspaces.active_tabs().active_index();
+
+        self.tab_strip.reveal_active(active_id, active_index, cx);
+
+        let tab_bar = match vertical_tabs {
+            true => div().into_any_element(),
+
+            false => self.tab_strip.render(
+                self.workspaces.active_tabs(),
+                &unread_tabs,
+                &busy_agent_tabs,
+                &self.renames,
+                cx,
+            ),
+        };
+
+        self.apply_pending_ratios(cx);
+
+        let pane_tree = self.render_active_tree(cx);
+
+        let background_image = cx
+            .global::<AppSettings>()
+            .appearance
+            .background_image
+            .clone()
+            .map(|path| {
+                let path: PathBuf = path.into();
+
+                img(path)
+                    .absolute()
+                    .inset_0()
+                    .size_full()
+                    .object_fit(ObjectFit::Cover)
+                    .opacity(ui::background_image_layer_opacity(cx))
+            });
+
+        let shell = div()
+            .size_full()
+            .relative()
+            .overflow_hidden()
+            // A context menu drawn in its own window never takes activation, so
+            // that this window keeps its focused backdrop material — which also
+            // means it never receives the press or the key that should dismiss
+            // it. This window does. Capture phase, because the input still
+            // belongs to whatever it was aimed at.
+            .capture_any_mouse_down(|_, _, cx| ui::dismiss_modern_menu(cx))
+            .capture_key_down(|event: &KeyDownEvent, _, cx| {
+                // Capture phase, and propagation stops on anything the menu
+                // used: while a menu is up its keys outrank the bindings of
+                // whatever still holds focus underneath it.
+                if dispatch_modern_menu_key(event, cx) {
+                    cx.stop_propagation();
+                }
+            })
+            // The window surface itself is never painted (gpui leaves it
+            // white/transparent), and the chrome now has see-through regions —
+            // the tab strip and the gutters around the terminal cards — so the
+            // shell paints the chrome background across the whole window.
+            // `apply_window_translucency` dims this color with the rest of the
+            // chrome when window transparency is on.
+            .bg(cx.theme().background)
+            .flex()
+            .flex_col()
+            // All chrome inherits the configured UI font; terminal panes override it.
+            .font(ui::font_with_default_fallback(
+                cx.global::<AppSettings>().appearance.ui_font.clone(),
+            ))
+            .key_context("Shell");
+
+        Self::bind_actions(shell, cx)
+            .children(background_image)
+            .child(self.render_title_bar(tab_bar, cx))
+            .child(
+                div()
+                    .flex_1()
+                    // Without this the row keeps `min-height: auto` and any
+                    // child taller than the window stretches it, which pushes
+                    // the bottom-anchored pane content below the viewport and
+                    // reads as a blank main area.
+                    .min_h_0()
+                    .flex()
+                    .flex_row()
+                    .child(sidebar)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .min_w_0()
+                            .relative()
+                            .overflow_hidden()
+                            // Gutters only on the two sides that face other
+                            // chrome; the surface runs flush into the window's
+                            // right and bottom edges.
+                            .pl(px(ui::composition::FLOATING_SURFACE_SIDE_INSET))
+                            .pt(px(ui::composition::FLOATING_SURFACE_TOP_INSET))
+                            .child(
+                                floating_surface_card(cx)
+                                    .id("main-floating-surface")
+                                    .min_w_0()
+                                    .relative()
+                                    .child(pane_tree)
+                                    // Notifications are anchored to the pane
+                                    // viewport inside the clipped card.
+                                    .children(notification_layer),
+                            ),
+                    )
+                    .child(self.panels.panel().clone()),
+            )
+            .children(update_notification_layer)
+            .children(dialog_layer)
+    }
+}
 
 pub(super) fn title_bar_leading_region(width: f32) -> Div {
     // Sidebar alignment yields to the tab strip on narrow windows, while
@@ -464,7 +711,7 @@ fn app_menu(menu: ModernMenu, shell: &Entity<Shell>, _cx: &mut App) -> ModernMen
     // Only a build that can replace itself offers to check.
     #[cfg(windows)]
     let menu = menu
-        .item(t!("shell-menu-check-updates"), |_, cx| check_now(cx))
+        .item(t!("shell-menu-check-updates"), |_, cx| check(cx))
         .icon(Icon::new(IconName::ArrowDown));
 
     menu
@@ -487,253 +734,6 @@ struct NextBusyTabIcon;
 impl IconNamed for NextBusyTabIcon {
     fn path(self) -> SharedString {
         "icons/circle-arrow-right.svg".into()
-    }
-}
-
-impl Render for Shell {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Safety net for any activation path that reaches a render without
-        // passing `focus_active`: the visible tab must be live before anything
-        // below reads the active pane.
-        self.ensure_active_tab_live(window, cx);
-
-        self.window_active = Self::exact_window_active(window);
-
-        self.acknowledge_visible(window, false, cx);
-
-        window.set_window_title(&self.active_tab_title());
-
-        if self.needs_focus {
-            self.needs_focus = false;
-            self.focus_active(window, cx);
-        }
-
-        if let Some(request) = self.pending_agent_resume.take() {
-            // The conversation ran in a directory of its own. Where a
-            // workspace owns that directory, the reopened tab gets that
-            // workspace's whole directory list; otherwise the conversation's
-            // own directory is all this tab can honestly claim.
-            let workspace =
-                exact_match(&self.workspaces.summaries(), path::Path::new(&request.cwd))
-                    .and_then(|id| self.workspaces.roots_of(id))
-                    .map_or_else(
-                        || AgentWorkspace::single(Some(request.cwd.clone())),
-                        |roots| agent_workspace(Some(roots)),
-                    );
-
-            self.open_agent_tab_in(
-                &request.profile,
-                workspace,
-                Some(RecoveryIdentity::new(
-                    AgentKind::from_profile(request.profile.kind),
-                    request.session_id,
-                )),
-                window,
-                cx,
-            );
-        }
-
-        if let Some(tab) = self.pending_agent_close.take() {
-            self.request_close_tab(tab, window, cx);
-        }
-
-        self.process_native_notifications(cx);
-
-        ui::sync_modern_menu(cx);
-
-        // Any workspace/tab switch re-renders the shell, so this render-time
-        // compare-and-set catches every switch path.
-        self.sync_git_target(cx);
-        self.panels.sync_task_target(self.active_agent(), cx);
-
-        // The sidebar is always mounted so it can animate its width open/closed.
-        let summaries = self.projected_workspace_summaries(cx);
-
-        // Vertical style folds the tab strip into the sidebar as child rows of
-        // each workspace, leaving the title bar's strip slot empty.
-        let vertical_tabs =
-            cx.global::<AppSettings>().appearance.tab_bar_style == TabBarStyle::Vertical;
-
-        let (unread_tabs, busy_agent_tabs) = self.tab_agent_indicators(cx);
-
-        let sidebar_tabs: Vec<Vec<SidebarTab>> = match vertical_tabs {
-            false => Vec::new(),
-
-            true => summaries
-                .iter()
-                .map(|ws| {
-                    let Some(tabs) = self.workspaces.tabs_of(ws.id) else {
-                        return Vec::new();
-                    };
-
-                    let active_id = tabs.active_id();
-
-                    tabs.tabs()
-                        .iter()
-                        .map(|tab| SidebarTab {
-                            id: tab.id(),
-                            label: match tab.title().is_empty() {
-                                true => SharedString::new_static("PowerShell"),
-                                false => tab.title().to_string().into(),
-                            },
-                            // Every workspace keeps its own active tab, but
-                            // only one of them is the tab on screen. Marking
-                            // the others would put a selection highlight on
-                            // every workspace's list at once.
-                            active: ws.active && tab.id() == active_id,
-                            unread: unread_tabs.contains(&tab.id()),
-                            busy: busy_agent_tabs.contains(&tab.id()),
-                            bell: tab.bell(),
-                            agent_kind: tab.surface().agent_kind(cx),
-                            icon: tab.surface().icon(cx),
-                            pending: matches!(tab.surface(), TabSurface::Pending(_)),
-                            exited: tab.exited(),
-                            progress: tab.progress(),
-                            terminal: Self::tab_terminal_activity(tab, cx),
-                        })
-                        .collect()
-                })
-                .collect(),
-        };
-
-        let sidebar = self.sidebar.render(
-            summaries,
-            sidebar_tabs,
-            &self.renames,
-            SidebarUsage {
-                daily: self.token_usage.clone(),
-                quotas: self.agent_usage.clone(),
-            },
-            cx,
-        );
-
-        // Re-render the shell whenever the wrapping Root changes (dialog
-        // open/close), since the shell draws the dialog layer.
-        if !self.root_observed
-            && let Some(Some(root)) = window.root::<Root>()
-        {
-            cx.observe(&root, |_, _, cx| cx.notify()).detach();
-            self.root_observed = true;
-        }
-
-        // Root stores opened dialogs but does not draw them; the app renders the
-        // dialog overlay itself.
-        let dialog_layer = Root::render_dialog_layer(window, cx);
-        let notification_layer = Root::render_notification_layer(window, cx);
-        let update_notification_layer = self.update_notifications.render(cx);
-
-        // Scroll the newly active tab into view on any switch path.
-        let active_id = self.workspaces.active_tabs().active_id();
-        let active_index = self.workspaces.active_tabs().active_index();
-
-        self.tab_strip.reveal_active(active_id, active_index, cx);
-
-        let tab_bar = match vertical_tabs {
-            true => div().into_any_element(),
-
-            false => self.tab_strip.render(
-                self.workspaces.active_tabs(),
-                &unread_tabs,
-                &busy_agent_tabs,
-                &self.renames,
-                cx,
-            ),
-        };
-
-        self.apply_pending_ratios(cx);
-
-        let pane_tree = self.render_active_tree(cx);
-
-        let background_image = cx
-            .global::<AppSettings>()
-            .appearance
-            .background_image
-            .clone()
-            .map(|path| {
-                let path: PathBuf = path.into();
-
-                img(path)
-                    .absolute()
-                    .inset_0()
-                    .size_full()
-                    .object_fit(ObjectFit::Cover)
-                    .opacity(ui::background_image_layer_opacity(cx))
-            });
-
-        let shell = div()
-            .size_full()
-            .relative()
-            .overflow_hidden()
-            // A context menu drawn in its own window never takes activation, so
-            // that this window keeps its focused backdrop material — which also
-            // means it never receives the press or the key that should dismiss
-            // it. This window does. Capture phase, because the input still
-            // belongs to whatever it was aimed at.
-            .capture_any_mouse_down(|_, _, cx| ui::dismiss_modern_menu(cx))
-            .capture_key_down(|event: &KeyDownEvent, _, cx| {
-                // Capture phase, and propagation stops on anything the menu
-                // used: while a menu is up its keys outrank the bindings of
-                // whatever still holds focus underneath it.
-                if dispatch_modern_menu_key(event, cx) {
-                    cx.stop_propagation();
-                }
-            })
-            // The window surface itself is never painted (gpui leaves it
-            // white/transparent), and the chrome now has see-through regions —
-            // the tab strip and the gutters around the terminal cards — so the
-            // shell paints the chrome background across the whole window.
-            // `apply_window_translucency` dims this color with the rest of the
-            // chrome when window transparency is on.
-            .bg(cx.theme().background)
-            .flex()
-            .flex_col()
-            // All chrome inherits the configured UI font; terminal panes override it.
-            .font(ui::font_with_default_fallback(
-                cx.global::<AppSettings>().appearance.ui_font.clone(),
-            ))
-            .key_context("Shell");
-
-        Self::bind_actions(shell, cx)
-            .children(background_image)
-            .child(self.render_title_bar(tab_bar, cx))
-            .child(
-                div()
-                    .flex_1()
-                    // Without this the row keeps `min-height: auto` and any
-                    // child taller than the window stretches it, which pushes
-                    // the bottom-anchored pane content below the viewport and
-                    // reads as a blank main area.
-                    .min_h_0()
-                    .flex()
-                    .flex_row()
-                    .child(sidebar)
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_h_0()
-                            .min_w_0()
-                            .relative()
-                            .overflow_hidden()
-                            // Gutters only on the two sides that face other
-                            // chrome; the surface runs flush into the window's
-                            // right and bottom edges.
-                            .pl(px(ui::composition::FLOATING_SURFACE_SIDE_INSET))
-                            .pt(px(ui::composition::FLOATING_SURFACE_TOP_INSET))
-                            .child(
-                                floating_surface_card(cx)
-                                    .id("main-floating-surface")
-                                    .min_w_0()
-                                    .relative()
-                                    .child(pane_tree)
-                                    // Notifications are anchored to the pane
-                                    // viewport inside the clipped card.
-                                    .children(notification_layer),
-                            ),
-                    )
-                    .child(self.panels.panel().clone()),
-            )
-            .children(update_notification_layer)
-            .children(dialog_layer)
     }
 }
 

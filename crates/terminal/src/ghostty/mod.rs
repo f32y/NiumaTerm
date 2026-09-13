@@ -264,7 +264,7 @@ impl GhosttyTerminal {
     /// Poll the terminal title; returns `Some(title)` only when it changed
     /// since the last poll.
     pub fn poll_title(&mut self) -> Option<String> {
-        let title = self.get_string(VtTerminalData::TITLE);
+        let title = self.read_string(VtTerminalData::TITLE);
 
         self.titles.note_title(title)
     }
@@ -272,7 +272,7 @@ impl GhosttyTerminal {
     /// Poll the working directory (OSC 7); returns `Some(pwd)` only when it
     /// changed since the last poll.
     pub fn poll_pwd(&mut self) -> Option<String> {
-        let pwd = self.get_string(VtTerminalData::PWD);
+        let pwd = self.read_string(VtTerminalData::PWD);
 
         self.titles.note_pwd(pwd)
     }
@@ -281,13 +281,13 @@ impl GhosttyTerminal {
     /// change-detection). `poll_title` is the producer's change-detecting variant;
     /// this is for on-demand frontend reads (title template), replacing the mirror.
     pub fn title(&self) -> String {
-        self.get_string(VtTerminalData::TITLE)
+        self.read_string(VtTerminalData::TITLE)
     }
 
     /// The current OSC 7 working directory (peek) as a path, or `None` when unset.
     /// Replaces the mirror's `current_directory` for the title template.
     pub fn current_directory(&self) -> Option<path::PathBuf> {
-        let pwd = self.get_string(VtTerminalData::PWD);
+        let pwd = self.read_string(VtTerminalData::PWD);
 
         if pwd.is_empty() {
             None
@@ -299,7 +299,7 @@ impl GhosttyTerminal {
     /// Read a `GhosttyString`-typed terminal datum as an owned `String`. The
     /// borrowed pointer is only valid until the next mutating call, so we copy
     /// immediately.
-    fn get_string(&self, data: VtTerminalData::Type) -> String {
+    fn read_string(&self, data: VtTerminalData::Type) -> String {
         let mut s = VtString {
             ptr: ptr::null(),
             len: 0,

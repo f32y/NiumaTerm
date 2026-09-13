@@ -105,11 +105,11 @@ pub fn install_hooks(hooks_path: &Path) -> io::Result<()> {
 }
 
 fn install_hooks_with_command(hooks_path: &Path, command: &str) -> io::Result<()> {
-    let mut settings = read_hooks(hooks_path)?;
+    let mut settings = read_settings(hooks_path)?;
 
     install_into(&mut settings, command)?;
 
-    write_hooks(hooks_path, &settings)
+    write_settings(hooks_path, &settings)
 }
 
 pub fn uninstall_hooks(hooks_path: &Path) -> io::Result<()> {
@@ -117,15 +117,15 @@ pub fn uninstall_hooks(hooks_path: &Path) -> io::Result<()> {
         return Ok(());
     }
 
-    let mut settings = read_hooks(hooks_path)?;
+    let mut settings = read_settings(hooks_path)?;
 
     uninstall_from(&mut settings);
 
-    write_hooks(hooks_path, &settings)
+    write_settings(hooks_path, &settings)
 }
 
 pub fn hooks_status(hooks_path: &Path) -> HookInstallStatus {
-    let Ok(settings) = read_hooks(hooks_path) else {
+    let Ok(settings) = read_settings(hooks_path) else {
         return HookInstallStatus::NotInstalled;
     };
 
@@ -169,11 +169,11 @@ fn status_of(settings: &Value, command: &str) -> HookInstallStatus {
     hook_store::status_of(settings, &HOOK_EVENTS, command)
 }
 
-fn read_hooks(hooks_path: &Path) -> io::Result<Value> {
+fn read_settings(hooks_path: &Path) -> io::Result<Value> {
     hook_store::read(hooks_path, "Codex hooks.json")
 }
 
-fn write_hooks(hooks_path: &Path, settings: &Value) -> io::Result<()> {
+fn write_settings(hooks_path: &Path, settings: &Value) -> io::Result<()> {
     hook_store::write(hooks_path, settings)
 }
 

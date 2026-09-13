@@ -25,7 +25,7 @@ use crate::agent_tab::{AgentPane, AgentPaneEvent, RecentSessionsMode};
 impl AgentPane {
     /// Apply provider state before presenting its effects in transcript order.
     #[cfg(test)]
-    pub(crate) fn apply_event(&mut self, event: SessionEvent, cx: &mut Context<Self>) {
+    pub(crate) fn on_event(&mut self, event: SessionEvent, cx: &mut Context<Self>) {
         self.prepare_ready_defaults(cx);
 
         let effect = {
@@ -162,10 +162,10 @@ impl AgentPane {
             }
 
             SessionEffect::Branch(update @ BranchUpdate::Branching) => {
-                self.apply_fork_update(update, cx)
+                self.on_fork_update(update, cx)
             }
 
-            SessionEffect::Branch(update) => self.apply_rewind_update(update, cx),
+            SessionEffect::Branch(update) => self.on_rewind_update(update, cx),
 
             SessionEffect::Error {
                 message,
@@ -438,7 +438,7 @@ impl AgentPane {
     /// conversation. Replay entries share one turn and carry no fold header,
     /// so they render as a plain chronological stream above the new turns.
     #[cfg(test)]
-    pub(crate) fn apply_replay(&mut self, replay: Vec<ReplayTurn>, cx: &mut Context<Self>) {
+    pub(crate) fn on_replay(&mut self, replay: Vec<ReplayTurn>, cx: &mut Context<Self>) {
         let answered_at = replay
             .iter()
             .flat_map(|turn| turn.items.iter())

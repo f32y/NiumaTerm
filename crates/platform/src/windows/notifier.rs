@@ -70,15 +70,7 @@ pub(crate) fn remove(tag: &str, group: &str) -> Result<(), String> {
 }
 
 pub(crate) fn register_identity(exe_path: &Path) -> Result<(), String> {
-    use windows::Win32::Foundation::PROPERTYKEY;
-    use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
-    use windows::Win32::System::Com::{
-        CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
-        CoUninitialize, IPersistFile,
-    };
-    use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
-    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
-    use windows::core::{Error, GUID, HSTRING, Interface};
+    use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize};
 
     let shortcut = shortcut_path()?;
 
@@ -88,10 +80,26 @@ pub(crate) fn register_identity(exe_path: &Path) -> Result<(), String> {
     let initialized = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
 
     if initialized.is_err() {
-        return Err(Error::from_hresult(initialized).to_string());
+        return Err(WindowsError::from_hresult(initialized).to_string());
     }
 
-    let result = (|| unsafe {
+    let result =
+        write_shortcut(exe_path, &shortcut).map_err(|error: WindowsError| error.to_string());
+
+    unsafe { CoUninitialize() };
+
+    result
+}
+
+fn write_shortcut(exe_path: &Path, shortcut: &Path) -> Result<(), WindowsError> {
+    use windows::Win32::Foundation::PROPERTYKEY;
+    use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
+    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, IPersistFile};
+    use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+    use windows::core::{GUID, HSTRING, Interface};
+
+    unsafe {
         let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
         let exe: HSTRING = exe_path.to_string_lossy().as_ref().into();
 
@@ -114,12 +122,7 @@ pub(crate) fn register_identity(exe_path: &Path) -> Result<(), String> {
         let shortcut: HSTRING = shortcut.to_string_lossy().as_ref().into();
 
         persist.Save(&shortcut, true)
-    })()
-    .map_err(|error: WindowsError| error.to_string());
-
-    unsafe { CoUninitialize() };
-
-    result
+    }
 }
 
 pub(crate) fn unregister_identity() -> Result<(), String> {

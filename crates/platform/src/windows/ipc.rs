@@ -77,57 +77,59 @@ pub fn send(message: &str, timeout: Duration, testing: bool) -> io::Result<()> {
 
 /// Run the primary process pipe server. Returning `false` from the callback
 /// stops the server thread.
-pub fn spawn_server(testing: bool, mut on_message: impl FnMut(Vec<u8>) -> bool + Send + 'static) {
+pub fn spawn_server(testing: bool, on_message: impl FnMut(Vec<u8>) -> bool + Send + 'static) {
     thread::Builder::new()
         .name("nmt-ipc".into())
-        .spawn(move || {
-            let name = wide(pipe_name(testing));
-
-            loop {
-                let handle = unsafe {
-                    CreateNamedPipeW(
-                        name.as_ptr(),
-                        PIPE_ACCESS_INBOUND,
-                        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-                        PIPE_UNLIMITED_INSTANCES,
-                        512,
-                        512,
-                        0,
-                        ptr::null(),
-                    )
-                };
-
-                if handle == INVALID_HANDLE_VALUE {
-                    warn!("CreateNamedPipeW failed ({}); IPC disabled", unsafe {
-                        GetLastError()
-                    });
-
-                    return;
-                }
-
-                let connected = unsafe { ConnectNamedPipe(handle, ptr::null_mut()) } != 0
-                    || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
-
-                let mut pipe = unsafe { File::from_raw_handle(handle as _) };
-
-                if !connected {
-                    continue;
-                }
-
-                let mut bytes = Vec::new();
-
-                if Read::take(&mut pipe, (MAX_MESSAGE_BYTES + 1) as u64)
-                    .read_to_end(&mut bytes)
-                    .is_err()
-                    || bytes.len() > MAX_MESSAGE_BYTES
-                {
-                    continue;
-                }
-
-                if !on_message(bytes) {
-                    return;
-                }
-            }
-        })
+        .spawn(move || serve_pipe(testing, on_message))
         .expect("spawn nmt-ipc thread");
+}
+
+fn serve_pipe(testing: bool, mut on_message: impl FnMut(Vec<u8>) -> bool) {
+    let name = wide(pipe_name(testing));
+
+    loop {
+        let handle = unsafe {
+            CreateNamedPipeW(
+                name.as_ptr(),
+                PIPE_ACCESS_INBOUND,
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                PIPE_UNLIMITED_INSTANCES,
+                512,
+                512,
+                0,
+                ptr::null(),
+            )
+        };
+
+        if handle == INVALID_HANDLE_VALUE {
+            warn!("CreateNamedPipeW failed ({}); IPC disabled", unsafe {
+                GetLastError()
+            });
+
+            return;
+        }
+
+        let connected = unsafe { ConnectNamedPipe(handle, ptr::null_mut()) } != 0
+            || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
+
+        let mut pipe = unsafe { File::from_raw_handle(handle as _) };
+
+        if !connected {
+            continue;
+        }
+
+        let mut bytes = Vec::new();
+
+        if Read::take(&mut pipe, (MAX_MESSAGE_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .is_err()
+            || bytes.len() > MAX_MESSAGE_BYTES
+        {
+            continue;
+        }
+
+        if !on_message(bytes) {
+            return;
+        }
+    }
 }

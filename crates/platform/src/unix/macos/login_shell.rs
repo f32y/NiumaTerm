@@ -27,29 +27,6 @@ use tracing::{debug, warn};
 
 use crate::unix::shell::default_shell;
 
-/// Separates shell startup chatter from the environment dump. Startup files
-/// print banners, version notices and completion warnings, none of which can
-/// be told apart from a variable assignment by shape alone.
-///
-/// A literal would not be enough on its own: a startup file that warns about
-/// an unset variable prints the name it was asked about, and an exported
-/// variable's value can hold arbitrary text. Neither can reproduce a string
-/// the process invented for this one run.
-fn marker() -> String {
-    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
-
-    let clock = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| since.subsec_nanos());
-
-    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
-
-    format!(
-        "__NMT_LOGIN_ENVIRONMENT_{}_{clock}_{sequence}__",
-        process::id()
-    )
-}
-
 /// A startup file that waits on something — a network mount, a prompt the
 /// shell will never receive an answer to — would otherwise block the first
 /// agent launch forever. A heavyweight zsh configuration measures in the
@@ -96,6 +73,29 @@ pub(crate) fn missing_variables() -> &'static [(String, String)] {
 
         variables
     })
+}
+
+/// Separates shell startup chatter from the environment dump. Startup files
+/// print banners, version notices and completion warnings, none of which can
+/// be told apart from a variable assignment by shape alone.
+///
+/// A literal would not be enough on its own: a startup file that warns about
+/// an unset variable prints the name it was asked about, and an exported
+/// variable's value can hold arbitrary text. Neither can reproduce a string
+/// the process invented for this one run.
+fn marker() -> String {
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    let clock = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.subsec_nanos());
+
+    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+
+    format!(
+        "__NMT_LOGIN_ENVIRONMENT_{}_{clock}_{sequence}__",
+        process::id()
+    )
 }
 
 /// Whether this process was started from a terminal. A launchd start attaches

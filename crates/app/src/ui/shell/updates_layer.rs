@@ -222,44 +222,7 @@ impl UpdateNotificationLayer {
                     .timer(time::Duration::from_millis(100))
                     .await;
 
-                let keep_running = shell
-                    .update(cx, |shell, cx| {
-                        let mut expired = Vec::new();
-
-                        if shell.window_active {
-                            for (key, entry) in &mut shell.update_notifications.cards {
-                                if let Some(lifetime) = &mut entry.elapsed
-                                    && lifetime.tick(true, time::Duration::from_millis(100))
-                                {
-                                    expired.push(key.clone());
-                                }
-                            }
-                        }
-
-                        if !expired.is_empty() {
-                            let coordinator = cx.global::<AgentUpdates>().coordinator.clone();
-
-                            for key in &expired {
-                                if let Some(entry) = shell.update_notifications.cards.get_mut(key) {
-                                    coordinator.hide_notification(&entry.view.installation);
-
-                                    // The card stays until the coordinator's
-                                    // next snapshot retires its key; only the
-                                    // clock is spent.
-                                    entry.elapsed = None;
-                                }
-                            }
-
-                            cx.refresh_windows();
-                        }
-
-                        shell
-                            .update_notifications
-                            .cards
-                            .values()
-                            .any(|entry| entry.elapsed.is_some())
-                    })
-                    .unwrap_or(false);
+                let keep_running = shell.update(cx, expire_elapsed_cards).unwrap_or(false);
 
                 if !keep_running {
                     let _ = shell.update(cx, |shell, _| {
@@ -272,6 +235,43 @@ impl UpdateNotificationLayer {
         })
         .detach();
     }
+}
+
+fn expire_elapsed_cards(shell: &mut Shell, cx: &mut Context<Shell>) -> bool {
+    let mut expired = Vec::new();
+
+    if shell.window_active {
+        for (key, entry) in &mut shell.update_notifications.cards {
+            if let Some(lifetime) = &mut entry.elapsed
+                && lifetime.tick(true, time::Duration::from_millis(100))
+            {
+                expired.push(key.clone());
+            }
+        }
+    }
+
+    if !expired.is_empty() {
+        let coordinator = cx.global::<AgentUpdates>().coordinator.clone();
+
+        for key in &expired {
+            if let Some(entry) = shell.update_notifications.cards.get_mut(key) {
+                coordinator.hide_notification(&entry.view.installation);
+
+                // The card stays until the coordinator's
+                // next snapshot retires its key; only the
+                // clock is spent.
+                entry.elapsed = None;
+            }
+        }
+
+        cx.refresh_windows();
+    }
+
+    shell
+        .update_notifications
+        .cards
+        .values()
+        .any(|entry| entry.elapsed.is_some())
 }
 
 struct ClaudeUpdateIcon;

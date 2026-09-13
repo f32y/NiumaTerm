@@ -170,7 +170,7 @@ pub fn macos_process_name(pid: c_int) -> String {
     let mut name = String::new();
 
     if pid >= 0 {
-        let proc_path = get_proc_path(pid);
+        let proc_path = proc_path(pid);
 
         name = Path::new(&proc_path)
             .file_name()
@@ -183,7 +183,7 @@ pub fn macos_process_name(pid: c_int) -> String {
     name
 }
 
-fn get_proc_path(pid: i32) -> String {
+fn proc_path(pid: i32) -> String {
     let mut pathbuf: Vec<u8> = Vec::with_capacity(4 * 1024); // 4 * MAXPATHLEN
 
     #[allow(unused)]

@@ -252,19 +252,6 @@ pub struct WorkspaceSummary {
     pub progress: ProgressTally,
 }
 
-/// OSC 9;4 progress of a workspace's tabs. Only tabs carrying a number take
-/// part — an indeterminate report has no percentage to add, and a tab without a
-/// running command has no progress at all, so neither drags the bar down while
-/// the others advance.
-fn tabs_progress(tabs: &TabManager<TabSurface>) -> ProgressTally {
-    tabs.tabs()
-        .iter()
-        .filter_map(|tab| tab.progress())
-        .filter_map(|report| report.progress)
-        .map(ProgressTally::percent)
-        .fold(ProgressTally::default(), ProgressTally::merge)
-}
-
 impl WorkspaceManager {
     /// Start with a single active workspace. There is no empty state.
     pub fn new(
@@ -284,17 +271,6 @@ impl WorkspaceManager {
                 tabs,
             }),
         }
-    }
-
-    /// Append a workspace (already seeded with its tab set) and make it active.
-    pub fn new_workspace(
-        &mut self,
-        tabs: TabManager<TabSurface>,
-        id: WorkspaceId,
-        name: String,
-        roots: WorkspaceRoots,
-    ) -> WorkspaceId {
-        self.new_workspace_of_kind(tabs, id, name, Some(roots), WorkspaceKind::Normal)
     }
 
     /// Append a workspace of an explicit kind and make it active.
@@ -384,7 +360,7 @@ impl WorkspaceManager {
         roots: WorkspaceRoots,
         pinned: bool,
     ) -> WorkspaceId {
-        let id = self.new_workspace(tabs, id, name, roots);
+        let id = self.new_workspace_of_kind(tabs, id, name, Some(roots), WorkspaceKind::Normal);
 
         self.set_pinned(id, pinned);
 
@@ -524,7 +500,7 @@ impl WorkspaceManager {
 
     /// The tab set that contains `tab_id`, searched across all workspaces (a
     /// background workspace's surface still polls host events).
-    pub fn tab_manager_for(&self, tab_id: TabId) -> Option<&TabManager<TabSurface>> {
+    pub fn tabs_for_tab(&self, tab_id: TabId) -> Option<&TabManager<TabSurface>> {
         self.workspaces
             .items()
             .iter()
@@ -543,7 +519,7 @@ impl WorkspaceManager {
             .map(|tab| tab.id())
     }
 
-    pub fn tab_manager_for_mut(&mut self, tab_id: TabId) -> Option<&mut TabManager<TabSurface>> {
+    pub fn tabs_for_tab_mut(&mut self, tab_id: TabId) -> Option<&mut TabManager<TabSurface>> {
         self.workspaces
             .items_mut()
             .iter_mut()
@@ -601,4 +577,17 @@ impl WorkspaceManager {
     pub fn active_id(&self) -> WorkspaceId {
         self.workspaces.active_id()
     }
+}
+
+/// OSC 9;4 progress of a workspace's tabs. Only tabs carrying a number take
+/// part — an indeterminate report has no percentage to add, and a tab without a
+/// running command has no progress at all, so neither drags the bar down while
+/// the others advance.
+fn tabs_progress(tabs: &TabManager<TabSurface>) -> ProgressTally {
+    tabs.tabs()
+        .iter()
+        .filter_map(|tab| tab.progress())
+        .filter_map(|report| report.progress)
+        .map(ProgressTally::percent)
+        .fold(ProgressTally::default(), ProgressTally::merge)
 }

@@ -1,3 +1,4 @@
+use gpui_component::dialog::Dialog;
 use std::borrow::Cow;
 
 use gpui_component::StyledExt;
@@ -298,12 +299,12 @@ impl Shell {
         }
 
         let settings = cx.global::<AppSettings>();
-        let warn = settings.system.warn_before_terminating_shell;
+        let warn_before_terminating_shell = settings.system.warn_before_terminating_shell;
 
         if !should_confirm_tab_close(
             is_agent,
             settings.system.confirm_before_closing_workspace,
-            warn,
+            warn_before_terminating_shell,
             count,
         ) {
             self.close_tab_now(id, window, cx);
@@ -338,7 +339,7 @@ impl Shell {
         // pane entity; dropping it drops the pane's surface and PTY.
         let removed = self
             .workspaces
-            .tab_manager_for_mut(id)
+            .tabs_for_tab_mut(id)
             .and_then(|tabs| tabs.close(id));
 
         let Some(tree) = removed else {
@@ -384,19 +385,19 @@ impl Shell {
             return;
         }
 
-        let confirm = cx
+        let confirm_before_closing_workspace = cx
             .global::<AppSettings>()
             .system
             .confirm_before_closing_workspace;
 
         let count = self.workspace_process_count(id, cx);
 
-        let warn = cx
+        let warn_before_terminating_shell = cx
             .global::<AppSettings>()
             .system
             .warn_before_terminating_shell;
 
-        if !confirm && !warn.should_warn(count) {
+        if !confirm_before_closing_workspace && !warn_before_terminating_shell.should_warn(count) {
             self.close_workspace_now(id, window, cx);
 
             return;
@@ -442,10 +443,14 @@ impl Shell {
             .sum();
 
         let settings = cx.global::<AppSettings>();
-        let confirm = settings.system.confirm_before_closing_workspace;
-        let warn = settings.system.warn_before_terminating_shell;
+        let confirm_before_closing_workspace = settings.system.confirm_before_closing_workspace;
+        let warn_before_terminating_shell = settings.system.warn_before_terminating_shell;
 
-        if !should_confirm_close(confirm, warn, process_count) {
+        if !should_confirm_close(
+            confirm_before_closing_workspace,
+            warn_before_terminating_shell,
+            process_count,
+        ) {
             self.close_temporary_workspaces_now(&ids, window, cx);
 
             return;
@@ -522,63 +527,7 @@ impl Shell {
         let shell = cx.entity();
 
         window.open_dialog(cx, move |dialog, _, _| {
-            let quit_shell = shell.clone();
-            let replace_shell = shell.clone();
-            let message = message.clone();
-            let note = note.clone();
-
-            dialog
-                .title(t!("shell-close-last-workspace-title"))
-                .overlay_closable(false)
-                .content(move |content, _, cx| {
-                    content.child(
-                        v_flex()
-                            .gap_1()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(message.clone())
-                            .children(note.clone().map(|note| div().font_bold().child(note))),
-                    )
-                })
-                .footer(
-                    DialogFooter::new()
-                        .child(
-                            Button::new("replace-ws")
-                                .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                .label(t!("shell-close-new-default-workspace"))
-                                .primary()
-                                .on_click(move |_, window, cx| {
-                                    window.close_dialog(cx);
-
-                                    replace_shell.update(cx, |this, cx| {
-                                        this.replace_last_workspace(id, window, cx)
-                                    });
-                                }),
-                        )
-                        .child(
-                            Button::new("quit-app")
-                                .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                .label(t!("shell-close-quit"))
-                                .danger()
-                                .on_click(move |_, window, cx| {
-                                    if !ui::settings::save_settings(window, cx) {
-                                        window.close_dialog(cx);
-
-                                        return;
-                                    }
-
-                                    quit_shell.update(cx, |this, cx| this.doom_workspace(id, cx));
-                                    cx.quit();
-                                }),
-                        )
-                        .child(
-                            DialogClose::new().child(
-                                Button::new("keep-ws")
-                                    .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                    .label(t!("shell-close-cancel")),
-                            ),
-                        ),
-                )
+            close_last_workspace_dialog(dialog, &shell, id, &message, &note)
         });
     }
 
@@ -626,12 +575,12 @@ impl Shell {
             .sum();
 
         let settings = cx.global::<AppSettings>();
-        let warn = settings.system.warn_before_terminating_shell;
+        let warn_before_terminating_shell = settings.system.warn_before_terminating_shell;
 
         if saved
             && !should_confirm_close(
                 settings.system.confirm_before_closing_workspace,
-                warn,
+                warn_before_terminating_shell,
                 count,
             )
         {
@@ -738,4 +687,69 @@ impl Shell {
             cx.notify();
         }
     }
+}
+
+fn close_last_workspace_dialog(
+    dialog: Dialog,
+    shell: &Entity<Shell>,
+    id: WorkspaceId,
+    message: &str,
+    note: &Option<SharedString>,
+) -> Dialog {
+    let quit_shell = shell.clone();
+    let replace_shell = shell.clone();
+    let message = message.to_string();
+    let note = note.clone();
+
+    dialog
+        .title(t!("shell-close-last-workspace-title"))
+        .overlay_closable(false)
+        .content(move |content, _, cx| {
+            content.child(
+                v_flex()
+                    .gap_1()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(message.clone())
+                    .children(note.clone().map(|note| div().font_bold().child(note))),
+            )
+        })
+        .footer(
+            DialogFooter::new()
+                .child(
+                    Button::new("replace-ws")
+                        .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                        .label(t!("shell-close-new-default-workspace"))
+                        .primary()
+                        .on_click(move |_, window, cx| {
+                            window.close_dialog(cx);
+
+                            replace_shell
+                                .update(cx, |this, cx| this.replace_last_workspace(id, window, cx));
+                        }),
+                )
+                .child(
+                    Button::new("quit-app")
+                        .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                        .label(t!("shell-close-quit"))
+                        .danger()
+                        .on_click(move |_, window, cx| {
+                            if !ui::settings::save_settings(window, cx) {
+                                window.close_dialog(cx);
+
+                                return;
+                            }
+
+                            quit_shell.update(cx, |this, cx| this.doom_workspace(id, cx));
+                            cx.quit();
+                        }),
+                )
+                .child(
+                    DialogClose::new().child(
+                        Button::new("keep-ws")
+                            .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                            .label(t!("shell-close-cancel")),
+                    ),
+                ),
+        )
 }

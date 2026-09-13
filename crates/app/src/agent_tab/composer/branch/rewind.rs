@@ -264,10 +264,10 @@ impl AgentPane {
             state.branch.rewind(&mut state.runtime, action)
         };
 
-        self.apply_rewind_update(update, cx);
+        self.on_rewind_update(update, cx);
     }
 
-    pub(crate) fn apply_rewind_update(&mut self, update: BranchUpdate, cx: &mut Context<Self>) {
+    pub(crate) fn on_rewind_update(&mut self, update: BranchUpdate, cx: &mut Context<Self>) {
         match update {
             BranchUpdate::Ignored => {}
 
@@ -314,7 +314,7 @@ impl AgentPane {
                 self.palette.reset_discovery(false);
 
                 if let Some(host) = self.host.upgrade() {
-                    host.update(cx, |host, cx| host.apply_branch_update(update, cx));
+                    host.update(cx, |host, cx| host.on_branch_update(update, cx));
                 }
             }
 

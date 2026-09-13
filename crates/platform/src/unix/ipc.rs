@@ -117,7 +117,7 @@ pub fn send(message: &str, timeout: Duration, testing: bool) -> io::Result<()> {
 
 /// Run the primary process socket server. Returning `false` from the callback
 /// stops the server thread.
-pub fn spawn_server(testing: bool, mut on_message: impl FnMut(Vec<u8>) -> bool + Send + 'static) {
+pub fn spawn_server(testing: bool, on_message: impl FnMut(Vec<u8>) -> bool + Send + 'static) {
     let path = match socket_path(testing) {
         Ok(path) => path,
 
@@ -157,24 +157,26 @@ pub fn spawn_server(testing: bool, mut on_message: impl FnMut(Vec<u8>) -> bool +
 
     thread::Builder::new()
         .name("nmt-ipc".into())
-        .spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(stream) = stream else { continue };
-
-                let mut bytes = Vec::new();
-
-                if Read::take(stream, (MAX_MESSAGE_BYTES + 1) as u64)
-                    .read_to_end(&mut bytes)
-                    .is_err()
-                    || bytes.len() > MAX_MESSAGE_BYTES
-                {
-                    continue;
-                }
-
-                if !on_message(bytes) {
-                    return;
-                }
-            }
-        })
+        .spawn(move || serve_socket(listener, on_message))
         .expect("spawn nmt-ipc thread");
+}
+
+fn serve_socket(listener: UnixListener, mut on_message: impl FnMut(Vec<u8>) -> bool) {
+    for stream in listener.incoming() {
+        let Ok(stream) = stream else { continue };
+
+        let mut bytes = Vec::new();
+
+        if Read::take(stream, (MAX_MESSAGE_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .is_err()
+            || bytes.len() > MAX_MESSAGE_BYTES
+        {
+            continue;
+        }
+
+        if !on_message(bytes) {
+            return;
+        }
+    }
 }

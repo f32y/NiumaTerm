@@ -33,51 +33,6 @@ const QUOTA_TRACK_HEIGHT: f32 = 4.0;
 const QUOTA_ICON: f32 = 12.0;
 const QUOTA_FILL_OPACITY: f32 = 0.7;
 
-/// One provider half of the quota row: its mark, how much of the window it
-/// reports is left, and that same figure spelled out. A provider that reports
-/// no window at all gets no gauge, because an empty track would state a limit
-/// nothing was measured against.
-fn quota_gauge(
-    id: &'static str,
-    label: Cow<'static, str>,
-    icon: Icon,
-    usage: &UsageSnapshot,
-    cx: &App,
-) -> Option<AnyElement> {
-    let window = usage.compact_window()?;
-    let value = format!("{}%", window.remaining_percentage);
-    let remaining: f32 = window.remaining_percentage.into();
-
-    Some(
-        h_flex()
-            .id(id)
-            .aria_label(format!("{label}: {value}"))
-            .flex_1()
-            .min_w_0()
-            .gap_1p5()
-            .items_center()
-            .child(icon.with_size(px(QUOTA_ICON)))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .h(px(QUOTA_TRACK_HEIGHT))
-                    .rounded(px(QUOTA_TRACK_HEIGHT / 2.0))
-                    .overflow_hidden()
-                    .bg(cx.theme().sidebar_foreground.opacity(0.12))
-                    .child(
-                        div()
-                            .h_full()
-                            .w(relative(remaining / 100.0))
-                            .rounded_full()
-                            .bg(cx.theme().primary.opacity(QUOTA_FILL_OPACITY)),
-                    ),
-            )
-            .child(div().flex_none().child(value))
-            .into_any_element(),
-    )
-}
-
 pub(crate) struct AgentUsageView {
     providers: [Refresh<UsageSnapshot>; 2],
     enabled: bool,
@@ -96,24 +51,8 @@ impl AgentUsageView {
             enabled,
         };
 
-        cx.observe_global::<AppSettings>(|this: &mut Self, cx| {
-            let enabled = cx.global::<AppSettings>().agent.show_agent_usage;
-
-            if enabled == this.enabled {
-                return;
-            }
-
-            this.enabled = enabled;
-
-            for provider in &mut this.providers {
-                provider.set_enabled(enabled);
-            }
-
-            if enabled {
-                this.refresh_all(cx);
-            }
-        })
-        .detach();
+        cx.observe_global::<AppSettings>(Self::on_settings_changed)
+            .detach();
 
         cx.spawn(async move |view, cx| {
             loop {
@@ -129,6 +68,24 @@ impl AgentUsageView {
         this.refresh_all(cx);
 
         this
+    }
+
+    fn on_settings_changed(&mut self, cx: &mut Context<Self>) {
+        let enabled = cx.global::<AppSettings>().agent.show_agent_usage;
+
+        if enabled == self.enabled {
+            return;
+        }
+
+        self.enabled = enabled;
+
+        for provider in &mut self.providers {
+            provider.set_enabled(enabled);
+        }
+
+        if enabled {
+            self.refresh_all(cx);
+        }
     }
 
     fn refresh_all(&mut self, cx: &mut Context<Self>) {
@@ -202,6 +159,98 @@ struct UsagePanelColors {
 struct UsageWindowRow<'a> {
     label: Cow<'static, str>,
     window: &'a UsageWindow,
+}
+
+impl Render for AgentUsageView {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let refreshing = self.providers[0].refreshing() || self.providers[1].refreshing();
+
+        let codex_gauge = quota_gauge(
+            "agent-usage-codex",
+            t!("agent-provider-codex"),
+            Icon::new(CodexIcon),
+            &self.providers[0].value,
+            cx,
+        );
+
+        let claude_gauge = quota_gauge(
+            "agent-usage-claude",
+            t!("agent-provider-claude"),
+            Icon::new(ClaudeIcon),
+            &self.providers[1].value,
+            cx,
+        );
+
+        // Neither provider reports a limit at all, so there is nothing to
+        // gauge. A row of bare icons over empty tracks would read as two
+        // exhausted subscriptions rather than as two unknown ones.
+        if codex_gauge.is_none() && claude_gauge.is_none() {
+            return div().into_any_element();
+        }
+
+        // The divider separates two gauges; with one of them absent it would
+        // be an edge against nothing.
+        let divider = (codex_gauge.is_some() && claude_gauge.is_some()).then(|| {
+            div()
+                .flex_none()
+                .w(px(1.))
+                .h(px(12.))
+                .bg(cx.theme().sidebar_foreground.opacity(0.15))
+        });
+
+        let codex = self.providers[0].value.clone();
+        let claude = self.providers[1].value.clone();
+        let codex_refreshing = self.providers[0].refreshing();
+        let claude_refreshing = self.providers[1].refreshing();
+        let codex_failed = self.providers[0].failed;
+        let claude_failed = self.providers[1].failed;
+
+        let trigger = Button::new("agent-usage")
+            .ghost()
+            .small()
+            .w_full()
+            .h(px(QUOTA_ROW_HEIGHT))
+            .px_1()
+            .accessibility_label(self.accessibility_label())
+            // Opacity communicates in-flight work without replacing or moving
+            // the last successful values in this tightly packed status line.
+            .when(refreshing, |this| this.opacity(0.65))
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap_2()
+                    .items_center()
+                    .text_xs()
+                    .text_color(cx.theme().sidebar_foreground.opacity(0.65))
+                    .children(codex_gauge)
+                    .children(divider)
+                    .children(claude_gauge),
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.refresh_all(cx)));
+
+        div()
+            .w_full()
+            .child(
+                HoverCard::new("agent-usage-details")
+                    .anchor(gpui::Anchor::BottomLeft)
+                    .open_delay(Duration::from_millis(250))
+                    .close_delay(Duration::from_millis(150))
+                    .trigger(trigger)
+                    .content(move |_, _, cx| {
+                        render_usage_details(
+                            &codex,
+                            &claude,
+                            codex_refreshing,
+                            claude_refreshing,
+                            codex_failed,
+                            claude_failed,
+                            cx,
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
 }
 
 fn usage_window_rows(usage: &UsageSnapshot) -> Vec<UsageWindowRow<'_>> {
@@ -491,124 +540,97 @@ fn render_provider_panel(
         .into_any_element()
 }
 
-impl Render for AgentUsageView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let refreshing = self.providers[0].refreshing() || self.providers[1].refreshing();
+fn render_usage_details(
+    codex: &UsageSnapshot,
+    claude: &UsageSnapshot,
+    codex_refreshing: bool,
+    claude_refreshing: bool,
+    codex_failed: bool,
+    claude_failed: bool,
+    cx: &App,
+) -> gpui::Div {
+    let colors = UsagePanelColors {
+        foreground: cx.theme().foreground,
+        muted: cx.theme().muted_foreground,
+        border: cx.theme().border,
+        track: cx.theme().muted.opacity(0.65),
+        normal: cx.theme().primary,
+        warning: cx.theme().warning,
+        danger: cx.theme().danger,
+    };
 
-        let codex_gauge = quota_gauge(
-            "agent-usage-codex",
+    let now = now_unix_millis();
+
+    v_flex()
+        .w(px(272.))
+        .gap_3()
+        .child(render_provider_panel(
             t!("agent-provider-codex"),
-            Icon::new(CodexIcon),
-            &self.providers[0].value,
-            cx,
-        );
-
-        let claude_gauge = quota_gauge(
-            "agent-usage-claude",
-            t!("agent-provider-claude"),
-            Icon::new(ClaudeIcon),
-            &self.providers[1].value,
-            cx,
-        );
-
-        // Neither provider reports a limit at all, so there is nothing to
-        // gauge. A row of bare icons over empty tracks would read as two
-        // exhausted subscriptions rather than as two unknown ones.
-        if codex_gauge.is_none() && claude_gauge.is_none() {
-            return div().into_any_element();
-        }
-
-        // The divider separates two gauges; with one of them absent it would
-        // be an edge against nothing.
-        let divider = (codex_gauge.is_some() && claude_gauge.is_some()).then(|| {
+            Icon::new(CodexIcon).small().into_any_element(),
+            codex,
+            codex_refreshing,
+            codex_failed,
+            now,
+            colors,
+        ))
+        .child(
             div()
-                .flex_none()
-                .w(px(1.))
-                .h(px(12.))
-                .bg(cx.theme().sidebar_foreground.opacity(0.15))
-        });
+                .w_full()
+                .border_t_1()
+                .border_color(colors.border.opacity(0.65)),
+        )
+        .child(render_provider_panel(
+            t!("agent-provider-claude"),
+            Icon::new(ClaudeIcon).small().into_any_element(),
+            claude,
+            claude_refreshing,
+            claude_failed,
+            now,
+            colors,
+        ))
+}
 
-        let codex = self.providers[0].value.clone();
-        let claude = self.providers[1].value.clone();
-        let codex_refreshing = self.providers[0].refreshing();
-        let claude_refreshing = self.providers[1].refreshing();
-        let codex_failed = self.providers[0].failed;
-        let claude_failed = self.providers[1].failed;
+/// One provider half of the quota row: its mark, how much of the window it
+/// reports is left, and that same figure spelled out. A provider that reports
+/// no window at all gets no gauge, because an empty track would state a limit
+/// nothing was measured against.
+fn quota_gauge(
+    id: &'static str,
+    label: Cow<'static, str>,
+    icon: Icon,
+    usage: &UsageSnapshot,
+    cx: &App,
+) -> Option<AnyElement> {
+    let window = usage.compact_window()?;
+    let value = format!("{}%", window.remaining_percentage);
+    let remaining: f32 = window.remaining_percentage.into();
 
-        let trigger = Button::new("agent-usage")
-            .ghost()
-            .small()
-            .w_full()
-            .h(px(QUOTA_ROW_HEIGHT))
-            .px_1()
-            .accessibility_label(self.accessibility_label())
-            // Opacity communicates in-flight work without replacing or moving
-            // the last successful values in this tightly packed status line.
-            .when(refreshing, |this| this.opacity(0.65))
+    Some(
+        h_flex()
+            .id(id)
+            .aria_label(format!("{label}: {value}"))
+            .flex_1()
+            .min_w_0()
+            .gap_1p5()
+            .items_center()
+            .child(icon.with_size(px(QUOTA_ICON)))
             .child(
-                h_flex()
-                    .w_full()
+                div()
+                    .flex_1()
                     .min_w_0()
-                    .gap_2()
-                    .items_center()
-                    .text_xs()
-                    .text_color(cx.theme().sidebar_foreground.opacity(0.65))
-                    .children(codex_gauge)
-                    .children(divider)
-                    .children(claude_gauge),
+                    .h(px(QUOTA_TRACK_HEIGHT))
+                    .rounded(px(QUOTA_TRACK_HEIGHT / 2.0))
+                    .overflow_hidden()
+                    .bg(cx.theme().sidebar_foreground.opacity(0.12))
+                    .child(
+                        div()
+                            .h_full()
+                            .w(relative(remaining / 100.0))
+                            .rounded_full()
+                            .bg(cx.theme().primary.opacity(QUOTA_FILL_OPACITY)),
+                    ),
             )
-            .on_click(cx.listener(|this, _, _, cx| this.refresh_all(cx)));
-
-        div()
-            .w_full()
-            .child(
-                HoverCard::new("agent-usage-details")
-                    .anchor(gpui::Anchor::BottomLeft)
-                    .open_delay(Duration::from_millis(250))
-                    .close_delay(Duration::from_millis(150))
-                    .trigger(trigger)
-                    .content(move |_, _, cx| {
-                        let colors = UsagePanelColors {
-                            foreground: cx.theme().foreground,
-                            muted: cx.theme().muted_foreground,
-                            border: cx.theme().border,
-                            track: cx.theme().muted.opacity(0.65),
-                            normal: cx.theme().primary,
-                            warning: cx.theme().warning,
-                            danger: cx.theme().danger,
-                        };
-
-                        let now = now_unix_millis();
-
-                        v_flex()
-                            .w(px(272.))
-                            .gap_3()
-                            .child(render_provider_panel(
-                                t!("agent-provider-codex"),
-                                Icon::new(CodexIcon).small().into_any_element(),
-                                &codex,
-                                codex_refreshing,
-                                codex_failed,
-                                now,
-                                colors,
-                            ))
-                            .child(
-                                div()
-                                    .w_full()
-                                    .border_t_1()
-                                    .border_color(colors.border.opacity(0.65)),
-                            )
-                            .child(render_provider_panel(
-                                t!("agent-provider-claude"),
-                                Icon::new(ClaudeIcon).small().into_any_element(),
-                                &claude,
-                                claude_refreshing,
-                                claude_failed,
-                                now,
-                                colors,
-                            ))
-                    }),
-            )
-            .into_any_element()
-    }
+            .child(div().flex_none().child(value))
+            .into_any_element(),
+    )
 }

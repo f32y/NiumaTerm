@@ -433,7 +433,7 @@ impl Conpty {
         self.job.as_ref().map(KillOnCloseJob::process_tree)
     }
 
-    pub fn on_resize(&mut self, window_size: Winsize) {
+    pub fn set_winsize(&mut self, window_size: Winsize) {
         let result = unsafe { (self.api.resize)(self.handle, window_size.into()) };
 
         // A failed resize leaves the console at its previous size; the session

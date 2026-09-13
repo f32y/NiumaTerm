@@ -358,7 +358,7 @@ pub(super) fn materialize_active_tab(
             cx.global::<AppSettings>(),
         );
 
-        let owner = AgentSession::create(profile, workspace, cx);
+        let owner = AgentSession::create(profile, workspace, None, cx);
         let pane = cx.new(|cx| AgentPane::attach(&owner, window, cx));
 
         Shell::watch_agent_tab(&pane, cx);

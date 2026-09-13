@@ -11,11 +11,13 @@ mod releases;
 #[cfg(test)]
 mod tests;
 
+use nmt_platform::windows::self_update::discard_previous;
 use std::fs;
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use gpui::{AnyWindowHandle, App, Global, Window};
+use gpui::{AnyWindowHandle, App, AsyncApp, Global, Window};
 use nmt_config::update::UpdateChannel;
 use nmt_platform::windows::restart_manager::{
     AffectedApplication, FileUsage, RestartManagerError, RestartManagerSession,
@@ -192,12 +194,6 @@ pub(crate) fn status(cx: &App) -> Status {
         .map_or(Status::Unknown, |update| update.status.clone())
 }
 
-/// The About page's Check button. It runs whether or not automatic checking is
-/// on, which is the point of having it.
-pub(crate) fn check_now(cx: &mut App) {
-    check(cx);
-}
-
 /// The About page's Update button: fetch the release the last check found,
 /// capture the files that differ from it, and restart into the result after any
 /// required file-use decision.
@@ -267,7 +263,7 @@ fn prepare_install(
     }
 }
 
-fn inspect_file_users(cx: &mut App) {
+pub(crate) fn inspect_file_users(cx: &mut App) {
     let Some(pending) = cx.global::<AppUpdate>().pending.clone() else {
         return;
     };
@@ -363,10 +359,6 @@ fn pending_windows(pending: &PendingInstall, cx: &App) -> Vec<AnyWindowHandle> {
     }
 
     handles
-}
-
-pub(crate) fn retry_file_use(cx: &mut App) {
-    inspect_file_users(cx);
 }
 
 pub(crate) fn cancel_install(cx: &mut App) {
@@ -489,44 +481,44 @@ pub(crate) fn close_file_users(cx: &mut App) {
     cx.spawn(async move |cx| {
         let prepared = cx
             .background_executor()
-            .spawn(async move { prepare_close(&dll) })
+            .spawn(async move { prepare_close_with(&SystemSessionSource, &dll) })
             .await;
 
-        match prepared {
-            ClosePreparation::Clear => {
-                cx.update(continue_install);
-            }
-
-            ClosePreparation::Prompt(prompt) => {
-                cx.update(|cx| show_file_use_prompt(prompt, cx));
-            }
-
-            ClosePreparation::Released {
-                session,
-                applications,
-            } => {
-                cx.update(|cx| {
-                    let applied = apply_pending_files(cx);
-
-                    // Once the running executable has moved aside, no other UI
-                    // callback may run before application recovery and relaunch:
-                    // resolving current_exe during that gap would name the old
-                    // copy instead of the installed executable.
-                    let restarted = session.restart();
-
-                    match applied {
-                        Err(error) => fail_install(error, cx),
-                        Ok(()) => finish_recovery(restarted, applications, cx),
-                    }
-                });
-            }
-        }
+        on_close_prepared(prepared, cx);
     })
     .detach();
 }
 
-fn prepare_close(path: &Path) -> ClosePreparation<RestartManagerSession> {
-    prepare_close_with(&SystemSessionSource, path)
+fn on_close_prepared(prepared: ClosePreparation<RestartManagerSession>, cx: &mut AsyncApp) {
+    match prepared {
+        ClosePreparation::Clear => {
+            cx.update(continue_install);
+        }
+
+        ClosePreparation::Prompt(prompt) => {
+            cx.update(|cx| show_file_use_prompt(prompt, cx));
+        }
+
+        ClosePreparation::Released {
+            session,
+            applications,
+        } => {
+            cx.update(|cx| {
+                let applied = apply_pending_files(cx);
+
+                // Once the running executable has moved aside, no other UI
+                // callback may run before application recovery and relaunch:
+                // resolving current_exe during that gap would name the old
+                // copy instead of the installed executable.
+                let restarted = session.restart();
+
+                match applied {
+                    Err(error) => fail_install(error, cx),
+                    Ok(()) => finish_recovery(restarted, applications, cx),
+                }
+            });
+        }
+    }
 }
 
 fn prepare_close_with<S>(source: &S, path: &Path) -> ClosePreparation<S::Session>
@@ -684,7 +676,7 @@ pub(crate) fn settle_previous_update() {
     // removable once whoever had them mapped has exited, which for the
     // executable this process replaced is now, and for the context-menu
     // extension is whenever Explorer next restarts.
-    install::discard_previous(&install);
+    discard_previous(&install);
 
     // Whatever was unpacked before this process started has either been
     // installed already or belongs to an attempt that ended; either way a
@@ -722,7 +714,7 @@ pub(crate) fn await_predecessor(pid: u32) {
 /// switch asserts something about the new channel that was never asked; it is
 /// cleared instead. The check that replaces it still answers to the automatic
 /// checking switch, which is the user saying not to reach the network unasked.
-pub(crate) fn settings_changed(cx: &mut App) {
+pub(crate) fn on_settings_changed(cx: &mut App) {
     let settings = cx.global::<AppSettings>();
     let channel = settings.update.channel;
     let checking_enabled = settings.update.check_updates;
@@ -767,11 +759,7 @@ pub(crate) fn schedule_automatic_checks(cx: &mut App) {
         loop {
             // Read the switch every tick rather than at startup: the user can
             // turn checking on and off while the app runs.
-            cx.update(|cx| {
-                if cx.global::<AppSettings>().update.check_updates {
-                    check(cx);
-                }
-            });
+            cx.update(check_if_enabled);
 
             cx.background_executor().timer(CHECK_INTERVAL).await;
         }
@@ -779,7 +767,13 @@ pub(crate) fn schedule_automatic_checks(cx: &mut App) {
     .detach();
 }
 
-fn check(cx: &mut App) {
+fn check_if_enabled(cx: &mut App) {
+    if cx.global::<AppSettings>().update.check_updates {
+        check(cx);
+    }
+}
+
+pub(crate) fn check(cx: &mut App) {
     // An install has already decided which release is being put in place, and a
     // check landing on top of it would replace that with an answer about a
     // release nothing is waiting for.
@@ -797,19 +791,21 @@ fn check(cx: &mut App) {
             .spawn(async move { releases::latest(channel) })
             .await;
 
-        cx.update(|cx| {
-            // The channel can move while the request is out. A result for the
-            // channel the user left says nothing about the one they chose, and
-            // the switch has already started the check that does.
-            if cx.global::<AppSettings>().update.channel != channel {
-                return;
-            }
-
-            set_status(outcome(found), cx);
-            cx.refresh_windows();
-        });
+        cx.update(|cx| finish_check(found, channel, cx));
     })
     .detach();
+}
+
+fn finish_check(found: Result<Option<Release>, CheckError>, channel: UpdateChannel, cx: &mut App) {
+    // The channel can move while the request is out. A result for the
+    // channel the user left says nothing about the one they chose, and
+    // the switch has already started the check that does.
+    if cx.global::<AppSettings>().update.channel != channel {
+        return;
+    }
+
+    set_status(outcome(found), cx);
+    cx.refresh_windows();
 }
 
 fn outcome(found: Result<Option<Release>, CheckError>) -> Status {

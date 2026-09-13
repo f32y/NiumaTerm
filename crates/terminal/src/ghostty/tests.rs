@@ -1640,7 +1640,7 @@ fn pwd_set_via_setter_and_osc7() {
 
     assert_eq!(rc, VtResult::SUCCESS);
     assert_eq!(
-        t.get_string(VtTerminalData::PWD),
+        t.read_string(VtTerminalData::PWD),
         "/tmp/set",
         "the PWD setter populates the getter"
     );
@@ -1651,7 +1651,7 @@ fn pwd_set_via_setter_and_osc7() {
     t.write_vt(b"\x1b]7;file:///home/u\x07");
 
     assert_eq!(
-        t.get_string(VtTerminalData::PWD),
+        t.read_string(VtTerminalData::PWD),
         "file:///home/u",
         "OSC 7 populates PWD"
     );

@@ -6,7 +6,7 @@ use std::thread;
 use serde_json::{Value, json};
 
 use crate::chat::{Event, QueuedPrompt};
-use crate::dsh::api::ApiClient;
+use crate::dsh::api::{ApiClient, CallError};
 use crate::dsh::events::session_address;
 use crate::dsh::models::ModelDirectory;
 use crate::dsh::session::{
@@ -380,109 +380,126 @@ pub(super) fn load_models(
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
     thread::spawn(move || {
-        let read_catalog = || {
-            client
-                .call("session/modelCatalog", json!({}))
-                .map(|mut catalog| {
-                    catalog["current"] = if selected.is_null() {
-                        catalog["default"].clone()
-                    } else {
-                        selected.clone()
-                    };
-
-                    catalog
-                })
+        let Some(payload) = reconcile_models(
+            &client,
+            &session_id,
+            &selected,
+            wanted_model,
+            wanted_effort,
+            declares_image_input,
+        ) else {
+            return;
         };
-
-        let mut catalog = match read_catalog() {
-            Ok(catalog) => catalog,
-
-            Err(error) => {
-                tracing::warn!(
-                    "deepseek model directory could not be read: {}",
-                    error.message()
-                );
-
-                return;
-            }
-        };
-
-        // Why the harness kept its own selection, when it did. The levels a
-        // route serves are the adapter's, so a profile can name one this
-        // deployment does not offer, and nothing else would ever say so: this
-        // path runs in the background with no control waiting on an answer.
-        let mut refusal = None;
-
-        if let Some(model) = wanted_model {
-            let mut directory = ModelDirectory::parse(&catalog);
-
-            if declares_image_input {
-                let (provider, id) = directory.route(&model);
-                let (provider, id) = (provider.to_string(), id.to_string());
-
-                match declare_image_input(&client, &provider, &id) {
-                    // A catalog that gained an entry is a different catalog:
-                    // the model now has a name and a reasoning-effort list
-                    // instead of the bare id a selection alone would show.
-                    Ok(true) => {
-                        if let Ok(refreshed) = read_catalog() {
-                            catalog = refreshed;
-                            directory = ModelDirectory::parse(&catalog);
-                        }
-                    }
-
-                    Ok(false) => {}
-
-                    // Reported beside the picker rather than only logged: the
-                    // alternative is a switch that looks applied while the
-                    // first message carrying an image is refused for a reason
-                    // the pane never mentions.
-                    Err(message) => {
-                        tracing::warn!(
-                            "deepseek could not declare {id} as image-capable: {message}"
-                        );
-
-                        refusal = Some(message);
-                    }
-                }
-            }
-
-            let already = directory.selected() == Some(model.as_str())
-                && (wanted_effort.is_none() || directory.effort() == wanted_effort.as_deref());
-
-            // A model the catalog never listed is still applied: a provider
-            // resolves an unadvertised id as a text-only model on its own
-            // route, which is how a profile names a model behind a proxy or one
-            // the endpoint stopped advertising.
-            if !already {
-                let (provider, id) = directory.route(&model);
-
-                let mut payload = json!({
-                    "sessionId": session_id,
-                    "provider": provider,
-                    "model": id,
-                });
-
-                if let Some(effort) = &wanted_effort {
-                    payload["reasoningEffort"] = json!(effort);
-                }
-
-                match client.request("session/selectModel", payload) {
-                    Ok(selected) => catalog["current"] = selected["selected"].clone(),
-                    Err(error) => refusal = Some(error.message().to_string()),
-                }
-            }
-        }
-
-        let mut payload =
-            json!({ "type": MODELS_FRAME, "sessionId": session_id, "models": catalog });
-
-        if let Some(message) = refusal {
-            payload["error"] = json!(message);
-        }
 
         deliver(json!({ "payload": payload }));
     });
+}
+
+fn reconcile_models(
+    client: &ApiClient,
+    session_id: &str,
+    selected: &Value,
+    wanted_model: Option<String>,
+    wanted_effort: Option<String>,
+    declares_image_input: bool,
+) -> Option<Value> {
+    let mut catalog = match read_model_catalog(client, selected) {
+        Ok(catalog) => catalog,
+
+        Err(error) => {
+            tracing::warn!(
+                "deepseek model directory could not be read: {}",
+                error.message()
+            );
+
+            return None;
+        }
+    };
+
+    // Why the harness kept its own selection, when it did. The levels a
+    // route serves are the adapter's, so a profile can name one this
+    // deployment does not offer, and nothing else would ever say so: this
+    // path runs in the background with no control waiting on an answer.
+    let mut refusal = None;
+
+    if let Some(model) = wanted_model {
+        let mut directory = ModelDirectory::parse(&catalog);
+
+        if declares_image_input {
+            let (provider, id) = directory.route(&model);
+            let (provider, id) = (provider.to_string(), id.to_string());
+
+            match declare_image_input(client, &provider, &id) {
+                // A catalog that gained an entry is a different catalog:
+                // the model now has a name and a reasoning-effort list
+                // instead of the bare id a selection alone would show.
+                Ok(true) => {
+                    if let Ok(refreshed) = read_model_catalog(client, selected) {
+                        catalog = refreshed;
+                        directory = ModelDirectory::parse(&catalog);
+                    }
+                }
+
+                Ok(false) => {}
+
+                // Reported beside the picker rather than only logged: the
+                // alternative is a switch that looks applied while the
+                // first message carrying an image is refused for a reason
+                // the pane never mentions.
+                Err(message) => {
+                    tracing::warn!("deepseek could not declare {id} as image-capable: {message}");
+
+                    refusal = Some(message);
+                }
+            }
+        }
+
+        let already = directory.selected() == Some(model.as_str())
+            && (wanted_effort.is_none() || directory.effort() == wanted_effort.as_deref());
+
+        // A model the catalog never listed is still applied: a provider
+        // resolves an unadvertised id as a text-only model on its own
+        // route, which is how a profile names a model behind a proxy or one
+        // the endpoint stopped advertising.
+        if !already {
+            let (provider, id) = directory.route(&model);
+
+            let mut payload = json!({
+                "sessionId": session_id,
+                "provider": provider,
+                "model": id,
+            });
+
+            if let Some(effort) = &wanted_effort {
+                payload["reasoningEffort"] = json!(effort);
+            }
+
+            match client.request("session/selectModel", payload) {
+                Ok(selected) => catalog["current"] = selected["selected"].clone(),
+                Err(error) => refusal = Some(error.message().to_string()),
+            }
+        }
+    }
+
+    let mut payload = json!({ "type": MODELS_FRAME, "sessionId": session_id, "models": catalog });
+
+    if let Some(message) = refusal {
+        payload["error"] = json!(message);
+    }
+
+    Some(payload)
+}
+
+fn read_model_catalog(client: &ApiClient, selected: &Value) -> Result<Value, CallError> {
+    let mut catalog = client.call("session/modelCatalog", json!({}))?;
+
+    catalog["current"] = if selected.is_null() {
+        catalog["default"].clone()
+    } else {
+        selected.clone()
+    };
+
+    Ok(catalog)
 }
 
 // Declaring a model as image-capable in the harness's own configuration.

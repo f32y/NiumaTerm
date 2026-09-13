@@ -299,10 +299,6 @@ impl Session {
         self.detach_with(timeout, force)
     }
 
-    fn detach(&mut self) {
-        let _ = self.detach_with(Duration::from_millis(250), true);
-    }
-
     fn detach_with(&mut self, timeout: Duration, force: bool) -> Result<(), String> {
         if self.detached {
             return Ok(());
@@ -372,22 +368,15 @@ impl Session {
         }
 
         let events = match (id, method.as_deref()) {
-            (Some(rpc_id), Some(method)) => self.process_server_request(rpc_id, method, &message),
-            (Some(rpc_id), None) => self.process_response(rpc_id, &message),
-            (None, Some(method)) => self.process_notification(method, &message["params"]),
+            (Some(rpc_id), Some(method)) => self.on_server_request(rpc_id, method, &message),
+            (Some(rpc_id), None) => self.on_response(rpc_id, &message),
+            (None, Some(method)) => self.on_notification(method, &message["params"]),
             (None, None) => Vec::new(),
         };
 
         self.sync_descendant_owners();
 
         events
-    }
-
-    /// A message typed while a turn is running becomes a steer (mid-turn
-    /// interjection); otherwise it starts the next turn carrying the settings
-    /// as overrides.
-    pub fn send_user_message(&mut self, text: &str, settings: &ThreadSettings) -> SendOutcome {
-        self.send_user_message_with_skill(text, settings, None, &[])
     }
 
     /// Send text plus the exact skill identity selected by a client picker.
@@ -835,13 +824,11 @@ impl Session {
         }
     }
 
-    fn process_server_request(&mut self, rpc_id: u64, method: &str, message: &Value) -> Vec<Event> {
+    fn on_server_request(&mut self, rpc_id: u64, method: &str, message: &Value) -> Vec<Event> {
         match method {
-            "item/tool/call" => self.process_team_decision(rpc_id, &message["params"]),
+            "item/tool/call" => self.on_team_decision(rpc_id, &message["params"]),
 
-            "item/tool/requestUserInput" => {
-                self.process_question_request(rpc_id, &message["params"])
-            }
+            "item/tool/requestUserInput" => self.on_question_request(rpc_id, &message["params"]),
 
             "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
                 let params = &message["params"];
@@ -875,7 +862,7 @@ impl Session {
         }
     }
 
-    fn process_response(&mut self, rpc_id: u64, message: &Value) -> Vec<Event> {
+    fn on_response(&mut self, rpc_id: u64, message: &Value) -> Vec<Event> {
         let (pending_command, query) = match self.control.finish(rpc_id) {
             Some(ControlOperation::Command(command)) => (Some(command), None),
             Some(ControlOperation::Query(kind)) => (None, Some(kind)),
@@ -890,7 +877,7 @@ impl Session {
             Some(ControlOperation::ThreadName) | None => return Vec::new(),
         };
 
-        if let Some(events) = self.process_question_response(rpc_id, message) {
+        if let Some(events) = self.on_question_response(rpc_id, message) {
             return events;
         }
 
@@ -908,106 +895,17 @@ impl Session {
         // A descendant read answers before the shared error path so a failed
         // read reports an unavailable conversation instead of a session error.
         if self.background.is_transcript_read(rpc_id) {
-            let Some(thread_id) = self.background.finish_transcript_read(rpc_id) else {
-                return Vec::new();
-            };
-
-            let key = BackgroundTaskKey::codex(&thread_id);
-
-            let update = match message["error"]["message"].as_str() {
-                Some(error) => BackgroundTaskTranscriptUpdate::state(
-                    BackgroundTaskTranscriptState::Unavailable {
-                        message: error.to_owned(),
-                    },
-                ),
-
-                // The same parser the parent transcript uses, so a child's
-                // tool cards cannot lose output or status relative to it. A
-                // child's conversation is presented as one stream, so its turn
-                // grouping is flattened away.
-                None => BackgroundTaskTranscriptUpdate::loaded(
-                    self.background.with_launch_message(
-                        &thread_id,
-                        parse_replay(&message["result"]["thread"]["turns"])
-                            .into_iter()
-                            .flat_map(|turn| turn.items)
-                            .map(|entry| entry.item)
-                            .collect(),
-                    ),
-                ),
-            };
-
-            return vec![Event::BackgroundTaskTranscript { key, update }];
+            return self.on_transcript_read_response(rpc_id, message);
         }
 
         // Descendant discovery answers before the shared error path so a
         // failed page reports unavailable status instead of a session error.
         if self.background.is_query(rpc_id) {
-            if let Some(error) = message["error"]["message"].as_str() {
-                let changed = self.background.fail_query(rpc_id, error);
-
-                return self.background_events(changed);
-            }
-
-            let (mut changed, next_cursor) = self
-                .background
-                .apply_descendants(rpc_id, &message["result"]);
-
-            // A server that keeps handing back the same cursor would page
-            // forever, so a repeat ends discovery instead of looping.
-            if let Some(cursor) = next_cursor.filter(|cursor| self.background.accept_cursor(cursor))
-            {
-                let next_rpc_id = self.alloc_rpc_id();
-
-                if let Some(request) = self
-                    .background
-                    .descendant_request(next_rpc_id, Some(&cursor))
-                {
-                    self.send(request);
-                    changed = true;
-                }
-            }
-
-            return self.background_events(changed);
+            return self.on_descendant_page(rpc_id, message);
         }
 
         if let Some(error) = message["error"]["message"].as_str() {
-            if let Some(command) = pending_command.as_deref() {
-                if command == "compact" {
-                    self.conversation.compaction.reject_manual_request();
-                }
-
-                return vec![Event::SlashCommandResult {
-                    name: command.to_string(),
-                    outcome: codex_command_response(command, Some(error)),
-                }];
-            }
-
-            // A branch-point list nobody could read leaves the picker with
-            // nothing to show, which is the picker's own failure to report
-            // rather than something that happened to the conversation.
-            if query == Some(QueryKind::Checkpoints) {
-                return vec![Event::ForkCheckpoints(Err(error.to_string()))];
-            }
-
-            // A failed resume (deleted/corrupt thread) is not fatal: the
-            // session still has the thread it started with, so the composer
-            // keeps working for a fresh conversation.
-            let initial_resume_failed =
-                query == Some(QueryKind::Resume) && self.initial_resume.is_some();
-
-            let message = match query {
-                Some(QueryKind::Resume) => format!("Could not resume session: {error}"),
-                // A refused branch leaves the session on the thread it was
-                // already holding, so the conversation stays usable.
-                Some(QueryKind::Fork) => format!("Could not branch this conversation: {error}"),
-                _ => error.to_string(),
-            };
-
-            return vec![Event::Error {
-                message,
-                fatal: initial_resume_failed || query == Some(QueryKind::Start),
-            }];
+            return self.on_response_error(pending_command.as_deref(), query, error);
         }
 
         if let Some(command) = pending_command {
@@ -1073,49 +971,143 @@ impl Session {
             // down to the settings block, so both switch this session onto the
             // thread the reply names.
             Some(QueryKind::Resume | QueryKind::Fork) => {
-                let result = &message["result"];
-
-                self.control.reset_thread();
-                self.retain_request_routes();
-                self.conversation.pending_approval = None;
-                self.conversation.compaction.reset_thread();
-                self.conversation.questions = QuestionState::default();
-                self.conversation.current_turn = None;
-                self.conversation.thread_id = result["thread"]["id"].as_str().map(str::to_owned);
-                self.initial_resume = None;
-
-                // A resumed parent can already have finished descendants, and
-                // a reconnect resumes into a new process with none of the live
-                // child state the previous one observed.
-                self.start_descendant_discovery();
-
-                self.retain_team_history(&result["thread"]["turns"]);
-
-                let events = resumed_thread_events(result, take(&mut self.suppress_resume_replay));
-
-                self.finish_team_start(events)
+                self.on_thread_switched(&message["result"])
             }
 
             _ => Vec::new(),
         }
     }
 
-    fn process_notification(&mut self, method: &str, params: &Value) -> Vec<Event> {
-        if method == HOST_EXIT_METHOD {
-            self.cancel_title_generation();
-            self.conversation.current_turn = None;
-            self.conversation.pending_approval = None;
-            self.conversation.questions = QuestionState::default();
-            self.control.close();
-            self.skill_refresh = SkillRefreshState::default();
-            self.conversation.compaction.reset_thread();
+    fn on_transcript_read_response(&mut self, rpc_id: u64, message: &Value) -> Vec<Event> {
+        let Some(thread_id) = self.background.finish_transcript_read(rpc_id) else {
+            return Vec::new();
+        };
 
-            return vec![Event::HostExited {
-                message: params["message"]
-                    .as_str()
-                    .unwrap_or("Codex app-server stopped unexpectedly")
-                    .to_string(),
+        let key = BackgroundTaskKey::codex(&thread_id);
+
+        let update = match message["error"]["message"].as_str() {
+            Some(error) => {
+                BackgroundTaskTranscriptUpdate::state(BackgroundTaskTranscriptState::Unavailable {
+                    message: error.to_owned(),
+                })
+            }
+
+            // The same parser the parent transcript uses, so a child's
+            // tool cards cannot lose output or status relative to it. A
+            // child's conversation is presented as one stream, so its turn
+            // grouping is flattened away.
+            None => BackgroundTaskTranscriptUpdate::loaded(
+                self.background.with_launch_message(
+                    &thread_id,
+                    parse_replay(&message["result"]["thread"]["turns"])
+                        .into_iter()
+                        .flat_map(|turn| turn.items)
+                        .map(|entry| entry.item)
+                        .collect(),
+                ),
+            ),
+        };
+
+        vec![Event::BackgroundTaskTranscript { key, update }]
+    }
+
+    fn on_descendant_page(&mut self, rpc_id: u64, message: &Value) -> Vec<Event> {
+        if let Some(error) = message["error"]["message"].as_str() {
+            let changed = self.background.fail_query(rpc_id, error);
+
+            return self.background_events(changed);
+        }
+
+        let (mut changed, next_cursor) = self
+            .background
+            .apply_descendants(rpc_id, &message["result"]);
+
+        // A server that keeps handing back the same cursor would page
+        // forever, so a repeat ends discovery instead of looping.
+        if let Some(cursor) = next_cursor.filter(|cursor| self.background.accept_cursor(cursor)) {
+            let next_rpc_id = self.alloc_rpc_id();
+
+            if let Some(request) = self
+                .background
+                .descendant_request(next_rpc_id, Some(&cursor))
+            {
+                self.send(request);
+                changed = true;
+            }
+        }
+
+        self.background_events(changed)
+    }
+
+    fn on_response_error(
+        &mut self,
+        pending_command: Option<&str>,
+        query: Option<QueryKind>,
+        error: &str,
+    ) -> Vec<Event> {
+        if let Some(command) = pending_command {
+            if command == "compact" {
+                self.conversation.compaction.reject_manual_request();
+            }
+
+            return vec![Event::SlashCommandResult {
+                name: command.to_string(),
+                outcome: codex_command_response(command, Some(error)),
             }];
+        }
+
+        // A branch-point list nobody could read leaves the picker with
+        // nothing to show, which is the picker's own failure to report
+        // rather than something that happened to the conversation.
+        if query == Some(QueryKind::Checkpoints) {
+            return vec![Event::ForkCheckpoints(Err(error.to_string()))];
+        }
+
+        // A failed resume (deleted/corrupt thread) is not fatal: the
+        // session still has the thread it started with, so the composer
+        // keeps working for a fresh conversation.
+        let initial_resume_failed =
+            query == Some(QueryKind::Resume) && self.initial_resume.is_some();
+
+        let message = match query {
+            Some(QueryKind::Resume) => format!("Could not resume session: {error}"),
+            // A refused branch leaves the session on the thread it was
+            // already holding, so the conversation stays usable.
+            Some(QueryKind::Fork) => format!("Could not branch this conversation: {error}"),
+            _ => error.to_string(),
+        };
+
+        vec![Event::Error {
+            message,
+            fatal: initial_resume_failed || query == Some(QueryKind::Start),
+        }]
+    }
+
+    fn on_thread_switched(&mut self, result: &Value) -> Vec<Event> {
+        self.control.reset_thread();
+        self.retain_request_routes();
+        self.conversation.pending_approval = None;
+        self.conversation.compaction.reset_thread();
+        self.conversation.questions = QuestionState::default();
+        self.conversation.current_turn = None;
+        self.conversation.thread_id = result["thread"]["id"].as_str().map(str::to_owned);
+        self.initial_resume = None;
+
+        // A resumed parent can already have finished descendants, and
+        // a reconnect resumes into a new process with none of the live
+        // child state the previous one observed.
+        self.start_descendant_discovery();
+
+        self.retain_team_history(&result["thread"]["turns"]);
+
+        let events = resumed_thread_events(result, take(&mut self.suppress_resume_replay));
+
+        self.finish_team_start(events)
+    }
+
+    fn on_notification(&mut self, method: &str, params: &Value) -> Vec<Event> {
+        if method == HOST_EXIT_METHOD {
+            return self.on_host_exit(params);
         }
 
         if is_legacy_compaction_notification(method) {
@@ -1146,7 +1138,7 @@ impl Session {
 
                     let changed = self
                         .background
-                        .apply_descendant_notification(&thread_id, method, params);
+                        .observe_descendant_notification(&thread_id, method, params);
 
                     return self.background_events(changed);
                 }
@@ -1179,16 +1171,33 @@ impl Session {
             && params["item"]["type"].as_str() != Some("contextCompaction")
             && self.background.observe_parent_item(&params["item"]);
 
-        let mut events = self.conversation.process_notification(method, params);
+        let mut events = self.conversation.on_notification(method, params);
 
         events.extend(self.background_events(children_changed));
 
         events
     }
+
+    fn on_host_exit(&mut self, params: &Value) -> Vec<Event> {
+        self.cancel_title_generation();
+        self.conversation.current_turn = None;
+        self.conversation.pending_approval = None;
+        self.conversation.questions = QuestionState::default();
+        self.control.close();
+        self.skill_refresh = SkillRefreshState::default();
+        self.conversation.compaction.reset_thread();
+
+        vec![Event::HostExited {
+            message: params["message"]
+                .as_str()
+                .unwrap_or("Codex app-server stopped unexpectedly")
+                .to_string(),
+        }]
+    }
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
-        self.detach();
+        let _ = self.detach_with(Duration::from_millis(250), true);
     }
 }

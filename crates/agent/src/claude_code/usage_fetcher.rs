@@ -144,6 +144,27 @@ struct OAuthUsageWindow {
     resets_at: Option<Value>,
 }
 
+pub fn fetch_with_cancel(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchError> {
+    let result = match fetch_via_oauth(cancelled) {
+        Ok(usage) => Ok(supplement_from_cli(usage, cancelled)),
+        Err(OAuthFetchError::Cancelled) => Err(UsageFetchError::Cancelled),
+        Err(OAuthFetchError::Final(error)) => Err(UsageFetchError::Failed(error)),
+
+        Err(OAuthFetchError::Fallback(oauth_error)) => match fetch_via_cli(cancelled) {
+            Ok(usage) => Ok(usage),
+            // Only the OAuth path's own diagnosis is worth pairing with the CLI
+            // fallback's; a cancellation says nothing about either.
+            Err(UsageFetchError::Cancelled) => Err(UsageFetchError::Cancelled),
+
+            Err(UsageFetchError::Failed(cli_error)) => Err(UsageFetchError::Failed(format!(
+                "Claude OAuth usage unavailable: {oauth_error}; interactive CLI fallback failed: {cli_error}"
+            ))),
+        },
+    };
+
+    result.map(UsageSnapshot::with_updated_now)
+}
+
 fn oauth_credentials_path() -> Option<PathBuf> {
     let config_dir = env::var_os("CLAUDE_CONFIG_DIR");
 
@@ -282,27 +303,6 @@ fn fetch_via_oauth(cancelled: &AtomicBool) -> Result<UsageSnapshot, OAuthFetchEr
     }
 
     parse_oauth_usage(&bytes).map_err(OAuthFetchError::Fallback)
-}
-
-pub fn fetch_with_cancel(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchError> {
-    let result = match fetch_via_oauth(cancelled) {
-        Ok(usage) => Ok(supplement_from_cli(usage, cancelled)),
-        Err(OAuthFetchError::Cancelled) => Err(UsageFetchError::Cancelled),
-        Err(OAuthFetchError::Final(error)) => Err(UsageFetchError::Failed(error)),
-
-        Err(OAuthFetchError::Fallback(oauth_error)) => match fetch_via_cli(cancelled) {
-            Ok(usage) => Ok(usage),
-            // Only the OAuth path's own diagnosis is worth pairing with the CLI
-            // fallback's; a cancellation says nothing about either.
-            Err(UsageFetchError::Cancelled) => Err(UsageFetchError::Cancelled),
-
-            Err(UsageFetchError::Failed(cli_error)) => Err(UsageFetchError::Failed(format!(
-                "Claude OAuth usage unavailable: {oauth_error}; interactive CLI fallback failed: {cli_error}"
-            ))),
-        },
-    };
-
-    result.map(UsageSnapshot::with_updated_now)
 }
 
 /// Read the windows the OAuth endpoint does not report from the interactive

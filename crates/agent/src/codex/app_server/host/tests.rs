@@ -19,8 +19,8 @@ fn startup_preserves_the_protocol_failure_reason() {
     let (tx, rx) = sync_channel(1);
     let router = Router::new(tx);
 
-    router.handle_message(json!({"method":OUTPUT_FAILURE_METHOD,"params":{"message":"Agent protocol JSON is invalid"}}));
-    router.handle_stdout_closed();
+    router.on_message(json!({"method":OUTPUT_FAILURE_METHOD,"params":{"message":"Agent protocol JSON is invalid"}}));
+    router.on_stdout_closed();
 
     assert_eq!(
         rx.try_recv().unwrap(),
@@ -60,7 +60,7 @@ fn retiring_routes_cancels_only_their_ordinary_pending_inputs() {
     assert!(tickets[1].is_cancelled());
     assert!(tickets[2..].iter().all(|ticket| !ticket.is_cancelled()));
 
-    router.handle_stdout_closed();
+    router.on_stdout_closed();
 
     assert!(tickets[2].is_cancelled());
 }
@@ -85,7 +85,7 @@ fn expired_queued_requests_report_not_sent_and_ignore_late_success() {
     assert_eq!(response["error"]["data"]["notSent"], true);
     assert!(ticket.cancel());
 
-    router.handle_message(json!({"id":global_id,"result":{"thread":{"id":"late"}}}));
+    router.on_message(json!({"id":global_id,"result":{"thread":{"id":"late"}}}));
 
     assert!(rx.try_recv().is_err());
 }
@@ -168,7 +168,7 @@ fn large_request_bursts_keep_independent_deadlines() {
             .contains("result is unknown")
     );
 
-    router.handle_message(json!({"id": mutation["id"], "result": {"thread": {"id": "late"}}}));
+    router.on_message(json!({"id": mutation["id"], "result": {"thread": {"id": "late"}}}));
 
     assert!(other_rx.try_recv().is_err());
 
@@ -190,17 +190,16 @@ fn retired_requests_cannot_reassign_roots_or_affect_other_owners() {
     router.prepare_outgoing(owner, &mut current).unwrap();
     router.prepare_outgoing(other, &mut independent).unwrap();
     router.retain_requests(owner, &[11]);
-    router.handle_message(json!({"id": old["id"], "result": {"thread": {"id": "stale"}}}));
+    router.on_message(json!({"id": old["id"], "result": {"thread": {"id": "stale"}}}));
 
     assert!(rx.try_recv().is_err());
 
-    router.handle_message(json!({"id": current["id"], "result": {"thread": {"id": "chosen"}}}));
+    router.on_message(json!({"id": current["id"], "result": {"thread": {"id": "chosen"}}}));
 
     assert_eq!(rx.try_recv().unwrap()["id"], 11);
 
-    router.handle_message(
-        json!({"id": independent["id"], "result": {"thread": {"id": "independent"}}}),
-    );
+    router
+        .on_message(json!({"id": independent["id"], "result": {"thread": {"id": "independent"}}}));
 
     assert_eq!(other_rx.try_recv().unwrap()["id"], 10);
 }
@@ -276,11 +275,11 @@ fn rejected_requests_release_routes_without_affecting_other_sessions() {
     let id = rejected["id"].as_u64().unwrap();
 
     router.reject_outgoing(id);
-    router.handle_message(start_response(id, "rejected"));
+    router.on_message(start_response(id, "rejected"));
 
     assert!(first_rx.try_recv().is_err());
 
-    router.handle_message(start_response(accepted["id"].as_u64().unwrap(), "accepted"));
+    router.on_message(start_response(accepted["id"].as_u64().unwrap(), "accepted"));
 
     assert_eq!(
         second_rx.try_recv().unwrap()["result"]["thread"]["id"],
@@ -326,8 +325,8 @@ fn responses_return_to_their_owner_with_local_ids() {
 
     assert_ne!(first_global, second_global);
 
-    router.handle_message(start_response(second_global, "thread-b"));
-    router.handle_message(start_response(first_global, "thread-a"));
+    router.on_message(start_response(second_global, "thread-b"));
+    router.on_message(start_response(first_global, "thread-a"));
 
     assert_eq!(second_rx.recv().expect("second response")["id"], 2);
     assert_eq!(first_rx.recv().expect("first response")["id"], 2);
@@ -349,12 +348,12 @@ fn server_requests_are_checked_against_thread_ownership() {
         .prepare_outgoing(second, &mut second_request)
         .unwrap();
 
-    router.handle_message(start_response(
+    router.on_message(start_response(
         first_request["id"].as_u64().unwrap(),
         "thread-a",
     ));
 
-    router.handle_message(start_response(
+    router.on_message(start_response(
         second_request["id"].as_u64().unwrap(),
         "thread-b",
     ));
@@ -362,13 +361,13 @@ fn server_requests_are_checked_against_thread_ownership() {
     let _ = first_rx.recv().unwrap();
     let _ = second_rx.recv().unwrap();
 
-    router.handle_message(json!({
+    router.on_message(json!({
         "id": 900,
         "method": "item/commandExecution/requestApproval",
         "params": {"threadId": "thread-a", "turnId": "turn-a"},
     }));
 
-    router.handle_message(json!({
+    router.on_message(json!({
         "id": 901,
         "method": "item/commandExecution/requestApproval",
         "params": {"threadId": "thread-b", "turnId": "turn-b"},
@@ -400,12 +399,12 @@ fn root_notifications_are_isolated_and_process_notifications_are_shared() {
         .prepare_outgoing(second, &mut second_request)
         .unwrap();
 
-    router.handle_message(start_response(
+    router.on_message(start_response(
         first_request["id"].as_u64().unwrap(),
         "thread-a",
     ));
 
-    router.handle_message(start_response(
+    router.on_message(start_response(
         second_request["id"].as_u64().unwrap(),
         "thread-b",
     ));
@@ -413,7 +412,7 @@ fn root_notifications_are_isolated_and_process_notifications_are_shared() {
     let _ = first_rx.recv().unwrap();
     let _ = second_rx.recv().unwrap();
 
-    router.handle_message(json!({
+    router.on_message(json!({
         "method": "turn/started",
         "params": {"threadId": "thread-a", "turn": {"id": "turn-a"}},
     }));
@@ -421,12 +420,12 @@ fn root_notifications_are_isolated_and_process_notifications_are_shared() {
     assert_eq!(first_rx.recv().unwrap()["params"]["threadId"], "thread-a");
     assert!(second_rx.try_recv().is_err());
 
-    router.handle_message(json!({"method": "skills/changed", "params": {}}));
+    router.on_message(json!({"method": "skills/changed", "params": {}}));
 
     assert_eq!(first_rx.recv().unwrap()["method"], "skills/changed");
     assert_eq!(second_rx.recv().unwrap()["method"], "skills/changed");
 
-    router.handle_message(json!({
+    router.on_message(json!({
         "method": "turn/started",
         "params": {"threadId": "unowned", "turn": {"id": "late"}},
     }));
@@ -440,14 +439,14 @@ fn early_approval_remains_answerable_after_a_large_notification_backlog() {
     let router = router();
     let (owner, rx) = register(&router);
 
-    router.handle_message(json!({
+    router.on_message(json!({
         "id": 900,
         "method": "item/commandExecution/requestApproval",
         "params": {"threadId": "child", "turnId": "turn"},
     }));
 
     for id in 0..80 {
-        router.handle_message(json!({"method": "item/agentMessage/delta",
+        router.on_message(json!({"method": "item/agentMessage/delta",
             "params": {"threadId": "child", "delta": id.to_string()}}));
     }
 
@@ -477,12 +476,12 @@ fn auxiliary_title_thread_activity_never_reaches_the_primary_registration() {
         .prepare_outgoing(title_worker, &mut title_request)
         .unwrap();
 
-    router.handle_message(start_response(
+    router.on_message(start_response(
         primary_request["id"].as_u64().unwrap(),
         "thread-primary",
     ));
 
-    router.handle_message(start_response(
+    router.on_message(start_response(
         title_request["id"].as_u64().unwrap(),
         "thread-title",
     ));
@@ -490,7 +489,7 @@ fn auxiliary_title_thread_activity_never_reaches_the_primary_registration() {
     let _ = primary_rx.recv().unwrap();
     let _ = title_rx.recv().unwrap();
 
-    router.handle_message(json!({
+    router.on_message(json!({
         "method": "item/completed",
         "params": {
             "threadId": "thread-title",
@@ -514,14 +513,14 @@ fn early_descendant_activity_waits_for_a_proven_owner() {
 
     router.prepare_outgoing(owner, &mut root_request).unwrap();
 
-    router.handle_message(start_response(
+    router.on_message(start_response(
         root_request["id"].as_u64().unwrap(),
         "root-a",
     ));
 
     let _ = rx.recv().unwrap();
 
-    router.handle_message(json!({
+    router.on_message(json!({
         "method": "item/started",
         "params": {"threadId": "child-a", "item": {"type": "agentMessage"}},
     }));
@@ -543,7 +542,7 @@ fn delayed_child_replay_delivers_every_message_only_to_its_owner() {
     let (_, other_rx) = register(&router);
 
     for index in 0..40 {
-        router.handle_message(json!({"method": "item/agentMessage/delta",
+        router.on_message(json!({"method": "item/agentMessage/delta",
             "params": {"threadId": "child", "delta": index.to_string()}}));
     }
 
@@ -572,11 +571,11 @@ fn oldest_root_activity_survives_many_unclaimed_threads() {
     router.prepare_outgoing(owner, &mut request).unwrap();
 
     for id in 0..65 {
-        router.handle_message(json!({"method": "turn/started",
+        router.on_message(json!({"method": "turn/started",
             "params": {"threadId": id.to_string(), "turn": {"id": "turn"}}}));
     }
 
-    router.handle_message(start_response(request["id"].as_u64().unwrap(), "0"));
+    router.on_message(start_response(request["id"].as_u64().unwrap(), "0"));
 
     assert_eq!(rx.recv().unwrap()["result"]["thread"]["id"], "0");
 
@@ -601,12 +600,12 @@ fn thread_started_inherits_the_known_parent_owner() {
         .prepare_outgoing(second, &mut second_request)
         .unwrap();
 
-    router.handle_message(start_response(
+    router.on_message(start_response(
         first_request["id"].as_u64().unwrap(),
         "root-a",
     ));
 
-    router.handle_message(start_response(
+    router.on_message(start_response(
         second_request["id"].as_u64().unwrap(),
         "root-b",
     ));
@@ -614,7 +613,7 @@ fn thread_started_inherits_the_known_parent_owner() {
     let _ = first_rx.recv().unwrap();
     let _ = second_rx.recv().unwrap();
 
-    router.handle_message(json!({
+    router.on_message(json!({
         "method": "thread/started",
         "params": {"thread": {"id": "child-a", "parentThreadId": "root-a"}},
     }));
@@ -622,7 +621,7 @@ fn thread_started_inherits_the_known_parent_owner() {
     assert_eq!(first_rx.recv().unwrap()["method"], "thread/started");
     assert!(second_rx.try_recv().is_err());
 
-    router.handle_message(json!({
+    router.on_message(json!({
         "method": "item/started",
         "params": {"threadId": "child-a", "item": {"type": "agentMessage"}},
     }));
@@ -639,7 +638,7 @@ fn detached_sessions_do_not_receive_late_responses() {
 
     router.prepare_outgoing(owner, &mut request).unwrap();
     router.detach(owner);
-    router.handle_message(start_response(request["id"].as_u64().unwrap(), "late"));
+    router.on_message(start_response(request["id"].as_u64().unwrap(), "late"));
 
     assert!(rx.try_recv().is_err());
 }
@@ -658,12 +657,12 @@ fn a_root_conflict_keeps_the_requesting_sessions_previous_root() {
         .prepare_outgoing(second, &mut second_request)
         .unwrap();
 
-    router.handle_message(start_response(
+    router.on_message(start_response(
         first_request["id"].as_u64().unwrap(),
         "root-a",
     ));
 
-    router.handle_message(start_response(
+    router.on_message(start_response(
         second_request["id"].as_u64().unwrap(),
         "root-b",
     ));
@@ -681,7 +680,7 @@ fn a_root_conflict_keeps_the_requesting_sessions_previous_root() {
         .prepare_outgoing(second, &mut conflicting_resume)
         .unwrap();
 
-    router.handle_message(start_response(
+    router.on_message(start_response(
         conflicting_resume["id"].as_u64().unwrap(),
         "root-a",
     ));
@@ -693,7 +692,7 @@ fn a_root_conflict_keeps_the_requesting_sessions_previous_root() {
             .contains("another Agent Tab")
     );
 
-    router.handle_message(json!({
+    router.on_message(json!({
         "method": "turn/started",
         "params": {"threadId": "root-b", "turn": {"id": "turn-b"}},
     }));
@@ -709,14 +708,14 @@ fn an_early_closed_thread_is_not_retained_after_owner_discovery() {
 
     router.prepare_outgoing(owner, &mut root_request).unwrap();
 
-    router.handle_message(start_response(
+    router.on_message(start_response(
         root_request["id"].as_u64().unwrap(),
         "root-a",
     ));
 
     let _ = rx.recv().unwrap();
 
-    router.handle_message(json!({
+    router.on_message(json!({
         "method": "thread/closed",
         "params": {"threadId": "child-a"},
     }));
@@ -725,7 +724,7 @@ fn an_early_closed_thread_is_not_retained_after_owner_discovery() {
 
     assert_eq!(rx.recv().unwrap()["method"], "thread/closed");
 
-    router.handle_message(json!({
+    router.on_message(json!({
         "method": "turn/started",
         "params": {"threadId": "child-a", "turn": {"id": "late"}},
     }));
@@ -738,7 +737,7 @@ fn unexpected_stdout_close_notifies_sessions_but_expected_shutdown_does_not() {
     let unexpected = router();
     let (_owner, unexpected_rx) = register(&unexpected);
 
-    unexpected.handle_stdout_closed();
+    unexpected.on_stdout_closed();
 
     assert_eq!(
         unexpected_rx.recv().expect("unexpected exit notification")["method"],
@@ -749,7 +748,7 @@ fn unexpected_stdout_close_notifies_sessions_but_expected_shutdown_does_not() {
     let (_owner, expected_rx) = register(&expected);
 
     expected.expected_shutdown.store(true, Ordering::Release);
-    expected.handle_stdout_closed();
+    expected.on_stdout_closed();
 
     assert!(expected_rx.try_recv().is_err());
 }

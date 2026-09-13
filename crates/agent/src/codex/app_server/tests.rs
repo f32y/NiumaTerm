@@ -448,12 +448,12 @@ fn routed_child_completion_does_not_finish_the_parent_turn() {
     session.conversation.thread_id = Some("parent".into());
     session.background.set_root("parent");
 
-    session.process_notification(
+    session.on_notification(
         "turn/started",
         &json!({"threadId":"parent","turn":{"id":"parent-turn"}}),
     );
 
-    let spawn_events = session.process_notification("item/completed", &json!({"threadId":"parent","item":{
+    let spawn_events = session.on_notification("item/completed", &json!({"threadId":"parent","item":{
         "type":"collabAgentToolCall","id":"spawn","tool":"spawnAgent","status":"completed",
         "senderThreadId":"parent","receiverThreadIds":["child"],"agentsStates":{"child":{"status":"running"}}
     }}));
@@ -467,7 +467,7 @@ fn routed_child_completion_does_not_finish_the_parent_turn() {
         Some(Event::BackgroundTasks(_))
     ));
 
-    let child_events = session.process_notification(
+    let child_events = session.on_notification(
         "turn/completed",
         &json!({"threadId":"child","turn":{"id":"child-turn","status":"completed"}}),
     );
@@ -483,7 +483,7 @@ fn routed_child_completion_does_not_finish_the_parent_turn() {
     );
     assert!(
         session
-            .process_notification(
+            .on_notification(
                 "turn/completed",
                 &json!({"threadId":"unrelated","turn":{"id":"other","status":"completed"}})
             )
@@ -504,7 +504,7 @@ fn conversation_approval_resolution_requires_its_thread_and_request() {
 
     assert!(
         state
-            .process_notification(
+            .on_notification(
                 "serverRequest/resolved",
                 &json!({"threadId":"other","requestId":8})
             )
@@ -512,7 +512,7 @@ fn conversation_approval_resolution_requires_its_thread_and_request() {
     );
     assert!(
         state
-            .process_notification(
+            .on_notification(
                 "serverRequest/resolved",
                 &json!({"threadId":"parent","requestId":9})
             )
@@ -521,7 +521,7 @@ fn conversation_approval_resolution_requires_its_thread_and_request() {
     assert_eq!(state.pending_approval, Some(8));
     assert!(matches!(
         state
-            .process_notification(
+            .on_notification(
                 "serverRequest/resolved",
                 &json!({"threadId":"parent","requestId":8})
             )
@@ -539,7 +539,7 @@ fn conversation_turns_and_output_baselines_are_independent() {
     for state in [&mut first, &mut second] {
         assert!(matches!(
             state
-                .process_notification("turn/started", &json!({"turn":{"id":"turn"}}))
+                .on_notification("turn/started", &json!({"turn":{"id":"turn"}}))
                 .as_slice(),
             [Event::TurnStarted, Event::ProviderTurnAccepted { id }] if id == "turn"
         ));
@@ -547,9 +547,9 @@ fn conversation_turns_and_output_baselines_are_independent() {
 
     let usage = |total, last| json!({"turnId":"turn","tokenUsage":{"total":{"outputTokens":total,"totalTokens":total},"last":{"outputTokens":last,"totalTokens":last}}});
 
-    first.process_notification("thread/tokenUsage/updated", &usage(80, 10));
+    first.on_notification("thread/tokenUsage/updated", &usage(80, 10));
 
-    let second_events = second.process_notification("thread/tokenUsage/updated", &usage(5, 5));
+    let second_events = second.on_notification("thread/tokenUsage/updated", &usage(5, 5));
 
     assert!(
         second_events
@@ -557,7 +557,7 @@ fn conversation_turns_and_output_baselines_are_independent() {
             .any(|event| matches!(event, Event::TurnOutputTokensUpdated(5)))
     );
 
-    let first_events = first.process_notification("thread/tokenUsage/updated", &usage(90, 10));
+    let first_events = first.on_notification("thread/tokenUsage/updated", &usage(90, 10));
 
     assert!(
         first_events
@@ -565,7 +565,7 @@ fn conversation_turns_and_output_baselines_are_independent() {
             .any(|event| matches!(event, Event::TurnOutputTokensUpdated(20)))
     );
 
-    first.process_notification(
+    first.on_notification(
         "turn/completed",
         &json!({"turn":{"id":"turn","status":"completed"}}),
     );

@@ -52,7 +52,7 @@ pub(super) struct ConversationState {
 }
 
 impl ConversationState {
-    pub(super) fn process_notification(&mut self, method: &str, params: &Value) -> Vec<Event> {
+    pub(super) fn on_notification(&mut self, method: &str, params: &Value) -> Vec<Event> {
         match method {
             "turn/started" => {
                 self.current_turn = params["turn"]["id"].as_str().map(str::to_owned);

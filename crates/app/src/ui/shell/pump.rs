@@ -4,23 +4,29 @@ impl Shell {
     /// Observe a pane so its host events reach the shell pump even when the tab
     /// is not visible (the render-damage/host-event split from the design).
     pub(crate) fn watch_pane(pane: &Entity<TerminalPane>, cx: &mut Context<Self>) {
-        cx.observe(pane, |this, pane, cx| this.pump_pane(pane, cx))
+        cx.observe(pane, |this, pane, cx| this.on_pane_notified(pane, cx))
             .detach();
 
-        cx.subscribe(pane, |this, pane, _: &AgentInterrupted, cx| {
-            let route = pane.read(cx).agent_route().clone();
+        cx.subscribe(pane, Self::on_agent_interrupted).detach();
+    }
 
-            let mutation = this.agent_monitor.interrupt(&route, time::Instant::now());
+    fn on_agent_interrupted(
+        &mut self,
+        pane: Entity<TerminalPane>,
+        _: &AgentInterrupted,
+        cx: &mut Context<Self>,
+    ) {
+        let route = pane.read(cx).agent_route().clone();
 
-            Self::remove_native_notifications(&mutation.removed_notifications);
+        let mutation = self.agent_monitor.interrupt(&route, time::Instant::now());
 
-            if mutation.visible_changed {
-                cx.notify();
-            }
+        Self::remove_native_notifications(&mutation.removed_notifications);
 
-            this.reschedule_agent_timer(cx);
-        })
-        .detach();
+        if mutation.visible_changed {
+            cx.notify();
+        }
+
+        self.reschedule_agent_timer(cx);
     }
 
     /// The id of the tab whose pane tree contains `pane_id`, searched across
@@ -32,7 +38,7 @@ impl Shell {
 
     /// Host-event pump: drain one pane's events (applying its pane-side effects)
     /// and fold the chrome-visible ones into the owning tab.
-    fn pump_pane(&mut self, pane: Entity<TerminalPane>, cx: &mut Context<Self>) {
+    fn on_pane_notified(&mut self, pane: Entity<TerminalPane>, cx: &mut Context<Self>) {
         let pane_id = PaneId(pane.read(cx).id());
         let agent_route = pane.read(cx).agent_route().clone();
         let events = pane.update(cx, |pane, _cx| pane.drain_host_events());
@@ -46,12 +52,12 @@ impl Shell {
                     if let Some(tab_id) = self.tab_for_pane(pane_id)
                         && self
                             .workspaces
-                            .tab_manager_for(tab_id)
+                            .tabs_for_tab(tab_id)
                             .and_then(|tabs| tabs.find(tab_id))
                             .is_some_and(|tab| {
                                 tab.surface().tree().is_some_and(|t| t.focused() == pane_id)
                             })
-                        && let Some(tabs) = self.workspaces.tab_manager_for_mut(tab_id)
+                        && let Some(tabs) = self.workspaces.tabs_for_tab_mut(tab_id)
                     {
                         chrome_changed |= tabs.set_title(tab_id, title.clone());
                     }
@@ -67,7 +73,7 @@ impl Shell {
                         // before splits existed.
                         let mut removed = None;
 
-                        if let Some(tabs) = self.workspaces.tab_manager_for_mut(tab_id) {
+                        if let Some(tabs) = self.workspaces.tabs_for_tab_mut(tab_id) {
                             if let Some(tab) = tabs.find_mut(tab_id)
                                 && tab.surface().tree().is_some_and(|t| !t.is_single_leaf())
                             {
@@ -106,7 +112,7 @@ impl Shell {
                     // expire the flag again.
                     if let Some(tab_id) = self.tab_for_pane(pane_id)
                         && self.workspaces.active_tabs().active_id() != tab_id
-                        && let Some(tabs) = self.workspaces.tab_manager_for_mut(tab_id)
+                        && let Some(tabs) = self.workspaces.tabs_for_tab_mut(tab_id)
                     {
                         tabs.ring_bell(tab_id);
                         chrome_changed = true;
@@ -115,7 +121,7 @@ impl Shell {
 
                 HostEvent::Progress(report) => {
                     if let Some(tab_id) = self.tab_for_pane(pane_id)
-                        && let Some(tabs) = self.workspaces.tab_manager_for_mut(tab_id)
+                        && let Some(tabs) = self.workspaces.tabs_for_tab_mut(tab_id)
                     {
                         tabs.set_progress(tab_id, *report);
                         chrome_changed = true;
@@ -126,7 +132,7 @@ impl Shell {
                     if let Some(tab_id) = self.tab_for_pane(pane_id) {
                         let watched = self.workspaces.active_tabs().active_id() == tab_id;
 
-                        if let Some(tabs) = self.workspaces.tab_manager_for_mut(tab_id) {
+                        if let Some(tabs) = self.workspaces.tabs_for_tab_mut(tab_id) {
                             // Only a tab the user is not watching records its
                             // result: a command that ends in front of them
                             // already shows its own output, and the record

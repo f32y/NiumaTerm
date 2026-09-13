@@ -194,7 +194,7 @@ impl Shell {
             if !name.is_empty() {
                 let mut renamed_agent = None;
 
-                if let Some(tabs) = self.workspaces.tab_manager_for_mut(id) {
+                if let Some(tabs) = self.workspaces.tabs_for_tab_mut(id) {
                     tabs.rename(id, name.clone());
                     renamed_agent = tabs.find(id).and_then(|tab| tab.surface().agent().cloned());
 

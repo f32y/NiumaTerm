@@ -6,7 +6,7 @@ use futures::future::join_all;
 use gpui::prelude::*;
 use gpui::{App, AsyncApp, Entity, Window, div};
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogClose, DialogFooter};
+use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, Dialog, DialogClose, DialogFooter};
 use gpui_component::{ActiveTheme as _, WindowExt as _};
 use nmt_agent::session::lifecycle::{RecoveryReadiness, RecoverySnapshot, RestorationReadiness};
 use nmt_agent::update::{
@@ -65,67 +65,61 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
     }
 
     window.open_dialog(cx, move |dialog, _, _| {
-        let wait_key = key.clone();
-        let stop_key = key.clone();
-
-        dialog
-            .title(t!("agent-update-dialog-title"))
-            .overlay_closable(false)
-            .content(move |content, _, cx| {
-                content.child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(t!("agent-update-dialog-active-work", count = busy).into_owned()),
-                )
-            })
-            .footer(
-                DialogFooter::new()
-                    .child(
-                        Button::new("agent-update-when-idle")
-                            .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                            .primary()
-                            .label(t!("agent-update-dialog-when-idle"))
-                            .on_click(move |_, window, cx| {
-                                window.close_dialog(cx);
-
-                                let sessions = matching_sessions(&wait_key, cx);
-
-                                start_transaction(
-                                    wait_key.clone(),
-                                    UpdateMode::WhenIdle,
-                                    sessions,
-                                    cx,
-                                );
-                            }),
-                    )
-                    .child(
-                        Button::new("agent-update-stop-now")
-                            .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                            .danger()
-                            .label(t!("agent-update-dialog-stop-now"))
-                            .on_click(move |_, window, cx| {
-                                window.close_dialog(cx);
-
-                                let sessions = matching_sessions(&stop_key, cx);
-
-                                start_transaction(
-                                    stop_key.clone(),
-                                    UpdateMode::StopNow,
-                                    sessions,
-                                    cx,
-                                );
-                            }),
-                    )
-                    .child(
-                        DialogClose::new().child(
-                            Button::new("agent-update-cancel")
-                                .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                .label(t!("agent-update-dialog-cancel")),
-                        ),
-                    ),
-            )
+        active_work_dialog(dialog, &key, busy)
     });
+}
+
+fn active_work_dialog(dialog: Dialog, key: &InstallationKey, busy: usize) -> Dialog {
+    let wait_key = key.clone();
+    let stop_key = key.clone();
+
+    dialog
+        .title(t!("agent-update-dialog-title"))
+        .overlay_closable(false)
+        .content(move |content, _, cx| {
+            content.child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(t!("agent-update-dialog-active-work", count = busy).into_owned()),
+            )
+        })
+        .footer(
+            DialogFooter::new()
+                .child(
+                    Button::new("agent-update-when-idle")
+                        .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                        .primary()
+                        .label(t!("agent-update-dialog-when-idle"))
+                        .on_click(move |_, window, cx| {
+                            window.close_dialog(cx);
+
+                            let sessions = matching_sessions(&wait_key, cx);
+
+                            start_transaction(wait_key.clone(), UpdateMode::WhenIdle, sessions, cx);
+                        }),
+                )
+                .child(
+                    Button::new("agent-update-stop-now")
+                        .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                        .danger()
+                        .label(t!("agent-update-dialog-stop-now"))
+                        .on_click(move |_, window, cx| {
+                            window.close_dialog(cx);
+
+                            let sessions = matching_sessions(&stop_key, cx);
+
+                            start_transaction(stop_key.clone(), UpdateMode::StopNow, sessions, cx);
+                        }),
+                )
+                .child(
+                    DialogClose::new().child(
+                        Button::new("agent-update-cancel")
+                            .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                            .label(t!("agent-update-dialog-cancel")),
+                    ),
+                ),
+        )
 }
 
 fn matching_sessions(key: &InstallationKey, cx: &mut App) -> Vec<Entity<AgentSession>> {
@@ -176,41 +170,49 @@ fn start_transaction(
 
     cx.refresh_windows();
 
-    cx.spawn(async move |cx| {
-        let mut environment = SessionUpdateEnvironment {
-            sessions,
-            coordinator: coordinator.clone(),
-            key: key.clone(),
-            started: Instant::now(),
-            cx,
-        };
+    cx.spawn(async move |cx| drive_transaction(key, mode, sessions, coordinator, cx).await)
+        .detach();
+}
 
-        let (verified, error) = match run_transaction(&mut environment, mode).await {
-            Ok(outcome) => (
-                outcome.verified,
-                combine_transaction_error(outcome.operation_error, outcome.restore_failures),
-            ),
+async fn drive_transaction(
+    key: InstallationKey,
+    mode: UpdateMode,
+    sessions: Vec<Entity<AgentSession>>,
+    coordinator: UpdateCoordinator,
+    cx: &mut AsyncApp,
+) {
+    let mut environment = SessionUpdateEnvironment {
+        sessions,
+        coordinator: coordinator.clone(),
+        key: key.clone(),
+        started: Instant::now(),
+        cx,
+    };
 
-            Err(error) => {
-                let message = match error {
-                    PreflightFailure::MissingIdentity(message) => message,
+    let (verified, error) = match run_transaction(&mut environment, mode).await {
+        Ok(outcome) => (
+            outcome.verified,
+            combine_transaction_error(outcome.operation_error, outcome.restore_failures),
+        ),
 
-                    PreflightFailure::InterruptionTimeout => {
-                        t!("agent-update-interruption-timeout").to_string()
-                    }
-                };
+        Err(error) => {
+            let message = match error {
+                PreflightFailure::MissingIdentity(message) => message,
 
-                (
-                    None,
-                    Some(UpdateError::new(UpdateErrorKind::Recovery, message)),
-                )
-            }
-        };
+                PreflightFailure::InterruptionTimeout => {
+                    t!("agent-update-interruption-timeout").to_string()
+                }
+            };
 
-        coordinator.finish_update(&key, verified, error, 0);
-        environment.cx.update(|cx| cx.refresh_windows());
-    })
-    .detach();
+            (
+                None,
+                Some(UpdateError::new(UpdateErrorKind::Recovery, message)),
+            )
+        }
+    };
+
+    coordinator.finish_update(&key, verified, error, 0);
+    environment.cx.update(|cx| cx.refresh_windows());
 }
 
 struct SessionUpdateEnvironment<'a> {

@@ -6,7 +6,7 @@ use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, TryRecvError, channel};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::thread::{JoinHandle, spawn};
 
 use miow::pipe::{AnonRead, AnonWrite};
@@ -58,8 +58,8 @@ macro_rules! try_or_send {
 }
 
 impl EventedAnonRead {
-    pub fn new(mut pipe: AnonRead) -> Self {
-        let (mut producer, consumer) = spsc_buffer(65536);
+    pub fn new(pipe: AnonRead) -> Self {
+        let (producer, consumer) = spsc_buffer(65536);
 
         let done = AtomicBool::new(false);
 
@@ -78,48 +78,7 @@ impl EventedAnonRead {
         let thread = {
             let inner = inner.clone();
 
-            spawn(move || {
-                use std::io::Read;
-
-                let mut tmp_buf = [0u8; 65535];
-
-                loop {
-                    if inner.done.load(Ordering::SeqCst) {
-                        return;
-                    }
-
-                    // Read into temp buffer
-                    let nbytes = try_or_send!(pipe.read(&mut tmp_buf[..]), error_sender);
-
-                    // Write from the temp buffer into the producer
-                    let mut written = 0usize;
-
-                    while written < nbytes {
-                        // Wait for buffer to clear if need be. The predicate is
-                        // re-checked under the lock and notifiers acquire this
-                        // lock after changing buffer state, so a drain+notify
-                        // cannot slip between the check and the wait (a lost
-                        // wakeup here strands bytes until the next notify).
-                        if producer.is_full() {
-                            let mut wait_tag = inner.wait_tag.lock();
-
-                            while producer.is_full() && !inner.done.load(Ordering::SeqCst) {
-                                inner.sig_buffer_not_full.wait(&mut wait_tag);
-                            }
-
-                            if inner.done.load(Ordering::SeqCst) {
-                                return;
-                            }
-                        }
-
-                        written += producer.write_from_slice(&tmp_buf[written..nbytes]);
-
-                        if !inner.soft.is_ready() {
-                            inner.soft.set_ready();
-                        }
-                    }
-                }
-            })
+            spawn(move || pump_pipe_to_buffer(pipe, producer, inner, error_sender))
         };
 
         Self {
@@ -127,6 +86,54 @@ impl EventedAnonRead {
             consumer,
             inner,
             error_receiver,
+        }
+    }
+}
+
+fn pump_pipe_to_buffer(
+    mut pipe: AnonRead,
+    mut producer: SpscBufferWriter,
+    inner: Arc<EventedAnonReadInner>,
+    error_sender: Sender<String>,
+) {
+    use std::io::Read;
+
+    let mut tmp_buf = [0u8; 65535];
+
+    loop {
+        if inner.done.load(Ordering::SeqCst) {
+            return;
+        }
+
+        // Read into temp buffer
+        let nbytes = try_or_send!(pipe.read(&mut tmp_buf[..]), error_sender);
+
+        // Write from the temp buffer into the producer
+        let mut written = 0usize;
+
+        while written < nbytes {
+            // Wait for buffer to clear if need be. The predicate is
+            // re-checked under the lock and notifiers acquire this
+            // lock after changing buffer state, so a drain+notify
+            // cannot slip between the check and the wait (a lost
+            // wakeup here strands bytes until the next notify).
+            if producer.is_full() {
+                let mut wait_tag = inner.wait_tag.lock();
+
+                while producer.is_full() && !inner.done.load(Ordering::SeqCst) {
+                    inner.sig_buffer_not_full.wait(&mut wait_tag);
+                }
+
+                if inner.done.load(Ordering::SeqCst) {
+                    return;
+                }
+            }
+
+            written += producer.write_from_slice(&tmp_buf[written..nbytes]);
+
+            if !inner.soft.is_ready() {
+                inner.soft.set_ready();
+            }
         }
     }
 }
@@ -236,8 +243,8 @@ pub struct EventedAnonWrite {
 }
 
 impl EventedAnonWrite {
-    pub fn new(mut pipe: AnonWrite) -> Self {
-        let (producer, mut consumer) = spsc_buffer(65536);
+    pub fn new(pipe: AnonWrite) -> Self {
+        let (producer, consumer) = spsc_buffer(65536);
 
         let done = AtomicBool::new(false);
 
@@ -256,57 +263,7 @@ impl EventedAnonWrite {
         let thread = {
             let inner = inner.clone();
 
-            spawn(move || {
-                use std::io::Write;
-
-                let mut tmp_buf = [0u8; 65535];
-
-                // The buffer starts empty, so the loop may write immediately.
-                inner.soft.set_ready();
-
-                loop {
-                    if inner.done.load(Ordering::SeqCst) {
-                        return;
-                    }
-
-                    // Read into temp buffer while holding the lock
-                    let nbytes = {
-                        // Wait for buffer to have contents. The predicate is
-                        // re-checked under the lock and notifiers acquire this
-                        // lock after changing buffer state, so a write+notify
-                        // from the app thread cannot slip between the check and
-                        // the wait — a lost wakeup here would leave the written
-                        // bytes sitting in the ring until the next write call.
-                        if consumer.is_empty() {
-                            let mut wait_tag = inner.wait_tag.lock();
-
-                            while consumer.is_empty() && !inner.done.load(Ordering::SeqCst) {
-                                inner.sig_buffer_not_empty.wait(&mut wait_tag);
-                            }
-
-                            if inner.done.load(Ordering::SeqCst) {
-                                return;
-                            }
-                        }
-
-                        let nbytes = consumer.read_to_slice(&mut tmp_buf);
-
-                        // Buffer has space again → the loop may write more.
-                        if !inner.soft.is_ready() {
-                            inner.soft.set_ready();
-                        }
-
-                        nbytes
-                    };
-
-                    let mut written = 0usize;
-
-                    while written < nbytes {
-                        written +=
-                            try_or_send!(pipe.write(&tmp_buf[written..nbytes]), error_sender);
-                    }
-                }
-            })
+            spawn(move || pump_buffer_to_pipe(pipe, consumer, inner, error_sender))
         };
 
         Self {
@@ -314,6 +271,62 @@ impl EventedAnonWrite {
             producer,
             inner,
             error_receiver,
+        }
+    }
+}
+
+fn pump_buffer_to_pipe(
+    mut pipe: AnonWrite,
+    mut consumer: SpscBufferReader,
+    inner: Arc<EventedAnonWriteInner>,
+    error_sender: Sender<String>,
+) {
+    use std::io::Write;
+
+    let mut tmp_buf = [0u8; 65535];
+
+    // The buffer starts empty, so the loop may write immediately.
+    inner.soft.set_ready();
+
+    loop {
+        if inner.done.load(Ordering::SeqCst) {
+            return;
+        }
+
+        // Read into temp buffer while holding the lock
+        let nbytes = {
+            // Wait for buffer to have contents. The predicate is
+            // re-checked under the lock and notifiers acquire this
+            // lock after changing buffer state, so a write+notify
+            // from the app thread cannot slip between the check and
+            // the wait — a lost wakeup here would leave the written
+            // bytes sitting in the ring until the next write call.
+            if consumer.is_empty() {
+                let mut wait_tag = inner.wait_tag.lock();
+
+                while consumer.is_empty() && !inner.done.load(Ordering::SeqCst) {
+                    inner.sig_buffer_not_empty.wait(&mut wait_tag);
+                }
+
+                if inner.done.load(Ordering::SeqCst) {
+                    return;
+                }
+            }
+
+            let nbytes = consumer.read_to_slice(&mut tmp_buf);
+
+            // Buffer has space again → the loop may write more.
+            if !inner.soft.is_ready() {
+                inner.soft.set_ready();
+            }
+
+            nbytes
+        };
+
+        let mut written = 0usize;
+
+        while written < nbytes {
+            written += try_or_send!(pipe.write(&tmp_buf[written..nbytes]), error_sender);
         }
     }
 }

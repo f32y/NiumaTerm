@@ -111,7 +111,7 @@ impl TranscriptState {
     /// The post-compaction boundary. Live it carries only the token accounting:
     /// the replacement summary is written to the transcript file and marked
     /// visible there only, so a resumed thread shows it and this one does not.
-    pub(super) fn process_compact_boundary(&mut self, message: &Value) -> Vec<Event> {
+    pub(super) fn on_compact_boundary(&mut self, message: &Value) -> Vec<Event> {
         let detail = parse_compaction(compaction_metadata(message));
 
         let id = match message["uuid"].as_str() {
@@ -147,7 +147,7 @@ impl TranscriptState {
         format!("{prefix}-{}", self.item_seq)
     }
 
-    pub(super) fn process_stream_event(&mut self, message: &Value) -> Vec<Event> {
+    pub(super) fn on_stream_event(&mut self, message: &Value) -> Vec<Event> {
         // Subagent (Task tool) internals stream with a parent id; the parent
         // tool row already represents them in the transcript.
         if !message["parent_tool_use_id"].is_null() {
@@ -278,7 +278,7 @@ impl TranscriptState {
     /// and thinking blocks overwrite their streamed item with the
     /// authoritative full text (or create it when partial messages were
     /// missed), tool-use blocks become started tool items.
-    pub(super) fn process_assistant(&mut self, message: &Value) -> Vec<Event> {
+    pub(super) fn on_assistant(&mut self, message: &Value) -> Vec<Event> {
         if !message["parent_tool_use_id"].is_null() {
             return Vec::new();
         }
@@ -354,7 +354,7 @@ impl TranscriptState {
 
     /// `user` messages in the stream carry tool results; each one completes
     /// its started tool item with output and success/failure status.
-    pub(super) fn process_tool_results(&mut self, message: &Value) -> Vec<Event> {
+    pub(super) fn on_tool_results(&mut self, message: &Value) -> Vec<Event> {
         let Some(blocks) = message["message"]["content"].as_array() else {
             return Vec::new();
         };

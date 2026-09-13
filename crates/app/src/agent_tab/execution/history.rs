@@ -40,7 +40,7 @@ impl AgentSession {
                     ReplayLoaded::Failed(message) => {
                         let epoch = this.controller.borrow().runtime.epoch();
 
-                        this.apply_event(
+                        this.on_event(
                             epoch,
                             Event::Error {
                                 message,

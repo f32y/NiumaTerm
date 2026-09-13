@@ -362,7 +362,13 @@ fn modified_link_click_precedes_program_mouse_reporting() {
     assert!(
         matches!(model.mouse_down(input), MouseOutcome::OpenUrl(url) if url == "https://example.com")
     );
-    assert!(model.source.session.selection_range().is_none());
+    assert!(
+        model
+            .source
+            .session
+            .selection_range_in(&model.source.session.snapshot())
+            .is_none()
+    );
     assert!(model.interaction.block_anchor().is_none());
 }
 

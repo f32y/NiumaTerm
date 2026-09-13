@@ -83,7 +83,7 @@ impl AgentPane {
             // refusing it as an unknown command would block the only way to
             // reach a skill at all.
             if self.kind.caps().slash_skills_are_prompts && self.names_a_skill(&parsed.name) {
-                return self.send_text(input.to_string(), cx);
+                return self.send_text_inner(input.to_string(), None, None, cx);
             }
 
             self.palette.set_feedback(

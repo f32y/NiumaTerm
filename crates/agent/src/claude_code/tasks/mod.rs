@@ -248,7 +248,7 @@ impl ClaudeTasks {
         self.children.drain()
     }
 
-    fn apply_lifecycle(&mut self, kind: &str, record: &Value) -> bool {
+    fn observe_lifecycle(&mut self, kind: &str, record: &Value) -> bool {
         // Every task type shares these records. A record that names a type
         // this view does not show is not its work, and one that names no type
         // at all is not assumed to be either kind — it may still enrich a row
@@ -311,7 +311,7 @@ impl ClaudeTasks {
     /// A `SubagentStop` hook ends one child. Without a stable identifier that
     /// matches a known task it is ignored, exactly as the parent turn handling
     /// already ignores it, rather than being charged to the newest task.
-    fn apply_subagent_stop(&mut self, record: &Value) -> bool {
+    fn observe_subagent_stop(&mut self, record: &Value) -> bool {
         let ids = record_identifiers(record);
 
         let Some(canonical) = self.canonical_from(&ids) else {

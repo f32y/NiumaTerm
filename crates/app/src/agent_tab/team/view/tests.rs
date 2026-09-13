@@ -203,6 +203,7 @@ async fn reopened_request(cx: &mut TestAppContext, completed: bool) {
                 ..AgentProfile::default()
             },
             AgentWorkspace::default(),
+            None,
             cx,
         );
 
@@ -252,7 +253,7 @@ async fn reopened_request(cx: &mut TestAppContext, completed: bool) {
         let epoch = session.controller.borrow_mut().starting(None).epoch;
 
         session.install(Ok(Backend::Test(backend)), epoch, "test", cx);
-        session.apply_event(epoch, Event::Ready(ThreadSettings::default()), cx);
+        session.on_event(epoch, Event::Ready(ThreadSettings::default()), cx);
     });
 
     cx.run_until_parked();
@@ -372,6 +373,7 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
                 ..AgentProfile::default()
             },
             AgentWorkspace::default(),
+            None,
             cx,
         );
 
@@ -413,7 +415,7 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
             Some(true)
         );
 
-        session.apply_event(epoch, Event::Ready(ThreadSettings::default()), cx);
+        session.on_event(epoch, Event::Ready(ThreadSettings::default()), cx);
 
         epoch
     });
@@ -448,7 +450,7 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
     });
 
     host.update(&mut cx, |session, cx| {
-        session.apply_event(
+        session.on_event(
             epoch,
             Event::ProviderTurnAccepted {
                 id: "provider-turn".into(),
@@ -456,9 +458,9 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
             cx,
         );
 
-        session.apply_event(epoch, Event::TurnStarted, cx);
+        session.on_event(epoch, Event::TurnStarted, cx);
 
-        session.apply_event(
+        session.on_event(
             epoch,
             Event::ItemStarted(Item::AgentMessage {
                 id: "reply".into(),
@@ -468,7 +470,7 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
             cx,
         );
 
-        session.apply_event(
+        session.on_event(
             epoch,
             Event::AgentMessageDelta {
                 item_id: "reply".into(),
@@ -513,7 +515,7 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
     assert!(author.size.height > px(0.));
 
     host.update(&mut cx, |session, cx| {
-        session.apply_event(
+        session.on_event(
             epoch,
             Event::AgentMessageDelta {
                 item_id: "reply".into(),
@@ -542,9 +544,9 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
     });
 
     host.update(&mut cx, |session, cx| {
-        session.apply_event(epoch, Event::TurnCompleted { error: None }, cx);
+        session.on_event(epoch, Event::TurnCompleted { error: None }, cx);
 
-        session.apply_event(
+        session.on_event(
             epoch,
             Event::ProviderTurnFinished {
                 id: "provider-turn".into(),
@@ -567,7 +569,7 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
     });
 
     host.update(&mut cx, |session, cx| {
-        session.apply_event(
+        session.on_event(
             epoch,
             Event::Error {
                 message: "Provider disconnected".into(),

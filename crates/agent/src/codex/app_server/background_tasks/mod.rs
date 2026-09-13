@@ -443,7 +443,7 @@ impl CodexTasks {
 
     /// Fold a notification that belongs to a confirmed descendant. The parent's
     /// turn id, running state, approval state, and transcript are untouched.
-    pub(super) fn apply_descendant_notification(
+    pub(super) fn observe_descendant_notification(
         &mut self,
         thread_id: &str,
         method: &str,

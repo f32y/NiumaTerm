@@ -118,10 +118,6 @@ fn config_dir_for_mode(path: PathBuf, testing: bool) -> PathBuf {
     if testing { path.join("Test") } else { path }
 }
 
-fn selected_config_dir(path: PathBuf) -> PathBuf {
-    config_dir_for_mode(path, TESTING_MODE.load(Ordering::Relaxed))
-}
-
 /// Home directory with a temp-dir fallback: a session without a resolvable
 /// home (stripped-down service accounts) gets per-boot config instead of a
 /// startup panic.
@@ -138,7 +134,7 @@ fn base_config_dir_path() -> PathBuf {
 
 #[inline]
 pub fn config_dir_path() -> PathBuf {
-    selected_config_dir(base_config_dir_path())
+    config_dir_for_mode(base_config_dir_path(), TESTING_MODE.load(Ordering::Relaxed))
 }
 
 #[inline]
@@ -233,11 +229,7 @@ impl Config {
         themes
     }
 
-    pub fn load_for_startup() -> Result<Self, TomlDeError> {
-        Config::load_for_startup_from(&config_file_path(), &config_dir_path())
-    }
-
-    fn load_for_startup_from(path: &Path, config_dir: &Path) -> Result<Self, TomlDeError> {
+    pub fn load_for_startup_from(path: &Path, config_dir: &Path) -> Result<Self, TomlDeError> {
         let Some(content) = fs::read_to_string(path).ok() else {
             return Ok(Config::default());
         };
@@ -385,10 +377,6 @@ pub struct SettingsPatch<'a> {
     pub default_profile: &'a str,
     pub agent_profiles: &'a [profile::AgentProfile],
     pub default_agent_profile: &'a str,
-}
-
-pub fn save_settings(patch: &SettingsPatch<'_>) -> io::Result<()> {
-    save_settings_to(&config_file_path(), patch)
 }
 
 /// Save settings to an explicit configuration path using the same locked,

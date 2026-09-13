@@ -129,23 +129,33 @@ pub(crate) const MIN_WINDOW_WIDTH: f32 = 640.0;
 const MIN_WINDOW_HEIGHT: f32 = 400.0;
 
 impl AppWindow {
-    /// Startup state from one persisted window entry. `restore_session: false`
+    /// Startup state from one persisted window entry. `restore_last_session_when_opening: false`
     /// discards the saved session; the caller persists that cleanup.
-    pub(crate) fn from_local_state(state: &WindowLocalState, restore_session: bool) -> Self {
+    pub(crate) fn from_local_state(
+        state: &WindowLocalState,
+        restore_last_session_when_opening: bool,
+    ) -> Self {
         Self {
             bounds: state.window.clone(),
-            session: restore_session.then(|| state.session.clone()).flatten(),
+            session: restore_last_session_when_opening
+                .then(|| state.session.clone())
+                .flatten(),
             sidebar_width: state.sidebar_width,
             initial_cwd: None,
         }
     }
 
-    /// Persisted form of this window's state. `save_session: false` drops the
+    /// Persisted form of this window's state. `restore_last_session_when_opening: false` drops the
     /// session snapshot.
-    pub(crate) fn to_local_state(&self, save_session: bool) -> WindowLocalState {
+    pub(crate) fn to_local_state(
+        &self,
+        restore_last_session_when_opening: bool,
+    ) -> WindowLocalState {
         WindowLocalState {
             window: self.bounds.clone(),
-            session: save_session.then(|| self.session.clone()).flatten(),
+            session: restore_last_session_when_opening
+                .then(|| self.session.clone())
+                .flatten(),
             sidebar_width: self.sidebar_width,
         }
     }

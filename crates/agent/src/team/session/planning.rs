@@ -7,8 +7,8 @@ use crate::team::budget::TurnPurpose;
 use crate::team::content::{Author, PublicMessage, Publication, UserInput};
 use crate::team::context::{ContextError, ContextLimits};
 use crate::team::discussion::{
-    Arrangement, ArrangementState, DiscussionMode, DiscussionState, PauseReason, PublicSnapshot,
-    Stage, StageKind,
+    Arrangement, ArrangementState, Discussion, DiscussionMode, DiscussionState, PauseReason,
+    PublicSnapshot, Stage, StageKind,
 };
 use crate::team::identity::{AttemptId, DiscussionId, MemberId, MessageId, OperationId, StageId};
 use crate::team::moderation::ModeratorAction;
@@ -165,79 +165,7 @@ impl TeamSession {
                 return Ok(Vec::new());
             }
 
-            let (kind, recipients) = if discussion.budget.remaining_non_report_turns() == 0
-                && discussion
-                    .stages
-                    .last()
-                    .is_none_or(|stage| stage.kind != StageKind::ModeratorDecision)
-            {
-                (StageKind::Report, vec![discussion.mode.report_author()])
-            } else {
-                match discussion.mode {
-                    DiscussionMode::Fixed { report_author } => {
-                        let kind = if !discussion
-                            .stages
-                            .iter()
-                            .any(|stage| stage.kind == StageKind::InitialAnswers)
-                        {
-                            StageKind::InitialAnswers
-                        } else if !discussion
-                            .stages
-                            .iter()
-                            .any(|stage| stage.kind == StageKind::PeerResponses)
-                        {
-                            StageKind::PeerResponses
-                        } else {
-                            StageKind::Report
-                        };
-
-                        let recipients = if kind == StageKind::Report {
-                            vec![report_author]
-                        } else {
-                            discussion.participants.clone()
-                        };
-
-                        (kind, recipients)
-                    }
-
-                    DiscussionMode::Moderated { moderator } => {
-                        match discussion.stages.last().filter(|stage| {
-                            stage.kind == StageKind::ModeratorDecision
-                                && stage.arrangements.iter().any(|entry| {
-                                    entry.recipient == moderator
-                                        && matches!(entry.state, ArrangementState::Completed(_))
-                                })
-                        }) {
-                            Some(stage) => match &stage.decision {
-                                Some(decision) => match &decision.action {
-                                    ModeratorAction::Invite { recipients } => {
-                                        (StageKind::InvitedResponses, recipients.clone())
-                                    }
-
-                                    ModeratorAction::Report => (StageKind::Report, vec![moderator]),
-                                },
-
-                                None => {
-                                    let operation = stage
-                                        .arrangements
-                                        .first()
-                                        .ok_or(TeamError::Unavailable)?
-                                        .operation;
-
-                                    self.pause_discussion(
-                                        id,
-                                        PauseReason::InvalidModeration(operation),
-                                    )?;
-
-                                    return Err(TeamError::Paused);
-                                }
-                            },
-
-                            None => (StageKind::ModeratorDecision, vec![moderator]),
-                        }
-                    }
-                }
-            };
+            let (kind, recipients) = self.next_stage(discussion)?;
 
             discussion.stages.push(Stage {
                 decision: None,
@@ -382,6 +310,97 @@ impl TeamSession {
                 Err(error)
             }
         }
+    }
+
+    fn next_stage(
+        &mut self,
+        discussion: &Discussion,
+    ) -> Result<(StageKind, Vec<MemberId>), TeamError> {
+        Ok(
+            if discussion.budget.remaining_non_report_turns() == 0
+                && discussion
+                    .stages
+                    .last()
+                    .is_none_or(|stage| stage.kind != StageKind::ModeratorDecision)
+            {
+                (StageKind::Report, vec![discussion.mode.report_author()])
+            } else {
+                match discussion.mode {
+                    DiscussionMode::Fixed { report_author } => {
+                        let kind = if !discussion
+                            .stages
+                            .iter()
+                            .any(|stage| stage.kind == StageKind::InitialAnswers)
+                        {
+                            StageKind::InitialAnswers
+                        } else if !discussion
+                            .stages
+                            .iter()
+                            .any(|stage| stage.kind == StageKind::PeerResponses)
+                        {
+                            StageKind::PeerResponses
+                        } else {
+                            StageKind::Report
+                        };
+
+                        let recipients = if kind == StageKind::Report {
+                            vec![report_author]
+                        } else {
+                            discussion.participants.clone()
+                        };
+
+                        (kind, recipients)
+                    }
+
+                    DiscussionMode::Moderated { moderator } => {
+                        self.moderated_next_stage(discussion, moderator)?
+                    }
+                }
+            },
+        )
+    }
+
+    fn moderated_next_stage(
+        &mut self,
+        discussion: &Discussion,
+        moderator: MemberId,
+    ) -> Result<(StageKind, Vec<MemberId>), TeamError> {
+        Ok(
+            match discussion.stages.last().filter(|stage| {
+                stage.kind == StageKind::ModeratorDecision
+                    && stage.arrangements.iter().any(|entry| {
+                        entry.recipient == moderator
+                            && matches!(entry.state, ArrangementState::Completed(_))
+                    })
+            }) {
+                Some(stage) => match &stage.decision {
+                    Some(decision) => match &decision.action {
+                        ModeratorAction::Invite { recipients } => {
+                            (StageKind::InvitedResponses, recipients.clone())
+                        }
+
+                        ModeratorAction::Report => (StageKind::Report, vec![moderator]),
+                    },
+
+                    None => {
+                        let operation = stage
+                            .arrangements
+                            .first()
+                            .ok_or(TeamError::Unavailable)?
+                            .operation;
+
+                        self.pause_discussion(
+                            discussion.id,
+                            PauseReason::InvalidModeration(operation),
+                        )?;
+
+                        return Err(TeamError::Paused);
+                    }
+                },
+
+                None => (StageKind::ModeratorDecision, vec![moderator]),
+            },
+        )
     }
 
     fn pause_dispatch_error(

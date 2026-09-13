@@ -17,7 +17,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
-    AppContext as _, Context, Entity, ScrollHandle, Subscription, Task, UniformListScrollHandle,
+    AppContext as _, AsyncApp, Context, Entity, ScrollHandle, Subscription, Task,
+    UniformListScrollHandle, WeakEntity,
 };
 use gpui_component::text::TextViewState;
 use nmt_agent::chat::Item;
@@ -178,60 +179,62 @@ impl CodeView {
         // One worker per expanded card coalesces streamed updates. A newer
         // revision supersedes an in-flight result without starting another
         // concurrent parse of the same growing output.
-        self.parse_task = Some(cx.spawn(async move |view, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(24))
-                    .await;
+        self.parse_task = Some(cx.spawn(Self::parse_loop));
+    }
 
-                let Ok((revision, source)) =
-                    view.read_with(cx, |view, _| (view.revision, view.source.clone()))
-                else {
-                    break;
-                };
+    async fn parse_loop(view: WeakEntity<Self>, cx: &mut AsyncApp) {
+        loop {
+            cx.background_executor()
+                .timer(Duration::from_millis(24))
+                .await;
 
-                let parsing = source.clone();
+            let Ok((revision, source)) =
+                view.read_with(cx, |view, _| (view.revision, view.source.clone()))
+            else {
+                break;
+            };
 
-                let prepared = cx
-                    .background_spawn(async move {
-                        let mut prepared = PreparedCode::new(&parsing);
+            let parsing = source.clone();
 
-                        prepared.parse_syntax();
+            let prepared = cx
+                .background_spawn(async move {
+                    let mut prepared = PreparedCode::new(&parsing);
 
-                        prepared
-                    })
-                    .await;
+                    prepared.parse_syntax();
 
-                let Ok(done) = view.update(cx, |view, cx| {
-                    let done = view.revision == revision;
+                    prepared
+                })
+                .await;
 
-                    // A completed prefix remains useful during sustained output.
-                    // Replacements must never display an older result, while
-                    // append-only streams can show progress before they pause.
-                    if done
-                        || (view.source.command == source.command
-                            && view.source.language == source.language
-                            && view.source.strip_gutter == source.strip_gutter
-                            && view.source.output.starts_with(&source.output))
-                    {
-                        view.prepared = Some(Arc::new(prepared));
+            let Ok(done) = view.update(cx, |view, cx| {
+                let done = view.revision == revision;
 
-                        cx.notify();
-                    }
+                // A completed prefix remains useful during sustained output.
+                // Replacements must never display an older result, while
+                // append-only streams can show progress before they pause.
+                if done
+                    || (view.source.command == source.command
+                        && view.source.language == source.language
+                        && view.source.strip_gutter == source.strip_gutter
+                        && view.source.output.starts_with(&source.output))
+                {
+                    view.prepared = Some(Arc::new(prepared));
 
-                    if done {
-                        view.parse_task = None;
-                    }
-
-                    done
-                }) else {
-                    break;
-                };
+                    cx.notify();
+                }
 
                 if done {
-                    break;
+                    view.parse_task = None;
                 }
+
+                done
+            }) else {
+                break;
+            };
+
+            if done {
+                break;
             }
-        }));
+        }
     }
 }

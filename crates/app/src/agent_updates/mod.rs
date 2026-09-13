@@ -21,7 +21,7 @@ use std::time::Duration;
 use std::{env, process};
 
 use app::agent_tab::agent_launch;
-use gpui::{App, Global};
+use gpui::{App, AsyncApp, Global};
 use nmt_agent::launcher::AgentCli;
 use nmt_agent::update::{
     ClaudeMaintenance, CodexMaintenance, HttpClaudeReleaseChannel, InstallationKey,
@@ -191,37 +191,38 @@ pub(crate) fn schedule_automatic_checks(cx: &mut App) {
         return;
     }
 
-    cx.spawn(async move |cx| {
-        // Let the first windows finish opening before probing providers.
-        cx.background_executor().timer(Duration::from_secs(3)).await;
+    cx.spawn(run_automatic_checks).detach();
+}
 
-        loop {
-            // Re-read the switch every tick: the user can toggle it, and the
-            // registered installations change, while the app runs.
-            let active = cx.update(|cx| {
-                let coordinator = cx.global::<AgentUpdates>().coordinator.clone();
+async fn run_automatic_checks(cx: &mut AsyncApp) {
+    // Let the first windows finish opening before probing providers.
+    cx.background_executor().timer(Duration::from_secs(3)).await;
 
-                cx.global::<AppSettings>()
-                    .agent
-                    .check_agent_updates
-                    .then_some(coordinator)
+    loop {
+        // Re-read the switch every tick: the user can toggle it, and the
+        // registered installations change, while the app runs.
+        let active = cx.update(|cx| {
+            let coordinator = cx.global::<AgentUpdates>().coordinator.clone();
+
+            cx.global::<AppSettings>()
+                .agent
+                .check_agent_updates
+                .then_some(coordinator)
+        });
+
+        if let Some(coordinator) = active {
+            let worker = cx.background_executor().spawn(async move {
+                for snapshot in coordinator.snapshots() {
+                    let _ = coordinator.check(&snapshot.identity.key, false);
+                }
             });
 
-            if let Some(coordinator) = active {
-                let worker = cx.background_executor().spawn(async move {
-                    for snapshot in coordinator.snapshots() {
-                        let _ = coordinator.check(&snapshot.identity.key, false);
-                    }
-                });
-
-                worker.await;
-                cx.update(|cx| cx.refresh_windows());
-            }
-
-            cx.background_executor()
-                .timer(AUTOMATIC_CHECK_INTERVAL)
-                .await;
+            worker.await;
+            cx.update(|cx| cx.refresh_windows());
         }
-    })
-    .detach();
+
+        cx.background_executor()
+            .timer(AUTOMATIC_CHECK_INTERVAL)
+            .await;
+    }
 }

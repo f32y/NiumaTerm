@@ -23,26 +23,28 @@ pub(crate) fn account_sources() -> [Arc<dyn UsageSource<UsageSnapshot>>; 2] {
 }
 
 pub(crate) fn daily_source() -> Arc<dyn UsageSource<Option<DailyTokenUsage>>> {
-    Arc::new(|_: &AtomicBool| {
-        let now = Local::now();
-        let since = now.format("%Y%m%d").to_string();
-        let date = now.format("%Y-%m-%d").to_string();
+    Arc::new(fetch_daily_usage)
+}
 
-        let output = hidden_cmd_command("npx")
-            .args(["ccusage@latest", "-j", "--since", &since])
-            .output()
-            .map_err(|error| FetchError::Failed(format!("failed to run ccusage: {error}")))?;
+fn fetch_daily_usage(_: &AtomicBool) -> Result<Option<DailyTokenUsage>, FetchError> {
+    let now = Local::now();
+    let since = now.format("%Y%m%d").to_string();
+    let date = now.format("%Y-%m-%d").to_string();
 
-        if !output.status.success() {
-            return Err(FetchError::Failed(format!(
-                "ccusage exited with {}: {}",
-                output.status,
-                decode_child_output(&output.stderr).trim()
-            )));
-        }
+    let output = hidden_cmd_command("npx")
+        .args(["ccusage@latest", "-j", "--since", &since])
+        .output()
+        .map_err(|error| FetchError::Failed(format!("failed to run ccusage: {error}")))?;
 
-        parse_usage(&output.stdout, &date)
-            .map(Some)
-            .map_err(FetchError::Failed)
-    })
+    if !output.status.success() {
+        return Err(FetchError::Failed(format!(
+            "ccusage exited with {}: {}",
+            output.status,
+            decode_child_output(&output.stderr).trim()
+        )));
+    }
+
+    parse_usage(&output.stdout, &date)
+        .map(Some)
+        .map_err(FetchError::Failed)
 }

@@ -6,7 +6,9 @@
 //! the list rather than showing every step inline.
 
 use gpui::prelude::*;
-use gpui::{Context, FontWeight, IntoElement, MouseButton, div, px, relative};
+use gpui::{
+    App, Context, Entity, FontWeight, IntoElement, MouseButton, MouseMoveEvent, div, px, relative,
+};
 use gpui_component::button::Button;
 use gpui_component::popover::Popover;
 use gpui_component::{ActiveTheme as _, Icon, IconName, h_flex, v_flex};
@@ -232,47 +234,13 @@ pub(super) fn effort_panel(
                                     .on_mouse_down(MouseButton::Left, {
                                         let pane = pane.clone();
 
-                                        move |_, _, cx| {
-                                            pane.update(cx, |this, cx| {
-                                                if !this.binding.is_current() {
-                                                    return;
-                                                }
-
-                                                this.controls.effort_drag = Some(index);
-
-                                                cx.notify();
-                                            });
-                                        }
+                                        move |_, _, cx| on_effort_drag_start(&pane, index, cx)
                                     })
                                     .on_mouse_move({
                                         let pane = pane.clone();
 
                                         move |event, _, cx| {
-                                            if !event.dragging() {
-                                                return;
-                                            }
-
-                                            pane.update(cx, |this, cx| {
-                                                if !this.binding.is_current() {
-                                                    return;
-                                                }
-
-                                                // Moving within the stop
-                                                // the drag already holds
-                                                // is not a change, and a
-                                                // move with no drag in
-                                                // flight started outside
-                                                // the track.
-                                                if this.controls.effort_drag.is_none()
-                                                    || this.controls.effort_drag == Some(index)
-                                                {
-                                                    return;
-                                                }
-
-                                                this.controls.effort_drag = Some(index);
-
-                                                cx.notify();
-                                            });
+                                            on_effort_drag_move(&pane, index, event, cx)
                                         }
                                     })
                                     // The panel stays open on release: a
@@ -298,4 +266,47 @@ pub(super) fn effort_panel(
         });
 
     settings_pill_frame(panel, cx)
+}
+
+fn on_effort_drag_start(pane: &Entity<AgentPane>, index: usize, cx: &mut App) {
+    pane.update(cx, |this, cx| {
+        if !this.binding.is_current() {
+            return;
+        }
+
+        this.controls.effort_drag = Some(index);
+
+        cx.notify();
+    });
+}
+
+fn on_effort_drag_move(
+    pane: &Entity<AgentPane>,
+    index: usize,
+    event: &MouseMoveEvent,
+    cx: &mut App,
+) {
+    if !event.dragging() {
+        return;
+    }
+
+    pane.update(cx, |this, cx| {
+        if !this.binding.is_current() {
+            return;
+        }
+
+        // Moving within the stop
+        // the drag already holds
+        // is not a change, and a
+        // move with no drag in
+        // flight started outside
+        // the track.
+        if this.controls.effort_drag.is_none() || this.controls.effort_drag == Some(index) {
+            return;
+        }
+
+        this.controls.effort_drag = Some(index);
+
+        cx.notify();
+    });
 }

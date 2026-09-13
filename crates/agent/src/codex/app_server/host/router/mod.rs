@@ -428,7 +428,7 @@ impl Router {
         }
     }
 
-    pub(super) fn handle_message(&self, message: Value) {
+    pub(super) fn on_message(&self, message: Value) {
         let deliveries = if let Some(method) = message["method"].as_str().map(str::to_string) {
             if message["id"].is_number() {
                 self.route_server_request(message)
@@ -637,7 +637,7 @@ impl Router {
         state.sessions.is_empty()
     }
 
-    pub(super) fn handle_stdout_closed(&self) {
+    pub(super) fn on_stdout_closed(&self) {
         if !self.alive.swap(false, Ordering::AcqRel) {
             return;
         }

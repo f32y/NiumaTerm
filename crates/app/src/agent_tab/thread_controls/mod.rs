@@ -109,12 +109,17 @@ impl ThreadControls {
         state: &ConversationSettings,
         cx: &App,
     ) -> Vec<(String, String)> {
-        let style = cx.global::<AgentSettings>().model_list_style;
+        let model_list_style = cx.global::<AgentSettings>().model_list_style;
 
         state
             .models
             .iter()
-            .map(|m| (m.model.clone(), style.label(&m.display, &m.model)))
+            .map(|m| {
+                (
+                    m.model.clone(),
+                    model_list_style.label(&m.display, &m.model),
+                )
+            })
             .collect()
     }
 }

@@ -9,7 +9,7 @@ use std::time::Duration;
 use std::{fs, io, path};
 
 use gpui::prelude::*;
-use gpui::{Context, Entity, SharedString, Window, div};
+use gpui::{AsyncApp, Context, Entity, SharedString, WeakEntity, Window, div};
 use gpui_component::{ActiveTheme, h_flex};
 use nmt_agent::git::{CheckedOut, current_branch, run_git};
 use rust_i18n::t;
@@ -351,32 +351,7 @@ impl GitStatusModel {
 
         // Interval loop; the period is re-read each tick so the settings
         // dropdown takes effect at the next tick without restart plumbing.
-        cx.spawn(async move |this, cx| {
-            loop {
-                let Ok(interval) = this.update(cx, |_, cx| {
-                    cx.global::<AppSettings>()
-                        .appearance
-                        .git_status_refresh_interval
-                }) else {
-                    break;
-                };
-
-                cx.background_executor()
-                    .timer(Duration::from_secs(interval.max(1)))
-                    .await;
-
-                let alive = this.update(cx, |this, cx| {
-                    if this.active() {
-                        this.refresh(cx);
-                    }
-                });
-
-                if alive.is_err() {
-                    break;
-                }
-            }
-        })
-        .detach();
+        cx.spawn(Self::poll_git_status).detach();
 
         Self {
             target_cwd: None,
@@ -386,6 +361,32 @@ impl GitStatusModel {
             refreshing: false,
             enabled,
             sidebar_open: false,
+        }
+    }
+
+    async fn poll_git_status(this: WeakEntity<Self>, cx: &mut AsyncApp) {
+        loop {
+            let Ok(interval) = this.update(cx, |_, cx| {
+                cx.global::<AppSettings>()
+                    .appearance
+                    .git_status_refresh_interval
+            }) else {
+                break;
+            };
+
+            cx.background_executor()
+                .timer(Duration::from_secs(interval.max(1)))
+                .await;
+
+            let alive = this.update(cx, |this, cx| {
+                if this.active() {
+                    this.refresh(cx);
+                }
+            });
+
+            if alive.is_err() {
+                break;
+            }
         }
     }
 
@@ -443,85 +444,95 @@ impl GitStatusModel {
         );
 
         cx.spawn(async move |this, cx| {
-            let root = cx
-                .background_executor()
-                .spawn(async move { resolve_repo_root(&cwd) })
-                .await;
-
-            let proceed = this
-                .update(cx, |this, cx| {
-                    if this.generation != generation {
-                        // Retargeted mid-flight: restart for the new target.
-                        this.refreshing = false;
-
-                        this.refresh(cx);
-
-                        return None;
-                    }
-
-                    match root {
-                        None => {
-                            // Not a repo: clear and stop.
-                            this.refreshing = false;
-
-                            if this.snapshot.take().is_some() {
-                                this.snapshot_seq += 1;
-                            }
-
-                            cx.notify();
-
-                            None
-                        }
-
-                        Some(root) => {
-                            // Different repo: drop the stale snapshot now so
-                            // the old repo's data never shows for the new one.
-                            if this.snapshot.as_ref().is_some_and(|s| s.repo_root != root) {
-                                this.snapshot = None;
-                                this.snapshot_seq += 1;
-
-                                cx.notify();
-                            }
-
-                            Some(root)
-                        }
-                    }
-                })
-                .ok()
-                .flatten();
-
-            let Some(root) = proceed else {
-                return;
-            };
-
-            let snapshot = cx
-                .background_executor()
-                .spawn(async move { fetch_snapshot(&root, branch_max_age) })
-                .await;
-
-            this.update(cx, |this, cx| {
-                this.refreshing = false;
-
-                if this.generation != generation {
-                    this.refresh(cx);
-
-                    return;
-                }
-
-                match snapshot {
-                    Ok(snapshot) => {
-                        this.snapshot = Some(snapshot);
-                        this.snapshot_seq += 1;
-                    }
-
-                    Err(err) => warn!("git status refresh failed: {err}"),
-                }
-
-                cx.notify();
-            })
-            .ok();
+            Self::load_snapshot(this, cwd, generation, branch_max_age, cx).await
         })
         .detach();
+    }
+
+    async fn load_snapshot(
+        this: WeakEntity<Self>,
+        cwd: String,
+        generation: u64,
+        branch_max_age: Duration,
+        cx: &mut AsyncApp,
+    ) {
+        let root = cx
+            .background_executor()
+            .spawn(async move { resolve_repo_root(&cwd) })
+            .await;
+
+        let proceed = this
+            .update(cx, |this, cx| {
+                if this.generation != generation {
+                    // Retargeted mid-flight: restart for the new target.
+                    this.refreshing = false;
+
+                    this.refresh(cx);
+
+                    return None;
+                }
+
+                match root {
+                    None => {
+                        // Not a repo: clear and stop.
+                        this.refreshing = false;
+
+                        if this.snapshot.take().is_some() {
+                            this.snapshot_seq += 1;
+                        }
+
+                        cx.notify();
+
+                        None
+                    }
+
+                    Some(root) => {
+                        // Different repo: drop the stale snapshot now so
+                        // the old repo's data never shows for the new one.
+                        if this.snapshot.as_ref().is_some_and(|s| s.repo_root != root) {
+                            this.snapshot = None;
+                            this.snapshot_seq += 1;
+
+                            cx.notify();
+                        }
+
+                        Some(root)
+                    }
+                }
+            })
+            .ok()
+            .flatten();
+
+        let Some(root) = proceed else {
+            return;
+        };
+
+        let snapshot = cx
+            .background_executor()
+            .spawn(async move { fetch_snapshot(&root, branch_max_age) })
+            .await;
+
+        this.update(cx, |this, cx| {
+            this.refreshing = false;
+
+            if this.generation != generation {
+                this.refresh(cx);
+
+                return;
+            }
+
+            match snapshot {
+                Ok(snapshot) => {
+                    this.snapshot = Some(snapshot);
+                    this.snapshot_seq += 1;
+                }
+
+                Err(err) => warn!("git status refresh failed: {err}"),
+            }
+
+            cx.notify();
+        })
+        .ok();
     }
 }
 

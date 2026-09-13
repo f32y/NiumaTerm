@@ -182,17 +182,17 @@ fn file_round_trip_is_atomic_and_invalid_json_is_kept() {
     install_hooks_with_command(&path, CURRENT_COMMAND).unwrap();
 
     assert_eq!(
-        status_of(&read_hooks(&path).unwrap(), CURRENT_COMMAND),
+        status_of(&read_settings(&path).unwrap(), CURRENT_COMMAND),
         HookInstallStatus::Installed
     );
 
     uninstall_hooks(&path).unwrap();
 
     assert_eq!(
-        status_of(&read_hooks(&path).unwrap(), CURRENT_COMMAND),
+        status_of(&read_settings(&path).unwrap(), CURRENT_COMMAND),
         HookInstallStatus::NotInstalled
     );
-    assert_eq!(read_hooks(&path).unwrap(), user_hooks());
+    assert_eq!(read_settings(&path).unwrap(), user_hooks());
 
     let wrong_shape = r#"{"hooks":{"Stop":{}}}"#;
 
@@ -231,7 +231,7 @@ fn complete_registration_with_an_old_command_is_stale() {
     fs::write(&path, to_string_pretty(&json!({ "hooks": hooks })).unwrap()).unwrap();
 
     assert_eq!(
-        status_of(&read_hooks(&path).unwrap(), CURRENT_COMMAND),
+        status_of(&read_settings(&path).unwrap(), CURRENT_COMMAND),
         HookInstallStatus::Stale
     );
 

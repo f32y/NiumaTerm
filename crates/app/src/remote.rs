@@ -21,7 +21,7 @@ use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use crate::utils::get_data_dir;
+use nmt_platform::environment::data_dir;
 
 struct RemoteHostState {
     handle: Option<HostHandle>,
@@ -67,7 +67,7 @@ pub fn reconcile(config: &RemoteSessionConfig) {
     match HostHandle::start(HostConfig {
         relay_url: desired.0.clone(),
         access_token: desired.1.clone(),
-        data_dir: get_data_dir(),
+        data_dir: data_dir(),
     }) {
         Ok(handle) => {
             state.handle = Some(handle);
@@ -127,11 +127,11 @@ pub struct KnownHost {
 }
 
 fn device_key_path() -> PathBuf {
-    get_data_dir().join("device-key.json")
+    data_dir().join("device-key.json")
 }
 
 fn known_hosts_path() -> PathBuf {
-    get_data_dir().join("known_hosts.json")
+    data_dir().join("known_hosts.json")
 }
 
 pub fn known_hosts() -> Vec<KnownHost> {

@@ -38,6 +38,7 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
                 ..AgentProfile::default()
             },
             AgentWorkspace::default(),
+            None,
             cx,
         );
 
@@ -84,7 +85,7 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
             Some(true)
         );
 
-        session.apply_event(epoch, Event::Ready(ThreadSettings::default()), cx);
+        session.on_event(epoch, Event::Ready(ThreadSettings::default()), cx);
 
         epoch
     });
@@ -95,7 +96,7 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
     cx.update(|_, cx| assert!(!first.read(cx).binding.is_current()));
 
     first.update(&mut cx, |pane, cx| {
-        assert!(!pane.send_text("obsolete".into(), cx))
+        assert!(!pane.send_text_inner("obsolete".into(), None, None, cx))
     });
 
     let mut bytes = Cursor::new(Vec::new());
@@ -113,7 +114,7 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
                 .ok()
                 .expect("attach test image");
 
-            assert!(pane.send_text("accepted image".into(), cx));
+            assert!(pane.send_text_inner("accepted image".into(), None, None, cx));
 
             let state = pane.session.borrow();
             let conversation = state.conversation.borrow();
@@ -132,9 +133,9 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
     cx.run_until_parked();
 
     host.update(&mut cx, |session, cx| {
-        session.apply_event(epoch, Event::TurnStarted, cx);
+        session.on_event(epoch, Event::TurnStarted, cx);
 
-        session.apply_event(
+        session.on_event(
             epoch,
             Event::ItemStarted(Item::AgentMessage {
                 id: "reply".into(),
@@ -144,7 +145,7 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
             cx,
         );
 
-        session.apply_event(
+        session.on_event(
             epoch,
             Event::AgentMessageDelta {
                 item_id: "reply".into(),
@@ -153,7 +154,7 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
             cx,
         );
 
-        session.apply_event(
+        session.on_event(
             epoch,
             Event::ApprovalRequested {
                 description: "Approve retained operation".into(),
@@ -202,8 +203,8 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
     });
 
     host.update(&mut cx, |session, cx| {
-        session.apply_event(epoch, Event::TurnCompleted { error: None }, cx);
-        session.apply_event(epoch, Event::TurnCompleted { error: None }, cx);
+        session.on_event(epoch, Event::TurnCompleted { error: None }, cx);
+        session.on_event(epoch, Event::TurnCompleted { error: None }, cx);
     });
 
     cx.run_until_parked();
@@ -228,11 +229,11 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
     assert!(weak.upgrade().is_none());
 
     second.update(&mut cx, |pane, cx| {
-        assert!(!pane.send_text("closed".into(), cx))
+        assert!(!pane.send_text_inner("closed".into(), None, None, cx))
     });
 
     host.update(&mut cx, |session, cx| {
-        session.apply_event(
+        session.on_event(
             epoch,
             Event::AgentMessageDelta {
                 item_id: "reply".into(),

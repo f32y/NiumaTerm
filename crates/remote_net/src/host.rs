@@ -9,7 +9,7 @@ use std::{io, thread};
 
 use futures::stream::SplitSink;
 use futures::{SinkExt, StreamExt};
-use nmt_remote_session_hub::{RemoteSessionHub, SessionEvent, SessionId};
+use nmt_remote_session_hub::{RemoteSessionHub, SessionEvent, SessionId, SessionSubscription};
 use parking_lot::Mutex;
 use tokio::runtime::Builder as RuntimeBuilder;
 use tokio::sync::{mpsc, watch};
@@ -247,49 +247,51 @@ async fn run_control(shared: &Arc<Shared>, mut ws: WsStream) {
                     Some(Err(e)) => { warn!("control socket error: {e}"); return }
                 };
 
-                let Ok(control) = serde_json::from_str::<RelayControlMessage>(&text) else {
-                    warn!("unparseable relay control message: {text}");
+                on_control_message(shared, &text);
+            }
+        }
+    }
+}
 
-                    continue;
-                };
+fn on_control_message(shared: &Arc<Shared>, text: &str) {
+    let Ok(control) = serde_json::from_str::<RelayControlMessage>(text) else {
+        warn!("unparseable relay control message: {text}");
 
-                match control {
-                    RelayControlMessage::Connected { connection_id } => {
-                        spawn_connection(shared, connection_id);
-                    }
+        return;
+    };
 
-                    RelayControlMessage::Sync { connections } => {
-                        // Reconciliation after (re)registering: open data
-                        // sockets for clients we don't serve yet, drop ones
-                        // the relay no longer knows.
-                        let active = shared.active.lock();
+    match control {
+        RelayControlMessage::Connected { connection_id } => {
+            spawn_connection(shared, connection_id);
+        }
 
-                        for (cid, conn) in active.iter() {
-                            if !connections.contains(cid) {
-                                let _ = conn.cancel.send(true);
-                            }
-                        }
+        RelayControlMessage::Sync { connections } => {
+            // Reconciliation after (re)registering: open data
+            // sockets for clients we don't serve yet, drop ones
+            // the relay no longer knows.
+            let active = shared.active.lock();
 
-                        let missing: Vec<String> = connections
-                            .into_iter()
-                            .filter(|cid| !active.contains_key(cid))
-                            .collect();
-
-                        drop(active);
-
-                        for cid in missing {
-                            spawn_connection(shared, cid);
-                        }
-                    }
-
-                    RelayControlMessage::Disconnected { connection_id } => {
-                        if let Some(conn) =
-                            shared.active.lock().remove(&connection_id)
-                        {
-                            let _ = conn.cancel.send(true);
-                        }
-                    }
+            for (cid, conn) in active.iter() {
+                if !connections.contains(cid) {
+                    let _ = conn.cancel.send(true);
                 }
+            }
+
+            let missing: Vec<String> = connections
+                .into_iter()
+                .filter(|cid| !active.contains_key(cid))
+                .collect();
+
+            drop(active);
+
+            for cid in missing {
+                spawn_connection(shared, cid);
+            }
+        }
+
+        RelayControlMessage::Disconnected { connection_id } => {
+            if let Some(conn) = shared.active.lock().remove(&connection_id) {
+                let _ = conn.cancel.send(true);
             }
         }
     }
@@ -473,28 +475,35 @@ impl SubscriptionBridge {
         let cancel = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&cancel);
 
-        thread::spawn(move || {
-            while !flag.load(Ordering::Relaxed) {
-                match subscription
-                    .events()
-                    .recv_timeout(Duration::from_millis(500))
-                {
-                    Ok(event) => {
-                        if events.send((session_id, event)).is_err() {
-                            break;
-                        }
-                    }
-
-                    Err(RecvTimeoutError::Timeout) => continue,
-                    Err(RecvTimeoutError::Disconnected) => break,
-                }
-            }
-            // `subscription` drops here, unregistering the subscriber while
-            // leaving the shell running (detach semantics).
-        });
+        thread::spawn(move || forward_events(subscription, session_id, events, flag));
 
         Self { cancel }
     }
+}
+
+fn forward_events(
+    subscription: SessionSubscription,
+    session_id: u64,
+    events: mpsc::UnboundedSender<(u64, SessionEvent)>,
+    flag: Arc<AtomicBool>,
+) {
+    while !flag.load(Ordering::Relaxed) {
+        match subscription
+            .events()
+            .recv_timeout(Duration::from_millis(500))
+        {
+            Ok(event) => {
+                if events.send((session_id, event)).is_err() {
+                    break;
+                }
+            }
+
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    // `subscription` drops here, unregistering the subscriber while
+    // leaving the shell running (detach semantics).
 }
 
 impl Drop for SubscriptionBridge {
@@ -530,28 +539,7 @@ async fn serve_session(
                 // Sender lives in this scope, so the channel can't close.
                 let Some((session_id, event)) = event else { return Ok(()) };
 
-                match event {
-                    SessionEvent::Output { seq, data } => {
-                        // Chunk to respect the Noise message cap; chunks keep
-                        // the event's seq — ordering is what clients rely on.
-                        for piece in data.chunks(MAX_DATA_LEN) {
-                            let frame = Frame::Output {
-                                session_id,
-                                seq,
-                                data: piece.to_vec(),
-                            };
-
-                            send_split(&mut sink, &mut chan, &frame).await?;
-                        }
-                    }
-
-                    SessionEvent::Exited { seq } => {
-                        bridges.remove(&session_id);
-
-                        send_split(&mut sink, &mut chan, &Frame::Exited { session_id, seq })
-                            .await?;
-                    }
-                }
+                on_session_event(&mut sink, &mut chan, &mut bridges, session_id, event).await?;
             }
 
             msg = stream.next() => {
@@ -572,6 +560,38 @@ async fn serve_session(
             }
         }
     }
+}
+
+async fn on_session_event(
+    sink: &mut SplitSink<WsStream, Message>,
+    chan: &mut SecureChannel,
+    bridges: &mut HashMap<u64, SubscriptionBridge>,
+    session_id: u64,
+    event: SessionEvent,
+) -> Result<(), NetError> {
+    match event {
+        SessionEvent::Output { seq, data } => {
+            // Chunk to respect the Noise message cap; chunks keep
+            // the event's seq — ordering is what clients rely on.
+            for piece in data.chunks(MAX_DATA_LEN) {
+                let frame = Frame::Output {
+                    session_id,
+                    seq,
+                    data: piece.to_vec(),
+                };
+
+                send_split(sink, chan, &frame).await?;
+            }
+        }
+
+        SessionEvent::Exited { seq } => {
+            bridges.remove(&session_id);
+
+            send_split(sink, chan, &Frame::Exited { session_id, seq }).await?;
+        }
+    }
+
+    Ok(())
 }
 
 async fn send_split(

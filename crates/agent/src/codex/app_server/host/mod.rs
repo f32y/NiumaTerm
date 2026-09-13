@@ -174,13 +174,13 @@ impl CodexHost {
             {
                 let router = Arc::clone(&router);
 
-                move |message| router.handle_message(message)
+                move |message| router.on_message(message)
             },
             move |line| on_stderr(redact(&line, &stderr_credentials)),
             {
                 let router = Arc::clone(&router);
 
-                move || router.handle_stdout_closed()
+                move || router.on_stdout_closed()
             },
         )?;
 

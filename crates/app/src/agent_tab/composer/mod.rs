@@ -29,9 +29,9 @@ mod tests;
 use std::time::Duration;
 
 use gpui::prelude::*;
-use gpui::{Context, SharedString, Window};
+use gpui::{Context, Entity, SharedString, Window};
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogClose, DialogFooter};
+use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, Dialog, DialogClose, DialogFooter};
 use gpui_component::{ActiveTheme as _, WindowExt, v_flex};
 use nmt_agent::session::commands::CommandQueue;
 use rust_i18n::t;
@@ -234,46 +234,48 @@ impl AgentPane {
         let pane = cx.entity();
 
         window.open_dialog(cx, move |dialog, _, _| {
-            let pane = pane.clone();
-            let idle = idle.clone();
-
-            dialog
-                .title(t!("agent-cache-warning-title"))
-                .overlay_closable(false)
-                .content(move |content, _, cx| {
-                    content.child(
-                        v_flex()
-                            .gap_1()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(idle.clone())
-                            .child(t!("agent-cache-warning-message")),
-                    )
-                })
-                .footer(
-                    DialogFooter::new()
-                        .child(
-                            Button::new("agent-cache-warning-send")
-                                .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                .label(t!("agent-cache-warning-send"))
-                                .on_click(move |_, window, cx| {
-                                    window.close_dialog(cx);
-
-                                    pane.update(cx, |pane, cx| {
-                                        pane.send_user_message_now(window, cx)
-                                    });
-                                }),
-                        )
-                        .child(
-                            DialogClose::new().child(
-                                Button::new("agent-cache-warning-cancel")
-                                    .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                    .primary()
-                                    .label(t!("agent-cache-warning-cancel")),
-                            ),
-                        ),
-                )
+            Self::cache_expiry_dialog(dialog, &pane, &idle)
         });
+    }
+
+    fn cache_expiry_dialog(dialog: Dialog, pane: &Entity<Self>, idle: &str) -> Dialog {
+        let pane = pane.clone();
+        let idle = idle.to_string();
+
+        dialog
+            .title(t!("agent-cache-warning-title"))
+            .overlay_closable(false)
+            .content(move |content, _, cx| {
+                content.child(
+                    v_flex()
+                        .gap_1()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(idle.clone())
+                        .child(t!("agent-cache-warning-message")),
+                )
+            })
+            .footer(
+                DialogFooter::new()
+                    .child(
+                        Button::new("agent-cache-warning-send")
+                            .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                            .label(t!("agent-cache-warning-send"))
+                            .on_click(move |_, window, cx| {
+                                window.close_dialog(cx);
+
+                                pane.update(cx, |pane, cx| pane.send_user_message_now(window, cx));
+                            }),
+                    )
+                    .child(
+                        DialogClose::new().child(
+                            Button::new("agent-cache-warning-cancel")
+                                .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                                .primary()
+                                .label(t!("agent-cache-warning-cancel")),
+                        ),
+                    ),
+            )
     }
 
     fn send_user_message_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {

@@ -7,12 +7,40 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt, registry};
 
-use crate::utils::get_data_dir;
+use nmt_platform::environment::data_dir;
+
+pub fn init_logging(testing: bool) -> io::Result<WorkerGuard> {
+    let log_path = log_dir(testing);
+
+    rotate_logs(&log_path)?;
+
+    let log_file = log_path.join("app.log");
+
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_file)?;
+
+    let (non_blocking, guard) = non_blocking(file);
+
+    let file_layer = fmt::layer()
+        .with_writer(non_blocking)
+        .with_ansi(false)
+        .with_target(true)
+        .with_thread_ids(true)
+        .with_thread_names(true);
+
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+    registry().with(filter).with(file_layer).init();
+
+    Ok(guard)
+}
 
 /// Testing instances keep their own log directory so a test run cannot rotate
 /// away or interleave with the logs of a normally launched terminal.
 fn log_dir(testing: bool) -> PathBuf {
-    let base = get_data_dir();
+    let base = data_dir();
 
     if testing {
         base.join("Test").join("logs")
@@ -51,32 +79,4 @@ fn rotate_logs(log_path: &Path) -> io::Result<()> {
     }
 
     Ok(())
-}
-
-pub fn init_logging(testing: bool) -> io::Result<WorkerGuard> {
-    let log_path = log_dir(testing);
-
-    rotate_logs(&log_path)?;
-
-    let log_file = log_path.join("app.log");
-
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_file)?;
-
-    let (non_blocking, guard) = non_blocking(file);
-
-    let file_layer = fmt::layer()
-        .with_writer(non_blocking)
-        .with_ansi(false)
-        .with_target(true)
-        .with_thread_ids(true)
-        .with_thread_names(true);
-
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-
-    registry().with(filter).with(file_layer).init();
-
-    Ok(guard)
 }
