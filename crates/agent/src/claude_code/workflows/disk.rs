@@ -256,8 +256,7 @@ impl ClaudeWorkflowSource {
     ) -> Option<WorkflowTranscriptRead> {
         let path = dir.join(format!("agent-{agent_id}.jsonl"));
         let len = agent_transcript_len(dir, agent_id)?;
-        let mut cache = self.cache.lock();
-        let previous = cache.transcripts.get(&path).copied();
+        let previous = self.cache.lock().transcripts.get(&path).copied();
 
         if let Some((previous_len, revision)) = previous
             && previous_len == len
@@ -267,6 +266,13 @@ impl ClaudeWorkflowSource {
         }
 
         let items = read_agent_transcript(dir, agent_id).ok()?;
+        let mut cache = self.cache.lock();
+
+        // Another reader may have published while this transcript was read.
+        // Leave its revision intact and retry instead of publishing older data.
+        if cache.transcripts.get(&path).copied() != previous {
+            return None;
+        }
 
         let revision = match previous {
             Some((previous_len, revision)) if previous_len == len => revision,
