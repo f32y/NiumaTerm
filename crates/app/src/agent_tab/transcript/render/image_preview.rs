@@ -12,6 +12,7 @@
 #[path = "image_preview_tests.rs"]
 mod image_preview_tests;
 
+use std::mem;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -24,9 +25,10 @@ use gpui_component::IconName;
 use gpui_component::button::{Button, ButtonVariants as _};
 use rust_i18n::t;
 
-use crate::agent_tab::fade::FrostedLayer;
+use crate::agent_tab::fade::{Fade, FrostedLayer};
 use crate::agent_tab::settings::UI_RADIUS;
 use crate::agent_tab::transcript::TranscriptView;
+use crate::agent_tab::transcript::view::{ImagePreview, ZoomedImage};
 
 /// How long the image takes to travel between its thumbnail and its full
 /// size. Brisk: the reader asked for the image and is waiting on it, and the
@@ -58,19 +60,30 @@ impl TranscriptView {
         origin: Option<Bounds<Pixels>>,
         cx: &mut Context<Self>,
     ) {
-        self.zoomed_image = Some(image);
-        self.zoom_origin = origin;
-        self.zoom_open = true;
+        let fade = match &self.image_preview {
+            ImagePreview::Closed => Fade::lasting(ZOOM_DURATION),
+            ImagePreview::Open(preview) | ImagePreview::Closing(preview) => preview.fade,
+        };
+
+        self.image_preview = ImagePreview::Open(ZoomedImage {
+            image,
+            origin,
+            fade,
+        });
 
         cx.notify();
     }
 
     pub(crate) fn close_zoomed_image(&mut self, cx: &mut Context<Self>) {
-        if self.zoom_open {
-            self.zoom_open = false;
+        self.image_preview = match mem::take(&mut self.image_preview) {
+            ImagePreview::Open(preview) => {
+                cx.notify();
 
-            cx.notify();
-        }
+                ImagePreview::Closing(preview)
+            }
+
+            state => state,
+        };
     }
 
     /// The mask over the conversation and the enlarged image above it, while
@@ -84,17 +97,22 @@ impl TranscriptView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        let frost = self.zoom_fade.drive(self.zoom_open, now, window, cx);
+        let (preview, open) = match &mut self.image_preview {
+            ImagePreview::Closed => return Vec::new(),
+            ImagePreview::Open(preview) => (preview, true),
+            ImagePreview::Closing(preview) => (preview, false),
+        };
 
-        // The image is released only once the fade-out has nothing left to
-        // show; an opening layer also starts at zero and must keep it.
+        let frost = preview.fade.drive(open, now, window, cx);
+
         if frost.gone() {
-            self.zoomed_image = None;
+            self.image_preview = ImagePreview::Closed;
+
+            return Vec::new();
         }
 
-        let Some(image) = self.zoomed_image.clone() else {
-            return Vec::new();
-        };
+        let image = preview.image.clone();
+        let origin = preview.origin;
 
         let mut elements = vec![
             FrostedLayer::new(frost)
@@ -106,7 +124,7 @@ impl TranscriptView {
         ];
 
         elements.extend(
-            self.render_preview_image(image, frost.progress(), window, cx)
+            self.render_preview_image(image, origin, frost.progress(), window, cx)
                 // A composer thumbnail sits in a sibling of the transcript
                 // that paints after it, so an image growing out of one would
                 // start behind the composer. Deferring the paint puts the
@@ -126,6 +144,7 @@ impl TranscriptView {
     fn render_preview_image(
         &self,
         image: Arc<Image>,
+        origin: Option<Bounds<Pixels>>,
         progress: f32,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -155,8 +174,7 @@ impl TranscriptView {
         // The thumbnail reports where it is in the window; the image is laid
         // out inside the viewport, so it needs the same place measured from
         // the viewport's corner.
-        let origin = self
-            .zoom_origin
+        let origin = origin
             .zip(self.transcript_origin)
             .map(|(origin, viewport)| Bounds {
                 origin: origin.origin - viewport,

@@ -31,7 +31,6 @@ use crate::agent_tab::profile::AgentKind;
 use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
 use crate::agent_tab::transcript::incremental::RowCache;
 use crate::agent_tab::transcript::render::TRANSCRIPT_LINE_HEIGHT;
-use crate::agent_tab::transcript::render::image_preview::ZOOM_DURATION;
 use crate::agent_tab::transcript::reveal::Disclosures;
 use crate::agent_tab::transcript::rows::{TranscriptRow, folds_turns};
 use crate::agent_tab::transcript::{CodeTranscriptCache, Entry, ReadingPosition};
@@ -115,22 +114,7 @@ pub struct TranscriptView {
 
     observed_version: (u64, u64),
 
-    /// The image a reader opened at full size over the conversation. Held per
-    /// conversation rather than per pane so a child agent's transcript
-    /// enlarges its own images inside its own bounds. Stays through the
-    /// layer's fade-out, which needs something to fade.
-    pub(crate) zoomed_image: Option<Arc<Image>>,
-
-    /// Whether the preview layer is up or on its way out; the image alone
-    /// cannot say, because it outlives the dismissal by the fade.
-    pub(crate) zoom_open: bool,
-
-    pub(super) zoom_fade: Fade,
-
-    /// The thumbnail the open image grew out of, in window coordinates, so
-    /// the preview can shrink back into it. Absent when the image was opened
-    /// from something with no place on screen, such as a link in the composer.
-    pub(crate) zoom_origin: Option<Bounds<Pixels>>,
+    pub(super) image_preview: ImagePreview,
 
     /// The pane whose conversation this is, for the row actions that address
     /// the conversation rather than the row: branching in front of a prompt,
@@ -140,6 +124,21 @@ pub struct TranscriptView {
     owner: Option<gpui::WeakEntity<AgentPane>>,
 
     pub(crate) attribution: HashMap<String, TranscriptAttribution>,
+}
+
+#[derive(Default)]
+pub(super) enum ImagePreview {
+    #[default]
+    Closed,
+    Open(ZoomedImage),
+    Closing(ZoomedImage),
+}
+
+/// The image and thumbnail stay alive until the closing animation completes.
+pub(super) struct ZoomedImage {
+    pub(super) image: Arc<Image>,
+    pub(super) origin: Option<Bounds<Pixels>>,
+    pub(super) fade: Fade,
 }
 
 pub(crate) struct TranscriptAttribution {
@@ -181,10 +180,7 @@ impl TranscriptView {
             kind,
             source_revision: None,
             observed_version: (0, 0),
-            zoomed_image: None,
-            zoom_open: false,
-            zoom_fade: Fade::lasting(ZOOM_DURATION),
-            zoom_origin: None,
+            image_preview: ImagePreview::Closed,
             owner: None,
             attribution: HashMap::new(),
         }
@@ -300,6 +296,7 @@ impl TranscriptView {
     }
 
     pub(crate) fn reset_presentation(&mut self) {
+        self.image_preview = ImagePreview::Closed;
         self.image_previews.borrow_mut().clear();
         self.row_cache.invalidate(0);
         self.source_revision = None;
