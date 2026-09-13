@@ -12,11 +12,11 @@ fn a_pipe_error_after_its_consumer_closes_does_not_panic() {
     let (producer, _consumer) = spsc_buffer(16);
     let (error_sender, error_receiver) = channel();
 
-    let inner = Arc::new(EventedAnonReadInner {
+    let inner = Arc::new(PipeState {
         soft: SoftReady::new(),
         done: AtomicBool::new(false),
-        sig_buffer_not_full: Condvar::new(),
-        wait_tag: Mutex::new(WaitTag {}),
+        buffer_changed: Condvar::new(),
+        wait_tag: Mutex::new(()),
     });
 
     drop(error_receiver);
@@ -27,6 +27,31 @@ fn a_pipe_error_after_its_consumer_closes_does_not_panic() {
             .join()
             .is_ok()
     );
+}
+
+#[test]
+fn dropping_writer_cancels_a_full_native_pipe() {
+    let (reader, pipe) = anonymous(64).unwrap();
+    let mut writer = EventedAnonWrite::new(pipe);
+
+    assert_eq!(writer.write(&[0; 65536]).unwrap(), 65536);
+    assert!(wait_until(|| !writer.producer.is_full()));
+
+    let (closed_tx, closed_rx) = channel();
+
+    let closer = spawn(move || {
+        drop(writer);
+        closed_tx.send(()).unwrap();
+    });
+
+    let closed = closed_rx.recv_timeout(Duration::from_secs(1)).is_ok();
+
+    // Release the native write even on failure so the regression cannot leave
+    // its helper thread blocked after the assertion.
+    drop(reader);
+    closer.join().unwrap();
+
+    assert!(closed, "writer teardown waited for the native pipe reader");
 }
 
 /// Spin until `cond` holds, up to ~2s, so the worker thread has time to move

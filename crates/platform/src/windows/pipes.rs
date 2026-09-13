@@ -7,7 +7,8 @@ use std::os::windows::io::AsRawHandle;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
-use std::thread::{JoinHandle, spawn};
+use std::thread::{JoinHandle, sleep, spawn};
+use std::time::Duration;
 
 use miow::pipe::{AnonRead, AnonWrite};
 use parking_lot::{Condvar, Mutex};
@@ -16,13 +17,81 @@ use windows_sys::Win32::System::IO::CancelSynchronousIo;
 use crate::windows::readiness::SoftReady;
 use crate::windows::spsc::*;
 
-struct WaitTag {}
-
-struct EventedAnonReadInner {
+struct PipeState {
     soft: SoftReady,
     done: AtomicBool,
-    sig_buffer_not_full: Condvar,
-    wait_tag: Mutex<WaitTag>,
+    buffer_changed: Condvar,
+    wait_tag: Mutex<()>,
+}
+
+struct PipeWorker {
+    thread: Option<JoinHandle<()>>,
+    state: Arc<PipeState>,
+    errors: Receiver<String>,
+}
+
+impl PipeWorker {
+    fn new(pump: impl FnOnce(Arc<PipeState>, Sender<String>) + Send + 'static) -> Self {
+        let state = Arc::new(PipeState {
+            soft: SoftReady::new(),
+            done: AtomicBool::new(false),
+            buffer_changed: Condvar::new(),
+            wait_tag: Mutex::new(()),
+        });
+
+        let (sender, errors) = channel();
+        let worker_state = state.clone();
+        let thread = spawn(move || pump(worker_state, sender));
+
+        Self {
+            thread: Some(thread),
+            state,
+            errors,
+        }
+    }
+
+    fn check_error(&mut self) -> io::Result<()> {
+        if self.thread.is_none() {
+            return Err(io::ErrorKind::BrokenPipe.into());
+        }
+
+        match self.errors.try_recv() {
+            Ok(error) => {
+                if let Some(thread) = self.thread.take() {
+                    let _ = thread.join();
+                }
+
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, error))
+            }
+
+            Err(TryRecvError::Disconnected) => Err(io::ErrorKind::BrokenPipe.into()),
+            Err(TryRecvError::Empty) => Ok(()),
+        }
+    }
+}
+
+impl Drop for PipeWorker {
+    fn drop(&mut self) {
+        self.state.done.store(true, Ordering::SeqCst);
+
+        // Pair with the worker's predicate check so the stop notification
+        // cannot be lost between checking the flag and parking.
+        drop(self.state.wait_tag.lock());
+        self.state.buffer_changed.notify_one();
+
+        if let Some(thread) = self.thread.take() {
+            while !thread.is_finished() {
+                // A worker may enter native I/O after checking `done` but after
+                // our first cancellation too. Retry until it observes the stop
+                // flag or the pending synchronous call is cancelled.
+                unsafe { CancelSynchronousIo(thread.as_raw_handle()) };
+
+                sleep(Duration::from_millis(1));
+            }
+
+            let _ = thread.join();
+        }
+    }
 }
 
 /// Wraps an AnonRead pipe so that it can be read asynchronously using mio.
@@ -35,11 +104,8 @@ struct EventedAnonReadInner {
 /// a synchronous anonymous pipe; an asynchronous NamedPipe will likely be
 /// more performant.
 pub struct EventedAnonRead {
-    // Is an Option so it can be moved out and joined in the Drop impl.
-    thread: Option<JoinHandle<()>>,
+    worker: PipeWorker,
     consumer: SpscBufferReader,
-    inner: Arc<EventedAnonReadInner>,
-    error_receiver: Receiver<String>,
 }
 
 // Helper to send an error string from the worker threads
@@ -59,39 +125,18 @@ impl EventedAnonRead {
     pub fn new(pipe: AnonRead) -> Self {
         let (producer, consumer) = spsc_buffer(65536);
 
-        let done = AtomicBool::new(false);
-
-        let sig_buffer_not_full = Condvar::new();
-        let wait_tag = Mutex::new(WaitTag {});
-
-        let (error_sender, error_receiver) = channel();
-
-        let inner = Arc::new(EventedAnonReadInner {
-            soft: SoftReady::new(),
-            done,
-            sig_buffer_not_full,
-            wait_tag,
+        let worker = PipeWorker::new(move |state, errors| {
+            pump_pipe_to_buffer(pipe, producer, state, errors)
         });
 
-        let thread = {
-            let inner = inner.clone();
-
-            spawn(move || pump_pipe_to_buffer(pipe, producer, inner, error_sender))
-        };
-
-        Self {
-            thread: Some(thread),
-            consumer,
-            inner,
-            error_receiver,
-        }
+        Self { worker, consumer }
     }
 }
 
 fn pump_pipe_to_buffer(
     mut pipe: AnonRead,
     mut producer: SpscBufferWriter,
-    inner: Arc<EventedAnonReadInner>,
+    inner: Arc<PipeState>,
     error_sender: Sender<String>,
 ) {
     use std::io::Read;
@@ -119,7 +164,7 @@ fn pump_pipe_to_buffer(
                 let mut wait_tag = inner.wait_tag.lock();
 
                 while producer.is_full() && !inner.done.load(Ordering::SeqCst) {
-                    inner.sig_buffer_not_full.wait(&mut wait_tag);
+                    inner.buffer_changed.wait(&mut wait_tag);
                 }
 
                 if inner.done.load(Ordering::SeqCst) {
@@ -138,38 +183,19 @@ fn pump_pipe_to_buffer(
 
 impl io::Read for EventedAnonRead {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.thread.is_none() {
-            return Err(io::Error::new(io::ErrorKind::BrokenPipe, ""));
-        }
-
-        match self.error_receiver.try_recv() {
-            Ok(err) => {
-                // Other thread will be closing; the pipe error is already in
-                // hand, so a worker panic on top of it is not worth
-                // propagating into the caller.
-                let _ = self.thread.take().unwrap().join();
-
-                return Err(io::Error::new(io::ErrorKind::BrokenPipe, err));
-            }
-
-            Err(TryRecvError::Disconnected) => {
-                return Err(io::Error::new(io::ErrorKind::BrokenPipe, ""));
-            }
-
-            Err(TryRecvError::Empty) => {}
-        }
+        self.worker.check_error()?;
 
         let nbytes = self.consumer.read_to_slice(buf);
 
         if self.consumer.is_empty() {
             // Level-like: clear only when the buffer is fully drained.
-            self.inner.soft.clear();
+            self.worker.state.soft.clear();
 
             // Possible race: the consumer may think the queue is empty but by the time
             // the flag is cleared the producer thread may have written data. We avoid
             // the race by re-checking and re-arming if necessary.
             if !self.consumer.is_empty() {
-                self.inner.soft.set_ready();
+                self.worker.state.soft.set_ready();
             }
         }
 
@@ -177,8 +203,8 @@ impl io::Read for EventedAnonRead {
         // releasing) the wait lock after draining guarantees the worker is
         // either before its check (and will see the space) or already parked
         // (and will get this notify).
-        drop(self.inner.wait_tag.lock());
-        self.inner.sig_buffer_not_full.notify_one();
+        drop(self.worker.state.wait_tag.lock());
+        self.worker.state.buffer_changed.notify_one();
 
         Ok(nbytes)
     }
@@ -188,39 +214,8 @@ impl EventedAnonRead {
     /// The soft-ready handle, so the `Pty` can inject the loop `Waker` at
     /// `register()` time and query readiness in `drain_ready()`.
     pub fn soft(&self) -> &SoftReady {
-        &self.inner.soft
+        &self.worker.state.soft
     }
-}
-
-impl Drop for EventedAnonRead {
-    fn drop(&mut self) {
-        self.inner.done.store(true, Ordering::SeqCst);
-
-        // Lock/unlock before notifying so the done flag cannot be missed by a
-        // worker between its predicate check and its wait.
-        drop(self.inner.wait_tag.lock());
-        self.inner.sig_buffer_not_full.notify_one();
-
-        // The thread may already have been taken and joined by the read()
-        // error path; nothing left to do then.
-        if let Some(thread) = self.thread.take() {
-            // Stop reader thread waiting for pipe contents
-            unsafe {
-                CancelSynchronousIo(thread.as_raw_handle());
-            }
-
-            // A panicking worker must not turn Drop into a panic (which
-            // aborts when already unwinding); the thread is gone either way.
-            let _ = thread.join();
-        }
-    }
-}
-
-struct EventedAnonWriteInner {
-    soft: SoftReady,
-    done: AtomicBool,
-    sig_buffer_not_empty: Condvar,
-    wait_tag: Mutex<WaitTag>,
 }
 
 /// Wraps an AnonWrite pipe so that it can be written asynchronously using mio.
@@ -233,50 +228,26 @@ struct EventedAnonWriteInner {
 /// a synchronous anonymous pipe; an asynchronous NamedPipe will likely be
 /// more performant.
 pub struct EventedAnonWrite {
-    // Is an Option so it can be moved out and joined in the Drop impl
-    thread: Option<JoinHandle<()>>,
+    worker: PipeWorker,
     producer: SpscBufferWriter,
-    inner: Arc<EventedAnonWriteInner>,
-    error_receiver: Receiver<String>,
 }
 
 impl EventedAnonWrite {
     pub fn new(pipe: AnonWrite) -> Self {
         let (producer, consumer) = spsc_buffer(65536);
 
-        let done = AtomicBool::new(false);
-
-        let sig_buffer_not_empty = Condvar::new();
-        let wait_tag = Mutex::new(WaitTag {});
-
-        let inner = Arc::new(EventedAnonWriteInner {
-            soft: SoftReady::new(),
-            done,
-            sig_buffer_not_empty,
-            wait_tag,
+        let worker = PipeWorker::new(move |state, errors| {
+            pump_buffer_to_pipe(pipe, consumer, state, errors)
         });
 
-        let (error_sender, error_receiver) = channel();
-
-        let thread = {
-            let inner = inner.clone();
-
-            spawn(move || pump_buffer_to_pipe(pipe, consumer, inner, error_sender))
-        };
-
-        Self {
-            thread: Some(thread),
-            producer,
-            inner,
-            error_receiver,
-        }
+        Self { worker, producer }
     }
 }
 
 fn pump_buffer_to_pipe(
     mut pipe: AnonWrite,
     mut consumer: SpscBufferReader,
-    inner: Arc<EventedAnonWriteInner>,
+    inner: Arc<PipeState>,
     error_sender: Sender<String>,
 ) {
     use std::io::Write;
@@ -303,7 +274,7 @@ fn pump_buffer_to_pipe(
                 let mut wait_tag = inner.wait_tag.lock();
 
                 while consumer.is_empty() && !inner.done.load(Ordering::SeqCst) {
-                    inner.sig_buffer_not_empty.wait(&mut wait_tag);
+                    inner.buffer_changed.wait(&mut wait_tag);
                 }
 
                 if inner.done.load(Ordering::SeqCst) {
@@ -331,38 +302,19 @@ fn pump_buffer_to_pipe(
 
 impl io::Write for EventedAnonWrite {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if self.thread.is_none() {
-            return Err(io::Error::new(io::ErrorKind::BrokenPipe, ""));
-        }
-
-        match self.error_receiver.try_recv() {
-            Ok(err) => {
-                // Other thread will be closing; the pipe error is already in
-                // hand, so a worker panic on top of it is not worth
-                // propagating into the caller.
-                let _ = self.thread.take().unwrap().join();
-
-                return Err(io::Error::new(io::ErrorKind::BrokenPipe, err));
-            }
-
-            Err(TryRecvError::Disconnected) => {
-                return Err(io::Error::new(io::ErrorKind::BrokenPipe, ""));
-            }
-
-            Err(TryRecvError::Empty) => {}
-        }
+        self.worker.check_error()?;
 
         let nbytes = self.producer.write_from_slice(buf);
 
         if self.producer.is_full() {
             // Backpressure: buffer full → not writable until the worker drains it.
-            self.inner.soft.clear();
+            self.worker.state.soft.clear();
 
             // Possible race: the producer may think the buffer is full but by the time
             // the flag is cleared the consumer thread may have read data. Re-check and
             // re-arm to work around this.
             if !self.producer.is_full() {
-                self.inner.soft.set_ready();
+                self.worker.state.soft.set_ready();
             }
         }
 
@@ -370,8 +322,8 @@ impl io::Write for EventedAnonWrite {
         // releasing) the wait lock after publishing the bytes guarantees the
         // worker is either before its check (and will see the data) or already
         // parked (and will get this notify).
-        drop(self.inner.wait_tag.lock());
-        self.inner.sig_buffer_not_empty.notify_one();
+        drop(self.worker.state.wait_tag.lock());
+        self.worker.state.buffer_changed.notify_one();
 
         Ok(nbytes)
     }
@@ -385,24 +337,6 @@ impl EventedAnonWrite {
     /// The soft-ready handle, so the `Pty` can inject the loop `Waker` at
     /// `register()` time and query writability in `drain_ready()`.
     pub fn soft(&self) -> &SoftReady {
-        &self.inner.soft
-    }
-}
-
-impl Drop for EventedAnonWrite {
-    fn drop(&mut self) {
-        self.inner.done.store(true, Ordering::SeqCst);
-
-        // Stop the writer thread waiting for contents. Lock/unlock before
-        // notifying so the done flag cannot be missed by a worker between its
-        // predicate check and its wait.
-        drop(self.inner.wait_tag.lock());
-        self.inner.sig_buffer_not_empty.notify_one();
-
-        // A panicking worker must not turn Drop into a panic (which aborts
-        // when already unwinding); the thread is gone either way.
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
+        &self.worker.state.soft
     }
 }
