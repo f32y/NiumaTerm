@@ -185,6 +185,13 @@ impl Drop for Conpty {
 unsafe impl Send for Conpty {}
 
 pub fn new(shell: &str, options: PtyOptions<'_>, manage_process_tree: bool) -> Result<Pty> {
+    if options.bootstrap.is_some() {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "ConPTY does not support a bootstrap input command",
+        ));
+    }
+
     let PtyOptions {
         working_directory,
         columns,

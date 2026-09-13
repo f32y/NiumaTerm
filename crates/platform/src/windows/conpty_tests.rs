@@ -10,6 +10,7 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use crate::windows::conpty::{ConptyApi, build_environment_block};
+use crate::{PtyOptions, create_managed_pty_with_env, create_pty_with_env};
 
 #[test]
 fn missing_bundled_api_returns_error() {
@@ -198,4 +199,25 @@ fn create_process_receives_exact_agent_overrides() {
         values.lines().collect::<Vec<_>>(),
         ["route-exact", "token-exact", "1"]
     );
+}
+
+#[test]
+fn unsupported_bootstrap_is_rejected_before_launch() {
+    let options = PtyOptions {
+        shell: "missing-bootstrap-test-shell.exe",
+        args: &[],
+        working_directory: None,
+        columns: 80,
+        rows: 24,
+        environment_overrides: &[],
+        starting_title: None,
+        bootstrap: Some("echo bootstrap"),
+    };
+
+    for create in [create_pty_with_env, create_managed_pty_with_env] {
+        let error = create(options).err().expect("bootstrap must be rejected");
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("bootstrap"));
+    }
 }
