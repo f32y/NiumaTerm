@@ -1,3 +1,5 @@
+pub use crate::environment_override::override_value;
+
 use std::ffi::CStr;
 use std::path::{Path, PathBuf};
 use std::{env, fs};
@@ -86,12 +88,3 @@ pub fn computer_name() -> Option<String> {
 }
 
 pub const DEFAULT_EDITOR: &str = "vi";
-
-/// Find the final child override using the operating system's environment rules.
-pub fn override_value<'a>(entries: &'a [(String, String)], target: &str) -> Option<&'a str> {
-    entries
-        .iter()
-        .rev()
-        .find(|(name, _)| name == target)
-        .map(|(_, value)| value.as_str())
-}

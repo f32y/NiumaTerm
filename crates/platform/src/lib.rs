@@ -22,6 +22,8 @@ pub mod windows;
 #[cfg(not(windows))]
 mod unix;
 
+mod environment_override;
+
 use std::{io, sync};
 
 /// The `mio` types this crate's `ProcessReadWrite`/`EventedPty` surface is built
