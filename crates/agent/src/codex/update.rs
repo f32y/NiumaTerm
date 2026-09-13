@@ -35,7 +35,7 @@ impl ProviderMaintenance for CodexMaintenance {
     }
 }
 
-pub fn parse_codex_doctor(json: &str) -> Result<VersionStatus, UpdateError> {
+fn parse_codex_doctor(json: &str) -> Result<VersionStatus, UpdateError> {
     let report: Value = serde_json::from_str(json).map_err(|_| {
         UpdateError::new(
             UpdateErrorKind::InvalidResponse,

@@ -168,7 +168,7 @@ where
     }
 }
 
-pub fn parse_claude_doctor(output: &str) -> Result<VersionStatus, UpdateError> {
+fn parse_claude_doctor(output: &str) -> Result<VersionStatus, UpdateError> {
     let mut current = None;
     let mut running_method = None;
     let mut configured_method = None;

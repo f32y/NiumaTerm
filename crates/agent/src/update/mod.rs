@@ -1,9 +1,9 @@
 //! Provider-neutral discovery, update coordination, caching, and maintenance contracts.
 
 pub use crate::claude_code::update::{
-    ClaudeMaintenance, ClaudeReleaseChannel, HttpClaudeReleaseChannel, parse_claude_doctor,
+    ClaudeMaintenance, ClaudeReleaseChannel, HttpClaudeReleaseChannel,
 };
-pub use crate::codex::update::{CodexMaintenance, parse_codex_doctor};
+pub use crate::codex::update::CodexMaintenance;
 
 #[cfg(test)]
 mod coordinator_tests;
