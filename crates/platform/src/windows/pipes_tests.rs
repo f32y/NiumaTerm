@@ -6,6 +6,29 @@ use miow::pipe::anonymous;
 
 use crate::windows::pipes::*;
 
+#[test]
+fn a_pipe_error_after_its_consumer_closes_does_not_panic() {
+    let (reader, writer) = anonymous(0).unwrap();
+    let (producer, _consumer) = spsc_buffer(16);
+    let (error_sender, error_receiver) = channel();
+
+    let inner = Arc::new(EventedAnonReadInner {
+        soft: SoftReady::new(),
+        done: AtomicBool::new(false),
+        sig_buffer_not_full: Condvar::new(),
+        wait_tag: Mutex::new(WaitTag {}),
+    });
+
+    drop(error_receiver);
+    drop(writer);
+
+    assert!(
+        spawn(move || pump_pipe_to_buffer(reader, producer, inner, error_sender))
+            .join()
+            .is_ok()
+    );
+}
+
 /// Spin until `cond` holds, up to ~2s, so the worker thread has time to move
 /// pipe bytes into the ring. Returns whether it held within the budget.
 fn wait_until(mut cond: impl FnMut() -> bool) -> bool {

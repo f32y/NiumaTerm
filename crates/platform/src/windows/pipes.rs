@@ -48,9 +48,7 @@ macro_rules! try_or_send {
         match $e {
             Ok(value) => value,
             Err(e) => {
-                $sender
-                    .send(format!("{}", e))
-                    .expect("Could not send error");
+                let _ = $sender.send(e.to_string());
                 return;
             }
         }
