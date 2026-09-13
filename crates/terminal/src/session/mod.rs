@@ -40,6 +40,7 @@ mod vtebench_tests;
 #[cfg(test)]
 mod block_tests;
 
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -136,7 +137,7 @@ pub struct InFlightBlock {
 /// asynchronous reads. The PTY event loop exclusively owns the engine.
 pub struct TerminalSession {
     _worker: SessionWorker,
-    pages: Mutex<PageCache>,
+    pages: RefCell<PageCache>,
     render_buffer: SessionBuffer,
     vt_modes: Arc<AtomicU32>,
     messenger: MsgSender,
@@ -254,7 +255,7 @@ impl TerminalSession {
 
         Ok(Self {
             _worker: handles.worker,
-            pages: Mutex::new(PageCache::default()),
+            pages: RefCell::new(PageCache::default()),
             render_buffer: handles.render_buffer,
             vt_modes: handles.vt_modes,
             messenger: handles.messenger,
@@ -619,13 +620,13 @@ impl TerminalSession {
 
     pub fn take_block_image(&self, handle: BlockHandle, image_id: u32) -> Option<GraphicData> {
         self.pages
-            .lock()
+            .borrow_mut()
             .take_image(handle, image_id, &self.messenger)
     }
 
     pub fn screen_page_at(&self, revision: u64, row: usize) -> Option<Arc<RowPage>> {
         self.pages
-            .lock()
+            .borrow_mut()
             .read(PageSource::Screen { revision }, row, &self.messenger)
     }
 
@@ -636,7 +637,7 @@ impl TerminalSession {
             theme: self.snapshot().theme_revision(),
         };
 
-        self.pages.lock().read(source, row, &self.messenger)
+        self.pages.borrow_mut().read(source, row, &self.messenger)
     }
 
     pub fn screen_row_text_in(&self, snapshot: &RenderBuffer, row: u32) -> Option<RowText> {

@@ -1,9 +1,9 @@
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::SystemTime;
 
 use nmt_platform::{Poll, Token, Waker};
-use parking_lot::Mutex;
 
 use crate::event::{
     BlockEvent, CommandCapture, EventListener, Msg, MsgSender, TerminalEvent, WindowId,
@@ -87,7 +87,7 @@ pub(super) fn session_from_engine(
     (
         TerminalSession {
             _worker: SessionWorker::without_thread_for_test(messenger.clone()),
-            pages: Mutex::new(PageCache::default()),
+            pages: RefCell::new(PageCache::default()),
             render_buffer: Arc::new(FrameStore::new(buffer)),
             vt_modes: Arc::new(AtomicU32::new(0)),
             messenger,
