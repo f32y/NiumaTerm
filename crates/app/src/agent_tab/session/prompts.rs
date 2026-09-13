@@ -1,29 +1,29 @@
 //! Active panel selection and widgets for core-owned input requests.
 
+use std::collections::HashMap;
+
 use nmt_agent::chat::{Question, QuestionInput, QuestionMode};
-use nmt_agent::session::input::{QuestionDraft, QuestionStatus, SessionInput};
+use nmt_agent::session::input::{QuestionDraft, QuestionKey, QuestionStatus, SessionInput};
 
 use crate::agent_tab::questions::QuestionPresentation;
 
 #[derive(Default)]
 pub(crate) struct PendingPrompts {
-    pub(crate) presentations: Vec<QuestionPresentation>,
-    pub(crate) active: Option<usize>,
+    pub(crate) presentations: HashMap<QuestionKey, QuestionPresentation>,
+    pub(crate) active: Option<QuestionKey>,
     pub(crate) collapsed: bool,
 }
 
 impl PendingPrompts {
     pub(crate) fn questions<'a>(&self, input: &'a SessionInput) -> Option<&'a QuestionDraft> {
-        self.active.and_then(|index| input.batches().get(index))
+        self.active.and_then(|key| input.draft(key))
     }
 
     pub(crate) fn questions_mut<'a>(
         &mut self,
         input: &'a mut SessionInput,
     ) -> Option<&'a mut QuestionDraft> {
-        let key = self.questions(input)?.key();
-
-        input.draft_mut(key)
+        input.draft_mut(self.active?)
     }
 
     pub(crate) fn questions_open(&self, input: &SessionInput) -> bool {
@@ -31,25 +31,28 @@ impl PendingPrompts {
     }
 
     pub(crate) fn reveal(&mut self, input: &SessionInput, index: usize) {
-        let prompt = &input.batches()[index];
+        let Some(prompt) = input.batches().get(index) else {
+            return;
+        };
 
-        let reveal = index < self.presentations.len()
+        let key = prompt.key();
+
+        let reveal = self.presentations.contains_key(&key)
             || self.questions(input).is_none_or(|question| {
                 !question.pending()
                     || (prompt.mode() != QuestionMode::Async
                         && question.mode() == QuestionMode::Async)
             });
 
-        let presentation = QuestionPresentation::new(prompt);
+        self.presentations
+            .retain(|key, _| input.draft(*key).is_some());
 
-        if index < self.presentations.len() {
-            self.presentations[index] = presentation;
-        } else {
-            self.presentations.push(presentation);
-        }
+        self.presentations
+            .entry(key)
+            .or_insert_with(|| QuestionPresentation::new(prompt));
 
         if reveal {
-            self.active = Some(index);
+            self.active = Some(key);
             self.collapsed = false;
         }
     }
@@ -62,12 +65,14 @@ impl PendingPrompts {
     ) {
         let index = input.history(item_id, questions);
 
-        if index == self.presentations.len() {
-            self.presentations
-                .push(QuestionPresentation::new(&input.batches()[index]));
-        }
+        let prompt = &input.batches()[index];
+        let key = prompt.key();
 
-        self.active = Some(index);
+        self.presentations
+            .entry(key)
+            .or_insert_with(|| QuestionPresentation::new(prompt));
+
+        self.active = Some(key);
         self.collapsed = false;
     }
 
@@ -75,31 +80,39 @@ impl PendingPrompts {
     pub(crate) fn hide_settled(&mut self, input: &SessionInput) {
         let settled = self
             .questions(input)
-            .is_some_and(|prompt| !prompt.pending() && prompt.status() != QuestionStatus::History);
+            .is_none_or(|prompt| !prompt.pending() && prompt.status() != QuestionStatus::History);
 
         if settled {
-            self.active = input.batches().iter().position(QuestionDraft::pending);
+            self.active = input
+                .batches()
+                .iter()
+                .find(|draft| draft.pending())
+                .map(|draft| draft.key());
         }
 
         self.release_secret_editors(input);
     }
 
     pub(crate) fn release_secret_editors(&mut self, input: &SessionInput) {
-        for (draft, presentation) in input.batches().iter().zip(&mut self.presentations) {
-            if draft.pending() {
-                continue;
-            }
+        self.presentations.retain(|key, presentation| {
+            let Some(draft) = input.draft(*key) else {
+                return false;
+            };
 
-            for (question, editor) in draft.questions().iter().zip(&mut presentation.editors) {
-                if question.input == QuestionInput::Secret {
-                    *editor = None;
+            if !draft.pending() {
+                for (question, editor) in draft.questions().iter().zip(&mut presentation.editors) {
+                    if question.input == QuestionInput::Secret {
+                        *editor = None;
+                    }
                 }
             }
-        }
+
+            true
+        });
     }
 
     pub(crate) fn reset_editors(&mut self) {
-        for presentation in &mut self.presentations {
+        for presentation in self.presentations.values_mut() {
             for editor in &mut presentation.editors {
                 *editor = None;
             }

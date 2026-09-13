@@ -18,7 +18,7 @@ use crate::session::SessionRuntime;
 use crate::session::lifecycle::Status;
 
 /// Distinguishes a draft from a later request reusing its provider ID or list position.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct QuestionKey {
     index: usize,
     generation: u64,
@@ -66,6 +66,10 @@ pub struct SessionInput {
 impl SessionInput {
     pub fn batches(&self) -> &[QuestionDraft] {
         &self.batches
+    }
+
+    pub fn draft(&self, key: QuestionKey) -> Option<&QuestionDraft> {
+        self.batches.get(key.index).filter(|draft| draft.key == key)
     }
 
     pub fn draft_mut(&mut self, key: QuestionKey) -> Option<&mut QuestionDraft> {

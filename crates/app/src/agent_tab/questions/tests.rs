@@ -104,7 +104,7 @@ fn question_editors_keep_multiline_text_and_mask_secrets(cx: &mut TestAppContext
             pane.prepare_question_editors(window, cx);
 
             let prompt =
-                &pane.prompts.presentations[pane.prompts.active.expect("active questions")];
+                &pane.prompts.presentations[&pane.prompts.active.expect("active questions")];
 
             let QuestionEditorState::Text(plain) =
                 &prompt.editors[0].as_ref().expect("plain editor").state
@@ -242,7 +242,11 @@ fn confirmed_secret_answer_releases_its_widget_and_reveals_the_next_batch(cx: &m
 
             pane.prepare_question_editors(window, cx);
 
-            assert!(pane.prompts.presentations[0].editors[0].is_some());
+            assert!(
+                pane.prompts.presentations[&pane.session.borrow().input.batches()[0].key()].editors
+                    [0]
+                .is_some()
+            );
 
             pane.on_event(
                 Event::InputRequested(QuestionRequest {
@@ -253,7 +257,10 @@ fn confirmed_secret_answer_releases_its_widget_and_reveals_the_next_batch(cx: &m
                 cx,
             );
 
-            assert_eq!(pane.prompts.active, Some(0));
+            assert_eq!(
+                pane.prompts.active,
+                Some(pane.session.borrow().input.batches()[0].key())
+            );
 
             pane.submit_current_questions(cx);
 
@@ -273,9 +280,16 @@ fn confirmed_secret_answer_releases_its_widget_and_reveals_the_next_batch(cx: &m
                 cx,
             );
 
-            assert!(pane.prompts.presentations[0].editors[0].is_none());
+            assert!(
+                pane.prompts.presentations[&pane.session.borrow().input.batches()[0].key()].editors
+                    [0]
+                .is_none()
+            );
             assert_eq!(pane.session.borrow().input.batches()[0].text(0), "");
-            assert_eq!(pane.prompts.active, Some(1));
+            assert_eq!(
+                pane.prompts.active,
+                Some(pane.session.borrow().input.batches()[1].key())
+            );
             assert_eq!(pane.session.borrow().input.pending_count(), 1);
         });
     });
@@ -308,7 +322,9 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
 
             pane.prepare_question_editors(window, cx);
 
-            let QuestionEditorState::Text(editor) = &pane.prompts.presentations[0].editors[0]
+            let QuestionEditorState::Text(editor) = &pane.prompts.presentations
+                [&pane.session.borrow().input.batches()[0].key()]
+                .editors[0]
                 .as_ref()
                 .unwrap()
                 .state
@@ -320,7 +336,9 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
 
             pane.on_event(Event::InputRequested(asynchronous), cx);
 
-            let QuestionEditorState::Text(current) = &pane.prompts.presentations[0].editors[0]
+            let QuestionEditorState::Text(current) = &pane.prompts.presentations
+                [&pane.session.borrow().input.batches()[0].key()]
+                .editors[0]
                 .as_ref()
                 .unwrap()
                 .state
@@ -339,7 +357,10 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
                 cx,
             );
 
-            assert_eq!(pane.prompts.active, Some(1));
+            assert_eq!(
+                pane.prompts.active,
+                Some(pane.session.borrow().input.batches()[1].key())
+            );
             assert_eq!(
                 pane.session.borrow().input.batches()[0].text(0),
                 "keep this"
@@ -355,7 +376,10 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
                 cx,
             );
 
-            assert_eq!(pane.prompts.active, Some(0));
+            assert_eq!(
+                pane.prompts.active,
+                Some(pane.session.borrow().input.batches()[0].key())
+            );
             assert_eq!(
                 pane.prompts
                     .questions(&pane.session.borrow().input)
@@ -424,11 +448,17 @@ fn a_new_request_does_not_reuse_the_expired_answer(cx: &mut TestAppContext) {
                     .key(),
                 old_key
             );
-            assert!(pane.prompts.presentations[1].editors[0].is_none());
+            assert!(
+                pane.prompts.presentations[&pane.session.borrow().input.batches()[1].key()].editors
+                    [0]
+                .is_none()
+            );
 
             pane.prepare_question_editors(window, cx);
 
-            let QuestionEditorState::Text(editor) = &pane.prompts.presentations[1].editors[0]
+            let QuestionEditorState::Text(editor) = &pane.prompts.presentations
+                [&pane.session.borrow().input.batches()[1].key()]
+                .editors[0]
                 .as_ref()
                 .unwrap()
                 .state
@@ -444,6 +474,61 @@ fn a_new_request_does_not_reuse_the_expired_answer(cx: &mut TestAppContext) {
                     .text(0),
                 ""
             );
+        });
+    });
+}
+
+#[gpui::test]
+fn question_editors_survive_unshown_batches_and_reused_positions(cx: &mut TestAppContext) {
+    let (pane, window) = open_pane(cx);
+    let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
+            let mut prompt = question("Answer", false, &[]);
+
+            prompt.input = QuestionInput::Text;
+
+            pane.session
+                .borrow_mut()
+                .input
+                .history("unshown", vec![prompt.clone()]);
+
+            pane.on_event(
+                Event::InputRequested(QuestionRequest {
+                    id: "shown".into(),
+                    mode: QuestionMode::Blocking,
+                    questions: vec![prompt.clone()],
+                }),
+                cx,
+            );
+
+            pane.prepare_question_editors(window, cx);
+
+            let old_key = pane.prompts.active.unwrap();
+
+            assert_eq!(pane.prompts.presentations.len(), 1);
+            assert!(pane.prompts.presentations[&old_key].editors[0].is_some());
+
+            pane.session.borrow_mut().input.clear_questions();
+
+            pane.on_event(
+                Event::InputRequested(QuestionRequest {
+                    id: "replacement".into(),
+                    mode: QuestionMode::Blocking,
+                    questions: vec![prompt],
+                }),
+                cx,
+            );
+
+            pane.prepare_question_editors(window, cx);
+
+            let key = pane.prompts.active.unwrap();
+
+            assert_ne!(old_key, key);
+            assert!(pane.session.borrow().input.draft(old_key).is_none());
+            assert!(!pane.prompts.presentations.contains_key(&old_key));
+            assert!(pane.prompts.presentations[&key].editors[0].is_some());
         });
     });
 }

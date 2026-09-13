@@ -7,7 +7,7 @@ use gpui_component::checkbox::Checkbox;
 use gpui_component::radio::Radio;
 use gpui_component::{ActiveTheme as _, Disableable as _, Sizable as _, h_flex, v_flex};
 use nmt_agent::chat::{QuestionInput, QuestionMode};
-use nmt_agent::session::input::QuestionError;
+use nmt_agent::session::input::{QuestionError, QuestionKey};
 use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
@@ -43,7 +43,7 @@ impl AgentPane {
             && !self.branch_flow_holds_composer()
             && !self.session.borrow().commands.awaiting_turn;
 
-        let presentation = &self.prompts.presentations[active];
+        let presentation = self.prompts.presentations.get(&active)?;
 
         let status = match prompt.status() {
             QuestionStatus::Pending => {
@@ -76,14 +76,15 @@ impl AgentPane {
                 }),
         );
 
-        let candidates: Vec<usize> = self
+        let candidates: Vec<QuestionKey> = self
             .session
             .borrow()
             .input
             .batches()
             .iter()
-            .enumerate()
-            .filter_map(|(index, prompt)| (prompt.pending() || index == active).then_some(index))
+            .filter_map(|prompt| {
+                (prompt.pending() || prompt.key() == active).then_some(prompt.key())
+            })
             .collect();
 
         if candidates.len() > 1 {
@@ -183,7 +184,7 @@ impl AgentPane {
         let mut rows = Vec::new();
 
         for (index, question) in prompt.questions().iter().enumerate() {
-            let group: SharedString = format!("question-{active}-{index}").into();
+            let group: SharedString = format!("question-{active:?}-{index}").into();
 
             let mut row = v_flex()
                 .w_full()
@@ -265,8 +266,9 @@ impl AgentPane {
                                     }
 
                                     if let Some(active) = this.prompts.active
-                                        && let Some(editor) =
-                                            &this.prompts.presentations[active].editors[index]
+                                        && let Some(presentation) =
+                                            this.prompts.presentations.get(&active)
+                                        && let Some(editor) = &presentation.editors[index]
                                     {
                                         editor.state.focus(window, cx);
                                     }
@@ -300,7 +302,7 @@ impl AgentPane {
 
         panel = panel.child(
             v_flex()
-                .id(("question-scroll", active))
+                .id(SharedString::from(format!("question-scroll-{active:?}")))
                 .w_full()
                 .max_h((window.viewport_size().height * 0.4).min(px(280.)))
                 .overflow_y_scroll()

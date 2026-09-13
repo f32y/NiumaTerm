@@ -11,7 +11,9 @@ use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
 use crate::agent_tab::composer::PaletteControl;
-use crate::agent_tab::questions::{QuestionEditor, QuestionEditorState, QuestionStatus};
+use crate::agent_tab::questions::{
+    QuestionEditor, QuestionEditorState, QuestionPresentation, QuestionStatus,
+};
 
 impl AgentPane {
     pub(crate) fn present_questions(&mut self, index: usize, cx: &mut Context<Self>) {
@@ -93,8 +95,10 @@ impl AgentPane {
         {
             prompt.toggle(question, option);
 
-            if let Some(active) = self.prompts.active {
-                self.prompts.presentations[active].focus = (question, option);
+            if let Some(active) = self.prompts.active
+                && let Some(presentation) = self.prompts.presentations.get_mut(&active)
+            {
+                presentation.focus = (question, option);
             }
 
             cx.notify();
@@ -114,11 +118,9 @@ impl AgentPane {
             return false;
         }
 
-        let Some(index) = self.prompts.active else {
+        let Some(key) = self.prompts.active else {
             return false;
         };
-
-        let key = self.session.borrow().input.batches()[index].key();
 
         let mut state = self.session.borrow_mut();
 
@@ -130,7 +132,9 @@ impl AgentPane {
             return false;
         }
 
-        let presentation = &mut self.prompts.presentations[index];
+        let Some(presentation) = self.prompts.presentations.get_mut(&key) else {
+            return false;
+        };
 
         let handled = match control {
             PaletteControl::Previous => presentation.move_focus(prompt, false),
@@ -234,18 +238,34 @@ impl AgentPane {
             return;
         };
 
-        let count = self.session.borrow().input.batches()[batch]
-            .questions()
-            .len();
+        let shared = self.session.clone();
+        let state = shared.borrow();
+
+        let Some(prompt) = state.input.draft(batch) else {
+            return;
+        };
+
+        let count = prompt.questions().len();
+
+        self.prompts
+            .presentations
+            .entry(batch)
+            .or_insert_with(|| QuestionPresentation::new(prompt));
+
+        drop(state);
 
         for index in 0..count {
             let shared = self.session.clone();
             let state = shared.borrow();
-            let prompt = &state.input.batches()[batch];
+
+            let Some(prompt) = state.input.draft(batch) else {
+                return;
+            };
+
             let input = prompt.questions()[index].input;
 
             if input == QuestionInput::SelectionOnly
-                || self.prompts.presentations[batch].editors[index].is_some()
+                || self.prompts.presentations[&batch].editors[index].is_some()
                 || !prompt.pending()
             {
                 continue;
@@ -305,10 +325,12 @@ impl AgentPane {
                 (QuestionEditorState::Text(state), subscription)
             };
 
-            self.prompts.presentations[batch].editors[index] = Some(QuestionEditor {
-                state,
-                _subscription: subscription,
-            });
+            if let Some(presentation) = self.prompts.presentations.get_mut(&batch) {
+                presentation.editors[index] = Some(QuestionEditor {
+                    state,
+                    _subscription: subscription,
+                });
+            }
         }
     }
 }
