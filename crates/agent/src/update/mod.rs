@@ -395,7 +395,7 @@ struct CacheEntry {
     dismissed_target: Option<Version>,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 struct CacheFile {
     version: u32,
     installations: HashMap<String, CacheEntry>,
@@ -423,6 +423,7 @@ struct Inner {
 #[derive(Clone)]
 pub struct UpdateCoordinator {
     inner: Arc<Mutex<Inner>>,
+    cache_write: Arc<Mutex<()>>,
     cache_path: PathBuf,
     now: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
 }
@@ -441,6 +442,7 @@ impl UpdateCoordinator {
                 records: HashMap::new(),
                 cache: read_cache(&cache_path),
             })),
+            cache_write: Arc::new(Mutex::new(())),
             cache_path,
             now,
         }
@@ -567,7 +569,8 @@ impl UpdateCoordinator {
                     };
 
                     inner.cache.installations.insert(key.to_string(), entry);
-                    write_cache(&self.cache_path, &inner.cache);
+                    drop(inner);
+                    self.persist_cache();
                 }
             }
 
@@ -747,7 +750,8 @@ impl UpdateCoordinator {
                 },
             );
 
-            write_cache(&self.cache_path, &inner.cache);
+            drop(inner);
+            self.persist_cache();
         }
     }
 
@@ -764,7 +768,17 @@ impl UpdateCoordinator {
             entry.dismissed_target = Some(target.clone());
         }
 
-        write_cache(&self.cache_path, &inner.cache);
+        drop(inner);
+        self.persist_cache();
+    }
+
+    fn persist_cache(&self) {
+        // Serialize disk replacement before taking the latest snapshot, so an
+        // older caller cannot overwrite newer state after waiting for a writer.
+        let _write = self.cache_write.lock();
+        let cache = self.inner.lock().cache.clone();
+
+        write_cache(&self.cache_path, &cache);
     }
 
     pub fn hide_notification(&self, key: &InstallationKey) {

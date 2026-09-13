@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::{env, process};
+use std::time::Instant;
+use std::{env, process, thread};
 
 use crate::update::{DiscoverySupport, VendorUpdateResult, *};
 
@@ -68,6 +69,52 @@ impl ProviderMaintenance for FakeMaintenance {
 
 fn test_path(name: &str) -> PathBuf {
     env::temp_dir().join(format!("niumaterm-update-{name}-{}.json", process::id()))
+}
+
+#[test]
+fn waiting_for_cache_persistence_keeps_update_state_readable() {
+    let path = test_path("pending-write");
+    let coordinator = UpdateCoordinator::new(path.clone());
+
+    let key = coordinator.register(
+        ProviderKind::Codex,
+        AgentCli::new("fake-codex", []),
+        Arc::new(FakeMaintenance {
+            provider: ProviderKind::Codex,
+            probes: AtomicUsize::new(0),
+            updates: AtomicUsize::new(0),
+        }),
+    );
+
+    let disk_busy = coordinator.cache_write.lock();
+    let checker = coordinator.clone();
+    let checked_key = key.clone();
+    let worker = thread::spawn(move || checker.check(&checked_key, true));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut available = false;
+
+    while Instant::now() < deadline {
+        if let Some(inner) = coordinator.inner.try_lock()
+            && inner.records[&key].state.phase == UpdatePhase::Available
+        {
+            available = true;
+
+            break;
+        }
+
+        thread::sleep(Duration::from_millis(1));
+    }
+
+    drop(disk_busy);
+    worker.join().unwrap().unwrap();
+
+    assert!(
+        available,
+        "state must remain readable while persistence waits"
+    );
+    assert!(read_cache(&path).installations.contains_key(key.as_str()));
+
+    fs::remove_file(path).unwrap();
 }
 
 #[test]
