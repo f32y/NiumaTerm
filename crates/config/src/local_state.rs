@@ -86,16 +86,6 @@ pub struct SessionState {
     pub workspaces: Vec<WorkspaceState>,
 }
 
-impl SessionState {
-    pub fn active_workspace_index(&self) -> Option<usize> {
-        if self.workspaces.is_empty() {
-            None
-        } else {
-            Some(self.active_workspace.min(self.workspaces.len() - 1))
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct WorkspaceState {
     #[serde(default)]
@@ -117,16 +107,6 @@ pub struct WorkspaceState {
     pub active_tab: usize,
     #[serde(default)]
     pub tabs: Vec<TabState>,
-}
-
-impl WorkspaceState {
-    pub fn active_tab_index(&self) -> Option<usize> {
-        if self.tabs.is_empty() {
-            None
-        } else {
-            Some(self.active_tab.min(self.tabs.len() - 1))
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
