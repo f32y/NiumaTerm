@@ -127,6 +127,8 @@ pub struct Notification {
     on_click: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
     on_close: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
     transition_status: ToastTransitionStatus,
+    /// A list owns exit timing; standalone cards notify their owner immediately.
+    managed_by_list: bool,
 }
 
 impl From<String> for Notification {
@@ -190,6 +192,7 @@ impl Notification {
             on_click: None,
             on_close: None,
             transition_status: ToastTransitionStatus::Starting,
+            managed_by_list: false,
         }
     }
 
@@ -379,8 +382,12 @@ impl Notification {
 
     /// Dismiss the notification.
     pub fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let _ = window;
-        cx.emit(DismissRequest);
+        if self.managed_by_list {
+            cx.emit(DismissRequest);
+        } else if self.transition_status != ToastTransitionStatus::Ending {
+            self.begin_close(cx);
+            self.complete_close(window, cx);
+        }
     }
 
     fn begin_close(&mut self, cx: &mut Context<Self>) {
@@ -848,7 +855,7 @@ impl NotificationList {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let notification = notification.into();
+        let mut notification = notification.into();
         let delivery = notification
             .delivery
             .unwrap_or(cx.theme().notification.delivery);
@@ -864,6 +871,7 @@ impl NotificationList {
         let window_id = window.window_handle().window_id();
         let autohide_after = notification.autohide_after;
 
+        notification.managed_by_list = true;
         let notification = cx.new(|_| notification);
 
         let dismiss_id = id.clone();
@@ -1128,7 +1136,9 @@ impl Render for NotificationList {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::cell::Cell;
+
+    use crate::notification::*;
     use crate::theme::Theme;
     use gpui::{TestAppContext, VisualTestContext};
 
@@ -1178,6 +1188,36 @@ mod tests {
         cx.background_executor
             .advance_clock(NOTIFICATION_EXIT_DURATION + Duration::from_millis(50));
         cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn standalone_dismiss_fires_close_callback_and_event_once(cx: &mut TestAppContext) {
+        cx.update(|cx| cx.set_global(Theme::default()));
+        let closed = Rc::new(Cell::new(0));
+        let on_close_count = closed.clone();
+        let (notification, cx) = cx.add_window_view(|_, _| {
+            Notification::info("Update available")
+                .autohide(false)
+                .action(|_, _, _| Button::new("update").label("Update"))
+                .on_close(move |_, _| on_close_count.set(on_close_count.get() + 1))
+        });
+        let dismissed = Rc::new(Cell::new(0));
+        let on_dismiss_count = dismissed.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(&notification, move |_, _: &DismissEvent, _| {
+                on_dismiss_count.set(on_dismiss_count.get() + 1);
+            })
+            .detach();
+        });
+
+        notification.update_in(cx, |notification, window, cx| {
+            notification.dismiss(window, cx);
+            notification.dismiss(window, cx);
+        });
+        cx.run_until_parked();
+
+        assert_eq!(closed.get(), 1);
+        assert_eq!(dismissed.get(), 1);
     }
 
     #[test]
@@ -1341,27 +1381,35 @@ mod tests {
         });
         cx.update(|window, _| window.activate_window());
         let list = root.read_with(cx, |root, _| root.list.clone());
+        let closed = Rc::new(Cell::new(0));
+        let on_close_count = closed.clone();
 
         list.update_in(cx, |list, window, cx| {
             list.push(
                 Notification::info("closing")
                     .id::<FooKind>()
-                    .autohide(false),
+                    .autohide(false)
+                    .on_close(move |_, _| on_close_count.set(on_close_count.get() + 1)),
                 window,
                 cx,
             );
-            list.close(TypeId::of::<FooKind>(), window, cx);
+            list.notifications()[0].update(cx, |notification, cx| {
+                notification.dismiss(window, cx);
+                notification.dismiss(window, cx);
+            });
         });
 
         cx.background_executor
             .advance_clock(NOTIFICATION_EXIT_DURATION - Duration::from_millis(1));
         cx.run_until_parked();
         assert_eq!(ids(&list, cx).len(), 1);
+        assert_eq!(closed.get(), 0);
 
         cx.background_executor
             .advance_clock(Duration::from_millis(1));
         cx.run_until_parked();
         assert!(ids(&list, cx).is_empty());
+        assert_eq!(closed.get(), 1);
     }
 
     #[gpui::test]
