@@ -7,15 +7,6 @@ use rust_i18n::t;
 
 use crate::ui::shell::*;
 
-pub(super) fn should_confirm_tab_close(
-    is_agent: bool,
-    confirm_agent_close: bool,
-    warn: WarnBeforeTerminatingShell,
-    child_process_count: usize,
-) -> bool {
-    should_confirm_close(is_agent && confirm_agent_close, warn, child_process_count)
-}
-
 pub(super) fn should_confirm_close(
     confirm: bool,
     warn: WarnBeforeTerminatingShell,
@@ -302,9 +293,8 @@ impl Shell {
         let settings = cx.global::<AppSettings>();
         let warn_before_terminating_shell = settings.system.warn_before_terminating_shell;
 
-        if !should_confirm_tab_close(
-            is_agent,
-            settings.system.confirm_before_closing_workspace,
+        if !should_confirm_close(
+            is_agent && settings.system.confirm_before_closing_workspace,
             warn_before_terminating_shell,
             count,
         ) {

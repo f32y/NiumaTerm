@@ -96,7 +96,7 @@ use crate::ui::persistence::{default_session, materialize_active_tab, restore_se
 use crate::ui::right_panel::{RightPanel, RightPanelKind};
 use crate::ui::settings::{AgentProfile, AppSettings, TabBarStyle};
 #[cfg(test)]
-use crate::ui::shell::close::{should_confirm_close, should_confirm_tab_close};
+use crate::ui::shell::close::should_confirm_close;
 use crate::ui::shell::panels::RightPanelController;
 use crate::ui::shell::settings_workspace::SettingsSurface;
 use crate::ui::shell::updates_layer::UpdateNotificationLayer;

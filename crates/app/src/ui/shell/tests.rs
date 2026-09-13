@@ -5,12 +5,9 @@ use app::agent_tab::AgentKind;
 use gpui::{Bounds, Pixels, TestAppContext};
 use gpui_component::input::InputState;
 use nmt_config::local_state::TabState;
-use nmt_config::system::WarnBeforeTerminatingShell;
 
 use crate::ui::shell::render::{TAB_STRIP_MIN_WIDTH, title_bar_leading_region};
-use crate::ui::shell::{
-    InlineRename, InlineRenameStyle, TabSurface, should_confirm_close, should_confirm_tab_close,
-};
+use crate::ui::shell::{InlineRename, InlineRenameStyle, TabSurface, should_confirm_close};
 use crate::window::MIN_WINDOW_WIDTH;
 
 struct InlineRenameProbe {
@@ -48,20 +45,10 @@ fn restored_agent_tab_keeps_kind_before_activation(cx: &mut TestAppContext) {
 
 #[test]
 fn window_close_honors_confirmation_setting() {
-    use WarnBeforeTerminatingShell::Disabled;
+    use nmt_config::system::WarnBeforeTerminatingShell::Disabled;
 
     assert!(should_confirm_close(true, Disabled, 0));
     assert!(!should_confirm_close(false, Disabled, 0));
-}
-
-#[test]
-fn agent_tab_close_honors_confirmation_setting() {
-    use WarnBeforeTerminatingShell::{Always, Disabled};
-
-    assert!(should_confirm_tab_close(true, true, Disabled, 0));
-    assert!(!should_confirm_tab_close(true, false, Disabled, 0));
-    assert!(!should_confirm_tab_close(false, true, Disabled, 0));
-    assert!(should_confirm_tab_close(false, false, Always, 0));
 }
 
 #[gpui::test]
