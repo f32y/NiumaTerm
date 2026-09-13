@@ -1,12 +1,51 @@
 use std::{env, fs, io, mem, process, ptr};
 
 use windows_sys::Win32::Foundation::CloseHandle;
+use windows_sys::Win32::System::LibraryLoader::{
+    LOAD_LIBRARY_SEARCH_USER_DIRS, SetDefaultDllDirectories,
+};
 use windows_sys::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateProcessW, INFINITE, PROCESS_INFORMATION, STARTUPINFOW,
     WaitForSingleObject,
 };
 
-use crate::windows::conpty::build_environment_block;
+use crate::windows::conpty::{ConptyApi, build_environment_block};
+
+#[test]
+fn missing_bundled_api_returns_error() {
+    const CHILD_FLAG: &str = "NMT_TEST_MISSING_CONPTY";
+
+    if env::var_os(CHILD_FLAG).is_some() {
+        // Isolate the loader policy in a child process so concurrent tests
+        // retain access to their normal bundled libraries.
+        assert_ne!(
+            unsafe { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_USER_DIRS) },
+            0
+        );
+
+        let error = ConptyApi::new().err().expect("missing DLL must fail");
+
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert!(error.to_string().contains("bundled ConPTY"));
+
+        return;
+    }
+
+    let output = process::Command::new(env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "windows::conpty::conpty_tests::missing_bundled_api_returns_error",
+        ])
+        .env(CHILD_FLAG, "1")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
 
 fn entries(block: &[u16]) -> Vec<String> {
     block[..block.len() - 1]

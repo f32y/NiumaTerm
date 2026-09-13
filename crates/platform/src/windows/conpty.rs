@@ -3,7 +3,7 @@
 mod conpty_tests;
 
 use std::ffi::{self, OsString};
-use std::io::{Error, Result};
+use std::io::{Error, ErrorKind, Result};
 use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::io::IntoRawHandle;
 use std::sync::mpsc;
@@ -53,21 +53,23 @@ struct ConptyApi {
 }
 
 impl ConptyApi {
-    fn new() -> Self {
+    fn new() -> Result<Self> {
         // The bundled Windows Terminal ConPTY is mandatory: it implements the resize
         // quirk (no full-buffer repaint), so scrollback survives a window resize. The
         // in-box system ConPTY repaints the whole buffer and corrupts the history on
         // every resize, so it is no longer an accepted fallback. `build.rs` copies
         // `conpty.dll` + `OpenConsole.exe` next to the executable.
-        let api = Self::load_conpty().expect(
-            "bundled ConPTY failed to load: conpty.dll + OpenConsole.exe must sit next \
-             to the executable (copied by pty's build.rs). The in-box system ConPTY \
-             corrupts scrollback on resize and is not supported.",
-        );
+        let api = Self::load_conpty().ok_or_else(|| {
+            Error::new(
+                ErrorKind::NotFound,
+                "bundled ConPTY failed to load: conpty.dll and OpenConsole.exe must be \
+                 available beside the executable; system ConPTY is not supported",
+            )
+        })?;
 
         info!("Using bundled conpty.dll for pseudoconsole");
 
-        api
+        Ok(api)
     }
 
     /// Try loading ConptyApi from Windows Terminal's bundled ConPTY: newer WT
@@ -192,7 +194,7 @@ pub fn new(shell: &str, options: PtyOptions<'_>, manage_process_tree: bool) -> R
         ..
     } = options;
 
-    let api = ConptyApi::new();
+    let api = ConptyApi::new()?;
     let mut pty_handle: HPCON = 0;
 
     // Passing 0 as the size parameter allows the "system default" buffer
