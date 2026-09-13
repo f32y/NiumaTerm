@@ -50,8 +50,11 @@ use std::time;
 use futures::channel::oneshot;
 use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
-use nmt_input::keyboard::ModifiersState;
-use nmt_input::{bracket_paste, encode_mouse_report};
+use nmt_input::event::ElementState;
+use nmt_input::keyboard::{Key, KeyLocation, ModifiersState};
+use nmt_input::{
+    KeyEncodeFlags, KeyInput, bracket_paste, encode_mouse_report, encode_terminal_input,
+};
 use nmt_platform::process::ProcessTree;
 use nmt_platform::{
     EventedPty, PtyOptions, WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env,
@@ -63,6 +66,7 @@ use crate::block_store::{BlockItem, BlockStore};
 use crate::event::{Msg, MsgSender, ProgressReport};
 use crate::ghostty::BlockHandle;
 use crate::graphics::GraphicData;
+use crate::input::{TerminalKey, should_defer_to_ime};
 use crate::pty_pipe::{SessionOptions, SessionWorker, start_session};
 use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
@@ -473,6 +477,32 @@ impl TerminalSession {
 
     pub fn write_text(&self, text: &str) -> bool {
         self.write_input(text.as_bytes())
+    }
+
+    pub fn defer_key_to_ime(&self, key: &TerminalKey<'_>) -> bool {
+        !self.modes().contains(Mode::REPORT_ALL_KEYS_AS_ESC) && should_defer_to_ime(key)
+    }
+
+    pub fn commit_text(&self, text: &str) -> bool {
+        let flags = KeyEncodeFlags::from(self.modes());
+
+        if !flags.contains(KeyEncodeFlags::REPORT_ALL_KEYS_AS_ESC) {
+            return self.write_text(text);
+        }
+
+        // An IME commit has no physical key identity. The empty key makes the
+        // encoder use key number zero and include only the requested text.
+        let input = KeyInput {
+            logical_key: Key::Character("".into()),
+            key_without_modifiers: Key::Character("".into()),
+            text_with_all_modifiers: Some(text.into()),
+            location: KeyLocation::Standard,
+            state: ElementState::Pressed,
+            repeat: false,
+        };
+
+        encode_terminal_input(&input, ModifiersState::empty(), flags, None)
+            .is_some_and(|bytes| self.write_input(&bytes))
     }
 
     pub fn paste_text(&self, text: &str) -> bool {

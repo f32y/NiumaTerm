@@ -4,7 +4,7 @@ use futures::executor::block_on;
 use nmt_input::keyboard::ModifiersState;
 use nmt_terminal::block_store::BlockStore;
 use nmt_terminal::ghostty::ScrollbarInfo;
-use nmt_terminal::input::{TerminalKey, WheelDelta};
+use nmt_terminal::input::{KeyPhase, TerminalKey, WheelDelta};
 use nmt_terminal::selection::SelectionType;
 use nmt_terminal::session::{
     SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
@@ -26,6 +26,67 @@ use crate::terminal_tab::pane_model::test_session::{TestClipboard, assert_input,
 use crate::terminal_tab::pane_model::viewport::{LocalPoint, Viewport};
 
 #[test]
+fn terminal_requested_keyboard_modes_drive_keys_and_ime_commits() {
+    let (mut model, input) = controller(b"\x1b[>31u", false);
+
+    let mut key = TerminalKey {
+        key: "a",
+        key_char: Some("A"),
+        modifiers: ModifiersState::SHIFT,
+        function: false,
+        phase: KeyPhase::Press,
+    };
+
+    assert!(matches!(model.key_down(&key), KeyOutcome::Written));
+
+    key.phase = KeyPhase::Repeat;
+
+    assert!(matches!(model.key_down(&key), KeyOutcome::Written));
+
+    key.phase = KeyPhase::Release;
+    key.key_char = None;
+
+    assert!(matches!(model.send_key(&key), KeyOutcome::Written));
+    assert!(matches!(model.send_key(&key), KeyOutcome::Ignored));
+    assert!(model.write_text_input(TextInput::Commit("你好")));
+
+    key.key = "v";
+
+    key.modifiers = if cfg!(target_os = "macos") {
+        ModifiersState::SUPER
+    } else {
+        ModifiersState::CONTROL
+    };
+
+    key.phase = KeyPhase::Press;
+
+    assert!(matches!(model.key_down(&key), KeyOutcome::Ignored));
+
+    key.phase = KeyPhase::Release;
+
+    assert!(matches!(model.send_key(&key), KeyOutcome::Ignored));
+
+    assert_input(
+        &input,
+        b"\x1b[97:65;2;65u\x1b[97:65;2:2;65u\x1b[97;2:3u\x1b[0;1;20320:22909u",
+    );
+
+    input.lock().clear();
+
+    key.key = "c";
+    key.modifiers = ModifiersState::CONTROL;
+    key.phase = KeyPhase::Press;
+
+    assert!(matches!(model.key_down(&key), KeyOutcome::Written));
+
+    key.phase = KeyPhase::Release;
+
+    assert!(matches!(model.send_key(&key), KeyOutcome::Written));
+
+    assert_input(&input, b"\x1b[99;5u\x1b[99;5:3u");
+}
+
+#[test]
 fn paste_uses_the_supplied_clipboard_and_respects_input_rejection() {
     let (mut model, input) = controller(b"\x1b[?2004h", false);
     let clipboard = TestClipboard::default();
@@ -41,6 +102,7 @@ fn paste_uses_the_supplied_clipboard_and_respects_input_rejection() {
             ModifiersState::CONTROL
         },
         function: false,
+        phase: KeyPhase::Press,
     };
 
     assert!(matches!(model.send_key(&paste), KeyOutcome::Ignored));
@@ -385,6 +447,7 @@ fn key_outcomes_distinguish_accepted_input_from_read_only_rejection() {
             key_char: None,
             modifiers: ModifiersState::empty(),
             function: false,
+            phase: KeyPhase::Press,
         }),
         KeyOutcome::Written
     ));
@@ -407,6 +470,7 @@ fn key_outcomes_distinguish_accepted_input_from_read_only_rejection() {
             key_char: None,
             modifiers: ModifiersState::empty(),
             function: false,
+            phase: KeyPhase::Press,
         }),
         KeyOutcome::Ignored
     ));
@@ -551,6 +615,7 @@ fn end_scrolls_history_but_modified_end_and_alternate_screen_reach_the_pty() {
             key_char: None,
             modifiers,
             function,
+            phase: KeyPhase::Press,
         });
 
         match (scrolls, outcome) {
@@ -571,6 +636,7 @@ fn committed_text_is_sent_once_and_dropped_paths_use_bracketed_paste() {
             key_char: Some("a"),
             modifiers: ModifiersState::empty(),
             function: false,
+            phase: KeyPhase::Press,
         }),
         KeyOutcome::Ignored
     ));

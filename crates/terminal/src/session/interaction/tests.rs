@@ -6,7 +6,7 @@ use nmt_input::keyboard::ModifiersState;
 
 use crate::event::{BlockEvent, Msg};
 use crate::ghostty::GhosttyTerminal;
-use crate::input::TerminalKey;
+use crate::input::{KeyPhase, TerminalKey};
 use crate::pty_pipe::requests::answer_query;
 use crate::selection::SelectionType;
 use crate::session::interaction::{
@@ -44,7 +44,7 @@ fn answer_pending(engine: &mut GhosttyTerminal, messages: &mpsc::Receiver<Msg>) 
 #[test]
 fn key_dispatch_reports_writes_and_requests_paste_from_the_host() {
     let (session, messages) = test_session();
-    let interaction = TerminalInteraction::default();
+    let mut interaction = TerminalInteraction::default();
     let snapshot = session.snapshot();
 
     let enter = TerminalKey {
@@ -52,6 +52,7 @@ fn key_dispatch_reports_writes_and_requests_paste_from_the_host() {
         key_char: None,
         modifiers: ModifiersState::SHIFT,
         function: false,
+        phase: KeyPhase::Press,
     };
 
     assert!(matches!(
@@ -78,6 +79,7 @@ fn key_dispatch_reports_writes_and_requests_paste_from_the_host() {
         key_char: None,
         modifiers,
         function: false,
+        phase: KeyPhase::Press,
     };
 
     assert!(matches!(

@@ -12,20 +12,24 @@ mod selection;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashSet;
+
 use nmt_config::system::NewlineShortcut;
 
-use crate::input::{TerminalKey, TerminalKeyAction, key_action};
+use crate::input::{KeyPhase, TerminalKey, TerminalKeyAction, key_action};
 use crate::render_buffer::RenderBuffer;
 use crate::selection::SelectionType;
 use crate::session::interaction::copy::CopiedSelection;
 use crate::session::interaction::selection::{FrozenSelection, PendingExpansion};
 use crate::session::{BlockPoint, TerminalSession};
+use crate::terminal::Mode;
 
 #[derive(Default)]
 pub struct TerminalInteraction {
     frozen: FrozenSelection,
     pending_expansion: Option<PendingExpansion>,
     selection_generation: u64,
+    pressed_keys: HashSet<String>,
 }
 
 #[derive(Debug)]
@@ -38,13 +42,23 @@ pub enum InputOutcome {
 
 impl TerminalInteraction {
     pub fn send_key(
-        &self,
+        &mut self,
         session: &TerminalSession,
         snapshot: &RenderBuffer,
         key: &TerminalKey<'_>,
         newline_shortcut: NewlineShortcut,
     ) -> InputOutcome {
-        match key_action(key, newline_shortcut, session.modes()) {
+        let mode = session.modes();
+
+        if !mode.contains(Mode::REPORT_EVENT_TYPES) {
+            self.pressed_keys.clear();
+        }
+
+        if key.phase == KeyPhase::Release && !self.pressed_keys.remove(key.key) {
+            return InputOutcome::Ignored;
+        }
+
+        let outcome = match key_action(key, newline_shortcut, mode) {
             TerminalKeyAction::CopyOrWrite(bytes) => {
                 if let Some(copy) = self.copy_selection(session, snapshot) {
                     return InputOutcome::CopyPending(copy);
@@ -56,7 +70,20 @@ impl TerminalInteraction {
             TerminalKeyAction::Write(bytes) => Self::write(session, &bytes),
             TerminalKeyAction::Paste => InputOutcome::PasteRequested,
             TerminalKeyAction::Ignore => InputOutcome::Ignored,
+        };
+
+        if matches!(outcome, InputOutcome::Written)
+            && key.phase != KeyPhase::Release
+            && mode.contains(Mode::REPORT_EVENT_TYPES)
+        {
+            self.pressed_keys.insert(key.key.to_owned());
         }
+
+        outcome
+    }
+
+    pub fn clear_pressed_keys(&mut self) {
+        self.pressed_keys.clear();
     }
 
     fn write(session: &TerminalSession, bytes: &[u8]) -> InputOutcome {

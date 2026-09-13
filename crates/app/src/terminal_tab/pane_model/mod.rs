@@ -29,7 +29,7 @@ mod tests;
 
 use nmt_config::colors::Colors;
 use nmt_input::keyboard::ModifiersState;
-use nmt_terminal::input::{TerminalKey, WheelDelta, should_defer_to_ime};
+use nmt_terminal::input::{TerminalKey, WheelDelta};
 use nmt_terminal::links::{follows_link, resolve_link};
 use nmt_terminal::selection::SelectionType;
 use nmt_terminal::session::interaction::{
@@ -348,7 +348,7 @@ impl PaneController {
             }
         }
 
-        if should_defer_to_ime(key) {
+        if self.source.session.defer_key_to_ime(key) {
             return KeyOutcome::Ignored;
         }
 
@@ -382,7 +382,7 @@ impl PaneController {
 
     pub(super) fn write_text_input(&mut self, input: TextInput<'_>) -> bool {
         match input {
-            TextInput::Commit(text) => self.source.session.write_text(text),
+            TextInput::Commit(text) => self.source.session.commit_text(text),
             TextInput::DropPaths(paths) => self.source.session.paste_paths(paths),
 
             TextInput::RerunSelectedBlock => self

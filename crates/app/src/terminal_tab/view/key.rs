@@ -1,6 +1,6 @@
 use gpui::{Keystroke, Modifiers};
 use nmt_input::keyboard::ModifiersState;
-use nmt_terminal::input::TerminalKey;
+use nmt_terminal::input::{KeyPhase, TerminalKey};
 
 pub(super) fn terminal_key(key: &Keystroke) -> TerminalKey<'_> {
     TerminalKey {
@@ -8,6 +8,7 @@ pub(super) fn terminal_key(key: &Keystroke) -> TerminalKey<'_> {
         key_char: key.key_char.as_deref(),
         modifiers: modifiers_state(key.modifiers),
         function: key.modifiers.function,
+        phase: KeyPhase::Press,
     }
 }
 

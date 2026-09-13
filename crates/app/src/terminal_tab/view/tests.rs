@@ -2,13 +2,13 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui::{
-    AppContext, Entity, EntityInputHandler, KeyDownEvent, Keystroke, ListAlignment, Modifiers,
-    TestAppContext, VisualTestContext,
+    AppContext, Entity, EntityInputHandler, KeyDownEvent, KeyUpEvent, Keystroke, ListAlignment,
+    Modifiers, TestAppContext, VisualTestContext,
 };
 use nmt_agent::AgentRoute;
 use nmt_config::local_state::TabState;
 
-use crate::terminal_tab::pane_model::test_session::controller;
+use crate::terminal_tab::pane_model::test_session::{assert_input, controller};
 use crate::terminal_tab::view::list_state::BlockListState;
 use crate::terminal_tab::view::{AgentInterrupted, PaneIdentity, TerminalPane};
 use crate::terminal_tab::wake::wake_channel;
@@ -30,6 +30,53 @@ fn pane(cx: &mut VisualTestContext) -> Entity<TerminalPane> {
         image_releases_attached: false,
         block_list: BlockListState::new(ListAlignment::Top),
     })
+}
+
+#[gpui::test]
+fn keyboard_events_and_native_text_use_the_requested_reporting_mode(cx: &mut TestAppContext) {
+    let cx = cx.add_empty_window();
+    let pane = pane(cx);
+    let (model, input) = controller(b"\x1b[>27u", false);
+
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
+            pane.model = model;
+
+            let mut event = KeyDownEvent {
+                keystroke: Keystroke {
+                    modifiers: Modifiers::none(),
+                    key: "a".into(),
+                    key_char: Some("a".into()),
+                },
+                is_held: false,
+                prefer_character_input: false,
+            };
+
+            pane.on_key_down(&event, window, cx);
+
+            event.is_held = true;
+
+            pane.on_key_down(&event, window, cx);
+
+            pane.on_key_up(
+                &KeyUpEvent {
+                    keystroke: event.keystroke.clone(),
+                },
+                window,
+                cx,
+            );
+
+            event.prefer_character_input = true;
+
+            pane.on_key_down(&event, window, cx);
+            pane.replace_text_in_range(None, "å", window, cx);
+        });
+    });
+
+    assert_input(
+        &input,
+        b"\x1b[97;1;97u\x1b[97;1:2;97u\x1b[97;1:3u\x1b[0;1;229u",
+    );
 }
 
 #[gpui::test]

@@ -12,10 +12,10 @@ use futures::StreamExt;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, AppContext, Bounds, Context, Entity, EntityInputHandler, EventEmitter,
-    ExternalPaths, FocusHandle, Focusable, IntoElement, KeyDownEvent, Keystroke, Modifiers,
-    ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
-    Point, ScrollDelta, ScrollWheelEvent, Size, UTF16Selection, Window, actions, div, list, point,
-    px, rgb, size,
+    ExternalPaths, FocusHandle, Focusable, IntoElement, KeyDownEvent, KeyUpEvent, Keystroke,
+    Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    Pixels, Point, ScrollDelta, ScrollWheelEvent, Size, UTF16Selection, Window, actions, div, list,
+    point, px, rgb, size,
 };
 use gpui_component::WindowExt as _;
 use gpui_component::notification::Notification;
@@ -23,7 +23,7 @@ use nmt_agent::AgentRoute;
 use nmt_config::active_colors;
 use nmt_config::local_state::TabState;
 use nmt_terminal::clipboard::{Clipboard, ClipboardType};
-use nmt_terminal::input::WheelDelta;
+use nmt_terminal::input::{KeyPhase, WheelDelta};
 use nmt_terminal::session::interaction::{CopyCompletion, PendingCopy};
 use nmt_terminal::session::{
     EngineError, HostEvent, SessionObserver, SurfaceMouseButton, TerminalSession,
@@ -561,13 +561,39 @@ impl TerminalPane {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if event.prefer_character_input {
+            return;
+        }
+
         let interrupts_agent = matches!(event.keystroke.key.as_str(), "escape" | "esc")
             && !event.keystroke.modifiers.modified();
 
-        let outcome = self.model.key_down(&terminal_key(&event.keystroke));
+        let mut key = terminal_key(&event.keystroke);
+
+        if event.is_held {
+            key.phase = KeyPhase::Repeat;
+        }
+
+        let outcome = self.model.key_down(&key);
+
+        if !matches!(outcome, KeyOutcome::Ignored) {
+            // Stop native character delivery after the key path has accepted
+            // input, otherwise printable keys are sent again by WM_CHAR.
+            cx.stop_propagation();
+        }
 
         if self.apply_key_outcome(outcome, window, cx) && interrupts_agent {
             cx.emit(AgentInterrupted);
+        }
+    }
+
+    fn on_key_up(&mut self, event: &KeyUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let mut key = terminal_key(&event.keystroke);
+
+        key.phase = KeyPhase::Release;
+
+        if matches!(self.model.send_key(&key), KeyOutcome::Written) {
+            cx.stop_propagation();
         }
     }
 
@@ -941,6 +967,10 @@ impl Focusable for TerminalPane {
 
 impl Render for TerminalPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.focus.is_focused(window) {
+            self.model.interaction.clear_pressed_keys();
+        }
+
         if !self.image_releases_attached {
             self.attach_image_releases(window, cx);
         }
@@ -1012,6 +1042,7 @@ impl Render for TerminalPane {
             .on_action(cx.listener(Self::on_previous_block))
             .on_action(cx.listener(Self::on_next_block))
             .on_key_down(cx.listener(Self::on_key_down))
+            .on_key_up(cx.listener(Self::on_key_up))
             .on_modifiers_changed(cx.listener(Self::on_modifiers_changed))
             .on_drop(cx.listener(Self::on_file_drop))
             // Moving off the pane produces no further mouse-move events here,

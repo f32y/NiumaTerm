@@ -4,7 +4,8 @@ use nmt_input::keyboard::ModifiersState;
 use crate::terminal::Mode;
 
 use crate::input::{
-    TerminalKey, TerminalKeyAction, WheelDelta, key_action, pty_bytes_for_key, should_defer_to_ime,
+    KeyPhase, TerminalKey, TerminalKeyAction, WheelDelta, key_action, pty_bytes_for_key,
+    should_defer_to_ime,
 };
 
 #[test]
@@ -22,6 +23,7 @@ fn key<'a>(name: &'a str, key_char: Option<&'a str>) -> TerminalKey<'a> {
         key: name,
         key_char,
         function: false,
+        phase: KeyPhase::Press,
     }
 }
 
