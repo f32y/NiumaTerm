@@ -286,25 +286,6 @@ pub fn encode_mouse_report(
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum KeyUpAction {
-    Suppress,
-    EncodeRelease,
-    Fallthrough,
-}
-
-/// Decide how a frontend should handle key-up events after its key-down path has
-/// had a chance to consume the key.
-pub fn key_up_action(consumed_on_press: bool, report_events: bool) -> KeyUpAction {
-    if consumed_on_press {
-        KeyUpAction::Suppress
-    } else if report_events {
-        KeyUpAction::EncodeRelease
-    } else {
-        KeyUpAction::Fallthrough
-    }
-}
-
 /// Named keys whose terminal sequence overrides the generic encoder, mirroring
 /// rioterm's built-in `Action::Esc` binding rows exactly (modifiers matched for
 /// equality, mode gates as in `default_key_bindings`). `None` falls through to

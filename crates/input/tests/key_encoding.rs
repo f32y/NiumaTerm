@@ -5,8 +5,8 @@
 use nmt_input::event::ElementState;
 use nmt_input::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
 use nmt_input::{
-    KeyEncodeFlags, KeyInput, KeyUpAction, bracket_paste, build_key_sequence, encode_mouse_report,
-    encode_terminal_input, encode_terminal_key, key_up_action,
+    KeyEncodeFlags, KeyInput, bracket_paste, build_key_sequence, encode_mouse_report,
+    encode_terminal_input, encode_terminal_key,
 };
 
 fn named(key: NamedKey) -> KeyInput {
@@ -449,16 +449,4 @@ fn mouse_report_sgr_and_legacy() {
         &[0x1b, b'[', b'M', 35, 33, 33]
     );
     assert!(encode_mouse_report(false, 0, 0, true, 223, 0).is_none());
-}
-
-#[test]
-fn consumed_key_up_is_suppressed_even_under_event_types() {
-    assert_eq!(key_up_action(true, true), KeyUpAction::Suppress);
-    assert_eq!(key_up_action(false, true), KeyUpAction::EncodeRelease);
-}
-
-#[test]
-fn unconsumed_key_up_reports_release_only_under_event_types() {
-    assert_eq!(key_up_action(false, true), KeyUpAction::EncodeRelease);
-    assert_eq!(key_up_action(false, false), KeyUpAction::Fallthrough);
 }
