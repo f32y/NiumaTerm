@@ -79,7 +79,7 @@ impl AgentWorkspace {
     /// and repeating it here would move every existing single-directory
     /// history entry to a new key. Normalization is literal so a directory
     /// that is temporarily unreachable keeps its scope.
-    pub fn history_signature(&self) -> String {
+    pub(crate) fn history_signature(&self) -> String {
         self.additional
             .iter()
             .map(|path| lexical_path_spelling(Path::new(path.trim())))
