@@ -128,13 +128,6 @@ impl KillOnCloseJob {
         Ok(job)
     }
 
-    pub fn attach_or_kill(child: &mut Child) -> io::Result<Self> {
-        Self::attach(child).inspect_err(|_| {
-            let _ = child.kill();
-            let _ = child.wait();
-        })
-    }
-
     pub(crate) fn new() -> io::Result<Self> {
         unsafe {
             let job = CreateJobObjectW(ptr::null(), ptr::null());
@@ -187,10 +180,6 @@ impl Drop for JobHandle {
 impl ProcessTree {
     pub fn process_count(&self) -> usize {
         self.0.upgrade().map_or(0, |job| query_process_count(job.0))
-    }
-
-    pub fn other_process_count(&self) -> usize {
-        self.process_count().saturating_sub(1)
     }
 }
 

@@ -24,6 +24,7 @@ mod unix;
 
 mod environment_override;
 mod ipc_message;
+mod process_lifetime;
 
 use std::{io, sync};
 

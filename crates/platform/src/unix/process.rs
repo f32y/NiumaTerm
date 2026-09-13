@@ -137,13 +137,6 @@ impl KillOnCloseJob {
         Ok(Self(Arc::new(ProcessGroup(pid))))
     }
 
-    pub fn attach_or_kill(child: &mut Child) -> io::Result<Self> {
-        Self::attach(child).inspect_err(|_| {
-            let _ = child.kill();
-            let _ = child.wait();
-        })
-    }
-
     pub(crate) fn process_tree(&self) -> ProcessTree {
         ProcessTree(Arc::downgrade(&self.0))
     }
@@ -161,10 +154,6 @@ impl ProcessTree {
         self.0
             .upgrade()
             .map_or(0, |group| group_process_count(group.0))
-    }
-
-    pub fn other_process_count(&self) -> usize {
-        self.process_count().saturating_sub(1)
     }
 }
 
