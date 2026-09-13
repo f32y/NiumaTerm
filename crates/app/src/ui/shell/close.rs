@@ -72,15 +72,11 @@ impl Shell {
             return;
         }
 
-        let description = if count > 0 {
-            t!(
-                "shell-close-pane-processes-description",
-                processes = &Self::processes_running(count)
-            )
-            .into_owned()
-        } else {
-            t!("shell-close-pane-description").to_string()
-        };
+        let description = Self::close_description(
+            count,
+            "shell-close-pane-description",
+            "shell-close-pane-processes-description",
+        );
 
         Self::open_close_confirm(
             window,
@@ -112,6 +108,14 @@ impl Shell {
         self.sync_session_memory(cx);
 
         cx.notify();
+    }
+
+    fn close_description(count: usize, plain: &str, with_processes: &str) -> String {
+        if count > 0 {
+            t!(with_processes, processes = &Self::processes_running(count)).into_owned()
+        } else {
+            t!(plain).into_owned()
+        }
     }
 
     /// "1 child process is running" / "N child processes are running" — the
@@ -269,17 +273,15 @@ impl Shell {
                 return;
             }
 
-            let description = if count > 0 {
-                t!(
-                    "shell-close-last-tab-processes-description",
-                    processes = &Self::processes_running(count)
-                )
-                .into_owned()
-            } else if is_agent {
-                t!("shell-close-last-tab-agent-description").to_string()
-            } else {
-                t!("shell-close-last-tab-description").to_string()
-            };
+            let description = Self::close_description(
+                count,
+                if is_agent {
+                    "shell-close-last-tab-agent-description"
+                } else {
+                    "shell-close-last-tab-description"
+                },
+                "shell-close-last-tab-processes-description",
+            );
 
             Self::open_close_confirm(
                 window,
@@ -308,14 +310,12 @@ impl Shell {
 
         let description = if is_agent {
             t!("shell-close-tab-agent-description").to_string()
-        } else if count > 0 {
-            t!(
-                "shell-close-tab-processes-description",
-                processes = &Self::processes_running(count)
-            )
-            .into_owned()
         } else {
-            t!("shell-close-tab-description").to_string()
+            Self::close_description(
+                count,
+                "shell-close-tab-description",
+                "shell-close-tab-processes-description",
+            )
         };
 
         Self::open_close_confirm(
@@ -405,15 +405,11 @@ impl Shell {
             return;
         }
 
-        let description = if count > 0 {
-            t!(
-                "shell-close-workspace-processes-description",
-                processes = &Self::processes_running(count)
-            )
-            .into_owned()
-        } else {
-            t!("shell-close-workspace-description").to_string()
-        };
+        let description = Self::close_description(
+            count,
+            "shell-close-workspace-description",
+            "shell-close-workspace-processes-description",
+        );
 
         Self::open_close_confirm(
             window,
@@ -461,15 +457,11 @@ impl Shell {
             return;
         }
 
-        let description = if process_count > 0 {
-            t!(
-                "shell-close-temporary-workspaces-processes-description",
-                processes = &Self::processes_running(process_count)
-            )
-            .into_owned()
-        } else {
-            t!("shell-close-temporary-workspaces-description").to_string()
-        };
+        let description = Self::close_description(
+            process_count,
+            "shell-close-temporary-workspaces-description",
+            "shell-close-temporary-workspaces-processes-description",
+        );
 
         Self::open_close_confirm(
             window,
@@ -515,15 +507,11 @@ impl Shell {
     ) {
         let count = self.workspace_process_count(id, cx);
 
-        let message = if count > 0 {
-            t!(
-                "shell-close-last-workspace-processes-message",
-                processes = &Self::processes_running(count)
-            )
-            .into_owned()
-        } else {
-            t!("shell-close-last-workspace-message").to_string()
-        };
+        let message = Self::close_description(
+            count,
+            "shell-close-last-workspace-message",
+            "shell-close-last-workspace-processes-message",
+        );
 
         // Quitting from here saves the session, so the same warning the
         // window-close dialog carries applies to this choice too.
@@ -592,15 +580,11 @@ impl Shell {
             return true;
         }
 
-        let mut description = if count > 0 {
-            t!(
-                "shell-close-window-processes-description",
-                processes = &Self::processes_running(count)
-            )
-            .into_owned()
-        } else {
-            t!("shell-close-window-description").to_string()
-        };
+        let mut description = Self::close_description(
+            count,
+            "shell-close-window-description",
+            "shell-close-window-processes-description",
+        );
 
         if !saved {
             description.push_str("\n\n");
