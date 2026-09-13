@@ -18,7 +18,7 @@ use std::borrow::Cow;
 use std::io;
 use std::path::Path;
 
-use app::agent_tab::{AgentKind, AgentKindExt as _};
+use app::agent_tab::AgentKind;
 use gpui::Global;
 #[cfg(windows)]
 use gpui::SharedString;
@@ -99,7 +99,7 @@ impl Default for AppSettings {
             profiles: vec![builtin_profile()],
             default_profile: builtin_profile().name,
             agent_profiles: builtin_agent_profiles(),
-            default_agent_profile: agent_kind_label(AgentProfileKind::ClaudeCode).to_string(),
+            default_agent_profile: AgentProfileKind::Claude.full_name().to_string(),
             editing: SettingsEditing::default(),
         }
     }
@@ -127,18 +127,9 @@ fn builtin_profile() -> Profile {
     }
 }
 
-/// Display name of a supported agent CLI, doubling as the seeded profile name.
-pub(super) fn agent_kind_label(kind: AgentProfileKind) -> &'static str {
-    match kind {
-        AgentProfileKind::ClaudeCode => "Claude Code",
-        AgentProfileKind::Codex => "Codex",
-        AgentProfileKind::DeepSeek => "DeepSeek Harness",
-    }
-}
-
 pub(super) fn agent_kind_display_label(kind: AgentProfileKind) -> Cow<'static, str> {
     match kind {
-        AgentProfileKind::ClaudeCode => t!("settings-agent-kind-claude-code"),
+        AgentProfileKind::Claude => t!("settings-agent-kind-claude-code"),
         AgentProfileKind::Codex => t!("settings-agent-kind-codex"),
         AgentProfileKind::DeepSeek => t!("settings-agent-kind-deepseek"),
     }
@@ -149,13 +140,13 @@ pub(super) fn agent_kind_display_label(kind: AgentProfileKind) -> Cow<'static, s
 /// the npm `claude.cmd` shim.
 pub(crate) fn builtin_agent_profile(kind: AgentProfileKind) -> AgentProfile {
     let executable = match kind {
-        AgentProfileKind::ClaudeCode => "claude",
+        AgentProfileKind::Claude => "claude",
         AgentProfileKind::Codex => "codex",
         AgentProfileKind::DeepSeek => dsh::DEFAULT_EXECUTABLE,
     };
 
     AgentProfile {
-        name: agent_kind_label(kind).to_string(),
+        name: kind.full_name().to_string(),
         kind,
         executable: executable.to_string(),
         // DeepSeek Harness is published to npm and has no installer of its
@@ -177,7 +168,7 @@ pub(crate) fn builtin_agent_profile(kind: AgentProfileKind) -> AgentProfile {
 fn builtin_agent_profiles() -> Vec<AgentProfile> {
     AgentKind::ALL
         .into_iter()
-        .map(|kind| builtin_agent_profile(kind.profile_kind()))
+        .map(builtin_agent_profile)
         .collect()
 }
 
@@ -304,7 +295,7 @@ impl AppSettings {
         exclude: Option<usize>,
     ) -> String {
         let base = if desired.trim().is_empty() {
-            agent_kind_label(kind)
+            kind.full_name()
         } else {
             desired.trim()
         };
@@ -370,7 +361,7 @@ impl AppSettings {
             .find(|p| p.name == self.default_agent_profile)
             .or_else(|| self.agent_profiles.first())
             .cloned()
-            .unwrap_or_else(|| builtin_agent_profile(AgentProfileKind::ClaudeCode))
+            .unwrap_or_else(|| builtin_agent_profile(AgentProfileKind::Claude))
     }
 
     /// The default profile's launch command: shell plus whitespace-split

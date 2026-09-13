@@ -84,7 +84,7 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
         // provider entry rather than an environment variable; that entry is
         // built from the same field further down.
         let base_url_env = match profile.kind {
-            AgentProfileKind::ClaudeCode => Some("ANTHROPIC_BASE_URL"),
+            AgentProfileKind::Claude => Some("ANTHROPIC_BASE_URL"),
             AgentProfileKind::DeepSeek => Some(DEEPSEEK_BASE_URL_ENV),
             AgentProfileKind::Codex => None,
         };
@@ -101,7 +101,7 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
 
         if !api_key.is_empty() {
             let key_env = match profile.kind {
-                AgentProfileKind::ClaudeCode => "ANTHROPIC_API_KEY",
+                AgentProfileKind::Claude => "ANTHROPIC_API_KEY",
 
                 AgentProfileKind::Codex => codex_credential_env
                     .as_deref()
@@ -114,7 +114,7 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
         }
     }
 
-    if profile.kind == AgentProfileKind::ClaudeCode
+    if profile.kind == AgentProfileKind::Claude
         && let Some(model) = model.as_ref()
     {
         env.push((ANTHROPIC_MODEL_ENV.to_string(), model.clone()));

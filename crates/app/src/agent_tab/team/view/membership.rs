@@ -8,12 +8,10 @@ use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::{
     ActiveTheme as _, Disableable as _, IconNamed, Size, WindowExt as _, h_flex, v_flex,
 };
-use nmt_agent::session::AgentKind;
 use nmt_agent::team::member::{HistoryScope, MemberConfig, ProfileReference};
 use rand::seq::SliceRandom as _;
 use rust_i18n::t;
 
-use crate::agent_tab::profile::AgentKindExt as _;
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::team::view::TeamPane;
 use crate::agent_tab::thread_controls::{launch_effort, launch_model, stored_thread_settings};
@@ -181,7 +179,7 @@ impl TeamPane {
             return;
         };
 
-        let kind = AgentKind::from_profile(profile.kind);
+        let kind = profile.kind;
 
         let mut settings = stored_thread_settings(kind, &profile, cx)
             .cloned()

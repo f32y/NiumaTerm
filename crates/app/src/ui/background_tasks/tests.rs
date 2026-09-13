@@ -261,7 +261,7 @@ fn both_providers_render_from_the_same_snapshot_shape() {
 
     assert_eq!(rows.len(), 1);
 
-    let provider: &str = rows[0].key.provider.into();
+    let provider: &str = rows[0].key.provider.full_name();
 
     assert_eq!(provider, "Claude Code");
     assert_eq!(rows[0].display_label(), "Review the diff");

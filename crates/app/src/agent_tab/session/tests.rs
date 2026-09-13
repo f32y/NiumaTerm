@@ -868,7 +868,7 @@ mod queued_prompt_placement_tests {
 
     #[gpui::test]
     fn a_queued_prompt_heads_the_turn_opened_for_it(cx: &mut TestAppContext) {
-        let (pane, window) = open_pane(cx, AgentProfileKind::ClaudeCode);
+        let (pane, window) = open_pane(cx, AgentProfileKind::Claude);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
         cx.update(|_, cx| {

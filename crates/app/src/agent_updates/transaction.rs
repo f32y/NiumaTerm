@@ -359,7 +359,7 @@ impl UpdateEnvironment for SessionUpdateEnvironment<'_> {
 /// there is nothing for the update surface to probe or replace.
 pub(crate) fn provider_for_profile(kind: AgentProfileKind) -> Option<ProviderKind> {
     match kind {
-        AgentProfileKind::ClaudeCode => Some(ProviderKind::Claude),
+        AgentProfileKind::Claude => Some(ProviderKind::Claude),
         AgentProfileKind::Codex => Some(ProviderKind::Codex),
         AgentProfileKind::DeepSeek => None,
     }

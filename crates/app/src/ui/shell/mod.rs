@@ -43,7 +43,7 @@ mod tests;
 use std::rc::Rc;
 use std::{collections, path, thread, time};
 
-use app::agent_tab::{AgentKind, AgentPane, AgentPaneEvent};
+use app::agent_tab::{AgentPane, AgentPaneEvent};
 use app::terminal_tab::session::HostEvent;
 use app::terminal_tab::view::{AgentInterrupted, TerminalPane};
 use dirs::home_dir;

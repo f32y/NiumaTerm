@@ -1,6 +1,10 @@
 //! Shell profiles, persisted as top-level `[[profiles]]` entries in
 //! `config.toml` by the settings dialog.
 
+pub use crate::kind::{AgentKind, AgentKind as AgentProfileKind};
+
+mod kind;
+
 #[cfg(test)]
 mod credential_tests;
 
@@ -9,7 +13,8 @@ use aes_gcm::aead::{Aead, KeyInit, OsRng, Payload};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use serde::{Deserialize, Serialize};
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use toml_edit::{Array, ArrayOfTables, InlineTable, Item, Table, value};
 
 /// The `[profiles]` section: the default-profile name plus the profile
@@ -56,21 +61,6 @@ pub struct AgentProfilesConfig {
     pub list: Vec<AgentProfile>,
 }
 
-/// Which agent CLI protocol a profile speaks; decides the spawn command line
-/// and which provider env vars a custom endpoint maps to.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum AgentProfileKind {
-    #[default]
-    ClaudeCode,
-    Codex,
-
-    /// DeepSeek Harness, driven through the local HTTP and WebSocket interface
-    /// its `dsh web` host serves rather than through a stdio CLI protocol.
-    #[serde(rename = "deepseek")]
-    DeepSeek,
-}
-
 /// How a DeepSeek Harness profile obtains the `dsh` command it launches.
 /// Other agent kinds always use [`AgentProfileLauncher::Custom`].
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -100,7 +90,7 @@ pub struct EnvVar {
 pub struct AgentProfile {
     #[serde(default)]
     pub name: String,
-    #[serde(default)]
+    #[serde(default, serialize_with = "serialize_profile_kind")]
     pub kind: AgentProfileKind,
 
     /// Executable name or path; a bare name resolves via PATH (and PATHEXT on
@@ -165,7 +155,7 @@ pub struct AgentProfile {
 struct PersistedAgentProfile {
     #[serde(default)]
     name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_profile_kind")]
     kind: AgentProfileKind,
     #[serde(default)]
     executable: String,
@@ -288,7 +278,7 @@ pub fn patch_agent_table(
         let mut table = Table::new();
 
         table["name"] = value(&profile.name);
-        table["kind"] = value::<&str>(profile.kind.into());
+        table["kind"] = value(profile_kind_name(profile.kind));
         table["executable"] = value(&profile.executable);
         table["launcher"] = value::<&str>(profile.launcher.into());
         table["model"] = value(&profile.model);
@@ -330,13 +320,36 @@ pub fn patch_agent_table(
     Ok(())
 }
 
-impl From<AgentProfileKind> for &'static str {
-    fn from(value: AgentProfileKind) -> Self {
-        match value {
-            AgentProfileKind::ClaudeCode => "claude-code",
-            AgentProfileKind::Codex => "codex",
-            AgentProfileKind::DeepSeek => "deepseek",
-        }
+// Profile files retain the labels used before session identities were shared.
+fn profile_kind_name(kind: AgentKind) -> &'static str {
+    match kind {
+        AgentKind::Claude => "claude-code",
+        AgentKind::Codex => "codex",
+        AgentKind::DeepSeek => "deepseek",
+    }
+}
+
+fn serialize_profile_kind<S: Serializer>(
+    kind: &AgentKind,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(profile_kind_name(*kind))
+}
+
+fn deserialize_profile_kind<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<AgentKind, D::Error> {
+    let value = String::deserialize(deserializer)?;
+
+    match value.as_str() {
+        "claude-code" => Ok(AgentKind::Claude),
+        "codex" => Ok(AgentKind::Codex),
+        "deepseek" => Ok(AgentKind::DeepSeek),
+
+        _ => Err(D::Error::unknown_variant(
+            &value,
+            &["claude-code", "codex", "deepseek"],
+        )),
     }
 }
 

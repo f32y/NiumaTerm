@@ -5,7 +5,7 @@ mod tests;
 use gpui_component::dialog::Dialog;
 use std::borrow::Cow;
 
-use app::agent_tab::{AgentKind, AgentKindExt as _};
+use app::agent_tab::AgentKind;
 use gpui::{AppContext as _, ClickEvent, Context, Entity, IntoElement, Render};
 use gpui_component::input::InputState;
 use rust_i18n::t;
@@ -100,7 +100,7 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
         // name; Save fills in a unique placeholder.
         None => AgentProfile {
             name: String::new(),
-            ..builtin_agent_profile(AgentProfileKind::ClaudeCode)
+            ..builtin_agent_profile(AgentProfileKind::Claude)
         },
     };
 
@@ -222,7 +222,7 @@ fn select_profile_kind(draft: &mut AgentProfileDraft, profile_kind: AgentProfile
     let follows_default = executable.is_empty()
         || AgentKind::ALL
             .into_iter()
-            .any(|other| builtin_agent_profile(other.profile_kind()).executable == executable);
+            .any(|other| builtin_agent_profile(other).executable == executable);
 
     if follows_default {
         let builtin = builtin_agent_profile(profile_kind);
@@ -462,7 +462,7 @@ fn agent_profile_dialog_content(
     let kind_label = agent_kind_display_label(profile.kind);
 
     let key_env = match profile.kind {
-        AgentProfileKind::ClaudeCode => "ANTHROPIC_API_KEY",
+        AgentProfileKind::Claude => "ANTHROPIC_API_KEY",
         AgentProfileKind::Codex => "OPENAI_API_KEY",
         AgentProfileKind::DeepSeek => "DEEPSEEK_API_KEY",
     };
@@ -533,7 +533,7 @@ fn agent_profile_dialog_content(
 
                 owner.update(cx, |_, cx| {
                     AgentKind::ALL.into_iter().fold(menu, |menu, kind| {
-                        let profile_kind = kind.profile_kind();
+                        let profile_kind = kind;
 
                         menu.item(
                             PopupMenuItem::new(agent_kind_display_label(profile_kind))
@@ -770,7 +770,7 @@ fn agent_profile_dialog_content(
         .child(card_row(
             t!("settings-agent-profile-model"),
             match profile.kind {
-                AgentProfileKind::ClaudeCode => {
+                AgentProfileKind::Claude => {
                     t!("settings-agent-profile-model-claude-description")
                 }
 
@@ -785,7 +785,7 @@ fn agent_profile_dialog_content(
         ))
         // Claude Code is the only kind that splits work across model tiers;
         // Codex has no equivalent setting to redirect.
-        .when(profile.kind == AgentProfileKind::ClaudeCode, |this| {
+        .when(profile.kind == AgentProfileKind::Claude, |this| {
             this.child(card_row(
                 t!("settings-agent-profile-replace-sub-models"),
                 t!("settings-agent-profile-replace-sub-models-description"),
@@ -819,7 +819,7 @@ fn agent_profile_dialog_content(
         .child(card_row(
             t!("settings-agent-profile-api-url"),
             match profile.kind {
-                AgentProfileKind::ClaudeCode => {
+                AgentProfileKind::Claude => {
                     t!("settings-agent-profile-api-url-claude-description")
                 }
 
@@ -835,7 +835,7 @@ fn agent_profile_dialog_content(
         .child(card_row(
             t!("settings-agent-profile-api-key"),
             match profile.kind {
-                AgentProfileKind::ClaudeCode => t!(
+                AgentProfileKind::Claude => t!(
                     "settings-agent-profile-api-key-claude-description",
                     key = key_env
                 )

@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 use std::{fs, io};
 
-use app::agent_tab::{AgentKind, AgentKindExt as _};
+use app::agent_tab::AgentKind;
 use gpui::{
     Context, Entity, IntoElement, ListAlignment, ListOffset, ListState, ScrollDelta,
     ScrollWheelEvent, TestAppContext, list, point, size,
@@ -318,7 +318,7 @@ fn agent_profile_mutations_keep_default_valid() {
     // label, collisions get a numeric suffix, and the excluded index
     // (edit mode) keeps its own name available.
     assert_eq!(
-        settings.unique_agent_profile_name("", AgentProfileKind::ClaudeCode, None),
+        settings.unique_agent_profile_name("", AgentProfileKind::Claude, None),
         "Claude Code 2"
     );
     assert_eq!(
@@ -356,7 +356,7 @@ fn agent_profile_mutations_keep_default_valid() {
     // The shortcut fallback still produces a launchable profile.
     assert_eq!(
         settings.default_agent_profile_entry().kind,
-        AgentProfileKind::ClaudeCode
+        AgentProfileKind::Claude
     );
 }
 
@@ -401,7 +401,7 @@ fn default_agent_profile_entry_resolves_by_name() {
 
     assert_eq!(
         settings.default_agent_profile_entry().kind,
-        AgentProfileKind::ClaudeCode
+        AgentProfileKind::Claude
     );
 }
 
@@ -576,14 +576,14 @@ fn every_registered_harness_can_be_named_seeded_and_launched() {
     // invisible in practice: the add dialog's picker, the seeded list, and the
     // built-in profile all have to agree on the same registry.
     for kind in AgentKind::ALL {
-        let profile = builtin_agent_profile(kind.profile_kind());
+        let profile = builtin_agent_profile(kind);
         let id: &str = kind.into();
 
-        assert_eq!(profile.kind, kind.profile_kind(), "{}", id);
+        assert_eq!(profile.kind, kind, "{}", id);
         assert!(!profile.executable.trim().is_empty(), "{}", id);
         assert!(!profile.name.trim().is_empty(), "{}", id);
         assert!(
-            !agent_kind_display_label(kind.profile_kind()).is_empty(),
+            !agent_kind_display_label(kind).is_empty(),
             "{} has no display label",
             id
         );
@@ -592,7 +592,6 @@ fn every_registered_harness_can_be_named_seeded_and_launched() {
     // Round-tripping catches a conversion that quietly maps a new kind onto an
     // existing one, which would make its profiles open the wrong backend.
     for kind in AgentKind::ALL {
-        assert_eq!(AgentKind::from_profile(kind.profile_kind()), kind);
         assert_eq!(AgentKind::from_id(kind.into()), Some(kind));
     }
 

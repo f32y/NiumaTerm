@@ -10,7 +10,7 @@ use crate::agent_tab::profile::{
 fn claude_profile_model_is_an_environment_default_with_user_override_last() {
     let profile = AgentProfile {
         name: "Claude Proxy".into(),
-        kind: AgentProfileKind::ClaudeCode,
+        kind: AgentProfileKind::Claude,
         executable: "claude".into(),
         model: "claude-profile-model".into(),
         env: vec![EnvVar {
@@ -55,7 +55,7 @@ fn a_pinned_effort_reaches_the_launch_and_default_leaves_it_unset() {
 #[test]
 fn replacing_sub_models_points_every_tier_at_the_profile_model() {
     let profile = AgentProfile {
-        kind: AgentProfileKind::ClaudeCode,
+        kind: AgentProfileKind::Claude,
         executable: "claude".into(),
         model: "vendor/only-model".into(),
         replace_sub_models: true,
@@ -83,7 +83,7 @@ fn a_user_env_entry_overrides_a_replaced_sub_model() {
     // Case-insensitive, because Windows resolves process environment keys
     // that way and the launcher hands the table straight to the command.
     let profile = AgentProfile {
-        kind: AgentProfileKind::ClaudeCode,
+        kind: AgentProfileKind::Claude,
         executable: "claude".into(),
         model: "vendor/only-model".into(),
         replace_sub_models: true,
@@ -109,7 +109,7 @@ fn a_user_env_entry_overrides_a_replaced_sub_model() {
 #[test]
 fn sub_model_replacement_is_off_by_default_and_needs_a_model() {
     let off = AgentProfile {
-        kind: AgentProfileKind::ClaudeCode,
+        kind: AgentProfileKind::Claude,
         executable: "claude".into(),
         model: "vendor/only-model".into(),
         ..AgentProfile::default()
@@ -118,7 +118,7 @@ fn sub_model_replacement_is_off_by_default_and_needs_a_model() {
     // Without a model there is nothing to propagate, so the switch alone
     // must not export empty overrides that would break model selection.
     let no_model = AgentProfile {
-        kind: AgentProfileKind::ClaudeCode,
+        kind: AgentProfileKind::Claude,
         executable: "claude".into(),
         replace_sub_models: true,
         ..AgentProfile::default()
@@ -140,7 +140,7 @@ fn claude_custom_endpoint_exports_base_url_and_api_key() {
     // provider environment.
     let profile = AgentProfile {
         name: "Claude Proxy".into(),
-        kind: AgentProfileKind::ClaudeCode,
+        kind: AgentProfileKind::Claude,
         executable: "claude".into(),
         use_custom_endpoint: true,
         api_base_url: "https://proxy.example.com".into(),

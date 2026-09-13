@@ -16,7 +16,6 @@ use nmt_agent::profile::{
 };
 use nmt_agent::session::settings::RememberedSettings;
 use nmt_config::local_state::AgentDefaults as StoredAgentDefaults;
-use nmt_config::profile::AgentProfileKind;
 
 /// Provider icons, defined beside the kind they mark. The usage view and the
 /// settings chrome borrow them from here.
@@ -46,30 +45,10 @@ impl IconNamed for DeepSeekIcon {
 
 /// Application configuration and presentation for an agent kind.
 pub trait AgentKindExt {
-    fn from_profile(kind: AgentProfileKind) -> Self;
-
-    fn profile_kind(self) -> AgentProfileKind;
-
     fn icon(self) -> Icon;
 }
 
 impl AgentKindExt for AgentKind {
-    fn from_profile(kind: AgentProfileKind) -> Self {
-        match kind {
-            AgentProfileKind::ClaudeCode => AgentKind::Claude,
-            AgentProfileKind::Codex => AgentKind::Codex,
-            AgentProfileKind::DeepSeek => AgentKind::DeepSeek,
-        }
-    }
-
-    fn profile_kind(self) -> AgentProfileKind {
-        match self {
-            AgentKind::Claude => AgentProfileKind::ClaudeCode,
-            AgentKind::Codex => AgentProfileKind::Codex,
-            AgentKind::DeepSeek => AgentProfileKind::DeepSeek,
-        }
-    }
-
     /// The harness's own mark. Tabs and the profile list read it from here so
     /// one kind cannot end up wearing another's glyph in one of them.
     fn icon(self) -> Icon {

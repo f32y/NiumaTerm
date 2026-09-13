@@ -123,7 +123,7 @@ impl BackgroundTasksView {
 
         let theme = cx.theme();
 
-        let provider: &str = task.key.provider.into();
+        let provider: &str = task.key.provider.full_name();
 
         let header = v_flex()
             .px_2()

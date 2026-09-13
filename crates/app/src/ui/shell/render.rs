@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use app::agent_tab::{AgentKindExt as _, RecoveryIdentity};
+use app::agent_tab::RecoveryIdentity;
 use gpui::KeyDownEvent;
 use gpui_component::Disableable;
 use gpui_component::modern_menu::{ModernMenu, dispatch_modern_menu_key};
@@ -95,7 +95,7 @@ impl Render for Shell {
                 &request.profile,
                 workspace,
                 Some(RecoveryIdentity::new(
-                    AgentKind::from_profile(request.profile.kind),
+                    request.profile.kind,
                     request.session_id,
                 )),
                 window,

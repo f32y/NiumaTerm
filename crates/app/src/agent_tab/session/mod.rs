@@ -58,7 +58,7 @@ use crate::agent_tab::execution::{AgentSession, PresentationEffect, SessionOwner
 use crate::agent_tab::fade::Fade;
 use crate::agent_tab::input_history::{InputHistoryNavigation, InputHistoryScope};
 use crate::agent_tab::pane_state::TurnPresentation;
-use crate::agent_tab::profile::{AgentKind, AgentKindExt as _};
+use crate::agent_tab::profile::AgentKind;
 use crate::agent_tab::session::prompts::PendingPrompts;
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::thread_controls::ThreadControls;
@@ -168,7 +168,7 @@ impl AgentPane {
         let session = host.read(cx).controller.clone();
         let route = host.read(cx).route.clone();
         let binding = owner.bind();
-        let kind = AgentKind::from_profile(profile.kind);
+        let kind = profile.kind;
         let cwd = workspace.primary().map(str::to_string);
         let input_history_scope = InputHistoryScope::local(kind, &workspace);
         let name = kind.display();

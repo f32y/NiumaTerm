@@ -2,7 +2,7 @@ use std::process;
 
 use app::agent_tab::execution::AgentSession;
 use app::agent_tab::team::{TeamPane, TeamRuntime};
-use app::agent_tab::{AgentKind, AgentKindExt as _, AgentPane};
+use app::agent_tab::{AgentKind, AgentPane};
 use app::terminal_tab::view::TerminalPane;
 use dirs::home_dir;
 use gpui::{App, AppContext, Axis, Context, Entity, Window};
@@ -106,14 +106,9 @@ fn restored_agent_profile(
         .agent_profiles
         .iter()
         .find(|p| name.is_some_and(|name| p.name == name))
-        .or_else(|| {
-            settings
-                .agent_profiles
-                .iter()
-                .find(|p| p.kind == kind.profile_kind())
-        })
+        .or_else(|| settings.agent_profiles.iter().find(|p| p.kind == kind))
         .cloned()
-        .unwrap_or_else(|| builtin_agent_profile(kind.profile_kind()))
+        .unwrap_or_else(|| builtin_agent_profile(kind))
 }
 
 fn axis_to_state(axis: Axis) -> PaneSplitAxis {

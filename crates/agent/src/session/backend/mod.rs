@@ -385,7 +385,7 @@ impl Backend {
     fn owns_task(&self, key: &BackgroundTaskKey) -> bool {
         let provider = match self {
             Backend::Codex(_) => BackgroundTaskProvider::Codex,
-            Backend::Claude(_) => BackgroundTaskProvider::ClaudeCode,
+            Backend::Claude(_) => BackgroundTaskProvider::Claude,
             Backend::DeepSeek(_) => BackgroundTaskProvider::DeepSeek,
 
             #[cfg(any(test, feature = "test-support"))]

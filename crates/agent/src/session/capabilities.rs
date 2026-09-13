@@ -1,5 +1,6 @@
 use crate::MultiRootAccess;
 use crate::session::AgentKind;
+use crate::update::ProviderKind;
 
 /// What one harness can do. Behavior questions ask a named capability here
 /// instead of comparing against a kind, so a call site reads as the question
@@ -154,10 +155,22 @@ const DEEPSEEK: Capabilities = Capabilities {
 };
 
 pub trait AgentCapabilities {
+    /// DeepSeek is installed outside the application update service.
+    fn provider_kind(self) -> Option<ProviderKind>;
+
     fn caps(self) -> &'static Capabilities;
 }
 
 impl AgentCapabilities for AgentKind {
+    /// DeepSeek is installed outside the application update service.
+    fn provider_kind(self) -> Option<ProviderKind> {
+        match self {
+            Self::Claude => Some(ProviderKind::Claude),
+            Self::Codex => Some(ProviderKind::Codex),
+            Self::DeepSeek => None,
+        }
+    }
+
     fn caps(self) -> &'static Capabilities {
         match self {
             AgentKind::Codex => &CODEX,

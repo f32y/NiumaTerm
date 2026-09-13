@@ -1,7 +1,7 @@
 //! Agent profiles rendered as a three-column list: the agent's own mark, the
 //! profile name, and the per-row edit and delete controls.
 
-use app::agent_tab::{AgentKind, AgentKindExt as _};
+use app::agent_tab::AgentKindExt as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Div, DragMoveEvent, Entity, Hsla,
@@ -62,7 +62,7 @@ fn row_line(edge: RowEdge, height: Pixels, color: Hsla) -> Div {
 
 /// The agent's mark, matching the glyph its tabs carry.
 fn agent_icon(profile: &AgentProfile) -> Icon {
-    AgentKind::from_profile(profile.kind).icon().small()
+    profile.kind.icon().small()
 }
 
 fn profile_label(ix: usize, profile: &AgentProfile) -> String {

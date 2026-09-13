@@ -39,7 +39,7 @@ use uuid::Uuid;
 
 use crate::agent_tab::AgentPaneEvent;
 use crate::agent_tab::composer::attachments::scratch_dir;
-use crate::agent_tab::profile::{AgentKind, AgentKindExt as _};
+use crate::agent_tab::profile::AgentKind;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SessionId(Uuid);
@@ -202,7 +202,7 @@ impl AgentSession {
         team_launch: Option<TeamLaunch>,
         cx: &mut App,
     ) -> SessionOwner {
-        let kind = AgentKind::from_profile(profile.kind);
+        let kind = profile.kind;
         let controller = Rc::new(RefCell::new(SessionController::new(kind)));
         let closed = Rc::new(Cell::new(false));
         let binding_generation = Rc::new(Cell::new(0));

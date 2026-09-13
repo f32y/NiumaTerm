@@ -31,7 +31,7 @@ pub(super) fn render_row(
     let detail = row_detail(task);
     let timing = row_timing(task, now);
     let state_label = background_task_state_label(task.state);
-    let provider: &str = task.key.provider.into();
+    let provider: &str = task.key.provider.full_name();
 
     // Everything the row shows visually, in one string. A screen reader
     // announces the row as a whole, so it needs the parts the layout separates

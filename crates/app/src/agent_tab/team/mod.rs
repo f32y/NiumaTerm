@@ -23,7 +23,6 @@ use nmt_agent::team::session::{TeamError, TeamSession};
 use nmt_config::profile::AgentProfile;
 
 use crate::agent_tab::execution::{AgentSession, SessionOwner};
-use crate::agent_tab::profile::AgentKindExt as _;
 use crate::agent_tab::settings::AgentSettings;
 
 struct MemberHost {
@@ -80,7 +79,7 @@ impl TeamRuntime {
             let members: Vec<_> = this.room().members().iter().filter(|member| !member.excluded()).cloned().collect();
 
             for member in members {
-                let profile = cx.global::<AgentSettings>().profiles.iter().find(|profile| AgentKind::from_profile(profile.kind) == member.profile().kind && profile.name == member.profile().name).cloned();
+                let profile = cx.global::<AgentSettings>().profiles.iter().find(|profile| profile.kind == member.profile().kind && profile.name == member.profile().name).cloned();
 
                 match profile {
                     Some(profile) => this.attach_member(member.id(), profile, cx),
@@ -123,9 +122,7 @@ impl TeamRuntime {
         config: MemberConfig,
         cx: &mut Context<Self>,
     ) -> Result<MemberId, TeamError> {
-        if config.profile.kind != AgentKind::from_profile(profile.kind)
-            || config.profile.name != profile.name
-        {
+        if config.profile.kind != profile.kind || config.profile.name != profile.name {
             return Err(TeamError::Unavailable);
         }
 

@@ -178,7 +178,7 @@ pub(crate) fn new_tab_menu(
         };
 
         let item_shell = shell.clone();
-        let icon = tab_icon(Some(AgentKind::from_profile(profile.kind)), false);
+        let icon = tab_icon(Some(profile.kind), false);
 
         menu = menu
             .item(label, move |window, cx| {

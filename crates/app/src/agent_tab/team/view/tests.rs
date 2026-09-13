@@ -46,7 +46,7 @@ async fn claude_member_startup_retains_native_permission_selection(cx: &mut Test
 
         let profile = AgentProfile {
             name: "test-claude".into(),
-            kind: AgentProfileKind::ClaudeCode,
+            kind: AgentProfileKind::Claude,
             executable: Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../agent/tests/fixtures/claude/fake-stream-json.cmd")
                 .to_string_lossy()

@@ -1,6 +1,6 @@
+use app::agent_tab::RecoveryIdentity;
 use app::agent_tab::execution::AgentSession;
 use app::agent_tab::team::{TeamPane, TeamRuntime};
-use app::agent_tab::{AgentKindExt as _, RecoveryIdentity};
 use nmt_agent::team::identity::RoomId;
 use nmt_config::config_dir_path;
 use nmt_config::local_state::TabState;
@@ -268,7 +268,7 @@ impl Shell {
         // agent stay distinguishable; an unnamed profile falls back to the
         // agent name.
         let title = if profile.name.trim().is_empty() {
-            AgentKind::from_profile(profile.kind).display().to_string()
+            profile.kind.display().to_string()
         } else {
             profile.name.clone()
         };

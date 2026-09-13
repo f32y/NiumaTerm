@@ -3,6 +3,8 @@
 //! reports them as Task tool calls plus sidechain records; both reduce into the
 //! same summary so the UI never parses a provider protocol.
 
+pub use nmt_profile::AgentKind as BackgroundTaskProvider;
+
 pub use crate::background_task::transcript::{
     BackgroundTaskTranscript, BackgroundTaskTranscriptState, BackgroundTaskTranscriptUpdate,
     MAX_TRANSCRIPT_ITEMS,
@@ -15,15 +17,6 @@ mod tests;
 
 use std::collections::HashMap;
 use std::time::SystemTime;
-
-/// Which agent backend owns a task. Two providers can emit the same local id
-/// string, so every identity in this module is qualified by the provider.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum BackgroundTaskProvider {
-    Codex,
-    ClaudeCode,
-    DeepSeek,
-}
 
 /// A provider plus a provider-local stable id. Used both for a child task and
 /// for the parent session that owns it, because both need the same
@@ -47,7 +40,7 @@ impl BackgroundTaskKey {
     }
 
     pub fn claude_code(id: impl Into<String>) -> Self {
-        Self::new(BackgroundTaskProvider::ClaudeCode, id)
+        Self::new(BackgroundTaskProvider::Claude, id)
     }
 
     pub fn deepseek(id: impl Into<String>) -> Self {
@@ -506,7 +499,7 @@ fn default_refs(key: &BackgroundTaskKey) -> BackgroundTaskRefs {
             parent_thread_id: None,
         },
 
-        BackgroundTaskProvider::ClaudeCode => BackgroundTaskRefs::ClaudeCode {
+        BackgroundTaskProvider::Claude => BackgroundTaskRefs::ClaudeCode {
             task_id: None,
             tool_use_id: None,
             agent_id: None,
@@ -609,16 +602,6 @@ pub(crate) fn replace_text(current: &mut Option<String>, incoming: &Option<Strin
     *current = Some(incoming.clone());
 
     true
-}
-
-impl From<BackgroundTaskProvider> for &'static str {
-    fn from(value: BackgroundTaskProvider) -> Self {
-        match value {
-            BackgroundTaskProvider::Codex => "Codex",
-            BackgroundTaskProvider::ClaudeCode => "Claude Code",
-            BackgroundTaskProvider::DeepSeek => "DeepSeek Harness",
-        }
-    }
 }
 
 impl From<BackgroundTaskState> for &'static str {

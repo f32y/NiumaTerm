@@ -3,6 +3,7 @@ use std::time::Duration;
 use gpui::{App, AsyncApp, Context, Task, WeakEntity};
 use nmt_agent::launcher::AgentCli;
 use nmt_agent::session::Backend;
+use nmt_agent::session::capabilities::AgentCapabilities as _;
 use nmt_agent::session::update_readiness::{ConversationWork, Readiness};
 use nmt_agent::update::InstallationKey;
 use rust_i18n::t;

@@ -81,3 +81,51 @@ fn unknown_version_is_rejected() {
         assert!(err.contains("unsupported"), "{err}");
     }
 }
+
+#[test]
+fn shared_identity_preserves_profile_and_session_storage_labels() {
+    use serde::{Deserialize, Serialize};
+
+    use crate::{AgentKind, AgentProfile, patch_agent_table};
+    use toml_edit::Table;
+
+    #[derive(Serialize, Deserialize)]
+    struct SessionIdentity {
+        kind: AgentKind,
+    }
+
+    for (kind, profile_label, session_label) in [
+        (AgentKind::Claude, "claude-code", "claude"),
+        (AgentKind::Codex, "codex", "codex"),
+        (AgentKind::DeepSeek, "deepseek", "deep_seek"),
+    ] {
+        let profile = AgentProfile {
+            kind,
+            ..AgentProfile::default()
+        };
+
+        let serialized = toml::to_string(&profile).unwrap();
+        let decoded: AgentProfile = toml::from_str(&serialized).unwrap();
+
+        assert_eq!(decoded.kind, kind);
+        assert_eq!(
+            toml::from_str::<toml::Value>(&serialized).unwrap()["kind"].as_str(),
+            Some(profile_label)
+        );
+
+        let mut table = Table::new();
+
+        patch_agent_table(&mut table, &[profile], "").unwrap();
+
+        assert_eq!(table["list"][0]["kind"].as_str(), Some(profile_label));
+
+        let serialized = toml::to_string(&SessionIdentity { kind }).unwrap();
+        let decoded: SessionIdentity = toml::from_str(&serialized).unwrap();
+
+        assert_eq!(decoded.kind, kind);
+        assert_eq!(
+            toml::from_str::<toml::Value>(&serialized).unwrap()["kind"].as_str(),
+            Some(session_label)
+        );
+    }
+}
