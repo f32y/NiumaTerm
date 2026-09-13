@@ -2,9 +2,9 @@
 //! before it was moved here; these lock its current byte output so the rio-input
 //! extraction and later refactors are verifiably non-regressing.
 
-use nmt_input::event::ElementState;
-use nmt_input::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
-use nmt_input::{
+use crate::event::ElementState;
+use crate::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
+use crate::{
     KeyEncodeFlags, KeyInput, bracket_paste, build_key_sequence, encode_mouse_report,
     encode_terminal_input, encode_terminal_key,
 };

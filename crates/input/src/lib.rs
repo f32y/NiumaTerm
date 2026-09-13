@@ -12,6 +12,9 @@
 pub mod event;
 pub mod keyboard;
 
+#[cfg(test)]
+mod key_encoding_tests;
+
 use std::borrow::Cow;
 
 use bitflags::bitflags;
@@ -62,7 +65,7 @@ pub struct KeyInput {
 }
 
 #[inline(never)]
-pub fn build_key_sequence(key: &KeyInput, mods: ModifiersState, flags: KeyEncodeFlags) -> Vec<u8> {
+fn build_key_sequence(key: &KeyInput, mods: ModifiersState, flags: KeyEncodeFlags) -> Vec<u8> {
     let mut modifiers = mods.into();
 
     let kitty_seq = flags.intersects(
@@ -171,7 +174,7 @@ pub fn build_key_sequence(key: &KeyInput, mods: ModifiersState, flags: KeyEncode
 /// search input, hint selection, IME preedit) — those gates stay caller-side. It is
 /// for the press path only; key-release (kitty event types) calls
 /// [`build_key_sequence`] directly.
-pub fn encode_terminal_key(
+fn encode_terminal_key(
     input: &KeyInput,
     mods: ModifiersState,
     flags: KeyEncodeFlags,
