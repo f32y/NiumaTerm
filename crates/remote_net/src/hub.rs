@@ -1,3 +1,5 @@
+//! Headless ConPTY sessions retained independently of client subscriptions.
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;

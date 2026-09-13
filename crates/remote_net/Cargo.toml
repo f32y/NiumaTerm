@@ -27,4 +27,3 @@ tracing.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 nmt_platform.workspace = true
-nmt_remote_session_hub.workspace = true

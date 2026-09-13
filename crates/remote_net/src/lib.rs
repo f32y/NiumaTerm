@@ -19,6 +19,8 @@ pub use crate::keys::*;
 pub use crate::protocol::*;
 
 #[cfg(windows)]
+pub mod hub;
+#[cfg(windows)]
 pub mod net_pty;
 pub mod protocol;
 

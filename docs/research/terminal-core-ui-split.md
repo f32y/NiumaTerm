@@ -389,7 +389,7 @@ integration adds arguments, environment entries, or bootstrap input.
 Current Windows dependencies include:
 
 ```text
-nmt_remote_net -> nmt_remote_session_hub -> nmt_terminal
+nmt_remote_net (including hub) -> nmt_terminal
 ```
 
 Moving `NetPty` into `nmt_terminal` while retaining its dependency on
@@ -402,7 +402,7 @@ Preserve the distinction between:
 - Remote host: owns the shell and output stream; terminal query responses are
   disabled so host and client do not send duplicate answers.
 
-See [host construction](../../crates/remote_session_hub/src/windows.rs).
+See [host construction](../../crates/remote_net/src/hub.rs).
 Do not flatten these differences into one set of default creation options.
 
 The remote hub also owns subscriptions, checkpoints, and output broadcasting.

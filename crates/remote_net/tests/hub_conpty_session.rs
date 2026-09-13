@@ -3,7 +3,7 @@
 use std::thread;
 use std::time::{Duration, Instant};
 
-use nmt_remote_session_hub::{RemoteSessionHub, SessionEvent, SessionOptions, SessionSubscription};
+use nmt_remote_net::hub::{RemoteSessionHub, SessionEvent, SessionOptions, SessionSubscription};
 
 #[test]
 fn session_survives_detach_and_reconnects_from_a_vt_checkpoint() {

@@ -9,7 +9,7 @@ use std::time::Duration;
 use nmt_platform::{
     ChildEvent, EventedPty, Interest, Poll, ProcessReadWrite, Token, Waker, WinsizeBuilder,
 };
-use nmt_remote_session_hub::{
+use nmt_remote_net::hub::{
     HubError, OpenedPty, PtySource, RemoteSessionHub, SessionEvent, SessionOptions,
 };
 use parking_lot::Mutex;

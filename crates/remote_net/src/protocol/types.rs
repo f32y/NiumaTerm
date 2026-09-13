@@ -1,4 +1,5 @@
-use nmt_remote_session_hub::{SessionInfo, SessionOptions, SessionSnapshot};
+#[cfg(windows)]
+use crate::hub::{SessionInfo, SessionOptions, SessionSnapshot};
 use serde::{Deserialize, Serialize};
 
 /// Options a remote client may request when opening a session. Deliberately a
@@ -80,6 +81,7 @@ pub enum ClientBound {
     },
 }
 
+#[cfg(windows)]
 impl From<ProtocolSessionOptions> for SessionOptions {
     fn from(request: ProtocolSessionOptions) -> Self {
         let mut options = SessionOptions::default();
@@ -102,6 +104,7 @@ impl From<ProtocolSessionOptions> for SessionOptions {
     }
 }
 
+#[cfg(windows)]
 impl From<SessionInfo> for ProtocolSessionInfo {
     fn from(info: SessionInfo) -> Self {
         ProtocolSessionInfo {
@@ -114,6 +117,7 @@ impl From<SessionInfo> for ProtocolSessionInfo {
     }
 }
 
+#[cfg(windows)]
 impl From<&SessionSnapshot> for ProtocolSessionSnapshot {
     fn from(snapshot: &SessionSnapshot) -> Self {
         ProtocolSessionSnapshot {

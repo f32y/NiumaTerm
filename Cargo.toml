@@ -18,7 +18,6 @@ members = [
     "crates/platform",
     "crates/profiling",
     "crates/remote_net",
-    "crates/remote_session_hub",
     "crates/shell_extension",
     "crates/terminal",
     "crates/tree_sitter_bundle",
@@ -53,9 +52,7 @@ members = [
     "third_party/gpui-kit/crates/component-macros",
     "third_party/gpui-kit/crates/component",
 ]
-# The binaries a bare `cargo build` produces. `remote_session_hub` is not one:
-# it is a library the app already pulls in through `remote_net`, so naming it
-# here only made it read as a build target of its own.
+# The binaries a bare `cargo build` produces.
 default-members = [
     "crates/agent_hook_cli",
     "crates/app",
@@ -83,7 +80,6 @@ libghostty-vt-sys = { path = "third_party/libghostty-vt-sys" }
 nmt_platform = { path = "crates/platform" }
 nmt_profiling = { path = "crates/profiling" }
 nmt_remote_net = { path = "crates/remote_net" }
-nmt_remote_session_hub = { path = "crates/remote_session_hub" }
 nmt_terminal = { path = "crates/terminal" }
 nmt_sparkle = { path = "crates/sparkle" }
 

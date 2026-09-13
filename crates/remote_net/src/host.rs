@@ -10,9 +10,9 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 use std::{io, thread};
 
+use crate::hub::{RemoteSessionHub, SessionEvent, SessionId, SessionSubscription};
 use futures::stream::SplitSink;
 use futures::{SinkExt, StreamExt};
-use nmt_remote_session_hub::{RemoteSessionHub, SessionEvent, SessionId, SessionSubscription};
 use parking_lot::Mutex;
 use tokio::runtime::Builder as RuntimeBuilder;
 use tokio::sync::{mpsc, watch};

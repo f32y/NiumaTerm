@@ -4335,7 +4335,6 @@ dependencies = [
  "futures",
  "nmt_config",
  "nmt_platform",
- "nmt_remote_session_hub",
  "nmt_terminal",
  "parking_lot",
  "postcard",
@@ -4348,17 +4347,6 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tracing",
-]
-
-[[package]]
-name = "nmt_remote_session_hub"
-version = "1.3.4"
-dependencies = [
- "nmt_config",
- "nmt_platform",
- "nmt_terminal",
- "parking_lot",
- "serde",
 ]
 
 [[package]]

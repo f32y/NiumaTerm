@@ -3,8 +3,8 @@ use std::sync::{Arc, mpsc};
 use std::time::Duration;
 use std::{env, fs, process, thread};
 
+use crate::hub::SessionEvent;
 use futures::StreamExt;
-use nmt_remote_session_hub::SessionEvent;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::time::timeout;
