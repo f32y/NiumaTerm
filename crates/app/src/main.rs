@@ -611,10 +611,8 @@ fn get_last_active_shell(cx: &App) -> Option<(AnyWindowHandle, WeakEntity<ui::Sh
     let last = cx.global::<LastActiveWindow>().0;
 
     registry
-        .0
-        .iter()
-        .find(|entry| Some(entry.window_id) == last)
-        .or_else(|| registry.0.last())
+        .prioritized(last)
+        .next()
         .map(|entry| (entry.handle, entry.shell.clone()))
 }
 
@@ -705,24 +703,11 @@ fn on_ipc_cli(action: CliAction, cx: &mut App) {
             // remaining windows are checked newest first.
             let last = cx.global::<LastActiveWindow>().0;
             let registry = cx.global::<ShellRegistry>();
-            let mut targets = Vec::with_capacity(registry.0.len());
 
-            if let Some(entry) = registry
-                .0
-                .iter()
-                .find(|entry| Some(entry.window_id) == last)
-            {
-                targets.push((entry.handle, entry.shell.clone()));
-            }
-
-            targets.extend(
-                registry
-                    .0
-                    .iter()
-                    .rev()
-                    .filter(|entry| Some(entry.window_id) != last)
-                    .map(|entry| (entry.handle, entry.shell.clone())),
-            );
+            let targets: Vec<_> = registry
+                .prioritized(last)
+                .map(|entry| (entry.handle, entry.shell.clone()))
+                .collect();
 
             for (handle, shell) in targets {
                 let activated = handle

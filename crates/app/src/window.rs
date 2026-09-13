@@ -84,6 +84,19 @@ pub(crate) struct ShellRegistry(pub(crate) Vec<ShellEntry>);
 impl Global for ShellRegistry {}
 
 impl ShellRegistry {
+    pub(crate) fn prioritized(&self, last: Option<WindowId>) -> impl Iterator<Item = &ShellEntry> {
+        self.0
+            .iter()
+            .find(|entry| Some(entry.window_id) == last)
+            .into_iter()
+            .chain(
+                self.0
+                    .iter()
+                    .rev()
+                    .filter(move |entry| Some(entry.window_id) != last),
+            )
+    }
+
     pub(crate) fn remove(&mut self, id: WindowId) {
         self.0.retain(|entry| entry.window_id != id);
     }
