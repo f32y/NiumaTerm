@@ -531,7 +531,7 @@ fn write_pty(pty: &mut nmt_platform::Pty, bytes: &[u8], description: &str) -> Re
         .map_err(|err| format!("failed to write {description}: {err}"))
 }
 
-pub fn parse_output(output: &str) -> Result<UsageSnapshot, String> {
+fn parse_output(output: &str) -> Result<UsageSnapshot, String> {
     let normalized = strip_terminal_sequences(&output.replace("\r\n", "\n").replace('\r', "\n"));
     let lines: Vec<&str> = normalized.lines().collect();
 

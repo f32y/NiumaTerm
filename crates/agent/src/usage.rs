@@ -9,8 +9,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::DateTime;
 use serde_json::Value;
 
-pub const FIVE_HOUR_WINDOW_MINUTES: u32 = 5 * 60;
-pub const WEEKLY_WINDOW_MINUTES: u32 = 7 * 24 * 60;
+pub(crate) const FIVE_HOUR_WINDOW_MINUTES: u32 = 5 * 60;
+pub(crate) const WEEKLY_WINDOW_MINUTES: u32 = 7 * 24 * 60;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UsageWindow {
@@ -48,7 +48,7 @@ pub struct UsageSnapshot {
 }
 
 impl UsageSnapshot {
-    pub fn is_unavailable(&self) -> bool {
+    pub(crate) fn is_unavailable(&self) -> bool {
         self.five_hour.is_none() && self.weekly.is_none() && self.fable_weekly.is_none()
     }
 
@@ -68,7 +68,7 @@ impl UsageSnapshot {
         ]
     }
 
-    pub fn with_updated_now(mut self) -> Self {
+    pub(crate) fn with_updated_now(mut self) -> Self {
         self.updated_at = Some(now_unix_millis());
 
         self
@@ -79,7 +79,7 @@ impl UsageSnapshot {
     /// than about their values, so a window already present is never replaced:
     /// two readings of the same window differ only by the seconds between
     /// them, and the first one asked is the more authoritative source.
-    pub fn filled_from(mut self, other: &Self) -> Self {
+    pub(crate) fn filled_from(mut self, other: &Self) -> Self {
         self.five_hour = self.five_hour.or_else(|| other.five_hour.clone());
         self.weekly = self.weekly.or_else(|| other.weekly.clone());
         self.fable_weekly = self.fable_weekly.or_else(|| other.fable_weekly.clone());
@@ -125,7 +125,7 @@ pub(crate) fn parse_timestamp_millis(value: &Value) -> Option<i64> {
         .map(|timestamp| timestamp.timestamp_millis())
 }
 
-pub fn format_remaining(window: Option<&UsageWindow>) -> String {
+fn format_remaining(window: Option<&UsageWindow>) -> String {
     window.map_or_else(
         || "—".to_string(),
         |window| format!("{}%", window.remaining_percentage),
