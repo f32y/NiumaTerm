@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::mem;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -5,14 +6,17 @@ use std::sync::atomic::Ordering;
 use tracing::debug;
 
 use crate::block_store::SegmentMeta;
-use crate::event::{EventListener, TerminalEvent, WindowId};
+use crate::event::{BlockEvent, EventListener, TerminalEvent, WindowId};
 use crate::session::{
     HostEvent, InFlightBlock, SessionChange, SessionObserver, SessionSharedState,
 };
 
-#[derive(Clone)]
 pub(super) struct TerminalEventProxy {
     shared: Arc<SessionSharedState>,
+
+    /// Block events wait for the read-cycle damage notification so image
+    /// generations are installed before frozen rows become visible.
+    pub(super) staged_blocks: RefCell<Vec<BlockEvent>>,
 
     /// Source surface id, stamped onto every wake so the shell can route by tab.
     id: u64,
@@ -29,6 +33,7 @@ impl TerminalEventProxy {
     ) -> Self {
         Self {
             shared,
+            staged_blocks: RefCell::default(),
             id,
             observer,
         }
@@ -44,7 +49,7 @@ impl TerminalEventProxy {
     /// Called on the read's damage wake so items land together with the
     /// render they belong to. Empty in steady state.
     fn flush_staged_blocks(&self) {
-        let batch = mem::take(&mut *self.shared.staged_blocks.lock());
+        let batch = mem::take(&mut *self.staged_blocks.borrow_mut());
 
         if batch.is_empty() {
             return;
@@ -125,7 +130,7 @@ impl EventListener for TerminalEventProxy {
 
                 self.shared.open_prompt.store(false, Ordering::Release);
 
-                self.shared.staged_blocks.lock().clear();
+                self.staged_blocks.borrow_mut().clear();
 
                 HostEvent::Exit
             }
@@ -163,7 +168,7 @@ impl EventListener for TerminalEventProxy {
                 // Stage this read's block events; they flush to the store on the
                 // read's damage wake, after `UpdateGraphics` installs the generations
                 // its slices bind to. No chrome/content wake here.
-                self.shared.staged_blocks.lock().extend(batch);
+                self.staged_blocks.borrow_mut().extend(batch);
 
                 return;
             }

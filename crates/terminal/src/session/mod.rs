@@ -60,7 +60,7 @@ use parking_lot::Mutex;
 use tracing::error;
 
 use crate::block_store::{BlockItem, BlockStore};
-use crate::event::{BlockEvent, Msg, MsgSender, ProgressReport};
+use crate::event::{Msg, MsgSender, ProgressReport};
 use crate::ghostty::BlockHandle;
 use crate::graphics::GraphicData;
 use crate::pty_pipe::{SessionOptions, SessionWorker, start_session};
@@ -169,10 +169,6 @@ struct SessionSharedState {
     exited: AtomicBool,
     alt_screen: AtomicBool,
     selection: SurfaceSelection,
-
-    /// Block events wait for the read-cycle damage notification so image
-    /// generations are installed before frozen rows become visible.
-    staged_blocks: Mutex<Vec<BlockEvent>>,
 }
 
 impl TerminalSession {

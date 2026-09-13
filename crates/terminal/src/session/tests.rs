@@ -596,7 +596,7 @@ fn sustained_output_does_not_grow_ui_queue() {
 
         // After each read's damage flush the staging buffer is empty again.
         assert!(
-            p.shared.staged_blocks.lock().is_empty(),
+            proxy.staged_blocks.borrow().is_empty(),
             "staging bounded to one read"
         );
     }
