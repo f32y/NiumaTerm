@@ -25,7 +25,7 @@ impl SessionController {
             .push(self.delivery.turn(), item, images);
     }
 
-    pub fn note_visible_output(&mut self) {
+    pub(crate) fn note_visible_output(&mut self) {
         self.delivery.visible_output();
         self.conversation.borrow_mut().visible_output();
     }
@@ -57,7 +57,7 @@ impl SessionController {
         self.push_item(item);
     }
 
-    pub fn complete_item(&mut self, item: Item) {
+    pub(crate) fn complete_item(&mut self, item: Item) {
         let Some(id) = item.id() else {
             return;
         };

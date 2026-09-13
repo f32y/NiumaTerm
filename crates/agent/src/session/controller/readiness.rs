@@ -117,7 +117,7 @@ impl SessionController {
     /// Apply host-supplied defaults after any restored content has been accepted.
     /// A model-selection refusal leaves the effective settings reported by the
     /// backend and returns its error for the host to present.
-    pub fn finish_ready(
+    pub(crate) fn finish_ready(
         &mut self,
         kind: AgentKind,
         settings: ThreadSettings,

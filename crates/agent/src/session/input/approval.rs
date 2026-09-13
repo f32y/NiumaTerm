@@ -21,18 +21,18 @@ impl SessionInput {
             .map(|approval| approval.description.as_str())
     }
 
-    pub fn ask_approval(&mut self, description: String) {
+    pub(crate) fn ask_approval(&mut self, description: String) {
         self.approval = Some(Approval {
             description,
             submitted: false,
         });
     }
 
-    pub fn dismiss_approval(&mut self) {
+    pub(crate) fn dismiss_approval(&mut self) {
         self.approval = None;
     }
 
-    pub fn resolve_approval(&mut self, epoch: u64) -> bool {
+    pub(crate) fn resolve_approval(&mut self, epoch: u64) -> bool {
         epoch == self.epoch && !self.disconnected && self.approval.take().is_some()
     }
 

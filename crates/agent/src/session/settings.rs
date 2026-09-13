@@ -131,7 +131,7 @@ impl ConversationSettings {
         self.settings = next;
     }
 
-    pub fn apply_model(&mut self, session: &mut Backend) -> Option<Result<(), String>> {
+    pub(crate) fn apply_model(&mut self, session: &mut Backend) -> Option<Result<(), String>> {
         let model = self.settings.model.as_deref()?;
 
         let effort = (session.selection().0 == Some(model))

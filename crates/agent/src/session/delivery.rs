@@ -125,7 +125,7 @@ impl MessageDelivery {
     }
 
     /// Commands and accepted question answers can open a turn without a prompt.
-    pub fn begin_turn(&mut self) -> u64 {
+    pub(crate) fn begin_turn(&mut self) -> u64 {
         self.turn += 1;
         self.active = true;
 
@@ -133,7 +133,7 @@ impl MessageDelivery {
     }
 
     /// A submitted turn already has a number; a provider-opened turn does not.
-    pub fn provider_started(&mut self) -> bool {
+    pub(crate) fn provider_started(&mut self) -> bool {
         if self.active {
             return false;
         }
@@ -148,7 +148,7 @@ impl MessageDelivery {
     }
 
     /// Restored turns reserve numbers without starting live work.
-    pub fn replay_turn(&mut self) -> u64 {
+    pub(crate) fn replay_turn(&mut self) -> u64 {
         self.turn += 1;
 
         self.turn
@@ -157,7 +157,7 @@ impl MessageDelivery {
     /// Only visible activity answers the active prompt. Hidden provider items
     /// do not revoke the user's ability to recover an unanswered submission.
     #[inline]
-    pub fn visible_output(&mut self) {
+    pub(crate) fn visible_output(&mut self) {
         if self
             .unanswered
             .as_ref()
@@ -167,7 +167,7 @@ impl MessageDelivery {
         }
     }
 
-    pub fn take_interrupted_prompt(&mut self) -> Option<(u64, RecoverablePrompt)> {
+    pub(crate) fn take_interrupted_prompt(&mut self) -> Option<(u64, RecoverablePrompt)> {
         let prompt = self
             .unanswered
             .take()
@@ -180,7 +180,7 @@ impl MessageDelivery {
         Some(prompt)
     }
 
-    pub fn agent_message(&mut self) {
+    pub(crate) fn agent_message(&mut self) {
         if self.policy == QueuedPromptDelivery::RunningTurn {
             self.confirmed = self.pending.len();
         }
@@ -202,11 +202,11 @@ impl MessageDelivery {
 
     /// Publish accepted work before an update retires its provider, while
     /// leaving the active turn open until its completion arrives.
-    pub fn stopping_for_update(&mut self) {
+    pub(crate) fn stopping_for_update(&mut self) {
         self.confirmed = self.pending.len();
     }
 
-    pub fn start_failed(&mut self) {
+    pub(crate) fn start_failed(&mut self) {
         self.active = false;
         self.unanswered = None;
         self.pending.clear();
@@ -215,7 +215,7 @@ impl MessageDelivery {
 
     /// Return confirmed text by ownership without replacing the queue storage.
     #[inline]
-    pub fn pop_confirmed(&mut self) -> Option<String> {
+    pub(crate) fn pop_confirmed(&mut self) -> Option<String> {
         if self.confirmed == 0 {
             return None;
         }

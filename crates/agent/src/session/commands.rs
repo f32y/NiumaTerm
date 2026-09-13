@@ -106,7 +106,7 @@ impl CommandQueue {
         take(&mut self.awaiting_turn)
     }
 
-    pub fn turn_completed(&mut self) {
+    pub(crate) fn turn_completed(&mut self) {
         self.awaiting_turn = false;
     }
 }

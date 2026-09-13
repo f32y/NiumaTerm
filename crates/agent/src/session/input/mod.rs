@@ -78,7 +78,7 @@ impl SessionInput {
             .filter(|draft| draft.key == key)
     }
 
-    pub fn has_submission(&self) -> bool {
+    pub(crate) fn has_submission(&self) -> bool {
         self.batches
             .iter()
             .any(|draft| draft.status == QuestionStatus::Submitting)
@@ -268,7 +268,7 @@ impl SessionInput {
         })
     }
 
-    pub fn submission_failed(&mut self, epoch: u64, id: &str, message: String) -> bool {
+    pub(crate) fn submission_failed(&mut self, epoch: u64, id: &str, message: String) -> bool {
         if epoch != self.epoch || self.disconnected {
             return false;
         }

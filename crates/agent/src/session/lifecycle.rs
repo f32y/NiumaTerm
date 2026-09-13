@@ -233,7 +233,7 @@ impl SessionRuntime {
         }
     }
 
-    pub fn turn_completed(&mut self, turn: u64) -> bool {
+    pub(crate) fn turn_completed(&mut self, turn: u64) -> bool {
         let interrupted = self.pending_interrupt.take() == Some(turn);
 
         if self.status == Status::Running {
@@ -243,7 +243,7 @@ impl SessionRuntime {
         interrupted
     }
 
-    pub fn clear_turn(&mut self) {
+    pub(crate) fn clear_turn(&mut self) {
         self.pending_interrupt = None;
     }
 
@@ -263,7 +263,7 @@ impl SessionRuntime {
         previous
     }
 
-    pub fn conversation_change_rejected(&mut self, previous: Status) {
+    pub(crate) fn conversation_change_rejected(&mut self, previous: Status) {
         self.status = previous;
     }
 

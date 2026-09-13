@@ -86,7 +86,7 @@ impl WorkflowData {
     /// Take a replacement snapshot, reporting whether what the chrome shows
     /// changed. The chrome reveals its control and shows a running count, so
     /// it is told on a change rather than on every refreshed snapshot.
-    pub fn set_snapshot(&mut self, snapshot: WorkflowSnapshot) -> bool {
+    pub(crate) fn set_snapshot(&mut self, snapshot: WorkflowSnapshot) -> bool {
         let before = self.activity();
 
         self.snapshot = Some(snapshot);
@@ -121,7 +121,7 @@ impl WorkflowData {
 
     /// Fold one agent conversation in, reporting whether it is still the one
     /// on screen. The user may have moved on while the read was in flight.
-    pub fn apply_transcript(
+    pub(crate) fn apply_transcript(
         &mut self,
         task_id: &str,
         agent_id: &str,
@@ -196,7 +196,7 @@ impl WorkflowData {
 
     /// Attach the open conversation to the request for the run it belongs to,
     /// so a tick still touches at most one transcript.
-    pub fn scope_requests(
+    pub(crate) fn scope_requests(
         &self,
         requests: Vec<WorkflowRefreshRequest>,
     ) -> Vec<WorkflowRefreshRequest> {

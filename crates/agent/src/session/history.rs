@@ -64,7 +64,7 @@ impl SessionHistory {
         request
     }
 
-    pub fn owns_filesystem_request(
+    pub(crate) fn owns_filesystem_request(
         &self,
         request: &FilesystemHistoryRequest,
         cwd: Option<&str>,
