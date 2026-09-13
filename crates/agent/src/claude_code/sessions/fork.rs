@@ -25,7 +25,7 @@ pub struct ClaudeFork {
 /// Fork the active conversation immediately before a human prompt. The source
 /// JSONL is never opened for writing, and file-history snapshots are not part
 /// of the copied active chain, so the result has no inherited file undo state.
-pub fn fork_session_before(
+pub(crate) fn fork_session_before(
     cwd: Option<&str>,
     source_session_id: &str,
     user_message_id: &str,

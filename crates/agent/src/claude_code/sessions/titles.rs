@@ -24,12 +24,12 @@ const PROVISIONAL_TITLE_WORDS: usize = 6;
 /// Cheap first pass for the history UI: how many sessions exist, so the list
 /// can reserve its final height (placeholder rows) before any transcript
 /// head is parsed for titles.
-pub fn count_sessions(cwd: Option<&str>) -> usize {
+pub(crate) fn count_sessions(cwd: Option<&str>) -> usize {
     project_dir(cwd).map(|dir| count_in_dir(&dir)).unwrap_or(0)
 }
 
 /// The same cheap first pass across every project the CLI has recorded.
-pub fn count_all_sessions() -> usize {
+pub(crate) fn count_all_sessions() -> usize {
     project_dirs().iter().map(|dir| count_in_dir(dir)).sum()
 }
 
@@ -80,7 +80,7 @@ pub fn list_sessions(cwd: Option<&str>) -> Vec<SessionSummary> {
 /// Sessions resumable from any project the CLI has recorded, newest first.
 /// Each carries the working directory it ran in, because resuming one outside
 /// the current directory has to happen where it worked.
-pub fn list_all_sessions() -> Vec<SessionSummary> {
+pub(crate) fn list_all_sessions() -> Vec<SessionSummary> {
     sorted_newest_first(
         project_dirs()
             .iter()
@@ -366,7 +366,7 @@ pub(super) fn clean_prompt(text: &str) -> String {
 
 /// The compact opening-prompt title shown while Claude generates a model title.
 /// It is also the history fallback when no persisted title metadata exists.
-pub fn provisional_title_from_prompt(text: &str) -> Option<String> {
+pub(crate) fn provisional_title_from_prompt(text: &str) -> Option<String> {
     let cleaned = clean_prompt(text);
     let mut words = cleaned.split_whitespace();
     let first = words.next()?;

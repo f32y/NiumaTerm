@@ -8,14 +8,15 @@
 //! recognize — an unparseable session degrades to an id-prefix title instead of
 //! failing the list.
 
-pub use crate::claude_code::sessions::fork::{ClaudeFork, fork_session_before};
-pub use crate::claude_code::sessions::replay::{load_checkpoints, load_replay, try_load_replay};
-pub use crate::claude_code::sessions::task_history::{
-    RestoredTask, load_child_transcript, load_task_history,
-};
-pub use crate::claude_code::sessions::titles::{
-    count_all_sessions, count_sessions, list_all_sessions, list_sessions,
-    provisional_title_from_prompt,
+pub use crate::claude_code::sessions::fork::ClaudeFork;
+pub use crate::claude_code::sessions::task_history::{RestoredTask, load_task_history};
+pub use crate::claude_code::sessions::titles::list_sessions;
+
+pub(crate) use crate::claude_code::sessions::fork::fork_session_before;
+pub(crate) use crate::claude_code::sessions::replay::{load_checkpoints, try_load_replay};
+pub(crate) use crate::claude_code::sessions::task_history::load_child_transcript;
+pub(crate) use crate::claude_code::sessions::titles::{
+    count_all_sessions, count_sessions, list_all_sessions, provisional_title_from_prompt,
 };
 
 /// The workflow reader resolves the same project directory and parses the same

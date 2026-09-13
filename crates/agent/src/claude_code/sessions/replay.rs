@@ -16,16 +16,12 @@ use crate::claude_code::sessions::titles::{
 };
 use crate::claude_code::tool_items::{complete_tool_item, tool_item};
 
-/// Reconstruct a session's conversation for the transcript UI. Reads the
-/// whole file (resume replays nothing from the backend, so this is the only
-/// source); meant for a background thread.
-pub fn load_replay(cwd: Option<&str>, session_id: &str) -> Vec<ReplayTurn> {
-    try_load_replay(cwd, session_id).unwrap_or_default()
-}
-
 /// Opening a selected conversation must distinguish unreadable history from an
 /// empty transcript, so a failed read cannot replace the visible conversation.
-pub fn try_load_replay(cwd: Option<&str>, session_id: &str) -> Result<Vec<ReplayTurn>, String> {
+pub(crate) fn try_load_replay(
+    cwd: Option<&str>,
+    session_id: &str,
+) -> Result<Vec<ReplayTurn>, String> {
     let path = session_path(cwd, session_id)
         .ok_or_else(|| format!("Claude session {session_id} has no project directory"))?;
 
@@ -38,7 +34,7 @@ pub fn try_load_replay(cwd: Option<&str>, session_id: &str) -> Result<Vec<Replay
 /// Rewindable human prompts from the current active branch, newest first.
 /// Reading stays synchronous because callers already run session file work on
 /// a background executor.
-pub fn load_checkpoints(
+pub(crate) fn load_checkpoints(
     cwd: Option<&str>,
     session_id: &str,
 ) -> Result<Vec<ClaudeCheckpoint>, String> {

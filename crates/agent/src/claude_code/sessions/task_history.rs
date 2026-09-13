@@ -85,7 +85,7 @@ pub(super) fn load_task_history_at(
 ///
 /// Returns `None` when this session kept no child files, which leaves whatever
 /// the stream did supply in place rather than blanking it.
-pub fn load_child_transcript(
+pub(crate) fn load_child_transcript(
     cwd: Option<&str>,
     session_id: &str,
     tool_use_id: &str,
