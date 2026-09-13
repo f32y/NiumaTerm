@@ -166,43 +166,51 @@ impl TeamRuntime {
                 }
 
                 host.ready_epoch = None;
-            } else if state.runtime.status() == Status::Idle {
-                for discussion in &discussion_ids {
-                    self.session
-                        .resolve_pause(*discussion, &PauseReason::Maintenance(id.to_string()))?;
-                }
             }
 
-            if state.runtime.status() == Status::Exited {
-                if let Some(attempt_id) = host.active
-                    && let Some(attempt) = self
-                        .session
-                        .room()
-                        .attempts()
-                        .iter()
-                        .find(|attempt| attempt.id == attempt_id)
-                    && matches!(
-                        attempt.state,
-                        AttemptState::Sending | AttemptState::Accepted { .. }
-                    )
-                {
-                    self.session.fail_attempt(
-                        AttemptEventKey {
-                            attempt: attempt_id,
-                            member: *id,
-                            ownership,
-                            backend_generation: attempt.intent.backend_generation,
-                        },
-                        true,
-                    )?;
+            match state.runtime.status() {
+                Status::Idle if state.runtime.update_suspension().is_none() => {
+                    for discussion in &discussion_ids {
+                        self.session.resolve_pause(
+                            *discussion,
+                            &PauseReason::Maintenance(id.to_string()),
+                        )?;
+                    }
                 }
 
-                self.session.member_unavailable(*id)?;
-                host.ready_epoch = None;
+                Status::Exited => {
+                    if let Some(attempt_id) = host.active
+                        && let Some(attempt) = self
+                            .session
+                            .room()
+                            .attempts()
+                            .iter()
+                            .find(|attempt| attempt.id == attempt_id)
+                        && matches!(
+                            attempt.state,
+                            AttemptState::Sending | AttemptState::Accepted { .. }
+                        )
+                    {
+                        self.session.fail_attempt(
+                            AttemptEventKey {
+                                attempt: attempt_id,
+                                member: *id,
+                                ownership,
+                                backend_generation: attempt.intent.backend_generation,
+                            },
+                            true,
+                        )?;
+                    }
 
-                if let Some(message) = state.runtime.start_failure() {
-                    self.error = Some(message.to_owned());
+                    self.session.member_unavailable(*id)?;
+                    host.ready_epoch = None;
+
+                    if let Some(message) = state.runtime.start_failure() {
+                        self.error = Some(message.to_owned());
+                    }
                 }
+
+                Status::Starting | Status::Running | Status::Idle => {}
             }
         }
 
