@@ -43,11 +43,6 @@ pub fn cursor() -> ColorArray {
 }
 
 #[inline]
-pub fn vi_cursor() -> ColorArray {
-    hex("#12d0ff")
-}
-
-#[inline]
 pub fn tabs() -> ColorArray {
     hex("#424040")
 }
@@ -55,16 +50,6 @@ pub fn tabs() -> ColorArray {
 #[inline]
 pub fn bar() -> ColorArray {
     hex("#1b1a1a")
-}
-
-#[inline]
-pub fn tabs_active() -> ColorArray {
-    [1., 1., 1., 1.]
-}
-
-#[inline]
-pub fn tab_border() -> ColorArray {
-    hex("#696767")
 }
 
 #[inline]
@@ -158,48 +143,6 @@ pub fn split() -> ColorArray {
 }
 
 #[inline]
-pub fn split_active() -> ColorArray {
-    hex("#44C9F0")
-}
-
-#[inline]
-pub fn selection_foreground() -> ColorArray {
-    hex("#0F0D0E")
-}
-
-#[inline]
 pub fn selection_background() -> ColorArray {
     hex("#C8C8C8")
-}
-
-#[inline]
-pub fn search_match_background() -> ColorArray {
-    hex("#44C9F0")
-}
-
-#[inline]
-pub fn search_match_foreground() -> ColorArray {
-    [1., 1., 1., 1.]
-}
-
-#[inline]
-pub fn search_focused_match_background() -> ColorArray {
-    hex("#E6A003")
-}
-
-#[inline]
-pub fn search_focused_match_foreground() -> ColorArray {
-    [1., 1., 1., 1.]
-}
-
-#[inline]
-pub fn hint_foreground() -> ColorArray {
-    // Dark text color (#181818)
-    hex("#181818")
-}
-
-#[inline]
-pub fn hint_background() -> ColorArray {
-    // Orange background color (#f4bf75)
-    hex("#f4bf75")
 }

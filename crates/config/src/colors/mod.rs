@@ -102,20 +102,8 @@ pub struct Colors {
     pub red: ColorArray,
     #[serde(deserialize_with = "deserialize_to_arr", default = "defaults::yellow")]
     pub yellow: ColorArray,
-    #[serde(
-        deserialize_with = "deserialize_to_arr",
-        default = "defaults::tabs_active",
-        rename = "tabs-active"
-    )]
-    pub tabs_active: ColorArray,
     #[serde(default = "defaults::cursor", deserialize_with = "deserialize_to_arr")]
     pub cursor: ColorArray,
-    #[serde(
-        default = "defaults::vi_cursor",
-        rename = "vi-cursor",
-        deserialize_with = "deserialize_to_arr"
-    )]
-    pub vi_cursor: ColorArray,
     #[serde(default = "defaults::black", deserialize_with = "deserialize_to_arr")]
     pub black: ColorArray,
     #[serde(default = "defaults::cyan", deserialize_with = "deserialize_to_arr")]
@@ -124,12 +112,6 @@ pub struct Colors {
     pub magenta: ColorArray,
     #[serde(default = "defaults::tabs", deserialize_with = "deserialize_to_arr")]
     pub tabs: ColorArray,
-    #[serde(
-        default = "defaults::tab_border",
-        rename = "tab-border",
-        deserialize_with = "deserialize_to_arr"
-    )]
-    pub tab_border: ColorArray,
     #[serde(default = "defaults::bar", deserialize_with = "deserialize_to_arr")]
     pub bar: ColorArray,
     #[serde(default = "defaults::white", deserialize_with = "deserialize_to_arr")]
@@ -248,56 +230,8 @@ pub struct Colors {
         rename = "selection-background"
     )]
     pub selection_background: ColorArray,
-    #[serde(
-        default = "defaults::selection_foreground",
-        deserialize_with = "deserialize_to_arr",
-        rename = "selection-foreground"
-    )]
-    pub selection_foreground: ColorArray,
     #[serde(default = "defaults::split", deserialize_with = "deserialize_to_arr")]
     pub split: ColorArray,
-    #[serde(
-        default = "defaults::split_active",
-        deserialize_with = "deserialize_to_arr",
-        rename = "split-active"
-    )]
-    pub split_active: ColorArray,
-    #[serde(
-        default = "defaults::search_match_background",
-        deserialize_with = "deserialize_to_arr",
-        rename = "search-match-background"
-    )]
-    pub search_match_background: ColorArray,
-    #[serde(
-        default = "defaults::search_match_foreground",
-        deserialize_with = "deserialize_to_arr",
-        rename = "search-match-foreground"
-    )]
-    pub search_match_foreground: ColorArray,
-    #[serde(
-        default = "defaults::search_focused_match_background",
-        deserialize_with = "deserialize_to_arr",
-        rename = "search-focused-match-background"
-    )]
-    pub search_focused_match_background: ColorArray,
-    #[serde(
-        default = "defaults::search_focused_match_foreground",
-        deserialize_with = "deserialize_to_arr",
-        rename = "search-focused-match-foreground"
-    )]
-    pub search_focused_match_foreground: ColorArray,
-    #[serde(
-        default = "defaults::hint_foreground",
-        deserialize_with = "deserialize_to_arr",
-        rename = "hint-foreground"
-    )]
-    pub hint_foreground: ColorArray,
-    #[serde(
-        default = "defaults::hint_background",
-        deserialize_with = "deserialize_to_arr",
-        rename = "hint-background"
-    )]
-    pub hint_background: ColorArray,
 }
 
 impl Default for Colors {
@@ -311,12 +245,8 @@ impl Default for Colors {
             yellow: defaults::yellow(),
             bar: defaults::bar(),
             tabs: defaults::tabs(),
-            tabs_active: defaults::tabs_active(),
-            tab_border: defaults::tab_border(),
             cursor: defaults::cursor(),
             split: defaults::split(),
-            split_active: defaults::split_active(),
-            vi_cursor: defaults::vi_cursor(),
             black: defaults::black(),
             cyan: defaults::cyan(),
             magenta: defaults::magenta(),
@@ -340,13 +270,6 @@ impl Default for Colors {
             light_white: default_light_white(),
             light_yellow: default_light_yellow(),
             selection_background: defaults::selection_background(),
-            selection_foreground: defaults::selection_foreground(),
-            search_match_background: defaults::search_match_background(),
-            search_match_foreground: defaults::search_match_foreground(),
-            search_focused_match_background: defaults::search_focused_match_background(),
-            search_focused_match_foreground: defaults::search_focused_match_foreground(),
-            hint_foreground: defaults::hint_foreground(),
-            hint_background: defaults::hint_background(),
         }
     }
 }

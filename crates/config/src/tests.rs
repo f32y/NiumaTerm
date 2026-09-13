@@ -612,7 +612,6 @@ fn test_change_theme() {
     // Colors
     assert_eq!(result.colors.background, colors::defaults::background());
     assert_eq!(result.colors.foreground, colors::defaults::foreground());
-    assert_eq!(result.colors.tabs_active, colors::defaults::tabs_active());
     assert_eq!(result.colors.cursor, colors::defaults::cursor());
 }
 
@@ -656,7 +655,6 @@ fn test_change_theme_with_colors() {
     let result = Config::load_for_startup_from(&path, dir.path()).unwrap();
 
     // Colors
-    assert_eq!(result.colors.tabs_active, colors::defaults::tabs_active());
     assert_eq!(result.colors.cursor, colors::defaults::cursor());
     assert_eq!(result.colors.foreground, hex_to_color_arr("#F8F8F2"));
     assert_eq!(result.colors.background.0, hex_to_color_arr("#2B3E50"));
@@ -812,7 +810,7 @@ fn example_config_matches_the_serialized_defaults() {
 
 #[test]
 fn a_model_entry_carries_the_names_the_style_asks_for() {
-    use agent::ModelListStyle;
+    use crate::agent::ModelListStyle;
 
     assert_eq!(
         ModelListStyle::NameAndId.label("Opus 5", "claude-opus-5"),
