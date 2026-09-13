@@ -96,7 +96,7 @@ fn the_live_context_and_the_last_turn_report_the_same_categories() {
 
     // Both sections are built the same way, so the two can be read against
     // each other rather than one omitting a figure the other shows.
-    let labels: Vec<_> = token_usage_rows(usage, true)
+    let labels: Vec<_> = token_usage_rows(usage)
         .iter()
         .map(|row| row.label.clone())
         .collect();
@@ -112,7 +112,7 @@ fn a_restored_conversation_still_reports_its_context_size() {
     // Restored from a context breakdown: the window size is known, the
     // billing categories are not, because the breakdown reports what fills
     // the window rather than how tokens were billed.
-    let rows = token_usage_rows(TokenUsageBreakdown::total_only(41_000), true);
+    let rows = token_usage_rows(TokenUsageBreakdown::total_only(41_000));
 
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].label, "Total");
@@ -188,21 +188,23 @@ fn context_capacity_formats_known_and_unknown_limits() {
 
 #[test]
 fn token_rows_keep_available_categories_and_their_hierarchy() {
-    let rows = token_usage_rows(
-        TokenUsageBreakdown {
-            total_tokens: 16_700,
-            input_tokens: Some(15_500),
-            cache_read_input_tokens: Some(2_000),
-            cache_write_input_tokens: Some(5_000),
-            output_tokens: Some(1_200),
-            reasoning_output_tokens: None,
-        },
-        false,
-    );
+    let rows = token_usage_rows(TokenUsageBreakdown {
+        total_tokens: 16_700,
+        input_tokens: Some(15_500),
+        cache_read_input_tokens: Some(2_000),
+        cache_write_input_tokens: Some(5_000),
+        output_tokens: Some(1_200),
+        reasoning_output_tokens: None,
+    });
 
     assert_eq!(
         rows,
         vec![
+            TokenUsageRow {
+                label: "Total".into(),
+                tokens: 16_700,
+                nested: false,
+            },
             TokenUsageRow {
                 label: "Input".into(),
                 tokens: 15_500,
@@ -224,10 +226,6 @@ fn token_rows_keep_available_categories_and_their_hierarchy() {
                 nested: false,
             },
         ]
-    );
-    assert_eq!(
-        token_usage_rows(TokenUsageBreakdown::total_only(17_000), false),
-        Vec::new()
     );
 }
 

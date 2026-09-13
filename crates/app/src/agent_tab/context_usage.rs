@@ -60,7 +60,7 @@ impl RenderOnce for ContextUsageIndicator {
         // the last turn can be read against each other. A conversation
         // restored from history knows only its total, and that alone keeps the
         // section present until the first reply reports the categories.
-        let current_rows = token_usage_rows(usage.current, /*include_total*/ true);
+        let current_rows = token_usage_rows(usage.current);
         let cumulative = usage.cumulative;
 
         let segment_rows = self
@@ -206,7 +206,7 @@ impl RenderOnce for ContextUsageIndicator {
                         )
                     })
                     .when_some(cumulative, |this, cumulative| {
-                        let rows = token_usage_rows(cumulative.breakdown, true);
+                        let rows = token_usage_rows(cumulative.breakdown);
 
                         this.child(
                             v_flex()
@@ -409,16 +409,12 @@ fn context_capacity_labels(usage: ContextWindowUsage) -> (String, Option<String>
     }
 }
 
-fn token_usage_rows(usage: TokenUsageBreakdown, include_total: bool) -> Vec<TokenUsageRow> {
-    let mut rows = Vec::new();
-
-    if include_total {
-        rows.push(TokenUsageRow {
-            label: t!("agent-context-total"),
-            tokens: usage.total_tokens,
-            nested: false,
-        });
-    }
+fn token_usage_rows(usage: TokenUsageBreakdown) -> Vec<TokenUsageRow> {
+    let mut rows = vec![TokenUsageRow {
+        label: t!("agent-context-total"),
+        tokens: usage.total_tokens,
+        nested: false,
+    }];
 
     if let Some(tokens) = usage.input_tokens {
         rows.push(TokenUsageRow {
