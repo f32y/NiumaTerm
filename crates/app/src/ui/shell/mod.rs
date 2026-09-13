@@ -228,9 +228,8 @@ impl Drop for Shell {
 
 impl Shell {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        // Repaint shell chrome when settings change.
-        cx.observe_global_in::<AppSettings>(window, |_this, window, cx| {
-            let _ = window;
+        cx.observe_global_in::<AppSettings>(window, |this, window, cx| {
+            this.sync_team_setting(window, cx);
 
             cx.notify();
         })
@@ -460,6 +459,37 @@ impl Shell {
         }
     }
 
+    fn sync_team_setting(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if cx.global::<AppSettings>().config().agent.enable_agent_team {
+            if matches!(
+                self.workspaces.active_tabs().active(),
+                TabSurface::TeamDisabled(_)
+            ) {
+                self.on_active_tab_changed(window, cx);
+            }
+
+            return;
+        }
+
+        let teams: Vec<_> = self
+            .workspaces
+            .all_tabs()
+            .flat_map(TabManager::tabs)
+            .filter(|tab| tab.surface().team().is_some())
+            .map(Tab::id)
+            .collect();
+
+        for id in teams {
+            if let Some(tab) = self
+                .workspaces
+                .tabs_for_tab_mut(id)
+                .and_then(|tabs| tabs.find_mut(id))
+            {
+                tab.surface_mut().disable_team(cx);
+            }
+        }
+    }
+
     fn sync_active_terminal_title(&mut self, cx: &App) {
         let Some(pane) = self.try_active_pane() else {
             return;
@@ -501,7 +531,7 @@ impl Shell {
 
         if matches!(
             self.workspaces.active_tabs().active(),
-            TabSurface::TeamUnavailable { .. }
+            TabSurface::TeamUnavailable { .. } | TabSurface::TeamDisabled(_)
         ) {
             return;
         }

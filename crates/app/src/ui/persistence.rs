@@ -324,31 +324,22 @@ pub(super) fn materialize_active_tab(
     let state = match workspaces.active_tabs().active() {
         TabSurface::Pending(state) => (**state).clone(),
 
+        TabSurface::TeamDisabled(state)
+            if cx.global::<AppSettings>().config().agent.enable_agent_team =>
+        {
+            (**state).clone()
+        }
+
         TabSurface::Live(_)
         | TabSurface::Agent(_)
         | TabSurface::Settings
         | TabSurface::Team(_)
+        | TabSurface::TeamDisabled(_)
         | TabSurface::TeamUnavailable { .. } => return false,
     };
 
     if let Some(saved_id) = state.team_room.as_deref() {
-        let restored = saved_id
-            .parse::<RoomId>()
-            .map_err(|error| error.to_string())
-            .and_then(|id| {
-                TeamRuntime::open(&config_dir_path(), id, cx).map_err(|error| error.to_string())
-            });
-
-        let surface = match restored {
-            Ok(runtime) => TabSurface::Team(cx.new(|cx| TeamPane::new(runtime, window, cx))),
-
-            Err(message) => TabSurface::TeamUnavailable {
-                saved: Box::new(state),
-                message,
-            },
-        };
-
-        *workspaces.active_tabs_mut().active_mut() = surface;
+        *workspaces.active_tabs_mut().active_mut() = restore_team_tab(saved_id, &state, window, cx);
 
         return true;
     }
@@ -407,6 +398,33 @@ pub(super) fn materialize_active_tab(
     *workspaces.active_tabs_mut().active_mut() = TabSurface::Live(tree);
 
     true
+}
+
+fn restore_team_tab(
+    saved_id: &str,
+    state: &TabState,
+    window: &mut Window,
+    cx: &mut App,
+) -> TabSurface {
+    if !cx.global::<AppSettings>().config().agent.enable_agent_team {
+        return TabSurface::TeamDisabled(Box::new(state.clone()));
+    }
+
+    let restored = saved_id
+        .parse::<RoomId>()
+        .map_err(|error| error.to_string())
+        .and_then(|id| {
+            TeamRuntime::open(&config_dir_path(), id, cx).map_err(|error| error.to_string())
+        });
+
+    match restored {
+        Ok(runtime) => TabSurface::Team(cx.new(|cx| TeamPane::new(runtime, window, cx))),
+
+        Err(message) => TabSurface::TeamUnavailable {
+            saved: Box::new(state.clone()),
+            message,
+        },
+    }
 }
 
 /// Rebuild a workspace's tabs as pending surfaces: the saved snapshot is
@@ -719,7 +737,8 @@ fn session_state(
                             ..TabState::default()
                         },
 
-                        TabSurface::TeamUnavailable { saved, .. } => (**saved).clone(),
+                        TabSurface::TeamUnavailable { saved, .. }
+                        | TabSurface::TeamDisabled(saved) => (**saved).clone(),
                     };
 
                     normalize_saved_launch(&mut state, &default_profile);
@@ -757,8 +776,10 @@ mod launch_resolution_tests {
 
     use crate::ui::persistence::{
         legacy_generated_tab_title, normalize_saved_launch, resolve_restored_launch, restore_tabs,
+        restore_team_tab,
     };
     use crate::ui::settings::{AppSettings, Profile};
+    use crate::ui::shell::TabSurface;
     use nmt_config::Config;
     use nmt_config::profile::ProfilesConfig;
 
@@ -817,6 +838,37 @@ mod launch_resolution_tests {
 
             assert_eq!(tabs.tabs()[0].title(), rust_i18n::t!("team-title"));
             assert_eq!(tabs.tabs()[1].title(), "Review team");
+        });
+    }
+
+    #[gpui::test]
+    fn disabled_agent_team_restore_keeps_saved_state_without_opening_it(cx: &mut TestAppContext) {
+        cx.set_global(settings_with_pwsh_default());
+
+        let cx = cx.add_empty_window();
+
+        cx.update(|window, cx| {
+            let saved = TabState {
+                team_room: Some("invalid-room-id".into()),
+                name: Some("Review team".into()),
+                user_named: true,
+                ..TabState::default()
+            };
+
+            for enabled in [false, true, false] {
+                cx.global_mut::<AppSettings>()
+                    .edit_agent(|agent| agent.enable_agent_team = enabled);
+
+                let surface = restore_team_tab("invalid-room-id", &saved, window, cx);
+
+                let restored = match surface {
+                    TabSurface::TeamDisabled(restored) if !enabled => restored,
+                    TabSurface::TeamUnavailable { saved, .. } if enabled => saved,
+                    _ => panic!("team restore did not honor the current setting"),
+                };
+
+                assert_eq!(*restored, saved);
+            }
         });
     }
 

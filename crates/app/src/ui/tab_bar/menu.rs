@@ -194,6 +194,10 @@ pub(crate) fn new_tab_menu(
             .icon(icon);
     }
 
+    if !cx.global::<AppSettings>().config().agent.enable_agent_team {
+        return menu;
+    }
+
     let item_shell = shell.clone();
 
     menu = menu.separator().item(t!("team-new"), move |window, cx| {

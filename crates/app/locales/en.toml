@@ -1068,3 +1068,6 @@
 "team-end-interrupted-description" = "No confirmed result was recovered for %{members}. Ending tracking keeps the conversation and consumed turns, and lets you continue without resending this request. Any actions it already performed remain."
 "team-member-name-pool" = "Alex, Sam, Jamie, Taylor, Casey, Jordan, Morgan, Riley, Cameron, Avery, Logan, Parker, Charlie, Robin, Jesse, Quinn, Reese, Drew, Blake, Devon, Hayden, Rowan, Sidney, Skyler"
 "team-random-name" = "Random"
+"settings-agent-enable-team" = "Enable Agent Team"
+"settings-agent-enable-team-description" = "Create and reopen Agent Team tabs. Turning this off stops open teams and keeps their saved conversations."
+"team-disabled" = "Agent Team is disabled. Turn on Enable Agent Team in Settings > Agent > General to reopen this team."

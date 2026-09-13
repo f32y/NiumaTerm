@@ -36,6 +36,10 @@ pub struct AgentConfig {
     /// How the composer's model picker spells each model it offers.
     #[serde(default, rename = "model-list-style")]
     pub model_list_style: ModelListStyle,
+
+    /// Allow Agent Team tabs to create or resume collaborative sessions.
+    #[serde(default, rename = "enable-agent-team")]
+    pub enable_agent_team: bool,
 }
 
 impl Default for AgentConfig {
@@ -47,6 +51,7 @@ impl Default for AgentConfig {
             check_agent_updates: true,
             codex_skill_command_compat: true,
             model_list_style: ModelListStyle::default(),
+            enable_agent_team: false,
         }
     }
 }

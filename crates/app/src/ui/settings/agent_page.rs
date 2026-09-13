@@ -162,6 +162,19 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                 ),
             )
             .description(t!("settings-agent-model-list-style-description").into_owned()),
+        )
+        .item(
+            SettingItem::new(
+                t!("settings-agent-enable-team"),
+                SettingField::switch(
+                    |cx| cx.global::<AppSettings>().config().agent.enable_agent_team,
+                    |value, cx| {
+                        cx.global_mut::<AppSettings>()
+                            .edit_agent(|section| section.enable_agent_team = value);
+                    },
+                ),
+            )
+            .description(t!("settings-agent-enable-team-description").into_owned()),
         );
 
     let mut cli_updates = SettingGroup::new()

@@ -1067,3 +1067,6 @@
 "team-end-interrupted-description" = "未能恢复 %{members} 的确定结果。结束跟踪会保留对话和已消耗轮数，之后可继续讨论，不会重新发送这条请求。请求已经执行过的操作仍然保留。"
 "team-member-name-pool" = "小林, 小夏, 小陈, 小周, 小吴, 小郑, 小王, 小李, 小张, 小赵, 小刘, 小杨, 小徐, 小孙, 小许, 小何, 小罗, 小宋, 小唐, 小韩, 小谢, 小陆, 小沈, 小苏"
 "team-random-name" = "随机"
+"settings-agent-enable-team" = "启用智能体团队"
+"settings-agent-enable-team-description" = "创建和重新打开智能体团队标签页。关闭后停止已打开的团队，并保留已保存的对话。"
+"team-disabled" = "智能体团队已关闭。请在设置 > 智能体 > 常规中开启“启用智能体团队”，以重新打开此团队。"

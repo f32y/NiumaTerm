@@ -194,6 +194,14 @@ impl Shell {
                     .into_any_element();
             }
 
+            TabSurface::TeamDisabled(_) => {
+                return div()
+                    .size_full()
+                    .p_4()
+                    .child(t!("team-disabled").into_owned())
+                    .into_any_element();
+            }
+
             _ => {}
         }
 

@@ -56,6 +56,7 @@ fn sample_agent() -> AgentConfig {
         check_agent_updates: false,
         codex_skill_command_compat: false,
         model_list_style: agent::ModelListStyle::IdOnly,
+        enable_agent_team: true,
     }
 }
 

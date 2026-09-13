@@ -38,6 +38,10 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !cx.global::<AppSettings>().config().agent.enable_agent_team {
+            return;
+        }
+
         self.leave_settings_workspace();
 
         let directory = config_dir_path();

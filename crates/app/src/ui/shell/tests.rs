@@ -2,9 +2,14 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use app::agent_tab::AgentKind;
-use gpui::{Bounds, Pixels, TestAppContext};
+use app::agent_tab::settings::AgentSettings;
+use app::agent_tab::team::{TeamPane, TeamRuntime};
+use gpui::{AppContext as _, Bounds, Pixels, TestAppContext};
 use gpui_component::input::InputState;
+use nmt_agent::AgentWorkspace;
+use nmt_agent::team::session::TeamSession;
 use nmt_config::local_state::TabState;
+use tempfile::tempdir;
 
 use crate::ui::shell::render::{TAB_STRIP_MIN_WIDTH, title_bar_leading_region};
 use crate::ui::shell::{InlineRename, InlineRenameStyle, TabSurface, should_confirm_close};
@@ -41,6 +46,44 @@ fn restored_agent_tab_keeps_kind_before_activation(cx: &mut TestAppContext) {
     }));
 
     assert!(cx.update(|cx| surface.agent_kind(cx)) == Some(AgentKind::Codex));
+}
+
+#[gpui::test]
+fn disabling_agent_team_releases_the_runtime_and_keeps_the_saved_room(cx: &mut TestAppContext) {
+    let directory = tempdir().unwrap();
+
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        cx.set_global(AgentSettings::default());
+    });
+
+    let cx = cx.add_empty_window();
+
+    let (runtime, room_id) = cx.update(|window, cx| {
+        let runtime = TeamRuntime::create(directory.path(), AgentWorkspace::default(), cx).unwrap();
+        let room_id = runtime.read(cx).room().id();
+        let weak = runtime.downgrade();
+        let pane = cx.new(|cx| TeamPane::new(runtime, window, cx));
+        let mut surface = TabSurface::Team(pane);
+
+        assert!(surface.disable_team(cx));
+
+        let TabSurface::TeamDisabled(saved) = surface else {
+            panic!("disabled team retained its live pane");
+        };
+
+        assert_eq!(saved.team_room, Some(room_id.to_string()));
+
+        (weak, room_id)
+    });
+
+    cx.run_until_parked();
+
+    assert!(runtime.upgrade().is_none());
+
+    let (restored, _) = TeamSession::open(directory.path(), room_id).unwrap();
+
+    assert_eq!(restored.room().id(), room_id);
 }
 
 #[test]

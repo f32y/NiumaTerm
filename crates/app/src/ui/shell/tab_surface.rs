@@ -5,6 +5,7 @@ use app::terminal_tab::view::TerminalPane;
 use gpui::{App, Entity};
 use gpui_component::{Icon, IconName, Sizable as _};
 use nmt_config::local_state::TabState;
+use tracing::warn;
 
 use crate::pane_tree::PaneId;
 use crate::ui::tab_bar::menu::tab_icon;
@@ -39,12 +40,16 @@ pub(crate) enum TabSurface {
         saved: Box<TabState>,
         message: String,
     },
+
+    TeamDisabled(Box<TabState>),
 }
 
 impl TabSurface {
     pub(crate) fn icon(&self, cx: &App) -> Icon {
         match self {
-            Self::Team(_) | Self::TeamUnavailable { .. } => Icon::new(IconName::Network).xsmall(),
+            Self::Team(_) | Self::TeamUnavailable { .. } | Self::TeamDisabled(_) => {
+                Icon::new(IconName::Network).xsmall()
+            }
 
             Self::Pending(state) if state.team_room.is_some() => {
                 Icon::new(IconName::Network).xsmall()
@@ -61,11 +66,37 @@ impl TabSurface {
         }
     }
 
+    pub(super) fn disable_team(&mut self, cx: &mut App) -> bool {
+        let Self::Team(pane) = self else {
+            return false;
+        };
+
+        let saved = TabState {
+            team_room: Some(pane.read(cx).room_id(cx).to_string()),
+            ..TabState::default()
+        };
+
+        let runtime = pane.read(cx).runtime().clone();
+
+        if let Err(error) = runtime.update(cx, |runtime, cx| runtime.close(cx)) {
+            warn!("could not save disabled Team: {error}");
+        }
+
+        *self = Self::TeamDisabled(Box::new(saved));
+
+        true
+    }
+
     pub(crate) fn agent_kind(&self, cx: &App) -> Option<AgentKind> {
         match self {
             Self::Agent(tab) => Some(tab.pane.read(cx).kind()),
             Self::Pending(state) => state.agent.as_deref().and_then(AgentKind::from_id),
-            Self::Live(_) | Self::Settings | Self::Team(_) | Self::TeamUnavailable { .. } => None,
+
+            Self::Live(_)
+            | Self::Settings
+            | Self::Team(_)
+            | Self::TeamUnavailable { .. }
+            | Self::TeamDisabled(_) => None,
         }
     }
 
@@ -79,7 +110,11 @@ impl TabSurface {
                 .and_then(AgentKind::from_id)
                 .is_some(),
 
-            Self::Live(_) | Self::Settings | Self::Team(_) | Self::TeamUnavailable { .. } => false,
+            Self::Live(_)
+            | Self::Settings
+            | Self::Team(_)
+            | Self::TeamUnavailable { .. }
+            | Self::TeamDisabled(_) => false,
         }
     }
 
