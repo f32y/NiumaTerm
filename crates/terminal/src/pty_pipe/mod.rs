@@ -449,15 +449,17 @@ where
 
         let engine = &mut self.ghostty;
 
+        // The PTY bytes reach the engine exactly as ConPTY wrote them; the
+        // resize recovery may only prepend a scroll.
         let ResizeRead {
-            rewritten,
             synthetic_prefix,
-            expected_cursor: su_realigned_to,
+            expected_cursor: realigned_to,
             repaint_window,
-            echo_pending: echo_pending_at_entry,
         } = self.conpty_resize.on_read(input, engine);
 
-        let bytes = rewritten.as_deref().unwrap_or(input);
+        let bytes = input;
+
+        let scroll_escaped = synthetic_prefix.as_deref().map(escape_bytes);
 
         let observed_output = output_sink.as_ref().map(|_| match synthetic_prefix {
             Some(mut prefix) => {
@@ -468,22 +470,6 @@ where
 
             None => bytes.into(),
         });
-
-        let was_rewritten = rewritten.is_some();
-
-        // Capture the pre-rewrite ConPTY bytes + cursor visibility for the
-        // trace so we can compare original vs rewritten CUP rows.
-        let (orig_escaped, cursor_vis_at_decision) =
-            if vt_trace::enabled() && (repaint_window || was_rewritten || echo_pending_at_entry) {
-                let orig = input;
-
-                (
-                    escape_bytes(&orig[..orig.len().min(240)]),
-                    engine.snapshot().ok().map(|s| s.cursor_visible()),
-                )
-            } else {
-                (String::new(), None)
-            };
 
         // Always run the sniffer: it classifies/captures OSC 133 lifecycle state
         // while every byte, including marks, still reaches the engine.
@@ -525,41 +511,31 @@ where
         // this replaced was the throughput cost the per-block
         // grid exists to delete).
 
-        // After SU realignment and the original repaint, ConPTY's own
-        // absolute CUP must have pulled the active cursor onto the realigned
-        // prompt row. A mismatch means the realign assumption broke (mis-latched
-        // resize, divergent wrap) — trace + debug_assert, never a prod panic.
-        if let Some(expected) = su_realigned_to {
+        // After the scroll and the repaint, ConPTY's own absolute CUP normally
+        // pulls the active cursor onto the realigned row. A mismatch is
+        // possible when the ED came from something other than the repaint (a
+        // clear, a full-screen program drawing on the primary screen), so it
+        // is traced for diagnosis and never asserted.
+        if let Some(expected) = realigned_to {
             let got = engine.active_cursor_row();
 
             if got != Some(expected) && vt_trace::enabled() {
                 vt_trace::trace(
-                    "su_realign_assert",
+                    "realign_cursor_mismatch",
                     engine,
                     &format!("expected R_conpty={expected} got={got:?}"),
                 );
             }
-
-            debug_assert_eq!(
-                got,
-                Some(expected),
-                "SU realign: active cursor should land on R_conpty"
-            );
         }
 
-        // Dump the full VT only for resize-related reads (the ConPTY repaint
-        // window or a realigned echo) — a per-keystroke full dump would be
-        // O(scrollback) on every read.
-        if vt_trace::enabled() && (repaint_window || was_rewritten || echo_pending_at_entry) {
+        // Dump the full VT only for reads inside the ConPTY repaint window —
+        // a per-keystroke full dump would be O(scrollback) on every read.
+        if vt_trace::enabled() && repaint_window {
             vt_trace::trace(
                 "pty_resize_read",
                 engine,
                 &format!(
-                    "read_bytes={input_len} rewritten={was_rewritten} \
-                         repaint_window={repaint_window} echo_pending={echo_pending_at_entry} \
-                         cursor_vis_pre={cursor_vis_at_decision:?} \
-                         orig={orig_escaped} \
-                         bytes={}",
+                    "read_bytes={input_len} scroll={scroll_escaped:?} bytes={}",
                     escape_bytes(&bytes[..bytes.len().min(240)])
                 ),
             );
@@ -799,9 +775,6 @@ where
     }
 
     fn on_input(&mut self, input: Cow<'static, [u8]>, state: &mut PtyState) {
-        self.conpty_resize
-            .on_input(input.as_ref(), time::Instant::now());
-
         state.write_list.push_back(input)
     }
 

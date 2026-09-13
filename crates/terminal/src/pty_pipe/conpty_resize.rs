@@ -2,15 +2,16 @@ use std::mem;
 use std::time::{Duration, Instant};
 
 use nmt_platform::USES_CONPTY;
-use nmt_platform::conpty_realign::{
-    is_conpty_resize_echo_input, is_conpty_resize_repaint, rewrite_conpty_resize_echo_cup_rows,
-    su_realign_count,
-};
+use nmt_platform::conpty_realign::{contains_csi_erase_display, realign_scroll_rows};
 
 use crate::ghostty::{GhosttyTerminal, mode};
 
-const ECHO_WINDOW: Duration = Duration::from_millis(150);
+/// Reads after a resize during which ConPTY's repaint is still expected. Both
+/// bounds must expire before the window closes: a burst of small reads must not
+/// end it before the repaint arrives, and an idle shell must not keep it open.
 const REPAINT_READS: u8 = 8;
+
+const REPAINT_WINDOW: Duration = Duration::from_millis(150);
 
 #[derive(Default)]
 pub(super) struct ConptyResize {
@@ -23,19 +24,18 @@ enum ResizePhase {
     Idle,
 
     Armed {
-        window: ResizeWindow,
-        anchor: Option<ResizeAnchor>,
-    },
-
-    Repainting {
-        window: ResizeWindow,
+        at: Instant,
         remaining: u8,
-    },
-}
 
-struct ResizeWindow {
-    at: Instant,
-    echo_pending: bool,
+        /// Ghostty's cursor row and the PTY size latched when the resize was
+        /// issued. Held until the one scroll this window may inject, so a
+        /// keystroke echo arriving before the repaint cannot consume it.
+        anchor: Option<ResizeAnchor>,
+
+        /// An ED has been seen in this window: ConPTY's repaint is in flight.
+        /// Spans reads because the erase and the repaint's CUPs may be split.
+        erase_seen: bool,
+    },
 }
 
 struct ResizeAnchor {
@@ -46,110 +46,84 @@ struct ResizeAnchor {
 
 #[derive(Default)]
 pub(super) struct ResizeRead {
-    pub(super) rewritten: Option<Vec<u8>>,
     pub(super) synthetic_prefix: Option<Vec<u8>>,
     pub(super) expected_cursor: Option<u16>,
     pub(super) repaint_window: bool,
-    pub(super) echo_pending: bool,
 }
 
 impl ConptyResize {
     pub(super) fn on_resize(&mut self, cols: u16, rows: u16, active_row: Option<u16>, at: Instant) {
         if USES_CONPTY {
             self.phase = ResizePhase::Armed {
-                window: ResizeWindow {
-                    at,
-                    echo_pending: false,
-                },
+                at,
+                remaining: REPAINT_READS,
                 anchor: active_row.map(|row| ResizeAnchor { row, cols, rows }),
+                erase_seen: false,
             };
         }
     }
 
-    pub(super) fn on_input(&mut self, input: &[u8], now: Instant) {
-        let window = match &mut self.phase {
-            ResizePhase::Idle => return,
-            ResizePhase::Armed { window, .. } | ResizePhase::Repainting { window, .. } => window,
-        };
-
-        // A read-count bound alone stays open while the user is idle. Only
-        // typing during the resize may need its stale cursor address shifted.
-        if now.saturating_duration_since(window.at) < ECHO_WINDOW
-            && is_conpty_resize_echo_input(input)
-        {
-            window.echo_pending = true;
-        }
-    }
-
+    /// The PTY bytes always reach the engine unchanged. The only action this
+    /// may take is to scroll the engine's content before them, and only once
+    /// per window, once the burst is provably ConPTY's repaint (an ED has been
+    /// seen and the CUPs fit the latched size). Rewriting CUP rows instead
+    /// would leave ConPTY's cursor model and ghostty's pointing at different
+    /// rows; ConPTY then addresses later echo by column only, and typed text
+    /// keeps landing on a row the user cannot see.
     pub(super) fn on_read(&mut self, input: &[u8], engine: &mut GhosttyTerminal) -> ResizeRead {
-        let (mut window, anchor, mut remaining) = match mem::take(&mut self.phase) {
-            ResizePhase::Idle => return ResizeRead::default(),
-            ResizePhase::Armed { window, anchor } => (window, anchor, REPAINT_READS),
-            ResizePhase::Repainting { window, remaining } => (window, None, remaining),
+        let ResizePhase::Armed {
+            at,
+            remaining,
+            mut anchor,
+            erase_seen,
+        } = mem::take(&mut self.phase)
+        else {
+            return ResizeRead::default();
         };
 
         let mut read = ResizeRead {
-            repaint_window: remaining > 0,
-            echo_pending: window.echo_pending,
+            repaint_window: true,
             ..ResizeRead::default()
         };
 
-        remaining = remaining.saturating_sub(1);
+        // A full-screen program owns the alternate screen; its redraw after a
+        // resize is its own layout, not ConPTY's repaint of the primary screen.
+        if engine.mode(mode::ALT_SCREEN) {
+            return read;
+        }
 
-        // The first repaint uses the cursor captured at resize time. Later
-        // reads have already moved that cursor, so they cannot repeat the
-        // scroll-up adjustment. The size check rejects an unrelated repaint.
-        if let Some(anchor) = anchor
-            && !engine.mode(mode::ALT_SCREEN)
-            && let Some((rows, target)) = su_realign_count(
-                input,
-                anchor.row,
-                anchor.cols,
-                anchor.rows,
-                engine.cols(),
-                engine.rows(),
-            )
+        let erase_seen = erase_seen || contains_csi_erase_display(input);
+
+        if erase_seen
+            && let Some(a) = &anchor
+            && let Some((delta, target)) =
+                realign_scroll_rows(input, a.row, a.cols, a.rows, engine.cols(), engine.rows())
         {
-            let prefix = format!("\x1b[{rows}S").into_bytes();
+            let prefix = if delta > 0 {
+                format!("\x1b[{delta}S")
+            } else {
+                format!("\x1b[{}T", -delta)
+            }
+            .into_bytes();
 
             engine.write_vt(&prefix);
 
             read.synthetic_prefix = Some(prefix);
             read.expected_cursor = Some(target);
-            window.echo_pending = false;
+            anchor = None;
         }
 
-        if read.expected_cursor.is_none() && (window.echo_pending || read.repaint_window) {
-            if engine.mode(mode::ALT_SCREEN) {
-                window.echo_pending = false;
-                remaining = 0;
-            } else if let Some(active_row) = engine.active_cursor_row() {
-                // CUP addresses the active screen, even when the visible
-                // viewport is scrolled into history or has blank rows below it.
-                let target_row = active_row.saturating_add(1);
+        let remaining = remaining.saturating_sub(1);
 
-                let repaint_pending =
-                    read.repaint_window && is_conpty_resize_repaint(input, target_row);
-
-                if window.echo_pending || repaint_pending {
-                    read.rewritten = rewrite_conpty_resize_echo_cup_rows(input, target_row);
-                }
-
-                if read.rewritten.is_some() || repaint_pending {
-                    window.echo_pending = false;
-
-                    if repaint_pending {
-                        remaining = 0;
-                    }
-                }
-            }
-        }
-
-        self.phase = if remaining == 0 && !window.echo_pending && window.at.elapsed() >= ECHO_WINDOW
-        {
+        self.phase = if remaining == 0 && at.elapsed() >= REPAINT_WINDOW {
             ResizePhase::Idle
         } else {
-            ResizePhase::Repainting { window, remaining }
+            ResizePhase::Armed {
+                at,
+                remaining,
+                anchor,
+                erase_seen,
+            }
         };
 
         read
@@ -161,18 +135,31 @@ mod tests {
     use std::time::Instant;
 
     use crate::ghostty::GhosttyTerminal;
-    use crate::pty_pipe::conpty_resize::{ConptyResize, ECHO_WINDOW, REPAINT_READS};
+    use crate::pty_pipe::conpty_resize::ConptyResize;
+
+    fn armed(engine: &mut GhosttyTerminal, prompt_row_1based: u16) -> ConptyResize {
+        engine.write_vt(format!("\x1b[{prompt_row_1based};1H>").as_bytes());
+
+        let mut resize = ConptyResize::default();
+
+        resize.on_resize(80, 24, Some(prompt_row_1based - 1), Instant::now());
+
+        resize
+    }
 
     #[test]
-    fn first_repaint_scrolls_once_and_late_typing_is_not_rewritten() {
+    fn echo_before_repaint_keeps_anchor_and_repaint_scrolls_once() {
         let mut engine = GhosttyTerminal::new(80, 24, 100).unwrap();
-        let mut resize = ConptyResize::default();
-        let now = Instant::now();
-        let repaint = b"\x1b[2;1H>";
+        let mut resize = armed(&mut engine, 18);
 
-        engine.write_vt(b"\x1b[18;1H>");
-        resize.on_resize(80, 24, Some(17), now);
+        // Keystroke echo at ConPTY's stale row: no ED, so nothing happens and
+        // the anchor survives for the repaint still to come.
+        let echo = resize.on_read(b"\x1b[18;2Hx", &mut engine);
 
+        assert!(echo.synthetic_prefix.is_none());
+        assert!(echo.repaint_window);
+
+        let repaint = b"\x1b[2;1H\x1b[J>";
         let first = resize.on_read(repaint, &mut engine);
 
         assert_eq!(
@@ -189,28 +176,76 @@ mod tests {
                 .synthetic_prefix
                 .is_none()
         );
+    }
 
-        for _ in 0..REPAINT_READS {
-            resize.on_read(b"", &mut engine);
-        }
-
-        resize.on_input(b"x", now + ECHO_WINDOW);
+    #[test]
+    fn erase_in_an_earlier_read_arms_the_scroll_for_the_cup_read() {
+        let mut engine = GhosttyTerminal::new(80, 24, 100).unwrap();
+        let mut resize = armed(&mut engine, 18);
 
         assert!(
             resize
-                .on_read(b"\x1b[10;2Hx", &mut engine)
-                .rewritten
+                .on_read(b"\x1b[?25l\x1b[J", &mut engine)
+                .synthetic_prefix
                 .is_none()
         );
 
-        resize.on_resize(80, 24, None, now);
-        resize.on_input(b"x", now);
+        assert_eq!(
+            resize
+                .on_read(b"\x1b[2;1H>", &mut engine)
+                .synthetic_prefix
+                .as_deref(),
+            Some(b"\x1b[16S".as_slice())
+        );
+    }
+
+    #[test]
+    fn repaint_below_the_prompt_scrolls_down() {
+        let mut engine = GhosttyTerminal::new(80, 24, 100).unwrap();
+        let mut resize = armed(&mut engine, 2);
+
+        assert_eq!(
+            resize
+                .on_read(b"\x1b[5;1H\x1b[J>", &mut engine)
+                .synthetic_prefix
+                .as_deref(),
+            Some(b"\x1b[3T".as_slice())
+        );
+    }
+
+    #[test]
+    fn multi_row_redraw_without_erase_passes_through_untouched() {
+        let mut engine = GhosttyTerminal::new(80, 24, 100).unwrap();
+        let mut resize = armed(&mut engine, 18);
+
+        // The shape of a PSReadLine ListView redraw: several rows, each
+        // addressed absolutely and cleared with EL, cursor returned to the
+        // input row. No ED anywhere, so it must not be taken for a repaint.
+        let list =
+            b"\x1b[18;1H\x1b[K> git\x1b[19;1H\x1b[K  git status\x1b[20;1H\x1b[K  git log\x1b[18;6H";
+
+        let read = resize.on_read(list, &mut engine);
+
+        assert!(read.synthetic_prefix.is_none());
+
+        engine.write_vt(list);
+
+        assert_eq!(engine.active_cursor_row(), Some(17));
+    }
+
+    #[test]
+    fn alternate_screen_ends_the_window() {
+        let mut engine = GhosttyTerminal::new(80, 24, 100).unwrap();
+        let mut resize = armed(&mut engine, 18);
+
+        engine.write_vt(b"\x1b[?1049h");
 
         assert!(
             resize
-                .on_read(b"\x1b[10;2Hx", &mut engine)
-                .rewritten
-                .is_some()
+                .on_read(b"\x1b[2;1H\x1b[J>", &mut engine)
+                .synthetic_prefix
+                .is_none()
         );
+        assert!(!resize.on_read(b"x", &mut engine).repaint_window);
     }
 }

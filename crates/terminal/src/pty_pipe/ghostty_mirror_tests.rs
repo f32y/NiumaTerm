@@ -6,7 +6,7 @@ use std::{io, sync, time};
 
 use nmt_config::colors::Colors;
 use nmt_platform::conpty_realign::{
-    max_cup_row_col, rewrite_conpty_resize_echo_cup_rows, su_realign_count,
+    contains_csi_erase_display, max_cup_row_col, realign_scroll_rows,
 };
 use nmt_platform::{EventedPty, ProcessReadWrite, WinsizeBuilder};
 use parking_lot::Mutex;
@@ -56,59 +56,65 @@ fn render_buffer_row_text(buffer: &RenderBuffer, y: usize) -> String {
 }
 
 #[test]
-fn conpty_resize_echo_rewrites_cup_to_engine_cursor_row() {
-    let rewritten = rewrite_conpty_resize_echo_cup_rows(b"\x1b[10;18Hx\x1b[10;19H", 42)
-        .expect("CUP row should be rewritten");
-
-    assert_eq!(rewritten, b"\x1b[42;18Hx\x1b[42;19H");
-}
-
-#[test]
-fn su_realign_count_computes_push_to_align_prompt() {
+fn realign_scroll_rows_scrolls_up_to_meet_conpty_prompt() {
     // Ghostty keeps the prompt on row 17 while ConPTY repaints it on row 1;
     // (CUP row 2, last CUP). N = 17 − 1 = 16, R_conpty = 1. Repaint fits 80x24.
     let repaint = b"\x1b[2;18Hdir\x1b[2;21H";
 
-    assert_eq!(su_realign_count(repaint, 17, 80, 24, 80, 24), Some((16, 1)));
+    assert_eq!(
+        realign_scroll_rows(repaint, 17, 80, 24, 80, 24),
+        Some((16, 1))
+    );
 }
 
 #[test]
-fn su_realign_count_uses_last_cup_for_multirow_prompt() {
+fn realign_scroll_rows_scrolls_down_when_conpty_prompt_is_lower() {
+    // Ghostty's prompt sits on row 1 while ConPTY repaints it on row 4 (CUP row
+    // 5): scroll down 3 so the stale copy cannot stay above the repaint.
+    let repaint = b"\x1b[5;1H\x1b[J>\x1b[5;2H";
+
+    assert_eq!(
+        realign_scroll_rows(repaint, 1, 80, 24, 80, 24),
+        Some((-3, 4))
+    );
+}
+
+#[test]
+fn realign_scroll_rows_uses_last_cup_for_multirow_prompt() {
     // Multi-row wrapped prompt: first CUP row 10 (top), last CUP row 11 (cursor).
     // Anchoring on the LAST CUP (row 11 → R_conpty 10) matches R_ghostty (cursor
     // row 22), so N = 22 − 10 = 12 — not 13, which the first CUP (row 10) would give.
     let repaint = b"\x1b[10;22Hxxx\x1b[11;6H";
 
     assert_eq!(
-        su_realign_count(repaint, 22, 90, 40, 90, 40),
+        realign_scroll_rows(repaint, 22, 90, 40, 90, 40),
         Some((12, 10))
     );
 }
 
 #[test]
-fn su_realign_count_none_when_already_aligned() {
-    // R_ghostty == R_conpty means no divergence and no SU; the legacy CUP rewrite handles it.
+fn realign_scroll_rows_none_when_already_aligned() {
     let repaint = b"\x1b[2;18Hdir\x1b[2;21H";
 
-    assert_eq!(su_realign_count(repaint, 1, 80, 24, 80, 24), None);
+    assert_eq!(realign_scroll_rows(repaint, 1, 80, 24, 80, 24), None);
 }
 
 #[test]
-fn su_realign_count_none_on_resize_mismatch() {
+fn realign_scroll_rows_none_on_resize_mismatch() {
     let repaint = b"\x1b[2;18Hdir\x1b[2;21H";
 
     // engine size moved past the latch → repaint answers a different resize.
-    assert_eq!(su_realign_count(repaint, 17, 80, 24, 100, 24), None);
+    assert_eq!(realign_scroll_rows(repaint, 17, 80, 24, 100, 24), None);
 
     // repaint addresses col 90, beyond the latched 80 cols → different resize.
     let wide = b"\x1b[2;90Hx\x1b[2;90H";
 
-    assert_eq!(su_realign_count(wide, 17, 80, 24, 80, 24), None);
+    assert_eq!(realign_scroll_rows(wide, 17, 80, 24, 80, 24), None);
 }
 
 #[test]
-fn su_realign_count_none_without_cup() {
-    assert_eq!(su_realign_count(b"\x1b[?25l", 17, 80, 24, 80, 24), None);
+fn realign_scroll_rows_none_without_cup() {
+    assert_eq!(realign_scroll_rows(b"\x1b[?25l", 17, 80, 24, 80, 24), None);
 }
 
 #[test]
@@ -118,26 +124,12 @@ fn max_cup_row_col_reports_maxima() {
 }
 
 #[test]
-fn conpty_resize_echo_leaves_wrapped_redraw_when_cursor_already_aligned() {
-    // Narrow width: PSReadLine redraws the input across two rows — input starts
-    // at row 10, wraps, cursor ends at row 11. ConPTY's cursor row (11) already
-    // matches ghostty's cursor row (target 11), so the redraw must be left
-    // untouched. Collapsing the first CUP onto row 11 re-wraps the content and
-    // makes it accumulate (the cols=37 xxxx-duplication bug).
-    let wrapped = b"\x1b[10;22Hxxxxxxxxxxxxxxxxxxxxx\x1b[11;6H";
-
-    assert_eq!(rewrite_conpty_resize_echo_cup_rows(wrapped, 11), None);
-}
-
-#[test]
-fn conpty_resize_echo_shifts_wrapped_redraw_by_delta_preserving_rows() {
-    // Divergent multi-row redraw: ConPTY input spans rows 9-10 (cursor row 10),
-    // ghostty's cursor is at row 22. The whole redraw shifts down by 12, keeping
-    // the two-row structure intact.
-    let rewritten = rewrite_conpty_resize_echo_cup_rows(b"\x1b[9;22Hxxx\x1b[10;6H", 22)
-        .expect("divergent redraw should shift");
-
-    assert_eq!(rewritten, b"\x1b[21;22Hxxx\x1b[22;6H");
+fn erase_display_detection_ignores_erase_line() {
+    assert!(contains_csi_erase_display(b"\x1b[1;24H\x1b[J"));
+    assert!(contains_csi_erase_display(b"\x1b[2J\x1b[H"));
+    assert!(!contains_csi_erase_display(
+        b"\x1b[10;1H\x1b[K> foo\x1b[10;6H"
+    ));
 }
 
 struct FakeReader {
@@ -612,12 +604,15 @@ fn osc_progress_hides_published_cursor_until_removed() {
     );
 }
 
-/// Drives the read loop's realignment, which `USES_CONPTY` enables only
-/// where ConPTY is the backend; a real PTY never emits the resize echo
-/// this reacts to.
+/// A keystroke echo inside the resize window reaches the engine untouched and
+/// leaves the engine cursor on the row ConPTY addressed. Moving it to
+/// ghostty's prompt row would split the two cursor models, after which ConPTY's
+/// column-only moves keep landing on a row the user cannot see. Drives the
+/// read loop's recovery, which `USES_CONPTY` enables only where ConPTY is the
+/// backend.
 #[cfg(windows)]
 #[test]
-fn conpty_resize_echo_realigns_machine_pty_read_to_cursor_row() {
+fn conpty_echo_in_resize_window_passes_through_unchanged() {
     let render_buffer = Arc::new(FrameStore::new(RenderBuffer::new(134, 42)));
     let vt_modes = Arc::new(AtomicU32::new(0));
 
@@ -653,14 +648,14 @@ fn conpty_resize_echo_realigns_machine_pty_read_to_cursor_row() {
         engine.write_vt(b"\x1b[2J\x1b[10;1HHISTORY\x1b[42;1HC:\\Workspace\\NiumaTerm>");
     }
 
+    let active_row = machine.ghostty.active_cursor_row();
+
     machine.conpty_resize.on_resize(
         machine.ghostty.cols(),
         machine.ghostty.rows(),
-        None,
+        active_row,
         Instant::now(),
     );
-
-    machine.conpty_resize.on_input(b"x", Instant::now());
 
     let mut state = PtyState::default();
     let mut read_buf = [0u8; READ_BUFFER_SIZE];
@@ -669,11 +664,15 @@ fn conpty_resize_echo_realigns_machine_pty_read_to_cursor_row() {
 
     let snapshot = machine.ghostty.snapshot().unwrap();
 
-    assert_eq!(snapshot_row_text(&snapshot, 9), "HISTORY");
+    assert_eq!(
+        snapshot_row_text(&snapshot, 9),
+        format!("HISTORY{}x", " ".repeat(16))
+    );
     assert_eq!(
         snapshot_row_text(&snapshot, 41),
-        "C:\\Workspace\\NiumaTerm>x"
+        "C:\\Workspace\\NiumaTerm>"
     );
+    assert_eq!(machine.ghostty.active_cursor_row(), Some(9));
 }
 
 /// Drives the read loop's realignment, which `USES_CONPTY` enables only
@@ -717,10 +716,12 @@ fn conpty_resize_repaint_realigns_clear_without_new_input() {
         engine.write_vt(b"\x1b[2J\x1b[10;1HHISTORY\x1b[42;1HC:\\Workspace\\NiumaTerm>");
     }
 
+    let active_row = machine.ghostty.active_cursor_row();
+
     machine.conpty_resize.on_resize(
         machine.ghostty.cols(),
         machine.ghostty.rows(),
-        None,
+        active_row,
         Instant::now(),
     );
 
@@ -731,11 +732,15 @@ fn conpty_resize_repaint_realigns_clear_without_new_input() {
 
     let snapshot = machine.ghostty.snapshot().unwrap();
 
-    assert_eq!(snapshot_row_text(&snapshot, 9), "HISTORY");
+    // ConPTY repaints the prompt on row 1 while ghostty held it on row 42. The
+    // content scrolls up to meet ConPTY's row and the repaint overwrites it in
+    // place, so the prompt appears once and the cursor models agree.
     assert_eq!(
-        snapshot_row_text(&snapshot, 41),
+        snapshot_row_text(&snapshot, 0),
         "C:\\Workspace\\NiumaTerm>TERMINPUT123"
     );
+    assert_eq!(snapshot_row_text(&snapshot, 41), "");
+    assert_eq!(machine.ghostty.active_cursor_row(), Some(0));
 }
 
 /// When the viewport is scrolled into history, the resize repaint is still
@@ -793,10 +798,12 @@ fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
         );
     }
 
+    let active_row = machine.ghostty.active_cursor_row();
+
     machine.conpty_resize.on_resize(
         machine.ghostty.cols(),
         machine.ghostty.rows(),
-        None,
+        active_row,
         Instant::now(),
     );
 
@@ -824,110 +831,6 @@ fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
         .count();
 
     assert_eq!(injects, 1, "INJECT must appear exactly once");
-}
-
-/// Typing while scrolled up: a ConPTY echo of user input is realigned to the
-/// ENGINE's active cursor row (`active_cursor_row()`, independent of the viewport
-/// scroll), so the echo lands on the active prompt row — never on the scrolled-away
-/// history currently in view. ConPTY emits the echo at its own stale CUP row.
-/// Drives the read loop's realignment, which `USES_CONPTY` enables only
-/// where ConPTY is the backend; a real PTY never emits the resize echo
-/// this reacts to.
-#[cfg(windows)]
-#[test]
-fn conpty_resize_echo_routes_to_active_cursor_when_scrolled_typing() {
-    let render_buffer = Arc::new(FrameStore::new(RenderBuffer::new(20, 4)));
-    let vt_modes = Arc::new(AtomicU32::new(0));
-
-    let pty = FakePty {
-        // ConPTY echoes the typed 'Z' at its stale row 2, col 8 (after the
-        // prompt in ConPTY's frame). The engine's real prompt is elsewhere.
-        reader: FakeReader {
-            data: b"\x1b[2;8HZ\x1b[2;9H".to_vec(),
-        },
-        writer: FakeWriter::default(),
-    };
-
-    let mut machine = PtyPipe::new(
-        render_buffer,
-        vt_modes,
-        pty,
-        VoidListener {},
-        &SessionOptions {
-            cols: 20,
-            rows: 4,
-            route_id: 0,
-            colors: Colors::default(),
-            cursor_shape: ansi::CursorShape::Block,
-            scrollback_lines: 1000,
-            engine_blocks: false,
-            terminal_responses: true,
-            output_sink: None,
-        },
-    )
-    .unwrap();
-
-    {
-        let engine = &mut machine.ghostty;
-
-        engine.write_vt(b"\x1b[2JL0\r\nL1\r\nL2\r\nL3\r\nL4\r\nL5\r\nL6\r\nL7\r\nL8\r\nPROMPT>");
-        engine.scroll_viewport_top();
-
-        let sb = engine.snapshot().unwrap().scrollbar();
-
-        assert!(
-            sb.offset < sb.total.saturating_sub(sb.len),
-            "precondition: viewport scrolled away from the bottom"
-        );
-    }
-
-    // echo_pending = this read is a ConPTY echo of user input.
-    machine.conpty_resize.on_resize(
-        machine.ghostty.cols(),
-        machine.ghostty.rows(),
-        None,
-        Instant::now(),
-    );
-
-    machine.conpty_resize.on_input(b"x", Instant::now());
-
-    let mut state = PtyState::default();
-    let mut read_buf = [0u8; READ_BUFFER_SIZE];
-
-    machine.pty_read(&mut state, &mut read_buf).unwrap();
-
-    // The echo went to the active screen (off the scrolled-to-top view); scroll
-    // to the bottom to observe where it landed.
-    let snapshot = {
-        let engine = &mut machine.ghostty;
-
-        engine.scroll_viewport_bottom();
-
-        engine.snapshot().unwrap()
-    };
-
-    // 'Z' lands exactly once, on the prompt row — not a history row.
-    let mut z_rows = Vec::new();
-    let mut prompt_y = None;
-
-    for y in 0..snapshot.rows() as u16 {
-        let text = snapshot_row_text(&snapshot, y);
-
-        if text.contains('Z') {
-            z_rows.push(y);
-        }
-
-        if text.contains("PROMPT") {
-            prompt_y = Some(y);
-        }
-    }
-
-    assert_eq!(z_rows.len(), 1, "echo 'Z' must appear exactly once");
-    assert_eq!(
-        Some(z_rows[0]),
-        prompt_y,
-        "echo 'Z' must land on the prompt row, not a history row"
-    );
 }
 
 // ---- command-blocks: pty_read emits CommandFinished with the launch cwd ----
