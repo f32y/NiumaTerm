@@ -157,13 +157,7 @@ impl BackgroundTasksView {
         target: Option<WeakEntity<AgentPane>>,
         cx: &mut Context<Self>,
     ) {
-        let same = match (&self.target, &target) {
-            (Some(current), Some(next)) => current == next,
-            (None, None) => true,
-            _ => false,
-        };
-
-        if same {
+        if self.target == target {
             return;
         }
 
