@@ -163,6 +163,7 @@ struct SessionSharedState {
     in_flight: Mutex<Option<InFlightBlock>>,
 
     open_prompt: Mutex<bool>,
+    #[cfg(any(test, feature = "test-support"))]
     read_only: AtomicBool,
     exited: AtomicBool,
     alt_screen: AtomicBool,
@@ -285,10 +286,12 @@ impl TerminalSession {
     /// True means the local queue accepted the bytes, not that a remote peer
     /// received them or the shell processed them.
     pub fn write_input(&self, data: &[u8]) -> bool {
-        if data.is_empty()
-            || self.shared.read_only.load(Ordering::Acquire)
-            || self.shared.exited.load(Ordering::Acquire)
-        {
+        if data.is_empty() || self.shared.exited.load(Ordering::Acquire) {
+            return false;
+        }
+
+        #[cfg(any(test, feature = "test-support"))]
+        if self.shared.read_only.load(Ordering::Acquire) {
             return false;
         }
 
@@ -320,6 +323,7 @@ impl TerminalSession {
         self.shared.alt_screen.load(Ordering::Acquire)
     }
 
+    #[cfg(any(test, feature = "test-support"))]
     pub fn mark_read_only(&self) {
         self.shared.read_only.store(true, Ordering::Release);
     }

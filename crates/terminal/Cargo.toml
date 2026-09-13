@@ -17,6 +17,8 @@ wayland = [
     "nmt_platform/wayland",
 ]
 
+test-support = []
+
 [dependencies]
 libghostty-vt-sys.workspace = true
 nmt_config.workspace = true

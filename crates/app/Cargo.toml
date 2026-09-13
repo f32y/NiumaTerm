@@ -92,3 +92,4 @@ tree-sitter-bash.workspace = true
 tree-sitter-diff.workspace = true
 tree-sitter-powershell.workspace = true
 tree-sitter-rust.workspace = true
+nmt_terminal = { workspace = true, features = ["test-support"] }
