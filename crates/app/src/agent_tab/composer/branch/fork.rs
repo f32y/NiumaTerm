@@ -15,6 +15,7 @@ pub(crate) use nmt_agent::session::branch::checkpoint_at_depth;
 use gpui::{Context, SharedString, Window};
 use nmt_agent::chat::ForkCheckpoint;
 use nmt_agent::session::branch::{BranchError, BranchUpdate, BranchView};
+use nmt_agent::session::restore::SettingsSeed;
 use rust_i18n::t;
 
 use crate::agent_tab::composer::branch::rewind::{rewind_prompt_label, rewind_timestamp};
@@ -214,8 +215,7 @@ impl AgentPane {
                 self.branch.draft = Some(self.input.read(cx).text().to_string());
                 self.history_ui.mode = RecentSessionsMode::Loading;
                 self.session.borrow_mut().restore.cancel();
-                self.session.borrow_mut().controls.seed_thread_defaults = false;
-                self.session.borrow_mut().controls.seed_approval_reviewer = false;
+                self.session.borrow_mut().controls.seed = SettingsSeed::None;
 
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,

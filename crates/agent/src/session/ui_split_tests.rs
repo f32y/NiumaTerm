@@ -9,6 +9,7 @@ use crate::session::delivery::MessageDelivery;
 use crate::session::history::{CountPublication, SessionHistory};
 use crate::session::lifecycle::{SessionRuntime, Status};
 use crate::session::naming::ConversationNaming;
+use crate::session::restore::SettingsSeed;
 use crate::session::settings::{ConversationSettings, RememberedSettings};
 use crate::session::test_support::TestBackend;
 use crate::session::update_readiness::{ConversationWork, Readiness};
@@ -58,7 +59,7 @@ fn queued_commands_wait_for_real_turn_and_exit_discards_pending_work() {
 #[test]
 fn ready_priority_keeps_profile_then_current_then_branch_settings() {
     let mut settings = ConversationSettings {
-        seed_thread_defaults: true,
+        seed: SettingsSeed::Defaults,
         ..Default::default()
     };
 
@@ -77,6 +78,7 @@ fn ready_priority_keeps_profile_then_current_then_branch_settings() {
     );
 
     assert_eq!(settings.settings.model.as_deref(), Some("profile"));
+    assert_eq!(settings.seed, SettingsSeed::None);
 
     settings.ready(
         AgentKind::Claude,

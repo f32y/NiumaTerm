@@ -263,8 +263,7 @@ fn resumed_codex_controls_keep_provider_values_instead_of_local_defaults(cx: &mu
             pane.session.borrow_mut().controls.settings.model = Some("old-model".into());
             pane.resume_session(0, cx);
 
-            assert!(!pane.session.borrow().controls.seed_thread_defaults);
-            assert!(pane.session.borrow().controls.seed_approval_reviewer);
+            assert_eq!(pane.session.borrow().controls.seed, SettingsSeed::Reviewer);
 
             let settings = ThreadSettings {
                 model: Some("resumed-model".into()),
@@ -282,8 +281,7 @@ fn resumed_codex_controls_keep_provider_values_instead_of_local_defaults(cx: &mu
 
             pane.seed_restored_settings(SettingsSeed::None);
 
-            assert!(!pane.session.borrow().controls.seed_thread_defaults);
-            assert!(!pane.session.borrow().controls.seed_approval_reviewer);
+            assert_eq!(pane.session.borrow().controls.seed, SettingsSeed::None);
         })
     });
 }

@@ -34,7 +34,7 @@ use crate::session::delivery::{MessageDelivery, RecoverablePrompt, Submission};
 use crate::session::input::SessionInput;
 use crate::session::lifecycle::{SessionRuntime, StartOutcome, Status};
 use crate::session::naming::ConversationNaming;
-use crate::session::restore::ConversationRestore;
+use crate::session::restore::{ConversationRestore, SettingsSeed};
 use crate::session::settings::ConversationSettings;
 use crate::session::workflows::WorkflowData;
 use crate::session::{AgentKind, Backend, RecoveryIdentity};
@@ -91,7 +91,7 @@ impl SessionController {
             restore: ConversationRestore::default(),
             naming: ConversationNaming::default(),
             controls: ConversationSettings {
-                seed_thread_defaults: true,
+                seed: SettingsSeed::Defaults,
                 ..ConversationSettings::default()
             },
             input: SessionInput::default(),

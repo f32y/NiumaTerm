@@ -3,6 +3,7 @@ use std::mem::take;
 
 use crate::chat::{AgentPreset, ApprovalPreset, ModelInfo, ThreadSettings};
 use crate::session::capabilities::AgentCapabilities as _;
+use crate::session::restore::SettingsSeed;
 use crate::session::{AgentKind, Backend};
 
 #[derive(Default)]
@@ -12,15 +13,9 @@ pub struct ConversationSettings {
     /// turn start (idempotent when unchanged).
     pub settings: ThreadSettings,
 
-    /// Whether the next `Ready` should overlay all remembered settings. True
-    /// for fresh conversations and resumed Claude conversations; later Claude
-    /// confirmations keep the values currently selected under the input.
-    pub seed_thread_defaults: bool,
-
-    /// Whether the next resumed Codex thread should take the locally
-    /// remembered approval reviewer while preserving its other stored
-    /// settings.
-    pub seed_approval_reviewer: bool,
+    /// Which local settings the next Ready may overlay. Resumed providers
+    /// differ in whether they restore all controls or leave the reviewer local.
+    pub seed: SettingsSeed,
 
     /// A rewind starts a new backend identity but keeps the user's current
     /// thread controls. The first Ready payload describes process defaults,
@@ -103,8 +98,12 @@ impl ConversationSettings {
         // another Ready arrives during first-turn initialization, that
         // later confirmation preserves the controls in use instead of
         // restoring the ones the CLI reports.
-        let seed_thread_defaults = take(&mut self.seed_thread_defaults);
-        let seed_approval_reviewer = take(&mut self.seed_approval_reviewer);
+        let (seed_thread_defaults, seed_approval_reviewer) = match take(&mut self.seed) {
+            SettingsSeed::Defaults => (true, false),
+            SettingsSeed::Reviewer => (false, true),
+            SettingsSeed::None => (false, false),
+        };
+
         let preserve_current = kind.caps().repeats_ready_during_init && !seed_thread_defaults;
 
         let local = if preserve_current {

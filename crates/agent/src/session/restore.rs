@@ -14,10 +14,11 @@ use crate::session::lifecycle::{SessionRuntime, Status};
 use crate::session::{AgentKind, RecoveryIdentity};
 
 /// Only controls absent from the provider's resumed settings are seeded locally.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SettingsSeed {
     Defaults,
     Reviewer,
+    #[default]
     None,
 }
 

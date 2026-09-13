@@ -11,6 +11,8 @@ use nmt_agent::session::branch::BranchUpdate;
 use nmt_agent::session::controller::ReadyDefaults;
 use nmt_agent::session::controller::{SessionEffect, SessionFailure, SessionReady};
 #[cfg(test)]
+use nmt_agent::session::restore::SettingsSeed;
+#[cfg(test)]
 use nmt_agent::transcript::TextField;
 use rust_i18n::t;
 use tracing::info;
@@ -459,16 +461,21 @@ impl AgentPane {
 
     #[cfg(test)]
     pub(super) fn prepare_ready_defaults(&mut self, cx: &Context<Self>) {
-        let seed = self.session.borrow().controls.seed_thread_defaults;
+        let mut session = self.session.borrow_mut();
 
-        self.session.borrow_mut().ready_defaults = ReadyDefaults {
-            stored: (seed || self.session.borrow().controls.seed_approval_reviewer)
-                .then(|| stored_thread_settings(self.kind, &self.profile, cx).cloned())
-                .flatten(),
-            model: seed
-                .then(|| launch_model(self.kind, &self.profile))
-                .flatten(),
-            effort: seed.then(|| launch_effort(&self.profile)).flatten(),
+        session.ready_defaults = match session.controls.seed {
+            SettingsSeed::Defaults => ReadyDefaults {
+                stored: stored_thread_settings(self.kind, &self.profile, cx).cloned(),
+                model: launch_model(self.kind, &self.profile),
+                effort: launch_effort(&self.profile),
+            },
+
+            SettingsSeed::Reviewer => ReadyDefaults {
+                stored: stored_thread_settings(self.kind, &self.profile, cx).cloned(),
+                ..ReadyDefaults::default()
+            },
+
+            SettingsSeed::None => ReadyDefaults::default(),
         };
     }
 

@@ -203,14 +203,7 @@ impl AgentPane {
             return;
         }
 
-        let (defaults, reviewer) = match seed {
-            SettingsSeed::Defaults => (true, false),
-            SettingsSeed::Reviewer => (false, true),
-            SettingsSeed::None => (false, false),
-        };
-
-        self.session.borrow_mut().controls.seed_thread_defaults = defaults;
-        self.session.borrow_mut().controls.seed_approval_reviewer = reviewer;
+        self.session.borrow_mut().controls.seed = seed;
     }
 
     /// Keep the displayed conversation until the replacement supplies its replay.

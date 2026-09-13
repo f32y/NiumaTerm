@@ -93,8 +93,7 @@ impl AgentSession {
                 SettingsSeed::Defaults
             };
 
-            session.controls.seed_thread_defaults = matches!(seed, SettingsSeed::Defaults);
-            session.controls.seed_approval_reviewer = matches!(seed, SettingsSeed::Reviewer);
+            session.controls.seed = seed;
 
             session.controls.restore_on_ready =
                 preserve_settings.then(|| session.controls.settings.clone());
@@ -296,16 +295,20 @@ impl AgentSession {
 
     pub(crate) fn prepare_defaults(&self, cx: &Context<Self>) {
         let mut session = self.controller.borrow_mut();
-        let seed = session.controls.seed_thread_defaults;
 
-        session.ready_defaults = ReadyDefaults {
-            stored: (seed || session.controls.seed_approval_reviewer)
-                .then(|| stored_thread_settings(self.kind, &self.profile, cx).cloned())
-                .flatten(),
-            model: seed
-                .then(|| launch_model(self.kind, &self.profile))
-                .flatten(),
-            effort: seed.then(|| launch_effort(&self.profile)).flatten(),
+        session.ready_defaults = match session.controls.seed {
+            SettingsSeed::Defaults => ReadyDefaults {
+                stored: stored_thread_settings(self.kind, &self.profile, cx).cloned(),
+                model: launch_model(self.kind, &self.profile),
+                effort: launch_effort(&self.profile),
+            },
+
+            SettingsSeed::Reviewer => ReadyDefaults {
+                stored: stored_thread_settings(self.kind, &self.profile, cx).cloned(),
+                ..ReadyDefaults::default()
+            },
+
+            SettingsSeed::None => ReadyDefaults::default(),
         };
     }
 
