@@ -3,6 +3,8 @@
 //! workspace is left or closed. Field edits mutate the global live for preview;
 //! failed writes retain those edits and expose a retry action.
 
+pub use nmt_config::appearance::MAX_TAB_WIDTH;
+
 pub use crate::ui::settings::state::{
     AgentProfile, AgentProfileKind, AgentProfileLauncher, AppSettings, CollapseRows, EnvVar,
     InputStyle, MIN_TAB_WIDTH, ModelListStyle, Profile, TabBarStyle, WindowBackdrop,
@@ -136,8 +138,6 @@ use crate::{agent_updates, ui};
 const APP_VERSION: &str = env!("NIUMATERM_VERSION");
 const APP_INTERNAL_VERSION: &str = env!("NIUMATERM_INTERNAL_VERSION");
 const RELEASE_PAGE_URL: &str = "https://github.com/f32y/NiumaTerm/releases";
-
-pub const MAX_TAB_WIDTH: f64 = MIN_TAB_WIDTH * 3.0;
 
 struct SettingsSaveFailure;
 

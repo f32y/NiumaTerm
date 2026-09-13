@@ -868,3 +868,58 @@ fn encrypt_credentials(api_base_url: &str, api_key: &str) -> Result<String, Stri
         .unwrap()
         .to_owned())
 }
+
+#[test]
+fn startup_load_normalizes_appearance_before_any_ui_reads_it() {
+    let config = create_temporary_config(
+        "invalid-appearance",
+        r#"
+[appearance]
+ui-font = " "
+terminal-font-family = ""
+agent-font-family = " "
+agent-transcript-font-family = ""
+terminal-font-size = -1
+agent-font-size = 500
+agent-transcript-font-size = nan
+terminal-line-height = inf
+tab-width = 9999
+background-opacity = -5
+background-image-opacity = nan
+background-image = " "
+git-status-refresh-interval = 1
+"#,
+    );
+
+    let appearance = &config.appearance;
+    let defaults = AppearanceConfig::default();
+
+    assert_eq!(appearance.ui_font, defaults.ui_font);
+    assert_eq!(
+        appearance.terminal_font_family,
+        defaults.terminal_font_family
+    );
+    assert_eq!(appearance.agent_font_family, defaults.agent_font_family);
+    assert_eq!(
+        appearance.agent_transcript_font_family,
+        defaults.agent_transcript_font_family
+    );
+    assert_eq!(appearance.terminal_font_size, 6.0);
+    assert_eq!(appearance.agent_font_size, 72.0);
+    assert_eq!(
+        appearance.agent_transcript_font_size,
+        defaults.agent_transcript_font_size
+    );
+    assert_eq!(
+        appearance.terminal_line_height,
+        defaults.terminal_line_height
+    );
+    assert_eq!(appearance.tab_width, appearance::MAX_TAB_WIDTH);
+    assert_eq!(appearance.background_opacity, 0.2);
+    assert_eq!(
+        appearance.background_image_opacity,
+        defaults.background_image_opacity
+    );
+    assert_eq!(appearance.background_image, None);
+    assert_eq!(appearance.git_status_refresh_interval, 30);
+}

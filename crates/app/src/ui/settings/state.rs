@@ -1,5 +1,15 @@
 pub use nmt_config::agent::{CollapseRows, ModelListStyle};
-pub use nmt_config::appearance::{InputStyle, TabBarStyle, WindowBackdrop};
+#[cfg(test)]
+pub use nmt_config::appearance::{
+    DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE, DEFAULT_BACKGROUND_IMAGE_OPACITY, DEFAULT_FONT_FAMILY,
+    DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_TAB_WIDTH, DEFAULT_UI_FONT,
+    clamp_agent_transcript_font_size, clamp_terminal_font_size, clamp_terminal_line_height,
+    terminal_font_or_default, ui_font_or_default,
+};
+pub use nmt_config::appearance::{
+    InputStyle, MIN_TAB_WIDTH, TabBarStyle, WindowBackdrop, clamp_background_image_opacity,
+    clamp_background_opacity, clamp_git_interval, clamp_tab_width,
+};
 pub use nmt_config::profile::{
     AgentProfile, AgentProfileKind, AgentProfileLauncher, EnvVar, Profile,
 };
@@ -23,41 +33,12 @@ use nmt_config::update::UpdateConfig;
 use nmt_config::{Config, CursorShape, SettingsPatch, config_file_path, get, save_settings_to};
 use rust_i18n::t;
 
-use crate::ui::settings::MAX_TAB_WIDTH;
-
 /// The shell a freshly seeded profile names, which is the platform's own
 /// default rather than a fixed program.
 #[cfg(test)]
 pub fn default_shell_for_tests() -> String {
     default_shell()
 }
-
-/// The fixed-pitch face the terminal grid falls back to, and the proportional
-/// one the interface does. Both mirror the configuration defaults; see
-/// `nmt_config::appearance` for why macOS names its system face through a
-/// token rather than by family.
-#[cfg(target_os = "windows")]
-pub const DEFAULT_FONT_FAMILY: &str = "Consolas";
-
-#[cfg(target_os = "macos")]
-pub const DEFAULT_FONT_FAMILY: &str = "Menlo";
-
-#[cfg(all(unix, not(target_os = "macos")))]
-pub const DEFAULT_FONT_FAMILY: &str = "monospace";
-
-pub const DEFAULT_FONT_SIZE: f64 = 14.0;
-pub const DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE: f64 = 13.0;
-pub const DEFAULT_LINE_HEIGHT: f64 = 1.0;
-pub(super) const DEFAULT_BACKGROUND_IMAGE_OPACITY: f64 = 0.3;
-
-#[cfg(target_os = "windows")]
-pub const DEFAULT_UI_FONT: &str = "Segoe UI";
-
-#[cfg(not(target_os = "windows"))]
-pub const DEFAULT_UI_FONT: &str = ".SystemUIFont";
-
-pub const MIN_TAB_WIDTH: f64 = 120.0;
-pub const DEFAULT_TAB_WIDTH: f64 = 220.0;
 
 /// Persistent settings are shared with the configuration reader and writer.
 /// Picker state and save errors live separately and never enter a pane snapshot.
@@ -200,91 +181,9 @@ fn builtin_agent_profiles() -> Vec<AgentProfile> {
         .collect()
 }
 
-/// Snap a persisted refresh interval to the allowed set, falling back to 30.
-pub(super) fn clamp_git_interval(seconds: u64) -> u64 {
-    if matches!(seconds, 10 | 15 | 30 | 60) {
-        seconds
-    } else {
-        30
-    }
-}
-
-/// The configured UI font, or the default when the config leaves it blank
-/// (an empty family would fall back to gpui's default, not Segoe UI).
-pub(super) fn ui_font_or_default(family: &str) -> String {
-    if family.trim().is_empty() {
-        DEFAULT_UI_FONT.into()
-    } else {
-        family.to_string()
-    }
-}
-
-pub(super) fn terminal_font_or_default(family: &str) -> String {
-    if family.trim().is_empty() {
-        DEFAULT_FONT_FAMILY.into()
-    } else {
-        family.to_string()
-    }
-}
-
-/// Clamp a persisted tab width to the allowed range, falling back to the
-/// default for non-finite values.
-pub(super) fn clamp_tab_width(width: f64) -> f64 {
-    if width.is_finite() {
-        width.clamp(MIN_TAB_WIDTH, MAX_TAB_WIDTH)
-    } else {
-        DEFAULT_TAB_WIDTH
-    }
-}
-
-pub(super) fn clamp_terminal_font_size(size: f64) -> f64 {
-    if size.is_finite() {
-        size.clamp(6.0, 72.0)
-    } else {
-        DEFAULT_FONT_SIZE
-    }
-}
-
-pub(super) fn clamp_agent_transcript_font_size(size: f64) -> f64 {
-    if size.is_finite() {
-        size.clamp(6.0, 72.0)
-    } else {
-        DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE
-    }
-}
-
-pub(super) fn clamp_terminal_line_height(line_height: f64) -> f64 {
-    if line_height.is_finite() {
-        line_height.clamp(0.8, 3.0)
-    } else {
-        DEFAULT_LINE_HEIGHT
-    }
-}
-
-/// Clamp a persisted opacity into `min..=1.0`; non-finite values (a hand-
-/// edited config) fall back to `fallback`.
-fn clamp_opacity(opacity: f64, min: f64, fallback: f64) -> f64 {
-    if opacity.is_finite() {
-        opacity.clamp(min, 1.0)
-    } else {
-        fallback
-    }
-}
-
-/// The 0.2 floor keeps the window from becoming effectively invisible.
-pub(super) fn clamp_background_opacity(opacity: f64) -> f64 {
-    clamp_opacity(opacity, 0.2, 1.0)
-}
-
-pub(super) fn clamp_background_image_opacity(opacity: f64) -> f64 {
-    clamp_opacity(opacity, 0.0, DEFAULT_BACKGROUND_IMAGE_OPACITY)
-}
-
 impl AppSettings {
     pub fn load() -> Self {
         let config = get();
-
-        let mut appearance = config.appearance.clone();
 
         let profiles: Vec<Profile> = if config.profiles.list.is_empty() {
             vec![builtin_profile()]
@@ -321,45 +220,13 @@ impl AppSettings {
                 .unwrap_or_default()
         };
 
-        appearance.git_status_refresh_interval =
-            clamp_git_interval(appearance.git_status_refresh_interval);
-
-        appearance.ui_font = ui_font_or_default(&appearance.ui_font);
-
-        appearance.terminal_font_family =
-            terminal_font_or_default(&appearance.terminal_font_family);
-
-        appearance.agent_font_family = ui_font_or_default(&appearance.agent_font_family);
-
-        appearance.agent_transcript_font_family =
-            terminal_font_or_default(&appearance.agent_transcript_font_family);
-
-        appearance.terminal_font_size = clamp_terminal_font_size(appearance.terminal_font_size);
-        appearance.agent_font_size = clamp_terminal_font_size(appearance.agent_font_size);
-
-        appearance.agent_transcript_font_size =
-            clamp_agent_transcript_font_size(appearance.agent_transcript_font_size);
-
-        appearance.terminal_line_height =
-            clamp_terminal_line_height(appearance.terminal_line_height);
-
-        appearance.tab_width = clamp_tab_width(appearance.tab_width);
-        appearance.background_opacity = clamp_background_opacity(appearance.background_opacity);
-
-        appearance.background_image_opacity =
-            clamp_background_image_opacity(appearance.background_image_opacity);
-
-        appearance.background_image = appearance
-            .background_image
-            .filter(|path| !path.trim().is_empty());
-
         Self {
             theme: if config.theme.is_empty() {
                 default_theme()
             } else {
                 config.theme.clone()
             },
-            appearance,
+            appearance: config.appearance.clone(),
             agent: config.agent.clone(),
             system: config.system.clone(),
             remote_session: config.remote_session.clone(),

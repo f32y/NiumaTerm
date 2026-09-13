@@ -218,6 +218,9 @@ impl Config {
         };
 
         let mut decoded = parse_toml::<Config>(&content)?;
+
+        decoded.appearance.normalize();
+
         let theme = &decoded.theme;
 
         if !theme.is_empty() {

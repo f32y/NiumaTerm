@@ -4,6 +4,32 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::defaults::default_bool_true;
 
+/// Default font families and metrics shared by loading and editing.
+#[cfg(target_os = "windows")]
+pub const DEFAULT_FONT_FAMILY: &str = "Consolas";
+
+#[cfg(target_os = "macos")]
+pub const DEFAULT_FONT_FAMILY: &str = "Menlo";
+
+#[cfg(all(unix, not(target_os = "macos")))]
+pub const DEFAULT_FONT_FAMILY: &str = "monospace";
+
+pub const DEFAULT_FONT_SIZE: f64 = 14.0;
+pub const DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE: f64 = 13.0;
+pub const DEFAULT_LINE_HEIGHT: f64 = 1.0;
+pub const DEFAULT_BACKGROUND_IMAGE_OPACITY: f64 = 0.3;
+
+#[cfg(target_os = "windows")]
+pub const DEFAULT_UI_FONT: &str = "Segoe UI";
+
+#[cfg(not(target_os = "windows"))]
+pub const DEFAULT_UI_FONT: &str = ".SystemUIFont";
+
+pub const MIN_TAB_WIDTH: f64 = 120.0;
+pub const DEFAULT_TAB_WIDTH: f64 = 220.0;
+
+pub const MAX_TAB_WIDTH: f64 = MIN_TAB_WIDTH * 3.0;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum InputStyle {
@@ -143,7 +169,7 @@ fn default_git_status_refresh_interval() -> u64 {
 }
 
 fn default_tab_width() -> f64 {
-    220.0
+    DEFAULT_TAB_WIDTH
 }
 
 /// The proportional face the interface is drawn in.
@@ -154,12 +180,12 @@ fn default_tab_width() -> f64 {
 /// installed does not fail — it silently resolves to Helvetica.
 #[cfg(target_os = "windows")]
 fn default_ui_font() -> String {
-    "Segoe UI".to_string()
+    DEFAULT_UI_FONT.to_string()
 }
 
 #[cfg(not(target_os = "windows"))]
 fn default_ui_font() -> String {
-    ".SystemUIFont".to_string()
+    DEFAULT_UI_FONT.to_string()
 }
 
 /// The fixed-pitch face the terminal grid is drawn in.
@@ -170,25 +196,25 @@ fn default_ui_font() -> String {
 /// a proportional face.
 #[cfg(target_os = "windows")]
 fn default_terminal_font_family() -> String {
-    "Consolas".to_string()
+    DEFAULT_FONT_FAMILY.to_string()
 }
 
 #[cfg(target_os = "macos")]
 fn default_terminal_font_family() -> String {
-    "Menlo".to_string()
+    DEFAULT_FONT_FAMILY.to_string()
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn default_terminal_font_family() -> String {
-    "monospace".to_string()
+    DEFAULT_FONT_FAMILY.to_string()
 }
 
 fn default_terminal_font_size() -> f64 {
-    14.0
+    DEFAULT_FONT_SIZE
 }
 
 fn default_terminal_line_height() -> f64 {
-    1.0
+    DEFAULT_LINE_HEIGHT
 }
 
 fn default_scroll_to_bottom_when_typing() -> bool {
@@ -212,7 +238,7 @@ fn default_agent_transcript_font_family() -> String {
 }
 
 fn default_agent_transcript_font_size() -> f64 {
-    13.0
+    DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE
 }
 
 fn default_background_opacity() -> f64 {
@@ -220,7 +246,7 @@ fn default_background_opacity() -> f64 {
 }
 
 fn default_background_image_opacity() -> f64 {
-    0.3
+    DEFAULT_BACKGROUND_IMAGE_OPACITY
 }
 
 fn default_window_backdrop() -> WindowBackdrop {
@@ -537,5 +563,119 @@ impl From<&str> for InputStyle {
             "fixed-bottom" => InputStyle::FixedBottom,
             _ => InputStyle::Waterfall,
         }
+    }
+}
+
+/// Snap a persisted refresh interval to the allowed set, falling back to 30.
+pub fn clamp_git_interval(seconds: u64) -> u64 {
+    if matches!(seconds, 10 | 15 | 30 | 60) {
+        seconds
+    } else {
+        30
+    }
+}
+
+/// The configured UI font, or the default when the config leaves it blank
+/// (an empty family would fall back to gpui's default, not Segoe UI).
+pub fn ui_font_or_default(family: &str) -> String {
+    if family.trim().is_empty() {
+        DEFAULT_UI_FONT.into()
+    } else {
+        family.to_string()
+    }
+}
+
+pub fn terminal_font_or_default(family: &str) -> String {
+    if family.trim().is_empty() {
+        DEFAULT_FONT_FAMILY.into()
+    } else {
+        family.to_string()
+    }
+}
+
+/// Clamp a persisted tab width to the allowed range, falling back to the
+/// default for non-finite values.
+pub fn clamp_tab_width(width: f64) -> f64 {
+    if width.is_finite() {
+        width.clamp(MIN_TAB_WIDTH, MAX_TAB_WIDTH)
+    } else {
+        DEFAULT_TAB_WIDTH
+    }
+}
+
+pub fn clamp_terminal_font_size(size: f64) -> f64 {
+    if size.is_finite() {
+        size.clamp(6.0, 72.0)
+    } else {
+        DEFAULT_FONT_SIZE
+    }
+}
+
+pub fn clamp_agent_transcript_font_size(size: f64) -> f64 {
+    if size.is_finite() {
+        size.clamp(6.0, 72.0)
+    } else {
+        DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE
+    }
+}
+
+pub fn clamp_terminal_line_height(line_height: f64) -> f64 {
+    if line_height.is_finite() {
+        line_height.clamp(0.8, 3.0)
+    } else {
+        DEFAULT_LINE_HEIGHT
+    }
+}
+
+/// Clamp a persisted opacity into `min..=1.0`; non-finite values (a hand-
+/// edited config) fall back to `fallback`.
+fn clamp_opacity(opacity: f64, min: f64, fallback: f64) -> f64 {
+    if opacity.is_finite() {
+        opacity.clamp(min, 1.0)
+    } else {
+        fallback
+    }
+}
+
+/// The 0.2 floor keeps the window from becoming effectively invisible.
+pub fn clamp_background_opacity(opacity: f64) -> f64 {
+    clamp_opacity(opacity, 0.2, 1.0)
+}
+
+pub fn clamp_background_image_opacity(opacity: f64) -> f64 {
+    clamp_opacity(opacity, 0.0, DEFAULT_BACKGROUND_IMAGE_OPACITY)
+}
+
+impl AppearanceConfig {
+    pub fn normalize(&mut self) {
+        self.git_status_refresh_interval = clamp_git_interval(self.git_status_refresh_interval);
+
+        self.ui_font = ui_font_or_default(&self.ui_font);
+
+        self.terminal_font_family = terminal_font_or_default(&self.terminal_font_family);
+
+        self.agent_font_family = ui_font_or_default(&self.agent_font_family);
+
+        self.agent_transcript_font_family =
+            terminal_font_or_default(&self.agent_transcript_font_family);
+
+        self.terminal_font_size = clamp_terminal_font_size(self.terminal_font_size);
+        self.agent_font_size = clamp_terminal_font_size(self.agent_font_size);
+
+        self.agent_transcript_font_size =
+            clamp_agent_transcript_font_size(self.agent_transcript_font_size);
+
+        self.terminal_line_height = clamp_terminal_line_height(self.terminal_line_height);
+
+        self.tab_width = clamp_tab_width(self.tab_width);
+        self.background_opacity = clamp_background_opacity(self.background_opacity);
+
+        self.background_image_opacity =
+            clamp_background_image_opacity(self.background_image_opacity);
+
+        self.background_image = self
+            .background_image
+            .take()
+            .filter(|path| !path.trim().is_empty());
     }
 }
