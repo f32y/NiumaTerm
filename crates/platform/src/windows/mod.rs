@@ -49,7 +49,7 @@ use std::sync::{self};
 use crate::windows::child::ChildExitWatcher;
 use crate::windows::conpty::Conpty as Backend;
 use crate::windows::pipes::{EventedAnonRead as ReadPipe, EventedAnonWrite as WritePipe};
-use crate::windows::process::ProcessTree;
+use crate::windows::process::{KillOnCloseJob, ProcessTree};
 use crate::{
     ChildEvent, EventedPty, Interest, Poll, ProcessReadWrite, PtyOptions, Token, Waker, Winsize,
     WinsizeBuilder,
@@ -69,29 +69,12 @@ pub struct Pty {
 
 /// Create a ConPTY shell with child-only environment overrides.
 pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, io::Error> {
-    create_pty_with_management(options, false)
+    conpty::new(options, None)
 }
 
 /// Create a ConPTY whose child process tree is terminated when it is dropped.
 pub fn create_managed_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, io::Error> {
-    let pty = create_pty_with_management(options, true)?;
-
-    if pty.process_tree().is_none() {
-        return Err(io::Error::other(
-            "managed ConPTY could not create its process-tree job",
-        ));
-    }
-
-    Ok(pty)
-}
-
-fn create_pty_with_management(
-    options: PtyOptions<'_>,
-    manage_process_tree: bool,
-) -> Result<Pty, io::Error> {
-    let exec = command_line(options.shell, options.args);
-
-    conpty::new(&exec, options, manage_process_tree)
+    conpty::new(options, Some(KillOnCloseJob::new()?))
 }
 
 impl Pty {

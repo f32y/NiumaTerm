@@ -121,7 +121,11 @@ unsafe impl Sync for JobHandle {}
 
 impl KillOnCloseJob {
     pub fn attach(child: &Child) -> io::Result<Self> {
-        unsafe { Self::attach_handle(child.as_raw_handle() as HANDLE) }
+        let job = Self::new()?;
+
+        unsafe { job.assign_handle(child.as_raw_handle() as HANDLE)? };
+
+        Ok(job)
     }
 
     pub fn attach_or_kill(child: &mut Child) -> io::Result<Self> {
@@ -131,7 +135,7 @@ impl KillOnCloseJob {
         })
     }
 
-    pub(crate) unsafe fn attach_handle(process: HANDLE) -> io::Result<Self> {
+    pub(crate) fn new() -> io::Result<Self> {
         unsafe {
             let job = CreateJobObjectW(ptr::null(), ptr::null());
 
@@ -157,15 +161,15 @@ impl KillOnCloseJob {
                 return Err(error);
             }
 
-            if AssignProcessToJobObject(job, process) == 0 {
-                let error = io::Error::last_os_error();
-
-                CloseHandle(job);
-
-                return Err(error);
-            }
-
             Ok(Self(Arc::new(JobHandle(job))))
+        }
+    }
+
+    pub(crate) unsafe fn assign_handle(&self, process: HANDLE) -> io::Result<()> {
+        if unsafe { AssignProcessToJobObject(self.0.0, process) } == 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
         }
     }
 

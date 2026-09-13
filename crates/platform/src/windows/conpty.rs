@@ -5,7 +5,7 @@ mod conpty_tests;
 use std::ffi::{self, OsString};
 use std::io::{Error, ErrorKind, Result};
 use std::os::windows::ffi::OsStrExt as _;
-use std::os::windows::io::IntoRawHandle;
+use std::os::windows::io::{AsRawHandle, FromRawHandle, IntoRawHandle, OwnedHandle};
 use std::sync::mpsc;
 use std::time::Duration;
 use std::{env, mem, ptr, thread};
@@ -13,13 +13,14 @@ use std::{env, mem, ptr, thread};
 use libc::c_ushort;
 use miow::pipe::anonymous;
 use tracing::*;
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, S_OK};
+use windows_sys::Win32::Foundation::{HANDLE, S_OK};
 use windows_sys::Win32::System::Console::{COORD, HPCON};
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows_sys::Win32::System::Threading::{
     CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, EXTENDED_STARTUPINFO_PRESENT,
     InitializeProcThreadAttributeList, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION,
-    ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW, UpdateProcThreadAttribute,
+    ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW, TerminateProcess,
+    UpdateProcThreadAttribute,
 };
 use windows_sys::core::{HRESULT, PWSTR};
 use windows_sys::{s, w};
@@ -27,7 +28,7 @@ use windows_sys::{s, w};
 use crate::windows::child::ChildExitWatcher;
 use crate::windows::pipes::{EventedAnonRead, EventedAnonWrite};
 use crate::windows::process::{KillOnCloseJob, ProcessTree};
-use crate::windows::{Pty, win32_string};
+use crate::windows::{Pty, command_line, win32_string};
 use crate::{PtyOptions, Winsize};
 
 /// Load the pseudoconsole API from conpty.dll if possible, otherwise use the
@@ -184,7 +185,7 @@ impl Drop for Conpty {
 // The ConPTY handle can be sent between threads.
 unsafe impl Send for Conpty {}
 
-pub fn new(shell: &str, options: PtyOptions<'_>, manage_process_tree: bool) -> Result<Pty> {
+pub fn new(options: PtyOptions<'_>, job: Option<KillOnCloseJob>) -> Result<Pty> {
     if options.bootstrap.is_some() {
         return Err(Error::new(
             ErrorKind::InvalidInput,
@@ -240,6 +241,12 @@ pub fn new(shell: &str, options: PtyOptions<'_>, manage_process_tree: bool) -> R
             "CreatePseudoConsole failed: HRESULT {result:#010x}"
         )));
     }
+
+    let conpty = Conpty {
+        handle: pty_handle,
+        api,
+        job,
+    };
 
     let mut success;
 
@@ -317,7 +324,7 @@ pub fn new(shell: &str, options: PtyOptions<'_>, manage_process_tree: bool) -> R
         }
     }
 
-    let cmdline = win32_string(shell);
+    let cmdline = win32_string(&command_line(options.shell, options.args));
     let cwd = working_directory.map(win32_string);
 
     let mut environment = build_environment_block(environment_overrides);
@@ -331,13 +338,9 @@ pub fn new(shell: &str, options: PtyOptions<'_>, manage_process_tree: bool) -> R
             ptr::null_mut(),
             ptr::null_mut(),
             false as i32,
-            // Suspended start when job management is on: the shell must be in
-            // the job before it can spawn children, or an early child escapes.
-            if manage_process_tree {
-                EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED
-            } else {
-                EXTENDED_STARTUPINFO_PRESENT
-            } | CREATE_UNICODE_ENVIRONMENT,
+            // Starting suspended lets any supplied job contain the shell before
+            // it can create descendants. Both launch paths resume below.
+            EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
             environment.as_mut_ptr().cast(),
             cwd.as_ref().map_or_else(ptr::null, |s| s.as_ptr()),
             &mut startup_info_ex.StartupInfo as *mut STARTUPINFOW,
@@ -349,38 +352,40 @@ pub fn new(shell: &str, options: PtyOptions<'_>, manage_process_tree: bool) -> R
         }
     }
 
-    let job = if manage_process_tree {
-        let job = unsafe { KillOnCloseJob::attach_handle(proc_info.hProcess) }
-            .map_err(|error| warn!("failed to create process-tree job: {error}"))
-            .ok();
+    // CreateProcessW transferred both handles to us; errors below must release
+    // them as well as the pseudoconsole.
+    let process = unsafe { OwnedHandle::from_raw_handle(proc_info.hProcess) };
 
-        // The shell was created suspended; resume it whether or not the job
-        // setup succeeded (failure degrades to unmanaged, it must not hang).
-        unsafe {
-            ResumeThread(proc_info.hThread);
-        }
+    let primary_thread = unsafe { OwnedHandle::from_raw_handle(proc_info.hThread) };
 
-        job
-    } else {
-        None
-    };
+    let started = conpty
+        .job
+        .as_ref()
+        .map_or(Ok(()), |job| unsafe {
+            job.assign_handle(process.as_raw_handle())
+        })
+        .and_then(|()| {
+            if unsafe { ResumeThread(primary_thread.as_raw_handle()) } == u32::MAX {
+                Err(Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
 
-    // The primary-thread handle has no further use in either path; leaving it
-    // open would leak one thread handle per spawned PTY.
-    unsafe {
-        CloseHandle(proc_info.hThread);
+    if let Err(error) = started {
+        // A failed attachment must never let an unmanaged shell run. The
+        // process is still suspended and is the child created by this call.
+        unsafe { TerminateProcess(process.as_raw_handle(), 1) };
+
+        return Err(error);
     }
+
+    drop(primary_thread);
 
     let conin = EventedAnonWrite::new(conin);
     let conout = EventedAnonRead::new(conout);
 
-    let child_watcher = ChildExitWatcher::new(proc_info.hProcess)?;
-
-    let conpty = Conpty {
-        handle: pty_handle as HPCON,
-        api,
-        job,
-    };
+    let child_watcher = ChildExitWatcher::new(process.into_raw_handle())?;
 
     Ok(Pty::new(conpty, conout, conin, child_watcher))
 }

@@ -436,20 +436,19 @@ impl ShellUser {
     }
 }
 
-/// Create a shell PTY with child-only environment overrides.
-pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
-    create_pty_with_management(options, false)
-}
-
 /// Create a shell PTY whose child process tree is terminated when it is dropped.
 pub fn create_managed_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
-    let pty = create_pty_with_management(options, true)?;
+    let mut pty = create_pty_with_env(options)?;
 
-    if pty.process_tree().is_none() {
-        return Err(Error::other(
-            "managed PTY could not contain its child process group",
-        ));
-    }
+    // The child established its own session before exec, so attaching records
+    // its existing group. A failure must also terminate and reap the child.
+    let child = pty
+        .child
+        .process
+        .as_mut()
+        .ok_or_else(|| Error::other("new PTY has no child process"))?;
+
+    pty.job = Some(KillOnCloseJob::attach_or_kill(child)?);
 
     Ok(pty)
 }
@@ -517,10 +516,8 @@ fn queue_bootstrap(main: libc::c_int, child: libc::c_int, bootstrap: &str) -> Re
     Ok(())
 }
 
-fn create_pty_with_management(
-    options: PtyOptions<'_>,
-    manage_process_tree: bool,
-) -> Result<Pty, Error> {
+/// Create a shell PTY with child-only environment overrides.
+pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
     let PtyOptions {
         shell,
         args,
@@ -734,12 +731,6 @@ fn create_pty_with_management(
 
             let ptsname: String = tty_ptsname(main).unwrap_or_else(|_| "".to_string());
 
-            // `pre_exec` made the child a session leader, so it already leads
-            // its own group and attaching only records it.
-            let job = manage_process_tree
-                .then(|| KillOnCloseJob::attach(&child_process))
-                .transpose()?;
-
             let child_unix = Child {
                 id: Arc::new(main),
                 ptsname,
@@ -753,7 +744,7 @@ fn create_pty_with_management(
                 token: Token(0),
                 signals,
                 signals_token: Token(0),
-                job,
+                job: None,
             })
         }
 

@@ -35,4 +35,8 @@ fn managed_pty_controls_shell_process_tree() {
 
     assert_eq!(process_tree.process_count(), 1);
     assert_eq!(process_tree.other_process_count(), 0);
+
+    drop(pty);
+
+    assert_eq!(process_tree.process_count(), 0);
 }
