@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::path::PathBuf;
@@ -76,14 +79,14 @@ struct Shared {
     devices: Mutex<AuthorizedDevices>,
     pending_pairing: Mutex<Option<PendingPairing>>,
     active: Mutex<HashMap<String, ActiveConnection>>,
-    shutdown: AtomicBool,
+    shutdown: watch::Sender<bool>,
 }
 
-/// Handle to the running host service. The service outlives dropped handles
-/// only until `shutdown()`; sessions themselves live in the hub and survive
-/// client disconnects by design.
+/// Owns the host service thread. Dropping the handle stops the service and
+/// waits for its runtime to release the relay connections.
 pub struct HostHandle {
     shared: Arc<Shared>,
+    worker: Option<thread::JoinHandle<()>>,
 }
 
 impl HostHandle {
@@ -107,7 +110,7 @@ impl HostHandle {
             devices: Mutex::new(devices),
             pending_pairing: Mutex::new(None),
             active: Mutex::new(HashMap::new()),
-            shutdown: AtomicBool::new(false),
+            shutdown: watch::channel(false).0,
         });
 
         let runtime = RuntimeBuilder::new_multi_thread()
@@ -117,13 +120,28 @@ impl HostHandle {
             .map_err(HostStartError::Runtime)?;
 
         let control = Arc::clone(&shared);
+        let mut shutdown = shared.shutdown.subscribe();
 
-        thread::Builder::new()
+        let worker = thread::Builder::new()
             .name("remote-host".into())
-            .spawn(move || runtime.block_on(control_loop(control)))
+            .spawn(move || {
+                runtime.block_on(async {
+                    tokio::select! {
+                        biased;
+                        _ = shutdown.wait_for(|stopped| *stopped) => {}
+
+                        _ = control_loop(control) => {}
+                    }
+                });
+
+                runtime.shutdown_timeout(Duration::from_secs(1));
+            })
             .map_err(HostStartError::Runtime)?;
 
-        Ok(HostHandle { shared })
+        Ok(HostHandle {
+            shared,
+            worker: Some(worker),
+        })
     }
 
     pub fn host_id(&self) -> &str {
@@ -185,7 +203,7 @@ impl HostHandle {
     }
 
     pub fn shutdown(&self) {
-        self.shared.shutdown.store(true, Ordering::SeqCst);
+        self.shared.shutdown.send_replace(true);
 
         let active = self.shared.active.lock();
 
@@ -195,14 +213,22 @@ impl HostHandle {
     }
 }
 
+impl Drop for HostHandle {
+    fn drop(&mut self) {
+        self.shutdown();
+
+        if let Some(worker) = self.worker.take()
+            && worker.join().is_err()
+        {
+            warn!("remote host thread panicked");
+        }
+    }
+}
+
 async fn control_loop(shared: Arc<Shared>) {
     let mut attempt: u32 = 0;
 
     loop {
-        if shared.shutdown.load(Ordering::SeqCst) {
-            return;
-        }
-
         let url = relay_ws_url(&shared.config.relay_url, &shared.host_id, "host", None);
 
         match ws_connect(&url, Some(&shared.config.access_token)).await {
@@ -214,10 +240,6 @@ async fn control_loop(shared: Arc<Shared>) {
             }
 
             Err(e) => warn!("relay control connect failed: {e}"),
-        }
-
-        if shared.shutdown.load(Ordering::SeqCst) {
-            return;
         }
 
         attempt = attempt.saturating_add(1);
@@ -304,7 +326,7 @@ fn spawn_connection(shared: &Arc<Shared>, cid: String) {
     let cancel_rx = {
         let mut active = shared.active.lock();
 
-        if active.contains_key(&cid) {
+        if *shared.shutdown.borrow() || active.contains_key(&cid) {
             return;
         }
 
