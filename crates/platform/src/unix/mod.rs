@@ -809,7 +809,8 @@ unsafe fn prepare_pty_child(
 ///
 /// It returns two [`Pty`] along with respective process name [`String`] and process id (`libc::pid_`)
 ///
-pub fn create_pty_with_fork(
+#[expect(dead_code)]
+fn create_pty_with_fork(
     shell: &str,
     columns: u16,
     rows: u16,
@@ -984,7 +985,8 @@ impl Child {
     }
 }
 
-pub fn kill_pid(pid: i32) {
+#[expect(dead_code)]
+fn kill_pid(pid: i32) {
     unsafe {
         libc::kill(pid, libc::SIGHUP);
     }
@@ -1006,7 +1008,8 @@ impl Drop for Child {
     }
 }
 
-pub fn command_per_pid(pid: libc::pid_t) -> String {
+#[expect(dead_code)]
+fn command_per_pid(pid: libc::pid_t) -> String {
     let current_process_name = Command::new("ps")
         .arg("-p")
         .arg(format!("{pid:}"))
@@ -1174,7 +1177,8 @@ pub fn foreground_process_path(
 }
 
 /// Start a new process in the background.
-pub fn spawn_daemon<I, S>(program: &str, args: I, main_fd: RawFd, shell_pid: u32) -> io::Result<()>
+#[expect(dead_code)]
+fn spawn_daemon<I, S>(program: &str, args: I, main_fd: RawFd, shell_pid: u32) -> io::Result<()>
 where
     I: IntoIterator<Item = S> + Copy,
     S: AsRef<OsStr>,
