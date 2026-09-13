@@ -2,7 +2,7 @@
 // which is licensed under Apache 2.0 license.
 
 pub use crate::terminal::grid::row::Row;
-pub use crate::terminal::pos::{Column, Cursor, Line, Pos};
+pub use crate::terminal::pos::{Column, Line, Pos};
 pub use crate::terminal::square::Square;
 
 pub mod grid;
