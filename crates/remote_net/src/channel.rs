@@ -86,6 +86,12 @@ impl NetError {
 /// from a UI action.
 pub const NET_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// Retry immediately after a lost connection, then back off by one second per
+/// failed attempt. The cap keeps long-lived hosts responsive to relay recovery.
+pub(crate) fn reconnect_delay(failed_attempts: u32) -> Duration {
+    Duration::from_secs(u64::from(failed_attempts.min(30)))
+}
+
 /// Fail with [`NetError::Timeout`] instead of awaiting indefinitely.
 pub async fn with_timeout<T>(
     future: impl Future<Output = Result<T, NetError>>,

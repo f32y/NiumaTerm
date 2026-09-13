@@ -1,12 +1,44 @@
 use std::sync::{Arc, mpsc as std_mpsc};
 use std::thread;
+use std::time::Duration;
 
 use parking_lot::Mutex;
+use tokio::net::TcpListener;
 use tokio::runtime::Builder as RuntimeBuilder;
 use tokio::sync::{mpsc, watch};
+use tokio::time;
 
-use crate::client::{ClientWorker, RemoteSession, SessionByteEvent};
-use crate::protocol::{Frame, ProtocolSessionSnapshot};
+use crate::client::{ClientWorker, RemoteSession, SessionByteEvent, reconnect};
+use crate::protocol::{Frame, ProtocolSessionSnapshot, generate_keypair};
+
+#[test]
+fn reconnect_starts_without_an_initial_delay() {
+    RuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("ws://{}", listener.local_addr().unwrap());
+            let device = generate_keypair().unwrap();
+            let host = generate_keypair().unwrap();
+            let (_commands, receiver) = mpsc::unbounded_channel();
+
+            time::timeout(Duration::from_secs(1), async {
+                tokio::select! {
+                    _ = reconnect(&url, "host", &host.public, &device, 1, &receiver) => {
+                        panic!("reconnect ended before connecting");
+                    }
+
+                    accepted = listener.accept() => {
+                        accepted.unwrap();
+                    }
+                }
+            })
+            .await
+            .expect("the first retry should connect immediately");
+        });
+}
 
 #[test]
 fn splitting_session_moves_snapshot_and_preserves_both_stream_directions() {

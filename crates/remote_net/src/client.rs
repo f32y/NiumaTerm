@@ -14,6 +14,7 @@ use tokio::time;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tracing::{info, warn};
 
+use crate::channel::reconnect_delay;
 use crate::protocol::{
     ClientBound, Frame, HostBound, PairingCode, ProtocolSessionInfo, ProtocolSessionOptions,
     ProtocolSessionSnapshot, SecureChannel, StaticKeypair,
@@ -192,8 +193,6 @@ pub enum AttachTarget {
 /// retrying is what makes a flaky link survivable rather than session-ending.
 const RECONNECT_ATTEMPTS: u32 = 5;
 
-const RECONNECT_BACKOFF: Duration = Duration::from_secs(2);
-
 #[allow(clippy::too_many_arguments)]
 async fn session_thread(
     relay_url: String,
@@ -324,7 +323,7 @@ async fn reconnect(
             return None; // Tab closed while we were retrying.
         }
 
-        time::sleep(RECONNECT_BACKOFF * attempt).await;
+        time::sleep(reconnect_delay(attempt - 1)).await;
 
         match connect_and_attach(
             relay_url,

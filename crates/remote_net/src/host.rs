@@ -20,6 +20,7 @@ use tokio::time;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tracing::{info, warn};
 
+use crate::channel::reconnect_delay;
 use crate::protocol::{
     CONNECT_MODE_IK, CONNECT_MODE_PAIR, ClientBound, Frame, Handshake, HostBound, MAX_DATA_LEN,
     PairingCode, ProtocolSessionSnapshot, SecureChannel, StaticKeypair, derive_host_id,
@@ -32,7 +33,6 @@ use crate::{
 
 const PAIRING_TTL: Duration = Duration::from_secs(300);
 const CONTROL_PING_INTERVAL: Duration = Duration::from_secs(20);
-const RECONNECT_CAP: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 pub struct HostConfig {
@@ -242,11 +242,9 @@ async fn control_loop(shared: Arc<Shared>) {
             Err(e) => warn!("relay control connect failed: {e}"),
         }
 
+        time::sleep(reconnect_delay(attempt)).await;
+
         attempt = attempt.saturating_add(1);
-
-        let backoff = RECONNECT_CAP.min(Duration::from_millis(1000) * attempt);
-
-        time::sleep(backoff).await;
     }
 }
 
