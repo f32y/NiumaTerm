@@ -126,8 +126,6 @@ impl BlockRef {
         &self,
         start: Option<(usize, u32)>,
         end: Option<(usize, u32)>,
-        unwrap: bool,
-        trim: bool,
     ) -> Option<String> {
         let rows = self.row_count();
 
@@ -147,7 +145,7 @@ impl BlockRef {
         let tl = clamp(start.unwrap_or((0, 0)));
         let br = clamp(end.unwrap_or((rows - 1, last_col)));
 
-        self.format_range(tl, br, unwrap, trim).ok()
+        self.format_range(tl, br, true, true).ok()
     }
 
     /// Export an inclusive cell range of the snapshot as plain text — the

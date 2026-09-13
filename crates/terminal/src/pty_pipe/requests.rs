@@ -80,7 +80,7 @@ pub(crate) fn answer_query(
                             kind,
                         )?;
 
-                        block.format_range_clamped(Some(start), Some(end), true, true)
+                        block.format_range_clamped(Some(start), Some(end))
                     });
 
                     result.ok_or(RequestError::Unavailable)
@@ -117,7 +117,7 @@ pub(crate) fn answer_query(
                             }
 
                             let part = block
-                                .format_range_clamped(piece.start, piece.end, true, true)
+                                .format_range_clamped(piece.start, piece.end)
                                 .ok_or(RequestError::Unavailable)?;
 
                             if index > 0 {
