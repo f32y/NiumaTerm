@@ -1,7 +1,4 @@
-//! Which `dsh` releases this build was written against.
-//!
-//! The Remote interface does not negotiate a protocol version. The installed
-//! package release is therefore what the compatibility notice checks.
+//! Installed-release checks for DeepSeek integration tests.
 
 use std::time::Duration;
 
@@ -11,7 +8,7 @@ use crate::launcher::{AgentCli, ProcessLimits, run_bounded};
 
 /// The exact release used by the package launchers. The Remote API can change
 /// between pre-releases, so other releases retain a compatibility notice.
-pub const SUPPORTED_VERSIONS: &str = "=0.1.5-rc.1";
+const SUPPORTED_VERSIONS: &str = "=0.1.5-rc.1";
 
 /// `dsh --version` only has to start Node and print, but a first run on a cold
 /// machine still pays for module resolution.
@@ -24,7 +21,7 @@ const VERSION_OUTPUT_LIMIT: usize = 8 * 1024;
 /// untested release would make every harness update an outage, and the
 /// interface usually keeps working.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum VersionSupport {
+enum VersionSupport {
     Supported,
 
     /// Installed and readable, but outside the tested range.
@@ -40,7 +37,7 @@ pub enum VersionSupport {
 }
 
 /// Ask the installed harness what it is.
-pub fn describe_version(cli: &AgentCli) -> VersionSupport {
+fn describe_version(cli: &AgentCli) -> VersionSupport {
     let run = match run_bounded(
         cli,
         ["--version"],
@@ -64,7 +61,7 @@ pub fn describe_version(cli: &AgentCli) -> VersionSupport {
 
 /// Compare a known version against the supported range. Separate from the
 /// process run so the decision can be exercised without launching anything.
-pub(crate) fn classify(installed: &Version) -> VersionSupport {
+fn classify(installed: &Version) -> VersionSupport {
     let requirement = VersionReq::parse(SUPPORTED_VERSIONS)
         .expect("the supported range is a literal in this file");
 
@@ -88,4 +85,47 @@ fn parse_version(output: &str) -> Option<Version> {
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .find_map(|line| Version::parse(line.trim_start_matches('v')).ok())
+}
+
+#[test]
+fn only_the_pinned_release_is_reported_as_supported() {
+    assert_eq!(
+        classify(&Version::parse("0.1.5-rc.1").unwrap()),
+        VersionSupport::Supported,
+    );
+
+    for outside in [
+        "0.1.0-rc.6",
+        "0.1.1-rc.2",
+        "0.1.2-rc.0",
+        "0.1.2-rc.1",
+        "0.1.2",
+        "0.1.3",
+        "0.1.5-rc.0",
+        "0.1.5-rc.2",
+        "0.1.5",
+        "0.2.0",
+        "1.0.0",
+    ] {
+        assert!(
+            matches!(
+                classify(&Version::parse(outside).unwrap()),
+                VersionSupport::Unsupported { .. }
+            ),
+            "{outside}"
+        );
+    }
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "resolves the installed harness"]
+fn the_installed_release_is_one_this_build_supports() {
+    let cli = AgentCli::new("dsh", []);
+
+    assert_eq!(
+        describe_version(&cli),
+        VersionSupport::Supported,
+        "the installed harness is outside {SUPPORTED_VERSIONS}"
+    );
 }

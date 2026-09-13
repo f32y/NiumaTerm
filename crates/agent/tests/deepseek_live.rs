@@ -286,21 +286,6 @@ fn two_sessions_share_one_host_and_do_not_see_each_other() {
 }
 
 #[test]
-#[ignore = "resolves the installed harness"]
-fn the_installed_release_is_one_this_build_supports() {
-    use nmt_agent::dsh::{SUPPORTED_VERSIONS, VersionSupport, describe_version};
-    use nmt_agent::launcher::AgentCli;
-
-    let cli = AgentCli::from_launch(&launch(), "dsh");
-
-    assert_eq!(
-        describe_version(&cli),
-        VersionSupport::Supported,
-        "the installed harness is outside {SUPPORTED_VERSIONS}"
-    );
-}
-
-#[test]
 #[ignore = "starts a real harness host and spends model calls"]
 fn an_approval_is_raised_answered_and_the_turn_continues() {
     let outside: PathBuf =

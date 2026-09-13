@@ -476,40 +476,6 @@ fn host_and_stream_failures_reach_the_transcript() {
 }
 
 #[test]
-fn only_the_pinned_release_is_reported_as_supported() {
-    use semver::Version;
-
-    use crate::dsh::version::{VersionSupport, classify};
-
-    assert_eq!(
-        classify(&Version::parse("0.1.5-rc.1").unwrap()),
-        VersionSupport::Supported,
-    );
-
-    for outside in [
-        "0.1.0-rc.6",
-        "0.1.1-rc.2",
-        "0.1.2-rc.0",
-        "0.1.2-rc.1",
-        "0.1.2",
-        "0.1.3",
-        "0.1.5-rc.0",
-        "0.1.5-rc.2",
-        "0.1.5",
-        "0.2.0",
-        "1.0.0",
-    ] {
-        assert!(
-            matches!(
-                classify(&Version::parse(outside).unwrap()),
-                VersionSupport::Unsupported { .. }
-            ),
-            "{outside}"
-        );
-    }
-}
-
-#[test]
 fn an_unresolvable_harness_is_reported_as_missing_rather_than_as_a_failed_start() {
     use crate::LaunchConfig;
     use crate::dsh::{HostError, Session};

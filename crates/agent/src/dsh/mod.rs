@@ -12,7 +12,6 @@
 
 pub use crate::dsh::host::{DEFAULT_EXECUTABLE, Host, HostError};
 pub use crate::dsh::session::Session;
-pub use crate::dsh::version::{SUPPORTED_VERSIONS, VersionSupport, describe_version};
 
 pub(crate) use crate::dsh::host::{
     NPX_ARGUMENTS, NPX_EXECUTABLE, PNPM_DLX_ARGUMENTS, PNPM_DLX_EXECUTABLE,
@@ -30,8 +29,10 @@ mod presets;
 mod projections;
 mod session;
 mod subagents;
-mod version;
 mod workflows;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod version_tests;
