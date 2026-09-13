@@ -202,7 +202,24 @@ pub fn encode_terminal_input(
 ) -> Option<Vec<u8>> {
     let bytes = match input.state {
         ElementState::Released => {
-            if flags.contains(KeyEncodeFlags::REPORT_EVENT_TYPES) {
+            let all_keys = flags.contains(KeyEncodeFlags::REPORT_ALL_KEYS_AS_ESC);
+
+            let text = input.text_with_all_modifiers.as_deref().unwrap_or_else(|| {
+                match &input.logical_key {
+                    Key::Character(text) => text.as_str(),
+                    _ => "",
+                }
+            });
+
+            let legacy_text_key = matches!(
+                input.logical_key,
+                Key::Named(NamedKey::Enter | NamedKey::Tab | NamedKey::Backspace)
+            );
+
+            if flags.contains(KeyEncodeFlags::REPORT_EVENT_TYPES)
+                && (all_keys
+                    || (!legacy_text_key && should_build_sequence(input, text, modifiers, flags)))
+            {
                 build_key_sequence(input, modifiers, flags)
             } else {
                 Vec::new()
@@ -306,10 +323,10 @@ fn named_key_escape(
     let all_keys = flags.contains(KeyEncodeFlags::REPORT_ALL_KEYS_AS_ESC);
     let disamb = flags.contains(KeyEncodeFlags::DISAMBIGUATE_ESC_CODES);
     let empty = mods.is_empty();
+    let report_repeat = input.repeat && flags.contains(KeyEncodeFlags::REPORT_EVENT_TYPES);
 
-    // App-cursor SS3 — fires regardless of kitty mode (the binding rows gate only on
-    // ~VI), no modifiers.
-    if app_cursor && empty {
+    // SS3 has no field for event types or associated text.
+    if app_cursor && empty && !all_keys && !report_repeat {
         let b: &[u8] = match named {
             NamedKey::ArrowUp => b"\x1bOA",
             NamedKey::ArrowDown => b"\x1bOB",
@@ -326,7 +343,7 @@ fn named_key_escape(
     }
 
     // F1–F4 SS3 — no modifiers, not kitty (gated ~ALL_KEYS ~DISAMBIGUATE).
-    if empty && !all_keys && !disamb {
+    if empty && !all_keys && !disamb && !report_repeat {
         let b: &[u8] = match named {
             NamedKey::F1 => b"\x1bOP",
             NamedKey::F2 => b"\x1bOQ",

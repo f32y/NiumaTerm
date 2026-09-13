@@ -362,6 +362,47 @@ fn terminal_input_reports_release_when_event_type_reporting_is_enabled() {
 }
 
 #[test]
+fn event_reporting_preserves_text_keys_and_encodes_cursor_repeats() {
+    let flags = KeyEncodeFlags::DISAMBIGUATE_ESC_CODES | KeyEncodeFlags::REPORT_EVENT_TYPES;
+    let mut letter = character("a");
+
+    letter.state = ElementState::Released;
+
+    for input in [
+        letter,
+        released(NamedKey::Enter),
+        released(NamedKey::Tab),
+        released(NamedKey::Backspace),
+    ] {
+        assert!(encode_terminal_input(&input, ModifiersState::empty(), flags, None).is_none());
+        assert!(
+            encode_terminal_input(
+                &input,
+                ModifiersState::empty(),
+                flags | KeyEncodeFlags::REPORT_ALL_KEYS_AS_ESC,
+                None,
+            )
+            .is_some()
+        );
+    }
+
+    let mut arrow = named(NamedKey::ArrowUp);
+
+    arrow.repeat = true;
+
+    assert_eq!(
+        encode_terminal_input(
+            &arrow,
+            ModifiersState::empty(),
+            flags | KeyEncodeFlags::APP_CURSOR,
+            None,
+        )
+        .as_deref(),
+        Some(b"\x1b[1;1:2A".as_slice()),
+    );
+}
+
+#[test]
 fn terminal_input_uses_text_fallback_for_printable_press() {
     let got = encode_terminal_input(
         &character("a"),
