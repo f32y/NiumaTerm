@@ -727,7 +727,11 @@ where
                 #[cfg(enable_profiling)]
                 let capture_started = self.profile.start();
 
-                let capture = engine.snapshot_into(&mut self.back_buffer);
+                let capture = engine.snapshot_into(
+                    &mut self.back_buffer,
+                    self.content_version.load(sync::atomic::Ordering::Relaxed),
+                    self.theme_revision,
+                );
 
                 #[cfg(enable_profiling)]
                 self.profile.record(
@@ -765,9 +769,6 @@ where
             self.event_proxy
                 .send_event(TerminalEvent::Cwd(cwd), self.window_id);
         }
-
-        self.back_buffer.revision = self.content_version.load(sync::atomic::Ordering::Relaxed);
-        self.back_buffer.theme_revision = self.theme_revision;
 
         // Ship new/changed kitty image pixels + removals via the existing graphics
         // event to the renderer's image store. Empty in steady state.
@@ -989,7 +990,13 @@ where
             #[cfg(enable_profiling)]
             let capture_started = self.profile.start();
 
-            let capture = engine.snapshot_into(&mut self.back_buffer);
+            let revision = self
+                .content_version
+                .fetch_add(1, sync::atomic::Ordering::Relaxed)
+                + 1;
+
+            let capture =
+                engine.snapshot_into(&mut self.back_buffer, revision, self.theme_revision);
 
             #[cfg(enable_profiling)]
             self.profile.record(Stage::CaptureResize, capture_started);
@@ -1004,12 +1011,6 @@ where
             );
         }
 
-        self.back_buffer.revision = self
-            .content_version
-            .fetch_add(1, sync::atomic::Ordering::Relaxed)
-            + 1;
-
-        self.back_buffer.theme_revision = self.theme_revision;
         self.last_snapshot_at = Some(time::Instant::now());
 
         #[cfg(enable_profiling)]

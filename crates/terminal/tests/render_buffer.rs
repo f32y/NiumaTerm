@@ -12,7 +12,7 @@ fn populates_text_styles_and_cursor() {
 
     let mut buf = RenderBuffer::new(20, 2);
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     assert_eq!(buf.cell(0, 0).c(), 'h');
     assert_eq!(buf.cell(1, 0).c(), 'i');
@@ -25,6 +25,26 @@ fn populates_text_styles_and_cursor() {
 }
 
 #[test]
+fn reused_captures_replace_metadata_and_revisions_together() {
+    let mut engine = GhosttyTerminal::new(20, 2, 100).unwrap();
+    let mut buffer = RenderBuffer::new(20, 2);
+
+    engine.write_vt(b"\x1b]0;first\x07one");
+    engine.snapshot_into(&mut buffer, 7, 2).unwrap();
+
+    assert_eq!((buffer.revision(), buffer.theme_revision()), (7, 2));
+    assert_eq!(buffer.title(), "first");
+    assert_eq!(buffer.viewport_top(), Some(0));
+
+    engine.write_vt(b"\x1b]0;second\x07\rTWO");
+    engine.snapshot_into(&mut buffer, 9, 3).unwrap();
+
+    assert_eq!((buffer.revision(), buffer.theme_revision()), (9, 3));
+    assert_eq!(buffer.title(), "second");
+    assert_eq!(buffer.cell(0, 0).c(), 'T');
+}
+
+#[test]
 fn wide_char_marks_spacer() {
     let mut engine = GhosttyTerminal::new(8, 1, 100).unwrap();
 
@@ -32,7 +52,7 @@ fn wide_char_marks_spacer() {
 
     let mut buf = RenderBuffer::new(8, 1);
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     assert_eq!(buf.cell(0, 0).wide(), Wide::Wide);
     assert_eq!(buf.cell(1, 0).wide(), Wide::Spacer);
@@ -47,7 +67,7 @@ fn style_table_indexed_by_style_id() {
 
     let mut buf = RenderBuffer::new(8, 1);
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let sid = buf.cell(0, 0).style_id();
 
@@ -81,16 +101,16 @@ fn content_changed_lifecycle() {
 
     // A batch sets it.
     engine.write_vt(b"a");
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     assert!(buf.take_content_changed(), "capture sets it");
     assert!(!buf.take_content_changed(), "consumed after one take");
 
     // Coalesced updates between frames report true exactly once.
     engine.write_vt(b"b");
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
     engine.write_vt(b"c");
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     assert!(buf.take_content_changed(), "coalesced updates → true");
     assert!(!buf.take_content_changed(), "→ false after the single take");
@@ -107,7 +127,7 @@ fn grapheme_cluster_fidelity() {
 
     let mut buf = RenderBuffer::new(8, 1);
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let sq = buf.cell(0, 0);
 
@@ -135,7 +155,7 @@ fn captures_softwrap() {
 
     let mut buf = RenderBuffer::new(8, 3);
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     assert!(buf.row_wrapped(0), "row 0 soft-wraps into row 1");
     assert!(!buf.row_wrapped(1), "row 1 is the (hard) end of the line");
@@ -147,7 +167,7 @@ fn captures_softwrap() {
 
     let mut buf2 = RenderBuffer::new(8, 3);
 
-    engine2.snapshot_into(&mut buf2).unwrap();
+    engine2.snapshot_into(&mut buf2, 0, 0).unwrap();
 
     assert!(!buf2.row_wrapped(0), "row 0 ends with a hard newline");
 }
@@ -161,7 +181,7 @@ fn buffer_resize_follows_engine() {
 
     let mut buf = RenderBuffer::new(20, 4);
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     assert_eq!((buf.cols(), buf.rows()), (20, 4));
     assert_eq!(buf.grid().len(), 4);
@@ -169,7 +189,7 @@ fn buffer_resize_follows_engine() {
     let before_resize = buf.row_versions().to_vec();
 
     engine.resize(10, 2, 8, 16).unwrap();
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     assert_eq!((buf.cols(), buf.rows()), (10, 2));
     assert_eq!(buf.grid().len(), 2);
@@ -194,19 +214,19 @@ fn row_versions_follow_and_consume_render_damage() {
     let mut buf = RenderBuffer::new(8, 3);
 
     engine.write_vt(b"\x1b[2;1H");
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let initial = buf.row_versions().to_vec();
 
     assert!(initial.iter().all(|version| *version != 0));
     assert!(initial.windows(2).all(|pair| pair[0] == pair[1]));
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     assert_eq!(buf.row_versions(), initial, "clean capture keeps versions");
 
     engine.write_vt(b"X");
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let partial = buf.row_versions().to_vec();
 
@@ -215,7 +235,7 @@ fn row_versions_follow_and_consume_render_damage() {
     assert_eq!(partial[2], initial[2]);
 
     engine.set_colors([1, 2, 3], [4, 5, 6], [7, 8, 9], &[[0; 3]; 256]);
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     assert!(
         buf.row_versions()
@@ -232,14 +252,14 @@ fn row_versions_accumulate_across_skipped_publications() {
     let mut buf = RenderBuffer::new(8, 3);
 
     engine.write_vt(b"\x1b[2;1H");
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let initial = buf.row_versions().to_vec();
 
     engine.write_vt(b"A");
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
     engine.write_vt(b"\x1b[3;1HB");
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let latest = buf.row_versions();
 

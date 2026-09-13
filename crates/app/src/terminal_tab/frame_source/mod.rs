@@ -333,7 +333,7 @@ impl TerminalFrameSource {
         rows.filter_map(|row| {
             let page = self
                 .session
-                .screen_page_at(self.snapshot.revision, usize::try_from(row).ok()?)?;
+                .screen_page_at(self.snapshot.revision(), usize::try_from(row).ok()?)?;
 
             let data = page.row(row as usize)?;
             let mut builder = block_list::EngineRowBuilder::default();

@@ -224,7 +224,7 @@ fn local_session_publishes_engine_output_and_host_events() {
         let snapshot = session.snapshot();
 
         let top = snapshot
-            .viewport_top
+            .viewport_top()
             .expect("the viewport must have a top row");
 
         let output = (0..snapshot.rows())

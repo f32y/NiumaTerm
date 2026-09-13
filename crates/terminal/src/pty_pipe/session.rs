@@ -127,7 +127,7 @@ where
     pipe.output_sink = options.output_sink;
 
     pipe.ghostty
-        .snapshot_into(&mut pipe.back_buffer)
+        .snapshot_into(&mut pipe.back_buffer, 0, 0)
         .map_err(|error| Box::new(error) as Box<dyn error::Error>)?;
 
     render_buffer.publish(&mut pipe.back_buffer);

@@ -10,7 +10,7 @@ fn buffer(cols: usize, rows: usize, bytes: &[u8]) -> RenderBuffer {
 
     let mut buf = RenderBuffer::new(cols, rows);
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     buf
 }

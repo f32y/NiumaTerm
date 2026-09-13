@@ -43,7 +43,7 @@ fn screen_word_selection_searches_the_visible_row_before_rebasing() {
 
     let mut buf = RenderBuffer::new(24, 2);
 
-    terminal.snapshot_into(&mut buf).unwrap();
+    terminal.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let selection = Selection::new(
         SelectionType::Semantic,

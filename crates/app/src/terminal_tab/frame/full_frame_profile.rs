@@ -71,7 +71,7 @@ fn profile_full_frame_pipeline() -> Result<(), &'static str> {
     for _ in 0..FRAMES {
         let s = Instant::now();
 
-        engine.snapshot_into(&mut render_buf).unwrap();
+        engine.snapshot_into(&mut render_buf, 0, 0).unwrap();
         capture_total += s.elapsed();
 
         let e = Instant::now();
@@ -86,7 +86,7 @@ fn profile_full_frame_pipeline() -> Result<(), &'static str> {
     // Keep the cursor on row 0 and alternate one cell so every iteration has
     // exactly one content-dirty row while cursor rendering stays unchanged.
     engine.write_vt(b"\x1b[1;1H");
-    engine.snapshot_into(&mut render_buf).unwrap();
+    engine.snapshot_into(&mut render_buf, 0, 0).unwrap();
 
     let mut previous =
         TerminalFrame::from_render_buffer_reusing(&render_buf, None, &gens, None, &theme);
@@ -97,7 +97,7 @@ fn profile_full_frame_pipeline() -> Result<(), &'static str> {
 
     for i in 0..FRAMES + WARMUP_FRAMES {
         engine.write_vt(if i % 2 == 0 { b"\rA" } else { b"\rB" });
-        engine.snapshot_into(&mut render_buf).unwrap();
+        engine.snapshot_into(&mut render_buf, 0, 0).unwrap();
 
         let e = Instant::now();
 

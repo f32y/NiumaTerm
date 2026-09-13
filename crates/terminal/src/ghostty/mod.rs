@@ -1130,7 +1130,12 @@ impl GhosttyTerminal {
     }
 
     /// Populate a reusable render buffer from the full visible viewport.
-    pub fn snapshot_into(&mut self, buffer: &mut RenderBuffer) -> Result<()> {
+    pub fn snapshot_into(
+        &mut self,
+        buffer: &mut RenderBuffer,
+        revision: u64,
+        theme_revision: u64,
+    ) -> Result<()> {
         self.render.update(self.terminal)?;
         self.render.consume_damage(self.rows)?;
 
@@ -1144,13 +1149,14 @@ impl GhosttyTerminal {
 
         let palette = self.color_palette();
 
-        buffer.begin_capture(self.cols as usize, self.rows as usize);
-        buffer.viewport_top = self.viewport_top_screen();
-        buffer.title = self.title();
-
-        buffer.current_directory = self
-            .current_directory()
-            .map(|path| path.to_string_lossy().into_owned());
+        buffer.begin_capture(
+            self.cols as usize,
+            self.rows as usize,
+            self.viewport_top_screen(),
+            self.title(),
+            self.current_directory()
+                .map(|path| path.to_string_lossy().into_owned()),
+        );
 
         // A transient row lookup failure blanks only that row; publishing the
         // remaining viewport is safer than withholding an otherwise valid frame.
@@ -1177,6 +1183,8 @@ impl GhosttyTerminal {
             placements,
             scrollbar,
             self.render.row_versions(),
+            revision,
+            theme_revision,
         );
 
         Ok(())
@@ -1186,7 +1194,7 @@ impl GhosttyTerminal {
     pub fn snapshot(&mut self) -> Result<RenderBuffer> {
         let mut buffer = RenderBuffer::new(self.cols as usize, self.rows as usize);
 
-        self.snapshot_into(&mut buffer)?;
+        self.snapshot_into(&mut buffer, 0, 0)?;
 
         Ok(buffer)
     }

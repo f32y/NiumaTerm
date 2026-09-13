@@ -54,7 +54,7 @@ fn block_cursor_uses_terminal_background_for_glyph() {
 
     let mut buf = RenderBuffer::new(4, 1);
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let gray = |value: u8| -> ColorArray {
         let value: f32 = value.into();
@@ -85,7 +85,7 @@ fn extracted_rows_have_stable_content_hashes() {
 
     let mut buf = RenderBuffer::new(4, 1);
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let first = extract_row(&buf, 0, None);
     let second = extract_row(&buf, 0, None);
@@ -93,7 +93,7 @@ fn extracted_rows_have_stable_content_hashes() {
     assert_eq!(first.text_hash(), second.text_hash());
 
     engine.write_vt(b"c");
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let changed = extract_row(&buf, 0, None);
 
@@ -161,7 +161,7 @@ fn incremental_extraction_reuses_only_clean_rows() {
     let mut buf = RenderBuffer::new(8, 3);
 
     engine.write_vt(b"\x1b[2;1H");
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let generations = GenerationMap::new();
 
@@ -173,7 +173,7 @@ fn incremental_extraction_reuses_only_clean_rows() {
         &FrameTheme::default(),
     );
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let clean = TerminalFrame::from_render_buffer_reusing(
         &buf,
@@ -193,7 +193,7 @@ fn incremental_extraction_reuses_only_clean_rows() {
     );
 
     engine.write_vt(b"X");
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let changed = TerminalFrame::from_render_buffer_reusing(
         &buf,
@@ -233,7 +233,7 @@ fn supplied_theme_controls_selection_without_installed_globals() {
 
     let mut buffer = RenderBuffer::new(8, 2);
 
-    engine.snapshot_into(&mut buffer).unwrap();
+    engine.snapshot_into(&mut buffer, 0, 0).unwrap();
 
     let generations = GenerationMap::new();
     let mut theme = FrameTheme::default();
@@ -275,7 +275,7 @@ fn cursor_only_change_rebuilds_affected_row() {
     let mut buf = RenderBuffer::new(8, 2);
 
     engine.write_vt(b"AB");
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let generations = GenerationMap::new();
 
@@ -290,7 +290,7 @@ fn cursor_only_change_rebuilds_affected_row() {
     let versions = buf.row_versions().to_vec();
 
     engine.write_vt(b"\r");
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     assert_eq!(buf.row_versions(), versions, "CR changes only the cursor");
 
@@ -312,7 +312,7 @@ fn selection_changes_rebuild_only_affected_rows() {
     let mut buf = RenderBuffer::new(8, 3);
 
     engine.write_vt(b"row0\r\nrow1\r\nrow2");
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let generations = GenerationMap::new();
 
@@ -363,7 +363,7 @@ fn extracts_row_cells_extras_wide_style_and_cursor() {
 
     let mut buf = RenderBuffer::new(8, 1);
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let frame = TerminalFrame::from_render_buffer(&buf);
     let row = extract_row(&buf, 0, cursor_for_row(frame.cursor(), 0));
@@ -396,7 +396,7 @@ fn colored_text_yields_distinct_fg_run_and_cache_key() {
 
     let mut buf = RenderBuffer::new(4, 1);
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let colored = extract_row(&buf, 0, None);
 
@@ -406,7 +406,7 @@ fn colored_text_yields_distinct_fg_run_and_cache_key() {
 
     let mut plain_buf = RenderBuffer::new(4, 1);
 
-    plain_engine.snapshot_into(&mut plain_buf).unwrap();
+    plain_engine.snapshot_into(&mut plain_buf, 0, 0).unwrap();
 
     let plain = extract_row(&plain_buf, 0, None);
 
@@ -430,7 +430,7 @@ fn extracts_cell_backgrounds_from_rgb_style() {
 
     let mut buf = RenderBuffer::new(4, 1);
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let row = extract_row(&buf, 0, None);
 
@@ -445,7 +445,7 @@ fn dim_does_not_change_explicit_background() {
 
     let mut buf = RenderBuffer::new(4, 1);
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let row = extract_row(&buf, 0, None);
 
@@ -460,7 +460,7 @@ fn selection_overlay_uses_selection_background() {
 
     let mut buf = RenderBuffer::new(4, 1);
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let selection = SelectionRange::new(
         Pos::new(Line(0), Column(1)),
@@ -491,7 +491,7 @@ fn wide_char_gets_placeholder_and_runs_cover_text() {
 
     let mut buf = RenderBuffer::new(6, 1);
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let row = extract_row(&buf, 0, None);
 
@@ -514,7 +514,7 @@ fn inverse_swaps_foreground_into_the_painted_background() {
 
     let mut plain_buf = RenderBuffer::new(4, 1);
 
-    plain_engine.snapshot_into(&mut plain_buf).unwrap();
+    plain_engine.snapshot_into(&mut plain_buf, 0, 0).unwrap();
 
     let plain = extract_row(&plain_buf, 0, None);
 
@@ -524,7 +524,7 @@ fn inverse_swaps_foreground_into_the_painted_background() {
 
     let mut buf = RenderBuffer::new(4, 1);
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let inverse = extract_row(&buf, 0, None);
 
@@ -540,7 +540,7 @@ fn text_styles_become_distinct_style_runs() {
 
     let mut buf = RenderBuffer::new(8, 1);
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let row = extract_row(&buf, 0, None);
 
@@ -562,7 +562,7 @@ fn bold_toggle_changes_shape_cache_key() {
 
     let mut plain_buf = RenderBuffer::new(4, 1);
 
-    plain_engine.snapshot_into(&mut plain_buf).unwrap();
+    plain_engine.snapshot_into(&mut plain_buf, 0, 0).unwrap();
 
     let plain = extract_row(&plain_buf, 0, None);
 
@@ -572,7 +572,7 @@ fn bold_toggle_changes_shape_cache_key() {
 
     let mut bold_buf = RenderBuffer::new(4, 1);
 
-    bold_engine.snapshot_into(&mut bold_buf).unwrap();
+    bold_engine.snapshot_into(&mut bold_buf, 0, 0).unwrap();
 
     let bold = extract_row(&bold_buf, 0, None);
 
@@ -589,7 +589,7 @@ fn extracts_cursor_shape_without_mutating_row_text() {
 
     let mut buf = RenderBuffer::new(4, 1);
 
-    engine.snapshot_into(&mut buf).unwrap();
+    engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let frame = TerminalFrame::from_render_buffer(&buf);
     let row = &frame.lines()[0];

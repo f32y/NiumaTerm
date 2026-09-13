@@ -325,7 +325,10 @@ impl TerminalSession {
     }
 
     pub fn current_directory(&self) -> Option<String> {
-        self.render_buffer.load().current_directory.clone()
+        self.render_buffer
+            .load()
+            .current_directory()
+            .map(str::to_string)
     }
 
     /// Drain host events in their publication order. Directory changes are
@@ -521,7 +524,7 @@ impl TerminalSession {
 
         let viewport_top = self
             .snapshot()
-            .viewport_top
+            .viewport_top()
             .unwrap_or(0)
             .min(i32::MAX as u32) as i32;
 
@@ -579,7 +582,7 @@ impl TerminalSession {
     }
 
     pub fn title(&self) -> String {
-        self.snapshot().title.clone()
+        self.snapshot().title().to_string()
     }
 
     /// Reports queue acceptance; the owner publishes colors with its next frame.
@@ -626,14 +629,14 @@ impl TerminalSession {
         let source = PageSource::Block {
             id: handle.id,
             generation: handle.generation,
-            theme: self.snapshot().theme_revision,
+            theme: self.snapshot().theme_revision(),
         };
 
         self.pages.lock().read(source, row, &self.messenger)
     }
 
     pub fn screen_row_text_in(&self, snapshot: &RenderBuffer, row: u32) -> Option<RowText> {
-        if let Some(index) = snapshot.viewport_top.and_then(|top| row.checked_sub(top))
+        if let Some(index) = snapshot.viewport_top().and_then(|top| row.checked_sub(top))
             && let Some(cells) = snapshot.grid().get(index as usize)
         {
             return Some(RowText {
@@ -650,7 +653,7 @@ impl TerminalSession {
             });
         }
 
-        let page = self.screen_page_at(snapshot.revision, row as usize)?;
+        let page = self.screen_page_at(snapshot.revision(), row as usize)?;
 
         Some(materialized_pointer_row(page.row(row as usize)?, page.cols))
     }
@@ -700,7 +703,7 @@ impl TerminalSession {
         let range = selection_screen_range(
             selection.as_ref()?,
             snapshot,
-            snapshot.viewport_top.unwrap_or(0) as i32,
+            snapshot.viewport_top().unwrap_or(0) as i32,
         )?;
 
         let start = (
@@ -714,7 +717,7 @@ impl TerminalSession {
         );
 
         Some(self.request_text(TextSource::Screen {
-            revision: snapshot.revision,
+            revision: snapshot.revision(),
             start,
             end,
             rectangle: range.is_block,
@@ -726,7 +729,7 @@ impl TerminalSession {
 
         selection.as_ref()?.to_range_engine(
             snapshot,
-            snapshot.viewport_top.unwrap_or(0) as i32,
+            snapshot.viewport_top().unwrap_or(0) as i32,
             WORD_DELIMITERS,
         )
     }
@@ -749,7 +752,7 @@ impl TerminalSession {
         selection_screen_range(
             selection.as_ref()?,
             snapshot,
-            snapshot.viewport_top.unwrap_or(0) as i32,
+            snapshot.viewport_top().unwrap_or(0) as i32,
         )
     }
 

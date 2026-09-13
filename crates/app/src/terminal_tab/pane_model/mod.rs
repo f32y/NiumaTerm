@@ -504,7 +504,7 @@ impl PaneController {
             Block { item: usize, line: i64 },
         }
 
-        let viewport_top = self.source.snapshot.viewport_top;
+        let viewport_top = self.source.snapshot.viewport_top();
 
         let (source, col) = match self.block_list_point_at(position) {
             Some(BlockListPoint::Frozen(pt)) => (
@@ -771,7 +771,7 @@ impl PaneController {
                     row: self
                         .source
                         .snapshot
-                        .viewport_top
+                        .viewport_top()
                         .unwrap_or(0)
                         .saturating_add(cell.row.into()),
                 },

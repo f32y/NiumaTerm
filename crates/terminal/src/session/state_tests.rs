@@ -80,7 +80,7 @@ pub(super) fn session_from_engine(
     let waker = Arc::new(Waker::new(poll.registry(), Token(0)).unwrap());
     let mut buffer = RenderBuffer::new(engine.cols() as usize, engine.rows() as usize);
 
-    engine.snapshot_into(&mut buffer).unwrap();
+    engine.snapshot_into(&mut buffer, 0, 0).unwrap();
 
     let messenger = MsgSender::new(tx, waker);
 

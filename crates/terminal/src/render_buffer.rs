@@ -27,11 +27,11 @@ use crate::terminal::style::{Style, StyleId, StyleSet};
 
 /// A decoupled, renderable copy of the visible viewport.
 pub struct RenderBuffer {
-    pub revision: u64,
-    pub theme_revision: u64,
-    pub viewport_top: Option<u32>,
-    pub title: String,
-    pub current_directory: Option<String>,
+    revision: u64,
+    theme_revision: u64,
+    viewport_top: Option<u32>,
+    title: String,
+    current_directory: Option<String>,
     cols: usize,
     rows: usize,
 
@@ -93,6 +93,26 @@ pub struct RenderBuffer {
 }
 
 impl RenderBuffer {
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub fn theme_revision(&self) -> u64 {
+        self.theme_revision
+    }
+
+    pub fn viewport_top(&self) -> Option<u32> {
+        self.viewport_top
+    }
+
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    pub fn current_directory(&self) -> Option<&str> {
+        self.current_directory.as_deref()
+    }
+
     pub fn new(cols: usize, rows: usize) -> Self {
         Self {
             revision: 0,
@@ -232,8 +252,19 @@ impl RenderBuffer {
         self.styles.get(id)
     }
 
-    pub(crate) fn begin_capture(&mut self, cols: usize, rows: usize) {
+    pub(crate) fn begin_capture(
+        &mut self,
+        cols: usize,
+        rows: usize,
+        viewport_top: Option<u32>,
+        title: String,
+        current_directory: Option<String>,
+    ) {
         let cols = cols.max(1);
+
+        self.viewport_top = viewport_top;
+        self.title = title;
+        self.current_directory = current_directory;
 
         if cols != self.cols || rows != self.rows {
             self.cols = cols;
@@ -325,6 +356,7 @@ impl RenderBuffer {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn finish_capture(
         &mut self,
         cursor: SnapshotCursor,
@@ -332,7 +364,12 @@ impl RenderBuffer {
         placements: Vec<SnapshotPlacement>,
         scrollbar: ScrollbarInfo,
         row_versions: &[u64],
+        revision: u64,
+        theme_revision: u64,
     ) {
+        self.revision = revision;
+        self.theme_revision = theme_revision;
+
         let cx = (cursor.x as usize).min(self.cols.saturating_sub(1));
         let cy = (cursor.y as usize).min(self.rows.saturating_sub(1));
 
