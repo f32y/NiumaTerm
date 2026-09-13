@@ -26,7 +26,8 @@ pub struct ProtocolSessionInfo {
 
 /// Reconnect checkpoint: everything the client needs to rebuild terminal
 /// state. Bytes are either inside `vt` or arrive in Output frames with
-/// `seq >= base_seq` — never both, never neither.
+/// `seq > base_seq` — never both, never neither. All chunks of one output
+/// event share its sequence number and must be applied together.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProtocolSessionSnapshot {
     pub session_id: u64,
