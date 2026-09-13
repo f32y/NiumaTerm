@@ -123,7 +123,7 @@ impl EventListener for TerminalEventProxy {
                 // half-staged block batch for the interrupted read is discarded.
                 *self.shared.in_flight.lock() = None;
 
-                *self.shared.open_prompt.lock() = false;
+                self.shared.open_prompt.store(false, Ordering::Release);
 
                 self.shared.staged_blocks.lock().clear();
 
@@ -147,14 +147,14 @@ impl EventListener for TerminalEventProxy {
                     // Trust lost mid-command (nested shell, malformed stream): the
                     // running block's lifecycle can no longer complete.
                     *self.shared.in_flight.lock() = None;
-                    *self.shared.open_prompt.lock() = false;
+                    self.shared.open_prompt.store(false, Ordering::Release);
                 }
 
                 HostEvent::PromptBoundaryTrusted(on)
             }
 
             TerminalEvent::PromptStarted => {
-                *self.shared.open_prompt.lock() = true;
+                self.shared.open_prompt.store(true, Ordering::Release);
 
                 HostEvent::PromptStarted
             }
@@ -169,7 +169,7 @@ impl EventListener for TerminalEventProxy {
             }
 
             TerminalEvent::CommandStarted(cmd) => {
-                *self.shared.open_prompt.lock() = false;
+                self.shared.open_prompt.store(false, Ordering::Release);
 
                 // Marry the command metadata to its block item; the
                 // segment materializes later, when its rows scroll out.

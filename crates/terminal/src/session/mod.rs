@@ -162,7 +162,7 @@ struct SessionSharedState {
     /// The in-flight command, if one is executing.
     in_flight: Mutex<Option<InFlightBlock>>,
 
-    open_prompt: Mutex<bool>,
+    open_prompt: AtomicBool,
     #[cfg(any(test, feature = "test-support"))]
     read_only: AtomicBool,
     exited: AtomicBool,
@@ -355,7 +355,7 @@ impl TerminalSession {
     }
 
     pub fn open_prompt_region(&self) -> bool {
-        *self.shared.open_prompt.lock()
+        self.shared.open_prompt.load(Ordering::Acquire)
     }
 
     pub fn block_selection_text(

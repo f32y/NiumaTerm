@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 #[cfg(windows)]
 use std::thread;
 use std::time;
@@ -332,12 +333,15 @@ fn in_flight_block_lifecycle() {
 
     proxy.send_event(TerminalEvent::PromptStarted, wid);
 
-    assert!(*open_prompt.lock());
+    assert!(open_prompt.load(Ordering::Acquire));
 
     // start -> finish: in-flight visible while running, then cleared.
     proxy.send_event(TerminalEvent::CommandStarted(start("sleep 5")), wid);
 
-    assert!(!*open_prompt.lock(), "command start closes prompt");
+    assert!(
+        !open_prompt.load(Ordering::Acquire),
+        "command start closes prompt"
+    );
 
     {
         let running = in_flight.lock().clone().expect("in-flight set");
@@ -359,7 +363,7 @@ fn in_flight_block_lifecycle() {
 
     proxy.send_event(TerminalEvent::PromptStarted, wid);
 
-    assert!(*open_prompt.lock());
+    assert!(open_prompt.load(Ordering::Acquire));
 
     proxy.send_event(TerminalEvent::PromptBoundaryTrusted(false), wid);
 
@@ -367,18 +371,21 @@ fn in_flight_block_lifecycle() {
         in_flight.lock().is_none(),
         "trust loss drops the running block"
     );
-    assert!(!*open_prompt.lock(), "trust loss closes prompt");
+    assert!(
+        !open_prompt.load(Ordering::Acquire),
+        "trust loss closes prompt"
+    );
 
     // start -> exit: cleared as well.
     proxy.send_event(TerminalEvent::CommandStarted(start("hang")), wid);
     proxy.send_event(TerminalEvent::PromptStarted, wid);
 
-    assert!(*open_prompt.lock());
+    assert!(open_prompt.load(Ordering::Acquire));
 
     proxy.send_event(TerminalEvent::CloseTerminal(0), wid);
 
     assert!(in_flight.lock().is_none(), "exit drops the running block");
-    assert!(!*open_prompt.lock(), "exit closes prompt");
+    assert!(!open_prompt.load(Ordering::Acquire), "exit closes prompt");
 
     // The host queue saw the prompt and command events too, in order.
     let q = events.lock();
