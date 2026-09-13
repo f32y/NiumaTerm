@@ -4237,6 +4237,7 @@ dependencies = [
  "getrandom 0.4.3",
  "image",
  "nmt_platform",
+ "nmt_profile",
  "parking_lot",
  "reqwest",
  "semver",

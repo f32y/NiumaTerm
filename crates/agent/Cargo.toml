@@ -35,3 +35,4 @@ reqwest = { workspace = true, features = [
 ] }
 tungstenite.workspace = true
 smallvec.workspace = true
+nmt_profile.workspace = true

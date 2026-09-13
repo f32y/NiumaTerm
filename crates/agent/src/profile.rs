@@ -1,28 +1,9 @@
 //! Provider launch rules independent of application configuration storage.
 
+use nmt_profile::{AgentProfile, AgentProfileKind, AgentProfileLauncher};
+
 use crate::session::AgentKind;
 use crate::{CodexProviderConfig, LaunchConfig, dsh};
-
-#[derive(Clone, Copy)]
-pub enum ProfileLauncher {
-    Executable,
-    Npx,
-    PnpmDlx,
-}
-
-pub struct LaunchProfile<'a> {
-    pub kind: AgentKind,
-    pub name: &'a str,
-    pub executable: &'a str,
-    pub launcher: ProfileLauncher,
-    pub model: &'a str,
-    pub effort: &'a str,
-    pub use_custom_endpoint: bool,
-    pub api_base_url: &'a str,
-    pub api_key: &'a str,
-    pub replace_sub_models: bool,
-    pub vision_model: bool,
-}
 
 pub const ANTHROPIC_MODEL_ENV: &str = "ANTHROPIC_MODEL";
 pub const OPENAI_API_KEY_ENV: &str = "OPENAI_API_KEY";
@@ -87,17 +68,14 @@ pub fn launch_env_value(launch: &LaunchConfig, target: &str) -> Option<String> {
 /// Turn a profile into a protocol-neutral launch spec. Generated environment
 /// entries precede user entries so the explicit environment table retains
 /// last-value-wins behavior.
-pub fn agent_launch<'a>(
-    profile: &LaunchProfile<'a>,
-    overrides: impl IntoIterator<Item = (&'a str, &'a str)>,
-) -> LaunchConfig {
+pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
     let mut env: Vec<(String, String)> = Vec::new();
     let model = (!profile.model.trim().is_empty()).then(|| profile.model.trim().to_string());
 
-    let codex_provider_id = (profile.kind == AgentKind::Codex
+    let codex_provider_id = (profile.kind == AgentProfileKind::Codex
         && profile.use_custom_endpoint
         && !profile.api_base_url.trim().is_empty())
-    .then(|| codex_provider_id(profile.name));
+    .then(|| codex_provider_id(&profile.name));
 
     let codex_credential_env = codex_provider_id.as_deref().map(codex_credential_env);
 
@@ -106,9 +84,9 @@ pub fn agent_launch<'a>(
         // provider entry rather than an environment variable; that entry is
         // built from the same field further down.
         let base_url_env = match profile.kind {
-            AgentKind::Claude => Some("ANTHROPIC_BASE_URL"),
-            AgentKind::DeepSeek => Some(DEEPSEEK_BASE_URL_ENV),
-            AgentKind::Codex => None,
+            AgentProfileKind::ClaudeCode => Some("ANTHROPIC_BASE_URL"),
+            AgentProfileKind::DeepSeek => Some(DEEPSEEK_BASE_URL_ENV),
+            AgentProfileKind::Codex => None,
         };
 
         let api_base_url = profile.api_base_url.trim();
@@ -123,20 +101,20 @@ pub fn agent_launch<'a>(
 
         if !api_key.is_empty() {
             let key_env = match profile.kind {
-                AgentKind::Claude => "ANTHROPIC_API_KEY",
+                AgentProfileKind::ClaudeCode => "ANTHROPIC_API_KEY",
 
-                AgentKind::Codex => codex_credential_env
+                AgentProfileKind::Codex => codex_credential_env
                     .as_deref()
                     .unwrap_or(OPENAI_API_KEY_ENV),
 
-                AgentKind::DeepSeek => DEEPSEEK_API_KEY_ENV,
+                AgentProfileKind::DeepSeek => DEEPSEEK_API_KEY_ENV,
             };
 
             env.push((key_env.to_string(), api_key.to_string()));
         }
     }
 
-    if profile.kind == AgentKind::Claude
+    if profile.kind == AgentProfileKind::ClaudeCode
         && let Some(model) = model.as_ref()
     {
         env.push((ANTHROPIC_MODEL_ENV.to_string(), model.clone()));
@@ -149,10 +127,11 @@ pub fn agent_launch<'a>(
     }
 
     env.extend(
-        overrides
-            .into_iter()
-            .filter(|(name, _)| !name.trim().is_empty())
-            .map(|(name, value)| (name.trim().to_string(), value.to_string())),
+        profile
+            .env
+            .iter()
+            .filter(|entry| !entry.name.trim().is_empty())
+            .map(|entry| (entry.name.trim().to_string(), entry.value.clone())),
     );
 
     if let Some(generated_name) = codex_credential_env.as_deref() {
@@ -187,12 +166,12 @@ pub fn agent_launch<'a>(
     // their configured executable even if a hand-edited file names a package
     // launcher that their adapter does not support.
     let (executable, executable_args) = match (profile.kind, profile.launcher) {
-        (AgentKind::DeepSeek, ProfileLauncher::Npx) => (
+        (AgentProfileKind::DeepSeek, AgentProfileLauncher::Npx) => (
             dsh::NPX_EXECUTABLE.to_string(),
             dsh::NPX_ARGUMENTS.map(str::to_string).to_vec(),
         ),
 
-        (AgentKind::DeepSeek, ProfileLauncher::PnpmDlx) => (
+        (AgentProfileKind::DeepSeek, AgentProfileLauncher::PnpmDlx) => (
             dsh::PNPM_DLX_EXECUTABLE.to_string(),
             dsh::PNPM_DLX_ARGUMENTS.map(str::to_string).to_vec(),
         ),
@@ -209,7 +188,7 @@ pub fn agent_launch<'a>(
         provider: codex_provider,
         // Only the harness keeps a provider catalog to declare a model in, and
         // only a model this profile names can be declared in it.
-        declares_image_input: profile.kind == AgentKind::DeepSeek
+        declares_image_input: profile.kind == AgentProfileKind::DeepSeek
             && profile.vision_model
             && !profile.model.trim().is_empty(),
     }
@@ -227,7 +206,7 @@ fn launch_env_value_from_entries(env: &[(String, String)], target: &str) -> Opti
 /// to the remembered pick and the agent. The literal `default` is accepted
 /// alongside an empty field because that word is the picker's own label for
 /// "no choice".
-pub fn profile_effort(profile: &LaunchProfile<'_>) -> Option<String> {
+fn profile_effort(profile: &AgentProfile) -> Option<String> {
     let effort = profile.effort.trim();
 
     (!effort.is_empty() && effort != "default").then(|| effort.to_string())

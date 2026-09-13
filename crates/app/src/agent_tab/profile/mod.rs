@@ -1,4 +1,4 @@
-pub use nmt_agent::profile::{ANTHROPIC_MODEL_ENV, launch_env_value};
+pub use nmt_agent::profile::{ANTHROPIC_MODEL_ENV, agent_launch, launch_env_value};
 pub use nmt_agent::session::AgentKind;
 
 #[cfg(test)]
@@ -8,17 +8,15 @@ use std::collections::BTreeMap;
 
 use gpui::{Global, SharedString};
 use gpui_component::{Icon, IconNamed};
-use nmt_agent::LaunchConfig;
 use nmt_agent::chat::ThreadSettings;
 #[cfg(test)]
 use nmt_agent::profile::{
     ANTHROPIC_SUB_MODEL_ENVS, CODEX_CREDENTIAL_ENV_PREFIX, DEEPSEEK_API_KEY_ENV,
     DEEPSEEK_BASE_URL_ENV, OPENAI_API_KEY_ENV,
 };
-use nmt_agent::profile::{LaunchProfile, ProfileLauncher, agent_launch as build_launch};
 use nmt_agent::session::settings::RememberedSettings;
 use nmt_config::local_state::AgentDefaults as StoredAgentDefaults;
-use nmt_config::profile::{AgentProfile, AgentProfileKind, AgentProfileLauncher};
+use nmt_config::profile::AgentProfileKind;
 
 /// Provider icons, defined beside the kind they mark. The usage view and the
 /// settings chrome borrow them from here.
@@ -81,34 +79,6 @@ impl AgentKindExt for AgentKind {
             AgentKind::DeepSeek => Icon::new(DeepSeekIcon),
         }
     }
-}
-
-pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
-    let source = LaunchProfile {
-        kind: AgentKind::from_profile(profile.kind),
-        name: &profile.name,
-        executable: &profile.executable,
-        launcher: match profile.launcher {
-            AgentProfileLauncher::Npx => ProfileLauncher::Npx,
-            AgentProfileLauncher::PnpmDlx => ProfileLauncher::PnpmDlx,
-            _ => ProfileLauncher::Executable,
-        },
-        model: &profile.model,
-        effort: &profile.effort,
-        use_custom_endpoint: profile.use_custom_endpoint,
-        api_base_url: &profile.api_base_url,
-        api_key: &profile.api_key,
-        replace_sub_models: profile.replace_sub_models,
-        vision_model: profile.vision_model,
-    };
-
-    build_launch(
-        &source,
-        profile
-            .env
-            .iter()
-            .map(|entry| (entry.name.as_str(), entry.value.as_str())),
-    )
 }
 
 /// Last-chosen thread settings per agent profile name (agent ID for
