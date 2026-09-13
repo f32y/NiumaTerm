@@ -15,7 +15,6 @@ pub use crate::process::{
 };
 pub use crate::workspace::{AgentWorkspace, MultiRootAccess};
 
-pub mod annotations;
 pub mod background_task;
 pub mod catalog;
 pub mod chat;
