@@ -2,6 +2,9 @@
 //! tab, because its event stream is all-session aggregated and a second host
 //! would pay the Node start cost again for nothing.
 
+#[cfg(test)]
+mod tests;
+
 use std::io::{BufRead as _, BufReader};
 use std::process::{Child, Stdio};
 use std::sync::mpsc::{RecvTimeoutError, channel};
@@ -104,7 +107,28 @@ impl LaunchKey {
 /// weakly so it stops when its last tab lets go. A strong static would keep
 /// Node running for the rest of the application's life after the last DeepSeek
 /// tab closed.
-static SHARED: Mutex<Vec<(LaunchKey, Weak<Host>)>> = Mutex::new(Vec::new());
+static SHARED: Mutex<Vec<(LaunchKey, HostSlot)>> = Mutex::new(Vec::new());
+
+type HostSlot = Arc<Mutex<Weak<Host>>>;
+
+fn host_slot(launch: &crate::LaunchConfig) -> HostSlot {
+    let key = LaunchKey::of(launch);
+    let mut hosts = SHARED.lock();
+
+    // An acquired slot may be starting a process. Only inspect unused slots
+    // while holding the registry lock, so another launch never waits on startup.
+    hosts.retain(|(_, slot)| Arc::strong_count(slot) > 1 || slot.lock().strong_count() > 0);
+
+    if let Some((_, slot)) = hosts.iter().find(|(candidate, _)| *candidate == key) {
+        return Arc::clone(slot);
+    }
+
+    let slot = Arc::new(Mutex::new(Weak::new()));
+
+    hosts.push((key, Arc::clone(&slot)));
+
+    slot
+}
 
 /// Hand out the running host for this launch, starting it if no tab currently
 /// holds one.
@@ -114,25 +138,18 @@ static SHARED: Mutex<Vec<(LaunchKey, Weak<Host>)>> = Mutex::new(Vec::new());
 /// deliver the same frames twice. Tabs whose launches differ cannot share one,
 /// because the launch is what decides where the host routes.
 pub fn shared(launch: &crate::LaunchConfig) -> Result<Arc<Host>, HostError> {
-    let key = LaunchKey::of(launch);
-    let mut hosts = SHARED.lock();
+    let slot = host_slot(launch);
+    let mut current = slot.lock();
 
-    // Entries whose host has stopped are dropped on the way past rather than
-    // in a sweep of their own: a launch is looked up whenever a tab opens, and
-    // the list only ever holds as many entries as there are distinct profiles.
-    hosts.retain(|(_, host)| host.upgrade().is_some_and(|host| host.is_running()));
-
-    if let Some(running) = hosts
-        .iter()
-        .find(|(candidate, _)| *candidate == key)
-        .and_then(|(_, host)| host.upgrade())
+    if let Some(running) = current.upgrade()
+        && running.is_running()
     {
         return Ok(running);
     }
 
     let host = Arc::new(Host::start(launch)?);
 
-    hosts.push((key, Arc::downgrade(&host)));
+    *current = Arc::downgrade(&host);
 
     Ok(host)
 }
