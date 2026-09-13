@@ -629,33 +629,32 @@ fn agent_profile_dialog_content(
             };
 
             owner.update(cx, |_, cx| {
-                menu.item(
-                    PopupMenuItem::new(t!("settings-agent-profile-launcher-npx"))
-                        .checked(launcher == AgentProfileLauncher::Npx)
-                        .on_click(cx.listener(|draft, _, _, cx| {
-                            draft.profile.launcher = AgentProfileLauncher::Npx;
+                [
+                    (
+                        AgentProfileLauncher::Npx,
+                        t!("settings-agent-profile-launcher-npx"),
+                    ),
+                    (
+                        AgentProfileLauncher::PnpmDlx,
+                        t!("settings-agent-profile-launcher-pnpm-dlx"),
+                    ),
+                    (
+                        AgentProfileLauncher::Custom,
+                        t!("settings-agent-profile-launcher-custom"),
+                    ),
+                ]
+                .into_iter()
+                .fold(menu, |menu, (option, label)| {
+                    menu.item(
+                        PopupMenuItem::new(label)
+                            .checked(launcher == option)
+                            .on_click(cx.listener(move |draft, _, _, cx| {
+                                draft.profile.launcher = option;
 
-                            cx.notify();
-                        })),
-                )
-                .item(
-                    PopupMenuItem::new(t!("settings-agent-profile-launcher-pnpm-dlx"))
-                        .checked(launcher == AgentProfileLauncher::PnpmDlx)
-                        .on_click(cx.listener(|draft, _, _, cx| {
-                            draft.profile.launcher = AgentProfileLauncher::PnpmDlx;
-
-                            cx.notify();
-                        })),
-                )
-                .item(
-                    PopupMenuItem::new(t!("settings-agent-profile-launcher-custom"))
-                        .checked(launcher == AgentProfileLauncher::Custom)
-                        .on_click(cx.listener(|draft, _, _, cx| {
-                            draft.profile.launcher = AgentProfileLauncher::Custom;
-
-                            cx.notify();
-                        })),
-                )
+                                cx.notify();
+                            })),
+                    )
+                })
             })
         });
 
@@ -726,27 +725,29 @@ fn agent_profile_dialog_content(
             kind_control,
             cx,
         ))
-        .when(profile.kind == AgentProfileKind::DeepSeek, |this| {
-            this.child(card_row(
-                t!("settings-agent-profile-launcher"),
-                t!("settings-agent-profile-launcher-description"),
-                launcher_control,
+        .map(|this| {
+            let executable = card_row(
+                t!("settings-agent-profile-executable"),
+                t!("settings-agent-profile-executable-description"),
+                Input::new(&exe_input).w_64(),
                 cx,
-            ))
+            );
+
+            match profile.kind {
+                AgentProfileKind::Claude | AgentProfileKind::Codex => this.child(executable),
+
+                AgentProfileKind::DeepSeek => this
+                    .child(card_row(
+                        t!("settings-agent-profile-launcher"),
+                        t!("settings-agent-profile-launcher-description"),
+                        launcher_control,
+                        cx,
+                    ))
+                    .when(launcher == AgentProfileLauncher::Custom, |this| {
+                        this.child(executable)
+                    }),
+            }
         })
-        // The path is what the profile launches, so it is only asked for when
-        // the profile launches a path.
-        .when(
-            profile.kind != AgentProfileKind::DeepSeek || launcher == AgentProfileLauncher::Custom,
-            |this| {
-                this.child(card_row(
-                    t!("settings-agent-profile-executable"),
-                    t!("settings-agent-profile-executable-description"),
-                    Input::new(&exe_input).w_64(),
-                    cx,
-                ))
-            },
-        )
         .child(card_row(
             t!("settings-agent-profile-model"),
             match profile.kind {
@@ -763,26 +764,22 @@ fn agent_profile_dialog_content(
             Input::new(&model_input).w_64(),
             cx,
         ))
-        // Claude Code is the only kind that splits work across model tiers;
-        // Codex has no equivalent setting to redirect.
-        .when(profile.kind == AgentProfileKind::Claude, |this| {
-            this.child(card_row(
+        .map(|this| match profile.kind {
+            AgentProfileKind::Claude => this.child(card_row(
                 t!("settings-agent-profile-replace-sub-models"),
                 t!("settings-agent-profile-replace-sub-models-description"),
                 sub_models_switch,
                 cx,
-            ))
-        })
-        // The harness is the only kind that gates image input on a model
-        // catalog of its own, and writing into that catalog is a change to the
-        // user's harness configuration rather than to this profile alone.
-        .when(profile.kind == AgentProfileKind::DeepSeek, |this| {
-            this.child(card_row(
+            )),
+
+            AgentProfileKind::Codex => this,
+
+            AgentProfileKind::DeepSeek => this.child(card_row(
                 t!("settings-agent-profile-vision-model"),
                 t!("settings-agent-profile-vision-model-description"),
                 vision_switch,
                 cx,
-            ))
+            )),
         })
         .child(card_row(
             t!("settings-agent-profile-effort"),
