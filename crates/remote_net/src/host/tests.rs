@@ -1,7 +1,7 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
-use std::{env, fs, process};
+use std::{env, fs, process, thread};
 
 use futures::StreamExt;
 use nmt_remote_session_hub::SessionEvent;
@@ -11,8 +11,32 @@ use tokio::time::timeout;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::host::forward_events;
+use crate::host::{SubscriptionBridge, forward_events};
 use crate::{HostConfig, HostHandle};
+
+#[test]
+fn dropping_an_idle_subscription_joins_its_worker() {
+    let (_sender, receiver) = mpsc::channel();
+    let (events, _forwarded) = unbounded_channel();
+    let (finished, completion) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let stopped = Arc::clone(&cancel);
+
+    let worker = thread::spawn(move || {
+        forward_events(&receiver, 42, events, stopped);
+        finished.send(()).unwrap();
+    });
+
+    drop(SubscriptionBridge {
+        cancel,
+        worker: Some(worker),
+    });
+
+    assert!(
+        completion.try_recv().is_ok(),
+        "drop must wait for worker completion"
+    );
+}
 
 #[test]
 fn a_detached_subscription_reports_stream_loss_after_queued_output() {

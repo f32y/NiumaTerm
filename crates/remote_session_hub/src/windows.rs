@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::{error, fmt, io, thread};
 
 use nmt_config::{CursorShape, active_colors};
@@ -217,19 +217,27 @@ impl StreamState {
         // A full queue means the client can no longer consume a lossless ordered
         // stream. Detaching it forces a later reconnect to start from a fresh VT
         // checkpoint instead of silently continuing with missing bytes.
-        self.subscribers.retain(
-            |_, subscriber| match subscriber.sender.try_send(event.clone()) {
-                Ok(()) => {
-                    if let Some(thread) = &subscriber.wake_thread {
-                        thread.unpark();
-                    }
+        let detached = self.subscribers.extract_if(|_, subscriber| {
+            if subscriber.sender.try_send(event.clone()).is_err() {
+                return true;
+            }
 
-                    true
-                }
+            if let Some(thread) = &subscriber.wake_thread {
+                thread.unpark();
+            }
 
-                Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => false,
-            },
-        );
+            false
+        });
+
+        for (_, subscriber) in detached {
+            // Close before waking so the reader cannot park again while the
+            // last sender still exists.
+            drop(subscriber.sender);
+
+            if let Some(thread) = subscriber.wake_thread {
+                thread.unpark();
+            }
+        }
     }
 }
 

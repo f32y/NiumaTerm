@@ -6,7 +6,7 @@ use std::fmt::Display;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 use std::{io, thread};
 
@@ -482,10 +482,11 @@ async fn send_frame(
 }
 
 /// Bridge from the hub's blocking std receiver to the async serving loop.
-/// One std thread per attached session: it parks in `recv_timeout` and exits
+/// One std thread per attached session: it parks until output arrives and exits
 /// on cancel, on hub-side detach (overflow), or when the serving loop dies.
 struct SubscriptionBridge {
     cancel: Arc<AtomicBool>,
+    worker: Option<thread::JoinHandle<()>>,
 }
 
 impl SubscriptionBridge {
@@ -493,13 +494,21 @@ impl SubscriptionBridge {
         subscription: SessionSubscription,
         session_id: u64,
         events: mpsc::UnboundedSender<(u64, Option<SessionEvent>)>,
-    ) -> Self {
+    ) -> io::Result<Self> {
         let cancel = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&cancel);
 
-        thread::spawn(move || forward_events(subscription.events(), session_id, events, flag));
+        let worker = thread::Builder::new()
+            .name("remote-subscription".into())
+            .spawn(move || {
+                subscription.set_wake_thread(thread::current());
+                forward_events(subscription.events(), session_id, events, flag);
+            })?;
 
-        Self { cancel }
+        Ok(Self {
+            cancel,
+            worker: Some(worker),
+        })
     }
 }
 
@@ -510,16 +519,16 @@ fn forward_events(
     flag: Arc<AtomicBool>,
 ) {
     while !flag.load(Ordering::Relaxed) {
-        match receiver.recv_timeout(Duration::from_millis(500)) {
+        match receiver.try_recv() {
             Ok(event) => {
                 if events.send((session_id, Some(event))).is_err() {
                     break;
                 }
             }
 
-            Err(RecvTimeoutError::Timeout) => continue,
+            Err(TryRecvError::Empty) => thread::park(),
 
-            Err(RecvTimeoutError::Disconnected) => {
+            Err(TryRecvError::Disconnected) => {
                 if !flag.load(Ordering::Relaxed) {
                     let _ = events.send((session_id, None));
                 }
@@ -533,6 +542,14 @@ fn forward_events(
 impl Drop for SubscriptionBridge {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
+
+        if let Some(worker) = self.worker.take() {
+            worker.thread().unpark();
+
+            if worker.join().is_err() {
+                warn!("remote subscription thread panicked");
+            }
+        }
     }
 }
 
@@ -680,14 +697,16 @@ fn handle_frame(
                         Ok(subscription) => {
                             let snapshot: ProtocolSessionSnapshot = subscription.snapshot().into();
 
-                            bridges.insert(
+                            let bridge = match SubscriptionBridge::spawn(
+                                subscription,
                                 session_id,
-                                SubscriptionBridge::spawn(
-                                    subscription,
-                                    session_id,
-                                    event_tx.clone(),
-                                ),
-                            );
+                                event_tx.clone(),
+                            ) {
+                                Ok(bridge) => bridge,
+                                Err(e) => return error(Some(session_id), &e),
+                            };
+
+                            bridges.insert(session_id, bridge);
 
                             reply(&ClientBound::Attached(snapshot))
                         }
