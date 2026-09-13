@@ -170,6 +170,25 @@ pub struct VersionStatus {
 }
 
 impl VersionStatus {
+    pub(crate) fn unsupported(
+        provider: ProviderKind,
+        current: Option<Version>,
+        reason: &str,
+    ) -> Self {
+        Self {
+            provider,
+            current,
+            available: None,
+            install_method: None,
+            channel: None,
+            can_update: false,
+            support: DiscoverySupport::Unsupported {
+                reason: bounded_label(reason, MAX_LABEL_CHARS),
+            },
+            remediation: None,
+        }
+    }
+
     pub fn update_available(&self) -> bool {
         matches!((&self.current, &self.available), (Some(current), Some(available)) if available > current)
     }

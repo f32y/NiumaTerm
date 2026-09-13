@@ -103,18 +103,11 @@ pub fn parse_codex_doctor(json: &str) -> Result<VersionStatus, UpdateError> {
 }
 
 fn version_fallback(launcher: &AgentCli, reason: &str) -> Result<VersionStatus, UpdateError> {
-    Ok(VersionStatus {
-        provider: ProviderKind::Codex,
-        current: current_version_fallback(launcher),
-        available: None,
-        install_method: None,
-        channel: None,
-        can_update: false,
-        support: DiscoverySupport::Unsupported {
-            reason: bounded_label(reason, MAX_LABEL_CHARS),
-        },
-        remediation: None,
-    })
+    Ok(VersionStatus::unsupported(
+        ProviderKind::Codex,
+        current_version_fallback(launcher),
+        reason,
+    ))
 }
 
 fn detail_string<'a>(details: &'a Value, key: &str) -> Option<&'a str> {

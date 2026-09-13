@@ -118,33 +118,13 @@ where
         let mut status = match doctor {
             Ok(output) => {
                 parse_claude_doctor(output.stdout_for_parsing()).unwrap_or_else(|error| {
-                    VersionStatus {
-                        provider: ProviderKind::Claude,
-                        current: None,
-                        available: None,
-                        install_method: None,
-                        channel: None,
-                        can_update: false,
-                        support: DiscoverySupport::Unsupported {
-                            reason: error.message().to_string(),
-                        },
-                        remediation: None,
-                    }
+                    VersionStatus::unsupported(ProviderKind::Claude, None, error.message())
                 })
             }
 
-            Err(error) => VersionStatus {
-                provider: ProviderKind::Claude,
-                current: None,
-                available: None,
-                install_method: None,
-                channel: None,
-                can_update: false,
-                support: DiscoverySupport::Unsupported {
-                    reason: bounded_label(&error.to_string(), MAX_LABEL_CHARS),
-                },
-                remediation: None,
-            },
+            Err(error) => {
+                VersionStatus::unsupported(ProviderKind::Claude, None, &error.to_string())
+            }
         };
 
         if status.current.is_none() {
