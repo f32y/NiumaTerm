@@ -72,11 +72,24 @@ fn current_family(target: FontTarget, cx: &App) -> SharedString {
     let settings = cx.global::<AppSettings>();
 
     match target {
-        FontTarget::Terminal => settings.appearance.terminal_font_family.clone().into(),
-        FontTarget::Ui => settings.appearance.ui_font.clone().into(),
-        FontTarget::Agent => settings.appearance.agent_font_family.clone().into(),
+        FontTarget::Terminal => settings
+            .config()
+            .appearance
+            .terminal_font_family
+            .clone()
+            .into(),
+
+        FontTarget::Ui => settings.config().appearance.ui_font.clone().into(),
+
+        FontTarget::Agent => settings
+            .config()
+            .appearance
+            .agent_font_family
+            .clone()
+            .into(),
 
         FontTarget::AgentTranscript => settings
+            .config()
             .appearance
             .agent_transcript_font_family
             .clone()
@@ -86,7 +99,11 @@ fn current_family(target: FontTarget, cx: &App) -> SharedString {
 
 fn monospace_filter(target: FontTarget, cx: &App) -> bool {
     matches!(target, FontTarget::Terminal | FontTarget::AgentTranscript)
-        && cx.global::<AppSettings>().appearance.monospace_only
+        && cx
+            .global::<AppSettings>()
+            .config()
+            .appearance
+            .monospace_only
 }
 
 pub fn font_family_field(target: FontTarget) -> SettingField<SharedString> {
@@ -122,18 +139,16 @@ fn ensure_picker(target: FontTarget, window: &mut Window, cx: &mut App) -> Entit
             if let SelectEvent::Confirm(Some(name)) = event {
                 let settings = cx.global_mut::<AppSettings>();
 
-                match target {
-                    FontTarget::Terminal => {
-                        settings.appearance.terminal_font_family = name.to_string()
-                    }
+                settings.edit_appearance(|appearance| match target {
+                    FontTarget::Terminal => appearance.terminal_font_family = name.to_string(),
 
-                    FontTarget::Ui => settings.appearance.ui_font = name.to_string(),
-                    FontTarget::Agent => settings.appearance.agent_font_family = name.to_string(),
+                    FontTarget::Ui => appearance.ui_font = name.to_string(),
+                    FontTarget::Agent => appearance.agent_font_family = name.to_string(),
 
                     FontTarget::AgentTranscript => {
-                        settings.appearance.agent_transcript_font_family = name.to_string()
+                        appearance.agent_transcript_font_family = name.to_string()
                     }
-                }
+                });
             }
         });
 
@@ -253,7 +268,8 @@ mod tests {
                 ("Second".into(), false),
             ]));
 
-            cx.global_mut::<AppSettings>().appearance.ui_font = "First".into();
+            cx.global_mut::<AppSettings>()
+                .edit_appearance(|section| section.ui_font = "First".into());
         });
 
         let first = cx.update(|cx| {
@@ -282,7 +298,10 @@ mod tests {
 
         assert_ne!(first_select.entity_id(), second_select.entity_id());
 
-        cx.update(|cx| cx.global_mut::<AppSettings>().appearance.ui_font = "Second".into());
+        cx.update(|cx| {
+            cx.global_mut::<AppSettings>()
+                .edit_appearance(|section| section.ui_font = "Second".into())
+        });
 
         let mut cx = VisualTestContext::from_window(first.into(), cx);
 

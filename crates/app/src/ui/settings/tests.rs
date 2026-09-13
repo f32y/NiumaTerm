@@ -10,6 +10,7 @@ use gpui::{
 use nmt_config::Config;
 use nmt_config::appearance::SmoothScrollingMode;
 use nmt_config::builtin_themes::{THEMES as BUILTIN_THEMES, get as builtin_theme_source};
+use nmt_config::profile::ProfilesConfig;
 use nmt_config::theme::Theme as ConfigTheme;
 
 use crate::ui::settings::state::default_shell_for_tests;
@@ -82,11 +83,11 @@ fn agent_transcript_font_has_first_party_defaults() {
     let settings = AppSettings::default();
 
     assert_eq!(
-        settings.appearance.agent_transcript_font_family,
+        settings.config().appearance.agent_transcript_font_family,
         DEFAULT_FONT_FAMILY
     );
     assert_eq!(
-        settings.appearance.agent_transcript_font_size,
+        settings.config().appearance.agent_transcript_font_size,
         DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE
     );
 }
@@ -205,54 +206,71 @@ fn load_falls_back_to_default_profile() {
     // profile resolves to that profile's name.
     let settings = AppSettings::load();
 
-    assert_eq!(settings.appearance.input_style, InputStyle::Waterfall);
-    assert!(settings.appearance.scroll_to_bottom_when_typing);
-    assert_eq!(settings.appearance.window_backdrop, WindowBackdrop::Acrylic);
-    assert_eq!(settings.profiles.len(), 1);
-    assert_eq!(settings.default_profile, settings.profiles[0].name);
-    assert_eq!(settings.default_profile, "PowerShell");
-    assert!(settings.appearance.monospace_only);
-    assert!(settings.system.restore_last_session_when_opening);
     assert_eq!(
-        settings.appearance.smooth_scrolling,
+        settings.config().appearance.input_style,
+        InputStyle::Waterfall
+    );
+    assert!(settings.config().appearance.scroll_to_bottom_when_typing);
+    assert_eq!(
+        settings.config().appearance.window_backdrop,
+        WindowBackdrop::Acrylic
+    );
+    assert_eq!(settings.config().profiles.list.len(), 1);
+    assert_eq!(
+        settings.config().profiles.default,
+        settings.config().profiles.list[0].name
+    );
+    assert_eq!(settings.config().profiles.default, "PowerShell");
+    assert!(settings.config().appearance.monospace_only);
+    assert!(settings.config().system.restore_last_session_when_opening);
+    assert_eq!(
+        settings.config().appearance.smooth_scrolling,
         SmoothScrollingMode::All
     );
 }
 
 #[test]
 fn default_profile_command_resolves_by_name() {
-    let mut settings = AppSettings {
-        profiles: vec![
-            Profile {
-                name: "PowerShell".into(),
-                shell: default_shell_for_tests(),
-                args: String::new(),
-            },
-            Profile {
-                name: "Cmd".into(),
-                shell: "cmd.exe".into(),
-                args: "/k echo hi".into(),
-            },
-        ],
-        default_profile: "Cmd".into(),
-        ..AppSettings::default()
-    };
+    let mut settings = AppSettings::from_config(Config {
+        profiles: ProfilesConfig {
+            list: vec![
+                Profile {
+                    name: "PowerShell".into(),
+                    shell: default_shell_for_tests(),
+                    args: String::new(),
+                },
+                Profile {
+                    name: "Cmd".into(),
+                    shell: "cmd.exe".into(),
+                    args: "/k echo hi".into(),
+                },
+            ],
+            default: "Cmd".into(),
+        },
+        ..Config::default()
+    });
 
     let (shell, args) = settings.default_profile_command();
 
     assert_eq!(shell.as_deref(), Some("cmd.exe"));
     assert_eq!(args, vec!["/k", "echo", "hi"]);
 
-    // Dangling name falls back to the first profile.
-    settings.default_profile = "Nope".into();
+    assert!(!settings.set_default_profile("Nope".into()));
+    assert_eq!(settings.config().profiles.default, "Cmd");
+
+    // An unknown name loaded from disk falls back to the first profile.
+    let mut config = settings.config().clone();
+
+    config.profiles.default = "Nope".into();
+    settings = AppSettings::from_config(config);
 
     let (shell, _) = settings.default_profile_command();
 
     assert_eq!(shell.as_deref(), Some(default_shell_for_tests().as_str()));
 
     // Blank shell path: no override, session uses its built-in default.
-    settings.profiles[0].shell = "  ".into();
-    settings.default_profile = "PowerShell".into();
+    settings.set_profile_shell(0, "  ".into());
+    settings.set_default_profile("PowerShell".into());
 
     let (shell, args) = settings.default_profile_command();
 
@@ -264,11 +282,10 @@ fn default_profile_command_resolves_by_name() {
 fn profile_name_resolves_from_launch_command() {
     let mut settings = AppSettings::default();
 
-    settings.profiles.push(Profile {
-        name: "Developer PowerShell".into(),
-        shell: "pwsh.exe".into(),
-        args: "-NoLogo".into(),
-    });
+    settings.add_profile();
+    settings.rename_profile(1, "Developer PowerShell".into());
+    settings.set_profile_shell(1, "pwsh.exe".into());
+    settings.set_profile_args(1, "-NoLogo".into());
 
     assert_eq!(
         settings.profile_name_for_command(Some("PWSH.EXE"), &["-NoLogo".to_string()]),
@@ -284,25 +301,25 @@ fn profile_mutations_keep_default_valid() {
     settings.add_profile();
     settings.add_profile();
 
-    assert_eq!(settings.profiles.len(), 3);
-    assert_eq!(settings.profiles[1].name, "Profile 2");
-    assert_eq!(settings.profiles[2].name, "Profile 3");
+    assert_eq!(settings.config().profiles.list.len(), 3);
+    assert_eq!(settings.config().profiles.list[1].name, "Profile 2");
+    assert_eq!(settings.config().profiles.list[2].name, "Profile 3");
 
     // Rename the default: the reference follows.
     settings.rename_profile(0, "Pwsh".into());
 
-    assert_eq!(settings.default_profile, "Pwsh");
+    assert_eq!(settings.config().profiles.default, "Pwsh");
 
     // Remove the default: falls back to the first remaining profile.
     settings.remove_profile(0);
 
-    assert_eq!(settings.default_profile, "Profile 2");
+    assert_eq!(settings.config().profiles.default, "Profile 2");
 
     // The last profile cannot be removed.
     settings.remove_profile(0);
     settings.remove_profile(0);
 
-    assert_eq!(settings.profiles.len(), 1);
+    assert_eq!(settings.config().profiles.list.len(), 1);
 }
 
 #[test]
@@ -311,8 +328,11 @@ fn agent_profile_mutations_keep_default_valid() {
 
     // One seeded profile per registered harness, the first of which is the
     // default a new installation launches.
-    assert_eq!(settings.agent_profiles.len(), AgentKind::ALL.len());
-    assert_eq!(settings.default_agent_profile, "Claude Code");
+    assert_eq!(
+        settings.config().agent_profiles.list.len(),
+        AgentKind::ALL.len()
+    );
+    assert_eq!(settings.config().agent_profiles.default, "Claude Code");
 
     // Unique-name resolution: an empty desired name takes the kind
     // label, collisions get a numeric suffix, and the excluded index
@@ -333,31 +353,99 @@ fn agent_profile_mutations_keep_default_valid() {
     // Update with a rename: the default reference follows.
     let renamed = AgentProfile {
         name: "Proxy".into(),
-        ..settings.agent_profiles[0].clone()
+        ..settings.config().agent_profiles.list[0].clone()
     };
 
-    settings.update_agent_profile(0, renamed);
+    settings.save_agent_profile(Some(0), renamed);
 
-    assert_eq!(settings.default_agent_profile, "Proxy");
+    assert_eq!(settings.config().agent_profiles.default, "Proxy");
 
     // Remove the default: falls back to the first remaining profile.
     settings.remove_agent_profile(0);
 
-    assert_eq!(settings.default_agent_profile, "Codex");
+    assert_eq!(settings.config().agent_profiles.default, "Codex");
 
     // Every profile can be removed; an empty list clears the default.
-    while !settings.agent_profiles.is_empty() {
+    while !settings.config().agent_profiles.list.is_empty() {
         settings.remove_agent_profile(0);
     }
 
-    assert!(settings.agent_profiles.is_empty());
-    assert_eq!(settings.default_agent_profile, "");
+    assert!(settings.config().agent_profiles.list.is_empty());
+    assert_eq!(settings.config().agent_profiles.default, "");
 
     // The shortcut fallback still produces a launchable profile.
     assert_eq!(
         settings.default_agent_profile_entry().kind,
         AgentProfileKind::Claude
     );
+}
+
+#[test]
+fn live_settings_edits_normalize_values_and_preserve_other_configuration() {
+    let mut settings = AppSettings::from_config(Config {
+        working_dir: Some("retained-directory".into()),
+        ..Config::default()
+    });
+
+    settings.edit_appearance(|appearance| {
+        appearance.terminal_font_family = "   ".into();
+        appearance.terminal_font_size = f64::NAN;
+        appearance.background_opacity = -1.0;
+    });
+
+    assert_eq!(
+        settings.config().working_dir.as_deref(),
+        Some("retained-directory")
+    );
+    assert_eq!(
+        settings.config().appearance.terminal_font_family,
+        DEFAULT_FONT_FAMILY
+    );
+    assert_eq!(
+        settings.config().appearance.terminal_font_size,
+        DEFAULT_FONT_SIZE
+    );
+    assert_eq!(settings.config().appearance.background_opacity, 0.2);
+}
+
+#[test]
+fn profile_edits_keep_names_and_defaults_valid_across_reordering() {
+    let mut settings = AppSettings::default();
+
+    assert!(settings.duplicate_agent_profile(0));
+    assert_eq!(
+        settings.config().agent_profiles.list[1].name,
+        "Claude Code 2"
+    );
+    assert!(settings.move_agent_profile(0, 2));
+    assert_eq!(settings.config().agent_profiles.default, "Claude Code");
+    assert_eq!(settings.default_agent_profile_entry().name, "Claude Code");
+
+    let previous = settings.config().clone();
+
+    assert!(!settings.move_agent_profile(99, 0));
+    assert!(!settings.duplicate_agent_profile(99));
+    assert!(!settings.save_agent_profile(Some(99), AgentProfile::default()));
+    assert!(!settings.set_profile_shell(99, "missing".into()));
+    assert_eq!(settings.config(), &previous);
+
+    while !settings.config().agent_profiles.list.is_empty() {
+        settings.remove_agent_profile(0);
+    }
+
+    assert!(settings.save_agent_profile(
+        None,
+        AgentProfile {
+            name: "  Replacement  ".into(),
+            env: vec![EnvVar {
+                name: " ".into(),
+                value: "unused".into()
+            }],
+            ..AgentProfile::default()
+        }
+    ));
+    assert_eq!(settings.config().agent_profiles.default, "Replacement");
+    assert!(settings.default_agent_profile_entry().env.is_empty());
 }
 
 #[test]
@@ -388,16 +476,27 @@ fn unchecked_installations_do_not_render_unknown_versions() {
 fn default_agent_profile_entry_resolves_by_name() {
     let mut settings = AppSettings::default();
 
-    settings.agent_profiles[1].executable = "custom-codex".into();
-    settings.default_agent_profile = "Codex".into();
+    let profile = AgentProfile {
+        executable: "custom-codex".into(),
+        ..settings.config().agent_profiles.list[1].clone()
+    };
+
+    settings.save_agent_profile(Some(1), profile);
+    settings.set_default_agent_profile("Codex".into());
 
     assert_eq!(
         settings.default_agent_profile_entry().executable,
         "custom-codex"
     );
 
-    // Dangling name falls back to the first profile.
-    settings.default_agent_profile = "Nope".into();
+    assert!(!settings.set_default_agent_profile("Nope".into()));
+    assert_eq!(settings.config().agent_profiles.default, "Codex");
+
+    // An unknown name loaded from disk falls back to the first profile.
+    let mut config = settings.config().clone();
+
+    config.agent_profiles.default = "Nope".into();
+    settings = AppSettings::from_config(config);
 
     assert_eq!(
         settings.default_agent_profile_entry().kind,
@@ -409,18 +508,26 @@ fn default_agent_profile_entry_resolves_by_name() {
 fn defaults_have_one_powershell_profile() {
     let settings = AppSettings::default();
 
-    assert_eq!(settings.appearance.input_style, InputStyle::Waterfall);
-    assert!(settings.appearance.scroll_to_bottom_when_typing);
-    assert_eq!(settings.appearance.window_backdrop, WindowBackdrop::Acrylic);
-    assert_eq!(settings.profiles.len(), 1);
-    assert!(
-        settings.profiles[0].shell == default_shell_for_tests()
-            || settings.profiles[0].shell.ends_with(r"\pwsh.exe")
-    );
-    assert_eq!(settings.profiles[0].args, "");
-    assert!(settings.system.restore_last_session_when_opening);
     assert_eq!(
-        settings.appearance.smooth_scrolling,
+        settings.config().appearance.input_style,
+        InputStyle::Waterfall
+    );
+    assert!(settings.config().appearance.scroll_to_bottom_when_typing);
+    assert_eq!(
+        settings.config().appearance.window_backdrop,
+        WindowBackdrop::Acrylic
+    );
+    assert_eq!(settings.config().profiles.list.len(), 1);
+    assert!(
+        settings.config().profiles.list[0].shell == default_shell_for_tests()
+            || settings.config().profiles.list[0]
+                .shell
+                .ends_with(r"\pwsh.exe")
+    );
+    assert_eq!(settings.config().profiles.list[0].args, "");
+    assert!(settings.config().system.restore_last_session_when_opening);
+    assert_eq!(
+        settings.config().appearance.smooth_scrolling,
         SmoothScrollingMode::All
     );
 }
@@ -434,16 +541,16 @@ fn failed_settings_save_keeps_edits_for_retry() {
 
     let mut settings = AppSettings::default();
 
-    settings.appearance.scroll_to_bottom_when_typing = false;
-    settings.appearance.reduce_motion = true;
-    settings.appearance.human_friendly_agent_ui_layout = false;
-    settings.appearance.smooth_scrolling = SmoothScrollingMode::OnlyAgent;
+    settings.edit_appearance(|section| section.scroll_to_bottom_when_typing = false);
+    settings.edit_appearance(|section| section.reduce_motion = true);
+    settings.edit_appearance(|section| section.human_friendly_agent_ui_layout = false);
+    settings.edit_appearance(|section| section.smooth_scrolling = SmoothScrollingMode::OnlyAgent);
 
     let error = settings.save_to(&path).unwrap_err();
 
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-    assert!(settings.appearance.reduce_motion);
-    assert!(!settings.appearance.scroll_to_bottom_when_typing);
+    assert!(settings.config().appearance.reduce_motion);
+    assert!(!settings.config().appearance.scroll_to_bottom_when_typing);
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
         "invalid [ configuration"
@@ -459,11 +566,11 @@ fn failed_settings_save_keeps_edits_for_retry() {
 
     let config: Config = toml::from_str(&saved).unwrap();
 
-    assert_eq!(config.appearance, settings.appearance);
-    assert_eq!(config.agent, settings.agent);
-    assert_eq!(config.system, settings.system);
-    assert_eq!(config.update, settings.update);
-    assert_eq!(config.remote_session, settings.remote_session);
+    assert_eq!(config.appearance, settings.config().appearance);
+    assert_eq!(config.agent, settings.config().agent);
+    assert_eq!(config.system, settings.config().system);
+    assert_eq!(config.update, settings.config().update);
+    assert_eq!(config.remote_session, settings.config().remote_session);
 }
 
 #[test]
@@ -475,10 +582,10 @@ fn settings_io_failure_preserves_edits_until_the_path_is_repaired() {
 
     let mut settings = AppSettings::default();
 
-    settings.system.confirm_before_closing_workspace = false;
+    settings.edit_system(|section| section.confirm_before_closing_workspace = false);
 
     assert!(settings.save_to(&path).is_err());
-    assert!(!settings.system.confirm_before_closing_workspace);
+    assert!(!settings.config().system.confirm_before_closing_workspace);
     assert!(path.is_dir());
 
     fs::remove_dir(&path).unwrap();
@@ -501,6 +608,7 @@ impl gpui::Render for SettingsAwareList {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.0.set_smooth_wheel_enabled(
             cx.global::<AppSettings>()
+                .config()
                 .appearance
                 .smooth_scrolling
                 .terminal_enabled(),
@@ -552,7 +660,8 @@ fn smooth_scrolling_mode_updates_an_open_terminal_list(cx: &mut TestAppContext) 
     assert!(stopped_at > 150. && stopped_at < 200.);
 
     cx.update_global::<AppSettings, _>(|settings, _| {
-        settings.appearance.smooth_scrolling = SmoothScrollingMode::OnlyAgent;
+        settings
+            .edit_appearance(|section| section.smooth_scrolling = SmoothScrollingMode::OnlyAgent);
     });
 
     draw_settings_aware_list(cx, &view);

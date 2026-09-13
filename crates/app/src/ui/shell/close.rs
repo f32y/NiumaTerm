@@ -52,8 +52,9 @@ impl Shell {
         let pane = self.active_pane();
         let settings = cx.global::<AppSettings>();
 
-        let count = if settings.system.manage_subprocess_job
-            && settings.system.warn_before_terminating_shell != WarnBeforeTerminatingShell::Disabled
+        let count = if settings.config().system.manage_subprocess_job
+            && settings.config().system.warn_before_terminating_shell
+                != WarnBeforeTerminatingShell::Disabled
         {
             pane.read(cx).child_process_count()
         } else {
@@ -61,6 +62,7 @@ impl Shell {
         };
 
         if !settings
+            .config()
             .system
             .warn_before_terminating_shell
             .should_warn(count)
@@ -202,8 +204,9 @@ impl Shell {
     fn close_process_count(&self, tree: &TabSurface, cx: &App) -> usize {
         let settings = cx.global::<AppSettings>();
 
-        if !settings.system.manage_subprocess_job
-            || settings.system.warn_before_terminating_shell == WarnBeforeTerminatingShell::Disabled
+        if !settings.config().system.manage_subprocess_job
+            || settings.config().system.warn_before_terminating_shell
+                == WarnBeforeTerminatingShell::Disabled
         {
             return 0;
         }
@@ -291,10 +294,10 @@ impl Shell {
         }
 
         let settings = cx.global::<AppSettings>();
-        let warn_before_terminating_shell = settings.system.warn_before_terminating_shell;
+        let warn_before_terminating_shell = settings.config().system.warn_before_terminating_shell;
 
         if !should_confirm_close(
-            is_agent && settings.system.confirm_before_closing_workspace,
+            is_agent && settings.config().system.confirm_before_closing_workspace,
             warn_before_terminating_shell,
             count,
         ) {
@@ -384,6 +387,7 @@ impl Shell {
 
         let confirm_before_closing_workspace = cx
             .global::<AppSettings>()
+            .config()
             .system
             .confirm_before_closing_workspace;
 
@@ -391,6 +395,7 @@ impl Shell {
 
         let warn_before_terminating_shell = cx
             .global::<AppSettings>()
+            .config()
             .system
             .warn_before_terminating_shell;
 
@@ -440,8 +445,11 @@ impl Shell {
             .sum();
 
         let settings = cx.global::<AppSettings>();
-        let confirm_before_closing_workspace = settings.system.confirm_before_closing_workspace;
-        let warn_before_terminating_shell = settings.system.warn_before_terminating_shell;
+
+        let confirm_before_closing_workspace =
+            settings.config().system.confirm_before_closing_workspace;
+
+        let warn_before_terminating_shell = settings.config().system.warn_before_terminating_shell;
 
         if !should_confirm_close(
             confirm_before_closing_workspace,
@@ -572,11 +580,11 @@ impl Shell {
             .sum();
 
         let settings = cx.global::<AppSettings>();
-        let warn_before_terminating_shell = settings.system.warn_before_terminating_shell;
+        let warn_before_terminating_shell = settings.config().system.warn_before_terminating_shell;
 
         if saved
             && !should_confirm_close(
-                settings.system.confirm_before_closing_workspace,
+                settings.config().system.confirm_before_closing_workspace,
                 warn_before_terminating_shell,
                 count,
             )

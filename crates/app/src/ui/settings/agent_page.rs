@@ -64,9 +64,10 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
         .item(SettingItem::new(
             t!("settings-agent-show-usage"),
             SettingField::switch(
-                |cx| cx.global::<AppSettings>().agent.show_agent_usage,
+                |cx| cx.global::<AppSettings>().config().agent.show_agent_usage,
                 |value, cx| {
-                    cx.global_mut::<AppSettings>().agent.show_agent_usage = value;
+                    cx.global_mut::<AppSettings>()
+                        .edit_agent(|section| section.show_agent_usage = value);
                 },
             ),
         ))
@@ -86,13 +87,19 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                         (off_key.into(), t!("settings-common-off").into()),
                     ],
                     |cx| {
-                        let key: &str = cx.global::<AppSettings>().agent.collapse_tool_calls.into();
+                        let key: &str = cx
+                            .global::<AppSettings>()
+                            .config()
+                            .agent
+                            .collapse_tool_calls
+                            .into();
 
                         key.into()
                     },
                     |value, cx| {
-                        cx.global_mut::<AppSettings>().agent.collapse_tool_calls =
-                            value.as_str().into();
+                        cx.global_mut::<AppSettings>().edit_agent(|section| {
+                            section.collapse_tool_calls = value.as_str().into()
+                        });
                     },
                 ),
             )
@@ -102,11 +109,15 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
             SettingItem::new(
                 t!("settings-agent-codex-skill-compat"),
                 SettingField::switch(
-                    |cx| cx.global::<AppSettings>().agent.codex_skill_command_compat,
+                    |cx| {
+                        cx.global::<AppSettings>()
+                            .config()
+                            .agent
+                            .codex_skill_command_compat
+                    },
                     |value, cx| {
                         cx.global_mut::<AppSettings>()
-                            .agent
-                            .codex_skill_command_compat = value;
+                            .edit_agent(|section| section.codex_skill_command_compat = value);
                     },
                 ),
             )
@@ -135,13 +146,18 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                         ),
                     ],
                     |cx| {
-                        let key: &str = cx.global::<AppSettings>().agent.model_list_style.into();
+                        let key: &str = cx
+                            .global::<AppSettings>()
+                            .config()
+                            .agent
+                            .model_list_style
+                            .into();
 
                         key.into()
                     },
                     |value, cx| {
-                        cx.global_mut::<AppSettings>().agent.model_list_style =
-                            value.as_str().into();
+                        cx.global_mut::<AppSettings>()
+                            .edit_agent(|section| section.model_list_style = value.as_str().into());
                     },
                 ),
             )
@@ -153,9 +169,15 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
         .item(SettingItem::new(
             t!("settings-agent-check-updates"),
             SettingField::switch(
-                |cx| cx.global::<AppSettings>().agent.check_agent_updates,
+                |cx| {
+                    cx.global::<AppSettings>()
+                        .config()
+                        .agent
+                        .check_agent_updates
+                },
                 |value, cx| {
-                    cx.global_mut::<AppSettings>().agent.check_agent_updates = value;
+                    cx.global_mut::<AppSettings>()
+                        .edit_agent(|section| section.check_agent_updates = value);
                 },
             ),
         ))
@@ -191,9 +213,10 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                     SettingItem::new(
                         t!("settings-agent-enable-hooks"),
                         SettingField::switch(
-                            |cx| cx.global::<AppSettings>().agent.enable_agent_hooks,
+                            |cx| cx.global::<AppSettings>().config().agent.enable_agent_hooks,
                             |value, cx| {
-                                cx.global_mut::<AppSettings>().agent.enable_agent_hooks = value;
+                                cx.global_mut::<AppSettings>()
+                                    .edit_agent(|section| section.enable_agent_hooks = value);
                             },
                         ),
                     )
@@ -254,7 +277,13 @@ pub(super) fn installation_version_text(
 
 fn agent_update_check_item() -> SettingItem {
     SettingItem::render(move |options, _window, cx| {
-        let profiles = cx.global::<AppSettings>().agent_profiles.clone();
+        let profiles = cx
+            .global::<AppSettings>()
+            .config()
+            .agent_profiles
+            .list
+            .clone();
+
         let installations = agent_updates::installations_for_profiles(&profiles, cx);
         let busy = installations.iter().any(|snapshot| snapshot.busy);
         let check_profiles = profiles.clone();

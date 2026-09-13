@@ -64,7 +64,7 @@ fn profile_dialogs_keep_separate_drafts_and_release_cancelled_credentials(cx: &m
 
         save_agent_profile_draft(&second, cx);
 
-        let profiles = &cx.global::<AppSettings>().agent_profiles;
+        let profiles = &cx.global::<AppSettings>().config().agent_profiles.list;
 
         assert!(
             profiles

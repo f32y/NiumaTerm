@@ -9,9 +9,7 @@ use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::{ActiveTheme as _, AxisExt as _, Disableable as _, h_flex};
 use rust_i18n::t;
 
-use crate::ui::settings::state::{
-    AppSettings, clamp_background_image_opacity, clamp_background_opacity,
-};
+use crate::ui::settings::state::AppSettings;
 
 #[derive(Clone, Copy)]
 enum OpacityTarget {
@@ -22,8 +20,8 @@ enum OpacityTarget {
 impl OpacityTarget {
     fn value(self, settings: &AppSettings) -> f64 {
         match self {
-            Self::Window => settings.appearance.background_opacity,
-            Self::Image => settings.appearance.background_image_opacity,
+            Self::Window => settings.config().appearance.background_opacity,
+            Self::Image => settings.config().appearance.background_image_opacity,
         }
     }
 
@@ -35,15 +33,11 @@ impl OpacityTarget {
     }
 
     fn set(self, value: f64, settings: &mut AppSettings) {
-        match self {
-            Self::Window => {
-                settings.appearance.background_opacity = clamp_background_opacity(value)
-            }
+        settings.edit_appearance(|appearance| match self {
+            Self::Window => appearance.background_opacity = value,
 
-            Self::Image => {
-                settings.appearance.background_image_opacity = clamp_background_image_opacity(value)
-            }
-        }
+            Self::Image => appearance.background_image_opacity = value,
+        });
     }
 }
 
@@ -129,6 +123,7 @@ pub(super) fn background_image_field() -> SettingField<SharedString> {
     SettingField::render(|options, _window, cx| {
         let path = cx
             .global::<AppSettings>()
+            .config()
             .appearance
             .background_image
             .clone();
@@ -176,7 +171,9 @@ pub(super) fn background_image_field() -> SettingField<SharedString> {
                                     let path = path.display().to_string();
 
                                     let _ = cx.update_global(|settings: &mut AppSettings, _, _| {
-                                        settings.appearance.background_image = Some(path);
+                                        settings.edit_appearance(|section| {
+                                            section.background_image = Some(path)
+                                        });
                                     });
                                 }
                             })
@@ -189,7 +186,8 @@ pub(super) fn background_image_field() -> SettingField<SharedString> {
                     .label(t!("settings-common-clear"))
                     .disabled(options.is_disabled())
                     .on_click(|_, _, cx: &mut App| {
-                        cx.global_mut::<AppSettings>().appearance.background_image = None;
+                        cx.global_mut::<AppSettings>()
+                            .edit_appearance(|section| section.background_image = None);
                     })
             }))
     })

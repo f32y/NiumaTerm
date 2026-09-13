@@ -332,12 +332,14 @@ impl GitStatusModel {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
         let enabled = cx
             .global::<AppSettings>()
+            .config()
             .appearance
             .show_git_status_on_title_bar;
 
         cx.observe_global::<AppSettings>(|this, cx| {
             let enabled = cx
                 .global::<AppSettings>()
+                .config()
                 .appearance
                 .show_git_status_on_title_bar;
 
@@ -368,6 +370,7 @@ impl GitStatusModel {
         loop {
             let Ok(interval) = this.update(cx, |_, cx| {
                 cx.global::<AppSettings>()
+                    .config()
                     .appearance
                     .git_status_refresh_interval
             }) else {
@@ -438,6 +441,7 @@ impl GitStatusModel {
         // rather than read again here.
         let branch_max_age = Duration::from_secs(
             cx.global::<AppSettings>()
+                .config()
                 .appearance
                 .git_status_refresh_interval
                 .max(1),
@@ -555,6 +559,7 @@ impl Render for GitStatusView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !cx
             .global::<AppSettings>()
+            .config()
             .appearance
             .show_git_status_on_title_bar
         {

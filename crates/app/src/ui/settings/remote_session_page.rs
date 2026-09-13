@@ -19,9 +19,16 @@ pub(super) fn remote_session_page(editing: Entity<SettingsEditing>) -> SettingPa
                     SettingItem::new(
                         t!("settings-remote-enable-host"),
                         SettingField::switch(
-                            |cx| cx.global::<AppSettings>().remote_session.host_enabled,
+                            |cx| {
+                                cx.global::<AppSettings>()
+                                    .config()
+                                    .remote_session
+                                    .host_enabled
+                            },
                             |value, cx| {
-                                cx.global_mut::<AppSettings>().remote_session.host_enabled = value;
+                                cx.global_mut::<AppSettings>()
+                                    .edit_remote_session(|section| section.host_enabled = value);
+
                                 reconcile_remote_host(cx);
                             },
                         ),
@@ -34,14 +41,17 @@ pub(super) fn remote_session_page(editing: Entity<SettingsEditing>) -> SettingPa
                         SettingField::input(
                             |cx| {
                                 cx.global::<AppSettings>()
+                                    .config()
                                     .remote_session
                                     .relay_url
                                     .clone()
                                     .into()
                             },
                             |value, cx| {
-                                cx.global_mut::<AppSettings>().remote_session.relay_url =
-                                    value.to_string();
+                                cx.global_mut::<AppSettings>()
+                                    .edit_remote_session(|section| {
+                                        section.relay_url = value.to_string()
+                                    });
                             },
                         ),
                     )
@@ -53,14 +63,17 @@ pub(super) fn remote_session_page(editing: Entity<SettingsEditing>) -> SettingPa
                         SettingField::input(
                             |cx| {
                                 cx.global::<AppSettings>()
+                                    .config()
                                     .remote_session
                                     .access_token
                                     .clone()
                                     .into()
                             },
                             |value, cx| {
-                                cx.global_mut::<AppSettings>().remote_session.access_token =
-                                    value.to_string();
+                                cx.global_mut::<AppSettings>()
+                                    .edit_remote_session(|section| {
+                                        section.access_token = value.to_string()
+                                    });
                             },
                         ),
                     )
@@ -106,7 +119,7 @@ pub(super) fn remote_session_page(editing: Entity<SettingsEditing>) -> SettingPa
 pub(crate) fn reconcile_remote_host(cx: &App) {
     let settings = cx.global::<AppSettings>();
 
-    reconcile_remote_session(&settings.remote_session);
+    reconcile_remote_session(&settings.config().remote_session);
 }
 
 #[cfg(not(windows))]

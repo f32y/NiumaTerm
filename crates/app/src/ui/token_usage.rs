@@ -72,7 +72,11 @@ impl TokenUsageView {
         source: Arc<dyn UsageSource<Option<DailyTokenUsage>>>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let enabled = cx.global::<AppSettings>().appearance.show_daily_token_usage;
+        let enabled = cx
+            .global::<AppSettings>()
+            .config()
+            .appearance
+            .show_daily_token_usage;
 
         let mut this = Self {
             refresh: Refresh::new(None, source, enabled),
@@ -81,7 +85,11 @@ impl TokenUsageView {
         };
 
         cx.observe_global::<AppSettings>(|this: &mut Self, cx| {
-            let enabled = cx.global::<AppSettings>().appearance.show_daily_token_usage;
+            let enabled = cx
+                .global::<AppSettings>()
+                .config()
+                .appearance
+                .show_daily_token_usage;
 
             if enabled != this.enabled {
                 this.enabled = enabled;

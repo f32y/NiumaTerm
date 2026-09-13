@@ -42,24 +42,37 @@ fn agent_snapshot(cx: &App) -> AgentSettings {
     let settings = cx.global::<AppSettings>();
 
     AgentSettings {
-        pane_background_follows_terminal: settings.appearance.agent_pane_use_terminal_background,
-        font_family: settings.appearance.agent_font_family.clone().into(),
-        font_size: settings.appearance.agent_font_size as f32,
+        pane_background_follows_terminal: settings
+            .config()
+            .appearance
+            .agent_pane_use_terminal_background,
+        font_family: settings
+            .config()
+            .appearance
+            .agent_font_family
+            .clone()
+            .into(),
+        font_size: settings.config().appearance.agent_font_size as f32,
         transcript_font_family: settings
+            .config()
             .appearance
             .agent_transcript_font_family
             .clone()
             .into(),
-        transcript_font_size: settings.appearance.agent_transcript_font_size as f32,
-        newline_shortcut: settings.system.newline_shortcut,
-        collapse_tool_calls: settings.agent.collapse_tool_calls,
-        codex_skill_command_compat: settings.agent.codex_skill_command_compat,
-        model_list_style: settings.agent.model_list_style,
-        smooth_wheel: settings.appearance.smooth_scrolling.agent_enabled(),
-        reduce_motion: settings.appearance.reduce_motion,
-        human_friendly_layout: settings.appearance.human_friendly_agent_ui_layout,
-        git_status_refresh_interval: settings.appearance.git_status_refresh_interval,
-        profiles: settings.agent_profiles.clone(),
+        transcript_font_size: settings.config().appearance.agent_transcript_font_size as f32,
+        newline_shortcut: settings.config().system.newline_shortcut,
+        collapse_tool_calls: settings.config().agent.collapse_tool_calls,
+        codex_skill_command_compat: settings.config().agent.codex_skill_command_compat,
+        model_list_style: settings.config().agent.model_list_style,
+        smooth_wheel: settings
+            .config()
+            .appearance
+            .smooth_scrolling
+            .agent_enabled(),
+        reduce_motion: settings.config().appearance.reduce_motion,
+        human_friendly_layout: settings.config().appearance.human_friendly_agent_ui_layout,
+        git_status_refresh_interval: settings.config().appearance.git_status_refresh_interval,
+        profiles: settings.config().agent_profiles.list.clone(),
         background_opacity: main_view_background_opacity(cx),
         font_fallbacks: default_font_fallbacks(),
         terminal_background: rgb(theme_default_background().into()).into(),
@@ -70,16 +83,25 @@ fn terminal_snapshot(cx: &App) -> TerminalSettings {
     let settings = cx.global::<AppSettings>();
 
     TerminalSettings {
-        input_style: settings.appearance.input_style,
-        cursor_shape: settings.cursor_shape,
-        manage_subprocess_job: settings.system.manage_subprocess_job,
-        command_blocks: settings.appearance.command_blocks,
-        smooth_wheel: settings.appearance.smooth_scrolling.terminal_enabled(),
-        scroll_to_bottom_when_typing: settings.appearance.scroll_to_bottom_when_typing,
-        newline_shortcut: settings.system.newline_shortcut,
-        font_family: settings.appearance.terminal_font_family.clone().into(),
-        font_size: settings.appearance.terminal_font_size as f32,
-        line_height: settings.appearance.terminal_line_height as f32,
+        input_style: settings.config().appearance.input_style,
+        cursor_shape: settings.config().cursor.shape,
+        manage_subprocess_job: settings.config().system.manage_subprocess_job,
+        command_blocks: settings.config().appearance.command_blocks,
+        smooth_wheel: settings
+            .config()
+            .appearance
+            .smooth_scrolling
+            .terminal_enabled(),
+        scroll_to_bottom_when_typing: settings.config().appearance.scroll_to_bottom_when_typing,
+        newline_shortcut: settings.config().system.newline_shortcut,
+        font_family: settings
+            .config()
+            .appearance
+            .terminal_font_family
+            .clone()
+            .into(),
+        font_size: settings.config().appearance.terminal_font_size as f32,
+        line_height: settings.config().appearance.terminal_line_height as f32,
         background_opacity: main_view_background_opacity(cx),
         corner_radius: UI_RADIUS,
         font_fallbacks: default_font_fallbacks(),

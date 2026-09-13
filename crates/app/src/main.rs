@@ -236,7 +236,12 @@ fn main() {
         ui::install_terminal_settings(cx);
         ui::install_agent_settings(cx);
 
-        let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
+        let agent_profiles = cx
+            .global::<AppSettings>()
+            .config()
+            .agent_profiles
+            .list
+            .clone();
 
         agent_updates::initialize(testing, &agent_profiles, cx);
         input_history::initialize(testing, cx);
@@ -259,6 +264,7 @@ fn main() {
         // through a plain scroll handle, which is the rest of the app.
         let enable_smooth_scrolling = cx
             .global::<AppSettings>()
+            .config()
             .appearance
             .smooth_scrolling
             .panels_enabled();
@@ -268,7 +274,12 @@ fn main() {
         // The platform remembers the choice and applies it to the vsync
         // thread when that spawns (after this closure returns).
         #[cfg(windows)]
-        if cx.global::<AppSettings>().system.prioritize_ui_threads {
+        if cx
+            .global::<AppSettings>()
+            .config()
+            .system
+            .prioritize_ui_threads
+        {
             platform_handle.set_ui_thread_priority(true);
         }
 
@@ -292,6 +303,7 @@ fn main() {
 
         let restore_last_session_when_opening = cx
             .global::<AppSettings>()
+            .config()
             .system
             .restore_last_session_when_opening;
 
@@ -442,7 +454,12 @@ where
 }
 
 fn on_settings_changed(cx: &mut App) {
-    let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
+    let agent_profiles = cx
+        .global::<AppSettings>()
+        .config()
+        .agent_profiles
+        .list
+        .clone();
 
     agent_updates::reconcile_profiles(&agent_profiles, cx);
 
@@ -454,6 +471,7 @@ fn on_settings_changed(cx: &mut App) {
 
     let enable_smooth_scrolling = cx
         .global::<AppSettings>()
+        .config()
         .appearance
         .smooth_scrolling
         .panels_enabled();
@@ -466,9 +484,14 @@ fn on_settings_changed(cx: &mut App) {
 
     // The shared locale doubles as the change detector:
     // the observer fires on every configuration edit, and only a
-    // language switch should
-    // pay for a full re-render of every window.
-    let language: &str = cx.global::<AppSettings>().appearance.language.into();
+    // language switch should re-render every window.
+    let language: &str = cx
+        .global::<AppSettings>()
+        .config()
+        .appearance
+        .language
+        .into();
+
     let language_changed = &*rust_i18n::locale() != language;
 
     if language_changed {
@@ -536,6 +559,7 @@ fn on_app_quit(cx: &mut App) -> Ready<()> {
 
     let restore_last_session_when_opening = cx
         .global::<AppSettings>()
+        .config()
         .system
         .restore_last_session_when_opening;
 
@@ -647,6 +671,7 @@ pub(crate) fn open_window_without_a_source(cx: &mut App) {
 
         if cx
             .global::<AppSettings>()
+            .config()
             .system
             .restore_last_session_when_opening
         {
@@ -799,7 +824,7 @@ fn on_ipc_focus_notification(route: &AgentRoute, notification_id: &str, cx: &mut
 }
 
 fn on_ipc_agent_hook(event: AgentEvent, cx: &mut App) {
-    if !cx.global::<AppSettings>().agent.enable_agent_hooks {
+    if !cx.global::<AppSettings>().config().agent.enable_agent_hooks {
         return;
     }
 

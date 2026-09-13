@@ -76,7 +76,9 @@ fn profile_label(ix: usize, profile: &AgentProfile) -> String {
 fn delete_profile(ix: usize, window: &mut Window, cx: &mut App) {
     let description = cx
         .global::<AppSettings>()
+        .config()
         .agent_profiles
+        .list
         .get(ix)
         .map(|profile| profile_label(ix, profile))
         .map(|label| t!("settings-agent-profile-delete-named", name = &label).into_owned())
@@ -100,16 +102,7 @@ fn delete_profile(ix: usize, window: &mut Window, cx: &mut App) {
 /// this list is the user's own, so the copy belongs next to its original
 /// rather than at the end.
 fn duplicate_profile(ix: usize, cx: &mut App) {
-    let settings = cx.global_mut::<AppSettings>();
-
-    let Some(mut profile) = settings.agent_profiles.get(ix).cloned() else {
-        return;
-    };
-
-    // Names key the default-profile selector, tab persistence, and the
-    // per-profile thread defaults, so the copy has to take a free one.
-    profile.name = settings.unique_agent_profile_name(&profile.name, profile.kind, None);
-    settings.agent_profiles.insert(ix + 1, profile);
+    cx.global_mut::<AppSettings>().duplicate_agent_profile(ix);
 }
 
 /// Drag payload for reordering rows: the position the drag started from.
@@ -241,30 +234,25 @@ impl ListDelegate for AgentProfileList {
                             let gap = this.delegate_mut().drop_gap.take();
 
                             let from = drag.from;
-                            let profiles = &mut cx.global_mut::<AppSettings>().agent_profiles;
 
                             // Removing the profile first shifts every gap below
                             // it up by one, so a gap past the profile's own
                             // position lands one row earlier than it reads.
                             let to = gap.map(|gap| if from < gap { gap - 1 } else { gap });
 
-                            // Stale indices only appear if the list changed
-                            // mid-drag; skip the move rather than panic.
-                            if let Some(to) = to
-                                && from != to
-                                && from < profiles.len()
-                                && to < profiles.len()
-                            {
-                                let profile = profiles.remove(from);
-
-                                profiles.insert(to, profile);
+                            if let Some(to) = to {
+                                cx.global_mut::<AppSettings>().move_agent_profile(from, to);
                             }
 
                             // Refresh the rows directly: the drop lands on
                             // this list, so no outer render is guaranteed to
                             // push the reordered profiles back in.
-                            this.delegate_mut().profiles =
-                                cx.global::<AppSettings>().agent_profiles.clone();
+                            this.delegate_mut().profiles = cx
+                                .global::<AppSettings>()
+                                .config()
+                                .agent_profiles
+                                .list
+                                .clone();
 
                             cx.notify();
                         }))
@@ -367,7 +355,13 @@ impl ListDelegate for AgentProfileList {
 /// profiles are pushed in from here on every render, which keeps the rows
 /// current after an add, an edit, or a delete.
 pub(super) fn agent_profile_list(window: &mut Window, cx: &mut App) -> AnyElement {
-    let profiles = cx.global::<AppSettings>().agent_profiles.clone();
+    let profiles = cx
+        .global::<AppSettings>()
+        .config()
+        .agent_profiles
+        .list
+        .clone();
+
     let rows = profiles.len() as f32;
 
     let state: Entity<ListState<AgentProfileList>> =

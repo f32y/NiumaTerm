@@ -36,9 +36,17 @@ fn terminal_profiles_group(profiles: &[Profile]) -> SettingGroup {
             t!("settings-profiles-default"),
             SettingField::dropdown(
                 options,
-                |cx| cx.global::<AppSettings>().default_profile.clone().into(),
+                |cx| {
+                    cx.global::<AppSettings>()
+                        .config()
+                        .profiles
+                        .default
+                        .clone()
+                        .into()
+                },
                 |value, cx| {
-                    cx.global_mut::<AppSettings>().default_profile = value.to_string();
+                    cx.global_mut::<AppSettings>()
+                        .set_default_profile(value.to_string());
                 },
             ),
         ))
@@ -69,7 +77,9 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
         // index must read as empty, not panic.
         let profile = cx
             .global::<AppSettings>()
+            .config()
             .profiles
+            .list
             .get(ix)
             .cloned()
             .unwrap_or_default();
@@ -87,7 +97,9 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
             format!("terminal-profile-name-{ix}"),
             profile.name.clone().into(),
             false,
-            move |value, cx| cx.global_mut::<AppSettings>().rename_profile(ix, value),
+            move |value, cx| {
+                cx.global_mut::<AppSettings>().rename_profile(ix, value);
+            },
             window,
             cx,
         );
@@ -97,9 +109,7 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
             profile.shell.clone().into(),
             false,
             move |value, cx| {
-                if let Some(profile) = cx.global_mut::<AppSettings>().profiles.get_mut(ix) {
-                    profile.shell = value;
-                }
+                cx.global_mut::<AppSettings>().set_profile_shell(ix, value);
             },
             window,
             cx,
@@ -110,9 +120,7 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
             profile.args.clone().into(),
             false,
             move |value, cx| {
-                if let Some(profile) = cx.global_mut::<AppSettings>().profiles.get_mut(ix) {
-                    profile.args = value;
-                }
+                cx.global_mut::<AppSettings>().set_profile_args(ix, value);
             },
             window,
             cx,
@@ -159,10 +167,7 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
 
                                         let _ =
                                             cx.update_global(|settings: &mut AppSettings, _, _| {
-                                                if let Some(profile) = settings.profiles.get_mut(ix)
-                                                {
-                                                    profile.shell = value.clone();
-                                                }
+                                                settings.set_profile_shell(ix, value.clone());
                                             });
 
                                         let _ = input.update_in(cx, |input, window, cx| {
@@ -182,7 +187,9 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
             .on_click(move |_, window, cx: &mut App| {
                 let name = cx
                     .global::<AppSettings>()
+                    .config()
                     .profiles
+                    .list
                     .get(ix)
                     .map(|profile| profile.name.clone())
                     .unwrap_or_default();
@@ -269,12 +276,15 @@ fn agent_profiles_group(agent_profiles: &[AgentProfile]) -> SettingGroup {
                 options,
                 |cx| {
                     cx.global::<AppSettings>()
-                        .default_agent_profile
+                        .config()
+                        .agent_profiles
+                        .default
                         .clone()
                         .into()
                 },
                 |value, cx| {
-                    cx.global_mut::<AppSettings>().default_agent_profile = value.to_string();
+                    cx.global_mut::<AppSettings>()
+                        .set_default_agent_profile(value.to_string());
                 },
             ),
         ))

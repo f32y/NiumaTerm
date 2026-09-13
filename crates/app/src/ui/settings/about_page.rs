@@ -39,9 +39,10 @@ pub(super) fn about_page() -> SettingPage {
             SettingItem::new(
                 t!("settings-about-check-updates"),
                 SettingField::switch(
-                    |cx| cx.global::<AppSettings>().update.check_updates,
+                    |cx| cx.global::<AppSettings>().config().update.check_updates,
                     |value, cx| {
-                        cx.global_mut::<AppSettings>().update.check_updates = value;
+                        cx.global_mut::<AppSettings>()
+                            .edit_update(|section| section.check_updates = value);
                     },
                 ),
             )
@@ -58,12 +59,13 @@ pub(super) fn about_page() -> SettingPage {
                     ),
                 ],
                 |cx| {
-                    let key: &str = cx.global::<AppSettings>().update.channel.into();
+                    let key: &str = cx.global::<AppSettings>().config().update.channel.into();
 
                     key.into()
                 },
                 |value, cx| {
-                    cx.global_mut::<AppSettings>().update.channel = value.as_str().into();
+                    cx.global_mut::<AppSettings>()
+                        .edit_update(|section| section.channel = value.as_str().into());
                 },
             )
             .default_value("stable"),

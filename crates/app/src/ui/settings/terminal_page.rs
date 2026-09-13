@@ -25,14 +25,19 @@ pub(super) fn terminal_page() -> SettingPage {
                             ),
                         ],
                         |cx| {
-                            let key: &str =
-                                cx.global::<AppSettings>().appearance.input_style.into();
+                            let key: &str = cx
+                                .global::<AppSettings>()
+                                .config()
+                                .appearance
+                                .input_style
+                                .into();
 
                             key.into()
                         },
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().appearance.input_style =
-                                value.as_str().into();
+                            cx.global_mut::<AppSettings>().edit_appearance(|section| {
+                                section.input_style = value.as_str().into()
+                            });
                         },
                     )
                     .default_value(waterfall_key),
@@ -49,12 +54,13 @@ pub(super) fn terminal_page() -> SettingPage {
                             ),
                         ],
                         |cx| {
-                            let key: &str = cx.global::<AppSettings>().cursor_shape.into();
+                            let key: &str = cx.global::<AppSettings>().config().cursor.shape.into();
 
                             key.into()
                         },
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().cursor_shape = value.as_str().into();
+                            cx.global_mut::<AppSettings>()
+                                .set_cursor_shape(value.as_str().into());
                         },
                     )
                     .default_value("block"),
@@ -62,9 +68,15 @@ pub(super) fn terminal_page() -> SettingPage {
                 .item(SettingItem::new(
                     t!("settings-terminal-command-blocks"),
                     SettingField::switch(
-                        |cx| cx.global::<AppSettings>().appearance.command_blocks,
+                        |cx| {
+                            cx.global::<AppSettings>()
+                                .config()
+                                .appearance
+                                .command_blocks
+                        },
                         |value, cx| {
-                            cx.global_mut::<AppSettings>().appearance.command_blocks = value;
+                            cx.global_mut::<AppSettings>()
+                                .edit_appearance(|section| section.command_blocks = value);
                         },
                     ),
                 ))
@@ -73,13 +85,14 @@ pub(super) fn terminal_page() -> SettingPage {
                     SettingField::switch(
                         |cx| {
                             cx.global::<AppSettings>()
+                                .config()
                                 .appearance
                                 .scroll_to_bottom_when_typing
                         },
                         |value, cx| {
-                            cx.global_mut::<AppSettings>()
-                                .appearance
-                                .scroll_to_bottom_when_typing = value;
+                            cx.global_mut::<AppSettings>().edit_appearance(|section| {
+                                section.scroll_to_bottom_when_typing = value
+                            });
                         },
                     ),
                 )),

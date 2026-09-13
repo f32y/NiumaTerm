@@ -3,13 +3,11 @@ pub use nmt_config::agent::{CollapseRows, ModelListStyle};
 pub use nmt_config::appearance::{
     DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE, DEFAULT_BACKGROUND_IMAGE_OPACITY, DEFAULT_FONT_FAMILY,
     DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_TAB_WIDTH, DEFAULT_UI_FONT,
-    clamp_agent_transcript_font_size, clamp_terminal_font_size, clamp_terminal_line_height,
+    clamp_agent_transcript_font_size, clamp_background_image_opacity, clamp_background_opacity,
+    clamp_git_interval, clamp_tab_width, clamp_terminal_font_size, clamp_terminal_line_height,
     terminal_font_or_default, ui_font_or_default,
 };
-pub use nmt_config::appearance::{
-    InputStyle, MIN_TAB_WIDTH, TabBarStyle, WindowBackdrop, clamp_background_image_opacity,
-    clamp_background_opacity, clamp_git_interval, clamp_tab_width,
-};
+pub use nmt_config::appearance::{InputStyle, MIN_TAB_WIDTH, TabBarStyle, WindowBackdrop};
 pub use nmt_config::profile::{
     AgentProfile, AgentProfileKind, AgentProfileLauncher, EnvVar, Profile,
 };
@@ -26,11 +24,12 @@ use nmt_agent::dsh;
 use nmt_config::agent::AgentConfig;
 use nmt_config::appearance::AppearanceConfig;
 use nmt_config::defaults::default_theme;
+#[cfg(windows)]
 use nmt_config::remote_session::RemoteSessionConfig;
 use nmt_config::system::SystemConfig;
 use nmt_config::theme::Theme;
 use nmt_config::update::UpdateConfig;
-use nmt_config::{CursorShape, SettingsPatch, config_file_path, get, save_settings_to};
+use nmt_config::{Config, CursorShape, SettingsPatch, config_file_path, get, save_settings_to};
 use rust_i18n::t;
 
 /// The shell a freshly seeded profile names, which is the platform's own
@@ -43,26 +42,8 @@ pub fn default_shell_for_tests() -> String {
 /// Persistent settings are shared with the configuration reader and writer.
 /// Picker state lives separately and never enters a pane snapshot.
 pub struct AppSettings {
-    /// File stem selected from the per-user themes directory.
-    pub theme: String,
-
-    pub appearance: AppearanceConfig,
-    pub agent: AgentConfig,
-    pub system: SystemConfig,
-    pub remote_session: RemoteSessionConfig,
-    pub update: UpdateConfig,
-    pub cursor_shape: CursorShape,
-    pub profiles: Vec<Profile>,
-
-    /// Resolves by name; loading and profile edits repair dangling references.
-    pub default_profile: String,
-
-    pub agent_profiles: Vec<AgentProfile>,
-
-    /// Empty when the user has deliberately removed every agent profile.
-    pub default_agent_profile: String,
-
-    pub(crate) discard_on_exit: bool,
+    config: Config,
+    discard_on_exit: bool,
 }
 
 #[derive(Default)]
@@ -82,20 +63,7 @@ pub struct SettingsEditing {
 
 impl Default for AppSettings {
     fn default() -> Self {
-        Self {
-            theme: String::new(),
-            appearance: AppearanceConfig::default(),
-            agent: AgentConfig::default(),
-            system: SystemConfig::default(),
-            remote_session: RemoteSessionConfig::default(),
-            update: UpdateConfig::default(),
-            cursor_shape: CursorShape::Block,
-            profiles: vec![builtin_profile()],
-            default_profile: builtin_profile().name,
-            agent_profiles: builtin_agent_profiles(),
-            default_agent_profile: AgentProfileKind::Claude.full_name().to_string(),
-            discard_on_exit: false,
-        }
+        Self::from_config(Config::default())
     }
 }
 
@@ -176,79 +144,182 @@ impl AppSettings {
         !self.discard_on_exit
     }
 
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
     pub fn load() -> Self {
-        let config = get();
+        Self::from_config(get().clone())
+    }
 
-        let profiles: Vec<Profile> = if config.profiles.list.is_empty() {
-            vec![builtin_profile()]
-        } else {
-            config.profiles.list.clone()
-        };
+    pub(crate) fn from_config(mut config: Config) -> Self {
+        config.appearance.normalize();
 
-        // An unset or dangling default falls back to the first profile.
-        let default_profile = if profiles.iter().any(|p| p.name == config.profiles.default) {
-            config.profiles.default.clone()
-        } else {
-            profiles[0].name.clone()
-        };
+        if config.theme.is_empty() {
+            config.theme = default_theme();
+        }
 
-        // Seed the built-ins only for a never-configured section; once the
-        // dialog has saved (`initialized`), an empty list is a deliberate
-        // "no agent profiles" state.
-        let agent_profiles: Vec<AgentProfile> =
-            if config.agent_profiles.list.is_empty() && !config.agent_profiles.initialized {
-                builtin_agent_profiles()
-            } else {
-                config.agent_profiles.list.clone()
-            };
+        if config.profiles.list.is_empty() {
+            config.profiles.list.push(builtin_profile());
+        }
 
-        let default_agent_profile = if agent_profiles
+        if !config
+            .profiles
+            .list
+            .iter()
+            .any(|p| p.name == config.profiles.default)
+        {
+            config.profiles.default = config.profiles.list[0].name.clone();
+        }
+
+        // Only a never-configured list receives built-ins. A saved empty list
+        // means the user deliberately removed every agent profile.
+        if config.agent_profiles.list.is_empty() && !config.agent_profiles.initialized {
+            config.agent_profiles.list = builtin_agent_profiles();
+        }
+
+        if !config
+            .agent_profiles
+            .list
             .iter()
             .any(|p| p.name == config.agent_profiles.default)
         {
-            config.agent_profiles.default.clone()
-        } else {
-            agent_profiles
+            config.agent_profiles.default = config
+                .agent_profiles
+                .list
                 .first()
                 .map(|p| p.name.clone())
-                .unwrap_or_default()
-        };
+                .unwrap_or_default();
+        }
 
         Self {
-            theme: if config.theme.is_empty() {
-                default_theme()
-            } else {
-                config.theme.clone()
-            },
-            appearance: config.appearance.clone(),
-            agent: config.agent.clone(),
-            system: config.system.clone(),
-            remote_session: config.remote_session.clone(),
-            update: config.update.clone(),
-            cursor_shape: config.cursor.shape,
-            profiles,
-            default_profile,
-            agent_profiles,
-            default_agent_profile,
+            config,
             discard_on_exit: false,
         }
     }
 
+    pub fn edit_appearance(&mut self, edit: impl FnOnce(&mut AppearanceConfig)) {
+        edit(&mut self.config.appearance);
+        self.config.appearance.normalize();
+    }
+
+    pub fn edit_agent(&mut self, edit: impl FnOnce(&mut AgentConfig)) {
+        edit(&mut self.config.agent);
+    }
+
+    pub fn edit_system(&mut self, edit: impl FnOnce(&mut SystemConfig)) {
+        edit(&mut self.config.system);
+    }
+
+    #[cfg(windows)]
+    pub fn edit_remote_session(&mut self, edit: impl FnOnce(&mut RemoteSessionConfig)) {
+        edit(&mut self.config.remote_session);
+    }
+
+    pub fn edit_update(&mut self, edit: impl FnOnce(&mut UpdateConfig)) {
+        edit(&mut self.config.update);
+    }
+
+    pub fn set_theme(&mut self, theme: String) {
+        self.config.theme = theme;
+    }
+
+    pub fn set_cursor_shape(&mut self, shape: CursorShape) {
+        self.config.cursor.shape = shape;
+    }
+
+    pub fn set_default_profile(&mut self, name: String) -> bool {
+        if !self.config.profiles.list.iter().any(|p| p.name == name) {
+            return false;
+        }
+
+        self.config.profiles.default = name;
+
+        true
+    }
+
+    pub fn set_default_agent_profile(&mut self, name: String) -> bool {
+        if !self
+            .config
+            .agent_profiles
+            .list
+            .iter()
+            .any(|p| p.name == name)
+        {
+            return false;
+        }
+
+        self.config.agent_profiles.default = name;
+
+        true
+    }
+
+    pub fn set_profile_shell(&mut self, ix: usize, shell: String) -> bool {
+        let Some(profile) = self.config.profiles.list.get_mut(ix) else {
+            return false;
+        };
+
+        profile.shell = shell;
+
+        true
+    }
+
+    pub fn set_profile_args(&mut self, ix: usize, args: String) -> bool {
+        let Some(profile) = self.config.profiles.list.get_mut(ix) else {
+            return false;
+        };
+
+        profile.args = args;
+
+        true
+    }
+
+    pub fn duplicate_agent_profile(&mut self, ix: usize) -> bool {
+        let Some(mut profile) = self.config.agent_profiles.list.get(ix).cloned() else {
+            return false;
+        };
+
+        profile.name = self.unique_agent_profile_name(&profile.name, profile.kind, None);
+        self.config.agent_profiles.list.insert(ix + 1, profile);
+
+        true
+    }
+
+    pub fn move_agent_profile(&mut self, from: usize, to: usize) -> bool {
+        let profiles = &mut self.config.agent_profiles.list;
+
+        if from == to || from >= profiles.len() || to >= profiles.len() {
+            return false;
+        }
+
+        let profile = profiles.remove(from);
+
+        profiles.insert(to, profile);
+
+        true
+    }
+
     /// Append a new profile with a unique placeholder name.
     pub fn add_profile(&mut self) {
-        let mut n = self.profiles.len() + 1;
+        let mut n = self.config.profiles.list.len() + 1;
 
         let name = loop {
             let candidate = t!("settings-profiles-new-name", n = n).into_owned();
 
-            if !self.profiles.iter().any(|p| p.name == candidate) {
+            if !self
+                .config
+                .profiles
+                .list
+                .iter()
+                .any(|p| p.name == candidate)
+            {
                 break candidate;
             }
 
             n += 1;
         };
 
-        self.profiles.push(Profile {
+        self.config.profiles.list.push(Profile {
             name,
             ..builtin_profile()
         });
@@ -256,31 +327,35 @@ impl AppSettings {
 
     /// Remove the profile at `ix`. Refuses the last one; removing the
     /// default falls the default back to the first remaining profile.
-    pub fn remove_profile(&mut self, ix: usize) {
-        if self.profiles.len() <= 1 || ix >= self.profiles.len() {
-            return;
+    pub fn remove_profile(&mut self, ix: usize) -> bool {
+        if self.config.profiles.list.len() <= 1 || ix >= self.config.profiles.list.len() {
+            return false;
         }
 
-        let removed = self.profiles.remove(ix);
+        let removed = self.config.profiles.list.remove(ix);
 
-        if self.default_profile == removed.name {
-            self.default_profile = self.profiles[0].name.clone();
+        if self.config.profiles.default == removed.name {
+            self.config.profiles.default = self.config.profiles.list[0].name.clone();
         }
+
+        true
     }
 
     /// Rename the profile at `ix`, keeping the default reference in sync.
     /// `ix` is captured by long-lived UI closures, so it can be stale after
     /// a profile was removed; out-of-range renames are ignored.
-    pub fn rename_profile(&mut self, ix: usize, name: String) {
-        let Some(profile) = self.profiles.get_mut(ix) else {
-            return;
+    pub fn rename_profile(&mut self, ix: usize, name: String) -> bool {
+        let Some(profile) = self.config.profiles.list.get_mut(ix) else {
+            return false;
         };
 
-        if profile.name == self.default_profile {
-            self.default_profile = name.clone();
+        if profile.name == self.config.profiles.default {
+            self.config.profiles.default = name.clone();
         }
 
         profile.name = name;
+
+        true
     }
 
     /// A profile name that collides with no existing agent profile
@@ -301,7 +376,9 @@ impl AppSettings {
         };
 
         let taken = |name: &str| {
-            self.agent_profiles
+            self.config
+                .agent_profiles
+                .list
                 .iter()
                 .enumerate()
                 .any(|(ix, p)| Some(ix) != exclude && p.name == name)
@@ -321,45 +398,69 @@ impl AppSettings {
     /// Remove the agent profile at `ix`; removing the default falls the
     /// default back to the first remaining profile (or clears it when the
     /// list becomes empty).
-    pub fn remove_agent_profile(&mut self, ix: usize) {
-        if ix >= self.agent_profiles.len() {
-            return;
+    pub fn remove_agent_profile(&mut self, ix: usize) -> bool {
+        if ix >= self.config.agent_profiles.list.len() {
+            return false;
         }
 
-        let removed = self.agent_profiles.remove(ix);
+        let removed = self.config.agent_profiles.list.remove(ix);
 
-        if self.default_agent_profile == removed.name {
-            self.default_agent_profile = self
+        if self.config.agent_profiles.default == removed.name {
+            self.config.agent_profiles.default = self
+                .config
                 .agent_profiles
+                .list
                 .first()
                 .map(|p| p.name.clone())
                 .unwrap_or_default();
         }
+
+        true
     }
 
-    /// Replace the agent profile at `ix`, keeping the default reference in
-    /// sync with a rename. Out-of-range updates are ignored (stale index
-    /// after a removal).
-    pub fn update_agent_profile(&mut self, ix: usize, profile: AgentProfile) {
-        let Some(slot) = self.agent_profiles.get_mut(ix) else {
-            return;
-        };
-
-        if slot.name == self.default_agent_profile {
-            self.default_agent_profile = profile.name.clone();
+    /// Store a dialog draft with a unique name and a valid default reference.
+    /// A stale edit index leaves the current list unchanged.
+    pub fn save_agent_profile(&mut self, target: Option<usize>, mut profile: AgentProfile) -> bool {
+        if target.is_some_and(|ix| ix >= self.config.agent_profiles.list.len()) {
+            return false;
         }
 
-        *slot = profile;
+        profile.env.retain(|var| !var.name.trim().is_empty());
+        profile.name = self.unique_agent_profile_name(&profile.name, profile.kind, target);
+
+        match target {
+            Some(ix) => {
+                let slot = &mut self.config.agent_profiles.list[ix];
+
+                if slot.name == self.config.agent_profiles.default {
+                    self.config.agent_profiles.default = profile.name.clone();
+                }
+
+                *slot = profile;
+            }
+
+            None => {
+                if self.config.agent_profiles.default.is_empty() {
+                    self.config.agent_profiles.default = profile.name.clone();
+                }
+
+                self.config.agent_profiles.list.push(profile);
+            }
+        }
+
+        true
     }
 
     /// The agent profile new agent tabs launch with: the default by name,
     /// falling back to the first profile, then to the built-in Claude Code
     /// profile if the list is somehow empty.
     pub fn default_agent_profile_entry(&self) -> AgentProfile {
-        self.agent_profiles
+        self.config
+            .agent_profiles
+            .list
             .iter()
-            .find(|p| p.name == self.default_agent_profile)
-            .or_else(|| self.agent_profiles.first())
+            .find(|p| p.name == self.config.agent_profiles.default)
+            .or_else(|| self.config.agent_profiles.list.first())
             .cloned()
             .unwrap_or_else(|| builtin_agent_profile(AgentProfileKind::Claude))
     }
@@ -369,10 +470,12 @@ impl AppSettings {
     /// path is blank (the session falls back to its built-in default).
     pub fn default_profile_command(&self) -> (Option<String>, Vec<String>) {
         let profile = self
+            .config
             .profiles
+            .list
             .iter()
-            .find(|p| p.name == self.default_profile)
-            .or_else(|| self.profiles.first());
+            .find(|p| p.name == self.config.profiles.default)
+            .or_else(|| self.config.profiles.list.first());
 
         match profile {
             Some(p) if !p.shell.trim().is_empty() => (
@@ -385,7 +488,9 @@ impl AppSettings {
     }
 
     pub fn profile_name_for_command(&self, shell: Option<&str>, args: &[String]) -> String {
-        self.profiles
+        self.config
+            .profiles
+            .list
             .iter()
             .find(|profile| {
                 let profile_shell =
@@ -399,7 +504,7 @@ impl AppSettings {
                     .eq(args.iter().map(String::as_str))
             })
             .map(|profile| profile.name.clone())
-            .unwrap_or_else(|| self.default_profile.clone())
+            .unwrap_or_else(|| self.config.profiles.default.clone())
     }
 
     /// Persist the current edits without replacing unrelated TOML content.
@@ -412,17 +517,17 @@ impl AppSettings {
         save_settings_to(
             path,
             &SettingsPatch {
-                theme: &self.theme,
-                appearance: &self.appearance,
-                cursor_shape: self.cursor_shape,
-                agent: &self.agent,
-                system: &self.system,
-                remote_session: &self.remote_session,
-                update: &self.update,
-                profiles: &self.profiles,
-                default_profile: &self.default_profile,
-                agent_profiles: &self.agent_profiles,
-                default_agent_profile: &self.default_agent_profile,
+                theme: &self.config.theme,
+                appearance: &self.config.appearance,
+                cursor_shape: self.config.cursor.shape,
+                agent: &self.config.agent,
+                system: &self.config.system,
+                remote_session: &self.config.remote_session,
+                update: &self.config.update,
+                profiles: &self.config.profiles.list,
+                default_profile: &self.config.profiles.default,
+                agent_profiles: &self.config.agent_profiles.list,
+                default_agent_profile: &self.config.agent_profiles.default,
             },
         )
     }

@@ -91,7 +91,9 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
     let profile = match target {
         Some(ix) => cx
             .global::<AppSettings>()
+            .config()
             .agent_profiles
+            .list
             .get(ix)
             .cloned()
             .unwrap_or_default(),
@@ -177,34 +179,12 @@ fn agent_profile_dialog(
 /// Commit the dialog draft into `AppSettings`: dedupe the name, then update
 /// the edited entry or append a new one.
 fn save_agent_profile_draft(draft: &Entity<AgentProfileDraft>, cx: &mut App) {
-    let target = draft.read(cx).target;
-    let mut profile = draft.read(cx).profile.clone();
+    let draft = draft.read(cx);
+    let target = draft.target;
+    let profile = draft.profile.clone();
 
-    // A variable with no name cannot be exported, and an entry the user added
-    // but never filled in would otherwise persist as noise in config.toml.
-    profile.env.retain(|var| !var.name.trim().is_empty());
-
-    let settings = cx.global_mut::<AppSettings>();
-
-    profile.name = settings.unique_agent_profile_name(&profile.name, profile.kind, target);
-
-    match target {
-        Some(ix) => settings.update_agent_profile(ix, profile),
-
-        None => {
-            settings.agent_profiles.push(profile);
-
-            // Adding to a previously empty list makes the new profile the
-            // default, so NewAgentTab immediately uses it.
-            if settings.default_agent_profile.is_empty() {
-                settings.default_agent_profile = settings
-                    .agent_profiles
-                    .last()
-                    .map(|p| p.name.clone())
-                    .unwrap_or_default();
-            }
-        }
-    }
+    cx.global_mut::<AppSettings>()
+        .save_agent_profile(target, profile);
 }
 
 /// Point the draft at another agent type, as picked in the add dialog.

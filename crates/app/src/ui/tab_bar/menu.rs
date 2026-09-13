@@ -109,7 +109,7 @@ pub(crate) fn new_tab_menu(
     shell: &Entity<Shell>,
     cx: &mut App,
 ) -> ModernMenu {
-    let profiles = cx.global::<AppSettings>().profiles.clone();
+    let profiles = cx.global::<AppSettings>().config().profiles.list.clone();
 
     // One snapshot of the active workspace's directories and their last known
     // availability, taken as the menu opens. The re-check runs on the
@@ -164,7 +164,12 @@ pub(crate) fn new_tab_menu(
         }
     }
 
-    let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
+    let agent_profiles = cx
+        .global::<AppSettings>()
+        .config()
+        .agent_profiles
+        .list
+        .clone();
 
     if !agent_profiles.is_empty() {
         menu = menu.separator();

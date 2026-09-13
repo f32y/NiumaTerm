@@ -121,7 +121,7 @@ fn select_theme(name: String, cx: &mut App) {
 
             apply_ui_theme(theme.ui_theme().as_ref(), cx);
 
-            cx.update_global(|settings: &mut AppSettings, _| settings.theme = name);
+            cx.update_global(|settings: &mut AppSettings, _| settings.set_theme(name));
 
             apply_window_translucency(cx);
 
@@ -139,7 +139,7 @@ fn reload_themes(editing: &Entity<SettingsEditing>, cx: &mut App) {
         cx.notify();
     });
 
-    let selected = cx.global::<AppSettings>().theme.clone();
+    let selected = cx.global::<AppSettings>().config().theme.clone();
 
     if !selected.is_empty() {
         select_theme(selected, cx);
@@ -254,7 +254,7 @@ fn theme_preview(colors: Colors) -> Div {
 }
 
 pub(super) fn theme_list(editing: Entity<SettingsEditing>, cx: &mut App) -> Div {
-    let selected = cx.global::<AppSettings>().theme.clone();
+    let selected = cx.global::<AppSettings>().config().theme.clone();
 
     let filter = editing.read(cx).theme_filter.to_lowercase();
 

@@ -184,8 +184,8 @@ pub(crate) fn initialize(testing: bool, cx: &mut App) {
         status: Status::Unknown,
         testing,
         pending: None,
-        channel: settings.update.channel,
-        checking_enabled: settings.update.check_updates,
+        channel: settings.config().update.channel,
+        checking_enabled: settings.config().update.check_updates,
     });
 }
 
@@ -716,8 +716,8 @@ pub(crate) fn await_predecessor(pid: u32) {
 /// checking switch, which is the user saying not to reach the network unasked.
 pub(crate) fn on_settings_changed(cx: &mut App) {
     let settings = cx.global::<AppSettings>();
-    let channel = settings.update.channel;
-    let checking_enabled = settings.update.check_updates;
+    let channel = settings.config().update.channel;
+    let checking_enabled = settings.config().update.check_updates;
 
     let update = cx.global_mut::<AppUpdate>();
 
@@ -768,7 +768,7 @@ pub(crate) fn schedule_automatic_checks(cx: &mut App) {
 }
 
 fn check_if_enabled(cx: &mut App) {
-    if cx.global::<AppSettings>().update.check_updates {
+    if cx.global::<AppSettings>().config().update.check_updates {
         check(cx);
     }
 }
@@ -781,7 +781,7 @@ pub(crate) fn check(cx: &mut App) {
         return;
     }
 
-    let channel = cx.global::<AppSettings>().update.channel;
+    let channel = cx.global::<AppSettings>().config().update.channel;
 
     set_status(Status::Checking, cx);
 
@@ -800,7 +800,7 @@ fn finish_check(found: Result<Option<Release>, CheckError>, channel: UpdateChann
     // The channel can move while the request is out. A result for the
     // channel the user left says nothing about the one they chose, and
     // the switch has already started the check that does.
-    if cx.global::<AppSettings>().update.channel != channel {
+    if cx.global::<AppSettings>().config().update.channel != channel {
         return;
     }
 

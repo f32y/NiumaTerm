@@ -335,6 +335,7 @@ impl Shell {
 
         let containing = cx
             .global::<AppSettings>()
+            .config()
             .system
             .open_in_best_workspace
             .then(|| best_match(&self.workspaces.summaries(), path))

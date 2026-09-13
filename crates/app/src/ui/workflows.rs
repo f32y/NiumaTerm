@@ -140,8 +140,8 @@ impl Render for WorkflowsView {
         // and the two are the same surface to a user, so both follow the agent
         // typography rather than the app chrome's.
         let settings = cx.global::<AppSettings>();
-        let font_family = settings.appearance.agent_font_family.clone();
-        let font_size = px(settings.appearance.agent_font_size as f32);
+        let font_family = settings.config().appearance.agent_font_family.clone();
+        let font_size = px(settings.config().appearance.agent_font_size as f32);
         let showing_conversation = self.detail_transcript.is_some();
 
         v_flex()

@@ -29,13 +29,17 @@ pub(crate) fn account_sources(launcher: AgentCli) -> [Arc<dyn UsageSource<UsageS
 
 pub(crate) fn codex_usage_launcher(settings: &AppSettings) -> AgentCli {
     let profile = settings
+        .config()
         .agent_profiles
+        .list
         .iter()
         .filter(|profile| profile.kind == AgentProfileKind::Codex)
-        .find(|profile| profile.name == settings.default_agent_profile)
+        .find(|profile| profile.name == settings.config().agent_profiles.default)
         .or_else(|| {
             settings
+                .config()
                 .agent_profiles
+                .list
                 .iter()
                 .find(|profile| profile.kind == AgentProfileKind::Codex)
         });
@@ -78,35 +82,39 @@ fn fetch_daily_usage(_: &AtomicBool) -> Result<Option<DailyTokenUsage>, FetchErr
 
 #[cfg(test)]
 mod tests {
-    use nmt_config::profile::{AgentProfile, AgentProfileKind, EnvVar};
+    use nmt_config::Config;
+    use nmt_config::profile::{AgentProfile, AgentProfileKind, AgentProfilesConfig, EnvVar};
 
     use crate::ui::AppSettings;
     use crate::usage_sources::codex_usage_launcher;
 
     #[test]
     fn account_usage_prefers_the_default_codex_profile() {
-        let mut settings = AppSettings {
-            agent_profiles: vec![
-                AgentProfile {
-                    name: "First".into(),
-                    kind: AgentProfileKind::Codex,
-                    executable: "first-codex".into(),
-                    ..AgentProfile::default()
-                },
-                AgentProfile {
-                    name: "Chosen".into(),
-                    kind: AgentProfileKind::Codex,
-                    executable: "chosen-codex".into(),
-                    env: vec![EnvVar {
-                        name: "CODEX_HOME".into(),
-                        value: "custom-home".into(),
-                    }],
-                    ..AgentProfile::default()
-                },
-            ],
-            default_agent_profile: "Chosen".into(),
-            ..AppSettings::default()
-        };
+        let mut settings = AppSettings::from_config(Config {
+            agent_profiles: AgentProfilesConfig {
+                list: vec![
+                    AgentProfile {
+                        name: "First".into(),
+                        kind: AgentProfileKind::Codex,
+                        executable: "first-codex".into(),
+                        ..AgentProfile::default()
+                    },
+                    AgentProfile {
+                        name: "Chosen".into(),
+                        kind: AgentProfileKind::Codex,
+                        executable: "chosen-codex".into(),
+                        env: vec![EnvVar {
+                            name: "CODEX_HOME".into(),
+                            value: "custom-home".into(),
+                        }],
+                        ..AgentProfile::default()
+                    },
+                ],
+                default: "Chosen".into(),
+                initialized: true,
+            },
+            ..Config::default()
+        });
 
         let launcher = codex_usage_launcher(&settings);
 
@@ -116,11 +124,22 @@ mod tests {
             Some("custom-home".into())
         );
 
-        settings.default_agent_profile = "Another provider".into();
+        settings.save_agent_profile(
+            None,
+            AgentProfile {
+                name: "Another provider".into(),
+                kind: AgentProfileKind::Claude,
+                ..AgentProfile::default()
+            },
+        );
+
+        settings.set_default_agent_profile("Another provider".into());
 
         assert_eq!(codex_usage_launcher(&settings).executable(), "first-codex");
 
-        settings.agent_profiles.clear();
+        while !settings.config().agent_profiles.list.is_empty() {
+            settings.remove_agent_profile(0);
+        }
 
         assert_eq!(codex_usage_launcher(&settings).executable(), "codex");
     }

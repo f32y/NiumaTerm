@@ -26,14 +26,15 @@ pub(crate) fn surface_background_opacity(cx: &App) -> f32 {
 
     effective_surface_background_opacity(
         effective_background_opacity(
-            settings.appearance.window_backdrop,
-            settings.appearance.background_opacity,
+            settings.config().appearance.window_backdrop,
+            settings.config().appearance.background_opacity,
         ),
         settings
+            .config()
             .appearance
             .background_image
             .as_ref()
-            .map(|_| settings.appearance.background_image_opacity),
+            .map(|_| settings.config().appearance.background_image_opacity),
     ) as f32
 }
 
@@ -49,7 +50,10 @@ pub(super) fn effective_main_view_background_opacity(
 
 pub(crate) fn main_view_background_opacity(cx: &App) -> f32 {
     effective_main_view_background_opacity(
-        cx.global::<AppSettings>().appearance.transparent_main_view,
+        cx.global::<AppSettings>()
+            .config()
+            .appearance
+            .transparent_main_view,
         surface_background_opacity(cx),
     )
 }
@@ -72,10 +76,10 @@ pub(crate) fn background_image_layer_opacity(cx: &App) -> f32 {
 
     effective_background_image_layer_opacity(
         effective_background_opacity(
-            settings.appearance.window_backdrop,
-            settings.appearance.background_opacity,
+            settings.config().appearance.window_backdrop,
+            settings.config().appearance.background_opacity,
         ),
-        settings.appearance.background_image_opacity,
+        settings.config().appearance.background_image_opacity,
     ) as f32
 }
 
@@ -96,5 +100,10 @@ pub(super) fn window_background_appearance_for(
 
 /// Select the DWM backdrop material for the configured mode.
 pub(crate) fn window_background_appearance(cx: &App) -> WindowBackgroundAppearance {
-    window_background_appearance_for(cx.global::<AppSettings>().appearance.window_backdrop)
+    window_background_appearance_for(
+        cx.global::<AppSettings>()
+            .config()
+            .appearance
+            .window_backdrop,
+    )
 }

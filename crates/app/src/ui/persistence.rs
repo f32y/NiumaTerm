@@ -80,7 +80,9 @@ fn launch_with_profile(
 fn resolve_restored_launch(state: &mut TabState, settings: &AppSettings) {
     let keep = state.shell.as_deref().is_some_and(|shell| {
         settings
+            .config()
             .profiles
+            .list
             .iter()
             .any(|p| p.shell.trim().eq_ignore_ascii_case(shell))
     });
@@ -103,10 +105,19 @@ fn restored_agent_profile(
     settings: &AppSettings,
 ) -> AgentProfile {
     settings
+        .config()
         .agent_profiles
+        .list
         .iter()
         .find(|p| name.is_some_and(|name| p.name == name))
-        .or_else(|| settings.agent_profiles.iter().find(|p| p.kind == kind))
+        .or_else(|| {
+            settings
+                .config()
+                .agent_profiles
+                .list
+                .iter()
+                .find(|p| p.kind == kind)
+        })
         .cloned()
         .unwrap_or_else(|| builtin_agent_profile(kind))
 }
@@ -748,24 +759,28 @@ mod launch_resolution_tests {
         legacy_generated_tab_title, normalize_saved_launch, resolve_restored_launch, restore_tabs,
     };
     use crate::ui::settings::{AppSettings, Profile};
+    use nmt_config::Config;
+    use nmt_config::profile::ProfilesConfig;
 
     fn settings_with_pwsh_default() -> AppSettings {
-        AppSettings {
-            profiles: vec![
-                Profile {
-                    name: "PowerShell".into(),
-                    shell: r"C:\Program Files\PowerShell\7\pwsh.exe".into(),
-                    args: String::new(),
-                },
-                Profile {
-                    name: "WSL".into(),
-                    shell: "wsl.exe".into(),
-                    args: "-d Ubuntu".into(),
-                },
-            ],
-            default_profile: "PowerShell".into(),
-            ..AppSettings::default()
-        }
+        AppSettings::from_config(Config {
+            profiles: ProfilesConfig {
+                list: vec![
+                    Profile {
+                        name: "PowerShell".into(),
+                        shell: r"C:\Program Files\PowerShell\7\pwsh.exe".into(),
+                        args: String::new(),
+                    },
+                    Profile {
+                        name: "WSL".into(),
+                        shell: "wsl.exe".into(),
+                        args: "-d Ubuntu".into(),
+                    },
+                ],
+                default: "PowerShell".into(),
+            },
+            ..Config::default()
+        })
     }
 
     fn tab(shell: Option<&str>, args: &[&str]) -> TabState {

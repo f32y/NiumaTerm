@@ -205,6 +205,7 @@ async fn run_automatic_checks(cx: &mut AsyncApp) {
             let coordinator = cx.global::<AgentUpdates>().coordinator.clone();
 
             cx.global::<AppSettings>()
+                .config()
                 .agent
                 .check_agent_updates
                 .then_some(coordinator)

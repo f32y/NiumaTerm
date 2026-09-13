@@ -160,8 +160,13 @@ impl Sidebar {
             .iter()
             .any(|workspace| workspace.summary.temporary);
 
-        let show_daily_token_usage = cx.global::<AppSettings>().appearance.show_daily_token_usage;
-        let show_agent_usage = cx.global::<AppSettings>().agent.show_agent_usage;
+        let show_daily_token_usage = cx
+            .global::<AppSettings>()
+            .config()
+            .appearance
+            .show_daily_token_usage;
+
+        let show_agent_usage = cx.global::<AppSettings>().config().agent.show_agent_usage;
 
         // Fixed-width content; the animated wrapper below clips it so the buttons
         // don't reflow while the sidebar slides. The transparent panel inherits

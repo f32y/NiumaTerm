@@ -42,7 +42,7 @@ pub(crate) struct AgentUsageView {
 
 impl AgentUsageView {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
-        let enabled = cx.global::<AppSettings>().agent.show_agent_usage;
+        let enabled = cx.global::<AppSettings>().config().agent.show_agent_usage;
         let codex_launcher = codex_usage_launcher(cx.global::<AppSettings>());
 
         let mut this = Self {
@@ -73,7 +73,7 @@ impl AgentUsageView {
 
     fn on_settings_changed(&mut self, cx: &mut Context<Self>) {
         let settings = cx.global::<AppSettings>();
-        let enabled = settings.agent.show_agent_usage;
+        let enabled = settings.config().agent.show_agent_usage;
         let launcher = codex_usage_launcher(settings);
         let launcher_changed = launcher != self.codex_launcher;
 

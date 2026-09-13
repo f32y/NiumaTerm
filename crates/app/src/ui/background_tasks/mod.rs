@@ -290,8 +290,8 @@ impl BackgroundTasksView {
 impl Render for BackgroundTasksView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = cx.global::<AppSettings>();
-        let font_family = settings.appearance.agent_font_family.clone();
-        let font_size = px(settings.appearance.agent_font_size as f32);
+        let font_family = settings.config().appearance.agent_font_family.clone();
+        let font_size = px(settings.config().appearance.agent_font_size as f32);
 
         v_flex()
             .size_full()

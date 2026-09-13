@@ -94,7 +94,7 @@ fn changing_usage_launcher_discards_the_previous_request(cx: &mut gpui::TestAppC
     cx.update(|cx| {
         let mut settings = AppSettings::default();
 
-        settings.agent.show_agent_usage = false;
+        settings.edit_agent(|section| section.show_agent_usage = false);
         cx.set_global(settings);
     });
 

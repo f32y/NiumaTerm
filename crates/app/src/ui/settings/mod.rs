@@ -120,12 +120,10 @@ use crate::ui::settings::remote_session_page::remote_session_page;
 use crate::ui::settings::state::{
     DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE, DEFAULT_BACKGROUND_IMAGE_OPACITY, DEFAULT_TAB_WIDTH,
     clamp_agent_transcript_font_size, clamp_background_image_opacity, clamp_background_opacity,
-    clamp_terminal_font_size, clamp_terminal_line_height, terminal_font_or_default,
-    ui_font_or_default,
+    clamp_git_interval, clamp_tab_width, clamp_terminal_font_size, clamp_terminal_line_height,
+    terminal_font_or_default, ui_font_or_default,
 };
-use crate::ui::settings::state::{
-    agent_kind_display_label, clamp_git_interval, clamp_tab_width, input_style_label,
-};
+use crate::ui::settings::state::{agent_kind_display_label, input_style_label};
 use crate::ui::settings::system_page::system_page;
 use crate::ui::settings::table::{
     ENV_OPERATION_COLUMN, TABLE_OPERATION_BUTTON, TrashIcon, table_frame, table_header, table_row,
@@ -181,12 +179,24 @@ pub(crate) fn save_settings(window: &mut Window, cx: &mut App) -> bool {
 }
 
 pub fn settings_view(editing: Entity<SettingsEditing>, cx: &App) -> Settings {
-    let profiles = cx.global::<AppSettings>().profiles.clone();
-    let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
-    let backdrop = cx.global::<AppSettings>().appearance.window_backdrop;
+    let profiles = cx.global::<AppSettings>().config().profiles.list.clone();
+
+    let agent_profiles = cx
+        .global::<AppSettings>()
+        .config()
+        .agent_profiles
+        .list
+        .clone();
+
+    let backdrop = cx
+        .global::<AppSettings>()
+        .config()
+        .appearance
+        .window_backdrop;
 
     let background_image_enabled = cx
         .global::<AppSettings>()
+        .config()
         .appearance
         .background_image
         .is_some();
@@ -205,8 +215,9 @@ pub fn settings_view(editing: Entity<SettingsEditing>, cx: &App) -> Settings {
             editing.clone(),
             backdrop,
             background_image_enabled,
-            cx.global::<AppSettings>().appearance.tab_auto_size,
+            cx.global::<AppSettings>().config().appearance.tab_auto_size,
             cx.global::<AppSettings>()
+                .config()
                 .appearance
                 .show_git_status_on_title_bar,
         ))
