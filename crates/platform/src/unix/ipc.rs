@@ -117,16 +117,11 @@ pub fn send(message: &str, timeout: Duration, testing: bool) -> io::Result<()> {
 
 /// Run the primary process socket server. Returning `false` from the callback
 /// stops the server thread.
-pub fn spawn_server(testing: bool, on_message: impl FnMut(Vec<u8>) -> bool + Send + 'static) {
-    let path = match socket_path(testing) {
-        Ok(path) => path,
-
-        Err(error) => {
-            warn!("IPC socket directory unavailable ({error}); IPC disabled");
-
-            return;
-        }
-    };
+pub fn spawn_server(
+    testing: bool,
+    on_message: impl FnMut(Vec<u8>) -> bool + Send + 'static,
+) -> io::Result<()> {
+    let path = socket_path(testing)?;
 
     // Only the instance that won the single-instance lock reaches here, so a
     // socket file left behind by a crashed predecessor has no live listener
@@ -134,31 +129,17 @@ pub fn spawn_server(testing: bool, on_message: impl FnMut(Vec<u8>) -> bool + Sen
     if let Err(error) = fs::remove_file(&path)
         && error.kind() != io::ErrorKind::NotFound
     {
-        warn!("stale IPC socket could not be removed ({error}); IPC disabled");
-
-        return;
+        return Err(error);
     }
 
-    let listener = match UnixListener::bind(&path) {
-        Ok(listener) => listener,
+    let listener = UnixListener::bind(&path)?;
 
-        Err(error) => {
-            warn!("IPC socket bind failed ({error}); IPC disabled");
-
-            return;
-        }
-    };
-
-    if let Err(error) = fs::set_permissions(&path, fs::Permissions::from_mode(0o600)) {
-        warn!("IPC socket permissions could not be tightened ({error}); IPC disabled");
-
-        return;
-    }
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
 
     thread::Builder::new()
         .name("nmt-ipc".into())
         .spawn(move || serve_socket(listener, on_message))
-        .expect("spawn nmt-ipc thread");
+        .map(|_| ())
 }
 
 fn serve_socket(listener: UnixListener, mut on_message: impl FnMut(Vec<u8>) -> bool) {

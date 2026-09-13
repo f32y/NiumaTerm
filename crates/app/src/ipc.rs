@@ -26,14 +26,16 @@ pub(crate) enum IpcAction {
 /// a time, read its line(s), parse, and send each action into `tx`. Runs for
 /// the process lifetime.
 pub(crate) fn spawn_pipe_server(tx: UnboundedSender<IpcAction>, testing: bool) {
-    spawn_server(testing, move |bytes| {
+    if let Err(error) = spawn_server(testing, move |bytes| {
         match parse_message(&bytes, agent_process().hook_token()) {
             Ok(action) => return tx.unbounded_send(action).is_ok(),
             Err(error) => warn!("ignoring IPC message: {error}"),
         }
 
         true
-    });
+    }) {
+        warn!("IPC server could not start: {error}");
+    }
 }
 
 fn parse_message(bytes: &[u8], expected_token: &str) -> Result<IpcAction, String> {

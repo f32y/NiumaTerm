@@ -77,11 +77,14 @@ pub fn send(message: &str, timeout: Duration, testing: bool) -> io::Result<()> {
 
 /// Run the primary process pipe server. Returning `false` from the callback
 /// stops the server thread.
-pub fn spawn_server(testing: bool, on_message: impl FnMut(Vec<u8>) -> bool + Send + 'static) {
+pub fn spawn_server(
+    testing: bool,
+    on_message: impl FnMut(Vec<u8>) -> bool + Send + 'static,
+) -> io::Result<()> {
     thread::Builder::new()
         .name("nmt-ipc".into())
         .spawn(move || serve_pipe(testing, on_message))
-        .expect("spawn nmt-ipc thread");
+        .map(|_| ())
 }
 
 fn serve_pipe(testing: bool, mut on_message: impl FnMut(Vec<u8>) -> bool) {
