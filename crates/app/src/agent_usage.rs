@@ -3,7 +3,6 @@
 mod agent_usage_tests;
 
 use std::borrow::Cow;
-use std::sync::Arc;
 use std::time::Duration;
 
 use app::agent_tab::profile::{ClaudeIcon, CodexIcon};
@@ -12,12 +11,14 @@ use gpui::{AnyElement, App, Context, FontWeight, Hsla, Window, div, px, relative
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::hover_card::HoverCard;
 use gpui_component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
+use nmt_agent::launcher::AgentCli;
 use nmt_agent::usage::{UsageSnapshot, UsageWindow, now_unix_millis};
 use rust_i18n::t;
 use tracing::warn;
 
 use crate::ui::AppSettings;
-use crate::usage_refresh::{Completion, Refresh, UsageSource};
+use crate::usage_refresh::{Completion, Refresh};
+use crate::usage_sources::{account_sources, codex_source, codex_usage_launcher};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
@@ -36,19 +37,19 @@ const QUOTA_FILL_OPACITY: f32 = 0.7;
 pub(crate) struct AgentUsageView {
     providers: [Refresh<UsageSnapshot>; 2],
     enabled: bool,
+    codex_launcher: AgentCli,
 }
 
 impl AgentUsageView {
-    pub(crate) fn new(
-        sources: [Arc<dyn UsageSource<UsageSnapshot>>; 2],
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub(crate) fn new(cx: &mut Context<Self>) -> Self {
         let enabled = cx.global::<AppSettings>().agent.show_agent_usage;
+        let codex_launcher = codex_usage_launcher(cx.global::<AppSettings>());
 
         let mut this = Self {
-            providers: sources
+            providers: account_sources(codex_launcher.clone())
                 .map(|source| Refresh::new(UsageSnapshot::default(), source, enabled)),
             enabled,
+            codex_launcher,
         };
 
         cx.observe_global::<AppSettings>(Self::on_settings_changed)
@@ -71,20 +72,30 @@ impl AgentUsageView {
     }
 
     fn on_settings_changed(&mut self, cx: &mut Context<Self>) {
-        let enabled = cx.global::<AppSettings>().agent.show_agent_usage;
+        let settings = cx.global::<AppSettings>();
+        let enabled = settings.agent.show_agent_usage;
+        let launcher = codex_usage_launcher(settings);
+        let launcher_changed = launcher != self.codex_launcher;
 
-        if enabled == self.enabled {
-            return;
+        if launcher_changed {
+            self.codex_launcher = launcher.clone();
+
+            self.providers[0] =
+                Refresh::new(UsageSnapshot::default(), codex_source(launcher), enabled);
         }
 
-        self.enabled = enabled;
+        if enabled != self.enabled {
+            self.enabled = enabled;
 
-        for provider in &mut self.providers {
-            provider.set_enabled(enabled);
-        }
+            for provider in &mut self.providers {
+                provider.set_enabled(enabled);
+            }
 
-        if enabled {
-            self.refresh_all(cx);
+            if enabled {
+                self.refresh_all(cx);
+            }
+        } else if launcher_changed {
+            self.refresh_provider(0, cx);
         }
     }
 

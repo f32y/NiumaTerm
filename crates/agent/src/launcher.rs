@@ -129,7 +129,7 @@ impl AgentCli {
         command
     }
 
-    fn redact(&self, text: &str) -> String {
+    pub(crate) fn redact(&self, text: &str) -> String {
         let mut redacted = text.to_string();
 
         let mut secrets: Vec<&str> = self
