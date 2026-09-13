@@ -1,6 +1,7 @@
 # ConPTY resize recovery
 
-Status: accepted, 2026-09-13.
+Status: superseded by 0004, 2026-09-13. The echo correction described below
+rewrote CUP rows and is gone; only the one-time scroll remains.
 
 ConPTY can repaint at an old cursor position after a resize. The PTY loop
 previously maintained the cursor anchor, echo timing, and repaint budget as
