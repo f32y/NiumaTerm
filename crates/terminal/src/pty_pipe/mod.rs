@@ -373,7 +373,7 @@ where
     }
 
     #[inline]
-    fn pty_read(&mut self, _state: &mut PtyState, buf: &mut [u8]) -> io::Result<()> {
+    fn pty_read(&mut self, state: &mut PtyState, buf: &mut [u8]) -> io::Result<()> {
         let mut unprocessed = 0;
         let mut processed = 0;
 
@@ -429,6 +429,12 @@ where
             if processed >= MAX_READ_BATCH {
                 break;
             }
+        }
+
+        let responses = self.ghostty.take_pty_writes();
+
+        if self.terminal_responses_enabled && !responses.is_empty() {
+            state.write_list.push_back(responses.into());
         }
 
         if processed == 0 && !self.snapshot_pending {
@@ -690,14 +696,13 @@ where
                 .is_none_or(|at| at.elapsed() >= SNAPSHOT_MIN_INTERVAL),
         };
 
-        // Collect one batch's protocol responses, metadata, image changes,
+        // Collect one batch's metadata, image changes,
         // and frame before delivering events that announce the publication.
         let pwd = self.ghostty.poll_pwd();
 
-        let (responses, bell, clipboard_writes, title, vt_modes, sync_output, capture, image_delta) = {
+        let (bell, clipboard_writes, title, vt_modes, sync_output, capture, image_delta) = {
             let engine = &mut self.ghostty;
 
-            let responses = engine.take_pty_writes();
             let bell = engine.take_bell();
             let clipboard_writes = engine.take_clipboard_writes();
             let title = engine.poll_title();
@@ -745,7 +750,6 @@ where
             };
 
             (
-                responses,
                 bell,
                 clipboard_writes,
                 title,
@@ -785,10 +789,6 @@ where
                 },
                 self.window_id,
             );
-        }
-
-        if self.terminal_responses_enabled && !responses.is_empty() {
-            let _ = self.pty.writer().write_all(&responses);
         }
 
         if bell > 0 {

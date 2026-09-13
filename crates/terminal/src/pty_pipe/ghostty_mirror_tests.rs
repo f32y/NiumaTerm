@@ -160,10 +160,25 @@ impl io::Read for FakeReader {
 #[derive(Default)]
 struct FakeWriter {
     data: Vec<u8>,
+    budget: Option<usize>,
 }
 
 impl io::Write for FakeWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let buf = if let Some(budget) = &mut self.budget {
+            if *budget == 0 {
+                return Err(io::ErrorKind::WouldBlock.into());
+            }
+
+            let count = buf.len().min(*budget);
+
+            *budget -= count;
+
+            &buf[..count]
+        } else {
+            buf
+        };
+
         self.data.extend_from_slice(buf);
 
         Ok(buf.len())
@@ -235,6 +250,66 @@ impl EventedPty for FakePty {
     fn next_child_event(&mut self) -> Option<ChildEvent> {
         None
     }
+}
+
+#[test]
+fn terminal_replies_resume_after_partial_writes_in_input_order() {
+    let pty = FakePty {
+        reader: FakeReader {
+            data: b"\x1b[6n".to_vec(),
+        },
+        writer: FakeWriter {
+            budget: Some(2),
+            ..FakeWriter::default()
+        },
+    };
+
+    let mut machine = PtyPipe::new(
+        Arc::new(FrameStore::new(RenderBuffer::new(20, 3))),
+        Arc::new(AtomicU32::new(0)),
+        pty,
+        VoidListener {},
+        0.into(),
+        &SessionOptions {
+            cols: 20,
+            rows: 3,
+            route_id: 0,
+            colors: Colors::default(),
+            cursor_shape: ansi::CursorShape::Block,
+            scrollback_lines: 1000,
+            engine_blocks: false,
+            terminal_responses: true,
+            output_sink: None,
+        },
+    )
+    .unwrap();
+
+    let mut state = PtyState::default();
+
+    state.write_list.push_back(b"in".to_vec().into());
+
+    machine
+        .pty_read(&mut state, &mut [0; READ_BUFFER_SIZE])
+        .unwrap();
+
+    assert!(machine.pty.writer.data.is_empty());
+
+    machine.pty_write(&mut state).unwrap();
+
+    assert_eq!(machine.pty.writer.data, b"in");
+    assert!(state.needs_write());
+
+    machine.pty.writer.budget = Some(3);
+    machine.pty_write(&mut state).unwrap();
+
+    assert_eq!(machine.pty.writer.data, b"in\x1b[1");
+    assert!(state.needs_write());
+
+    machine.pty.writer.budget = None;
+    machine.pty_write(&mut state).unwrap();
+
+    assert_eq!(machine.pty.writer.data, b"in\x1b[1;1R");
+    assert!(!state.needs_write());
 }
 
 #[test]
