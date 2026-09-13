@@ -295,7 +295,7 @@ fn local_branch_waits_for_ready_preserves_controls_and_keeps_later_drafts(cx: &m
         pane.update(cx, |pane, cx| {
             install(pane);
             pane.on_replay(replay("current"), cx);
-            pane.session.borrow_mut().controls.settings.model = Some("selected-model".into());
+            pane.session.borrow_mut().set_model("selected-model".into());
             prepare_local(pane, RewindAction::Conversation, cx);
 
             assert_eq!(rows(pane, cx), ["current"]);
@@ -309,7 +309,7 @@ fn local_branch_waits_for_ready_preserves_controls_and_keeps_later_drafts(cx: &m
 
             assert_eq!(rows(pane, cx), ["kept prefix"]);
             assert_eq!(
-                pane.session.borrow().controls.settings.model.as_deref(),
+                pane.session.borrow().controls().settings.model.as_deref(),
                 Some("selected-model")
             );
             assert_eq!(pane.input.read(cx).text().to_string(), "later draft");

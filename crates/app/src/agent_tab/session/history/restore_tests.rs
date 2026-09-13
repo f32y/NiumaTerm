@@ -147,9 +147,9 @@ fn failed_resume_keeps_the_transcript_and_current_controls(cx: &mut TestAppConte
         pane.update(cx, |pane, cx| {
             install_backend(pane);
             pane.on_replay(replay("current"), cx);
-            pane.session.borrow_mut().controls.settings.model = Some("current-model".into());
+            pane.session.borrow_mut().set_model("current-model".into());
 
-            let settings = pane.session.borrow().controls.settings.clone();
+            let settings = pane.session.borrow().controls().settings.clone();
 
             pane.history_ui.data.sessions = vec![summary()];
             pane.history_ui.mode = RecentSessionsMode::Open;
@@ -170,7 +170,7 @@ fn failed_resume_keeps_the_transcript_and_current_controls(cx: &mut TestAppConte
             assert_eq!(pane.history_ui.mode, RecentSessionsMode::Open);
             assert_eq!(pane.session.borrow().runtime.status(), Status::Idle);
             assert_eq!(user_rows(pane, cx), ["current"]);
-            assert_eq!(pane.session.borrow().controls.settings, settings);
+            assert_eq!(pane.session.borrow().controls().settings, settings);
         })
     });
 }
@@ -260,10 +260,13 @@ fn resumed_codex_controls_keep_provider_values_instead_of_local_defaults(cx: &mu
             install_backend(pane);
             pane.history_ui.data.sessions = vec![summary()];
             pane.history_ui.mode = RecentSessionsMode::Open;
-            pane.session.borrow_mut().controls.settings.model = Some("old-model".into());
+            pane.session.borrow_mut().set_model("old-model".into());
             pane.resume_session(0, cx);
 
-            assert_eq!(pane.session.borrow().controls.seed, SettingsSeed::Reviewer);
+            assert_eq!(
+                pane.session.borrow().controls().seed,
+                SettingsSeed::Reviewer
+            );
 
             let settings = ThreadSettings {
                 model: Some("resumed-model".into()),
@@ -274,14 +277,14 @@ fn resumed_codex_controls_keep_provider_values_instead_of_local_defaults(cx: &mu
             pane.on_event(Event::Replay(replay("restored")), cx);
 
             assert_eq!(
-                pane.session.borrow().controls.settings.model.as_deref(),
+                pane.session.borrow().controls().settings.model.as_deref(),
                 Some("resumed-model")
             );
             assert_eq!(user_rows(pane, cx), ["restored"]);
 
             pane.seed_restored_settings(SettingsSeed::None);
 
-            assert_eq!(pane.session.borrow().controls.seed, SettingsSeed::None);
+            assert_eq!(pane.session.borrow().controls().seed, SettingsSeed::None);
         })
     });
 }
@@ -297,9 +300,9 @@ fn old_backend_events_during_disk_read_leave_visible_rows_and_settings_untouched
         pane.update(cx, |pane, cx| {
             install_backend(pane);
             pane.on_replay(replay("current"), cx);
-            pane.session.borrow_mut().controls.settings.model = Some("current-model".into());
+            pane.session.borrow_mut().set_model("current-model".into());
 
-            let settings = pane.session.borrow().controls.settings.clone();
+            let settings = pane.session.borrow().controls().settings.clone();
             let cwd = pane.cwd();
 
             let ResumeStart::ReadReplay(request) = ({
@@ -331,7 +334,7 @@ fn old_backend_events_during_disk_read_leave_visible_rows_and_settings_untouched
             assert_eq!(pane.session.borrow().runtime.status(), Status::Starting);
             assert_eq!(pane.history_ui.mode, RecentSessionsMode::Loading);
             assert_eq!(user_rows(pane, cx), ["current"]);
-            assert_eq!(pane.session.borrow().controls.settings, settings);
+            assert_eq!(pane.session.borrow().controls().settings, settings);
             assert!(matches!(
                 {
                     let mut guard = pane.session.borrow_mut();

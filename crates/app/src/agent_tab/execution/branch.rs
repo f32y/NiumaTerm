@@ -1,7 +1,6 @@
 use gpui::Context;
 use nmt_agent::session::branch::{BranchUpdate, CheckpointRead};
 use nmt_agent::session::controller::SessionEffect;
-use nmt_agent::session::restore::SettingsSeed;
 
 use crate::agent_tab::execution::AgentSession;
 
@@ -78,8 +77,7 @@ impl AgentSession {
             BranchUpdate::Branching => {
                 let mut state = self.controller.borrow_mut();
 
-                state.restore.cancel();
-                state.controls.seed = SettingsSeed::None;
+                state.begin_branched_conversation();
                 drop(state);
                 self.publish(SessionEffect::Branch(BranchUpdate::Branching), cx);
             }

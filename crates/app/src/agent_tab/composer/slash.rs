@@ -144,10 +144,10 @@ impl AgentPane {
 
             match resolve_choice(&parsed.arguments, &choices) {
                 Ok(value) if command.name == "model" => {
-                    self.session.borrow_mut().controls.settings.model = Some(value.clone());
+                    self.session.borrow_mut().set_model(value.clone());
 
                     self.controls.remember_defaults(
-                        &self.session.borrow().controls,
+                        self.session.borrow().controls(),
                         self.kind,
                         &self.profile,
                         cx,
@@ -171,10 +171,10 @@ impl AgentPane {
                 }
 
                 Ok(value) if command.name == "permissions" => {
-                    self.session.borrow_mut().controls.settings.approval = Some(value.clone());
+                    self.session.borrow_mut().set_approval(value.clone());
 
                     self.controls.remember_defaults(
-                        &self.session.borrow().controls,
+                        self.session.borrow().controls(),
                         self.kind,
                         &self.profile,
                         cx,
@@ -401,23 +401,28 @@ impl AgentPane {
         for (name, value) in [
             (
                 t!("agent-setting-model"),
-                self.session.borrow().controls.settings.model.as_deref(),
+                self.session.borrow().controls().settings.model.as_deref(),
             ),
             (
                 t!("agent-setting-permissions"),
-                self.session.borrow().controls.settings.approval.as_deref(),
+                self.session
+                    .borrow()
+                    .controls()
+                    .settings
+                    .approval
+                    .as_deref(),
             ),
             (
                 t!("agent-setting-sandbox"),
-                self.session.borrow().controls.settings.sandbox.as_deref(),
+                self.session.borrow().controls().settings.sandbox.as_deref(),
             ),
             (
                 t!("agent-setting-effort"),
-                self.session.borrow().controls.settings.effort.as_deref(),
+                self.session.borrow().controls().settings.effort.as_deref(),
             ),
             (
                 t!("agent-setting-tier"),
-                self.session.borrow().controls.settings.tier.as_deref(),
+                self.session.borrow().controls().settings.tier.as_deref(),
             ),
         ] {
             if let Some(value) = value {
@@ -498,7 +503,7 @@ impl AgentPane {
             "model" => self
                 .session
                 .borrow()
-                .controls
+                .controls()
                 .models
                 .iter()
                 .map(|model| (model.model.clone(), model.display.clone()))

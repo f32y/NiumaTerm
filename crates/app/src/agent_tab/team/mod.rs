@@ -155,7 +155,10 @@ impl TeamRuntime {
         let owner = AgentSession::create_team(profile, member.roots().clone(), options, cx);
 
         owner.session().update(cx, |session, _| {
-            session.controller.borrow_mut().controls.settings = member.settings().clone();
+            session
+                .controller
+                .borrow_mut()
+                .set_settings(member.settings().clone());
         });
 
         self.attach_member_owner(id, owner, cx);
@@ -198,7 +201,7 @@ impl TeamRuntime {
                 .read(cx)
                 .controller
                 .borrow()
-                .controls
+                .controls()
                 .settings
                 .clone(),
         )

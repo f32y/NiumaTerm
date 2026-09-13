@@ -146,7 +146,7 @@ impl TeamRuntime {
                     .clone();
 
                 execution.update(cx, |session, cx| {
-                    session.controller.borrow_mut().controls.settings = settings;
+                    session.controller.borrow_mut().set_settings(settings);
 
                     cx.notify();
                 });

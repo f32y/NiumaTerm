@@ -6,13 +6,14 @@ use crate::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskSnapshot,
 };
 use crate::chat::{
-    Event, Item, Question, QuestionInput, QuestionMode, QuestionRequest, QuestionResolution,
-    SendOutcome, SlashCommandOutcome, ThreadSettings,
+    Event, Item, ModelInfo, Question, QuestionInput, QuestionMode, QuestionRequest,
+    QuestionResolution, SendOutcome, SlashCommandOutcome, ThreadSettings,
 };
 use crate::session::controller::{QuestionSubmission, SessionController, SessionEffect};
 use crate::session::delivery::{RecoverablePrompt, Submission};
 use crate::session::input::{ApprovalOutcome, QuestionAction, QuestionKey};
 use crate::session::lifecycle::{InterruptOutcome, StartOutcome, Status};
+use crate::session::restore::SettingsSeed;
 use crate::session::test_support::TestBackend;
 use crate::session::{AgentKind, Backend};
 
@@ -410,4 +411,47 @@ fn repeated_ready_preserves_the_running_turn_and_selected_settings() {
     assert_eq!(session.controls.settings.effort.as_deref(), Some("high"));
     assert_eq!(session.conversation.borrow().live.started(), started);
     assert_eq!(session.conversation.borrow().content.entries().len(), 1);
+}
+
+#[test]
+fn settings_changes_and_restart_keep_catalog_state_consistent() {
+    let mut session = started(AgentKind::Codex, "current", Vec::new());
+
+    apply(
+        &mut session,
+        Event::Models(vec![ModelInfo {
+            model: "selected".into(),
+            display: "Selected".into(),
+            tiers: vec![("fast".into(), "Fast".into())],
+            default_tier: None,
+            efforts: Vec::new(),
+        }]),
+    );
+
+    apply(&mut session, Event::Commands(Vec::new()));
+
+    session.set_tier(Some("unavailable".into()));
+    session.set_model("selected".into());
+
+    assert_eq!(
+        session.controls().settings.model.as_deref(),
+        Some("selected")
+    );
+    assert!(session.controls().settings.tier.is_none());
+
+    session.set_tier(Some("fast".into()));
+    session.set_model("selected".into());
+
+    assert_eq!(session.controls().settings.tier.as_deref(), Some("fast"));
+    assert!(session.command_catalog().is_some());
+
+    session.seed_settings(SettingsSeed::Reviewer);
+    session.begin_branched_conversation();
+
+    assert_eq!(session.controls().seed, SettingsSeed::None);
+    assert!(session.reset_for_restart().is_some());
+    assert_eq!(session.controls().settings, ThreadSettings::default());
+    assert!(session.controls().models.is_empty());
+    assert!(session.command_catalog().is_none());
+    assert!(session.skill_catalog().is_none());
 }

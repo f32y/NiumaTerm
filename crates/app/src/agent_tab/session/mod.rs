@@ -280,12 +280,12 @@ impl AgentPane {
 
             this.prompts.hide_settled(&state.input);
 
-            if let Some(commands) = &state.command_catalog {
-                this.palette.provider_commands = commands.clone();
+            if let Some(commands) = state.command_catalog() {
+                this.palette.provider_commands = commands.to_vec();
                 this.palette.provider_commands_ready = true;
             }
 
-            this.palette.skill_catalog = state.skill_catalog.clone();
+            this.palette.skill_catalog = state.skill_catalog().cloned();
         }
 
         this.active_workspace = host.read(cx).active_workspace.clone();
@@ -568,7 +568,7 @@ impl AgentPane {
                 .naming
                 .request(self.kind, title_text, tab_title_from_prompt);
 
-        let settings = self.session.borrow().controls.settings.clone();
+        let settings = self.session.borrow().controls().settings.clone();
         let scratch = scratch_dir(self.agent_route.as_str());
 
         let restores_annotations = restore_on_interrupt.is_some();

@@ -227,11 +227,11 @@ impl TeamRuntime {
 
             let ownership = member.ownership();
 
-            if state.controls.settings != *member.settings() {
+            if state.controls().settings != *member.settings() {
                 self.session.set_member_settings(
                     *id,
                     ownership,
-                    state.controls.settings.clone(),
+                    state.controls().settings.clone(),
                 )?;
             }
 

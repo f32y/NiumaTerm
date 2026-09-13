@@ -203,7 +203,7 @@ impl AgentPane {
             return;
         }
 
-        self.session.borrow_mut().controls.seed = seed;
+        self.session.borrow_mut().seed_settings(seed);
     }
 
     /// Keep the displayed conversation until the replacement supplies its replay.

@@ -4,7 +4,7 @@ use futures::StreamExt as _;
 use futures::channel::mpsc::UnboundedReceiver;
 use futures::stream::ReadyChunks;
 use gpui::{AsyncApp, Context, Task, WeakEntity};
-use nmt_agent::chat::{Event, Item, ThreadSettings};
+use nmt_agent::chat::{Event, Item};
 use nmt_agent::session::controller::{ReadyDefaults, SessionEffect};
 use nmt_agent::session::lifecycle::StartOutcome;
 use nmt_agent::session::restore::SettingsSeed;
@@ -28,19 +28,7 @@ impl AgentSession {
             return;
         }
 
-        let retiring = {
-            let mut state = self.controller.borrow_mut();
-            let retiring = state.runtime.retire();
-
-            state.clear_conversation();
-            state.controls.settings = ThreadSettings::default();
-            state.controls.models.clear();
-            state.command_catalog = None;
-            state.skill_catalog = None;
-            state.commands.clear();
-
-            retiring
-        };
+        let retiring = self.controller.borrow_mut().reset_for_restart();
 
         cx.emit(AgentPaneEvent::TitleSuggested(String::new()));
         self.start(None, false, move |_, _| drop(retiring), cx);
@@ -77,11 +65,11 @@ impl AgentSession {
 
             if !preserve_settings {
                 if let Some(model) = launch_model(kind, &self.profile) {
-                    session.controls.settings.model = Some(model);
+                    session.set_model(model);
                 }
 
                 if let Some(effort) = launch_effort(&self.profile) {
-                    session.controls.settings.effort = Some(effort);
+                    session.set_effort(effort);
                 }
             }
 
@@ -93,13 +81,14 @@ impl AgentSession {
                 SettingsSeed::Defaults
             };
 
-            session.controls.seed = seed;
+            session.seed_settings(seed);
 
-            session.controls.restore_on_ready =
-                preserve_settings.then(|| session.controls.settings.clone());
+            let restored = preserve_settings.then(|| session.controls().settings.clone());
+
+            session.restore_settings_on_ready(restored);
 
             if kind.caps().model_baked_into_launch {
-                launch.model = session.controls.settings.model.clone().or_else(|| {
+                launch.model = session.controls().settings.model.clone().or_else(|| {
                     stored_thread_settings(kind, &self.profile, cx)
                         .and_then(|stored| stored.model.clone())
                 });
@@ -296,7 +285,7 @@ impl AgentSession {
     pub(crate) fn prepare_defaults(&self, cx: &Context<Self>) {
         let mut session = self.controller.borrow_mut();
 
-        session.ready_defaults = match session.controls.seed {
+        session.ready_defaults = match session.controls().seed {
             SettingsSeed::Defaults => ReadyDefaults {
                 stored: stored_thread_settings(self.kind, &self.profile, cx).cloned(),
                 model: launch_model(self.kind, &self.profile),

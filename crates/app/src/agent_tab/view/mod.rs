@@ -392,7 +392,7 @@ impl Render for AgentPane {
                                     composer_controls_row()
                                         .child(div().flex_1().min_w_0().child(
                                             self.controls.render_row(
-                                                &self.session.borrow().controls,
+                                                self.session.borrow().controls(),
                                                 self.kind,
                                                 cx,
                                             ),

@@ -13,6 +13,7 @@ mod content;
 mod events;
 mod input;
 mod readiness;
+mod settings;
 mod transitions;
 
 #[cfg(test)]
@@ -59,15 +60,15 @@ pub struct SessionController {
     pub ready_defaults: ReadyDefaults,
     pub goal: Option<GoalStatus>,
     pub plan_mode: bool,
-    pub command_catalog: Option<Vec<SlashCommandInfo>>,
-    pub skill_catalog: Option<SkillCatalog>,
+    command_catalog: Option<Vec<SlashCommandInfo>>,
+    skill_catalog: Option<SkillCatalog>,
     pub conversation: Rc<RefCell<ConversationState>>,
     pub pending_images: VecDeque<(String, Vec<Arc<ConversationImage>>)>,
     pub runtime: SessionRuntime,
     pub delivery: MessageDelivery,
     pub restore: ConversationRestore,
     pub naming: ConversationNaming,
-    pub controls: ConversationSettings,
+    controls: ConversationSettings,
     pub input: SessionInput,
     pub branch: ConversationBranch,
     pub commands: CommandQueue,

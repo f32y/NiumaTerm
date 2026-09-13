@@ -59,10 +59,10 @@ impl ThreadControls {
             state.settings.model.clone(),
             model_options,
             |this, value, cx| {
-                this.session.borrow_mut().controls.settings.model = Some(value);
+                this.session.borrow_mut().set_model(value);
 
                 this.controls.remember_defaults(
-                    &this.session.borrow().controls,
+                    this.session.borrow().controls(),
                     this.kind,
                     &this.profile,
                     cx,
@@ -77,9 +77,9 @@ impl ThreadControls {
             current: state.settings.approval.clone(),
             options: permission_options,
             set: |this, value, cx| {
-                this.session.borrow_mut().controls.settings.approval = Some(value);
+                this.session.borrow_mut().set_approval(value);
                 this.controls.remember_defaults(
-                    &this.session.borrow().controls,
+                    this.session.borrow().controls(),
                     this.kind,
                     &this.profile,
                     cx,
@@ -107,10 +107,10 @@ impl ThreadControls {
                     .or_else(|| Some("default".to_string())),
                 effort_levels(kind),
                 |this, value, cx| {
-                    this.session.borrow_mut().controls.settings.effort = Some(value);
+                    this.session.borrow_mut().set_effort(value);
 
                     this.controls.remember_defaults(
-                        &this.session.borrow().controls,
+                        this.session.borrow().controls(),
                         this.kind,
                         &this.profile,
                         cx,
@@ -161,10 +161,10 @@ impl ThreadControls {
             state.settings.model.clone(),
             model_options,
             |this, value, cx| {
-                this.session.borrow_mut().controls.settings.model = Some(value);
+                this.session.borrow_mut().set_model(value);
 
                 this.controls.remember_defaults(
-                    &this.session.borrow().controls,
+                    this.session.borrow().controls(),
                     this.kind,
                     &this.profile,
                     cx,
@@ -225,10 +225,10 @@ impl ThreadControls {
                 state.settings.effort.clone(),
                 effort_levels(kind),
                 |this, value, cx| {
-                    this.session.borrow_mut().controls.settings.effort = Some(value);
+                    this.session.borrow_mut().set_effort(value);
 
                     this.controls.remember_defaults(
-                        &this.session.borrow().controls,
+                        this.session.borrow().controls(),
                         this.kind,
                         &this.profile,
                         cx,
@@ -298,31 +298,10 @@ impl ThreadControls {
             state.settings.model.clone(),
             model_options,
             |this, value, cx| {
-                // A tier the new model doesn't offer falls back to that
-                // model's default tier instead of erroring the next turn.
-                if let Some(info) = this
-                    .session
-                    .borrow()
-                    .controls
-                    .models
-                    .iter()
-                    .find(|m| m.model == value)
-                    && !this
-                        .session
-                        .borrow()
-                        .controls
-                        .settings
-                        .tier
-                        .as_ref()
-                        .is_some_and(|tier| info.tiers.iter().any(|(id, _)| id == tier))
-                {
-                    this.session.borrow_mut().controls.settings.tier = info.default_tier.clone();
-                }
-
-                this.session.borrow_mut().controls.settings.model = Some(value);
+                this.session.borrow_mut().set_model(value);
 
                 this.controls.remember_defaults(
-                    &this.session.borrow().controls,
+                    this.session.borrow().controls(),
                     this.kind,
                     &this.profile,
                     cx,
@@ -338,9 +317,9 @@ impl ThreadControls {
                 current: state.settings.approval.clone(),
                 options: approval_options,
                 set: |this, value, cx| {
-                    this.session.borrow_mut().controls.settings.approval = Some(value);
+                    this.session.borrow_mut().set_approval(value);
                     this.controls.remember_defaults(
-                        &this.session.borrow().controls,
+                        this.session.borrow().controls(),
                         this.kind,
                         &this.profile,
                         cx,
@@ -353,13 +332,9 @@ impl ThreadControls {
                 current: state.settings.approvals_reviewer.clone(),
                 options: reviewer_options,
                 set: |this, value, cx| {
-                    this.session
-                        .borrow_mut()
-                        .controls
-                        .settings
-                        .approvals_reviewer = Some(value);
+                    this.session.borrow_mut().set_approval_reviewer(value);
                     this.controls.remember_defaults(
-                        &this.session.borrow().controls,
+                        this.session.borrow().controls(),
                         this.kind,
                         &this.profile,
                         cx,
@@ -372,9 +347,9 @@ impl ThreadControls {
                 current: state.settings.sandbox.clone(),
                 options: sandbox_options,
                 set: |this, value, cx| {
-                    this.session.borrow_mut().controls.settings.sandbox = Some(value);
+                    this.session.borrow_mut().set_sandbox(value);
                     this.controls.remember_defaults(
-                        &this.session.borrow().controls,
+                        this.session.borrow().controls(),
                         this.kind,
                         &this.profile,
                         cx,
@@ -387,10 +362,11 @@ impl ThreadControls {
                 current: Some(state.settings.tier.clone().unwrap_or_default()),
                 options: tier_options,
                 set: |this, value, cx| {
-                    this.session.borrow_mut().controls.settings.tier =
-                        (!value.is_empty()).then_some(value);
+                    this.session
+                        .borrow_mut()
+                        .set_tier((!value.is_empty()).then_some(value));
                     this.controls.remember_defaults(
-                        &this.session.borrow().controls,
+                        this.session.borrow().controls(),
                         this.kind,
                         &this.profile,
                         cx,
@@ -404,10 +380,10 @@ impl ThreadControls {
             state.settings.effort.clone(),
             effort_levels(kind),
             |this, value, cx| {
-                this.session.borrow_mut().controls.settings.effort = Some(value);
+                this.session.borrow_mut().set_effort(value);
 
                 this.controls.remember_defaults(
-                    &this.session.borrow().controls,
+                    this.session.borrow().controls(),
                     this.kind,
                     &this.profile,
                     cx,

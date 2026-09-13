@@ -177,7 +177,7 @@ impl AgentPane {
 
             SessionEffect::EffortRejected { message } => {
                 self.controls.remember_defaults(
-                    &self.session.borrow().controls,
+                    self.session.borrow().controls(),
                     self.kind,
                     &self.profile,
                     cx,
@@ -266,7 +266,7 @@ impl AgentPane {
         info!(
             "agent thread ready: profile=\"{}\", model={:?}, profile_model={:?}",
             self.profile.name,
-            self.session.borrow().controls.settings.model,
+            self.session.borrow().controls().settings.model,
             launch_model(self.kind, &self.profile)
         );
 
@@ -463,7 +463,7 @@ impl AgentPane {
     pub(super) fn prepare_ready_defaults(&mut self, cx: &Context<Self>) {
         let mut session = self.session.borrow_mut();
 
-        session.ready_defaults = match session.controls.seed {
+        session.ready_defaults = match session.controls().seed {
             SettingsSeed::Defaults => ReadyDefaults {
                 stored: stored_thread_settings(self.kind, &self.profile, cx).cloned(),
                 model: launch_model(self.kind, &self.profile),

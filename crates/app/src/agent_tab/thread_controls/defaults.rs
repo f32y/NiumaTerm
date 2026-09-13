@@ -89,19 +89,8 @@ impl AgentPane {
             return;
         }
 
-        let outcome = {
-            let mut guard = self.session.borrow_mut();
-            let state = &mut *guard;
-
-            let Some(session) = state.runtime.backend_mut() else {
-                return;
-            };
-
-            let Some(outcome) = state.controls.apply_model(session) else {
-                return;
-            };
-
-            outcome
+        let Some(outcome) = self.session.borrow_mut().apply_model_selection() else {
+            return;
         };
 
         match outcome {
@@ -124,26 +113,12 @@ impl AgentPane {
             return;
         }
 
-        let outcome = {
-            let mut state = self.session.borrow_mut();
-
-            if state.controls.agent_preset.as_deref() == Some(preset.as_str()) {
-                return;
-            }
-
-            let Some(session) = state.runtime.backend_mut() else {
-                return;
-            };
-
-            session.select_agent_preset(&preset)
+        let Some(outcome) = self.session.borrow_mut().select_agent_preset(preset) else {
+            return;
         };
 
         match outcome {
-            Ok(()) => {
-                self.session.borrow_mut().controls.agent_preset = Some(preset);
-
-                cx.notify();
-            }
+            Ok(()) => cx.notify(),
 
             Err(error) => self
                 .palette
