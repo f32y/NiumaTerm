@@ -48,7 +48,7 @@ pub fn parse_skill_prefix(input: &str) -> Option<String> {
     (!tail.contains(char::is_whitespace)).then(|| tail.to_ascii_lowercase())
 }
 
-pub fn normalize_command(mut command: SlashCommandInfo) -> Option<SlashCommandInfo> {
+fn normalize_command(mut command: SlashCommandInfo) -> Option<SlashCommandInfo> {
     let name = command.name.trim().trim_start_matches('/');
 
     if name.is_empty() || name.chars().any(char::is_whitespace) {
