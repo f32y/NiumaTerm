@@ -161,7 +161,8 @@ impl Room {
         Ok(id)
     }
 
-    pub fn rename_member(&mut self, id: MemberId, name: &str) -> Result<(), MemberError> {
+    #[cfg(test)]
+    pub(crate) fn rename_member(&mut self, id: MemberId, name: &str) -> Result<(), MemberError> {
         let name = self.available_name(name, Some(id))?;
 
         self.member_mut(id)?.name = name;

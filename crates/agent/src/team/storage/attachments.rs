@@ -1,12 +1,16 @@
 use std::fs;
 
 use crate::team::content::AttachmentReference;
+#[cfg(test)]
 use crate::team::identity::AttachmentId;
+#[cfg(test)]
+use crate::team::storage::atomic_write;
 use crate::team::storage::records::digest;
-use crate::team::storage::{RoomStore, StorageError, atomic_write};
+use crate::team::storage::{RoomStore, StorageError};
 
 impl RoomStore {
-    pub fn save_attachment(
+    #[cfg(test)]
+    pub(crate) fn save_attachment(
         &self,
         media_type: &str,
         bytes: &[u8],

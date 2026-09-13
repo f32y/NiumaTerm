@@ -1,7 +1,10 @@
 //! Durable room operations and live dispatch readiness owned by one Team.
 
 pub use crate::team::session::outcomes::AttemptEventKey;
-pub use crate::team::session::summaries::{SummaryRequest, SummaryText};
+pub use crate::team::session::summaries::SummaryRequest;
+
+#[cfg(test)]
+pub(crate) use crate::team::session::summaries::SummaryText;
 
 mod controls;
 mod members;

@@ -5,7 +5,7 @@ use crate::chat::ThreadSettings;
 use crate::team::content::AttachmentReference;
 use crate::team::discussion::PauseReason;
 use crate::team::identity::{MemberId, OwnershipGeneration, RoomId};
-use crate::team::member::{HistoryScope, MemberConfig};
+use crate::team::member::MemberConfig;
 use crate::team::session::{TeamError, TeamSession};
 use crate::team::storage::StorageError;
 
@@ -44,41 +44,6 @@ impl TeamSession {
         self.store.commit(room)?;
 
         Ok(id)
-    }
-
-    pub fn rename_member(&mut self, member: MemberId, name: &str) -> Result<(), TeamError> {
-        let mut room = self.room().clone();
-
-        room.rename_member(member, name)?;
-        self.store.commit(room)?;
-
-        Ok(())
-    }
-
-    pub fn set_member_context(
-        &mut self,
-        id: MemberId,
-        role: String,
-        history: HistoryScope,
-    ) -> Result<(), TeamError> {
-        let mut room = self.room().clone();
-
-        let member = room
-            .members
-            .iter_mut()
-            .find(|member| member.id == id)
-            .ok_or(TeamError::Unavailable)?;
-
-        member.role = role;
-        member.history = history;
-
-        for discussion in &mut room.discussions {
-            discussion.pause(PauseReason::User);
-        }
-
-        self.store.commit(room)?;
-
-        Ok(())
     }
 
     pub fn set_member_settings(
@@ -151,14 +116,6 @@ impl TeamSession {
         self.readiness.remove(&id);
 
         Ok(())
-    }
-
-    pub fn save_attachment(
-        &self,
-        media_type: &str,
-        bytes: &[u8],
-    ) -> Result<AttachmentReference, TeamError> {
-        Ok(self.store.save_attachment(media_type, bytes)?)
     }
 
     pub fn read_attachment(&self, reference: &AttachmentReference) -> Result<Vec<u8>, TeamError> {

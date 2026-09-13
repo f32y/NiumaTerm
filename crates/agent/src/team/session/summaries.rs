@@ -1,16 +1,23 @@
-use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::team::attempt::{AttemptState, BudgetScope, DispatchIntent, Invocation};
 use crate::team::budget::TurnPurpose;
-use crate::team::content::{
-    AttachmentReference, AttributedPosition, Author, SourceFragment, Summary, UserInput,
-};
+use crate::team::content::{AttachmentReference, Author, SourceFragment, UserInput};
+#[cfg(test)]
+use crate::team::content::{AttributedPosition, Summary};
 use crate::team::context::{ContextError, ContextLimits, SummaryChunk};
 use crate::team::discussion::PublicSnapshot;
+#[cfg(test)]
 use crate::team::execution_slots::{ExecutionKey, WorkStatus};
-use crate::team::identity::{AttemptId, MemberId, OperationId, StageId, SummaryId};
+#[cfg(test)]
+use crate::team::identity::SummaryId;
+use crate::team::identity::{AttemptId, MemberId, OperationId, StageId};
 use crate::team::member::AcceptedCoverage;
-use crate::team::session::{AttemptEventKey, TeamError, TeamSession};
+#[cfg(test)]
+use crate::team::session::AttemptEventKey;
+use crate::team::session::{TeamError, TeamSession};
 
 pub struct SummaryRequest {
     pub owner: MemberId,
@@ -20,9 +27,10 @@ pub struct SummaryRequest {
     pub chunks: Vec<SummaryChunk>,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SummaryText {
+pub(crate) struct SummaryText {
     pub goals: String,
     pub constraints: String,
     pub agreements: String,
@@ -179,7 +187,8 @@ impl TeamSession {
         self.reserve_dispatches(intents)
     }
 
-    pub fn complete_summary(
+    #[cfg(test)]
+    pub(crate) fn complete_summary(
         &mut self,
         key: AttemptEventKey,
         provider_turn: &str,
