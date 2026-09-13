@@ -175,9 +175,9 @@ pub struct NetWriter {
 
 impl Write for NetWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        // The network sink never blocks; the send is fire-and-forget (a dropped
-        // channel just means the session is tearing down).
-        self.input.send_input(buf.to_vec());
+        if !self.input.send_input(buf.to_vec()) {
+            return Err(io::ErrorKind::BrokenPipe.into());
+        }
 
         Ok(buf.len())
     }
@@ -261,7 +261,9 @@ impl ProcessReadWrite for NetPty {
     }
 
     fn set_winsize(&mut self, size: WinsizeBuilder) -> io::Result<()> {
-        self.input.send_resize(size.cols, size.rows);
+        if !self.input.send_resize(size.cols, size.rows) {
+            return Err(io::ErrorKind::BrokenPipe.into());
+        }
 
         Ok(())
     }

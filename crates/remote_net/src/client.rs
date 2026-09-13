@@ -57,19 +57,23 @@ pub struct RemoteInput {
 }
 
 impl RemoteInput {
-    pub fn send_input(&self, data: Vec<u8>) {
-        let _ = self.commands.send(Frame::Input {
-            session_id: self.session_id,
-            data,
-        });
+    pub fn send_input(&self, data: Vec<u8>) -> bool {
+        self.commands
+            .send(Frame::Input {
+                session_id: self.session_id,
+                data,
+            })
+            .is_ok()
     }
 
-    pub fn send_resize(&self, cols: u16, rows: u16) {
-        let _ = self.commands.send(Frame::Resize {
-            session_id: self.session_id,
-            cols,
-            rows,
-        });
+    pub fn send_resize(&self, cols: u16, rows: u16) -> bool {
+        self.commands
+            .send(Frame::Resize {
+                session_id: self.session_id,
+                cols,
+                rows,
+            })
+            .is_ok()
     }
 }
 
