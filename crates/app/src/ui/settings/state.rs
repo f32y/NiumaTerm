@@ -30,7 +30,7 @@ use nmt_config::remote_session::RemoteSessionConfig;
 use nmt_config::system::SystemConfig;
 use nmt_config::theme::Theme;
 use nmt_config::update::UpdateConfig;
-use nmt_config::{Config, CursorShape, SettingsPatch, config_file_path, get, save_settings_to};
+use nmt_config::{CursorShape, SettingsPatch, config_file_path, get, save_settings_to};
 use rust_i18n::t;
 
 /// The shell a freshly seeded profile names, which is the platform's own
@@ -62,7 +62,7 @@ pub struct AppSettings {
     /// Empty when the user has deliberately removed every agent profile.
     pub default_agent_profile: String,
 
-    pub editing: SettingsEditing,
+    pub(crate) discard_on_exit: bool,
 }
 
 #[derive(Default)]
@@ -71,9 +71,6 @@ pub struct SettingsEditing {
 
     /// Parsed theme files refreshed by the settings surface's watcher.
     pub themes: Vec<(String, Theme)>,
-
-    /// The last window's explicit choice must also bypass the final quit hook.
-    pub discard_on_exit: bool,
 
     #[cfg(windows)]
     pub remote_pairing_code: Option<String>,
@@ -97,7 +94,7 @@ impl Default for AppSettings {
             default_profile: builtin_profile().name,
             agent_profiles: builtin_agent_profiles(),
             default_agent_profile: AgentProfileKind::Claude.full_name().to_string(),
-            editing: SettingsEditing::default(),
+            discard_on_exit: false,
         }
     }
 }
@@ -170,6 +167,15 @@ fn builtin_agent_profiles() -> Vec<AgentProfile> {
 }
 
 impl AppSettings {
+    /// The last window's explicit discard also bypasses the final quit hook.
+    pub(crate) fn discard_on_exit(&mut self) {
+        self.discard_on_exit = true;
+    }
+
+    pub(crate) fn should_save_on_exit(&self) -> bool {
+        !self.discard_on_exit
+    }
+
     pub fn load() -> Self {
         let config = get();
 
@@ -224,10 +230,7 @@ impl AppSettings {
             default_profile,
             agent_profiles,
             default_agent_profile,
-            editing: SettingsEditing {
-                themes: Config::load_themes(),
-                ..SettingsEditing::default()
-            },
+            discard_on_exit: false,
         }
     }
 

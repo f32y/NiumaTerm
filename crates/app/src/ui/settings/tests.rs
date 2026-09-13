@@ -438,7 +438,6 @@ fn failed_settings_save_keeps_edits_for_retry() {
     settings.appearance.reduce_motion = true;
     settings.appearance.human_friendly_agent_ui_layout = false;
     settings.appearance.smooth_scrolling = SmoothScrollingMode::OnlyAgent;
-    settings.editing.theme_filter = "not persisted".into();
 
     let error = settings.save_to(&path).unwrap_err();
 
@@ -457,7 +456,6 @@ fn failed_settings_save_keeps_edits_for_retry() {
 
     assert!(saved.contains("# keep this"));
     assert!(saved.contains("future-setting = 42"));
-    assert!(!saved.contains("not persisted"));
 
     let config: Config = toml::from_str(&saved).unwrap();
 

@@ -465,8 +465,8 @@ fn on_settings_changed(cx: &mut App) {
     ui::apply_window_translucency(cx);
 
     // The shared locale doubles as the change detector:
-    // the observer fires on every settings edit (including theme
-    // filter keystrokes), and only a real language switch should
+    // the observer fires on every configuration edit, and only a
+    // language switch should
     // pay for a full re-render of every window.
     let language: &str = cx.global::<AppSettings>().appearance.language.into();
     let language_changed = &*rust_i18n::locale() != language;
@@ -528,7 +528,7 @@ fn on_app_quit(cx: &mut App) -> Ready<()> {
     // Settings edits live in the global until something writes
     // them out. Closing the settings surface does that, and so
     // does quitting with it still open.
-    if !cx.global::<AppSettings>().editing.discard_on_exit
+    if cx.global::<AppSettings>().should_save_on_exit()
         && let Err(error) = cx.global::<AppSettings>().save()
     {
         warn!("failed to save settings on application shutdown: {error}");

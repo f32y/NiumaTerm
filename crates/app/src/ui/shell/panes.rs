@@ -198,11 +198,7 @@ impl Shell {
         }
 
         if self.workspaces.active_tabs().active().is_settings() {
-            let mut settings = ui::settings::settings_view(cx);
-
-            if let Some(state) = self.settings.render_target().cloned() {
-                settings = settings.state(state);
-            }
+            let settings = self.settings.render(cx);
 
             return div()
                 .size_full()
@@ -215,7 +211,7 @@ impl Shell {
                     .theme()
                     .background
                     .alpha(main_view_background_opacity(cx)))
-                .child(settings)
+                .children(settings)
                 .into_any_element();
         }
 

@@ -1,13 +1,14 @@
 //! Persisted to `config.toml`: seeded via [`AppSettings::load`] at startup,
 //! written back patch-style via [`AppSettings::save`] when the settings
-//! workspace is left or closed. Field edits mutate the global live for preview;
+//! workspace closes and on quit. Field edits mutate the global live for preview;
 //! failed writes retain those edits and expose a retry action.
 
 pub use nmt_config::appearance::MAX_TAB_WIDTH;
 
 pub use crate::ui::settings::state::{
     AgentProfile, AgentProfileKind, AgentProfileLauncher, AppSettings, CollapseRows, EnvVar,
-    InputStyle, MIN_TAB_WIDTH, ModelListStyle, Profile, TabBarStyle, WindowBackdrop,
+    InputStyle, MIN_TAB_WIDTH, ModelListStyle, Profile, SettingsEditing, TabBarStyle,
+    WindowBackdrop,
 };
 
 pub(crate) use crate::ui::settings::opacity::{
@@ -56,7 +57,7 @@ use gpui::AppContext as _;
 use gpui::WindowBackgroundAppearance;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, Div, FileDialogFilter, InteractiveElement as _, IntoElement as _,
+    AnyElement, App, Div, Entity, FileDialogFilter, InteractiveElement as _, IntoElement as _,
     ParentElement as _, PathPromptOptions, SharedString, StatefulInteractiveElement as _,
     Styled as _, Window, div, px, relative,
 };
@@ -179,7 +180,7 @@ pub(crate) fn save_settings(window: &mut Window, cx: &mut App) -> bool {
     }
 }
 
-pub fn settings_view(cx: &App) -> Settings {
+pub fn settings_view(editing: Entity<SettingsEditing>, cx: &App) -> Settings {
     let profiles = cx.global::<AppSettings>().profiles.clone();
     let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
     let backdrop = cx.global::<AppSettings>().appearance.window_backdrop;
@@ -201,6 +202,7 @@ pub fn settings_view(cx: &App) -> Settings {
         // whole category top to bottom.
         .single_group_pages(true)
         .page(appearance_page(
+            editing.clone(),
             backdrop,
             background_image_enabled,
             cx.global::<AppSettings>().appearance.tab_auto_size,
@@ -216,7 +218,7 @@ pub fn settings_view(cx: &App) -> Settings {
     // Remote sessions are hosted by ConPTY and keyed by DPAPI, so the page
     // that configures them exists only where they do.
     #[cfg(windows)]
-    let settings = settings.page(remote_session_page());
+    let settings = settings.page(remote_session_page(editing));
 
     settings.page(about_page())
 }

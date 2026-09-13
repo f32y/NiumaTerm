@@ -5,7 +5,8 @@ use futures::StreamExt as _;
 use futures::channel::mpsc::unbounded;
 use gpui::prelude::{FluentBuilder as _, InteractiveElement as _, StatefulInteractiveElement as _};
 use gpui::{
-    App, BorrowAppContext as _, Div, Hsla, ParentElement as _, Styled as _, Task, div, px, rgba,
+    App, BorrowAppContext as _, Div, Entity, Hsla, ParentElement as _, Styled as _, Task, div, px,
+    rgba,
 };
 use gpui_component::button::Button;
 use gpui_component::{
@@ -24,7 +25,7 @@ use tracing::warn;
 
 use crate::ui::fluent::{BUTTON_PADDING_X, CONTROL_RADIUS};
 use crate::ui::settings::opacity::{main_view_background_opacity, surface_background_opacity};
-use crate::ui::settings::state::AppSettings;
+use crate::ui::settings::state::{AppSettings, SettingsEditing};
 use crate::ui::{UI_BORDER_OPACITY, UI_RADIUS};
 
 /// Apply the UI half of a terminal theme, falling back to the built-in dark
@@ -131,20 +132,22 @@ fn select_theme(name: String, cx: &mut App) {
     }
 }
 
-fn reload_themes(cx: &mut App) {
-    cx.global_mut::<AppSettings>().editing.themes = Config::load_themes();
+fn reload_themes(editing: &Entity<SettingsEditing>, cx: &mut App) {
+    editing.update(cx, |editing, cx| {
+        editing.themes = Config::load_themes();
+
+        cx.notify();
+    });
 
     let selected = cx.global::<AppSettings>().theme.clone();
 
-    if selected.is_empty() {
-        cx.refresh_windows();
-    } else {
+    if !selected.is_empty() {
         select_theme(selected, cx);
     }
 }
 
-pub(crate) fn watch_themes(cx: &mut App) -> Option<Task<()>> {
-    reload_themes(cx);
+pub(crate) fn watch_themes(editing: &Entity<SettingsEditing>, cx: &mut App) -> Option<Task<()>> {
+    reload_themes(editing, cx);
 
     let themes_dir = config_dir_path().join("themes");
 
@@ -176,11 +179,17 @@ pub(crate) fn watch_themes(cx: &mut App) -> Option<Task<()>> {
         return None;
     }
 
+    let editing = editing.downgrade();
+
     Some(cx.spawn(async move |cx| {
         let _watcher = watcher;
 
         while rx.next().await.is_some() {
-            cx.update(reload_themes);
+            let Some(editing) = editing.upgrade() else {
+                break;
+            };
+
+            cx.update(|cx| reload_themes(&editing, cx));
         }
     }))
 }
@@ -244,18 +253,13 @@ fn theme_preview(colors: Colors) -> Div {
         })))
 }
 
-pub(super) fn theme_list(cx: &mut App) -> Div {
+pub(super) fn theme_list(editing: Entity<SettingsEditing>, cx: &mut App) -> Div {
     let selected = cx.global::<AppSettings>().theme.clone();
 
-    let filter = cx
-        .global::<AppSettings>()
-        .editing
-        .theme_filter
-        .to_lowercase();
+    let filter = editing.read(cx).theme_filter.to_lowercase();
 
-    let themes = cx
-        .global::<AppSettings>()
-        .editing
+    let themes = editing
+        .read(cx)
         .themes
         .clone()
         .into_iter()
@@ -288,7 +292,7 @@ pub(super) fn theme_list(cx: &mut App) -> Div {
                     Button::new("theme-refresh")
                         .outline()
                         .label(t!("settings-theme-refresh"))
-                        .on_click(|_, _, cx: &mut App| reload_themes(cx)),
+                        .on_click(move |_, _, cx: &mut App| reload_themes(&editing, cx)),
                 ),
         )
         .when(themes.is_empty(), |this| {

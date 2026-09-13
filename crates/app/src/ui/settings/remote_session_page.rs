@@ -4,7 +4,11 @@ use rust_i18n::t;
 use crate::remote::reconcile as reconcile_remote_session;
 use crate::ui::settings::*;
 
-pub(super) fn remote_session_page() -> SettingPage {
+pub(super) fn remote_session_page(editing: Entity<SettingsEditing>) -> SettingPage {
+    let host = editing.clone();
+    let input = editing.clone();
+    let edit_input = editing.clone();
+
     SettingPage::new(t!("settings-remote-title"))
         .default_open(true)
         .description(t!("settings-remote-description").into_owned())
@@ -66,7 +70,9 @@ pub(super) fn remote_session_page() -> SettingPage {
         .group(
             SettingGroup::new()
                 .title(t!("settings-remote-pairing-devices"))
-                .item(SettingItem::render(|_, _, cx| remote_host_status(cx))),
+                .item(SettingItem::render(move |_, _, cx| {
+                    remote_host_status(host.clone(), cx)
+                })),
         )
         .group(
             SettingGroup::new()
@@ -76,20 +82,21 @@ pub(super) fn remote_session_page() -> SettingPage {
                     SettingItem::new(
                         t!("settings-remote-pairing-code"),
                         SettingField::input(
-                            |cx| {
-                                cx.global::<AppSettings>()
-                                    .editing
-                                    .remote_pairing_input
-                                    .clone()
-                            },
-                            |value, cx| {
-                                cx.global_mut::<AppSettings>().editing.remote_pairing_input = value;
+                            move |cx| input.read(cx).remote_pairing_input.clone(),
+                            move |value, cx| {
+                                edit_input.update(cx, |editing, cx| {
+                                    editing.remote_pairing_input = value;
+
+                                    cx.notify();
+                                });
                             },
                         ),
                     )
                     .description(t!("settings-remote-pairing-code-description").into_owned()),
                 )
-                .item(SettingItem::render(|_, _, cx| remote_client_status(cx))),
+                .item(SettingItem::render(move |_, _, cx| {
+                    remote_client_status(editing.clone(), cx)
+                })),
         )
 }
 
@@ -106,7 +113,7 @@ pub(crate) fn reconcile_remote_host(cx: &App) {
 pub(crate) fn reconcile_remote_host(_cx: &App) {}
 
 #[cfg(windows)]
-fn remote_host_status(cx: &mut App) -> Div {
+fn remote_host_status(editing: Entity<SettingsEditing>, cx: &mut App) -> Div {
     use crate::remote;
 
     let muted = cx.theme().muted_foreground;
@@ -124,11 +131,7 @@ fn remote_host_status(cx: &mut App) -> Div {
 
     let host_id = remote::host_id().unwrap_or_default();
 
-    let pairing = cx
-        .global::<AppSettings>()
-        .editing
-        .remote_pairing_code
-        .clone();
+    let pairing = editing.read(cx).remote_pairing_code.clone();
 
     let devices = remote::list_devices();
 
@@ -151,10 +154,13 @@ fn remote_host_status(cx: &mut App) -> Div {
                     Button::new("remote-generate-pairing")
                         .outline()
                         .label(t!("settings-remote-generate-pairing-code"))
-                        .on_click(|_, _, cx: &mut App| {
+                        .on_click(move |_, _, cx: &mut App| {
                             if let Some(code) = remote::begin_pairing() {
-                                cx.global_mut::<AppSettings>().editing.remote_pairing_code =
-                                    Some((&code).into());
+                                editing.update(cx, |editing, cx| {
+                                    editing.remote_pairing_code = Some((&code).into());
+
+                                    cx.notify();
+                                });
                             }
                         }),
                 ),
@@ -226,17 +232,13 @@ fn remote_host_status(_cx: &mut App) -> Div {
 }
 
 #[cfg(windows)]
-fn remote_client_status(cx: &mut App) -> Div {
+fn remote_client_status(editing: Entity<SettingsEditing>, cx: &mut App) -> Div {
     use crate::remote;
 
     let muted = cx.theme().muted_foreground;
     let border = cx.theme().border;
 
-    let status = cx
-        .global::<AppSettings>()
-        .editing
-        .remote_client_status
-        .clone();
+    let status = editing.read(cx).remote_client_status.clone();
 
     let hosts = remote::known_hosts();
 
@@ -251,22 +253,28 @@ fn remote_client_status(cx: &mut App) -> Div {
                     Button::new("remote-pair")
                         .outline()
                         .label(t!("settings-remote-pair"))
-                        .on_click(|_, _, cx: &mut App| {
-                            let code = cx
-                                .global::<AppSettings>()
-                                .editing
-                                .remote_pairing_input
-                                .to_string();
+                        .on_click(move |_, _, cx: &mut App| {
+                            let code = editing.read(cx).remote_pairing_input.to_string();
 
                             if code.trim().is_empty() {
-                                cx.global_mut::<AppSettings>().editing.remote_client_status =
-                                    Some(t!("settings-remote-enter-code-first").into_owned());
+                                editing.update(cx, |editing, cx| {
+                                    editing.remote_client_status =
+                                        Some(t!("settings-remote-enter-code-first").into_owned());
+
+                                    cx.notify();
+                                });
 
                                 return;
                             }
 
-                            cx.global_mut::<AppSettings>().editing.remote_client_status =
-                                Some(t!("settings-remote-pairing").into_owned());
+                            editing.update(cx, |editing, cx| {
+                                editing.remote_client_status =
+                                    Some(t!("settings-remote-pairing").into_owned());
+
+                                cx.notify();
+                            });
+
+                            let editing = editing.downgrade();
 
                             // Pairing is a network round trip: running it inline
                             // would freeze the window until the relay answers or
@@ -282,11 +290,10 @@ fn remote_client_status(cx: &mut App) -> Div {
                                     })
                                     .await;
 
-                                cx.update_global(|settings: &mut AppSettings, _| {
+                                let _ = editing.update(cx, |editing, cx| {
                                     let message = match paired {
                                         Ok(host) => {
-                                            settings.editing.remote_pairing_input =
-                                                SharedString::default();
+                                            editing.remote_pairing_input = SharedString::default();
 
                                             t!(
                                                 "settings-remote-paired-success",
@@ -300,8 +307,10 @@ fn remote_client_status(cx: &mut App) -> Div {
                                             .into_owned(),
                                     };
 
-                                    settings.editing.remote_client_status = Some(message);
-                                })
+                                    editing.remote_client_status = Some(message);
+
+                                    cx.notify();
+                                });
                             })
                             .detach();
                         }),

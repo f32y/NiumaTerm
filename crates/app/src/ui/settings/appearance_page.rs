@@ -3,11 +3,15 @@ use rust_i18n::t;
 use crate::ui::settings::*;
 
 pub(super) fn appearance_page(
+    editing: Entity<SettingsEditing>,
     backdrop: WindowBackdrop,
     background_image_enabled: bool,
     tab_auto_size: bool,
     show_git_status: bool,
 ) -> SettingPage {
+    let filter = editing.clone();
+    let edit_filter = editing.clone();
+
     SettingPage::new(t!("settings-appearance-title"))
         .default_open(true)
         .group(
@@ -56,23 +60,25 @@ pub(super) fn appearance_page(
                 .item(SettingItem::new(
                     t!("settings-appearance-theme-search"),
                     SettingField::input(
-                        |cx| {
-                            cx.global::<AppSettings>()
-                                .editing
-                                .theme_filter
-                                .clone()
-                                .into()
-                        },
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>().editing.theme_filter = value.to_string();
+                        move |cx| filter.read(cx).theme_filter.clone().into(),
+                        move |value, cx| {
+                            edit_filter.update(cx, |editing, cx| {
+                                editing.theme_filter = value.to_string();
+
+                                cx.notify();
+                            });
                         },
                     ),
                 ))
-                .item(SettingItem::render(|_, _, cx| theme_list(cx)).keywords([
-                    t!("settings-appearance-keyword-theme"),
-                    t!("settings-appearance-keyword-colors"),
-                    t!("settings-appearance-keyword-palette"),
-                ])),
+                .item(
+                    SettingItem::render(move |_, _, cx| theme_list(editing.clone(), cx)).keywords(
+                        [
+                            t!("settings-appearance-keyword-theme"),
+                            t!("settings-appearance-keyword-colors"),
+                            t!("settings-appearance-keyword-palette"),
+                        ],
+                    ),
+                ),
         )
         .group(
             SettingGroup::new()

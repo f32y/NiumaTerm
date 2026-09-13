@@ -621,7 +621,7 @@ impl Shell {
                     )
                     .on_ok(|_, window, cx| {
                         if cx.windows().len() == 1 {
-                            cx.global_mut::<AppSettings>().editing.discard_on_exit = true;
+                            cx.global_mut::<AppSettings>().discard_on_exit();
                         }
 
                         window.remove_window();
