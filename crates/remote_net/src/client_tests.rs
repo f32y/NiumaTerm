@@ -1,8 +1,11 @@
-use std::sync::mpsc as std_mpsc;
+use std::sync::{Arc, mpsc as std_mpsc};
+use std::thread;
 
-use tokio::sync::mpsc;
+use parking_lot::Mutex;
+use tokio::runtime::Builder as RuntimeBuilder;
+use tokio::sync::{mpsc, watch};
 
-use crate::client::{RemoteSession, SessionByteEvent};
+use crate::client::{ClientWorker, RemoteSession, SessionByteEvent};
 use crate::protocol::{Frame, ProtocolSessionSnapshot};
 
 #[test]
@@ -23,6 +26,10 @@ fn splitting_session_moves_snapshot_and_preserves_both_stream_directions() {
         },
         output,
         commands,
+        worker: Arc::new(ClientWorker {
+            cancel: watch::channel(false).0,
+            thread: Mutex::new(None),
+        }),
     };
 
     let (snapshot, input, output): (_, _, _) = session.into();
@@ -73,15 +80,29 @@ fn splitting_session_moves_snapshot_and_preserves_both_stream_directions() {
 
 #[cfg(windows)]
 #[test]
-fn remote_pty_rejects_writes_and_resizes_after_the_pump_exits() {
+fn remote_pty_reports_closed_input_and_joins_workers_on_drop() {
     use std::io::{ErrorKind, Write};
 
     use nmt_platform::{ProcessReadWrite, WinsizeBuilder};
 
     use crate::net_pty::NetPty;
 
-    let (_output_tx, output) = std_mpsc::channel();
+    let (output_tx, output) = std_mpsc::channel();
     let (commands, mut command_rx) = mpsc::unbounded_channel();
+    let (cancel, mut stopped) = watch::channel(false);
+    let (finished, completion) = std_mpsc::channel();
+
+    let thread = thread::spawn(move || {
+        RuntimeBuilder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let _ = stopped.wait_for(|cancelled| *cancelled).await;
+            });
+
+        drop(output_tx);
+        finished.send(()).unwrap();
+    });
 
     let mut pty = NetPty::new(RemoteSession {
         session_id: 42,
@@ -94,7 +115,12 @@ fn remote_pty_rejects_writes_and_resizes_after_the_pump_exits() {
         },
         output,
         commands,
-    });
+        worker: Arc::new(ClientWorker {
+            cancel,
+            thread: Mutex::new(Some(thread)),
+        }),
+    })
+    .unwrap();
 
     assert_eq!(pty.writer().write(b"pwd\r").unwrap(), 4);
     assert!(matches!(command_rx.try_recv(), Ok(Frame::Input { data, .. }) if data == b"pwd\r"));
@@ -115,5 +141,12 @@ fn remote_pty_rejects_writes_and_resizes_after_the_pump_exits() {
         .unwrap_err()
         .kind(),
         ErrorKind::BrokenPipe
+    );
+
+    drop(pty);
+
+    assert!(
+        completion.try_recv().is_ok(),
+        "closing the PTY must join the idle client"
     );
 }

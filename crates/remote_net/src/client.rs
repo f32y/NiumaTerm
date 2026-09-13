@@ -2,13 +2,14 @@
 #[path = "client_tests.rs"]
 mod client_tests;
 
-use std::sync::mpsc as std_mpsc;
+use std::sync::{Arc, mpsc as std_mpsc};
 use std::thread;
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
+use parking_lot::Mutex;
 use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::time;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tracing::{info, warn};
@@ -36,6 +37,30 @@ pub struct RemoteSession {
     pub snapshot: ProtocolSessionSnapshot,
     output: std_mpsc::Receiver<SessionByteEvent>,
     commands: mpsc::UnboundedSender<Frame>,
+    worker: Arc<ClientWorker>,
+}
+
+struct ClientWorker {
+    cancel: watch::Sender<bool>,
+    thread: Mutex<Option<thread::JoinHandle<()>>>,
+}
+
+impl ClientWorker {
+    fn close(&self) {
+        self.cancel.send_replace(true);
+
+        if let Some(thread) = self.thread.lock().take()
+            && thread.join().is_err()
+        {
+            warn!("remote client thread panicked");
+        }
+    }
+}
+
+impl Drop for ClientWorker {
+    fn drop(&mut self) {
+        self.close();
+    }
 }
 
 impl RemoteSession {
@@ -54,9 +79,15 @@ impl RemoteSession {
 pub struct RemoteInput {
     session_id: u64,
     commands: mpsc::UnboundedSender<Frame>,
+    worker: Arc<ClientWorker>,
 }
 
 impl RemoteInput {
+    #[cfg(windows)]
+    pub(crate) fn close(&self) {
+        self.worker.close();
+    }
+
     pub fn send_input(&self, data: Vec<u8>) -> bool {
         self.commands
             .send(Frame::Input {
@@ -93,19 +124,28 @@ pub fn open_remote_session(
     let (ready_tx, ready_rx) = std_mpsc::channel();
     let (output_tx, output_rx) = std_mpsc::channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
+    let (cancel, mut stopped) = watch::channel(false);
 
-    on_worker_thread("remote-client", ready_tx, move |runtime, ready_tx| {
-        runtime.block_on(session_thread(
-            relay_url,
-            host_id,
-            host_public_key,
-            device,
-            target,
-            ready_tx,
-            output_tx,
-            command_rx,
-        ));
+    let thread = on_worker_thread("remote-client", ready_tx, move |runtime, ready_tx| {
+        runtime.block_on(async {
+            tokio::select! {
+                biased;
+                _ = stopped.wait_for(|cancelled| *cancelled) => {}
+
+                _ = session_thread(
+                    relay_url, host_id, host_public_key, device, target,
+                    ready_tx, output_tx, command_rx,
+                ) => {}
+            }
+        });
+
+        runtime.shutdown_timeout(Duration::from_secs(1));
     })?;
+
+    let worker = Arc::new(ClientWorker {
+        cancel,
+        thread: Mutex::new(Some(thread)),
+    });
 
     // The thread bounds its own waits, so this only has to outlast them; a
     // hard bound here is what keeps a wedged connect from parking the caller.
@@ -118,6 +158,7 @@ pub fn open_remote_session(
         snapshot,
         output: output_rx,
         commands: command_tx,
+        worker,
     })
 }
 
@@ -125,7 +166,7 @@ fn on_worker_thread<T: Send + 'static>(
     name: &'static str,
     sender: std_mpsc::Sender<Result<T, NetError>>,
     body: impl FnOnce(Runtime, std_mpsc::Sender<Result<T, NetError>>) + Send + 'static,
-) -> Result<(), NetError> {
+) -> Result<thread::JoinHandle<()>, NetError> {
     thread::Builder::new()
         .name(name.into())
         .spawn(move || {
@@ -138,7 +179,6 @@ fn on_worker_thread<T: Send + 'static>(
                 }
             }
         })
-        .map(|_| ())
         .map_err(|error| NetError::Internal(error.to_string()))
 }
 
@@ -489,6 +529,7 @@ impl From<RemoteSession>
         let input = RemoteInput {
             session_id: value.session_id,
             commands: value.commands,
+            worker: value.worker,
         };
 
         (value.snapshot, input, value.output)
@@ -503,6 +544,7 @@ impl From<&RemoteSession> for RemoteInput {
         RemoteInput {
             session_id: value.session_id,
             commands: value.commands.clone(),
+            worker: Arc::clone(&value.worker),
         }
     }
 }

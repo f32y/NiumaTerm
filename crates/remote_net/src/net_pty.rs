@@ -28,7 +28,7 @@ use nmt_platform::{
     WinsizeBuilder,
 };
 use nmt_terminal::pty_pipe::SessionOptions;
-use nmt_terminal::session::{EngineError, SessionObserver, TerminalSession};
+use nmt_terminal::session::{EngineError, EngineErrorCode, SessionObserver, TerminalSession};
 use parking_lot::Mutex;
 use tracing::warn;
 
@@ -43,6 +43,7 @@ use crate::{RemoteInput, RemoteSession, SessionByteEvent};
 const MAX_BUFFERED_BYTES: usize = 8 * 1024 * 1024;
 
 pub struct NetPty {
+    drain: Option<thread::JoinHandle<()>>,
     reader: NetReader,
     writer: NetWriter,
     input: RemoteInput,
@@ -57,7 +58,7 @@ pub struct NetPty {
 impl NetPty {
     /// Build a PTY from an attached remote session, spawning the drain thread
     /// that feeds the snapshot then live output into the read buffer.
-    pub fn new(session: RemoteSession) -> Self {
+    pub fn new(session: RemoteSession) -> io::Result<Self> {
         let (snapshot, input, output): (_, _, _) = session.into();
         let buffer = Arc::new(Mutex::new(snapshot.vt.into()));
         let read_ready = SoftReady::new();
@@ -72,7 +73,7 @@ impl NetPty {
         let drain_child_ready = child_ready.clone();
         let drain_exited = Arc::clone(&exited);
 
-        thread::Builder::new()
+        let drain = thread::Builder::new()
             .name("net-pty-drain".into())
             .spawn(move || {
                 let mut overflowed = false;
@@ -101,10 +102,10 @@ impl NetPty {
                 // The channel closing (host gone / session ended) is a child exit.
                 drain_exited.store(true, Ordering::SeqCst);
                 drain_child_ready.set_ready();
-            })
-            .expect("spawn net-pty drain thread");
+            })?;
 
-        Self {
+        Ok(Self {
+            drain: Some(drain),
             reader: NetReader {
                 buffer,
                 read_ready: read_ready.clone(),
@@ -119,6 +120,18 @@ impl NetPty {
             read_token: Token(0),
             write_token: Token(0),
             child_token: Token(0),
+        })
+    }
+}
+
+impl Drop for NetPty {
+    fn drop(&mut self) {
+        self.input.close();
+
+        if let Some(drain) = self.drain.take()
+            && drain.join().is_err()
+        {
+            warn!("remote PTY drain thread panicked");
         }
     }
 }
@@ -296,7 +309,10 @@ pub fn terminal_session(
     let rows = remote.snapshot().rows.max(1);
 
     TerminalSession::from_pty(
-        NetPty::new(remote),
+        NetPty::new(remote).map_err(|error| EngineError {
+            code: EngineErrorCode::PtySpawn,
+            message: format!("remote PTY startup failed: {error}"),
+        })?,
         None,
         SessionOptions {
             cols,
