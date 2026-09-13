@@ -5,9 +5,8 @@ pub use crate::event::{
 };
 pub use crate::hook_command::{HookInstallStatus, build_hook_command, hook_command_contains};
 pub use crate::monitor::{
-    ACTIVE_STATE_STALE_AFTER, AgentActivityPolicy, AgentMonitor, AgentNotification, AgentPaneState,
-    AgentProjection, COMPLETION_QUIET_WINDOW, MonitorMutation, PendingCompletion,
-    request_native_delivery,
+    AgentActivityPolicy, AgentMonitor, AgentNotification, AgentProjection, COMPLETION_QUIET_WINDOW,
+    MonitorMutation, request_native_delivery,
 };
 pub use crate::process::{
     AGENT_HOOK_EXE_ENV, AGENT_HOOK_PROTOCOL_VERSION, AGENT_HOOK_TOKEN_ENV, AGENT_HOOK_VERSION_ENV,
@@ -52,6 +51,8 @@ mod tests;
 #[cfg(test)]
 use crate::event::MAX_TITLE_CHARS;
 use crate::event::{MAX_ROUTE_BYTES, validate_identity};
+#[cfg(test)]
+use crate::monitor::ACTIVE_STATE_STALE_AFTER;
 
 /// How to launch an agent CLI. Protocol-specific settings are carried here so
 /// adapters can map them onto their native environment or RPC surfaces.

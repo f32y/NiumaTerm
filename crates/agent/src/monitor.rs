@@ -9,7 +9,7 @@ use crate::event::{
 use crate::process::agent_process;
 
 #[derive(Clone, Debug)]
-pub struct PendingCompletion {
+pub(crate) struct PendingCompletion {
     pub owner: AgentOwner,
     pub turn_generation: u64,
     pub deadline: Instant,
@@ -29,7 +29,7 @@ pub enum AgentActivityPolicy {
 }
 
 #[derive(Clone, Debug)]
-pub struct AgentPaneState {
+pub(crate) struct AgentPaneState {
     pub current_owner: Option<AgentOwner>,
     pub turn_generation: u64,
     pub status: AgentRuntimeStatus,
@@ -155,7 +155,7 @@ impl AgentMonitor {
     }
 
     #[cfg(test)]
-    pub fn pane(&self, route: &AgentRoute) -> Option<&AgentPaneState> {
+    pub(crate) fn pane(&self, route: &AgentRoute) -> Option<&AgentPaneState> {
         self.panes.get(route)
     }
 
@@ -543,4 +543,4 @@ pub fn request_native_delivery(
 }
 
 pub const COMPLETION_QUIET_WINDOW: Duration = Duration::from_millis(1_500);
-pub const ACTIVE_STATE_STALE_AFTER: Duration = Duration::from_secs(30 * 60);
+pub(crate) const ACTIVE_STATE_STALE_AFTER: Duration = Duration::from_secs(30 * 60);
