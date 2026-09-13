@@ -340,7 +340,7 @@ impl BackgroundTaskRegistry {
         }
     }
 
-    pub fn parent_session(&self) -> &BackgroundTaskKey {
+    pub(crate) fn parent_session(&self) -> &BackgroundTaskKey {
         &self.parent_session
     }
 
@@ -438,7 +438,7 @@ impl BackgroundTaskRegistry {
     /// then keeps its state and only accepts still-missing metadata.
     ///
     /// [`sequence`]: Self::sequence
-    pub fn merge_restored(
+    pub(crate) fn merge_restored(
         &mut self,
         key: BackgroundTaskKey,
         update: BackgroundTaskUpdate,

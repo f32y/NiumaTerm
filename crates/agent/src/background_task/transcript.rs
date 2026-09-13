@@ -65,7 +65,7 @@ impl BackgroundTaskTranscript {
         self.revision
     }
 
-    pub fn set_state(&mut self, state: BackgroundTaskTranscriptState) -> bool {
+    pub(crate) fn set_state(&mut self, state: BackgroundTaskTranscriptState) -> bool {
         if self.state == state {
             return false;
         }

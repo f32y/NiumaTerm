@@ -198,7 +198,7 @@ impl ConversationState {
         self.changed(self.content.entries().len(), None);
     }
 
-    pub fn visible_output(&mut self) {
+    pub(crate) fn visible_output(&mut self) {
         if let Some(at) = self.submitted_at.take() {
             self.first_output_latency = Some(at.elapsed());
         }

@@ -113,7 +113,7 @@ impl<M> TranscriptContent<M> {
         self.item_index.contains_key(id)
     }
 
-    pub fn last_metadata_mut(&mut self) -> Option<&mut M> {
+    pub(crate) fn last_metadata_mut(&mut self) -> Option<&mut M> {
         self.entries.last_mut().map(|entry| &mut entry.metadata)
     }
 
@@ -186,7 +186,7 @@ impl<M> TranscriptContent<M> {
     }
 
     /// Providers may repeat an earlier error when they report turn completion.
-    pub fn turn_has_error(&self, turn: u64, text: &str) -> bool {
+    pub(crate) fn turn_has_error(&self, turn: u64, text: &str) -> bool {
         self.entries.iter().any(|entry| {
             entry.turn == turn
                 && matches!(&entry.item, Item::Error { text: shown } if shown == text)

@@ -71,7 +71,7 @@ impl LiveTurn {
     /// Record output usage, reporting whether a turn was running to record it
     /// against. Counts arriving between turns describe the one that just
     /// ended, which already has its own total.
-    pub fn set_output_tokens(&mut self, output_tokens: u64) -> bool {
+    pub(crate) fn set_output_tokens(&mut self, output_tokens: u64) -> bool {
         if self.started.is_none() {
             return false;
         }
