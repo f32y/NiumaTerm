@@ -20,11 +20,7 @@ impl Shell {
 
         let mutation = self.agent_monitor.interrupt(&route, time::Instant::now());
 
-        Self::remove_native_notifications(&mutation.removed_notifications);
-
-        if mutation.visible_changed {
-            cx.notify();
-        }
+        Self::apply_agent_monitor_display_change(&mutation, cx);
 
         self.reschedule_agent_timer(cx);
     }

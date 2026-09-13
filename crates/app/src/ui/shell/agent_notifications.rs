@@ -1,4 +1,5 @@
 use app::agent_tab::execution::AgentSession;
+use nmt_agent::MonitorMutation;
 
 use crate::ui::shell::*;
 
@@ -20,6 +21,17 @@ enum AgentRouteTarget {
 }
 
 impl Shell {
+    pub(super) fn apply_agent_monitor_display_change(
+        mutation: &MonitorMutation,
+        cx: &mut Context<Self>,
+    ) {
+        Self::remove_native_notifications(&mutation.removed_notifications);
+
+        if mutation.visible_changed {
+            cx.notify();
+        }
+    }
+
     pub(super) fn register_agent_pane(&mut self, pane: &Entity<TerminalPane>, cx: &App) {
         self.agent_monitor.register_route(
             pane.read(cx).agent_route().clone(),
@@ -39,11 +51,7 @@ impl Shell {
     pub(super) fn remove_agent_route(&mut self, route: &AgentRoute, cx: &mut Context<Self>) {
         let mutation = self.agent_monitor.remove_route(route);
 
-        Self::remove_native_notifications(&mutation.removed_notifications);
-
-        if mutation.visible_changed {
-            cx.notify();
-        }
+        Self::apply_agent_monitor_display_change(&mutation, cx);
 
         self.reschedule_agent_timer(cx);
     }
@@ -100,11 +108,7 @@ impl Shell {
     ) -> bool {
         let mutation = self.agent_monitor.acknowledge(route, notification_id);
 
-        Self::remove_native_notifications(&mutation.removed_notifications);
-
-        if mutation.visible_changed {
-            cx.notify();
-        }
+        Self::apply_agent_monitor_display_change(&mutation, cx);
 
         mutation.visible_changed
     }
@@ -282,11 +286,7 @@ impl Shell {
 
         let mutation = self.agent_monitor.apply(event, time::Instant::now());
 
-        Self::remove_native_notifications(&mutation.removed_notifications);
-
-        if mutation.visible_changed {
-            cx.notify();
-        }
+        Self::apply_agent_monitor_display_change(&mutation, cx);
 
         self.reschedule_agent_timer(cx);
 
@@ -323,11 +323,7 @@ impl Shell {
 
         let mutation = self.agent_monitor.process_due(time::Instant::now());
 
-        Self::remove_native_notifications(&mutation.removed_notifications);
-
-        if mutation.visible_changed {
-            cx.notify();
-        }
+        Self::apply_agent_monitor_display_change(&mutation, cx);
 
         self.reschedule_agent_timer(cx);
         self.process_native_notifications(cx);
@@ -432,11 +428,7 @@ impl Shell {
             }
         };
 
-        Self::remove_native_notifications(&mutation.removed_notifications);
-
-        if mutation.visible_changed {
-            cx.notify();
-        }
+        Self::apply_agent_monitor_display_change(&mutation, cx);
 
         self.reschedule_agent_timer(cx);
         self.process_native_notifications(cx);
