@@ -2,11 +2,8 @@ pub mod defaults;
 pub mod term;
 
 use std::fmt;
-use std::num::ParseIntError;
 use std::ops::Mul;
-use std::sync::OnceLock;
 
-use regex::Regex;
 use serde::de::Error as DeError;
 use serde::{Deserialize, Serialize, de};
 use tracing::trace;
@@ -374,59 +371,31 @@ pub struct ColorBuilder {
 }
 
 impl ColorBuilder {
-    pub fn from_hex(mut hex: String, conversion_type: Format) -> Result<Self, String> {
-        // Compiled once: this runs for every color of every theme, and regex
-        // compilation dwarfs the match itself.
-        static NON_HEX_CHARS: OnceLock<Regex> = OnceLock::new();
+    pub fn from_hex(hex: String, conversion_type: Format) -> Result<Self, String> {
+        let hex = hex.strip_prefix('#').unwrap_or(&hex);
 
-        static VALID_HEX_SIZE: OnceLock<Regex> = OnceLock::new();
-
-        let mut alpha: f64 = 1.0;
-        let non_hex_chars = NON_HEX_CHARS.get_or_init(|| Regex::new(r"(?i)[^#a-f\d]").unwrap());
-
-        // match valid 6 or 8 hex characters
-        let valid_hex_size =
-            VALID_HEX_SIZE.get_or_init(|| Regex::new(r"(?i)^#?[a-f\d]{6}([a-f\d]{2})?$").unwrap());
-
-        if non_hex_chars.is_match(&hex) {
+        if !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err("Error: Character is not valid".into());
         }
 
-        if !valid_hex_size.is_match(&hex) {
+        if !matches!(hex.len(), 6 | 8) {
             return Err("Error: Hex String size is not valid".into());
         }
 
-        hex = hex.replace('#', "");
+        let rgba = u32::from_str_radix(hex, 16).map_err(|error| error.to_string())?;
 
-        if hex.len() == 8 {
-            let (rgb_part, alpha_part) = hex.split_at(6);
-            let alpha_from_hex = i32::from_str_radix(alpha_part, 16).unwrap();
+        let rgba = if hex.len() == 6 {
+            (rgba << 8) | 255
+        } else {
+            rgba
+        };
 
-            hex = rgb_part.to_string();
-            alpha = (alpha_from_hex as f64) / 255.0;
-        }
+        let [r, g, b, a] = rgba.to_be_bytes();
+        let mut color = Self::from_rgb(ColorRgb { r, g, b }, conversion_type);
 
-        let rgb = decode_hex(&hex).unwrap_or_default();
+        color.alpha = f64::from(a) / 255.0;
 
-        if rgb.is_empty() || (rgb.len() != 3 && rgb.len() != 4) {
-            return Err("Error: Invalid string, not able to convert".into());
-        }
-
-        match conversion_type {
-            Format::SRGB0_1 => Ok(Self {
-                red: (rgb[0] as f64) / 255.0,
-                green: (rgb[1] as f64) / 255.0,
-                blue: (rgb[2] as f64) / 255.0,
-                alpha,
-            }),
-
-            Format::SRGB0_255 => Ok(Self {
-                red: (rgb[0] as f64),
-                green: (rgb[1] as f64),
-                blue: (rgb[2] as f64),
-                alpha,
-            }),
-        }
+        Ok(color)
     }
 
     pub fn from_rgb(rgb: ColorRgb, conversion_type: Format) -> Self {
@@ -446,13 +415,6 @@ impl ColorBuilder {
             },
         }
     }
-}
-
-fn decode_hex(s: &str) -> Result<Vec<u8>, ParseIntError> {
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16))
-        .collect()
 }
 
 impl Default for ColorBuilder {
@@ -601,5 +563,36 @@ impl From<&ColorBuilder> for String {
             "r: {:?}, g: {:?}, b: {:?}, a: {:?}",
             value.red, value.green, value.blue, value.alpha
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::colors::{ColorBuilder, Format};
+
+    #[test]
+    fn hex_colors_accept_rgb_and_rgba_and_reject_non_ascii_digits() {
+        for input in [
+            "12345٣", "#12٣456", "#12345", "##123456", "+12345", "#GG0000",
+        ] {
+            assert!(
+                ColorBuilder::from_hex(input.into(), Format::SRGB0_1).is_err(),
+                "{input}"
+            );
+        }
+
+        let rgb = ColorBuilder::from_hex("#ff8040".into(), Format::SRGB0_255).unwrap();
+
+        assert_eq!(
+            (rgb.red, rgb.green, rgb.blue, rgb.alpha),
+            (255.0, 128.0, 64.0, 1.0)
+        );
+
+        let rgba = ColorBuilder::from_hex("FF804020".into(), Format::SRGB0_1).unwrap();
+
+        assert_eq!(
+            (rgba.red, rgba.green, rgba.blue, rgba.alpha),
+            (1.0, 128.0 / 255.0, 64.0 / 255.0, 32.0 / 255.0)
+        );
     }
 }
