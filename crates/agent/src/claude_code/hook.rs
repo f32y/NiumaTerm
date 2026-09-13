@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::hook_store::{self, uninstall_from};
+use crate::hook_store::{self, HookRegistration};
 use crate::{AgentEvent, AgentEventInput, AgentEventKind, HookInstallStatus};
 
 /// Every hook event the adapter normalizes. Keep in sync with the `normalize`
@@ -109,50 +109,20 @@ pub fn settings_path() -> Option<PathBuf> {
     )
 }
 
+const REGISTRATION: HookRegistration = HookRegistration {
+    events: &HOOK_EVENTS,
+    file_label: "settings file",
+    entry: |command| json!({"hooks": [{"type": "command", "command": command}]}),
+};
+
 pub fn install_hooks(settings_path: &Path) -> io::Result<()> {
-    let mut settings = read_settings(settings_path)?;
-
-    install_into(&mut settings, HOOK_COMMAND)?;
-
-    write_settings(settings_path, &settings)
+    REGISTRATION.install(settings_path, HOOK_COMMAND)
 }
 
 pub fn uninstall_hooks(settings_path: &Path) -> io::Result<()> {
-    if !settings_path.exists() {
-        return Ok(());
-    }
-
-    let mut settings = read_settings(settings_path)?;
-
-    uninstall_from(&mut settings);
-
-    write_settings(settings_path, &settings)
+    REGISTRATION.uninstall(settings_path)
 }
 
 pub fn hooks_status(settings_path: &Path) -> HookInstallStatus {
-    match read_settings(settings_path) {
-        Ok(settings) => status_of(&settings, HOOK_COMMAND),
-        Err(_) => HookInstallStatus::NotInstalled,
-    }
-}
-
-/// Binds the shared hook store to Claude Code's event list and entry shape.
-fn install_into(settings: &mut Value, command: &str) -> io::Result<()> {
-    hook_store::install_into(settings, &HOOK_EVENTS, command, |command| {
-        json!({
-            "hooks": [{ "type": "command", "command": command }]
-        })
-    })
-}
-
-fn status_of(settings: &Value, command: &str) -> HookInstallStatus {
-    hook_store::status_of(settings, &HOOK_EVENTS, command)
-}
-
-fn read_settings(settings_path: &Path) -> io::Result<Value> {
-    hook_store::read(settings_path, "settings file")
-}
-
-fn write_settings(settings_path: &Path, settings: &Value) -> io::Result<()> {
-    hook_store::write(settings_path, settings)
+    REGISTRATION.status(settings_path, Some(HOOK_COMMAND))
 }

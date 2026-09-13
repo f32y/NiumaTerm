@@ -1,3 +1,4 @@
+use crate::hook_store::{event_commands, is_marked, uninstall_from};
 use std::{env, fs, process};
 
 use serde_json::{Map, from_str, to_string, to_string_pretty};
@@ -93,10 +94,17 @@ fn user_hooks() -> Value {
 fn install_preserves_other_hooks_and_registers_every_event() {
     let mut settings = user_hooks();
 
-    install_into(&mut settings, CURRENT_COMMAND).unwrap();
+    REGISTRATION
+        .install_into(&mut settings, CURRENT_COMMAND)
+        .unwrap();
 
     assert_eq!(
-        status_of(&settings, CURRENT_COMMAND),
+        REGISTRATION.status_of(&settings, None),
+        HookInstallStatus::Stale
+    );
+
+    assert_eq!(
+        REGISTRATION.status_of(&settings, Some(CURRENT_COMMAND)),
         HookInstallStatus::Installed
     );
     assert_eq!(settings["metadata"]["preserved"], true);
@@ -111,18 +119,25 @@ fn install_preserves_other_hooks_and_registers_every_event() {
 fn reinstall_migrates_legacy_entries_without_duplicates() {
     let mut settings = json!({});
 
-    install_into(&mut settings, LEGACY_COMMAND).unwrap();
+    REGISTRATION
+        .install_into(&mut settings, LEGACY_COMMAND)
+        .unwrap();
 
     assert_eq!(
-        status_of(&settings, LEGACY_COMMAND),
+        REGISTRATION.status_of(&settings, Some(LEGACY_COMMAND)),
         HookInstallStatus::Installed
     );
 
-    install_into(&mut settings, CURRENT_COMMAND).unwrap();
-    install_into(&mut settings, CURRENT_COMMAND).unwrap();
+    REGISTRATION
+        .install_into(&mut settings, CURRENT_COMMAND)
+        .unwrap();
+
+    REGISTRATION
+        .install_into(&mut settings, CURRENT_COMMAND)
+        .unwrap();
 
     assert_eq!(
-        status_of(&settings, CURRENT_COMMAND),
+        REGISTRATION.status_of(&settings, Some(CURRENT_COMMAND)),
         HookInstallStatus::Installed
     );
 
@@ -142,11 +157,14 @@ fn uninstall_removes_only_niuma_entries_and_prunes_empty_groups() {
     let original = user_hooks();
     let mut settings = original.clone();
 
-    install_into(&mut settings, CURRENT_COMMAND).unwrap();
+    REGISTRATION
+        .install_into(&mut settings, CURRENT_COMMAND)
+        .unwrap();
+
     uninstall_from(&mut settings);
 
     assert_eq!(
-        status_of(&settings, CURRENT_COMMAND),
+        REGISTRATION.status_of(&settings, Some(CURRENT_COMMAND)),
         HookInstallStatus::NotInstalled
     );
     assert_eq!(settings, original);
@@ -156,7 +174,9 @@ fn uninstall_removes_only_niuma_entries_and_prunes_empty_groups() {
 fn missing_event_is_stale() {
     let mut settings = json!({});
 
-    install_into(&mut settings, CURRENT_COMMAND).unwrap();
+    REGISTRATION
+        .install_into(&mut settings, CURRENT_COMMAND)
+        .unwrap();
 
     settings["hooks"]
         .as_object_mut()
@@ -164,7 +184,7 @@ fn missing_event_is_stale() {
         .remove("PermissionRequest");
 
     assert_eq!(
-        status_of(&settings, CURRENT_COMMAND),
+        REGISTRATION.status_of(&settings, Some(CURRENT_COMMAND)),
         HookInstallStatus::Stale
     );
 }
@@ -179,31 +199,40 @@ fn file_round_trip_is_atomic_and_invalid_json_is_kept() {
 
     fs::write(&path, to_string(&user_hooks()).unwrap()).unwrap();
 
-    install_hooks_with_command(&path, CURRENT_COMMAND).unwrap();
+    REGISTRATION.install(&path, CURRENT_COMMAND).unwrap();
 
     assert_eq!(
-        status_of(&read_settings(&path).unwrap(), CURRENT_COMMAND),
+        REGISTRATION.status_of(
+            &hook_store::read(&path, REGISTRATION.file_label).unwrap(),
+            Some(CURRENT_COMMAND)
+        ),
         HookInstallStatus::Installed
     );
 
     uninstall_hooks(&path).unwrap();
 
     assert_eq!(
-        status_of(&read_settings(&path).unwrap(), CURRENT_COMMAND),
+        REGISTRATION.status_of(
+            &hook_store::read(&path, REGISTRATION.file_label).unwrap(),
+            Some(CURRENT_COMMAND)
+        ),
         HookInstallStatus::NotInstalled
     );
-    assert_eq!(read_settings(&path).unwrap(), user_hooks());
+    assert_eq!(
+        hook_store::read(&path, REGISTRATION.file_label).unwrap(),
+        user_hooks()
+    );
 
     let wrong_shape = r#"{"hooks":{"Stop":{}}}"#;
 
     fs::write(&path, wrong_shape).unwrap();
 
-    assert!(install_hooks_with_command(&path, CURRENT_COMMAND).is_err());
+    assert!(REGISTRATION.install(&path, CURRENT_COMMAND).is_err());
     assert_eq!(fs::read_to_string(&path).unwrap(), wrong_shape);
 
     fs::write(&path, "{ not valid").unwrap();
 
-    assert!(install_hooks_with_command(&path, CURRENT_COMMAND).is_err());
+    assert!(REGISTRATION.install(&path, CURRENT_COMMAND).is_err());
     assert_eq!(fs::read_to_string(&path).unwrap(), "{ not valid");
     assert!(!path.with_extension("json.niumaterm-tmp").exists());
 
@@ -231,7 +260,10 @@ fn complete_registration_with_an_old_command_is_stale() {
     fs::write(&path, to_string_pretty(&json!({ "hooks": hooks })).unwrap()).unwrap();
 
     assert_eq!(
-        status_of(&read_settings(&path).unwrap(), CURRENT_COMMAND),
+        REGISTRATION.status_of(
+            &hook_store::read(&path, REGISTRATION.file_label).unwrap(),
+            Some(CURRENT_COMMAND)
+        ),
         HookInstallStatus::Stale
     );
 

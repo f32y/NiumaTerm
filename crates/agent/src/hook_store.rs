@@ -14,6 +14,96 @@ use serde_json::{Value, from_str, json, to_string_pretty};
 
 use crate::{AGENT_HOOK_EXE_ENV, HookInstallStatus, hook_command_contains};
 
+pub(crate) struct HookRegistration {
+    pub(crate) events: &'static [&'static str],
+    pub(crate) file_label: &'static str,
+    pub(crate) entry: fn(&str) -> Value,
+}
+
+impl HookRegistration {
+    pub(crate) fn install(&self, path: &Path, command: &str) -> io::Result<()> {
+        let mut settings = read(path, self.file_label)?;
+
+        self.install_into(&mut settings, command)?;
+
+        write(path, &settings)
+    }
+
+    pub(crate) fn uninstall(&self, path: &Path) -> io::Result<()> {
+        if !path.exists() {
+            return Ok(());
+        }
+
+        let mut settings = read(path, self.file_label)?;
+
+        uninstall_from(&mut settings);
+
+        write(path, &settings)
+    }
+
+    pub(crate) fn status(&self, path: &Path, command: Option<&str>) -> HookInstallStatus {
+        match read(path, self.file_label) {
+            Ok(settings) => self.status_of(&settings, command),
+            Err(_) => HookInstallStatus::NotInstalled,
+        }
+    }
+
+    /// Re-registering is idempotent: prior NiumaTerm entries (including legacy
+    /// absolute-path installs) are removed before `entry(command)` is appended
+    /// to every event.
+    pub(crate) fn install_into(&self, settings: &mut Value, command: &str) -> io::Result<()> {
+        uninstall_from(settings);
+
+        let root = settings
+            .as_object_mut()
+            .expect("hook settings reads only yield objects");
+
+        let hooks = root.entry("hooks").or_insert_with(|| json!({}));
+
+        let hooks = hooks
+            .as_object_mut()
+            .ok_or_else(|| invalid("existing \"hooks\" value is not an object"))?;
+
+        for event in self.events {
+            let entries = hooks.entry(*event).or_insert_with(|| json!([]));
+
+            let entries = entries
+                .as_array_mut()
+                .ok_or_else(|| invalid("existing hook event value is not an array"))?;
+
+            entries.push((self.entry)(command));
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn status_of(&self, settings: &Value, command: Option<&str>) -> HookInstallStatus {
+        let marked: Vec<&str> = self
+            .events
+            .iter()
+            .flat_map(|event| event_commands(settings, event))
+            .filter(|value| is_marked(value))
+            .collect();
+
+        if marked.is_empty() {
+            return HookInstallStatus::NotInstalled;
+        }
+
+        match command {
+            Some(command)
+                if marked.iter().all(|value| *value == command)
+                    && self.events.iter().all(|event| {
+                        event_commands(settings, event).any(|value| value == command)
+                    }) =>
+            {
+                HookInstallStatus::Installed
+            }
+
+            Some(_) | None => HookInstallStatus::Stale,
+        }
+    }
+}
+
 /// Markers that identify hook entries owned by NiumaTerm: the current
 /// env-var command and legacy installs that baked in an absolute path. The
 /// former executable name stays listed so an entry written before the rename
@@ -25,40 +115,6 @@ const HOOK_MARKERS: [&str; 3] = [AGENT_HOOK_EXE_ENV, "NmtAgentHook.exe", "NiumaT
 /// every per-agent config path.
 pub(crate) fn home_dir() -> Option<PathBuf> {
     environment::home_dir()
-}
-
-/// Re-registering is idempotent: prior NiumaTerm entries (including legacy
-/// absolute-path installs) are removed before `entry(command)` is appended
-/// to every event.
-pub(crate) fn install_into(
-    settings: &mut Value,
-    events: &[&str],
-    command: &str,
-    entry: impl Fn(&str) -> Value,
-) -> io::Result<()> {
-    uninstall_from(settings);
-
-    let root = settings
-        .as_object_mut()
-        .expect("hook settings reads only yield objects");
-
-    let hooks = root.entry("hooks").or_insert_with(|| json!({}));
-
-    let hooks = hooks
-        .as_object_mut()
-        .ok_or_else(|| invalid("existing \"hooks\" value is not an object"))?;
-
-    for event in events {
-        let entries = hooks.entry(*event).or_insert_with(|| json!([]));
-
-        let entries = entries
-            .as_array_mut()
-            .ok_or_else(|| invalid("existing hook event value is not an array"))?;
-
-        entries.push(entry(command));
-    }
-
-    Ok(())
 }
 
 pub(crate) fn uninstall_from(settings: &mut Value) {
@@ -94,26 +150,6 @@ pub(crate) fn uninstall_from(settings: &mut Value) {
             .as_object_mut()
             .expect("checked above")
             .remove("hooks");
-    }
-}
-
-pub(crate) fn status_of(settings: &Value, events: &[&str], command: &str) -> HookInstallStatus {
-    let marked: Vec<&str> = events
-        .iter()
-        .flat_map(|event| event_commands(settings, event))
-        .filter(|value| is_marked(value))
-        .collect();
-
-    if marked.is_empty() {
-        HookInstallStatus::NotInstalled
-    } else if marked.iter().all(|value| *value == command)
-        && events
-            .iter()
-            .all(|event| event_commands(settings, event).any(|value| value == command))
-    {
-        HookInstallStatus::Installed
-    } else {
-        HookInstallStatus::Stale
     }
 }
 

@@ -1,7 +1,7 @@
+use crate::hook_store::{event_commands, uninstall_from};
 use std::{env, fs, process};
 
 use crate::claude_code::hook::*;
-use crate::hook_store::event_commands;
 use crate::{AGENT_HOOK_PROTOCOL_VERSION, RawAgentHookMessage};
 
 #[test]
@@ -85,10 +85,12 @@ fn user_settings() -> Value {
 fn install_registers_every_event_and_preserves_user_settings() {
     let mut settings = user_settings();
 
-    install_into(&mut settings, HOOK_COMMAND).unwrap();
+    REGISTRATION
+        .install_into(&mut settings, HOOK_COMMAND)
+        .unwrap();
 
     assert_eq!(
-        status_of(&settings, HOOK_COMMAND),
+        REGISTRATION.status_of(&settings, Some(HOOK_COMMAND)),
         HookInstallStatus::Installed
     );
     assert_eq!(settings["model"], "opus");
@@ -103,14 +105,21 @@ fn install_registers_every_event_and_preserves_user_settings() {
 fn reinstall_migrates_legacy_absolute_path_without_duplicates() {
     let mut settings = json!({});
 
-    install_into(&mut settings, LEGACY_COMMAND).unwrap();
-
-    assert_eq!(status_of(&settings, HOOK_COMMAND), HookInstallStatus::Stale);
-
-    install_into(&mut settings, HOOK_COMMAND).unwrap();
+    REGISTRATION
+        .install_into(&mut settings, LEGACY_COMMAND)
+        .unwrap();
 
     assert_eq!(
-        status_of(&settings, HOOK_COMMAND),
+        REGISTRATION.status_of(&settings, Some(HOOK_COMMAND)),
+        HookInstallStatus::Stale
+    );
+
+    REGISTRATION
+        .install_into(&mut settings, HOOK_COMMAND)
+        .unwrap();
+
+    assert_eq!(
+        REGISTRATION.status_of(&settings, Some(HOOK_COMMAND)),
         HookInstallStatus::Installed
     );
     assert_eq!(event_commands(&settings, "Stop").count(), 1);
@@ -120,18 +129,24 @@ fn reinstall_migrates_legacy_absolute_path_without_duplicates() {
 fn uninstall_removes_our_and_legacy_entries_and_prunes_empties() {
     let mut settings = user_settings();
 
-    install_into(&mut settings, HOOK_COMMAND).unwrap();
+    REGISTRATION
+        .install_into(&mut settings, HOOK_COMMAND)
+        .unwrap();
+
     uninstall_from(&mut settings);
 
     assert_eq!(
-        status_of(&settings, HOOK_COMMAND),
+        REGISTRATION.status_of(&settings, Some(HOOK_COMMAND)),
         HookInstallStatus::NotInstalled
     );
     assert_eq!(settings, user_settings());
 
     let mut legacy_only = json!({});
 
-    install_into(&mut legacy_only, LEGACY_COMMAND).unwrap();
+    REGISTRATION
+        .install_into(&mut legacy_only, LEGACY_COMMAND)
+        .unwrap();
+
     uninstall_from(&mut legacy_only);
 
     assert_eq!(legacy_only, json!({}));
@@ -141,25 +156,38 @@ fn uninstall_removes_our_and_legacy_entries_and_prunes_empties() {
 fn missing_events_read_as_stale() {
     let mut settings = json!({});
 
-    install_into(&mut settings, HOOK_COMMAND).unwrap();
+    REGISTRATION
+        .install_into(&mut settings, HOOK_COMMAND)
+        .unwrap();
 
     settings["hooks"]
         .as_object_mut()
         .unwrap()
         .remove("Notification");
 
-    assert_eq!(status_of(&settings, HOOK_COMMAND), HookInstallStatus::Stale);
+    assert_eq!(
+        REGISTRATION.status_of(&settings, Some(HOOK_COMMAND)),
+        HookInstallStatus::Stale
+    );
 }
 
 #[test]
 fn malformed_shapes_are_refused_and_unparseable_files_are_kept() {
     let mut hooks_not_object = json!({ "hooks": [] });
 
-    assert!(install_into(&mut hooks_not_object, HOOK_COMMAND).is_err());
+    assert!(
+        REGISTRATION
+            .install_into(&mut hooks_not_object, HOOK_COMMAND)
+            .is_err()
+    );
 
     let mut event_not_array = json!({ "hooks": { "Stop": {} } });
 
-    assert!(install_into(&mut event_not_array, HOOK_COMMAND).is_err());
+    assert!(
+        REGISTRATION
+            .install_into(&mut event_not_array, HOOK_COMMAND)
+            .is_err()
+    );
 
     let dir = env::temp_dir().join(format!("nmt-installer-{}", process::id()));
 

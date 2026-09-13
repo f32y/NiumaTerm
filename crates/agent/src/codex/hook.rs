@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::hook_store::{self, event_commands, is_marked, uninstall_from};
+use crate::hook_store::{self, HookRegistration, invalid};
 use crate::{
     AgentEvent, AgentEventInput, AgentEventKind, HookInstallStatus, agent_process,
     build_hook_command,
@@ -98,51 +98,22 @@ pub fn hooks_path() -> Option<PathBuf> {
     Some(hook_store::home_dir()?.join(".codex").join("hooks.json"))
 }
 
+const REGISTRATION: HookRegistration = HookRegistration {
+    events: &HOOK_EVENTS,
+    file_label: "Codex hooks.json",
+    entry: |command| json!({"hooks": [{"type": "command", "command": command, "timeout": 10}]}),
+};
+
 pub fn install_hooks(hooks_path: &Path) -> io::Result<()> {
-    let command = hook_command()?;
-
-    install_hooks_with_command(hooks_path, &command)
-}
-
-fn install_hooks_with_command(hooks_path: &Path, command: &str) -> io::Result<()> {
-    let mut settings = read_settings(hooks_path)?;
-
-    install_into(&mut settings, command)?;
-
-    write_settings(hooks_path, &settings)
+    REGISTRATION.install(hooks_path, &hook_command()?)
 }
 
 pub fn uninstall_hooks(hooks_path: &Path) -> io::Result<()> {
-    if !hooks_path.exists() {
-        return Ok(());
-    }
-
-    let mut settings = read_settings(hooks_path)?;
-
-    uninstall_from(&mut settings);
-
-    write_settings(hooks_path, &settings)
+    REGISTRATION.uninstall(hooks_path)
 }
 
 pub fn hooks_status(hooks_path: &Path) -> HookInstallStatus {
-    let Ok(settings) = read_settings(hooks_path) else {
-        return HookInstallStatus::NotInstalled;
-    };
-
-    match hook_command() {
-        Ok(command) => status_of(&settings, &command),
-
-        Err(_)
-            if HOOK_EVENTS
-                .iter()
-                .flat_map(|event| event_commands(&settings, event))
-                .any(is_marked) =>
-        {
-            HookInstallStatus::Stale
-        }
-
-        Err(_) => HookInstallStatus::NotInstalled,
-    }
+    REGISTRATION.status(hooks_path, hook_command().as_deref().ok())
 }
 
 /// The exact command written to Codex and used when checking whether an
@@ -153,30 +124,4 @@ pub fn hook_command() -> io::Result<String> {
         .ok_or_else(|| invalid("NiumaTerm Hook executable path is unavailable"))?;
 
     build_hook_command(executable, "codex")
-}
-
-/// Binds the shared hook store to Codex's event list and entry shape. The
-/// per-entry timeout keeps a hung hook from stalling the Codex turn.
-fn install_into(settings: &mut Value, command: &str) -> io::Result<()> {
-    hook_store::install_into(settings, &HOOK_EVENTS, command, |command| {
-        json!({
-            "hooks": [{ "type": "command", "command": command, "timeout": 10 }]
-        })
-    })
-}
-
-fn status_of(settings: &Value, command: &str) -> HookInstallStatus {
-    hook_store::status_of(settings, &HOOK_EVENTS, command)
-}
-
-fn read_settings(hooks_path: &Path) -> io::Result<Value> {
-    hook_store::read(hooks_path, "Codex hooks.json")
-}
-
-fn write_settings(hooks_path: &Path, settings: &Value) -> io::Result<()> {
-    hook_store::write(hooks_path, settings)
-}
-
-fn invalid(message: &str) -> io::Error {
-    hook_store::invalid(message)
 }
