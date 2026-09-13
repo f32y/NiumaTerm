@@ -236,6 +236,9 @@ impl Shell {
         })
         .detach();
 
+        cx.observe_global::<AgentUpdates>(|_, cx| cx.notify())
+            .detach();
+
         // Stash the window geometry on every move/resize; main.rs flushes it
         // to local_state.toml on quit. Fires for both, and the Maximized
         // variant carries the restore bounds. Scan-and-update only: a stale

@@ -1,8 +1,11 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::Duration;
 use std::{env, process};
 
 use app::agent_tab::{AgentKind, RecoveryIdentity, RecoveryReadiness, RecoverySnapshot};
 use chrono::Utc;
+use gpui::TestAppContext;
 use nmt_agent::launcher::AgentCli;
 use nmt_agent::update::{
     DiscoverySupport, InstallationKey, InstallationSnapshot, InstallationUpdateState, ProviderKind,
@@ -11,6 +14,64 @@ use nmt_agent::update::{
 use semver::Version;
 
 use crate::agent_updates::*;
+
+#[gpui::test]
+fn provider_checks_and_updates_notify_registered_views(cx: &mut TestAppContext) {
+    let cache = tempfile::tempdir().unwrap();
+
+    let profile = AgentProfile {
+        kind: AgentKind::Codex,
+        executable: "codex".into(),
+        ..AgentProfile::default()
+    };
+
+    cx.update(|cx| {
+        initialize(true, &[], cx);
+
+        cx.global_mut::<AgentUpdates>().coordinator =
+            UpdateCoordinator::new(cache.path().join("updates.json"));
+    });
+
+    let first = Rc::new(RefCell::new(Vec::new()));
+    let second = Rc::new(RefCell::new(Vec::new()));
+
+    let _subscriptions = cx.update(|cx| {
+        [first.clone(), second.clone()].map(|observed| {
+            cx.observe_global::<AgentUpdates>(move |cx| {
+                observed.borrow_mut().extend(
+                    cx.global::<AgentUpdates>()
+                        .coordinator
+                        .snapshots()
+                        .into_iter()
+                        .map(|snapshot| snapshot.state.phase),
+                );
+            })
+        })
+    });
+
+    cx.update(|cx| manual_check_profiles(&[profile], cx));
+    cx.run_until_parked();
+
+    assert!(first.borrow().contains(&UpdatePhase::Available));
+    assert_eq!(*first.borrow(), *second.borrow());
+
+    let cx = cx.add_empty_window();
+
+    cx.update(|window, cx| {
+        let key = cx.global::<AgentUpdates>().coordinator.snapshots()[0]
+            .identity
+            .key
+            .clone();
+
+        request_update(key, window, cx);
+    });
+
+    cx.run_until_parked();
+
+    assert!(first.borrow().contains(&UpdatePhase::WaitingForIdle));
+    assert!(first.borrow().contains(&UpdatePhase::Updated));
+    assert_eq!(*first.borrow(), *second.borrow());
+}
 
 fn snapshot(phase: UpdatePhase) -> InstallationSnapshot {
     let launcher = AgentCli::new("fake-codex", []);

@@ -104,7 +104,7 @@ fn update_notification_card(
                 updates.coordinator.hide_notification(&close_key);
             }
 
-            cx.refresh_windows();
+            AgentUpdates::notify_changed(cx);
         });
 
     if let Some(primary) = view.primary {
@@ -264,7 +264,7 @@ fn expire_elapsed_cards(shell: &mut Shell, cx: &mut Context<Shell>) -> bool {
             }
         }
 
-        cx.refresh_windows();
+        AgentUpdates::notify_changed(cx);
     }
 
     shell

@@ -163,12 +163,10 @@ fn start_transaction(
     let coordinator = cx.global::<AgentUpdates>().coordinator.clone();
 
     if coordinator.begin_update(&key).is_err() {
-        cx.refresh_windows();
-
         return;
     }
 
-    cx.refresh_windows();
+    AgentUpdates::notify_changed(cx);
 
     cx.spawn(async move |cx| drive_transaction(key, mode, sessions, coordinator, cx).await)
         .detach();
@@ -212,7 +210,7 @@ async fn drive_transaction(
     };
 
     coordinator.finish_update(&key, verified, error, 0);
-    environment.cx.update(|cx| cx.refresh_windows());
+    environment.cx.update(AgentUpdates::notify_changed);
 }
 
 struct SessionUpdateEnvironment<'a> {
@@ -243,8 +241,6 @@ impl UpdateEnvironment for SessionUpdateEnvironment<'_> {
                     UpdateMode::WhenIdle => session.prepare_update_wait(cx),
                 });
             }
-
-            cx.refresh_windows();
         });
     }
 
@@ -262,8 +258,6 @@ impl UpdateEnvironment for SessionUpdateEnvironment<'_> {
             for session in &self.sessions {
                 session.update(cx, |session, cx| session.cancel_update_wait(cx));
             }
-
-            cx.refresh_windows();
         });
     }
 
@@ -287,8 +281,6 @@ impl UpdateEnvironment for SessionUpdateEnvironment<'_> {
             for session in &self.sessions {
                 session.update(cx, |session, cx| session.mark_provider_updating(cx));
             }
-
-            cx.refresh_windows();
         });
 
         let coordinator = self.coordinator.clone();
@@ -342,7 +334,7 @@ impl UpdateEnvironment for SessionUpdateEnvironment<'_> {
 
     fn publish(&mut self, phase: UpdatePhase, progress: Option<UpdateProgress>) {
         self.coordinator.transition(&self.key, phase, progress);
-        self.cx.update(|cx| cx.refresh_windows());
+        self.cx.update(AgentUpdates::notify_changed);
     }
 
     fn now(&self) -> Duration {

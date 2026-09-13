@@ -48,6 +48,12 @@ pub(crate) struct AgentUpdates {
 impl Global for AgentUpdates {}
 
 impl AgentUpdates {
+    pub(crate) fn notify_changed(cx: &mut App) {
+        // Worker threads mutate the shared coordinator outside GPUI. Mutable
+        // global access publishes those changes to the registered views.
+        cx.global_mut::<Self>();
+    }
+
     /// `None` for a profile whose harness has no vendor-managed installation:
     /// it registers nothing, so it never reaches the status rows or the shared
     /// Check action.
@@ -177,7 +183,7 @@ pub(crate) fn manual_check_profiles(profiles: &[AgentProfile], cx: &mut App) {
         });
 
         worker.await;
-        cx.update(|cx| cx.refresh_windows());
+        cx.update(AgentUpdates::notify_changed);
     })
     .detach();
 }
@@ -219,7 +225,7 @@ async fn run_automatic_checks(cx: &mut AsyncApp) {
             });
 
             worker.await;
-            cx.update(|cx| cx.refresh_windows());
+            cx.update(AgentUpdates::notify_changed);
         }
 
         cx.background_executor()
