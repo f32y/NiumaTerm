@@ -14,7 +14,6 @@ mod tests;
 use std::borrow::Cow;
 use std::{iter, path};
 
-use nmt_agent::AgentRuntimeStatus;
 use rust_i18n::t;
 
 use crate::tabs::{CommandOutcome, TabId, TabManager};
@@ -229,15 +228,6 @@ pub struct WorkspaceSummary {
     pub additional_cwds: Vec<String>,
 
     pub active: bool,
-    pub agent_status: AgentRuntimeStatus,
-
-    /// Terminal activity across this workspace's tabs. The manager cannot see
-    /// pane state, so the shell fills this in when it projects the summaries
-    /// for the chrome.
-    pub terminal_activity: TerminalActivity,
-
-    pub unread_count: usize,
-    pub latest_unread_text: Option<String>,
     pub pinned: bool,
     pub closeable: bool,
 
@@ -246,10 +236,8 @@ pub struct WorkspaceSummary {
 
     pub kind: WorkspaceKind,
 
-    /// Work reported inside this workspace. The manager can only see what its
-    /// tabs report over OSC 9;4; the shell folds in the agent panes' task
-    /// lists, which live behind entities the manager cannot read.
-    pub progress: ProgressTally,
+    /// Progress reported by terminal tabs through OSC 9;4.
+    pub terminal_progress: ProgressTally,
 }
 
 impl WorkspaceManager {
@@ -555,15 +543,11 @@ impl WorkspaceManager {
                     .as_ref()
                     .map_or_else(Vec::new, |roots| roots.additional().to_vec()),
                 active: index == self.workspaces.active_index(),
-                agent_status: AgentRuntimeStatus::Idle,
-                terminal_activity: TerminalActivity::Idle,
-                unread_count: 0,
-                latest_unread_text: None,
                 pinned: ws.pinned,
                 closeable: (closeable || ws.kind == WorkspaceKind::Settings) && !ws.pinned,
                 temporary: ws.temporary,
                 kind: ws.kind,
-                progress: tabs_progress(&ws.tabs),
+                terminal_progress: tabs_progress(&ws.tabs),
             })
             .collect()
     }

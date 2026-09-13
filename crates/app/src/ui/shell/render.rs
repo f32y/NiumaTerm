@@ -117,7 +117,7 @@ impl Render for Shell {
         self.panels.sync_task_target(self.active_agent(), cx);
 
         // The sidebar is always mounted so it can animate its width open/closed.
-        let summaries = self.projected_workspace_summaries(cx);
+        let summaries = self.workspace_chrome(cx);
 
         // Vertical style folds the tab strip into the sidebar as child rows of
         // each workspace, leaving the title bar's strip slot empty.
@@ -132,7 +132,7 @@ impl Render for Shell {
             true => summaries
                 .iter()
                 .map(|ws| {
-                    let Some(tabs) = self.workspaces.tabs_of(ws.id) else {
+                    let Some(tabs) = self.workspaces.tabs_of(ws.summary.id) else {
                         return Vec::new();
                     };
 
@@ -150,7 +150,7 @@ impl Render for Shell {
                             // only one of them is the tab on screen. Marking
                             // the others would put a selection highlight on
                             // every workspace's list at once.
-                            active: ws.active && tab.id() == active_id,
+                            active: ws.summary.active && tab.id() == active_id,
                             unread: unread_tabs.contains(&tab.id()),
                             busy: busy_agent_tabs.contains(&tab.id()),
                             bell: tab.bell(),

@@ -12,10 +12,12 @@ impl Sidebar {
     pub(super) fn render_item(
         &self,
         idx: usize,
-        ws: &WorkspaceSummary,
+        chrome: &WorkspaceChrome,
         renames: &InlineRenameSession,
         cx: &mut Context<Shell>,
     ) -> AnyElement {
+        let ws = &chrome.summary;
+
         let settings_entry = ws.kind == WorkspaceKind::Settings;
         let selection = sidebar_selection(cx);
 
@@ -28,8 +30,8 @@ impl Sidebar {
         let highlight_active = ws.active && !vertical_tabs;
 
         let (glyphs, status_label) = workspace_status_glyphs(
-            ws.agent_status,
-            ws.terminal_activity,
+            chrome.agent.status,
+            chrome.terminal_activity,
             ("workspace-busy", idx),
             cx,
         );
@@ -127,11 +129,15 @@ impl Sidebar {
 
         let suffix = h_flex()
             .gap_1()
-            .children((ws.unread_count > 0).then(|| {
+            .children((chrome.agent.unread_count > 0).then(|| {
                 div()
                     .id(("workspace-unread", idx))
                     .aria_label(
-                        t!("sidebar-workspace-unread-label", count = ws.unread_count).into_owned(),
+                        t!(
+                            "sidebar-workspace-unread-label",
+                            count = chrome.agent.unread_count
+                        )
+                        .into_owned(),
                     )
                     .size_5()
                     .flex()
@@ -140,7 +146,7 @@ impl Sidebar {
                     .rounded(UI_RADIUS)
                     .bg(cx.theme().primary)
                     .text_color(cx.theme().primary_foreground)
-                    .child(ws.unread_count.to_string())
+                    .child(chrome.agent.unread_count.to_string())
             }))
             .child(controls);
 
@@ -265,8 +271,8 @@ impl Sidebar {
 
         let drag_name = display_label.clone();
         let drag_cwd = display_path.clone();
-        let drag_agent_status = ws.agent_status;
-        let drag_terminal_activity = ws.terminal_activity;
+        let drag_agent_status = chrome.agent.status;
+        let drag_terminal_activity = chrome.terminal_activity;
 
         // Replicate the item's rendered width: sidebar width minus the card
         // gutter/border and the card's inner paddings around the list.
@@ -345,7 +351,7 @@ impl Sidebar {
         let temporary = ws.temporary;
 
         let progress = (!vertical_tabs)
-            .then(|| ws.progress.fraction())
+            .then(|| chrome.progress.fraction())
             .flatten()
             .map(|fraction| workspace_progress_bar(fraction, cx));
 

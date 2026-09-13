@@ -105,12 +105,12 @@ use crate::ui::tab_bar::TabStrip;
 use crate::ui::terminal_layout::TerminalLayout;
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workflows::WorkflowsView;
-use crate::ui::workspace_sidebar::{self, Sidebar, SidebarTab, SidebarUsage};
+use crate::ui::workspace_sidebar::{self, Sidebar, SidebarTab, SidebarUsage, WorkspaceChrome};
 use crate::usage_sources::{account_sources, daily_source};
 use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
 use crate::workspace::{
-    self, ProgressTally, TerminalActivity, WorkspaceId, WorkspaceKind, WorkspaceManager,
-    WorkspaceRoots, best_match, exact_match,
+    ProgressTally, TerminalActivity, WorkspaceId, WorkspaceKind, WorkspaceManager, WorkspaceRoots,
+    best_match, exact_match,
 };
 
 /// A workspace cwd as a shell working directory: `None` for empty or the
@@ -559,47 +559,43 @@ impl Shell {
             .map_or(TerminalActivity::Idle, TerminalActivity::Finished)
     }
 
-    fn projected_workspace_summaries(&self, cx: &App) -> Vec<workspace::WorkspaceSummary> {
-        let mut summaries = self.workspaces.summaries();
+    fn workspace_chrome(&self, cx: &App) -> Vec<WorkspaceChrome> {
+        self.workspaces
+            .summaries()
+            .into_iter()
+            .map(|summary| {
+                let tabs = self.workspaces.tabs_of(summary.id);
 
-        for summary in &mut summaries {
-            let routes: Vec<_> = self
-                .workspaces
-                .tabs_of(summary.id)
-                .into_iter()
-                .flat_map(|tabs| tabs.tabs())
-                .flat_map(|tab| Self::agent_routes_in_surface(tab.surface(), cx))
-                .collect();
+                let routes: Vec<_> = tabs
+                    .into_iter()
+                    .flat_map(|tabs| tabs.tabs())
+                    .flat_map(|tab| Self::agent_routes_in_surface(tab.surface(), cx))
+                    .collect();
 
-            let projection = self.agent_monitor.project(&routes);
+                let agent = self.agent_monitor.project(&routes);
 
-            summary.agent_status = projection.status;
-            summary.unread_count = projection.unread_count;
-            summary.latest_unread_text = projection.latest_unread_text;
+                let terminal_activity = tabs
+                    .into_iter()
+                    .flat_map(|tabs| tabs.tabs())
+                    .map(|tab| Self::tab_terminal_activity(tab, cx))
+                    .fold(TerminalActivity::Idle, TerminalActivity::merge);
 
-            summary.terminal_activity = self
-                .workspaces
-                .tabs_of(summary.id)
-                .into_iter()
-                .flat_map(|tabs| tabs.tabs())
-                .map(|tab| Self::tab_terminal_activity(tab, cx))
-                .fold(TerminalActivity::Idle, TerminalActivity::merge);
+                let progress = tabs
+                    .into_iter()
+                    .flat_map(|tabs| tabs.tabs())
+                    .filter_map(|tab| tab.surface().agent())
+                    .filter_map(|pane| pane.read(cx).task_tally(cx))
+                    .map(|(done, total)| ProgressTally::tasks(done, total))
+                    .fold(summary.terminal_progress, ProgressTally::merge);
 
-            // The manager's tally covers what the tabs report over OSC 9;4;
-            // an agent's task list lives inside a pane entity, which only a
-            // reader holding the app context can reach.
-            summary.progress = self
-                .workspaces
-                .tabs_of(summary.id)
-                .into_iter()
-                .flat_map(|tabs| tabs.tabs())
-                .filter_map(|tab| tab.surface().agent())
-                .filter_map(|pane| pane.read(cx).task_tally(cx))
-                .map(|(done, total)| ProgressTally::tasks(done, total))
-                .fold(summary.progress, ProgressTally::merge);
-        }
-
-        summaries
+                WorkspaceChrome {
+                    summary,
+                    agent,
+                    terminal_activity,
+                    progress,
+                }
+            })
+            .collect()
     }
 
     /// Project each tab's routes once for the two chrome indicators. Busy is

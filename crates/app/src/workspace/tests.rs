@@ -19,15 +19,11 @@ fn multi_root_summaries(roots: &[Vec<&str>]) -> Vec<WorkspaceSummary> {
             cwd: cwds[0].to_string(),
             additional_cwds: cwds[1..].iter().map(|cwd| cwd.to_string()).collect(),
             active: i == 0,
-            agent_status: AgentRuntimeStatus::Idle,
-            terminal_activity: TerminalActivity::Idle,
-            unread_count: 0,
-            latest_unread_text: None,
             pinned: false,
             closeable: roots.len() > 1,
             temporary: false,
             kind: WorkspaceKind::Normal,
-            progress: ProgressTally::default(),
+            terminal_progress: ProgressTally::default(),
         })
         .collect()
 }

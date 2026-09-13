@@ -18,7 +18,7 @@ use gpui_component::scroll::Scrollbar;
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, IconNamed, Selectable, Sizable, h_flex, v_flex,
 };
-use nmt_agent::AgentRuntimeStatus;
+use nmt_agent::{AgentProjection, AgentRuntimeStatus};
 use nmt_config::appearance::TabBarStyle;
 use nmt_terminal::event::ProgressReport;
 use rust_i18n::t;
@@ -43,7 +43,14 @@ use crate::ui::workspace_sidebar::drag::{
 };
 use crate::ui::{AppSettings, NewWorkspace, Shell, UI_RADIUS};
 use crate::window::WindowRegistry;
-use crate::workspace::{TerminalActivity, WorkspaceKind, WorkspaceSummary};
+use crate::workspace::{ProgressTally, TerminalActivity, WorkspaceKind, WorkspaceSummary};
+
+pub(super) struct WorkspaceChrome {
+    pub summary: WorkspaceSummary,
+    pub agent: AgentProjection,
+    pub terminal_activity: TerminalActivity,
+    pub progress: ProgressTally,
+}
 
 /// Default expanded width of the workspace sidebar, in pixels; the user can
 /// drag the right edge to resize.
@@ -128,7 +135,7 @@ impl Sidebar {
     /// `ToggleSidebar` (Ctrl+Shift+B).
     pub(super) fn render(
         &mut self,
-        summaries: Vec<WorkspaceSummary>,
+        summaries: Vec<WorkspaceChrome>,
         // One entry per summary in the vertical tab-bar style, empty in the
         // horizontal one where the title bar still owns the tabs.
         tabs: Vec<Vec<SidebarTab>>,
@@ -148,7 +155,11 @@ impl Sidebar {
         }
 
         let width = self.width;
-        let has_temporary_workspaces = summaries.iter().any(|workspace| workspace.temporary);
+
+        let has_temporary_workspaces = summaries
+            .iter()
+            .any(|workspace| workspace.summary.temporary);
+
         let show_daily_token_usage = cx.global::<AppSettings>().appearance.show_daily_token_usage;
         let show_agent_usage = cx.global::<AppSettings>().agent.show_agent_usage;
 
@@ -270,7 +281,7 @@ impl Sidebar {
                                 // effect. A pinned or sole workspace refuses both,
                                 // and the row withholds a control that would do
                                 // nothing.
-                                let closeable = ws_tabs.len() > 1 || ws.closeable;
+                                let closeable = ws_tabs.len() > 1 || ws.summary.closeable;
 
                                 rows.extend(ws_tabs.iter().enumerate().map(|(tab_idx, tab)| {
                                     self.render_tab_row(idx, tab_idx, tab, closeable, renames, cx)
