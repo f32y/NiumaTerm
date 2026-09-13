@@ -17,8 +17,6 @@ theme = "modern_dark"
 
 [cursor]
 shape = "Block"
-blinking = false
-blinking-interval = 800
 
 [shell]
 program = "powershell"

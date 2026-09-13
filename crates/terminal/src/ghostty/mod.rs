@@ -1144,7 +1144,6 @@ impl GhosttyTerminal {
             y: 0,
             visible: false,
             shape: ansi::CursorShape::Block,
-            blinking: false,
         });
 
         let palette = self.color_palette();

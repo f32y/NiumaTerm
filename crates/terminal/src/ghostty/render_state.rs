@@ -223,7 +223,7 @@ impl RenderStateReader {
             )
         })?;
 
-        // DECSCUSR shape and modes-based blink come from the render state.
+        // DECSCUSR determines the cursor shape reported by the render state.
         let mut style: VtRenderStateCursorVisualStyle::Type = VtRenderStateCursorVisualStyle::BLOCK;
 
         let _ = unsafe {
@@ -239,16 +239,6 @@ impl RenderStateReader {
             VtRenderStateCursorVisualStyle::UNDERLINE => ansi::CursorShape::Underline,
             // BLOCK and BLOCK_HOLLOW → Block (terminal renders hollow from focus state).
             _ => ansi::CursorShape::Block,
-        };
-
-        let mut blinking = false;
-
-        let _ = unsafe {
-            ghostty_render_state_get(
-                self.render_state,
-                VtRenderStateData::CURSOR_BLINKING,
-                (&mut blinking as *mut bool).cast(),
-            )
         };
 
         let mut has_viewport = false;
@@ -267,7 +257,6 @@ impl RenderStateReader {
                 y: 0,
                 visible: false,
                 shape,
-                blinking,
             });
         }
 
@@ -295,7 +284,6 @@ impl RenderStateReader {
             y,
             visible,
             shape,
-            blinking,
         })
     }
 

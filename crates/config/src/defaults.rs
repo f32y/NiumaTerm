@@ -10,11 +10,6 @@ pub fn default_bool_true() -> bool {
 }
 
 #[inline]
-pub fn default_cursor_interval() -> u64 {
-    800
-}
-
-#[inline]
 pub fn default_shell() -> Shell {
     #[cfg(not(target_os = "windows"))]
     {

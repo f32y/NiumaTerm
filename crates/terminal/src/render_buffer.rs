@@ -66,8 +66,6 @@ pub struct RenderBuffer {
     /// DECSCUSR shape + modes-based blink captured from the engine render-state.
     cursor_shape: ansi::CursorShape,
 
-    cursor_blinking: bool,
-
     /// Effective default colors captured from the render-state: the
     /// `term_colors` OSC-override layer (Foreground/Background/Cursor) over the
     /// renderer's config palette. Other slots stay `None` (config fallback).
@@ -132,7 +130,6 @@ impl RenderBuffer {
             cursor: Pos::default(),
             cursor_visible: false,
             cursor_shape: ansi::CursorShape::Block,
-            cursor_blinking: false,
             colors: TermColors::default(),
             window_bg_override: None,
             scrollbar: ScrollbarInfo::default(),
@@ -168,11 +165,6 @@ impl RenderBuffer {
     /// The cursor's DECSCUSR shape captured from the render-state.
     pub fn cursor_shape(&self) -> ansi::CursorShape {
         self.cursor_shape
-    }
-
-    /// Whether the cursor blinks, derived from render-state modes.
-    pub fn cursor_blinking(&self) -> bool {
-        self.cursor_blinking
     }
 
     /// The engine scrollbar geometry captured with the last snapshot.
@@ -376,7 +368,6 @@ impl RenderBuffer {
         self.cursor = Pos::new(Line(cy as i32), Column(cx));
         self.cursor_visible = cursor.visible;
         self.cursor_shape = cursor.shape;
-        self.cursor_blinking = cursor.blinking;
 
         use nmt_config::colors::NamedColor;
 

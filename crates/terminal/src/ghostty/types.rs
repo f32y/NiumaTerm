@@ -238,9 +238,6 @@ pub struct SnapshotCursor {
 
     /// DECSCUSR shape from the render-state `CURSOR_VISUAL_STYLE`.
     pub shape: ansi::CursorShape,
-
-    /// Modes-based blink from the render-state `CURSOR_BLINKING`.
-    pub blinking: bool,
 }
 
 /// The terminal's effective default colors from the render state:

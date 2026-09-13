@@ -101,10 +101,6 @@ pub struct Config {
 pub struct CursorConfig {
     #[serde(default = "default_cursor")]
     pub shape: CursorShape,
-    #[serde(default = "bool::default")]
-    pub blinking: bool,
-    #[serde(default = "default_cursor_interval", rename = "blinking-interval")]
-    pub blinking_interval: u64,
 }
 
 static TESTING_MODE: AtomicBool = AtomicBool::new(false);
@@ -288,8 +284,6 @@ impl Default for CursorConfig {
     fn default() -> Self {
         Self {
             shape: default_cursor(),
-            blinking: false,
-            blinking_interval: default_cursor_interval(),
         }
     }
 }
