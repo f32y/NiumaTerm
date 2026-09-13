@@ -114,7 +114,7 @@ impl Render for Shell {
         // Any workspace/tab switch re-renders the shell, so this render-time
         // compare-and-set catches every switch path.
         self.sync_git_target(cx);
-        self.panels.sync_task_target(self.active_agent(), cx);
+        self.panels.sync_agent_targets(self.active_agent(), cx);
 
         // The sidebar is always mounted so it can animate its width open/closed.
         let summaries = self.workspace_chrome(cx);

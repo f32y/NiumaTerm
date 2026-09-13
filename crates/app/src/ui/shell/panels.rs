@@ -4,6 +4,10 @@
 //! Only one can be open at a time, so opening one closes whichever was there,
 //! and each is retargeted as the active tab changes rather than rebuilt.
 
+#[cfg(test)]
+#[path = "panels_tests.rs"]
+mod tests;
+
 use app::agent_tab::AgentPane;
 use gpui::{App, Context, Entity, Window};
 use nmt_config::get;
@@ -81,39 +85,24 @@ impl RightPanelController {
             .update(cx, |model, cx| model.set_target_cwd(cwd, cx));
     }
 
-    /// Point the workflow view at the active Agent pane. Only Claude Code
-    /// reports workflows, so any other pane clears the target and the view
-    /// reports that there is no session rather than closing.
-    pub(super) fn sync_workflow_target(
-        &self,
-        active: Option<Entity<AgentPane>>,
-        cx: &mut Context<Shell>,
-    ) {
-        let handle = active
-            .filter(|pane| pane.read(cx).workflow_session_id().is_some())
-            .map(|pane| pane.downgrade());
+    /// Both views follow the active tab. Unsupported sessions clear their
+    /// target while retaining the panel's open state.
+    pub(super) fn sync_agent_targets(&self, active: Option<Entity<AgentPane>>, cx: &mut App) {
+        let (workflow_target, task_target) = active.map_or((None, None), |pane| {
+            let view = pane.read(cx);
 
-        let workflows = self.panel.read(cx).workflows().clone();
+            (
+                view.workflow_session_id().map(|_| pane.downgrade()),
+                view.background_task_parent().map(|_| pane.downgrade()),
+            )
+        });
 
-        workflows.update(cx, |view, cx| view.set_target(handle, cx));
-    }
+        let panel = self.panel.read(cx);
+        let workflows = panel.workflows().clone();
+        let tasks = panel.tasks().clone();
 
-    /// Point the view at the active Agent pane. A pane with no supported
-    /// provider session clears the target rather than closing the view: the
-    /// panel reports that there is nothing to show, which keeps the right-side
-    /// area from vanishing while the user moves between tabs.
-    pub(super) fn sync_task_target(
-        &self,
-        active: Option<Entity<AgentPane>>,
-        cx: &mut Context<Shell>,
-    ) {
-        let handle = active
-            .filter(|pane| pane.read(cx).background_task_parent().is_some())
-            .map(|pane| pane.downgrade());
-
-        let tasks = self.panel.read(cx).tasks().clone();
-
-        tasks.update(cx, |view, cx| view.set_target(handle, cx));
+        workflows.update(cx, |view, cx| view.set_target(workflow_target, cx));
+        tasks.update(cx, |view, cx| view.set_target(task_target, cx));
     }
 
     /// Show `kind`, or close the area when it was already showing. Reports
@@ -173,7 +162,7 @@ impl Shell {
         let open = self.panels.select(RightPanelKind::BackgroundTasks, cx);
 
         if open {
-            self.panels.sync_task_target(self.active_agent(), cx);
+            self.panels.sync_agent_targets(self.active_agent(), cx);
 
             // Asking for fresher data happens on the open edge, not on every
             // render, so a visible panel does not re-query the provider each
@@ -199,7 +188,7 @@ impl Shell {
         let open = self.panels.select(RightPanelKind::Workflows, cx);
 
         if open {
-            self.panels.sync_workflow_target(self.active_agent(), cx);
+            self.panels.sync_agent_targets(self.active_agent(), cx);
         }
 
         // Git owns the poller's own visibility flag; leaving Git for another
