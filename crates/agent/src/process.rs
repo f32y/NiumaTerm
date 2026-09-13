@@ -47,7 +47,7 @@ impl AgentProcess {
         AgentRoute(format!("{}-{counter:x}", self.nonce))
     }
 
-    pub fn next_notification_counter(&self) -> u64 {
+    pub(crate) fn next_notification_counter(&self) -> u64 {
         self.next_notification.fetch_add(1, Ordering::Relaxed)
     }
 
@@ -74,7 +74,7 @@ impl AgentProcess {
     /// Installers use the same absolute binary path exported to pane children,
     /// so their registrations keep working when NiumaTerm is installed in a
     /// directory that is not on `PATH`.
-    pub fn hook_executable(&self) -> Option<&str> {
+    pub(crate) fn hook_executable(&self) -> Option<&str> {
         self.hook_executable.get().map(String::as_str)
     }
 
