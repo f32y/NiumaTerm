@@ -64,16 +64,6 @@ fn strip_verbatim_prefix(path: &str) -> String {
         .unwrap_or_else(|| path.to_string())
 }
 
-/// Whether every listed directory currently resolves. Availability is
-/// presentation state: a saved workspace keeps a directory it cannot reach, so
-/// a disconnected drive marks a row instead of dropping it.
-fn check_availability(paths: Vec<String>) -> Vec<bool> {
-    paths
-        .into_iter()
-        .map(|path| path::Path::new(&path).is_dir())
-        .collect()
-}
-
 /// Draft directory list behind the workspace-directory dialog. Owning the
 /// draft rather than mutating the workspace directly is what lets Cancel leave
 /// a running workspace untouched.
@@ -82,8 +72,8 @@ pub(crate) struct WorkspaceDirsEditor {
     /// non-empty [`WorkspaceRoots`] invariant cannot express.
     roots: Option<WorkspaceRoots>,
 
-    /// Parallel to `roots.ordered()`; refreshed whenever the list changes.
-    available: Vec<bool>,
+    /// Path identities keep existing marks attached to their directories during edits.
+    available: RootAvailability,
 
     /// Why the last action did nothing, shown under the list.
     notice: Option<SharedString>,
@@ -93,7 +83,7 @@ impl WorkspaceDirsEditor {
     pub(crate) fn new(roots: Option<WorkspaceRoots>, cx: &mut Context<Self>) -> Self {
         let mut editor = Self {
             roots,
-            available: Vec::new(),
+            available: RootAvailability::default(),
             notice: None,
         };
 
@@ -120,18 +110,17 @@ impl WorkspaceDirsEditor {
     /// waits on a slow share.
     fn refresh_availability(&mut self, cx: &mut Context<Self>) {
         let paths = self.ordered();
-        let expected = paths.len();
+        let expected = paths.clone();
 
         cx.spawn(async move |editor, cx| {
             let available = cx
                 .background_executor()
-                .spawn(async move { check_availability(paths) })
+                .spawn(async move { RootAvailability::check(paths) })
                 .await;
 
             let _ = editor.update(cx, |editor, cx| {
-                // A second edit may have landed while the check ran; a stale
-                // answer of the wrong length would mislabel rows.
-                if editor.ordered().len() == expected {
+                // An older check must not replace results for a different directory list.
+                if editor.ordered() == expected {
                     editor.available = available;
 
                     cx.notify();
@@ -222,7 +211,7 @@ impl WorkspaceDirsEditor {
 
         // A row whose check has not returned yet reads as available; marking
         // it unavailable first would flash a warning on every edit.
-        let unavailable = self.available.get(index).is_some_and(|ok| !ok);
+        let unavailable = !self.available.is_available(&path);
         let promote = path.clone();
         let detach = path.clone();
 
@@ -514,26 +503,30 @@ pub(super) struct RootAvailability {
 }
 
 impl RootAvailability {
+    fn check(paths: Vec<String>) -> Self {
+        Self {
+            unavailable: paths
+                .into_iter()
+                .filter(|path| !path::Path::new(path).is_dir())
+                .filter_map(|path| root_key(&path))
+                .collect(),
+        }
+    }
+
     /// Re-check the given directories off the UI thread and remember which
     /// ones the filesystem could not reach. Rendering a sidebar row or opening
     /// the New Tab menu reads the remembered answer, so neither one waits on a
     /// sleeping disk or a disconnected share.
     pub(super) fn refresh(&mut self, paths: Vec<String>, cx: &mut Context<Shell>) {
         cx.spawn(async move |shell, cx| {
-            let unreachable = cx
+            let available = cx
                 .background_executor()
-                .spawn(async move {
-                    paths
-                        .into_iter()
-                        .filter(|path| !path::Path::new(path).is_dir())
-                        .filter_map(|path| root_key(&path))
-                        .collect::<collections::HashSet<String>>()
-                })
+                .spawn(async move { Self::check(paths) })
                 .await;
 
             let _ = shell.update(cx, |this, cx| {
-                if this.root_availability.unavailable != unreachable {
-                    this.root_availability.unavailable = unreachable;
+                if this.root_availability.unavailable != available.unavailable {
+                    this.root_availability = available;
 
                     cx.notify();
                 }
@@ -581,4 +574,48 @@ impl Shell {
 /// that names no concrete location.
 fn root_key(path: &str) -> Option<String> {
     Some(root_identity(path)?.join("/"))
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::tempdir;
+
+    use crate::ui::shell::workspace_dirs::{RootAvailability, WorkspaceDirsEditor};
+    use crate::workspace::WorkspaceRoots;
+
+    #[test]
+    fn directory_marks_follow_paths_through_reordering_and_replacement() {
+        let directory = tempdir().unwrap();
+        let present = directory.path().to_string_lossy().into_owned();
+
+        let missing = directory
+            .path()
+            .join("missing")
+            .to_string_lossy()
+            .into_owned();
+
+        let replacement = directory
+            .path()
+            .join("replacement")
+            .to_string_lossy()
+            .into_owned();
+
+        let mut editor = WorkspaceDirsEditor {
+            roots: Some(WorkspaceRoots::new(present.clone(), vec![missing.clone()])),
+            available: RootAvailability::check(vec![present.clone(), missing.clone()]),
+            notice: None,
+        };
+
+        editor.roots.as_mut().unwrap().make_primary(&missing);
+
+        let paths = editor.ordered();
+
+        assert!(!editor.available.is_available(&paths[0]));
+        assert!(editor.available.is_available(&paths[1]));
+
+        editor.roots = Some(WorkspaceRoots::new(replacement.clone(), vec![present]));
+
+        // A new path remains unmarked until its own check completes.
+        assert!(editor.available.is_available(&replacement));
+    }
 }
