@@ -16,7 +16,7 @@ impl Backend {
             #[cfg(any(test, feature = "test-support"))]
             Self::Test(backend) => &backend.team_recovered_turns,
 
-            _ => &[],
+            Self::Claude(_) | Self::DeepSeek(_) => &[],
         }
     }
 
@@ -36,12 +36,8 @@ impl Backend {
             return Err("The saved Team conversation belongs to another provider.".into());
         }
 
-        if kind == AgentKind::DeepSeek && recovery.is_some() {
-            return Err("DeepSeek cannot resume this saved Team conversation. Keep its history and explicitly create a new member.".into());
-        }
-
-        if kind == AgentKind::Codex {
-            return app_server::Session::spawn_team(
+        match kind {
+            AgentKind::Codex => app_server::Session::spawn_team(
                 launch,
                 host_catalog,
                 workspace,
@@ -50,16 +46,25 @@ impl Backend {
                 deliver,
                 |line| trace!("codex app-server: {line}"),
             )
-            .map(Self::Codex);
-        }
+            .map(Self::Codex),
 
-        Self::spawn(kind, launch, host_catalog, workspace, recovery, deliver)
+            AgentKind::DeepSeek if recovery.is_some() => Err(
+                "DeepSeek cannot resume this saved Team conversation. Keep its history and explicitly create a new member.".into(),
+            ),
+
+            AgentKind::Claude | AgentKind::DeepSeek => {
+                Self::spawn(kind, launch, host_catalog, workspace, recovery, deliver)
+            }
+        }
     }
 
     pub fn team_capabilities(&self, kind: AgentKind, backend_generation: u64) -> TeamCapabilities {
         match self {
             Self::Codex(session) => session.team_capabilities(backend_generation),
-            _ => TeamCapabilities::unverified(kind),
+            Self::Claude(_) | Self::DeepSeek(_) => TeamCapabilities::unverified(kind),
+
+            #[cfg(any(test, feature = "test-support"))]
+            Self::Test(_) => TeamCapabilities::unverified(kind),
         }
     }
 
@@ -71,7 +76,10 @@ impl Backend {
     ) -> bool {
         match self {
             Self::Codex(session) => session.respond_team_decision(request, accepted, explanation),
-            _ => false,
+            Self::Claude(_) | Self::DeepSeek(_) => false,
+
+            #[cfg(any(test, feature = "test-support"))]
+            Self::Test(_) => false,
         }
     }
 }
