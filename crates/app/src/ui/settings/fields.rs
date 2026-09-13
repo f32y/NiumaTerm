@@ -1,6 +1,6 @@
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    App, AppContext as _, Entity, FileDialogFilter, Global, ParentElement as _, PathPromptOptions,
+    App, AppContext as _, Entity, FileDialogFilter, ParentElement as _, PathPromptOptions,
     SharedString, Styled as _, Subscription, div,
 };
 use gpui_component::button::Button;
@@ -47,56 +47,37 @@ impl OpacityTarget {
     }
 }
 
-/// Both opacity fields share persistent slider entities because the settings
-/// view and its field closures are rebuilt every render.
 struct OpacitySliderState {
-    window: Entity<SliderState>,
-    image: Entity<SliderState>,
-    _subscriptions: [Subscription; 2],
+    slider: Entity<SliderState>,
+    _subscription: Subscription,
 }
-
-impl Global for OpacitySliderState {}
 
 fn opacity_slider_field(target: OpacityTarget) -> SettingField<SharedString> {
     SettingField::render(move |options, window, cx| {
-        if !cx.has_global::<OpacitySliderState>() {
-            let make_slider = |target: OpacityTarget, cx: &mut App| {
-                let value = target.value(cx.global::<AppSettings>()) as f32;
+        let state = window.use_keyed_state(("opacity-slider", target as usize), cx, |_, cx| {
+            let value = target.value(cx.global::<AppSettings>()) as f32;
 
-                let slider = cx.new(|_| {
-                    SliderState::new()
-                        .min(target.min())
-                        .max(1.0)
-                        .step(0.05)
-                        .default_value(value)
-                });
-
-                let subscription = cx.subscribe(&slider, move |_, event: &SliderEvent, cx| {
-                    let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
-
-                    target.set(value.end() as f64, cx.global_mut::<AppSettings>());
-                });
-
-                (slider, subscription)
-            };
-
-            let (window_slider, window_subscription) = make_slider(OpacityTarget::Window, cx);
-            let (image_slider, image_subscription) = make_slider(OpacityTarget::Image, cx);
-
-            cx.set_global(OpacitySliderState {
-                window: window_slider,
-                image: image_slider,
-                _subscriptions: [window_subscription, image_subscription],
+            let slider = cx.new(|_| {
+                SliderState::new()
+                    .min(target.min())
+                    .max(1.0)
+                    .step(0.05)
+                    .default_value(value)
             });
-        }
 
-        let sliders = cx.global::<OpacitySliderState>();
+            let subscription = cx.subscribe(&slider, move |_, _, event: &SliderEvent, cx| {
+                let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
 
-        let slider = match target {
-            OpacityTarget::Window => &sliders.window,
-            OpacityTarget::Image => &sliders.image,
-        }
-        .clone();
+                target.set(value.end() as f64, cx.global_mut::<AppSettings>());
+            });
+
+            OpacitySliderState {
+                slider,
+                _subscription: subscription,
+            }
+        });
+
+        let slider = state.read(cx).slider.clone();
 
         let current = target.value(cx.global::<AppSettings>()) as f32;
 
