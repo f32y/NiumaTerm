@@ -564,85 +564,79 @@ impl TerminalPane {
         let interrupts_agent = matches!(event.keystroke.key.as_str(), "escape" | "esc")
             && !event.keystroke.modifiers.modified();
 
-        match self.model.key_down(&terminal_key(&event.keystroke)) {
-            KeyOutcome::Ignored => return,
+        let outcome = self.model.key_down(&terminal_key(&event.keystroke));
+
+        if self.apply_key_outcome(outcome, window, cx) && interrupts_agent {
+            cx.emit(AgentInterrupted);
+        }
+    }
+
+    fn apply_key_outcome(
+        &mut self,
+        outcome: KeyOutcome,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match outcome {
+            KeyOutcome::Ignored => false,
 
             KeyOutcome::Scrolled(outcome) => {
                 self.apply_scroll_outcome(outcome, cx);
 
-                return;
+                false
             }
 
-            KeyOutcome::Written => self.react_to_pty_input(cx),
+            KeyOutcome::Written => {
+                self.react_to_pty_input(cx);
+                self.invalidate(cx);
+
+                true
+            }
 
             KeyOutcome::CopyPending(copy) => {
                 self.begin_copy(copy, window, cx);
 
-                return;
+                false
             }
         }
-
-        if interrupts_agent {
-            cx.emit(AgentInterrupted);
-        }
-
-        self.invalidate(cx);
     }
 
     /// Route a keystroke straight to the terminal PTY.
-    pub(super) fn feed_terminal_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
-        match self.model.send_key(&terminal_key(keystroke)) {
-            KeyOutcome::Ignored => return,
+    fn feed_terminal_key(
+        &mut self,
+        keystroke: &Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let outcome = self.model.send_key(&terminal_key(keystroke));
 
-            KeyOutcome::Scrolled(outcome) => {
-                self.apply_scroll_outcome(outcome, cx);
-
-                return;
-            }
-
-            KeyOutcome::Written => self.react_to_pty_input(cx),
-
-            KeyOutcome::CopyPending(copy) => {
-                cx.spawn(async move |this, cx| {
-                    if let Ok(Ok(text)) = copy.request.await {
-                        let _ = this.update(cx, |this, cx| {
-                            if this.model.finish_copy(text, copy.completion) {
-                                this.invalidate(cx);
-
-                                cx.notify();
-                            }
-                        });
-                    }
-                })
-                .detach();
-            }
-        }
-
-        self.invalidate(cx);
+        self.apply_key_outcome(outcome, window, cx);
     }
 
     /// Tab/Shift-Tab belong to the shell (completion) while the terminal is
     /// focused, but `Root` binds them to focus traversal and key bindings
     /// dispatch before the pane's `on_key_down` listener. These actions are
     /// bound in the deeper `Terminal` context, which wins over `Root`.
-    fn on_send_tab(&mut self, _: &SendTab, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_send_tab(&mut self, _: &SendTab, window: &mut Window, cx: &mut Context<Self>) {
         self.feed_terminal_key(
             &Keystroke {
                 modifiers: Modifiers::none(),
                 key: "tab".into(),
                 key_char: None,
             },
+            window,
             cx,
         );
     }
 
-    fn on_send_shift_tab(&mut self, _: &SendShiftTab, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_send_shift_tab(&mut self, _: &SendShiftTab, window: &mut Window, cx: &mut Context<Self>) {
         self.feed_terminal_key(
             &Keystroke {
                 modifiers: Modifiers::shift(),
                 key: "tab".into(),
                 key_char: None,
             },
+            window,
             cx,
         );
     }
