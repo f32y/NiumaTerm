@@ -74,7 +74,7 @@ impl TeamSession {
     /// Preparation uses only the supplied public sources. The invocation type
     /// requires a separate provider conversation;
     /// the member's existing private conversation is never a summary input.
-    pub fn reserve_summaries(
+    pub(crate) fn reserve_summaries(
         &mut self,
         request: SummaryRequest,
         limits: &ContextLimits,

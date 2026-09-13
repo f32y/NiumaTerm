@@ -110,7 +110,7 @@ impl Room {
         &self.attempts
     }
 
-    pub fn create_discussion(
+    pub(crate) fn create_discussion(
         &mut self,
         objective: String,
         participants: Vec<MemberId>,

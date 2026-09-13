@@ -56,14 +56,14 @@ struct PublicInput<'a> {
 }
 
 impl Room {
-    pub fn public_snapshot(&self) -> PublicSnapshot {
+    pub(crate) fn public_snapshot(&self) -> PublicSnapshot {
         PublicSnapshot {
             messages: self.messages.iter().map(|message| message.id).collect(),
             summaries: self.summaries.iter().map(|summary| summary.id).collect(),
         }
     }
 
-    pub fn prepare_context(
+    pub(crate) fn prepare_context(
         &self,
         member_id: MemberId,
         boundary: &PublicSnapshot,
@@ -260,7 +260,10 @@ impl Room {
         Err(ContextError::NeedsSummaries(chunks))
     }
 
-    pub fn summary_sources(&self, id: SummaryId) -> Result<BTreeSet<MessageId>, ContextError> {
+    pub(crate) fn summary_sources(
+        &self,
+        id: SummaryId,
+    ) -> Result<BTreeSet<MessageId>, ContextError> {
         let mut sources = BTreeSet::new();
         let mut pending = vec![id];
         let mut visited = BTreeSet::new();

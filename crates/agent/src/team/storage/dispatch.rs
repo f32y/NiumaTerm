@@ -21,7 +21,7 @@ pub enum DispatchError {
 }
 
 impl RoomStore {
-    pub fn reserve_dispatches(
+    pub(crate) fn reserve_dispatches(
         &mut self,
         intents: Vec<DispatchIntent>,
     ) -> Result<Vec<AttemptId>, DispatchError> {

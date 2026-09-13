@@ -75,7 +75,7 @@ impl Budget {
         self.limit
     }
 
-    pub fn reservations(&self) -> &BTreeMap<AttemptId, Reservation> {
+    pub(crate) fn reservations(&self) -> &BTreeMap<AttemptId, Reservation> {
         &self.reservations
     }
 
@@ -152,7 +152,7 @@ impl Budget {
         Ok(())
     }
 
-    pub fn cancel_unsent(&mut self, id: AttemptId) -> Result<(), BudgetError> {
+    pub(crate) fn cancel_unsent(&mut self, id: AttemptId) -> Result<(), BudgetError> {
         match self
             .reservations
             .get(&id)

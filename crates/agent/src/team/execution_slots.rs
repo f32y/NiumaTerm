@@ -28,7 +28,7 @@ pub struct ExecutionSlots {
 }
 
 impl ExecutionSlots {
-    pub fn is_idle(&self) -> bool {
+    pub(crate) fn is_idle(&self) -> bool {
         self.members.is_empty()
     }
 
