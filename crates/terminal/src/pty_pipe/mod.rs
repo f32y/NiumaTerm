@@ -19,7 +19,7 @@ mod ghostty_mirror_tests;
 
 use std::borrow::Cow;
 use std::io::{self, ErrorKind, Read, Write};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::AtomicU32;
 use std::sync::{self, Arc, mpsc};
 use std::{cell, error, fmt, path, time};
 
@@ -119,7 +119,7 @@ pub struct PtyPipe<T: EventedPty, U: EventListener> {
     /// Monotonic content version, bumped once per PTY batch / resize (the engine
     /// exposes no generation signal). The frontend's deep-search corpus cache
     /// compares it to detect content changes and invalidate cached views.
-    content_version: Arc<AtomicU64>,
+    content_version: u64,
 
     /// Optional observer for the exact VT stream accepted by the engine. It runs
     /// on the owner thread before another command or byte batch can run,
@@ -298,7 +298,7 @@ where
             render_buffer,
             back_buffer: RenderBuffer::new(cols as usize, rows as usize),
             vt_modes,
-            content_version: Arc::new(AtomicU64::new(0)),
+            content_version: 0,
             output_sink: None,
             terminal_responses_enabled: true,
             event_proxy,
@@ -393,8 +393,7 @@ where
             self.on_pty_chunk(&buf[..unprocessed]);
 
             // Content changed, so invalidate the cached deep-search corpus.
-            self.content_version
-                .fetch_add(1, sync::atomic::Ordering::Relaxed);
+            self.content_version = self.content_version.wrapping_add(1);
 
             processed += unprocessed;
             unprocessed = 0;
@@ -626,7 +625,7 @@ where
 
                 let capture = engine.snapshot_into(
                     &mut self.back_buffer,
-                    self.content_version.load(sync::atomic::Ordering::Relaxed),
+                    self.content_version,
                     self.theme_revision,
                 );
 
@@ -871,13 +870,13 @@ where
             #[cfg(enable_profiling)]
             let capture_started = self.profile.start();
 
-            let revision = self
-                .content_version
-                .fetch_add(1, sync::atomic::Ordering::Relaxed)
-                + 1;
+            self.content_version = self.content_version.wrapping_add(1);
 
-            let capture =
-                engine.snapshot_into(&mut self.back_buffer, revision, self.theme_revision);
+            let capture = engine.snapshot_into(
+                &mut self.back_buffer,
+                self.content_version,
+                self.theme_revision,
+            );
 
             #[cfg(enable_profiling)]
             self.profile.record(Stage::CaptureResize, capture_started);
@@ -1215,7 +1214,7 @@ where
 
                 answer_query(
                     &mut self.ghostty,
-                    self.content_version.load(Ordering::Relaxed),
+                    self.content_version,
                     self.theme_revision,
                     query,
                 );
@@ -1254,7 +1253,7 @@ where
     }
 
     fn publish_command(&mut self) {
-        self.content_version.fetch_add(1, Ordering::Relaxed);
+        self.content_version = self.content_version.wrapping_add(1);
         self.snapshot_pending = true;
 
         #[cfg(enable_profiling)]
