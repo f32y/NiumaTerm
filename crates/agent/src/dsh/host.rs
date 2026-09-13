@@ -289,9 +289,9 @@ pub const DEFAULT_EXECUTABLE: &str = "dsh";
 /// An exact release prevents package updates from changing the Remote API
 /// without an adapter update. It also prevents npx from selecting a different
 /// globally installed release when resolving the command.
-pub const NPX_EXECUTABLE: &str = "npx";
+pub(crate) const NPX_EXECUTABLE: &str = "npx";
 
-pub const NPX_ARGUMENTS: [&str; 2] = ["-y", "@deepseek-ai/dsh@0.1.5-rc.1"];
+pub(crate) const NPX_ARGUMENTS: [&str; 2] = ["-y", "@deepseek-ai/dsh@0.1.5-rc.1"];
 
 /// pnpm's one-shot package launcher. Unlike npm's dependency resolver, pnpm
 /// can resolve the harness's mutually referring peer dependencies without
@@ -301,9 +301,9 @@ pub const NPX_ARGUMENTS: [&str; 2] = ["-y", "@deepseek-ai/dsh@0.1.5-rc.1"];
 /// rebuilding the same dependency tree delays the first tab in another process
 /// by tens of seconds. The exact package release keeps later launches on the
 /// same Remote API until the adapter changes its supported release.
-pub const PNPM_DLX_EXECUTABLE: &str = "pnpm";
+pub(crate) const PNPM_DLX_EXECUTABLE: &str = "pnpm";
 
-pub const PNPM_DLX_ARGUMENTS: [&str; 3] = [
+pub(crate) const PNPM_DLX_ARGUMENTS: [&str; 3] = [
     "dlx",
     "--config.dlx-cache-max-age=Infinity",
     "@deepseek-ai/dsh@0.1.5-rc.1",

@@ -10,12 +10,13 @@
 //! The Remote API supplies raw session events, projection updates, and
 //! answerable interactions over independent logical streams on one connection.
 
-pub use crate::dsh::host::{
-    DEFAULT_EXECUTABLE, Host, HostError, NPX_ARGUMENTS, NPX_EXECUTABLE, PNPM_DLX_ARGUMENTS,
-    PNPM_DLX_EXECUTABLE,
-};
+pub use crate::dsh::host::{DEFAULT_EXECUTABLE, Host, HostError};
 pub use crate::dsh::session::Session;
 pub use crate::dsh::version::{SUPPORTED_VERSIONS, VersionSupport, describe_version};
+
+pub(crate) use crate::dsh::host::{
+    NPX_ARGUMENTS, NPX_EXECUTABLE, PNPM_DLX_ARGUMENTS, PNPM_DLX_EXECUTABLE,
+};
 
 mod api;
 mod commands;
