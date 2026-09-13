@@ -1,19 +1,16 @@
 use std::borrow::Cow;
-use std::collections::VecDeque;
 use std::fmt::{self, Debug, Formatter};
 use std::sync::{self, Arc};
 use std::{option, path, time};
 
 use nmt_config::CursorShape;
-use nmt_config::colors::{ColorRgb, Colors};
+use nmt_config::colors::Colors;
 use nmt_platform::{Waker, WinsizeBuilder};
 
 use crate::clipboard::ClipboardType;
 use crate::ghostty;
 use crate::graphics::UpdateQueues;
 use crate::session::request::{CheckpointRequest, Query, Reply};
-use crate::terminal::Match;
-use crate::terminal::pos::{Direction, Pos};
 
 /// Opaque window identifier carried on terminal events. In the GPUI shell this
 /// is just an id value (the old winit `WindowId` is gone); headless sessions use
@@ -153,15 +150,8 @@ impl MsgSender {
 
 #[derive(Clone)]
 pub enum TerminalEvent {
-    PrepareRender(u64),
-    PrepareRenderOnRoute(u64, usize),
-    PrepareUpdateConfig,
-
     /// New terminal content available.
     Render,
-
-    /// New terminal content available per route.
-    RenderRoute(usize),
 
     /// Terminal content changed — lightweight notification (no damage payload).
     /// Damage versions travel in the published frame.
@@ -172,27 +162,6 @@ pub enum TerminalEvent {
         route_id: usize,
         queues: UpdateQueues,
     },
-
-    Paste,
-    Copy(String),
-    UpdateFontSize(u8),
-    ToggleFullScreen,
-    ToggleAppearanceTheme,
-    Minimize(bool),
-    Hide,
-    HideOtherApplications,
-    UpdateConfig,
-    CreateWindow,
-    CloseWindow,
-    CreateNativeTab(Option<String>),
-    CreateConfigEditor,
-    SelectNativeTabByIndex(usize),
-    SelectNativeTabLast,
-    SelectNativeTabNext,
-    SelectNativeTabPrev,
-
-    /// Grid has changed possibly requiring a mouse cursor shape change.
-    MouseCursorDirty,
 
     /// Window title change.
     Title(String),
@@ -240,48 +209,6 @@ pub enum TerminalEvent {
     /// Request to store a text string in the clipboard.
     ClipboardStore(ClipboardType, String),
 
-    /// Request to write the contents of the clipboard to the PTY.
-    ///
-    /// `route_id` identifies the panel that emitted the request so
-    /// the bytes land on the originating PTY rather than whichever
-    /// panel happens to be focused. The attached function is a
-    /// formatter which transforms the clipboard content into the
-    /// expected escape-sequence form.
-    ClipboardLoad(
-        usize,
-        ClipboardType,
-        Arc<dyn Fn(&str) -> String + Sync + Send + 'static>,
-    ),
-
-    /// Request to write the RGB value of a color to the PTY.
-    ///
-    /// `route_id` identifies the panel that emitted the request so
-    /// the reply lands on the originating PTY. The attached function
-    /// is a formatter which transforms the RGB color into the
-    /// expected escape-sequence form.
-    ColorRequest(
-        usize,
-        usize,
-        Arc<dyn Fn(ColorRgb) -> String + Sync + Send + 'static>,
-    ),
-
-    /// Write some text to the PTY identified by `route_id`. Routing
-    /// by panel (rather than the focused context) is required so
-    /// CSI / OSC reply bytes land on the shell that asked for them
-    /// even if the user focuses a different split mid-flight.
-    PtyWrite(usize, String),
-
-    /// Request to write the text area size to the PTY of `route_id`.
-    TextAreaSizeRequest(
-        usize,
-        Arc<dyn Fn(WinsizeBuilder) -> String + Sync + Send + 'static>,
-    ),
-
-    /// Cursor blinking state has changed.
-    CursorBlinkingChange,
-
-    CursorBlinkingChangeOnRoute(usize),
-
     /// Progress bar report from OSC 9;4 sequence
     ProgressReport(ProgressReport),
 
@@ -297,28 +224,8 @@ pub enum TerminalEvent {
     /// Shutdown request.
     Exit,
 
-    /// Quit request.
-    Quit,
-
     /// Leave current terminal.
     CloseTerminal(usize),
-
-    BlinkCursor(u64, usize),
-
-    /// Selection scroll tick — auto-scroll while dragging outside viewport.
-    SelectionScrollTick,
-
-    /// Update window titles.
-    UpdateTitles,
-
-    /// Update terminal screen colors.
-    ///
-    /// The first usize is the route_id, the second is the color index to change.
-    /// Color index: 0 for foreground, 1 for background, 2 for cursor color.
-    ColorChange(usize, usize, Option<ColorRgb>),
-
-    // No operation
-    Noop,
 }
 
 impl Debug for TerminalEvent {
@@ -326,22 +233,6 @@ impl Debug for TerminalEvent {
         match self {
             TerminalEvent::ClipboardStore(ty, text) => {
                 write!(f, "ClipboardStore({ty:?}, {text})")
-            }
-
-            TerminalEvent::ClipboardLoad(route_id, ty, _) => {
-                write!(f, "ClipboardLoad(route={route_id}, {ty:?})")
-            }
-
-            TerminalEvent::TextAreaSizeRequest(route_id, _) => {
-                write!(f, "TextAreaSizeRequest(route={route_id})")
-            }
-
-            TerminalEvent::ColorRequest(route_id, index, _) => {
-                write!(f, "ColorRequest(route={route_id}, idx={index})")
-            }
-
-            TerminalEvent::PtyWrite(route_id, text) => {
-                write!(f, "PtyWrite(route={route_id}, {text})")
             }
 
             TerminalEvent::Title(title) => write!(f, "Title({title})"),
@@ -371,32 +262,14 @@ impl Debug for TerminalEvent {
                 write!(f, "BlockBatch({} events)", events.len())
             }
 
-            TerminalEvent::Minimize(cond) => write!(f, "Minimize({cond})"),
-            TerminalEvent::Hide => write!(f, "Hide"),
-            TerminalEvent::HideOtherApplications => write!(f, "HideOtherApplications"),
-            TerminalEvent::CursorBlinkingChange => write!(f, "CursorBlinkingChange"),
-
-            TerminalEvent::CursorBlinkingChangeOnRoute(route_id) => {
-                write!(f, "CursorBlinkingChangeOnRoute {route_id}")
-            }
-
             TerminalEvent::ProgressReport(report) => {
                 write!(f, "ProgressReport({:?})", report)
             }
 
-            TerminalEvent::MouseCursorDirty => write!(f, "MouseCursorDirty"),
             TerminalEvent::ResetTitle => write!(f, "ResetTitle"),
             TerminalEvent::ReadReady => f.write_str("ReadReady"),
             TerminalEvent::Cwd(cwd) => f.debug_tuple("Cwd").field(cwd).finish(),
-            TerminalEvent::PrepareUpdateConfig => write!(f, "PrepareUpdateConfig"),
-            TerminalEvent::PrepareRender(millis) => write!(f, "PrepareRender({millis})"),
-
-            TerminalEvent::PrepareRenderOnRoute(millis, route) => {
-                write!(f, "PrepareRender({millis} on route {route})")
-            }
-
             TerminalEvent::Render => write!(f, "Render"),
-            TerminalEvent::RenderRoute(route) => write!(f, "Render route {route}"),
 
             TerminalEvent::TerminalDamaged(route_id) => {
                 write!(f, "TerminalDamaged route {route_id}")
@@ -409,41 +282,10 @@ impl Debug for TerminalEvent {
             }
 
             TerminalEvent::Exit => write!(f, "Exit"),
-            TerminalEvent::Quit => write!(f, "Quit"),
             TerminalEvent::CloseTerminal(route) => write!(f, "CloseTerminal {route}"),
-            TerminalEvent::CreateWindow => write!(f, "CreateWindow"),
-            TerminalEvent::CloseWindow => write!(f, "CloseWindow"),
-            TerminalEvent::CreateNativeTab(_) => write!(f, "CreateNativeTab"),
-
-            TerminalEvent::SelectNativeTabByIndex(tab_index) => {
-                write!(f, "SelectNativeTabByIndex({tab_index})")
-            }
-
-            TerminalEvent::SelectNativeTabLast => write!(f, "SelectNativeTabLast"),
-            TerminalEvent::SelectNativeTabNext => write!(f, "SelectNativeTabNext"),
-            TerminalEvent::SelectNativeTabPrev => write!(f, "SelectNativeTabPrev"),
-            TerminalEvent::CreateConfigEditor => write!(f, "CreateConfigEditor"),
-            TerminalEvent::UpdateConfig => write!(f, "ReloadConfiguration"),
-            TerminalEvent::ToggleFullScreen => write!(f, "FullScreen"),
-            TerminalEvent::ToggleAppearanceTheme => write!(f, "ToggleAppearanceTheme"),
-
-            TerminalEvent::BlinkCursor(timeout, route_id) => {
-                write!(f, "BlinkCursor {timeout} {route_id}")
-            }
-
-            TerminalEvent::SelectionScrollTick => write!(f, "SelectionScrollTick"),
-            TerminalEvent::UpdateTitles => write!(f, "UpdateTitles"),
-            TerminalEvent::Noop => write!(f, "Noop"),
-            TerminalEvent::Copy(_) => write!(f, "Copy"),
-            TerminalEvent::Paste => write!(f, "Paste"),
-            TerminalEvent::UpdateFontSize(action) => write!(f, "UpdateFontSize({action:?})"),
 
             TerminalEvent::UpdateGraphics { route_id, .. } => {
                 write!(f, "UpdateGraphics({route_id})")
-            }
-
-            TerminalEvent::ColorChange(route_id, color, rgb) => {
-                write!(f, "ColorChange({route_id}, {color:?}, {rgb:?})")
             }
         }
     }
@@ -478,58 +320,6 @@ impl From<TerminalEvent> for TerminalEventType {
 impl EventListener for VoidListener {
     fn event(&self) -> (option::Option<TerminalEvent>, bool) {
         (None, false)
-    }
-}
-
-/// Regex search state.
-pub struct SearchState {
-    /// Search direction.
-    pub direction: Direction,
-
-    /// Current position in the search history.
-    pub history_index: Option<usize>,
-
-    /// Search origin in viewport coordinates relative to original display offset.
-    pub origin: Pos,
-
-    /// Focused match during active search.
-    pub focused_match: Option<Match>,
-
-    /// Search regex and history.
-    ///
-    /// During an active search, the first element is the user's current input.
-    ///
-    /// While going through history, the [`SearchState::history_index`] will point to the element
-    /// in history which is currently being previewed.
-    pub history: VecDeque<String>,
-}
-
-impl SearchState {
-    /// Search regex text if a search is active.
-    pub fn regex(&self) -> Option<&String> {
-        self.history_index.and_then(|index| self.history.get(index))
-    }
-
-    /// Direction of the search from the search origin.
-    pub fn direction(&self) -> Direction {
-        self.direction
-    }
-
-    /// Focused match during vi-less search.
-    pub fn focused_match(&self) -> Option<&Match> {
-        self.focused_match.as_ref()
-    }
-}
-
-impl Default for SearchState {
-    fn default() -> Self {
-        Self {
-            direction: Direction::Right,
-            focused_match: Default::default(),
-            history_index: Default::default(),
-            history: Default::default(),
-            origin: Default::default(),
-        }
     }
 }
 
