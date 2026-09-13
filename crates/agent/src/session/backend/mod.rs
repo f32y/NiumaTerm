@@ -20,6 +20,8 @@ use crate::chat::{
 use crate::claude_code::sessions::RestoredTask;
 use crate::claude_code::stream_json;
 use crate::codex::app_server;
+use crate::session::capabilities::AgentCapabilities as _;
+use crate::session::input::ApprovalOutcome;
 #[cfg(any(test, feature = "test-support"))]
 use crate::session::test_support::{InputResponse, TestBackend};
 use crate::session::{AgentKind, ImageAttachment, OperationError, UnsupportedOperation};
@@ -626,11 +628,22 @@ impl Backend {
         }
     }
 
-    pub fn respond_approval(&mut self, decision: &str) -> bool {
-        match self {
-            Backend::Codex(session) => session.respond_approval(decision),
-            Backend::Claude(session) => session.respond_approval(decision),
-            Backend::DeepSeek(session) => session.respond_approval(decision),
+    pub fn respond_approval(&mut self, decision: &str) -> ApprovalOutcome {
+        let (accepted, waits) = match self {
+            Backend::Codex(session) => (
+                session.respond_approval(decision),
+                AgentKind::Codex.caps().async_approval_resolution,
+            ),
+
+            Backend::Claude(session) => (
+                session.respond_approval(decision),
+                AgentKind::Claude.caps().async_approval_resolution,
+            ),
+
+            Backend::DeepSeek(session) => (
+                session.respond_approval(decision),
+                AgentKind::DeepSeek.caps().async_approval_resolution,
+            ),
 
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => {
@@ -638,8 +651,16 @@ impl Backend {
                     session.approval_responses.push(decision.to_owned());
                 }
 
-                session.approval_accepted
+                (session.approval_accepted, session.approval_waits)
             }
+        };
+
+        if !accepted {
+            ApprovalOutcome::Rejected
+        } else if waits {
+            ApprovalOutcome::Waiting
+        } else {
+            ApprovalOutcome::Settled
         }
     }
 

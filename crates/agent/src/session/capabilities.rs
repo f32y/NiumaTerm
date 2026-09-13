@@ -81,6 +81,9 @@ pub struct Capabilities {
     /// the tab rather than quietly working against one directory, and must
     /// never be widened to a common ancestor to look like one that can.
     pub multi_root_access: MultiRootAccess,
+
+    /// Accepted approvals remain pending until the harness confirms resolution.
+    pub async_approval_resolution: bool,
 }
 
 const CODEX: Capabilities = Capabilities {
@@ -99,6 +102,7 @@ const CODEX: Capabilities = Capabilities {
     session_search: false,
     model_selection_is_a_request: false,
     multi_root_access: MultiRootAccess::Full,
+    async_approval_resolution: false,
 };
 
 const CLAUDE: Capabilities = Capabilities {
@@ -117,6 +121,7 @@ const CLAUDE: Capabilities = Capabilities {
     session_search: false,
     model_selection_is_a_request: false,
     multi_root_access: MultiRootAccess::Full,
+    async_approval_resolution: false,
 };
 
 /// `skill_references` is false because the harness has no structured skill
@@ -145,6 +150,7 @@ const DEEPSEEK: Capabilities = Capabilities {
     // publishes a per-session multi-root policy this becomes `Full` and the
     // adapter passes every selected root.
     multi_root_access: MultiRootAccess::PrimaryOnly,
+    async_approval_resolution: true,
 };
 
 pub trait AgentCapabilities {

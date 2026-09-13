@@ -1,5 +1,5 @@
+use crate::session::SessionRuntime;
 use crate::session::input::SessionInput;
-use crate::session::{Backend, SessionRuntime};
 
 pub(super) struct Approval {
     description: String,
@@ -57,26 +57,20 @@ impl SessionInput {
             return ApprovalOutcome::Rejected;
         };
 
-        let waits = match backend {
-            Backend::DeepSeek(_) => true,
-            Backend::Codex(_) | Backend::Claude(_) => false,
+        match backend.respond_approval(decision) {
+            ApprovalOutcome::Waiting => {
+                approval.submitted = true;
 
-            #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(session) => session.approval_waits,
-        };
+                ApprovalOutcome::Waiting
+            }
 
-        if !backend.respond_approval(decision) {
-            return ApprovalOutcome::Rejected;
-        }
+            ApprovalOutcome::Settled => {
+                self.approval = None;
 
-        if waits {
-            approval.submitted = true;
+                ApprovalOutcome::Settled
+            }
 
-            ApprovalOutcome::Waiting
-        } else {
-            self.approval = None;
-
-            ApprovalOutcome::Settled
+            outcome @ (ApprovalOutcome::Ignored | ApprovalOutcome::Rejected) => outcome,
         }
     }
 }
