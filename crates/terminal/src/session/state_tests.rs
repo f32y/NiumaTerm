@@ -92,6 +92,7 @@ pub(super) fn session_from_engine(
             shared: Arc::new(SessionSharedState::default()),
             process_tree: None,
             engine_blocks: false,
+            supports_powershell_compatibility: false,
         },
         rx,
     )
@@ -117,6 +118,27 @@ fn writes_report_queue_acceptance_and_reject_closed_or_read_only_sessions() {
 
     assert!(!closed.write_text("undeliverable"));
     assert!(!closed.resize(80, 24, 800, 480));
+}
+
+#[test]
+fn powershell_setting_only_updates_supported_sessions_and_can_be_disabled() {
+    let (mut session, rx) = test_session();
+
+    assert!(!session.set_powershell_compatibility(true));
+    assert!(rx.try_recv().is_err());
+
+    session.supports_powershell_compatibility = true;
+
+    assert!(session.set_powershell_compatibility(true));
+    assert!(session.set_powershell_compatibility(false));
+    assert!(matches!(
+        rx.try_recv().unwrap(),
+        Msg::PowerShellCompatibility(true)
+    ));
+    assert!(matches!(
+        rx.try_recv().unwrap(),
+        Msg::PowerShellCompatibility(false)
+    ));
 }
 
 #[test]

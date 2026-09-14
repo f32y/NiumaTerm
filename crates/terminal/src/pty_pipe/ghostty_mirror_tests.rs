@@ -7,6 +7,7 @@ use nmt_platform::{EventedPty, ProcessReadWrite, WinsizeBuilder};
 use parking_lot::Mutex;
 
 use crate::event::{self, VoidListener};
+use crate::pty_pipe::powershell_compatibility::RESIZE_INPUT_DELAY;
 use crate::pty_pipe::{
     Interest, Poll, PtyPipe, PtyState, READ_BUFFER_SIZE, SNAPSHOT_MIN_INTERVAL,
     SYNC_OUTPUT_TIMEOUT, SessionOptions, Token, Waker, mode, publish_render_buffer, start_session,
@@ -472,6 +473,206 @@ fn pending_resize_allows_cursor_replies_and_immediate_shutdown() {
     assert!(!machine.drain_recv_channel(&mut state));
     assert_eq!(machine.ghostty.cols(), 80);
     assert_eq!(machine.pty.writer.data, b"\x1b[4;5R");
+}
+
+#[test]
+fn powershell_pause_keeps_replies_live_and_disabling_releases_ordered_input() {
+    let mut machine = resized_pipe(b"\x1b[4;5H");
+    let mut state = PtyState::default();
+    let sender = machine.channel();
+
+    sender
+        .send(event::Msg::PowerShellCompatibility(true))
+        .unwrap();
+
+    sender
+        .send(event::Msg::Resize(WinsizeBuilder {
+            cols: 60,
+            rows: 20,
+            width: 480,
+            height: 360,
+        }))
+        .unwrap();
+
+    sender
+        .send(event::Msg::Input(b"A".to_vec().into()))
+        .unwrap();
+
+    sender
+        .send(event::Msg::Resize(WinsizeBuilder {
+            cols: 100,
+            rows: 30,
+            width: 800,
+            height: 540,
+        }))
+        .unwrap();
+
+    sender
+        .send(event::Msg::Input(b"B".to_vec().into()))
+        .unwrap();
+
+    assert!(machine.drain_recv_channel(&mut state));
+    assert!(!state.needs_write());
+    assert_eq!(machine.ghostty.cols(), 60);
+
+    machine.pty.reader.data.extend_from_slice(b"\x1b[6n");
+
+    machine
+        .pty_read(&mut state, &mut [0; READ_BUFFER_SIZE])
+        .unwrap();
+
+    machine.pty_write(&mut state).unwrap();
+
+    assert_eq!(machine.pty.writer.data, b"\x1b[4;5R");
+
+    sender
+        .send(event::Msg::PowerShellCompatibility(false))
+        .unwrap();
+
+    assert!(machine.drain_recv_channel(&mut state));
+
+    machine.pty_write(&mut state).unwrap();
+
+    assert_eq!(machine.ghostty.cols(), 60);
+    assert!(machine.drain_recv_channel(&mut state));
+
+    machine.pty_write(&mut state).unwrap();
+
+    assert_eq!(machine.ghostty.cols(), 100);
+    assert_eq!(machine.pty.writer.data, b"\x1b[4;5RAB");
+
+    sender
+        .send(event::Msg::PowerShellCompatibility(true))
+        .unwrap();
+
+    sender
+        .send(event::Msg::Resize(WinsizeBuilder {
+            cols: 60,
+            rows: 20,
+            width: 480,
+            height: 360,
+        }))
+        .unwrap();
+
+    sender
+        .send(event::Msg::Input(b"discard-on-close".to_vec().into()))
+        .unwrap();
+
+    assert!(machine.drain_recv_channel(&mut state));
+
+    sender.send(event::Msg::Shutdown).unwrap();
+
+    assert!(!machine.drain_recv_channel(&mut state));
+    assert_eq!(machine.pty.writer.data, b"\x1b[4;5RAB");
+}
+
+#[test]
+fn powershell_input_deadline_wakes_a_quiet_event_loop() {
+    use std::thread;
+
+    let mut machine = resized_pipe(b"");
+    let (written, received) = sync::mpsc::channel();
+
+    machine.pty.writer.observer = Some(written);
+
+    let sender = machine.channel();
+
+    sender
+        .send(event::Msg::PowerShellCompatibility(true))
+        .unwrap();
+
+    sender
+        .send(event::Msg::Resize(WinsizeBuilder {
+            cols: 60,
+            rows: 20,
+            width: 480,
+            height: 360,
+        }))
+        .unwrap();
+
+    sender
+        .send(event::Msg::Input(b"later".to_vec().into()))
+        .unwrap();
+
+    let started = time::Instant::now();
+
+    let worker = thread::Builder::new()
+        .stack_size(4 * 1024 * 1024)
+        .spawn(move || machine.run_event_loop())
+        .unwrap();
+
+    let bytes = received.recv_timeout(time::Duration::from_secs(2));
+    let elapsed = started.elapsed();
+
+    sender.send(event::Msg::Shutdown).unwrap();
+    worker.join().unwrap();
+
+    assert_eq!(bytes.expect("input deadline did not wake poll"), b"later");
+    assert!(elapsed >= RESIZE_INPUT_DELAY);
+}
+
+#[test]
+fn powershell_pause_skips_alternate_screen_and_unchanged_grid_sizes() {
+    let mut machine = resized_pipe(b"");
+    let mut state = PtyState::default();
+    let sender = machine.channel();
+
+    sender
+        .send(event::Msg::PowerShellCompatibility(true))
+        .unwrap();
+
+    assert!(machine.drain_recv_channel(&mut state));
+
+    machine.on_resize(WinsizeBuilder {
+        cols: 80,
+        rows: 25,
+        width: 640,
+        height: 400,
+    });
+
+    sender
+        .send(event::Msg::Input(b"same-size".to_vec().into()))
+        .unwrap();
+
+    assert!(machine.drain_recv_channel(&mut state));
+
+    machine.pty_write(&mut state).unwrap();
+
+    machine.on_resize(WinsizeBuilder {
+        cols: 60,
+        rows: 20,
+        width: 480,
+        height: 360,
+    });
+
+    machine.on_pty_chunk(b"\x1b[?1049h");
+
+    sender
+        .send(event::Msg::Input(b"alternate".to_vec().into()))
+        .unwrap();
+
+    assert!(machine.drain_recv_channel(&mut state));
+
+    machine.pty_write(&mut state).unwrap();
+
+    machine.on_resize(WinsizeBuilder {
+        cols: 80,
+        rows: 25,
+        width: 640,
+        height: 400,
+    });
+
+    machine.on_pty_chunk(b"\x1b[?1049l");
+
+    sender
+        .send(event::Msg::Input(b"returned".to_vec().into()))
+        .unwrap();
+
+    assert!(machine.drain_recv_channel(&mut state));
+
+    machine.pty_write(&mut state).unwrap();
+
+    assert_eq!(machine.pty.writer.data, b"same-sizealternatereturned");
 }
 
 #[test]

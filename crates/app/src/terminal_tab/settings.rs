@@ -48,6 +48,8 @@ pub struct TerminalSettings {
     /// Fallback chain appended to the terminal font, matching the CJK
     /// preference the rest of the application text uses.
     pub font_fallbacks: FontFallbacks,
+
+    pub improve_powershell_compatibility: bool,
 }
 
 impl Global for TerminalSettings {}

@@ -97,4 +97,29 @@ pub(super) fn terminal_page() -> SettingPage {
                     ),
                 )),
         )
+        .group(
+            SettingGroup::new()
+                .title(t!("settings-terminal-advanced"))
+                .item(
+                    SettingItem::new(
+                        t!("settings-terminal-powershell-compatibility"),
+                        SettingField::switch(
+                            |cx| {
+                                cx.global::<AppSettings>()
+                                    .config()
+                                    .terminal
+                                    .improve_powershell_compatibility
+                            },
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().edit_terminal(|section| {
+                                    section.improve_powershell_compatibility = value;
+                                });
+                            },
+                        ),
+                    )
+                    .description(
+                        t!("settings-terminal-powershell-compatibility-description").into_owned(),
+                    ),
+                ),
+        )
 }

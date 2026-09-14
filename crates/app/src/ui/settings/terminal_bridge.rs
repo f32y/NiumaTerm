@@ -105,5 +105,9 @@ fn terminal_snapshot(cx: &App) -> TerminalSettings {
         background_opacity: main_view_background_opacity(cx),
         corner_radius: UI_RADIUS,
         font_fallbacks: default_font_fallbacks(),
+        improve_powershell_compatibility: settings
+            .config()
+            .terminal
+            .improve_powershell_compatibility,
     }
 }

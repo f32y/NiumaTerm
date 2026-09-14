@@ -1070,3 +1070,7 @@
 "settings-agent-enable-team" = "启用智能体团队"
 "settings-agent-enable-team-description" = "创建和重新打开智能体团队标签页。关闭后停止已打开的团队，并保留已保存的对话。"
 "team-disabled" = "智能体团队已关闭。请在设置 > 智能体 > 常规中开启“启用智能体团队”，以重新打开此团队。"
+
+"settings-terminal-advanced" = "高级"
+"settings-terminal-powershell-compatibility" = "改善 PowerShell 兼容性"
+"settings-terminal-powershell-compatibility-description" = "减少 Windows 上调整 PowerShell 终端大小时的输入错位。调整大小后，输入可能会短暂停顿。"

@@ -99,6 +99,9 @@ pub enum Msg {
 
     Query(Query),
     Checkpoint(CheckpointRequest),
+
+    /// Update the local PowerShell resize workaround without waiting behind input.
+    PowerShellCompatibility(bool),
 }
 
 /// A `Msg` sender that wakes the PTY event loop's mio `Poll` after each send, so the

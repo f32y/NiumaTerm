@@ -3,6 +3,23 @@ use tempfile::Builder as TempDirBuilder;
 use crate::application::*;
 use crate::colors::{self, hex_to_color_arr};
 
+#[test]
+fn powershell_compatibility_defaults_on_for_existing_configs_and_preserves_opt_out() {
+    for text in ["", "[terminal]\n", "[appearance]\n"] {
+        let config: Config = parse_toml(text).unwrap();
+
+        assert!(config.terminal.improve_powershell_compatibility);
+    }
+
+    let config: Config =
+        parse_toml("[terminal]\nimprove-powershell-compatibility = false\n").unwrap();
+
+    let saved = toml::to_string(&config).unwrap();
+    let restored: Config = parse_toml(&saved).unwrap();
+
+    assert!(!restored.terminal.improve_powershell_compatibility);
+}
+
 fn sample_appearance() -> AppearanceConfig {
     AppearanceConfig {
         input_style: appearance::InputStyle::Waterfall,
@@ -104,6 +121,7 @@ fn patch_settings(doc: &mut DocumentMut) {
             default_profile: "PowerShell",
             agent_profiles: &sample_agent_profiles(),
             default_agent_profile: "Claude Code",
+            terminal: &TerminalConfig::default(),
         },
     )
     .unwrap();
@@ -190,6 +208,7 @@ update = { future-update = "keep" }
             default_profile: "PowerShell",
             agent_profiles: &sample_agent_profiles(),
             default_agent_profile: "Claude Code",
+            terminal: &TerminalConfig::default(),
         },
     )
     .unwrap();
@@ -248,6 +267,7 @@ fn save_settings_to_creates_updates_and_rejects_invalid() {
                 default_profile: "PowerShell",
                 agent_profiles: &sample_agent_profiles(),
                 default_agent_profile: "Claude Code",
+                terminal: &TerminalConfig::default(),
             },
         )
     };

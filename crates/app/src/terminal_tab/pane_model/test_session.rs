@@ -207,6 +207,7 @@ pub(crate) fn controller(vt: &[u8], engine_blocks: bool) -> (PaneController, Arc
         scroll_to_bottom_when_typing: true,
         newline_shortcut: NewlineShortcut::ShiftEnter,
         cursor_shape: CursorShape::Block,
+        improve_powershell_compatibility: true,
     };
 
     let mut controller = PaneController::new(

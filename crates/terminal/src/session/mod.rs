@@ -72,7 +72,7 @@ use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
 use crate::selection::{SelectionRange, SelectionType, WORD_DELIMITERS};
 use crate::session::blocks::frozen_selection_pieces;
-use crate::session::config::default_shell;
+use crate::session::config::{default_shell, is_windows_powershell};
 use crate::session::mouse::{mouse_button_code, mouse_motion_code, mouse_report_mods};
 use crate::session::page::{PageCache, PageSource, RowPage};
 use crate::session::proxy::TerminalEventProxy;
@@ -152,6 +152,8 @@ pub struct TerminalSession {
     /// finished engine blocks, read through owned pages. Mirrors the flag the
     /// PTY event loop runs with.
     engine_blocks: bool,
+
+    supports_powershell_compatibility: bool,
 }
 
 /// The event proxy and render host share these stores for one session.
@@ -216,7 +218,7 @@ impl TerminalSession {
 
         let process_tree = pty.process_tree();
 
-        Self::from_pty(
+        let mut session = Self::from_pty(
             pty,
             process_tree,
             SessionOptions {
@@ -231,7 +233,12 @@ impl TerminalSession {
                 output_sink: None,
             },
             observer,
-        )
+        )?;
+
+        session.supports_powershell_compatibility = is_windows_powershell(&shell);
+        session.set_powershell_compatibility(config.improve_powershell_compatibility);
+
+        Ok(session)
     }
 
     pub fn from_pty<T: EventedPty + Send + 'static>(
@@ -262,12 +269,23 @@ impl TerminalSession {
             shared,
             process_tree,
             engine_blocks,
+            supports_powershell_compatibility: false,
         })
     }
 
     /// Whether frozen history lives in finished engine blocks.
     pub fn engine_blocks(&self) -> bool {
         self.engine_blocks
+    }
+
+    /// Remote sessions and other launch executables do not opt into the local
+    /// PowerShell workaround, even when the application setting is enabled.
+    pub fn set_powershell_compatibility(&self, enabled: bool) -> bool {
+        self.supports_powershell_compatibility
+            && self
+                .messenger
+                .send(Msg::PowerShellCompatibility(enabled))
+                .is_ok()
     }
 
     /// Shared frozen block-split history (renderer read side).

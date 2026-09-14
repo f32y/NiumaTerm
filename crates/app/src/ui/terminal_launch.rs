@@ -16,9 +16,14 @@ pub(super) fn spawn_pane(
     let agent_route = agent_process().allocate_route();
     let environment_overrides = agent_process().environment_for(&agent_route);
 
-    let (cursor_shape, manage_process_tree) = cx.read_global(|settings: &TerminalSettings, _| {
-        (settings.cursor_shape, settings.manage_subprocess_job)
-    });
+    let (cursor_shape, manage_process_tree, improve_powershell_compatibility) =
+        cx.read_global(|settings: &TerminalSettings, _| {
+            (
+                settings.cursor_shape,
+                settings.manage_subprocess_job,
+                settings.improve_powershell_compatibility,
+            )
+        });
 
     let config = TerminalSessionConfig {
         shell: state.shell.clone(),
@@ -28,6 +33,7 @@ pub(super) fn spawn_pane(
         cursor_shape,
         environment_overrides,
         manage_process_tree,
+        improve_powershell_compatibility,
         ..TerminalSessionConfig::default()
     };
 

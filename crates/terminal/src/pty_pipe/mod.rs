@@ -6,6 +6,7 @@ pub use crate::pty_pipe::write_queue::PtyState;
 pub(crate) mod requests;
 
 mod marks;
+mod powershell_compatibility;
 
 mod session;
 mod write_queue;
@@ -34,6 +35,7 @@ use crate::event::{self, EventListener, Msg, MsgSender, TerminalEvent};
 use crate::ghostty::{self, GhosttyTerminal, mode};
 use crate::prompt_sniffer::PromptSniffer;
 use crate::pty_pipe::marks::{apply_sniffer_mark, engine_blocks_live_list};
+use crate::pty_pipe::powershell_compatibility::PowerShellCompatibility;
 use crate::pty_pipe::requests::answer_query;
 use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
@@ -69,7 +71,11 @@ enum FlushReason {
 pub struct PtyPipe<T: EventedPty, U: EventListener> {
     sender: MsgSender,
     receiver: mpsc::Receiver<Msg>,
-    pending_commands: VecDeque<Msg>,
+
+    /// Inputs carry a fixed wait limit measured at receipt; other commands carry None.
+    pending_commands: VecDeque<(Msg, Option<time::Instant>)>,
+
+    powershell_compatibility: PowerShellCompatibility,
     pty: T,
     poll: Poll,
 
@@ -268,6 +274,7 @@ where
             sender,
             receiver: rx,
             pending_commands: VecDeque::new(),
+            powershell_compatibility: PowerShellCompatibility::default(),
             poll,
             waker,
             pty,
@@ -691,15 +698,25 @@ where
             match msg {
                 Msg::Shutdown => return false,
 
+                Msg::PowerShellCompatibility(enabled) => {
+                    self.powershell_compatibility.set_enabled(enabled);
+                }
+
                 Msg::Resize(size) => {
-                    if let Some(Msg::Resize(previous)) = self.pending_commands.back_mut() {
+                    if let Some((Msg::Resize(previous), _)) = self.pending_commands.back_mut() {
                         *previous = size;
                     } else {
-                        self.pending_commands.push_back(Msg::Resize(size));
+                        self.pending_commands.push_back((Msg::Resize(size), None));
                     }
                 }
 
-                request => self.pending_commands.push_back(request),
+                Msg::Input(input) => self.pending_commands.push_back((
+                    Msg::Input(input),
+                    self.powershell_compatibility
+                        .input_limit(time::Instant::now()),
+                )),
+
+                request => self.pending_commands.push_back((request, None)),
             }
         }
 
@@ -710,7 +727,14 @@ where
 
     fn process_pending_commands(&mut self, state: &mut PtyState) -> bool {
         for _ in 0..64 {
-            if matches!(self.pending_commands.front(), Some(Msg::Resize(_))) {
+            if self
+                .pending_input_timeout()
+                .is_some_and(|delay| !delay.is_zero())
+            {
+                return true;
+            }
+
+            if matches!(self.pending_commands.front(), Some((Msg::Resize(_), _))) {
                 if state.needs_write() {
                     return true;
                 }
@@ -733,7 +757,7 @@ where
                 }
             }
 
-            let Some(msg) = self.pending_commands.pop_front() else {
+            let Some((msg, _)) = self.pending_commands.pop_front() else {
                 return true;
             };
 
@@ -761,10 +785,27 @@ where
         state.write_list.push_back(input)
     }
 
+    fn pending_input_timeout(&self) -> Option<time::Duration> {
+        let (Msg::Input(bytes), limit) = self.pending_commands.front()? else {
+            return None;
+        };
+
+        if bytes.is_empty() {
+            return None;
+        }
+
+        let delay = self
+            .powershell_compatibility
+            .timeout(*limit, time::Instant::now())?;
+
+        (!self.ghostty.mode(mode::ALT_SCREEN)).then_some(delay)
+    }
+
     fn on_resize(&mut self, window_size: WinsizeBuilder) {
         // Keep the Ghostty engine sized to match the PTY/Crosswords.
         let cols = window_size.cols.max(1);
         let rows = window_size.rows.max(1);
+        let grid_changed = self.ghostty.cols() != cols || self.ghostty.rows() != rows;
         let cell_w = (window_size.width / cols).max(1) as u32;
         let cell_h = (window_size.height / rows).max(1) as u32;
         let mut blocks_sync: Option<Vec<(ghostty::BlockHandle, usize)>> = None;
@@ -862,6 +903,12 @@ where
         if let Err(err) = self.pty.set_winsize(window_size) {
             warn!("pty set_winsize failed: {err}");
         }
+
+        if self.ghostty.mode(mode::ALT_SCREEN) {
+            self.powershell_compatibility.clear_resize();
+        } else if grid_changed {
+            self.powershell_compatibility.resized(time::Instant::now());
+        }
     }
 
     #[inline]
@@ -953,6 +1000,9 @@ where
                 Some(time::Duration::ZERO)
             } else {
                 self.pending_snapshot_timeout()
+                    .into_iter()
+                    .chain(self.pending_input_timeout())
+                    .min()
             };
 
             #[cfg(enable_profiling)]
@@ -1198,7 +1248,7 @@ where
                 self.profile.record(Stage::Checkpoint, checkpoint_started);
             }
 
-            Msg::Input(_) | Msg::Resize(_) | Msg::Shutdown => {
+            Msg::Input(_) | Msg::Resize(_) | Msg::Shutdown | Msg::PowerShellCompatibility(_) => {
                 unreachable!("handled by the PTY loop")
             }
         }

@@ -252,6 +252,10 @@ fn resize_while_scrolled_preserves_history_and_live_input() {
 
     wait_for_input(&session, "echo NMT_VISIBLE");
 
+    assert_history_preserved(&session);
+}
+
+fn assert_history_preserved(session: &SessionHandles) {
     let (send, receive) = mpsc::channel();
 
     session
@@ -363,4 +367,53 @@ fn immediate_input_after_shrink_and_grow_stays_with_prompt() {
         .unwrap();
 
     wait_for_input(&session, "echo NMT_VISIBLE");
+}
+
+#[test]
+fn powershell_compatibility_preserves_wrapped_input_after_shrink_and_grow() {
+    for initial_len in [0, 90, 240] {
+        for final_cols in [80, 100] {
+            let session = scrolled_history_session();
+
+            session
+                .messenger
+                .send(Msg::PowerShellCompatibility(true))
+                .unwrap();
+
+            session.messenger.send(Msg::ScrollToEnd).unwrap();
+
+            let initial = "x".repeat(initial_len);
+
+            if !initial.is_empty() {
+                session
+                    .messenger
+                    .send(Msg::Input(initial.as_bytes().to_vec().into()))
+                    .unwrap();
+            }
+
+            wait_for_input(&session, &initial);
+
+            resize(&session, 60, 20);
+
+            wait_for(&session, "smaller viewport", |snapshot| {
+                snapshot.cols() == 60 && snapshot.rows() == 20
+            });
+
+            resize(&session, final_cols, 30);
+
+            session
+                .messenger
+                .send(Msg::Input(b"q".to_vec().into()))
+                .unwrap();
+
+            let snapshot = wait_for_input(&session, &format!("{initial}q"));
+            let text = screen_text(&snapshot);
+
+            assert_eq!(text.matches('x').count(), initial_len);
+            assert_eq!(text.matches('q').count(), 1);
+            assert_eq!(text.matches(PROMPT).count(), 1);
+
+            assert_history_preserved(&session);
+        }
+    }
 }

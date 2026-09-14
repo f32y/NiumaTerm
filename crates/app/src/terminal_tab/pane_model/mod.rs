@@ -942,6 +942,14 @@ impl PaneController {
     ) -> Option<CursorShapeUpdate> {
         self.source.session.set_theme_colors(colors);
 
+        if settings.improve_powershell_compatibility
+            != self.settings.improve_powershell_compatibility
+        {
+            self.source
+                .session
+                .set_powershell_compatibility(settings.improve_powershell_compatibility);
+        }
+
         let cursor_update =
             (settings.cursor_shape != self.settings.cursor_shape).then(|| CursorShapeUpdate {
                 request: self.source.session.set_cursor_shape(settings.cursor_shape),

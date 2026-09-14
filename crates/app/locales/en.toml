@@ -1071,3 +1071,7 @@
 "settings-agent-enable-team" = "Enable Agent Team"
 "settings-agent-enable-team-description" = "Create and reopen Agent Team tabs. Turning this off stops open teams and keeps their saved conversations."
 "team-disabled" = "Agent Team is disabled. Turn on Enable Agent Team in Settings > Agent > General to reopen this team."
+
+"settings-terminal-advanced" = "Advanced"
+"settings-terminal-powershell-compatibility" = "Improve PowerShell compatibility"
+"settings-terminal-powershell-compatibility-description" = "Reduce misplaced input when resizing PowerShell terminals on Windows. Typing may pause briefly after resize."

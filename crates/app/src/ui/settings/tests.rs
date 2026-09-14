@@ -3,6 +3,7 @@ use std::time::Duration;
 use std::{fs, io};
 
 use app::agent_tab::AgentKind;
+use app::terminal_tab::settings::TerminalSettings;
 use gpui::{
     Context, Entity, IntoElement, ListAlignment, ListOffset, ListState, ScrollDelta,
     ScrollWheelEvent, TestAppContext, list, point, size,
@@ -16,6 +17,26 @@ use nmt_config::theme::Theme as ConfigTheme;
 use crate::ui::settings::state::default_shell_for_tests;
 use crate::ui::settings::theme::ui_theme_config;
 use crate::ui::settings::*;
+
+#[gpui::test]
+fn powershell_compatibility_changes_reach_the_live_terminal_snapshot(cx: &mut TestAppContext) {
+    cx.set_global(AppSettings::default());
+    cx.update(install_terminal_settings);
+
+    assert!(cx.read(|cx| {
+        cx.global::<TerminalSettings>()
+            .improve_powershell_compatibility
+    }));
+
+    cx.update_global::<AppSettings, _>(|settings, _| {
+        settings.edit_terminal(|section| section.improve_powershell_compatibility = false);
+    });
+
+    assert!(!cx.read(|cx| {
+        cx.global::<TerminalSettings>()
+            .improve_powershell_compatibility
+    }));
+}
 
 #[test]
 fn cursor_shape_dropdown_values_match_config_shapes() {
@@ -541,6 +562,10 @@ fn failed_settings_save_keeps_edits_for_retry() {
 
     let mut settings = AppSettings::default();
 
+    assert!(settings.config().terminal.improve_powershell_compatibility);
+
+    settings.edit_terminal(|section| section.improve_powershell_compatibility = false);
+
     settings.edit_appearance(|section| section.scroll_to_bottom_when_typing = false);
     settings.edit_appearance(|section| section.reduce_motion = true);
     settings.edit_appearance(|section| section.human_friendly_agent_ui_layout = false);
@@ -571,6 +596,7 @@ fn failed_settings_save_keeps_edits_for_retry() {
     assert_eq!(config.system, settings.config().system);
     assert_eq!(config.update, settings.config().update);
     assert_eq!(config.remote_session, settings.config().remote_session);
+    assert!(!config.terminal.improve_powershell_compatibility);
 }
 
 #[test]

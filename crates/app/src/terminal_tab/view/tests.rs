@@ -87,6 +87,7 @@ fn restored_grid_reaches_the_shell_before_its_first_output(cx: &mut TestAppConte
 
     cx.update(|cx| {
         cx.set_global(TerminalSettings {
+            improve_powershell_compatibility: true,
             input_style: Default::default(),
             cursor_shape: Default::default(),
             manage_subprocess_job: false,

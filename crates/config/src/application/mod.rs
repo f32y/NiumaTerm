@@ -22,6 +22,7 @@ use crate::colors::Colors;
 use crate::defaults::*;
 use crate::profile::Profile;
 use crate::system::{self, SystemConfig};
+use crate::terminal::TerminalConfig;
 #[cfg(test)]
 use crate::theme::AppearanceTheme;
 use crate::theme::{Theme, UiTheme};
@@ -82,6 +83,9 @@ pub struct Config {
     /// Update checking settings (settings dialog, About page).
     #[serde(default = "update::UpdateConfig::default")]
     pub update: update::UpdateConfig,
+
+    #[serde(default)]
+    pub terminal: TerminalConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -266,6 +270,7 @@ impl Default for Config {
             system: system::SystemConfig::default(),
             remote_session: remote_session::RemoteSessionConfig::default(),
             update: update::UpdateConfig::default(),
+            terminal: TerminalConfig::default(),
         }
     }
 }
@@ -303,6 +308,7 @@ pub struct SettingsPatch<'a> {
     pub default_profile: &'a str,
     pub agent_profiles: &'a [profile::AgentProfile],
     pub default_agent_profile: &'a str,
+    pub terminal: &'a TerminalConfig,
 }
 
 /// Save settings to an explicit configuration path using the same locked,
@@ -346,6 +352,7 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> 
         default_profile,
         agent_profiles,
         default_agent_profile,
+        terminal,
     } = patch;
 
     doc["theme"] = value(theme);
@@ -376,7 +383,9 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> 
         ensure_explicit_table(doc, "agent-profiles"),
         agent_profiles,
         default_agent_profile,
-    )
+    )?;
+
+    patch_group(doc, "terminal", terminal)
 }
 
 /// Each group's serde names also define the keys edited by the settings UI.

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use nmt_config::CursorShape;
 use nmt_platform::PromptIntegration;
 
@@ -40,6 +42,9 @@ pub struct TerminalSessionConfig {
     /// rather than found by it. Not part of the restorable tab state: it is a
     /// property of this launch, not of the command the user configured.
     pub bootstrap: Option<String>,
+
+    /// Briefly defer input after resize in local Windows PowerShell sessions.
+    pub improve_powershell_compatibility: bool,
 }
 
 impl TerminalSessionConfig {
@@ -93,6 +98,18 @@ impl Default for TerminalSessionConfig {
             environment_overrides: Vec::new(),
             manage_process_tree: false,
             bootstrap: None,
+            improve_powershell_compatibility: true,
         }
     }
+}
+
+pub(crate) fn is_windows_powershell(shell: &str) -> bool {
+    let Some(name) = Path::new(shell).file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+
+    nmt_platform::USES_CONPTY
+        && ["pwsh", "pwsh.exe", "powershell", "powershell.exe"]
+            .iter()
+            .any(|candidate| name.eq_ignore_ascii_case(candidate))
 }

@@ -90,3 +90,6 @@ access-token = ""
 [update]
 check-updates = true
 channel = "stable"
+
+[terminal]
+improve-powershell-compatibility = true

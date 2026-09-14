@@ -14,11 +14,35 @@ use parking_lot::Mutex;
 
 use crate::event::TerminalEvent;
 use crate::graphics::UpdateQueues;
+use crate::session::config::is_windows_powershell;
 use crate::session::error::EngineErrorCode;
 use crate::session::{
     HostEvent, SessionChange, SessionObserver, SessionSharedState, TerminalEventProxy,
     TerminalSession, TerminalSessionConfig,
 };
+
+#[test]
+fn powershell_compatibility_only_recognizes_local_windows_executables() {
+    for shell in [
+        "pwsh",
+        "powershell.exe",
+        "PWSH.EXE",
+        "C:/Program Files/PowerShell/7/pwsh.exe",
+    ] {
+        assert_eq!(is_windows_powershell(shell), cfg!(windows), "{shell}");
+    }
+
+    for shell in [
+        "cmd.exe",
+        "bash",
+        "ssh.exe",
+        "pwsh.cmd",
+        "powershell.exe -NoExit",
+        "my-pwsh.exe",
+    ] {
+        assert!(!is_windows_powershell(shell), "{shell}");
+    }
+}
 
 /// Which shells carry a trusted OSC 133 integration is a platform answer, so
 /// the acceptance cases live under the platform that provides the script.

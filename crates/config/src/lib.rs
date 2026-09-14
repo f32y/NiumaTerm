@@ -14,6 +14,7 @@ pub mod local_state;
 
 pub mod remote_session;
 pub mod system;
+pub mod terminal;
 #[cfg(feature = "application")]
 pub mod theme;
 pub mod update;

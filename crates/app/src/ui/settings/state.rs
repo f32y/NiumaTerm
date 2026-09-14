@@ -27,6 +27,7 @@ use nmt_config::defaults::default_theme;
 #[cfg(windows)]
 use nmt_config::remote_session::RemoteSessionConfig;
 use nmt_config::system::SystemConfig;
+use nmt_config::terminal::TerminalConfig;
 use nmt_config::theme::Theme;
 use nmt_config::update::UpdateConfig;
 use nmt_config::{Config, CursorShape, SettingsPatch, config_file_path, get, save_settings_to};
@@ -218,6 +219,10 @@ impl AppSettings {
 
     pub fn edit_update(&mut self, edit: impl FnOnce(&mut UpdateConfig)) {
         edit(&mut self.config.update);
+    }
+
+    pub(super) fn edit_terminal(&mut self, edit: impl FnOnce(&mut TerminalConfig)) {
+        edit(&mut self.config.terminal);
     }
 
     pub fn set_theme(&mut self, theme: String) {
@@ -528,6 +533,7 @@ impl AppSettings {
                 default_profile: &self.config.profiles.default,
                 agent_profiles: &self.config.agent_profiles.list,
                 default_agent_profile: &self.config.agent_profiles.default,
+                terminal: &self.config.terminal,
             },
         )
     }
