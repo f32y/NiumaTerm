@@ -21,9 +21,7 @@ use crate::terminal_tab::pane_model::key_action::{KeyOutcome, TextInput};
 use crate::terminal_tab::pane_model::list_mirror::{BlockListMirror, ListOp, ListPosition};
 use crate::terminal_tab::pane_model::mouse::{MouseInput, MouseOutcome};
 use crate::terminal_tab::pane_model::scroll::ScrollOutcome;
-use crate::terminal_tab::pane_model::selection_geometry::{
-    block_gutter_hit, selection_drag_started,
-};
+use crate::terminal_tab::pane_model::selection_geometry::selection_drag_started;
 use crate::terminal_tab::pane_model::test_session::{TestClipboard, assert_input, controller};
 use crate::terminal_tab::pane_model::viewport::{LocalPoint, Viewport};
 
@@ -227,10 +225,9 @@ fn pending_repaint_retains_shared_grid_coordinates_and_coalesces_wakes() {
 }
 
 #[test]
-fn block_frame_reset_discards_visible_records_and_retains_selection_and_live_origin() {
+fn block_frame_reset_discards_visible_records_and_retains_live_origin() {
     let (mut model, _) = controller(b"", true);
 
-    model.gutter.select(3);
     model.frozen.push_row(10.0, 3, 0, 40);
     model.frozen.push_separator(8.0);
     model.block_list.active_top = 90.0;
@@ -238,7 +235,6 @@ fn block_frame_reset_discards_visible_records_and_retains_selection_and_live_ori
 
     assert!(model.frozen.row_top(3, 0).is_none());
     assert!(model.frozen.separators().is_empty());
-    assert_eq!(model.gutter.selected(), Some(3));
     assert_eq!(model.viewport.cursor_y(0, 18.0), 90.0);
 
     let tail = FrozenView {
@@ -247,10 +243,8 @@ fn block_frame_reset_discards_visible_records_and_retains_selection_and_live_ori
     };
 
     let state = LiveItemState {
-        index: 4,
         in_flight: None,
         has_open_prompt: true,
-        selected_item: Some(4),
     };
 
     let layout = state.layout(tail.active_top, 2, 18.0, 1.0);
@@ -265,32 +259,11 @@ fn block_frame_reset_discards_visible_records_and_retains_selection_and_live_ori
         (chrome.top, chrome.bottom, chrome.header_y),
         (-18.0, 90.0, 36.0)
     );
-    assert!(chrome.selected);
 
     model.begin_block_list_frame();
 
     assert!(model.frozen.chrome().is_empty());
     assert_eq!(model.viewport.cursor_y(0, 18.0), 90.0);
-}
-
-#[test]
-fn block_gutter_hit_band() {
-    let origin_x = 10.0;
-
-    assert!(block_gutter_hit(10.0 - 5.0, origin_x), "on the strip");
-    assert!(
-        block_gutter_hit(10.0 + 2.0, origin_x),
-        "tolerance into col 0"
-    );
-    assert!(
-        !block_gutter_hit(10.0 + 6.0, origin_x),
-        "column 0 text is not the gutter"
-    );
-    assert!(
-        block_gutter_hit(0.0, origin_x),
-        "strip is flush with the pane edge"
-    );
-    assert!(!block_gutter_hit(-3.0, origin_x), "left of the pane misses");
 }
 
 #[test]

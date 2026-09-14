@@ -208,7 +208,7 @@ fn summary_scope_cannot_include_omitted_sources_and_disabling_requires_originals
 }
 
 #[test]
-fn oversized_original_is_split_at_utf8_boundaries_without_dropping_text() {
+fn oversized_public_context_is_rejected_without_truncating_sources() {
     let mut room = Room::new(AgentWorkspace::default());
     let alice = room.add_member(config("Alice", "C:/a")).unwrap();
     let original = message(&"Résumé 😀 ".repeat(1000));
@@ -227,21 +227,8 @@ fn oversized_original_is_split_at_utf8_boundaries_without_dropping_text() {
         &limits,
     );
 
-    let Err(ContextError::NeedsSummaries(chunks)) = result else {
-        panic!("expected bounded chunks")
-    };
-
-    let recovered: String = chunks
-        .iter()
-        .flat_map(|chunk| &chunk.fragments)
-        .map(|fragment| {
-            assert_eq!(fragment.source, original.id);
-
-            &original.text[fragment.start..fragment.end]
-        })
-        .collect();
-
-    assert_eq!(recovered, original.text);
+    assert!(matches!(result, Err(ContextError::SummaryUnavailable)));
+    assert_eq!(room.messages[0].text, original.text);
 
     room.controls.automatic_summaries = false;
 

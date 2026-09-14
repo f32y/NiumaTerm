@@ -5,8 +5,7 @@ use std::time::{Duration, Instant};
 use nmt_config::colors::Colors;
 
 use crate::terminal_tab::frame_source::{ItemViewport, TerminalFrameSource};
-use crate::terminal_tab::pane_model::key_action::TextInput;
-use crate::terminal_tab::pane_model::test_session::{assert_input, controller};
+use crate::terminal_tab::pane_model::test_session::controller;
 use crate::terminal_tab::session::{HostEvent, TerminalSessionConfig};
 
 #[test]
@@ -71,7 +70,7 @@ fn frozen_item_loads_rows_and_reuses_images_without_a_window() {
         \x1b_Ga=T,f=32,s=1,v=1,i=1,p=9,c=1,r=2;/wAA/w==\x1b\\\r\n\
         \x1b]133;D;0\x07\x1b]133;A\x07> \x1b]133;B\x07";
 
-    let (mut model, input) = controller(stream, true);
+    let (model, _) = controller(stream, true);
     let count = model.source.session.block_store().lock().items().len();
 
     let item = (0..count)
@@ -92,7 +91,6 @@ fn frozen_item_loads_rows_and_reuses_images_without_a_window() {
             item,
             &viewport,
             None,
-            Some(item),
             &model.duration_labels,
             model.theme.foreground,
         );
@@ -110,17 +108,17 @@ fn frozen_item_loads_rows_and_reuses_images_without_a_window() {
     };
 
     assert!(view.rows.iter().any(|row| row.line.text().contains("hi")));
-    assert!(
-        view.items_chrome
-            .iter()
-            .any(|chrome| chrome.item == item && chrome.selected)
-    );
+    assert!(view.items_chrome.iter().any(|chrome| {
+        chrome
+            .header
+            .as_deref()
+            .is_some_and(|header| header.starts_with("echo hi"))
+    }));
 
     let second = model.source.frozen_block_view(
         item,
         &viewport,
         None,
-        Some(item),
         &model.duration_labels,
         model.theme.foreground,
     );
@@ -137,21 +135,10 @@ fn frozen_item_loads_rows_and_reuses_images_without_a_window() {
                 count + 1,
                 &viewport,
                 None,
-                None,
                 &model.duration_labels,
                 model.theme.foreground
             )
             .rows
             .is_empty()
     );
-
-    input.lock().clear();
-    model.gutter.select(item);
-
-    assert!(model.write_text_input(TextInput::RerunSelectedBlock));
-
-    assert_input(&input, b"echo hi\r");
-    model.source.session.mark_read_only();
-
-    assert!(!model.write_text_input(TextInput::RerunSelectedBlock));
 }

@@ -7,13 +7,11 @@
 //! when text is added/removed/scrolled on the screen. The selection should
 //! also be cleared if the user clicks off of the selection.
 
-use std::cmp::min;
 use std::mem;
-use std::ops::{self, Bound, Range, RangeBounds};
+use std::ops::{Bound, Range, RangeBounds};
 
 use crate::render_buffer::RenderBuffer;
 use crate::selection_search::VisibleGrid;
-use crate::terminal::grid::Dimensions;
 use crate::terminal::pos::{Column, Line, Pos, Side};
 
 /// Characters that split words for semantic selection. Matches Windows
@@ -55,31 +53,6 @@ impl SelectionRange {
             end,
             is_block,
         }
-    }
-
-    /// The visible row indices this selection damages, clamped to a `rows`-tall
-    /// viewport, or `None` when the selection is fully outside it.
-    /// Mirrors the retired `TermDamageState::damage_selection` at
-    /// `display_offset == 0` — the render buffer is always the displayed viewport
-    /// without scanning unrelated rows.
-    /// `start <= end` is guaranteed by `SelectionRange::new`.
-    pub fn visible_rows_clamped(&self, rows: usize) -> Option<ops::RangeInclusive<usize>> {
-        if rows == 0 {
-            return None;
-        }
-
-        let last = rows as i32 - 1;
-        let (start_row, end_row) = (self.start.row.0, self.end.row.0);
-
-        // Fully above (end before row 0) or below (start past the last row).
-        if end_row < 0 || start_row > last {
-            return None;
-        }
-
-        let start = start_row.max(0) as usize;
-        let end = end_row.clamp(0, last) as usize;
-
-        Some(start..=end)
     }
 }
 
@@ -126,65 +99,6 @@ impl Selection {
     /// Update the end of the selection.
     pub fn update(&mut self, point: Pos, side: Side) {
         self.region.end = Anchor::new(point, side);
-    }
-
-    pub fn rotate<D: Dimensions>(
-        mut self,
-        dimensions: &D,
-        range: &Range<Line>,
-        delta: i32,
-    ) -> Option<Selection> {
-        let bottommost_line = dimensions.bottommost_line();
-        let range_bottom = range.end;
-        let range_top = range.start;
-
-        let (mut start, mut end) = (&mut self.region.start, &mut self.region.end);
-
-        if start.point > end.point {
-            mem::swap(&mut start, &mut end);
-        }
-
-        // Rotate start of selection.
-        if (start.point.row >= range_top || range_top == 0) && start.point.row < range_bottom {
-            start.point.row = min(start.point.row - delta, bottommost_line);
-
-            // If end is within the same region, delete selection once start rotates out.
-            if start.point.row >= range_bottom && end.point.row < range_bottom {
-                return None;
-            }
-
-            // Clamp selection to start of region.
-            if start.point.row < range_top && range_top != 0 {
-                if self.ty != SelectionType::Block {
-                    start.point.col = Column(0);
-                    start.side = Side::Left;
-                }
-
-                start.point.row = range_top;
-            }
-        }
-
-        // Rotate end of selection.
-        if (end.point.row >= range_top || range_top == 0) && end.point.row < range_bottom {
-            end.point.row = min(end.point.row - delta, bottommost_line);
-
-            // Delete selection if end has overtaken the start.
-            if end.point.row < start.point.row {
-                return None;
-            }
-
-            // Clamp selection to end of region.
-            if end.point.row >= range_bottom {
-                if self.ty != SelectionType::Block {
-                    end.point.col = dimensions.last_column();
-                    end.side = Side::Right;
-                }
-
-                end.point.row = range_bottom - 1;
-            }
-        }
-
-        Some(self)
     }
 
     pub fn is_empty(&self) -> bool {

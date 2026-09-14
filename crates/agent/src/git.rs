@@ -6,21 +6,23 @@
 //! consumer.
 
 use std::collections::HashMap;
+
+use std::process::Output;
+
 use std::sync::OnceLock;
+
 use std::time::{Duration, Instant};
 
 use nmt_platform::process::hidden_command;
+
 use parking_lot::Mutex;
+
+use tracing::warn;
 
 /// Run one git command in `dir` and return its stdout, with stderr folded
 /// into the error text so a failed call explains itself.
 pub fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, String> {
-    let output = hidden_command("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .map_err(|err| format!("failed to run git: {err}"))?;
+    let output = git_output(dir, args)?;
 
     if !output.status.success() {
         return Err(format!(
@@ -32,6 +34,16 @@ pub fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, String> {
     }
 
     Ok(output.stdout)
+}
+
+fn git_output(dir: &str, args: &[&str]) -> Result<Output, String> {
+    hidden_command("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("LC_ALL", "C")
+        .output()
+        .map_err(|error| format!("failed to run git: {error}"))
 }
 
 /// What `HEAD` points at. Presentation of the detached form is the caller's:
@@ -49,9 +61,8 @@ pub enum CheckedOut {
 struct ReadBranch {
     at: Instant,
 
-    /// `None` records that the directory is no repository, which is an answer
-    /// worth holding: it is the case that runs git twice.
-    answer: Option<CheckedOut>,
+    /// Cache a missing repository separately from a failed Git invocation.
+    answer: Result<Option<CheckedOut>, String>,
 }
 
 /// Answers already read, by working directory. Each conversation tab watches
@@ -66,7 +77,8 @@ static READ_BRANCHES: OnceLock<Mutex<HashMap<String, ReadBranch>>> = OnceLock::n
 const BRANCH_RETENTION: Duration = Duration::from_secs(600);
 
 /// The checked-out branch for a working directory, or the short commit for a
-/// detached `HEAD`. `None` when `dir` is no repository at all.
+/// detached `HEAD`. `Ok(None)` means the directory is not a repository;
+/// command failures remain errors.
 ///
 /// An answer read less than `max_age` ago is returned without running git, so
 /// the watchers of one directory cost one process between them rather than one
@@ -75,7 +87,7 @@ const BRANCH_RETENTION: Duration = Duration::from_secs(600);
 /// lag a real switch at one further interval.
 ///
 /// Runs git on the calling thread, so callers poll from a background one.
-pub fn current_branch(cwd: &str, max_age: Duration) -> Option<CheckedOut> {
+pub fn current_branch(cwd: &str, max_age: Duration) -> Result<Option<CheckedOut>, String> {
     let cache = READ_BRANCHES.get_or_init(Mutex::default);
 
     // Scoped so the lock is released before git runs: holding it across a
@@ -98,6 +110,15 @@ pub fn current_branch(cwd: &str, max_age: Duration) -> Option<CheckedOut> {
 
     let mut entries = cache.lock();
 
+    if let Err(error) = &answer
+        && entries
+            .get(cwd)
+            .and_then(|entry| entry.answer.as_ref().err())
+            != Some(error)
+    {
+        warn!("failed to read git branch in {cwd}: {error}");
+    }
+
     entries.retain(|_, read| read.at.elapsed() < BRANCH_RETENTION);
 
     entries.insert(
@@ -114,18 +135,27 @@ pub fn current_branch(cwd: &str, max_age: Duration) -> Option<CheckedOut> {
 /// A detached `HEAD` costs a second call: `rev-parse` resolves one revision at
 /// a time, so no single invocation reports both the symbolic name and the short
 /// commit to fall back on.
-fn read_current_branch(cwd: &str) -> Option<CheckedOut> {
-    let branch = run_git(cwd, &["branch", "--show-current"])
-        .ok()
-        .map(|out| String::from_utf8_lossy(&out).trim().to_string())
-        .filter(|branch| !branch.is_empty());
+fn read_current_branch(cwd: &str) -> Result<Option<CheckedOut>, String> {
+    let output = git_output(cwd, &["branch", "--show-current"])?;
 
-    if let Some(branch) = branch {
-        return Some(CheckedOut::Branch(branch));
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+        if error.contains("not a git repository") {
+            return Ok(None);
+        }
+
+        return Err(format!("git branch exited with {}: {error}", output.status));
     }
 
-    let commit = run_git(cwd, &["rev-parse", "--short", "HEAD"]).ok()?;
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    if !branch.is_empty() {
+        return Ok(Some(CheckedOut::Branch(branch)));
+    }
+
+    let commit = run_git(cwd, &["rev-parse", "--short", "HEAD"])?;
     let commit = String::from_utf8_lossy(&commit).trim().to_string();
 
-    (!commit.is_empty()).then_some(CheckedOut::Detached(commit))
+    Ok((!commit.is_empty()).then_some(CheckedOut::Detached(commit)))
 }

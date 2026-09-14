@@ -329,38 +329,6 @@ fn supplement_from_cli(usage: UsageSnapshot, cancelled: &AtomicBool) -> UsageSna
     }
 }
 
-/// The shell and arguments that put the CLI on a PTY.
-///
-/// Windows installs the CLI as a `.cmd` shim, which only `cmd.exe` resolves,
-/// because applying `PATHEXT` to a bare name is a shell rule rather than a
-/// kernel one. A Unix shell finds the name on PATH by itself, and `exec`
-/// leaves the CLI as the terminal's own child instead of putting a shell in
-/// front of it that would only relay signals and its exit status.
-#[cfg(windows)]
-fn interactive_launch() -> (String, Vec<String>) {
-    (
-        "cmd.exe".to_string(),
-        vec![
-            "/D".to_string(),
-            "/C".to_string(),
-            CLI_EXECUTABLE.to_string(),
-            "--settings".to_string(),
-            CLI_SETTINGS_OVERRIDE.to_string(),
-        ],
-    )
-}
-
-#[cfg(not(windows))]
-fn interactive_launch() -> (String, Vec<String>) {
-    (
-        default_shell(),
-        vec![
-            "-c".to_string(),
-            format!("exec {CLI_EXECUTABLE} --settings '{CLI_SETTINGS_OVERRIDE}'"),
-        ],
-    )
-}
-
 fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchError> {
     if cancelled.load(Ordering::Relaxed) {
         return Err(UsageFetchError::Cancelled);
@@ -377,7 +345,10 @@ fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchErro
         environment_overrides.push(("PATH".to_string(), path.to_string_lossy().into_owned()));
     }
 
-    let (shell, shell_arguments) = interactive_launch();
+    let (shell, shell_arguments) = nmt_platform::interactive_shell_command(
+        CLI_EXECUTABLE,
+        &["--settings", CLI_SETTINGS_OVERRIDE],
+    );
 
     // A real terminal is required because current Claude versions render
     // subscription limits only through the interactive `/usage` panel.

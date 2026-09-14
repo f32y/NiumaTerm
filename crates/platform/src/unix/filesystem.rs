@@ -9,6 +9,18 @@ pub fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
     fs::rename(source, destination)
 }
 
+/// Persist the directory entry as well as replacing its contents.
+pub fn replace_file_durable(source: &Path, destination: &Path) -> io::Result<()> {
+    let directory = destination
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+
+    replace_file(source, destination)?;
+
+    fs::File::open(directory)?.sync_all()
+}
+
 /// Comparable lexical components without consulting the filesystem.
 pub fn path_identity(path: &Path) -> Vec<String> {
     path.components()
@@ -41,4 +53,8 @@ pub fn lexical_path_spelling(path: &Path) -> String {
 /// Windows keys keep their existing ASCII folding; Unix names remain distinct.
 pub fn installation_path_spelling(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+pub fn history_path_spelling(path: &Path) -> String {
+    installation_path_spelling(path)
 }

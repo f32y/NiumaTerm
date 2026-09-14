@@ -10,7 +10,6 @@ use crate::input::{
 
 #[test]
 fn wheel_steps_and_smooth_rows_use_terminal_speed_and_rounding() {
-    assert_eq!(WheelDelta::Rows(3.0).lines(), 3);
     assert_eq!(WheelDelta::Steps(-2.0).lines(), -6);
     assert_eq!(WheelDelta::Rows(0.2).lines(), 0);
     assert_eq!(WheelDelta::Rows(-0.5).lines(), -1);

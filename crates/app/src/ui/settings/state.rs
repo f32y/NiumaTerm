@@ -31,14 +31,8 @@ use nmt_config::terminal::TerminalConfig;
 use nmt_config::theme::Theme;
 use nmt_config::update::UpdateConfig;
 use nmt_config::{Config, CursorShape, SettingsPatch, config_file_path, get, save_settings_to};
+use nmt_platform::default_shell;
 use rust_i18n::t;
-
-/// The shell a freshly seeded profile names, which is the platform's own
-/// default rather than a fixed program.
-#[cfg(test)]
-pub fn default_shell_for_tests() -> String {
-    default_shell()
-}
 
 /// Persistent settings are shared with the configuration reader and writer.
 /// Picker state lives separately and never enters a pane snapshot.
@@ -75,10 +69,6 @@ pub(super) fn input_style_label(style: InputStyle) -> Cow<'static, str> {
         InputStyle::Waterfall => t!("settings-terminal-input-style-waterfall"),
         InputStyle::FixedBottom => t!("settings-terminal-input-style-fixed-bottom"),
     }
-}
-
-fn default_shell() -> String {
-    nmt_platform::default_shell()
 }
 
 /// The built-in profile seeded when the config file defines none.

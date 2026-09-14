@@ -17,15 +17,6 @@ pub(super) mod turn;
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
-use crate::agent_tab::AgentKind;
-#[cfg(test)]
-use crate::agent_tab::tab_title_from_prompt;
-#[cfg(test)]
-use nmt_agent::session::ConversationTitleRequest;
-#[cfg(test)]
-use nmt_agent::session::naming::conversation_title_request as build_title_request;
-
 pub(super) fn directory_label(cwd: &str) -> String {
     let parts: Vec<&str> = cwd
         .trim_end_matches(['/', '\\'])
@@ -38,9 +29,4 @@ pub(super) fn directory_label(cwd: &str) -> String {
         1 => parts[0].to_string(),
         length => format!("{}/{}", parts[length - 2], parts[length - 1]),
     }
-}
-
-#[cfg(test)]
-fn conversation_title_request(kind: AgentKind, text: &str) -> Option<ConversationTitleRequest> {
-    build_title_request(kind, text, tab_title_from_prompt)
 }

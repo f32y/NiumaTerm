@@ -1,19 +1,31 @@
 use std::ffi::OsStr;
+
 use std::os::windows::io::AsRawHandle as _;
+
 use std::os::windows::process::{CommandExt as _, ExitStatusExt as _};
+
 use std::process::{Child, Command, ExitStatus};
+
 use std::sync::{Arc, Weak};
+
 use std::{env, ffi, io, mem, ptr, str};
 
+use tracing::warn;
+
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_MORE_DATA, GetLastError, HANDLE};
+
 use windows_sys::Win32::Globalization::{CP_OEMCP, MB_ERR_INVALID_CHARS, MultiByteToWideChar};
+
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JobObjectBasicProcessIdList, JobObjectExtendedLimitInformation, QueryInformationJobObject,
     SetInformationJobObject,
 };
+
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+
+use crate::process_lifetime::cleanup_failed_attachment;
 
 pub fn hidden_command(program: impl AsRef<OsStr>) -> Command {
     let mut command = Command::new(program);
@@ -120,6 +132,10 @@ unsafe impl Send for JobHandle {}
 unsafe impl Sync for JobHandle {}
 
 impl KillOnCloseJob {
+    pub fn attach_or_kill(child: &mut Child) -> io::Result<Self> {
+        Self::attach(child).inspect_err(|_| cleanup_failed_attachment(child))
+    }
+
     pub fn attach(child: &Child) -> io::Result<Self> {
         let job = Self::new()?;
 
@@ -178,12 +194,25 @@ impl Drop for JobHandle {
 }
 
 impl ProcessTree {
-    pub fn process_count(&self) -> usize {
-        self.0.upgrade().map_or(0, |job| query_process_count(job.0))
+    pub fn other_process_count(&self) -> usize {
+        match self.process_count() {
+            Ok(count) => count.saturating_sub(1),
+            Err(error) => {
+                warn!("failed to count child processes: {error}");
+
+                0
+            }
+        }
+    }
+
+    pub fn process_count(&self) -> io::Result<usize> {
+        self.0
+            .upgrade()
+            .map_or(Ok(0), |job| query_process_count(job.0))
     }
 }
 
-fn query_process_count(job: HANDLE) -> usize {
+fn query_process_count(job: HANDLE) -> io::Result<usize> {
     #[repr(C)]
     struct PidListBuffer {
         list: JOBOBJECT_BASIC_PROCESS_ID_LIST,
@@ -203,8 +232,8 @@ fn query_process_count(job: HANDLE) -> usize {
     };
 
     if result != 0 || unsafe { GetLastError() } == ERROR_MORE_DATA {
-        buffer.list.NumberOfAssignedProcesses as usize
+        Ok(buffer.list.NumberOfAssignedProcesses as usize)
     } else {
-        0
+        Err(io::Error::last_os_error())
     }
 }

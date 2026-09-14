@@ -347,10 +347,6 @@ pub(super) fn theme_list(editing: Entity<SettingsEditing>, cx: &mut App) -> Div 
         )
 }
 
-pub(super) fn tab_background_opacity(opacity: f32) -> f32 {
-    1.0 - (1.0 - opacity) * 0.5
-}
-
 /// Retint the component theme for the foreground surface opacity. A configured
 /// image shows through by reducing this tint; without an image it remains the
 /// effective window opacity. Reset first so repeated calls do not compound alpha.
@@ -395,7 +391,7 @@ pub(crate) fn apply_window_translucency(cx: &mut App) {
             .tokens
             .tab_active
             .color
-            .opacity(tab_background_opacity(opacity));
+            .opacity(1.0 - (1.0 - opacity) * 0.5);
 
         theme.tokens.tab_active = ComponentThemeToken::new(color, color.into());
     }

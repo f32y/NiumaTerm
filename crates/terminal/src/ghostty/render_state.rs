@@ -1,24 +1,29 @@
 use std::ptr;
 
+#[cfg(test)]
+use libghostty_vt_sys::Result as VtResult;
+
 use libghostty_vt_sys::{
     ColorRgb as VtColorRgb, RenderState as VtRenderState,
     RenderStateCursorVisualStyle as VtRenderStateCursorVisualStyle,
     RenderStateData as VtRenderStateData, RenderStateDirty as VtRenderStateDirty,
     RenderStateOption as VtRenderStateOption, RenderStateRowData as VtRenderStateRowData,
     RenderStateRowIterator as VtRenderStateRowIterator,
-    RenderStateRowOption as VtRenderStateRowOption, Result as VtResult, Terminal as VtTerminal,
+    RenderStateRowOption as VtRenderStateRowOption, Terminal as VtTerminal,
     TerminalData as VtTerminalData, ghostty_render_state_free, ghostty_render_state_get,
     ghostty_render_state_new, ghostty_render_state_row_get, ghostty_render_state_row_iterator_free,
     ghostty_render_state_row_iterator_new, ghostty_render_state_row_iterator_next,
     ghostty_render_state_row_set, ghostty_render_state_set, ghostty_render_state_update,
     ghostty_terminal_get,
 };
+
 #[cfg(test)]
 use libghostty_vt_sys::{
     Row as VtRow, RowData as VtRowData, RowSemanticPrompt as VtRowSemanticPrompt, ghostty_row_get,
 };
 
 use crate::ansi;
+
 use crate::ghostty::{Error, Result, SnapshotColors, SnapshotCursor};
 
 /// The engine's render state and the row damage derived from it.
@@ -226,13 +231,13 @@ impl RenderStateReader {
         // DECSCUSR determines the cursor shape reported by the render state.
         let mut style: VtRenderStateCursorVisualStyle::Type = VtRenderStateCursorVisualStyle::BLOCK;
 
-        let _ = unsafe {
+        Error::from_code(unsafe {
             ghostty_render_state_get(
                 self.render_state,
                 VtRenderStateData::CURSOR_VISUAL_STYLE,
                 (&mut style as *mut VtRenderStateCursorVisualStyle::Type).cast(),
             )
-        };
+        })?;
 
         let shape = match style {
             VtRenderStateCursorVisualStyle::BAR => ansi::CursorShape::Beam,
@@ -288,82 +293,78 @@ impl RenderStateReader {
     }
 
     /// Effective default colors from the render-state.
-    pub(super) fn colors(&self, terminal: VtTerminal) -> SnapshotColors {
+    pub(super) fn colors(&self, terminal: VtTerminal) -> Result<SnapshotColors> {
         use nmt_config::colors::ColorRgb;
 
-        let read = |data: VtRenderStateData::Type| -> Option<ColorRgb> {
-            let mut c = VtColorRgb::default();
+        let read = |data: VtRenderStateData::Type| -> Result<ColorRgb> {
+            let mut color = VtColorRgb::default();
 
-            match unsafe {
+            Error::from_code(unsafe {
                 ghostty_render_state_get(
                     self.render_state,
                     data,
-                    (&mut c as *mut VtColorRgb).cast(),
+                    (&mut color as *mut VtColorRgb).cast(),
                 )
-            } {
-                VtResult::SUCCESS => Some(ColorRgb {
-                    r: c.r,
-                    g: c.g,
-                    b: c.b,
-                }),
+            })?;
 
-                _ => None,
-            }
+            Ok(ColorRgb {
+                r: color.r,
+                g: color.g,
+                b: color.b,
+            })
         };
 
-        let fg = read(VtRenderStateData::COLOR_FOREGROUND).unwrap_or_default();
-        let bg = read(VtRenderStateData::COLOR_BACKGROUND).unwrap_or_default();
-
+        let fg = read(VtRenderStateData::COLOR_FOREGROUND)?;
+        let bg = read(VtRenderStateData::COLOR_BACKGROUND)?;
         let mut has_cursor = false;
 
-        let _ = unsafe {
+        Error::from_code(unsafe {
             ghostty_render_state_get(
                 self.render_state,
                 VtRenderStateData::COLOR_CURSOR_HAS_VALUE,
                 (&mut has_cursor as *mut bool).cast(),
             )
-        };
+        })?;
 
         let cursor = if has_cursor {
-            read(VtRenderStateData::COLOR_CURSOR)
+            Some(read(VtRenderStateData::COLOR_CURSOR)?)
         } else {
             None
         };
 
-        // Detect OSC 11 overrides by comparing the effective background
-        // (override OR default) to the engine's *default* (ignoring OSC). Both come
-        // from the engine, so there's no config↔u8 conversion mismatch. An override
-        // is active iff they differ; `bg_override` is then `Some(effective)`.
-        let read_term = |data: VtTerminalData::Type| -> Option<ColorRgb> {
-            let mut c = VtColorRgb::default();
+        // Compare engine colors directly so theme conversion rounding cannot
+        // be mistaken for an OSC 11 override.
+        let read_term = |data: VtTerminalData::Type| -> Result<Option<ColorRgb>> {
+            let mut color = VtColorRgb::default();
 
-            match unsafe {
-                ghostty_terminal_get(terminal, data, (&mut c as *mut VtColorRgb).cast())
-            } {
-                VtResult::SUCCESS => Some(ColorRgb {
-                    r: c.r,
-                    g: c.g,
-                    b: c.b,
-                }),
+            let result = Error::from_code(unsafe {
+                ghostty_terminal_get(terminal, data, (&mut color as *mut VtColorRgb).cast())
+            });
 
-                _ => None,
+            // A terminal without configured colors has no default or override.
+            // The render state still supplies its built-in display colors.
+            match result {
+                Ok(()) => {}
+                Err(Error::NoValue) => return Ok(None),
+                Err(error) => return Err(error),
             }
+
+            Ok(Some(ColorRgb {
+                r: color.r,
+                g: color.g,
+                b: color.b,
+            }))
         };
 
-        let bg_effective = read_term(VtTerminalData::COLOR_BACKGROUND);
-        let bg_default = read_term(VtTerminalData::COLOR_BACKGROUND_DEFAULT);
+        let bg_effective = read_term(VtTerminalData::COLOR_BACKGROUND)?;
+        let bg_default = read_term(VtTerminalData::COLOR_BACKGROUND_DEFAULT)?;
+        let bg_override = bg_effective.filter(|color| Some(*color) != bg_default);
 
-        let bg_override = if bg_effective != bg_default {
-            bg_effective
-        } else {
-            None
-        };
-
-        SnapshotColors {
+        Ok(SnapshotColors {
             fg,
             bg,
             cursor,
             bg_override,
-        }
+        })
     }
 }

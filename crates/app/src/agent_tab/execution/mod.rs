@@ -275,10 +275,6 @@ impl AgentSession {
         }
     }
 
-    pub fn id(&self) -> SessionId {
-        self.id
-    }
-
     pub fn is_closed(&self) -> bool {
         self.closed.get()
     }

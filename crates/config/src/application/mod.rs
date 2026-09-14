@@ -10,7 +10,6 @@ use std::{env, fs, io, mem};
 use dirs::home_dir;
 use nmt_platform::environment::config_dir;
 use serde::{Deserialize, Serialize};
-use toml::de::Error as TomlDeError;
 use toml::from_str as parse_toml;
 use toml_edit::{DocumentMut, Item, Table, value};
 use tracing::warn;
@@ -216,12 +215,14 @@ impl Config {
         themes
     }
 
-    pub fn load_for_startup_from(path: &Path, config_dir: &Path) -> Result<Self, TomlDeError> {
-        let Some(content) = fs::read_to_string(path).ok() else {
-            return Ok(Config::default());
+    pub fn load_for_startup_from(path: &Path, config_dir: &Path) -> Result<Self, String> {
+        let content = match fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Config::default()),
+            Err(error) => return Err(format!("failed to read {}: {error}", path.display())),
         };
 
-        let mut decoded = parse_toml::<Config>(&content)?;
+        let mut decoded = parse_toml::<Config>(&content).map_err(|error| error.to_string())?;
 
         decoded.appearance.normalize();
 
@@ -286,9 +287,14 @@ impl Default for CursorConfig {
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
 pub fn init(config: Config) {
-    set_active_colors(config.colors);
+    let colors = config.colors;
 
-    let _ = CONFIG.set(config);
+    assert!(
+        CONFIG.set(config).is_ok(),
+        "configuration already initialized"
+    );
+
+    set_active_colors(colors);
 }
 
 pub fn get() -> &'static Config {

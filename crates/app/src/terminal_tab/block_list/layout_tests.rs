@@ -6,7 +6,6 @@ use nmt_terminal::session::InFlightBlock;
 
 use crate::terminal_tab::block_list::chrome::offset_frozen_chrome;
 use crate::terminal_tab::block_list::live::LiveItemState;
-use crate::terminal_tab::block_list::reconcile::shift_selected_item_for_eviction;
 use crate::terminal_tab::pane_model::list_mirror::ListPosition;
 use crate::terminal_tab::{block_list, theme};
 
@@ -25,10 +24,8 @@ fn live_item_layout_places_chrome_around_history_active_rows_and_padding() {
         (None, false, None),
     ] {
         let state = LiveItemState {
-            index: 4,
             in_flight,
             has_open_prompt: open_prompt,
-            selected_item: Some(4),
         };
 
         for pad_rows in [0.0, 1.0] {
@@ -46,7 +43,6 @@ fn live_item_layout_places_chrome_around_history_active_rows_and_padding() {
                         (chrome.top, chrome.bottom, chrome.header_y),
                         (0.0, history_height + 20.0 + pad_rows * 10.0, history_height)
                     );
-                    assert!(chrome.selected);
                     assert!(chrome.header.is_none());
                 }
             }
@@ -136,18 +132,6 @@ fn block_list_render_metrics_resolve_scroll_once() {
     );
     assert_eq!(metrics.offset_px, 33.0);
     assert_eq!(metrics.last_item_px, 30.0);
-}
-
-#[test]
-fn selected_item_tracks_store_head_eviction() {
-    assert_eq!(shift_selected_item_for_eviction(Some(4), 2, 10), Some(2));
-    assert_eq!(shift_selected_item_for_eviction(Some(1), 2, 10), None);
-    assert_eq!(
-        shift_selected_item_for_eviction(Some(10), 3, 7),
-        Some(7),
-        "old live index shifts to the new live index"
-    );
-    assert_eq!(shift_selected_item_for_eviction(Some(11), 3, 7), None);
 }
 
 #[test]
@@ -241,26 +225,22 @@ fn remeasure_scope_tracks_layout_vs_content_changes() {
 
 #[test]
 fn block_list_live_chrome_marks_idle_open_prompt() {
-    let chrome = block_list::block_list_live_chrome(4, 2, 10.0, None, true, false).unwrap();
+    let chrome = block_list::block_list_live_chrome(2, 10.0, None, true).unwrap();
 
-    assert_eq!(chrome.item, 4);
     assert_eq!(chrome.accent, theme::BLOCK_INPUT_COLOR);
     assert_eq!(chrome.header, None);
-    assert!(!chrome.selected);
 
-    assert!(block_list::block_list_live_chrome(4, 2, 10.0, None, false, false).is_none());
+    assert!(block_list::block_list_live_chrome(2, 10.0, None, false).is_none());
 }
 
 #[test]
 fn frozen_chrome_offset_moves_header_with_item() {
     let chrome = block_list::FrozenItemChrome {
-        item: 0,
         top: 0.0,
         bottom: 40.0,
         header_y: 10.0,
         accent: theme::BLOCK_SUCCESS_COLOR,
         header: Some("build · ✓".into()),
-        selected: false,
     };
 
     let chrome = offset_frozen_chrome(chrome, 80.0);

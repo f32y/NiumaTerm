@@ -461,16 +461,6 @@ fn failed_native_operations_cannot_clear_internal_attention() {
 }
 
 #[test]
-fn native_delivery_is_suppressed_only_for_the_exact_visible_route() {
-    let target = route("target");
-    let sibling = route("sibling");
-
-    assert!(!request_native_delivery(Some(&target), &target));
-    assert!(request_native_delivery(Some(&sibling), &target));
-    assert!(request_native_delivery(None, &target));
-}
-
-#[test]
 fn aggregation_counts_routes_and_prioritizes_needs_input() {
     let now = Instant::now();
     let a = route("a");
@@ -651,11 +641,8 @@ fn closed_route_cancels_pending_and_rejects_late_events() {
 #[test]
 fn colliding_local_pane_ids_stay_isolated_across_windows_and_close_cascades() {
     let now = Instant::now();
-    let local_pane_id = 1;
     let window_one = route("window-1:route-1");
     let window_two = route("window-2:route-1");
-
-    assert_eq!(local_pane_id, 1); // Both windows may independently allocate pane 1.
 
     let mut first = monitor(now, slice::from_ref(&window_one));
     let mut second = monitor(now, slice::from_ref(&window_two));

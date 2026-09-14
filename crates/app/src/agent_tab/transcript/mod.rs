@@ -45,10 +45,6 @@ use crate::agent_tab::transcript::code::should_virtualize_transcript;
 #[cfg(test)]
 use crate::agent_tab::transcript::code::transcript_segments;
 #[cfg(test)]
-use crate::agent_tab::transcript::disclosure_row::{
-    AGENT_CARD_GAP, AGENT_CARD_ICON_BLOCK, AGENT_CARD_PADDING_X, AGENT_DISCLOSURE_DETAIL_INSET,
-};
-#[cfg(test)]
 use crate::agent_tab::transcript::format::{
     command_execution_detail, elapsed_label, interrupted_status_label, worked_status_label,
     working_status_label,

@@ -45,7 +45,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::time;
+use std::{io, time};
 
 use futures::channel::oneshot;
 use nmt_config::CursorShape;
@@ -293,12 +293,12 @@ impl TerminalSession {
         Arc::clone(&self.shared.block_store)
     }
 
-    /// Number of processes beyond the shell itself in the shell's Job
-    /// Object (requires job management; 0 otherwise).
-    pub fn child_process_count(&self) -> usize {
-        self.process_tree
-            .as_ref()
-            .map_or(0, ProcessTree::other_process_count)
+    /// Number of processes beyond the shell itself; zero without process
+    /// management. Query failures remain distinguishable from an empty group.
+    pub fn child_process_count(&self) -> io::Result<usize> {
+        self.process_tree.as_ref().map_or(Ok(0), |tree| {
+            tree.process_count().map(|count| count.saturating_sub(1))
+        })
     }
 
     /// Write input bytes (already terminal-encoded) to the session's PTY.

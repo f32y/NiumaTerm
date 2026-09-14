@@ -44,7 +44,7 @@ impl HookRegistration {
     pub(crate) fn status(&self, path: &Path, command: Option<&str>) -> HookInstallStatus {
         match read(path, self.file_label) {
             Ok(settings) => self.status_of(&settings, command),
-            Err(_) => HookInstallStatus::NotInstalled,
+            Err(_) => HookInstallStatus::Unavailable,
         }
     }
 

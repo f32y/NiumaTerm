@@ -1,9 +1,5 @@
 mod detail_navigation {
-    use nmt_agent::background_task::{
-        BackgroundTaskKey, BackgroundTaskTranscript, BackgroundTaskTranscriptState,
-        BackgroundTaskTranscriptUpdate, MAX_TRANSCRIPT_ITEMS,
-    };
-    use nmt_agent::chat::Item;
+    use nmt_agent::background_task::BackgroundTaskKey;
 
     use crate::ui::background_tasks::PanelMode;
 
@@ -42,73 +38,6 @@ mod detail_navigation {
             Some(&BackgroundTaskKey::claude_code("a"))
         );
         assert_eq!(mode.close(), Some((false, true)));
-    }
-
-    #[test]
-    fn a_failed_read_reports_itself_without_hiding_what_is_known() {
-        let mut transcript = BackgroundTaskTranscript::default();
-
-        BackgroundTaskTranscriptUpdate::appended(vec![Item::AgentMessage {
-            id: "a".into(),
-            text: Some("partial output".into()),
-            questions: None,
-        }])
-        .apply_to(&mut transcript);
-
-        BackgroundTaskTranscriptUpdate::state(BackgroundTaskTranscriptState::Unavailable {
-            message: "thread/read failed".into(),
-        })
-        .apply_to(&mut transcript);
-
-        assert_eq!(transcript.items().len(), 1);
-        assert!(matches!(
-            transcript.state(),
-            BackgroundTaskTranscriptState::Unavailable { .. }
-        ));
-    }
-
-    #[test]
-    fn a_truncated_conversation_reports_what_is_missing() {
-        let mut transcript = BackgroundTaskTranscript::default();
-
-        for index in 0..MAX_TRANSCRIPT_ITEMS + 3 {
-            transcript.push(Item::AgentMessage {
-                id: format!("m{index}"),
-                text: Some("line".into()),
-                questions: None,
-            });
-        }
-
-        assert_eq!(
-            transcript.dropped(),
-            3,
-            "the view states what the retention bound removed"
-        );
-    }
-
-    #[test]
-    fn a_revision_changes_only_when_the_conversation_does() {
-        let mut transcript = BackgroundTaskTranscript::default();
-        let start = transcript.revision();
-
-        BackgroundTaskTranscriptUpdate::appended(vec![Item::AgentMessage {
-            id: "a".into(),
-            text: Some("one".into()),
-            questions: None,
-        }])
-        .apply_to(&mut transcript);
-
-        let after_append = transcript.revision();
-
-        assert!(after_append > start);
-
-        BackgroundTaskTranscriptUpdate::appended(Vec::new()).apply_to(&mut transcript);
-
-        assert_eq!(
-            transcript.revision(),
-            after_append,
-            "an empty update must not force the view to rebuild"
-        );
     }
 }
 

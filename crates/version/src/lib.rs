@@ -40,16 +40,6 @@ impl Version {
     pub fn parse(label: &str) -> Option<Self> {
         parse_release(label).or_else(|| parse_nightly(label))
     }
-
-    /// Whether two labels came from the same publishing channel, which is what
-    /// makes their parts comparable at all.
-    pub fn same_channel(&self, other: &Self) -> bool {
-        matches!(
-            (self, other),
-            (Self::Release { .. }, Self::Release { .. })
-                | (Self::Nightly { .. }, Self::Nightly { .. })
-        )
-    }
 }
 
 fn parse_release(label: &str) -> Option<Version> {

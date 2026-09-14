@@ -2,6 +2,23 @@
 
 pub(crate) mod login_shell;
 
+#[cfg(test)]
+mod tests;
+
+use std::ffi::{CStr, CString, IntoStringError, OsStr};
+
+use std::fmt::{self, Display, Formatter};
+
+use std::mem::{MaybeUninit, size_of_val};
+
+use std::os::raw::c_int;
+
+use std::path::{Path, PathBuf};
+
+use std::{error, io, ptr};
+
+use libc::{__error, c_void};
+
 /// Bindings for libproc.
 #[allow(non_camel_case_types)]
 mod sys {
@@ -87,18 +104,6 @@ mod sys {
     }
 }
 
-#[cfg(test)]
-mod tests;
-
-use std::ffi::{CStr, CString, IntoStringError, OsStr};
-use std::fmt::{self, Display, Formatter};
-use std::mem::MaybeUninit;
-use std::os::raw::c_int;
-use std::path::{Path, PathBuf};
-use std::{error, io, ptr};
-
-use libc::c_void;
-
 /// Error during working directory retrieval.
 #[derive(Debug)]
 pub enum Error {
@@ -149,21 +154,47 @@ impl From<IntoStringError> for Error {
     }
 }
 
-/// The number of live processes in the process group `pgid`.
-///
-/// `proc_listpgrppids` reports the byte length it would fill when handed a
-/// null buffer, which is the group size without a second call or a guess at
-/// how large the group may grow.
-pub fn process_group_count(pgid: c_int) -> usize {
-    // SAFETY: a null buffer with zero capacity is the documented way to ask
-    // for the required size, and the call only reads the group id.
-    let bytes = unsafe { sys::proc_listpgrppids(pgid, ptr::null_mut(), 0) };
+/// Count group members from a populated buffer: a null-buffer query estimates
+/// all system processes before the kernel applies its group filter.
+/// See Apple's implementation:
+/// https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/proc_info.c
+pub fn process_group_count(pgid: c_int) -> io::Result<usize> {
+    let mut pids: Vec<c_int> = vec![0; 32];
 
-    if bytes <= 0 {
-        return 0;
+    loop {
+        let bytes = c_int::try_from(size_of_val(pids.as_slice()))
+            .map_err(|_| io::Error::other("process list exceeds the native buffer limit"))?;
+
+        // libproc returns a count, and reports errors as zero plus errno.
+        // Clear errno so an empty group cannot inherit an earlier call's error.
+        // https://github.com/apple-oss-distributions/xnu/blob/main/libsyscall/wrappers/libproc/libproc.c
+        // SAFETY: errno is thread-local and the buffer has the supplied byte size.
+        let count = unsafe {
+            *__error() = 0;
+
+            sys::proc_listpgrppids(pgid, pids.as_mut_ptr().cast(), bytes)
+        };
+
+        let error = io::Error::last_os_error();
+
+        if count < 0 || (count == 0 && error.raw_os_error() != Some(0)) {
+            return Err(error);
+        }
+
+        let count = count as usize;
+
+        if count < pids.len() {
+            return Ok(count);
+        }
+
+        let next = pids
+            .len()
+            .checked_mul(2)
+            .filter(|len| *len <= c_int::MAX as usize / size_of::<c_int>())
+            .ok_or_else(|| io::Error::other("process list exceeds the native buffer limit"))?;
+
+        pids.resize(next, 0);
     }
-
-    bytes as usize / size_of::<c_int>()
 }
 
 pub fn macos_process_name(pid: c_int) -> String {

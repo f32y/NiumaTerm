@@ -110,8 +110,7 @@ use crate::ui::settings::fields::{
 #[cfg(test)]
 use crate::ui::settings::opacity::{
     effective_background_image_layer_opacity, effective_background_opacity,
-    effective_main_view_background_opacity, effective_surface_background_opacity,
-    window_background_appearance_for,
+    effective_surface_background_opacity, window_background_appearance_for,
 };
 use crate::ui::settings::profiles_page::profiles_page;
 #[cfg(windows)]
@@ -129,8 +128,6 @@ use crate::ui::settings::table::{
     ENV_OPERATION_COLUMN, TABLE_OPERATION_BUTTON, TrashIcon, table_frame, table_header, table_row,
 };
 use crate::ui::settings::terminal_page::terminal_page;
-#[cfg(test)]
-use crate::ui::settings::theme::tab_background_opacity;
 use crate::ui::settings::theme::theme_list;
 use crate::{agent_updates, ui};
 

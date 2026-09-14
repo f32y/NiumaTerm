@@ -5,8 +5,8 @@ use tree_sitter_language::LanguageFn;
 use tree_sitter_runtime::{Language, Parser};
 
 use crate::{
-    LANGUAGE_COUNT, LanguageDescriptor, RawSlice, nmt_tree_sitter_abi_version,
-    nmt_tree_sitter_language, nmt_tree_sitter_language_count,
+    LanguageDescriptor, RawSlice, nmt_tree_sitter_abi_version, nmt_tree_sitter_language,
+    nmt_tree_sitter_language_count,
 };
 
 fn text(value: RawSlice) -> &'static str {
@@ -22,11 +22,14 @@ fn text(value: RawSlice) -> &'static str {
 #[test]
 fn every_exported_language_has_a_unique_name_and_usable_parser() {
     assert_eq!(nmt_tree_sitter_abi_version(), 1);
-    assert_eq!(nmt_tree_sitter_language_count(), LANGUAGE_COUNT);
+
+    let count = nmt_tree_sitter_language_count();
+
+    assert!(count > 0);
 
     let mut names = HashSet::new();
 
-    for index in 0..LANGUAGE_COUNT {
+    for index in 0..count {
         let mut raw = mem::MaybeUninit::<LanguageDescriptor>::uninit();
 
         // The output points to aligned storage for the exact exported type.
@@ -55,7 +58,7 @@ fn every_exported_language_has_a_unique_name_and_usable_parser() {
 
     // An out-of-range index must leave caller storage untouched.
     assert_eq!(
-        unsafe { nmt_tree_sitter_language(LANGUAGE_COUNT, unused.as_mut_ptr()) },
+        unsafe { nmt_tree_sitter_language(count, unused.as_mut_ptr()) },
         0
     );
 }

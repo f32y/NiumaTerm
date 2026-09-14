@@ -1,7 +1,6 @@
 use gpui::px;
 use nmt_config::profile::Profile;
 
-use crate::ui::UI_RADIUS;
 use crate::ui::tab_bar::menu::profile_root_choices;
 use crate::ui::tab_bar::{
     AgentTabIndicator, COMPACT_TAB_WIDTH, FULL_TAB_WIDTH, MIN_AUTO_TAB_WIDTH, NEW_TAB_BUTTON_WIDTH,
@@ -15,7 +14,6 @@ fn progress_bar_stops_at_rounded_tab_edges() {
     let bar_width = progress_bar_width(tab_width);
 
     assert_eq!(bar_width, px(134.0));
-    assert_eq!(tab_width - UI_RADIUS - bar_width, UI_RADIUS);
 }
 
 /// Auto Size holds the configured width while the row has room, shares the

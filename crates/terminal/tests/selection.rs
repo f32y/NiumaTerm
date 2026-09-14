@@ -26,43 +26,6 @@ fn to_range_engine_maps_screen_to_visible() {
     assert_eq!(r.end.row, Line(0));
 }
 
-/// `visible_rows_clamped` reproduces the retired
-/// `TermDamageState::damage_selection` clamp (display_offset == 0).
-#[test]
-fn visible_rows_clamped_cases() {
-    let mk = |s: i32, e: i32| {
-        SelectionRange::new(
-            Pos::new(Line(s), Column(0)),
-            Pos::new(Line(e), Column(0)),
-            false,
-        )
-    };
-
-    // Fully inside.
-    assert_eq!(mk(1, 3).visible_rows_clamped(5), Some(1..=3));
-
-    // Single row.
-    assert_eq!(mk(2, 2).visible_rows_clamped(5), Some(2..=2));
-
-    // Spans past the bottom → clamps end to last row.
-    assert_eq!(mk(3, 9).visible_rows_clamped(5), Some(3..=4));
-
-    // Starts above row 0 → clamps start to 0.
-    assert_eq!(mk(-2, 1).visible_rows_clamped(5), Some(0..=1));
-
-    // Spans the whole (and beyond) viewport.
-    assert_eq!(mk(-5, 99).visible_rows_clamped(5), Some(0..=4));
-
-    // Fully above the viewport → None.
-    assert_eq!(mk(-4, -1).visible_rows_clamped(5), None);
-
-    // Fully below the viewport → None.
-    assert_eq!(mk(5, 8).visible_rows_clamped(5), None);
-
-    // Zero-height viewport → None (no panic).
-    assert_eq!(mk(0, 0).visible_rows_clamped(0), None);
-}
-
 #[test]
 fn simple_is_empty() {
     let mut selection = Selection::new(

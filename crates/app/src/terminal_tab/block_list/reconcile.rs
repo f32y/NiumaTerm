@@ -84,22 +84,6 @@ pub(crate) fn block_list_render_metrics(
     }
 }
 
-pub(crate) fn shift_selected_item_for_eviction(
-    selected: Option<usize>,
-    evicted_delta: usize,
-    store_len: usize,
-) -> Option<usize> {
-    let selected = selected?;
-
-    if selected < evicted_delta {
-        None
-    } else {
-        let shifted = selected - evicted_delta;
-
-        (shifted <= store_len).then_some(shifted)
-    }
-}
-
 /// How to bring the mirrored GPUI `ListState` in line with the store after
 /// front evictions and tail growth. Pure so the index arithmetic is testable
 /// away from `ListState`.

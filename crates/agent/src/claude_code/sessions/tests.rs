@@ -1,8 +1,9 @@
 use std::io::BufRead;
 
-use crate::background_task::{BackgroundTaskState, BackgroundTaskTranscript};
+use crate::background_task::{BackgroundTaskState, BackgroundTaskTranscriptUpdate};
 use crate::chat::{CompactionTrigger, Item};
 use crate::claude_code::sessions::*;
+use crate::session::children::ChildTranscript;
 
 /// Replayed conversation with its turn grouping flattened away, for the tests
 /// that assert what a session replays rather than how it is divided.
@@ -343,7 +344,9 @@ fn titles_come_from_the_first_real_user_prompt() {
         "message": {"content": [{"type": "text", "text": "fix the login bug\nmore detail"}]}});
 
     assert_eq!(
-        user_prompt_text(&record).as_deref().and_then(title_line),
+        user_prompt_text(&record)
+            .as_deref()
+            .and_then(provisional_title_from_prompt),
         Some("fix the login bug more detail".to_string())
     );
 }
@@ -524,17 +527,19 @@ fn a_summary_whose_boundary_never_reached_disk_keeps_its_row() {
 #[test]
 fn prompt_wrappers_are_stripped() {
     assert_eq!(
-        title_line("<system-reminder>injected context</system-reminder>real question"),
+        provisional_title_from_prompt(
+            "<system-reminder>injected context</system-reminder>real question"
+        ),
         Some("real question".to_string())
     );
     assert_eq!(
-        title_line(
+        provisional_title_from_prompt(
             "<command-message>opsx:apply</command-message>\n<command-name>/opsx:apply</command-name>"
         ),
         Some("opsx:apply".to_string())
     );
     assert_eq!(
-        title_line("one two three four five six seven eight"),
+        provisional_title_from_prompt("one two three four five six seven eight"),
         Some("one two three four five six".to_string())
     );
 }
@@ -895,22 +900,33 @@ fn task_history_rebuilds_a_childs_own_conversation_from_linked_sidechains() {
     // Assert on the accumulated conversation rather than the raw records: a
     // tool result carries its call's id, and folding it into that row is what
     // the accumulator does for both live and restored content.
-    let mut transcript = BackgroundTaskTranscript::default();
+    let mut transcript = ChildTranscript::default();
 
-    assert!(transcript.restore(tasks[0].items.clone()));
+    assert!(transcript.apply(BackgroundTaskTranscriptUpdate::restored(
+        tasks[0].items.clone()
+    )));
 
-    let ids: Vec<_> = transcript.items().iter().map(Item::id).collect();
+    let conversation = transcript.conversation.borrow();
+
+    let items: Vec<_> = conversation
+        .content
+        .entries()
+        .iter()
+        .map(|entry| &entry.item)
+        .collect();
+
+    let ids: Vec<_> = items.iter().map(|item| item.id()).collect();
 
     assert_eq!(ids, [None, Some("th-1"), Some("tu-1"), Some("tx-1")]);
     assert!(
         matches!(
-            &transcript.items()[0],
+            items[0],
             Item::UserMessage { text: Some(text) } if text == "review the parser"
         ),
         "the child's first instruction is shown as user input"
     );
     assert!(
-        matches!(transcript.items()[1], Item::Reasoning { .. }),
+        matches!(items[1], Item::Reasoning { .. }),
         "the child's work uses the same row kinds as the parent conversation"
     );
 }

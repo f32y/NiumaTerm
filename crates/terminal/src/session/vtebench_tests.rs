@@ -8,9 +8,8 @@
 //!    between samples and before printing results) lost the post-RIS output:
 //!    the results text showed up neither in the frozen block nor on screen.
 //!
-//! Both bugs are fixed; these tests pin the recovered behavior. Environments
-//! where the real shell session cannot start (no ConPTY, missing PowerShell)
-//! skip via the `trusted_session()` guard rather than failing.
+//! These tests require ConPTY, PowerShell, and the bundled integration script.
+//! Missing prerequisites fail explicitly so the checks cannot silently pass.
 
 #![cfg(windows)]
 
@@ -151,16 +150,9 @@ fn run_command(session: &TerminalSession, all: &mut Vec<HostEvent>, cmd: &str) -
 }
 
 /// Spawn an integrated session and wait for boundary trust.
-fn trusted_session() -> Option<(TerminalSession, Vec<HostEvent>)> {
-    let session = match TerminalSession::new(&integration_config(), 1, active_colors(), None) {
-        Ok(s) => s,
-
-        Err(e) => {
-            eprintln!("skipping: could not spawn powershell.exe: {e:?}");
-
-            return None;
-        }
-    };
+fn trusted_session() -> (TerminalSession, Vec<HostEvent>) {
+    let session = TerminalSession::new(&integration_config(), 1, active_colors(), None)
+        .expect("could not start the required PowerShell session");
 
     let mut all = Vec::new();
 
@@ -171,7 +163,7 @@ fn trusted_session() -> Option<(TerminalSession, Vec<HostEvent>)> {
         screen_text(&session)
     );
 
-    Some((session, all))
+    (session, all)
 }
 
 fn last_alt_screen(all: &[HostEvent]) -> Option<bool> {
@@ -187,9 +179,7 @@ fn last_alt_screen(all: &[HostEvent]) -> Option<bool> {
 /// the next command must produce a frozen block.
 #[test]
 fn ctrl_c_on_alt_screen_recovers_block_mode() {
-    let Some((session, mut all)) = trusted_session() else {
-        return;
-    };
+    let (session, mut all) = trusted_session();
 
     // Enter alt screen, then hang like a mid-sample benchmark.
     // Ctrl-C should cut the sleep short; the short sleep bounds the test even
@@ -255,9 +245,7 @@ fn ctrl_c_on_alt_screen_recovers_block_mode() {
 /// and the block keeps only the first line(s).
 #[test]
 fn full_tail_survives_after_alt_screen_roundtrip() {
-    let Some((session, mut all)) = trusted_session() else {
-        return;
-    };
+    let (session, mut all) = trusted_session();
 
     let cmd = "$e=[char]27; [Console]::Write(\"$e[?1049h\"); \
                [Console]::Write(\"$($e)c\"); \
@@ -298,15 +286,8 @@ fn engine_blocks_bridge_freezes_command_output() {
 
     config.engine_blocks = true;
 
-    let session = match TerminalSession::new(&config, 1, active_colors(), None) {
-        Ok(s) => s,
-
-        Err(e) => {
-            eprintln!("skipping: could not spawn powershell.exe: {e:?}");
-
-            return;
-        }
-    };
+    let session = TerminalSession::new(&config, 1, active_colors(), None)
+        .expect("could not start the required PowerShell session");
 
     let mut all = Vec::new();
 
@@ -361,9 +342,7 @@ fn engine_blocks_bridge_freezes_command_output() {
 /// and/or on the visible screen — not be swallowed by the boundary clear.
 #[test]
 fn output_after_ris_survives_into_the_block() {
-    let Some((session, mut all)) = trusted_session() else {
-        return;
-    };
+    let (session, mut all) = trusted_session();
 
     // Emulate one vtebench run tail: alt screen sample, RIS, then results.
     let cmd = "$e=[char]27; [Console]::Write(\"$e[?1049h\"); \

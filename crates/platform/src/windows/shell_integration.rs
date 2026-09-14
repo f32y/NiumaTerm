@@ -5,7 +5,8 @@ mod shell_integration_tests;
 use std::env;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Error, Result};
+use anyhow::{Context as _, Error, Result};
+use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND};
 use windows_registry::CURRENT_USER;
 
 use crate::windows::notifier;
@@ -42,7 +43,7 @@ pub fn register_shell_integration() -> Result<()> {
 
 pub fn unregister_shell_integration() -> Result<()> {
     for path in context_menu_owned_registry_roots() {
-        let _ = CURRENT_USER.remove_tree(path);
+        remove_registry_tree(&path)?;
     }
 
     Ok(())
@@ -96,7 +97,7 @@ pub fn set_system_notification_enabled(enabled: bool) -> Result<()> {
 
         notifier::register_identity(Path::new(&exe_path)).map_err(Error::msg)
     } else {
-        let _ = CURRENT_USER.remove_tree(NMT_PROTOCOL_ROOT);
+        remove_registry_tree(NMT_PROTOCOL_ROOT)?;
 
         notifier::unregister_identity().map_err(Error::msg)
     }
@@ -115,7 +116,7 @@ pub(crate) fn register_shell_integration_paths(exe_path: &Path, dll_path: &Path)
     let icon = format!("{exe_path},0");
 
     for path in LEGACY_NEW_WINDOW_ROOTS {
-        let _ = CURRENT_USER.remove_tree(path);
+        remove_registry_tree(path)?;
     }
 
     for verb in VERBS {
@@ -143,6 +144,19 @@ pub(crate) fn register_shell_integration_paths(exe_path: &Path, dll_path: &Path)
 
 fn shell_extension_path(exe_path: &Path) -> PathBuf {
     exe_path.with_file_name("NmtShellExtension.dll")
+}
+
+fn remove_registry_tree(path: &str) -> Result<()> {
+    match CURRENT_USER.remove_tree(path) {
+        Ok(()) => Ok(()),
+        Err(error)
+            if error.code() == ERROR_FILE_NOT_FOUND.to_hresult()
+                || error.code() == ERROR_PATH_NOT_FOUND.to_hresult() =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(error).with_context(|| format!("failed to remove registry key {path}")),
+    }
 }
 
 fn dll_path_matches(actual: &str, expected: &Path) -> bool {

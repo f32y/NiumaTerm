@@ -1082,8 +1082,8 @@ impl Session {
             .map_err(|error| error.to_string())
     }
 
-    /// Write one line; write failures stay unsurfaced because the reader-side
-    /// EOF is the single exit-detection path.
+    /// Required-input failures are logged and terminate the process tree;
+    /// the reader then reports EOF through the normal lifecycle path.
     fn send(&mut self, message: Value) {
         let _ = self.process.write_line(message);
     }

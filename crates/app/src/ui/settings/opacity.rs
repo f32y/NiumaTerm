@@ -38,24 +38,19 @@ pub(crate) fn surface_background_opacity(cx: &App) -> f32 {
     ) as f32
 }
 
-/// The tint strength for everything inside a tab (terminal panes, agent pane,
-/// right-hand panel). Keeping this at full opacity is what confines the
-/// backdrop to the chrome, so tab content stays readable over any wallpaper.
-pub(super) fn effective_main_view_background_opacity(
-    effect_on_content_area: bool,
-    opacity: f32,
-) -> f32 {
-    if effect_on_content_area { opacity } else { 1.0 }
-}
-
+/// The tint strength inside a tab. Full opacity confines the backdrop to
+/// the chrome so terminal and agent content stays readable over wallpaper.
 pub(crate) fn main_view_background_opacity(cx: &App) -> f32 {
-    effective_main_view_background_opacity(
-        cx.global::<AppSettings>()
-            .config()
-            .appearance
-            .transparent_main_view,
-        surface_background_opacity(cx),
-    )
+    if cx
+        .global::<AppSettings>()
+        .config()
+        .appearance
+        .transparent_main_view
+    {
+        surface_background_opacity(cx)
+    } else {
+        1.0
+    }
 }
 
 pub(super) fn effective_background_image_layer_opacity(

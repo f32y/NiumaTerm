@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "children_tests.rs"]
+mod tests;
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -69,7 +73,6 @@ pub struct ChildTranscript {
     pub conversation: Rc<RefCell<ConversationState>>,
     state: BackgroundTaskTranscriptState,
     dropped: usize,
-    revision: u64,
 }
 
 impl ChildTranscript {
@@ -79,14 +82,6 @@ impl ChildTranscript {
 
     pub fn dropped(&self) -> usize {
         self.dropped
-    }
-
-    pub fn revision(&self) -> u64 {
-        self.revision
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.conversation.borrow().content.entries().is_empty()
     }
 
     pub fn apply(&mut self, update: BackgroundTaskTranscriptUpdate) -> bool {
@@ -102,10 +97,6 @@ impl ChildTranscript {
         let mut conversation = self.conversation.borrow_mut();
 
         if update.restore && !conversation.content.entries().is_empty() {
-            if changed {
-                self.revision += 1;
-            }
-
             return changed;
         }
 
@@ -117,10 +108,6 @@ impl ChildTranscript {
                 .map(|entry| &entry.item)
                 .eq(update.items.iter())
             {
-                if changed {
-                    self.revision += 1;
-                }
-
                 return changed;
             }
 
@@ -146,10 +133,6 @@ impl ChildTranscript {
 
         if dropped > 0 {
             self.dropped += dropped;
-        }
-
-        if changed {
-            self.revision += 1;
         }
 
         changed

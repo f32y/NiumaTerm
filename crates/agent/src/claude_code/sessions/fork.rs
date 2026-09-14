@@ -12,7 +12,7 @@ use crate::chat::ReplayTurn;
 use crate::claude_code::sessions::index::TranscriptIndex;
 use crate::claude_code::sessions::paths::session_path;
 use crate::claude_code::sessions::replay::parse_replay;
-use crate::claude_code::sessions::titles::{title_line, user_prompt_text};
+use crate::claude_code::sessions::titles::{provisional_title_from_prompt, user_prompt_text};
 
 /// A conversation rewind either starts a fresh process before the first
 /// prompt or resumes an immutable prefix copied into a new Claude session.
@@ -250,7 +250,11 @@ pub(super) fn build_fork_records(
 
     let title = prefix
         .iter()
-        .find_map(|record| user_prompt_text(record).as_deref().and_then(title_line))
+        .find_map(|record| {
+            user_prompt_text(record)
+                .as_deref()
+                .and_then(provisional_title_from_prompt)
+        })
         .unwrap_or_else(|| "Rewound session".into());
 
     records.push(serde_json::json!({

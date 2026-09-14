@@ -254,10 +254,6 @@ impl Default for Colors {
     }
 }
 
-pub fn hex_to_color_arr(s: &str) -> ColorArray {
-    Rgba::from_hex(s.to_string()).unwrap_or_default().into()
-}
-
 #[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub enum NamedColor {
     Black = 0,

@@ -2,8 +2,8 @@ use crate::AgentWorkspace;
 use crate::chat::ThreadSettings;
 use crate::team::attempt::Attempt;
 use crate::team::budget::Budget;
-use crate::team::content::{PublicMessage, SourceFragment, Summary, UserInput};
-use crate::team::context::{ContextError, ContextLimits, PreparedContext, SummaryChunk};
+use crate::team::content::{PublicMessage, Summary, UserInput};
+use crate::team::context::{ContextError, ContextLimits, PreparedContext};
 use crate::team::discussion::{
     Discussion, DiscussionError, DiscussionMode, DiscussionState, PublicSnapshot,
 };
@@ -104,10 +104,6 @@ impl Room {
 
     pub fn summaries(&self) -> &[Summary] {
         &self.summaries
-    }
-
-    pub fn input_history(&self) -> &[UserInput] {
-        &self.input_history
     }
 
     pub fn attempts(&self) -> &[Attempt] {
@@ -346,85 +342,7 @@ impl Room {
             return Err(ContextError::SelectRange);
         }
 
-        let mut chunks = Vec::new();
-        let mut sources = Vec::new();
-        let mut fragments = Vec::new();
-        let mut bytes: usize = 1024;
-
-        for message in eligible.iter().take(recent_start) {
-            if represented.contains(&message.id) {
-                continue;
-            }
-
-            let size = serde_json::to_vec(message)
-                .map_err(|_| ContextError::Encoding)?
-                .len();
-
-            if size.saturating_add(1024) > limits.max_bytes {
-                if !sources.is_empty() {
-                    chunks.push(SummaryChunk { sources, fragments });
-                    sources = Vec::new();
-                    fragments = Vec::new();
-                    bytes = 1024;
-                }
-
-                let width = limits.max_bytes.saturating_sub(1024) / 6;
-
-                if width < 4 {
-                    return Err(ContextError::OversizedInput);
-                }
-
-                let mut start = 0;
-
-                while start < message.text.len() {
-                    let mut end = start.saturating_add(width).min(message.text.len());
-
-                    while !message.text.is_char_boundary(end) {
-                        end -= 1;
-                    }
-
-                    chunks.push(SummaryChunk {
-                        sources: vec![message.id],
-                        fragments: vec![SourceFragment {
-                            source: message.id,
-                            start,
-                            end,
-                        }],
-                    });
-
-                    start = end;
-                }
-
-                continue;
-            }
-
-            if bytes.saturating_add(size) > limits.max_bytes && !sources.is_empty() {
-                chunks.push(SummaryChunk { sources, fragments });
-                sources = Vec::new();
-                fragments = Vec::new();
-                bytes = 1024;
-            }
-
-            sources.push(message.id);
-
-            fragments.push(SourceFragment {
-                source: message.id,
-                start: 0,
-                end: message.text.len(),
-            });
-
-            bytes = bytes.saturating_add(size);
-        }
-
-        if !sources.is_empty() {
-            chunks.push(SummaryChunk { sources, fragments });
-        }
-
-        if chunks.is_empty() {
-            return Err(ContextError::SelectRange);
-        }
-
-        Err(ContextError::NeedsSummaries(chunks))
+        Err(ContextError::SummaryUnavailable)
     }
 
     pub(crate) fn summary_sources(

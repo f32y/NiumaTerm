@@ -1,18 +1,32 @@
 use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, WindowHandle};
+
 use gpui_component::Root;
+
+use gpui_component::input::InputEvent;
+
 use nmt_agent::AgentWorkspace;
+
 use nmt_agent::chat::{
     Event, Question, QuestionInput, QuestionMode, QuestionOption, QuestionRequest,
     QuestionResolution, SlashCommandOutcome,
 };
+
 use nmt_agent::session::input::{QuestionDraft, QuestionStatus};
+
 use nmt_agent::session::lifecycle::StartOutcome;
+
 use nmt_agent::session::test_support::TestBackend;
+
 use nmt_agent::session::{AgentKind, Backend};
+
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
 use crate::agent_tab::questions::{QuestionEditorState, QuestionPresentation};
+
 use crate::agent_tab::settings::AgentSettings;
+
+use crate::agent_tab::tests::deliver_session_event;
+
 use crate::agent_tab::{AgentPane, AgentThreadDefaults};
 
 fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>) {
@@ -71,38 +85,26 @@ fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>)
 fn question_editors_keep_multiline_text_and_mask_secrets(cx: &mut TestAppContext) {
     let (pane, window) = open_pane(cx);
     let mut cx = VisualTestContext::from_window(window.into(), cx);
+    let mut plain = question("Describe the change", false, &[]);
+
+    plain.input = QuestionInput::Text;
+
+    let mut secret = question("Enter a token", false, &[]);
+
+    secret.input = QuestionInput::Secret;
+
+    deliver_session_event(
+        &pane,
+        Event::InputRequested(QuestionRequest {
+            id: "editors".into(),
+            mode: QuestionMode::Blocking,
+            questions: vec![plain, secret],
+        }),
+        &cx,
+    );
 
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
-            let mut plain = question("Describe the change", false, &[]);
-
-            plain.input = QuestionInput::Text;
-
-            let mut secret = question("Enter a token", false, &[]);
-
-            secret.input = QuestionInput::Secret;
-
-            pane.on_event(
-                Event::InputRequested(QuestionRequest {
-                    id: "editors".into(),
-                    mode: QuestionMode::Blocking,
-                    questions: vec![plain, secret],
-                }),
-                cx,
-            );
-
-            let mut state = pane.session.borrow_mut();
-
-            let prompt = pane
-                .prompts
-                .questions_mut(&mut state.input)
-                .expect("active draft");
-
-            prompt.set_text(0, "first line\nsecond line".into());
-            prompt.set_text(1, "test-token".into());
-            drop(state);
-            pane.prepare_question_editors(window, cx);
-
             let prompt =
                 &pane.prompts.presentations[&pane.prompts.active.expect("active questions")];
 
@@ -111,6 +113,12 @@ fn question_editors_keep_multiline_text_and_mask_secrets(cx: &mut TestAppContext
             else {
                 panic!("ordinary answers use a textarea");
             };
+
+            plain.update(cx, |plain, cx| {
+                plain.set_value("first line\nsecond line", window, cx);
+
+                cx.emit(InputEvent::Change);
+            });
 
             let plain = plain.read(cx);
 
@@ -124,7 +132,13 @@ fn question_editors_keep_multiline_text_and_mask_secrets(cx: &mut TestAppContext
                 panic!("secret answers use a password input");
             };
 
-            secret.update(cx, |secret, cx| secret.select_all(window, cx));
+            secret.update(cx, |secret, cx| {
+                secret.set_value("test-token", window, cx);
+
+                cx.emit(InputEvent::Change);
+
+                secret.select_all(window, cx);
+            });
 
             let secret = secret.read(cx);
 
@@ -134,6 +148,15 @@ fn question_editors_keep_multiline_text_and_mask_secrets(cx: &mut TestAppContext
             assert!(!secret.context_menu_capabilities().is_copyable());
             assert_eq!(secret.value().as_ref(), "test-token");
         });
+    });
+
+    cx.read(|cx| {
+        let pane = pane.read(cx);
+        let state = pane.session.borrow();
+        let draft = pane.prompts.questions(&state.input).unwrap();
+
+        assert_eq!(draft.text(0), "first line\nsecond line");
+        assert_eq!(draft.text(1), "test-token");
     });
 }
 
@@ -219,22 +242,22 @@ fn a_question_with_no_options_cannot_trap_the_highlight() {
 fn confirmed_secret_answer_releases_its_widget_and_reveals_the_next_batch(cx: &mut TestAppContext) {
     let (pane, window) = open_pane(cx);
     let mut cx = VisualTestContext::from_window(window.into(), cx);
+    let mut secret = question("Token", false, &[]);
+
+    secret.input = QuestionInput::Secret;
+
+    deliver_session_event(
+        &pane,
+        Event::InputRequested(QuestionRequest {
+            id: "secret".into(),
+            mode: QuestionMode::Blocking,
+            questions: vec![secret],
+        }),
+        &cx,
+    );
 
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
-            let mut secret = question("Token", false, &[]);
-
-            secret.input = QuestionInput::Secret;
-
-            pane.on_event(
-                Event::InputRequested(QuestionRequest {
-                    id: "secret".into(),
-                    mode: QuestionMode::Blocking,
-                    questions: vec![secret],
-                }),
-                cx,
-            );
-
             pane.prompts
                 .questions_mut(&mut pane.session.borrow_mut().input)
                 .unwrap()
@@ -247,16 +270,21 @@ fn confirmed_secret_answer_releases_its_widget_and_reveals_the_next_batch(cx: &m
                     [0]
                 .is_some()
             );
+        });
+    });
 
-            pane.on_event(
-                Event::InputRequested(QuestionRequest {
-                    id: "next".into(),
-                    mode: QuestionMode::Async,
-                    questions: vec![question("Next", false, &["yes"])],
-                }),
-                cx,
-            );
+    deliver_session_event(
+        &pane,
+        Event::InputRequested(QuestionRequest {
+            id: "next".into(),
+            mode: QuestionMode::Async,
+            questions: vec![question("Next", false, &["yes"])],
+        }),
+        &cx,
+    );
 
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, cx| {
             assert_eq!(
                 pane.prompts.active,
                 Some(pane.session.borrow().input.batches()[0].key())
@@ -268,18 +296,23 @@ fn confirmed_secret_answer_releases_its_widget_and_reveals_the_next_batch(cx: &m
                 pane.session.borrow().input.batches()[0].status(),
                 QuestionStatus::Submitting
             );
+        });
+    });
 
-            pane.on_event(
-                Event::InputResolved {
-                    id: "secret".into(),
-                    resolution: QuestionResolution::Submitted {
-                        message: None,
-                        started_turn: false,
-                    },
-                },
-                cx,
-            );
+    deliver_session_event(
+        &pane,
+        Event::InputResolved {
+            id: "secret".into(),
+            resolution: QuestionResolution::Submitted {
+                message: None,
+                started_turn: false,
+            },
+        },
+        &cx,
+    );
 
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, _| {
             assert!(
                 pane.prompts.presentations[&pane.session.borrow().input.batches()[0].key()].editors
                     [0]
@@ -302,19 +335,19 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
     let (pane, window) = open_pane(cx);
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
-    cx.update(|window, cx| {
+    let asynchronous = QuestionRequest {
+        id: "async".into(),
+        mode: QuestionMode::Async,
+        questions: vec![Question {
+            input: QuestionInput::Text,
+            ..question("Async", false, &[])
+        }],
+    };
+
+    deliver_session_event(&pane, Event::InputRequested(asynchronous.clone()), &cx);
+
+    let editor = cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
-            let asynchronous = QuestionRequest {
-                id: "async".into(),
-                mode: QuestionMode::Async,
-                questions: vec![Question {
-                    input: QuestionInput::Text,
-                    ..question("Async", false, &[])
-                }],
-            };
-
-            pane.on_event(Event::InputRequested(asynchronous.clone()), cx);
-
             pane.prompts
                 .questions_mut(&mut pane.session.borrow_mut().input)
                 .unwrap()
@@ -332,10 +365,14 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
                 panic!("text editor required");
             };
 
-            let editor = editor.clone();
+            editor.clone()
+        })
+    });
 
-            pane.on_event(Event::InputRequested(asynchronous), cx);
+    deliver_session_event(&pane, Event::InputRequested(asynchronous), &cx);
 
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, _| {
             let QuestionEditorState::Text(current) = &pane.prompts.presentations
                 [&pane.session.borrow().input.batches()[0].key()]
                 .editors[0]
@@ -347,16 +384,21 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
             };
 
             assert_eq!(editor, *current);
+        });
+    });
 
-            pane.on_event(
-                Event::InputRequested(QuestionRequest {
-                    id: "blocking".into(),
-                    mode: QuestionMode::Blocking,
-                    questions: vec![question("Blocking", false, &["yes"])],
-                }),
-                cx,
-            );
+    deliver_session_event(
+        &pane,
+        Event::InputRequested(QuestionRequest {
+            id: "blocking".into(),
+            mode: QuestionMode::Blocking,
+            questions: vec![question("Blocking", false, &["yes"])],
+        }),
+        &cx,
+    );
 
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, cx| {
             assert_eq!(
                 pane.prompts.active,
                 Some(pane.session.borrow().input.batches()[1].key())
@@ -367,15 +409,20 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
             );
 
             pane.skip_current_questions(cx);
+        });
+    });
 
-            pane.on_event(
-                Event::InputResolved {
-                    id: "blocking".into(),
-                    resolution: QuestionResolution::Skipped,
-                },
-                cx,
-            );
+    deliver_session_event(
+        &pane,
+        Event::InputResolved {
+            id: "blocking".into(),
+            resolution: QuestionResolution::Skipped,
+        },
+        &cx,
+    );
 
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, _| {
             assert_eq!(
                 pane.prompts.active,
                 Some(pane.session.borrow().input.batches()[0].key())
@@ -395,52 +442,59 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
 fn a_new_request_does_not_reuse_the_expired_answer(cx: &mut TestAppContext) {
     let (pane, window) = open_pane(cx);
     let mut cx = VisualTestContext::from_window(window.into(), cx);
+    let mut question = question("Answer", false, &[]);
 
-    cx.update(|window, cx| {
+    question.input = QuestionInput::Text;
+
+    deliver_session_event(
+        &pane,
+        Event::InputRequested(QuestionRequest {
+            id: "old".into(),
+            mode: QuestionMode::Blocking,
+            questions: vec![question.clone()],
+        }),
+        &cx,
+    );
+
+    let (old_key, old_editor) = cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
-            let mut question = question("Answer", false, &[]);
+            let key = pane.prompts.active.unwrap();
 
-            question.input = QuestionInput::Text;
-
-            pane.on_event(
-                Event::InputRequested(QuestionRequest {
-                    id: "old".into(),
-                    mode: QuestionMode::Blocking,
-                    questions: vec![question.clone()],
-                }),
-                cx,
-            );
-
-            pane.prompts
-                .questions_mut(&mut pane.session.borrow_mut().input)
+            let QuestionEditorState::Text(editor) = &pane.prompts.presentations[&key].editors[0]
+                .as_ref()
                 .unwrap()
-                .set_text(0, "old value".into());
+                .state
+            else {
+                panic!("text editor");
+            };
 
-            pane.prepare_question_editors(window, cx);
+            editor.update(cx, |editor, cx| editor.set_value("old value", window, cx));
 
-            let old_key = pane
-                .prompts
-                .questions(&pane.session.borrow().input)
-                .unwrap()
-                .key();
+            (key, editor.clone())
+        })
+    });
 
-            pane.on_event(
-                Event::InputResolved {
-                    id: "old".into(),
-                    resolution: QuestionResolution::Expired,
-                },
-                cx,
-            );
+    deliver_session_event(
+        &pane,
+        Event::InputResolved {
+            id: "old".into(),
+            resolution: QuestionResolution::Expired,
+        },
+        &cx,
+    );
 
-            pane.on_event(
-                Event::InputRequested(QuestionRequest {
-                    id: "new".into(),
-                    mode: QuestionMode::Blocking,
-                    questions: vec![question],
-                }),
-                cx,
-            );
+    deliver_session_event(
+        &pane,
+        Event::InputRequested(QuestionRequest {
+            id: "new".into(),
+            mode: QuestionMode::Blocking,
+            questions: vec![question],
+        }),
+        &cx,
+    );
 
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, cx| {
             assert_ne!(
                 pane.prompts
                     .questions(&pane.session.borrow().input)
@@ -448,13 +502,6 @@ fn a_new_request_does_not_reuse_the_expired_answer(cx: &mut TestAppContext) {
                     .key(),
                 old_key
             );
-            assert!(
-                pane.prompts.presentations[&pane.session.borrow().input.batches()[1].key()].editors
-                    [0]
-                .is_none()
-            );
-
-            pane.prepare_question_editors(window, cx);
 
             let QuestionEditorState::Text(editor) = &pane.prompts.presentations
                 [&pane.session.borrow().input.batches()[1].key()]
@@ -466,6 +513,7 @@ fn a_new_request_does_not_reuse_the_expired_answer(cx: &mut TestAppContext) {
                 panic!("text editor required");
             };
 
+            assert_ne!(*editor, old_editor);
             assert_eq!(editor.read(cx).value().as_ref(), "");
             assert_eq!(
                 pane.prompts
@@ -482,27 +530,31 @@ fn a_new_request_does_not_reuse_the_expired_answer(cx: &mut TestAppContext) {
 fn question_editors_survive_unshown_batches_and_reused_positions(cx: &mut TestAppContext) {
     let (pane, window) = open_pane(cx);
     let mut cx = VisualTestContext::from_window(window.into(), cx);
+    let mut prompt = question("Answer", false, &[]);
 
-    cx.update(|window, cx| {
-        pane.update(cx, |pane, cx| {
-            let mut prompt = question("Answer", false, &[]);
+    prompt.input = QuestionInput::Text;
 
-            prompt.input = QuestionInput::Text;
-
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, _| {
             pane.session
                 .borrow_mut()
                 .input
                 .history("unshown", vec![prompt.clone()]);
+        });
+    });
 
-            pane.on_event(
-                Event::InputRequested(QuestionRequest {
-                    id: "shown".into(),
-                    mode: QuestionMode::Blocking,
-                    questions: vec![prompt.clone()],
-                }),
-                cx,
-            );
+    deliver_session_event(
+        &pane,
+        Event::InputRequested(QuestionRequest {
+            id: "shown".into(),
+            mode: QuestionMode::Blocking,
+            questions: vec![prompt.clone()],
+        }),
+        &cx,
+    );
 
+    let old_key = cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
             pane.prepare_question_editors(window, cx);
 
             let old_key = pane.prompts.active.unwrap();
@@ -512,15 +564,22 @@ fn question_editors_survive_unshown_batches_and_reused_positions(cx: &mut TestAp
 
             pane.session.borrow_mut().input.clear_questions();
 
-            pane.on_event(
-                Event::InputRequested(QuestionRequest {
-                    id: "replacement".into(),
-                    mode: QuestionMode::Blocking,
-                    questions: vec![prompt],
-                }),
-                cx,
-            );
+            old_key
+        })
+    });
 
+    deliver_session_event(
+        &pane,
+        Event::InputRequested(QuestionRequest {
+            id: "replacement".into(),
+            mode: QuestionMode::Blocking,
+            questions: vec![prompt],
+        }),
+        &cx,
+    );
+
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
             pane.prepare_question_editors(window, cx);
 
             let key = pane.prompts.active.unwrap();

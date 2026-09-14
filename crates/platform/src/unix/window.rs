@@ -1,6 +1,7 @@
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSAlert, NSAlertStyle};
 use objc2_foundation::NSString;
+use raw_window_handle::HasWindowHandle;
 use tracing::error;
 
 /// Report a failure the application cannot start past.
@@ -24,4 +25,8 @@ pub fn show_error_dialog(title: &str, message: &str) {
     alert.setMessageText(&NSString::from_str(title));
     alert.setInformativeText(&NSString::from_str(message));
     alert.runModal();
+}
+
+pub fn native_active_state(_window: &impl HasWindowHandle) -> Option<bool> {
+    None
 }

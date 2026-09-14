@@ -4,6 +4,7 @@ mod list_state;
 #[cfg(test)]
 mod tests;
 
+use std::io;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
@@ -57,12 +58,6 @@ actions!(
         SendTab,
         /// Send Shift-Tab to the PTY (shell backward completion).
         SendShiftTab,
-        /// Copy the selected command block's command line.
-        CopyBlockCommand,
-        /// Copy the selected command block's output text.
-        CopyBlockOutput,
-        /// Re-run the selected command block's command.
-        RerunBlock,
         /// Scroll the viewport to the previous command block's start.
         PreviousBlock,
         /// Scroll the viewport to the next command block's start.
@@ -333,7 +328,7 @@ impl TerminalPane {
 
     /// Number of child processes in the shell's Job Object (requires the
     /// job-management setting; 0 otherwise).
-    pub fn child_process_count(&self) -> usize {
+    pub fn child_process_count(&self) -> io::Result<usize> {
         self.model.source.session.child_process_count()
     }
 
@@ -364,36 +359,6 @@ impl TerminalPane {
     ) {
         self.set_content_bounds(bounds, cell, cx);
         self.model.begin_block_list_frame();
-    }
-
-    fn on_copy_block_command(
-        &mut self,
-        _: &CopyBlockCommand,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(command) = self.model.selected_block_command()
-            && self.model.copy_text_to_clipboard(command)
-        {
-            cx.notify();
-        }
-    }
-
-    fn on_copy_block_output(
-        &mut self,
-        _: &CopyBlockOutput,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(copy) = self.model.selected_block_output() {
-            self.begin_copy(copy, window, cx);
-        }
-    }
-
-    fn on_rerun_block(&mut self, _: &RerunBlock, _: &mut Window, cx: &mut Context<Self>) {
-        if self.model.write_text_input(TextInput::RerunSelectedBlock) {
-            self.invalidate(cx);
-        }
     }
 
     fn on_previous_block(&mut self, _: &PreviousBlock, _: &mut Window, cx: &mut Context<Self>) {
@@ -463,7 +428,6 @@ impl TerminalPane {
         let frame_for_items = frame.clone();
         let in_flight_for_items = self.model.in_flight.clone();
         let has_open_prompt_for_items = self.model.open_prompt;
-        let selected_frozen_item = self.model.gutter.selected();
         let frozen_selection = self.model.interaction.block_selection();
         let cell_for_items = cell;
         let pane_for_items = cx.entity();
@@ -477,7 +441,6 @@ impl TerminalPane {
                     cols,
                     cell: cell_for_items,
                     selection: frozen_selection,
-                    selected_item: selected_frozen_item,
                     pane: pane_for_items.clone(),
                 }
                 .into_any_element()
@@ -486,10 +449,8 @@ impl TerminalPane {
                     frame: frame_for_items.clone(),
                     history_rows,
                     state: LiveItemState {
-                        index: live_index,
                         in_flight: in_flight_for_items.clone(),
                         has_open_prompt: has_open_prompt_for_items,
-                        selected_item: selected_frozen_item,
                     },
                     cols,
                     cell: cell_for_items,
@@ -1057,9 +1018,6 @@ impl Render for TerminalPane {
             .key_context("Terminal")
             .on_action(cx.listener(Self::on_send_tab))
             .on_action(cx.listener(Self::on_send_shift_tab))
-            .on_action(cx.listener(Self::on_copy_block_command))
-            .on_action(cx.listener(Self::on_copy_block_output))
-            .on_action(cx.listener(Self::on_rerun_block))
             .on_action(cx.listener(Self::on_previous_block))
             .on_action(cx.listener(Self::on_next_block))
             .on_key_down(cx.listener(Self::on_key_down))

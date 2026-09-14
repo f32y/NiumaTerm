@@ -443,13 +443,20 @@ fn reconcile_models(
                 // A catalog that gained an entry is a different catalog:
                 // the model now has a name and a reasoning-effort list
                 // instead of the bare id a selection alone would show.
-                Ok(true) => {
-                    if let Ok(refreshed) = read_model_catalog(client, selected) {
+                Ok(true) => match read_model_catalog(client, selected) {
+                    Ok(refreshed) => {
                         catalog = refreshed;
                         directory = ModelDirectory::parse(&catalog);
                     }
-                }
+                    Err(error) => {
+                        tracing::warn!(
+                            "deepseek could not refresh the model catalog: {}",
+                            error.message()
+                        );
 
+                        refusal = Some(error.message().to_string());
+                    }
+                },
                 Ok(false) => {}
 
                 // Reported beside the picker rather than only logged: the

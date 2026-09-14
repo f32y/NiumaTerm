@@ -205,9 +205,13 @@ fn invalid_transition_drops_boundary_trust() {
     let mut s = PromptSniffer::default();
 
     s.feed(
-        b"\x1b]133;A\x07PS> \x1b]133;B\x07\x1b]133;B\x07",
+        b"\x1b]133;A\x07p\x1b]133;B\x07c\x1b]133;C\x07o\x1b]133;D\x07\x1b]133;A\x07",
         |_, _, _| {},
     );
+
+    assert!(s.boundary_trusted());
+
+    s.feed(b"\x1b]133;C\x07", |_, _, _| {});
 
     assert!(!s.boundary_trusted());
 }

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
-use nmt_platform::windows::powershell::{encode_command, preferred_shell};
+use nmt_platform::windows::powershell::encode_command;
 use nmt_platform::{PtyOptions, WinsizeBuilder, create_managed_pty_with_env};
 use nmt_terminal::event::{Msg, VoidListener};
 use nmt_terminal::ghostty::GhosttyTerminal;
@@ -38,7 +38,7 @@ function global:prompt {{ 'NMT> ' }}
     ]);
 
     let pty = create_managed_pty_with_env(PtyOptions {
-        shell: preferred_shell(),
+        shell: &nmt_platform::default_shell(),
         args: &args,
         working_directory: None,
         columns: 80,

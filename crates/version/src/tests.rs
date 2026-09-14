@@ -65,15 +65,3 @@ fn rejects_everything_else() {
         assert_eq!(Version::parse(label), None, "`{label}` should not parse");
     }
 }
-
-#[test]
-fn channels_are_comparable_only_with_themselves() {
-    let release = Version::parse("v1.2.0").unwrap();
-    let newer_release = Version::parse("v1.3.0").unwrap();
-    let nightly = Version::parse("nightly-20260821-7567b41").unwrap();
-
-    assert!(release.same_channel(&newer_release));
-    assert!(nightly.same_channel(&nightly.clone()));
-    assert!(!release.same_channel(&nightly));
-    assert!(!nightly.same_channel(&release));
-}

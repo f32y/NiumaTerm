@@ -1,13 +1,23 @@
 use std::ffi::{OsStr, OsString};
+
 #[cfg(not(target_os = "macos"))]
 use std::fs;
+
 use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
+
 use std::process::{Child, Command, ExitStatus};
+
 use std::sync::{Arc, Weak};
+
 use std::{env, io};
+
+use tracing::warn;
+
+use crate::process_lifetime::cleanup_failed_attachment;
 
 #[cfg(target_os = "macos")]
 use crate::unix::macos::login_shell;
+
 #[cfg(target_os = "macos")]
 use crate::unix::macos::process_group_count as group_process_count;
 
@@ -108,6 +118,10 @@ struct ProcessGroup(libc::pid_t);
 pub struct ProcessTree(Weak<ProcessGroup>);
 
 impl KillOnCloseJob {
+    pub fn attach_or_kill(child: &mut Child) -> io::Result<Self> {
+        Self::attach(child).inspect_err(|_| cleanup_failed_attachment(child))
+    }
+
     pub fn attach(child: &Child) -> io::Result<Self> {
         let pid = child.id() as libc::pid_t;
 
@@ -150,10 +164,21 @@ impl Drop for ProcessGroup {
 }
 
 impl ProcessTree {
-    pub fn process_count(&self) -> usize {
+    pub fn other_process_count(&self) -> usize {
+        match self.process_count() {
+            Ok(count) => count.saturating_sub(1),
+            Err(error) => {
+                warn!("failed to count child processes: {error}");
+
+                0
+            }
+        }
+    }
+
+    pub fn process_count(&self) -> io::Result<usize> {
         self.0
             .upgrade()
-            .map_or(0, |group| group_process_count(group.0))
+            .map_or(Ok(0), |group| group_process_count(group.0))
     }
 }
 
@@ -162,12 +187,10 @@ impl ProcessTree {
 /// and it follows the comm field, which may itself contain spaces or
 /// parentheses — hence the split on the last `')'` rather than on whitespace.
 #[cfg(not(target_os = "macos"))]
-fn group_process_count(pgid: libc::pid_t) -> usize {
-    let Ok(entries) = fs::read_dir("/proc") else {
-        return 0;
-    };
+fn group_process_count(pgid: libc::pid_t) -> io::Result<usize> {
+    let entries = fs::read_dir("/proc")?;
 
-    entries
+    Ok(entries
         .flatten()
         .filter(|entry| {
             let Ok(status) = fs::read_to_string(entry.path().join("stat")) else {
@@ -184,5 +207,5 @@ fn group_process_count(pgid: libc::pid_t) -> usize {
                 .and_then(|field| field.parse::<libc::pid_t>().ok())
                 == Some(pgid)
         })
-        .count()
+        .count())
 }

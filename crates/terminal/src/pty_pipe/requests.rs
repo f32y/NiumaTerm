@@ -66,26 +66,23 @@ pub(crate) fn answer_query(
                     line,
                     col,
                     kind,
-                } => {
-                    let result = engine.block_acquire(handle).and_then(|block| {
+                } => engine
+                    .block_acquire(handle)
+                    .ok_or(RequestError::Unavailable)
+                    .and_then(|block| {
                         if block.handle().generation != handle.generation {
-                            return None;
+                            return Err(RequestError::Stale);
                         }
 
-                        let (start, end) = block_selection_range(
-                            &block,
-                            &engine.color_palette(),
-                            line,
-                            col,
-                            kind,
-                        )?;
+                        let (start, end) =
+                            block_selection_range(&block, &engine.color_palette(), line, col, kind)
+                                .ok_or(RequestError::Unavailable)?;
 
-                        block.format_range_clamped(Some(start), Some(end))
-                    });
-
-                    result.ok_or(RequestError::Unavailable)
-                }
-
+                        block
+                            .format_range_clamped(Some(start), Some(end))
+                            .map_err(|error| RequestError::Engine(error.to_string()))?
+                            .ok_or(RequestError::Unavailable)
+                    }),
                 TextSource::Screen {
                     revision,
                     start,
@@ -118,6 +115,7 @@ pub(crate) fn answer_query(
 
                             let part = block
                                 .format_range_clamped(piece.start, piece.end)
+                                .map_err(|error| RequestError::Engine(error.to_string()))?
                                 .ok_or(RequestError::Unavailable)?;
 
                             if index > 0 {
@@ -179,9 +177,13 @@ fn read_page(
     match source {
         PageSource::Screen { .. } => {
             for row in start..start.saturating_add(PAGE_ROWS) {
-                let Some(row) = u32::try_from(row)
-                    .ok()
-                    .and_then(|row| engine.read_screen_row(row).ok().flatten())
+                let Ok(row) = u32::try_from(row) else {
+                    break;
+                };
+
+                let Some(row) = engine
+                    .read_screen_row(row)
+                    .map_err(|error| RequestError::Engine(error.to_string()))?
                 else {
                     break;
                 };

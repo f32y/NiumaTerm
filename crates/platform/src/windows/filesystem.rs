@@ -1,5 +1,9 @@
+pub use crate::windows::filesystem::replace_file as replace_file_durable;
+
 use std::io;
+
 use std::os::windows::ffi::OsStrExt as _;
+
 use std::path::{Component, Path};
 
 use windows_sys::Win32::Storage::FileSystem::{
@@ -64,4 +68,9 @@ pub fn lexical_path_spelling(path: &Path) -> String {
 /// Windows keys keep their existing ASCII folding; Unix names remain distinct.
 pub fn installation_path_spelling(path: &Path) -> String {
     path.to_string_lossy().to_ascii_lowercase()
+}
+
+/// Keep the slash spelling used by existing input history keys.
+pub fn history_path_spelling(path: &Path) -> String {
+    installation_path_spelling(path).replace('\\', "/")
 }

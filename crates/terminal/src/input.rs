@@ -99,7 +99,6 @@ pub(crate) fn key_encode_flags(mode: Mode) -> KeyEncodeFlags {
 
     for (terminal, input) in [
         (Mode::APP_CURSOR, KeyEncodeFlags::APP_CURSOR),
-        (Mode::APP_KEYPAD, KeyEncodeFlags::APP_KEYPAD),
         (
             Mode::DISAMBIGUATE_ESC_CODES,
             KeyEncodeFlags::DISAMBIGUATE_ESC_CODES,
@@ -322,10 +321,16 @@ fn key_input(event: &TerminalKey<'_>) -> KeyInput {
         _ => base_key.clone(),
     };
 
+    let text = event.key_char;
+
+    // macOS reports a private-use character for Fn+Backspace; encode Delete.
+    #[cfg(target_os = "macos")]
+    let text = text.filter(|_| logical_key != Key::Named(NamedKey::Delete));
+
     KeyInput {
         logical_key,
         key_without_modifiers: base_key,
-        text_with_all_modifiers: event.key_char.map(Into::into),
+        text_with_all_modifiers: text.map(Into::into),
         location: KeyLocation::Standard,
         state: match event.phase {
             KeyPhase::Press | KeyPhase::Repeat => ElementState::Pressed,

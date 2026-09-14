@@ -25,10 +25,4 @@ impl SessionRegistry {
             })
             .unwrap_or_default()
     }
-
-    pub fn get(id: SessionId, cx: &App) -> Option<Entity<AgentSession>> {
-        let session = cx.try_global::<Self>()?.0.borrow().get(&id)?.upgrade()?;
-
-        (!session.read(cx).is_closed()).then_some(session)
-    }
 }

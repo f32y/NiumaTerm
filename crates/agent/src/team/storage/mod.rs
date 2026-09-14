@@ -14,7 +14,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use nmt_platform::filesystem::replace_file;
+use nmt_platform::filesystem::replace_file_durable;
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
@@ -257,10 +257,6 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 
     temporary.write_all(bytes)?;
     temporary.as_file().sync_all()?;
-    replace_file(temporary.path(), path)?;
 
-    #[cfg(unix)]
-    File::open(directory)?.sync_all()?;
-
-    Ok(())
+    replace_file_durable(temporary.path(), path)
 }

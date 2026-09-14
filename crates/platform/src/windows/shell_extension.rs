@@ -82,13 +82,21 @@ fn alloc_co_task_str(s: &str) -> PWSTR {
     }
 }
 
-fn folder_path(items: Option<&IShellItemArray>) -> Option<String> {
-    let items = items?;
+fn folder_path(items: Option<&IShellItemArray>) -> Result<Option<String>> {
+    let Some(items) = items else {
+        return Ok(None);
+    };
 
     unsafe {
-        let item = items.GetItemAt(0).ok()?;
+        // A background command can have no selected item. Preserve the default
+        // directory in that case while reporting failures reading a selection.
+        if items.GetCount()? == 0 {
+            return Ok(None);
+        }
 
-        let name = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let item = items.GetItemAt(0)?;
+
+        let name = item.GetDisplayName(SIGDN_FILESYSPATH)?;
 
         // Convert before freeing, free before the ?-return: bailing out on a
         // failed UTF-16 conversion must not leak the CoTaskMem string.
@@ -96,7 +104,7 @@ fn folder_path(items: Option<&IShellItemArray>) -> Option<String> {
 
         CoTaskMemFree(Some(name.0 as *const _));
 
-        path.ok()
+        Ok(Some(path?))
     }
 }
 
@@ -143,14 +151,14 @@ impl IExplorerCommand_Impl for NiumaTermNewTabCommand_Impl {
     fn Invoke(&self, items: Ref<'_, IShellItemArray>, _bind_ctx: Ref<'_, IBindCtx>) -> Result<()> {
         let exe = exe_path();
 
-        let path = folder_path(items.as_ref()).unwrap_or_default();
+        let path = folder_path(items.as_ref())?.unwrap_or_default();
 
         let uri = format!(
             "nmt://action/new_tab?path={}",
             utf8_percent_encode(&path, NON_ALPHANUMERIC)
         );
 
-        let _ = process::Command::new(&exe).arg(&uri).spawn();
+        process::Command::new(&exe).arg(&uri).spawn()?;
 
         Ok(())
     }

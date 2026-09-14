@@ -1,22 +1,37 @@
-use crate::agent_tab::settings::AgentSettings;
-use crate::agent_tab::{AgentPane, AgentThreadDefaults, RecentSessionsMode};
+use std::time::SystemTime;
+
 use gpui::{
     App, AppContext as _, Context, Entity, TestAppContext, VisualTestContext, WindowHandle,
 };
+
 use gpui_component::Root;
+
 use nmt_agent::AgentWorkspace;
+
 use nmt_agent::chat::{
     Event, ForkAnchor, ForkCheckpoint, Item, ReplayItem, ReplayTurn, SessionSummary,
     SlashCommandOutcome, ThreadSettings,
 };
+
 use nmt_agent::claude_code::sessions::{ClaudeCheckpoint, ClaudeFork, FileRestoreAvailability};
+
 use nmt_agent::session::branch::{BranchUpdate, RewindAction};
+
 use nmt_agent::session::lifecycle::{StartOutcome, Status};
+
 use nmt_agent::session::test_support::TestBackend;
+
 use nmt_agent::session::{AgentKind, Backend};
+
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
+
 use rust_i18n::t;
-use std::time::SystemTime;
+
+use crate::agent_tab::settings::AgentSettings;
+
+use crate::agent_tab::tests::deliver_session_event;
+
+use crate::agent_tab::{AgentPane, AgentThreadDefaults, RecentSessionsMode};
 
 fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>) {
     let profile = AgentProfile {
@@ -96,8 +111,12 @@ fn rows(pane: &AgentPane, cx: &App) -> Vec<String> {
         .collect()
 }
 
-fn fork(pane: &mut AgentPane, cx: &mut Context<AgentPane>) {
-    assert!(pane.open_fork(cx));
+fn fork(pane: &Entity<AgentPane>, cx: &mut VisualTestContext) {
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, cx| {
+            assert!(pane.open_fork(cx));
+        });
+    });
 
     let checkpoint = ForkCheckpoint {
         prompt: "cut prompt".into(),
@@ -105,10 +124,19 @@ fn fork(pane: &mut AgentPane, cx: &mut Context<AgentPane>) {
         anchor: ForkAnchor::CodexThrough("turn".into()),
     };
 
-    pane.on_event(Event::ForkCheckpoints(Ok(vec![checkpoint.clone()])), cx);
-    pane.start_conversation_branch(checkpoint, cx);
+    deliver_session_event(
+        pane,
+        Event::ForkCheckpoints(Ok(vec![checkpoint.clone()])),
+        cx,
+    );
 
-    assert!(pane.session.borrow().branch.is_working());
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, cx| {
+            pane.start_conversation_branch(checkpoint, cx);
+
+            assert!(pane.session.borrow().branch.is_working());
+        });
+    });
 }
 
 fn local_checkpoint() -> ClaudeCheckpoint {
@@ -205,19 +233,27 @@ fn protocol_branch_keeps_old_rows_until_replay_and_fills_the_prompt_once(cx: &mu
     let (pane, window) = open_pane(cx);
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
+    cx.update(|_, cx| pane.update(cx, |pane, _| install(pane)));
+
+    deliver_session_event(&pane, Event::Replay(replay("current")), &cx);
+
+    fork(&pane, &mut cx);
+
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
-            install(pane);
-            pane.on_replay(replay("current"), cx);
-            fork(pane, cx);
             pane.branch.fill_branch_prompt(&pane.input, window, cx);
 
             assert_eq!(rows(pane, cx), ["current"]);
             assert!(pane.input.read(cx).text().len() == 0);
+        });
+    });
 
-            pane.on_event(Event::Ready(ThreadSettings::default()), cx);
-            pane.on_event(Event::Replay(replay("copy")), cx);
+    deliver_session_event(&pane, Event::Ready(ThreadSettings::default()), &cx);
 
+    deliver_session_event(&pane, Event::Replay(replay("copy")), &cx);
+
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
             assert_eq!(rows(pane, cx), ["copy"]);
             assert!(!pane.session.borrow().branch.holds_composer());
 
@@ -240,15 +276,21 @@ fn late_protocol_replay_does_not_overwrite_a_new_draft(cx: &mut TestAppContext) 
     let (pane, window) = open_pane(cx);
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
+    cx.update(|_, cx| pane.update(cx, |pane, _| install(pane)));
+
+    fork(&pane, &mut cx);
+
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
-            install(pane);
-            fork(pane, cx);
-
             pane.input
                 .update(cx, |input, cx| input.set_value("new draft", window, cx));
+        });
+    });
 
-            pane.on_event(Event::Replay(replay("copy")), cx);
+    deliver_session_event(&pane, Event::Replay(replay("copy")), &cx);
+
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
             pane.branch.fill_branch_prompt(&pane.input, window, cx);
 
             assert_eq!(pane.input.read(cx).text().to_string(), "new draft");
@@ -262,20 +304,23 @@ fn protocol_failure_preserves_conversation_and_does_not_refill_the_prompt(cx: &m
     let (pane, window) = open_pane(cx);
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
+    cx.update(|_, cx| pane.update(cx, |pane, _| install(pane)));
+
+    deliver_session_event(&pane, Event::Replay(replay("current")), &cx);
+
+    fork(&pane, &mut cx);
+
+    deliver_session_event(
+        &pane,
+        Event::Error {
+            message: "fork rejected".into(),
+            fatal: false,
+        },
+        &cx,
+    );
+
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
-            install(pane);
-            pane.on_replay(replay("current"), cx);
-            fork(pane, cx);
-
-            pane.on_event(
-                Event::Error {
-                    message: "fork rejected".into(),
-                    fatal: false,
-                },
-                cx,
-            );
-
             pane.branch.fill_branch_prompt(&pane.input, window, cx);
 
             assert_eq!(rows(pane, cx), ["current"]);
@@ -291,11 +336,12 @@ fn local_branch_waits_for_ready_preserves_controls_and_keeps_later_drafts(cx: &m
     let (pane, window) = open_pane(cx);
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
+    cx.update(|_, cx| pane.update(cx, |pane, _| install(pane)));
+
+    deliver_session_event(&pane, Event::Replay(replay("current")), &cx);
+
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
-            install(pane);
-            pane.on_replay(replay("current"), cx);
-
             pane.session
                 .borrow_mut()
                 .controls
@@ -308,8 +354,13 @@ fn local_branch_waits_for_ready_preserves_controls_and_keeps_later_drafts(cx: &m
 
             pane.input
                 .update(cx, |input, cx| input.set_value("later draft", window, cx));
+        });
+    });
 
-            pane.on_event(Event::Ready(ThreadSettings::default()), cx);
+    deliver_session_event(&pane, Event::Ready(ThreadSettings::default()), &cx);
+
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
             pane.branch.fill_branch_prompt(&pane.input, window, cx);
 
             assert_eq!(rows(pane, cx), ["kept prefix"]);
@@ -318,17 +369,22 @@ fn local_branch_waits_for_ready_preserves_controls_and_keeps_later_drafts(cx: &m
                 Some("selected-model")
             );
             assert_eq!(pane.input.read(cx).text().to_string(), "later draft");
+        });
+    });
 
-            pane.on_replay(replay("later turn"), cx);
+    deliver_session_event(&pane, Event::Replay(replay("later turn")), &cx);
 
-            pane.on_event(
-                Event::Ready(ThreadSettings {
-                    model: Some("selected-model".into()),
-                    ..ThreadSettings::default()
-                }),
-                cx,
-            );
+    deliver_session_event(
+        &pane,
+        Event::Ready(ThreadSettings {
+            model: Some("selected-model".into()),
+            ..ThreadSettings::default()
+        }),
+        &cx,
+    );
 
+    cx.update(|_, cx| {
+        pane.update(cx, |pane, cx| {
             assert_eq!(rows(pane, cx), ["kept prefix", "later turn"]);
         })
     });
@@ -339,10 +395,12 @@ fn local_start_failure_keeps_old_rows_and_reports_files_already_restored(cx: &mu
     let (pane, window) = open_pane(cx);
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
-    cx.update(|window, cx| {
+    cx.update(|_, cx| pane.update(cx, |pane, _| install(pane)));
+
+    deliver_session_event(&pane, Event::Replay(replay("current")), &cx);
+
+    cx.update(|_, cx| {
         pane.update(cx, |pane, cx| {
-            install(pane);
-            pane.on_replay(replay("current"), cx);
             prepare_local(pane, RewindAction::FilesAndConversation, cx);
 
             assert!(matches!(
@@ -355,15 +413,20 @@ fn local_start_failure_keeps_old_rows_and_reports_files_already_restored(cx: &mu
                 },
                 StartOutcome::Failed(_)
             ));
+        });
+    });
 
-            pane.on_event(
-                Event::Error {
-                    message: "cannot start".into(),
-                    fatal: true,
-                },
-                cx,
-            );
+    deliver_session_event(
+        &pane,
+        Event::Error {
+            message: "cannot start".into(),
+            fatal: true,
+        },
+        &cx,
+    );
 
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
             pane.branch.fill_branch_prompt(&pane.input, window, cx);
 
             assert_eq!(rows(pane, cx), ["current"]);

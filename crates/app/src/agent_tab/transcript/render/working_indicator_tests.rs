@@ -27,12 +27,3 @@ fn pulse_remains_in_unit_range() {
         }
     }
 }
-
-/// The cluster stands in the slot a card gives its type icon, so the label
-/// beside it starts on the column a tool call's title starts on.
-#[test]
-fn the_cluster_measures_a_cards_icon_block() {
-    let width = DOT_COUNT as f32 * DOT_CELL_SIZE + (DOT_COUNT as f32 - 1.0) * DOT_GAP;
-
-    assert!((width - AGENT_CARD_ICON_BLOCK).abs() < 0.001, "{width}");
-}

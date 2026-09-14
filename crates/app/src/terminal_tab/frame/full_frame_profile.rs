@@ -211,13 +211,13 @@ fn profile_full_frame_pipeline() -> Result<(), &'static str> {
 
     eprint!("{report}");
 
-    let _ = fs::write(
+    fs::write(
         concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../target/frame_profile.txt"
         ),
         &report,
-    );
+    )?;
 
     assert!(sink > 0);
 

@@ -6,7 +6,7 @@ use crate::windows::shell_integration::{
 };
 
 #[test]
-fn unregister_only_removes_owned_roots() {
+fn context_menu_cleanup_targets_current_and_legacy_roots() {
     assert_eq!(
         context_menu_owned_registry_roots(),
         [

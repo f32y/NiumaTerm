@@ -198,7 +198,7 @@ fn malformed_shapes_are_refused_and_unparseable_files_are_kept() {
     fs::write(&path, "{ broken").unwrap();
 
     assert!(install_hooks(&path).is_err());
-    assert_eq!(hooks_status(&path), HookInstallStatus::NotInstalled);
+    assert_eq!(hooks_status(&path), HookInstallStatus::Unavailable);
     assert_eq!(fs::read_to_string(&path).unwrap(), "{ broken");
 
     fs::remove_dir_all(&dir).unwrap();

@@ -120,13 +120,6 @@ impl CodeTranscriptCache {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn invalidate_all(&mut self) {
-        for cached in self.entries.values_mut() {
-            cached.dirty = true;
-        }
-    }
-
     pub(crate) fn drop_row(&mut self, index: usize) {
         self.entries.remove(&index);
     }

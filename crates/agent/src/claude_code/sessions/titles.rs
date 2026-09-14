@@ -223,7 +223,7 @@ fn head_summary(path: &Path) -> HeadSummary {
             continue;
         };
 
-        let Some(title) = title_line(&text) else {
+        let Some(title) = provisional_title_from_prompt(&text) else {
             continue;
         };
 
@@ -392,9 +392,4 @@ pub(crate) fn provisional_title_from_prompt(text: &str) -> Option<String> {
     truncated.push('…');
 
     Some(truncated)
-}
-
-/// One-line title from a prompt, after removing provider-added wrappers.
-pub(super) fn title_line(text: &str) -> Option<String> {
-    provisional_title_from_prompt(text)
 }

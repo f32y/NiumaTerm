@@ -51,7 +51,7 @@ pub fn build_hook_command(executable: &str, argument: &str) -> io::Result<String
 ///
 /// Single quotes suppress every expansion; a literal quote is closed, escaped
 /// and reopened because single quotes do not nest.
-pub(super) fn single_quoted(value: &str) -> String {
+pub(crate) fn single_quoted(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
 

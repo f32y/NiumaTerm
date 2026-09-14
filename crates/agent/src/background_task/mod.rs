@@ -6,8 +6,7 @@
 pub use nmt_profile::AgentKind as BackgroundTaskProvider;
 
 pub use crate::background_task::transcript::{
-    BackgroundTaskTranscript, BackgroundTaskTranscriptState, BackgroundTaskTranscriptUpdate,
-    MAX_TRANSCRIPT_ITEMS,
+    BackgroundTaskTranscriptState, BackgroundTaskTranscriptUpdate, MAX_TRANSCRIPT_ITEMS,
 };
 
 mod transcript;

@@ -123,15 +123,15 @@ pub(super) fn visit_row_cells(
             (&mut virtual_placeholder as *mut bool).cast(),
         ];
 
-        unsafe {
-            let _ = ghostty_row_get_multi(
+        Error::from_code(unsafe {
+            ghostty_row_get_multi(
                 raw_row,
                 ROW_KEYS.len(),
                 ROW_KEYS.as_ptr(),
                 values.as_mut_ptr(),
                 ptr::null_mut(),
-            );
-        }
+            )
+        })?;
     }
 
     let mut hyperlinks: Vec<(u16, u16, String)> = Vec::new();
@@ -143,16 +143,12 @@ pub(super) fn visit_row_cells(
 
         let mut raw: VtCell = 0;
 
-        if unsafe { ghostty_grid_ref_cell(&grid_ref, &mut raw) } != VtResult::SUCCESS {
-            continue;
-        }
+        Error::from_code(unsafe { ghostty_grid_ref_cell(&grid_ref, &mut raw) })?;
 
         // Tag-driven per-cell reads on the raw cell handle, fetched in one
         // multi-get FFI call: the common cases (blank, single codepoint)
-        // never call the grapheme reader. CODEPOINT is deliberately last —
-        // multi-get stops at the first error, and a bg-color-only cell that
-        // rejected it would still have tag/wide/styling written while `cp`
-        // keeps its correct 0 default.
+        // never call the grapheme reader. Background-only cells report zero
+        // for CODEPOINT; a failed read aborts the snapshot.
         let mut tag: VtCellContentTag::Type = VtCellContentTag::CODEPOINT;
         let mut wide_raw: VtCellWide::Type = VtCellWide::NARROW;
         let mut has_styling = false;
@@ -173,15 +169,15 @@ pub(super) fn visit_row_cells(
                 (&mut cp as *mut u32).cast(),
             ];
 
-            unsafe {
-                let _ = ghostty_cell_get_multi(
+            Error::from_code(unsafe {
+                ghostty_cell_get_multi(
                     raw,
                     CELL_KEYS.len(),
                     CELL_KEYS.as_ptr(),
                     values.as_mut_ptr(),
                     ptr::null_mut(),
-                );
-            }
+                )
+            })?;
         }
 
         let wide: CellWide = wide_raw.into();

@@ -20,17 +20,27 @@ use crate::{ansi, ghostty};
 fn failed_capture_does_not_publish_back_buffer() {
     let front = FrameStore::new(RenderBuffer::new(2, 1));
     let mut back = RenderBuffer::new(3, 1);
+    let mut failed = false;
 
     assert!(!publish_render_buffer(
         &front,
         &mut back,
         Err(ghostty::Error::InvalidValue),
         false,
+        &mut failed,
     ));
+    assert!(failed);
     assert_eq!(front.load().cols(), 2);
     assert_eq!(back.cols(), 3);
 
-    assert!(publish_render_buffer(&front, &mut back, Ok(()), false));
+    assert!(publish_render_buffer(
+        &front,
+        &mut back,
+        Ok(()),
+        false,
+        &mut failed
+    ));
+    assert!(!failed);
     assert_eq!(front.load().cols(), 3);
     assert_eq!(back.cols(), 2);
 }

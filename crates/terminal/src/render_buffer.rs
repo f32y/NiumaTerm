@@ -229,11 +229,6 @@ impl RenderBuffer {
         &self.grid
     }
 
-    /// The interned style table, indexed by a cell's `style_id`.
-    pub fn style_table(&self) -> &[Style] {
-        self.styles.styles()
-    }
-
     /// The per-frame grapheme extras, keyed by a cell's `extras_id`.
     pub fn extras(&self) -> &FxHashMap<u16, Extras> {
         &self.extras

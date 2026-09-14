@@ -16,14 +16,15 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use std::{fmt, fs};
+use std::{fmt, fs, io};
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use nmt_platform::filesystem::installation_path_spelling;
+use nmt_platform::filesystem::{installation_path_spelling, replace_file};
 use parking_lot::Mutex;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
+use tracing::warn;
 
 use crate::launcher::{AgentCli, ProcessError, ProcessLimits, ProcessOutput, run_bounded};
 
@@ -784,7 +785,9 @@ impl UpdateCoordinator {
         let _write = self.cache_write.lock();
         let cache = self.inner.lock().cache.clone();
 
-        write_cache(&self.cache_path, &cache);
+        if let Err(error) = write_cache(&self.cache_path, &cache) {
+            warn!("failed to save agent update state: {error}");
+        }
     }
 
     pub fn hide_notification(&self, key: &InstallationKey) {
@@ -838,28 +841,19 @@ fn read_cache(path: &Path) -> CacheFile {
         })
 }
 
-fn write_cache(path: &Path, cache: &CacheFile) {
-    let Some(parent) = path.parent() else {
-        return;
-    };
+fn write_cache(path: &Path, cache: &CacheFile) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::other("missing cache directory"))?;
 
-    if fs::create_dir_all(parent).is_err() {
-        return;
-    }
+    fs::create_dir_all(parent)?;
 
-    let Ok(bytes) = serde_json::to_vec(cache) else {
-        return;
-    };
-
+    let bytes = serde_json::to_vec(cache).map_err(io::Error::other)?;
     let temporary = path.with_extension("tmp");
 
-    if fs::write(&temporary, bytes).is_ok() && fs::rename(&temporary, path).is_err() {
-        // Windows rename does not replace an existing destination. Cache
-        // loss is recoverable by probing again, so a short replacement
-        // gap is preferable to leaving every later result stale.
-        let _ = fs::remove_file(path);
-        let _ = fs::rename(temporary, path);
-    }
+    fs::write(&temporary, bytes)?;
+
+    replace_file(&temporary, path)
 }
 
 impl From<VersionStatus> for InstallationUpdateState {

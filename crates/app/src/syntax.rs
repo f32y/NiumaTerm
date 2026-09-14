@@ -1,3 +1,4 @@
+use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::ffi::c_void;
 use std::{mem, slice, str};
 
@@ -9,15 +10,6 @@ use tree_sitter::Parser;
 use tree_sitter_language::LanguageFn;
 
 use crate::utils::get_exe_dir;
-
-#[cfg(windows)]
-const BUNDLE_FILE: &str = "tree_sitter.dll";
-
-#[cfg(target_os = "macos")]
-const BUNDLE_FILE: &str = "libtree_sitter.dylib";
-
-#[cfg(all(unix, not(target_os = "macos")))]
-const BUNDLE_FILE: &str = "libtree_sitter.so";
 
 const ABI_VERSION: u32 = 1;
 const MAX_LANGUAGES: u32 = 128;
@@ -50,18 +42,19 @@ struct RawLanguageDescriptor {
 }
 
 pub fn register_languages() -> Result<usize> {
-    let path = get_exe_dir().join(BUNDLE_FILE);
+    let bundle_file = format!("{DLL_PREFIX}tree_sitter{DLL_SUFFIX}");
+    let path = get_exe_dir().join(&bundle_file);
 
     // The installed bundle is trusted executable code, and its parser tables
     // must remain mapped for every language registered below.
     let module = unsafe { ResidentLibrary::load(&path) }
-        .with_context(|| format!("cannot load {BUNDLE_FILE} beside the executable"))?;
+        .with_context(|| format!("cannot load {bundle_file} beside the executable"))?;
 
     let abi_version: AbiVersionFn = unsafe {
         mem::transmute::<LibrarySymbol, AbiVersionFn>(
             module
                 .symbol(c"nmt_tree_sitter_abi_version")
-                .with_context(|| format!("{BUNDLE_FILE} has no ABI version export"))?,
+                .with_context(|| format!("{bundle_file} has no ABI version export"))?,
         )
     };
 
@@ -69,7 +62,7 @@ pub fn register_languages() -> Result<usize> {
         mem::transmute::<LibrarySymbol, LanguageCountFn>(
             module
                 .symbol(c"nmt_tree_sitter_language_count")
-                .with_context(|| format!("{BUNDLE_FILE} has no language count export"))?,
+                .with_context(|| format!("{bundle_file} has no language count export"))?,
         )
     };
 
@@ -77,7 +70,7 @@ pub fn register_languages() -> Result<usize> {
         mem::transmute::<LibrarySymbol, LanguageAtFn>(
             module
                 .symbol(c"nmt_tree_sitter_language")
-                .with_context(|| format!("{BUNDLE_FILE} has no language export"))?,
+                .with_context(|| format!("{bundle_file} has no language export"))?,
         )
     };
 

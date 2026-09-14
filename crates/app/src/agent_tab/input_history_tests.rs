@@ -1,28 +1,48 @@
+use std::io::Cursor;
+
+use std::path::{Path, PathBuf};
+
+use std::sync::Arc;
+
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use std::time::SystemTime;
+
+use std::{env, fs, process};
+
+use gpui::{Entity, Image, ImageFormat, TestAppContext, VisualTestContext, WindowHandle};
+
+use image_rs::{DynamicImage, ImageFormat as EncodedImageFormat, RgbaImage};
+
+use nmt_agent::AgentWorkspace;
+
+use nmt_agent::chat::{SendOutcome, SessionSummary, SlashCommandOutcome};
+
+use nmt_agent::codex::app_server;
+
+use nmt_agent::input_history::AgentInputHistory as InputHistoryService;
+
+use nmt_agent::session::lifecycle::StartOutcome;
+
+use nmt_agent::transcript::TextField;
+
+use nmt_config::profile::{AgentProfile, AgentProfileKind};
+
 use crate::agent_tab::input_history::{
     AgentInputHistory, InputHistoryAction, InputHistoryDirection, InputHistoryNavigation,
     InputHistoryScope,
 };
+
 use crate::agent_tab::session::{Backend, TestBackend};
+
 use crate::agent_tab::settings::AgentSettings;
+
+use crate::agent_tab::tests::deliver_session_event;
+
 use crate::agent_tab::{
     AgentKind, AgentPane, AgentThreadDefaults, PaletteControl, RecentSessionsMode,
     replace_input_with_history,
 };
-use gpui::{Entity, Image, ImageFormat, TestAppContext, VisualTestContext, WindowHandle};
-use image_rs::{DynamicImage, ImageFormat as EncodedImageFormat, RgbaImage};
-use nmt_agent::AgentWorkspace;
-use nmt_agent::chat::{SendOutcome, SessionSummary, SlashCommandOutcome};
-use nmt_agent::codex::app_server;
-use nmt_agent::input_history::AgentInputHistory as InputHistoryService;
-use nmt_agent::session::lifecycle::StartOutcome;
-use nmt_agent::transcript::TextField;
-use nmt_config::profile::{AgentProfile, AgentProfileKind};
-use std::io::Cursor;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::SystemTime;
-use std::{env, fs, process};
 
 static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(1);
 
@@ -653,7 +673,7 @@ fn interruption_restores_only_unanswered_input_and_preserves_new_drafts(cx: &mut
         let (pane, window) = open_test_pane(cx, &directory);
         let mut view_cx = VisualTestContext::from_window(window.into(), cx);
 
-        view_cx.update(|window, cx| {
+        let turn = view_cx.update(|window, cx| {
             pane.update(cx, |pane, cx| {
                 let epoch = pane.session.borrow_mut().runtime.begin_start();
 
@@ -708,21 +728,12 @@ fn interruption_restores_only_unanswered_input_and_preserves_new_drafts(cx: &mut
                     assert_eq!(input, "new draft");
                     assert!(pane.attachments.annotations().is_empty());
                     assert!(pane.session.borrow().delivery.is_active());
-
-                    pane.on_event(Event::TurnStarted, cx);
-
-                    assert_eq!(pane.session.borrow().delivery.turn(), turn);
                 } else {
                     assert!(input.contains("original draft"));
                     assert!(input.ends_with("new draft"));
                     assert_eq!(pane.attachments.annotations(), ["quoted answer"]);
                     assert!(!pane.transcript.read(cx).is_working());
                     assert!(!pane.session.borrow().delivery.is_active());
-
-                    pane.on_event(Event::TurnStarted, cx);
-
-                    assert_eq!(pane.session.borrow().delivery.turn(), turn + 1);
-                    assert!(pane.transcript.read(cx).is_working());
                 }
 
                 assert_eq!(
@@ -733,7 +744,21 @@ fn interruption_restores_only_unanswered_input_and_preserves_new_drafts(cx: &mut
                     1,
                     "recovering a draft must not record a second submission"
                 );
-            });
+
+                turn
+            })
+        });
+
+        deliver_session_event(&pane, Event::TurnStarted, &view_cx);
+
+        view_cx.read(|cx| {
+            let pane = pane.read(cx);
+
+            assert_eq!(
+                pane.session.borrow().delivery.turn(),
+                turn + u64::from(!visible)
+            );
+            assert!(pane.transcript.read(cx).is_working());
         });
     }
 }

@@ -13,10 +13,15 @@ fn agent_hook_item(
     uninstall: fn(&path::Path) -> io::Result<()>,
 ) -> SettingItem {
     let detected = detection_path.as_ref().is_some_and(|path| path.is_file());
+
+    let unavailable = hooks_path
+        .as_deref()
+        .is_some_and(|path| status(path) == HookInstallStatus::Unavailable);
+
     let status_path = hooks_path.clone();
     let action_path = hooks_path;
 
-    SettingItem::new(
+    let mut item = SettingItem::new(
         name.clone(),
         SettingField::checkbox(
             // Settings renders only the active page, so a disk-backed getter
@@ -45,7 +50,15 @@ fn agent_hook_item(
             },
         ),
     )
-    .disabled(!detected)
+    .disabled(!detected || unavailable);
+
+    if unavailable {
+        item = item.description(
+            "Hook settings could not be read. Check the settings file before changing hooks.",
+        );
+    }
+
+    item
 }
 
 pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPage {

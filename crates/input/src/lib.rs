@@ -30,7 +30,6 @@ bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct KeyEncodeFlags: u16 {
         const APP_CURSOR            = 1 << 0;
-        const APP_KEYPAD            = 1 << 1;
         const DISAMBIGUATE_ESC_CODES = 1 << 2;
         const REPORT_EVENT_TYPES    = 1 << 3;
         const REPORT_ALTERNATE_KEYS = 1 << 4;
@@ -88,17 +87,6 @@ fn build_key_sequence(key: &KeyInput, mods: ModifiersState, flags: KeyEncodeFlag
         kitty_event_type,
     };
 
-    // Backspace whenever pressed with Fn(Globe button) on MacOS
-    // will produce `\u{f728}` as text_with_all_modifiers
-    // however it should act as a Delete key.
-    #[cfg(target_os = "macos")]
-    let text = if key.logical_key == Key::Named(NamedKey::Delete) {
-        None
-    } else {
-        key.text_with_all_modifiers.as_deref()
-    };
-
-    #[cfg(not(target_os = "macos"))]
     let text = key.text_with_all_modifiers.as_deref();
 
     let associated_text = text.filter(|text| {

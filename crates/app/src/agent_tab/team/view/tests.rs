@@ -100,8 +100,15 @@ async fn claude_member_startup_retains_native_permission_selection(cx: &mut Test
 
         assert_eq!(runtime.error(), None);
         assert_eq!(
-            runtime.member_settings(member, cx).as_ref(),
-            Some(&settings)
+            runtime
+                .member_session(member)
+                .unwrap()
+                .read(cx)
+                .controller
+                .borrow()
+                .controls
+                .settings,
+            settings
         );
         assert_eq!(runtime.room().member(member).unwrap().settings(), &settings);
     });
@@ -194,7 +201,7 @@ async fn reopened_request(cx: &mut TestAppContext, completed: bool) {
         cx.set_global(AgentSettings::default());
         cx.set_global(AgentThreadDefaults::default());
 
-        let runtime = cx.new(|_| TeamRuntime::new(saved, directory.path()));
+        let runtime = cx.new(|_| TeamRuntime::new(saved));
 
         let owner = AgentSession::create(
             AgentProfile {
@@ -370,7 +377,7 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
             })
             .unwrap();
 
-        let runtime = cx.new(|_| TeamRuntime::new(session, directory.path()));
+        let runtime = cx.new(|_| TeamRuntime::new(session));
 
         let owner = AgentSession::create(
             AgentProfile {

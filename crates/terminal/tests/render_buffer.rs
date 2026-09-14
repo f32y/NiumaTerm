@@ -60,7 +60,7 @@ fn wide_char_marks_spacer() {
 }
 
 #[test]
-fn style_table_indexed_by_style_id() {
+fn captured_style_id_resolves_bold_text() {
     let mut engine = GhosttyTerminal::new(8, 1, 100).unwrap();
 
     engine.write_vt(b"\x1b[1mB\x1b[0m");
@@ -71,13 +71,7 @@ fn style_table_indexed_by_style_id() {
 
     let sid = buf.cell(0, 0).style_id();
 
-    // The exposed style_table resolves the same style `style()` does.
-    assert_eq!(buf.style_table()[sid as usize], buf.style(sid));
-    assert!(
-        buf.style_table()[sid as usize]
-            .flags
-            .contains(StyleFlags::BOLD)
-    );
+    assert!(buf.style(sid).flags.contains(StyleFlags::BOLD));
 }
 
 /// `content_changed` is the signal that replaces the mirror's

@@ -22,8 +22,10 @@ fn attach_three() -> (PendingAttachments, String) {
     let mut pending = PendingAttachments::default();
     let mut text = String::new();
 
-    for _ in 0..3 {
-        let placeholder = attach_png(&mut pending, &png(4, 4)).ok().expect("attach");
+    for width in 4..7 {
+        let placeholder = attach_png(&mut pending, &png(width, 4))
+            .ok()
+            .expect("attach");
 
         text.push_str(&placeholder);
     }

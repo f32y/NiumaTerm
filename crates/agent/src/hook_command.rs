@@ -11,4 +11,6 @@ pub enum HookInstallStatus {
     Stale,
 
     NotInstalled,
+    /// Existing settings could not be read or decoded.
+    Unavailable,
 }

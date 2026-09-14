@@ -84,13 +84,13 @@ pub(crate) fn fetch_snapshot(root: &str, branch_max_age: Duration) -> Result<Git
         &["diff", "--numstat", "-z"][..],
         &["diff", "--numstat", "-z", "--cached"][..],
     ] {
-        if let Ok(out) = run_git(root, args) {
-            for (path, added, removed) in parse_numstat_z(&out) {
-                let entry = counts.entry(path).or_default();
+        let out = run_git(root, args)?;
 
-                entry.0 += added;
-                entry.1 += removed;
-            }
+        for (path, added, removed) in parse_numstat_z(&out) {
+            let entry = counts.entry(path).or_default();
+
+            entry.0 += added;
+            entry.1 += removed;
         }
     }
 
@@ -117,7 +117,7 @@ pub(crate) fn fetch_snapshot(root: &str, branch_max_age: Duration) -> Result<Git
 
     Ok(GitSnapshot {
         repo_root: root.to_string(),
-        branch: current_branch(root, branch_max_age).map(|checked_out| match checked_out {
+        branch: current_branch(root, branch_max_age)?.map(|checked_out| match checked_out {
             CheckedOut::Branch(branch) => branch,
             CheckedOut::Detached(commit) => commit,
         }),

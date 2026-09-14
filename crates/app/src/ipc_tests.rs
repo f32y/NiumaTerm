@@ -148,13 +148,9 @@ fn public_ingress_completes_and_acknowledges_exact_notification() {
     monitor.process_due(now + COMPLETION_QUIET_WINDOW);
 
     let pane = monitor.project([&route]);
-    let tab = monitor.project([&route]);
-    let workspace = monitor.project([&route]);
 
     assert_eq!(pane.status, AgentRuntimeStatus::Idle);
     assert_eq!(pane.unread_count, 1);
-    assert_eq!(tab, pane);
-    assert_eq!(workspace, pane);
 
     let notification = monitor.notification(&route).unwrap().clone();
 

@@ -1,75 +1,102 @@
 pub(super) use crate::terminal_tab::pane_model::settings::FrameTheme;
 
 pub(super) mod frame_cache;
+
 pub(super) mod frame_record;
+
 pub(super) mod key_action;
 
 pub(super) mod frozen_hit_map;
 
 pub(super) mod list_mirror;
+
 pub(super) mod mouse;
+
 pub(super) mod scroll;
 
 pub(super) mod selection_geometry;
+
 pub(super) mod viewport;
 
 mod settings;
 
 mod blocks;
 
-mod gutter_selection;
 mod links;
 
 mod scrollbar_activity;
 
 #[cfg(test)]
 pub(super) mod test_session;
+
 #[cfg(test)]
 mod tests;
 
-use crate::terminal_tab::block_list::ITEM_PAD_ROWS;
-use crate::terminal_tab::settings::TerminalSettings;
 use nmt_config::colors::Colors;
+
 use nmt_input::keyboard::ModifiersState;
+
 use nmt_terminal::input::{TerminalKey, WheelDelta};
+
 use nmt_terminal::links::{follows_link, resolve_link};
+
 use nmt_terminal::selection::SelectionType;
+
 use nmt_terminal::session::interaction::{
-    CopyCompletion, InputOutcome, PendingCopy, TerminalInteraction, selection_type_for_click_count,
+    CopyCompletion, InputOutcome, TerminalInteraction, selection_type_for_click_count,
 };
+
 use nmt_terminal::session::{
     HostEvent, InFlightBlock, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
 };
 
+use crate::terminal_tab::block_list::ITEM_PAD_ROWS;
+
 use crate::terminal_tab::block_list::chrome::DurationLabels;
+
 use crate::terminal_tab::block_list::{
     BlockListPoint, block_list_active_top_px, block_list_render_metrics, nav_item_top,
 };
+
 use crate::terminal_tab::dirty::DirtyState;
+
 use crate::terminal_tab::frame::TerminalFrame;
+
 use crate::terminal_tab::frame_source::TerminalFrameSource;
-use crate::terminal_tab::layout::{bottom_anchor_offsets, frame_content_rows, live_frame_text};
+
+use crate::terminal_tab::layout::{bottom_anchor_offsets, frame_content_rows};
+
 use crate::terminal_tab::metrics::CellMetrics;
+
 use crate::terminal_tab::pane_model::blocks::ListPlan;
+
 use crate::terminal_tab::pane_model::frame_cache::TerminalFrameCache;
+
 use crate::terminal_tab::pane_model::frame_record::FrameRecord;
+
 use crate::terminal_tab::pane_model::frozen_hit_map::FrozenHitMap;
-use crate::terminal_tab::pane_model::gutter_selection::GutterSelection;
+
 use crate::terminal_tab::pane_model::key_action::{KeyOutcome, TextInput};
+
 use crate::terminal_tab::pane_model::links::{LinkHit, LinkHover};
+
 use crate::terminal_tab::pane_model::list_mirror::{BlockListMirror, ListOp, ListPosition};
+
 use crate::terminal_tab::pane_model::mouse::{
     MouseInput, MouseOutcome, MouseRelease, WheelOutcome,
 };
+
 use crate::terminal_tab::pane_model::scroll::ScrollOutcome;
+
 use crate::terminal_tab::pane_model::scrollbar_activity::ScrollbarActivity;
-use crate::terminal_tab::pane_model::selection_geometry::{
-    block_gutter_hit, selection_drag_started,
-};
+
+use crate::terminal_tab::pane_model::selection_geometry::selection_drag_started;
+
 use crate::terminal_tab::pane_model::settings::{CursorShapeFailure, CursorShapeUpdate};
+
 use crate::terminal_tab::pane_model::viewport::{LocalPoint, LocalRect, Viewport};
 
-const BLOCK_GUTTER_SELECTION_ENABLED: bool = false;
+use crate::terminal_tab::settings::TerminalSettings;
 
 pub(super) trait ClipboardAccess {
     fn read(&mut self) -> Option<String>;
@@ -92,7 +119,6 @@ pub(super) struct PaneController {
     pub open_prompt: bool,
     pub block_list: BlockListMirror,
     pub frozen: FrozenHitMap,
-    pub gutter: GutterSelection,
 
     /// Ignore pointer jitter until the press moves beyond the drag threshold.
     selection_origin: Option<LocalPoint>,
@@ -130,7 +156,6 @@ impl PaneController {
             open_prompt: false,
             block_list: BlockListMirror::default(),
             frozen: FrozenHitMap::default(),
-            gutter: GutterSelection::default(),
             selection_origin: None,
             scrollbar: ScrollbarActivity::default(),
             links: LinkHover::default(),
@@ -245,24 +270,6 @@ impl PaneController {
         )
     }
 
-    pub(super) fn selected_block_command(&self) -> Option<String> {
-        self.source.session.block_command(self.gutter.selected()?)
-    }
-
-    pub(super) fn selected_block_output(&self) -> Option<PendingCopy> {
-        let item = self.gutter.selected()?;
-        let live = item == self.source.session.block_store().lock().items().len();
-
-        if live {
-            self.frame_cache
-                .current()
-                .and_then(|frame| live_frame_text(&frame))
-                .map(PendingCopy::ready)
-        } else {
-            self.source.session.block_text(item).map(Into::into)
-        }
-    }
-
     pub(super) fn prepare_block_list(
         &mut self,
         frame: &TerminalFrame,
@@ -288,12 +295,6 @@ impl PaneController {
             self.pad_rows,
             position,
         );
-
-        let evicted = metrics
-            .evicted_items
-            .saturating_sub(self.block_list.evicted_items) as usize;
-
-        self.gutter.shift_for_eviction(evicted, metrics.store_len);
 
         let ops = self
             .block_list
@@ -390,11 +391,6 @@ impl PaneController {
         match input {
             TextInput::Commit(text) => self.source.session.commit_text(text),
             TextInput::DropPaths(paths) => self.source.session.paste_paths(paths),
-
-            TextInput::RerunSelectedBlock => self
-                .gutter
-                .selected()
-                .is_some_and(|item| self.source.session.rerun_block(item)),
         }
     }
 
@@ -611,23 +607,6 @@ impl PaneController {
         }
 
         let mut cleared = false;
-
-        if BLOCK_GUTTER_SELECTION_ENABLED
-            && left
-            && self.block_list_mode()
-            && self.settings.command_blocks
-            && !self.source.session.mouse_reporting_active()
-        {
-            if block_gutter_hit(input.position.x, 0.0)
-                && let Some(item) = self.frozen.item_at(input.position.y)
-            {
-                self.gutter.select(item);
-
-                return MouseOutcome::SelectionChanged;
-            }
-
-            cleared = self.gutter.clear_selection();
-        }
 
         let reports = self
             .source

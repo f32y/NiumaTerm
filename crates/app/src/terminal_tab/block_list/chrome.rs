@@ -9,12 +9,11 @@ use crate::terminal_tab::theme::{
     BLOCK_FAILURE_COLOR, BLOCK_INPUT_COLOR, BLOCK_RUNNING_COLOR, BLOCK_SUCCESS_COLOR,
 };
 
-/// Chrome of one visible item: gutter accent, right-aligned header,
-/// selection state. Element coords (scroll already subtracted); may extend
+/// Chrome of one visible item: gutter accent and right-aligned header.
+/// Element coords (scroll already subtracted); may extend
 /// past the visible window — the paint's content mask clips.
 #[derive(Clone)]
 pub(crate) struct FrozenItemChrome {
-    pub item: usize,
     pub top: f32,
     pub bottom: f32,
     pub header_y: f32,
@@ -24,8 +23,6 @@ pub(crate) struct FrozenItemChrome {
 
     /// "cmd · ✓ 1.2s" / "cmd · ✗ 127"; `None` when no command is known.
     pub header: Option<String>,
-
-    pub selected: bool,
 }
 
 /// Gutter/header accent for a frozen item, keyed off the exit code.
@@ -63,13 +60,7 @@ pub(super) fn item_header(meta: &SegmentMeta, labels: &DurationLabels) -> Option
 /// Chrome of the live item: a running command uses the running accent, while
 /// the idle input region uses the input accent. Headers appear only after the
 /// item is finished. `rows == 0` → invisible.
-pub(crate) fn live_chrome(
-    item: usize,
-    rows: usize,
-    cell_h: f32,
-    running: bool,
-    selected: bool,
-) -> Option<FrozenItemChrome> {
+pub(crate) fn live_chrome(rows: usize, cell_h: f32, running: bool) -> Option<FrozenItemChrome> {
     if rows == 0 {
         return None;
     }
@@ -81,13 +72,11 @@ pub(crate) fn live_chrome(
     };
 
     Some(FrozenItemChrome {
-        item,
         top: 0.0,
         bottom: rows as f32 * cell_h,
         header_y: 0.0,
         accent,
         header: None,
-        selected,
     })
 }
 
@@ -112,12 +101,10 @@ pub(crate) fn format_duration(d: time::Duration, labels: &DurationLabels) -> Str
 }
 
 pub(crate) fn block_list_live_chrome(
-    live_index: usize,
     live_rows: usize,
     cell_h: f32,
     in_flight: Option<&InFlightBlock>,
     has_open_prompt: bool,
-    selected: bool,
 ) -> Option<block_list::FrozenItemChrome> {
     let running = in_flight.is_some();
 
@@ -125,7 +112,7 @@ pub(crate) fn block_list_live_chrome(
         return None;
     }
 
-    block_list::live_chrome(live_index, live_rows, cell_h, running, selected)
+    block_list::live_chrome(live_rows, cell_h, running)
 }
 
 pub(crate) fn offset_frozen_chrome(

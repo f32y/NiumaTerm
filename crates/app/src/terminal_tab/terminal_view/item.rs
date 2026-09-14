@@ -28,7 +28,6 @@ pub(crate) enum BlockListItem {
         cols: u32,
         cell: metrics::CellMetrics,
         selection: Option<(block_list::FrozenPoint, block_list::FrozenPoint)>,
-        selected_item: Option<usize>,
         pane: Entity<TerminalPane>,
     },
 
@@ -160,7 +159,6 @@ impl Element for BlockListItem {
                 cols: _,
                 cell,
                 selection,
-                selected_item,
                 pane,
             } => {
                 let model = &pane.read(cx).model;
@@ -169,7 +167,6 @@ impl Element for BlockListItem {
                     *item_idx,
                     &viewport,
                     *selection,
-                    *selected_item,
                     &model.duration_labels,
                     theme.foreground,
                 );

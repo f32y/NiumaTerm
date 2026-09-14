@@ -294,13 +294,7 @@ impl Session {
             || self.conversation.compaction.active.is_some()
     }
 
-    /// Detach this thread from the shared host. The final owner performs the
-    /// requested bounded process shutdown.
     pub fn shutdown(&mut self, timeout: Duration, force: bool) -> Result<(), String> {
-        self.detach_with(timeout, force)
-    }
-
-    fn detach_with(&mut self, timeout: Duration, force: bool) -> Result<(), String> {
         if self.detached {
             return Ok(());
         }
@@ -1199,6 +1193,6 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        let _ = self.detach_with(Duration::from_millis(250), true);
+        let _ = self.shutdown(Duration::from_millis(250), true);
     }
 }

@@ -10,160 +10,230 @@
 pub use crate::agent_tab::profile::{
     AgentKind, AgentKindExt, AgentThreadDefaults, agent_launch, thread_settings_from_defaults,
 };
+
 pub use crate::agent_tab::session::{
     RecoveryIdentity, RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
 };
 
 pub mod execution;
+
 pub mod input_history;
+
 pub mod profile;
+
 pub mod settings;
+
 pub mod team;
+
 pub mod transcript;
 
 mod capabilities;
+
 mod commands;
+
 mod composer;
+
 mod context_usage;
+
 mod fade;
+
 mod pane_state;
+
 mod questions;
+
 mod session;
+
 mod thread_controls;
+
 mod view;
+
 mod workflows;
 
 #[cfg(test)]
 mod tests;
 
-use crate::agent_tab::capabilities::AgentCapabilities as _;
-use crate::agent_tab::commands::{
-    PaletteCatalogEntry, PaletteDirection, filter_palette_catalog, filter_skill_catalog,
-    local_commands, merge_catalog, move_palette_selection, parse_skill_prefix, parse_slash_command,
-    prepare_skill_selection, reconcile_skill_binding, resolve_choice, setting_value_label,
-    validate_skill_binding,
-};
-use crate::agent_tab::composer::attachments::{
-    AttachError, ComposerAttachments, MAX_ATTACHMENTS, THUMBNAIL, scratch_dir,
-};
-use crate::agent_tab::composer::{
-    BranchFlow, CachedCatalog, CommandFeedbackKind, ComposerAction, PALETTE_MAX_HEIGHT,
-    PaletteAction, PaletteModel, PaletteRow, PendingSlashCommand, RewindAction, SlashPalette,
-    prompt_with_response_annotations, restored_input_after_interruption, rewind_prompt_label,
-    rewind_timestamp, row_prompt_target, visible_prompt,
-};
-use crate::agent_tab::context_usage::{ContextUsageIndicator, cache_hit_percent};
-use crate::agent_tab::execution::{
-    AgentSession, ChildReader, CommandBinding, PresentationEffect, SessionOwner,
-};
-use crate::agent_tab::fade::{Fade, FrostedLayer};
-use crate::agent_tab::input_history::{
-    InputHistoryAction, InputHistoryDirection, InputHistoryNavigation, InputHistoryScope,
-};
-use crate::agent_tab::pane_state::TurnPresentation;
-use crate::agent_tab::questions::{
-    QuestionEditor, QuestionEditorState, QuestionPresentation, QuestionStatus,
-};
-use crate::agent_tab::session::errors::operation_error;
-use crate::agent_tab::session::history::{
-    FilesystemHistoryRequest, RecentSessionsMode, SessionHistoryUi,
-};
-use crate::agent_tab::session::prompts::PendingPrompts;
-use crate::agent_tab::session::{
-    Backend, Status, UpdateSuspension, directories_match, directory_label,
-};
-use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
-#[cfg(test)]
-use crate::agent_tab::thread_controls::launch_effort;
-#[cfg(test)]
-use crate::agent_tab::thread_controls::stored_thread_settings;
-use crate::agent_tab::thread_controls::{launch_model, remember_defaults, render_row};
-use crate::agent_tab::transcript::{
-    LAST_RESPONSE_LIMIT, TranscriptView, last_response_label, relative_time, transcript_column,
-};
-use crate::agent_tab::view::composer_layout::{
-    composer_card, composer_controls_row, composer_input_row,
-};
-use crate::agent_tab::view::session_state::session_state_badge;
-use crate::agent_tab::workflows::WorkflowUi;
-#[cfg(test)]
-use chrono::Utc;
+use std::borrow::Cow;
+
+use std::cell::{Ref, RefCell};
+
+use std::ops::Range;
+
+use std::path::Path;
+
+use std::rc::Rc;
+
+use std::sync::Arc;
+
+use std::time::{Duration, Instant};
+
+use std::{env, fs};
+
 use gpui::prelude::*;
+
 use gpui::{
     AnyElement, App, AsyncApp, Bounds, ClipboardEntry, ClipboardItem, Context, Entity, FocusHandle,
     FontWeight, Hsla, Image, ImageFormat, IntoElement, ListSizingBehavior, MouseButton,
     MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollStrategy, SharedString, WeakEntity,
     Window, div, px, relative, size,
 };
+
 use gpui_base::TextSelection;
+
 use gpui_component::button::{Button, ButtonVariants as _};
+
 use gpui_component::checkbox::Checkbox;
+
 use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, Dialog, DialogClose, DialogFooter};
+
 use gpui_component::input::{
     Enter, Escape, IndentInline, InputEvent, InputState, MoveDown, MoveUp, Paste, Textarea,
     TextareaState,
 };
+
 use gpui_component::modern_menu::ModernMenu;
+
 use gpui_component::progress::ProgressCircle;
+
 use gpui_component::radio::Radio;
+
 use gpui_component::scroll::Scrollbar;
+
 use gpui_component::skeleton::Skeleton;
+
 use gpui_component::spinner::Spinner;
+
 use gpui_component::tooltip::Tooltip;
+
 use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, IconNamed, Sizable as _, WindowExt, h_flex,
     v_flex, v_virtual_list,
 };
+
 use nmt_agent::background_task::{BackgroundTaskKey, BackgroundTaskSnapshot};
+
 use nmt_agent::catalog::adapter_commands;
-#[cfg(test)]
-use nmt_agent::chat::Event as SessionEvent;
-#[cfg(test)]
-use nmt_agent::chat::ReplayTurn;
+
 use nmt_agent::chat::{
     ForkCheckpoint, Item as SessionItem, Question, QuestionInput, QuestionMode, QueuedPrompt,
     SessionScope, SessionSummary, SkillInfo, SkillReference, SlashCommandArguments,
     SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
 };
+
 use nmt_agent::claude_code::{sessions, stream_json};
+
 use nmt_agent::codex::app_server;
+
 use nmt_agent::session::ImageAttachment;
+
 use nmt_agent::session::branch::{
     BranchError, BranchFailure, BranchUpdate, BranchView, FailureStage, FileProgress, PromptTarget,
 };
+
 use nmt_agent::session::children::ChildTranscript;
+
 use nmt_agent::session::commands::CommandAdmission;
-#[cfg(test)]
-use nmt_agent::session::controller::ReadyDefaults;
+
 use nmt_agent::session::controller::{
     QuestionSubmission, SessionBranch, SessionController, SessionEffect, SessionFailure,
     SessionReady, SubmissionBlock,
 };
+
 use nmt_agent::session::delivery::{RecoverablePrompt, Submission};
+
 use nmt_agent::session::history::{CountPublication, count_scoped_sessions, list_scoped_sessions};
+
 use nmt_agent::session::input::{
     ApprovalOutcome, QuestionAction, QuestionCompletion, QuestionError, QuestionKey,
 };
+
 use nmt_agent::session::lifecycle::InterruptOutcome;
+
 use nmt_agent::session::restore::{ResumeStart, SettingsSeed};
+
 use nmt_agent::session::workflows::OpenWorkflowAgent;
+
 #[cfg(test)]
 use nmt_agent::transcript::TextField;
+
 use nmt_agent::transcript::conversation::ConversationImage;
+
 use nmt_agent::workflow::WorkflowRun;
+
 use nmt_agent::{AgentEvent, AgentEventKind, AgentRoute, AgentWorkspace, MultiRootAccess, git};
+
 use nmt_config::profile::AgentProfile;
+
 use nmt_config::system::NewlineShortcut;
+
 use rust_i18n::t;
-use std::borrow::Cow;
-use std::cell::{Ref, RefCell};
-use std::ops::Range;
-use std::path::Path;
-use std::rc::Rc;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use std::{env, fs};
+
 use tracing::info;
+
+use crate::agent_tab::capabilities::AgentCapabilities as _;
+
+use crate::agent_tab::commands::{
+    PaletteCatalogEntry, PaletteDirection, filter_palette_catalog, filter_skill_catalog,
+    local_commands, merge_catalog, move_palette_selection, parse_skill_prefix, parse_slash_command,
+    prepare_skill_selection, reconcile_skill_binding, resolve_choice, setting_value_label,
+    validate_skill_binding,
+};
+
+use crate::agent_tab::composer::attachments::{
+    AttachError, ComposerAttachments, MAX_ATTACHMENTS, THUMBNAIL, scratch_dir,
+};
+
+use crate::agent_tab::composer::{
+    BranchFlow, CachedCatalog, CommandFeedbackKind, ComposerAction, PALETTE_MAX_HEIGHT,
+    PaletteAction, PaletteModel, PaletteRow, PendingSlashCommand, RewindAction, SlashPalette,
+    prompt_with_response_annotations, restored_input_after_interruption, rewind_prompt_label,
+    rewind_timestamp, row_prompt_target, visible_prompt,
+};
+
+use crate::agent_tab::context_usage::{ContextUsageIndicator, cache_hit_percent};
+
+use crate::agent_tab::execution::{
+    AgentSession, ChildReader, CommandBinding, PresentationEffect, SessionOwner,
+};
+
+use crate::agent_tab::fade::{Fade, FrostedLayer};
+
+use crate::agent_tab::input_history::{
+    InputHistoryAction, InputHistoryDirection, InputHistoryNavigation, InputHistoryScope,
+};
+
+use crate::agent_tab::pane_state::TurnPresentation;
+
+use crate::agent_tab::questions::{
+    QuestionEditor, QuestionEditorState, QuestionPresentation, QuestionStatus,
+};
+
+use crate::agent_tab::session::errors::operation_error;
+
+use crate::agent_tab::session::history::{
+    FilesystemHistoryRequest, RecentSessionsMode, SessionHistoryUi,
+};
+
+use crate::agent_tab::session::prompts::PendingPrompts;
+
+use crate::agent_tab::session::{
+    Backend, Status, UpdateSuspension, directories_match, directory_label,
+};
+
+use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
+
+use crate::agent_tab::thread_controls::{launch_model, remember_defaults, render_row};
+
+use crate::agent_tab::transcript::{
+    LAST_RESPONSE_LIMIT, TranscriptView, last_response_label, relative_time, transcript_column,
+};
+
+use crate::agent_tab::view::composer_layout::{
+    composer_card, composer_controls_row, composer_input_row,
+};
+
+use crate::agent_tab::view::session_state::session_state_badge;
+
+use crate::agent_tab::workflows::WorkflowUi;
 
 #[derive(Clone)]
 pub enum AgentPaneEvent {
@@ -2730,12 +2800,6 @@ impl AgentPane {
         cx.notify();
     }
 
-    #[cfg(test)]
-    pub(crate) fn restore_question_drafts(&mut self) {
-        self.session.borrow_mut().restore_questions();
-        self.prompts.reset_editors();
-    }
-
     pub(crate) fn prepare_question_editors(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.prompts.collapsed {
             return;
@@ -3441,21 +3505,6 @@ impl AgentPane {
         cx.notify();
     }
 
-    /// Apply provider state before presenting its effects in transcript order.
-    #[cfg(test)]
-    pub(crate) fn on_event(&mut self, event: SessionEvent, cx: &mut Context<Self>) {
-        self.prepare_ready_defaults(cx);
-
-        let effect = {
-            let mut guard = self.session.borrow_mut();
-            let state = &mut *guard;
-
-            state.apply_event(state.runtime.epoch(), event)
-        };
-
-        self.present_session_effect(effect, cx);
-    }
-
     pub(super) fn present_session_effect(&mut self, effect: SessionEffect, cx: &mut Context<Self>) {
         let Some(session_host) = self.host.upgrade() else {
             return;
@@ -3858,56 +3907,6 @@ impl AgentPane {
         cx.notify();
     }
 
-    /// Pre-fill the transcript with a resumed session's reconstructed
-    /// conversation. Replay entries share one turn and carry no fold header,
-    /// so they render as a plain chronological stream above the new turns.
-    #[cfg(test)]
-    pub(crate) fn on_replay(&mut self, replay: Vec<ReplayTurn>, cx: &mut Context<Self>) {
-        let answered_at = replay
-            .iter()
-            .flat_map(|turn| turn.items.iter())
-            .filter_map(|item| item.at)
-            .max();
-
-        self.session.borrow_mut().apply_replay(replay);
-
-        self.transcript
-            .update(cx, |transcript, _| transcript.sync_content());
-
-        if let Some(at) = answered_at {
-            self.note_replayed_response(at, cx);
-        }
-
-        cx.notify();
-    }
-
-    #[cfg(test)]
-    pub(super) fn prepare_ready_defaults(&mut self, cx: &Context<Self>) {
-        let Some(session_host) = self.host.upgrade() else {
-            return;
-        };
-
-        let session_kind = session_host.read(cx).kind;
-        let session_profile = session_host.read(cx).profile.clone();
-
-        let mut session = self.session.borrow_mut();
-
-        session.ready_defaults = match session.controls.seed {
-            SettingsSeed::Defaults => ReadyDefaults {
-                stored: stored_thread_settings(session_kind, &session_profile, cx).cloned(),
-                model: launch_model(session_kind, &session_profile),
-                effort: launch_effort(&session_profile),
-            },
-
-            SettingsSeed::Reviewer => ReadyDefaults {
-                stored: stored_thread_settings(session_kind, &session_profile, cx).cloned(),
-                ..ReadyDefaults::default()
-            },
-
-            SettingsSeed::None => ReadyDefaults::default(),
-        };
-    }
-
     #[cfg(test)]
     pub(crate) fn start_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
         self.session.borrow_mut().start_item(item);
@@ -3949,7 +3948,7 @@ impl AgentPane {
     /// the protocol is asked again, one that reads its own transcripts is
     /// rescanned.
     pub(crate) fn toggle_history_scope(&mut self, cx: &mut Context<Self>) {
-        self.history_ui.invalidate_filesystem_history();
+        self.history_ui.data.invalidate_filesystem_history();
 
         self.history_ui.data.scope = match self.history_ui.data.scope {
             SessionScope::CurrentDirectory => SessionScope::AllDirectories,
@@ -3990,6 +3989,7 @@ impl AgentPane {
 
         let request = self
             .history_ui
+            .data
             .begin_filesystem_history(cwd.clone(), self.session.borrow().runtime.epoch());
 
         cx.notify();
@@ -4420,12 +4420,6 @@ impl AgentPane {
         Some(&self.host.upgrade()?.read(cx).workspace)
     }
 
-    /// The directories the running conversation was started with.
-    #[cfg(test)]
-    pub(super) fn active_workspace<'a>(&self, cx: &'a App) -> Option<&'a AgentWorkspace> {
-        Some(&self.host.upgrade()?.read(cx).active_workspace)
-    }
-
     /// Replace the configured directory list after the parent workspace was
     /// edited. The running conversation keeps the snapshot it started with;
     /// the next one clones this.
@@ -4782,7 +4776,8 @@ impl AgentPane {
             .update(cx, |transcript, _| transcript.reset_presentation());
 
         self.branch.clear();
-        self.history_ui.invalidate_filesystem_history();
+
+        self.history_ui.data.invalidate_filesystem_history();
 
         // Workflow runs are scoped the same way, and their refresh must not
         // keep polling a directory that belongs to the replaced conversation.
@@ -4874,7 +4869,8 @@ impl AgentPane {
             return;
         };
 
-        self.history_ui.invalidate_filesystem_history();
+        self.history_ui.data.invalidate_filesystem_history();
+
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
 
@@ -4907,26 +4903,6 @@ impl AgentPane {
         cx.notify();
     }
 
-    #[cfg(test)]
-    pub(super) fn install_started_session(
-        &mut self,
-        spawned: Result<Backend, String>,
-        epoch: u64,
-        name: &'static str,
-        cx: &mut Context<Self>,
-    ) -> Option<bool> {
-        self.host
-            .upgrade()?
-            .update(cx, |host, cx| host.install(spawned, epoch, name, cx))
-    }
-
-    #[cfg(test)]
-    pub(super) fn stop_for_output_failure(&mut self, error: String, cx: &mut Context<Self>) {
-        if let Some(host) = self.host.upgrade() {
-            host.update(cx, |host, cx| host.stop_for_output_failure(error, cx));
-        }
-    }
-
     /// Start the turn clock and drive the once-a-second repaint of the live
     /// progress row; the ticker stops itself once `finish_working` clears it.
     pub(crate) fn start_working(&mut self, cx: &mut Context<Self>) {
@@ -4955,26 +4931,6 @@ impl AgentPane {
             }
         })
         .detach();
-    }
-
-    /// Carry a resumed conversation's own last answer into the reading, from
-    /// the provider's wall-clock stamp for it.
-    ///
-    /// Without this the reading restarts at the resume, which reads as a warm
-    /// conversation and skips the cold-prompt-cache warning in front of the
-    /// first message — the one send where the cache is certainly gone.
-    #[cfg(test)]
-    pub(super) fn note_replayed_response(&mut self, at_unix: i64, cx: &mut Context<Self>) {
-        let age = replayed_response_age(at_unix, Utc::now().timestamp());
-        let now = Instant::now();
-
-        self.session
-            .borrow()
-            .conversation
-            .borrow_mut()
-            .last_response_at = Some(now.checked_sub(age).unwrap_or(now));
-
-        self.turn.refresh_timer(cx);
     }
 
     pub(crate) fn interrupt_from_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -6712,7 +6668,12 @@ fn cancel_row() -> PaletteRow {
 /// The pane's branch label: a detached `HEAD` shows its short commit,
 /// matching the git footer's presentation of the same state.
 fn branch_label(cwd: &str, max_age: Duration) -> Option<String> {
-    Some(match git::current_branch(cwd, max_age)? {
+    let branch = match git::current_branch(cwd, max_age) {
+        Ok(branch) => branch?,
+        Err(_) => return Some("Git unavailable".into()),
+    };
+
+    Some(match branch {
         git::CheckedOut::Branch(branch) => branch,
 
         git::CheckedOut::Detached(commit) => {
@@ -6768,26 +6729,6 @@ fn image_file(path: &Path) -> Option<Image> {
     };
 
     Some(Image::from_bytes(format, fs::read(path).ok()?))
-}
-
-/// How long the composer's "last response" reading stays accurate, given how
-/// old it already is. Matches the coarsest unit the label shows, so the pane
-/// redraws exactly as often as the words change, and `None` once the label has
-/// settled on "more than an hour" and will never change again.
-/// How long ago a resumed conversation was answered, from the wall-clock stamp
-/// the provider recorded for it.
-///
-/// The age is clamped to the span the label distinguishes: everything past it
-/// reads "more than an hour ago" and passes every idle threshold a profile can
-/// warn at, and the clamp keeps the caller's subtraction inside the monotonic
-/// clock's range, which on Windows starts at boot and so cannot reach back to a
-/// conversation from before the last restart. A stamp from ahead of this
-/// machine's clock is idle time that has not happened.
-#[cfg(test)]
-pub(super) fn replayed_response_age(at_unix: i64, now_unix: i64) -> Duration {
-    let seconds = u64::try_from(now_unix.saturating_sub(at_unix)).unwrap_or(0);
-
-    Duration::from_secs(seconds).min(LAST_RESPONSE_LIMIT)
 }
 
 #[derive(Clone, Copy)]

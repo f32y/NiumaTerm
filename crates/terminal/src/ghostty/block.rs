@@ -126,11 +126,11 @@ impl BlockRef {
         &self,
         start: Option<(usize, u32)>,
         end: Option<(usize, u32)>,
-    ) -> Option<String> {
+    ) -> Result<Option<String>> {
         let rows = self.row_count();
 
         if rows == 0 {
-            return None;
+            return Ok(None);
         }
 
         let last_col: u32 = self.cols().saturating_sub(1).into();
@@ -145,7 +145,7 @@ impl BlockRef {
         let tl = clamp(start.unwrap_or((0, 0)));
         let br = clamp(end.unwrap_or((rows - 1, last_col)));
 
-        self.format_range(tl, br, true, true).ok()
+        self.format_range(tl, br, true, true).map(Some)
     }
 
     /// Export an inclusive cell range of the snapshot as plain text — the

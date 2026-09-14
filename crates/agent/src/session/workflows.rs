@@ -25,16 +25,6 @@ pub struct OpenWorkflowAgent {
     /// The provider has not persisted this agent's transcript; the row stays
     /// listed and the conversation reports itself unavailable.
     pub unavailable: bool,
-
-    /// Bumped whenever `items` changes, so the transcript view rebuilds only
-    /// on a real change.
-    revision: u64,
-}
-
-impl OpenWorkflowAgent {
-    pub fn revision(&self) -> u64 {
-        self.revision
-    }
 }
 
 /// Workflow state the pane owns and the view renders.
@@ -143,7 +133,6 @@ impl WorkflowData {
         }
 
         open.unavailable = false;
-        open.revision += 1;
 
         true
     }

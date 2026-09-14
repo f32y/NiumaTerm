@@ -4389,7 +4389,6 @@ dependencies = [
  "futures",
  "image",
  "lazy_static",
- "libc",
  "libghostty-vt-sys",
  "memchr",
  "nmt_config",

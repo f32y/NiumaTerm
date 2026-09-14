@@ -49,18 +49,6 @@ pub fn newest_install(root: &Path) -> Option<String> {
         .map(|(_, executable)| executable.to_string_lossy().into_owned())
 }
 
-pub fn preferred_shell() -> &'static str {
-    static SHELL: OnceLock<String> = OnceLock::new();
-
-    SHELL.get_or_init(|| {
-        let program_files = env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".into());
-
-        newest_install(&Path::new(&program_files).join("PowerShell"))
-            .or_else(|| Some(which::which("pwsh").ok()?.to_string_lossy().into_owned()))
-            .unwrap_or_else(|| LEGACY_SHELL.to_string())
-    })
-}
-
 /// The shell launched when configuration names none.
 pub fn default_shell() -> String {
     DEFAULT_SHELL.to_string()

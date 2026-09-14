@@ -1,19 +1,23 @@
-use std::io;
 use std::process::Child;
 
-use crate::process::{KillOnCloseJob, ProcessTree};
+use tracing::warn;
 
-impl KillOnCloseJob {
-    pub fn attach_or_kill(child: &mut Child) -> io::Result<Self> {
-        Self::attach(child).inspect_err(|_| {
-            let _ = child.kill();
-            let _ = child.wait();
-        })
-    }
-}
-
-impl ProcessTree {
-    pub fn other_process_count(&self) -> usize {
-        self.process_count().saturating_sub(1)
+pub(crate) fn cleanup_failed_attachment(child: &mut Child) {
+    match child.kill() {
+        Ok(()) => {
+            if let Err(error) = child.wait() {
+                warn!(
+                    "failed to reap child {} after containment failure: {error}",
+                    child.id()
+                );
+            }
+        }
+        Err(error) => match child.try_wait() {
+            Ok(Some(_)) => {}
+            result => warn!(
+                "failed to terminate child {} after containment failure: {error}; status: {result:?}",
+                child.id()
+            ),
+        },
     }
 }

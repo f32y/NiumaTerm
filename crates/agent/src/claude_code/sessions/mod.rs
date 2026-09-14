@@ -60,7 +60,7 @@ use crate::claude_code::sessions::task_history::{
 };
 #[cfg(test)]
 use crate::claude_code::sessions::titles::{
-    compaction_summary_text, recorded_title, resolved_session_title, title_line, user_prompt_text,
+    compaction_summary_text, recorded_title, resolved_session_title, user_prompt_text,
 };
 
 /// Whether the selected user message has a persisted file-history snapshot.

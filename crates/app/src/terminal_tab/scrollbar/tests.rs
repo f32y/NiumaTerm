@@ -1,5 +1,3 @@
-use std::time;
-
 use crate::terminal_tab::scrollbar::geometry::{
     SCROLLBAR_AUTO_HIDE_DELAY, SCROLLBAR_FADE_OUT_DURATION, scrollbar_offset_for_thumb,
     scrollbar_opacity, scrollbar_thumb_geometry,
@@ -7,11 +5,6 @@ use crate::terminal_tab::scrollbar::geometry::{
 
 #[test]
 fn scrollbar_opacity_fades_after_linger() {
-    assert_eq!(SCROLLBAR_AUTO_HIDE_DELAY, time::Duration::from_millis(500));
-    assert_eq!(
-        SCROLLBAR_FADE_OUT_DURATION,
-        time::Duration::from_millis(200)
-    );
     assert_eq!(scrollbar_opacity(true, None), Some(1.0));
     assert_eq!(
         scrollbar_opacity(false, Some(SCROLLBAR_AUTO_HIDE_DELAY / 2)),

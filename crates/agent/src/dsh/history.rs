@@ -265,7 +265,7 @@ pub(crate) fn fork_checkpoints(page: &Value) -> Vec<ForkCheckpoint> {
 
             Some(ForkCheckpoint {
                 prompt: prompt.clone(),
-                timestamp: at.map(unix_millis_to_rfc3339),
+                timestamp: at.and_then(unix_millis_to_rfc3339),
                 anchor: ForkAnchor::DeepSeekThrough(*kept),
             })
         })
@@ -278,10 +278,11 @@ pub(crate) fn fork_checkpoints(page: &Value) -> Vec<ForkCheckpoint> {
 
 /// The harness dates its events in Unix milliseconds while the picker renders
 /// RFC 3339, which is what a backend reading its history off disk records.
-fn unix_millis_to_rfc3339(millis: u64) -> String {
-    chrono::DateTime::from_timestamp_millis(millis as i64)
-        .unwrap_or_default()
-        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+fn unix_millis_to_rfc3339(millis: u64) -> Option<String> {
+    let millis = i64::try_from(millis).ok()?;
+
+    chrono::DateTime::from_timestamp_millis(millis)
+        .map(|date| date.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
 }
 
 /// Flatten a rebuilt page into one stream of items.

@@ -30,10 +30,8 @@ pub enum ContextError {
 
     #[error("select a smaller public context range")]
     SelectRange,
-
-    #[error("public context needs budgeted summary preparation")]
-    NeedsSummaries(Vec<SummaryChunk>),
-
+    #[error("public context exceeds the delivery limit and automatic summaries are unavailable")]
+    SummaryUnavailable,
     #[error("the user request exceeds the delivery limit")]
     OversizedInput,
 

@@ -1,61 +1,90 @@
 #![cfg(unix)]
 pub use crate::unix::process_exit::wait_for_exit;
+
 pub use crate::unix::shell_integration::{
     is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
     shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
 };
 
 pub(crate) use crate::unix::hook_command::{build_hook_command, hook_command_contains};
-#[cfg(target_os = "macos")]
-pub(crate) use crate::unix::notifier::request_authorization;
+
 pub(crate) use crate::unix::notifier::{remove, show};
+
 pub(crate) use crate::unix::shell::{default_shell, prompt_integration};
 
 pub mod environment;
+
 pub mod filesystem;
+
 pub mod ipc;
+
 pub mod process;
+
 pub mod shell;
+
 pub mod window;
 
 pub(crate) mod library;
+
+pub(crate) mod hook_command;
 
 #[cfg(feature = "clipboard")]
 mod clipboard;
 
 mod process_exit;
-mod shell_integration;
 
-mod hook_command;
+mod shell_integration;
 
 #[cfg(target_os = "macos")]
 mod macos;
+
 mod notifier;
+
 mod signals;
 
 use std::ffi::{CStr, CString, OsStr};
+
 use std::fs::File;
+
 use std::io::Error;
+
 use std::mem::MaybeUninit;
+
 use std::ops::Deref;
+
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+
 use std::os::unix::process::CommandExt;
+
 use std::path::{Path, PathBuf};
+
 use std::process::{Child as ChildProcess, Command, Stdio};
+
 use std::sync::Arc;
+
 use std::{env, error, io, ptr, str};
 
 use dirs::home_dir;
+
+use mio::event::Event;
+
 use mio::unix::SourceFd;
+
 use mio::{Interest, Poll, Token, Waker};
+
 use signal_hook::consts as sigconsts;
+
 use tracing::info;
 
 use crate::unix::hook_command::single_quoted;
+
 #[cfg(target_os = "macos")]
 use crate::unix::macos::*;
+
 use crate::unix::process::{KillOnCloseJob, ProcessTree};
+
 use crate::unix::signals::Signals;
+
 use crate::{APP_ID, EventedPty, ProcessReadWrite, PtyOptions, Winsize, WinsizeBuilder};
 
 #[cfg(all(target_os = "linux", not(target_env = "musl")))]
@@ -178,6 +207,15 @@ impl io::Read for Pty {
 }
 
 impl ProcessReadWrite for Pty {
+    fn read_closed(&self, event: &Event) -> bool {
+        event.is_read_closed()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn is_hangup_error(&self, error: &io::Error) -> bool {
+        error.raw_os_error() == Some(libc::EIO)
+    }
+
     type Reader = File;
 
     type Writer = File;

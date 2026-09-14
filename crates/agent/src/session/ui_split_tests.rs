@@ -217,10 +217,22 @@ fn workflow_readers_keep_separate_content_and_acknowledge_source_revisions() {
 
     assert_eq!(requests[0].open_agent.as_deref(), Some("second"));
     assert_eq!(requests[0].transcript_revision, Some(128));
-    assert_eq!(
-        workflows.conversation("run", "second").unwrap().revision(),
-        1
-    );
+
+    for (agent_id, expected) in [("first", "old"), ("second", "new")] {
+        let conversation = workflows
+            .conversation("run", agent_id)
+            .unwrap()
+            .conversation
+            .borrow();
+
+        assert_eq!(conversation.content.entries().len(), 1);
+        assert_eq!(
+            conversation.content.entries()[0].item,
+            Item::Error {
+                text: expected.into()
+            }
+        );
+    }
 
     workflows.clear();
 

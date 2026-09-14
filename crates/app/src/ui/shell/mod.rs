@@ -1,121 +1,195 @@
 #[cfg(windows)]
 pub(crate) use crate::ui::shell::actions::NewRemoteTab;
+
 pub(crate) use crate::ui::shell::actions::{
     CloseTab, NewAgentTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace, PrevTab,
     PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp, ShowSettings,
     SplitDown, SplitLeft, SplitRight, SplitUp, ToggleBackgroundTasks, ToggleGitSidebar,
     ToggleSidebar, ToggleWorkflows,
 };
+
 pub(crate) use crate::ui::shell::tab_surface::TabSurface;
 
 pub(super) use crate::ui::shell::inline_rename::{InlineRename, InlineRenameStyle};
+
 pub(super) use crate::ui::shell::rename::InlineRenameSession;
+
 pub(super) use crate::ui::shell::tab_presentation::pending_tab_icon;
 
 pub(crate) mod tab_surface;
 
 mod actions;
+
 mod agent_notifications;
+
 mod inline_rename;
+
 mod panels;
+
 mod rename;
+
 mod render;
 
 mod settings_workspace;
+
 mod tab_presentation;
 
 mod updates_layer;
+
 mod workspace_dirs;
 
 #[cfg(test)]
 mod tests;
 
-use crate::agent_updates::{
-    AgentUpdates, FocusedVisibleLifetime, NotificationPrimaryAction, NotificationProgress,
-    UpdateNotificationTone, UpdateNotificationView,
-};
-use crate::agent_usage::AgentUsageView;
-use crate::cli::CliAction;
-use crate::pane_tree::{PaneId, PaneNode, SplitDirection};
-#[cfg(windows)]
-use crate::remote;
-use crate::tabs::{Tab, TabId, TabManager};
-use crate::ui::background_tasks::BackgroundTasksView;
-use crate::ui::composition::FLOATING_SURFACE_SIDE_INSET;
-use crate::ui::git_sidebar::GitSidebar;
-use crate::ui::git_status::{GitStatusModel, GitStatusView};
-use crate::ui::persistence::{
-    default_session, materialize_active_tab, restore_session, session_state, spawn_default_pane,
-};
-use crate::ui::right_panel::{RightPanel, RightPanelKind};
-use crate::ui::settings::{AgentProfile, AppSettings, TabBarStyle};
-use crate::ui::shell::actions::NewTeamTab;
-use crate::ui::shell::agent_notifications::AgentNotificationState;
-use crate::ui::shell::panels::RightPanelController;
-use crate::ui::shell::render::ShellChrome;
-use crate::ui::shell::settings_workspace::{SettingsSurface, settings_title};
-use crate::ui::shell::tab_surface::AgentTab;
-use crate::ui::shell::updates_layer::UpdateNotificationLayer;
-use crate::ui::shell::workspace_dirs::{RootAvailability, WorkspaceDirsEditor};
-use crate::ui::tab_bar::TabStrip;
-use crate::ui::terminal_launch::attach_remote;
-use crate::ui::terminal_layout::TerminalLayout;
-use crate::ui::token_usage::TokenUsageView;
-use crate::ui::workflows::WorkflowsView;
-use crate::ui::workspace_sidebar::{Sidebar, SidebarTab, SidebarUsage, WorkspaceChrome};
-use crate::ui::{UI_RADIUS, main_view_background_opacity, workspace_sidebar};
-#[cfg(windows)]
-use crate::update::check;
-use crate::usage_sources::daily_source;
-use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
-use crate::workspace::{
-    ProgressTally, TerminalActivity, WorkspaceId, WorkspaceKind, WorkspaceManager, WorkspaceRoots,
-    best_match, exact_match,
-};
-use crate::{agent_updates, ui};
+use std::borrow::Cow;
+
+use std::path::PathBuf;
+
+use std::rc::Rc;
+
+use std::{collections, io, iter, path, thread, time};
+
 use app::agent_tab::execution::AgentSession;
+
 use app::agent_tab::team::{TeamPane, TeamRuntime};
+
 use app::agent_tab::{AgentPane, AgentPaneEvent, RecoveryIdentity};
+
 use app::terminal_tab::session::HostEvent;
+
 use app::terminal_tab::view::{AgentInterrupted, TerminalGridResized, TerminalPane};
+
 use dirs::home_dir;
+
 use gpui::prelude::*;
+
 use gpui::{
     Anchor, AnyElement, App, Axis, Context, Div, Entity, FocusHandle, Focusable, KeyDownEvent,
     MouseDownEvent, ObjectFit, Pixels, Render, SharedString, Window, WindowBounds, WindowId, div,
     img, px, relative,
 };
+
 use gpui_component::button::{Button, ButtonVariants, Toggle, ToggleVariants};
+
 use gpui_component::dialog::{
     DIALOG_BUTTON_MIN_WIDTH, Dialog, DialogAction, DialogButtonProps, DialogClose, DialogFooter,
 };
+
 use gpui_component::input::{Input, InputState};
+
 use gpui_component::modern_menu::{ModernMenu, dispatch_modern_menu_key};
+
 use gpui_component::notification::{Notification, NotificationType};
+
 use gpui_component::progress::Progress;
+
 use gpui_component::resizable::{PANEL_MIN_SIZE, ResizablePanelGroup, resizable_panel};
+
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, IconNamed, Root, StyledExt, TitleBar, WindowExt,
     h_flex, v_flex,
 };
+
 use nmt_agent::team::identity::RoomId;
+
 use nmt_agent::update::{ProviderKind, UpdatePhase};
+
 use nmt_agent::{
     AgentActivityPolicy, AgentEvent, AgentMonitor, AgentNotification, AgentRoute,
     AgentRuntimeStatus, AgentWorkspace, MonitorMutation, agent_process, request_native_delivery,
 };
+
 use nmt_config::local_state::{TabState, WindowState};
+
 use nmt_config::system::WarnBeforeTerminatingShell;
+
 use nmt_config::{config_dir_path, get};
+
+use nmt_platform::window::native_active_state;
+
 use nmt_platform::{
     NativeNotification, remove_notification, show_notification, system_notification_enabled,
 };
+
 use rust_i18n::t;
-use std::borrow::Cow;
-use std::path::PathBuf;
-use std::rc::Rc;
-use std::{collections, iter, path, thread, time};
+
 use tracing::warn;
+
+use crate::agent_updates::{
+    AgentUpdates, FocusedVisibleLifetime, NotificationPrimaryAction, NotificationProgress,
+    UpdateNotificationTone, UpdateNotificationView,
+};
+
+use crate::agent_usage::AgentUsageView;
+
+use crate::cli::CliAction;
+
+use crate::pane_tree::{PaneId, PaneNode, SplitDirection};
+
+#[cfg(windows)]
+use crate::remote;
+
+use crate::tabs::{Tab, TabId, TabManager};
+
+use crate::ui::background_tasks::BackgroundTasksView;
+
+use crate::ui::composition::FLOATING_SURFACE_SIDE_INSET;
+
+use crate::ui::git_sidebar::GitSidebar;
+
+use crate::ui::git_status::{GitStatusModel, GitStatusView};
+
+use crate::ui::persistence::{
+    default_session, materialize_active_tab, restore_session, session_state, spawn_default_pane,
+};
+
+use crate::ui::right_panel::{RightPanel, RightPanelKind};
+
+use crate::ui::settings::{AgentProfile, AppSettings, TabBarStyle};
+
+use crate::ui::shell::actions::NewTeamTab;
+
+use crate::ui::shell::agent_notifications::AgentNotificationState;
+
+use crate::ui::shell::panels::RightPanelController;
+
+use crate::ui::shell::render::ShellChrome;
+
+use crate::ui::shell::settings_workspace::{SettingsSurface, settings_title};
+
+use crate::ui::shell::tab_surface::AgentTab;
+
+use crate::ui::shell::updates_layer::UpdateNotificationLayer;
+
+use crate::ui::shell::workspace_dirs::{RootAvailability, WorkspaceDirsEditor};
+
+use crate::ui::tab_bar::TabStrip;
+
+use crate::ui::terminal_launch::attach_remote;
+
+use crate::ui::terminal_layout::TerminalLayout;
+
+use crate::ui::token_usage::TokenUsageView;
+
+use crate::ui::workflows::WorkflowsView;
+
+use crate::ui::workspace_sidebar::{Sidebar, SidebarTab, SidebarUsage, WorkspaceChrome};
+
+use crate::ui::{UI_RADIUS, main_view_background_opacity, workspace_sidebar};
+
+#[cfg(windows)]
+use crate::update::check;
+
+use crate::usage_sources::daily_source;
+
+use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
+
+use crate::workspace::{
+    ProgressTally, TerminalActivity, WorkspaceId, WorkspaceKind, WorkspaceManager, WorkspaceRoots,
+    best_match, exact_match,
+};
+
+use crate::{agent_updates, ui};
 
 /// A workspace cwd as a shell working directory: `None` for empty or the
 /// legacy `"."` placeholder (shells then start in their default directory).
@@ -716,15 +790,14 @@ impl Shell {
         {
             pane.read(cx).child_process_count()
         } else {
-            0
+            Ok(0)
         };
 
-        if !settings
-            .config()
-            .system
-            .warn_before_terminating_shell
-            .should_warn(count)
-        {
+        if !should_confirm_close(
+            false,
+            settings.config().system.warn_before_terminating_shell,
+            &count,
+        ) {
             self.close_pane_now(id, window, cx);
 
             return;
@@ -768,11 +841,17 @@ impl Shell {
         cx.notify();
     }
 
-    fn close_description(count: usize, plain: &str, with_processes: &str) -> String {
-        if count > 0 {
-            t!(with_processes, processes = &Self::processes_running(count)).into_owned()
-        } else {
-            t!(plain).into_owned()
+    fn close_description(count: io::Result<usize>, plain: &str, with_processes: &str) -> String {
+        match count {
+            Ok(count) if count > 0 => {
+                t!(with_processes, processes = &Self::processes_running(count)).into_owned()
+            }
+            Ok(_) => t!(plain).into_owned(),
+            Err(error) => {
+                warn!("failed to count processes before closing: {error}");
+
+                t!(plain).into_owned()
+            }
         }
     }
 
@@ -811,8 +890,8 @@ impl Shell {
     }
 
     /// Child processes running across every pane of workspace `id`.
-    fn workspace_process_count(&self, id: WorkspaceId, cx: &App) -> usize {
-        self.workspaces.tabs_of(id).map_or(0, |tabs| {
+    fn workspace_process_count(&self, id: WorkspaceId, cx: &App) -> io::Result<usize> {
+        self.workspaces.tabs_of(id).map_or(Ok(0), |tabs| {
             tabs.list()
                 .items()
                 .iter()
@@ -864,14 +943,14 @@ impl Shell {
     /// Child processes running across every pane of this tab, summed over
     /// each shell's Job Object. The count enriches warnings but is not needed
     /// by the `Always` mode.
-    fn close_process_count(&self, tree: &TabSurface, cx: &App) -> usize {
+    fn close_process_count(&self, tree: &TabSurface, cx: &App) -> io::Result<usize> {
         let settings = cx.global::<AppSettings>();
 
         if !settings.config().system.manage_subprocess_job
             || settings.config().system.warn_before_terminating_shell
                 == WarnBeforeTerminatingShell::Disabled
         {
-            return 0;
+            return Ok(0);
         }
 
         tree.leaves()
@@ -960,7 +1039,7 @@ impl Shell {
         if !should_confirm_close(
             is_agent && settings.config().system.confirm_before_closing_workspace,
             warn_before_terminating_shell,
-            count,
+            &count,
         ) {
             self.close_tab_now(id, window, cx);
 
@@ -1058,7 +1137,11 @@ impl Shell {
             .system
             .warn_before_terminating_shell;
 
-        if !confirm_before_closing_workspace && !warn_before_terminating_shell.should_warn(count) {
+        if !should_confirm_close(
+            confirm_before_closing_workspace,
+            warn_before_terminating_shell,
+            &count,
+        ) {
             self.close_workspace_now(id, window, cx);
 
             return;
@@ -1094,7 +1177,7 @@ impl Shell {
             return;
         }
 
-        let process_count = ids
+        let process_count: io::Result<usize> = ids
             .iter()
             .map(|id| self.workspace_process_count(*id, cx))
             .sum();
@@ -1109,7 +1192,7 @@ impl Shell {
         if !should_confirm_close(
             confirm_before_closing_workspace,
             warn_before_terminating_shell,
-            process_count,
+            &process_count,
         ) {
             self.close_temporary_workspaces_now(&ids, window, cx);
 
@@ -1219,7 +1302,7 @@ impl Shell {
     ) -> bool {
         let saved = ui::settings::save_settings(window, cx);
 
-        let count: usize = self
+        let count: io::Result<usize> = self
             .workspaces
             .all_tabs()
             .flat_map(|tabs| tabs.list().items())
@@ -1233,7 +1316,7 @@ impl Shell {
             && !should_confirm_close(
                 settings.config().system.confirm_before_closing_workspace,
                 warn_before_terminating_shell,
-                count,
+                &count,
             )
         {
             return true;
@@ -2912,37 +2995,8 @@ impl Shell {
         }
     }
 
-    /// Whether the user is looking at this exact window, which is what decides
-    /// against posting a desktop notification for something already on screen.
-    #[cfg(windows)]
     pub(super) fn exact_window_active(window: &Window) -> bool {
-        use nmt_platform::window::is_foreground_and_not_minimized;
-        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
-        let Ok(handle) = HasWindowHandle::window_handle(window) else {
-            return false;
-        };
-
-        let RawWindowHandle::Win32(handle) = handle.as_raw() else {
-            return false;
-        };
-
-        // GetForegroundWindow answers this on its own: only the foreground
-        // top-level window holds keyboard focus. GPUI's cached activation bit
-        // is skipped here because it starts out false and is only refreshed
-        // from WM_ACTIVATE, which the window misses when it is shown already
-        // activated -- leaving the bit false until the user clicks or
-        // alt-tabs, long after the window is genuinely in front.
-        is_foreground_and_not_minimized(handle.hwnd)
-    }
-
-    /// The same question, asked of GPUI. Its activation bit is authoritative
-    /// here: AppKit reports activation on the notifications the backend
-    /// already tracks, so there is no window that is in front while the bit
-    /// still reads false.
-    #[cfg(not(windows))]
-    pub(super) fn exact_window_active(window: &Window) -> bool {
-        window.is_window_active()
+        native_active_state(window).unwrap_or_else(|| window.is_window_active())
     }
 
     pub(super) fn acknowledge_notification(
@@ -3699,9 +3753,13 @@ fn close_last_workspace_dialog(
 pub(super) fn should_confirm_close(
     confirm: bool,
     warn: WarnBeforeTerminatingShell,
-    child_process_count: usize,
+    child_process_count: &io::Result<usize>,
 ) -> bool {
-    confirm || warn.should_warn(child_process_count)
+    confirm
+        || match child_process_count {
+            Ok(count) => warn.should_warn(*count),
+            Err(_) => warn != WarnBeforeTerminatingShell::Disabled,
+        }
 }
 
 fn new_workspace_dialog(

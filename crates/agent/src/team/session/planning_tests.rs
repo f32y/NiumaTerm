@@ -4,16 +4,15 @@ use crate::AgentWorkspace;
 use crate::chat::SendOutcome;
 use crate::session::AgentKind;
 use crate::session::team_capabilities::ModeratorAdmission;
-use crate::team::attempt::Invocation;
 use crate::team::budget::{ReservationState, TurnPurpose};
 use crate::team::content::UserInput;
-use crate::team::context::ContextLimits;
+use crate::team::context::{ContextError, ContextLimits};
 use crate::team::discussion::{DiscussionMode, DiscussionState};
 use crate::team::execution_slots::WorkStatus;
 use crate::team::identity::{AttemptId, MemberId};
 use crate::team::moderation::ModeratorAction;
 use crate::team::room::Room;
-use crate::team::session::{AttemptEventKey, SummaryText, TeamSession};
+use crate::team::session::{AttemptEventKey, TeamError, TeamSession};
 use crate::team::tests::config;
 
 fn ready_team() -> (TempDir, TeamSession, MemberId, MemberId) {
@@ -127,7 +126,7 @@ fn decide(session: &mut TeamSession, id: AttemptId, action: ModeratorAction) {
 }
 
 #[test]
-fn summary_preparation_is_isolated_and_charged() {
+fn oversized_context_pauses_without_reserving_unavailable_summary_work() {
     let (_directory, mut session, alice, bob) = ready_team();
     let mut room = session.store.room().clone();
 
@@ -165,57 +164,17 @@ fn summary_preparation_is_isolated_and_charged() {
         recent_messages: 1,
     };
 
-    let summaries = session.advance_discussion(id, &limits).unwrap();
+    assert!(matches!(
+        session.advance_discussion(id, &limits),
+        Err(TeamError::Context(ContextError::SummaryUnavailable))
+    ));
 
-    assert!(!summaries.is_empty());
+    let discussion = &session.store.room().discussions()[0];
 
-    for attempt_id in &summaries {
-        let intent = session
-            .store
-            .room()
-            .attempts()
-            .iter()
-            .find(|attempt| attempt.id == *attempt_id)
-            .unwrap()
-            .intent
-            .clone();
-
-        assert!(matches!(intent.invocation, Invocation::PublicSummary(_)));
-        assert_eq!(intent.purpose, TurnPurpose::Summary);
-        assert!(intent.input.text.is_empty());
-        assert!(!intent.prepared_text.contains("Private role instructions"));
-
-        session
-            .dispatch(*attempt_id, |_| SendOutcome::StartedTurn)
-            .unwrap();
-
-        let key = AttemptEventKey {
-            attempt: *attempt_id,
-            member: alice,
-            ownership: intent.ownership,
-            backend_generation: intent.backend_generation,
-        };
-
-        let provider_turn = attempt_id.to_string();
-
-        session.accept_attempt(key, &provider_turn).unwrap();
-
-        session
-            .complete_summary(
-                key,
-                &provider_turn,
-                SummaryText {
-                    goals: "Review the listed constraints".into(),
-                    constraints: "Respect all supplied constraints".into(),
-                    agreements: String::new(),
-                    disagreements: Vec::new(),
-                },
-                WorkStatus::default(),
-            )
-            .unwrap()
-            .unwrap();
-    }
-
+    assert_eq!(discussion.state(), DiscussionState::Paused);
+    assert!(discussion.budget().reservations().is_empty());
+    assert!(session.store.room().attempts().is_empty());
+    assert!(session.slots.is_idle());
     assert!(
         session
             .store
@@ -226,35 +185,6 @@ fn summary_preparation_is_isolated_and_charged() {
             .messages
             .is_empty()
     );
-
-    let responses = session.advance_discussion(id, &limits).unwrap();
-
-    assert_eq!(responses.len(), 2);
-    assert!(responses.iter().all(|id| {
-        matches!(
-            session
-                .store
-                .room()
-                .attempts()
-                .iter()
-                .find(|attempt| attempt.id == *id)
-                .unwrap()
-                .intent
-                .invocation,
-            Invocation::MemberConversation
-        )
-    }));
-    assert_eq!(
-        session.store.room().discussions()[0]
-            .budget()
-            .reservations()
-            .values()
-            .filter(|entry| entry.purpose == TurnPurpose::Summary
-                && entry.state == ReservationState::Charged)
-            .count(),
-        summaries.len()
-    );
-    assert_eq!(session.store.room().summaries().len(), summaries.len());
 }
 
 #[test]
@@ -473,7 +403,7 @@ fn fixed_discussion_advances_all_stages_with_frozen_peer_inputs_and_report_charg
             .values()
             .all(|entry| entry.state == ReservationState::Charged)
     );
-    assert_eq!(session.store.room().input_history().len(), 1);
+    assert_eq!(session.store.room().input_history.len(), 1);
 }
 
 #[test]
@@ -540,7 +470,7 @@ fn user_correction_reprepares_only_unsent_arrangements_without_extra_charge() {
             .len(),
         2
     );
-    assert_eq!(session.store.room().input_history().len(), 2);
+    assert_eq!(session.store.room().input_history.len(), 2);
 
     finish(&mut session, resumed[0], "Bob's revised answer");
 }

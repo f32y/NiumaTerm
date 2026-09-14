@@ -1,21 +1,32 @@
 use std::collections::BTreeSet;
+
 use std::time::Duration;
+
 use std::{fs, io};
 
 use app::agent_tab::AgentKind;
+
 use app::terminal_tab::settings::TerminalSettings;
+
 use gpui::{
     Context, Entity, IntoElement, ListAlignment, ListOffset, ListState, ScrollDelta,
     ScrollWheelEvent, TestAppContext, list, point, size,
 };
+
 use nmt_config::Config;
+
 use nmt_config::appearance::SmoothScrollingMode;
+
 use nmt_config::builtin_themes::{THEMES as BUILTIN_THEMES, get as builtin_theme_source};
+
 use nmt_config::profile::ProfilesConfig;
+
 use nmt_config::theme::Theme as ConfigTheme;
 
-use crate::ui::settings::state::default_shell_for_tests;
+use nmt_platform::default_shell;
+
 use crate::ui::settings::theme::ui_theme_config;
+
 use crate::ui::settings::*;
 
 #[gpui::test]
@@ -115,8 +126,6 @@ fn agent_transcript_font_has_first_party_defaults() {
 
 #[test]
 fn window_transparency_controls_opacity_and_blur() {
-    assert_eq!(tab_background_opacity(1.0), 1.0);
-    assert!((tab_background_opacity(0.65) - 0.825).abs() < f32::EPSILON);
     assert_eq!(clamp_background_opacity(0.1), 0.2);
     assert_eq!(clamp_background_opacity(0.65), 0.65);
     assert_eq!(clamp_background_opacity(2.0), 1.0);
@@ -139,8 +148,6 @@ fn window_transparency_controls_opacity_and_blur() {
         effective_background_opacity(WindowBackdrop::Acrylic, 0.65),
         0.65
     );
-    assert_eq!(effective_main_view_background_opacity(false, 0.65), 1.0);
-    assert_eq!(effective_main_view_background_opacity(true, 0.65), 0.65);
     assert_eq!(clamp_background_image_opacity(-1.0), 0.0);
     assert_eq!(clamp_background_image_opacity(2.0), 1.0);
     assert_eq!(
@@ -257,7 +264,7 @@ fn default_profile_command_resolves_by_name() {
             list: vec![
                 Profile {
                     name: "PowerShell".into(),
-                    shell: default_shell_for_tests(),
+                    shell: default_shell(),
                     args: String::new(),
                 },
                 Profile {
@@ -287,7 +294,7 @@ fn default_profile_command_resolves_by_name() {
 
     let (shell, _) = settings.default_profile_command();
 
-    assert_eq!(shell.as_deref(), Some(default_shell_for_tests().as_str()));
+    assert_eq!(shell.as_deref(), Some(default_shell().as_str()));
 
     // Blank shell path: no override, session uses its built-in default.
     settings.set_profile_shell(0, "  ".into());
@@ -540,7 +547,7 @@ fn defaults_have_one_powershell_profile() {
     );
     assert_eq!(settings.config().profiles.list.len(), 1);
     assert!(
-        settings.config().profiles.list[0].shell == default_shell_for_tests()
+        settings.config().profiles.list[0].shell == default_shell()
             || settings.config().profiles.list[0]
                 .shell
                 .ends_with(r"\pwsh.exe")

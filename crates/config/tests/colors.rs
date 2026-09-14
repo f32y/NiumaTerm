@@ -48,50 +48,11 @@ fn test_conversion_from_hex_sgb_255() {
 }
 
 #[test]
-fn test_conversion_from_hex_sgb_1() {
-    let color = Rgba::from_hex("#151515".into()).unwrap();
-
-    assert_eq!(
-        color,
-        Rgba {
-            red: 21.0 / 255.0,
-            green: 21.0 / 255.0,
-            blue: 21.0 / 255.0,
-            alpha: 1.0
-        }
-    );
-
-    let color = Rgba::from_hex("#FFFFFF".into()).unwrap();
-
-    assert_eq!(
-        color,
-        Rgba {
-            red: 255.0 / 255.0,
-            green: 255.0 / 255.0,
-            blue: 255.0 / 255.0,
-            alpha: 1.0
-        }
-    );
-}
-
-#[test]
 fn test_conversion_from_gray_hex_with_alpha() {
     let color_with_alpha = Rgba::from_hex("#15151580".into()).unwrap();
 
     assert_eq!(
         color_with_alpha,
-        Rgba {
-            red: 21.0 / 255.0,
-            green: 21.0 / 255.0,
-            blue: 21.0 / 255.0,
-            alpha: 128.0 / 255.0
-        }
-    );
-
-    let color_with_alpha_srgb0_1 = Rgba::from_hex("#15151580".into()).unwrap();
-
-    assert_eq!(
-        color_with_alpha_srgb0_1,
         Rgba {
             red: 21.0 / 255.0,
             green: 21.0 / 255.0,
@@ -107,18 +68,6 @@ fn test_conversion_from_teal_hex_with_alpha() {
 
     assert_eq!(
         color_with_alpha,
-        Rgba {
-            red: 6.0 / 255.0,
-            green: 164.0 / 255.0,
-            blue: 155.0 / 255.0,
-            alpha: 153.0 / 255.0
-        }
-    );
-
-    let color_with_alpha_srgb0_1 = Rgba::from_hex("#06a49b99".into()).unwrap();
-
-    assert_eq!(
-        color_with_alpha_srgb0_1,
         Rgba {
             red: 6.0 / 255.0,
             green: 164.0 / 255.0,

@@ -24,8 +24,6 @@ use std::sync::atomic::AtomicU32;
 use std::sync::{self, Arc, mpsc};
 use std::{cell, error, path, time};
 
-#[cfg(target_os = "linux")]
-use libc::EIO;
 use nmt_platform::{EventedPty, Events, Interest, Poll, Token, Waker, WinsizeBuilder};
 #[cfg(enable_profiling)]
 use nmt_profiling::pty::{BatchEnd, PtyProfiler, Stage};
@@ -97,6 +95,8 @@ pub struct PtyPipe<T: EventedPty, U: EventListener> {
     /// PTY-thread-private target for direct Ghostty capture. A completed frame
     /// swaps with `render_buffer`, so the shared lock covers only publication.
     back_buffer: RenderBuffer,
+
+    capture_failed: bool,
 
     /// VT modes published to the frontend. This `PtyPipe` is the sole writer;
     /// the input path reads it lock-free. `Mode` is `u32`.
@@ -194,14 +194,23 @@ fn publish_render_buffer(
     back: &mut RenderBuffer,
     capture: ghostty::Result<()>,
     hide_cursor: bool,
+    capture_failed: &mut bool,
 ) -> bool {
-    if capture.is_err() {
+    if let Err(error) = capture {
+        if !*capture_failed {
+            warn!("failed to capture terminal frame: {error}");
+        }
+
+        *capture_failed = true;
+
         return false;
     }
 
     if hide_cursor {
         back.set_cursor_visible(false);
     }
+
+    *capture_failed = false;
 
     front.publish(back);
 
@@ -281,6 +290,7 @@ where
             ghostty,
             theme_revision: 0,
             render_buffer,
+            capture_failed: false,
             back_buffer: RenderBuffer::new(cols as usize, rows as usize),
             vt_modes,
             content_version: 0,
@@ -641,6 +651,7 @@ where
             &mut self.back_buffer,
             capture,
             self.sniffer.progress_active(),
+            &mut self.capture_failed,
         );
 
         #[cfg(enable_profiling)]
@@ -888,6 +899,7 @@ where
             &mut self.back_buffer,
             snapshot,
             self.sniffer.progress_active(),
+            &mut self.capture_failed,
         );
 
         #[cfg(enable_profiling)]
@@ -1039,7 +1051,6 @@ where
             let mut do_write = false;
             let mut child_exited = false;
 
-            #[cfg(unix)]
             let mut hup = false;
 
             for token in self.pty.drain_ready() {
@@ -1058,8 +1069,7 @@ where
                 if token == self.pty.child_event_token() {
                     child_exited = true;
                 } else if token == self.pty.read_token() || token == self.pty.write_token() {
-                    #[cfg(unix)]
-                    if event.is_read_closed() {
+                    if self.pty.read_closed(event) {
                         hup = true;
                     }
 
@@ -1086,24 +1096,13 @@ where
                 break 'event_loop;
             }
 
-            // Don't do I/O on a dead PTY (Unix HUP / `is_read_closed`).
-            #[cfg(unix)]
-            let skip_io = hup;
-
-            #[cfg(not(unix))]
-            let skip_io = false;
-
-            if !skip_io {
+            if !hup {
                 // Readiness drains new input; a capture deadline also reaches
                 // this path with an empty pipe to publish the final pending frame.
                 if (do_read || self.snapshot_pending)
                     && let Err(err) = self.pty_read(&mut state, &mut buf)
                 {
-                    // On Linux, a `read` on the master side of a PTY can fail
-                    // with `EIO` if the client side hangs up. In that case, just
-                    // loop back round for the inevitable `Exited` event.
-                    #[cfg(target_os = "linux")]
-                    if err.raw_os_error() == Some(EIO) {
+                    if self.pty.is_hangup_error(&err) {
                         continue;
                     }
 

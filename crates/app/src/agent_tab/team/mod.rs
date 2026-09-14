@@ -1,34 +1,60 @@
 pub use crate::agent_tab::team::controls::TeamCommand;
+
 pub use crate::agent_tab::team::view::TeamPane;
 
 mod controls;
+
 mod dispatch;
+
 mod events;
+
 mod view;
 
-use crate::agent_tab::composer::attachments::scratch_dir;
-use crate::agent_tab::execution::{AgentSession, ExecutionSignal, SessionOwner};
-use crate::agent_tab::settings::AgentSettings;
-use crate::agent_tab::team::dispatch::{CONTEXT_LIMITS, work_status};
-use crate::agent_tab::team::events::{DecisionAction, DecisionArguments};
-use gpui::{App, AppContext as _, Context, Entity, Subscription};
-use nmt_agent::AgentWorkspace;
-use nmt_agent::chat::{SendOutcome, ThreadSettings};
-use nmt_agent::session::delivery::Submission;
-use nmt_agent::session::lifecycle::Status;
-use nmt_agent::session::team_capabilities::{ModeratorAdmission, TeamLaunch};
-use nmt_agent::session::{AgentKind, ImageAttachment, RecoveryIdentity};
-use nmt_agent::team::attempt::{AttemptState, BudgetScope, Invocation};
-use nmt_agent::team::discussion::{DiscussionState, PauseReason};
-use nmt_agent::team::execution_slots::{ExecutionKey, WorkStatus};
-use nmt_agent::team::identity::{AttemptId, InteractionId, MemberId, RoomId};
-use nmt_agent::team::member::MemberConfig;
-use nmt_agent::team::moderation::ModeratorAction;
-use nmt_agent::team::room::Room;
-use nmt_agent::team::session::{AttemptEventKey, TeamError, TeamSession};
-use nmt_config::profile::AgentProfile;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+
+use std::path::Path;
+
+use gpui::{App, AppContext as _, Context, Entity, Subscription};
+
+use nmt_agent::AgentWorkspace;
+
+use nmt_agent::chat::SendOutcome;
+
+use nmt_agent::session::delivery::Submission;
+
+use nmt_agent::session::lifecycle::Status;
+
+use nmt_agent::session::team_capabilities::{ModeratorAdmission, TeamLaunch};
+
+use nmt_agent::session::{AgentKind, ImageAttachment, RecoveryIdentity};
+
+use nmt_agent::team::attempt::{AttemptState, BudgetScope, Invocation};
+
+use nmt_agent::team::discussion::{DiscussionState, PauseReason};
+
+use nmt_agent::team::execution_slots::{ExecutionKey, WorkStatus};
+
+use nmt_agent::team::identity::{AttemptId, InteractionId, MemberId, RoomId};
+
+use nmt_agent::team::member::MemberConfig;
+
+use nmt_agent::team::moderation::ModeratorAction;
+
+use nmt_agent::team::room::Room;
+
+use nmt_agent::team::session::{AttemptEventKey, TeamError, TeamSession};
+
+use nmt_config::profile::AgentProfile;
+
+use crate::agent_tab::composer::attachments::scratch_dir;
+
+use crate::agent_tab::execution::{AgentSession, ExecutionSignal, SessionOwner};
+
+use crate::agent_tab::settings::AgentSettings;
+
+use crate::agent_tab::team::dispatch::{CONTEXT_LIMITS, work_status};
+
+use crate::agent_tab::team::events::{DecisionAction, DecisionArguments};
 
 struct MemberHost {
     owner: SessionOwner,
@@ -43,7 +69,6 @@ struct MemberHost {
 pub struct TeamRuntime {
     session: TeamSession,
     hosts: BTreeMap<MemberId, MemberHost>,
-    data_directory: PathBuf,
     error: Option<String>,
     scheduled: bool,
     closed: bool,
@@ -67,7 +92,7 @@ impl TeamRuntime {
     ) -> Result<Entity<Self>, TeamError> {
         let session = TeamSession::create(data_directory, Room::new(workspace))?;
 
-        Ok(cx.new(|_| Self::new(session, data_directory)))
+        Ok(cx.new(|_| Self::new(session)))
     }
 
     pub fn open(
@@ -76,7 +101,7 @@ impl TeamRuntime {
         cx: &mut App,
     ) -> Result<Entity<Self>, TeamError> {
         let (session, truncated) = TeamSession::open(data_directory, id)?;
-        let entity = cx.new(|_| Self::new(session, data_directory));
+        let entity = cx.new(|_| Self::new(session));
 
         entity.update(cx, |this, cx| {
             if truncated { this.error = Some("Recovery notices: [TornFinalRecord]".into()); }
@@ -98,11 +123,10 @@ impl TeamRuntime {
         Ok(entity)
     }
 
-    fn new(session: TeamSession, data_directory: &Path) -> Self {
+    fn new(session: TeamSession) -> Self {
         Self {
             session,
             hosts: BTreeMap::new(),
-            data_directory: data_directory.to_owned(),
             error: None,
             scheduled: false,
             closed: false,
@@ -115,10 +139,6 @@ impl TeamRuntime {
 
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
-    }
-
-    pub fn data_directory(&self) -> &Path {
-        &self.data_directory
     }
 
     pub fn add_member(
@@ -196,18 +216,6 @@ impl TeamRuntime {
 
     pub fn member_session(&self, member: MemberId) -> Option<&Entity<AgentSession>> {
         self.hosts.get(&member).map(|host| host.owner.session())
-    }
-
-    pub fn member_settings(&self, member: MemberId, cx: &App) -> Option<ThreadSettings> {
-        Some(
-            self.member_session(member)?
-                .read(cx)
-                .controller
-                .borrow()
-                .controls
-                .settings
-                .clone(),
-        )
     }
 
     fn schedule(&mut self, cx: &mut Context<Self>) {
@@ -708,7 +716,12 @@ impl TeamRuntime {
                     Ok(Submission::Started { .. }) => SendOutcome::StartedTurn,
                     Ok(Submission::Queued) => SendOutcome::Steered,
                     Ok(Submission::Rejected { message }) => SendOutcome::Rejected { message },
-                    Ok(Submission::NotReady) | Err(_) => SendOutcome::NotReady,
+                    Ok(Submission::NotReady) => SendOutcome::NotReady,
+                    Err(blocker) => {
+                        tracing::warn!(?blocker, "team submission was blocked before sending");
+
+                        SendOutcome::NotReady
+                    }
                 }
             })
         });

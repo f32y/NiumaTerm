@@ -15,5 +15,4 @@ pub(crate) enum KeyOutcome {
 pub(crate) enum TextInput<'a> {
     Commit(&'a str),
     DropPaths(&'a [PathBuf]),
-    RerunSelectedBlock,
 }

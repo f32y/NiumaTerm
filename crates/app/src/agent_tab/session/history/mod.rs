@@ -19,18 +19,6 @@ use nmt_agent::chat::SessionSummary;
 use nmt_agent::session::history::{CountPublication, SessionHistory};
 
 impl SessionHistoryUi {
-    pub(crate) fn invalidate_filesystem_history(&mut self) {
-        self.data.invalidate_filesystem_history();
-    }
-
-    pub(crate) fn begin_filesystem_history(
-        &mut self,
-        cwd: Option<String>,
-        epoch: u64,
-    ) -> FilesystemHistoryRequest {
-        self.data.begin_filesystem_history(cwd, epoch)
-    }
-
     pub(crate) fn publish_filesystem_count(
         &mut self,
         request: &FilesystemHistoryRequest,

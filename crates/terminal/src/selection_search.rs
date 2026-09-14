@@ -7,7 +7,7 @@
 //! soft-wraps past the viewport edge clips there to keep the scan bounded.
 
 use crate::terminal::grid::row::Row;
-use crate::terminal::pos::{Column, Line, Pos};
+use crate::terminal::pos::{Column, Pos};
 use crate::terminal::square::{Square, Wide};
 
 const BRACKET_PAIRS: [(char, char); 4] = [('(', ')'), ('[', ']'), ('{', '}'), ('<', '>')];
@@ -235,10 +235,4 @@ impl<'a> VisibleGrid<'a> {
             cur = p;
         }
     }
-}
-
-/// Convenience: a `Pos` in visible-row coordinates.
-#[inline]
-pub fn vpos(row: usize, col: usize) -> Pos {
-    Pos::new(Line(row as i32), Column(col))
 }

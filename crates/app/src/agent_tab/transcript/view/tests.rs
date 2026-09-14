@@ -35,7 +35,8 @@ impl TranscriptView {
                 .collect(),
         );
 
-        self.code_transcripts.invalidate_all();
+        self.code_transcripts.invalidate_from(0);
+
         self.row_cache.invalidate(0);
 
         cx.notify();

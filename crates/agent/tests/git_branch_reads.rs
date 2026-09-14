@@ -37,7 +37,7 @@ fn repository() -> PathBuf {
 }
 
 fn branch_of(dir: &Path, max_age: Duration) -> Option<String> {
-    match current_branch(&dir.to_string_lossy(), max_age)? {
+    match current_branch(&dir.to_string_lossy(), max_age).unwrap()? {
         CheckedOut::Branch(branch) => Some(branch),
         CheckedOut::Detached(commit) => Some(commit),
     }
@@ -80,4 +80,12 @@ fn a_directory_outside_a_repository_has_no_branch() {
     assert!(branch_of(&dir, Duration::ZERO).is_none());
 
     fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_missing_working_directory_reports_a_read_error() {
+    let directory = tempfile::tempdir().unwrap();
+    let missing = directory.path().join("absent");
+
+    assert!(current_branch(&missing.to_string_lossy(), Duration::ZERO).is_err());
 }

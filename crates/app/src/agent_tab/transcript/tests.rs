@@ -9,7 +9,6 @@ mod prompt_truncation_tests {
     use crate::agent_tab::settings::AgentSettings;
     use crate::agent_tab::transcript::render::transcript_code_block_style;
     use crate::agent_tab::transcript::{
-        AGENT_CARD_GAP, AGENT_CARD_ICON_BLOCK, AGENT_CARD_PADDING_X, AGENT_DISCLOSURE_DETAIL_INSET,
         TurnSummary, VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, command_execution_detail,
         command_execution_heading, compaction_accounting, compaction_label,
         compaction_row_is_expandable, elapsed_label, entry_copy_text, interrupted_status_label,
@@ -36,14 +35,6 @@ mod prompt_truncation_tests {
         assert_eq!(style.text.font_family.as_deref(), Some("JetBrains Mono"));
         assert_eq!(style.text.font_size, Some(px(12.5).into()));
         assert_eq!(fallbacks.fallback_list(), ["Microsoft YaHei"]);
-    }
-
-    #[test]
-    fn disclosure_detail_matches_the_title_start() {
-        assert_eq!(
-            AGENT_DISCLOSURE_DETAIL_INSET,
-            AGENT_CARD_PADDING_X + AGENT_CARD_ICON_BLOCK + AGENT_CARD_GAP
-        );
     }
 
     #[test]

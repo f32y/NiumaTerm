@@ -5,7 +5,7 @@ use crate::pty_pipe::scrollback_bytes;
 #[test]
 fn scrollback_bytes_from_config() {
     // Default 10k lines @ 80 cols → ~12.8 MB (config-driven, ≈ the old 10 MB).
-    assert_eq!(scrollback_bytes(10_000, 80), 10_000 * 80 * 16);
+    assert_eq!(scrollback_bytes(10_000, 80), 12_800_000);
 
     // Scales with the configured line count.
     assert!(scrollback_bytes(100_000, 80) > scrollback_bytes(10_000, 80));

@@ -8,9 +8,7 @@
 //! one modifier for the other would produce Cmd-Shift-T for a new tab, which is
 //! not what any macOS application does.
 
-use app::terminal_tab::view::{
-    CopyBlockCommand, CopyBlockOutput, NextBlock, PreviousBlock, RerunBlock, SendShiftTab, SendTab,
-};
+use app::terminal_tab::view::{NextBlock, PreviousBlock, SendShiftTab, SendTab};
 use gpui::{App, KeyBinding};
 
 #[cfg(target_os = "macos")]
@@ -116,12 +114,9 @@ fn terminal_bindings() -> Vec<KeyBinding> {
     vec![
         KeyBinding::new("tab", SendTab, Some("Terminal")),
         KeyBinding::new("shift-tab", SendShiftTab, Some("Terminal")),
-        // Command-block navigation and actions on the selected block.
+        // Move between command blocks.
         KeyBinding::new("ctrl-shift-up", PreviousBlock, Some("Terminal")),
         KeyBinding::new("ctrl-shift-down", NextBlock, Some("Terminal")),
-        KeyBinding::new("ctrl-shift-y", CopyBlockCommand, Some("Terminal")),
-        KeyBinding::new("ctrl-shift-o", CopyBlockOutput, Some("Terminal")),
-        KeyBinding::new("ctrl-shift-r", RerunBlock, Some("Terminal")),
     ]
 }
 
@@ -135,9 +130,6 @@ fn terminal_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("shift-tab", SendShiftTab, Some("Terminal")),
         KeyBinding::new("cmd-shift-up", PreviousBlock, Some("Terminal")),
         KeyBinding::new("cmd-shift-down", NextBlock, Some("Terminal")),
-        KeyBinding::new("cmd-shift-y", CopyBlockCommand, Some("Terminal")),
-        KeyBinding::new("cmd-shift-o", CopyBlockOutput, Some("Terminal")),
-        KeyBinding::new("cmd-shift-r", RerunBlock, Some("Terminal")),
     ]
 }
 

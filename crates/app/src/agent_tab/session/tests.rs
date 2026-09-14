@@ -1,14 +1,21 @@
-use crate::agent_tab::session::{conversation_title_request, directories_match, directory_label};
-use crate::agent_tab::transcript::LAST_RESPONSE_LIMIT;
-use crate::agent_tab::{AgentKind, replayed_response_age, tab_title_from_prompt};
 use nmt_agent::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRegistry,
     BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskUpdate,
 };
+
 use nmt_agent::chat::ThreadSettings;
+
+use nmt_agent::session::ConversationTitleRequest;
+
 use nmt_agent::session::children::scoped_background_tasks;
+
+use nmt_agent::session::naming::conversation_title_request as build_title_request;
+
 use nmt_agent::session::settings::resolve_ready_settings;
-use std::time::Duration;
+
+use crate::agent_tab::session::{directories_match, directory_label};
+
+use crate::agent_tab::{AgentKind, tab_title_from_prompt};
 
 fn snapshot_for(parent: BackgroundTaskKey) -> BackgroundTaskSnapshot {
     let mut registry = BackgroundTaskRegistry::new(parent);
@@ -310,27 +317,6 @@ fn a_directory_reads_as_its_last_two_components() {
     assert_eq!(directory_label("C:/only"), "C:/only");
 }
 
-#[test]
-fn a_replayed_answer_is_read_as_old_as_the_provider_recorded_it() {
-    let now = 1_700_000_000;
-
-    assert_eq!(
-        replayed_response_age(now - 20 * 60, now),
-        Duration::from_secs(20 * 60),
-        "a stamp from twenty minutes ago reads as twenty minutes of idling"
-    );
-    assert_eq!(
-        replayed_response_age(now - 5 * 24 * 60 * 60, now),
-        LAST_RESPONSE_LIMIT,
-        "conversations older than the label's longest reading all read the same"
-    );
-    assert_eq!(
-        replayed_response_age(now + 30, now),
-        Duration::ZERO,
-        "a clock the provider ran ahead of never reads as a future answer"
-    );
-}
-
 mod conversation_title_tests {
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -345,6 +331,7 @@ mod conversation_title_tests {
 
     use crate::agent_tab::session::{Backend, RecoveryIdentity, Status, TestBackend};
     use crate::agent_tab::settings::AgentSettings;
+    use crate::agent_tab::tests::deliver_session_event;
     use crate::agent_tab::{AgentKind, AgentPane, AgentPaneEvent, AgentThreadDefaults};
 
     fn open_pane(
@@ -530,7 +517,7 @@ mod conversation_title_tests {
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
         cx.update(|_, cx| {
-            pane.update(cx, |pane, cx| {
+            pane.update(cx, |pane, _| {
                 let epoch = pane.session.borrow_mut().runtime.begin_start();
 
                 assert!(matches!(
@@ -551,19 +538,29 @@ mod conversation_title_tests {
 
                     state.input.restore(&mut state.runtime)
                 };
+            })
+        });
 
-                pane.on_event(
-                    Event::ApprovalRequested {
-                        description: "Run a command".into(),
-                    },
-                    cx,
-                );
+        deliver_session_event(
+            &pane,
+            Event::ApprovalRequested {
+                description: "Run a command".into(),
+            },
+            &cx,
+        );
 
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
                 pane.respond_approval("accept", cx);
 
                 assert!(pane.session.borrow().input.approval().is_some());
+            })
+        });
 
-                pane.on_event(Event::ApprovalResolved, cx);
+        deliver_session_event(&pane, Event::ApprovalResolved, &cx);
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, _| {
                 pane.session.borrow_mut().runtime.ready();
                 pane.restore_question_drafts();
 
@@ -572,22 +569,27 @@ mod conversation_title_tests {
                 {
                     backend.input_result = Err("The question response could not be queued.".into());
                 }
+            })
+        });
 
-                pane.on_event(
-                    Event::InputRequested(QuestionRequest {
-                        id: "declined".into(),
-                        mode: QuestionMode::Blocking,
-                        questions: vec![Question {
-                            input: QuestionInput::Text,
-                            header: None,
-                            question: "Describe the change".into(),
-                            multi_select: false,
-                            options: Vec::new(),
-                        }],
-                    }),
-                    cx,
-                );
+        deliver_session_event(
+            &pane,
+            Event::InputRequested(QuestionRequest {
+                id: "declined".into(),
+                mode: QuestionMode::Blocking,
+                questions: vec![Question {
+                    input: QuestionInput::Text,
+                    header: None,
+                    question: "Describe the change".into(),
+                    multi_select: false,
+                    options: Vec::new(),
+                }],
+            }),
+            &cx,
+        );
 
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
                 pane.skip_current_questions(cx);
 
                 let state = pane.session.borrow();
@@ -598,7 +600,7 @@ mod conversation_title_tests {
                     .expect("rejected answer remains visible");
 
                 assert!(question.error().is_some());
-            });
+            })
         });
     }
 
@@ -765,6 +767,7 @@ mod queued_prompt_placement_tests {
 
     use crate::agent_tab::session::{Backend, Status, TestBackend};
     use crate::agent_tab::settings::AgentSettings;
+    use crate::agent_tab::tests::deliver_session_event;
     use crate::agent_tab::{AgentPane, AgentThreadDefaults};
 
     fn open_pane(
@@ -826,7 +829,7 @@ mod queued_prompt_placement_tests {
         let (pane, window) = open_pane(cx, AgentProfileKind::Codex);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
-        cx.update(|_, cx| {
+        let previous_turn = cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
                 let epoch = pane.session.borrow_mut().runtime.begin_start();
 
@@ -849,21 +852,31 @@ mod queued_prompt_placement_tests {
 
                 assert!(!pane.transcript.read(cx).is_working());
 
-                pane.on_event(SessionEvent::TurnStarted, cx);
+                previous_turn
+            })
+        });
 
+        deliver_session_event(&pane, SessionEvent::TurnStarted, &cx);
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
                 assert!(!pane.session.borrow().commands.awaiting_turn);
                 assert_eq!(pane.session.borrow().delivery.turn(), previous_turn + 1);
                 assert_eq!(pane.session.borrow().runtime.status(), Status::Running);
                 assert!(pane.transcript.read(cx).is_working());
+            })
+        });
 
-                pane.on_event(SessionEvent::TurnStarted, cx);
+        deliver_session_event(&pane, SessionEvent::TurnStarted, &cx);
 
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, _| {
                 assert_eq!(
                     pane.session.borrow().delivery.turn(),
                     previous_turn + 1,
                     "a repeated event must not open another turn"
                 );
-            });
+            })
         });
     }
 
@@ -891,33 +904,48 @@ mod queued_prompt_placement_tests {
                 pane.session.borrow_mut().runtime.ready();
 
                 assert!(pane.send_text_inner("open the turn".into(), None, None, cx));
+            })
+        });
 
-                pane.on_event(SessionEvent::TurnStarted, cx);
+        deliver_session_event(&pane, SessionEvent::TurnStarted, &cx);
 
+        let first_turn = cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
                 let first_turn = pane.session.borrow().delivery.turn();
 
                 assert!(pane.send_text_inner("queued behind it".into(), None, None, cx));
 
-                pane.on_event(
-                    SessionEvent::ItemStarted(SessionItem::AgentMessage {
-                        id: "msg-1".into(),
-                        text: Some("the first answer".into()),
-                        questions: None,
-                    }),
-                    cx,
-                );
+                first_turn
+            })
+        });
 
-                pane.on_event(SessionEvent::TurnCompleted { error: None }, cx);
+        deliver_session_event(
+            &pane,
+            SessionEvent::ItemStarted(SessionItem::AgentMessage {
+                id: "msg-1".into(),
+                text: Some("the first answer".into()),
+                questions: None,
+            }),
+            &cx,
+        );
 
+        deliver_session_event(&pane, SessionEvent::TurnCompleted { error: None }, &cx);
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
                 assert_eq!(
                     user_rows(pane, cx),
                     vec![(first_turn, "open the turn".to_string())],
                     "the finished turn keeps only the prompt that opened it"
                 );
+            })
+        });
 
-                // The CLI answers the held prompt in a turn nothing here sent.
-                pane.on_event(SessionEvent::TurnStarted, cx);
+        // The CLI answers the held prompt in a turn nothing here sent.
+        deliver_session_event(&pane, SessionEvent::TurnStarted, &cx);
 
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
                 assert_eq!(
                     pane.session.borrow().delivery.turn(),
                     first_turn + 1,
@@ -933,7 +961,7 @@ mod queued_prompt_placement_tests {
                     ],
                     "the held prompt heads the turn that answers it"
                 );
-            });
+            })
         });
     }
 
@@ -946,7 +974,7 @@ mod queued_prompt_placement_tests {
         let (pane, window) = open_pane(cx, AgentProfileKind::DeepSeek);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
-        cx.update(|_, cx| {
+        let text = cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
                 let epoch = pane.session.borrow_mut().runtime.begin_start();
 
@@ -968,39 +996,53 @@ mod queued_prompt_placement_tests {
 
                 assert!(pane.send_text_inner(text.clone(), None, None, cx));
 
-                // What the harness reports, in the order it reports it: the
-                // prompt queued, the turn opened, the queue emptied, and the
-                // harness's own echo of the message it took.
-                pane.on_event(
-                    SessionEvent::QueuedPrompts(vec![QueuedPrompt {
-                        id: Some("afd4d197".into()),
-                        text: text.clone(),
-                    }]),
-                    cx,
-                );
+                text
+            })
+        });
 
+        // What the harness reports, in the order it reports it: the
+        // prompt queued, the turn opened, the queue emptied, and the
+        // harness's own echo of the message it took.
+
+        deliver_session_event(
+            &pane,
+            SessionEvent::QueuedPrompts(vec![QueuedPrompt {
+                id: Some("afd4d197".into()),
+                text: text.clone(),
+            }]),
+            &cx,
+        );
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, _| {
                 assert!(
                     pane.session.borrow().delivery.pending().is_empty(),
                     "a prompt already in the transcript is not also waiting"
                 );
+            })
+        });
 
-                pane.on_event(SessionEvent::TurnStarted, cx);
-                pane.on_event(SessionEvent::QueuedPrompts(Vec::new()), cx);
+        deliver_session_event(&pane, SessionEvent::TurnStarted, &cx);
 
-                pane.on_event(
-                    SessionEvent::ItemStarted(SessionItem::UserMessage {
-                        text: Some(text.clone()),
-                    }),
-                    cx,
-                );
+        deliver_session_event(&pane, SessionEvent::QueuedPrompts(Vec::new()), &cx);
 
+        deliver_session_event(
+            &pane,
+            SessionEvent::ItemStarted(SessionItem::UserMessage {
+                text: Some(text.clone()),
+            }),
+            &cx,
+        );
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
                 assert_eq!(
                     user_rows(pane, cx),
                     vec![(1, text)],
                     "the message appears once, in the turn it opened"
                 );
                 assert!(pane.session.borrow().delivery.pending().is_empty());
-            });
+            })
         });
     }
 }
@@ -1012,6 +1054,7 @@ mod turn_error_tests {
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
     use crate::agent_tab::settings::AgentSettings;
+    use crate::agent_tab::tests::deliver_session_event;
     use crate::agent_tab::{AgentPane, AgentThreadDefaults};
 
     fn open_pane(
@@ -1050,34 +1093,37 @@ mod turn_error_tests {
         let (pane, window) = open_pane(cx);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
+        deliver_session_event(&pane, SessionEvent::TurnStarted, &cx);
+
+        deliver_session_event(
+            &pane,
+            SessionEvent::ItemStarted(SessionItem::AgentMessage {
+                id: "message".into(),
+                text: Some("partial answer".into()),
+                questions: None,
+            }),
+            &cx,
+        );
+
+        deliver_session_event(
+            &pane,
+            SessionEvent::Error {
+                message: "model unavailable".into(),
+                fatal: false,
+            },
+            &cx,
+        );
+
+        deliver_session_event(
+            &pane,
+            SessionEvent::TurnCompleted {
+                error: Some("model unavailable".into()),
+            },
+            &cx,
+        );
+
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                pane.on_event(SessionEvent::TurnStarted, cx);
-
-                pane.on_event(
-                    SessionEvent::ItemStarted(SessionItem::AgentMessage {
-                        id: "message".into(),
-                        text: Some("partial answer".into()),
-                        questions: None,
-                    }),
-                    cx,
-                );
-
-                pane.on_event(
-                    SessionEvent::Error {
-                        message: "model unavailable".into(),
-                        fatal: false,
-                    },
-                    cx,
-                );
-
-                pane.on_event(
-                    SessionEvent::TurnCompleted {
-                        error: Some("model unavailable".into()),
-                    },
-                    cx,
-                );
-
                 let conversation = pane.transcript.read(cx).conversation.borrow();
 
                 let errors = conversation
@@ -1091,7 +1137,7 @@ mod turn_error_tests {
                     .collect::<Vec<_>>();
 
                 assert_eq!(errors, vec!["model unavailable"]);
-            });
+            })
         });
     }
 }
@@ -1192,6 +1238,7 @@ mod shared_host_recovery_tests {
 
     use crate::agent_tab::session::{Backend, Status, TestBackend, UpdateSuspension};
     use crate::agent_tab::settings::AgentSettings;
+    use crate::agent_tab::tests::deliver_session_event;
     use crate::agent_tab::{AgentKind, AgentPane, AgentThreadDefaults};
 
     #[gpui::test]
@@ -1225,7 +1272,7 @@ mod shared_host_recovery_tests {
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
         cx.update(|_, cx| {
-            pane.update(cx, |pane, cx| {
+            pane.update(cx, |pane, _| {
                 let epoch = pane.session.borrow_mut().runtime.begin_start();
 
                 assert!(matches!(
@@ -1244,14 +1291,19 @@ mod shared_host_recovery_tests {
                 ));
 
                 pane.session.borrow_mut().runtime.ready();
+            })
+        });
 
-                pane.on_event(
-                    SessionEvent::HostExited {
-                        message: "Codex app-server stopped unexpectedly".into(),
-                    },
-                    cx,
-                );
+        deliver_session_event(
+            &pane,
+            SessionEvent::HostExited {
+                message: "Codex app-server stopped unexpectedly".into(),
+            },
+            &cx,
+        );
 
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, _| {
                 assert_eq!(pane.session.borrow().runtime.status(), Status::Exited);
                 assert!(matches!(
                     pane.session.borrow().runtime.update_suspension(),
@@ -1274,7 +1326,7 @@ mod shared_host_recovery_tests {
                     Some("thread-recovery")
                 );
                 assert!(pane.session.borrow().runtime.backend().is_some());
-            });
+            })
         });
     }
 }
@@ -1294,6 +1346,7 @@ mod command_catalog_cache_tests {
 
     use crate::agent_tab::session::{Backend, TestBackend};
     use crate::agent_tab::settings::AgentSettings;
+    use crate::agent_tab::tests::deliver_session_event;
     use crate::agent_tab::{AgentPane, AgentThreadDefaults};
 
     fn open_pane(
@@ -1376,22 +1429,42 @@ mod command_catalog_cache_tests {
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
                 assert!(!offers(pane, "deploy", cx), "nothing published this yet");
+            })
+        });
 
-                pane.on_event(SessionEvent::Commands(vec![discovered("deploy")]), cx);
+        deliver_session_event(
+            &pane,
+            SessionEvent::Commands(vec![discovered("deploy")]),
+            &cx,
+        );
 
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
                 assert!(
                     offers(pane, "deploy", cx),
                     "a published command must show up"
                 );
+            })
+        });
 
-                // Discovery is a replacement snapshot, so a later one that
-                // omits the command withdraws it.
-                pane.on_event(SessionEvent::Commands(vec![discovered("status")]), cx);
+        // Discovery is a replacement snapshot, so a later one that
+        // omits the command withdraws it.
+        deliver_session_event(
+            &pane,
+            SessionEvent::Commands(vec![discovered("status")]),
+            &cx,
+        );
 
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
                 assert!(!offers(pane, "deploy", cx), "a withdrawn command must go");
-            });
+            })
         });
 
         cx.run_until_parked();
     }
+}
+
+fn conversation_title_request(kind: AgentKind, text: &str) -> Option<ConversationTitleRequest> {
+    build_title_request(kind, text, tab_title_from_prompt)
 }

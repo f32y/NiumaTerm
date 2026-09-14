@@ -214,7 +214,7 @@ fn palette_direction_navigation_wraps_and_handles_catalog_changes() {
 }
 
 #[test]
-fn clear_resets_discovery_without_owning_history_state() {
+fn clear_resets_discovery_state() {
     let mut palette = SlashPalette {
         provider_commands: vec![info("review", SlashCommandSource::Provider)],
         provider_commands_ready: true,
@@ -228,9 +228,6 @@ fn clear_resets_discovery_without_owning_history_state() {
         commands: palette.provider_commands.clone().into(),
     });
 
-    let history_dismissed = true;
-    let history = vec!["persisted session"];
-
     palette.reset_discovery(false);
 
     assert!(palette.provider_commands.is_empty());
@@ -238,8 +235,6 @@ fn clear_resets_discovery_without_owning_history_state() {
     assert!(!palette.provider_commands_ready);
     assert_eq!(palette.selected, 0);
     assert!(!palette.dismissed);
-    assert!(history_dismissed);
-    assert_eq!(history, vec!["persisted session"]);
 }
 
 fn skill(name: &str, path: &str, scope: &str, enabled: bool) -> SkillInfo {

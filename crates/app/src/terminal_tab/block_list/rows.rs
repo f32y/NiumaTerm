@@ -49,7 +49,6 @@ pub(crate) fn frozen_block_view(
     cell_h: f32,
     pad_rows: f32,
     selection: Option<(FrozenPoint, FrozenPoint)>,
-    selected_item: Option<usize>,
     default_fg: TerminalColor,
 ) -> FrozenView {
     let selection = selection.map(|(a, b)| if a <= b { (a, b) } else { (b, a) });
@@ -73,13 +72,11 @@ pub(crate) fn frozen_block_view(
     view.separators.push(0.0);
 
     view.items_chrome.push(FrozenItemChrome {
-        item: item_idx,
         top: 0.0,
         bottom: view.active_top,
         header_y: pad,
         accent: info.accent,
         header: info.header.clone(),
-        selected: selected_item == Some(item_idx),
     });
 
     let Some(first) = pages.first() else {

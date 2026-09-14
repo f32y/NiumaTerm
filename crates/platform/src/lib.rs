@@ -2,11 +2,13 @@ pub use mio::{Events, Interest, Poll, Token, Waker};
 
 #[cfg(not(windows))]
 pub use crate::unix::*;
+
 #[cfg(windows)]
 pub use crate::windows::*;
 
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
+
 pub mod library;
 
 #[cfg(windows)]
@@ -16,7 +18,9 @@ pub mod windows;
 mod unix;
 
 mod environment_override;
+
 mod ipc_message;
+
 mod process_lifetime;
 
 use std::{io, sync};
@@ -27,10 +31,16 @@ use std::{io, sync};
 /// `mio` dependency.
 use libc::c_ushort;
 
+use mio::event::Event;
+
 #[cfg(not(windows))]
 use crate::unix as platform;
+
 #[cfg(windows)]
 use crate::windows as platform;
+
+#[cfg(windows)]
+use crate::windows::powershell::DEFAULT_CONFIG_SHELL;
 
 /// Borrowed launch settings shared by local sessions and background PTYs.
 #[derive(Clone, Copy)]
@@ -106,6 +116,16 @@ pub trait ProcessReadWrite {
     fn has_ready(&self) -> bool {
         false
     }
+
+    /// Whether readiness reports that the native PTY read side has closed.
+    fn read_closed(&self, _event: &Event) -> bool {
+        false
+    }
+
+    /// Whether a read error represents native PTY hangup.
+    fn is_hangup_error(&self, _error: &io::Error) -> bool {
+        false
+    }
 }
 
 pub trait EventedPty: ProcessReadWrite {
@@ -123,12 +143,17 @@ pub struct WinsizeBuilder {
     pub height: u16,
 }
 
-/// Request notification authorization from the OS.
-/// On macOS this triggers the permission prompt on first call.
-/// No-op on other platforms.
-pub fn request_authorization() {
-    #[cfg(target_os = "macos")]
-    platform::request_authorization();
+/// Unresolved configuration defaults preserve shell discovery at launch time.
+pub fn configured_shell_defaults() -> (String, Vec<String>) {
+    #[cfg(windows)]
+    {
+        (DEFAULT_CONFIG_SHELL.into(), Vec::new())
+    }
+
+    #[cfg(not(windows))]
+    {
+        (String::new(), vec!["--login".into()])
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -215,5 +240,31 @@ impl From<&WinsizeBuilder> for Winsize {
             ws_xpixel,
             ws_ypixel,
         }
+    }
+}
+
+/// Resolve executable shims through the native shell on an interactive PTY.
+pub fn interactive_shell_command(executable: &str, arguments: &[&str]) -> (String, Vec<String>) {
+    #[cfg(windows)]
+    {
+        let mut args = vec!["/D".into(), "/C".into(), executable.into()];
+
+        args.extend(arguments.iter().map(|argument| (*argument).to_string()));
+
+        ("cmd.exe".into(), args)
+    }
+
+    #[cfg(not(windows))]
+    {
+        use crate::unix::hook_command::single_quoted;
+        use std::iter;
+
+        let words = iter::once(executable)
+            .chain(arguments.iter().copied())
+            .map(single_quoted)
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        (default_shell(), vec!["-c".into(), format!("exec {words}")])
     }
 }

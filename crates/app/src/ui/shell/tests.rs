@@ -90,10 +90,42 @@ fn disabling_agent_team_releases_the_runtime_and_keeps_the_saved_room(cx: &mut T
 
 #[test]
 fn window_close_honors_confirmation_setting() {
-    use nmt_config::system::WarnBeforeTerminatingShell::Disabled;
+    use nmt_config::system::WarnBeforeTerminatingShell::{
+        Always, Disabled, WhenChildProcessesRunning,
+    };
+    use std::io;
 
-    assert!(should_confirm_close(true, Disabled, 0));
-    assert!(!should_confirm_close(false, Disabled, 0));
+    for mode in [Disabled, WhenChildProcessesRunning, Always] {
+        assert!(should_confirm_close(true, mode, &Ok(0)));
+        assert!(should_confirm_close(
+            true,
+            mode,
+            &Err(io::Error::other("query failed"))
+        ));
+    }
+
+    assert!(!should_confirm_close(false, Disabled, &Ok(2)));
+    assert!(!should_confirm_close(
+        false,
+        Disabled,
+        &Err(io::Error::other("query failed"))
+    ));
+    assert!(!should_confirm_close(
+        false,
+        WhenChildProcessesRunning,
+        &Ok(0)
+    ));
+    assert!(should_confirm_close(
+        false,
+        WhenChildProcessesRunning,
+        &Ok(2)
+    ));
+    assert!(should_confirm_close(
+        false,
+        WhenChildProcessesRunning,
+        &Err(io::Error::other("query failed"))
+    ));
+    assert!(should_confirm_close(false, Always, &Ok(0)));
 }
 
 #[gpui::test]

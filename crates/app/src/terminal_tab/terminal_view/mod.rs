@@ -20,9 +20,7 @@ use crate::terminal_tab::block_list::FrozenItemChrome;
 use crate::terminal_tab::frame::TerminalFrame;
 use crate::terminal_tab::metrics;
 use crate::terminal_tab::paint::frame::{paint_frame, shape_frame};
-use crate::terminal_tab::theme::{
-    BLOCK_GUTTER_GAP, BLOCK_GUTTER_WIDTH, BLOCK_SELECTED_TINT, SEPARATOR_COLOR,
-};
+use crate::terminal_tab::theme::{BLOCK_GUTTER_GAP, BLOCK_GUTTER_WIDTH, SEPARATOR_COLOR};
 use crate::terminal_tab::view::TerminalPane;
 
 /// The terminal viewport as a custom GPUI leaf element: prepaint shapes the
@@ -285,8 +283,6 @@ fn paint_frozen_chrome(
         let top = bounds.top() + px(chrome.top);
         let height = px(chrome.bottom - chrome.top);
 
-        let gutter_alpha = if chrome.selected { 0xe6 } else { 0x59 };
-
         window.paint_quad(fill(
             Bounds::new(
                 point(
@@ -295,15 +291,8 @@ fn paint_frozen_chrome(
                 ),
                 size(px(BLOCK_GUTTER_WIDTH), height),
             ),
-            rgba((chrome.accent << 8) | gutter_alpha),
+            rgba((chrome.accent << 8) | 0x59),
         ));
-
-        if chrome.selected {
-            window.paint_quad(fill(
-                Bounds::new(point(bounds.left(), top), size(bounds.size.width, height)),
-                rgba(BLOCK_SELECTED_TINT),
-            ));
-        }
     }
 
     let style = window.text_style();

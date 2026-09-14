@@ -80,7 +80,6 @@ fn frozen_block_view_reads_engine_rows() {
         10.0,
         ITEM_PAD_ROWS,
         None,
-        Some(3),
         FrameTheme::default().foreground,
     );
 
@@ -92,8 +91,7 @@ fn frozen_block_view_reads_engine_rows() {
 
     let chrome = &view.items_chrome[0];
 
-    assert_eq!((chrome.item, chrome.top, chrome.bottom), (3, 0.0, 40.0));
-    assert!(chrome.selected);
+    assert_eq!((chrome.top, chrome.bottom), (0.0, 40.0));
     assert!(view.rows[0].shape_key.is_some());
     assert_ne!(
         view.rows[0].shape_key, view.rows[1].shape_key,
@@ -123,7 +121,6 @@ fn frozen_block_view_windows_visible_rows() {
         10.0,
         ITEM_PAD_ROWS,
         None,
-        None,
         FrameTheme::default().foreground,
     );
 
@@ -149,7 +146,6 @@ fn frozen_block_view_placeholder_keeps_height() {
         0..4,
         10.0,
         ITEM_PAD_ROWS,
-        None,
         None,
         FrameTheme::default().foreground,
     );
@@ -187,7 +183,6 @@ fn frozen_block_view_selection_spans_rows() {
         10.0,
         ITEM_PAD_ROWS,
         sel,
-        None,
         FrameTheme::default().foreground,
     );
 
@@ -221,7 +216,6 @@ fn frozen_selection_expands_wide_character() {
             10.0,
             ITEM_PAD_ROWS,
             Some((point, point)),
-            None,
             FrameTheme::default().foreground,
         );
 
@@ -245,7 +239,6 @@ fn compact_pad_rows_pack_rows_contiguously() {
         0..info.rows,
         10.0,
         0.0,
-        None,
         None,
         FrameTheme::default().foreground,
     );
@@ -499,26 +492,24 @@ fn nav_item_top_walks_items() {
 
 #[test]
 fn live_chrome_hides_running_header() {
-    let chrome = live_chrome(3, 2, 10.0, true, true).unwrap();
+    let chrome = live_chrome(2, 10.0, true).unwrap();
 
-    assert_eq!((chrome.item, chrome.top, chrome.bottom), (3, 0.0, 20.0));
+    assert_eq!((chrome.top, chrome.bottom), (0.0, 20.0));
     assert_eq!(chrome.accent, theme::BLOCK_RUNNING_COLOR);
     assert_eq!(chrome.header, None);
-    assert!(chrome.selected);
 
-    assert!(live_chrome(3, 0, 10.0, true, false).is_none());
+    assert!(live_chrome(0, 10.0, true).is_none());
 }
 
 #[test]
 fn live_chrome_marks_idle_prompt() {
-    let chrome = live_chrome(2, 3, 10.0, false, true).unwrap();
+    let chrome = live_chrome(3, 10.0, false).unwrap();
 
-    assert_eq!((chrome.item, chrome.top, chrome.bottom), (2, 0.0, 30.0));
+    assert_eq!((chrome.top, chrome.bottom), (0.0, 30.0));
     assert_eq!(chrome.accent, theme::BLOCK_INPUT_COLOR);
     assert_eq!(chrome.header, None);
-    assert!(chrome.selected);
 
-    assert!(live_chrome(2, 0, 10.0, false, false).is_none());
+    assert!(live_chrome(0, 10.0, false).is_none());
 }
 
 /// The live-history view positions SCREEN rows, applies the engine
@@ -649,7 +640,6 @@ fn frozen_block_view(
     cell_h: f32,
     pad: f32,
     selection: Option<(FrozenPoint, FrozenPoint)>,
-    selected: Option<usize>,
     foreground: TerminalColor,
 ) -> FrozenView {
     let pages: Vec<_> = block
@@ -692,6 +682,6 @@ fn frozen_block_view(
         .collect();
 
     frozen_page_view(
-        &pages, info, item, visible, cell_h, pad, selection, selected, foreground,
+        &pages, info, item, visible, cell_h, pad, selection, foreground,
     )
 }

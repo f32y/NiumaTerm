@@ -1,7 +1,7 @@
 use tempfile::Builder as TempDirBuilder;
 
 use crate::application::*;
-use crate::colors::{self, hex_to_color_arr};
+use crate::colors;
 
 #[test]
 fn powershell_compatibility_defaults_on_for_existing_configs_and_preserves_opt_out() {
@@ -577,6 +577,12 @@ fn startup_load_defaults_when_missing_and_errors_on_bad_toml() {
     fs::write(&path, "not [ valid").unwrap();
 
     assert!(Config::load_for_startup_from(&path, dir.path()).is_err());
+
+    fs::write(&path, [0xff]).unwrap();
+
+    assert!(Config::load_for_startup_from(&path, dir.path()).is_err());
+
+    assert!(Config::load_for_startup_from(dir.path(), dir.path()).is_err());
 }
 
 #[test]
@@ -586,7 +592,6 @@ fn test_if_explicit_defaults_match() {
 
     assert_eq!(result.cursor.shape, default_cursor());
     assert_eq!(result.theme, default_theme());
-    assert_eq!(result.cursor.shape, default_cursor());
     assert_eq!(result.shell, default_shell());
 
     // Colors
@@ -694,8 +699,14 @@ fn test_change_theme_with_colors() {
 
     // Colors
     assert_eq!(result.colors.cursor, colors::defaults::cursor());
-    assert_eq!(result.colors.foreground, hex_to_color_arr("#F8F8F2"));
-    assert_eq!(result.colors.background, hex_to_color_arr("#2B3E50"));
+    assert_eq!(
+        result.colors.foreground,
+        [248.0 / 255.0, 248.0 / 255.0, 242.0 / 255.0, 1.0]
+    );
+    assert_eq!(
+        result.colors.background,
+        [43.0 / 255.0, 62.0 / 255.0, 80.0 / 255.0, 1.0]
+    );
     assert_eq!(result.ui_theme.as_ref().unwrap().name, "Lucario");
     assert_eq!(
         result.ui_theme.as_ref().unwrap().mode,

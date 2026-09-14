@@ -72,14 +72,6 @@ impl FrozenHitMap {
         self.hit
             .hit_test(x, y, cell_width, cell_height, cols, pad_rows)
     }
-
-    /// The item whose gutter row covers `y`, if any.
-    pub(crate) fn item_at(&self, y: f32) -> Option<usize> {
-        self.chrome
-            .iter()
-            .find(|chrome| (chrome.top..chrome.bottom).contains(&y))
-            .map(|chrome| chrome.item)
-    }
 }
 
 /// Pane-side hit-test data for rows rendered above the active grid (small

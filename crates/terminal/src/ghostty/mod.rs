@@ -1129,12 +1129,7 @@ impl GhosttyTerminal {
         self.render.update(self.terminal)?;
         self.render.consume_damage(self.rows)?;
 
-        let cursor = self.render.cursor().unwrap_or(SnapshotCursor {
-            x: 0,
-            y: 0,
-            visible: false,
-            shape: ansi::CursorShape::Block,
-        });
+        let cursor = self.render.cursor()?;
 
         let palette = self.color_palette();
 
@@ -1147,8 +1142,6 @@ impl GhosttyTerminal {
                 .map(|path| path.to_string_lossy().into_owned()),
         );
 
-        // A transient row lookup failure blanks only that row; publishing the
-        // remaining viewport is safer than withholding an otherwise valid frame.
         for y in 0..self.rows {
             let meta = self
                 .grid_ref_at(VtPointTag::VIEWPORT, 0, y as u32)
@@ -1156,13 +1149,12 @@ impl GhosttyTerminal {
                     visit_row_cells(grid_ref, self.cols, &palette, |x, text, wide, style| {
                         buffer.write_cell(x as usize, y as usize, text.as_str(), wide, &style);
                     })
-                })
-                .unwrap_or_default();
+                })?;
 
             buffer.write_row_meta(y as usize, meta);
         }
 
-        let colors = self.render.colors(self.terminal);
+        let colors = self.render.colors(self.terminal)?;
         let placements = self.kitty.placements(self.terminal);
         let scrollbar = self.scrollbar();
 

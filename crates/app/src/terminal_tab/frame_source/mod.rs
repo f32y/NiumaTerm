@@ -191,7 +191,6 @@ impl TerminalFrameSource {
         item_idx: usize,
         viewport: &ItemViewport,
         selection: Option<(BlockPoint, BlockPoint)>,
-        selected_item: Option<usize>,
         labels: &DurationLabels,
         foreground: TerminalColor,
     ) -> FrozenView {
@@ -226,7 +225,6 @@ impl TerminalFrameSource {
             viewport.cell_height,
             viewport.pad_rows,
             selection,
-            selected_item,
             foreground,
         );
 

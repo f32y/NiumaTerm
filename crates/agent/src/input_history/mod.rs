@@ -7,7 +7,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, mpsc};
 use std::{env, fs, io, thread};
 
-use nmt_platform::filesystem::installation_path_spelling;
+use nmt_platform::filesystem::history_path_spelling;
 use parking_lot::Mutex;
 use tracing::warn;
 
@@ -65,14 +65,7 @@ fn normalize_working_directory(cwd: Option<&str>) -> String {
     let normalized =
         fs::canonicalize(&absolute).unwrap_or_else(|_| normalize_path_components(&absolute));
 
-    let spelling = installation_path_spelling(&normalized);
-
-    // Windows keeps its persisted slash spelling. On Unix both case and a
-    // backslash can distinguish directories, including after canonicalization.
-    #[cfg(windows)]
-    let spelling = spelling.replace('\\', "/");
-
-    spelling
+    history_path_spelling(&normalized)
 }
 
 fn normalize_path_components(path: &Path) -> PathBuf {

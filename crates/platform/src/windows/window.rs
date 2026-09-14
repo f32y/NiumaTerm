@@ -1,7 +1,11 @@
 use std::num::NonZeroIsize;
+
 use std::ptr;
 
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
 use windows_sys::Win32::Foundation::HWND;
+
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, IsIconic, MB_ICONERROR, MB_OK, MessageBoxW,
 };
@@ -24,4 +28,18 @@ pub fn show_error_dialog(title: &str, message: &str) {
             MB_OK | MB_ICONERROR,
         );
     }
+}
+
+/// Query native activation because the initial show can precede GPUI's
+/// activation event and leave its cached value unset.
+pub fn native_active_state(window: &impl HasWindowHandle) -> Option<bool> {
+    let Ok(handle) = window.window_handle() else {
+        return Some(false);
+    };
+
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return Some(false);
+    };
+
+    Some(is_foreground_and_not_minimized(handle.hwnd))
 }

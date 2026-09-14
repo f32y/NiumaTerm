@@ -204,7 +204,16 @@ pub(crate) fn new_tab_menu(
         item_shell.update(cx, |this, cx| this.open_team_tab(None, window, cx));
     });
 
-    if let Ok(rooms) = TeamSession::saved_rooms(&config_dir_path()) {
+    let rooms = match TeamSession::saved_rooms(&config_dir_path()) {
+        Ok(rooms) => rooms,
+        Err(error) => {
+            tracing::warn!("failed to list saved team rooms: {error}");
+
+            return menu;
+        }
+    };
+
+    {
         for room in rooms {
             let item_shell = shell.clone();
 

@@ -1,7 +1,5 @@
 #[cfg(feature = "application")]
 use nmt_platform::environment::DEFAULT_EDITOR;
-#[cfg(all(feature = "application", target_os = "windows"))]
-use nmt_platform::windows::powershell::DEFAULT_CONFIG_SHELL;
 
 use crate::CursorShape;
 #[cfg(feature = "application")]
@@ -15,21 +13,9 @@ pub fn default_bool_true() -> bool {
 #[cfg(feature = "application")]
 #[inline]
 pub fn default_shell() -> Shell {
-    #[cfg(not(target_os = "windows"))]
-    {
-        Shell {
-            program: "".into(),
-            args: vec!["--login".into()],
-        }
-    }
+    let (program, args) = nmt_platform::configured_shell_defaults();
 
-    #[cfg(target_os = "windows")]
-    {
-        Shell {
-            program: DEFAULT_CONFIG_SHELL.into(),
-            args: vec![],
-        }
-    }
+    Shell { program, args }
 }
 
 #[inline]
