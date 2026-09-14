@@ -470,7 +470,7 @@ pub(super) unsafe fn kitty_image_graphic_data(
         VtKittyImageFormat::GRAY_ALPHA => {
             let mut px = Vec::with_capacity(raw.len() * 2);
 
-            for ga in raw.chunks_exact(2) {
+            for ga in raw.as_chunks::<2>().0 {
                 px.extend_from_slice(&[ga[0], ga[0], ga[0], ga[1]]);
             }
 
