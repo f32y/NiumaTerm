@@ -23,8 +23,10 @@ members = [
     "crates/terminal",
     "crates/tree_sitter_bundle",
     "crates/sparkle",
-    
+
     "third_party/libghostty-vt-sys",
+
+    "tools/readability",
 
     # GPUI fork
     "third_party/gpui/collections",

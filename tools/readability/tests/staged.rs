@@ -8,6 +8,414 @@ const CLEAN: &str = "fn run() {\n    let value = 1;\n\n    consume(value);\n}\n"
 const CROWDED: &str = "fn run() {\n    let value = 1;\n    consume(value);\n}\n";
 const SOURCE: &str = "crates/demo/src/lib.rs";
 
+#[test]
+fn optional_spacing_rules_require_explicit_enablement_in_all_modes() {
+    let repo = Repository::new();
+    let source = r#"enum Value {
+    /// A documented variant.
+    Documented,
+    #[error("failed")]
+    Failed,
+    Data {
+        value: u8,
+    },
+    Empty,
+}
+
+fn run(value: u8) {
+    match value {
+        0 => {
+            first();
+        }
+        _ => second(),
+    }
+}
+"#;
+
+    repo.baseline("");
+    repo.write(SOURCE, source);
+    repo.git(&["add", SOURCE]);
+
+    for mode in ["--check", "--fix", "--staged"] {
+        let result = repo.tool(&[mode]);
+
+        assert_eq!(result.status.code(), Some(0), "{mode}: {result:?}");
+        assert_eq!(
+            fs::read_to_string(repo.0.path().join(SOURCE)).unwrap(),
+            source
+        );
+    }
+
+    for (rule, other, expected) in [
+        (
+            "spacing/match-arms",
+            "spacing/enum-variants",
+            source.replace("        }\n        _", "        }\n\n        _"),
+        ),
+        (
+            "spacing/enum-variants",
+            "spacing/match-arms",
+            source
+                .replace("    Documented,\n", "    Documented,\n\n")
+                .replace("    Failed,\n", "    Failed,\n\n")
+                .replace("    },\n", "    },\n\n"),
+        ),
+    ] {
+        for mode in ["--check", "--staged"] {
+            let result = repo.tool(&[mode, "--enable", rule]);
+            let output = String::from_utf8_lossy(&result.stdout);
+
+            assert_eq!(result.status.code(), Some(1), "{mode}: {result:?}");
+            assert!(output.contains(rule), "{output}");
+            assert!(!output.contains(other), "{output}");
+        }
+
+        let fixed = repo.tool(&["--fix", "--enable", rule, SOURCE]);
+
+        assert_eq!(fixed.status.code(), Some(0), "{fixed:?}");
+        assert_eq!(
+            fs::read_to_string(repo.0.path().join(SOURCE)).unwrap(),
+            expected
+        );
+        assert_eq!(repo.git(&["show", &format!(":{SOURCE}")]), source);
+
+        let checked = repo.tool(&["--check", "--enable", rule, SOURCE]);
+
+        assert_eq!(checked.status.code(), Some(0), "{checked:?}");
+
+        repo.write(SOURCE, source);
+    }
+
+    let both = repo.tool(&[
+        "--check",
+        "--enable",
+        "spacing/match-arms",
+        "--enable",
+        "spacing/enum-variants",
+        SOURCE,
+    ]);
+
+    let output = String::from_utf8_lossy(&both.stdout);
+
+    assert_eq!(both.status.code(), Some(1), "{both:?}");
+    assert!(output.contains("spacing/match-arms"));
+    assert!(output.contains("spacing/enum-variants"));
+}
+
+#[test]
+fn rejects_missing_or_unknown_optional_rules_before_fixing_files() {
+    let repo = Repository::new();
+
+    repo.baseline(CROWDED);
+
+    for arguments in [
+        vec!["--fix", SOURCE, "--enable"],
+        vec!["--fix", SOURCE, "--enable", "spacing/match-arm"],
+    ] {
+        let result = repo.tool(&arguments);
+
+        assert_eq!(result.status.code(), Some(2), "{result:?}");
+        assert_eq!(
+            fs::read_to_string(repo.0.path().join(SOURCE)).unwrap(),
+            CROWDED
+        );
+    }
+}
+
+#[test]
+fn rejects_and_removes_blank_lines_between_arms_and_variants_using_the_index() {
+    for (clean, boundary, rule) in [
+        (
+            "enum Value {\n    First,\n    Second,\n    Third,\n}\n",
+            "    First,\n",
+            "spacing/enum-variant-blank-lines",
+        ),
+        (
+            "fn run() {\n    match value {\n        0 => first(),\n        1 => second(),\n        _ => third(),\n    }\n}\n",
+            "        0 => first(),\n",
+            "spacing/match-arm-blank-lines",
+        ),
+    ] {
+        let repo = Repository::new();
+        let spaced = clean.replace(boundary, &format!("{boundary}\n\n"));
+
+        repo.baseline(clean);
+        repo.write(SOURCE, &spaced);
+        repo.git(&["add", SOURCE]);
+        repo.write(SOURCE, clean);
+
+        let staged = repo.tool(&["--staged"]);
+
+        assert_eq!(staged.status.code(), Some(1), "{staged:?}");
+        assert!(String::from_utf8_lossy(&staged.stdout).contains(rule));
+        assert!(String::from_utf8_lossy(&staged.stdout).contains("unexpected blank line"));
+
+        let checked = repo.tool(&["--check", SOURCE]);
+
+        assert_eq!(checked.status.code(), Some(0), "{checked:?}");
+
+        repo.write(SOURCE, &spaced);
+
+        let checked = repo.tool(&["--check", SOURCE]);
+
+        assert_eq!(checked.status.code(), Some(1), "{checked:?}");
+        assert!(String::from_utf8_lossy(&checked.stdout).contains(rule));
+
+        for _ in 0..2 {
+            let fixed = repo.tool(&["--fix", SOURCE]);
+
+            assert_eq!(fixed.status.code(), Some(0), "{fixed:?}");
+            assert_eq!(
+                fs::read_to_string(repo.0.path().join(SOURCE)).unwrap(),
+                clean
+            );
+            assert_eq!(repo.git(&["show", &format!(":{SOURCE}")]), spaced);
+        }
+
+        repo.baseline(&spaced);
+        repo.write(
+            SOURCE,
+            &spaced.replace("Third", "Last").replace("third()", "last()"),
+        );
+        repo.git(&["add", SOURCE]);
+
+        let staged = repo.tool(&["--staged"]);
+        let full = repo.tool(&["--check", SOURCE]);
+
+        assert_eq!(staged.status.code(), Some(0), "{staged:?}");
+        assert_eq!(full.status.code(), Some(1), "{full:?}");
+        assert!(String::from_utf8_lossy(&full.stdout).contains(rule));
+    }
+}
+
+#[test]
+fn separates_binding_mutability_without_hiding_staged_spacing_deletions() {
+    let repo = Repository::new();
+    let source = "fn run() {\n    let transcript = read();\n    let mut tasks: Vec<Task> = Vec::new();\n    let mut index = HashMap::new();\n    let ready = true;\n}\n";
+    let clean = source
+        .replace("read();\n", "read();\n\n")
+        .replace("HashMap::new();\n", "HashMap::new();\n\n");
+
+    repo.baseline(&clean);
+    repo.write(SOURCE, source);
+    repo.git(&["add", SOURCE]);
+
+    let checked = repo.tool(&["--check", SOURCE]);
+    let output = String::from_utf8_lossy(&checked.stdout).replace('\\', "/");
+
+    assert_eq!(checked.status.code(), Some(1), "{checked:?}");
+    assert!(output.contains("crates/demo/src/lib.rs:3:1: spacing/binding-mutability"));
+    assert!(output.contains("crates/demo/src/lib.rs:5:1: spacing/binding-mutability"));
+
+    let fixed = repo.tool(&["--fix", SOURCE]);
+
+    assert_eq!(fixed.status.code(), Some(0), "{fixed:?}");
+    assert_eq!(
+        fs::read_to_string(repo.0.path().join(SOURCE)).unwrap(),
+        clean
+    );
+    assert_eq!(repo.git(&["show", &format!(":{SOURCE}")]), source);
+
+    let checked = repo.tool(&["--check", SOURCE]);
+    let staged = repo.tool(&["--staged"]);
+    let output = String::from_utf8_lossy(&staged.stdout).replace('\\', "/");
+
+    assert_eq!(checked.status.code(), Some(0), "{checked:?}");
+    assert_eq!(staged.status.code(), Some(1), "{staged:?}");
+    assert!(output.contains("crates/demo/src/lib.rs:3:1: spacing/binding-mutability"));
+    assert!(output.contains("crates/demo/src/lib.rs:5:1: spacing/binding-mutability"));
+
+    repo.git(&["add", SOURCE]);
+
+    let staged = repo.tool(&["--staged"]);
+
+    assert_eq!(staged.status.code(), Some(0), "{staged:?}");
+}
+
+#[test]
+fn checks_and_fixes_call_and_assertion_spacing_without_changing_the_index() {
+    let repo = Repository::new();
+    let source = "fn run() {\n    merge_update(&mut summary, &update, sequence);\n    self.tasks.insert(key, summary);\n    self.activity += 1;\n    assert!(self.activity > 0);\n    debug_assert_eq!(self.tasks.len(), 1);\n    finish();\n}\n";
+    let clean = source
+        .replace("&update, sequence);\n", "&update, sequence);\n\n")
+        .replace("insert(key, summary);\n", "insert(key, summary);\n\n")
+        .replace("self.activity += 1;\n", "self.activity += 1;\n\n")
+        .replace(
+            "debug_assert_eq!(self.tasks.len(), 1);\n",
+            "debug_assert_eq!(self.tasks.len(), 1);\n\n",
+        );
+
+    repo.baseline(&clean);
+    repo.write(SOURCE, source);
+    repo.git(&["add", SOURCE]);
+    repo.write(SOURCE, &clean);
+
+    let staged = repo.tool(&["--staged"]);
+    let output = String::from_utf8_lossy(&staged.stdout).replace('\\', "/");
+
+    assert_eq!(staged.status.code(), Some(1), "{staged:?}");
+    assert!(output.contains("crates/demo/src/lib.rs:3:1: spacing/call-and-statement"));
+    assert!(output.contains("crates/demo/src/lib.rs:4:1: spacing/call-and-statement"));
+    assert!(output.contains("crates/demo/src/lib.rs:5:1: spacing/assertions"));
+    assert!(output.contains("crates/demo/src/lib.rs:7:1: spacing/assertions"));
+
+    repo.write(SOURCE, source);
+
+    let checked = repo.tool(&["--check", SOURCE]);
+
+    assert_eq!(checked.status.code(), Some(1), "{checked:?}");
+    assert!(String::from_utf8_lossy(&checked.stdout).contains("spacing/call-and-statement"));
+    assert!(String::from_utf8_lossy(&checked.stdout).contains("spacing/assertions"));
+
+    let fixed = repo.tool(&["--fix", SOURCE]);
+
+    assert_eq!(fixed.status.code(), Some(0), "{fixed:?}");
+    assert_eq!(
+        fs::read_to_string(repo.0.path().join(SOURCE)).unwrap(),
+        clean
+    );
+    assert_eq!(repo.git(&["show", &format!(":{SOURCE}")]), source);
+
+    repo.git(&["add", SOURCE]);
+    repo.write(SOURCE, source);
+
+    let staged = repo.tool(&["--staged"]);
+
+    assert_eq!(staged.status.code(), Some(0), "{staged:?}");
+}
+
+#[test]
+fn rejects_immediate_closure_calls_without_rewriting_them_and_checks_staged_changes() {
+    let repo = Repository::new();
+    let source = "fn run() -> Result<(), String> {\n    let result = (|| -> Result<(), String> {\n        write()?;\n\n        Ok(())\n    })();\n\n    result\n}\n\nconst VERSION: u8 = 1;\n";
+    let clean = source.replace(
+        "(|| -> Result<(), String> {\n        write()?;\n\n        Ok(())\n    })()",
+        "write()",
+    );
+
+    repo.baseline("");
+    repo.write(SOURCE, source);
+    repo.git(&["add", SOURCE]);
+    repo.write(SOURCE, &clean);
+
+    let staged = repo.tool(&["--staged"]);
+
+    assert_eq!(staged.status.code(), Some(1), "{staged:?}");
+    assert!(String::from_utf8_lossy(&staged.stdout).contains("expressions/immediate-closure-call"));
+
+    let checked = repo.tool(&["--check", SOURCE]);
+
+    assert_eq!(checked.status.code(), Some(0), "{checked:?}");
+
+    repo.write(SOURCE, source);
+
+    for mode in ["--check", "--fix"] {
+        let result = repo.tool(&[mode, SOURCE]);
+
+        assert_eq!(result.status.code(), Some(1), "{mode}: {result:?}");
+        assert!(
+            String::from_utf8_lossy(&result.stdout).contains("expressions/immediate-closure-call")
+        );
+        assert_eq!(
+            fs::read_to_string(repo.0.path().join(SOURCE)).unwrap(),
+            source
+        );
+        assert_eq!(repo.git(&["show", &format!(":{SOURCE}")]), source);
+    }
+
+    repo.git(&["commit", "-qm", "existing closure call"]);
+    repo.write(
+        SOURCE,
+        &source.replace("VERSION: u8 = 1", "VERSION: u8 = 2"),
+    );
+    repo.git(&["add", SOURCE]);
+
+    let staged = repo.tool(&["--staged"]);
+    let full = repo.tool(&["--check", SOURCE]);
+
+    assert_eq!(staged.status.code(), Some(0), "{staged:?}");
+    assert_eq!(full.status.code(), Some(1), "{full:?}");
+    assert!(String::from_utf8_lossy(&full.stdout).contains("expressions/immediate-closure-call"));
+
+    repo.write(SOURCE, &source.replace("write()?", "flush()?"));
+    repo.git(&["add", SOURCE]);
+
+    let staged = repo.tool(&["--staged"]);
+
+    assert_eq!(staged.status.code(), Some(1), "{staged:?}");
+    assert!(String::from_utf8_lossy(&staged.stdout).contains("expressions/immediate-closure-call"));
+}
+
+#[test]
+fn fixed_option_returns_require_explicit_enablement_in_all_modes() {
+    let rule = "expressions/fixed-option-return";
+
+    for value in ["Some(1)", "None"] {
+        let repo = Repository::new();
+        let clean = "fn value() -> Option<u8> {\n    lookup()\n}\n\nconst VERSION: u8 = 1;\n";
+        let source = clean.replace("lookup()", value);
+
+        repo.baseline(clean);
+        repo.write(SOURCE, &source);
+        repo.git(&["add", SOURCE]);
+
+        for mode in ["--check", "--fix", "--staged"] {
+            let result = repo.tool(&[mode]);
+
+            assert_eq!(result.status.code(), Some(0), "{mode}: {result:?}");
+            assert!(!String::from_utf8_lossy(&result.stdout).contains(rule));
+            assert_eq!(
+                fs::read_to_string(repo.0.path().join(SOURCE)).unwrap(),
+                source
+            );
+            assert_eq!(repo.git(&["show", &format!(":{SOURCE}")]), source);
+        }
+
+        repo.write(SOURCE, clean);
+
+        let staged = repo.tool(&["--staged", "--enable", rule]);
+
+        assert_eq!(staged.status.code(), Some(1), "{staged:?}");
+        assert!(
+            String::from_utf8_lossy(&staged.stdout).contains("expressions/fixed-option-return")
+        );
+
+        let checked = repo.tool(&["--check", "--enable", rule, SOURCE]);
+
+        assert_eq!(checked.status.code(), Some(0), "{checked:?}");
+
+        repo.write(SOURCE, &source);
+
+        for mode in ["--check", "--fix"] {
+            let result = repo.tool(&[mode, "--enable", rule, SOURCE]);
+
+            assert_eq!(result.status.code(), Some(1), "{mode}: {result:?}");
+            assert!(
+                String::from_utf8_lossy(&result.stdout).contains("expressions/fixed-option-return")
+            );
+            assert_eq!(
+                fs::read_to_string(repo.0.path().join(SOURCE)).unwrap(),
+                source
+            );
+            assert_eq!(repo.git(&["show", &format!(":{SOURCE}")]), source);
+        }
+
+        repo.git(&["commit", "-qm", "existing fixed return"]);
+        repo.write(
+            SOURCE,
+            &source.replace("VERSION: u8 = 1", "VERSION: u8 = 2"),
+        );
+        repo.git(&["add", SOURCE]);
+
+        let staged = repo.tool(&["--staged", "--enable", rule]);
+        let full = repo.tool(&["--check", "--enable", rule, SOURCE]);
+
+        assert_eq!(staged.status.code(), Some(0), "{staged:?}");
+        assert_eq!(full.status.code(), Some(1), "{full:?}");
+        assert!(String::from_utf8_lossy(&full.stdout).contains("expressions/fixed-option-return"));
+    }
+}
+
 struct Repository(TempDir);
 
 impl Repository {
@@ -325,7 +733,7 @@ fn checks_module_headers_and_visibility_but_exempts_local_order() {
 #[test]
 fn staged_visibility_checks_report_changed_methods_without_rewriting_them() {
     let repo = Repository::new();
-    let source = "impl Value {\n    pub(crate) fn run(&self) {\n        first();\n        second();\n    }\n}\n";
+    let source = "impl Value {\n    pub(crate) fn run(&self) {\n        first();\n\n        second();\n    }\n}\n";
     let restricted = source.replace("pub(crate)", "pub(in crate::outer)");
 
     repo.baseline(source);
@@ -406,7 +814,7 @@ fn staged_checks_leave_existing_declaration_issues_outside_changes_alone() {
     let repo = Repository::new();
 
     let source =
-        "fn run() {\n    first();\n    second();\n}\n\nuse std::fmt;\n\nconst N: u8 = 1;\n";
+        "fn run() {\n    first();\n\n    second();\n}\n\nuse std::fmt;\n\nconst N: u8 = 1;\n";
 
     repo.baseline(source);
     repo.write(SOURCE, &source.replace("second()", "third()"));
@@ -419,7 +827,7 @@ fn staged_checks_leave_existing_declaration_issues_outside_changes_alone() {
     assert_eq!(full.status.code(), Some(1), "{full:?}");
     assert!(String::from_utf8_lossy(&full.stdout).contains("declarations/header"));
 
-    let source = "mod inner {\n    fn run() {\n        first();\n        second();\n    }\n}\n\npub use std::fmt;\n";
+    let source = "pub(crate) mod inner {\n    fn run() {\n        first();\n\n        second();\n    }\n}\n\npub use std::fmt;\n";
 
     repo.write(SOURCE, source);
     repo.git(&["add", SOURCE]);
@@ -558,4 +966,200 @@ fn staged_module_paths_require_test_cfg_even_when_attributes_separate_them() {
     let staged = repo.tool(&["--staged"]);
 
     assert_eq!(staged.status.code(), Some(0), "{staged:?}");
+}
+
+#[test]
+fn fixes_import_spacing_without_hiding_deleted_spacing_in_the_index() {
+    let repo = Repository::new();
+    let source = "use std::fmt;\n\nuse serde::Serialize;\n\nuse crate::api::Public;\n";
+    let crowded = source.replace(";\n\n", ";\n");
+
+    repo.baseline(source);
+    repo.write(SOURCE, &crowded);
+    repo.git(&["add", SOURCE]);
+
+    let fixed = repo.tool(&["--fix", SOURCE]);
+
+    assert_eq!(fixed.status.code(), Some(0), "{fixed:?}");
+    assert_eq!(
+        fs::read_to_string(repo.0.path().join(SOURCE)).unwrap(),
+        source
+    );
+    assert_eq!(repo.git(&["show", &format!(":{SOURCE}")]), crowded);
+
+    let staged = repo.tool(&["--staged"]);
+
+    assert_eq!(staged.status.code(), Some(1), "{staged:?}");
+    assert!(String::from_utf8_lossy(&staged.stdout).contains("spacing/import-groups"));
+}
+
+#[test]
+fn staged_import_checks_follow_both_changed_imports_and_ignore_old_issues() {
+    for (baseline, changed, rule) in [
+        (
+            "use std::fmt;\n\nuse serde::Serialize;\n\nuse crate::api::Public;\n",
+            "use crate::api::Other;\n\nuse serde::Serialize;\n\nuse crate::api::Public;\n",
+            "import-order",
+        ),
+        (
+            "use serde::Serialize;\n\nuse crate::api::Public;\n",
+            "use serde::Serialize;\n\nuse std::fmt;\n",
+            "import-order",
+        ),
+        (
+            "use {anyhow::Result, serde::Serialize};\n",
+            "use {serde::Serialize, crate::api::Public};\n",
+            "mixed-imports",
+        ),
+    ] {
+        let repo = Repository::new();
+        let baseline = format!("{baseline}\n{CLEAN}");
+        let changed = format!("{changed}\n{CLEAN}");
+
+        repo.baseline(&baseline);
+        repo.write(SOURCE, &changed);
+        repo.git(&["add", SOURCE]);
+        repo.write(SOURCE, &baseline);
+
+        let staged = repo.tool(&["--staged"]);
+
+        assert_eq!(staged.status.code(), Some(1), "{staged:?}");
+        assert!(String::from_utf8_lossy(&staged.stdout).contains(rule));
+
+        repo.write(SOURCE, &changed);
+
+        let fixed = repo.tool(&["--fix", SOURCE]);
+
+        assert_eq!(fixed.status.code(), Some(1), "{fixed:?}");
+        assert_eq!(
+            fs::read_to_string(repo.0.path().join(SOURCE)).unwrap(),
+            changed
+        );
+
+        repo.git(&["commit", "-qm", "existing import issue"]);
+        repo.write(SOURCE, &changed.replace("value = 1", "value = 2"));
+        repo.git(&["add", SOURCE]);
+
+        let staged = repo.tool(&["--staged"]);
+        let full = repo.tool(&["--check", SOURCE]);
+
+        assert_eq!(staged.status.code(), Some(0), "{staged:?}");
+        assert_eq!(full.status.code(), Some(1), "{full:?}");
+        assert!(String::from_utf8_lossy(&full.stdout).contains(rule));
+    }
+}
+
+#[test]
+fn staged_private_inline_module_checks_follow_the_header_and_exclude_the_body() {
+    let repo = Repository::new();
+
+    let source =
+        "#[allow(dead_code)]\n#[allow(unused_imports)]\n#[cfg(unix)]\nmod sys;\n\nuse std::fmt;\n";
+
+    let changed = source.replace(
+        "mod sys;",
+        "mod sys {\n    fn run() {\n        first();\n\n        second();\n    }\n}",
+    );
+
+    repo.baseline(source);
+    repo.write(SOURCE, &changed);
+    repo.git(&["add", SOURCE]);
+    repo.write(SOURCE, source);
+
+    let staged = repo.tool(&["--staged"]);
+
+    assert_eq!(staged.status.code(), Some(1), "{staged:?}");
+    assert!(String::from_utf8_lossy(&staged.stdout).contains("declarations/header"));
+
+    repo.git(&["commit", "-qm", "existing private module placement"]);
+    repo.write(SOURCE, &changed.replace("second()", "third()"));
+    repo.git(&["add", SOURCE]);
+
+    let staged = repo.tool(&["--staged"]);
+    let full = repo.tool(&["--check", SOURCE]);
+
+    assert_eq!(staged.status.code(), Some(0), "{staged:?}");
+    assert_eq!(full.status.code(), Some(1), "{full:?}");
+    assert!(String::from_utf8_lossy(&full.stdout).contains("declarations/header"));
+}
+
+#[test]
+fn staged_alphabetical_checks_follow_both_imports_and_preserve_manual_fixes() {
+    for (ordered, reversed) in [
+        (
+            "use crate::alpha::Value;\n\nuse crate::middle::Value;\n",
+            "use crate::zeta::Value;\n\nuse crate::middle::Value;\n",
+        ),
+        (
+            "use crate::middle::Value;\n\nuse crate::zeta::Value;\n",
+            "use crate::middle::Value;\n\nuse crate::alpha::Value;\n",
+        ),
+    ] {
+        let repo = Repository::new();
+        let ordered = format!("{ordered}\n{CLEAN}");
+        let reversed = format!("{reversed}\n{CLEAN}");
+
+        repo.baseline(&ordered);
+        repo.write(SOURCE, &reversed);
+        repo.git(&["add", SOURCE]);
+        repo.write(SOURCE, &ordered);
+
+        let staged = repo.tool(&["--staged"]);
+
+        assert_eq!(staged.status.code(), Some(1), "{staged:?}");
+        assert!(
+            String::from_utf8_lossy(&staged.stdout).contains("declarations/import-alphabetical")
+        );
+
+        repo.write(SOURCE, &reversed);
+
+        let fixed = repo.tool(&["--fix", SOURCE]);
+
+        assert_eq!(fixed.status.code(), Some(1), "{fixed:?}");
+        assert_eq!(
+            fs::read_to_string(repo.0.path().join(SOURCE)).unwrap(),
+            reversed
+        );
+
+        repo.git(&["commit", "-qm", "existing import alphabetical issue"]);
+        repo.write(SOURCE, &reversed.replace("value = 1", "value = 2"));
+        repo.git(&["add", SOURCE]);
+
+        let staged = repo.tool(&["--staged"]);
+        let full = repo.tool(&["--check", SOURCE]);
+
+        assert_eq!(staged.status.code(), Some(0), "{staged:?}");
+        assert_eq!(full.status.code(), Some(1), "{full:?}");
+    }
+}
+
+#[test]
+fn staged_nested_import_order_checks_use_only_the_affected_entries() {
+    let repo = Repository::new();
+
+    let ordered =
+        "use crate::api::{\n    Alpha,\n    Zebra,\n    beta,\n    gamma,\n    omega,\n};\n";
+
+    let reversed = ordered.replace("Alpha,\n    Zebra", "Zebra,\n    Alpha");
+
+    repo.baseline(ordered);
+    repo.write(SOURCE, &reversed);
+    repo.git(&["add", SOURCE]);
+    repo.write(SOURCE, ordered);
+
+    let staged = repo.tool(&["--staged"]);
+    let output = String::from_utf8_lossy(&staged.stdout).replace('\\', "/");
+
+    assert_eq!(staged.status.code(), Some(1), "{staged:?}");
+    assert!(output.contains("crates/demo/src/lib.rs:3:5: declarations/import-alphabetical"));
+
+    repo.git(&["commit", "-qm", "existing nested import order"]);
+    repo.write(SOURCE, &reversed.replace("omega,", "omega2,"));
+    repo.git(&["add", SOURCE]);
+
+    let staged = repo.tool(&["--staged"]);
+    let full = repo.tool(&["--check", SOURCE]);
+
+    assert_eq!(staged.status.code(), Some(0), "{staged:?}");
+    assert_eq!(full.status.code(), Some(1), "{full:?}");
 }

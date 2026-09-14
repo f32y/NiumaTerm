@@ -1,4 +1,5 @@
 mod declarations;
+mod expressions;
 mod spacing;
 
 use std::collections::BTreeSet;
@@ -11,19 +12,24 @@ use std::{env, fs};
 
 use tempfile::NamedTempFile;
 
-use crate::spacing::{apply, inspect};
+use crate::spacing::{Options, apply, inspect};
 
 const HELP: &str = "Rust readability checks
 
-Usage: cargo readability --check [PATH ...]
-       cargo readability --fix [PATH ...]
-       cargo readability --staged
+Usage: cargo readability --check [--enable RULE ...] [PATH ...]
+       cargo readability --fix [--enable RULE ...] [PATH ...]
+       cargo readability --staged [--enable RULE ...]
 
 Without paths, --check and --fix scan tracked and unignored Rust files in crates/.
 Explicit paths are relative to the current directory and may name directories.
 --staged checks changed boundaries and declarations in staged crates/ Rust files.
---fix adds blank lines to working files; it never stages changes.
+--fix adds or removes blank lines in working files; it never stages changes.
 Declaration position, order, visibility, and attribute issues require manual edits.
+Immediately calling an anonymous closure is forbidden and requires a manual rewrite.
+--enable RULE opts into spacing/match-arms, spacing/enum-variants, or
+expressions/fixed-option-return; repeat to enable multiple rules.
+By default, blank lines between match arms and enum variants are forbidden.
+Enabling either optional spacing rule replaces its corresponding default rule.
 Exit codes: 0 clean or fixed, 1 readability issues, 2 invalid input or tool failure.";
 
 fn main() -> ExitCode {
@@ -52,7 +58,28 @@ fn run() -> Result<bool, Box<dyn Error>> {
         return Err(HELP.into());
     }
 
-    let paths: Vec<PathBuf> = arguments.map(PathBuf::from).collect();
+    let mut paths = Vec::new();
+    let mut options = Options::default();
+    let mut expression_options = expressions::Options::default();
+
+    while let Some(argument) = arguments.next() {
+        if argument == "--enable" {
+            let rule = arguments.next().ok_or("--enable requires a rule name")?;
+
+            match rule.to_str() {
+                Some("spacing/match-arms") => options.match_arms = true,
+                Some("spacing/enum-variants") => options.enum_variants = true,
+                Some("expressions/fixed-option-return") => {
+                    expression_options.fixed_option_returns = true;
+                }
+                _ => {
+                    return Err(format!("unknown optional rule: {}", rule.to_string_lossy()).into());
+                }
+            }
+        } else {
+            paths.push(PathBuf::from(argument));
+        }
+    }
 
     if mode == "--staged" && !paths.is_empty() {
         return Err("--staged cannot be combined with paths or other modes".into());
@@ -142,11 +169,12 @@ fn run() -> Result<bool, Box<dyn Error>> {
 
     let mut count = 0;
     let mut declaration_count = 0;
+    let mut expression_count = 0;
     let checked = files.len() + staged.len();
 
     for (path, source, ranges) in staged {
         let parsed = parse(&path, &source)?;
-        let issues = inspect(&source, &parsed);
+        let issues = inspect(&source, &parsed, &options);
 
         for (line, issue) in issues {
             if ranges
@@ -154,10 +182,11 @@ fn run() -> Result<bool, Box<dyn Error>> {
                 .any(|range| *range.start() <= issue.through_line && *range.end() >= line)
             {
                 println!(
-                    "{}:{}:1: spacing/{}: missing blank line",
+                    "{}:{}:1: spacing/{}: {}",
                     path.display(),
                     line + 1,
-                    issue.rule
+                    issue.rule,
+                    issue.message()
                 );
 
                 count += 1;
@@ -175,13 +204,24 @@ fn run() -> Result<bool, Box<dyn Error>> {
                 declaration_count += 1;
             }
         }
+
+        for issue in expressions::inspect(&parsed, &expression_options) {
+            if ranges.iter().any(|range| {
+                *range.start() < issue.span.end().line
+                    && *range.end() >= issue.span.start().line - 1
+            }) {
+                report_expression(&path, &issue);
+
+                expression_count += 1;
+            }
+        }
     }
 
     for path in files {
         let source = fs::read_to_string(&path)?;
 
         let mut parsed = parse(&path, &source)?;
-        let issues = inspect(&source, &parsed);
+        let issues = inspect(&source, &parsed, &options);
 
         if mode == "--fix" && !issues.is_empty() {
             let modified = apply(&source, &issues)?;
@@ -210,14 +250,19 @@ fn run() -> Result<bool, Box<dyn Error>> {
             }
 
             temporary.persist(&path)?;
-            println!("{}: added {} blank line(s)", path.display(), issues.len());
+            println!(
+                "{}: fixed {} spacing issue(s)",
+                path.display(),
+                issues.len()
+            );
         } else {
             for (line, issue) in &issues {
                 println!(
-                    "{}:{}:1: spacing/{}: missing blank line",
+                    "{}:{}:1: spacing/{}: {}",
                     path.display(),
                     line + 1,
-                    issue.rule
+                    issue.rule,
+                    issue.message()
                 );
             }
         }
@@ -229,20 +274,37 @@ fn run() -> Result<bool, Box<dyn Error>> {
 
             declaration_count += 1;
         }
+
+        for issue in expressions::inspect(&parsed, &expression_options) {
+            report_expression(&path, &issue);
+
+            expression_count += 1;
+        }
     }
 
     println!(
-        "readability: checked {checked} Rust file(s), {count} spacing issue(s){}, {declaration_count} declaration issue(s)",
+        "readability: checked {checked} Rust file(s), {count} spacing issue(s){}, {declaration_count} declaration issue(s), {expression_count} expression issue(s)",
         if mode == "--fix" { " fixed" } else { "" }
     );
 
-    if (count > 0 || declaration_count > 0) && mode == "--staged" {
+    if (count > 0 || declaration_count > 0 || expression_count > 0) && mode == "--staged" {
         eprintln!(
-            "readability: run cargo readability --fix <path> for spacing, correct declaration issues, review the diff, then stage the intended changes"
+            "readability: run cargo readability --fix <path> for spacing, correct declaration and expression issues, review the diff, then stage the intended changes"
         );
     }
 
-    Ok((count == 0 || mode == "--fix") && declaration_count == 0)
+    Ok((count == 0 || mode == "--fix") && declaration_count == 0 && expression_count == 0)
+}
+
+fn report_expression(path: &Path, issue: &expressions::Issue) {
+    println!(
+        "{}:{}:{}: expressions/{}: {}",
+        path.display(),
+        issue.span.start().line,
+        issue.span.start().column + 1,
+        issue.rule,
+        issue.message
+    );
 }
 
 fn parse(path: &Path, source: &str) -> Result<syn::File, Box<dyn Error>> {

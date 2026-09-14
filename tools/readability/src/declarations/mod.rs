@@ -1,3 +1,5 @@
+pub(crate) mod imports;
+
 #[cfg(test)]
 mod tests;
 
@@ -31,9 +33,15 @@ pub(crate) struct Issue {
 pub(crate) fn group(item: &Item) -> Option<Group> {
     let (is_use, visibility) = match item {
         Item::Use(item) => (true, &item.vis),
+
         Item::Mod(item) if item.ident.to_string().contains("test") => {
             return item.content.is_none().then_some(Group::TestMod);
         }
+
+        Item::Mod(item) if item.content.is_some() && matches!(item.vis, Visibility::Inherited) => {
+            return None;
+        }
+
         Item::Mod(item) => (false, &item.vis),
         _ => return None,
     };
@@ -173,7 +181,7 @@ fn module_header(module: &ItemMod) -> Span {
 }
 
 fn inspect_module(items: &[Item]) -> Vec<Issue> {
-    let mut issues = Vec::new();
+    let mut issues = imports::inspect(items);
     let mut body = None;
     let mut highest: Option<(Group, Span)> = None;
 
@@ -199,13 +207,18 @@ fn inspect_module(items: &[Item]) -> Vec<Issue> {
         }
 
         let Some(current) = group(item) else {
-            // Only the leading token identifies where the header ended. Editing
-            // a function body must not expose an unrelated old header issue.
+            // Body edits must not expose unrelated old header issues. Module
+            // declarations include attributes because a bodyless module can
+            // become inline without changing its leading attribute.
             body.get_or_insert_with(|| {
-                item.to_token_stream()
-                    .into_iter()
-                    .next()
-                    .map_or(item.span(), |token| token.span())
+                if let Item::Mod(module) = item {
+                    module_header(module)
+                } else {
+                    item.to_token_stream()
+                        .into_iter()
+                        .next()
+                        .map_or(item.span(), |token| token.span())
+                }
             });
 
             continue;

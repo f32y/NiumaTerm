@@ -9,21 +9,44 @@ use proc_macro2::{Delimiter, Span, TokenStream, TokenTree};
 use quote::ToTokens;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
-use syn::{AttrStyle, Attribute, Expr, Item, Stmt};
+use syn::{AttrStyle, Attribute, Expr, Item, Pat, Stmt};
 
-use crate::declarations::group;
+use crate::declarations::{group, imports};
 
 pub(crate) type Issues = BTreeMap<usize, Issue>;
 
 pub(crate) struct Issue {
     pub(crate) rule: &'static str,
     pub(crate) through_line: usize,
+    edit: BlankLineEdit,
+}
+
+#[derive(Clone, Copy)]
+enum BlankLineEdit {
+    Insert,
+    Remove,
+}
+
+impl Issue {
+    pub(crate) fn message(&self) -> &'static str {
+        match self.edit {
+            BlankLineEdit::Insert => "missing blank line",
+            BlankLineEdit::Remove => "unexpected blank line",
+        }
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct Options {
+    pub(crate) match_arms: bool,
+    pub(crate) enum_variants: bool,
 }
 
 struct Spacing<'a> {
     lines: Vec<&'a str>,
-    insertions: Issues,
+    issues: Issues,
     block_depth: usize,
+    options: &'a Options,
 }
 
 impl Spacing<'_> {
@@ -35,6 +58,7 @@ impl Spacing<'_> {
             .filter(|attribute| matches!(attribute.style, AttrStyle::Inner(_)))
         {
             let start = attribute.span().start();
+
             let line_doc = attribute.path().is_ident("doc")
                 && self.lines[start.line - 1]
                     .chars()
@@ -81,10 +105,61 @@ impl Spacing<'_> {
             return;
         }
 
-        self.insertions.entry(end).or_insert(Issue {
+        self.issues.entry(end).or_insert(Issue {
             rule: reason,
             through_line: start - 1,
+            edit: BlankLineEdit::Insert,
         });
+    }
+
+    fn compact(&mut self, previous: Span, next: Span, rule: &'static str) {
+        let end = previous.end();
+        let start = next.start();
+        let mut comment_depth = 0;
+
+        // Only the gap is scanned, so literal contents inside either item stay
+        // untouched. Block comments can start on the previous item's last line
+        // and contain nested comments and blank lines that must be preserved.
+        for index in end.line - 1..start.line.saturating_sub(1) {
+            let line = self.lines[index];
+
+            if index >= end.line && comment_depth == 0 && line.trim().is_empty() {
+                self.issues.insert(
+                    index,
+                    Issue {
+                        rule,
+                        through_line: index + 1,
+                        edit: BlankLineEdit::Remove,
+                    },
+                );
+            }
+
+            let mut bytes = if index == end.line - 1 {
+                let offset = line
+                    .char_indices()
+                    .nth(end.column)
+                    .map_or(line.len(), |(offset, _)| offset);
+
+                &line.as_bytes()[offset..]
+            } else {
+                line.as_bytes()
+            };
+
+            while bytes.len() >= 2 {
+                match &bytes[..2] {
+                    b"//" if comment_depth == 0 => break,
+                    b"/*" => {
+                        comment_depth += 1;
+                        bytes = &bytes[2..];
+                    }
+                    b"*/" if comment_depth > 0 => {
+                        comment_depth -= 1;
+                        bytes = &bytes[2..];
+                    }
+                    _ => bytes = &bytes[1..],
+                }
+            }
+        }
     }
 
     fn items(&mut self, items: &[Item]) {
@@ -96,6 +171,15 @@ impl Spacing<'_> {
                 && a_group != b_group
             {
                 self.separate(a.span(), b.span(), "declaration-groups");
+
+                continue;
+            }
+
+            if self.block_depth == 0
+                && let (Some(a_group), Some(b_group)) = (imports::group(a), imports::group(b))
+                && a_group != b_group
+            {
+                self.separate(a.span(), b.span(), "import-groups");
 
                 continue;
             }
@@ -155,7 +239,10 @@ fn flow(expr: &Expr) -> bool {
 fn assertion(stmt: &Stmt) -> bool {
     let name = match stmt {
         Stmt::Macro(x) => x.mac.path.segments.last().map(|s| s.ident.to_string()),
-        Stmt::Expr(Expr::Macro(x), _) => x.mac.path.segments.last().map(|s| s.ident.to_string()),
+        Stmt::Expr(expr, _) => match unwrapped(expr) {
+            Expr::Macro(x) => x.mac.path.segments.last().map(|s| s.ident.to_string()),
+            _ => None,
+        },
         _ => None,
     };
 
@@ -175,6 +262,30 @@ fn stmt_flow(stmt: &Stmt) -> bool {
             .as_ref()
             .is_some_and(|init| init.diverge.is_some() || flow(&init.expr)),
 
+        _ => false,
+    }
+}
+
+fn mutable_binding(pattern: &Pat) -> bool {
+    match pattern {
+        Pat::Ident(pattern) => {
+            pattern.mutability.is_some()
+                || pattern
+                    .subpat
+                    .as_ref()
+                    .is_some_and(|(_, pattern)| mutable_binding(pattern))
+        }
+        Pat::Or(pattern) => pattern.cases.iter().any(mutable_binding),
+        Pat::Paren(pattern) => mutable_binding(&pattern.pat),
+        Pat::Reference(pattern) => mutable_binding(&pattern.pat),
+        Pat::Slice(pattern) => pattern.elems.iter().any(mutable_binding),
+        Pat::Struct(pattern) => pattern
+            .fields
+            .iter()
+            .any(|field| mutable_binding(&field.pat)),
+        Pat::Tuple(pattern) => pattern.elems.iter().any(mutable_binding),
+        Pat::TupleStruct(pattern) => pattern.elems.iter().any(mutable_binding),
+        Pat::Type(pattern) => mutable_binding(&pattern.pat),
         _ => false,
     }
 }
@@ -204,8 +315,10 @@ fn boundary(a: &Stmt, b: &Stmt, last: bool) -> Option<&'static str> {
         return Some("control-flow");
     }
 
-    if assertion(a) != assertion(b) {
-        return Some("assertions");
+    match (assertion(a), assertion(b)) {
+        (true, true) => return None,
+        (true, false) | (false, true) => return Some("assertions"),
+        (false, false) => {}
     }
 
     if let Stmt::Expr(expr, semi) = b
@@ -218,7 +331,11 @@ fn boundary(a: &Stmt, b: &Stmt, last: bool) -> Option<&'static str> {
     }
 
     match (a, b) {
-        (Stmt::Local(_), Stmt::Local(_)) => {
+        (Stmt::Local(previous), Stmt::Local(next)) => {
+            if mutable_binding(&previous.pat) != mutable_binding(&next.pat) {
+                return Some("binding-mutability");
+            }
+
             if multiline(a) || multiline(b) {
                 return Some("multiline-binding");
             }
@@ -228,7 +345,7 @@ fn boundary(a: &Stmt, b: &Stmt, last: bool) -> Option<&'static str> {
         _ => {}
     }
 
-    if (multiline(a) || multiline(b)) && !(assertion(a) && assertion(b)) {
+    if multiline(a) || multiline(b) {
         return Some("multiline-statement");
     }
 
@@ -250,7 +367,13 @@ fn boundary(a: &Stmt, b: &Stmt, last: bool) -> Option<&'static str> {
         }
     }
 
-    None
+    let is_call = |statement: &Stmt| matches!(statement, Stmt::Expr(expr, _) if matches!(unwrapped(expr), Expr::Call(_) | Expr::MethodCall(_)));
+
+    if is_call(a) || is_call(b) {
+        Some("call-and-statement")
+    } else {
+        None
+    }
 }
 
 impl<'ast> Visit<'ast> for Spacing<'_> {
@@ -435,10 +558,14 @@ impl<'ast> Visit<'ast> for Spacing<'_> {
         for pair in expr.arms.windows(2) {
             let (a, b) = (&pair[0], &pair[1]);
 
-            if a.span().start().line != a.span().end().line
-                || b.span().start().line != b.span().end().line
-            {
-                self.separate(a.span(), b.span(), "match-arms");
+            if self.options.match_arms {
+                if a.span().start().line != a.span().end().line
+                    || b.span().start().line != b.span().end().line
+                {
+                    self.separate(a.span(), b.span(), "match-arms");
+                }
+            } else {
+                self.compact(a.span(), b.span(), "match-arm-blank-lines");
             }
         }
 
@@ -463,16 +590,20 @@ impl<'ast> Visit<'ast> for Spacing<'_> {
         for pair in variants.windows(2) {
             let (a, b) = (pair[0], pair[1]);
 
-            if documented(&a.attrs)
-                || documented(&b.attrs)
-                || a.attrs
-                    .iter()
-                    .chain(&b.attrs)
-                    .any(|attr| attr.path().is_ident("error"))
-                || a.fields.span().start().line != a.fields.span().end().line
-                || b.fields.span().start().line != b.fields.span().end().line
-            {
-                self.separate(a.span(), b.span(), "enum-variants");
+            if self.options.enum_variants {
+                if documented(&a.attrs)
+                    || documented(&b.attrs)
+                    || a.attrs
+                        .iter()
+                        .chain(&b.attrs)
+                        .any(|attr| attr.path().is_ident("error"))
+                    || a.fields.span().start().line != a.fields.span().end().line
+                    || b.fields.span().start().line != b.fields.span().end().line
+                {
+                    self.separate(a.span(), b.span(), "enum-variants");
+                }
+            } else {
+                self.compact(a.span(), b.span(), "enum-variant-blank-lines");
             }
         }
 
@@ -490,16 +621,17 @@ fn skips_formatting(attrs: &[Attribute]) -> bool {
     })
 }
 
-pub(crate) fn inspect(source: &str, parsed: &syn::File) -> Issues {
+pub(crate) fn inspect(source: &str, parsed: &syn::File, options: &Options) -> Issues {
     let mut spacing = Spacing {
         lines: source.lines().collect(),
-        insertions: BTreeMap::new(),
+        issues: BTreeMap::new(),
         block_depth: 0,
+        options,
     };
 
     spacing.visit_file(parsed);
 
-    spacing.insertions
+    spacing.issues
 }
 
 pub(crate) fn apply(source: &str, issues: &Issues) -> Result<String, Box<dyn Error>> {
@@ -507,8 +639,16 @@ pub(crate) fn apply(source: &str, issues: &Issues) -> Result<String, Box<dyn Err
     let mut newline = "\n";
 
     for (index, line) in source.split_inclusive('\n').enumerate() {
-        if issues.contains_key(&index) {
-            modified.push_str(newline);
+        match issues.get(&index).map(|issue| issue.edit) {
+            Some(BlankLineEdit::Insert) => modified.push_str(newline),
+            Some(BlankLineEdit::Remove) => {
+                if !line.trim().is_empty() {
+                    return Err("cannot remove a nonblank line; file left untouched".into());
+                }
+
+                continue;
+            }
+            None => {}
         }
 
         modified.push_str(line);
@@ -519,7 +659,7 @@ pub(crate) fn apply(source: &str, issues: &Issues) -> Result<String, Box<dyn Err
     let after = syn::parse_file(&modified.replace("\r\n", "\n"))?;
 
     if !same_tokens(before.to_token_stream(), after.to_token_stream()) {
-        return Err("inserting blank lines would change Rust tokens; file left untouched".into());
+        return Err("changing blank lines would change Rust tokens; file left untouched".into());
     }
 
     Ok(modified)

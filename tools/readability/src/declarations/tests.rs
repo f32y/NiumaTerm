@@ -214,6 +214,7 @@ fn allows_inline_test_modules_after_code_but_checks_their_contents() {
 
     let source =
         "fn run() {}\n\n#[cfg(test)]\nmod tests {\n    fn check() {}\n\n    use std::fmt;\n}\n";
+
     let issues = inspect(&syn::parse_file(source).unwrap().items);
 
     assert_eq!(issues.len(), 1);
@@ -226,6 +227,36 @@ fn allows_inline_test_modules_after_code_but_checks_their_contents() {
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0].rule, "header");
     assert_eq!(issues[0].span.start().line, 3);
+}
+
+#[test]
+fn allows_private_inline_modules_among_body_items_after_imports() {
+    let source = "mod external;\n\nuse std::fmt;\n\nmod first {\n    use std::io;\n\n    fn run() {}\n\n    mod nested {}\n}\n\nfn run() {}\n\n#[allow(dead_code)]\nmod second {}\n\nconst N: u8 = 0;\n";
+
+    assert!(inspect(&syn::parse_file(source).unwrap().items).is_empty());
+
+    for visibility in ["pub ", "pub(crate) ", "pub(super) "] {
+        let source = format!("fn run() {{}}\n\n{visibility}mod inner {{}}\n");
+        let issues = inspect(&syn::parse_file(&source).unwrap().items);
+
+        assert_eq!(issues.len(), 1, "{source}");
+        assert_eq!(issues[0].rule, "header", "{source}");
+    }
+}
+
+#[test]
+fn rejects_imports_after_private_inline_modules_and_checks_nested_headers() {
+    for source in [
+        "mod sys {}\n\nuse std::fmt;\n",
+        "#[allow(dead_code)]\nmod sys {\n    fn run() {}\n}\n\nuse std::fmt;\n",
+        "mod outer {\n    mod sys {}\n\n    use std::fmt;\n}\n",
+        "use std::fmt;\n\nmod sys {}\n\nuse serde::Serialize;\n",
+    ] {
+        let issues = inspect(&syn::parse_file(source).unwrap().items);
+
+        assert_eq!(issues.len(), 1, "{source}");
+        assert_eq!(issues[0].rule, "header", "{source}");
+    }
 }
 
 #[test]
@@ -275,7 +306,7 @@ fn permits_paths_only_on_modules_with_their_own_explicit_test_cfg() {
     assert_eq!(issues.len(), 2);
     assert!(issues.iter().all(|issue| issue.rule == "visibility"));
 
-    let source = "#[cfg(test)]\n#[path = \"outer\"]\nmod fixtures {\n    #[path = \"inner.rs\"]\n    mod inner;\n}\n\n#[path = \"sibling.rs\"]\nmod sibling;\n";
+    let source = "#[cfg(test)]\n#[path = \"outer\"]\npub(crate) mod fixtures {\n    #[path = \"inner.rs\"]\n    mod inner;\n}\n\n#[path = \"sibling.rs\"]\nmod sibling;\n";
     let issues = inspect(&syn::parse_file(source).unwrap().items);
 
     assert_eq!(issues.len(), 2);
