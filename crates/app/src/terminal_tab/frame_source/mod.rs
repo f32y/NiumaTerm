@@ -70,16 +70,7 @@ impl TerminalFrameSource {
             wake.signal(kind);
         });
 
-        // The initial grid is always the fixed metrics size; the real
-        // dimensions arrive with the first layout pass, so a caller-supplied
-        // size would only be overwritten.
-        let config = TerminalSessionConfig {
-            cols: metrics::COLS,
-            rows: metrics::ROWS,
-            ..launch
-        };
-
-        Self::new(config, surface_id, Some(wake_sender), colors)
+        Self::new(launch, surface_id, Some(wake_sender), colors)
     }
 
     pub(super) fn attach(
@@ -106,6 +97,10 @@ impl TerminalFrameSource {
             images,
             grid_size,
         })
+    }
+
+    pub(super) fn grid_size(&self) -> (u16, u16) {
+        self.grid_size
     }
 
     pub(super) fn resize_for_content(

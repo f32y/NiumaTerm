@@ -31,6 +31,7 @@ fn session_state() -> SessionState {
                 agent_profile: None,
                 team_room: None,
                 panes: None,
+                grid_size: None,
             }],
         }],
     }

@@ -104,6 +104,8 @@ pub struct TerminalPane {
 
 pub struct AgentInterrupted;
 
+pub struct TerminalGridResized;
+
 struct TextCopiedNotification;
 
 struct DesktopClipboard;
@@ -122,6 +124,8 @@ impl ClipboardAccess for DesktopClipboard {
 
 impl EventEmitter<AgentInterrupted> for TerminalPane {}
 
+impl EventEmitter<TerminalGridResized> for TerminalPane {}
+
 impl TerminalPane {
     pub fn spawn(
         cx: &mut impl AppContext,
@@ -130,10 +134,24 @@ impl TerminalPane {
     ) -> Result<Entity<Self>, String> {
         let (wake, wake_rx) = wake::wake_channel();
 
+        // ConPTY dimensions must fit its signed coordinates. Missing or invalid
+        // saved grids use the initial default until layout supplies a size.
+        let (cols, rows) = launch
+            .restorable
+            .grid_size
+            .filter(|&(cols, rows)| {
+                (1..=i16::MAX as u16).contains(&cols) && (1..=i16::MAX as u16).contains(&rows)
+            })
+            .unwrap_or((metrics::COLS, metrics::ROWS));
+
         let source = TerminalFrameSource::for_gpui(
             wake.clone(),
             surface_id,
-            launch.config,
+            TerminalSessionConfig {
+                cols,
+                rows,
+                ..launch.config
+            },
             active_colors(),
         )?;
 
@@ -287,6 +305,7 @@ impl TerminalPane {
             bounds.size.height.as_f32(),
             cell,
         ) {
+            cx.emit(TerminalGridResized);
             cx.notify();
         }
     }
@@ -327,6 +346,8 @@ impl TerminalPane {
 
     pub fn tab_state(&self) -> TabState {
         let mut state = self.identity.restorable.clone();
+
+        state.grid_size = Some(self.model.source.grid_size());
 
         if let Some(cwd) = self.model.source.session.current_directory() {
             state.cwd = Some(cwd);

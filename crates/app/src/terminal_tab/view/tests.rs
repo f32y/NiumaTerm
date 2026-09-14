@@ -2,15 +2,18 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui::{
-    AppContext, Entity, EntityInputHandler, KeyDownEvent, KeyUpEvent, Keystroke, ListAlignment,
-    Modifiers, TestAppContext, VisualTestContext,
+    AppContext, Bounds, Entity, EntityInputHandler, KeyDownEvent, KeyUpEvent, Keystroke,
+    ListAlignment, Modifiers, TestAppContext, VisualTestContext, point, px, size,
 };
 use nmt_agent::AgentRoute;
 use nmt_config::local_state::TabState;
 
+use crate::terminal_tab::metrics::CellMetrics;
 use crate::terminal_tab::pane_model::test_session::{assert_input, controller};
 use crate::terminal_tab::view::list_state::BlockListState;
-use crate::terminal_tab::view::{AgentInterrupted, PaneIdentity, TerminalPane};
+use crate::terminal_tab::view::{
+    AgentInterrupted, PaneIdentity, TerminalGridResized, TerminalPane,
+};
 use crate::terminal_tab::wake::wake_channel;
 
 fn pane(cx: &mut VisualTestContext) -> Entity<TerminalPane> {
@@ -30,6 +33,138 @@ fn pane(cx: &mut VisualTestContext) -> Entity<TerminalPane> {
         image_releases_attached: false,
         block_list: BlockListState::new(ListAlignment::Top),
     })
+}
+
+#[gpui::test]
+fn layout_saves_the_accepted_grid_and_emits_only_on_resize(cx: &mut TestAppContext) {
+    let cx = cx.add_empty_window();
+    let pane = pane(cx);
+    let changes = Rc::new(Cell::new(0));
+    let observed = changes.clone();
+
+    cx.update(|_, cx| {
+        cx.subscribe(&pane, move |_, _: &TerminalGridResized, _| {
+            observed.set(observed.get() + 1);
+        })
+        .detach();
+    });
+
+    for (cols, rows, expected_changes) in [(40, 6, 0), (132, 43, 1), (132, 43, 1)] {
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.set_content_bounds(
+                    Bounds {
+                        origin: point(px(0.0), px(0.0)),
+                        size: size(px(cols as f32 * 8.0), px(rows as f32 * 18.0)),
+                    },
+                    CellMetrics {
+                        width_px: 8.0,
+                        height_px: 18.0,
+                    },
+                    cx,
+                );
+
+                assert_eq!(pane.tab_state().grid_size, Some((cols, rows)));
+            });
+        });
+
+        cx.run_until_parked();
+
+        assert_eq!(changes.get(), expected_changes);
+    }
+}
+
+#[cfg(windows)]
+#[gpui::test]
+fn restored_grid_reaches_the_shell_before_its_first_output(cx: &mut TestAppContext) {
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use nmt_terminal::session::TerminalSessionConfig;
+
+    use crate::terminal_tab::settings::TerminalSettings;
+    use crate::terminal_tab::view::TerminalLaunch;
+
+    cx.update(|cx| {
+        cx.set_global(TerminalSettings {
+            input_style: Default::default(),
+            cursor_shape: Default::default(),
+            manage_subprocess_job: false,
+            command_blocks: false,
+            smooth_wheel: false,
+            scroll_to_bottom_when_typing: true,
+            newline_shortcut: Default::default(),
+            font_family: "Consolas".into(),
+            font_size: 14.0,
+            line_height: 1.2,
+            background_opacity: 1.0,
+            corner_radius: px(0.0),
+            font_fallbacks: Default::default(),
+        });
+    });
+
+    for (saved, expected) in [
+        (Some((132, 43)), (132, 43)),
+        (None, (100, 30)),
+        (Some((0, 30)), (100, 30)),
+        (Some((u16::MAX, 30)), (100, 30)),
+    ] {
+        let pane = cx.update(|cx| {
+            TerminalPane::spawn(cx, 1, TerminalLaunch {
+                config: TerminalSessionConfig {
+                    shell: Some("pwsh.exe".into()),
+                    args: vec![
+                        "-NoLogo".into(), "-NoProfile".into(), "-NoExit".into(),
+                        "-Command".into(),
+                        "$Host.UI.RawUI.WindowTitle = ('NMT_GRID_{0}_{1}' -f [Console]::WindowWidth, [Console]::WindowHeight)".into(),
+                    ],
+                    ..TerminalSessionConfig::default()
+                },
+                restorable: TabState { grid_size: saved, ..TabState::default() },
+                profile_name: "Startup grid test".into(),
+                agent_route: AgentRoute::parse("startup-grid-test").unwrap(),
+            }).unwrap()
+        });
+
+        let expected_title = format!("NMT_GRID_{}_{}", expected.0, expected.1);
+        let deadline = Instant::now() + Duration::from_secs(10);
+
+        loop {
+            let title = cx.update(|cx| pane.read(cx).terminal_title());
+
+            if title == expected_title {
+                break;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "shell reported {title:?}, expected {expected_title}"
+            );
+
+            thread::sleep(Duration::from_millis(5));
+        }
+
+        cx.update(|cx| {
+            pane.update(cx, |pane, _| {
+                assert_eq!(pane.tab_state().grid_size, Some(expected));
+                assert_eq!(
+                    pane.model
+                        .source
+                        .session
+                        .with_render_buffer(|buffer| (buffer.cols(), buffer.rows())),
+                    (expected.0 as usize, expected.1 as usize)
+                );
+                assert!(!pane.model.source.resize_for_content(
+                    expected.0 as f32 * 8.0,
+                    expected.1 as f32 * 18.0,
+                    CellMetrics {
+                        width_px: 8.0,
+                        height_px: 18.0
+                    },
+                ));
+            });
+        });
+    }
 }
 
 #[gpui::test]

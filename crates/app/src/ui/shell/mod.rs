@@ -77,7 +77,7 @@ use app::agent_tab::execution::AgentSession;
 use app::agent_tab::team::{TeamPane, TeamRuntime};
 use app::agent_tab::{AgentPane, AgentPaneEvent, RecoveryIdentity};
 use app::terminal_tab::session::HostEvent;
-use app::terminal_tab::view::{AgentInterrupted, TerminalPane};
+use app::terminal_tab::view::{AgentInterrupted, TerminalGridResized, TerminalPane};
 use dirs::home_dir;
 use gpui::prelude::*;
 use gpui::{
@@ -2578,13 +2578,17 @@ impl Shell {
         }
     }
 
-    /// Observe a pane so its host events reach the shell pump even when the tab
-    /// is not visible (the render-damage/host-event split from the design).
+    /// Keep background host events and accepted grid changes in the saved session.
     pub(crate) fn watch_pane(pane: &Entity<TerminalPane>, cx: &mut Context<Self>) {
         cx.observe(pane, |this, pane, cx| this.on_pane_notified(pane, cx))
             .detach();
 
         cx.subscribe(pane, Self::on_agent_interrupted).detach();
+
+        cx.subscribe(pane, |this, _, _: &TerminalGridResized, cx| {
+            this.sync_session_memory(cx);
+        })
+        .detach();
     }
 
     fn on_agent_interrupted(

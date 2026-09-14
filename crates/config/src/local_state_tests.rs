@@ -54,6 +54,7 @@ fn save_load_roundtrip_and_legacy_file_defaults() {
                                 agent_profile: None,
                                 team_room: None,
                                 panes: None,
+                                grid_size: Some((132, 43)),
                             },
                             TabState {
                                 team_room: Some("40000000-0000-4000-8000-000000000000".into()),
@@ -257,6 +258,7 @@ fn pane_layout_roundtrips_and_old_snapshots_load_without_it() {
         agent: None,
         agent_profile: None,
         team_room: None,
+        grid_size: Some((80, 36)),
         panes: Some(PaneNodeState::Split {
             axis: PaneSplitAxis::Horizontal,
             ratios: vec![0.6, 0.4],
@@ -265,6 +267,7 @@ fn pane_layout_roundtrips_and_old_snapshots_load_without_it() {
                     shell: Some("pwsh.exe".into()),
                     args: vec!["-NoLogo".into()],
                     cwd: Some("C:/a".into()),
+                    grid_size: Some((80, 36)),
                 },
                 PaneNodeState::Split {
                     axis: PaneSplitAxis::Vertical,
@@ -274,11 +277,13 @@ fn pane_layout_roundtrips_and_old_snapshots_load_without_it() {
                             shell: None,
                             args: vec![],
                             cwd: Some("C:/b".into()),
+                            grid_size: Some((53, 18)),
                         },
                         PaneNodeState::Leaf {
                             shell: None,
                             args: vec![],
                             cwd: None,
+                            grid_size: None,
                         },
                     ],
                 },
@@ -332,6 +337,7 @@ fn pane_layout_roundtrips_and_old_snapshots_load_without_it() {
     save_to(&path, &flat).unwrap();
 
     assert!(!fs::read_to_string(&path).unwrap().contains("panes"));
+    assert!(!fs::read_to_string(&path).unwrap().contains("grid_size"));
 
     // A pre-pane-layout snapshot (no `panes` key) loads with `panes: None`.
     fs::write(
@@ -355,6 +361,7 @@ shell = "pwsh.exe"
 
     assert_eq!(tab.name.as_deref(), Some("Tab 1"));
     assert_eq!(tab.panes, None);
+    assert_eq!(tab.grid_size, None);
     assert!(!loaded.windows[0].session.as_ref().unwrap().workspaces[0].pinned);
 
     let _ = fs::remove_dir_all(&dir);

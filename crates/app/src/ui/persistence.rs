@@ -153,6 +153,7 @@ fn pane_node_state(
                 shell: state.shell,
                 args: state.args,
                 cwd: state.cwd,
+                grid_size: state.grid_size,
             }
         }
 
@@ -523,7 +524,12 @@ fn restore_pane_node(
     cx: &mut Context<Shell>,
 ) -> Option<PaneNode<Entity<TerminalPane>>> {
     match node {
-        PaneNodeState::Leaf { shell, args, cwd } => {
+        PaneNodeState::Leaf {
+            shell,
+            args,
+            cwd,
+            grid_size,
+        } => {
             let surface_id = Shell::alloc_id(next_id);
 
             let mut launch = TabState {
@@ -536,6 +542,7 @@ fn restore_pane_node(
                 agent: None,
                 agent_profile: None,
                 panes: None,
+                grid_size: *grid_size,
             };
 
             resolve_restored_launch(&mut launch, cx.global::<AppSettings>());
@@ -807,6 +814,7 @@ mod launch_resolution_tests {
             agent_profile: None,
             team_room: None,
             panes: None,
+            grid_size: None,
         }
     }
 

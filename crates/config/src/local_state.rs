@@ -143,6 +143,11 @@ pub struct TabState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub team_room: Option<String>,
 
+    /// Last terminal grid, in columns and rows. Restoring the grid before
+    /// spawning the shell avoids a resize during its initial prompt rendering.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid_size: Option<(u16, u16)>,
+
     /// Split-pane layout for a multi-pane tab. Absent for single-pane tabs,
     /// which keep the flat fields above as their whole format (so snapshots
     /// without splits stay readable by older builds). Declared last: TOML
@@ -162,6 +167,8 @@ pub enum PaneNodeState {
         args: Vec<String>,
         #[serde(default)]
         cwd: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        grid_size: Option<(u16, u16)>,
     },
 
     #[serde(rename = "split")]
