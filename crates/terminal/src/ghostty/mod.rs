@@ -322,7 +322,7 @@ impl GhosttyTerminal {
     /// `terminal.screens.active.cursor.y` via the engine — unlike
     /// `snapshot().cursor.y` (render-state, **viewport-relative**), this stays valid
     /// when the viewport is scrolled into history or has blank rows below the prompt.
-    /// Used to realign ConPTY resize echoes to the true prompt row. `None` on error.
+    /// Returns `None` if the engine cannot provide the position.
     pub fn active_cursor_row(&self) -> Option<u16> {
         let mut out: u16 = 0;
 

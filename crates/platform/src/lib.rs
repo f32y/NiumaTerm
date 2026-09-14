@@ -7,13 +7,6 @@ pub use crate::windows::*;
 
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
-/// ConPTY's resize behaviour, recognized from the byte stream alone.
-///
-/// The quirk is Windows-only, and `USES_CONPTY` tells callers when it
-/// applies, but the analysis is plain stream parsing — keeping it out of the
-/// Windows backend lets the shared PTY read loop compile on every platform
-/// without splitting its control flow across `cfg` arms.
-pub mod conpty_realign;
 pub mod library;
 
 #[cfg(windows)]

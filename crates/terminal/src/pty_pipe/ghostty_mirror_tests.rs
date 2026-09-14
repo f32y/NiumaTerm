@@ -1,13 +1,8 @@
-use std::time::Instant;
-
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 use std::{io, sync, time};
 
 use nmt_config::colors::Colors;
-use nmt_platform::conpty_realign::{
-    contains_csi_erase_display, max_cup_row_col, realign_scroll_rows,
-};
 use nmt_platform::{EventedPty, ProcessReadWrite, WinsizeBuilder};
 use parking_lot::Mutex;
 
@@ -55,81 +50,101 @@ fn render_buffer_row_text(buffer: &RenderBuffer, y: usize) -> String {
         .to_string()
 }
 
-#[test]
-fn realign_scroll_rows_scrolls_up_to_meet_conpty_prompt() {
-    // Ghostty keeps the prompt on row 17 while ConPTY repaints it on row 1;
-    // (CUP row 2, last CUP). N = 17 − 1 = 16, R_conpty = 1. Repaint fits 80x24.
-    let repaint = b"\x1b[2;18Hdir\x1b[2;21H";
+fn resized_pipe(initial: &[u8]) -> PtyPipe<FakePty, VoidListener> {
+    let mut machine = PtyPipe::new(
+        Arc::new(FrameStore::new(RenderBuffer::new(80, 24))),
+        Arc::new(AtomicU32::new(0)),
+        FakePty {
+            reader: FakeReader { data: Vec::new() },
+            writer: FakeWriter::default(),
+        },
+        VoidListener {},
+        &SessionOptions {
+            cols: 80,
+            rows: 24,
+            route_id: 0,
+            colors: Colors::default(),
+            cursor_shape: ansi::CursorShape::Block,
+            scrollback_lines: 1000,
+            engine_blocks: false,
+            terminal_responses: true,
+            output_sink: None,
+        },
+    )
+    .unwrap();
 
-    assert_eq!(
-        realign_scroll_rows(repaint, 17, 80, 24, 80, 24),
-        Some((16, 1))
-    );
+    machine.ghostty.write_vt(initial);
+
+    machine.on_resize(WinsizeBuilder {
+        cols: 80,
+        rows: 25,
+        width: 640,
+        height: 400,
+    });
+
+    machine
 }
 
 #[test]
-fn realign_scroll_rows_scrolls_down_when_conpty_prompt_is_lower() {
-    // Ghostty's prompt sits on row 1 while ConPTY repaints it on row 4 (CUP row
-    // 5): scroll down 3 so the stale copy cannot stay above the repaint.
-    let repaint = b"\x1b[5;1H\x1b[J>\x1b[5;2H";
+fn resize_reads_preserve_repaint_across_every_split() {
+    let repaint = b"\x1b[H\x1b[2JHEADER\x1b[2;1H>";
+    let mut baseline = resized_pipe(b"\x1b[18;1H>");
 
-    assert_eq!(
-        realign_scroll_rows(repaint, 1, 80, 24, 80, 24),
-        Some((-3, 4))
-    );
+    baseline.ghostty.write_vt(repaint);
+
+    let expected = baseline.ghostty.format_text(None, false, true).unwrap();
+
+    for split in 1..repaint.len() {
+        let mut machine = resized_pipe(b"\x1b[18;1H>");
+
+        machine.on_pty_chunk(&repaint[..split]);
+        machine.on_pty_chunk(&repaint[split..]);
+
+        let snapshot = machine.ghostty.snapshot().unwrap();
+
+        assert_eq!(snapshot_row_text(&snapshot, 0), "HEADER", "split={split}");
+        assert_eq!(snapshot_row_text(&snapshot, 1), ">", "split={split}");
+        assert_eq!(machine.ghostty.active_cursor_row(), Some(1));
+        assert_eq!(
+            machine.ghostty.format_text(None, false, true).unwrap(),
+            expected,
+            "split={split} changed screen or history"
+        );
+    }
 }
 
 #[test]
-fn realign_scroll_rows_uses_last_cup_for_multirow_prompt() {
-    // Multi-row wrapped prompt: first CUP row 10 (top), last CUP row 11 (cursor).
-    // Anchoring on the LAST CUP (row 11 → R_conpty 10) matches R_ghostty (cursor
-    // row 22), so N = 22 − 10 = 12 — not 13, which the first CUP (row 10) would give.
-    let repaint = b"\x1b[10;22Hxxx\x1b[11;6H";
+fn resize_reads_preserve_bottom_text_during_partial_erase() {
+    let mut machine = resized_pipe(b"\x1b[24;1HBOTTOM\x1b[2;1H>");
+    let input = b"\x1b[1J\x1b[5;1Hnew";
+    let forwarded = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&forwarded);
 
-    assert_eq!(
-        realign_scroll_rows(repaint, 22, 90, 40, 90, 40),
-        Some((12, 10))
-    );
+    machine.set_output_sink(move |bytes| sink.lock().extend_from_slice(&bytes));
+
+    machine.on_pty_chunk(input);
+
+    let snapshot = machine.ghostty.snapshot().unwrap();
+
+    assert_eq!(snapshot_row_text(&snapshot, 23), "BOTTOM");
+    assert_eq!(snapshot_row_text(&snapshot, 4), "new");
+    assert_eq!(&*forwarded.lock(), input);
 }
 
 #[test]
-fn realign_scroll_rows_none_when_already_aligned() {
-    let repaint = b"\x1b[2;18Hdir\x1b[2;21H";
+fn resize_reads_leave_completed_repaint_and_later_echo_in_place() {
+    let mut machine = resized_pipe(b"\x1b[1;1HHISTORY\x1b[18;1H>");
 
-    assert_eq!(realign_scroll_rows(repaint, 1, 80, 24, 80, 24), None);
-}
+    machine.on_pty_chunk(b"\x1b[18;1H\x1b[J>");
+    machine.on_pty_chunk(b"\x1b[19;1Hresult");
+    machine.on_pty_chunk(b"\r\x1b[6CXYZ");
 
-#[test]
-fn realign_scroll_rows_none_on_resize_mismatch() {
-    let repaint = b"\x1b[2;18Hdir\x1b[2;21H";
+    let snapshot = machine.ghostty.snapshot().unwrap();
 
-    // engine size moved past the latch → repaint answers a different resize.
-    assert_eq!(realign_scroll_rows(repaint, 17, 80, 24, 100, 24), None);
-
-    // repaint addresses col 90, beyond the latched 80 cols → different resize.
-    let wide = b"\x1b[2;90Hx\x1b[2;90H";
-
-    assert_eq!(realign_scroll_rows(wide, 17, 80, 24, 80, 24), None);
-}
-
-#[test]
-fn realign_scroll_rows_none_without_cup() {
-    assert_eq!(realign_scroll_rows(b"\x1b[?25l", 17, 80, 24, 80, 24), None);
-}
-
-#[test]
-fn max_cup_row_col_reports_maxima() {
-    assert_eq!(max_cup_row_col(b"\x1b[2;18Hx\x1b[11;6H"), (11, 18));
-    assert_eq!(max_cup_row_col(b"no cup here"), (0, 0));
-}
-
-#[test]
-fn erase_display_detection_ignores_erase_line() {
-    assert!(contains_csi_erase_display(b"\x1b[1;24H\x1b[J"));
-    assert!(contains_csi_erase_display(b"\x1b[2J\x1b[H"));
-    assert!(!contains_csi_erase_display(
-        b"\x1b[10;1H\x1b[K> foo\x1b[10;6H"
-    ));
+    assert_eq!(snapshot_row_text(&snapshot, 0), "HISTORY");
+    assert_eq!(snapshot_row_text(&snapshot, 17), ">");
+    assert_eq!(snapshot_row_text(&snapshot, 18), "resultXYZ");
+    assert_eq!(machine.ghostty.active_cursor_row(), Some(18));
 }
 
 struct FakeReader {
@@ -604,15 +619,8 @@ fn osc_progress_hides_published_cursor_until_removed() {
     );
 }
 
-/// A keystroke echo inside the resize window reaches the engine untouched and
-/// leaves the engine cursor on the row ConPTY addressed. Moving it to
-/// ghostty's prompt row would split the two cursor models, after which ConPTY's
-/// column-only moves keep landing on a row the user cannot see. Drives the
-/// read loop's recovery, which `USES_CONPTY` enables only where ConPTY is the
-/// backend.
-#[cfg(windows)]
 #[test]
-fn conpty_echo_in_resize_window_passes_through_unchanged() {
+fn conpty_echo_after_resize_preserves_addressed_row() {
     let render_buffer = Arc::new(FrameStore::new(RenderBuffer::new(134, 42)));
     let vt_modes = Arc::new(AtomicU32::new(0));
 
@@ -648,14 +656,12 @@ fn conpty_echo_in_resize_window_passes_through_unchanged() {
         engine.write_vt(b"\x1b[2J\x1b[10;1HHISTORY\x1b[42;1HC:\\Workspace\\NiumaTerm>");
     }
 
-    let active_row = machine.ghostty.active_cursor_row();
-
-    machine.conpty_resize.on_resize(
-        machine.ghostty.cols(),
-        machine.ghostty.rows(),
-        active_row,
-        Instant::now(),
-    );
+    machine.on_resize(WinsizeBuilder {
+        cols: machine.ghostty.cols(),
+        rows: machine.ghostty.rows(),
+        width: machine.ghostty.cols() * 8,
+        height: machine.ghostty.rows() * 16,
+    });
 
     let mut state = PtyState::default();
     let mut read_buf = [0u8; READ_BUFFER_SIZE];
@@ -675,81 +681,8 @@ fn conpty_echo_in_resize_window_passes_through_unchanged() {
     assert_eq!(machine.ghostty.active_cursor_row(), Some(9));
 }
 
-/// Drives the read loop's realignment, which `USES_CONPTY` enables only
-/// where ConPTY is the backend; a real PTY never emits the resize echo
-/// this reacts to.
-#[cfg(windows)]
 #[test]
-fn conpty_resize_repaint_realigns_clear_without_new_input() {
-    let render_buffer = Arc::new(FrameStore::new(RenderBuffer::new(134, 42)));
-    let vt_modes = Arc::new(AtomicU32::new(0));
-
-    let pty = FakePty {
-        reader: FakeReader {
-            data: b"\x1b[1;24H\x1b[J\x1b[1;24HTERMINPUT123\x1b[1;36H".to_vec(),
-        },
-        writer: FakeWriter::default(),
-    };
-
-    let mut machine = PtyPipe::new(
-        render_buffer,
-        vt_modes,
-        pty,
-        VoidListener {},
-        &SessionOptions {
-            cols: 134,
-            rows: 42,
-            route_id: 0,
-            colors: Colors::default(),
-            cursor_shape: ansi::CursorShape::Block,
-            scrollback_lines: 1000,
-            engine_blocks: false,
-            terminal_responses: true,
-            output_sink: None,
-        },
-    )
-    .unwrap();
-
-    {
-        let engine = &mut machine.ghostty;
-
-        engine.write_vt(b"\x1b[2J\x1b[10;1HHISTORY\x1b[42;1HC:\\Workspace\\NiumaTerm>");
-    }
-
-    let active_row = machine.ghostty.active_cursor_row();
-
-    machine.conpty_resize.on_resize(
-        machine.ghostty.cols(),
-        machine.ghostty.rows(),
-        active_row,
-        Instant::now(),
-    );
-
-    let mut state = PtyState::default();
-    let mut read_buf = [0u8; READ_BUFFER_SIZE];
-
-    machine.pty_read(&mut state, &mut read_buf).unwrap();
-
-    let snapshot = machine.ghostty.snapshot().unwrap();
-
-    // ConPTY repaints the prompt on row 1 while ghostty held it on row 42. The
-    // content scrolls up to meet ConPTY's row and the repaint overwrites it in
-    // place, so the prompt appears once and the cursor models agree.
-    assert_eq!(
-        snapshot_row_text(&snapshot, 0),
-        "C:\\Workspace\\NiumaTerm>TERMINPUT123"
-    );
-    assert_eq!(snapshot_row_text(&snapshot, 41), "");
-    assert_eq!(machine.ghostty.active_cursor_row(), Some(0));
-}
-
-/// When the viewport is scrolled into history, the resize repaint is still
-/// realigned to the ENGINE's active cursor row via `active_cursor_row()` (which is
-/// independent of the scroll pin), so it lands on the active prompt row — not on
-/// the visible history row, and not forced to row 1 (the old 错位 bug, which came
-/// from the viewport-relative `cursor.y` reading 0 while scrolled).
-#[test]
-fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
+fn conpty_repaint_after_resize_uses_active_screen_when_scrolled() {
     let render_buffer = Arc::new(FrameStore::new(RenderBuffer::new(20, 4)));
     let vt_modes = Arc::new(AtomicU32::new(0));
 
@@ -798,22 +731,19 @@ fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
         );
     }
 
-    let active_row = machine.ghostty.active_cursor_row();
-
-    machine.conpty_resize.on_resize(
-        machine.ghostty.cols(),
-        machine.ghostty.rows(),
-        active_row,
-        Instant::now(),
-    );
+    machine.on_resize(WinsizeBuilder {
+        cols: machine.ghostty.cols(),
+        rows: machine.ghostty.rows(),
+        width: machine.ghostty.cols() * 8,
+        height: machine.ghostty.rows() * 16,
+    });
 
     let mut state = PtyState::default();
     let mut read_buf = [0u8; READ_BUFFER_SIZE];
 
     machine.pty_read(&mut state, &mut read_buf).unwrap();
 
-    // INJECT must be realigned onto the engine's active cursor row (read
-    // independently of the scroll pin), exactly once, never on row 0.
+    // CUP addresses the active screen even while the viewport shows history.
     let (active_row, snapshot) = {
         let engine = &mut machine.ghostty;
         let active_row = engine.active_cursor_row().unwrap();

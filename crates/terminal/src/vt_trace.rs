@@ -1,13 +1,11 @@
-//! Temporary VT-state tracer for the Windows ConPTY drag-resize / scrollback bug
-//! (`.scratch/remove-crosswords/HANDOFF-resize-conpty.md`). Every resize / scroll /
-//! Every ConPTY repaint path calls [`trace`], which appends a one-line summary to
-//! `target/logs/nmt-vt-trace.log` and writes the **entire** engine content
-//! (viewport snapshot + full screen+scrollback via the formatter) to its own file
-//! `target/logs/<seq>-<label>.txt`.
+//! VT diagnostics for cursor, resize, and scrollback problems. Each PTY chunk
+//! records its complete bytes and resulting active cursor row in
+//! `target/logs/nmt-vt-trace.log`. Explicit state captures such as resize also
+//! write the viewport and history to `target/logs/<seq>-<label>.txt`.
 //!
 //! Gated on the `NMT_VT_TRACE` env var so normal runs pay nothing (the full-content
 //! dump is O(scrollback) and must never run in production). Override the output dir
-//! with `NMT_VT_TRACE_DIR`. REMOVE this module once the resize bug is fixed.
+//! with `NMT_VT_TRACE_DIR`.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -161,11 +159,48 @@ fn append_master(dir: &Path, line: &str) {
     }
 }
 
+/// Record complete output across read boundaries without formatting history
+/// on every keystroke. Byte count and escaping preserve control sequences and
+/// partial UTF-8 characters for diagnosing output after a resize has finished.
+pub(crate) fn trace_read(route: usize, engine: &GhosttyTerminal, bytes: &[u8]) {
+    if !enabled() {
+        return;
+    }
+
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+
+    let mut line = format!(
+        "[vt-trace] #{seq:06} ts={} pty_read route={route} cols={} rows={} active_row={:?} read_bytes={} bytes=",
+        now_ms(),
+        engine.cols(),
+        engine.rows(),
+        engine.active_cursor_row(),
+        bytes.len(),
+    );
+
+    for &byte in bytes {
+        match byte {
+            b'\\' => line.push_str("\\\\"),
+            0x20..=0x7e => line.push(char::from(byte)),
+
+            _ => {
+                let _ = fmt::Write::write_fmt(&mut line, format_args!("\\x{byte:02x}"));
+            }
+        }
+    }
+
+    line.push('\n');
+
+    let dir = log_dir();
+    let _ = fs::create_dir_all(&dir);
+
+    append_master(&dir, &line);
+}
+
 /// Emit a trace point: one summary line to the master log + a full content dump to
 /// its own file. `label` names the trace source (becomes part of the filename), `detail` is
-/// free-form context (request dims, intent, rewritten bytes, …). No-op unless
-/// `NMT_VT_TRACE` is set. Safe to call with the engine lock held — touches only the
-/// engine (snapshot + formatter), never the render buffer or crosswords.
+/// free-form context (requested dimensions, route, and operation). No-op unless
+/// `NMT_VT_TRACE` is set. Captures engine state on the PTY owner thread.
 pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
     if !enabled() {
         return;

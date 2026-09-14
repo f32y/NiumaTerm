@@ -5,7 +5,6 @@ pub use crate::pty_pipe::write_queue::PtyState;
 
 pub(crate) mod requests;
 
-mod conpty_resize;
 mod marks;
 
 mod session;
@@ -21,7 +20,7 @@ use std::borrow::Cow;
 use std::io::{self, ErrorKind, Read, Write};
 use std::sync::atomic::AtomicU32;
 use std::sync::{self, Arc, mpsc};
-use std::{cell, error, fmt, path, time};
+use std::{cell, error, path, time};
 
 #[cfg(target_os = "linux")]
 use libc::EIO;
@@ -33,7 +32,6 @@ use tracing::{error, warn};
 use crate::event::{self, EventListener, Msg, MsgSender, TerminalEvent};
 use crate::ghostty::{self, GhosttyTerminal, mode};
 use crate::prompt_sniffer::PromptSniffer;
-use crate::pty_pipe::conpty_resize::{ConptyResize, ResizeRead};
 use crate::pty_pipe::marks::{apply_sniffer_mark, engine_blocks_live_list};
 use crate::pty_pipe::requests::answer_query;
 use crate::publication::FrameStore;
@@ -65,26 +63,6 @@ enum FlushReason {
     Saturated,
     Command,
     Exit,
-}
-
-/// Escape raw PTY bytes for human-readable vt_trace output.
-fn escape_bytes(bytes: &[u8]) -> String {
-    let mut out = String::new();
-
-    for &b in bytes {
-        match b {
-            b'\x1b' => out.push_str("<ESC>"),
-            b'\r' => out.push_str("<CR>"),
-            b'\n' => out.push_str("<LF>"),
-            0x20..=0x7e => out.push(b as char),
-
-            _ => {
-                let _ = fmt::Write::write_fmt(&mut out, format_args!("\\x{b:02x}"));
-            }
-        }
-    }
-
-    out
 }
 
 pub struct PtyPipe<T: EventedPty, U: EventListener> {
@@ -129,7 +107,6 @@ pub struct PtyPipe<T: EventedPty, U: EventListener> {
     terminal_responses_enabled: bool,
     event_proxy: U,
     route_id: usize,
-    conpty_resize: ConptyResize,
 
     /// OSC 133 region state; only touched on the PTY thread.
     sniffer: PromptSniffer,
@@ -301,7 +278,6 @@ where
             terminal_responses_enabled: true,
             event_proxy,
             route_id: options.route_id,
-            conpty_resize: ConptyResize::default(),
             sniffer: PromptSniffer::default(),
             launch_cwd: None,
             engine_blocks: options.engine_blocks,
@@ -441,35 +417,16 @@ where
         #[cfg(enable_profiling)]
         let ingest_started = self.profile.start();
 
-        let input_len = input.len();
-
         // The owner parses into private engine state while the UI retains its
         // last published frame. Neither side waits for the other's read pass.
         let output_sink = self.output_sink.clone();
 
         let engine = &mut self.ghostty;
 
-        // The PTY bytes reach the engine exactly as ConPTY wrote them; the
-        // resize recovery may only prepend a scroll.
-        let ResizeRead {
-            synthetic_prefix,
-            expected_cursor: realigned_to,
-            repaint_window,
-        } = self.conpty_resize.on_read(input, engine);
-
-        let bytes = input;
-
-        let scroll_escaped = synthetic_prefix.as_deref().map(escape_bytes);
-
-        let observed_output = output_sink.as_ref().map(|_| match synthetic_prefix {
-            Some(mut prefix) => {
-                prefix.extend_from_slice(bytes);
-
-                prefix.into()
-            }
-
-            None => bytes.into(),
-        });
+        // ConPTY tracks both cursor and content for incremental redraws.
+        // Altering addresses or inserting scrolls would change state it does
+        // not know to repaint, so output reaches the engine unchanged.
+        let observed_output = output_sink.as_ref().map(|_| input.into());
 
         // Always run the sniffer: it classifies/captures OSC 133 lifecycle state
         // while every byte, including marks, still reaches the engine.
@@ -485,7 +442,7 @@ where
         let engine_blocks = self.engine_blocks;
 
         self.sniffer.feed_hooked(
-            bytes,
+            input,
             |_, _, seg| {
                 engine_cell.borrow_mut().write_vt(seg);
             },
@@ -511,35 +468,7 @@ where
         // this replaced was the throughput cost the per-block
         // grid exists to delete).
 
-        // After the scroll and the repaint, ConPTY's own absolute CUP normally
-        // pulls the active cursor onto the realigned row. A mismatch is
-        // possible when the ED came from something other than the repaint (a
-        // clear, a full-screen program drawing on the primary screen), so it
-        // is traced for diagnosis and never asserted.
-        if let Some(expected) = realigned_to {
-            let got = engine.active_cursor_row();
-
-            if got != Some(expected) && vt_trace::enabled() {
-                vt_trace::trace(
-                    "realign_cursor_mismatch",
-                    engine,
-                    &format!("expected R_conpty={expected} got={got:?}"),
-                );
-            }
-        }
-
-        // Dump the full VT only for reads inside the ConPTY repaint window —
-        // a per-keystroke full dump would be O(scrollback) on every read.
-        if vt_trace::enabled() && repaint_window {
-            vt_trace::trace(
-                "pty_resize_read",
-                engine,
-                &format!(
-                    "read_bytes={input_len} scroll={scroll_escaped:?} bytes={}",
-                    escape_bytes(&bytes[..bytes.len().min(240)])
-                ),
-            );
-        }
+        vt_trace::trace_read(self.route_id, engine, input);
 
         if let (Some(sink), Some(output)) = (&output_sink, observed_output) {
             sink(output);
@@ -786,7 +715,7 @@ where
         let cell_h = (window_size.height / rows).max(1) as u32;
         let mut blocks_sync: Option<Vec<(ghostty::BlockHandle, usize)>> = None;
 
-        let (snapshot, active_row) = {
+        let snapshot = {
             let engine = &mut self.ghostty;
 
             if vt_trace::enabled() {
@@ -794,8 +723,14 @@ where
                     "perf_resize_before",
                     engine,
                     &format!(
-                        "request cols={} rows={} px={}x{} cell={}x{}",
-                        cols, rows, window_size.width, window_size.height, cell_w, cell_h
+                        "route={} request cols={} rows={} px={}x{} cell={}x{}",
+                        self.route_id,
+                        cols,
+                        rows,
+                        window_size.width,
+                        window_size.height,
+                        cell_w,
+                        cell_h
                     ),
                 );
             }
@@ -812,8 +747,8 @@ where
                     "perf_resize_after_engine",
                     engine,
                     &format!(
-                        "applied cols={} rows={} cell={}x{}",
-                        cols, rows, cell_w, cell_h
+                        "route={} applied cols={} rows={} cell={}x{}",
+                        self.route_id, cols, rows, cell_w, cell_h
                     ),
                 );
             }
@@ -839,7 +774,7 @@ where
             #[cfg(enable_profiling)]
             self.profile.record(Stage::CaptureResize, capture_started);
 
-            (capture, engine.active_cursor_row())
+            capture
         };
 
         if let Some(live) = blocks_sync {
@@ -869,9 +804,6 @@ where
             self.event_proxy
                 .send_event(TerminalEvent::TerminalDamaged(self.route_id));
         }
-
-        self.conpty_resize
-            .on_resize(cols, rows, active_row, time::Instant::now());
 
         if let Err(err) = self.pty.set_winsize(window_size) {
             warn!("pty set_winsize failed: {err}");
