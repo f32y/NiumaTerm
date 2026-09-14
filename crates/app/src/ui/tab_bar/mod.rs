@@ -15,8 +15,8 @@ use app::agent_tab::AgentKind;
 use app::design::{SETTINGS_NAV_WIDTH, SPACE_2, SPACE_3, SURFACE_RADIUS};
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Context, DragMoveEvent, Hsla, IsZero as _, MouseButton, Pixels, ScrollHandle,
-    SharedString, div, px, relative,
+    AnyElement, App, Context, DragMoveEvent, Edges, Hsla, IsZero as _, MouseButton, Pixels,
+    ScrollHandle, SharedString, div, px, relative,
 };
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
@@ -69,12 +69,12 @@ const MIN_AUTO_TAB_WIDTH: f32 = 54.0;
 
 /// Below this the leading icon and close control cannot retain their content
 /// padding side by side, so the tab collapses to the single glyph slot.
-const COMPACT_TAB_WIDTH: f32 = 90.0;
+const COMPACT_TAB_WIDTH: f32 = 82.0;
 
 /// Below this the title has under four characters of room left over from the
 /// icon, the padding and the close control, which renders as an ellipsis and
 /// little else, so the tab spends the width on the two controls instead.
-const FULL_TAB_WIDTH: f32 = 120.0;
+const FULL_TAB_WIDTH: f32 = 112.0;
 
 /// What a tab still has room to draw. The close control outranks the tab
 /// icon, which outranks the title: a tab nobody can close is worse than a tab
@@ -445,6 +445,13 @@ impl TabStrip {
 
                 shell_tab()
                     .aria_label(drag_label.clone())
+                    .when(!icon_only, |this| {
+                        this.content_paddings(Edges {
+                            left: px(4.0),
+                            right: SPACE_3,
+                            ..Default::default()
+                        })
+                    })
                     .on_scroll_wheel(move |event, window, _| {
                         let delta = event.delta.pixel_delta(window.line_height());
 
