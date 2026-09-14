@@ -116,18 +116,24 @@ missing blank lines without reordering declarations.
 
 ### Calls and other statements
 
-`spacing/call-and-statement` requires a blank line between a standalone function
-or method call and any adjacent statement, including another call. Consecutive
-simple assignments can stay together. Calls
-wrapped in parentheses, `?`, or `.await` still count as calls; an assignment whose
-right-hand side contains a call remains an assignment. Macro invocations count
-as non-call statements.
+`spacing/call-and-statement` classifies standalone statements as function calls,
+method calls, or non-call statements and requires a blank line when the kind
+changes. Consecutive single-line function calls can stay together, as can
+consecutive single-line method calls or simple assignments. Method calls share a
+kind even when their
+receivers differ, such as `self.update()` and `self.tasks.insert(key, value)`.
+Existing blank lines between calls are preserved so authors can separate distinct
+steps. Parentheses, `?`, and `.await` preserve the underlying call kind.
+Associated calls such as `Store::flush(&mut store)` count as function calls.
+An assignment whose right-hand side contains a call remains an assignment.
+Macro invocations count as non-call statements.
 
-For example, `--fix` separates each of these three statements:
+For example, `--fix` separates function calls, method calls, and assignments:
 
 ```rust
 merge_update(&mut summary, &update, sequence);
 
+self.merge_update(&mut summary, &update, sequence);
 self.tasks.insert(key, summary);
 
 self.activity += 1;

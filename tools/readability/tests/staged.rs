@@ -235,9 +235,9 @@ fn separates_binding_mutability_without_hiding_staged_spacing_deletions() {
 #[test]
 fn checks_and_fixes_call_and_assertion_spacing_without_changing_the_index() {
     let repo = Repository::new();
-    let source = "fn run() {\n    merge_update(&mut summary, &update, sequence);\n    self.tasks.insert(key, summary);\n    self.activity += 1;\n    assert!(self.activity > 0);\n    debug_assert_eq!(self.tasks.len(), 1);\n    finish();\n}\n";
+    let source = "fn run() {\n    merge_update(&mut summary, &update, sequence);\n    self.merge_update(&mut summary, &update, sequence);\n    self.tasks.insert(key, summary);\n    self.activity += 1;\n    assert!(self.activity > 0);\n    debug_assert_eq!(self.tasks.len(), 1);\n    finish();\n}\n";
     let clean = source
-        .replace("&update, sequence);\n", "&update, sequence);\n\n")
+        .replacen("&update, sequence);\n", "&update, sequence);\n\n", 1)
         .replace("insert(key, summary);\n", "insert(key, summary);\n\n")
         .replace("self.activity += 1;\n", "self.activity += 1;\n\n")
         .replace(
@@ -255,9 +255,10 @@ fn checks_and_fixes_call_and_assertion_spacing_without_changing_the_index() {
 
     assert_eq!(staged.status.code(), Some(1), "{staged:?}");
     assert!(output.contains("crates/demo/src/lib.rs:3:1: spacing/call-and-statement"));
-    assert!(output.contains("crates/demo/src/lib.rs:4:1: spacing/call-and-statement"));
-    assert!(output.contains("crates/demo/src/lib.rs:5:1: spacing/assertions"));
-    assert!(output.contains("crates/demo/src/lib.rs:7:1: spacing/assertions"));
+    assert!(!output.contains("crates/demo/src/lib.rs:4:1: spacing/call-and-statement"));
+    assert!(output.contains("crates/demo/src/lib.rs:5:1: spacing/call-and-statement"));
+    assert!(output.contains("crates/demo/src/lib.rs:6:1: spacing/assertions"));
+    assert!(output.contains("crates/demo/src/lib.rs:8:1: spacing/assertions"));
 
     repo.write(SOURCE, source);
 

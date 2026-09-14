@@ -27,6 +27,12 @@ enum BlankLineEdit {
     Remove,
 }
 
+#[derive(PartialEq, Eq)]
+enum CallKind {
+    Function,
+    Method,
+}
+
 impl Issue {
     pub(crate) fn message(&self) -> &'static str {
         match self.edit {
@@ -367,9 +373,16 @@ fn boundary(a: &Stmt, b: &Stmt, last: bool) -> Option<&'static str> {
         }
     }
 
-    let is_call = |statement: &Stmt| matches!(statement, Stmt::Expr(expr, _) if matches!(unwrapped(expr), Expr::Call(_) | Expr::MethodCall(_)));
+    let call_kind = |statement: &Stmt| match statement {
+        Stmt::Expr(expr, _) => match unwrapped(expr) {
+            Expr::Call(_) => Some(CallKind::Function),
+            Expr::MethodCall(_) => Some(CallKind::Method),
+            _ => None,
+        },
+        _ => None,
+    };
 
-    if is_call(a) || is_call(b) {
+    if call_kind(a) != call_kind(b) {
         Some("call-and-statement")
     } else {
         None

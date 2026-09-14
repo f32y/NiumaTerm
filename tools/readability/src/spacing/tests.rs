@@ -77,18 +77,17 @@ fn ignores_mutability_outside_binding_identifiers() {
 }
 
 #[test]
-fn separates_each_call_from_calls_and_assignments() {
-    let source = "fn run() {\n    merge_update(&mut summary, &update, sequence);\n    self.tasks.insert(key, summary);\n    self.activity += 1;\n    self.ready = true;\n    flush()?;\n    (publish().await);\n}\n";
+fn separates_function_calls_method_calls_and_assignments() {
+    let source = "fn run() {\n    merge_update(&mut summary, &update, sequence);\n    self.merge_update(&mut summary, &update, sequence);\n    self.tasks.insert(key, summary);\n    self.activity += 1;\n    self.ready = true;\n    flush()?;\n    (publish().await);\n}\n";
 
     let expected = source
-        .replace("&update, sequence);\n", "&update, sequence);\n\n")
+        .replacen("&update, sequence);\n", "&update, sequence);\n\n", 1)
         .replace("insert(key, summary);\n", "insert(key, summary);\n\n")
-        .replace("self.ready = true;\n", "self.ready = true;\n\n")
-        .replace("flush()?;\n", "flush()?;\n\n");
+        .replace("self.ready = true;\n", "self.ready = true;\n\n");
 
     let issues = inspect(source).unwrap();
 
-    assert_eq!(issues.len(), 4);
+    assert_eq!(issues.len(), 3);
     assert!(
         issues
             .values()
@@ -96,6 +95,69 @@ fn separates_each_call_from_calls_and_assignments() {
     );
     assert_eq!(apply(source, &issues).unwrap(), expected);
     assert!(inspect(&expected).unwrap().is_empty());
+}
+
+#[test]
+fn separates_call_kinds_in_both_directions_through_wrappers() {
+    for (function, method) in [
+        ("flush();", "self.flush();"),
+        ("(flush()?);", "(self.flush().await?);"),
+        ("flush().await?;", "(self.flush());"),
+        ("Store::flush(&mut store);", "store.flush();"),
+    ] {
+        for (previous, next) in [(function, method), (method, function)] {
+            let source = format!("fn run() {{\n    {previous}\n    {next}\n}}\n");
+            let expected = format!("fn run() {{\n    {previous}\n\n    {next}\n}}\n");
+            let issues = inspect(&source).unwrap();
+
+            assert_eq!(issues.len(), 1, "{source}");
+            assert_eq!(issues.values().next().unwrap().rule, "call-and-statement");
+            assert_eq!(apply(&source, &issues).unwrap(), expected);
+            assert!(inspect(&expected).unwrap().is_empty());
+        }
+    }
+}
+
+#[test]
+fn preserves_compact_calls_and_existing_blank_lines() {
+    let compact = "fn clear(&mut self) {\n    self.shell_meta.clear();\n    self.shell_meta_order.clear();\n    self.bash_commands.clear();\n    self.bash_command_order.clear();\n}\n";
+
+    for source in [compact.to_owned(), compact.replace(";\n", ";\n\n")] {
+        let issues = inspect(&source).unwrap();
+
+        assert!(issues.is_empty());
+        assert_eq!(apply(&source, &issues).unwrap(), source);
+    }
+}
+
+#[test]
+fn separates_calls_around_multiline_statements_results_and_ui_notifications() {
+    for (previous, next, rule) in [
+        (
+            "prepare();",
+            "consume(\n        value,\n    );",
+            "multiline-statement",
+        ),
+        (
+            "consume(\n        value,\n    );",
+            "finish();",
+            "multiline-statement",
+        ),
+        ("prepare();", "finish()", "result"),
+        ("prepare();", "return finish();", "result"),
+        ("prepare();", "cx.notify();", "view-reaction"),
+        ("prepare();", "window.refresh();", "view-reaction"),
+        ("prepare();", "cx.emit(event);", "view-reaction"),
+    ] {
+        let source = format!("fn run() {{\n    {previous}\n    {next}\n}}\n");
+        let expected = format!("fn run() {{\n    {previous}\n\n    {next}\n}}\n");
+        let issues = inspect(&source).unwrap();
+
+        assert_eq!(issues.len(), 1, "{source}");
+        assert_eq!(issues.values().next().unwrap().rule, rule, "{source}");
+        assert_eq!(apply(&source, &issues).unwrap(), expected);
+        assert!(inspect(&expected).unwrap().is_empty());
+    }
 }
 
 #[test]
