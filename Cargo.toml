@@ -4,7 +4,7 @@ publish = false
 authors = ["f32y <nyhvec@gmail.com>"]
 edition = "2024"
 license = "MIT"
-rust-version = "1.96.0"
+rust-version = "1.98.1"
 
 [workspace]
 resolver = "3"
