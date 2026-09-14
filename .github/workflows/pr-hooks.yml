@@ -1,0 +1,61 @@
+name: PR hooks
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-hooks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  hooks:
+    name: Git hooks
+    runs-on: windows-2025
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-pr-hooks-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-${{ github.event.pull_request.head.sha }}
+          restore-keys: |
+            ${{ runner.os }}-pr-hooks-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-
+
+      - name: Prepare the Rust toolchain and hook dependencies
+        shell: bash
+        run: |
+          rustup show active-toolchain
+          rustfmt --version
+          cargo clippy --version
+          jq --version
+
+      - name: Test the hook runner
+        shell: pwsh
+        run: ./scripts/check-pr-hooks.tests.ps1
+
+      - name: Check every PR commit
+        shell: pwsh
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_BRANCH: ${{ github.head_ref }}
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: |
+          ./scripts/check-pr-hooks.ps1 -Base $env:PR_BASE -Head $env:PR_HEAD -Branch $env:PR_BRANCH
