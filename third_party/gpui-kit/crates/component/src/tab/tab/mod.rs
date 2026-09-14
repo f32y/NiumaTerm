@@ -456,6 +456,7 @@ pub struct Tab {
     children: Vec<AnyElement>,
     variant: TabVariant,
     top_corner_radius: Option<Pixels>,
+    content_paddings: Option<Edges<Pixels>>,
     size: Size,
     pub(super) disabled: bool,
     pub(super) selected: bool,
@@ -518,6 +519,7 @@ impl Default for Tab {
             suffix: None,
             variant: TabVariant::default(),
             top_corner_radius: None,
+            content_paddings: None,
             size: Size::default(),
             max_width: None,
             on_click: None,
@@ -562,6 +564,12 @@ impl Tab {
     /// Round the upper corners of a tab attached to the content below it.
     pub fn top_corner_radius(mut self, radius: Pixels) -> Self {
         self.top_corner_radius = Some(radius);
+        self
+    }
+
+    /// Set label-area padding independently of prefix and suffix controls.
+    pub fn content_paddings(mut self, paddings: Edges<Pixels>) -> Self {
+        self.content_paddings = Some(paddings);
         self
     }
 
@@ -707,7 +715,9 @@ impl RenderOnce for Tab {
         };
         let radius = self.variant.radius(self.size, cx);
         let inner_radius = self.variant.inner_radius(self.size, cx);
-        let inner_paddings = self.variant.inner_paddings(self.size);
+        let inner_paddings = self
+            .content_paddings
+            .unwrap_or_else(|| self.variant.inner_paddings(self.size));
         let inner_margins = self.variant.inner_margins(self.size);
         let inner_height = self.variant.inner_height(self.size);
         let height = self.variant.height(self.size);
