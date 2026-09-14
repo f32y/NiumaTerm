@@ -822,7 +822,7 @@ fn zig_optimize_mode() -> &'static str {
         // EOF), so the archive cannot be indexed or linked at all.
         // ReleaseSafe keeps assertions while forcing the LLVM backend.
         // Revisit when a Zig release fixes the self-hosted COFF writer.
-        Ok("0") if env::var("TARGET").is_ok_and(|t| t.contains("windows")) => "ReleaseSafe",
+        Ok("0") if env::var("TARGET").is_ok_and(|t| t.contains("windows")) => "ReleaseFast",
         Ok("0") => "Debug",
         Ok("s") | Ok("z") => "ReleaseSmall",
         _ => "ReleaseFast",
@@ -942,7 +942,7 @@ fn zig_target(target: &str) -> String {
 }
 
 fn configure_zig_target(build: &mut Command, target: &str, host: &str) {
-    let is_windows_target = target.contains("-windows-");
+    let is_windows_target = target.contains("windows");
 
     // Windows binaries run beyond the build machine. Leaving the Zig target
     // implicit can place AVX-512 in compiler_rt, including the memset used by
@@ -952,7 +952,7 @@ fn configure_zig_target(build: &mut Command, target: &str, host: &str) {
         build.arg(format!("-Dtarget={zig_target}"));
     }
 
-    if is_windows_target && target.starts_with("x86_64-") {
+    if is_windows_target {
         build.arg("-Dcpu=baseline+avx2");
     }
 }
