@@ -61,8 +61,13 @@ the input-ordering change; the observed samples do not establish whether that
 change affects its frequency. The [current regression results](../research/conpty-realign-input-desync.md#current-regression-results)
 separate passing coverage from these unresolved cases.
 
-PSReadLine remains unmodified. Automatic redraw keys and an 80 ms input delay
-were isolated experiments, not adopted application behavior.
+PSReadLine remains unmodified. Automatic redraw keys remain isolated
+experiments. A subsequent compatibility setting, enabled by default, holds
+user input for 80 ms after a changed native grid in local Windows PowerShell
+sessions. Terminal output and generated replies continue during the pause.
+The [compatibility implementation](../research/conpty-resize-complete-fix-research.md#application-compatibility-setting)
+preserves submission order and bounds artificial waiting; it does not provide
+producer synchronization or change this output-preservation decision.
 
 The trace is diagnostic and performs synchronous file I/O when enabled. Its
 timing and scope must be considered when interpreting a capture; it is not a

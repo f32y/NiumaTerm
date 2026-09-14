@@ -4,9 +4,10 @@ Updated: 2026-09-14. Implementation baseline: `f3562681`.
 
 The branch bundles ConPTY `1.25.260710002-preview` and includes output
 preservation, saved startup grids, native write completion, and ordered
-input/resize submission. PSReadLine remains unmodified. The 80 ms delay and
-public redraw handlers described below are experiments, not application
-behavior. See [current regression results](conpty-realign-input-desync.md#current-regression-results)
+input/resize submission. PSReadLine remains unmodified. A default-enabled
+[compatibility setting](#application-compatibility-setting) now applies an
+80 ms pause after resize to supported sessions. Public redraw handlers remain
+experiments. See [current regression results](conpty-realign-input-desync.md#current-regression-results)
 for passing coverage and the two unresolved native resize/input cases.
 
 ## Assessment
@@ -36,7 +37,8 @@ A later 80 ms delay in the native test driver passed all 45 measured
 shrink/grow cases, compared with 23 of 45 immediate-input cases, and preserved
 selection replacement in a separate check. This is evidence for a possible
 narrow workaround, not a verified production queue or a complete correction.
-Its untested editing modes and timing limits are described below.
+Its untested editing modes and timing limits are described below. The later
+application implementation is described separately from that experiment.
 
 The recommended direction is a coordinated resize design with reliable
 producer synchronization and an editor refresh that preserves editing state.
@@ -338,6 +340,52 @@ handling. Probe source and logs are retained under the ignored research
 directory as `resize_delay_probe.rs`, `delay-basic-v125-ps245.txt`,
 `delay-return-v125-ps245.txt`, `delay-selection-v125-ps245.txt`, and
 `delay-summary.json`. The temporary Cargo test source was removed afterwards.
+
+## Application compatibility setting
+
+Settings > Terminal > Advanced contains **Improve PowerShell compatibility**,
+enabled by default. The persisted value is
+`[terminal] improve-powershell-compatibility = true`. Existing configuration
+files without this value also enable it. Changes apply to existing sessions;
+disabling the setting removes the active pause and releases queued input.
+
+Activation requires a locally launched Windows executable named pwsh,
+pwsh.exe, powershell, or powershell.exe, including absolute paths and mixed
+case. Remote sessions and other launch executables do not activate it. A
+nested PowerShell launched inside another shell is not detected. Programs on
+the alternate screen bypass the pause. Other programs running inside a
+PowerShell session can still encounter the brief pause after resize.
+
+After a changed grid is submitted to the native PTY, the coordinator starts
+an 80 ms deadline. It holds user input in the existing command order, while
+continuing output reads and generated terminal replies. Output does not extend
+the deadline. Resizes cannot overtake intervening input, and only adjacent
+unexecuted resizes coalesce. Repeating the same grid does not restart the pause.
+The poll timeout wakes a quiet session when input is due; no UI frame is needed.
+
+Each input also receives a 250 ms limit at coordinator receipt. A long sequence
+of interleaved input and resize requests can therefore exhaust that input's
+artificial waiting budget and release it before a later 80 ms pause expires.
+This fallback preserves responsiveness at the cost of reduced protection.
+It does not bound time spent in native calls or existing I/O backpressure.
+Shutdown is handled during channel draining without waiting for the pause.
+
+The enabled native regression covers initial input lengths 0, 90, and 240,
+shrinking from 80 by 24 to 60 by 20 and growing to 80 or 100 columns by 30 rows.
+It checks complete input before the cursor, one prompt, exact character counts,
+and each of the 40 history markers once. Separate coordinator tests cover idle
+deadline wakeup, reply delivery, disabling, shutdown, alternate-screen bypass,
+unchanged grids, and the fixed waiting limit. The original unmitigated native
+reproducers retain their ignored status and assertions.
+
+These checks exercise the implemented heuristic. They do not turn elapsed
+time into an editor readiness signal or establish a complete resize fix.
+
+On 2026-09-14, five consecutive runs of the enabled six-scenario native test
+passed all 30 scenarios with tracing disabled. The configuration suite passed
+44 tests, the terminal suite passed 187 unit tests and four enabled native
+tests, and the settings/pane settings suites passed 32 tests. The original
+three opt-in native tests remained ignored in the regular run.
 
 ## Requirements for a complete design
 

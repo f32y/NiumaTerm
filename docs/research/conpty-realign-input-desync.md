@@ -80,8 +80,11 @@ The implemented changes are:
 Existing native reflow patches remain in place. Missing or invalid saved grids
 use the startup default, and a changed layout can still require a resize.
 Ordering native submissions does not acknowledge producer processing or editor
-readiness. PSReadLine is unmodified; the public redraw and 80 ms input-delay
-experiments have not been added to the application.
+readiness. PSReadLine remains unmodified. Public redraw injection remains an
+experiment. The application now exposes a default-enabled
+[PowerShell compatibility setting](conpty-resize-complete-fix-research.md#application-compatibility-setting)
+that briefly defers user input after resize. The baseline regression results
+below predate that setting and do not establish a complete correction.
 
 ## Current regression results
 
