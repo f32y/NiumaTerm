@@ -40,7 +40,8 @@ pub enum BlockEvent {
 }
 
 /// A completed integrated-shell command, captured from the OSC 133 lifecycle by the PTY
-/// prompt sniffer. `command` is the `;B`→`;C` echo, control-stripped and trimmed.
+/// prompt sniffer. `command` is submitted shell text or a legacy echo estimate;
+/// missing text does not prevent output from being retained.
 /// `exit_code` comes from the `;D;<code>` argument (`None` for a foreign bare `;D`).
 /// `cwd` is the **launch** working directory, latched at command start — the ps1 reports
 /// the next prompt's OSC 7 just before `;D`, so a `cd` records its origin. Timestamps are
@@ -51,22 +52,22 @@ pub struct CommandCapture {
     /// marrying this metadata to its block item (block-split).
     pub seq: u64,
 
-    pub command: String,
+    pub command: Option<String>,
     pub exit_code: Option<i32>,
     pub cwd: Option<path::PathBuf>,
     pub started_at: time::SystemTime,
     pub ended_at: time::SystemTime,
 }
 
-/// An integrated-shell command that just began executing (trusted `;C` with a non-empty
-/// echo), for the in-flight command block. Carries the same launch metadata as the
+/// An integrated-shell execution beginning at a trusted `;C`, excluding an
+/// explicitly empty submission. Carries the same launch metadata as the
 /// eventual [`CommandCapture`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandStart {
     /// See [`CommandCapture::seq`].
     pub seq: u64,
 
-    pub command: String,
+    pub command: Option<String>,
     pub cwd: Option<path::PathBuf>,
     pub started_at: time::SystemTime,
 }
@@ -199,12 +200,12 @@ impl Debug for TerminalEvent {
             TerminalEvent::CommandFinished(cmd) => {
                 write!(
                     f,
-                    "CommandFinished({}, exit={:?})",
+                    "CommandFinished({:?}, exit={:?})",
                     cmd.command, cmd.exit_code
                 )
             }
             TerminalEvent::CommandStarted(cmd) => {
-                write!(f, "CommandStarted({})", cmd.command)
+                write!(f, "CommandStarted({:?})", cmd.command)
             }
             TerminalEvent::BlockBatch(events) => {
                 write!(f, "BlockBatch({} events)", events.len())

@@ -6,6 +6,8 @@ mod prompt_sniffer_tests;
 
 use std::{env, mem, str, sync, time};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use memchr::memchr;
 
 use crate::event::{CommandCapture, CommandStart, ProgressReport, ProgressState};
@@ -16,8 +18,8 @@ use crate::event::{CommandCapture, CommandStart, ProgressReport, ProgressState};
 // stream to track the prompt/command/output region for capture while forwarding the PTY
 // stream unchanged. Hot-path rule
 // Keep the PTY hot path cheap: memchr-skip to ESC, never a per-byte walk; forward
-// by sub-slice with no filtered-buffer allocation; a split mark is held in a fixed inline
-// buffer, not a heap Vec.
+// by sub-slice with no filtered-buffer allocation; a split mark is held in a carry Vec
+// that allocates once and keeps its capacity.
 
 /// FinalTerm OSC 133 region. `None` = before the first prompt (banner/MOTD) or after a
 /// command ends (`;D`).
@@ -60,8 +62,7 @@ pub(crate) struct PromptSniffer {
     boundary_trust: ShellBoundaryTrust,
     boundary_trust_changed: Option<bool>,
     lifecycle: ShellLifecycleProgress,
-    carry: [u8; OSC133_MAX],
-    carry_len: usize,
+    carry: Vec<u8>,
 
     /// Accumulates the current command-echo region's raw bytes (`;B`→`;C`), mirroring
     /// the shell lifecycle. Cleared at each `;B`; never grows on the output hot path.
@@ -70,9 +71,9 @@ pub(crate) struct PromptSniffer {
     /// When command output started (`;C`) — the block's `started_at`.
     command_started_at: Option<time::SystemTime>,
 
-    /// The command echo rendered once at `;C` (`render_command_echo`); reused by the
-    /// `;D` capture so the echo emulation runs once per command.
-    current_command: String,
+    /// Submitted text, or a legacy display estimate. Missing text cannot cancel
+    /// an execution because the screen may have erased its command echo.
+    current_command: Option<String>,
 
     /// Edge flags/payloads set by `apply` and drained by `feed_hooked` into the
     /// `on_mark` hook at the mark's exact stream position.
@@ -103,7 +104,7 @@ pub(crate) struct SnifferMark<'a> {
     /// Valid transition into the Prompt region (`;A`).
     pub prompt_started: bool,
 
-    /// A trusted command began output (`;C`, non-empty echo): the in-flight block.
+    /// A trusted execution began output (`;C`): the in-flight block.
     /// `cwd` is `None` from the sniffer; the caller fills it.
     pub command_started: Option<CommandStart>,
 
@@ -145,48 +146,41 @@ impl PromptSniffer {
         let mut pos = 0usize;
 
         // Resolve a mark carried from the previous read, if any.
-        if self.carry_len > 0 {
-            let cl = self.carry_len;
+        if !self.carry.is_empty() {
+            let cl = self.carry.len();
             let take = (OSC133_MAX - cl).min(input.len());
 
-            let mut tmp = [0u8; OSC133_MAX];
+            let mut buf = mem::take(&mut self.carry);
 
-            tmp[..cl].copy_from_slice(&self.carry[..cl]);
+            buf.extend_from_slice(&input[..take]);
 
-            tmp[cl..cl + take].copy_from_slice(&input[..take]);
-
-            match parse_sniffed_osc(&tmp[..cl + take]) {
+            match parse_sniffed_osc(&buf) {
                 SniffedOsc::Mark {
                     len,
                     sub,
                     exit,
                     next,
+                    cmdline,
                 } => {
-                    self.apply(sub, next, exit);
+                    self.apply(sub, next, exit, cmdline);
 
-                    let mark = self.drain_mark(&tmp[..len]);
+                    let mark = self.drain_mark(&buf[..len]);
 
                     on_mark(mark);
-
-                    self.carry_len = 0;
 
                     pos = len - cl; // skip the input portion of the mark
                 }
                 SniffedOsc::Progress { len, report } => {
                     self.note_progress(report);
 
-                    let mark = self.drain_mark(&tmp[..len]);
+                    let mark = self.drain_mark(&buf[..len]);
 
                     on_mark(mark);
-
-                    self.carry_len = 0;
 
                     pos = len - cl;
                 }
                 SniffedOsc::Incomplete if cl + take < OSC133_MAX => {
-                    self.carry[cl..cl + take].copy_from_slice(&input[..take]);
-
-                    self.carry_len = cl + take;
+                    self.carry = buf;
 
                     return; // still incomplete — wait for the next read
                 }
@@ -196,34 +190,29 @@ impl PromptSniffer {
                     // constant under ESC-dense output like vtebench). Forward the
                     // carried bytes and rescan the new input; NOT a boundary
                     // glitch, so trust is untouched.
-                    let mut tmp2 = [0u8; OSC133_MAX];
-
-                    tmp2[..cl].copy_from_slice(&self.carry[..cl]);
-
+                    //
                     // Same as the main-scan path: carried bytes inside the
                     // command region must also land in command_buf, or a
                     // read boundary through an ordinary escape drops
                     // characters from the captured command text.
-                    self.pre_forward(&tmp2[..cl]);
+                    self.pre_forward(&buf[..cl]);
 
-                    forward(self.region, self.boundary_trusted(), &tmp2[..cl]);
-
-                    self.carry_len = 0;
+                    forward(self.region, self.boundary_trusted(), &buf[..cl]);
                 }
                 _ => {
                     // Malformed/maxed carry: forward the carried bytes as native output and
                     // reprocess the new input under cleared trust.
-                    let mut tmp2 = [0u8; OSC133_MAX];
-
-                    tmp2[..cl].copy_from_slice(&self.carry[..cl]);
-
                     self.reset_boundary_state();
 
-                    forward(self.region, self.boundary_trusted(), &tmp2[..cl]);
-
-                    self.carry_len = 0;
+                    forward(self.region, self.boundary_trusted(), &buf[..cl]);
                 }
             }
+
+            // Keep the allocation: chunks ending in an ESC are constant under
+            // ESC-dense output, and the carry must not allocate per read.
+            buf.clear();
+
+            self.carry = buf;
         }
 
         // Main scan: memchr to the next ESC, classify, forward the run before it.
@@ -241,6 +230,7 @@ impl PromptSniffer {
                             sub,
                             exit,
                             next,
+                            cmdline,
                         } => {
                             if esc > seg_start {
                                 self.pre_forward(&input[seg_start..esc]);
@@ -252,7 +242,7 @@ impl PromptSniffer {
                                 );
                             }
 
-                            self.apply(sub, next, exit);
+                            self.apply(sub, next, exit, cmdline);
 
                             let mark = self.drain_mark(&input[esc..esc + len]);
 
@@ -296,11 +286,8 @@ impl PromptSniffer {
 
                             let tail = &input[esc..];
 
-                            let n = tail.len().min(OSC133_MAX);
-
-                            self.carry[..n].copy_from_slice(&tail[..n]);
-
-                            self.carry_len = n;
+                            self.carry
+                                .extend_from_slice(&tail[..tail.len().min(OSC133_MAX)]);
 
                             return;
                         }
@@ -370,7 +357,13 @@ impl PromptSniffer {
         }
     }
 
-    fn apply(&mut self, sub: u8, next: Option<PromptRegion>, exit: Option<i32>) {
+    fn apply(
+        &mut self,
+        sub: u8,
+        next: Option<PromptRegion>,
+        exit: Option<i32>,
+        cmdline: Option<String>,
+    ) {
         let Some(r) = next else {
             if sub == b'K' {
                 self.history_cleared_edge = true;
@@ -408,32 +401,39 @@ impl PromptSniffer {
 
         // Command output started (;C).
         if r == PromptRegion::Output && self.region != PromptRegion::Output {
-            self.command_started_at = Some(time::SystemTime::now());
+            // Only the shell's own report of the accepted line can say nothing ran:
+            // an empty or whitespace-only Enter gets no block. Without a report the
+            // echo estimate supplies just the title. It can read as empty after
+            // PSReadLine erases its prediction rows below the input, so it never
+            // decides whether the output is kept.
+            let (command, executed) = match cmdline {
+                Some(text) if text.trim().is_empty() => (None, false),
+                Some(text) => (Some(text), true),
+                None => {
+                    let echo = render_command_echo(&self.command_buf);
 
-            // Render the echo once here; the ;D capture reuses it. A trusted,
-            // non-empty start becomes the in-flight block.
-            self.current_command = render_command_echo(&self.command_buf);
-            self.command_started_edge = was_trusted && !self.current_command.is_empty();
+                    ((!echo.is_empty()).then_some(echo), true)
+                }
+            };
+
+            self.current_command = command;
+            self.command_started_at = executed.then(time::SystemTime::now);
+            self.command_started_edge = was_trusted && executed;
         }
 
         if r == PromptRegion::Command {
             self.command_buf.clear();
         }
 
-        // Command finished (;D) on an ordered lifecycle: finalize a command block — only
-        // when trust was already established before this mark (skips the synthetic-prime
-        // and trust-recovery cycles) and the command text is non-empty (an empty Enter
-        // carries no useful metadata; Warp builds no block for it either).
+        // Only a completed, previously trusted execution produces a block. The
+        // submitted text may be missing; that cannot discard the execution's output.
         if sub == b'D' && r == PromptRegion::None {
             let started_at = self.command_started_at.take();
             let command = mem::take(&mut self.current_command);
 
             self.command_buf.clear();
 
-            if was_trusted
-                && !command.is_empty()
-                && let Some(started_at) = started_at
-            {
+            if was_trusted && let Some(started_at) = started_at {
                 self.command_finished = Some(CommandCapture {
                     seq: 0, // stamped by the mark-closure caller (block-split)
                     command,
@@ -497,7 +497,7 @@ impl PromptSniffer {
 
         self.command_started_at = None;
 
-        self.current_command.clear();
+        self.current_command = None;
 
         self.prompt_start_edge = false;
         self.command_started_edge = false;
@@ -547,9 +547,10 @@ fn prompt_trace_enabled() -> bool {
 /// redraw at absolute columns, so concatenating printables duplicates the line once per
 /// redraw. Instead emulate a single line: printables write at the cursor column
 /// (overwriting earlier redraws), CR/CUP/CHA/CUF/CUB move the cursor, EL/ECH erase.
-/// Known ceiling: rows are collapsed onto the one line, so a wrapped multi-row command
-/// can self-overwrite; engine-grid readback (per-row SEMANTIC_PROMPT tags) is the
-/// upgrade path if that fidelity matters.
+/// Rows collapse onto one line, so this estimate can lose wrapped text or read as
+/// empty when PSReadLine erases its prediction rows. A `;C;cmdline=` report takes
+/// precedence; this estimate only supplies a title and never decides whether the
+/// output is kept.
 fn render_command_echo(bytes: &[u8]) -> String {
     let text = String::from_utf8_lossy(bytes);
     let chars: Vec<char> = text.chars().collect();
@@ -672,9 +673,15 @@ const OSC133_PREFIX: &[u8] = b"\x1b]133;";
 
 const OSC_PROGRESS_PREFIX: &[u8] = b"\x1b]9;4;";
 
-/// Max bytes of one mark we buffer/scan (`ESC]133;D;<exit>ST` is far shorter). A malformed
-/// mark longer than this resyncs as ordinary bytes; also bounds the inline carry buffer.
-const OSC133_MAX: usize = 32;
+/// Max bytes of one `;C` mark, which may carry `;cmdline=<base64>` with the accepted
+/// line; also bounds the carry buffer. A longer `;C` is malformed and costs one trust
+/// cycle, so the integration scripts omit `cmdline` above this size and the title
+/// falls back to the echo estimate.
+const OSC133_MAX: usize = 16 * 1024;
+
+/// Every other mark is far shorter (`ESC]133;D;<exit>ST`); a longer one is malformed
+/// and resyncs as ordinary bytes.
+const SHORT_MARK_MAX: usize = 32;
 
 /// Outcome of scanning an ESC in the PTY stream for sequences the sniffer
 /// cares about: OSC 133 prompt marks and OSC 9;4 progress reports.
@@ -682,11 +689,13 @@ enum SniffedOsc {
     /// A complete mark: consume `len` bytes; `next` is the region to switch to (`None` =
     /// a recognized 133 mark with no transition, e.g. `;P` right-prompt). `exit` is the
     /// command exit code carried by a `;D;<code>` mark (`None` for a bare `;D`).
+    /// `cmdline` is the accepted line carried by a `;C;cmdline=<base64>` mark.
     Mark {
         len: usize,
         sub: u8,
         exit: Option<i32>,
         next: Option<PromptRegion>,
+        cmdline: Option<String>,
     },
     Progress {
         len: usize,
@@ -734,7 +743,7 @@ fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
             return SniffedOsc::ProgressMalformed;
         }
 
-        let end = s.len().min(OSC133_MAX);
+        let end = s.len().min(SHORT_MARK_MAX);
         let arg_start = OSC_PROGRESS_PREFIX.len() + 2;
 
         let mut i = arg_start;
@@ -775,7 +784,7 @@ fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
             }
         }
 
-        return if s.len() < OSC133_MAX {
+        return if s.len() < SHORT_MARK_MAX {
             SniffedOsc::Incomplete
         } else {
             SniffedOsc::ProgressMalformed
@@ -806,8 +815,27 @@ fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
             .flatten()
     };
 
-    // Find the terminator: BEL (0x07) or ST (ESC \), bounded by OSC133_MAX.
-    let end = s.len().min(OSC133_MAX);
+    // OSC 133 C may carry ";cmdline=<base64 UTF-8>" with the accepted line. An
+    // unreadable value counts as absent: the echo estimate still supplies a title
+    // and nothing about keeping the block depends on it.
+    let cmdline_at = |term: usize| {
+        (sub == b'C')
+            .then(|| {
+                let encoded = s[arg_start..term].strip_prefix(b";cmdline=")?;
+
+                String::from_utf8(STANDARD.decode(encoded).ok()?).ok()
+            })
+            .flatten()
+    };
+
+    // Find the terminator: BEL (0x07) or ST (ESC \); only `;C` may be long.
+    let limit = if sub == b'C' {
+        OSC133_MAX
+    } else {
+        SHORT_MARK_MAX
+    };
+
+    let end = s.len().min(limit);
 
     let mut i = OSC133_PREFIX.len();
 
@@ -819,6 +847,7 @@ fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
                     sub,
                     exit: exit_at(i),
                     next: region_for(sub),
+                    cmdline: cmdline_at(i),
                 };
             }
             0x1b if i + 1 < s.len() && s[i + 1] == 0x5c => {
@@ -827,6 +856,7 @@ fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
                     sub,
                     exit: exit_at(i),
                     next: region_for(sub),
+                    cmdline: cmdline_at(i),
                 };
             }
             0x1b if i + 1 == s.len() => return SniffedOsc::Incomplete, // maybe a split ST
@@ -835,7 +865,7 @@ fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
         }
     }
 
-    if s.len() < OSC133_MAX {
+    if s.len() < limit {
         SniffedOsc::Incomplete // a terminator may still arrive next read
     } else {
         SniffedOsc::Malformed // too long, resync on the ESC

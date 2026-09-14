@@ -31,6 +31,8 @@ mod proxy;
 #[cfg(test)]
 mod interaction_tests;
 #[cfg(test)]
+mod psreadline_tests;
+#[cfg(test)]
 mod state_tests;
 #[cfg(test)]
 mod tests;
@@ -122,7 +124,7 @@ pub enum HostEvent {
 /// The currently executing command for split live chrome.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InFlightBlock {
-    pub command: String,
+    pub command: Option<String>,
     pub started_at: time::SystemTime,
 }
 
@@ -399,7 +401,7 @@ impl TerminalSession {
 
         live.then(|| self.in_flight_block())
             .flatten()
-            .map(|block| block.command)
+            .and_then(|block| block.command)
     }
 
     pub fn block_text(&self, item: usize) -> Option<Request<String>> {

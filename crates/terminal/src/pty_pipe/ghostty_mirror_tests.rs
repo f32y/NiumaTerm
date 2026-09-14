@@ -1279,6 +1279,68 @@ fn command_finished_events(stream: &[u8]) -> Vec<event::CommandCapture> {
 }
 
 #[test]
+fn prediction_cleanup_cannot_discard_completed_output() {
+    let stream = b"\x1b]133;A\x07\x1b]133;B\x07\x1b]133;C\x07\x1b]133;D;0\x07\
+\x1b]133;A\x07PS> \x1b]133;B\x07\x1b[1;5Hls\
+\x1b[2;1H\x1b[K\x1b[1;7H\r\n\x1b]133;C\x07Cargo.toml\r\n\
+\x1b]133;D;0\x07\x1b[2J\x1b[3J\x1b[H\x1b]133;A\x07PS> \x1b]133;B\x07";
+
+    let (events, machine) = pty_read_events(stream);
+
+    assert_eq!(machine.ghostty.block_count(), 1);
+
+    let handle = machine.ghostty.block_at(0).unwrap();
+    let rows = machine.ghostty.block_row_count(handle).unwrap();
+
+    let mut text = String::new();
+
+    for row in 0..rows {
+        for cell in machine
+            .ghostty
+            .read_block_row(handle, row)
+            .unwrap()
+            .unwrap()
+            .cells
+        {
+            text.push_str(&cell.text);
+        }
+    }
+
+    assert!(text.contains("Cargo.toml"));
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, event::TerminalEvent::CommandFinished(_)))
+            .count(),
+        1
+    );
+}
+
+/// The engine must accept a `;C` mark that carries parameters, or the output
+/// rows lose their semantic tag and the block disappears.
+#[test]
+fn submitted_command_survives_prediction_cleanup() {
+    let stream = b"\x1b]133;A\x07\x1b]133;B\x07\x1b]133;C\x07\x1b]133;D;0\x07\
+\x1b]133;A\x07PS> \x1b]133;B\x07\x1b[1;5Hls\
+\x1b[2;1H\x1b[K\x1b[1;7H\r\n\x1b]133;C;cmdline=bHM=\x07\
+Cargo.toml\r\n\x1b]133;D;0\x07\x1b[2J\x1b[3J\x1b[H";
+
+    let (events, machine) = pty_read_events(stream);
+
+    let finished: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            event::TerminalEvent::CommandFinished(c) => Some(c),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(finished.len(), 1);
+    assert_eq!(finished[0].command.as_deref(), Some("ls"));
+    assert_eq!(machine.ghostty.block_count(), 1);
+}
+
+#[test]
 fn pty_read_emits_osc_52_clipboard_store() {
     use crate::clipboard::ClipboardType;
     use crate::event::TerminalEvent;
@@ -1315,7 +1377,7 @@ cd dest\r\n\x1b]133;C\x07\
 
     let b = &blocks[0];
 
-    assert_eq!(b.command, "cd dest");
+    assert_eq!(b.command.as_deref(), Some("cd dest"));
     assert_eq!(b.exit_code, Some(0));
     assert!(b.started_at <= b.ended_at);
 
@@ -1490,10 +1552,10 @@ echo two\r\n\x1b]133;C\x07two\r\n\
         "one start per real command, none for the prime"
     );
     assert_eq!(finishes.len(), 2);
-    assert_eq!(starts[0].command, "echo one");
-    assert_eq!(starts[1].command, "echo two");
-    assert_eq!(finishes[0].command, "echo one");
-    assert_eq!(finishes[1].command, "echo two");
+    assert_eq!(starts[0].command.as_deref(), Some("echo one"));
+    assert_eq!(starts[1].command.as_deref(), Some("echo two"));
+    assert_eq!(finishes[0].command.as_deref(), Some("echo one"));
+    assert_eq!(finishes[1].command.as_deref(), Some("echo two"));
     assert_eq!(starts[0].seq, finishes[0].seq);
     assert_eq!(starts[1].seq, finishes[1].seq);
     assert!(starts[0].seq < starts[1].seq);

@@ -60,7 +60,7 @@ fn pump(session: &TerminalSession, all: &mut Vec<HostEvent>) -> usize {
 }
 
 /// Poll until `pred(all_events)` or timeout; returns whether it held.
-fn wait_for(
+pub(super) fn wait_for(
     session: &TerminalSession,
     all: &mut Vec<HostEvent>,
     timeout: Duration,
@@ -83,7 +83,7 @@ fn wait_for(
     }
 }
 
-fn screen_text(session: &TerminalSession) -> String {
+pub(super) fn screen_text(session: &TerminalSession) -> String {
     let b = session.snapshot();
 
     (0..b.rows())
@@ -98,7 +98,7 @@ fn screen_text(session: &TerminalSession) -> String {
         .join("\n")
 }
 
-fn block_texts(session: &TerminalSession) -> Vec<(Option<String>, String)> {
+pub(super) fn block_texts(session: &TerminalSession) -> Vec<(Option<String>, String)> {
     let count = session.block_store().lock().items().len();
 
     (0..count)

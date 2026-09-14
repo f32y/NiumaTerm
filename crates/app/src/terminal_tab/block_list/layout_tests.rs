@@ -14,7 +14,7 @@ fn live_item_layout_places_chrome_around_history_active_rows_and_padding() {
     for (in_flight, open_prompt, accent) in [
         (
             Some(InFlightBlock {
-                command: "build".into(),
+                command: Some("build".into()),
                 started_at: SystemTime::now(),
             }),
             false,

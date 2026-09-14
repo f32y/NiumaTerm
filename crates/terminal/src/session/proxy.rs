@@ -173,7 +173,7 @@ impl EventListener for TerminalEventProxy {
                     .block_store
                     .lock()
                     .update_meta(cmd.seq, |m: &mut SegmentMeta| {
-                        m.command = Some(cmd.command.clone());
+                        m.command = cmd.command.clone();
                         m.cwd = cmd.cwd.as_ref().map(|p| p.to_string_lossy().into_owned());
                         m.started_at = Some(cmd.started_at);
                     });
@@ -201,7 +201,7 @@ impl EventListener for TerminalEventProxy {
                     });
 
                 debug!(
-                    command = %cmd.command,
+                    command = ?cmd.command,
                     exit_code = ?cmd.exit_code,
                     "command block metadata recorded"
                 );

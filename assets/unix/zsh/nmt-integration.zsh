@@ -82,8 +82,9 @@ __nmt_precmd() {
     # An empty line, or one abandoned with Ctrl-C, runs no command, so
     # `preexec` never fired and the command region opened by the last `;B` is
     # still open. Close it here: a `;D` arriving straight after a `;B` is an
-    # out-of-order lifecycle and costs the terminal its boundary trust.
-    printf '\033]133;C\007'
+    # out-of-order lifecycle and costs the terminal its boundary trust. The
+    # empty `cmdline` says nothing ran, so the terminal builds no block.
+    printf '\033]133;C;cmdline=\007'
   fi
   __nmt_command_started=
 
@@ -113,10 +114,19 @@ __nmt_precmd() {
   fi
 }
 
-# `;C` — command input ends, its output begins.
+# `;C` — command input ends, its output begins. It carries the accepted line
+# (`$1`, as typed) so the block title does not depend on the screen echo. The
+# terminal scans a mark of at most 16 KiB; a longer line only loses its title.
+# `tr` folds the wrapping GNU base64 adds; BSD base64 emits one line already.
 __nmt_preexec() {
   __nmt_command_started=1
-  printf '\033]133;C\007'
+  local cmdline
+  cmdline=$(printf '%s' "$1" | base64 | tr -d '\n')
+  if (( ${#cmdline} > 16000 )); then
+    printf '\033]133;C\007'
+  else
+    printf '\033]133;C;cmdline=%s\007' "$cmdline"
+  fi
 }
 
 add-zsh-hook precmd __nmt_precmd

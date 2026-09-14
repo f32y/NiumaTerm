@@ -168,7 +168,7 @@ fn runtime_transitions_do_not_require_host_event_consumption() {
 
     proxy.send_event(TerminalEvent::CommandFinished(CommandCapture {
         seq: 1,
-        command: "echo hello".into(),
+        command: Some("echo hello".into()),
         cwd: None,
         exit_code: Some(0),
         started_at: now,

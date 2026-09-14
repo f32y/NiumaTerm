@@ -1,7 +1,10 @@
 use std::cell;
 
 // ---- command-blocks: exit-code extraction + completed-command capture ----
-use crate::event::CommandCapture;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
+
+use crate::event::{CommandCapture, CommandStart};
 use crate::prompt_sniffer::{
     ProgressReport, ProgressState, PromptRegion, PromptSniffer, SniffedOsc, parse_sniffed_osc,
 };
@@ -351,7 +354,7 @@ fn escape_split_inside_command_region_keeps_captured_text() {
     ));
 
     assert_eq!(cmds.len(), 1);
-    assert_eq!(cmds[0].command, "echo hi");
+    assert_eq!(cmds[0].command.as_deref(), Some("echo hi"));
 }
 
 #[test]
@@ -367,7 +370,7 @@ fn trusted_cycle_produces_block_with_exit_code_and_timing() {
 
     let cmd = &cmds[0];
 
-    assert_eq!(cmd.command, "echo hi");
+    assert_eq!(cmd.command.as_deref(), Some("echo hi"));
     assert_eq!(cmd.exit_code, Some(0));
     assert!(cmd.started_at <= cmd.ended_at);
 }
@@ -409,7 +412,7 @@ fn bare_d_records_unknown_exit_code() {
 
     assert_eq!(cmds.len(), 1, "block recorded without an exit code");
     assert_eq!(cmds[0].exit_code, None);
-    assert_eq!(cmds[0].command, "ls");
+    assert_eq!(cmds[0].command.as_deref(), Some("ls"));
 }
 
 #[test]
@@ -442,11 +445,11 @@ fn two_completions_in_one_read_stay_ordered() {
 
     assert_eq!(cmds.len(), 2);
     assert_eq!(
-        (cmds[0].command.as_str(), cmds[0].exit_code),
+        (cmds[0].command.as_deref().unwrap(), cmds[0].exit_code),
         ("first", Some(0))
     );
     assert_eq!(
-        (cmds[1].command.as_str(), cmds[1].exit_code),
+        (cmds[1].command.as_deref().unwrap(), cmds[1].exit_code),
         ("second", Some(1))
     );
 }
@@ -477,13 +480,13 @@ fn untrusted_or_partial_cycle_produces_no_block() {
 }
 
 #[test]
-fn empty_or_whitespace_command_produces_no_block() {
+fn explicitly_empty_command_produces_no_block() {
     let mut s = primed();
 
-    // Enter at an empty prompt: the echo region holds only the CRLF.
+    // The shell reports the empty line on `;C` itself, independently of the echo.
     let cmds = feed_commands(
         &mut s,
-        b"\x1b]133;A\x07> \x1b]133;B\x07\r\n\x1b]133;C\x07\x1b]133;D;0\x07",
+        b"\x1b]133;A\x07> \x1b]133;B\x07\r\n\x1b]133;C;cmdline=\x07\x1b]133;D;0\x07",
     );
 
     assert!(cmds.is_empty());
@@ -499,7 +502,7 @@ fn command_text_is_stripped_of_sgr_and_controls() {
         b"\x1b]133;A\x07> \x1b]133;B\x07\x1b[93mgit\x1b[0m status\r\n\x1b]133;C\x07\x1b]133;D;0\x07",
     );
 
-    assert_eq!(cmds[0].command, "git status");
+    assert_eq!(cmds[0].command.as_deref(), Some("git status"));
 }
 
 #[test]
@@ -517,7 +520,7 @@ fn command_echo_redraws_converge_to_final_line() {
 \x1b]133;C\x07\x1b]133;D;0\x07",
     );
 
-    assert_eq!(cmds[0].command, "echo hi2");
+    assert_eq!(cmds[0].command.as_deref(), Some("echo hi2"));
 }
 
 // ---- command lifecycle: mark hook edges + mark bytes ----
@@ -545,7 +548,7 @@ fn mark_hook_fires_in_stream_order_with_edges() {
             }
 
             if let Some(start) = &m.command_started {
-                tags.push(format!("C:{}", start.command));
+                tags.push(format!("C:{}", start.command.as_deref().unwrap()));
             }
 
             if m.command_finished.is_some() {
@@ -613,7 +616,7 @@ fn command_started_only_for_trusted_nonempty_commands() {
             |_, _, _| {},
             |mut m| {
                 if let Some(start) = m.command_started.take() {
-                    starts.borrow_mut().push(start.command);
+                    starts.borrow_mut().push(start.command.unwrap());
                 }
             },
         );
@@ -638,7 +641,7 @@ fn command_started_only_for_trusted_nonempty_commands() {
     // Empty Enter afterwards: no start.
     feed(
         &mut s,
-        b"\x1b]133;D;0\x07\x1b]133;A\x07> \x1b]133;B\x07\r\n\x1b]133;C\x07",
+        b"\x1b]133;D;0\x07\x1b]133;A\x07> \x1b]133;B\x07\r\n\x1b]133;C;cmdline=\x07",
     );
 
     assert_eq!(starts.borrow().len(), 1);
@@ -723,7 +726,7 @@ fn a_right_prompt_stays_out_of_the_captured_command() {
     );
 
     assert_eq!(cmds.len(), 1, "one command completed");
-    assert_eq!(cmds[0].command, "true");
+    assert_eq!(cmds[0].command.as_deref(), Some("true"));
 }
 
 /// The same mark is what a prompt re-render emits, so repeating it must not
@@ -738,4 +741,142 @@ fn a_repeated_command_mark_keeps_boundary_trust() {
     );
 
     assert!(s.boundary_trusted());
+}
+
+// ---- `;C;cmdline=<base64>`: the shell's own report of the accepted line ----
+
+struct Observed {
+    starts: Vec<CommandStart>,
+    finishes: Vec<CommandCapture>,
+    engine: Vec<u8>,
+    trusted: bool,
+}
+
+/// Feed `chunks` through a primed sniffer and collect everything a caller sees.
+fn observe(chunks: &[&[u8]]) -> Observed {
+    let mut sniffer = primed();
+    let mut starts = Vec::new();
+    let mut finishes = Vec::new();
+
+    let engine = cell::RefCell::new(Vec::new());
+
+    for chunk in chunks {
+        sniffer.feed_hooked(
+            chunk,
+            |_, _, bytes| engine.borrow_mut().extend_from_slice(bytes),
+            |mark| {
+                engine.borrow_mut().extend_from_slice(mark.bytes);
+                starts.extend(mark.command_started);
+                finishes.extend(mark.command_finished);
+            },
+        );
+    }
+
+    Observed {
+        starts,
+        finishes,
+        engine: engine.into_inner(),
+        trusted: sniffer.boundary_trusted(),
+    }
+}
+
+const PROMPT: &[u8] = b"\x1b]133;A\x07PS> \x1b]133;B\x07";
+const OUTPUT: &[u8] = b"saved output\r\n\x1b]133;D;0\x07";
+
+fn start_mark(command: &str, terminator: &str) -> Vec<u8> {
+    let encoded = STANDARD.encode(command);
+
+    format!("\x1b]133;C;cmdline={encoded}{terminator}").into_bytes()
+}
+
+#[test]
+fn reported_unicode_multiline_command_survives_every_read_split() {
+    let command = format!(
+        "  Write-Output '中文🚀'\n{}  ",
+        "# continuation\n".repeat(80)
+    );
+
+    for terminator in ["\x07", "\x1b\\"] {
+        let input = [PROMPT, &start_mark(&command, terminator), OUTPUT].concat();
+
+        for split in 0..=input.len() {
+            let observed = observe(&[&input[..split], &input[split..]]);
+
+            assert_eq!(observed.starts.len(), 1, "split {split}");
+            assert_eq!(observed.finishes.len(), 1, "split {split}");
+            assert_eq!(
+                observed.finishes[0].command.as_deref(),
+                Some(command.as_str())
+            );
+            assert_eq!(observed.engine, input, "split {split}");
+            assert!(observed.trusted);
+        }
+
+        let observed = observe(&input.chunks(1).collect::<Vec<_>>());
+
+        assert_eq!(
+            observed.starts[0].command.as_deref(),
+            Some(command.as_str())
+        );
+        assert_eq!(observed.engine, input);
+    }
+}
+
+#[test]
+fn reported_empty_or_cancelled_input_starts_no_execution() {
+    for command in ["", " \t\r\n "] {
+        let input = [
+            PROMPT,
+            b"cancelled input^C\r\n",
+            &start_mark(command, "\x07"),
+            OUTPUT,
+        ]
+        .concat();
+
+        let observed = observe(&input.chunks(1).collect::<Vec<_>>());
+
+        assert!(observed.starts.is_empty());
+        assert!(observed.finishes.is_empty());
+        assert!(observed.trusted);
+    }
+}
+
+/// PSReadLine erases its prediction rows below the input after Enter; collapsed
+/// onto one line that erase empties the echo estimate. The block must survive
+/// with no title rather than vanish with its output.
+#[test]
+fn erased_echo_without_a_report_still_keeps_the_block() {
+    let input = [
+        PROMPT,
+        b"\x1b[1;5Hls\x1b[2;1H\x1b[K\x1b[1;7H\r\n\x1b]133;C\x07",
+        OUTPUT,
+    ]
+    .concat();
+
+    for split in 0..=input.len() {
+        let observed = observe(&[&input[..split], &input[split..]]);
+
+        assert_eq!(observed.finishes.len(), 1, "split {split}");
+        assert!(observed.finishes[0].command.is_none());
+        assert_eq!(observed.finishes[0].exit_code, Some(0));
+        assert!(observed.trusted);
+    }
+}
+
+#[test]
+fn unreadable_report_falls_back_to_the_echo_title() {
+    for mark in [
+        b"\x1b]133;C;cmdline=!!!!\x07".as_slice(),
+        b"\x1b]133;C;cmdline=/w==\x07",
+        b"\x1b]133;C;cmdline\x07",
+        b"\x1b]133;C;other=bHM=\x07",
+    ] {
+        let input = [PROMPT, b"ls\r\n", mark, OUTPUT].concat();
+        let observed = observe(&input.chunks(3).collect::<Vec<_>>());
+
+        assert_eq!(observed.finishes.len(), 1, "{mark:?}");
+        assert_eq!(observed.finishes[0].command.as_deref(), Some("ls"));
+        assert_eq!(observed.engine, input);
+        assert!(observed.trusted);
+    }
 }

@@ -331,7 +331,7 @@ fn in_flight_block_lifecycle() {
     fn start(cmd: &str) -> CommandStart {
         CommandStart {
             seq: 0,
-            command: cmd.to_string(),
+            command: Some(cmd.to_string()),
             cwd: Some("C:/w".into()),
             started_at: SystemTime::now(),
         }
@@ -342,7 +342,7 @@ fn in_flight_block_lifecycle() {
 
         CommandCapture {
             seq: 0,
-            command: cmd.to_string(),
+            command: Some(cmd.to_string()),
             exit_code: Some(0),
             cwd: Some("C:/w".into()),
             started_at: now,
@@ -371,7 +371,7 @@ fn in_flight_block_lifecycle() {
     {
         let running = in_flight.lock().clone().expect("in-flight set");
 
-        assert_eq!(running.command.as_str(), "sleep 5");
+        assert_eq!(running.command.as_deref().unwrap(), "sleep 5");
     }
 
     proxy.send_event(TerminalEvent::CommandFinished(capture("sleep 5")));
@@ -384,7 +384,10 @@ fn in_flight_block_lifecycle() {
     // start -> trust loss: cleared.
     proxy.send_event(TerminalEvent::CommandStarted(start("nested")));
 
-    assert_eq!(in_flight.lock().clone().unwrap().command, "nested");
+    assert_eq!(
+        in_flight.lock().clone().unwrap().command.as_deref(),
+        Some("nested")
+    );
 
     proxy.send_event(TerminalEvent::PromptStarted);
 
@@ -441,14 +444,14 @@ fn block_batches_and_seq_metadata_reach_the_block_store() {
     // Marks fire first (write time)...
     proxy.send_event(TerminalEvent::CommandStarted(CommandStart {
         seq: 1,
-        command: "cargo build".into(),
+        command: Some("cargo build".into()),
         cwd: Some("C:/w".into()),
         started_at: now,
     }));
 
     proxy.send_event(TerminalEvent::CommandFinished(CommandCapture {
         seq: 1,
-        command: "cargo build".into(),
+        command: Some("cargo build".into()),
         exit_code: Some(0),
         cwd: Some("C:/w".into()),
         started_at: now,

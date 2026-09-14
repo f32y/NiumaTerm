@@ -87,6 +87,9 @@ __nmt_precmd() {
   local exit_code=$?
 
   __nmt_in_prompt=1
+  # The number the next saved line will get; `__nmt_preexec` compares it to
+  # tell a freshly saved line from a stale history entry.
+  __nmt_hist_next=$HISTCMD
 
   if [ -z "$__nmt_primed" ]; then
     __nmt_primed=1
@@ -143,7 +146,36 @@ __nmt_preexec() {
     return
   fi
   __nmt_in_prompt=1
-  printf '\033]133;C\007'
+  # DEBUG also fires before the first prompt hook after an empty line. An
+  # empty `cmdline` tells the terminal nothing ran, so it builds no block.
+  if [ "$BASH_COMMAND" = __nmt_precmd ]; then
+    printf '\033]133;C;cmdline=\007'
+    return
+  fi
+
+  # `;C` carries the accepted line so the block title does not depend on the
+  # screen echo. `$BASH_COMMAND` is only the first simple command of the line
+  # (`a | b` gives `a`); the whole line is the newest history entry, but only
+  # when the line was saved. Inside the trap `$HISTCMD` equals the number
+  # recorded at the prompt exactly then; `ignorespace` and `ignoredups` leave
+  # the previous entry on top, and a bare `;C` lets the terminal title the
+  # block from the echo instead. The two subshells cost about a millisecond
+  # per command; a pure-shell base64 would be forty lines to save that.
+  local cmdline=
+  if [ "$HISTCMD" = "$__nmt_hist_next" ]; then
+    cmdline=$(HISTTIMEFORMAT= builtin history 1)
+    # `history` prints `%5d%c %s`: the number, `*` or a space, a space, the line.
+    cmdline=${cmdline#*$HISTCMD}
+    # `tr` folds the wrapping GNU base64 adds; BSD base64 emits one line already.
+    cmdline=$(printf '%s' "${cmdline:2}" | base64 | tr -d '\n')
+  fi
+  # The terminal scans a mark of at most 16 KiB; a longer line only loses its
+  # title.
+  if [ -n "$cmdline" ] && [ "${#cmdline}" -le 16000 ]; then
+    printf '\033]133;C;cmdline=%s\007' "$cmdline"
+  else
+    printf '\033]133;C\007'
+  fi
 }
 
 # The terminal keeps no scrollback of its own once blocks are authoritative, so

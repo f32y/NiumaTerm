@@ -111,8 +111,18 @@ if (Get-Module PSReadLine) {
         $Global:__YtReadLineCompleted = $true
         $e = [char]27
         $b = [char]7
-        # ;C marks the transition from command input to command output.
-        [Console]::Write("$e]133;C$b")
+        # ;C marks the transition from command input to command output. It carries
+        # the accepted line itself: PSReadLine erases its prediction rows after
+        # Enter, so the terminal cannot recover the text from the screen, and an
+        # empty value is how it learns that nothing ran. The terminal scans a
+        # mark of at most 16 KiB; a longer line is left out and only its title
+        # degrades.
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$line))
+        if ($encoded.Length -gt 16000) {
+            [Console]::Write("$e]133;C$b")
+        } else {
+            [Console]::Write("$e]133;C;cmdline=$encoded$b")
+        }
         $line
     }
 
