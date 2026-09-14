@@ -5,7 +5,7 @@ mod pipes_tests;
 use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::thread::{JoinHandle, sleep, spawn};
 use std::time::Duration;
@@ -41,7 +41,13 @@ impl PipeWorker {
 
         let (sender, errors) = channel();
         let worker_state = state.clone();
-        let thread = spawn(move || pump(worker_state, sender));
+
+        let thread = spawn(move || {
+            pump(worker_state.clone(), sender);
+            // A failed native call must wake a loop waiting for write completion,
+            // even when no more pipe data or child-exit event will arrive.
+            worker_state.soft.set_ready();
+        });
 
         Self {
             thread: Some(thread),
@@ -228,17 +234,32 @@ impl io::Read for EventedAnonRead {
 pub struct EventedAnonWrite {
     worker: PipeWorker,
     producer: SpscBufferWriter,
+    progress: Arc<WriteProgress>,
+    submitted: u64,
+}
+
+#[derive(Default)]
+struct WriteProgress {
+    completed: AtomicU64,
+    flush_waiting: AtomicBool,
 }
 
 impl EventedAnonWrite {
     pub fn new(pipe: AnonWrite) -> Self {
         let (producer, consumer) = spsc_buffer(65536);
+        let progress = Arc::new(WriteProgress::default());
+        let worker_progress = progress.clone();
 
         let worker = PipeWorker::new(move |state, errors| {
-            pump_buffer_to_pipe(pipe, consumer, state, errors)
+            pump_buffer_to_pipe(pipe, consumer, state, errors, worker_progress)
         });
 
-        Self { worker, producer }
+        Self {
+            worker,
+            producer,
+            progress,
+            submitted: 0,
+        }
     }
 
     /// The soft-ready handle, so the `Pty` can inject the loop `Waker` at
@@ -253,6 +274,7 @@ fn pump_buffer_to_pipe(
     mut consumer: SpscBufferReader,
     inner: Arc<PipeState>,
     error_sender: Sender<String>,
+    progress: Arc<WriteProgress>,
 ) {
     use std::io::Write;
 
@@ -299,7 +321,20 @@ fn pump_buffer_to_pipe(
         let mut written = 0usize;
 
         while written < nbytes {
-            written += try_or_send!(pipe.write(&tmp_buf[written..nbytes]), error_sender);
+            let count = try_or_send!(pipe.write(&tmp_buf[written..nbytes]), error_sender);
+
+            if count == 0 {
+                let _ = error_sender.send("native pipe write returned zero bytes".into());
+
+                return;
+            }
+
+            written += count;
+            progress.completed.fetch_add(count as u64, Ordering::SeqCst);
+
+            if progress.flush_waiting.swap(false, Ordering::SeqCst) {
+                inner.soft.set_ready();
+            }
         }
     }
 }
@@ -309,6 +344,8 @@ impl io::Write for EventedAnonWrite {
         self.worker.check_error()?;
 
         let nbytes = self.producer.write_from_slice(buf);
+
+        self.submitted = self.submitted.wrapping_add(nbytes as u64);
 
         if self.producer.is_full() {
             // Backpressure: buffer full → not writable until the worker drains it.
@@ -333,6 +370,19 @@ impl io::Write for EventedAnonWrite {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        Ok(())
+        self.worker.check_error()?;
+        // Emptying the ring only transfers bytes to the worker's temporary
+        // buffer. A resize must wait until its native writes have completed.
+        // Register before checking completion so the last write cannot lose
+        // the wakeup. The bounded buffer keeps wrapped counters unambiguous.
+        self.progress.flush_waiting.store(true, Ordering::SeqCst);
+
+        if self.progress.completed.load(Ordering::SeqCst) == self.submitted {
+            self.progress.flush_waiting.store(false, Ordering::SeqCst);
+
+            Ok(())
+        } else {
+            Err(io::ErrorKind::WouldBlock.into())
+        }
     }
 }

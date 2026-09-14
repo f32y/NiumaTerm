@@ -59,6 +59,10 @@ pub struct Winsize {
 pub trait ProcessReadWrite {
     type Reader: io::Read;
 
+    /// Nonblocking input writer. `flush` reports `WouldBlock` while accepted
+    /// bytes are still waiting for native writes, and completion must wake the
+    /// registered poller. Successful flush does not mean the child consumed
+    /// the input; it permits a subsequent resize to be submitted in order.
     type Writer: io::Write;
 
     fn reader(&mut self) -> &mut Self::Reader;

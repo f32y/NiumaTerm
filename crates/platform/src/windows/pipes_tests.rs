@@ -2,9 +2,106 @@ use std::io::{Read, Write};
 use std::thread::sleep;
 use std::time::Duration;
 
+use mio::{Events, Poll, Token, Waker};
 use miow::pipe::anonymous;
 
 use crate::windows::pipes::*;
+
+#[test]
+fn flush_waits_for_native_writes_after_the_ring_has_space() {
+    let (mut reader, pipe) = anonymous(64).unwrap();
+    let mut writer = EventedAnonWrite::new(pipe);
+    let bytes = vec![0x5a; 65536];
+    let mut poll = Poll::new().unwrap();
+
+    writer
+        .soft()
+        .set_waker(Arc::new(Waker::new(poll.registry(), Token(0)).unwrap()));
+
+    let mut events = Events::with_capacity(4);
+
+    assert_eq!(writer.write(&bytes).unwrap(), bytes.len());
+    assert!(wait_until(|| !writer.producer.is_full()));
+
+    poll.poll(&mut events, Some(Duration::ZERO)).unwrap();
+
+    assert_eq!(
+        writer.flush().unwrap_err().kind(),
+        io::ErrorKind::WouldBlock
+    );
+
+    let drain = spawn(move || {
+        let mut received = vec![0; 65536];
+
+        reader.read_exact(&mut received).unwrap();
+
+        received
+    });
+
+    loop {
+        events.clear();
+
+        poll.poll(&mut events, Some(Duration::from_secs(2)))
+            .unwrap();
+
+        assert!(
+            !events.is_empty(),
+            "native completion did not wake the parked loop"
+        );
+
+        match writer.flush() {
+            Ok(()) => break,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+            Err(error) => panic!("native write failed: {error}"),
+        }
+    }
+
+    assert_eq!(drain.join().unwrap(), bytes);
+}
+
+#[test]
+fn native_write_failure_wakes_a_pending_flush() {
+    let (reader, pipe) = anonymous(64).unwrap();
+    let mut writer = EventedAnonWrite::new(pipe);
+    let mut poll = Poll::new().unwrap();
+
+    writer
+        .soft()
+        .set_waker(Arc::new(Waker::new(poll.registry(), Token(0)).unwrap()));
+
+    let mut events = Events::with_capacity(4);
+
+    writer.write_all(&[0; 65536]).unwrap();
+
+    assert!(wait_until(|| !writer.producer.is_full()));
+
+    poll.poll(&mut events, Some(Duration::ZERO)).unwrap();
+
+    assert_eq!(
+        writer.flush().unwrap_err().kind(),
+        io::ErrorKind::WouldBlock
+    );
+
+    drop(reader);
+
+    loop {
+        events.clear();
+
+        poll.poll(&mut events, Some(Duration::from_secs(2)))
+            .unwrap();
+
+        assert!(
+            !events.is_empty(),
+            "native failure did not wake the parked loop"
+        );
+
+        match writer.flush().unwrap_err().kind() {
+            io::ErrorKind::WouldBlock => {}
+            io::ErrorKind::BrokenPipe => break,
+            error => panic!("unexpected native write error: {error}"),
+        }
+    }
+}
 
 #[test]
 fn a_pipe_error_after_its_consumer_closes_does_not_panic() {
