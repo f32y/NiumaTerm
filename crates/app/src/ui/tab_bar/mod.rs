@@ -12,21 +12,22 @@ mod tests;
 use std::{cell, collections, rc};
 
 use app::agent_tab::AgentKind;
+use app::design::{SETTINGS_NAV_WIDTH, SURFACE_RADIUS};
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Context, DragMoveEvent, Hsla, IsZero as _, Pixels, ScrollHandle, SharedString,
-    div, px, relative,
+    AnyElement, App, Context, DragMoveEvent, Hsla, IsZero as _, MouseButton, Pixels, ScrollHandle,
+    SharedString, div, px, relative,
 };
-use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
-use gpui_component::{ActiveTheme, ElementExt as _, Icon, IconName, Sizable};
+use gpui_component::{ActiveTheme, ElementExt as _, Icon, IconName};
 use nmt_terminal::event::{ProgressReport, ProgressState};
 use rust_i18n::t;
 
 use crate::tabs::{TabId, TabManager};
 use crate::ui::composition::{
-    HoverActionLayout, HoverActionVisibility, StatusMark, StatusMarkTone, hover_action,
+    HoverActionLayout, HoverActionVisibility, StatusMark, StatusMarkTone, TOOLBAR_BUTTON_SIZE,
+    hover_action, toolbar_button,
 };
 use crate::ui::shell::{
     InlineRename, InlineRenameSession, InlineRenameStyle, TabSurface, pending_tab_icon,
@@ -50,11 +51,9 @@ pub(super) struct TabStrip {
     /// its first prepaint.
     reveal_retry: bool,
 
-    /// Tab position a tab drag currently hovers: that tab shifts right to open
-    /// an insertion gap ("make way"). Only overwritten when the pointer enters
-    /// another tab — clearing on exit would oscillate, because opening the gap
-    /// moves the hovered tab out from under the pointer.
-    drag_over: Option<usize>,
+    /// Destination tab and trailing-edge marker. The marker never changes
+    /// tab bounds, so hovering it cannot move the destination away.
+    drag_over: Option<(usize, bool)>,
 
     /// Strip width recorded during the previous prepaint, which is what
     /// `Auto Size` divides between the tabs. Held in a cell because the
@@ -62,9 +61,6 @@ pub(super) struct TabStrip {
     /// given up its borrow.
     measured_width: rc::Rc<cell::Cell<f32>>,
 }
-
-/// How far a tab slides to open the insertion gap while a drag hovers it.
-const TAB_MAKE_WAY_PX: f32 = 32.0;
 
 /// Narrowest a tab gets under `Auto Size`: one glyph slot centered in the
 /// pill's content padding, plus the gap and borders the tab draws around it
@@ -178,7 +174,7 @@ impl TabStrip {
         let menu_shell = cx.entity();
 
         let new_tab = modern_dropdown(
-            Button::new("tab-new").ghost().px_2().child("+"),
+            toolbar_button("tab-new").icon(IconName::Plus),
             move |menu, _, cx| new_tab_menu(menu, &menu_shell, cx),
         );
 
@@ -198,7 +194,9 @@ impl TabStrip {
         let configured_width = settings.config().appearance.tab_width as f32;
         let auto_size = settings.config().appearance.tab_auto_size;
 
-        let tab_width = if auto_size {
+        let tab_width = if settings_workspace {
+            SETTINGS_NAV_WIDTH.into()
+        } else if auto_size {
             auto_tab_width(self.measured_width.get(), tab_count, configured_width)
         } else {
             configured_width
@@ -208,12 +206,9 @@ impl TabStrip {
         let icon_only = density == TabDensity::IconOnly;
 
         let bar = TabBar::new("shell-tabs")
-            // Soft-rounded pills floating on the chrome (VS Code Modern UI
-            // look); Large gives a 30px strip, taller than the compact 24px one
-            // for an easier click/drag target while leaving the terminal below
-            // its room.
-            .with_variant(TabVariant::Modern)
-            .large()
+            // Attached tabs share the content edge and keep their own horizontal scroll.
+            .with_variant(TabVariant::Tab)
+            .bottom_border(false)
             .when(cfg!(target_os = "macos"), |bar| bar.pl_0())
             .w_full()
             .min_w_0()
@@ -447,8 +442,8 @@ impl TabStrip {
                 // prepaint clamps the offset to the scrollable range.
                 let scroll = self.scroll.clone();
 
-                Tab::new()
-                    .occlude()
+                shell_tab()
+                    .aria_label(drag_label.clone())
                     .on_scroll_wheel(move |event, window, _| {
                         let delta = event.delta.pixel_delta(window.line_height());
 
@@ -467,12 +462,22 @@ impl TabStrip {
                         window.refresh();
                     })
                     .w(px(tab_width))
-                    // Make way for the dragged tab: the hovered tab
-                    // slides right, opening an insertion gap at the
-                    // pointer.
-                    .when(self.drag_over == Some(index), |this| {
-                        this.ml(px(TAB_MAKE_WAY_PX))
-                    })
+                    .relative()
+                    .when_some(
+                        self.drag_over.filter(|(target, _)| *target == index),
+                        |this, (_, after)| {
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .top_1()
+                                    .bottom_1()
+                                    .w(px(2.0))
+                                    .bg(cx.theme().primary)
+                                    .when(after, |this| this.right_0())
+                                    .when(!after, |this| this.left_0()),
+                            )
+                        },
+                    )
                     .when(agent_kind.is_none() && !icon_only, |this| {
                         // Laid out like the agent prefix below, so a terminal
                         // tab's icon sits at the same offset whether or not a
@@ -605,7 +610,8 @@ impl TabStrip {
 
                         // No gap over the drag's own tab: dropping
                         // there is a no-op.
-                        let target = (e.drag(cx).from != index).then_some(index);
+                        let from = e.drag(cx).from;
+                        let target = (from != index).then_some((index, from < index));
 
                         if this.tab_strip_mut().drag_over != target {
                             this.tab_strip_mut().drag_over = target;
@@ -644,9 +650,8 @@ impl TabStrip {
                 cx.notify();
             }));
 
-        // Fallback drop target for the whole strip: a drop released over the
-        // make-way gap (a margin, outside every tab's hitbox) still lands on
-        // the tracked insertion position instead of silently ending the drag.
+        // Releasing over the strip's trailing space keeps the last visible
+        // destination, without inserting layout margins between tabs.
         let measured_width = self.measured_width.clone();
         let measured_shell = shell.clone();
 
@@ -672,7 +677,7 @@ impl TabStrip {
                 })
             })
             .on_drop(cx.listener(|this, drag: &TabDrag, window, cx| {
-                if let Some(to) = this.tab_strip_mut().drag_over.take() {
+                if let Some((to, _)) = this.tab_strip_mut().drag_over.take() {
                     this.workspaces
                         .active_tabs_mut()
                         .list_mut()
@@ -700,16 +705,14 @@ fn tab_density(tab_width: f32) -> TabDensity {
     }
 }
 
-/// Gap the tab bar leaves between neighbouring pills, and around the whole
-/// strip. `TabVariant::Modern` fixes both at 4px, and the tab widths have to
-/// be reduced by that much to keep the row from overflowing.
-const TAB_GAP: f32 = 4.0;
+/// Attached tabs have no inter-tab gap or outer strip padding.
+const TAB_GAP: f32 = 0.0;
 
-const TAB_BAR_PADDING: f32 = TAB_GAP * 2.0;
+const TAB_BAR_PADDING: f32 = 0.0;
 
 /// Room held back for the trailing new-tab button, which shares the row with
 /// the tabs.
-const NEW_TAB_BUTTON_WIDTH: f32 = 28.0;
+const NEW_TAB_BUTTON_WIDTH: f32 = TOOLBAR_BUTTON_SIZE;
 
 /// Width one tab takes under `Auto Size`. Tabs hold `configured` while the row
 /// has room and then shrink together, never past the point where the leading
@@ -817,4 +820,13 @@ fn progress_bar(report: ProgressReport, tab_width: f32, cx: &App) -> AnyElement 
                 .bg(color),
         )
         .into_any_element()
+}
+
+/// Native hit testing and the title bar's mouse handlers both leave tab
+/// gestures to the tab, including movement before the reorder threshold.
+fn shell_tab() -> Tab {
+    Tab::new()
+        .top_corner_radius(SURFACE_RADIUS)
+        .occlude()
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
 }

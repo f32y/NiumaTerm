@@ -11,6 +11,10 @@ pub struct Theme {
     pub mode: AppearanceTheme,
     #[serde(default)]
     pub colors: ThemeColors,
+
+    /// Shared display name for explicitly paired light and dark variants.
+    #[serde(default)]
+    pub family: String,
 }
 
 #[derive(Debug, Default, Clone, Deserialize, PartialEq)]

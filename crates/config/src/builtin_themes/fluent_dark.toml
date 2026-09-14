@@ -1,5 +1,6 @@
 name = "Fluent Dark"
 mode = "dark"
+family = "Fluent"
 
 # WinUI 3 / Fluent 2 dark tokens. Chrome sits on SolidBackgroundFillColorBase
 # (#202020) and content on the layer above it (#282828), which is the layering

@@ -47,6 +47,19 @@ fn marks(stream: &[u8]) -> Vec<String> {
     found
 }
 
+/// Command text is metadata; lifecycle ordering still depends on the C mark.
+fn lifecycle_marks(seen: &[String]) -> Vec<&str> {
+    seen.iter()
+        .map(|mark| {
+            if mark.starts_with("C;cmdline=") {
+                "C"
+            } else {
+                mark.as_str()
+            }
+        })
+        .collect()
+}
+
 struct Session {
     pty: Pty,
     home: PathBuf,
@@ -221,10 +234,11 @@ fn assert_ordered_lifecycle(shell: &str) {
         "running a command produced only {after:?} within {DEADLINE:?}"
     );
     assert_eq!(
-        &after[6..9],
+        &lifecycle_marks(&after[6..9]),
         &["C", "D;0", "A"],
         "a command must run inside C -> D and be followed by the next prompt"
     );
+    assert_eq!(after[6], "C;cmdline=dHJ1ZQ==");
 }
 
 #[test]
@@ -454,10 +468,11 @@ fn assert_empty_enter_keeps_the_lifecycle_ordered(shell: &str) {
     let seen = session.read_until(|seen| seen.len() >= 9);
 
     assert_eq!(
-        &seen[6..9],
+        &lifecycle_marks(&seen[6..9]),
         &["C", "D;0", "A"],
         "an empty line must still close its command region; saw {seen:?}"
     );
+    assert_eq!(seen[6], "C;cmdline=");
 }
 
 #[test]
@@ -488,7 +503,7 @@ fn assert_the_prompt_mark_does_not_accumulate(shell: &str) {
     let seen = session.read_until(|seen| seen.len() >= 6 + 4 * 4);
 
     assert_eq!(
-        &seen[6..],
+        &lifecycle_marks(&seen[6..]),
         &[
             "C", "D;0", "A", "B", "C", "D;0", "A", "B", "C", "D;0", "A", "B", "C", "D;0", "A", "B"
         ],
@@ -588,7 +603,7 @@ fn zsh_right_prompt_closes_with_its_own_command_mark() {
     let after = session.read_until(|seen| seen.len() >= 10);
 
     assert_eq!(
-        &after[7..10],
+        &lifecycle_marks(&after[7..10]),
         &["C", "D;0", "A"],
         "the repeated mark must leave the lifecycle ordered; saw {after:?}"
     );

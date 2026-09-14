@@ -148,6 +148,10 @@ pub struct TabState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grid_size: Option<(u16, u16)>,
 
+    /// Directory reviewed by a Git tab. Older snapshots omit this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_cwd: Option<String>,
+
     /// Split-pane layout for a multi-pane tab. Absent for single-pane tabs,
     /// which keep the flat fields above as their whole format (so snapshots
     /// without splits stay readable by older builds). Declared last: TOML

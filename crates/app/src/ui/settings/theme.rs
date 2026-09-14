@@ -1,32 +1,28 @@
 use std::fs;
 use std::rc::Rc;
+use std::time::Duration;
+
+use app::design::{CARD_RADIUS, CONTROL_RADIUS};
 
 use futures::StreamExt as _;
 use futures::channel::mpsc::unbounded;
-use gpui::prelude::{FluentBuilder as _, InteractiveElement as _, StatefulInteractiveElement as _};
-use gpui::{
-    App, BorrowAppContext as _, Div, Entity, Hsla, ParentElement as _, Styled as _, Task, div, px,
-    rgba,
-};
-use gpui_component::button::Button;
+use gpui::{App, BorrowAppContext as _, Entity, Task};
 use gpui_component::{
-    ActiveTheme as _, Theme as ComponentTheme, ThemeConfig as ComponentThemeConfig,
-    ThemeRegistry as ComponentThemeRegistry, ThemeToken as ComponentThemeToken, h_flex, v_flex,
+    Theme as ComponentTheme, ThemeConfig as ComponentThemeConfig,
+    ThemeRegistry as ComponentThemeRegistry, ThemeToken as ComponentThemeToken,
 };
-use nmt_config::colors::{ColorArray, Colors};
 use nmt_config::theme::{AppearanceTheme, Theme, UiTheme};
 use nmt_config::{Config, config_dir_path, set_active_colors};
 use notify::{
     Event as NotifyEvent, RecursiveMode, Result as NotifyResult, Watcher as _, recommended_watcher,
 };
-use rust_i18n::t;
 use toml::{Table as TomlTable, Value as TomlValue};
 use tracing::warn;
 
-use crate::ui::fluent::{BUTTON_PADDING_X, CONTROL_RADIUS};
+use crate::ui::UI_BORDER_OPACITY;
+use crate::ui::fluent::BUTTON_PADDING_X;
 use crate::ui::settings::opacity::{main_view_background_opacity, surface_background_opacity};
 use crate::ui::settings::state::{AppSettings, SettingsEditing};
-use crate::ui::{UI_BORDER_OPACITY, UI_RADIUS};
 
 /// Apply the UI half of a terminal theme, falling back to the built-in dark
 /// palette when the theme does not define `[colors.ui]` or contains invalid UI data.
@@ -45,7 +41,7 @@ pub(crate) fn apply_ui_theme(value: Option<&UiTheme>, cx: &mut App) {
 
     ComponentTheme::change(mode, None, cx);
 
-    apply_ui_constants(&theme, ComponentTheme::global_mut(cx));
+    apply_ui_constants(ComponentTheme::global_mut(cx));
 }
 
 /// Translate the `[colors.ui]` section of a theme file into the component
@@ -89,18 +85,11 @@ pub(super) fn ui_theme_config(value: &UiTheme) -> Option<Rc<ComponentThemeConfig
         .ok()
 }
 
-fn apply_ui_constants(config: &ComponentThemeConfig, theme: &mut ComponentTheme) {
-    // A theme that states its own corner radii owns them; these are the
-    // fallback for the themes that leave the choice to the application. The
-    // two radii part ways here: controls follow the system's smaller corner
-    // while dialogs, notifications, and the pane frame keep the app's own.
-    if config.radius.is_none() {
-        theme.radius = CONTROL_RADIUS;
-    }
-
-    if config.radius_lg.is_none() {
-        theme.radius_lg = UI_RADIUS;
-    }
+fn apply_ui_constants(theme: &mut ComponentTheme) {
+    // Geometry belongs to the application: switching a palette must not
+    // change the shape of controls, tabs, or conversation cards.
+    theme.radius = CONTROL_RADIUS;
+    theme.radius_lg = CARD_RADIUS;
 
     // No theme-file key backs this one, so it is not a fallback: button
     // padding is a property of the application's design language rather than
@@ -109,7 +98,7 @@ fn apply_ui_constants(config: &ComponentThemeConfig, theme: &mut ComponentTheme)
     theme.colors.sidebar_border = theme.colors.sidebar_border.opacity(UI_BORDER_OPACITY);
 }
 
-fn select_theme(name: String, cx: &mut App) {
+pub(super) fn select_theme(name: String, cx: &mut App) -> bool {
     let theme = if name.is_empty() {
         Ok(Theme::default())
     } else {
@@ -118,6 +107,12 @@ fn select_theme(name: String, cx: &mut App) {
 
     match theme {
         Ok(theme) => {
+            if let Some(ui) = theme.ui_theme()
+                && ui_theme_config(&ui).is_none()
+            {
+                return false;
+            }
+
             set_active_colors(theme.colors.terminal);
 
             apply_ui_theme(theme.ui_theme().as_ref(), cx);
@@ -127,23 +122,39 @@ fn select_theme(name: String, cx: &mut App) {
             apply_window_translucency(cx);
 
             cx.refresh_windows();
+
+            true
         }
-        Err(err) => warn!("failed to select theme {name}: {err}"),
+        Err(err) => {
+            warn!("failed to select theme {name}: {err}");
+
+            false
+        }
     }
 }
 
 fn reload_themes(editing: &Entity<SettingsEditing>, cx: &mut App) {
+    let selected = cx.global::<AppSettings>().config().theme.clone();
+    let applied = select_theme(selected.clone(), cx);
+
+    let mut themes = Config::load_themes();
+
     editing.update(cx, |editing, cx| {
-        editing.themes = Config::load_themes();
+        // A partial file save must not remove the active card or replace the
+        // currently displayed palette with a fallback.
+        if !applied {
+            themes.retain(|(id, _)| id != &selected);
+
+            if let Some(previous) = editing.themes.iter().find(|(id, _)| id == &selected) {
+                themes.push(previous.clone());
+            }
+        }
+
+        editing.themes = themes;
+        editing.theme_load_failed = !applied;
 
         cx.notify();
     });
-
-    let selected = cx.global::<AppSettings>().config().theme.clone();
-
-    if !selected.is_empty() {
-        select_theme(selected, cx);
-    }
 }
 
 pub(crate) fn watch_themes(editing: &Entity<SettingsEditing>, cx: &mut App) -> Option<Task<()>> {
@@ -160,7 +171,9 @@ pub(crate) fn watch_themes(editing: &Entity<SettingsEditing>, cx: &mut App) -> O
     let (tx, mut rx) = unbounded();
 
     let mut watcher = match recommended_watcher(move |event: NotifyResult<NotifyEvent>| {
-        if event.is_ok() {
+        if let Ok(event) = event
+            && (event.kind.is_create() || event.kind.is_modify() || event.kind.is_remove())
+        {
             let _ = tx.unbounded_send(());
         }
     }) {
@@ -184,6 +197,12 @@ pub(crate) fn watch_themes(editing: &Entity<SettingsEditing>, cx: &mut App) -> O
         let _watcher = watcher;
 
         while rx.next().await.is_some() {
+            cx.background_executor()
+                .timer(Duration::from_millis(150))
+                .await;
+
+            while rx.try_recv().is_ok() {}
+
             let Some(editing) = editing.upgrade() else {
                 break;
             };
@@ -191,159 +210,6 @@ pub(crate) fn watch_themes(editing: &Entity<SettingsEditing>, cx: &mut App) -> O
             cx.update(|cx| reload_themes(&editing, cx));
         }
     }))
-}
-
-fn preview_color(color: ColorArray) -> Hsla {
-    let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u32;
-
-    rgba(
-        channel(color[0]) << 24
-            | channel(color[1]) << 16
-            | channel(color[2]) << 8
-            | channel(color[3]),
-    )
-    .into()
-}
-
-// Fixed terminal samples keep theme comparisons consistent across UI languages.
-fn theme_preview(colors: Colors) -> Div {
-    let swatches = [
-        colors.red,
-        colors.yellow,
-        colors.green,
-        colors.cyan,
-        colors.blue,
-        colors.magenta,
-    ];
-
-    v_flex()
-        .w_full()
-        .h(px(72.0))
-        .p_3()
-        .gap_2()
-        .rounded(UI_RADIUS)
-        .bg(preview_color(colors.background))
-        .child(
-            h_flex()
-                .gap_2()
-                .child(
-                    div()
-                        .text_color(preview_color(colors.foreground))
-                        .child("ls"),
-                )
-                .child(div().text_color(preview_color(colors.blue)).child("dir"))
-                .child(
-                    div()
-                        .text_color(preview_color(colors.red))
-                        .child("executable"),
-                )
-                .child(
-                    div()
-                        .text_color(preview_color(colors.foreground))
-                        .child("file"),
-                ),
-        )
-        .child(h_flex().gap_1().children(swatches.into_iter().map(|color| {
-            div()
-                .w(px(18.0))
-                .h(px(6.0))
-                .rounded(UI_RADIUS)
-                .bg(preview_color(color))
-        })))
-}
-
-pub(super) fn theme_list(editing: Entity<SettingsEditing>, cx: &mut App) -> Div {
-    let selected = cx.global::<AppSettings>().config().theme.clone();
-
-    let filter = editing.read(cx).theme_filter.to_lowercase();
-
-    let themes = editing
-        .read(cx)
-        .themes
-        .clone()
-        .into_iter()
-        .filter(|(name, theme)| {
-            let display_name = if name.is_empty() {
-                t!("settings-theme-default")
-            } else {
-                name.as_str().into()
-            };
-
-            filter.is_empty()
-                || display_name.to_lowercase().contains(&filter)
-                || theme.name.to_lowercase().contains(&filter)
-        })
-        .collect::<Vec<_>>();
-
-    let border = cx.theme().border;
-    let selected_border = cx.theme().primary;
-    let selected_background = cx.theme().tokens.secondary;
-    let hover_background = cx.theme().tokens.secondary_hover;
-
-    v_flex()
-        .w_full()
-        .gap_2()
-        .child(
-            h_flex()
-                .justify_between()
-                .child(t!("settings-theme-title"))
-                .child(
-                    Button::new("theme-refresh")
-                        .outline()
-                        .label(t!("settings-theme-refresh"))
-                        .on_click(move |_, _, cx: &mut App| reload_themes(&editing, cx)),
-                ),
-        )
-        .when(themes.is_empty(), |this| {
-            this.child(
-                div()
-                    .py_4()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(t!("settings-theme-no-matches")),
-            )
-        })
-        .children(
-            themes
-                .into_iter()
-                .enumerate()
-                .map(|(index, (name, theme))| {
-                    let is_selected = name == selected;
-
-                    let display_name = if theme.name.is_empty() {
-                        if name.is_empty() {
-                            t!("settings-theme-default")
-                        } else {
-                            name.as_str().into()
-                        }
-                    } else {
-                        theme.name.as_str().into()
-                    }
-                    .to_string();
-
-                    div()
-                        .id(("theme-card", index))
-                        .w_full()
-                        .p_3()
-                        .rounded(UI_RADIUS)
-                        .border_1()
-                        .border_color(if is_selected { selected_border } else { border })
-                        .when(is_selected, |this| this.bg(selected_background))
-                        .hover(move |this| this.bg(hover_background))
-                        .cursor_pointer()
-                        .on_click(move |_, _, cx| select_theme(name.clone(), cx))
-                        .child(theme_preview(theme.colors.terminal))
-                        .child(h_flex().mt_2().justify_between().child(display_name).when(
-                            is_selected,
-                            |this| {
-                                this.child(
-                                    div()
-                                        .text_color(selected_border)
-                                        .child(t!("settings-theme-selected")),
-                                )
-                            },
-                        ))
-                }),
-        )
 }
 
 /// Retint the component theme for the foreground surface opacity. A configured
@@ -367,7 +233,7 @@ pub(crate) fn apply_window_translucency(cx: &mut App) {
 
     theme.apply_config(&palette);
 
-    apply_ui_constants(&palette, theme);
+    apply_ui_constants(theme);
 
     if content_opacity < 1.0 {
         theme.colors.sidebar = theme.colors.sidebar.opacity(content_opacity);

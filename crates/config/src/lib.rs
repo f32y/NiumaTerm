@@ -18,6 +18,7 @@ pub mod system;
 pub mod terminal;
 #[cfg(feature = "application")]
 pub mod theme;
+pub mod theme_catalog;
 pub mod update;
 
 #[cfg(feature = "application")]

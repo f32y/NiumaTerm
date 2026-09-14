@@ -10,12 +10,13 @@ use std::{fs, io, path};
 
 use gpui::prelude::*;
 use gpui::{AsyncApp, Context, Entity, SharedString, WeakEntity, Window, div};
-use gpui_component::{ActiveTheme, h_flex};
+use gpui_component::h_flex;
 use nmt_agent::git::{CheckedOut, current_branch, run_git};
 use rust_i18n::t;
 use tracing::warn;
 
 use crate::ui::AppSettings;
+use crate::ui::composition::GitColors;
 
 const MAX_DIFF_LINES: usize = 100_000;
 
@@ -51,15 +52,17 @@ pub(crate) enum DiffLineKind {
     Added,
     Removed,
     Hunk,
-    FileHeader,
+    Notice,
     Context,
     Truncated,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DiffLine {
     pub(crate) kind: DiffLineKind,
     pub(crate) text: SharedString,
+    pub(crate) old_line: Option<u64>,
+    pub(crate) new_line: Option<u64>,
 }
 
 pub(crate) fn resolve_repo_root(cwd: &str) -> Option<String> {
@@ -173,31 +176,39 @@ fn count_file_lines(root: &str, path: &str) -> u64 {
 pub(crate) fn fetch_file_diff(root: &str, path: &str, untracked: bool) -> Vec<DiffLine> {
     if untracked {
         let Ok(bytes) = fs::read(path::Path::new(root).join(path)) else {
-            return vec![line(
-                DiffLineKind::FileHeader,
-                t!("git-status-unreadable-file"),
-            )];
+            return vec![line(DiffLineKind::Notice, t!("git-status-unreadable-file"))];
         };
 
         if bytes.contains(&0) {
-            return vec![line(DiffLineKind::FileHeader, t!("git-status-binary-file"))];
+            return vec![line(DiffLineKind::Notice, t!("git-status-binary-file"))];
         }
 
         let text = String::from_utf8_lossy(&bytes);
 
-        return cap_lines(
-            text.lines()
-                .map(|l| line(DiffLineKind::Added, format!("+{l}"))),
-        );
+        return cap_lines(text.lines().enumerate().map(|(index, text)| DiffLine {
+            new_line: Some(index as u64 + 1),
+            ..line(DiffLineKind::Added, text.to_string())
+        }));
     }
 
-    match run_git(root, &["diff", "HEAD", "--", path]) {
+    match run_git(
+        root,
+        &[
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "HEAD",
+            "--",
+            path,
+        ],
+    ) {
         Ok(out) => {
             let text = String::from_utf8_lossy(&out);
 
             parse_diff(&text)
         }
-        Err(err) => vec![line(DiffLineKind::FileHeader, err)],
+        Err(err) => vec![line(DiffLineKind::Notice, err)],
     }
 }
 
@@ -205,6 +216,8 @@ fn line(kind: DiffLineKind, text: impl Into<SharedString>) -> DiffLine {
     DiffLine {
         kind,
         text: text.into(),
+        old_line: None,
+        new_line: None,
     }
 }
 
@@ -285,26 +298,91 @@ pub(crate) fn parse_numstat_z(raw: &[u8]) -> Vec<(String, u64, u64)> {
     out
 }
 
-/// Classify unified-diff lines by prefix, capped at [`MAX_DIFF_LINES`].
+/// Decode content inside unified hunks; file metadata is presented by the file list.
 pub(crate) fn parse_diff(text: &str) -> Vec<DiffLine> {
-    cap_lines(text.lines().map(|l| {
-        let kind = if l.starts_with("@@") {
-            DiffLineKind::Hunk
-        } else if l.starts_with("+++") || l.starts_with("---") {
-            DiffLineKind::FileHeader
-        } else if l.starts_with('+') {
-            DiffLineKind::Added
-        } else if l.starts_with('-') {
-            DiffLineKind::Removed
-        } else if l.starts_with(' ') {
-            DiffLineKind::Context
-        } else {
-            // diff --git, index, mode, similarity, "\ No newline" …
-            DiffLineKind::FileHeader
+    let mut hunk: Option<Hunk> = None;
+
+    cap_lines(text.lines().filter_map(|text| {
+        if let Some(parsed) = Hunk::parse(text) {
+            hunk = Some(parsed);
+
+            return Some(line(DiffLineKind::Hunk, text.to_string()));
+        }
+
+        if text.starts_with("\\ No newline at end of file") {
+            return Some(line(DiffLineKind::Notice, text.to_string()));
+        }
+
+        if text.starts_with("Binary files ") || text == "GIT binary patch" {
+            return Some(line(DiffLineKind::Notice, t!("git-status-binary-file")));
+        }
+
+        let hunk = hunk.as_mut()?;
+        let (prefix, content) = text.split_at_checked(1)?;
+
+        let (kind, old, new) = match prefix {
+            " " if hunk.old_remaining > 0 && hunk.new_remaining > 0 => {
+                (DiffLineKind::Context, true, true)
+            }
+            "-" if hunk.old_remaining > 0 => (DiffLineKind::Removed, true, false),
+            "+" if hunk.new_remaining > 0 => (DiffLineKind::Added, false, true),
+            _ => return None,
         };
 
-        line(kind, l.to_string())
+        let row = DiffLine {
+            old_line: old.then_some(hunk.old),
+            new_line: new.then_some(hunk.new),
+            ..line(kind, content.to_string())
+        };
+
+        if old {
+            hunk.old += 1;
+            hunk.old_remaining -= 1;
+        }
+
+        if new {
+            hunk.new += 1;
+            hunk.new_remaining -= 1;
+        }
+
+        Some(row)
     }))
+}
+
+struct Hunk {
+    old: u64,
+    new: u64,
+    old_remaining: u64,
+    new_remaining: u64,
+}
+
+impl Hunk {
+    fn parse(text: &str) -> Option<Self> {
+        let mut parts = text.strip_prefix("@@ ")?.split_whitespace();
+
+        let old = parts.next()?.strip_prefix('-')?;
+        let new = parts.next()?.strip_prefix('+')?;
+
+        if parts.next()? != "@@" {
+            return None;
+        }
+
+        let range = |value: &str| -> Option<(u64, u64)> {
+            let (start, count) = value.split_once(',').unwrap_or((value, "1"));
+
+            Some((start.parse().ok()?, count.parse().ok()?))
+        };
+
+        let (old, old_remaining) = range(old)?;
+        let (new, new_remaining) = range(new)?;
+
+        Some(Self {
+            old,
+            new,
+            old_remaining,
+            new_remaining,
+        })
+    }
 }
 
 /// Owns the latest [`GitSnapshot`] and the refresh loop. The titlebar
@@ -326,28 +404,44 @@ pub(crate) struct GitStatusModel {
     pub(crate) sidebar_open: bool,
 }
 
+enum GitStatusConsumer {
+    TitleBar,
+    Tab,
+}
+
 impl GitStatusModel {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
-        let enabled = cx
-            .global::<AppSettings>()
-            .config()
-            .appearance
-            .show_git_status_on_title_bar;
+        Self::create(GitStatusConsumer::TitleBar, cx)
+    }
 
-        cx.observe_global::<AppSettings>(|this, cx| {
-            let enabled = cx
+    pub(crate) fn for_tab(cx: &mut Context<Self>) -> Self {
+        Self::create(GitStatusConsumer::Tab, cx)
+    }
+
+    fn create(consumer: GitStatusConsumer, cx: &mut Context<Self>) -> Self {
+        let enabled = matches!(consumer, GitStatusConsumer::TitleBar)
+            && cx
                 .global::<AppSettings>()
                 .config()
                 .appearance
                 .show_git_status_on_title_bar;
 
-            if enabled && !this.enabled {
-                this.refresh(cx);
-            }
+        if matches!(consumer, GitStatusConsumer::TitleBar) {
+            cx.observe_global::<AppSettings>(|this, cx| {
+                let enabled = cx
+                    .global::<AppSettings>()
+                    .config()
+                    .appearance
+                    .show_git_status_on_title_bar;
 
-            this.enabled = enabled;
-        })
-        .detach();
+                if enabled && !this.enabled {
+                    this.refresh(cx);
+                }
+
+                this.enabled = enabled;
+            })
+            .detach();
+        }
 
         // Interval loop; the period is re-read each tick so the settings
         // dropdown takes effect at the next tick without restart plumbing.
@@ -570,18 +664,20 @@ impl Render for GitStatusView {
             return div().into_any_element();
         }
 
+        let colors = GitColors::new(cx);
+
         h_flex()
             .gap_1()
             .px_2()
             .text_sm()
             .child(
                 div()
-                    .text_color(cx.theme().green)
+                    .text_color(colors.added)
                     .child(format!("+{}", snapshot.total_added)),
             )
             .child(
                 div()
-                    .text_color(cx.theme().red)
+                    .text_color(colors.removed)
                     .child(format!("-{}", snapshot.total_removed)),
             )
             .into_any_element()

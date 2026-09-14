@@ -14,6 +14,7 @@ use gpui::{
 use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::scroll::Scrollbar;
+use gpui_component::tooltip::ManagedTooltipExt as _;
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, IconNamed, Selectable, Sizable, h_flex, v_flex,
 };
@@ -27,7 +28,7 @@ use crate::tabs::TabId;
 use crate::ui::composition::{
     FLOATING_SURFACE_BOTTOM_INSET, FLOATING_SURFACE_SIDE_INSET, FLOATING_SURFACE_TOP_INSET,
     HoverActionLayout, HoverActionVisibility, StatusMark, StatusMarkTone, hover_action,
-    sidebar_selection,
+    sidebar_selection, toolbar_button,
 };
 use crate::ui::fluent::{SELECTION_BAR_HEIGHT, SELECTION_BAR_RADIUS, SELECTION_BAR_WIDTH};
 use crate::ui::shell::{
@@ -41,6 +42,8 @@ use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workspace_sidebar::drag::{SidebarTabDrag, WorkspaceDrag, WorkspaceDragPreview};
 use crate::ui::{AppSettings, NewWorkspace, Shell, UI_RADIUS, modern_dropdown, sidebar_resize};
+#[cfg(target_os = "macos")]
+use crate::window::TRAFFIC_LIGHT_INSET;
 use crate::window::WindowRegistry;
 use crate::workspace::{ProgressTally, TerminalActivity, WorkspaceKind, WorkspaceSummary};
 
@@ -62,14 +65,6 @@ pub(super) const RESIZE_HANDLE: &str = "workspace-sidebar-resize";
 
 pub(super) const MIN_WIDTH: f32 = MIN_SIDEBAR_WIDTH;
 pub(crate) const MAX_WIDTH: f32 = 480.0;
-
-/// Side of the vertical tab-bar new-tab control on a workspace row, and the
-/// size the `+` glyph inside it is drawn at. The control is hover-only, so it
-/// is sized as a comfortable pointer target rather than to match the `×` it
-/// replaces.
-const NEW_TAB_BUTTON: f32 = 32.0;
-
-const NEW_TAB_GLYPH: f32 = 18.0;
 
 /// Diameter of a status dot in the sidebar column. Smaller than the agent
 /// spinner's `size_3`, so a stacked pair reads as a spinner with a mark under
@@ -176,8 +171,8 @@ impl Sidebar {
             .overflow_hidden()
             .flex()
             .flex_col()
-            .px(px(SIDEBAR_PADDING_X))
-            .pt(px(SIDEBAR_PADDING_TOP))
+            .pl(px(SIDEBAR_PADDING_LEFT))
+            .pr(px(SIDEBAR_PADDING_X))
             .gap(px(SIDEBAR_GROUP_GAP))
             .child(
                 h_flex()
@@ -185,6 +180,7 @@ impl Sidebar {
                     .justify_between()
                     .child(
                         div()
+                            .ml(px(-SIDEBAR_ROW_GUTTER))
                             .text_size(px(SIDEBAR_SECTION_TEXT))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(cx.theme().sidebar_foreground.opacity(0.5))
@@ -198,9 +194,7 @@ impl Sidebar {
                         h_flex()
                             .gap_1()
                             .child(
-                                Button::new("new-workspace")
-                                    .ghost()
-                                    .size(px(SIDEBAR_SECTION_BUTTON))
+                                toolbar_button("new-workspace")
                                     .icon(IconName::Plus)
                                     .accessibility_label(t!("shell-workspace-new-title"))
                                     .tooltip(t!("shell-workspace-new-title"))
@@ -209,9 +203,7 @@ impl Sidebar {
                                     })),
                             )
                             .child(
-                                Button::new("close-temporary-workspaces")
-                                    .ghost()
-                                    .size(px(SIDEBAR_SECTION_BUTTON))
+                                toolbar_button("close-temporary-workspaces")
                                     .icon(CloseTemporaryWorkspacesIcon)
                                     .accessibility_label(t!("sidebar-workspace-close-temporary"))
                                     .tooltip(t!("sidebar-workspace-close-temporary"))
@@ -231,17 +223,14 @@ impl Sidebar {
                     .relative()
                     .flex_1()
                     .min_h_0()
+                    // Stretch the wrapper over the leading gutter so the list
+                    // retains the header controls' trailing edge.
+                    .ml(px(-SIDEBAR_ROW_GUTTER))
                     .child(
                         v_flex()
                             .id("workspace-list")
                             .size_full()
                             .gap(px(WORKSPACE_LIST_GAP))
-                            // Pulled back over the panel's inset so a row's
-                            // fill can reach into it. The list clips its own
-                            // children horizontally, so a row cannot overhang
-                            // this box; the box has to move instead.
-                            .ml(px(-SIDEBAR_ROW_GUTTER))
-                            .pr_3()
                             .overflow_y_scroll()
                             .track_scroll(&self.scroll)
                             // Fallback drop target for the whole list: a drop released
@@ -302,11 +291,15 @@ impl Sidebar {
                     .w_full()
                     .flex_none()
                     .gap(px(SIDEBAR_STATUS_ROW_GAP))
-                    .py(px(SIDEBAR_STATUS_PADDING_Y))
+                    .pt(px(SIDEBAR_STATUS_PADDING_TOP))
+                    .pb(px(SIDEBAR_STATUS_PADDING_BOTTOM))
                     .border_t_1()
                     .border_color(cx.theme().sidebar_border)
                     .children(show_daily_token_usage.then_some(usage.daily))
-                    .children(show_agent_usage.then_some(usage.quotas))
+                    .children(
+                        show_agent_usage
+                            .then(|| div().ml(px(-SIDEBAR_ROW_GUTTER)).child(usage.quotas)),
+                    )
             }));
 
         // The terminal column's left gutter forms the gap between panels and
@@ -399,9 +392,8 @@ impl Sidebar {
             cx,
         );
 
-        // With the aggregate suppressed the lane would be empty on every row,
-        // and holding it open would only push the name off the leading edge
-        // the list heading starts at, so the row drops it instead.
+        // Runtime marks share the trailing controls so names keep a stable
+        // leading edge in both tab layouts, including idle workspaces.
         let indicator = (!vertical_tabs).then(|| {
             v_flex()
                 .id(("workspace-status", idx))
@@ -439,15 +431,9 @@ impl Sidebar {
                 HoverActionLayout::Bare,
                 HoverActionVisibility::OnGroupHover("ws-item".into()),
                 modern_dropdown(
-                    Button::new(("workspace-new-tab-button", idx))
-                        // A pixel size leaves the box to the styles below:
-                        // Button only derives its padding and glyph size from
-                        // it, while the named sizes would pin the height too.
-                        .with_size(px(NEW_TAB_GLYPH))
-                        .ghost()
-                        .accessibility_label(t!("sidebar-tab-new"))
-                        .size(px(NEW_TAB_BUTTON))
-                        .child("+"),
+                    toolbar_button(("workspace-new-tab-button", idx))
+                        .icon(IconName::Plus)
+                        .accessibility_label(t!("sidebar-tab-new")),
                     move |menu, _, cx| new_tab_menu(menu, &menu_shell, cx),
                 ),
             )
@@ -515,6 +501,7 @@ impl Sidebar {
                     .text_color(cx.theme().primary_foreground)
                     .child(chrome.agent.unread_count.to_string())
             }))
+            .children(indicator)
             .child(controls);
 
         let full_path = ws.cwd.clone();
@@ -645,11 +632,7 @@ impl Sidebar {
         // gutter/border and the card's inner paddings around the list.
         let drag_width = (self.width - 36.0).max(80.0);
 
-        let item = Button::new(("workspace", idx))
-            .ghost()
-            .when(!settings_entry, |this| {
-                this.tooltip(dirs_description.clone())
-            })
+        let item = workspace_row_button(("workspace", idx), cx)
             .accessibility_label(if settings_entry {
                 display_label.clone()
             } else {
@@ -675,20 +658,12 @@ impl Sidebar {
                         .active(selection.active_background),
                 )
             })
-            .w_full()
-            .h_auto()
-            // The list is pulled back over the panel's inset by exactly this
-            // much, so the fill reaches into it while the content still lands
-            // on the same edge as the list heading above.
-            .px(px(SIDEBAR_ROW_GUTTER))
-            .py_0p5()
             .group("ws-item")
             .child(
                 h_flex()
                     .w_full()
                     .gap_1p5()
                     .items_center()
-                    .children(indicator)
                     .child(div().flex_1().min_w_0().overflow_hidden().child(name))
                     .child(suffix),
             )
@@ -837,6 +812,9 @@ impl Sidebar {
                 })
             })
             .child(item)
+            .when(!settings_entry, |row| {
+                row.managed_tooltip_right(dirs_description)
+            })
             // After the row itself, because the row's selected fill would
             // otherwise paint over the bar's lane.
             .children(highlight_active.then(|| selection_bar(cx)))
@@ -1333,11 +1311,7 @@ const TAB_ROW_TEXT: f32 = 13.0;
 /// than the rows inside them, which is what makes a workspace and its tabs
 /// read as one block rather than as a flat list.
 ///
-/// The horizontal inset is the panel's alone: the rows inside carry none, so
-/// it is what every glyph and every run of text in the column stands on. It
-/// is set to land that edge under the glyph of the titlebar control directly
-/// above it, past that control's own button padding, so the window's leading
-/// chrome reads as one edge from the title bar down.
+/// The panel owns the horizontal text inset; row fills extend into its gutter.
 const SIDEBAR_PADDING_X: f32 = 12.0;
 
 /// How far a row's fill reaches back into that inset on each side, and how
@@ -1347,15 +1321,20 @@ const SIDEBAR_PADDING_X: f32 = 12.0;
 /// the selected-row mark stands in.
 const SIDEBAR_ROW_GUTTER: f32 = 6.0;
 
-const SIDEBAR_PADDING_TOP: f32 = 14.0;
-const SIDEBAR_GROUP_GAP: f32 = 14.0;
+// Remove the outer panel offset and restore the row's negative margin so
+// the visible row fill starts directly below the native close button.
+#[cfg(target_os = "macos")]
+const SIDEBAR_PADDING_LEFT: f32 =
+    TRAFFIC_LIGHT_INSET - FLOATING_SURFACE_SIDE_INSET + SIDEBAR_ROW_GUTTER;
+
+#[cfg(not(target_os = "macos"))]
+const SIDEBAR_PADDING_LEFT: f32 = SIDEBAR_PADDING_X;
+
+const SIDEBAR_GROUP_GAP: f32 = 8.0;
 const WORKSPACE_LIST_GAP: f32 = 6.0;
 
-/// The list heading. It names the column rather than competing with the
-/// workspaces under it, so it is the smallest run of text in the panel.
-const SIDEBAR_SECTION_TEXT: f32 = 10.5;
-
-const SIDEBAR_SECTION_BUTTON: f32 = 20.0;
+/// The heading uses one size across languages to keep the section easy to scan.
+const SIDEBAR_SECTION_TEXT: f32 = 12.0;
 
 /// A workspace heading: its name, and the path that trails it on the same
 /// line. The path is set small enough to read as an annotation on the name.
@@ -1366,13 +1345,17 @@ const WORKSPACE_PATH_TEXT: f32 = 10.5;
 /// The status cluster along the bottom edge: today's spend over the
 /// subscription gauges. Both report what the agents have consumed, so they
 /// stack as one block under a single rule rather than each carrying an edge.
-const SIDEBAR_STATUS_PADDING_Y: f32 = 8.0;
+const SIDEBAR_STATUS_PADDING_TOP: f32 = 8.0;
 
+const SIDEBAR_STATUS_PADDING_BOTTOM: f32 = 2.0;
 const SIDEBAR_STATUS_ROW_GAP: f32 = 2.0;
 
 /// Distance from the row box's leading edge. The row is a rounded rectangle,
 /// so a mark flush against that edge would sit outside the fill at the corners.
 const SELECTION_BAR_INSET: f32 = 2.0;
+
+/// Names retain an 8px gap after the selection mark on active and idle rows.
+const WORKSPACE_NAME_INSET: f32 = SELECTION_BAR_INSET + SELECTION_BAR_WIDTH + 8.0;
 
 /// The accent bar that marks the selected row. It is drawn out of the row's
 /// flow so it can sit in the gutter left of the row's own padding, and it
@@ -1414,4 +1397,28 @@ fn workspace_list_scrollbar(handle: &ScrollHandle) -> impl IntoElement {
         .bottom_0()
         .w(px(16.0))
         .child(Scrollbar::vertical(handle))
+}
+
+pub(super) fn workspace_row_button(id: impl Into<ElementId>, cx: &App) -> Button {
+    let selection = sidebar_selection(cx);
+
+    Button::new(id)
+        // Button registers its own hover handler; variants supply its colors
+        // without installing a second hover style on the same element.
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(cx.theme().sidebar_foreground.opacity(0.045))
+                .hover(cx.theme().sidebar_foreground.opacity(0.085))
+                .active(selection.active_background),
+        )
+        .w_full()
+        .h_auto()
+        // Base buttons use a one-em line box; clipped directory text needs
+        // leading so descenders remain visible inside the row.
+        .line_height(relative(1.5))
+        // Reserve the mark's width and a readable gap without moving the
+        // row background or changing its trailing alignment.
+        .pl(px(WORKSPACE_NAME_INSET))
+        .pr(px(SIDEBAR_ROW_GUTTER))
+        .py_0p5()
 }

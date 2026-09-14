@@ -1,5 +1,6 @@
 name = "Modern Light"
 mode = "light"
+family = "Modern"
 
 # VS Code "2026 Light" palette: single-color chrome (#FAFAFD) with a pure-white
 # terminal content layer; interaction states are foreground-alpha fills; the

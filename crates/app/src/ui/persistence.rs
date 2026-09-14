@@ -18,8 +18,9 @@ use tracing::warn;
 use crate::pane_tree::{PaneId, PaneNode, PaneTree};
 use crate::tabs::{TabId, TabManager};
 use crate::ui::Shell;
+use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::settings::{AgentProfile, AppSettings, builtin_agent_profile};
-use crate::ui::shell::tab_surface::AgentTab;
+use crate::ui::shell::tab_surface::{AgentTab, GitTab};
 use crate::ui::shell::{TabSurface, agent_workspace};
 use crate::ui::terminal_launch::spawn_pane;
 use crate::ui::terminal_layout::TerminalLayout;
@@ -330,11 +331,23 @@ pub(super) fn materialize_active_tab(
         }
         TabSurface::Live(_)
         | TabSurface::Agent(_)
+        | TabSurface::Git(_)
         | TabSurface::Settings
         | TabSurface::Team(_)
         | TabSurface::TeamDisabled(_)
         | TabSurface::TeamUnavailable { .. } => return false,
     };
+
+    if let Some(cwd) = &state.git_cwd {
+        let view = cx.new(|cx| GitSidebar::new(cwd.clone(), window, cx));
+
+        *workspaces.active_tabs_mut().active_mut() = TabSurface::Git(GitTab {
+            view,
+            return_to: None,
+        });
+
+        return true;
+    }
 
     if let Some(saved_id) = state.team_room.as_deref() {
         *workspaces.active_tabs_mut().active_mut() = restore_team_tab(saved_id, &state, window, cx);
@@ -438,7 +451,8 @@ fn restore_tabs(
     for mut tab_state in tabs {
         // Agent tabs carry no launch command; profile resolution only
         // applies to terminal tabs.
-        if tab_state.agent.is_none() && tab_state.team_room.is_none() {
+        if tab_state.agent.is_none() && tab_state.team_room.is_none() && tab_state.git_cwd.is_none()
+        {
             resolve_restored_launch(&mut tab_state, cx.global::<AppSettings>());
         }
 
@@ -451,7 +465,9 @@ fn restore_tabs(
         // The profile-derived title a live pane would report, so pending
         // tabs label identically to spawned ones. Unknown agent kinds
         // materialize as terminals, so they take the profile title too.
-        let default_title = if tab_state.team_room.is_some() {
+        let default_title = if tab_state.git_cwd.is_some() {
+            t!("git-tab-title").into_owned()
+        } else if tab_state.team_room.is_some() {
             t!("team-title").into_owned()
         } else {
             match tab_state.agent.as_deref().and_then(AgentKind::from_id) {
@@ -527,6 +543,7 @@ fn restore_pane_node(
             let surface_id = Shell::alloc_id(next_id);
 
             let mut launch = TabState {
+                git_cwd: None,
                 team_room: None,
                 name: None,
                 user_named: false,
@@ -728,6 +745,10 @@ pub(super) fn session_state(
                         // and that workspace is skipped above; the arm
                         // exists so the match stays exhaustive.
                         TabSurface::Settings => TabState::default(),
+                        TabSurface::Git(tab) => TabState {
+                            git_cwd: Some(tab.view.read(cx).cwd().to_string()),
+                            ..TabState::default()
+                        },
                         TabSurface::Team(pane) => TabState {
                             team_room: Some(pane.read(cx).room_id(cx).to_string()),
                             ..TabState::default()
@@ -798,9 +819,37 @@ mod launch_resolution_tests {
             agent: None,
             agent_profile: None,
             team_room: None,
+            git_cwd: None,
             panes: None,
             grid_size: None,
         }
+    }
+
+    #[gpui::test]
+    fn restored_git_tab_keeps_its_directory_without_resolving_a_shell(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            cx.set_global(settings_with_pwsh_default());
+
+            let saved = TabState {
+                git_cwd: Some("/project".into()),
+                ..TabState::default()
+            };
+
+            let tabs = restore_tabs(vec![saved.clone()], 0, &mut 0, cx).unwrap();
+
+            assert!(tabs.active().is_git());
+            assert!(tabs.active().tree().is_none());
+            assert_eq!(
+                tabs.list().items()[0].title(),
+                rust_i18n::t!("git-tab-title")
+            );
+
+            let TabSurface::Pending(restored) = tabs.active() else {
+                panic!("restored tab should start pending");
+            };
+
+            assert_eq!(restored.as_ref(), &saved);
+        });
     }
 
     #[gpui::test]

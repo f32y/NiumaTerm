@@ -62,6 +62,7 @@ fn sample_system() -> SystemConfig {
         prioritize_ui_threads: true,
         newline_shortcut: system::NewlineShortcut::ShiftEnter,
         open_in_best_workspace: false,
+        send_system_notifications: false,
     }
 }
 
@@ -783,6 +784,31 @@ fn custom_theme_overrides_builtin_case_insensitively() {
 }
 
 #[test]
+fn copied_builtin_keeps_family_without_changing_customized_colors() {
+    let dir = TempDirBuilder::new()
+        .prefix("theme-family-upgrade")
+        .tempdir()
+        .unwrap();
+
+    let source = get_builtin_theme("slate_light")
+        .unwrap()
+        .replace("family = \"Slate\"\n", "")
+        .replace("#FCFDFE", "#FAFAFA");
+
+    let path = dir.path().join("slate_light.toml");
+
+    fs::write(&path, source).unwrap();
+
+    let theme = Config::load_theme(&path).unwrap();
+
+    assert_eq!(theme.family, "Slate");
+    assert_eq!(
+        theme.colors.terminal.background,
+        [250.0 / 255.0, 250.0 / 255.0, 250.0 / 255.0, 1.0]
+    );
+}
+
+#[test]
 fn top_level_colors_are_ignored() {
     let result = create_temporary_config(
         "ignored-colors",
@@ -958,4 +984,12 @@ git-status-refresh-interval = 1
     );
     assert_eq!(appearance.background_image, None);
     assert_eq!(appearance.git_status_refresh_interval, 30);
+}
+
+#[test]
+fn older_system_settings_keep_native_notifications_enabled() {
+    let config: Config = parse_toml("[system]\nopen-in-best-workspace = false\n").unwrap();
+
+    assert!(config.system.send_system_notifications);
+    assert!(!config.system.open_in_best_workspace);
 }

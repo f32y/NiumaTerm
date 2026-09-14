@@ -29,7 +29,7 @@ fn missing_library_and_embedded_nul_return_errors() {
 fn system_library_exports_resolve_and_missing_exports_are_absent() {
     let address = {
         #[cfg(windows)]
-        let path = Path::new(&env::var_os("SystemRoot").unwrap())
+        let path = &Path::new(&env::var_os("SystemRoot").unwrap())
             .join("System32")
             .join("kernel32.dll");
 
@@ -40,7 +40,7 @@ fn system_library_exports_resolve_and_missing_exports_are_absent() {
         let path = Path::new("/usr/lib/libSystem.B.dylib");
 
         // The operating system's standard process library is trusted code.
-        let library = unsafe { ResidentLibrary::load(path.as_ref()) }.unwrap();
+        let library = unsafe { ResidentLibrary::load(path) }.unwrap();
 
         assert!(library.symbol(c"nmt_missing_export_9381").is_none());
 

@@ -30,6 +30,7 @@ fn session_state() -> SessionState {
                 agent: None,
                 agent_profile: None,
                 team_room: None,
+                git_cwd: None,
                 panes: None,
                 grid_size: None,
             }],

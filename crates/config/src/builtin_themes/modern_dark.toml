@@ -1,5 +1,6 @@
 name = "Modern Dark"
 mode = "dark"
+family = "Modern"
 
 # VS Code "2026 Dark" palette: single-color chrome (#191A1B) with a darker
 # terminal content layer (#121314); interaction states are foreground-alpha

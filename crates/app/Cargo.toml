@@ -13,6 +13,7 @@ name = "NiumaTerm"
 path = "src/main.rs"
 
 [dependencies]
+unicode-width.workspace = true
 nmt_profiling.workspace = true
 nmt_agent.workspace = true
 nmt_config = { workspace = true, features = ["application"] }

@@ -3,8 +3,10 @@ use app::terminal_tab::view::{TerminalLaunch, TerminalPane};
 use gpui::{AppContext, Entity};
 use nmt_agent::agent_process;
 use nmt_config::local_state::TabState;
+#[cfg(windows)]
 use nmt_remote_net::net_pty::terminal_session;
 use nmt_terminal::session::TerminalSessionConfig;
+#[cfg(windows)]
 use rust_i18n::t;
 
 pub(super) fn spawn_pane(

@@ -15,15 +15,13 @@ use crate::ui::git_status::GitStatusModel;
 use crate::ui::right_panel::{RightPanel, RightPanelKind};
 use crate::ui::shell::Shell;
 
-/// The right-side area and everything that decides what it shows. The git
-/// model sits here because opening or leaving the Git view is what turns its
-/// polling on and off, and the two sticky flags because they gate the title-bar
-/// controls that open the other two views.
+/// Controls the right-side task views and their title-bar entry points.
+/// The title-bar Git summary follows the active workspace independently.
 pub(super) struct RightPanelController {
     /// Always mounted so close can animate.
     panel: Entity<RightPanel>,
 
-    /// Shared git status poller feeding the titlebar indicator and sidebar.
+    /// Status for the title-bar summary; each Git tab owns its review state.
     git_model: Entity<GitStatusModel>,
 
     /// Whether any tab has run a workflow. Sticky: the title-bar control
@@ -108,17 +106,5 @@ impl RightPanelController {
     /// whether the area ended up open.
     pub(super) fn select(&self, kind: RightPanelKind, cx: &mut Context<Shell>) -> bool {
         self.panel.update(cx, |panel, cx| panel.select(kind, cx))
-    }
-
-    /// Match the git poller to whether its own view is on screen. Refreshing on
-    /// the open edge keeps a visible sidebar from re-querying every frame.
-    pub(super) fn set_git_sidebar_open(&self, open: bool, cx: &mut Context<Shell>) {
-        self.git_model.update(cx, |model, cx| {
-            model.sidebar_open = open;
-
-            if open {
-                model.refresh(cx);
-            }
-        });
     }
 }

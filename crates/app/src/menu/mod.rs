@@ -14,13 +14,16 @@
 //! selection, a text field its own), and a menu item would take them away from
 //! both.
 
+#[cfg(test)]
+mod tests;
+
 use gpui::{App, Menu, MenuItem, SystemMenuType, Window, actions};
 use rust_i18n::t;
 
-use crate::ui::settings::save_settings;
 use crate::ui::{
     CloseTab, NewAgentTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace, PrevTab,
     PrevWorkspace, ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp, ToggleSidebar,
+    save_settings,
 };
 use crate::{open_window_without_a_source, sparkle};
 
@@ -50,15 +53,17 @@ actions!(
 /// comes from the binding registered for its action.
 pub(crate) fn install(cx: &mut App) {
     cx.on_action(|_: &Quit, cx: &mut App| {
-        if let Some(handle) = cx.active_window() {
-            let _ = handle.update(cx, |_, window, cx| {
-                if save_settings(window, cx) {
-                    cx.quit();
-                }
-            });
-        } else {
+        if cx.active_window().is_none() {
             cx.quit();
+
+            return;
         }
+
+        with_active_window(cx, |window, cx| {
+            if save_settings(window, cx) {
+                cx.quit();
+            }
+        });
     });
 
     cx.on_action(|_: &Hide, cx: &mut App| cx.hide());
@@ -75,9 +80,13 @@ pub(crate) fn install(cx: &mut App) {
 
     // The window commands act on the window the menu bar belongs to, which is
     // the active one; the menu is disabled outright when there is none.
-    cx.on_action(|_: &Minimize, cx: &mut App| with_active_window(cx, Window::minimize_window));
+    cx.on_action(|_: &Minimize, cx: &mut App| {
+        with_active_window(cx, |window, _| window.minimize_window());
+    });
 
-    cx.on_action(|_: &Zoom, cx: &mut App| with_active_window(cx, Window::zoom_window));
+    cx.on_action(|_: &Zoom, cx: &mut App| {
+        with_active_window(cx, |window, _| window.zoom_window());
+    });
 
     // Disabled rather than absent while a check runs, and for a build with no
     // updater, so the item stays where a user learned to look for it.
@@ -102,12 +111,16 @@ pub(crate) fn refresh(cx: &mut App) {
 ///
 /// The bar has no window of its own, and every one of these commands is about
 /// the one on screen; with none open there is nothing to act on.
-fn with_active_window(cx: &mut App, command: impl FnOnce(&Window)) {
+fn with_active_window(cx: &mut App, command: impl FnOnce(&mut Window, &mut App) + 'static) {
     let Some(handle) = cx.active_window() else {
         return;
     };
 
-    let _ = handle.update(cx, |_, window, _| command(window));
+    // Menu actions still hold the window during dispatch, so accessing it
+    // immediately would fail and silently discard the command.
+    cx.defer(move |cx| {
+        let _ = handle.update(cx, |_, window, cx| command(window, cx));
+    });
 }
 
 fn menus() -> Vec<Menu> {
