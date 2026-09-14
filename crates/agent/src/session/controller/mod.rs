@@ -29,6 +29,7 @@ use crate::chat::{
     Event, GoalStatus, Item, ReplayTurn, SendOutcome, SkillCatalog, SlashCommandInfo,
     SlashCommandOutcome, ThreadSettings,
 };
+use crate::progress::TaskList;
 use crate::session::branch::{BranchCompletion, BranchReplay, ConversationBranch};
 use crate::session::capabilities::AgentCapabilities as _;
 use crate::session::children::{ChildAgents, ChildTranscript, scoped_background_tasks};
@@ -65,6 +66,10 @@ pub struct SessionController {
     kind: AgentKind,
     pub ready_defaults: ReadyDefaults,
     pub goal: Option<GoalStatus>,
+
+    /// An explicit empty snapshot prevents older transcript tasks resurfacing.
+    pub task_list: Option<TaskList>,
+
     pub plan_mode: bool,
     command_catalog: Option<Vec<SlashCommandInfo>>,
     skill_catalog: Option<SkillCatalog>,
@@ -88,6 +93,7 @@ impl SessionController {
             kind,
             ready_defaults: ReadyDefaults::default(),
             goal: None,
+            task_list: None,
             plan_mode: false,
             command_catalog: None,
             skill_catalog: None,
@@ -664,6 +670,11 @@ impl SessionController {
 
                 SessionEffect::Changed
             }
+            Event::TaskListUpdated(tasks) => {
+                self.task_list = Some(tasks);
+
+                SessionEffect::Changed
+            }
             Event::PlanModeUpdated(active) => {
                 self.plan_mode = active;
 
@@ -1035,6 +1046,7 @@ impl SessionController {
         self.children.transcripts.clear();
 
         self.goal = None;
+        self.task_list = None;
         self.plan_mode = false;
 
         self.workflows.clear();

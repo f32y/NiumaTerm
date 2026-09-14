@@ -9,6 +9,7 @@ use crate::chat::{
     Event, Item, ModelInfo, Question, QuestionInput, QuestionMode, QuestionRequest,
     QuestionResolution, SendOutcome, SlashCommandOutcome, ThreadSettings,
 };
+use crate::progress::{GoalStatus, Task, TaskList, TaskStatus};
 use crate::session::controller::{QuestionSubmission, SessionController, SessionEffect};
 use crate::session::delivery::{RecoverablePrompt, Submission};
 use crate::session::input::{ApprovalOutcome, QuestionAction, QuestionKey};
@@ -16,6 +17,53 @@ use crate::session::lifecycle::{InterruptOutcome, StartOutcome, Status};
 use crate::session::restore::SettingsSeed;
 use crate::session::test_support::TestBackend;
 use crate::session::{AgentKind, Backend};
+
+#[test]
+fn progress_survives_turns_but_clears_with_the_conversation_for_every_provider() {
+    for kind in [AgentKind::Codex, AgentKind::Claude, AgentKind::DeepSeek] {
+        let mut session = started(kind, "progress-session", vec![]);
+
+        let epoch = session.runtime.epoch();
+
+        let tasks = TaskList {
+            items: vec![Task {
+                id: "one".into(),
+                title: "Verify output".into(),
+                status: TaskStatus::InProgress,
+                description: None,
+                owner: None,
+                blocked_by: Vec::new(),
+            }],
+            explanation: None,
+        };
+
+        session.apply_event(epoch, Event::TaskListUpdated(tasks));
+
+        session.apply_event(
+            epoch,
+            Event::GoalUpdated(Some(GoalStatus {
+                objective: "Build both targets".into(),
+                phase: "active".into(),
+                ..GoalStatus::default()
+            })),
+        );
+
+        session.apply_event(epoch, Event::TurnStarted);
+        session.apply_event(epoch, Event::TurnCompleted { error: None });
+
+        assert_eq!(session.task_list.as_ref().unwrap().tally(), Some((0, 1)));
+        assert!(session.goal.is_some());
+
+        session.apply_event(epoch, Event::TaskListUpdated(TaskList::default()));
+
+        assert!(session.task_list.as_ref().unwrap().items.is_empty());
+
+        session.clear_conversation();
+
+        assert!(session.task_list.is_none());
+        assert!(session.goal.is_none());
+    }
+}
 
 fn started(kind: AgentKind, id: &str, outcomes: Vec<SendOutcome>) -> SessionController {
     let mut session = SessionController::new(kind);

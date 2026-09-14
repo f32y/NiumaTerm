@@ -26,6 +26,7 @@ pub mod input_history;
 pub mod launcher;
 pub mod message_memory;
 pub mod profile;
+pub mod progress;
 pub mod session;
 pub mod team;
 pub mod transcript;

@@ -231,7 +231,7 @@ use crate::agent_tab::view::composer_layout::{
     composer_card, composer_controls_row, composer_input_row,
 };
 
-use crate::agent_tab::view::session_state::session_state_badge;
+use crate::agent_tab::view::progress_panel::ProgressPanel;
 
 use crate::agent_tab::workflows::WorkflowUi;
 
@@ -331,6 +331,7 @@ pub struct AgentPane {
 
     input: Entity<TextareaState>,
     history_ui: SessionHistoryUi,
+    progress_panel: ProgressPanel,
 
     /// Provider state and transitions, independent of widgets and rendering.
     session: Rc<RefCell<SessionController>>,
@@ -4216,6 +4217,7 @@ impl AgentPane {
             #[cfg(test)]
             owned_session: None,
             history_ui: SessionHistoryUi::default(),
+            progress_panel: ProgressPanel::default(),
             prompts: PendingPrompts::default(),
             effort_drag: None,
             turn: TurnPresentation::default(),
@@ -4477,7 +4479,10 @@ impl AgentPane {
     /// Progress through the task list this conversation is working from, as
     /// completed items out of the total, for the workspace entry's bar.
     pub fn task_tally(&self, cx: &App) -> Option<(u32, u32)> {
-        self.transcript.read(cx).task_tally()
+        match &self.session.borrow().task_list {
+            Some(tasks) => tasks.tally(),
+            None => self.transcript.read(cx).task_tally(),
+        }
     }
 
     /// The launch profile this pane runs, so a tab opened from one of its
@@ -6042,12 +6047,6 @@ impl Render for AgentPane {
 
         let queued_message = self.render_queued_prompts(cx);
 
-        let session_state = session_state_badge(
-            &self.session.borrow().goal,
-            self.session.borrow().plan_mode,
-            cx,
-        );
-
         let approval = self.render_approval_panel(cx);
         let questions = self.render_question_panel(window, cx);
 
@@ -6100,6 +6099,21 @@ impl Render for AgentPane {
         // pushes it back a layer while keeping the tab recognizable as that
         // conversation; a blank tab has nothing to push back.
         let blur_transcript = history.is_some() && !transcript_empty;
+
+        let progress = if history.is_none() {
+            let session = self.session.borrow();
+
+            self.progress_panel.render(
+                session.goal.as_ref(),
+                session.task_list.as_ref(),
+                session.plan_mode,
+                background,
+                cx,
+            )
+        } else {
+            None
+        };
+
         let now = Instant::now();
 
         let transcript_frost =
@@ -6155,32 +6169,30 @@ impl Render for AgentPane {
                     }),
             )
             .child({
-                // Composer area: auxiliary strips sit outside the bordered,
-                // shadowed shell on a deeper surface. History is absolutely
-                // anchored above the shell because it only exists while the
-                // transcript is empty; loading it must never participate in
-                // composer height calculation. Both strips are painted before
-                // the shell, whose edge and shadow keep them visibly tucked
-                // behind the input card.
+                // History and progress share an absolute anchor so opening
+                // either panel keeps the input in place. Painting the panel
+                // first tucks its lower edge behind the input card's shadow.
                 transcript_column(
                     div()
                         .w_full()
                         .relative()
-                        .children(history.map(|history| {
-                            div()
-                                .absolute()
-                                .left_0()
-                                .right_0()
-                                .bottom(relative(1.))
-                                .mb(px(-14.))
-                                .child(history)
-                        }))
+                        .children(history.map(IntoElement::into_any_element).or(progress).map(
+                            |panel| {
+                                div()
+                                    .absolute()
+                                    .left_0()
+                                    .right_0()
+                                    .bottom(relative(1.))
+                                    .mb(px(-14.))
+                                    .child(panel)
+                            },
+                        ))
                         .child(
                             composer_card(cx)
+                                .debug_selector(|| "agent-progress-composer".into())
                                 .children(approval)
                                 .children(questions)
                                 .children(command_feedback)
-                                .children(session_state)
                                 .children(queued_message)
                                 .children(self.attachments.render(cx))
                                 .child(

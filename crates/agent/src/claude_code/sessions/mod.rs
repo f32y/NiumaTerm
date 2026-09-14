@@ -24,6 +24,8 @@ pub(crate) use crate::claude_code::sessions::titles::{
 pub(super) use crate::claude_code::sessions::paths::project_dir;
 pub(super) use crate::claude_code::sessions::replay::parse_child_replay;
 
+pub(crate) mod progress;
+
 mod fork;
 mod index;
 mod paths;

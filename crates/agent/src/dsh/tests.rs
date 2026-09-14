@@ -1874,6 +1874,37 @@ fn the_goal_projection_carries_the_objective_and_how_much_of_its_budget_is_spent
 }
 
 #[test]
+fn task_projection_restores_replaces_and_clears_without_older_pages_winning() {
+    use crate::dsh::projections::ProjectionTracker;
+    use crate::progress::TaskStatus;
+
+    let mut tracker = ProjectionTracker::default();
+
+    let values = json!({"todos": [
+        {"content": "Build editor", "status": "completed"},
+        {"content": "Build insights", "status": "in_progress"}
+    ]});
+
+    let events = tracker.apply_baseline(&values, Some(5));
+
+    let [Event::TaskListUpdated(tasks)] = events.as_slice() else {
+        panic!("expected tasks")
+    };
+
+    assert_eq!(tasks.tally(), Some((1, 2)));
+    assert_eq!(tasks.items[1].status, TaskStatus::InProgress);
+
+    let cleared = tracker.apply_baseline(&json!({"todos": null}), Some(7));
+
+    let [Event::TaskListUpdated(tasks)] = cleared.as_slice() else {
+        panic!("expected cleared tasks")
+    };
+
+    assert!(tasks.items.is_empty());
+    assert!(tracker.apply_baseline(&values, Some(6)).is_empty());
+}
+
+#[test]
 fn a_pending_plan_selection_reports_the_state_it_is_heading_for() {
     use crate::dsh::projections::ProjectionTracker;
 

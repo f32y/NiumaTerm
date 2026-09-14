@@ -13,6 +13,7 @@ use crate::chat::{
     ApprovalPreset, ContextComposition, ContextSegment, ContextUsageScope, ContextWindowUsage,
     Event, GoalStatus, ScopedTokenUsage, SessionStats, TokenUsageBreakdown,
 };
+use crate::progress::{Task, TaskList, TaskStatus};
 
 /// The projection values this session has seen so far.
 #[derive(Default)]
@@ -128,6 +129,7 @@ impl ProjectionTracker {
             // key disappearing, so the absent case is a value to publish and
             // not a frame to ignore.
             "goal" => vec![Event::GoalUpdated(goal_status(value))],
+            "todos" => vec![Event::TaskListUpdated(todo_list(value))],
             // `pending` is a selection the host has admitted but not yet
             // recorded, so the state the user is heading for is the pending
             // one's opposite of `active`.
@@ -242,7 +244,31 @@ fn goal_status(value: &Value) -> Option<GoalStatus> {
         phase: goal["phase"].as_str().unwrap_or_default().to_string(),
         rounds_started: value["roundsStarted"].as_u64().unwrap_or_default(),
         max_rounds: goal["maxGoalRounds"].as_u64().unwrap_or_default(),
+        reason: goal["blockedReason"]["message"].as_str().map(str::to_owned),
+        ..GoalStatus::default()
     })
+}
+
+fn todo_list(value: &Value) -> TaskList {
+    TaskList {
+        items: value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                Some(Task {
+                    id: index.to_string(),
+                    title: item["content"].as_str()?.to_owned(),
+                    status: TaskStatus::parse(item["status"].as_str()?)?,
+                    description: None,
+                    owner: None,
+                    blocked_by: Vec::new(),
+                })
+            })
+            .collect(),
+        ..TaskList::default()
+    }
 }
 
 /// The four reported buckets are disjoint — reasoning tokens are already inside

@@ -19,6 +19,7 @@ mod transcript;
 #[cfg(test)]
 mod tests;
 
+use std::env;
 #[cfg(all(test, windows))]
 use std::fs;
 use std::process::Command;
@@ -38,6 +39,7 @@ use crate::chat::{
     SendOutcome, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
     SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
+use crate::claude_code::sessions::progress::{PROGRESS_METHOD, ProgressMonitor, ProgressSnapshot};
 use crate::claude_code::sessions::{RestoredTask, load_child_transcript};
 use crate::claude_code::shell_output::shell_items;
 use crate::claude_code::stream_json::control::{
@@ -157,6 +159,7 @@ pub struct Session {
     workflows: ClaudeWorkflows,
 
     workflow_source: Arc<dyn WorkflowSource>,
+    progress_monitor: Box<ProgressMonitor>,
 }
 
 impl Session {
@@ -185,6 +188,14 @@ impl Session {
                 source: SlashCommandSource::Adapter,
                 arguments: SlashCommandArguments::None,
                 run_policy: SlashCommandRunPolicy::IdleOnly,
+            },
+            SlashCommandInfo {
+                name: "goal".into(),
+                description: "Set, inspect, or clear a persistent goal".into(),
+                argument_hint: Some("[condition|clear]".into()),
+                source: SlashCommandSource::Adapter,
+                arguments: SlashCommandArguments::Freeform,
+                run_policy: SlashCommandRunPolicy::QueueUntilIdle,
             },
         ]
     }
@@ -219,6 +230,12 @@ impl Session {
         );
 
         let deliver = Arc::new(deliver);
+
+        let progress_monitor =
+            ProgressMonitor::new(workspace.primary().map(str::to_owned), deliver.clone())
+                .map_err(|error| format!("could not start Claude progress reader: {error}"))?;
+
+        let stop_progress = progress_monitor.stop_on_exit();
         let timer_delivery = Arc::clone(&deliver);
 
         let timer = DeadlineTimer::new(move || {
@@ -234,7 +251,11 @@ impl Session {
             "Claude",
             move |message| deliver(message),
             on_stderr,
-            move || stop.stop(),
+            move || {
+                stop.stop();
+
+                stop_progress();
+            },
         )?;
 
         let mut session = Self {
@@ -257,6 +278,7 @@ impl Session {
             tasks: ClaudeTasks::default(),
             workflows: ClaudeWorkflows::default(),
             workflow_source: Arc::new(ClaudeWorkflowSource::default()),
+            progress_monitor: Box::new(progress_monitor),
         };
 
         session.control.set_timer(timer);
@@ -309,6 +331,21 @@ impl Session {
 
         if message["method"] == TIMEOUT_METHOD {
             return self.poll_timeouts(Instant::now());
+        }
+
+        if message["method"] == PROGRESS_METHOD {
+            if message["session_id"].as_str() != self.session_id.as_deref() {
+                return Vec::new();
+            }
+
+            return serde_json::from_value::<ProgressSnapshot>(message["progress"].clone())
+                .map(|progress| {
+                    vec![
+                        Event::GoalUpdated(progress.goal),
+                        Event::TaskListUpdated(progress.tasks),
+                    ]
+                })
+                .unwrap_or_default();
         }
 
         let mut events = Vec::new();
@@ -394,6 +431,12 @@ impl Session {
         // parent transcript above has already dropped this content.
         for (key, update) in self.tasks.take_transcripts() {
             events.push(Event::BackgroundTaskTranscript { key, update });
+        }
+
+        if self.ready
+            && let Some(id) = self.session_id.as_deref()
+        {
+            self.progress_monitor.watch(id);
         }
 
         events
@@ -1407,6 +1450,17 @@ fn claude_command(
     // applied after profile overrides so every NiumaTerm Claude session
     // can create checkpoints for subsequent `/rewind` operations.
     enable_file_checkpointing(&mut command);
+
+    // Recent models omit checklist tools unless the client opts in. Keep an
+    // explicit profile or inherited choice while enabling progress by default.
+    if !launch
+        .env
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("CLAUDE_CODE_ENABLE_TODO_TOOLS"))
+        && env::var_os("CLAUDE_CODE_ENABLE_TODO_TOOLS").is_none()
+    {
+        command.env("CLAUDE_CODE_ENABLE_TODO_TOOLS", "1");
+    }
 
     // Recent models omit thinking text by default and emit signature-only
     // thinking blocks, which would leave the chat's reasoning sections

@@ -8,6 +8,7 @@ pub use crate::chat::controls::*;
 pub use crate::chat::questions::*;
 pub use crate::chat::sessions::*;
 pub use crate::chat::usage::*;
+pub use crate::progress::GoalStatus;
 
 mod commands;
 mod controls;
@@ -23,6 +24,7 @@ use serde_json::Value;
 use crate::background_task::{
     BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscriptUpdate,
 };
+use crate::progress::TaskList;
 use crate::workflow::WorkflowSnapshot;
 
 /// Why a context compaction ran.
@@ -321,21 +323,6 @@ impl QueuedPrompt {
     }
 }
 
-/// The session's standing objective, when the backend runs one.
-///
-/// A goal outlives the turn that created it and drives further turns on its
-/// own, so it is session state rather than transcript content.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GoalStatus {
-    pub objective: String,
-
-    /// The backend's own lifecycle word for the goal, shown as it was given.
-    pub phase: String,
-
-    pub rounds_started: u64,
-    pub max_rounds: u64,
-}
-
 /// A provider request failed and is being tried again. The turn is waiting
 /// rather than working, which is otherwise indistinguishable: elapsed time
 /// climbs the same either way and the token count sits still for both.
@@ -500,6 +487,7 @@ pub enum Event {
     /// session with no goal, which is also what a backend that runs none
     /// reports by never sending this.
     GoalUpdated(Option<GoalStatus>),
+    TaskListUpdated(TaskList),
     /// Whether the backend is currently collaborating on a plan rather than
     /// carrying out work.
     PlanModeUpdated(bool),

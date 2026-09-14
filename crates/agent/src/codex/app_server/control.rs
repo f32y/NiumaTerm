@@ -11,6 +11,7 @@ pub(super) enum QueryKind {
     Resume,
     Checkpoints,
     Fork,
+    Goal(u64),
 }
 
 impl QueryKind {

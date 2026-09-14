@@ -28,7 +28,9 @@ use crate::subprocess::InputTicket;
 
 fn request_class(message: &Value) -> RequestClass {
     match message["method"].as_str() {
-        Some("model/list" | "skills/list" | "thread/list" | "thread/read") => RequestClass::Query,
+        Some("model/list" | "skills/list" | "thread/list" | "thread/read" | "thread/goal/get") => {
+            RequestClass::Query
+        }
         Some("turn/interrupt" | "thread/unsubscribe") => RequestClass::Control,
         _ => RequestClass::Mutation,
     }

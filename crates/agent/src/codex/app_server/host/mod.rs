@@ -163,7 +163,9 @@ impl CodexHost {
         let stderr_credentials = credential_values.clone();
         let launcher = AgentCli::from_launch(&bootstrap.launch, "codex");
         let executable = launcher.executable().to_string();
-        let command = launcher.command(["app-server"]);
+        // Goal scheduling must be available to the tab's native goal controls.
+        // This enables it only in the child process, without changing user files.
+        let command = launcher.command(["-c", "features.goals=true", "app-server"]);
         let (startup_tx, startup_rx) = mpsc::sync_channel(1);
         let router = Arc::new(Router::new(startup_tx));
 

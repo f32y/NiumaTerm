@@ -4,6 +4,7 @@ use crate::chat::Event;
 use crate::codex::app_server::compaction::{
     CompactionState, compaction_completed, compaction_started,
 };
+use crate::codex::app_server::progress::{PLAN_RESTORED, goal_status, task_list};
 use crate::codex::app_server::protocol::{delta_event, parse_context_window_usage, parse_item};
 use crate::codex::app_server::questions::QuestionState;
 
@@ -49,11 +50,37 @@ pub(super) struct ThreadState {
     pub(super) questions: QuestionState,
     pub(super) compaction: CompactionState,
     turn_output_usage: TurnOutputUsage,
+    pub(super) goal_revision: u64,
+    pub(super) plan_revision: u64,
 }
 
 impl ThreadState {
     pub(super) fn on_notification(&mut self, method: &str, params: &Value) -> Vec<Event> {
         match method {
+            "turn/plan/updated" => {
+                self.plan_revision += 1;
+
+                vec![Event::TaskListUpdated(task_list(params))]
+            }
+            PLAN_RESTORED => {
+                if params["threadId"].as_str() != self.thread_id.as_deref()
+                    || params["revision"].as_u64() != Some(self.plan_revision)
+                {
+                    return Vec::new();
+                }
+
+                vec![Event::TaskListUpdated(task_list(&params["value"]))]
+            }
+            "thread/goal/updated" => {
+                self.goal_revision += 1;
+
+                vec![Event::GoalUpdated(goal_status(&params["goal"]))]
+            }
+            "thread/goal/cleared" => {
+                self.goal_revision += 1;
+
+                vec![Event::GoalUpdated(None)]
+            }
             "turn/started" => {
                 self.current_turn = params["turn"]["id"].as_str().map(str::to_owned);
 

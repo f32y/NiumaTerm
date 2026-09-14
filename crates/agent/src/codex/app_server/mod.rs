@@ -27,6 +27,7 @@ mod control;
 mod conversation;
 mod host;
 mod options;
+mod progress;
 mod protocol;
 mod questions;
 mod skills;
@@ -39,6 +40,7 @@ mod tests;
 use std::mem::take;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 #[cfg(test)]
 use std::time::UNIX_EPOCH;
@@ -52,6 +54,7 @@ use crate::codex::app_server::conversation::ThreadState;
 #[cfg(test)]
 use crate::codex::app_server::conversation::TurnOutputUsage;
 use crate::codex::app_server::host::{CodexHost, HOST_EXIT_METHOD, RegistrationId};
+use crate::codex::app_server::progress::{PLAN_RESTORED, goal_request, goal_status, read_plan};
 #[cfg(test)]
 use crate::codex::app_server::protocol::thread_start_params;
 use crate::codex::app_server::protocol::{
@@ -82,7 +85,7 @@ const THREAD_LIST_LIMIT: u64 = 50;
 /// Notifications that describe one thread's activity. They are routed by
 /// thread id before parent handling, so a descendant's turn or item can never
 /// change the parent's turn identity, running state, or transcript.
-const THREAD_SCOPED_NOTIFICATIONS: [&str; 11] = [
+const THREAD_SCOPED_NOTIFICATIONS: [&str; 14] = [
     "turn/started",
     "turn/completed",
     "thread/status/changed",
@@ -94,6 +97,9 @@ const THREAD_SCOPED_NOTIFICATIONS: [&str; 11] = [
     "item/reasoning/textDelta",
     "item/commandExecution/outputDelta",
     "error",
+    "turn/plan/updated",
+    "thread/goal/updated",
+    "thread/goal/cleared",
 ];
 
 #[derive(Clone, Debug, Default)]
@@ -191,7 +197,28 @@ impl Session {
                 // one asked for mid-turn could not name the turn in progress.
                 run_policy: SlashCommandRunPolicy::IdleOnly,
             },
+            SlashCommandInfo {
+                name: "goal".into(),
+                description: "Set, inspect, pause, resume, or clear a persistent goal".into(),
+                argument_hint: Some("[objective|pause|resume|clear]".into()),
+                source: SlashCommandSource::Adapter,
+                arguments: SlashCommandArguments::Freeform,
+                run_policy: SlashCommandRunPolicy::Immediate,
+            },
         ]
+    }
+
+    fn request_goal(&mut self) {
+        let Some(thread_id) = self.conversation.thread_id.clone() else {
+            return;
+        };
+
+        self.send_query(
+            QueryKind::Goal(self.conversation.goal_revision),
+            json!({
+                "method": "thread/goal/get", "params": {"threadId": thread_id}
+            }),
+        );
     }
 
     /// Attach a conversation to the shared app-server, starting and
@@ -459,13 +486,13 @@ impl Session {
             return SlashCommandOutcome::NotReady;
         };
 
-        if self.conversation.current_turn.is_some() {
+        if name != "goal" && self.conversation.current_turn.is_some() {
             return SlashCommandOutcome::Rejected {
                 message: "Codex is already running a turn.".to_string(),
             };
         }
 
-        if !arguments.trim().is_empty() {
+        if name != "goal" && !arguments.trim().is_empty() {
             return SlashCommandOutcome::Rejected {
                 message: format!("/{name} does not accept arguments."),
             };
@@ -473,7 +500,13 @@ impl Session {
 
         let rpc_id = self.alloc_rpc_id();
 
-        let Some(request) = codex_command_request(rpc_id, &thread_id, name) else {
+        let request = if name == "goal" {
+            Some(goal_request(rpc_id, &thread_id, arguments))
+        } else {
+            codex_command_request(rpc_id, &thread_id, name)
+        };
+
+        let Some(request) = request else {
             return SlashCommandOutcome::Rejected {
                 message: format!("Unsupported Codex command: /{name}"),
             };
@@ -902,10 +935,26 @@ impl Session {
         }
 
         if let Some(error) = message["error"]["message"].as_str() {
+            if matches!(query, Some(QueryKind::Goal(_))) {
+                return Vec::new();
+            }
+
             return self.on_response_error(pending_command.as_deref(), query, error);
         }
 
         if let Some(command) = pending_command {
+            if command == "goal" {
+                // A live update can arrive before the command reply. Read the
+                // current goal with revision protection instead of restoring
+                // the older state captured in that reply.
+                self.request_goal();
+
+                return vec![Event::SlashCommandResult {
+                    name: command,
+                    outcome: SlashCommandOutcome::Completed { message: None },
+                }];
+            }
+
             return vec![Event::SlashCommandResult {
                 outcome: codex_command_response(&command, None),
                 name: command,
@@ -913,10 +962,19 @@ impl Session {
         }
 
         match query {
+            Some(QueryKind::Goal(revision)) => {
+                if revision == self.conversation.goal_revision {
+                    vec![Event::GoalUpdated(goal_status(&message["result"]["goal"]))]
+                } else {
+                    Vec::new()
+                }
+            }
             Some(QueryKind::Start) => {
                 let result = &message["result"];
 
                 self.conversation.thread_id = result["thread"]["id"].as_str().map(str::to_owned);
+
+                self.request_goal();
 
                 self.send_query(
                     QueryKind::Models,
@@ -1089,6 +1147,25 @@ impl Session {
         self.conversation.current_turn = None;
         self.conversation.thread_id = result["thread"]["id"].as_str().map(str::to_owned);
         self.initial_resume = None;
+        self.conversation.plan_revision += 1;
+        self.conversation.goal_revision += 1;
+
+        self.request_goal();
+
+        if let Some(path) = result["thread"]["path"].as_str() {
+            let path = PathBuf::from(path);
+            let deliver = self.deliver.clone();
+            let thread_id = self.conversation.thread_id.clone();
+            let revision = self.conversation.plan_revision;
+
+            let _ = thread::Builder::new()
+                .name("codex-plan-restore".into())
+                .spawn(move || {
+                    deliver(json!({"method": PLAN_RESTORED, "params": {
+                        "threadId": thread_id, "revision": revision, "value": read_plan(&path)
+                    }}));
+                });
+        }
 
         // A resumed parent can already have finished descendants, and
         // a reconnect resumes into a new process with none of the live
