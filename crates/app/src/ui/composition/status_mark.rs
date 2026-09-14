@@ -105,7 +105,6 @@ impl RenderOnce for StatusMark {
                 )
                 .into_any_element()
             }
-
             StatusMarkVisual::Busy => ProgressCircle::new(self.id)
                 .small()
                 .loading(true)

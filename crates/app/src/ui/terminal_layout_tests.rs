@@ -12,7 +12,6 @@ struct LayoutView(TerminalLayout<u32>);
 fn render_node(node: &PaneNode<u32>) -> AnyElement {
     match node {
         PaneNode::Leaf { .. } => div().size_full().into_any_element(),
-
         PaneNode::Split {
             id,
             axis,
@@ -60,6 +59,7 @@ fn harness(cx: &mut TestAppContext) -> (Entity<LayoutView>, &mut VisualTestConte
 
 fn draw(cx: &mut VisualTestContext) {
     cx.update(|window, cx| window.draw(cx).clear(cx));
+
     cx.update(|window, cx| window.draw(cx).clear(cx));
 }
 

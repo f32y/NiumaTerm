@@ -113,12 +113,16 @@ fn open_test_pane(
 
     let cwd = directory.path().to_string_lossy().into_owned();
     let history_path = directory.path().join("agent-input-history.json");
+
     let mut pane = None;
 
     let window = cx.update(|cx| {
         gpui_component::init(cx);
+
         cx.set_global(AgentSettings::default());
+
         cx.set_global(AgentThreadDefaults::default());
+
         cx.set_global(AgentInputHistory(InputHistoryService::open(history_path)));
 
         cx.open_window(Default::default(), |window, cx| {
@@ -138,6 +142,7 @@ fn open_test_pane(
 #[test]
 fn navigation_moves_without_wrapping_and_clears_after_newest() {
     let entries: Arc<[String]> = vec!["oldest".into(), "newest".into()].into();
+
     let mut navigation = InputHistoryNavigation::default();
 
     assert_eq!(
@@ -183,6 +188,7 @@ fn navigation_moves_without_wrapping_and_clears_after_newest() {
 #[test]
 fn drafts_selections_and_interior_cursors_keep_editor_navigation() {
     let entries: Arc<[String]> = vec!["first".into(), "second".into()].into();
+
     let mut navigation = InputHistoryNavigation::default();
 
     assert_eq!(
@@ -228,6 +234,7 @@ fn drafts_selections_and_interior_cursors_keep_editor_navigation() {
 #[test]
 fn multiline_and_slash_entries_are_plain_text_during_navigation() {
     let entries: Arc<[String]> = vec!["/status".into(), "first\nsecond".into()].into();
+
     let mut navigation = InputHistoryNavigation::default();
 
     assert_eq!(
@@ -250,6 +257,7 @@ fn multiline_and_slash_entries_are_plain_text_during_navigation() {
 fn matching_tabs_start_from_the_latest_shared_snapshot() {
     let directory = TestDirectory::new();
     let scope = scope("local", AgentKind::Codex, directory.path());
+
     let mut history = InputHistoryService::open(directory.path().join("history.json"));
 
     history.record(&scope, "first".into());
@@ -287,6 +295,7 @@ fn matching_tabs_start_from_the_latest_shared_snapshot() {
 fn pane_navigation_keeps_palette_and_recent_sessions_ahead_of_history(cx: &mut TestAppContext) {
     let directory = TestDirectory::new();
     let (pane, window) = open_test_pane(cx, &directory);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     cx.update(|window, cx| {
@@ -299,6 +308,7 @@ fn pane_navigation_keeps_palette_and_recent_sessions_ahead_of_history(cx: &mut T
                 .update(cx, |input, cx| input.set_value("/", window, cx));
 
             pane.palette.dismissed = false;
+
             pane.handle_palette_control(PaletteControl::Previous, window, cx);
 
             assert_eq!(pane.input.read(cx).text().to_string(), "/");
@@ -347,6 +357,7 @@ fn pane_navigation_keeps_palette_and_recent_sessions_ahead_of_history(cx: &mut T
 fn accepted_new_turn_and_steering_record_only_typed_input(cx: &mut TestAppContext) {
     let directory = TestDirectory::new();
     let (pane, window) = open_test_pane(cx, &directory);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     cx.update(|window, cx| {
@@ -400,6 +411,7 @@ fn accepted_new_turn_and_steering_record_only_typed_input(cx: &mut TestAppContex
 fn slash_history_requires_a_successful_action(cx: &mut TestAppContext) {
     let directory = TestDirectory::new();
     let (pane, window) = open_test_pane(cx, &directory);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     cx.update(|window, cx| {
@@ -442,6 +454,7 @@ fn slash_history_requires_a_successful_action(cx: &mut TestAppContext) {
             ));
 
             pane.session.borrow_mut().runtime.ready();
+
             pane.session.borrow_mut().commands.awaiting_turn = false;
 
             pane.input
@@ -477,6 +490,7 @@ fn slash_history_requires_a_successful_action(cx: &mut TestAppContext) {
 fn rejected_submission_preserves_draft_images_and_unnamed_state(cx: &mut TestAppContext) {
     let directory = TestDirectory::new();
     let (pane, window) = open_test_pane(cx, &directory);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
     let mut bytes = Cursor::new(Vec::new());
 
@@ -505,6 +519,7 @@ fn rejected_submission_preserves_draft_images_and_unnamed_state(cx: &mut TestApp
             ));
 
             pane.session.borrow_mut().runtime.ready();
+
             pane.session.borrow_mut().naming.named = false;
 
             pane.input.update(cx, |input, cx| {
@@ -537,6 +552,7 @@ fn rejected_submission_preserves_draft_images_and_unnamed_state(cx: &mut TestApp
 fn unavailable_session_keeps_input_without_recording(cx: &mut TestAppContext) {
     let directory = TestDirectory::new();
     let (pane, window) = open_test_pane(cx, &directory);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     cx.update(|window, cx| {
@@ -585,7 +601,9 @@ fn restored_multiline_text_places_the_utf8_cursor_at_the_end(cx: &mut gpui::Test
     });
 
     let input = input.expect("create input state");
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
+
     let text = "词元\n/status".to_string();
     let expected_end = text.len();
 
@@ -671,6 +689,7 @@ fn interruption_restores_only_unanswered_input_and_preserves_new_drafts(cx: &mut
     for visible in [false, true] {
         let directory = TestDirectory::new();
         let (pane, window) = open_test_pane(cx, &directory);
+
         let mut view_cx = VisualTestContext::from_window(window.into(), cx);
 
         let turn = view_cx.update(|window, cx| {
@@ -694,6 +713,7 @@ fn interruption_restores_only_unanswered_input_and_preserves_new_drafts(cx: &mut
                 ));
 
                 pane.session.borrow_mut().runtime.ready();
+
                 pane.attachments.add_annotation("quoted answer".into());
 
                 pane.input.update(cx, |input, cx| {

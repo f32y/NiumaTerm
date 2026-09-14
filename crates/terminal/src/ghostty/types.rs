@@ -76,13 +76,10 @@ impl From<VtSgrUnderline::Type> for Underline {
 pub enum CellWide {
     #[default]
     Narrow,
-
     /// First cell of a double-width character.
     Wide,
-
     /// Second cell of a double-width character (no glyph).
     SpacerTail,
-
     /// Padding before a wide char at a soft-wrap boundary (no glyph).
     SpacerHead,
 }
@@ -123,7 +120,6 @@ impl CellText {
             CellTextRepr::Inline { len, buf } => unsafe {
                 str::from_utf8_unchecked(&buf[..*len as usize])
             },
-
             CellTextRepr::Heap(s) => s,
         }
     }
@@ -327,6 +323,7 @@ pub struct ScrollbarInfo {
 impl From<char> for CellText {
     fn from(c: char) -> Self {
         let mut buf = [0u8; 22];
+
         let len = c.encode_utf8(&mut buf).len() as u8;
 
         CellText(CellTextRepr::Inline { len, buf })

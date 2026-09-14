@@ -113,6 +113,7 @@ fn empty_count_finishes_loading_and_removes_previous_rows() {
 #[test]
 fn replacement_invalidation_rejects_both_passes_and_clears_placeholders() {
     let mut history = SessionHistoryUi::default();
+
     let old = history.data.begin_filesystem_history(None, 1);
 
     assert!(matches!(

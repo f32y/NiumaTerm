@@ -15,6 +15,7 @@ fn split_right_wraps_root_leaf_and_focuses_new(cx: &mut TestAppContext) {
     let state10 = cx.new(|_| ResizableState::default());
 
     let mut tree = Tree::new_leaf(PaneId(1), 1);
+
     let outcome = tree.split(PaneId(2), 2, SplitDirection::Right, || state10.clone());
 
     assert!(matches!(outcome, SplitOutcome::Wrapped));
@@ -42,6 +43,7 @@ fn same_axis_split_inserts_sibling(cx: &mut TestAppContext) {
     let mut tree = Tree::new_leaf(PaneId(1), 1);
 
     tree.split(PaneId(2), 2, SplitDirection::Right, || state10.clone());
+
     tree.set_focused(PaneId(1));
 
     let outcome = tree.split(PaneId(3), 3, SplitDirection::Right, || state11.clone());
@@ -68,6 +70,7 @@ fn cross_axis_split_wraps_the_leaf(cx: &mut TestAppContext) {
     let mut tree = Tree::new_leaf(PaneId(1), 1);
 
     tree.split(PaneId(2), 2, SplitDirection::Right, || state10.clone());
+
     tree.set_focused(PaneId(1));
 
     let outcome = tree.split(PaneId(3), 3, SplitDirection::Down, || state11.clone());
@@ -121,6 +124,7 @@ fn remove_from_wider_split_reports_index(cx: &mut TestAppContext) {
     let mut tree = Tree::new_leaf(PaneId(1), 1);
 
     tree.split(PaneId(2), 2, SplitDirection::Right, || state10.clone());
+
     tree.split(PaneId(3), 3, SplitDirection::Right, || state11.clone());
 
     // Row is [1, 2, 3]; remove the middle.
@@ -142,6 +146,7 @@ fn remove_collapses_nested_split_and_refocuses(cx: &mut TestAppContext) {
     let mut tree = Tree::new_leaf(PaneId(1), 1);
 
     tree.split(PaneId(2), 2, SplitDirection::Right, || state10.clone());
+
     tree.split(PaneId(3), 3, SplitDirection::Down, || state11.clone());
 
     // Root: h[1, v[2, 3]]; removing 3 collapses the nested split.
@@ -184,6 +189,7 @@ fn resize_split_finds_nearest_matching_axis(cx: &mut TestAppContext) {
     let mut tree = Tree::new_leaf(PaneId(1), 1);
 
     tree.split(PaneId(2), 2, SplitDirection::Right, || state10.clone());
+
     tree.split(PaneId(3), 3, SplitDirection::Down, || state11.clone());
 
     // Focused leaf 3 sits in v-split 11 (index 1 of 2) inside h-split 10.

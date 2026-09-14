@@ -16,6 +16,14 @@ mod transitions;
 #[cfg(test)]
 mod tests;
 
+use std::cell::RefCell;
+use std::collections::VecDeque;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use chrono::Utc;
+
 use crate::background_task::{BackgroundTaskKey, BackgroundTaskSnapshot};
 use crate::chat::{
     Event, GoalStatus, Item, ReplayTurn, SendOutcome, SkillCatalog, SlashCommandInfo,
@@ -38,12 +46,6 @@ use crate::session::workflows::WorkflowData;
 use crate::session::{AgentKind, Backend, RecoveryIdentity};
 use crate::transcript::TextField;
 use crate::transcript::conversation::{ConversationImage, ConversationState, hidden};
-use chrono::Utc;
-use std::cell::RefCell;
-use std::collections::VecDeque;
-use std::rc::Rc;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SubmissionBlock {
@@ -179,6 +181,7 @@ impl SessionController {
 
         if matches!(outcome, StartOutcome::Failed(_)) {
             self.commands.clear();
+
             self.delivery.start_failed();
         }
 
@@ -189,6 +192,7 @@ impl SessionController {
         let epoch = self.runtime.begin_start();
 
         self.input.starting(epoch);
+
         self.restore.starting(epoch, recovery);
 
         let reset_branch = !self.branch.starting(epoch, recovery);
@@ -258,6 +262,7 @@ impl SessionController {
 
     pub(crate) fn note_visible_output(&mut self) {
         self.delivery.visible_output();
+
         self.conversation.borrow_mut().visible_output();
     }
 
@@ -282,6 +287,7 @@ impl SessionController {
 
         if matches!(item, Item::AgentMessage { .. }) {
             self.delivery.agent_message();
+
             self.publish_confirmed();
         }
 
@@ -352,13 +358,11 @@ impl SessionController {
 
                 SessionEffect::Changed
             }
-
             SessionEffect::ItemCompleted(item) => {
                 self.complete_item(item);
 
                 SessionEffect::Changed
             }
-
             SessionEffect::TextDelta {
                 item_id,
                 delta,
@@ -368,7 +372,6 @@ impl SessionController {
 
                 SessionEffect::Changed
             }
-
             SessionEffect::ConfirmedPrompts(prompts) => {
                 for text in prompts {
                     self.push_item(Item::UserMessage { text: Some(text) });
@@ -376,7 +379,6 @@ impl SessionController {
 
                 SessionEffect::Changed
             }
-
             SessionEffect::OutputTokens(tokens) => {
                 let mut conversation = self.conversation.borrow_mut();
 
@@ -386,25 +388,21 @@ impl SessionController {
 
                 SessionEffect::Changed
             }
-
             SessionEffect::ContextWindow(usage) => {
                 self.conversation.borrow_mut().context_window_usage = Some(usage);
 
                 SessionEffect::Changed
             }
-
             SessionEffect::ContextComposition(composition) => {
                 self.conversation.borrow_mut().context_composition = Some(composition);
 
                 SessionEffect::Changed
             }
-
             SessionEffect::Stats(stats) => {
                 self.conversation.borrow_mut().session_stats = Some(stats);
 
                 SessionEffect::Changed
             }
-
             SessionEffect::Error {
                 message,
                 fatal,
@@ -414,6 +412,7 @@ impl SessionController {
 
                 if fatal {
                     self.publish_confirmed();
+
                     self.conversation.borrow_mut().settle(self.delivery.turn());
                 }
 
@@ -427,7 +426,6 @@ impl SessionController {
                     failure,
                 }
             }
-
             SessionEffect::InputResolved(mut completion) => {
                 if let Some(text) = completion.message.take() {
                     if completion.started_turn {
@@ -439,7 +437,6 @@ impl SessionController {
 
                 SessionEffect::InputResolved(completion)
             }
-
             SessionEffect::TurnCompleted { error, interrupted } => {
                 if let Some(text) = &error {
                     let conversation = self.conversation.borrow();
@@ -458,18 +455,17 @@ impl SessionController {
 
                 SessionEffect::TurnCompleted { error, interrupted }
             }
-
             SessionEffect::CompactionStarted => {
                 self.note_visible_output();
 
                 let mut conversation = self.conversation.borrow_mut();
 
                 conversation.live.set_compacting(true);
+
                 conversation.changed_turn(self.delivery.turn());
 
                 SessionEffect::Changed
             }
-
             SessionEffect::CompactionFinished { error } => {
                 if let Some(text) = error {
                     self.push_item(Item::Error { text });
@@ -478,17 +474,16 @@ impl SessionController {
                 let mut conversation = self.conversation.borrow_mut();
 
                 conversation.live.set_compacting(false);
+
                 conversation.changed_turn(self.delivery.turn());
 
                 SessionEffect::Changed
             }
-
             effect @ (SessionEffect::ApprovalRequested | SessionEffect::InputRequested { .. }) => {
                 self.note_visible_output();
 
                 effect
             }
-
             effect => effect,
         }
     }
@@ -504,45 +499,38 @@ impl SessionController {
             Event::Ready(settings) => self
                 .prepare_ready(settings)
                 .map_or(SessionEffect::Unchanged, SessionEffect::Ready),
-
             Event::Models(models) => {
                 self.controls.models = models;
 
                 SessionEffect::Changed
             }
-
             Event::ApprovalPresets { presets, current } => {
                 self.controls.approval_presets = presets;
                 self.controls.settings.approval = current;
 
                 SessionEffect::Changed
             }
-
             Event::AgentPresets { presets, current } => {
                 self.controls.agent_presets = presets;
                 self.controls.agent_preset = current;
 
                 SessionEffect::Changed
             }
-
             Event::EffortRejected { message, effort } => {
                 self.controls.settings.effort = effort;
 
                 SessionEffect::EffortRejected { message }
             }
-
             Event::Commands(commands) => {
                 self.command_catalog = Some(commands.clone());
 
                 SessionEffect::Commands(commands)
             }
-
             Event::Skills(catalog) => {
                 self.skill_catalog = Some(catalog.clone());
 
                 SessionEffect::Skills(catalog)
             }
-
             Event::SlashCommandResult { name, outcome } => {
                 let advance = self.settle_command(&outcome);
 
@@ -552,65 +540,51 @@ impl SessionController {
                     advance,
                 }
             }
-
             Event::TurnStarted => SessionEffect::TurnStarted {
                 opened: self.turn_started(),
             },
-
             Event::ProviderTurnAccepted { id } => SessionEffect::ProviderTurnAccepted { id },
             Event::TeamDecision(request) => SessionEffect::TeamDecision(request),
-
             Event::ProviderTurnFinished { id, error } => {
                 SessionEffect::ProviderTurnFinished { id, error }
             }
-
             Event::TurnCompleted { error } => SessionEffect::TurnCompleted {
                 error,
                 interrupted: self.turn_completed(),
             },
-
             Event::TurnOutputTokensUpdated(tokens) => SessionEffect::OutputTokens(tokens),
             Event::ContextWindowUpdated(usage) => SessionEffect::ContextWindow(usage),
-
             Event::ContextCompositionUpdated(composition) => {
                 SessionEffect::ContextComposition(composition)
             }
-
             Event::CompactionStarted => SessionEffect::CompactionStarted,
             Event::CompactionFinished { error } => SessionEffect::CompactionFinished { error },
-
             Event::FileRewindCompleted { error } => SessionEffect::Branch(
                 self.branch
                     .files_completed(epoch, error.map_or(Ok(()), Err)),
             ),
-
             Event::ItemStarted(item) => SessionEffect::ItemStarted(item),
             Event::ItemCompleted(item) => SessionEffect::ItemCompleted(item),
-
             Event::AgentMessageDelta { item_id, delta } => SessionEffect::TextDelta {
                 item_id,
                 delta,
                 field: TextField::Reply,
             },
-
             Event::ReasoningSummaryDelta { item_id, delta } => SessionEffect::TextDelta {
                 item_id,
                 delta,
                 field: TextField::ReasoningSummary,
             },
-
             Event::CommandOutputDelta { item_id, delta } => SessionEffect::TextDelta {
                 item_id,
                 delta,
                 field: TextField::CommandOutput,
             },
-
             Event::ApprovalRequested { description } => {
                 self.input.ask_approval(description);
 
                 SessionEffect::ApprovalRequested
             }
-
             Event::ApprovalResolved => {
                 if self.input.resolve_approval(epoch) {
                     SessionEffect::ApprovalResolved
@@ -618,12 +592,10 @@ impl SessionController {
                     SessionEffect::Unchanged
                 }
             }
-
             Event::InputRequested(request) => match self.input.receive(&self.runtime, request) {
                 Some(index) => SessionEffect::InputRequested { index },
                 None => SessionEffect::Unchanged,
             },
-
             Event::InputResolved { id, resolution } => {
                 let Some(mut completion) = self.input.resolve(epoch, &id, resolution) else {
                     return SessionEffect::Unchanged;
@@ -635,12 +607,12 @@ impl SessionController {
 
                 if completion.started_turn {
                     self.delivery.begin_turn();
+
                     self.runtime.turn_started();
                 }
 
                 SessionEffect::InputResolved(completion)
             }
-
             Event::InputSubmissionFailed { id, message } => {
                 if self.input.submission_failed(epoch, &id, message) {
                     SessionEffect::Changed
@@ -648,7 +620,6 @@ impl SessionController {
                     SessionEffect::Unchanged
                 }
             }
-
             Event::BackgroundTasks(snapshot) => {
                 if self.set_background_tasks(snapshot) {
                     SessionEffect::BackgroundActivity
@@ -656,7 +627,6 @@ impl SessionController {
                     SessionEffect::Changed
                 }
             }
-
             Event::BackgroundTaskTranscript { key, update } => {
                 if self
                     .children
@@ -670,11 +640,9 @@ impl SessionController {
                     SessionEffect::Unchanged
                 }
             }
-
             Event::Workflows(snapshot) => SessionEffect::Workflows {
                 activity_changed: self.workflows.set_snapshot(snapshot),
             },
-
             Event::WorkflowAgentTranscript {
                 task_id,
                 agent_id,
@@ -686,46 +654,35 @@ impl SessionController {
                     SessionEffect::Unchanged
                 }
             }
-
             Event::History(sessions) => SessionEffect::History(sessions),
             Event::SessionSearchResults(sessions) => SessionEffect::SearchResults(sessions),
-
             Event::QueuedPrompts(prompts) => {
                 SessionEffect::ConfirmedPrompts(self.delivery.snapshot(prompts))
             }
-
             Event::GoalUpdated(goal) => {
                 self.goal = goal;
 
                 SessionEffect::Changed
             }
-
             Event::PlanModeUpdated(active) => {
                 self.plan_mode = active;
 
                 SessionEffect::Changed
             }
-
             Event::TitleUpdated(title) => {
                 self.naming.named = true;
 
                 SessionEffect::Title(title)
             }
-
             Event::SessionStatsUpdated(stats) => SessionEffect::Stats(stats),
-
             Event::Replay(turns) => self
                 .prepare_replay(turns)
                 .map_or(SessionEffect::Unchanged, SessionEffect::Replay),
-
             Event::StatusDetail(detail) => SessionEffect::StatusDetail(detail),
-
             Event::ForkCheckpoints(checkpoints) => {
                 SessionEffect::Branch(self.branch.fork_checkpoints(&mut self.runtime, checkpoints))
             }
-
             Event::HostExited { message } => SessionEffect::HostExited { message },
-
             Event::Error { message, fatal } => {
                 let failure = self.failed(&message, fatal);
 
@@ -751,7 +708,9 @@ impl SessionController {
             let mut conversation = self.conversation.borrow_mut();
 
             conversation.live.discard();
+
             conversation.turns.forget(*turn);
+
             conversation.changed_turn(*turn);
         }
 
@@ -779,11 +738,9 @@ impl SessionController {
             .submit(&mut self.runtime, key, action, &self.controls.settings, now)
         {
             InputSubmission::Ignored => QuestionSubmission::Ignored,
-
             InputSubmission::Settled => QuestionSubmission::Settled {
                 waiting_finished: waiting && !self.input.waiting(),
             },
-
             InputSubmission::Waiting => QuestionSubmission::Waiting,
             InputSubmission::Failed => QuestionSubmission::Failed,
         }
@@ -804,7 +761,6 @@ impl SessionController {
         let mut replay = match self.restore.ready(epoch) {
             ReadyAction::Ignore => return None,
             ReadyAction::Apply => None,
-
             ReadyAction::Replay(replay) => {
                 self.clear_conversation();
 
@@ -842,7 +798,6 @@ impl SessionController {
         let branch = match self.branch.replayed(epoch) {
             BranchReplay::Ignore => return None,
             BranchReplay::Unrelated => None,
-
             BranchReplay::Complete(completion) => {
                 // A completed branch supersedes any pending restore before the
                 // incoming replay is classified for the new conversation.
@@ -855,7 +810,6 @@ impl SessionController {
         let replace = match self.restore.replayed(epoch) {
             ReplayAction::Ignore => return None,
             ReplayAction::Append => false,
-
             ReplayAction::Replace => {
                 self.clear_conversation();
 
@@ -909,6 +863,7 @@ impl SessionController {
         };
 
         self.naming.sync(self.runtime.backend_mut());
+
         self.runtime.ready();
 
         selection
@@ -926,9 +881,11 @@ impl SessionController {
         let retiring = self.runtime.retire();
 
         self.clear_conversation();
+
         self.controls = ConversationSettings::default();
         self.command_catalog = None;
         self.skill_catalog = None;
+
         self.commands.clear();
 
         retiring
@@ -936,6 +893,7 @@ impl SessionController {
 
     pub fn begin_branched_conversation(&mut self) {
         self.restore.cancel();
+
         self.controls.seed = SettingsSeed::None;
     }
 
@@ -984,10 +942,13 @@ impl SessionController {
         let interrupted = self.runtime.turn_completed(self.delivery.turn());
 
         self.commands.turn_completed();
+
         self.delivery.completed();
+
         self.publish_confirmed();
 
         let turn = self.delivery.turn();
+
         let mut conversation = self.conversation.borrow_mut();
 
         if interrupted {
@@ -1006,8 +967,11 @@ impl SessionController {
 
         if fatal {
             self.input.disconnect();
+
             self.runtime.exited(message);
+
             self.delivery.exited();
+
             self.commands.clear();
         } else if self.commands.awaiting_turn {
             self.commands.turn_completed();
@@ -1033,6 +997,7 @@ impl SessionController {
         let cancelled_commands = self.commands.clear();
 
         self.input.disconnect();
+
         self.delivery.exited();
 
         SessionFailure {
@@ -1046,13 +1011,21 @@ impl SessionController {
     /// turn numbers must not match an interrupt requested for the old content.
     pub fn clear_conversation(&mut self) {
         self.conversation.borrow_mut().clear();
+
         self.delivery.reset();
+
         self.pending_images.clear();
+
         self.runtime.clear_turn();
+
         self.branch.clear();
+
         self.restore.cancel();
+
         self.input.dismiss_approval();
+
         self.input.clear_questions();
+
         self.children.background_tasks = None;
 
         for child in self.children.transcripts.values() {
@@ -1060,8 +1033,10 @@ impl SessionController {
         }
 
         self.children.transcripts.clear();
+
         self.goal = None;
         self.plan_mode = false;
+
         self.workflows.clear();
     }
 }

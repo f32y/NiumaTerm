@@ -101,7 +101,9 @@ fn mutually_exclusive_operations_hold_input_and_only_pickers_can_be_cancelled() 
 #[test]
 fn cancelled_disk_reads_cannot_publish_into_a_new_picker() {
     let runtime = runtime();
+
     let mut flow = ConversationBranch::default();
+
     let old = flow.begin_rewind(&runtime, None, None).expect("old read");
 
     assert!(flow.cancel_picker());
@@ -122,6 +124,7 @@ fn cancelled_disk_reads_cannot_publish_into_a_new_picker() {
 #[test]
 fn wrong_prompt_text_falls_back_to_picker_and_unknown_rows_cannot_be_selected() {
     let runtime = runtime();
+
     let mut flow = ConversationBranch::default();
 
     let request = flow
@@ -182,6 +185,7 @@ fn retry_after_file_success_only_retries_conversation_and_moves_replay_once() {
     let mut flow = ConversationBranch::default();
 
     select(&mut flow, &runtime);
+
     flow.rewind(&mut runtime, RewindAction::FilesAndConversation);
 
     let BranchUpdate::CreateFork(request) = flow.files_completed(runtime.epoch(), Ok(())) else {
@@ -280,6 +284,7 @@ fn startup_failure_reports_confirmed_file_changes_and_drops_unpublished_replay()
     let mut flow = ConversationBranch::default();
 
     select(&mut flow, &runtime);
+
     flow.rewind(&mut runtime, RewindAction::FilesAndConversation);
 
     let BranchUpdate::CreateFork(request) = flow.files_completed(runtime.epoch(), Ok(())) else {
@@ -327,6 +332,7 @@ fn unavailable_file_snapshots_are_rejected_without_a_provider_request() {
     let request = flow.begin_rewind(&runtime, None, None).expect("read");
 
     flow.checkpoints_loaded(runtime.epoch(), request, Ok(vec![checkpoint.clone()]));
+
     flow.select_checkpoint(runtime.epoch(), checkpoint);
 
     let BranchUpdate::Failed(failure) = flow.rewind(&mut runtime, RewindAction::Files) else {
@@ -344,8 +350,11 @@ fn abandoned_file_requests_are_drained_before_another_restore_can_start() {
     let mut flow = ConversationBranch::default();
 
     select(&mut flow, &runtime);
+
     flow.rewind(&mut runtime, RewindAction::Files);
+
     flow.clear();
+
     select(&mut flow, &runtime);
 
     let BranchUpdate::Failed(failure) = flow.rewind(&mut runtime, RewindAction::Files) else {
@@ -438,7 +447,9 @@ fn rejected_protocol_branch_preserves_picker_and_reported_failure_restores_statu
     let mut flow = ConversationBranch::default();
 
     flow.begin_fork(&mut runtime, None).expect("list");
+
     flow.fork_checkpoints(&mut runtime, Ok(vec![fork_checkpoint()]));
+
     backend(&mut runtime).fork_accepted = false;
 
     assert!(matches!(
@@ -449,6 +460,7 @@ fn rejected_protocol_branch_preserves_picker_and_reported_failure_restores_statu
     assert_eq!(runtime.status(), Status::Idle);
 
     backend(&mut runtime).fork_accepted = true;
+
     flow.fork(&mut runtime, fork_checkpoint());
 
     let failure = flow
@@ -464,10 +476,12 @@ fn rejected_protocol_branch_preserves_picker_and_reported_failure_restores_statu
 fn replacement_epochs_reject_disk_results_and_unrelated_starts_drop_prepared_history() {
     let mut runtime = runtime();
     let mut flow = ConversationBranch::default();
+
     let request = flow.begin_rewind(&runtime, None, None).expect("read");
     let epoch = runtime.begin_start();
 
     flow.starting(epoch, None);
+
     runtime.ready();
 
     assert!(matches!(

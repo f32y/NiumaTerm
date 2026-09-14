@@ -67,6 +67,7 @@ fn detail_rows_include_the_optional_fable_window() {
 #[test]
 fn reset_and_update_labels_use_compact_relative_time() {
     let now = 1_000_000_000;
+
     let mut window = UsageWindow::new(75, 300);
 
     window.resets_at = Some(now + 2 * 60 * 60_000 + 5 * 60_000);
@@ -95,6 +96,7 @@ fn changing_usage_launcher_discards_the_previous_request(cx: &mut gpui::TestAppC
         let mut settings = AppSettings::default();
 
         settings.edit_agent(|section| section.show_agent_usage = false);
+
         cx.set_global(settings);
     });
 

@@ -88,7 +88,9 @@ pub fn set_system_notification_enabled(enabled: bool) -> Result<()> {
         let protocol = CURRENT_USER.create(NMT_PROTOCOL_ROOT)?;
 
         protocol.set_string("", "URL:NiumaTerm Protocol")?;
+
         protocol.set_string("URL Protocol", "")?;
+
         protocol.create("DefaultIcon")?.set_string("", &icon)?;
 
         protocol
@@ -127,6 +129,7 @@ pub(crate) fn register_shell_integration_paths(exe_path: &Path, dll_path: &Path)
         let inproc = clsid.create("InprocServer32")?;
 
         inproc.set_string("", &dll_path)?;
+
         inproc.set_string("ThreadingModel", "Apartment")?;
 
         for item_type in ITEM_TYPES {
@@ -134,7 +137,9 @@ pub(crate) fn register_shell_integration_paths(exe_path: &Path, dll_path: &Path)
             let key = CURRENT_USER.create(path)?;
 
             key.set_string("MUIVerb", verb.title)?;
+
             key.set_string("Icon", &icon)?;
+
             key.set_string("ExplorerCommandHandler", verb.clsid)?;
         }
     }

@@ -18,6 +18,7 @@ pub(super) fn cancel_pending_reservations(
             && attempt.state == AttemptState::Reserved
         {
             discussion.budget.cancel_unsent(attempt.id)?;
+
             attempt.state = AttemptState::Rejected;
         }
     }

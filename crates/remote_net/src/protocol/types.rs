@@ -1,7 +1,7 @@
-#[cfg(windows)]
-use crate::hub::SessionInfo;
 use serde::{Deserialize, Serialize};
 
+#[cfg(windows)]
+use crate::hub::SessionInfo;
 use crate::session::SessionSnapshot;
 
 /// Options a remote client may request when opening a session. Deliberately a
@@ -32,19 +32,15 @@ pub struct ProtocolSessionInfo {
 pub enum HostBound {
     ListSessions,
     Open(ProtocolSessionOptions),
-
     Attach {
         session_id: u64,
     },
-
     Detach {
         session_id: u64,
     },
-
     Kill {
         session_id: u64,
     },
-
     /// Sent inside an XX-handshake channel to redeem a one-time pairing token.
     Pair {
         token: [u8; 16],
@@ -56,14 +52,11 @@ pub enum HostBound {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClientBound {
     SessionList(Vec<ProtocolSessionInfo>),
-
     Opened {
         session_id: u64,
     },
-
     Attached(SessionSnapshot),
     Paired,
-
     Error {
         session_id: Option<u64>,
         message: String,

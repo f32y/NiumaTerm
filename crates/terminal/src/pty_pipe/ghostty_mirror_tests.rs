@@ -19,6 +19,7 @@ use crate::{ansi, ghostty};
 #[test]
 fn failed_capture_does_not_publish_back_buffer() {
     let front = FrameStore::new(RenderBuffer::new(2, 1));
+
     let mut back = RenderBuffer::new(3, 1);
     let mut failed = false;
 
@@ -99,6 +100,7 @@ fn resized_pipe(initial: &[u8]) -> PtyPipe<FakePty, VoidListener> {
 #[test]
 fn resize_reads_preserve_repaint_across_every_split() {
     let repaint = b"\x1b[H\x1b[2JHEADER\x1b[2;1H>";
+
     let mut baseline = resized_pipe(b"\x1b[18;1H>");
 
     baseline.ghostty.write_vt(repaint);
@@ -109,6 +111,7 @@ fn resize_reads_preserve_repaint_across_every_split() {
         let mut machine = resized_pipe(b"\x1b[18;1H>");
 
         machine.on_pty_chunk(&repaint[..split]);
+
         machine.on_pty_chunk(&repaint[split..]);
 
         let snapshot = machine.ghostty.snapshot().unwrap();
@@ -127,6 +130,7 @@ fn resize_reads_preserve_repaint_across_every_split() {
 #[test]
 fn resize_reads_preserve_bottom_text_during_partial_erase() {
     let mut machine = resized_pipe(b"\x1b[24;1HBOTTOM\x1b[2;1H>");
+
     let input = b"\x1b[1J\x1b[5;1Hnew";
     let forwarded = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&forwarded);
@@ -147,7 +151,9 @@ fn resize_reads_leave_completed_repaint_and_later_echo_in_place() {
     let mut machine = resized_pipe(b"\x1b[1;1HHISTORY\x1b[18;1H>");
 
     machine.on_pty_chunk(b"\x1b[18;1H\x1b[J>");
+
     machine.on_pty_chunk(b"\x1b[19;1Hresult");
+
     machine.on_pty_chunk(b"\r\x1b[6CXYZ");
 
     let snapshot = machine.ghostty.snapshot().unwrap();
@@ -171,6 +177,7 @@ impl io::Read for FakeReader {
         let n = self.data.len().min(buf.len());
 
         buf[..n].copy_from_slice(&self.data[..n]);
+
         self.data.drain(..n);
 
         Ok(n)
@@ -296,6 +303,7 @@ fn queued_resize_cannot_overtake_partial_or_buffered_input() {
     let mut state = PtyState::default();
 
     machine.pty.writer.operations.clear();
+
     machine.pty.writer.budget = Some(2);
     machine.pty.writer.flush_pending = true;
 
@@ -328,6 +336,7 @@ fn queued_resize_cannot_overtake_partial_or_buffered_input() {
     assert_eq!(machine.pty.writer.data, b"ab");
 
     machine.pty.writer.budget = None;
+
     machine.pty_write(&mut state).unwrap();
 
     assert!(machine.drain_recv_channel(&mut state));
@@ -402,6 +411,7 @@ fn input_released_after_resize_wakes_an_otherwise_idle_loop() {
     use std::thread;
 
     let mut machine = resized_pipe(b"");
+
     let (written, received) = sync::mpsc::channel();
 
     machine.pty.writer.observer = Some(written);
@@ -434,6 +444,7 @@ fn input_released_after_resize_wakes_an_otherwise_idle_loop() {
     let second = received.recv_timeout(time::Duration::from_secs(2));
 
     sender.send(event::Msg::Shutdown).unwrap();
+
     worker.join().unwrap();
 
     assert_eq!(first.unwrap(), b"A");
@@ -489,6 +500,7 @@ fn pending_resize_allows_cursor_replies_and_immediate_shutdown() {
 fn powershell_pause_keeps_replies_live_and_disabling_releases_ordered_input() {
     let mut machine = resized_pipe(b"\x1b[4;5H");
     let mut state = PtyState::default();
+
     let sender = machine.channel();
 
     sender
@@ -581,6 +593,7 @@ fn powershell_input_deadline_wakes_a_quiet_event_loop() {
     use std::thread;
 
     let mut machine = resized_pipe(b"");
+
     let (written, received) = sync::mpsc::channel();
 
     machine.pty.writer.observer = Some(written);
@@ -615,6 +628,7 @@ fn powershell_input_deadline_wakes_a_quiet_event_loop() {
     let elapsed = started.elapsed();
 
     sender.send(event::Msg::Shutdown).unwrap();
+
     worker.join().unwrap();
 
     assert_eq!(bytes.expect("input deadline did not wake poll"), b"later");
@@ -625,6 +639,7 @@ fn powershell_input_deadline_wakes_a_quiet_event_loop() {
 fn powershell_pause_skips_alternate_screen_and_unchanged_grid_sizes() {
     let mut machine = resized_pipe(b"");
     let mut state = PtyState::default();
+
     let sender = machine.channel();
 
     sender
@@ -732,12 +747,14 @@ fn terminal_replies_resume_after_partial_writes_in_input_order() {
     assert!(state.needs_write());
 
     machine.pty.writer.budget = Some(3);
+
     machine.pty_write(&mut state).unwrap();
 
     assert_eq!(machine.pty.writer.data, b"in\x1b[1");
     assert!(state.needs_write());
 
     machine.pty.writer.budget = None;
+
     machine.pty_write(&mut state).unwrap();
 
     assert_eq!(machine.pty.writer.data, b"in\x1b[1;1R");
@@ -813,6 +830,7 @@ fn disabled_terminal_responses_are_forwarded_without_replying() {
     let forwarded_sink = Arc::clone(&forwarded);
 
     machine.set_output_sink(move |bytes| forwarded_sink.lock().extend_from_slice(&bytes));
+
     machine.set_terminal_responses_enabled(false);
 
     machine
@@ -959,7 +977,9 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
         .extend_from_slice(b"\x1b[?2026h\x1b[2;1HStuck");
 
     machine.pty_read(&mut state, &mut buf).unwrap();
+
     machine.sync_output_started_at = Some(time::Instant::now() - SYNC_OUTPUT_TIMEOUT);
+
     machine.pty_read(&mut state, &mut buf).unwrap();
 
     {
@@ -1019,6 +1039,7 @@ fn osc_progress_hides_published_cursor_until_removed() {
         .extend_from_slice(b";42\x1b\\    Building [====>     ] 4/10\r");
 
     machine.last_snapshot_at = Some(time::Instant::now() - SNAPSHOT_MIN_INTERVAL);
+
     machine.pty_read(&mut state, &mut buf).unwrap();
 
     {
@@ -1035,6 +1056,7 @@ fn osc_progress_hides_published_cursor_until_removed() {
         .extend_from_slice(b"\x1b]9;4;0;\x1b\\");
 
     machine.last_snapshot_at = Some(time::Instant::now() - SNAPSHOT_MIN_INTERVAL);
+
     machine.pty_read(&mut state, &mut buf).unwrap();
 
     assert!(
@@ -1329,13 +1351,11 @@ echo hi\r\n\x1b]133;C\x07hi\r\n\
             for event in batch {
                 match event {
                     BlockEvent::HistoryCleared => shape.push("cleared".into()),
-
                     BlockEvent::EngineBlock { seq, rows, handle } => {
                         handles.push(*handle);
 
                         shape.push(format!("block{seq}:{rows}"))
                     }
-
                     BlockEvent::EngineBlocksSync(live) => {
                         shape.push(format!("sync:{}", live.len()))
                     }

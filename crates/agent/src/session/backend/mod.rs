@@ -124,7 +124,6 @@ impl Backend {
                     deliver,
                     |line| trace!("codex app-server: {line}"),
                 ),
-
                 None => {
                     app_server::Session::spawn(launch, host_catalog, workspace, deliver, |line| {
                         trace!("codex app-server: {line}")
@@ -132,14 +131,12 @@ impl Backend {
                 }
             }
             .map(Backend::Codex),
-
             AgentKind::Claude => {
                 stream_json::Session::spawn(launch, workspace, resume, deliver, |line| {
                     trace!("claude: {line}")
                 })
                 .map(Backend::Claude)
             }
-
             // No process is started per tab here: the harness host is shared by
             // every DeepSeek tab, and this attaches a conversation to it,
             // starting it only if no tab holds one yet. `resume` is unused
@@ -155,7 +152,6 @@ impl Backend {
             Backend::Codex(session) => session.process(message),
             Backend::Claude(session) => session.process(message),
             Backend::DeepSeek(session) => session.process(message),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => Vec::new(),
         }
@@ -187,17 +183,14 @@ impl Backend {
 
                 session.send_user_message_with_skill(text, settings, skill, &paths)
             }
-
             Backend::Claude(session) => {
                 session.send_user_message(text, settings, &inline_images(attachments))
             }
-
             // Skills are not mapped for DeepSeek, so a reference cannot reach
             // it and the prompt goes as the user wrote it.
             Backend::DeepSeek(session) => {
                 session.send_user_message(text, &inline_images(attachments))
             }
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => session
                 .send_outcomes
@@ -236,7 +229,6 @@ impl Backend {
                     &title.provisional_title,
                 )
             }
-
             Backend::Claude(session) => {
                 let outcome =
                     session.send_user_message(text, settings, &inline_images(attachments));
@@ -247,11 +239,9 @@ impl Backend {
 
                 outcome
             }
-
             Backend::DeepSeek(session) => {
                 session.send_user_message(text, &inline_images(attachments))
             }
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => session
                 .send_outcomes
@@ -265,7 +255,6 @@ impl Backend {
             Backend::Codex(_) => AgentKind::Codex,
             Backend::Claude(_) => AgentKind::Claude,
             Backend::DeepSeek(_) => AgentKind::DeepSeek,
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => return session.commands.clone(),
         };
@@ -282,7 +271,6 @@ impl Backend {
             // The other backends report no identity for their pending work, so
             // nothing here can name a message to remove.
             Backend::Codex(_) | Backend::Claude(_) => false,
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => false,
         }
@@ -293,11 +281,9 @@ impl Backend {
     pub fn rename_conversation(&mut self, title: &str) -> Result<String, OperationError> {
         match self {
             Backend::DeepSeek(session) => session.rename(title).map_err(OperationError::Failed),
-
             Backend::Codex(_) | Backend::Claude(_) => {
                 Err(OperationError::Unsupported(UnsupportedOperation::Rename))
             }
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => Err(OperationError::Unsupported(UnsupportedOperation::Rename)),
         }
@@ -309,17 +295,14 @@ impl Backend {
     pub fn request_fork_checkpoints(&mut self) -> bool {
         match self {
             Backend::Codex(session) => session.request_fork_checkpoints(),
-
             Backend::DeepSeek(session) => {
                 session.request_fork_checkpoints();
 
                 true
             }
-
             // Claude's history is a file this side reads directly, and its own
             // rewind picker is what reads it.
             Backend::Claude(_) => false,
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => session.fork_accepted,
         }
@@ -330,13 +313,10 @@ impl Backend {
     pub(crate) fn fork_conversation(&mut self, anchor: &ForkAnchor) -> Result<(), OperationError> {
         match self {
             Backend::Codex(session) => session.fork_thread(anchor).map_err(OperationError::Failed),
-
             Backend::DeepSeek(session) => {
                 session.fork(Some(anchor)).map_err(OperationError::Failed)
             }
-
             Backend::Claude(_) => Err(OperationError::Unsupported(UnsupportedOperation::Fork)),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => {
                 if session.fork_accepted {
@@ -360,7 +340,6 @@ impl Backend {
             // is offered at all, so these arms are only reached by a caller
             // that skipped the question.
             Backend::Codex(_) | Backend::Claude(_) => {}
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => {}
         }
@@ -371,7 +350,6 @@ impl Backend {
             Backend::Codex(session) => session.execute_slash_command(name, arguments),
             Backend::Claude(session) => session.execute_slash_command(name, arguments),
             Backend::DeepSeek(session) => session.execute_slash_command(name, arguments),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => session.slash_outcome.clone(),
         }
@@ -383,14 +361,12 @@ impl Backend {
     ) -> Result<SlashCommandOutcome, OperationError> {
         match self {
             Backend::Claude(session) => Ok(session.rewind_files(user_message_id)),
-
             // `Capabilities::file_rewind` gates the command that leads here.
             // The rejection stays because it is the honest answer for a
             // harness with no such operation to run.
             Backend::Codex(_) | Backend::DeepSeek(_) => Err(OperationError::Unsupported(
                 UnsupportedOperation::FileRewind,
             )),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => {
                 session
@@ -412,7 +388,6 @@ impl Backend {
             // provider query, so there is nothing to re-request live.
             Backend::Claude(_) => {}
             Backend::DeepSeek(session) => session.refresh_background_tasks(),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => {}
         }
@@ -426,7 +401,6 @@ impl Backend {
             Backend::Codex(_) => BackgroundTaskProvider::Codex,
             Backend::Claude(_) => BackgroundTaskProvider::Claude,
             Backend::DeepSeek(_) => BackgroundTaskProvider::DeepSeek,
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => return false,
         };
@@ -449,7 +423,6 @@ impl Backend {
         match self {
             Backend::Codex(session) => session.load_background_task_transcript(&key.id),
             Backend::Claude(session) => session.load_background_task_transcript(&key.id, cwd),
-
             // The harness answers this one asynchronously, so the read starts
             // here and its result reaches the pane as an ordinary event.
             Backend::DeepSeek(session) => {
@@ -457,7 +430,6 @@ impl Backend {
 
                 Vec::new()
             }
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => Vec::new(),
         }
@@ -478,7 +450,6 @@ impl Backend {
             Backend::Codex(session) => session.interrupt_background_task(&key.id),
             Backend::Claude(session) => session.interrupt_background_task(key),
             Backend::DeepSeek(session) => session.interrupt_background_task(&key.id),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => false,
         }
@@ -492,7 +463,6 @@ impl Backend {
         match self {
             Backend::Claude(session) => session.begin_task_restoration(),
             Backend::Codex(_) | Backend::DeepSeek(_) => 0,
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => 0,
         }
@@ -507,9 +477,7 @@ impl Backend {
             Backend::Claude(session) => {
                 session.finish_task_restoration(restored, starting_sequence)
             }
-
             Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => Vec::new(),
         }
@@ -527,7 +495,6 @@ impl Backend {
             Backend::DeepSeek(session) => session.resume_thread(thread_id),
             // Claude selects its conversation only when a process starts.
             Backend::Claude(_) => false,
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => session.resume_accepted,
         }
@@ -542,7 +509,6 @@ impl Backend {
         match self {
             Backend::Codex(session) => session.request_history(scope),
             Backend::Claude(_) | Backend::DeepSeek(_) => {}
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => {}
         }
@@ -555,7 +521,6 @@ impl Backend {
         match self {
             Backend::Codex(session) => session.request_more_history(),
             Backend::Claude(_) | Backend::DeepSeek(_) => {}
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => {}
         }
@@ -566,7 +531,6 @@ impl Backend {
             Backend::Claude(session) => session.session_id(),
             Backend::DeepSeek(session) => session.session_id(),
             Backend::Codex(_) => None,
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => session
                 .recovery
@@ -581,17 +545,14 @@ impl Backend {
             Backend::Claude(session) => session
                 .session_id()
                 .map(|id| RecoveryIdentity::new(AgentKind::Claude, id)),
-
             Backend::Codex(session) => session
                 .thread_id()
                 .map(|id| RecoveryIdentity::new(AgentKind::Codex, id)),
-
             // The id names the conversation on the harness host, which is worth
             // reporting even though resuming into it is not mapped yet.
             Backend::DeepSeek(session) => session
                 .session_id()
                 .map(|id| RecoveryIdentity::new(AgentKind::DeepSeek, id)),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => session.recovery.clone(),
         }
@@ -604,7 +565,6 @@ impl Backend {
             Backend::Claude(session) => session.rename_session(title),
             Backend::Codex(session) => session.rename_thread(title),
             Backend::DeepSeek(_) => return RenameOutcome::Unsupported,
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => return session.rename_outcome,
         };
@@ -627,7 +587,6 @@ impl Backend {
             Backend::Claude(session) => session.has_active_operation(),
             Backend::Codex(session) => session.has_active_operation(),
             Backend::DeepSeek(session) => session.has_active_operation(),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => false,
         }
@@ -640,7 +599,6 @@ impl Backend {
             // Dropping this session releases its hold on the shared host, and
             // the last tab to let go stops it. Nothing here has to wait.
             Backend::DeepSeek(_) => Ok(()),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => Ok(()),
         }
@@ -650,7 +608,6 @@ impl Backend {
         match self {
             Backend::Claude(session) => session.on_exit(),
             Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => Vec::new(),
         }
@@ -661,7 +618,6 @@ impl Backend {
             Backend::Codex(session) => session.interrupt(),
             Backend::Claude(session) => session.interrupt(),
             Backend::DeepSeek(session) => session.interrupt(),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => session.interrupt_accepted,
         }
@@ -673,17 +629,14 @@ impl Backend {
                 session.respond_approval(decision),
                 AgentKind::Codex.caps().async_approval_resolution,
             ),
-
             Backend::Claude(session) => (
                 session.respond_approval(decision),
                 AgentKind::Claude.caps().async_approval_resolution,
             ),
-
             Backend::DeepSeek(session) => (
                 session.respond_approval(decision),
                 AgentKind::DeepSeek.caps().async_approval_resolution,
             ),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => {
                 if session.approval_accepted {
@@ -711,9 +664,7 @@ impl Backend {
             Backend::DeepSeek(session) => {
                 session.request_workflow_agent_transcript(task_id, agent_id)
             }
-
             Backend::Codex(_) | Backend::Claude(_) => {}
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => {}
         }
@@ -724,7 +675,6 @@ impl Backend {
         match self {
             Backend::Claude(session) => Some(session.workflow_source()),
             Backend::Codex(_) | Backend::DeepSeek(_) => None,
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => session.workflow_source.clone(),
         }
@@ -736,7 +686,6 @@ impl Backend {
         match self {
             Backend::Claude(session) => session.workflow_refresh_requests(),
             Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => session.workflow_requests.clone(),
         }
@@ -746,7 +695,6 @@ impl Backend {
         match self {
             Backend::Claude(session) => session.apply_workflow_refresh(result),
             Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => Vec::new(),
         }
@@ -756,7 +704,6 @@ impl Backend {
         match self {
             Backend::Claude(session) => session.restore_workflows(restored),
             Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => Vec::new(),
         }
@@ -769,7 +716,6 @@ impl Backend {
         match self {
             Backend::DeepSeek(session) => session.select_model(model, effort),
             Backend::Codex(_) | Backend::Claude(_) => Ok(()),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => Ok(()),
         }
@@ -782,7 +728,6 @@ impl Backend {
         match self {
             Backend::DeepSeek(session) => session.select_agent_preset(preset),
             Backend::Codex(_) | Backend::Claude(_) => Ok(()),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => Ok(()),
         }
@@ -794,7 +739,6 @@ impl Backend {
         match self {
             Backend::DeepSeek(session) => session.selection(),
             Backend::Codex(_) | Backend::Claude(_) => (None, None),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(_) => (None, None),
         }
@@ -803,10 +747,8 @@ impl Backend {
     pub(crate) fn restore_question_requests(&mut self, requests: Vec<QuestionRequest>) {
         match self {
             Backend::Codex(session) => session.restore_question_requests(requests),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => session.restored_questions = requests,
-
             Backend::Claude(_) | Backend::DeepSeek(_) => {}
         }
     }
@@ -821,7 +763,6 @@ impl Backend {
             Backend::Codex(session) => session.respond_input(id, answers, settings),
             Backend::Claude(session) => session.respond_input(id, answers),
             Backend::DeepSeek(session) => session.respond_input(id, answers),
-
             #[cfg(any(test, feature = "test-support"))]
             Backend::Test(session) => {
                 let outcome = session.input_result.clone()?;
@@ -839,10 +780,8 @@ impl Backend {
     pub fn team_recovered_turns(&self) -> &[RecoveredTeamTurn] {
         match self {
             Self::Codex(session) => session.team_recovered_turns(),
-
             #[cfg(any(test, feature = "test-support"))]
             Self::Test(backend) => &backend.team_recovered_turns,
-
             Self::Claude(_) | Self::DeepSeek(_) => &[],
         }
     }
@@ -874,11 +813,9 @@ impl Backend {
                 |line| trace!("codex app-server: {line}"),
             )
             .map(Self::Codex),
-
             AgentKind::DeepSeek if recovery.is_some() => Err(
                 "DeepSeek cannot resume this saved Team conversation. Keep its history and explicitly create a new member.".into(),
             ),
-
             AgentKind::Claude | AgentKind::DeepSeek => {
                 Self::spawn(kind, launch, host_catalog, workspace, recovery, deliver)
             }
@@ -893,7 +830,6 @@ impl Backend {
         match self {
             Self::Codex(session) => session.team_capabilities(backend_generation),
             Self::Claude(_) | Self::DeepSeek(_) => ModeratorAdmission::unverified(kind),
-
             #[cfg(any(test, feature = "test-support"))]
             Self::Test(_) => ModeratorAdmission::unverified(kind),
         }
@@ -908,7 +844,6 @@ impl Backend {
         match self {
             Self::Codex(session) => session.respond_team_decision(request, accepted, explanation),
             Self::Claude(_) | Self::DeepSeek(_) => false,
-
             #[cfg(any(test, feature = "test-support"))]
             Self::Test(_) => false,
         }

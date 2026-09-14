@@ -40,7 +40,6 @@ pub(crate) fn pty_bytes_for_key(
 ) -> Option<Vec<u8>> {
     match key_action(event, newline_shortcut, Mode::empty()) {
         TerminalKeyAction::Write(bytes) => Some(bytes),
-
         TerminalKeyAction::CopyOrWrite(_)
         | TerminalKeyAction::Paste
         | TerminalKeyAction::Ignore => None,
@@ -83,7 +82,6 @@ pub(crate) fn key_action(
                 {
                     TerminalKeyAction::CopyOrWrite(encoded_key(event, flags).unwrap_or(bytes))
                 }
-
                 action => action,
             };
         }
@@ -317,7 +315,6 @@ fn key_input(event: &TerminalKey<'_>) -> KeyInput {
 
     let logical_key = match (&base_key, event.key_char) {
         (Key::Character(_), Some(text)) if text.chars().count() == 1 => Key::Character(text.into()),
-
         _ => base_key.clone(),
     };
 

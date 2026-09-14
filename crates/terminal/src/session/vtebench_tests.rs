@@ -185,7 +185,9 @@ fn ctrl_c_on_alt_screen_recovers_block_mode() {
     // Ctrl-C should cut the sleep short; the short sleep bounds the test even
     // if the interrupt is swallowed (the end state is identical either way).
     session.write_input(b"$e=[char]27; [Console]::Write(\"$e[?1049h\"); Start-Sleep 8");
+
     thread::sleep(Duration::from_millis(300));
+
     session.write_input(b"\r");
 
     assert!(
@@ -257,6 +259,7 @@ fn full_tail_survives_after_alt_screen_roundtrip() {
     );
 
     thread::sleep(Duration::from_millis(500));
+
     pump(&session, &mut all);
 
     let blocks = block_texts(&session);
@@ -306,6 +309,7 @@ fn engine_blocks_bridge_freezes_command_output() {
     );
 
     thread::sleep(Duration::from_millis(500));
+
     pump(&session, &mut all);
 
     let handle_items = {
@@ -357,6 +361,7 @@ fn output_after_ris_survives_into_the_block() {
 
     // Give the block events a beat to land, then look for the results text.
     thread::sleep(Duration::from_millis(500));
+
     pump(&session, &mut all);
 
     let blocks = block_texts(&session);

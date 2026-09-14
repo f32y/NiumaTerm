@@ -113,6 +113,7 @@ impl Api for ScriptedApi {
                 let copied = capacity.min(reply.processes.len());
 
                 ptr::copy_nonoverlapping(reply.processes.as_ptr(), processes, copied);
+
                 *count = copied as u32;
             }
         }
@@ -258,6 +259,7 @@ fn shutdown_and_restart_use_normal_action_flags() {
         Session::for_files(api, &[Path::new(r"C:\NiumaTerm\NmtShellExtension.dll")]).unwrap();
 
     session.shutdown().unwrap();
+
     session.restart().unwrap();
 
     assert!(session.file_usage().unwrap().applications.is_empty());
@@ -308,6 +310,7 @@ fn dll_holder_process() {
     assert!(!module.is_null(), "load the isolated test DLL");
 
     println!("NMT_DLL_READY");
+
     io::stdout().flush().unwrap();
 
     let mut input = Vec::new();
@@ -340,6 +343,7 @@ fn a_loaded_dll_is_reported_and_old_copy_cleans_up_after_exit() {
         .unwrap();
 
     let child_input = child.stdin.take().unwrap();
+
     let mut output = BufReader::new(child.stdout.take().unwrap());
     let mut ready = false;
     let mut line = String::new();
@@ -369,7 +373,9 @@ fn a_loaded_dll_is_reported_and_old_copy_cleans_up_after_exit() {
     );
 
     fs::rename(&target, &previous).unwrap();
+
     fs::copy(&source, &target).unwrap();
+
     discard_previous(&scratch);
 
     assert!(previous.exists());

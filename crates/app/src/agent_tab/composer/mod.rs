@@ -1,3 +1,5 @@
+pub(super) use nmt_agent::session::commands::PendingSlashCommand;
+
 pub(super) use crate::agent_tab::composer::branch::BranchFlow;
 #[cfg(test)]
 pub(super) use crate::agent_tab::composer::branch::fork::checkpoint_at_depth;
@@ -12,7 +14,6 @@ pub(super) use crate::agent_tab::composer::response_annotations::{
     annotation_count_label, parse_annotated_prompt, prompt_with_response_annotations,
     visible_prompt,
 };
-pub(super) use nmt_agent::session::commands::PendingSlashCommand;
 
 pub(super) mod attachments;
 
@@ -23,20 +24,19 @@ mod response_annotations;
 #[cfg(test)]
 mod tests;
 
+use gpui::SharedString;
+
 #[cfg(test)]
 use crate::agent_tab::composer::palette::{feedback_is_current, feedback_is_transient};
 use crate::agent_tab::session::Status;
-use gpui::SharedString;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum CommandFeedbackKind {
     Notice,
-
     /// Information the user asked to see, or work still under way. Neither is
     /// an acknowledgement of something already done, so both hold until a
     /// newer message replaces them.
     Status,
-
     Error,
     Queued,
 }

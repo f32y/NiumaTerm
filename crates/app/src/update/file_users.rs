@@ -79,11 +79,11 @@ fn file_use_footer(reason: FileUsePromptReason) -> DialogFooter {
                     .label(t!("settings-about-file-use-close-update"))
                     .on_click(|_, window, cx| {
                         window.close_dialog(cx);
+
                         update::close_file_users(cx);
                     }),
             );
         }
-
         FileUsePromptReason::CheckFailed => {
             footer = footer.child(
                 Button::new("app-update-retry-file-use")
@@ -92,11 +92,11 @@ fn file_use_footer(reason: FileUsePromptReason) -> DialogFooter {
                     .label(t!("settings-about-file-use-retry"))
                     .on_click(|_, window, cx| {
                         window.close_dialog(cx);
+
                         update::inspect_file_users(cx);
                     }),
             );
         }
-
         FileUsePromptReason::RebootRequired => {}
     }
 
@@ -105,6 +105,7 @@ fn file_use_footer(reason: FileUsePromptReason) -> DialogFooter {
         .label(t!("settings-about-file-use-continue"))
         .on_click(|_, window, cx| {
             window.close_dialog(cx);
+
             update::continue_install(cx);
         });
 
@@ -212,6 +213,7 @@ fn build_recovery_dialog(dialog: Dialog, applications: &[String]) -> Dialog {
                     .label(t!("settings-about-recovery-restart"))
                     .on_click(|_, window, cx| {
                         window.close_dialog(cx);
+
                         update::complete_relaunch(cx);
                     }),
             ),

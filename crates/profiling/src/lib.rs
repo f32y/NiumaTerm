@@ -11,6 +11,7 @@ pub mod transcript;
 #[inline]
 pub fn set_enabled(enabled: bool) {
     frame_stats::set_enabled(enabled);
+
     allocation::set_enabled(enabled);
 }
 

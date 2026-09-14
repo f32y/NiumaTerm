@@ -72,6 +72,7 @@ fn scope_uses_target_backend_and_normalized_directory() {
     let second_cwd = directory.path().join("second");
 
     fs::create_dir_all(&first_cwd).expect("create first directory");
+
     fs::create_dir_all(&second_cwd).expect("create second directory");
 
     let local_codex = scope("local", AgentKind::Codex, &first_cwd);
@@ -88,8 +89,11 @@ fn scope_uses_target_backend_and_normalized_directory() {
     let mut history = HistoryStore::default();
 
     history.record(&local_codex, "local codex".into());
+
     history.record(&local_claude, "local claude".into());
+
     history.record(&remote_codex, "remote codex".into());
+
     history.record(&other_cwd, "other directory".into());
 
     assert_eq!(history.entries(&local_codex), ["local codex"]);
@@ -105,9 +109,11 @@ fn history_directory_keys_follow_native_spelling() {
     let lower = directory.path().join("project");
     let upper_scope = scope("local", AgentKind::Codex, &upper);
     let lower_scope = scope("local", AgentKind::Codex, &lower);
+
     let mut history = HistoryStore::default();
 
     history.record(&upper_scope, "upper directory".into());
+
     history.record(&lower_scope, "lower directory".into());
 
     let path = directory.path().join("history.json");
@@ -156,9 +162,13 @@ fn legacy_migration_and_stale_saves_preserve_distinct_records() {
     let mut second = load_from_path(&path).unwrap();
 
     first.record(&scope, "from first".into());
+
     second.record(&scope, "from second".into());
+
     save_to_path(&path, &(&first).into()).unwrap();
+
     save_to_path(&path, &(&second).into()).unwrap();
+
     save_to_path(&path, &(&first).into()).unwrap();
 
     let entries = load_from_path(&path).unwrap().entries(&scope);
@@ -178,6 +188,7 @@ fn stale_saves_do_not_revive_expired_entries_or_overwrite_invalid_files() {
     let directory = TestDirectory::new();
     let path = directory.path().join("history.json");
     let scope = scope("local", AgentKind::Codex, directory.path());
+
     let mut store = HistoryStore::default();
 
     store.record(&scope, "expired".into());
@@ -189,6 +200,7 @@ fn stale_saves_do_not_revive_expired_entries_or_overwrite_invalid_files() {
     }
 
     save_to_path(&path, &(&store).into()).unwrap();
+
     save_to_path(&path, &stale).unwrap();
 
     let entries = load_from_path(&path).unwrap().entries(&scope);
@@ -210,10 +222,12 @@ fn history_process_writer() {
     let path: PathBuf = path.into();
     let writer = env::var("NMT_HISTORY_TEST_WRITER").unwrap();
     let scope = scope("local", AgentKind::Codex, path.parent().unwrap());
+
     let mut history = HistoryStore::default();
 
     for index in 0..15 {
         history.record(&scope, format!("writer-{writer}-{index}"));
+
         save_to_path(&path, &(&history).into()).unwrap();
     }
 }
@@ -223,6 +237,7 @@ fn concurrent_processes_merge_history_without_losing_entries() {
     let directory = TestDirectory::new();
     let path = directory.path().join("history.json");
     let executable = env::current_exe().unwrap();
+
     let mut children = Vec::new();
 
     for writer in 0..3 {
@@ -262,6 +277,7 @@ fn concurrent_processes_merge_history_without_losing_entries() {
 fn recording_collapses_neighbors_and_keeps_the_newest_hundred() {
     let directory = TestDirectory::new();
     let codex_scope = scope("local", AgentKind::Codex, directory.path());
+
     let mut history = HistoryStore::default();
 
     assert!(history.record(&codex_scope, "first".into()));
@@ -289,9 +305,11 @@ fn json_round_trip_preserves_scoped_entries() {
     let path = directory.path().join("agent-input-history.json");
     let codex = scope("local", AgentKind::Codex, directory.path());
     let claude = scope("local", AgentKind::Claude, directory.path());
+
     let mut history = HistoryStore::default();
 
     history.record(&codex, "line one\nline two".into());
+
     history.record(&claude, "/status".into());
 
     save_to_path(&path, &(&history).into()).expect("save history");
@@ -332,6 +350,7 @@ fn failed_save_leaves_the_in_memory_entry_available() {
 
     let path = blocker.join("agent-input-history.json");
     let scope = scope("local", AgentKind::Codex, directory.path());
+
     let mut history = HistoryStore::default();
 
     history.record(&scope, "still available".into());
@@ -351,6 +370,7 @@ fn slow_storage_coalesces_saves_and_flush_waits_for_latest_write() {
 
     let writer = HistoryWriter::start(move |snapshot| {
         started_tx.send(()).unwrap();
+
         release_rx.recv().unwrap();
 
         save_to_path(&saved_path, snapshot)
@@ -360,11 +380,14 @@ fn slow_storage_coalesces_saves_and_flush_waits_for_latest_write() {
     let mut store = HistoryStore::default();
 
     store.record(&scope, "first".into());
+
     writer.save((&store).into()).unwrap();
+
     started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
 
     for index in 0..50 {
         store.record(&scope, format!("entry {index}"));
+
         writer.save((&store).into()).unwrap();
     }
 
@@ -375,6 +398,7 @@ fn slow_storage_coalesces_saves_and_flush_waits_for_latest_write() {
     assert!(flushed_rx.try_recv().is_err());
 
     release_tx.send(()).unwrap();
+
     started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
 
     assert!(flushed_rx.try_recv().is_err());
@@ -404,6 +428,7 @@ fn snapshots_keep_entries_from_before_later_edits() {
     let directory = TestDirectory::new();
     let path = directory.path().join("history.json");
     let scope = scope("local", AgentKind::Codex, directory.path());
+
     let mut store = HistoryStore::default();
 
     store.record(&scope, "original".into());
@@ -411,6 +436,7 @@ fn snapshots_keep_entries_from_before_later_edits() {
     let snapshot: StoredHistory = (&store).into();
 
     store.record(&scope, "later".into());
+
     save_to_path(&path, &snapshot).unwrap();
 
     assert_eq!(load_from_path(&path).unwrap().entries(&scope), ["original"]);
@@ -431,7 +457,9 @@ fn background_writer_flushes_the_latest_snapshot_in_order() {
     };
 
     history.record(&scope, "first".into());
+
     history.record(&scope, "second".into());
+
     history.flush().expect("flush history");
 
     assert_eq!(
@@ -499,7 +527,9 @@ fn workspaces_sharing_a_primary_directory_keep_separate_histories() {
     let mut history = HistoryStore::default();
 
     history.record(&alone, "alone".into());
+
     history.record(&with_web, "with web".into());
+
     history.record(&both, "both".into());
 
     assert_eq!(history.entries(&alone), ["alone"]);

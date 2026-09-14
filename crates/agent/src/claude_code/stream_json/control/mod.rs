@@ -54,6 +54,7 @@ impl Default for ControlState {
 impl ControlState {
     pub(super) fn set_timer(&mut self, timer: DeadlineTimer) {
         self.timer = Some(timer);
+
         self.refresh_timer();
     }
 
@@ -94,6 +95,7 @@ impl ControlState {
 
     pub(super) fn complete(&mut self, id: &str) {
         self.deadlines.remove(id);
+
         self.refresh_timer();
     }
 
@@ -132,6 +134,7 @@ impl ControlState {
     pub(super) fn record_effort(&mut self, id: String, value: String) {
         if !self.requests.is_closed() {
             self.requests.finish(&id);
+
             self.effort.record(id, value);
         }
     }
@@ -209,6 +212,7 @@ impl ControlState {
             .is_some_and(|pending| pending.request_id == id)
         {
             self.pending_approval = None;
+
             events.push(Event::ApprovalResolved);
         }
 
@@ -381,9 +385,7 @@ pub(super) fn resolve_pending_control_operation(
             message,
             fatal: false,
         }),
-
         PendingControlOperation::FileRewind => Some(Event::FileRewindCompleted { error }),
-
         // A composition that could not be computed leaves the previous
         // breakdown in place: the accounting beside it is still accurate, and
         // an error here says nothing about the conversation.
@@ -392,7 +394,6 @@ pub(super) fn resolve_pending_control_operation(
             .then(|| parse_context_composition(&response["response"]))
             .flatten()
             .map(Event::ContextCompositionUpdated),
-
         // The CLI answers with a null title when it had too little to name,
         // and a build that does not know the request answers with an error.
         // Neither is worth showing the user: the conversation keeps the name
@@ -474,11 +475,9 @@ pub(super) fn fail_pending_control_operations(
         .into_values()
         .filter_map(|operation| match operation {
             PendingControlOperation::Other => None,
-
             PendingControlOperation::FileRewind => Some(Event::FileRewindCompleted {
                 error: Some(message.to_string()),
             }),
-
             // Nothing is waiting on a breakdown, so a lost one is not worth
             // reporting; the next turn asks again.
             PendingControlOperation::ContextComposition => None,
@@ -492,14 +491,12 @@ pub(super) fn fail_pending_control_operations(
 fn control_response_error(response: &Value) -> Option<String> {
     match response["subtype"].as_str() {
         Some("success") => None,
-
         Some("error") => Some(
             response["error"]
                 .as_str()
                 .unwrap_or("unknown Claude control error")
                 .to_string(),
         ),
-
         _ => Some("Claude returned a malformed file restore response.".to_string()),
     }
 }
@@ -611,7 +608,6 @@ impl EffortState {
                     self.confirmed = Some(change.value);
                     self.unconfirmed = None;
                 }
-
                 Some(ChangeResult::Rejected(error)) => errors.push(error),
                 Some(ChangeResult::Unknown) => self.unconfirmed = Some(change.value),
                 None => unreachable!("only completed changes are removed"),

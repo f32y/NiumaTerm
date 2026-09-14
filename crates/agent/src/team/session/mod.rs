@@ -84,31 +84,22 @@ struct MemberReadiness {
 pub enum TeamError {
     #[error(transparent)]
     Member(#[from] MemberError),
-
     #[error(transparent)]
     Storage(#[from] StorageError),
-
     #[error(transparent)]
     Dispatch(#[from] DispatchError),
-
     #[error("member is unavailable")]
     Unavailable,
-
     #[error("discussion is paused")]
     Paused,
-
     #[error("member is busy")]
     Busy,
-
     #[error(transparent)]
     Discussion(#[from] DiscussionError),
-
     #[error(transparent)]
     Context(#[from] ContextError),
-
     #[error(transparent)]
     Budget(#[from] BudgetError),
-
     #[error("this arrangement cannot be changed while its work is unresolved")]
     Unresolved,
 }
@@ -192,6 +183,7 @@ impl TeamSession {
         }
 
         let ownership = member.ownership();
+
         let mut room = self.store.room().clone();
         let mut changed = false;
 
@@ -285,9 +277,7 @@ impl TeamSession {
             Ok(SendOutcome::NotReady) => {
                 self.slots.update(key, WorkStatus::default());
             }
-
             Ok(SendOutcome::StartedTurn) => {}
-
             Ok(SendOutcome::Steered | SendOutcome::Rejected { .. }) => {
                 self.slots.update(
                     key,
@@ -297,11 +287,9 @@ impl TeamSession {
                     },
                 );
             }
-
             Err(_) if !sent => {
                 self.slots.update(key, WorkStatus::default());
             }
-
             Err(_) => {
                 self.slots.update(
                     key,
@@ -371,6 +359,7 @@ impl TeamSession {
         mode: DiscussionMode,
     ) -> Result<DiscussionId, TeamError> {
         self.validate_input(&input)?;
+
         self.validate_mode(mode)?;
 
         let mut room = self.store.room().clone();
@@ -393,6 +382,7 @@ impl TeamSession {
 
         discussion.state = DiscussionState::Running;
         discussion.request = request;
+
         self.store.commit(room)?;
 
         Ok(id)
@@ -435,6 +425,7 @@ impl TeamSession {
 
         let snapshot = self.store.room().public_snapshot();
         let operation = OperationId::new();
+
         let mut intents = Vec::new();
 
         for recipient in recipients {
@@ -466,6 +457,7 @@ impl TeamSession {
         limits: &ContextLimits,
     ) -> Result<Vec<AttemptId>, TeamError> {
         let mut room = self.store.room().clone();
+
         let snapshot = room.public_snapshot();
 
         let discussion = room
@@ -544,6 +536,7 @@ impl TeamSession {
         };
 
         let input = discussion.request.clone();
+
         let mut intents = Vec::new();
         let mut ready = Vec::new();
 
@@ -594,7 +587,6 @@ impl TeamSession {
 
                 Ok(ready)
             }
-
             Err(error) => {
                 self.pause_dispatch_error(id, &error)?;
 
@@ -642,7 +634,6 @@ impl TeamSession {
 
                         (kind, recipients)
                     }
-
                     DiscussionMode::Moderated { moderator } => {
                         self.moderated_next_stage(discussion, moderator)?
                     }
@@ -669,10 +660,8 @@ impl TeamSession {
                         ModeratorAction::Invite { recipients } => {
                             (StageKind::InvitedResponses, recipients.clone())
                         }
-
                         ModeratorAction::Report => (StageKind::Report, vec![moderator]),
                     },
-
                     None => {
                         let operation = stage
                             .arrangements
@@ -688,7 +677,6 @@ impl TeamSession {
                         return Err(TeamError::Paused);
                     }
                 },
-
                 None => (StageKind::ModeratorDecision, vec![moderator]),
             },
         )
@@ -703,11 +691,9 @@ impl TeamSession {
             TeamError::Budget(_) | TeamError::Dispatch(DispatchError::Budget(_)) => {
                 PauseReason::Budget
             }
-
             TeamError::Storage(_) | TeamError::Dispatch(DispatchError::Storage(_)) => {
                 PauseReason::Storage
             }
-
             TeamError::Context(_) => PauseReason::ContextSelection,
             _ => PauseReason::DispatchUnavailable,
         };
@@ -773,19 +759,15 @@ impl TeamSession {
             Some(StageKind::InitialAnswers) => {
                 "Give your initial answer to the user's objective. Identify assumptions and reasons."
             }
-
             Some(StageKind::PeerResponses | StageKind::InvitedResponses) => {
                 "Respond to the preceding public contributions. Explain agreement, disagreement, and any changed view."
             }
-
             Some(StageKind::Report) => {
                 "Conclude with separate agreements, disagreements, each member's attributed reasons, and suggested next steps. Cite public message IDs. Do not present one member's preference as consensus."
             }
-
             Some(StageKind::ModeratorDecision) => {
                 "Review public progress and call team_decide exactly once. Invite eligible member IDs or request a report with an empty recipients list. Prose alone cannot schedule work."
             }
-
             _ => {
                 "Answer this one request. Further Team turns require a separate scheduling decision."
             }
@@ -956,6 +938,7 @@ impl TeamSession {
         }
 
         discussion.state = DiscussionState::Running;
+
         self.store.commit(room)?;
 
         Ok(())
@@ -971,7 +954,9 @@ impl TeamSession {
             .ok_or(TeamError::Unavailable)?;
 
         discussion.budget.add_turns(turns)?;
+
         discussion.resolve_pause(&PauseReason::Budget);
+
         self.store.commit(room)?;
 
         Ok(())
@@ -1041,18 +1026,18 @@ impl TeamSession {
 
         match arrangement.state {
             ArrangementState::Pending => {}
-
             ArrangementState::Failed(attempt) => {
                 discussion
                     .pauses
                     .remove(&PauseReason::AttemptFailed(attempt));
             }
-
             _ => return Err(TeamError::Unresolved),
         }
 
         arrangement.state = ArrangementState::Skipped;
+
         discussion.pause(PauseReason::User);
+
         self.store.commit(room)?;
 
         Ok(())
@@ -1151,6 +1136,7 @@ impl TeamSession {
         }
 
         let mut room = self.store.room().clone();
+
         let attempt = &mut room.attempts[index];
 
         attempt.provider_turn = Some(provider_turn.to_owned());
@@ -1230,6 +1216,7 @@ impl TeamSession {
         });
 
         member.coverage.messages.insert(id);
+
         room.attempts[index].state = AttemptState::Completed { message: id };
 
         if let BudgetScope::Discussion(discussion_id) = attempt.intent.budget {
@@ -1259,6 +1246,7 @@ impl TeamSession {
         }
 
         self.store.commit(room)?;
+
         self.restored_uncertainty.remove(&key.attempt);
 
         self.slots.update(
@@ -1384,6 +1372,7 @@ impl TeamSession {
 
     pub fn add_member(&mut self, config: MemberConfig) -> Result<MemberId, TeamError> {
         let mut room = self.store.room().clone();
+
         let id = room.add_member(config)?;
 
         self.store.commit(room)?;
@@ -1400,6 +1389,7 @@ impl TeamSession {
         let mut room = self.store.room().clone();
 
         room.set_member_settings(id, ownership, settings)?;
+
         self.store.commit(room)?;
 
         Ok(())
@@ -1437,6 +1427,7 @@ impl TeamSession {
 
         member.provider_id = Some(provider_id.to_owned());
         member.moderator_registered = moderator_registered;
+
         self.store.commit(room)?;
 
         Ok(())
@@ -1458,6 +1449,7 @@ impl TeamSession {
         }
 
         self.store.commit(room)?;
+
         self.readiness.remove(&id);
 
         Ok(())
@@ -1475,6 +1467,7 @@ impl TeamSession {
         }
 
         self.store.commit(room)?;
+
         self.store.checkpoint()?;
 
         Ok(())
@@ -1499,12 +1492,12 @@ impl TeamSession {
                         .iter_mut()
                         .find(|run| run.id == id)
                         .map(|run| &mut run.budget),
-
                     BudgetScope::Direct(id) => room.direct_allowances.get_mut(&id),
                 }
                 .ok_or(TeamError::Unavailable)?;
 
                 budget.cancel_unsent(attempt.id)?;
+
                 attempt.state = AttemptState::Rejected;
             }
         }
@@ -1552,11 +1545,14 @@ impl TeamSession {
             }
 
             discussion.resolve_pause(&PauseReason::UncertainAttempt(id));
+
             discussion.pause(PauseReason::User);
+
             discussion.settle_pause();
         }
 
         self.store.commit(room)?;
+
         self.restored_uncertainty.remove(&id);
 
         Ok(())
@@ -1627,6 +1623,7 @@ impl TeamSession {
         }
 
         self.validate_mode(discussion.mode)?;
+
         self.validate_member(key.member)?;
 
         let reservations = match &action {
@@ -1653,7 +1650,6 @@ impl TeamSession {
                     .map(|_| (AttemptId::new(), TurnPurpose::Response))
                     .collect::<Vec<_>>()
             }
-
             ModeratorAction::Report => vec![(AttemptId::new(), TurnPurpose::Report)],
         };
 

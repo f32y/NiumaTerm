@@ -27,6 +27,7 @@ impl TranscriptIndex {
             .collect::<Vec<_>>();
 
         let (chain, broken_parent) = active_chain_indices(&records);
+
         let mut snapshot_message_ids = HashSet::new();
         let mut malformed_snapshot = false;
 
@@ -39,7 +40,6 @@ impl TranscriptIndex {
                 Some(message_id) => {
                     snapshot_message_ids.insert(message_id.to_string());
                 }
-
                 None => malformed_snapshot = true,
             }
         }

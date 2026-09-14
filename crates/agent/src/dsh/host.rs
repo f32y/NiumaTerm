@@ -52,7 +52,6 @@ pub enum HostError {
     /// `dsh` could not be resolved. It is a user-installed dependency, so this
     /// is not something the application offers to fix.
     NotInstalled(String),
-
     /// The executable resolved but no serving host came out of it.
     FailedToStart(String),
 }
@@ -113,6 +112,7 @@ type HostSlot = Arc<Mutex<Weak<Host>>>;
 
 fn host_slot(launch: &crate::LaunchConfig) -> HostSlot {
     let key = LaunchKey::of(launch);
+
     let mut hosts = SHARED.lock();
 
     // An acquired slot may be starting a process. Only inspect unused slots
@@ -139,6 +139,7 @@ fn host_slot(launch: &crate::LaunchConfig) -> HostSlot {
 /// because the launch is what decides where the host routes.
 pub fn shared(launch: &crate::LaunchConfig) -> Result<Arc<Host>, HostError> {
     let slot = host_slot(launch);
+
     let mut current = slot.lock();
 
     if let Some(running) = current.upgrade()
@@ -170,7 +171,6 @@ impl Host {
             Err(HostError::FailedToStart(detail)) if detail.contains(NO_BROWSER_FLAG) => {
                 Self::start_with(launch, &["web", "--port", "0"])
             }
-
             outcome => outcome,
         }
     }
@@ -216,6 +216,7 @@ impl Host {
         thread::spawn(move || {
             for line in BufReader::new(stderr).split(b'\n').map_while(Result::ok) {
                 let line = decode_child_output(line.strip_suffix(b"\r").unwrap_or(&line));
+
                 let mut lines = sink.lock();
 
                 if lines.len() == RETAINED_STDERR_LINES {
@@ -247,7 +248,6 @@ impl Host {
 
         let base = match address_rx.recv_timeout(start_timeout) {
             Ok(address) => address,
-
             Err(reason) => {
                 let _ = child.kill();
                 let _ = child.wait();

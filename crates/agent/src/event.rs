@@ -126,11 +126,9 @@ impl AgentEvent {
 
         match (input.kind, input.turn_id) {
             (AgentEventKind::SessionStarted, None) => {}
-
             (AgentEventKind::SessionStarted, Some(_)) | (_, None) => {
                 return Err(AgentValidationError::InvalidTurnId);
             }
-
             (_, Some(turn_id)) => validate_identity(
                 turn_id,
                 MAX_PROVIDER_ID_BYTES,
@@ -224,6 +222,7 @@ fn normalize_presentation(value: &str, max_chars: usize, preserve_newlines: bool
             last_was_space = true;
         } else {
             normalized.push(ch);
+
             last_was_space = false;
         }
     }

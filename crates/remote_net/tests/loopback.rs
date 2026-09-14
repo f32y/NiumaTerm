@@ -61,6 +61,7 @@ fn tampering_one_byte_fails_decryption() {
 #[test]
 fn replayed_frame_fails_decryption() {
     let (mut client, mut host) = ik_pair();
+
     let ciphertext = client.seal(b"type a command").unwrap();
 
     assert_eq!(host.open(&ciphertext).unwrap(), b"type a command");

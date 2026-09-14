@@ -197,6 +197,7 @@ pub(super) fn build_fork_records(
         );
 
         object.insert("sessionId".into(), Value::String(new_session_id.into()));
+
         object.insert("isSidechain".into(), Value::Bool(false));
 
         object.insert(
@@ -276,40 +277,41 @@ pub(super) fn write_fork_file(
     let target = project_dir.join(format!("{session_id}.jsonl"));
     let temp = project_dir.join(format!(".{session_id}.{}.tmp", Uuid::new_v4()));
 
-    let write_result = (|| -> Result<(), String> {
-        let file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temp)
-            .map_err(|error| format!("could not create Claude fork: {error}"))?;
-
-        let mut writer = BufWriter::new(file);
-
-        for record in records {
-            serde_json::to_writer(&mut writer, record)
-                .map_err(|error| format!("could not serialize Claude fork: {error}"))?;
-
-            writer
-                .write_all(b"\n")
-                .map_err(|error| format!("could not write Claude fork: {error}"))?;
-        }
-
-        writer
-            .flush()
-            .map_err(|error| format!("could not flush Claude fork: {error}"))?;
-
-        writer
-            .get_ref()
-            .sync_all()
-            .map_err(|error| format!("could not sync Claude fork: {error}"))?;
-
-        fs::rename(&temp, &target)
-            .map_err(|error| format!("could not publish Claude fork: {error}"))
-    })();
+    let write_result = write_and_publish_fork(&temp, &target, records);
 
     if write_result.is_err() {
         let _ = fs::remove_file(&temp);
     }
 
     write_result.map(|()| target)
+}
+
+fn write_and_publish_fork(temp: &Path, target: &Path, records: &[Value]) -> Result<(), String> {
+    let file = fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(temp)
+        .map_err(|error| format!("could not create Claude fork: {error}"))?;
+
+    let mut writer = BufWriter::new(file);
+
+    for record in records {
+        serde_json::to_writer(&mut writer, record)
+            .map_err(|error| format!("could not serialize Claude fork: {error}"))?;
+
+        writer
+            .write_all(b"\n")
+            .map_err(|error| format!("could not write Claude fork: {error}"))?;
+    }
+
+    writer
+        .flush()
+        .map_err(|error| format!("could not flush Claude fork: {error}"))?;
+
+    writer
+        .get_ref()
+        .sync_all()
+        .map_err(|error| format!("could not sync Claude fork: {error}"))?;
+
+    fs::rename(temp, target).map_err(|error| format!("could not publish Claude fork: {error}"))
 }

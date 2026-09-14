@@ -74,11 +74,9 @@ fn normalize_path_components(path: &Path) -> PathBuf {
     for component in path.components() {
         match component {
             Component::CurDir => {}
-
             Component::ParentDir => {
                 normalized.pop();
             }
-
             component => normalized.push(component.as_os_str()),
         }
     }
@@ -132,7 +130,6 @@ impl AgentInputHistory {
 
         let writer = match HistoryWriter::spawn(path.clone()) {
             Ok(writer) => Some(writer),
-
             Err(error) => {
                 warn!("failed to start Agent input history writer: {error}");
 
@@ -203,13 +200,13 @@ impl HistoryWriter {
             .map_or_else(Vec::new, |pending| pending.waiters);
 
         waiters.extend(waiter);
+
         *pending = Some(PendingWrite { snapshot, waiters });
 
         // Only the newest snapshot matters. The wake token carries no history,
         // so a slow disk cannot accumulate a queue of obsolete copies.
         match self.sender.try_send(()) {
             Ok(()) | Err(mpsc::TrySendError::Full(())) => Ok(()),
-
             Err(mpsc::TrySendError::Disconnected(())) => {
                 pending.take();
 

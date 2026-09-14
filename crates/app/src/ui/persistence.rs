@@ -156,7 +156,6 @@ fn pane_node_state(
                 grid_size: state.grid_size,
             }
         }
-
         PaneNode::Split {
             axis,
             children,
@@ -198,7 +197,6 @@ pub(super) fn default_session(
     // then starts in its own default directory, as before.
     let (cwd, spawn_cwd) = match initial_cwd {
         Some(dir) => (dir.clone(), Some(dir)),
-
         None => (
             home_dir()
                 .map(|home| home.display().to_string())
@@ -325,13 +323,11 @@ pub(super) fn materialize_active_tab(
 ) -> bool {
     let state = match workspaces.active_tabs().active() {
         TabSurface::Pending(state) => (**state).clone(),
-
         TabSurface::TeamDisabled(state)
             if cx.global::<AppSettings>().config().agent.enable_agent_team =>
         {
             (**state).clone()
         }
-
         TabSurface::Live(_)
         | TabSurface::Agent(_)
         | TabSurface::Settings
@@ -363,6 +359,7 @@ pub(super) fn materialize_active_tab(
         Shell::watch_agent_tab(&pane, cx);
 
         owner.start(None, cx);
+
         *workspaces.active_tabs_mut().active_mut() = TabSurface::Agent(AgentTab { owner, pane });
 
         return true;
@@ -386,7 +383,6 @@ pub(super) fn materialize_active_tab(
 
                     pane
                 }
-
                 Err(error) => {
                     warn!("failed to restore tab {surface_id} lazily: {error}");
 
@@ -421,7 +417,6 @@ fn restore_team_tab(
 
     match restored {
         Ok(runtime) => TabSurface::Team(cx.new(|cx| TeamPane::new(runtime, window, cx))),
-
         Err(message) => TabSurface::TeamUnavailable {
             saved: Box::new(state.clone()),
             message,
@@ -474,7 +469,6 @@ fn restore_tabs(
                         name
                     }
                 }
-
                 None => cx
                     .global::<AppSettings>()
                     .profile_name_for_command(tab_state.shell.as_deref(), &tab_state.args),
@@ -555,7 +549,6 @@ fn restore_pane_node(
 
                     Some(PaneTree::restored_leaf(PaneId(surface_id), pane))
                 }
-
                 Err(error) => {
                     warn!("failed to restore pane {surface_id}: {error}");
 
@@ -563,7 +556,6 @@ fn restore_pane_node(
                 }
             }
         }
-
         PaneNodeState::Split {
             axis,
             ratios,
@@ -577,7 +569,6 @@ fn restore_pane_node(
             match built.len() {
                 0 => None,
                 1 => built.into_iter().next(),
-
                 _ => {
                     let state = cx.new(|_| ResizableState::default());
 
@@ -624,7 +615,6 @@ pub(super) fn spawn_default_pane(
 
     let pane = match spawned {
         Ok(pane) => pane,
-
         Err(error) => {
             warn!("default profile failed, retrying built-in shell: {error}");
 
@@ -632,7 +622,6 @@ pub(super) fn spawn_default_pane(
 
             match spawn_pane(cx, surface_id, launch, profile_name) {
                 Ok(pane) => pane,
-
                 Err(error) => {
                     // Even the built-in shell cannot spawn (e.g. ConPTY
                     // unavailable) — no terminal can ever open, so tell
@@ -710,7 +699,6 @@ pub(super) fn session_state(
                         // snapshot unchanged — its shells never ran, so the
                         // saved launch state is still the truth.
                         TabSurface::Pending(state) => (**state).clone(),
-
                         // Flat fields always mirror the focused pane, so a
                         // snapshot without splits stays in the old format
                         // and an old build restores something sensible
@@ -723,7 +711,6 @@ pub(super) fn session_state(
 
                             state
                         }
-
                         // Agent conversations are not persisted (the
                         // agent process and its thread die with the app);
                         // the saved kind reopens a fresh agent tab.
@@ -737,22 +724,20 @@ pub(super) fn session_state(
                                 ..TabState::default()
                             }
                         }
-
                         // Only the settings workspace holds this surface,
                         // and that workspace is skipped above; the arm
                         // exists so the match stays exhaustive.
                         TabSurface::Settings => TabState::default(),
-
                         TabSurface::Team(pane) => TabState {
                             team_room: Some(pane.read(cx).room_id(cx).to_string()),
                             ..TabState::default()
                         },
-
                         TabSurface::TeamUnavailable { saved, .. }
                         | TabSurface::TeamDisabled(saved) => (**saved).clone(),
                     };
 
                     normalize_saved_launch(&mut state, &default_profile);
+
                     state.name = tab.user_title().map(str::to_owned);
                     state.user_named = state.name.is_some();
 
@@ -771,7 +756,9 @@ pub(super) fn session_state(
 #[cfg(test)]
 mod launch_resolution_tests {
     use gpui::TestAppContext;
+    use nmt_config::Config;
     use nmt_config::local_state::TabState;
+    use nmt_config::profile::ProfilesConfig;
 
     use crate::ui::persistence::{
         legacy_generated_tab_title, normalize_saved_launch, resolve_restored_launch, restore_tabs,
@@ -779,8 +766,6 @@ mod launch_resolution_tests {
     };
     use crate::ui::settings::{AppSettings, Profile};
     use crate::ui::shell::TabSurface;
-    use nmt_config::Config;
-    use nmt_config::profile::ProfilesConfig;
 
     fn settings_with_pwsh_default() -> AppSettings {
         AppSettings::from_config(Config {
@@ -883,6 +868,7 @@ mod launch_resolution_tests {
     #[test]
     fn default_profile_pane_saves_as_follow_default() {
         let default = (Some("pwsh.exe".to_string()), vec!["-NoLogo".to_string()]);
+
         let mut state = tab(Some("pwsh.exe"), &["-NoLogo"]);
 
         normalize_saved_launch(&mut state, &default);
@@ -894,6 +880,7 @@ mod launch_resolution_tests {
     #[test]
     fn pinned_pane_keeps_its_saved_command() {
         let default = (Some("pwsh.exe".to_string()), Vec::new());
+
         let mut state = tab(Some("wsl.exe"), &["-d", "Ubuntu"]);
 
         normalize_saved_launch(&mut state, &default);
@@ -905,6 +892,7 @@ mod launch_resolution_tests {
     #[test]
     fn restore_resolves_none_to_default_profile() {
         let settings = settings_with_pwsh_default();
+
         let mut state = tab(None, &[]);
 
         resolve_restored_launch(&mut state, &settings);
@@ -938,6 +926,7 @@ mod launch_resolution_tests {
     #[test]
     fn restore_keeps_shell_still_present_in_profiles() {
         let settings = settings_with_pwsh_default();
+
         let mut state = tab(Some("WSL.EXE"), &["-d", "Ubuntu"]);
 
         resolve_restored_launch(&mut state, &settings);

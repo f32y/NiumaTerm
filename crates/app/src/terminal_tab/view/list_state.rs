@@ -25,12 +25,10 @@ impl BlockListState {
             ListOp::Splice(range, count) => self.list.splice(range, count),
             ListOp::RemeasureAll => self.list.remeasure(),
             ListOp::Remeasure(range) => self.list.remeasure_items(range),
-
             ListOp::ScrollTo(pos) => self.list.scroll_to(ListOffset {
                 item_ix: pos.item_ix,
                 offset_in_item: px(pos.offset_px),
             }),
-
             ListOp::ScrollToEnd => self.list.scroll_to_end(),
         }
     }

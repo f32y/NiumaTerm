@@ -62,7 +62,9 @@ pub(crate) fn install(cx: &mut App) {
     });
 
     cx.on_action(|_: &Hide, cx: &mut App| cx.hide());
+
     cx.on_action(|_: &HideOthers, cx: &mut App| cx.hide_other_apps());
+
     cx.on_action(|_: &ShowAll, cx: &mut App| cx.unhide_other_apps());
 
     // NewWindow is answered by the shell, and a focused window stops the action
@@ -74,6 +76,7 @@ pub(crate) fn install(cx: &mut App) {
     // The window commands act on the window the menu bar belongs to, which is
     // the active one; the menu is disabled outright when there is none.
     cx.on_action(|_: &Minimize, cx: &mut App| with_active_window(cx, Window::minimize_window));
+
     cx.on_action(|_: &Zoom, cx: &mut App| with_active_window(cx, Window::zoom_window));
 
     // Disabled rather than absent while a check runs, and for a build with no

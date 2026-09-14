@@ -407,6 +407,7 @@ fn an_explicit_lifecycle_record_resumes_a_finished_task() {
     let mut tasks = reducer();
 
     tasks.observe(&launch("toolu_1"));
+
     tasks.observe(&tool_result("toolu_1", false));
 
     assert_eq!(state_of(&tasks, "toolu_1"), Some(BackgroundTaskState::Done));
@@ -578,6 +579,7 @@ fn linked_activity_becomes_the_childs_own_conversation() {
     let mut tasks = reducer();
 
     tasks.observe(&launch("toolu_1"));
+
     tasks.take_transcripts();
 
     tasks.observe(&json!({
@@ -616,6 +618,7 @@ fn linked_user_text_becomes_the_childs_first_instruction() {
     let mut tasks = reducer();
 
     tasks.observe(&launch("toolu_1"));
+
     tasks.take_transcripts();
 
     tasks.observe(&json!({
@@ -714,6 +717,7 @@ fn unlinked_sidechain_activity_publishes_no_conversation() {
     let mut tasks = reducer();
 
     tasks.observe(&launch("toolu_1"));
+
     tasks.take_transcripts();
 
     tasks.observe(&json!({
@@ -856,6 +860,7 @@ fn a_backgrounded_commands_tool_result_is_not_its_outcome() {
     let mut tasks = reducer();
 
     tasks.observe(&bash_launch("toolu_1", "cargo build"));
+
     tasks.observe(&shell_started(true));
 
     // The `Bash` call is answered the moment the command is handed off, with
@@ -882,6 +887,7 @@ fn the_handoff_result_names_the_output_file_a_running_command_writes_to() {
     let mut tasks = reducer();
 
     tasks.observe(&bash_launch("toolu_1", "cargo build"));
+
     tasks.observe(&shell_started(true));
 
     tasks.observe(&json!({
@@ -922,6 +928,7 @@ fn a_completion_notification_settles_a_shell_and_names_its_output_file() {
     let mut tasks = reducer();
 
     tasks.observe(&bash_launch("toolu_1", "cargo build"));
+
     tasks.observe(&shell_started(true));
 
     assert!(tasks.observe(&json!({
@@ -957,6 +964,7 @@ fn the_live_set_does_not_revive_a_shell_that_already_reported_its_outcome() {
     let mut tasks = reducer();
 
     tasks.observe(&bash_launch("toolu_1", "cargo build"));
+
     tasks.observe(&shell_started(true));
 
     tasks.observe(&json!({

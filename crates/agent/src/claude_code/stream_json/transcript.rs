@@ -160,7 +160,9 @@ impl TranscriptState {
         match event["type"].as_str() {
             Some("message_start") => {
                 self.open_blocks.clear();
+
                 self.open_texts.clear();
+
                 self.open_thinkings.clear();
 
                 self.context_usage = parse_claude_usage(&event["message"]["usage"]);
@@ -181,7 +183,6 @@ impl TranscriptState {
 
                 events
             }
-
             Some("message_delta") => {
                 let turn_output_tokens =
                     event["usage"]["output_tokens"]
@@ -204,7 +205,6 @@ impl TranscriptState {
 
                 events
             }
-
             Some("content_block_start") => {
                 let Some(index) = index else {
                     return Vec::new();
@@ -215,6 +215,7 @@ impl TranscriptState {
                         let id = self.alloc_item_id("text");
 
                         self.open_blocks.insert(index, id.clone());
+
                         self.open_texts.push_back(id.clone());
 
                         vec![Event::ItemStarted(Item::AgentMessage {
@@ -223,23 +224,21 @@ impl TranscriptState {
                             questions: None,
                         })]
                     }
-
                     Some("thinking") => {
                         let id = self.alloc_item_id("thinking");
 
                         self.open_blocks.insert(index, id.clone());
+
                         self.open_thinkings.push_back(id.clone());
 
                         vec![Event::ItemStarted(Item::Reasoning { id, summary: None })]
                     }
-
                     // Tool-use blocks stream their input as JSON fragments;
                     // the item is emitted from the `assistant` snapshot where
                     // the input is complete.
                     _ => Vec::new(),
                 }
             }
-
             Some("content_block_delta") => {
                 let Some(item_id) = index.and_then(|i| self.open_blocks.get(&i)).cloned() else {
                     return Vec::new();
@@ -256,7 +255,6 @@ impl TranscriptState {
                         })
                         .into_iter()
                         .collect(),
-
                     Some("thinking_delta") => delta["thinking"]
                         .as_str()
                         .map(|text| Event::ReasoningSummaryDelta {
@@ -265,11 +263,9 @@ impl TranscriptState {
                         })
                         .into_iter()
                         .collect(),
-
                     _ => Vec::new(),
                 }
             }
-
             _ => Vec::new(),
         }
     }
@@ -317,7 +313,6 @@ impl TranscriptState {
                         questions: None,
                     }));
                 }
-
                 Some("thinking") => {
                     let id = self
                         .open_thinkings
@@ -329,7 +324,6 @@ impl TranscriptState {
                         summary: block["thinking"].as_str().map(str::to_owned),
                     }));
                 }
-
                 Some("tool_use") | Some("server_tool_use") | Some("mcp_tool_use") => {
                     let Some(id) = block["id"].as_str() else {
                         continue;
@@ -342,9 +336,9 @@ impl TranscriptState {
                     );
 
                     self.pending_tools.insert(id.to_string(), item.clone());
+
                     events.push(Event::ItemStarted(item));
                 }
-
                 _ => {}
             }
         }

@@ -36,6 +36,7 @@ fn first_line(frame: &TerminalFrame) -> &str {
 #[test]
 fn terminal_cursor_color_prefers_runtime_override() {
     let expected: ColorArray = [0.8, 0.1, 0.2, 1.0];
+
     let mut term_colors = TermColors::default();
 
     term_colors[NamedColor::Cursor] = Some(expected);
@@ -92,6 +93,7 @@ fn extracted_rows_have_stable_content_hashes() {
     assert_eq!(first.text_hash(), second.text_hash());
 
     engine.write_vt(b"c");
+
     engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let changed = extract_row(&buf, 0, None);
@@ -160,6 +162,7 @@ fn incremental_extraction_reuses_only_clean_rows() {
     let mut buf = RenderBuffer::new(8, 3);
 
     engine.write_vt(b"\x1b[2;1H");
+
     engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let generations = GenerationMap::new();
@@ -192,6 +195,7 @@ fn incremental_extraction_reuses_only_clean_rows() {
     );
 
     engine.write_vt(b"X");
+
     engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let changed = TerminalFrame::from_render_buffer_reusing(
@@ -235,6 +239,7 @@ fn supplied_theme_controls_selection_without_installed_globals() {
     engine.snapshot_into(&mut buffer, 0, 0).unwrap();
 
     let generations = GenerationMap::new();
+
     let mut theme = FrameTheme::default();
 
     let selection = Some(SelectionRange::new(
@@ -251,6 +256,7 @@ fn supplied_theme_controls_selection_without_installed_globals() {
     let mut cache = TerminalFrameCache::default();
 
     cache.rebuild(first.clone());
+
     cache.invalidate_full();
 
     let next = TerminalFrame::from_render_buffer_reusing(
@@ -274,6 +280,7 @@ fn cursor_only_change_rebuilds_affected_row() {
     let mut buf = RenderBuffer::new(8, 2);
 
     engine.write_vt(b"AB");
+
     engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let generations = GenerationMap::new();
@@ -289,6 +296,7 @@ fn cursor_only_change_rebuilds_affected_row() {
     let versions = buf.row_versions().to_vec();
 
     engine.write_vt(b"\r");
+
     engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     assert_eq!(buf.row_versions(), versions, "CR changes only the cursor");
@@ -311,6 +319,7 @@ fn selection_changes_rebuild_only_affected_rows() {
     let mut buf = RenderBuffer::new(8, 3);
 
     engine.write_vt(b"row0\r\nrow1\r\nrow2");
+
     engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let generations = GenerationMap::new();
@@ -605,12 +614,14 @@ fn buf_and_generations(cols: u16, rows: u16, vt: &[u8]) -> (RenderBuffer, Genera
     let mut engine = GhosttyTerminal::new(cols, rows, 100).unwrap();
 
     engine.resize(cols, rows, 10, 20).unwrap();
+
     engine.write_vt(vt);
 
     let buf = engine.snapshot().unwrap();
 
     let release: graphics::ReleaseQueue = Default::default();
     let (pending, _) = engine.take_image_deltas(buf.placements());
+
     let mut generations = GenerationMap::new();
 
     for (id, data) in pending {
@@ -645,7 +656,6 @@ fn extracts_ordinary_placement_with_source_and_z() {
             assert_eq!((viewport_col, viewport_row), (0, 0));
             assert_eq!(source, [0.0, 0.0, 1.0, 1.0], "full-image source");
         }
-
         _ => panic!("expected ordinary"),
     }
 }
@@ -715,10 +725,13 @@ fn extracts_contiguous_virtual_run() {
     let d0 = '\u{0305}';
     let cell0 = format!("\x1b[38;2;0;0;7m{}{}", '\u{10EEEE}', d0); // row=0,col=0
     let cell1 = format!("{}", '\u{10EEEE}'); // inherit row/col
+
     let mut vt = Vec::new();
 
     vt.extend_from_slice(b"\x1b_Ga=T,U=1,f=32,s=2,v=1,i=7,c=2,r=1;/wAA//8AAP8=\x1b\\");
+
     vt.extend_from_slice(cell0.as_bytes());
+
     vt.extend_from_slice(cell1.as_bytes());
 
     let (buf, generations) = buf_and_generations(20, 5, &vt);
@@ -740,7 +753,6 @@ fn extracts_contiguous_virtual_run() {
             assert_eq!(placement_cols, 2);
             assert_eq!((screen_line, screen_col), (0, 0));
         }
-
         _ => panic!("expected virtual"),
     }
 }
@@ -762,9 +774,11 @@ fn unmatched_placeholder_is_skipped() {
 #[test]
 fn placeholder_codepoint_is_suppressed_from_text() {
     let d0 = '\u{0305}';
+
     let mut vt = Vec::new();
 
     vt.extend_from_slice(b"\x1b_Ga=T,U=1,f=32,s=1,v=1,i=7,p=3,c=1,r=1;/wAA/w==\x1b\\");
+
     vt.extend_from_slice(format!("\x1b[38;2;0;0;7m{}{}{}", '\u{10EEEE}', d0, d0).as_bytes());
 
     let (buf, generations) = buf_and_generations(20, 5, &vt);

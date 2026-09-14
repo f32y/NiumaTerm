@@ -253,7 +253,6 @@ impl TerminalPane {
     fn on_wake(&mut self, wake: wake::Wake, cx: &mut Context<Self>) {
         match wake {
             wake::Wake::Content(_) => self.invalidate(cx),
-
             wake::Wake::Chrome(_) => {
                 self.model.invalidate();
 
@@ -301,6 +300,7 @@ impl TerminalPane {
             cell,
         ) {
             cx.emit(TerminalGridResized);
+
             cx.notify();
         }
     }
@@ -358,6 +358,7 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         self.set_content_bounds(bounds, cell, cx);
+
         self.model.begin_block_list_frame();
     }
 
@@ -474,7 +475,6 @@ impl TerminalPane {
                     this.on_copy_finished(text, copy.completion, window, cx)
                 });
             }
-
             result => warn!("terminal copy did not complete: {result:?}"),
         })
         .detach();
@@ -587,20 +587,18 @@ impl TerminalPane {
     ) -> bool {
         match outcome {
             KeyOutcome::Ignored => false,
-
             KeyOutcome::Scrolled(outcome) => {
                 self.apply_scroll_outcome(outcome, cx);
 
                 false
             }
-
             KeyOutcome::Written => {
                 self.react_to_pty_input(cx);
+
                 self.invalidate(cx);
 
                 true
             }
-
             KeyOutcome::CopyPending(copy) => {
                 self.begin_copy(copy, window, cx);
 
@@ -708,15 +706,12 @@ impl TerminalPane {
             MouseOutcome::Ignored => {}
             MouseOutcome::OpenUrl(url) => cx.open_url(&url),
             MouseOutcome::SelectionChanged | MouseOutcome::HoverChanged => cx.notify(),
-
             MouseOutcome::FrozenSelectionStarted => {
                 self.invalidate(cx);
 
                 cx.notify();
             }
-
             MouseOutcome::EngineHandled => self.invalidate(cx),
-
             MouseOutcome::Scrolled(outcome) => {
                 self.apply_scroll_outcome(outcome, cx);
             }
@@ -730,6 +725,7 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         window.focus(&self.focus, cx);
+
         self.cell_metrics(window, cx);
 
         let input = self.mouse_input(
@@ -781,7 +777,6 @@ impl TerminalPane {
 
         let delta = match event.delta {
             ScrollDelta::Lines(point) => WheelDelta::Steps(point.y),
-
             ScrollDelta::Pixels(point) => {
                 WheelDelta::Rows(point.y.as_f32() / cell.height_px.max(1.0))
             }
@@ -799,6 +794,7 @@ impl TerminalPane {
 
         if outcome.handled {
             self.mark_scrollbar_activity(cx);
+
             self.invalidate(cx);
         }
     }
@@ -830,7 +826,6 @@ impl TerminalPane {
         match outcome {
             ScrollOutcome::Ignored => return false,
             ScrollOutcome::GridRequested => self.invalidate(cx),
-
             ScrollOutcome::List(op) => {
                 self.block_list.apply(op);
 
@@ -858,6 +853,7 @@ impl EntityInputHandler for TerminalPane {
     ) {
         if self.model.write_text_input(TextInput::Commit(text)) {
             self.react_to_pty_input(cx);
+
             self.invalidate(cx);
         }
     }

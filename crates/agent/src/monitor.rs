@@ -22,7 +22,6 @@ pub enum AgentActivityPolicy {
     /// External Hook delivery can end without a final event, so an inactive
     /// route eventually returns to idle instead of remaining active forever.
     ExpireAfterInactivity,
-
     /// An in-process backend reports completion and interruption explicitly,
     /// so quiet work remains active until one of those events arrives.
     ExplicitLifecycle,
@@ -81,7 +80,6 @@ impl AgentPaneState {
             AgentActivityPolicy::ExpireAfterInactivity => {
                 Some(self.updated_at + ACTIVE_STATE_STALE_AFTER)
             }
-
             AgentActivityPolicy::ExplicitLifecycle => None,
         }
     }
@@ -209,7 +207,6 @@ impl AgentMonitor {
 
                 MonitorMutation::default()
             }
-
             AgentEventKind::PromptSubmitted => {
                 let owner = event.owner().expect("validated prompt has turn id");
                 let state = self.panes.get_mut(&route).expect("live route");
@@ -232,7 +229,6 @@ impl AgentMonitor {
 
                 mutation
             }
-
             AgentEventKind::ToolStarted | AgentEventKind::ToolFinished => {
                 let Some(owner) = event.owner() else {
                     return MonitorMutation::default();
@@ -254,7 +250,6 @@ impl AgentMonitor {
                     ..MonitorMutation::default()
                 }
             }
-
             AgentEventKind::PermissionRequested => {
                 let Some(owner) = event.owner() else {
                     return MonitorMutation::default();
@@ -269,13 +264,13 @@ impl AgentMonitor {
                 state.pending_completion = None;
 
                 let status_changed = state.set_status(AgentRuntimeStatus::NeedsInput, now);
+
                 let mut mutation = self.create_notification(&route, event.title, event.body);
 
                 mutation.visible_changed |= status_changed;
 
                 mutation
             }
-
             AgentEventKind::Stopped => {
                 let Some(owner) = event.owner() else {
                     return MonitorMutation::default();

@@ -231,6 +231,7 @@ impl KittyState {
 
         while unsafe { ghostty_kitty_graphics_placement_next(self.placement_iter) } {
             let iter = self.placement_iter;
+
             let (mut col, mut row) = (0u32, 0u32);
 
             if unsafe { ghostty_block_ref_placement_pos(block.raw, iter, &mut col, &mut row) }
@@ -457,7 +458,6 @@ pub(super) unsafe fn kitty_image_graphic_data(
     let (pixels, color_type) = match format {
         VtKittyImageFormat::RGB => (raw.to_vec(), ColorType::Rgb),
         VtKittyImageFormat::RGBA => (raw.to_vec(), ColorType::Rgba),
-
         VtKittyImageFormat::GRAY => {
             let mut px = Vec::with_capacity(raw.len() * 4);
 
@@ -467,7 +467,6 @@ pub(super) unsafe fn kitty_image_graphic_data(
 
             (px, ColorType::Rgba)
         }
-
         VtKittyImageFormat::GRAY_ALPHA => {
             let mut px = Vec::with_capacity(raw.len() * 2);
 
@@ -477,7 +476,6 @@ pub(super) unsafe fn kitty_image_graphic_data(
 
             (px, ColorType::Rgba)
         }
-
         _ => return None, // PNG/unknown shouldn't reach here post-decode
     };
 

@@ -78,16 +78,13 @@ fn current_family(target: FontTarget, cx: &App) -> SharedString {
             .terminal_font_family
             .clone()
             .into(),
-
         FontTarget::Ui => settings.config().appearance.ui_font.clone().into(),
-
         FontTarget::Agent => settings
             .config()
             .appearance
             .agent_font_family
             .clone()
             .into(),
-
         FontTarget::AgentTranscript => settings
             .config()
             .appearance
@@ -141,10 +138,8 @@ fn ensure_picker(target: FontTarget, window: &mut Window, cx: &mut App) -> Entit
 
                 settings.edit_appearance(|appearance| match target {
                     FontTarget::Terminal => appearance.terminal_font_family = name.to_string(),
-
                     FontTarget::Ui => appearance.ui_font = name.to_string(),
                     FontTarget::Agent => appearance.agent_font_family = name.to_string(),
-
                     FontTarget::AgentTranscript => {
                         appearance.agent_transcript_font_family = name.to_string()
                     }
@@ -166,6 +161,7 @@ fn ensure_picker(target: FontTarget, window: &mut Window, cx: &mut App) -> Entit
 
         select.update(cx, |state, cx| {
             state.set_items(SearchableVec::new(items), window, cx);
+
             state.set_selected_value(&family, window, cx);
         });
 
@@ -261,6 +257,7 @@ mod tests {
     fn font_pickers_are_local_to_rendered_windows(cx: &mut TestAppContext) {
         cx.update(|cx| {
             gpui_component::init(cx);
+
             cx.set_global(AppSettings::default());
 
             cx.set_global(FontCatalog(vec![
@@ -306,6 +303,7 @@ mod tests {
         let mut cx = VisualTestContext::from_window(first.into(), cx);
 
         first.update(&mut cx, |_, _, cx| cx.notify()).unwrap();
+
         cx.run_until_parked();
 
         cx.refresh().unwrap();
@@ -342,12 +340,17 @@ mod tests {
             .unwrap();
 
         cx.run_until_parked();
+
         cx.refresh().unwrap();
+
         cx.run_until_parked();
 
         first.update(&mut cx, |_, _, cx| cx.notify()).unwrap();
+
         cx.run_until_parked();
+
         cx.refresh().unwrap();
+
         cx.run_until_parked();
 
         assert!(first_select.upgrade().is_none());

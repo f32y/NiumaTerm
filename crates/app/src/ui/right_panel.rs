@@ -113,6 +113,7 @@ impl RightPanel {
         let open = self.selection.select(kind);
 
         self.animated = true;
+
         self.sync_task_visibility(cx);
 
         cx.notify();

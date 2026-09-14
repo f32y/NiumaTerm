@@ -7,12 +7,13 @@ mod local;
 #[cfg(test)]
 mod tests;
 
+use std::mem::replace;
+
 use crate::chat::{ForkCheckpoint, ReplayTurn, SlashCommandOutcome};
 use crate::claude_code::sessions::{ClaudeCheckpoint, ClaudeFork, FileRestoreAvailability};
 use crate::session::branch::local::{failure, fork_request};
 use crate::session::lifecycle::{SessionRuntime, Status};
 use crate::session::{AgentKind, Backend, OperationError, RecoveryIdentity};
-use std::mem::replace;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PromptTarget {
@@ -132,29 +133,24 @@ struct LocalOperation {
 enum LocalPhase {
     Loading(Option<PromptTarget>),
     Checkpoints(Vec<ClaudeCheckpoint>),
-
     Selecting {
         checkpoint: ClaudeCheckpoint,
         files: FileProgress,
     },
-
     Restoring {
         checkpoint: ClaudeCheckpoint,
         action: RewindAction,
     },
-
     Forking {
         checkpoint: ClaudeCheckpoint,
         files: FileProgress,
     },
-
     Prepared {
         identity: Option<RecoveryIdentity>,
         fork: ClaudeFork,
         prompt: String,
         files: FileProgress,
     },
-
     Starting {
         fork: ClaudeFork,
         prompt: String,
@@ -164,17 +160,14 @@ enum LocalPhase {
 
 enum State {
     Local(LocalOperation),
-
     LoadingFork {
         operation: Operation,
         target: Option<PromptTarget>,
     },
-
     ForkPicker {
         operation: Operation,
         checkpoints: Vec<ForkCheckpoint>,
     },
-
     Branching {
         operation: Operation,
         previous: Status,
@@ -266,10 +259,8 @@ impl ConversationBranch {
 
                     Some(State::Local(local))
                 }
-
                 _ => None,
             },
-
             _ => None,
         };
 
@@ -316,7 +307,6 @@ impl ConversationBranch {
                     files: FileProgress::NotConfirmed,
                 })
             }
-
             Some(State::Local(_)) | Some(State::Branching { .. }) => BranchReplay::Ignore,
             _ => BranchReplay::Unrelated,
         }
@@ -325,14 +315,12 @@ impl ConversationBranch {
     pub fn failed(&mut self, runtime: &mut SessionRuntime, error: String) -> Option<BranchFailure> {
         let stage = match &self.state {
             Some(State::Branching { .. }) => FailureStage::ProtocolFork,
-
             Some(State::Local(local)) => match local.phase {
                 LocalPhase::Restoring { .. } => FailureStage::Files,
                 LocalPhase::Forking { .. } => FailureStage::Conversation,
                 LocalPhase::Prepared { .. } | LocalPhase::Starting { .. } => FailureStage::Startup,
                 _ => return None,
             },
-
             _ => return None,
         };
 
@@ -348,15 +336,12 @@ impl ConversationBranch {
 
                 FileProgress::NotConfirmed
             }
-
             Some(State::Local(local)) => match local.phase {
                 LocalPhase::Forking { files, .. }
                 | LocalPhase::Prepared { files, .. }
                 | LocalPhase::Starting { files, .. } => files,
-
                 _ => FileProgress::NotConfirmed,
             },
-
             _ => FileProgress::NotConfirmed,
         };
 
@@ -421,7 +406,6 @@ impl ConversationBranch {
 
                 BranchUpdate::Empty
             }
-
             Ok(checkpoints) => {
                 let selected = target
                     .as_ref()
@@ -435,13 +419,11 @@ impl ConversationBranch {
                         checkpoint,
                         files: FileProgress::NotConfirmed,
                     },
-
                     None => LocalPhase::Checkpoints(checkpoints),
                 };
 
                 BranchUpdate::Picker { unresolved }
             }
-
             Err(error) => {
                 self.state = None;
 
@@ -502,7 +484,6 @@ impl ConversationBranch {
 
         match (action, files) {
             (RewindAction::Cancel, _) => return BranchUpdate::Ignored,
-
             (RewindAction::Conversation, _)
             | (RewindAction::FilesAndConversation, FileProgress::Restored) => {
                 let request = fork_request(&mut local, checkpoint, files);
@@ -511,9 +492,7 @@ impl ConversationBranch {
 
                 return BranchUpdate::CreateFork(request);
             }
-
             (RewindAction::Files, FileProgress::Restored) => return BranchUpdate::FilesRestored,
-
             (
                 RewindAction::Files | RewindAction::FilesAndConversation,
                 FileProgress::NotConfirmed,
@@ -540,7 +519,6 @@ impl ConversationBranch {
                     SlashCommandOutcome::Accepted => Ok(()),
                     SlashCommandOutcome::NotReady => Err(BranchError::NotReady),
                     SlashCommandOutcome::Rejected { message } => Err(BranchError::Failed(message)),
-
                     SlashCommandOutcome::Completed { message } => {
                         Err(BranchError::InvalidFileResult(message))
                     }
@@ -555,7 +533,6 @@ impl ConversationBranch {
 
                 BranchUpdate::RestoringFiles(action)
             }
-
             Err(error) => {
                 local.phase = LocalPhase::Selecting { checkpoint, files };
                 self.state = Some(State::Local(local));
@@ -601,10 +578,8 @@ impl ConversationBranch {
 
                     BranchUpdate::CreateFork(request)
                 }
-
                 _ => BranchUpdate::FilesRestored,
             },
-
             Err(error) => {
                 local.phase = LocalPhase::Selecting {
                     checkpoint,
@@ -662,7 +637,6 @@ impl ConversationBranch {
 
                 BranchUpdate::StartSession(identity)
             }
-
             Err(error) => {
                 // Retain confirmed file restoration when retrying the remaining
                 // conversation step; repeating the file operation could overwrite new edits.
@@ -731,7 +705,6 @@ impl ConversationBranch {
 
         match result {
             Ok(checkpoints) if checkpoints.is_empty() => BranchUpdate::Empty,
-
             Ok(checkpoints) => {
                 let selected = target
                     .as_ref()
@@ -750,7 +723,6 @@ impl ConversationBranch {
                     None => BranchUpdate::Picker { unresolved },
                 }
             }
-
             Err(error) => BranchUpdate::Failed(BranchFailure {
                 stage: FailureStage::Checkpoints,
                 files: FileProgress::NotConfirmed,
@@ -797,7 +769,6 @@ impl ConversationBranch {
 
                 BranchUpdate::Branching
             }
-
             Err(error) => BranchUpdate::Failed(BranchFailure {
                 stage: FailureStage::Conversation,
                 files: FileProgress::NotConfirmed,
@@ -814,15 +785,12 @@ impl<'a> From<&'a ConversationBranch> for BranchView<'a> {
             Some(State::LoadingFork { .. }) => BranchView::LoadingFork,
             Some(State::ForkPicker { checkpoints, .. }) => BranchView::ForkCheckpoints(checkpoints),
             Some(State::Branching { .. }) => BranchView::Working,
-
             Some(State::Local(local)) => match &local.phase {
                 LocalPhase::Loading(_) => BranchView::LoadingRewind,
                 LocalPhase::Checkpoints(checkpoints) => BranchView::RewindCheckpoints(checkpoints),
-
                 LocalPhase::Selecting { checkpoint, files } => {
                     BranchView::RewindAction(checkpoint, *files)
                 }
-
                 _ => BranchView::Working,
             },
         }

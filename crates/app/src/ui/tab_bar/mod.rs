@@ -88,10 +88,8 @@ const FULL_TAB_WIDTH: f32 = 100.0;
 enum TabDensity {
     /// Icon, title, and the close control on hover.
     Full,
-
     /// Icon and the close control on hover; the title is dropped.
     Compact,
-
     /// A single glyph slot, shared by the icon and the close control.
     IconOnly,
 }
@@ -272,6 +270,7 @@ impl TabStrip {
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
                     cx.stop_propagation();
+
                     this.request_close_tab(TabId(id), window, cx);
                 }))
                 .into_any_element();
@@ -462,6 +461,7 @@ impl TabStrip {
                         let mut offset = scroll.offset();
 
                         offset.x += step;
+
                         scroll.set_offset(offset);
 
                         window.refresh();
@@ -519,7 +519,6 @@ impl TabStrip {
                                                         id as usize,
                                                     ))
                                                     .into_any_element(),
-
                                                     _ => terminal_dot(visual, TAB_DOT, cx),
                                                 }),
                                         )
@@ -552,7 +551,6 @@ impl TabStrip {
                                                 AgentTabIndicator::Busy => {
                                                     t!("tabbar-tooltip-agent-busy")
                                                 }
-
                                                 AgentTabIndicator::Ready => {
                                                     t!("tabbar-tooltip-agent-ready")
                                                 }
@@ -568,7 +566,6 @@ impl TabStrip {
                                                     id as usize,
                                                 ))
                                                 .into_any_element(),
-
                                                 // An agent waiting on the user
                                                 // is the same "this tab is
                                                 // done working" state a
@@ -629,6 +626,7 @@ impl TabStrip {
                             .reorder(drag.from, index);
 
                         this.focus_active(window, cx);
+
                         this.sync_session_memory(cx);
 
                         cx.notify();
@@ -636,9 +634,11 @@ impl TabStrip {
             }))
             .on_click(cx.listener(|this, ix: &usize, window, cx| {
                 this.workspaces.active_tabs_mut().list_mut().activate(*ix);
+
                 this.on_active_tab_changed(window, cx);
 
                 this.focus_active(window, cx);
+
                 this.sync_session_memory(cx);
 
                 cx.notify();
@@ -679,6 +679,7 @@ impl TabStrip {
                         .reorder(drag.from, to);
 
                     this.focus_active(window, cx);
+
                     this.sync_session_memory(cx);
                 }
 

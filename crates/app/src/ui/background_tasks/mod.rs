@@ -10,13 +10,8 @@ pub(super) mod rows;
 #[cfg(test)]
 mod tests;
 
-use crate::ui::AppSettings;
-use crate::ui::background_tasks::rows::{
-    background_task_kind_label, background_task_state_label, finished_heading, finished_rows,
-    render_row, row_detail, row_timing, running_heading, running_rows, section_control_label,
-    state_color, visible_rows,
-};
-use crate::ui::composition::{empty_state, panel_header};
+use std::time::{Duration, SystemTime};
+
 use app::agent_tab::AgentPane;
 use app::agent_tab::execution::ChildReader;
 use app::agent_tab::transcript::TranscriptView;
@@ -34,7 +29,14 @@ use nmt_agent::background_task::{
 };
 use nmt_profiling::transcript::{Operation, Probe};
 use rust_i18n::t;
-use std::time::{Duration, SystemTime};
+
+use crate::ui::AppSettings;
+use crate::ui::background_tasks::rows::{
+    background_task_kind_label, background_task_state_label, finished_heading, finished_rows,
+    render_row, row_detail, row_timing, running_heading, running_rows, section_control_label,
+    state_color, visible_rows,
+};
+use crate::ui::composition::{empty_state, panel_header};
 
 /// Rows shown before the section control offers the rest. Running work is the
 /// part a user watches, so the finished list stays shorter per row of interest.
@@ -62,7 +64,6 @@ impl IconNamed for StopTaskIcon {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum PanelMode {
     List,
-
     Detail {
         key: BackgroundTaskKey,
 
@@ -295,7 +296,6 @@ impl BackgroundTasksView {
 
             return match snapshot {
                 Some(snapshot) => self.render_detail(key, transcript, &snapshot, now, cx),
-
                 None => {
                     self.close_detail(cx);
 
@@ -316,7 +316,6 @@ impl BackgroundTasksView {
                     t!("tasks-background-loading-detail"),
                     cx,
                 ),
-
                 false => empty_state(
                     t!("tasks-background-no-session-title"),
                     t!("tasks-background-no-session-detail"),
@@ -344,13 +343,11 @@ impl BackgroundTasksView {
                     ),
                     cx,
                 ),
-
                 BackgroundTaskDiscoveryState::Loading => empty_state(
                     t!("tasks-background-loading-title"),
                     t!("tasks-background-loading-detail"),
                     cx,
                 ),
-
                 _ => empty_state(
                     t!("tasks-background-empty-title"),
                     t!("tasks-background-empty-detail"),
@@ -553,19 +550,16 @@ impl BackgroundTasksView {
                 ),
                 cx,
             ),
-
             (BackgroundTaskTranscriptState::Loading, true) => empty_state(
                 t!("tasks-background-loading-title"),
                 t!("tasks-background-transcript-loading-detail"),
                 cx,
             ),
-
             (_, true) => empty_state(
                 t!("tasks-background-transcript-empty-title"),
                 t!("tasks-background-transcript-empty-detail"),
                 cx,
             ),
-
             _ => v_flex()
                 .flex_1()
                 .min_h_0()

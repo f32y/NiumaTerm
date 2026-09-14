@@ -39,7 +39,9 @@ async fn claude_member_startup_retains_native_permission_selection(cx: &mut Test
 
     let (runtime, member, host) = cx.update(|cx| {
         gpui_component::init(cx);
+
         cx.set_global(AgentSettings::default());
+
         cx.set_global(AgentThreadDefaults::default());
 
         let runtime = TeamRuntime::create(directory.path(), AgentWorkspace::default(), cx).unwrap();
@@ -192,13 +194,16 @@ async fn reopened_request(cx: &mut TestAppContext, completed: bool) {
     let room_id = saved.store().room().id();
 
     saved.member_unavailable(member).unwrap();
+
     drop(saved);
 
     let (saved, _) = TeamSession::open(directory.path(), room_id).unwrap();
 
     let (runtime, pane, host, window) = cx.update(|cx| {
         gpui_component::init(cx);
+
         cx.set_global(AgentSettings::default());
+
         cx.set_global(AgentThreadDefaults::default());
 
         let runtime = cx.new(|_| TeamRuntime::new(saved));
@@ -260,6 +265,7 @@ async fn reopened_request(cx: &mut TestAppContext, completed: bool) {
         let epoch = session.controller.borrow_mut().starting(None).epoch;
 
         session.install(Ok(Backend::Test(backend)), epoch, "test", cx);
+
         session.on_event(epoch, Event::Ready(ThreadSettings::default()), cx);
     });
 
@@ -357,7 +363,9 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
 
     let (runtime, pane, host, window) = cx.update(|cx| {
         gpui_component::init(cx);
+
         cx.set_global(AgentSettings::default());
+
         cx.set_global(AgentThreadDefaults::default());
 
         let mut session =
@@ -452,6 +460,7 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
     });
 
     cx.simulate_keystrokes("enter");
+
     cx.run_until_parked();
 
     runtime.update(&mut cx, |runtime, _| {
@@ -607,6 +616,7 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
     });
 
     cx.simulate_keystrokes("enter");
+
     cx.run_until_parked();
 
     pane.update(&mut cx, |pane, cx| {

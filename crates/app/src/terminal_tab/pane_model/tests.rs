@@ -1,8 +1,7 @@
-use nmt_config::appearance::InputStyle;
-
 use std::sync::Arc;
 
 use futures::executor::block_on;
+use nmt_config::appearance::InputStyle;
 use nmt_input::keyboard::ModifiersState;
 use nmt_terminal::block_store::BlockStore;
 use nmt_terminal::ghostty::ScrollbarInfo;
@@ -89,6 +88,7 @@ fn terminal_requested_keyboard_modes_drive_keys_and_ime_commits() {
 #[test]
 fn paste_uses_the_supplied_clipboard_and_respects_input_rejection() {
     let (mut model, input) = controller(b"\x1b[?2004h", false);
+
     let clipboard = TestClipboard::default();
 
     model.clipboard = Box::new(clipboard.clone());
@@ -113,7 +113,9 @@ fn paste_uses_the_supplied_clipboard_and_respects_input_rejection() {
     assert!(matches!(model.send_key(&paste), KeyOutcome::Written));
 
     assert_input(&input, b"\x1b[200~clipboard text\x1b[201~");
+
     input.lock().clear();
+
     model.source.session.mark_read_only();
 
     assert!(matches!(model.send_key(&paste), KeyOutcome::Ignored));
@@ -181,6 +183,7 @@ fn copy_failure_preserves_selection_and_success_preserves_a_newer_gesture() {
 #[test]
 fn resize_updates_content_geometry_and_only_invalidates_for_a_new_grid() {
     let (mut model, _) = controller(b"", false);
+
     let cell = model.cell_metrics.unwrap();
 
     assert!(!model.resize_content(327.0, 108.0, cell));
@@ -199,6 +202,7 @@ fn pending_repaint_retains_shared_grid_coordinates_and_coalesces_wakes() {
     let (mut model, _) = controller(b"text", false);
 
     model.settings.input_style = InputStyle::FixedBottom;
+
     model.update_viewport();
 
     let cell = model.cell_metrics.unwrap();
@@ -229,8 +233,11 @@ fn block_frame_reset_discards_visible_records_and_retains_live_origin() {
     let (mut model, _) = controller(b"", true);
 
     model.frozen.push_row(10.0, 3, 0, 40);
+
     model.frozen.push_separator(8.0);
+
     model.block_list.active_top = 90.0;
+
     model.begin_block_list_frame();
 
     assert!(model.frozen.row_top(3, 0).is_none());
@@ -341,8 +348,11 @@ fn frozen_selection_obeys_mouse_reporting_and_drag_threshold() {
         );
 
         model.frozen.begin_frame(54.0);
+
         model.frozen.push_row(0.0, 0, 0, 40);
+
         model.frozen.push_row(18.0, 0, 1, 40);
+
         model.update_viewport();
 
         assert!(matches!(
@@ -414,6 +424,7 @@ fn key_outcomes_distinguish_accepted_input_from_read_only_rejection() {
     let (mut model, _) = controller(b"", true);
 
     model.block_list.scrollbar = (24.0, 120.0);
+
     model.update_viewport();
 
     assert!(matches!(
@@ -582,6 +593,7 @@ fn end_scrolls_history_but_modified_end_and_alternate_screen_reach_the_pty() {
         let (mut model, _) = controller(vt, true);
 
         model.block_list.scrollbar = (24.0, 120.0);
+
         model.update_viewport();
 
         let outcome = model.key_down(&TerminalKey {
@@ -641,6 +653,7 @@ fn hover_tracks_modifiers_wheel_and_pointer_exit_without_a_window() {
     let mut input = left_press(LocalPoint { x: 40.0, y: 4.0 });
 
     input.button = None;
+
     model.mouse_move(input);
 
     assert!(model.hovered_link().is_none());
@@ -675,6 +688,7 @@ fn scrollbar_grab_preserves_offset_and_track_click_centers_the_thumb() {
 
     model.content_size.1 = 100.0;
     model.block_list.scrollbar = (0.0, 100.0);
+
     model.update_viewport();
 
     assert!(matches!(

@@ -153,8 +153,11 @@ impl RoomDelta {
         }
 
         room.messages.extend(self.messages);
+
         room.summaries.extend(self.summaries);
+
         room.input_history.extend(self.input_history);
+
         room.controls = self.controls;
 
         for attempt in self.attempts {

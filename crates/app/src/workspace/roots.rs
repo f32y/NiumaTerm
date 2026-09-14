@@ -28,13 +28,10 @@ fn same_root(a: &str, b: &str) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RootChange {
     Applied,
-
     /// The path already identifies a directory this workspace owns.
     Duplicate,
-
     /// The path is not one of this workspace's directories.
     NotAttached,
-
     /// A normal workspace always keeps at least one directory.
     WouldBeEmpty,
 }
@@ -123,7 +120,6 @@ impl WorkspaceRoots {
 
                 RootChange::Applied
             }
-
             None => RootChange::NotAttached,
         }
     }

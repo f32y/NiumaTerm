@@ -215,6 +215,7 @@ fn scrolled_history_session() -> SessionHandles {
     );
 
     wait_for_input(&session, "");
+
     session.messenger.send(Msg::ScrollTo(0)).unwrap();
 
     wait_for(&session, "history viewport", |snapshot| {
@@ -268,6 +269,7 @@ fn assert_history_preserved(session: &SessionHandles) {
         .unwrap();
 
     let checkpoint = receive.recv_timeout(TIMEOUT).unwrap().unwrap();
+
     let mut engine = GhosttyTerminal::new(checkpoint.cols, checkpoint.rows, 1_000_000).unwrap();
 
     engine.write_vt(&checkpoint.vt);
@@ -292,6 +294,7 @@ fn check_list_prediction_after_startup_resize(extra_args: &[&str]) {
     );
 
     resize(&session, 100, 30);
+
     wait_for_input(&session, "");
 
     session
@@ -359,6 +362,7 @@ fn immediate_input_after_shrink_and_grow_stays_with_prompt() {
     });
 
     resize(&session, 100, 30);
+
     session.messenger.send(Msg::ScrollToEnd).unwrap();
 
     session

@@ -5,8 +5,9 @@
 //! the last answer settled, so the moments recorded here are what the idle
 //! reading is built on.
 
-use crate::agent_tab::transcript::LAST_RESPONSE_LIMIT;
 use std::time::Duration;
+
+use crate::agent_tab::transcript::LAST_RESPONSE_LIMIT;
 
 pub(crate) fn response_age_tick(age: Duration) -> Option<Duration> {
     const MINUTE: u64 = 60;

@@ -67,6 +67,7 @@ fn approvals_completion_and_errors_flush_prior_text_immediately() {
     let mut applied = Vec::new();
 
     batch.push(text("answer", "before "), |event| applied.push(event));
+
     batch.push(text("answer", "approval"), |event| applied.push(event));
 
     let approval = Event::ApprovalRequested {
@@ -160,7 +161,9 @@ fn a_partial_batch_delivers_its_last_delta_before_eof() {
     drop(sender);
 
     let mut batches = receiver.ready_chunks(MAX_MESSAGES_PER_BATCH);
+
     let messages = block_on(batches.next()).unwrap();
+
     let mut batch = EventBatch::default();
     let mut applied = Vec::new();
 

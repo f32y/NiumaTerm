@@ -15,8 +15,12 @@ pub(crate) use nmt_agent::images::{AttachError, MAX_ATTACHMENTS};
 #[cfg(test)]
 mod tests;
 
-use crate::agent_tab::AgentPane;
-use crate::agent_tab::settings::UI_RADIUS;
+use std::cell::Cell;
+use std::env;
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::Arc;
+
 use gpui::prelude::*;
 use gpui::{
     AnyElement, Bounds, Context, Entity, FontWeight, Image, ImageFormat, ObjectFit, SharedString,
@@ -32,11 +36,9 @@ use nmt_agent::images::MAX_IMAGE_EDGE;
 use nmt_agent::images::placeholder_text;
 use nmt_agent::images::{Attachment, PendingAttachments as CorePendingAttachments};
 use rust_i18n::t;
-use std::cell::Cell;
-use std::env;
-use std::path::PathBuf;
-use std::rc::Rc;
-use std::sync::Arc;
+
+use crate::agent_tab::AgentPane;
+use crate::agent_tab::settings::UI_RADIUS;
 
 /// The placeholder as it is written into the composer. A space on each side
 /// keeps it a word of its own, so the prompt around it does not run into the
@@ -82,6 +84,7 @@ impl ComposerAttachments {
     /// what an interrupted message restores.
     pub(crate) fn restore_annotations(&mut self, mut earlier: Vec<String>) {
         earlier.append(&mut self.annotations);
+
         self.annotations = earlier;
     }
 
@@ -187,12 +190,12 @@ impl ComposerAttachments {
 
                 input.update(cx, |input, cx| {
                     input.set_value(renumbered.clone(), window, cx);
+
                     input.set_selected_range(cursor..cursor, cx);
                 });
 
                 renumbered
             }
-
             None => text.to_string(),
         };
 

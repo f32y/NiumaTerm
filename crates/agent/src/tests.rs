@@ -119,6 +119,7 @@ fn validation_is_strict_and_presentation_is_bounded() {
 fn session_start_does_not_invent_running() {
     let now = Instant::now();
     let r = route("pane-1");
+
     let mut monitor = monitor(now, slice::from_ref(&r));
 
     monitor.apply(event(&r, "s1", None, AgentEventKind::SessionStarted), now);
@@ -133,10 +134,13 @@ fn session_start_does_not_invent_running() {
 fn prompt_claims_owner_and_replay_does_not_advance_generation() {
     let now = Instant::now();
     let r = route("pane-1");
+
     let mut monitor = monitor(now, slice::from_ref(&r));
+
     let prompt = event(&r, "s1", Some("opaque-b"), AgentEventKind::PromptSubmitted);
 
     monitor.apply(prompt.clone(), now);
+
     monitor.apply(prompt, now + Duration::from_secs(1));
 
     let state = monitor.pane(&r).unwrap();
@@ -150,6 +154,7 @@ fn prompt_claims_owner_and_replay_does_not_advance_generation() {
 fn new_prompt_supersedes_needs_input_and_old_stop_is_ignored() {
     let now = Instant::now();
     let r = route("pane-1");
+
     let mut monitor = monitor(now, slice::from_ref(&r));
 
     monitor.apply(
@@ -188,6 +193,7 @@ fn new_prompt_supersedes_needs_input_and_old_stop_is_ignored() {
 fn nested_session_and_opaque_turn_events_cannot_steal_owner() {
     let now = Instant::now();
     let r = route("pane-1");
+
     let mut monitor = monitor(now, slice::from_ref(&r));
 
     monitor.apply(
@@ -218,6 +224,7 @@ fn nested_session_and_opaque_turn_events_cannot_steal_owner() {
 fn stop_quiets_then_commits_once_and_resumed_work_cancels() {
     let now = Instant::now();
     let r = route("pane-1");
+
     let mut monitor = monitor(now, slice::from_ref(&r));
 
     monitor.apply(
@@ -228,6 +235,7 @@ fn stop_quiets_then_commits_once_and_resumed_work_cancels() {
     let stop = event(&r, "s", Some("t"), AgentEventKind::Stopped);
 
     monitor.apply(stop.clone(), now);
+
     monitor.apply(stop, now);
 
     assert_eq!(monitor.next_deadline(), Some(now + COMPLETION_QUIET_WINDOW));
@@ -244,6 +252,7 @@ fn stop_quiets_then_commits_once_and_resumed_work_cancels() {
     assert!(monitor.pane(&r).unwrap().pending_completion.is_none());
 
     monitor.apply(event(&r, "s", Some("t"), AgentEventKind::Stopped), now);
+
     monitor.process_due(now + COMPLETION_QUIET_WINDOW);
 
     let first_id = monitor.notification(&r).unwrap().id.clone();
@@ -251,6 +260,7 @@ fn stop_quiets_then_commits_once_and_resumed_work_cancels() {
     assert_eq!(monitor.pane(&r).unwrap().status, AgentRuntimeStatus::Idle);
 
     monitor.apply(event(&r, "s", Some("t"), AgentEventKind::Stopped), now);
+
     monitor.process_due(now + COMPLETION_QUIET_WINDOW * 2);
 
     assert_eq!(monitor.notification(&r).unwrap().id, first_id);
@@ -260,10 +270,13 @@ fn stop_quiets_then_commits_once_and_resumed_work_cancels() {
 fn stop_without_current_runtime_evidence_never_notifies() {
     let now = Instant::now();
     let r = route("pane-1");
+
     let mut monitor = monitor(now, slice::from_ref(&r));
 
     monitor.apply(event(&r, "s", None, AgentEventKind::SessionStarted), now);
+
     monitor.apply(event(&r, "s", Some("t"), AgentEventKind::Stopped), now);
+
     monitor.process_due(now + COMPLETION_QUIET_WINDOW);
 
     assert!(monitor.notification(&r).is_none());
@@ -273,6 +286,7 @@ fn stop_without_current_runtime_evidence_never_notifies() {
 fn stale_active_state_becomes_idle_without_notification() {
     let now = Instant::now();
     let r = route("pane-1");
+
     let mut monitor = monitor(now, slice::from_ref(&r));
 
     monitor.apply(
@@ -296,6 +310,7 @@ fn explicit_lifecycle_route_stays_active_until_completion() {
     let now = Instant::now();
     let completion = now + ACTIVE_STATE_STALE_AFTER * 2;
     let r = route("pane-1");
+
     let mut monitor = AgentMonitor::new("process");
 
     monitor.register_route(r.clone(), AgentActivityPolicy::ExplicitLifecycle, now);
@@ -332,6 +347,7 @@ fn matching_update_reschedules_stale_expiry() {
     let now = Instant::now();
     let update = now + Duration::from_secs(60);
     let r = route("pane-1");
+
     let mut monitor = monitor(now, slice::from_ref(&r));
 
     monitor.apply(
@@ -365,6 +381,7 @@ fn matching_update_reschedules_stale_expiry() {
 fn old_generation_completion_timer_cannot_complete_new_prompt() {
     let now = Instant::now();
     let r = route("pane-1");
+
     let mut monitor = monitor(now, slice::from_ref(&r));
 
     monitor.apply(
@@ -392,6 +409,7 @@ fn old_generation_completion_timer_cannot_complete_new_prompt() {
 fn latest_notification_acknowledgement_and_status_are_independent() {
     let now = Instant::now();
     let r = route("pane-1");
+
     let mut monitor = monitor(now, slice::from_ref(&r));
 
     monitor.apply(
@@ -433,6 +451,7 @@ fn latest_notification_acknowledgement_and_status_are_independent() {
 fn failed_native_operations_cannot_clear_internal_attention() {
     let now = Instant::now();
     let r = route("pane-1");
+
     let mut monitor = monitor(now, slice::from_ref(&r));
 
     monitor.apply(
@@ -465,6 +484,7 @@ fn aggregation_counts_routes_and_prioritizes_needs_input() {
     let now = Instant::now();
     let a = route("a");
     let b = route("b");
+
     let mut monitor = monitor(now, &[a.clone(), b.clone()]);
 
     assert_eq!(monitor.project([&a, &b]).status, AgentRuntimeStatus::Idle);
@@ -521,7 +541,9 @@ fn tab_activation_keeps_split_sibling_unread_until_exact_acknowledgement() {
     );
 
     monitor.notify(&tab_one_left, "left", "left unread");
+
     monitor.notify(&tab_one_right, "right", "right unread");
+
     monitor.notify(&tab_two, "second tab", "latest unread");
 
     let tab_one = monitor.project([&tab_one_left, &tab_one_right]);
@@ -576,6 +598,7 @@ fn osc_style_notification_replaces_latest_without_changing_agent_state() {
     let now = Instant::now();
     let r = route("pane-1");
     let other = route("pane-2");
+
     let mut monitor = monitor(now, &[r.clone(), other.clone()]);
 
     monitor.apply(
@@ -618,6 +641,7 @@ fn osc_style_notification_replaces_latest_without_changing_agent_state() {
 fn closed_route_cancels_pending_and_rejects_late_events() {
     let now = Instant::now();
     let r = route("pane-1");
+
     let mut monitor = monitor(now, slice::from_ref(&r));
 
     monitor.apply(
@@ -626,7 +650,9 @@ fn closed_route_cancels_pending_and_rejects_late_events() {
     );
 
     monitor.apply(event(&r, "s", Some("t"), AgentEventKind::Stopped), now);
+
     monitor.remove_route(&r);
+
     monitor.process_due(now + COMPLETION_QUIET_WINDOW);
 
     monitor.apply(
@@ -676,6 +702,7 @@ fn colliding_local_pane_ids_stay_isolated_across_windows_and_close_cascades() {
     );
 
     second.remove_route(&window_two); // pane/tab/workspace/window teardown converges here.
+
     second.process_due(now + COMPLETION_QUIET_WINDOW);
 
     assert!(second.pane(&window_two).is_none());
@@ -687,10 +714,12 @@ fn background_window_notification_activation_is_exact() {
     let now = Instant::now();
     let foreground = route("window-1:route-1");
     let background = route("window-2:route-1");
+
     let mut foreground_monitor = monitor(now, slice::from_ref(&foreground));
     let mut background_monitor = monitor(now, slice::from_ref(&background));
 
     foreground_monitor.notify(&foreground, "foreground", "leave unread");
+
     background_monitor.notify(&background, "background", "activate me");
 
     let notification = background_monitor

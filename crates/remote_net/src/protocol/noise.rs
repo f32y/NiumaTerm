@@ -24,7 +24,6 @@ pub enum NoiseError {
     /// as fatal for the channel.
     #[error("noise protocol failure: {0}")]
     Snow(#[from] snow::Error),
-
     #[error("handshake not finished")]
     HandshakeNotFinished,
 }
@@ -100,6 +99,7 @@ impl Handshake {
     /// Produce the next handshake message to send to the peer.
     pub fn write_message(&mut self) -> Result<Vec<u8>, NoiseError> {
         let mut buf = vec![0u8; MSG_BUF];
+
         let len = self.state.write_message(&[], &mut buf)?;
 
         buf.truncate(len);
@@ -148,6 +148,7 @@ pub struct SecureChannel {
 impl SecureChannel {
     pub fn seal(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, NoiseError> {
         let mut buf = vec![0u8; plaintext.len() + 16];
+
         let len = self.state.write_message(plaintext, &mut buf)?;
 
         buf.truncate(len);
@@ -157,6 +158,7 @@ impl SecureChannel {
 
     pub fn open(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, NoiseError> {
         let mut buf = vec![0u8; ciphertext.len()];
+
         let len = self.state.read_message(ciphertext, &mut buf)?;
 
         buf.truncate(len);

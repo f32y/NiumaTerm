@@ -61,9 +61,11 @@ impl WorkflowsView {
         // The pane being replaced must stop refreshing for a view that is no
         // longer pointed at it.
         self.report_visibility(false, cx);
+
         self.target = target;
         self.detail_transcript = None;
         self.scroll = ScrollHandle::new();
+
         self.report_visibility(self.visible, cx);
 
         cx.notify();
@@ -76,6 +78,7 @@ impl WorkflowsView {
         }
 
         self.visible = visible;
+
         self.report_visibility(visible, cx);
 
         cx.notify();
@@ -350,7 +353,6 @@ impl WorkflowsView {
                     this.open_agent(&task_id, &agent_id, cx);
                 }))
                 .into_any_element(),
-
             None => row.into_any_element(),
         }
     }

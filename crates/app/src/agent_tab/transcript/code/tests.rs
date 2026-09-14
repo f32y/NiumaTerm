@@ -210,6 +210,7 @@ fn output_detection_accepts_streaming_json_and_unified_diffs_without_coloring_lo
 #[test]
 fn ansi_state_survives_chunk_boundaries_and_removes_nontext_controls() {
     let raw = "\x1b[31m红\nline\x1b[0m plain\r\n\x1b]52;c;ignored\x07**literal**\x1b[2K";
+
     let mut output = AnsiText::default();
     let mut parser = Parser::new();
 
@@ -306,6 +307,7 @@ fn latest_stream_revision_replaces_same_length_content_and_finishes_pending_ansi
     cx: &mut TestAppContext,
 ) {
     cx.update(gpui_component::init);
+
     register_languages();
 
     let first = CodeSource::from_item(&command("echo", "old\x1b[31")).unwrap();
@@ -326,7 +328,9 @@ fn latest_stream_revision_replaces_same_length_content_and_finishes_pending_ansi
     });
 
     cx.run_until_parked();
+
     cx.executor().advance_clock(Duration::from_millis(30));
+
     cx.run_until_parked();
 
     view.read_with(cx, |view, _| {

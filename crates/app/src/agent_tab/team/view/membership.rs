@@ -1,7 +1,5 @@
-use crate::agent_tab::settings::AgentSettings;
-use crate::agent_tab::team::TeamRuntime;
-use crate::agent_tab::team::view::TeamPane;
-use crate::agent_tab::thread_controls::{launch_effort, launch_model, stored_thread_settings};
+use std::collections::BTreeSet;
+
 use gpui::prelude::*;
 use gpui::{App, Context, Entity, IntoElement, SharedString, Window, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
@@ -15,7 +13,11 @@ use nmt_agent::team::member::{HistoryScope, MemberConfig, ProfileReference};
 use nmt_config::profile::AgentProfile;
 use rand::seq::SliceRandom as _;
 use rust_i18n::t;
-use std::collections::BTreeSet;
+
+use crate::agent_tab::settings::AgentSettings;
+use crate::agent_tab::team::TeamRuntime;
+use crate::agent_tab::team::view::TeamPane;
+use crate::agent_tab::thread_controls::{launch_effort, launch_model, stored_thread_settings};
 
 struct DiceIcon;
 
@@ -271,6 +273,7 @@ fn suggest_member_name(existing: &BTreeSet<String>) -> String {
     }
 
     let base = names.first().copied().unwrap_or("Agent");
+
     let mut suffix = 2usize;
 
     loop {

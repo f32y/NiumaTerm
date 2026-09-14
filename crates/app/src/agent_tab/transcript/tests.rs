@@ -436,6 +436,7 @@ mod separate_view_state_tests {
 
             child.update(cx, |transcript, cx| {
                 transcript.push(1, message("c0", "row"), Vec::new(), cx);
+
                 transcript.sync_transcript_list(transcript.build_row_specs(CollapseRows::Off));
             });
 
@@ -529,9 +530,13 @@ mod steered_prompt_rows_tests {
 
             transcript.update(cx, |transcript, cx| {
                 transcript.push(1, prompt("open the turn"), Vec::new(), cx);
+
                 transcript.push(1, reply("a"), Vec::new(), cx);
+
                 transcript.push(1, prompt("steered mid-turn"), Vec::new(), cx);
+
                 transcript.push(1, reply("b"), Vec::new(), cx);
+
                 settle(transcript, 1, 12);
 
                 // Folded: the work between prompt and answer is hidden, while
@@ -560,7 +565,9 @@ mod steered_prompt_rows_tests {
 
             transcript.update(cx, |transcript, cx| {
                 transcript.push(1, prompt("ask"), Vec::new(), cx);
+
                 transcript.push(1, reply("answer"), Vec::new(), cx);
+
                 settle(transcript, 1, 3);
 
                 // A control that would disclose nothing is not rendered; the
@@ -622,7 +629,9 @@ mod steered_prompt_rows_tests {
 
             transcript.update(cx, |transcript, cx| {
                 transcript.push(1, prompt("ask"), Vec::new(), cx);
+
                 transcript.push(1, reply("a"), Vec::new(), cx);
+
                 transcript.push(1, reply("b"), Vec::new(), cx);
 
                 // What a resumed conversation looks like: the turn is over, but
@@ -653,7 +662,9 @@ mod steered_prompt_rows_tests {
 
             transcript.update(cx, |transcript, cx| {
                 transcript.push(1, prompt("ask"), Vec::new(), cx);
+
                 transcript.push(1, reply("a"), Vec::new(), cx);
+
                 transcript.push(1, reply("b"), Vec::new(), cx);
 
                 // Nothing is hidden while the work is still happening.
@@ -1015,6 +1026,7 @@ mod branch_point_targeting_tests {
                 );
 
                 view.scroll_to_prompt(&first, false, cx);
+
                 view.release_from_picker(cx);
 
                 assert!(view.transcript_list.is_following_tail());
@@ -1027,6 +1039,7 @@ mod branch_point_targeting_tests {
                 });
 
                 view.hold_for_picker();
+
                 view.scroll_to_prompt(&first, false, cx);
 
                 assert_eq!(view.transcript_list.logical_scroll_top().item_ix, 0);
@@ -1316,6 +1329,7 @@ mod row_rhythm_tests {
 
             view.update(cx, |view, cx| {
                 view.toggle_disclosure(RevealKey::Group(2), cx);
+
                 view.toggle_disclosure(RevealKey::Group(2), cx);
 
                 let specs = view.build_row_specs(CollapseRows::ToolCalls);
@@ -1381,6 +1395,7 @@ mod row_rhythm_tests {
                 assert_eq!(last_step.0, "work");
 
                 view.toggle_disclosure(RevealKey::Group(2), cx);
+
                 view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
 
                 let specs = view.build_row_specs(CollapseRows::ToolCalls);
@@ -1421,6 +1436,7 @@ mod row_rhythm_tests {
                 view.disclosures.record_height(elsewhere, px(80.));
 
                 view.toggle_disclosure(RevealKey::Group(2), cx);
+
                 view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
 
                 assert_eq!(view.disclosures.measured_parts(), vec![elsewhere]);
@@ -1439,7 +1455,9 @@ mod row_rhythm_tests {
 
             view.update(cx, |view, cx| {
                 view.toggle_disclosure(RevealKey::Group(2), cx);
+
                 view.toggle_disclosure(RevealKey::Group(2), cx);
+
                 view.toggle_disclosure(RevealKey::Group(2), cx);
 
                 view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
@@ -1463,6 +1481,7 @@ mod row_rhythm_tests {
 
             view.update(cx, |view, cx| {
                 view.toggle_disclosure(RevealKey::Group(2), cx);
+
                 view.toggle_disclosure(RevealKey::Group(2), cx);
 
                 assert!(view.disclosures.expanded_groups().is_empty());
@@ -1530,6 +1549,7 @@ mod row_rhythm_tests {
 
             view.update(cx, |view, cx| {
                 view.toggle_disclosure(RevealKey::Turn(1), cx);
+
                 view.toggle_disclosure(RevealKey::Turn(1), cx);
 
                 let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
@@ -1626,6 +1646,7 @@ mod row_rhythm_tests {
 
             view.update(cx, |view, cx| {
                 view.push(1, user("ask").item, Vec::new(), cx);
+
                 view.push(1, command("ls").item, Vec::new(), cx);
 
                 let specs = view.build_row_specs(CollapseRows::Off);
@@ -1743,6 +1764,7 @@ mod surface_palette_tests {
     fn transcript_palette_tracks_background_snapshot_and_pane_choice(cx: &mut TestAppContext) {
         cx.update(|cx| {
             gpui_component::init(cx);
+
             Theme::global_mut(cx).highlight_theme = HighlightTheme::default_light();
 
             let themed = cx.theme().highlight_theme.clone();
@@ -1857,6 +1879,7 @@ mod reading_column_tests {
 
         cx.update(|cx| {
             gpui_component::init(cx);
+
             cx.set_global(AgentSettings::default());
         });
 

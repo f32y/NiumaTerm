@@ -182,6 +182,7 @@ pub(super) fn folded_settings_pill(
                     cx,
                     move |submenu, _, _| {
                         let mut submenu = submenu;
+
                         let set = setting.set;
 
                         for (value, label) in setting.options.clone() {

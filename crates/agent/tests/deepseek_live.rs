@@ -52,6 +52,7 @@ fn collect_until(
     mut stop: impl FnMut(&Event) -> bool,
 ) -> (Vec<Event>, bool) {
     let deadline = Instant::now() + timeout;
+
     let mut seen = Vec::new();
 
     while Instant::now() < deadline {
@@ -80,7 +81,6 @@ fn folded_text(events: &[Event]) -> String {
             Event::AgentMessageDelta { delta, .. } | Event::ReasoningSummaryDelta { delta, .. } => {
                 Some(delta.as_str())
             }
-
             _ => None,
         })
         .collect()

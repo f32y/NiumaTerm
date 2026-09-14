@@ -12,15 +12,10 @@ mod source;
 #[cfg(test)]
 mod tests;
 
-use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
-use crate::agent_tab::transcript::TranscriptView;
-use crate::agent_tab::transcript::code::prepared::PreparedCode;
-use crate::agent_tab::transcript::code::source::CodeSource;
-use crate::agent_tab::transcript::render::TRANSCRIPT_LINE_HEIGHT;
-use crate::agent_tab::transcript::render::text_style::{
-    transcript_highlight_theme, transcript_text_style,
-};
-use crate::agent_tab::transcript::rows::RowSpec;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
+
 use gpui::prelude::*;
 use gpui::{
     AsyncApp, Context, Entity, ListHorizontalSizingBehavior, Render, ScrollHandle, StyledText,
@@ -31,9 +26,16 @@ use gpui_component::scroll::Scrollbar;
 use gpui_component::spinner::Spinner;
 use gpui_component::text::{TextView, TextViewState};
 use nmt_agent::chat::Item;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
+
+use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
+use crate::agent_tab::transcript::TranscriptView;
+use crate::agent_tab::transcript::code::prepared::PreparedCode;
+use crate::agent_tab::transcript::code::source::CodeSource;
+use crate::agent_tab::transcript::render::TRANSCRIPT_LINE_HEIGHT;
+use crate::agent_tab::transcript::render::text_style::{
+    transcript_highlight_theme, transcript_text_style,
+};
+use crate::agent_tab::transcript::rows::RowSpec;
 
 pub(crate) fn is_code_item(item: &Item) -> bool {
     match item {

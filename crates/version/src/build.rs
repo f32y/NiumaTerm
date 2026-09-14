@@ -43,7 +43,6 @@ pub fn emit() -> String {
 
             label
         }
-
         None => derive_from_git(),
     };
 

@@ -10,7 +10,6 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 use std::{io, thread};
 
-use crate::hub::{RemoteSessionHub, SessionEvent, SessionId, SessionSubscription};
 use futures::stream::SplitSink;
 use futures::{SinkExt, StreamExt};
 use parking_lot::Mutex;
@@ -21,6 +20,7 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 use tracing::{info, warn};
 
 use crate::channel::reconnect_delay;
+use crate::hub::{RemoteSessionHub, SessionEvent, SessionId, SessionSubscription};
 use crate::protocol::{
     CONNECT_MODE_IK, CONNECT_MODE_PAIR, ClientBound, Frame, Handshake, HostBound, MAX_DATA_LEN,
     PairingCode, SecureChannel, StaticKeypair, derive_host_id, new_pairing_token,
@@ -48,10 +48,8 @@ pub struct HostConfig {
 pub enum HostStartError {
     #[error(transparent)]
     Key(#[from] KeyStoreError),
-
     #[error("device list unavailable: {0}")]
     Devices(io::Error),
-
     #[error("tokio runtime: {0}")]
     Runtime(io::Error),
 }
@@ -119,6 +117,7 @@ impl HostHandle {
             .map_err(HostStartError::Runtime)?;
 
         let control = Arc::clone(&shared);
+
         let mut shutdown = shared.shutdown.subscribe();
 
         let worker = thread::Builder::new()
@@ -234,10 +233,11 @@ async fn control_loop(shared: Arc<Shared>) {
             Ok(ws) => {
                 attempt = 0;
                 info!("relay control socket registered");
+
                 run_control(&shared, ws).await;
+
                 warn!("relay control socket lost");
             }
-
             Err(e) => warn!("relay control connect failed: {e}"),
         }
 
@@ -283,7 +283,6 @@ fn on_control_message(shared: &Arc<Shared>, text: &str) {
         RelayControlMessage::Connected { connection_id } => {
             spawn_connection(shared, connection_id);
         }
-
         RelayControlMessage::Sync { connections } => {
             // Reconciliation after (re)registering: open data
             // sockets for clients we don't serve yet, drop ones
@@ -307,7 +306,6 @@ fn on_control_message(shared: &Arc<Shared>, text: &str) {
                 spawn_connection(shared, cid);
             }
         }
-
         RelayControlMessage::Disconnected { connection_id } => {
             if let Some(conn) = shared.active.lock().remove(&connection_id) {
                 let _ = conn.cancel.send(true);
@@ -357,6 +355,7 @@ async fn serve_connection(
     cancel_rx: watch::Receiver<bool>,
 ) -> Result<(), NetError> {
     let url = relay_ws_url(&shared.config.relay_url, &shared.host_id, "host", Some(cid));
+
     let mut ws = ws_connect(&url, Some(&shared.config.access_token)).await?;
 
     // First client message: mode prefix + Noise message 1.
@@ -391,7 +390,6 @@ async fn serve_connection(
 
             (handshake.into_transport()?, remote)
         }
-
         CONNECT_MODE_PAIR => {
             let mut handshake = Handshake::responder_xx(&shared.keys.private)?;
 
@@ -400,6 +398,7 @@ async fn serve_connection(
             let msg2 = handshake.write_message()?;
 
             ws.send(Message::Binary(msg2.into())).await?;
+
             handshake.read_message(&next_binary(&mut ws).await?)?;
 
             let remote = handshake
@@ -446,11 +445,11 @@ async fn serve_connection(
                 .map_err(|e| NetError::Protocol(format!("persisting device failed: {e}")))?;
 
             info!(device = %device_name, "device paired");
+
             send_frame(&mut ws, &mut chan, &Frame::control(&ClientBound::Paired)?).await?;
 
             (chan, remote)
         }
-
         other => {
             return Err(NetError::Protocol(format!(
                 "unknown connect mode {other:#04x}"
@@ -499,6 +498,7 @@ impl SubscriptionBridge {
             .name("remote-subscription".into())
             .spawn(move || {
                 subscription.set_wake_thread(thread::current());
+
                 forward_events(subscription.events(), session_id, events, flag);
             })?;
 
@@ -522,9 +522,7 @@ fn forward_events(
                     break;
                 }
             }
-
             Err(TryRecvError::Empty) => thread::park(),
-
             Err(TryRecvError::Disconnected) => {
                 if !flag.load(Ordering::Relaxed) {
                     let _ = events.send((session_id, None));
@@ -625,7 +623,6 @@ async fn on_session_event(
                 send_split(sink, chan, &frame).await?;
             }
         }
-
         SessionEvent::Exited { seq } => {
             bridges.remove(&session_id);
 
@@ -683,12 +680,10 @@ fn handle_frame(
 
                     reply(&ClientBound::SessionList(sessions))
                 }
-
                 HostBound::Open(options) => match shared.hub.open(options.into()) {
                     Ok(id) => reply(&ClientBound::Opened { session_id: id.0 }),
                     Err(e) => error(None, &e),
                 },
-
                 HostBound::Attach { session_id } => {
                     match shared.hub.attach(SessionId(session_id)) {
                         Ok(subscription) => {
@@ -707,36 +702,30 @@ fn handle_frame(
 
                             reply(&ClientBound::Attached(snapshot))
                         }
-
                         Err(e) => error(Some(session_id), &e),
                     }
                 }
-
                 HostBound::Detach { session_id } => {
                     bridges.remove(&session_id);
 
                     None
                 }
-
                 HostBound::Kill { session_id } => match shared.hub.kill(SessionId(session_id)) {
                     Ok(()) => None,
                     Err(e) => error(Some(session_id), &e),
                 },
-
                 HostBound::Pair { .. } => error(
                     None,
                     &"pairing is only accepted as the first frame of a pairing connection",
                 ),
             }
         }
-
         Frame::Input { session_id, data } => {
             match shared.hub.write_input(SessionId(session_id), &data) {
                 Ok(()) => None,
                 Err(e) => error(Some(session_id), &e),
             }
         }
-
         Frame::Resize {
             session_id,
             cols,
@@ -745,7 +734,6 @@ fn handle_frame(
             Ok(()) => None,
             Err(e) => error(Some(session_id), &e),
         },
-
         // Output/Exited only flow host → client.
         Frame::Output { session_id, .. } | Frame::Exited { session_id, .. } => {
             error(Some(session_id), &"unexpected server-bound data frame")

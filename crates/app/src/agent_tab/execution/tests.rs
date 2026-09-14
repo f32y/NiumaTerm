@@ -29,7 +29,9 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
 ) {
     let (owner, window) = cx.update(|cx| {
         gpui_component::init(cx);
+
         cx.set_global(AgentSettings::default());
+
         cx.set_global(AgentThreadDefaults::default());
 
         let owner = AgentSession::create(
@@ -54,7 +56,9 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
     });
 
     let host = owner.session().clone();
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
+
     let released = Arc::new(AtomicBool::new(false));
     let events = Rc::new(RefCell::new(Vec::new()));
     let observed = events.clone();
@@ -122,6 +126,7 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
             let scratch = scratch_dir(pane.agent_route(cx).unwrap().as_str());
 
             fs::create_dir_all(&scratch).unwrap();
+
             fs::write(scratch.join("delayed-read.png"), &image.bytes).unwrap();
 
             (Arc::downgrade(image), scratch)
@@ -129,7 +134,9 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
     });
 
     drop(first);
+
     drop(stale);
+
     cx.run_until_parked();
 
     host.update(&mut cx, |session, cx| {
@@ -191,6 +198,7 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
         );
 
         pane.respond_approval("accept", cx);
+
         pane.respond_approval("accept", cx);
 
         let state = pane.session.borrow();
@@ -204,6 +212,7 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
 
     host.update(&mut cx, |session, cx| {
         session.on_event(epoch, Event::TurnCompleted { error: None }, cx);
+
         session.on_event(epoch, Event::TurnCompleted { error: None }, cx);
     });
 
@@ -268,8 +277,11 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
     assert!(!scratch.exists());
 
     drop(subscription);
+
     drop(owner);
+
     drop(host);
+
     cx.run_until_parked();
 
     cx.update(|window, cx| {

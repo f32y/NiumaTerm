@@ -20,6 +20,7 @@ fn startup_preserves_the_protocol_failure_reason() {
     let router = Router::new(tx);
 
     router.on_message(json!({"method":OUTPUT_FAILURE_METHOD,"params":{"message":"Agent protocol JSON is invalid"}}));
+
     router.on_stdout_closed();
 
     assert_eq!(
@@ -33,6 +34,7 @@ fn retiring_routes_cancels_only_their_ordinary_pending_inputs() {
     let router = router();
     let (owner, _) = register(&router);
     let (other, _) = register(&router);
+
     let mut tickets = Vec::new();
 
     for (id, owner, method) in [
@@ -49,6 +51,7 @@ fn retiring_routes_cancels_only_their_ordinary_pending_inputs() {
         let ticket = InputTicket::queued_for_test(false);
 
         router.attach_input(request["id"].as_u64().unwrap(), ticket.clone());
+
         tickets.push(ticket);
     }
 
@@ -69,6 +72,7 @@ fn retiring_routes_cancels_only_their_ordinary_pending_inputs() {
 fn expired_queued_requests_report_not_sent_and_ignore_late_success() {
     let router = router();
     let (owner, rx) = register(&router);
+
     let mut request = json!({"id": 10, "method": "thread/start"});
 
     router.prepare_outgoing(owner, &mut request).unwrap();
@@ -77,6 +81,7 @@ fn expired_queued_requests_report_not_sent_and_ignore_late_success() {
     let ticket = InputTicket::queued_for_test(false);
 
     router.attach_input(global_id, ticket.clone());
+
     router.expire_requests(Instant::now() + Duration::from_secs(301));
 
     let response = rx.try_recv().unwrap();
@@ -182,14 +187,19 @@ fn retired_requests_cannot_reassign_roots_or_affect_other_owners() {
     let router = router();
     let (owner, rx) = register(&router);
     let (other, other_rx) = register(&router);
+
     let mut old = start_request(10);
     let mut current = start_request(11);
     let mut independent = start_request(10);
 
     router.prepare_outgoing(owner, &mut old).unwrap();
+
     router.prepare_outgoing(owner, &mut current).unwrap();
+
     router.prepare_outgoing(other, &mut independent).unwrap();
+
     router.retain_requests(owner, &[11]);
+
     router.on_message(json!({"id": old["id"], "result": {"thread": {"id": "stale"}}}));
 
     assert!(rx.try_recv().is_err());
@@ -207,6 +217,7 @@ fn retired_requests_cannot_reassign_roots_or_affect_other_owners() {
 #[test]
 fn a_busy_shared_host_accepts_requests_from_additional_owners() {
     let router = router();
+
     let mut owners = Vec::new();
 
     for _ in 0..8 {
@@ -266,15 +277,18 @@ fn rejected_requests_release_routes_without_affecting_other_sessions() {
     let router = router();
     let (first, first_rx) = register(&router);
     let (second, second_rx) = register(&router);
+
     let mut rejected = start_request(2);
     let mut accepted = start_request(2);
 
     router.prepare_outgoing(first, &mut rejected).unwrap();
+
     router.prepare_outgoing(second, &mut accepted).unwrap();
 
     let id = rejected["id"].as_u64().unwrap();
 
     router.reject_outgoing(id);
+
     router.on_message(start_response(id, "rejected"));
 
     assert!(first_rx.try_recv().is_err());
@@ -309,6 +323,7 @@ fn responses_return_to_their_owner_with_local_ids() {
     let router = router();
     let (first, first_rx) = register(&router);
     let (second, second_rx) = register(&router);
+
     let mut first_request = start_request(2);
     let mut second_request = start_request(2);
 
@@ -326,6 +341,7 @@ fn responses_return_to_their_owner_with_local_ids() {
     assert_ne!(first_global, second_global);
 
     router.on_message(start_response(second_global, "thread-b"));
+
     router.on_message(start_response(first_global, "thread-a"));
 
     assert_eq!(second_rx.recv().expect("second response")["id"], 2);
@@ -339,6 +355,7 @@ fn server_requests_are_checked_against_thread_ownership() {
     let router = router();
     let (first, first_rx) = register(&router);
     let (second, second_rx) = register(&router);
+
     let mut first_request = start_request(2);
     let mut second_request = start_request(2);
 
@@ -390,6 +407,7 @@ fn root_notifications_are_isolated_and_process_notifications_are_shared() {
     let router = router();
     let (first, first_rx) = register(&router);
     let (second, second_rx) = register(&router);
+
     let mut first_request = start_request(2);
     let mut second_request = start_request(2);
 
@@ -465,6 +483,7 @@ fn auxiliary_title_thread_activity_never_reaches_the_primary_registration() {
     let router = router();
     let (primary, primary_rx) = register(&router);
     let (title_worker, title_rx) = register(&router);
+
     let mut primary_request = start_request(2);
     let mut title_request = start_request(1);
 
@@ -509,6 +528,7 @@ fn auxiliary_title_thread_activity_never_reaches_the_primary_registration() {
 fn early_descendant_activity_waits_for_a_proven_owner() {
     let router = router();
     let (owner, rx) = register(&router);
+
     let mut root_request = start_request(2);
 
     router.prepare_outgoing(owner, &mut root_request).unwrap();
@@ -566,6 +586,7 @@ fn delayed_child_replay_delivers_every_message_only_to_its_owner() {
 fn oldest_root_activity_survives_many_unclaimed_threads() {
     let router = router();
     let (owner, rx) = register(&router);
+
     let mut request = start_request(2);
 
     router.prepare_outgoing(owner, &mut request).unwrap();
@@ -591,6 +612,7 @@ fn thread_started_inherits_the_known_parent_owner() {
     let router = router();
     let (first, first_rx) = register(&router);
     let (second, second_rx) = register(&router);
+
     let mut first_request = start_request(2);
     let mut second_request = start_request(2);
 
@@ -634,10 +656,13 @@ fn thread_started_inherits_the_known_parent_owner() {
 fn detached_sessions_do_not_receive_late_responses() {
     let router = router();
     let (owner, rx) = register(&router);
+
     let mut request = start_request(2);
 
     router.prepare_outgoing(owner, &mut request).unwrap();
+
     router.detach(owner);
+
     router.on_message(start_response(request["id"].as_u64().unwrap(), "late"));
 
     assert!(rx.try_recv().is_err());
@@ -648,6 +673,7 @@ fn a_root_conflict_keeps_the_requesting_sessions_previous_root() {
     let router = router();
     let (first, first_rx) = register(&router);
     let (second, second_rx) = register(&router);
+
     let mut first_request = start_request(2);
     let mut second_request = start_request(2);
 
@@ -704,6 +730,7 @@ fn a_root_conflict_keeps_the_requesting_sessions_previous_root() {
 fn an_early_closed_thread_is_not_retained_after_owner_discovery() {
     let router = router();
     let (owner, rx) = register(&router);
+
     let mut root_request = start_request(2);
 
     router.prepare_outgoing(owner, &mut root_request).unwrap();
@@ -748,6 +775,7 @@ fn unexpected_stdout_close_notifies_sessions_but_expected_shutdown_does_not() {
     let (_owner, expected_rx) = register(&expected);
 
     expected.expected_shutdown.store(true, Ordering::Release);
+
     expected.on_stdout_closed();
 
     assert!(expected_rx.try_recv().is_err());
@@ -805,6 +833,7 @@ fn conflicting_credential_values_are_rejected() {
 #[test]
 fn conflicting_provider_definitions_are_rejected() {
     let first = custom_launch("codex", "provider-a", "NMT_CODEX_SHARED", "same-secret");
+
     let mut second = custom_launch("codex", "provider-b", "NMT_CODEX_SHARED", "same-secret");
 
     second.provider.as_mut().unwrap().base_url = "https://other.example/v1".into();

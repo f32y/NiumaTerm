@@ -16,8 +16,11 @@ pub(super) fn modifiers_state(modifiers: Modifiers) -> ModifiersState {
     let mut state = ModifiersState::empty();
 
     state.set(ModifiersState::SHIFT, modifiers.shift);
+
     state.set(ModifiersState::ALT, modifiers.alt);
+
     state.set(ModifiersState::CONTROL, modifiers.control);
+
     state.set(ModifiersState::SUPER, modifiers.platform);
 
     state

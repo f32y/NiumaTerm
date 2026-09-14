@@ -191,6 +191,7 @@ impl AppSettings {
 
     pub fn edit_appearance(&mut self, edit: impl FnOnce(&mut AppearanceConfig)) {
         edit(&mut self.config.appearance);
+
         self.config.appearance.normalize();
     }
 
@@ -275,6 +276,7 @@ impl AppSettings {
         };
 
         profile.name = self.unique_agent_profile_name(&profile.name, profile.kind, None);
+
         self.config.agent_profiles.list.insert(ix + 1, profile);
 
         true
@@ -421,6 +423,7 @@ impl AppSettings {
         }
 
         profile.env.retain(|var| !var.name.trim().is_empty());
+
         profile.name = self.unique_agent_profile_name(&profile.name, profile.kind, target);
 
         match target {
@@ -433,7 +436,6 @@ impl AppSettings {
 
                 *slot = profile;
             }
-
             None => {
                 if self.config.agent_profiles.default.is_empty() {
                     self.config.agent_profiles.default = profile.name.clone();
@@ -477,7 +479,6 @@ impl AppSettings {
                 Some(p.shell.trim().to_string()),
                 p.args.split_whitespace().map(str::to_string).collect(),
             ),
-
             _ => (None, Vec::new()),
         }
     }

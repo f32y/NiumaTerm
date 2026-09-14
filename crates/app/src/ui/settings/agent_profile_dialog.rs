@@ -2,11 +2,11 @@
 #[path = "agent_profile_dialog_tests.rs"]
 mod tests;
 
-use gpui_component::dialog::Dialog;
 use std::borrow::Cow;
 
 use app::agent_tab::AgentKind;
 use gpui::{AppContext as _, ClickEvent, Context, Entity, IntoElement, Render};
+use gpui_component::dialog::Dialog;
 use gpui_component::input::InputState;
 use rust_i18n::t;
 
@@ -97,7 +97,6 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
             .get(ix)
             .cloned()
             .unwrap_or_default(),
-
         // A new profile starts from the Claude Code built-in with a blank
         // name; Save fills in a unique placeholder.
         None => AgentProfile {
@@ -146,6 +145,7 @@ fn agent_profile_dialog(
                 .label(t!("settings-common-save"))
                 .on_click(move |_, window, cx: &mut App| {
                     save_agent_profile_draft(&saved_draft, cx);
+
                     window.close_dialog(cx);
                 }),
         )
@@ -735,7 +735,6 @@ fn agent_profile_dialog_content(
 
             match profile.kind {
                 AgentProfileKind::Claude | AgentProfileKind::Codex => this.child(executable),
-
                 AgentProfileKind::DeepSeek => this
                     .child(card_row(
                         t!("settings-agent-profile-launcher"),
@@ -754,9 +753,7 @@ fn agent_profile_dialog_content(
                 AgentProfileKind::Claude => {
                     t!("settings-agent-profile-model-claude-description")
                 }
-
                 AgentProfileKind::Codex => t!("settings-agent-profile-model-codex-description"),
-
                 AgentProfileKind::DeepSeek => {
                     t!("settings-agent-profile-model-deepseek-description")
                 }
@@ -771,9 +768,7 @@ fn agent_profile_dialog_content(
                 sub_models_switch,
                 cx,
             )),
-
             AgentProfileKind::Codex => this,
-
             AgentProfileKind::DeepSeek => this.child(card_row(
                 t!("settings-agent-profile-vision-model"),
                 t!("settings-agent-profile-vision-model-description"),
@@ -799,9 +794,7 @@ fn agent_profile_dialog_content(
                 AgentProfileKind::Claude => {
                     t!("settings-agent-profile-api-url-claude-description")
                 }
-
                 AgentProfileKind::Codex => t!("settings-agent-profile-api-url-codex-description"),
-
                 AgentProfileKind::DeepSeek => {
                     t!("settings-agent-profile-api-url-deepseek-description")
                 }
@@ -817,13 +810,11 @@ fn agent_profile_dialog_content(
                     key = key_env
                 )
                 .into_owned(),
-
                 AgentProfileKind::Codex => t!(
                     "settings-agent-profile-api-key-codex-description",
                     key = key_env
                 )
                 .into_owned(),
-
                 AgentProfileKind::DeepSeek => t!(
                     "settings-agent-profile-api-key-deepseek-description",
                     key = key_env

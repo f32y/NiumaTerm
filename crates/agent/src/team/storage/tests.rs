@@ -1,3 +1,11 @@
+use std::fs::File;
+use std::io::Write as _;
+use std::path::Path;
+use std::{fs, mem};
+
+use serde_json::Value;
+use tempfile::tempdir;
+
 use crate::AgentWorkspace;
 use crate::chat::SendOutcome;
 use crate::team::attempt::{AttemptState, BudgetScope, DispatchIntent};
@@ -21,20 +29,17 @@ use crate::team::storage::atomic_write;
 use crate::team::storage::records::digest;
 use crate::team::storage::{RoomStore, StorageError};
 use crate::team::tests::config;
-use serde_json::Value;
-use std::fs::File;
-use std::io::Write as _;
-use std::path::Path;
-use std::{fs, mem};
-use tempfile::tempdir;
 
 #[test]
 fn restart_retains_sources_scopes_controls_pending_work_and_budget() {
     let directory = tempdir().unwrap();
+
     let mut room = Room::new(AgentWorkspace::single(Some("C:/room".into())));
+
     let alice = room.add_member(config("Alice", "C:/frontend")).unwrap();
     let bob = room.add_member(config("Bob", "C:/backend")).unwrap();
     let id = room.id();
+
     let mut store = RoomStore::create(directory.path(), room.clone()).unwrap();
 
     let attachment = store
@@ -108,10 +113,15 @@ fn restart_retains_sources_scopes_controls_pending_work_and_budget() {
     });
 
     room.controls.automatic_summaries = false;
+
     store.commit(room.clone()).unwrap();
+
     store.checkpoint().unwrap();
+
     room.rename_member(alice, "Alice frontend").unwrap();
+
     store.commit(room.clone()).unwrap();
+
     drop(store);
 
     let (store, truncated) = RoomStore::open(directory.path(), id).unwrap();
@@ -134,13 +144,19 @@ fn restart_retains_sources_scopes_controls_pending_work_and_budget() {
 #[test]
 fn incomplete_final_record_recovers_prefix_and_prior_corruption_blocks_only_that_room() {
     let directory = tempdir().unwrap();
+
     let mut room = Room::new(AgentWorkspace::default());
+
     let id = room.id();
+
     let mut store = RoomStore::create(directory.path(), room.clone()).unwrap();
 
     room.controls.automatic_summaries = false;
+
     store.commit(room.clone()).unwrap();
+
     store.journal.write_all(b"{\"payload\":").unwrap();
+
     store.journal.sync_all().unwrap();
 
     let journal_path = store.directory.join("journal.jsonl");
@@ -157,6 +173,7 @@ fn incomplete_final_record_recovers_prefix_and_prior_corruption_blocks_only_that
     let mut bytes = fs::read(&journal_path).unwrap();
 
     bytes[0] = b'!';
+
     fs::write(&journal_path, bytes).unwrap();
 
     assert!(RoomStore::open(directory.path(), id).is_err());
@@ -195,10 +212,14 @@ fn unsupported_version_preserves_saved_bytes() {
 #[test]
 fn storage_failures_preserve_input_and_reservations_without_backend_dispatch() {
     let directory = tempdir().unwrap();
+
     let mut room = Room::new(AgentWorkspace::default());
+
     let alice = room.add_member(config("Alice", "C:/a")).unwrap();
     let room_id = room.id();
+
     let mut store = RoomStore::create(directory.path(), room).unwrap();
+
     let operation = OperationId::new();
 
     let input = UserInput {
@@ -243,6 +264,7 @@ fn storage_failures_preserve_input_and_reservations_without_backend_dispatch() {
     drop(store);
 
     let (mut store, _) = RoomStore::open(directory.path(), room_id).unwrap();
+
     let ids = reserve_dispatches(&mut store, vec![intent.clone()]).unwrap();
 
     store.journal = File::open(store.directory.join("journal.jsonl")).unwrap();
@@ -308,14 +330,19 @@ fn storage_failures_preserve_input_and_reservations_without_backend_dispatch() {
 #[test]
 fn legacy_member_columns_survive_checkpoint_and_journal_replay() {
     let directory = tempdir().unwrap();
+
     let mut room = Room::new(AgentWorkspace::single(Some("C:/room".into())));
+
     let alice = room.add_member(config("Alice", "C:/frontend")).unwrap();
     let id = room.id();
+
     let mut store = RoomStore::create(directory.path(), room).unwrap();
     let mut next = store.room().clone();
 
     next.add_member(config("Bob", "C:/backend")).unwrap();
+
     store.commit(next).unwrap();
+
     drop(store);
 
     let room_directory = directory.path().join("agent-teams").join(id.to_string());
@@ -323,6 +350,7 @@ fn legacy_member_columns_survive_checkpoint_and_journal_replay() {
     let journal = room_directory.join("journal.jsonl");
 
     restore_legacy_member_columns(&checkpoint, "/payload/room/members");
+
     restore_legacy_member_columns(&journal, "/payload/changes/members");
 
     let (mut store, truncated) = RoomStore::open(directory.path(), id).unwrap();
@@ -334,7 +362,9 @@ fn legacy_member_columns_survive_checkpoint_and_journal_replay() {
     let mut next = store.room().clone();
 
     next.members[0].role = "Updated after reopening".into();
+
     store.commit(next).unwrap();
+
     drop(store);
 
     let (store, truncated) = RoomStore::open(directory.path(), id).unwrap();
@@ -398,6 +428,7 @@ fn restore_legacy_member_columns(path: &Path, pointer: &str) {
     let mut bytes = serde_json::to_vec(&record).unwrap();
 
     bytes.push(b'\n');
+
     fs::write(path, bytes).unwrap();
 }
 

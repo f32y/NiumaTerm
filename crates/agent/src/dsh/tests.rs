@@ -86,6 +86,7 @@ fn a_dropped_downlink_does_not_wait_for_the_next_frame() {
 
     let server = thread::spawn(move || {
         let (stream, _) = listener.accept().expect("accept websocket client");
+
         let mut socket = accept(stream).expect("complete websocket handshake");
 
         thread::sleep(Duration::from_millis(700));
@@ -606,6 +607,7 @@ fn a_workflow_run_is_folded_from_its_own_increments() {
     use crate::workflow::{WorkflowAgentState, WorkflowRunState};
 
     let mut workflows = WorkflowTracker::default();
+
     let event = |value: Value| value;
 
     assert!(workflows.apply(&event(json!({
@@ -2202,6 +2204,7 @@ fn an_older_log_snapshot_cannot_overwrite_a_newer_control_update() {
     use crate::dsh::projections::ProjectionTracker;
 
     let mut tracker = ProjectionTracker::default();
+
     let frame = json!({"payload":{"type":"session/projection","sessionId":SESSION,"key":"title","seq":12,"value":"new title"}});
 
     assert_eq!(

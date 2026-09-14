@@ -27,6 +27,7 @@ impl Session {
         };
 
         let error = payload["error"].as_str().map(str::to_string);
+
         let mut events = Vec::new();
 
         if let Some(message) = payload["stopError"].as_str() {
@@ -44,22 +45,20 @@ impl Session {
                             message,
                             fatal: false,
                         }),
-
                         None => {
                             self.pending_approval = None;
+
                             events.push(Event::ApprovalResolved);
                         }
                     }
                 }
             }
-
             Operation::Questions { request, skipped } => {
                 if self.pending_questions.as_ref() == Some(&request) {
                     let id = question_id(&request);
 
                     match error {
                         Some(message) => events.push(Event::InputSubmissionFailed { id, message }),
-
                         None => {
                             self.pending_questions = None;
 
@@ -78,7 +77,6 @@ impl Session {
                     }
                 }
             }
-
             Operation::Interrupt | Operation::InterruptChild(_) => {
                 if let Some(message) = error {
                     events.push(Event::Error {

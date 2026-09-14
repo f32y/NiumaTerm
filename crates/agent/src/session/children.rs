@@ -112,6 +112,7 @@ impl ChildTranscript {
             }
 
             conversation.clear();
+
             self.dropped = 0;
             changed = true;
         }

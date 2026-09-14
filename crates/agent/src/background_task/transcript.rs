@@ -19,7 +19,6 @@ pub enum BackgroundTaskTranscriptState {
     NotLoaded,
     Loading,
     Ready,
-
     Unavailable {
         message: String,
     },

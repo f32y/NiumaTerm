@@ -26,11 +26,15 @@ fn repository() -> PathBuf {
     let dir = env::temp_dir().join(format!("nmt-git-branch-reads-{}", process::id()));
 
     fs::remove_dir_all(&dir).ok();
+
     fs::create_dir_all(&dir).expect("create test repository directory");
 
     git(&dir, &["init", "--initial-branch=trunk"]);
+
     git(&dir, &["config", "user.email", "test@example.invalid"]);
+
     git(&dir, &["config", "user.name", "Branch Read Test"]);
+
     git(&dir, &["commit", "--allow-empty", "-m", "root"]);
 
     dir
@@ -75,6 +79,7 @@ fn a_directory_outside_a_repository_has_no_branch() {
     let dir = env::temp_dir().join(format!("nmt-git-branch-bare-{}", process::id()));
 
     fs::remove_dir_all(&dir).ok();
+
     fs::create_dir_all(&dir).expect("create non-repository directory");
 
     assert!(branch_of(&dir, Duration::ZERO).is_none());

@@ -89,7 +89,6 @@ impl EventBatch {
                     delta: next,
                 },
             ) if *item_id == next_id => delta.push_str(&next),
-
             (_, event) => {
                 self.flush(&mut apply);
 
@@ -97,7 +96,6 @@ impl EventBatch {
                     Event::AgentMessageDelta { .. }
                     | Event::ReasoningSummaryDelta { .. }
                     | Event::CommandOutputDelta { .. } => self.pending = Some(event),
-
                     event => apply(event),
                 }
             }

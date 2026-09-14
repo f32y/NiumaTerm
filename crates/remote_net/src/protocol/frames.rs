@@ -31,24 +31,20 @@ pub enum Frame {
     /// Postcard-encoded `HostBound` or `ClientBound`; direction is implied by
     /// which side sent it, so the frame layer keeps the payload opaque.
     Control(Vec<u8>),
-
     Output {
         session_id: u64,
         seq: u64,
         data: Vec<u8>,
     },
-
     Input {
         session_id: u64,
         data: Vec<u8>,
     },
-
     Resize {
         session_id: u64,
         cols: u16,
         rows: u16,
     },
-
     Exited {
         session_id: u64,
         seq: u64,
@@ -59,13 +55,10 @@ pub enum Frame {
 pub enum FrameError {
     #[error("unknown frame type {0:#04x}")]
     UnknownType(u8),
-
     #[error("frame truncated")]
     Truncated,
-
     #[error("frame payload exceeds {MAX_DATA_LEN} bytes")]
     TooLarge,
-
     #[error("malformed control payload: {0}")]
     Control(String),
 }
@@ -97,9 +90,9 @@ impl Frame {
                 }
 
                 out.push(TYPE_CONTROL);
+
                 out.extend_from_slice(payload);
             }
-
             Frame::Output {
                 session_id,
                 seq,
@@ -110,35 +103,42 @@ impl Frame {
                 }
 
                 out.push(TYPE_OUTPUT);
+
                 out.extend_from_slice(&session_id.to_le_bytes());
+
                 out.extend_from_slice(&seq.to_le_bytes());
+
                 out.extend_from_slice(data);
             }
-
             Frame::Input { session_id, data } => {
                 if data.len() > MAX_DATA_LEN {
                     return Err(FrameError::TooLarge);
                 }
 
                 out.push(TYPE_INPUT);
+
                 out.extend_from_slice(&session_id.to_le_bytes());
+
                 out.extend_from_slice(data);
             }
-
             Frame::Resize {
                 session_id,
                 cols,
                 rows,
             } => {
                 out.push(TYPE_RESIZE);
+
                 out.extend_from_slice(&session_id.to_le_bytes());
+
                 out.extend_from_slice(&cols.to_le_bytes());
+
                 out.extend_from_slice(&rows.to_le_bytes());
             }
-
             Frame::Exited { session_id, seq } => {
                 out.push(TYPE_EXITED);
+
                 out.extend_from_slice(&session_id.to_le_bytes());
+
                 out.extend_from_slice(&seq.to_le_bytes());
             }
         }
@@ -157,7 +157,6 @@ impl Frame {
 
                 Ok(Frame::Control(rest.to_vec()))
             }
-
             TYPE_OUTPUT => {
                 let (session_id, rest) = read_u64(rest)?;
                 let (seq, data) = read_u64(rest)?;
@@ -172,7 +171,6 @@ impl Frame {
                     data: data.to_vec(),
                 })
             }
-
             TYPE_INPUT => {
                 let (session_id, data) = read_u64(rest)?;
 
@@ -185,7 +183,6 @@ impl Frame {
                     data: data.to_vec(),
                 })
             }
-
             TYPE_RESIZE => {
                 let (session_id, rest) = read_u64(rest)?;
                 let (cols, rest) = read_u16(rest)?;
@@ -201,7 +198,6 @@ impl Frame {
                     rows,
                 })
             }
-
             TYPE_EXITED => {
                 let (session_id, rest) = read_u64(rest)?;
                 let (seq, rest) = read_u64(rest)?;
@@ -212,7 +208,6 @@ impl Frame {
 
                 Ok(Frame::Exited { session_id, seq })
             }
-
             other => Err(FrameError::UnknownType(other)),
         }
     }

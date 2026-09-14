@@ -126,6 +126,7 @@ pub fn open_remote_session(
     let (ready_tx, ready_rx) = std_mpsc::channel();
     let (output_tx, output_rx) = std_mpsc::channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
+
     let (cancel, mut stopped) = watch::channel(false);
 
     let thread = on_worker_thread("remote-client", ready_tx, move |runtime, ready_tx| {
@@ -175,7 +176,6 @@ fn on_worker_thread<T: Send + 'static>(
             // Runtime startup errors must reach the caller before the worker exits.
             match RuntimeBuilder::new_current_thread().enable_all().build() {
                 Ok(runtime) => body(runtime, sender),
-
                 Err(error) => {
                     let _ = sender.send(Err(NetError::Internal(error.to_string())));
                 }
@@ -208,7 +208,6 @@ async fn session_thread(
     let (mut channel, snapshot) =
         match connect_and_attach(&relay_url, &host_id, &host_public_key, &device, target).await {
             Ok(attached) => attached,
-
             Err(e) => {
                 let _ = ready.send(Err(e));
 
@@ -230,13 +229,11 @@ async fn session_thread(
     loop {
         match pump(channel, &output, &mut commands, resume_after).await {
             PumpExit::Local => return,
-
             PumpExit::SessionEnded => {
                 let _ = output.send(SessionByteEvent::Exited);
 
                 return;
             }
-
             PumpExit::Disconnected => {}
         }
 
@@ -280,14 +277,12 @@ async fn connect_and_attach(
 
     let session_id = match target {
         AttachTarget::Existing(id) => id,
-
         AttachTarget::Open(options) => {
             with_timeout(channel.send_control(&HostBound::Open(options))).await?;
 
             match with_timeout(channel.recv_control::<ClientBound>()).await? {
                 ClientBound::Opened { session_id } => session_id,
                 ClientBound::Error { message, .. } => return Err(NetError::Protocol(message)),
-
                 other => {
                     return Err(NetError::Protocol(format!(
                         "expected Opened, got {other:?}"
@@ -302,7 +297,6 @@ async fn connect_and_attach(
     match with_timeout(channel.recv_control::<ClientBound>()).await? {
         ClientBound::Attached(snapshot) => Ok((channel, snapshot)),
         ClientBound::Error { message, .. } => Err(NetError::Protocol(message)),
-
         other => Err(NetError::Protocol(format!(
             "expected Attached, got {other:?}"
         ))),
@@ -340,7 +334,6 @@ async fn reconnect(
 
                 return Some(attached);
             }
-
             Err(error) => {
                 // A host rejection (session killed, device revoked) will not
                 // change on retry. Local failures and timeouts may recover.
@@ -363,10 +356,8 @@ async fn reconnect(
 enum PumpExit {
     /// The local side hung up (tab closed) or stopped consuming output.
     Local,
-
     /// The remote shell exited, or the host rejected the stream.
     SessionEnded,
-
     /// The transport died; the session itself may still be alive on the host.
     Disconnected,
 }
@@ -435,7 +426,6 @@ fn on_inbound_frame(
                 return Some(PumpExit::Local);
             }
         }
-
         Ok(Frame::Exited { .. }) => return Some(PumpExit::SessionEnded),
         // Control replies to mid-session requests are not used by
         // the byte-stream consumer; ignore rather than error.
@@ -507,11 +497,9 @@ async fn fetch_session_list(
     // Timeout (retryable), not a protocol violation.
     match time::timeout(Duration::from_secs(10), channel.recv_control()).await {
         Ok(Ok(ClientBound::SessionList(list))) => Ok(list),
-
         Ok(Ok(other)) => Err(NetError::Protocol(format!(
             "expected SessionList, got {other:?}"
         ))),
-
         Ok(Err(e)) => Err(e),
         Err(_) => Err(NetError::Timeout),
     }

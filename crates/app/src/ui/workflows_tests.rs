@@ -123,6 +123,7 @@ fn an_agent_outside_every_reported_phase_is_still_listed() {
 #[test]
 fn run_totals_omit_what_the_provider_did_not_report() {
     let mut subject = run(Vec::new(), vec![agent(1, None), agent(2, None)]);
+
     let totals = run_totals(&subject);
 
     assert!(totals.contains('2'), "{totals}");
@@ -150,10 +151,12 @@ fn every_state_has_its_own_label() {
         WorkflowRunState::Stopped,
     ] {
         subject.state = state;
+
         seen.push(run_state_label(&subject));
     }
 
     seen.sort();
+
     seen.dedup();
 
     assert_eq!(seen.len(), 5, "run states must be distinguishable");
@@ -169,6 +172,7 @@ fn every_state_has_its_own_label() {
     .collect();
 
     seen.sort();
+
     seen.dedup();
 
     assert_eq!(seen.len(), 4, "agent states must be distinguishable");

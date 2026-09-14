@@ -103,8 +103,11 @@ fn single_select_replaces_and_multi_select_answers_follow_option_order() {
     assert!(!draft.is_complete());
 
     draft.toggle(0, 1);
+
     draft.toggle(0, 0);
+
     draft.toggle(1, 2);
+
     draft.toggle(1, 0);
 
     assert!(draft.is_complete());
@@ -114,6 +117,7 @@ fn single_select_replaces_and_multi_select_answers_follow_option_order() {
     );
 
     draft.toggle(1, 0);
+
     draft.toggle(1, 2);
 
     assert!(!draft.is_complete());
@@ -328,6 +332,7 @@ fn reconnect_restores_only_async_drafts_for_the_same_provider_and_thread() {
     let key = receive(&mut input, &runtime, "async", QuestionMode::Async);
 
     receive(&mut input, &runtime, "blocking", QuestionMode::Blocking);
+
     receive(&mut input, &runtime, "optional", QuestionMode::Optional);
 
     input
@@ -361,6 +366,7 @@ fn reconnect_restores_only_async_drafts_for_the_same_provider_and_thread() {
     assert_eq!(backend(&mut runtime).restored_questions.len(), 1);
 
     backend(&mut runtime).recovery = Some(RecoveryIdentity::new(AgentKind::DeepSeek, "thread"));
+
     input.restore(&mut runtime);
 
     assert_eq!(input.batches()[0].status(), QuestionStatus::Expired);
@@ -385,7 +391,9 @@ fn old_epoch_completions_cannot_settle_or_reopen_a_restored_draft() {
     let epoch = runtime.begin_start();
 
     input.starting(epoch);
+
     runtime.ready();
+
     input.restore(&mut runtime);
 
     assert_eq!(
@@ -412,7 +420,9 @@ fn completion_is_applied_once_and_waiting_ends_only_after_the_last_blocking_requ
     let mut input = SessionInput::default();
 
     input.restore(&mut runtime);
+
     receive(&mut input, &runtime, "first", QuestionMode::Blocking);
+
     receive(&mut input, &runtime, "second", QuestionMode::Blocking);
 
     assert!(
@@ -506,6 +516,7 @@ fn approvals_distinguish_rejection_immediate_settlement_and_confirmation() {
     let mut input = SessionInput::default();
 
     input.restore(&mut runtime);
+
     input.ask_approval("Run command".into());
 
     assert_eq!(
@@ -524,6 +535,7 @@ fn approvals_distinguish_rejection_immediate_settlement_and_confirmation() {
     assert!(!input.resolve_approval(runtime.epoch()));
 
     backend(&mut runtime).approval_waits = true;
+
     input.ask_approval("Another command".into());
 
     assert_eq!(
@@ -551,6 +563,7 @@ fn disconnect_clears_approval_and_prevents_writes_to_a_retired_backend() {
     let key = receive(&mut input, &runtime, "request", QuestionMode::Async);
 
     input.ask_approval("Run command".into());
+
     input.starting(runtime.begin_start());
 
     assert!(input.approval().is_none());
@@ -571,6 +584,7 @@ fn synchronous_question_responses_settle_once_and_clear_secrets() {
     let mut input = SessionInput::default();
 
     input.restore(&mut runtime);
+
     backend(&mut runtime).input_result = Ok(QuestionResponse::Settled);
 
     let mut request = request("secret", QuestionMode::Blocking);

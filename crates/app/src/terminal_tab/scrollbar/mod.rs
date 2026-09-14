@@ -58,6 +58,7 @@ pub(super) fn scrollbar_element(
                 cx.listener(|this, event: &DragMoveEvent<ScrollbarDrag>, window, cx| {
                     if this.model.scrollbar.is_dragging() {
                         cx.stop_propagation();
+
                         this.on_mouse_move(&event.event, window, cx);
                     }
                 }),

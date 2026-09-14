@@ -23,6 +23,7 @@ pub(crate) fn initialize(cx: &mut App) {
         cx.spawn(async move |cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
+
                 cx.update(|_| flush());
             }
         })

@@ -25,10 +25,8 @@ pub struct PairingCode {
 pub enum PairingCodeError {
     #[error("pairing code must start with {CODE_PREFIX}")]
     MissingPrefix,
-
     #[error("pairing code is not valid base32")]
     InvalidBase32,
-
     #[error("pairing code payload is malformed")]
     Malformed,
 }

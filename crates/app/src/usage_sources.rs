@@ -7,11 +7,10 @@ use nmt_agent::claude_code::usage_fetcher::{UsageFetchError, fetch_with_cancel};
 use nmt_agent::codex::usage_fetcher::fetch;
 use nmt_agent::launcher::AgentCli;
 use nmt_agent::usage::UsageSnapshot;
+use nmt_config::profile::AgentProfileKind;
 use nmt_platform::process::{decode_child_output, hidden_cmd_command};
 
 use crate::daily_usage::{DailyTokenUsage, parse_usage};
-use nmt_config::profile::AgentProfileKind;
-
 use crate::ui::AppSettings;
 use crate::usage_refresh::{FetchError, UsageSource};
 

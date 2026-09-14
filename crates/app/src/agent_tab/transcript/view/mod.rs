@@ -3,6 +3,34 @@ mod tests;
 #[cfg(test)]
 mod typewriter_tests;
 
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::mem;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use chrono::{DateTime, Local, Utc};
+use gpui::prelude::*;
+use gpui::{
+    AnyElement, App, Bounds, ClipboardItem, Context, Div, FollowMode, FontWeight, Image,
+    ImageFormat, IntoElement, ListAlignment, ListOffset, ListState, ObjectFit, Pixels, Render,
+    ScrollHandle, SharedString, Window, div, img, list, px, relative,
+};
+use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::modern_menu::{ModernMenu, ModernMenuExt as _};
+use gpui_component::scroll::Scrollbar;
+use gpui_component::shimmer::ShimmerText;
+use gpui_component::spinner::Spinner;
+use gpui_component::{
+    ActiveTheme as _, ElementExt as _, Icon, IconName, Sizable as _, h_flex, text, v_flex,
+};
+use nmt_agent::chat::{Item as SessionItem, Question};
+use nmt_agent::transcript::conversation::{ConversationImage, ConversationState};
+use nmt_config::agent::CollapseRows;
+use nmt_profiling::transcript::{Operation, Probe};
+use rust_i18n::t;
+
 use crate::agent_tab::AgentPane;
 use crate::agent_tab::capabilities::AgentCapabilities as _;
 use crate::agent_tab::composer::attachments::MAX_ATTACHMENTS;
@@ -38,32 +66,6 @@ use crate::agent_tab::transcript::{
     entry_copy_text, hidden, is_work_row, should_show_jump_to_latest, truncated_user_prompt,
     working_label,
 };
-use chrono::{DateTime, Local, Utc};
-use gpui::prelude::*;
-use gpui::{
-    AnyElement, App, Bounds, ClipboardItem, Context, Div, FollowMode, FontWeight, Image,
-    ImageFormat, IntoElement, ListAlignment, ListOffset, ListState, ObjectFit, Pixels, Render,
-    ScrollHandle, SharedString, Window, div, img, list, px, relative,
-};
-use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::modern_menu::{ModernMenu, ModernMenuExt as _};
-use gpui_component::scroll::Scrollbar;
-use gpui_component::shimmer::ShimmerText;
-use gpui_component::spinner::Spinner;
-use gpui_component::{
-    ActiveTheme as _, ElementExt as _, Icon, IconName, Sizable as _, h_flex, text, v_flex,
-};
-use nmt_agent::chat::{Item as SessionItem, Question};
-use nmt_agent::transcript::conversation::{ConversationImage, ConversationState};
-use nmt_config::agent::CollapseRows;
-use nmt_profiling::transcript::{Operation, Probe};
-use rust_i18n::t;
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
-use std::mem;
-use std::rc::Rc;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 /// One agent conversation as the user reads it: the entry list, the row
 /// structure derived from it, and every piece of view state that structure
@@ -213,7 +215,9 @@ impl TranscriptView {
         }
 
         self.code_transcripts.invalidate_from(change.first);
+
         self.row_cache.invalidate(change.first);
+
         self.observed_version = version;
     }
 
@@ -245,8 +249,11 @@ impl TranscriptView {
         }
 
         self.conversation = conversation;
+
         self.reset_presentation();
+
         self.observed_version = self.conversation.borrow().version();
+
         self.row_cache.invalidate(0);
 
         cx.notify();
@@ -269,15 +276,19 @@ impl TranscriptView {
             .any(|(old, new)| old.item.id() != new.item.id());
 
         conversation.content.replace(entries);
+
         conversation.changed(first_changed, None);
+
         drop(conversation);
 
         if moved {
             self.disclosures.clear();
+
             self.image_previews.borrow_mut().clear();
         }
 
         self.attribution = attribution;
+
         self.sync_content();
 
         cx.notify();
@@ -285,14 +296,21 @@ impl TranscriptView {
 
     pub(crate) fn reset_presentation(&mut self) {
         self.preview.image_preview = ImagePreview::Closed;
+
         self.image_previews.borrow_mut().clear();
+
         self.row_cache.invalidate(0);
+
         self.source_revision = None;
         self.picker.stashed_position = None;
         self.picker.reserve_below = false;
+
         self.scroll_to_bottom();
+
         self.disclosures.clear();
+
         self.code_transcripts.clear();
+
         self.typewriter = None;
     }
 
@@ -303,7 +321,6 @@ impl TranscriptView {
             Some(typewriter) if typewriter.index() == index => {
                 shown_prefix(text, typewriter.shown())
             }
-
             _ => text,
         }
     }
@@ -392,7 +409,9 @@ impl TranscriptView {
     /// leaves no elapsed-time row behind for work that did not happen.
     pub(crate) fn discard_turn(&mut self, turn: u64, cx: &mut Context<Self>) {
         self.conversation.borrow_mut().live.discard();
+
         self.conversation.borrow_mut().turns.forget(turn);
+
         self.invalidate_turn_rows(turn);
 
         cx.notify();
@@ -447,26 +466,21 @@ impl TranscriptView {
         let row = match spec {
             RowSpec::Entry { index, .. } => self.render_entry_row(index, window, cx),
             RowSpec::Work { index, .. } => self.render_work_row(index, window, cx),
-
             RowSpec::TurnFold {
                 turn,
                 row_count,
                 folded,
             } => render_turn_fold(&self.disclosures, turn, row_count, folded, cx),
-
             RowSpec::TurnSummary {
                 seconds,
                 output_tokens,
             } => render_turn_summary(seconds, output_tokens, cx),
-
             RowSpec::Interrupted { output_tokens, .. } => render_interrupted_row(output_tokens, cx),
-
             RowSpec::RunToggle {
                 run_start,
                 tool_count,
                 expanded,
             } => render_run_toggle(&self.disclosures, run_start, tool_count, expanded, cx),
-
             RowSpec::Working { compacting } => self.render_working_row(compacting, cx),
         };
 
@@ -493,7 +507,6 @@ impl TranscriptView {
                     .pl(px(TRANSCRIPT_TEXT_INSET))
                     .child(body)
                     .into_any_element(),
-
                 false => body.into_any_element(),
             },
             cx,
@@ -517,7 +530,6 @@ impl TranscriptView {
                 cx.entity().downgrade(),
             )
             .into_any_element(),
-
             _ => row.into_any_element(),
         }
     }
@@ -675,7 +687,6 @@ impl TranscriptView {
 
         match &entry.item {
             SessionItem::UserMessage { text: Some(text) } => self.render_user_row(index, text, cx),
-
             SessionItem::AgentMessage {
                 id,
                 text: Some(text),
@@ -683,13 +694,10 @@ impl TranscriptView {
             } => {
                 self.render_question_message(index, id.clone(), text.clone(), questions.clone(), cx)
             }
-
             SessionItem::AgentMessage {
                 text: Some(text), ..
             } => self.render_agent_row(index, self.shown_reply(index, text).to_string(), cx),
-
             SessionItem::Error { text } => self.render_error_row(index, text.clone(), cx),
-
             SessionItem::Compaction { detail, .. } => {
                 let detail = detail.clone();
 
@@ -703,7 +711,6 @@ impl TranscriptView {
                     cx,
                 )
             }
-
             item if is_work_row(item) => self.render_work_row(index, window, cx),
             _ => div().into_any_element(),
         }
@@ -840,7 +847,6 @@ impl TranscriptView {
                         cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
                     })
                     .icon(IconName::Copy),
-
                 None => menu,
             }
         }
@@ -1248,7 +1254,6 @@ impl TranscriptView {
                         Some(detail),
                     )
                 }
-
                 SessionItem::FileChange {
                     paths,
                     diff,
@@ -1261,7 +1266,6 @@ impl TranscriptView {
                     Some(status.as_deref().unwrap_or("inProgress").to_string()),
                     diff.as_deref().filter(|diff| !diff.trim().is_empty()),
                 ),
-
                 SessionItem::Other {
                     kind,
                     title,
@@ -1283,7 +1287,6 @@ impl TranscriptView {
                     Some(status.as_deref().unwrap_or("inProgress").to_string()),
                     output.as_deref().filter(|output| !output.trim().is_empty()),
                 ),
-
                 SessionItem::Reasoning { summary, .. } => (
                     IconName::Bot,
                     t!("agent-transcript-thinking").to_string(),
@@ -1291,7 +1294,6 @@ impl TranscriptView {
                     None,
                     summary.as_deref().filter(|text| !text.trim().is_empty()),
                 ),
-
                 _ => return div().into_any_element(),
             };
 
@@ -1556,6 +1558,7 @@ impl TranscriptView {
 
         if self.row_cache.mode != Some(collapse) {
             self.row_cache.mode = Some(collapse);
+
             self.row_cache.invalidate(0);
         }
 
@@ -1589,11 +1592,13 @@ impl TranscriptView {
         // Reconsider the preceding row's gap along with the changed suffix.
         if row_start > 0 {
             row_start -= 1;
+
             specs.push(self.rows[row_start].spec.clone());
         }
 
         while start < items.len() {
             let turn = items[start].turn;
+
             let mut end = start + 1;
 
             while end < items.len() && items[end].turn == turn {
@@ -1601,7 +1606,9 @@ impl TranscriptView {
             }
 
             self.turn_specs(turn, start, end, collapse, &mut specs);
+
             self.row_cache.turns.push((end, row_start + specs.len()));
+
             start = end;
         }
 
@@ -1612,7 +1619,9 @@ impl TranscriptView {
         }
 
         self.sync_transcript_tail(row_start, &specs);
+
         specs.clear();
+
         self.row_cache.specs = specs;
     }
 
@@ -1677,7 +1686,6 @@ impl TranscriptView {
     fn invalidate_disclosure_rows(&mut self, key: RevealKey) {
         match key {
             RevealKey::Turn(turn) => self.invalidate_turn_rows(turn),
-
             RevealKey::Row(index) | RevealKey::Annotation(index) | RevealKey::Group(index) => {
                 self.row_cache.invalidate(index);
             }
@@ -1750,13 +1758,11 @@ impl TranscriptView {
         for cursor in (0..ix).rev() {
             match self.rows[cursor].spec {
                 RowSpec::Work { .. } => continue,
-
                 RowSpec::RunToggle {
                     run_start,
                     expanded: true,
                     ..
                 } => return Some(run_start),
-
                 _ => break,
             }
         }
@@ -1786,7 +1792,6 @@ impl TranscriptView {
                     folded: false,
                     ..
                 } if heads == turn => return Some(turn),
-
                 _ if self.row_turn(cursor) == Some(turn) => continue,
                 _ => break,
             }
@@ -1810,11 +1815,9 @@ impl TranscriptView {
             RowSpec::Entry { index, .. } | RowSpec::Work { index, .. } => {
                 Some(self.conversation.borrow().content.entries()[index].turn)
             }
-
             RowSpec::RunToggle { run_start, .. } => {
                 Some(self.conversation.borrow().content.entries()[run_start].turn)
             }
-
             RowSpec::TurnFold { turn, .. } | RowSpec::Interrupted { turn, .. } => Some(turn),
             RowSpec::TurnSummary { .. } | RowSpec::Working { .. } => None,
         }
@@ -1913,12 +1916,14 @@ impl TranscriptView {
     pub(crate) fn build_row_specs(&self, collapse: CollapseRows) -> Vec<RowSpec> {
         let mut rows = Vec::new();
         let mut start = 0;
+
         let shared = self.conversation.clone();
         let conversation = shared.borrow();
         let items = conversation.content.entries();
 
         while start < items.len() {
             let turn = items[start].turn;
+
             let mut end = start + 1;
 
             while end < items.len() && items[end].turn == turn {
@@ -1926,6 +1931,7 @@ impl TranscriptView {
             }
 
             self.turn_specs(turn, start, end, collapse, &mut rows);
+
             start = end;
         }
 
@@ -2054,6 +2060,7 @@ impl TranscriptView {
         rows: &mut Vec<RowSpec>,
     ) {
         let mut i = start;
+
         let shared = self.conversation.clone();
         let conversation = shared.borrow();
         let items = conversation.content.entries();
@@ -2069,6 +2076,7 @@ impl TranscriptView {
 
             if !is_work_row(item) {
                 rows.push(self.entry_spec(i));
+
                 i += 1;
 
                 continue;
@@ -2076,6 +2084,7 @@ impl TranscriptView {
 
             // Extend the run across consecutive (possibly hidden) work rows.
             let run_start = i;
+
             let mut visible: Vec<usize> = Vec::new();
             let mut j = i;
 
@@ -2129,11 +2138,9 @@ impl TranscriptView {
             SessionItem::Error { .. }
             | SessionItem::Compaction { .. }
             | SessionItem::UserMessage { .. } => true,
-
             SessionItem::AgentMessage {
                 questions: Some(_), ..
             } => true,
-
             SessionItem::AgentMessage { .. } => {
                 !hidden(&entry.item)
                     && items[index + 1..]
@@ -2144,7 +2151,6 @@ impl TranscriptView {
                                 || !matches!(later.item, SessionItem::AgentMessage { .. })
                         })
             }
-
             _ => false,
         }
     }
@@ -2170,6 +2176,7 @@ impl TranscriptView {
 
         if self.rows[start..] == new {
             new.clear();
+
             self.row_cache.scratch_rows = new;
 
             return;
@@ -2198,7 +2205,9 @@ impl TranscriptView {
         }
 
         self.rows.truncate(start);
+
         self.rows.append(&mut new);
+
         self.row_cache.scratch_rows = new;
     }
 
@@ -2287,7 +2296,6 @@ fn reply_chars(items: &[Entry], index: usize) -> usize {
         Some(SessionItem::AgentMessage {
             text: Some(text), ..
         }) => text.chars().count(),
-
         _ => 0,
     }
 }
@@ -2378,6 +2386,7 @@ impl Render for TranscriptView {
 
         if self.transcript_font != font {
             self.transcript_font = font;
+
             self.transcript_list.remeasure();
         }
 
@@ -2419,6 +2428,7 @@ impl Render for TranscriptView {
 
                                 if this.preview.transcript_width != Some(width) {
                                     this.preview.transcript_width = Some(width);
+
                                     this.transcript_list.remeasure();
 
                                     cx.notify();

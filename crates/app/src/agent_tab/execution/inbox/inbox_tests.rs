@@ -39,6 +39,7 @@ fn protocol_failure_keeps_accepted_messages_then_ends_with_one_error() {
     }
 
     sender.send(json!({"method":OUTPUT_FAILURE_METHOD,"params":{"message":"invalid JSON"}}));
+
     sender.send(json!("late"));
 
     for index in 0..4 {

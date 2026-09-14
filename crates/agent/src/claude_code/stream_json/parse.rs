@@ -269,17 +269,14 @@ pub(super) fn approval_description(tool_name: &str, input: &Value) -> String {
             "Run command: `{}`",
             input["command"].as_str().unwrap_or_default()
         ),
-
         "Edit" | "Write" | "NotebookEdit" => format!(
             "Edit file: {}",
             input["file_path"].as_str().unwrap_or("(unknown file)")
         ),
-
         "ExitPlanMode" => format!(
             "Approve Claude's plan:\n\n{}",
             input["plan"].as_str().unwrap_or_default()
         ),
-
         _ => {
             let detail = tool_title(input);
 

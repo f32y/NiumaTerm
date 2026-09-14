@@ -35,6 +35,7 @@ fn start(runtime: &mut SessionRuntime) -> u64 {
 #[test]
 fn replaced_session_rejects_output_exit_and_spawn_results() {
     let mut runtime = SessionRuntime::default();
+
     let old_epoch = start(&mut runtime);
     let current_epoch = start(&mut runtime);
 
@@ -71,6 +72,7 @@ fn replaced_session_rejects_output_exit_and_spawn_results() {
 #[test]
 fn start_failure_is_cleared_only_by_a_new_attempt() {
     let mut runtime = SessionRuntime::default();
+
     let epoch = runtime.begin_start();
 
     assert!(matches!(
@@ -96,7 +98,9 @@ fn ready_confirmation_does_not_end_an_active_turn() {
     let mut runtime = SessionRuntime::default();
 
     start(&mut runtime);
+
     runtime.turn_started();
+
     runtime.ready();
 
     assert_eq!(runtime.status(), Status::Running);
@@ -104,6 +108,7 @@ fn ready_confirmation_does_not_end_an_active_turn() {
     assert_eq!(runtime.status(), Status::Idle);
 
     runtime.turn_started();
+
     runtime.exited("connection lost");
 
     assert!(!runtime.turn_completed(2));
@@ -115,6 +120,7 @@ fn interruption_is_reported_when_the_matching_turn_completes() {
     let mut runtime = SessionRuntime::default();
 
     start(&mut runtime);
+
     runtime.turn_started();
 
     assert_eq!(runtime.interrupt(Some(7)), InterruptOutcome::Accepted);
@@ -123,12 +129,14 @@ fn interruption_is_reported_when_the_matching_turn_completes() {
     assert!(!runtime.turn_completed(7));
 
     runtime.turn_started();
+
     runtime.interrupt(Some(8));
 
     assert!(!runtime.turn_completed(9));
     assert!(!runtime.turn_completed(8));
 
     runtime.interrupt(Some(1));
+
     start(&mut runtime);
 
     assert!(!runtime.turn_completed(1));
@@ -144,6 +152,7 @@ fn update_wait_blocks_sends_and_cancellation_restores_delivery() {
     ));
 
     start(&mut runtime);
+
     runtime.wait_for_update();
 
     assert!(matches!(
@@ -172,6 +181,7 @@ fn retained_backend_cannot_receive_sends_during_replacement_or_after_exit() {
     let mut runtime = SessionRuntime::default();
 
     start(&mut runtime);
+
     runtime.begin_start();
 
     assert!(runtime.backend().is_some());
@@ -181,6 +191,7 @@ fn retained_backend_cannot_receive_sends_during_replacement_or_after_exit() {
     ));
 
     start(&mut runtime);
+
     runtime.exited("connection lost");
 
     assert!(matches!(
@@ -192,6 +203,7 @@ fn retained_backend_cannot_receive_sends_during_replacement_or_after_exit() {
 #[test]
 fn shutdown_rollback_cannot_replace_a_newer_session() {
     let mut runtime = SessionRuntime::default();
+
     let original_epoch = start(&mut runtime);
     let (shutdown_epoch, stopped) = runtime.suspend_for_update();
 
@@ -204,6 +216,7 @@ fn shutdown_rollback_cannot_replace_a_newer_session() {
     assert!(!runtime.cancel_update_wait());
 
     start(&mut runtime);
+
     runtime.turn_started();
 
     assert!(
@@ -238,7 +251,9 @@ fn recovery_stays_pending_until_ready_and_retains_retry_information() {
     let mut runtime = SessionRuntime::default();
 
     start(&mut runtime);
+
     runtime.suspend_for_update();
+
     runtime.provider_updating();
 
     let snapshot = RecoverySnapshot {
@@ -264,6 +279,7 @@ fn recovery_stays_pending_until_ready_and_retains_retry_information() {
     assert_eq!(runtime.restoration_readiness(), RestorationReadiness::Ready);
 
     runtime.reconnect(None);
+
     runtime.exited("reconnect failed");
 
     assert_eq!(

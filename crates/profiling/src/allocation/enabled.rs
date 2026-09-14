@@ -103,6 +103,7 @@ fn record(change: AllocationCounts) {
 
         if state.depth != 0 {
             state.counts.accumulate(change);
+
             slot.set(state);
         }
     });
@@ -200,6 +201,7 @@ impl AllocationScope {
             let mut state = slot.get();
 
             state.depth += 1;
+
             slot.set(state);
 
             state.counts
@@ -223,6 +225,7 @@ impl Drop for AllocationScope {
             let mut state = slot.get();
 
             state.depth -= 1;
+
             slot.set(state);
         });
     }

@@ -98,7 +98,6 @@ pub enum TabBarStyle {
     /// A row of tabs across the title bar.
     #[default]
     Horizontal,
-
     /// Tabs nested under their workspace in the sidebar.
     Vertical,
 }
@@ -111,14 +110,11 @@ pub enum WindowBackdrop {
     /// Windows 11 Mica Alt material: the same wallpaper tint as Mica, drawn
     /// stronger for tabbed shells.
     MicaAlt,
-
     /// Windows 11 Mica material: a static tint, no blur of the content behind.
     Mica,
-
     /// Blur the content behind the window (Acrylic).
     #[default]
     Acrylic,
-
     /// No material; translucent content shows the desktop directly.
     Off,
 }

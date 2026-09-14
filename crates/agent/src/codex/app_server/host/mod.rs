@@ -87,6 +87,7 @@ impl CodexHost {
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Arc<Self>, String> {
         let bootstrap = HostBootstrap::from_launches(launch, catalog)?;
+
         let mut on_stderr = Some(on_stderr);
 
         loop {
@@ -139,7 +140,6 @@ impl CodexHost {
 
             match &started {
                 Ok(host) => shared.host = Arc::downgrade(host),
-
                 Err(error) => {
                     shared.failed_attempts.push_back((attempt, error.clone()));
 
@@ -264,9 +264,9 @@ impl CodexHost {
 
         let result = match message["method"].as_str() {
             None => self.process.lock().write_line(message).map(|_| None),
-
             Some("turn/interrupt" | "thread/unsubscribe") => {
                 let mut process = self.process.lock();
+
                 let result = process.write_tracked(vec![message]);
 
                 if result.is_err() {
@@ -275,7 +275,6 @@ impl CodexHost {
 
                 result.map(Some)
             }
-
             _ => self.process.lock().write_tracked(vec![message]).map(Some),
         };
 
@@ -295,7 +294,6 @@ impl CodexHost {
 
                 Ok(())
             }
-
             Err(error) => Err(error.to_string()),
         }
     }
@@ -335,6 +333,7 @@ impl HostBootstrap {
         let mut launches = Vec::with_capacity(catalog.len() + 1);
 
         launches.push(selected);
+
         launches.extend(catalog.iter());
 
         let credential_names: HashSet<String> = launches
@@ -349,6 +348,7 @@ impl HostBootstrap {
             .collect();
 
         let key = HostKey::from_launch(selected, &credential_names);
+
         let mut credentials = BTreeMap::<String, (String, String)>::new();
         let mut providers = BTreeMap::<String, (String, String)>::new();
 
@@ -482,6 +482,7 @@ fn redact(text: &str, credential_values: &[String]) -> String {
         .collect();
 
     values.sort_unstable_by_key(|value| Reverse(value.len()));
+
     values.dedup();
 
     for value in values {

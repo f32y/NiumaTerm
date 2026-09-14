@@ -41,6 +41,7 @@ impl SettingsSurface {
         let editing = cx.new(|_| SettingsEditing::default());
 
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
+
         cx.observe(&editing, |_, _, cx| cx.notify()).detach();
 
         let theme_watcher = ui::watch_themes(&editing, cx);
@@ -88,6 +89,7 @@ mod tests {
     ) {
         cx.update(|cx| {
             gpui_component::init(cx);
+
             cx.set_global(AppSettings::default());
         });
 
@@ -166,8 +168,11 @@ mod tests {
         // completes, so both retained frames must stop referencing the page.
         for _ in 0..2 {
             windows[0].update(&mut cx, |_, _, cx| cx.notify()).unwrap();
+
             cx.run_until_parked();
+
             cx.refresh().unwrap();
+
             cx.run_until_parked();
         }
 

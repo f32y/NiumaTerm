@@ -4,11 +4,13 @@
 //! is written to, so what is kept for it is the command line, that file, and
 //! whether the row is a shell at all.
 
+use std::collections::{HashMap, VecDeque};
+
+use serde_json::Value;
+
 use crate::claude_code::tasks::ShellMeta;
 use crate::claude_code::tasks::records::result_content;
 use crate::json::text_field;
-use serde_json::Value;
-use std::collections::{HashMap, VecDeque};
 
 /// Shell entries retained per session, applied to both the metadata table and
 /// the command table beside it. Each entry is a few short strings, so this only
@@ -53,8 +55,11 @@ pub(super) struct ShellIndex {
 impl ShellIndex {
     pub(super) fn clear(&mut self) {
         self.shell_meta.clear();
+
         self.shell_meta_order.clear();
+
         self.bash_commands.clear();
+
         self.bash_command_order.clear();
     }
 

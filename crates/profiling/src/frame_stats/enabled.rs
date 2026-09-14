@@ -198,6 +198,7 @@ pub fn record_request_serviced() {
     }
 
     let now = Instant::now();
+
     let mut stats = STATS.lock();
 
     if let Some(armed_at) = stats.armed_at.take() {
@@ -235,6 +236,7 @@ pub fn record_draw(duration: Duration, dirty_views: usize) {
     let mut stats = STATS.lock();
 
     stats.draw.add(duration);
+
     stats.dirty_views += dirty_views as u64;
 }
 
@@ -246,9 +248,11 @@ pub fn record_present(duration: Duration, primitives: usize) {
     }
 
     let now = Instant::now();
+
     let mut stats = STATS.lock();
 
     stats.present.add(duration);
+
     stats.frames += 1;
     stats.primitives += primitives as u64;
 
@@ -295,6 +299,7 @@ pub fn record_vsync_tick(short_wait: bool) {
     }
 
     let now = Instant::now();
+
     let mut stats = STATS.lock();
 
     stats.vsync_ticks += 1;

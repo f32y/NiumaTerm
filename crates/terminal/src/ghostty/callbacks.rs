@@ -160,6 +160,7 @@ unsafe extern "C" fn decode_png_cb(
 
     unsafe {
         ptr::copy_nonoverlapping(rgba.as_ptr(), buf, rgba.len());
+
         (*out).width = w;
         (*out).height = h;
         (*out).data = buf;

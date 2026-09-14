@@ -108,7 +108,6 @@ fn build_key_sequence(key: &KeyInput, mods: ModifiersState, flags: KeyEncodeFlag
             payload,
             terminator,
         }) => (payload, terminator),
-
         _ => return Vec::new(),
     };
 
@@ -216,7 +215,6 @@ pub fn encode_terminal_input(
                 Vec::new()
             }
         }
-
         ElementState::Pressed => {
             if let Some(bytes) = encode_terminal_key(input, modifiers, flags) {
                 bytes
@@ -240,7 +238,9 @@ pub fn bracket_paste(body: &[u8], bracketed: bool) -> Vec<u8> {
     let mut out = Vec::with_capacity(body.len() + 12);
 
     out.extend_from_slice(b"\x1b[200~");
+
     out.extend_from_slice(body);
+
     out.extend_from_slice(b"\x1b[201~");
 
     out
@@ -429,6 +429,7 @@ impl SequenceBuilder {
             };
 
             let alternate_key_code: u32 = ch.into();
+
             let mut unicode_key_code: u32 = unshifted_ch.into();
 
             // Try to get the base for keys which change based on modifier, like `1` for `!`.
@@ -486,7 +487,6 @@ impl SequenceBuilder {
             Key::Character("-") => "57412",
             Key::Character("+") => "57413",
             Key::Character("=") => "57415",
-
             Key::Named(named) => match named {
                 NamedKey::Enter => "57414",
                 NamedKey::ArrowLeft => "57417",
@@ -501,7 +501,6 @@ impl SequenceBuilder {
                 NamedKey::Delete => "57426",
                 _ => return None,
             },
-
             _ => return None,
         };
 
@@ -710,7 +709,6 @@ impl SequenceBase {
 enum SequenceTerminator {
     /// The normal key esc sequence terminator defined by xterm/dec.
     Normal(char),
-
     /// The terminator is for kitty escape sequence.
     Kitty,
 }
@@ -733,8 +731,11 @@ impl From<ModifiersState> for SequenceModifiers {
         let mut modifiers = Self::empty();
 
         modifiers.set(Self::SHIFT, mods.shift_key());
+
         modifiers.set(Self::ALT, mods.alt_key());
+
         modifiers.set(Self::CONTROL, mods.control_key());
+
         modifiers.set(Self::SUPER, mods.super_key());
 
         modifiers

@@ -57,7 +57,9 @@ fn cli_session_starts_sends_images_and_rejects_cross_provider_recovery_without_a
     };
 
     let (sender, receiver) = mpsc::channel();
+
     let mut runtime = SessionRuntime::default();
+
     let epoch = runtime.begin_start();
 
     let backend = Backend::spawn(

@@ -7,11 +7,12 @@
 #[path = "lifecycle_tests.rs"]
 mod lifecycle_tests;
 
+use serde_json::Value;
+
 use crate::background_task::BackgroundTaskKey;
 use crate::chat::{Event, SendOutcome};
 use crate::session::backend::{Backend, RecoveryIdentity};
 use crate::session::children::ChildAgents;
-use serde_json::Value;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -148,7 +149,6 @@ impl SessionRuntime {
 
                 StartOutcome::Installed
             }
-
             Err(message) => {
                 self.status = Status::Exited;
                 self.start_failure = Some(message.clone());
@@ -223,7 +223,6 @@ impl SessionRuntime {
 
         match self.backend.as_mut() {
             None => InterruptOutcome::Unavailable,
-
             Some(backend) => {
                 if backend.interrupt() {
                     InterruptOutcome::Accepted
@@ -321,11 +320,9 @@ impl SessionRuntime {
     pub fn restoration_readiness(&self) -> RestorationReadiness {
         match self.update_suspension.as_ref() {
             None if self.status == Status::Idle => RestorationReadiness::Ready,
-
             Some(UpdateSuspension::Failed(message)) => {
                 RestorationReadiness::Failed(message.clone())
             }
-
             _ => RestorationReadiness::Pending,
         }
     }

@@ -16,7 +16,6 @@ pub enum Wake {
     /// Terminal content changed (PTY damage) or a UI repaint was requested. Carries
     /// the source surface id so the shell repaints only when it is the active tab.
     Content(u64),
-
     /// A user-visible `HostEvent` was enqueued on the surface with this id. Renders
     /// and rebuilds chrome.
     Chrome(u64),

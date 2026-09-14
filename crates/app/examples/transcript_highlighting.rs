@@ -119,6 +119,7 @@ fn main() {
             .detach();
 
             gpui_component::init(cx);
+
             Theme::change(ThemeMode::Dark, None, cx);
 
             syntax::register_languages()

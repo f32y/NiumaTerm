@@ -183,6 +183,7 @@ pub(crate) fn manual_check_profiles(profiles: &[AgentProfile], cx: &mut App) {
         });
 
         worker.await;
+
         cx.update(AgentUpdates::notify_changed);
     })
     .detach();
@@ -225,6 +226,7 @@ async fn run_automatic_checks(cx: &mut AsyncApp) {
             });
 
             worker.await;
+
             cx.update(AgentUpdates::notify_changed);
         }
 

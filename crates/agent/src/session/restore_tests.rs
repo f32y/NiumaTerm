@@ -129,6 +129,7 @@ fn accepted_protocol_resume_is_busy_until_replay_and_failure_restores_old_status
 fn an_old_read_cannot_replace_a_new_selection_even_for_the_same_session_id() {
     let mut runtime = ready_runtime();
     let mut restore = ConversationRestore::default();
+
     let old = read(&mut restore, &mut runtime);
 
     restore.failed(&mut runtime);
@@ -148,9 +149,11 @@ fn an_old_read_cannot_replace_a_new_selection_even_for_the_same_session_id() {
 fn a_read_from_an_old_epoch_cannot_restart_or_change_the_new_status() {
     let mut runtime = ready_runtime();
     let mut restore = ConversationRestore::default();
+
     let request = read(&mut restore, &mut runtime);
 
     runtime.begin_start();
+
     runtime.turn_started();
 
     assert!(matches!(
@@ -165,6 +168,7 @@ fn changed_directory_retires_the_read_and_releases_the_old_status() {
     for cwd in [None, Some("other")] {
         let mut runtime = ready_runtime();
         let mut restore = ConversationRestore::default();
+
         let request = read(&mut restore, &mut runtime);
 
         assert!(matches!(
@@ -179,6 +183,7 @@ fn changed_directory_retires_the_read_and_releases_the_old_status() {
 fn failed_disk_read_does_not_start_a_replacement() {
     let mut runtime = ready_runtime();
     let mut restore = ConversationRestore::default();
+
     let request = read(&mut restore, &mut runtime);
 
     assert!(
@@ -195,6 +200,7 @@ fn failed_disk_read_does_not_start_a_replacement() {
 fn local_replay_moves_once_after_the_matching_restart_becomes_ready() {
     let mut runtime = ready_runtime();
     let mut restore = ConversationRestore::default();
+
     let request = read(&mut restore, &mut runtime);
 
     let replay = vec![ReplayTurn {
@@ -243,6 +249,7 @@ fn unrelated_starts_and_startup_failures_drop_unpublished_replay() {
     ] {
         let mut runtime = ready_runtime();
         let mut restore = ConversationRestore::default();
+
         let request = read(&mut restore, &mut runtime);
 
         restore.loaded(
@@ -261,6 +268,7 @@ fn unrelated_starts_and_startup_failures_drop_unpublished_replay() {
 
     let mut runtime = ready_runtime();
     let mut restore = ConversationRestore::default();
+
     let request = read(&mut restore, &mut runtime);
 
     let ReplayLoaded::Restart(identity) =
@@ -320,6 +328,7 @@ fn missing_history_is_an_error_instead_of_an_empty_replay() {
 fn old_backend_ready_and_replay_cannot_complete_an_in_progress_disk_read() {
     let mut runtime = ready_runtime();
     let mut restore = ConversationRestore::default();
+
     let request = read(&mut restore, &mut runtime);
 
     assert!(matches!(

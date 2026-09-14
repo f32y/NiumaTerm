@@ -233,7 +233,9 @@ fn main() {
         notification.margins.top = px(16.);
 
         cx.set_global(AppSettings::load());
+
         ui::install_terminal_settings(cx);
+
         ui::install_agent_settings(cx);
 
         let agent_profiles = cx
@@ -244,6 +246,7 @@ fn main() {
             .clone();
 
         agent_updates::initialize(testing, &agent_profiles, cx);
+
         input_history::initialize(testing, cx);
 
         #[cfg(windows)]
@@ -346,7 +349,9 @@ fn main() {
         }
 
         cx.set_global(WindowRegistry(Vec::new()));
+
         cx.set_global(ShellRegistry(Vec::new()));
+
         cx.set_global(LastActiveWindow(None));
 
         cx.set_global::<AgentThreadDefaults>(thread_settings_from_defaults(
@@ -433,6 +438,7 @@ where
         .try_get_matches_from(args)
         .unwrap_or_else(|err| {
             eprintln!("{err}");
+
             process::exit(2);
         });
 
@@ -520,6 +526,7 @@ fn on_settings_changed(cx: &mut App) {
         handle
             .update(cx, |_, window, cx| {
                 window.set_background_appearance(background);
+
                 window.set_appearance_override(Some(appearance), cx);
 
                 if language_changed {
@@ -693,9 +700,7 @@ fn on_ipc_cli(action: CliAction, cx: &mut App) {
             route,
             notification_id,
         } => on_ipc_focus_notification(&route, &notification_id, cx),
-
         CliAction::Activate => foreground_last_active(cx),
-
         CliAction::NewTab { path } => {
             let Some(path) = openable_directory(path, cx) else {
                 return;
@@ -759,7 +764,6 @@ fn on_ipc_cli(action: CliAction, cx: &mut App) {
                 open_window_at(&path, cx);
             }
         }
-
         CliAction::NewWindow { path } => {
             let Some(path) = openable_directory(path, cx) else {
                 return;
@@ -779,6 +783,7 @@ fn openable_directory(path: path::PathBuf, cx: &mut App) -> Option<path::PathBuf
     }
 
     warn!("nmt:// target is not a directory: {}", path.display());
+
     foreground_last_active(cx);
 
     None

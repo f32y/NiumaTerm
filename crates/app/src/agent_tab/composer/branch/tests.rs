@@ -46,7 +46,9 @@ fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>)
 
     let window = cx.update(|cx| {
         gpui_component::init(cx);
+
         cx.set_global(AgentSettings::default());
+
         cx.set_global(AgentThreadDefaults::default());
 
         cx.open_window(Default::default(), |window, cx| {
@@ -66,6 +68,7 @@ fn install(pane: &mut AgentPane) {
     let epoch = pane.session.borrow_mut().runtime.begin_start();
 
     pane.session.borrow_mut().branch.starting(epoch, None);
+
     pane.session.borrow_mut().restore.starting(epoch, None);
 
     let mut backend = TestBackend::new([], SlashCommandOutcome::Accepted, Vec::new())
@@ -154,6 +157,7 @@ fn prepare_local(pane: &mut AgentPane, action: RewindAction, cx: &mut Context<Ag
 
     let request = {
         let mut guard = pane.session.borrow_mut();
+
         let state = &mut *guard;
 
         state
@@ -164,6 +168,7 @@ fn prepare_local(pane: &mut AgentPane, action: RewindAction, cx: &mut Context<Ag
 
     {
         let mut guard = pane.session.borrow_mut();
+
         let state = &mut *guard;
 
         state.branch.checkpoints_loaded(
@@ -185,6 +190,7 @@ fn prepare_local(pane: &mut AgentPane, action: RewindAction, cx: &mut Context<Ag
 
     let update = {
         let mut guard = pane.session.borrow_mut();
+
         let state = &mut *guard;
 
         state.branch.rewind(&mut state.runtime, action)
@@ -192,10 +198,10 @@ fn prepare_local(pane: &mut AgentPane, action: RewindAction, cx: &mut Context<Ag
 
     let request = match update {
         BranchUpdate::CreateFork(request) => request,
-
         BranchUpdate::RestoringFiles(_) => {
             let BranchUpdate::CreateFork(request) = ({
                 let mut guard = pane.session.borrow_mut();
+
                 let state = &mut *guard;
 
                 state.branch.files_completed(state.runtime.epoch(), Ok(()))
@@ -205,12 +211,12 @@ fn prepare_local(pane: &mut AgentPane, action: RewindAction, cx: &mut Context<Ag
 
             request
         }
-
         _ => panic!("fork expected"),
     };
 
     let update = {
         let mut guard = pane.session.borrow_mut();
+
         let state = &mut *guard;
 
         state.branch.fork_created(
@@ -231,6 +237,7 @@ fn prepare_local(pane: &mut AgentPane, action: RewindAction, cx: &mut Context<Ag
 #[gpui::test]
 fn protocol_branch_keeps_old_rows_until_replay_and_fills_the_prompt_once(cx: &mut TestAppContext) {
     let (pane, window) = open_pane(cx);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     cx.update(|_, cx| pane.update(cx, |pane, _| install(pane)));
@@ -274,6 +281,7 @@ fn protocol_branch_keeps_old_rows_until_replay_and_fills_the_prompt_once(cx: &mu
 #[gpui::test]
 fn late_protocol_replay_does_not_overwrite_a_new_draft(cx: &mut TestAppContext) {
     let (pane, window) = open_pane(cx);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     cx.update(|_, cx| pane.update(cx, |pane, _| install(pane)));
@@ -302,6 +310,7 @@ fn late_protocol_replay_does_not_overwrite_a_new_draft(cx: &mut TestAppContext) 
 #[gpui::test]
 fn protocol_failure_preserves_conversation_and_does_not_refill_the_prompt(cx: &mut TestAppContext) {
     let (pane, window) = open_pane(cx);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     cx.update(|_, cx| pane.update(cx, |pane, _| install(pane)));
@@ -334,6 +343,7 @@ fn protocol_failure_preserves_conversation_and_does_not_refill_the_prompt(cx: &m
 #[gpui::test]
 fn local_branch_waits_for_ready_preserves_controls_and_keeps_later_drafts(cx: &mut TestAppContext) {
     let (pane, window) = open_pane(cx);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     cx.update(|_, cx| pane.update(cx, |pane, _| install(pane)));
@@ -393,6 +403,7 @@ fn local_branch_waits_for_ready_preserves_controls_and_keeps_later_drafts(cx: &m
 #[gpui::test]
 fn local_start_failure_keeps_old_rows_and_reports_files_already_restored(cx: &mut TestAppContext) {
     let (pane, window) = open_pane(cx);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     cx.update(|_, cx| pane.update(cx, |pane, _| install(pane)));
@@ -453,6 +464,7 @@ fn partial_success_picker_disables_repeating_files_but_allows_continuing_the_con
     cx: &mut TestAppContext,
 ) {
     let (pane, window) = open_pane(cx);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     cx.update(|_, cx| {
@@ -463,6 +475,7 @@ fn partial_success_picker_disables_repeating_files_but_allows_continuing_the_con
 
             let request = {
                 let mut guard = pane.session.borrow_mut();
+
                 let state = &mut *guard;
 
                 state
@@ -473,6 +486,7 @@ fn partial_success_picker_disables_repeating_files_but_allows_continuing_the_con
 
             {
                 let mut guard = pane.session.borrow_mut();
+
                 let state = &mut *guard;
 
                 state.branch.checkpoints_loaded(
@@ -484,6 +498,7 @@ fn partial_success_picker_disables_repeating_files_but_allows_continuing_the_con
 
             {
                 let mut guard = pane.session.borrow_mut();
+
                 let state = &mut *guard;
 
                 state
@@ -493,6 +508,7 @@ fn partial_success_picker_disables_repeating_files_but_allows_continuing_the_con
 
             {
                 let mut guard = pane.session.borrow_mut();
+
                 let state = &mut *guard;
 
                 state
@@ -502,6 +518,7 @@ fn partial_success_picker_disables_repeating_files_but_allows_continuing_the_con
 
             let BranchUpdate::CreateFork(request) = ({
                 let mut guard = pane.session.borrow_mut();
+
                 let state = &mut *guard;
 
                 state.branch.files_completed(state.runtime.epoch(), Ok(()))
@@ -511,6 +528,7 @@ fn partial_success_picker_disables_repeating_files_but_allows_continuing_the_con
 
             let update = {
                 let mut guard = pane.session.borrow_mut();
+
                 let state = &mut *guard;
 
                 state
@@ -537,6 +555,7 @@ fn partial_success_picker_disables_repeating_files_but_allows_continuing_the_con
 #[gpui::test]
 fn history_resume_cannot_take_over_an_open_branch_picker(cx: &mut TestAppContext) {
     let (pane, window) = open_pane(cx);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     cx.update(|_, cx| {

@@ -2,9 +2,10 @@
 #[path = "incremental_tests.rs"]
 mod incremental_tests;
 
+use nmt_config::agent::CollapseRows;
+
 use crate::agent_tab::transcript::RowSpec;
 use crate::agent_tab::transcript::rows::TranscriptRow;
-use nmt_config::agent::CollapseRows;
 
 #[derive(Default)]
 pub(super) struct RowCache {

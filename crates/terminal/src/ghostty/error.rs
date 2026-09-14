@@ -30,11 +30,9 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::OutOfMemory => f.write_str("libghostty-vt allocation failed"),
-
             Self::InvalidValue => {
                 f.write_str("libghostty-vt received or returned an invalid value")
             }
-
             Self::OutOfSpace => f.write_str("buffer is too small for libghostty-vt output"),
             Self::NoValue => f.write_str("libghostty-vt value is absent"),
             Self::Unknown(code) => write!(f, "unknown libghostty-vt result code {code}"),

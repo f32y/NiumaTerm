@@ -1,3 +1,11 @@
+use std::time::Duration;
+
+use gpui::{point, px};
+use gpui_component::input::Enter;
+use nmt_agent::chat::QueuedPrompt;
+use nmt_agent::{AgentWorkspace, MultiRootAccess};
+use nmt_config::system::NewlineShortcut;
+
 use crate::agent_tab::capabilities::AgentCapabilities as _;
 use crate::agent_tab::composer::prompt_with_response_annotations;
 use crate::agent_tab::session::UpdateSuspension;
@@ -7,12 +15,6 @@ use crate::agent_tab::{
     composer_enter_behavior, composer_stats_label, last_response_tone, multi_root_notice,
     queued_message_label, update_overlay_phase,
 };
-use gpui::{point, px};
-use gpui_component::input::Enter;
-use nmt_agent::chat::QueuedPrompt;
-use nmt_agent::{AgentWorkspace, MultiRootAccess};
-use nmt_config::system::NewlineShortcut;
-use std::time::Duration;
 
 #[test]
 fn queued_message_label_flattens_a_multi_line_prompt() {
@@ -195,6 +197,7 @@ fn the_last_response_mark_tracks_how_far_the_window_has_run() {
 #[test]
 fn a_still_pointer_does_not_take_the_highlight_back() {
     let mut history = SessionHistoryUi::default();
+
     let resting = point(px(40.), px(60.));
 
     assert!(history.point_at(1, resting), "the pointer arrived at a row");

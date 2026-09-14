@@ -56,6 +56,7 @@ fn disabling_agent_team_releases_the_runtime_and_keeps_the_saved_room(cx: &mut T
 
     cx.update(|cx| {
         gpui_component::init(cx);
+
         cx.set_global(AgentSettings::default());
     });
 
@@ -66,6 +67,7 @@ fn disabling_agent_team_releases_the_runtime_and_keeps_the_saved_room(cx: &mut T
         let room_id = runtime.read(cx).room().id();
         let weak = runtime.downgrade();
         let pane = cx.new(|cx| TeamPane::new(runtime, window, cx));
+
         let mut surface = TabSurface::Team(pane);
 
         assert!(surface.disable_team(cx));
@@ -155,8 +157,11 @@ fn inline_rename_routes_escape_to_cancellation(cx: &mut TestAppContext) {
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     cx.run_until_parked();
+
     cx.refresh().expect("render inline rename probe");
+
     cx.simulate_keystrokes("escape");
+
     cx.run_until_parked();
 
     assert!(cancelled.get());
@@ -294,9 +299,13 @@ fn title_bar_controls_stay_inside_a_narrow_window(cx: &mut TestAppContext) {
     // 640 - 3 * 46 - 8 leaves 494 pixels for application content.
     for width in [1200.0f32, 900.0, 700.0, MIN_WINDOW_WIDTH, 494.0] {
         probe.borrow_mut().clear();
+
         cx.simulate_resize(size(px(width), px(800.)));
+
         cx.run_until_parked();
+
         cx.refresh().unwrap();
+
         cx.run_until_parked();
 
         let captured = probe.borrow().clone();

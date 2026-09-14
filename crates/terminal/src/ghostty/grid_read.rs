@@ -24,7 +24,6 @@ fn style_color_resolve(c: &VtStyleColor, palette: &[VtColorRgb; 256]) -> Option<
 
             palette.get(idx).map(|&rgb| color_from_vt(rgb))
         }
-
         VtStyleColorTag::RGB => Some(color_from_vt(unsafe { c.value.rgb })),
         _ => None,
     }
@@ -46,7 +45,6 @@ fn grid_ref_graphemes(r: &VtGridRef) -> String {
 
     match unsafe { ghostty_grid_ref_graphemes(r, buf.as_mut_ptr(), buf.len(), &mut len) } {
         VtResult::SUCCESS => to_string(&buf[..len]),
-
         VtResult::OUT_OF_SPACE => {
             let mut big = vec![0u32; len];
 
@@ -55,7 +53,6 @@ fn grid_ref_graphemes(r: &VtGridRef) -> String {
                 _ => String::new(),
             }
         }
-
         _ => String::new(),
     }
 }
@@ -192,7 +189,6 @@ pub(super) fn visit_row_cells(
                         .into()
                 }
             }
-
             VtCellContentTag::CODEPOINT_GRAPHEME => grid_ref_graphemes(&grid_ref).into(),
             _ => CellText::default(), // BG_COLOR_*: no text
         };

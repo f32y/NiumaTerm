@@ -56,6 +56,7 @@ impl ThreadState {
         match method {
             "turn/started" => {
                 self.current_turn = params["turn"]["id"].as_str().map(str::to_owned);
+
                 self.turn_output_usage.begin_turn();
 
                 let mut events = vec![Event::TurnStarted];
@@ -66,13 +67,13 @@ impl ThreadState {
 
                 events
             }
-
             "turn/completed" => {
                 let mut events = self
                     .questions
                     .end_turn(params["turn"]["id"].as_str().unwrap_or_default());
 
                 self.current_turn = None;
+
                 self.turn_output_usage.finish_turn();
 
                 let error = (params["turn"]["status"].as_str() == Some("failed"))
@@ -98,7 +99,6 @@ impl ThreadState {
 
                 events
             }
-
             "thread/tokenUsage/updated" => {
                 let Some(usage) = parse_context_window_usage(&params["tokenUsage"]) else {
                     return Vec::new();
@@ -124,7 +124,6 @@ impl ThreadState {
 
                 events
             }
-
             "item/started" => {
                 let item = &params["item"];
 
@@ -137,7 +136,6 @@ impl ThreadState {
                     .into_iter()
                     .collect()
             }
-
             "item/completed" => {
                 let item = &params["item"];
 
@@ -154,15 +152,12 @@ impl ThreadState {
 
                 events
             }
-
             "item/agentMessage/delta" => delta_event(params, |item_id, delta| {
                 Event::AgentMessageDelta { item_id, delta }
             }),
-
             "item/reasoning/summaryTextDelta" => delta_event(params, |item_id, delta| {
                 Event::ReasoningSummaryDelta { item_id, delta }
             }),
-
             // Raw reasoning tokens stream under their own method and append to
             // the same text as the summary deltas, because a model that emits
             // raw tokens is the one that emits no summary. A model that sent
@@ -172,11 +167,9 @@ impl ThreadState {
             "item/reasoning/textDelta" => delta_event(params, |item_id, delta| {
                 Event::ReasoningSummaryDelta { item_id, delta }
             }),
-
             "item/commandExecution/outputDelta" => delta_event(params, |item_id, delta| {
                 Event::CommandOutputDelta { item_id, delta }
             }),
-
             "serverRequest/resolved" => {
                 if params["threadId"].as_str() != self.thread_id.as_deref() {
                     return Vec::new();
@@ -201,7 +194,6 @@ impl ThreadState {
 
                 Vec::new()
             }
-
             "error" => {
                 let message = params["error"]["message"]
                     .as_str()
@@ -214,7 +206,6 @@ impl ThreadState {
                     fatal: false,
                 }]
             }
-
             // The status carries a protocol token rather than a sentence, and
             // the working row it would reach shows text to the user. Child-agent
             // rows read the same notification through their own reducer, which

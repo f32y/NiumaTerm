@@ -76,13 +76,17 @@ fn profile_dialogs_keep_separate_drafts_and_release_cancelled_credentials(cx: &m
     });
 
     cx.run_until_parked();
+
     cx.refresh().unwrap();
 
     assert!(cancelled.upgrade().is_some());
 
     cx.update(|window, cx| window.close_dialog(cx));
+
     cx.run_until_parked();
+
     cx.refresh().unwrap();
+
     cx.run_until_parked();
 
     assert!(cancelled.upgrade().is_none());

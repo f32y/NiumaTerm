@@ -146,7 +146,6 @@ pub(crate) fn save_settings(window: &mut Window, cx: &mut App) -> bool {
 
             true
         }
-
         Err(error) => {
             warn!("failed to save settings: {error}");
 

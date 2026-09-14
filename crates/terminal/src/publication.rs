@@ -63,6 +63,7 @@ impl FrameStore {
 
         let discarded = {
             let mut state = self.state.lock();
+
             let old = mem::replace(&mut state.current, next);
 
             state.retired.push(old);

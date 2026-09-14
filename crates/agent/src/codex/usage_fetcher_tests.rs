@@ -5,13 +5,12 @@ use std::sync::{Arc, mpsc};
 #[cfg(windows)]
 use std::{fs, thread};
 
+use serde_json::json;
 #[cfg(windows)]
 use tempfile::tempdir;
 
 #[cfg(windows)]
 use crate::LaunchConfig;
-use serde_json::json;
-
 use crate::codex::usage_fetcher::*;
 
 #[test]

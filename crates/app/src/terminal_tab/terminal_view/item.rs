@@ -30,7 +30,6 @@ pub(crate) enum BlockListItem {
         selection: Option<(block_list::FrozenPoint, block_list::FrozenPoint)>,
         pane: Entity<TerminalPane>,
     },
-
     Live {
         frame: TerminalFrame,
 
@@ -58,7 +57,6 @@ pub(crate) enum BlockListItemPrepaint {
         view: block_list::FrozenView,
         shaped: Vec<ShapedLine>,
     },
-
     Live {
         tail_view: block_list::FrozenView,
         tail_shaped: Vec<ShapedLine>,
@@ -109,7 +107,6 @@ impl Element for BlockListItem {
                     .map(|item| block_list::item_px(item, *cols, cell.height_px, pad_rows))
                     .unwrap_or(0.0)
             }
-
             BlockListItem::Live {
                 frame,
                 history_rows,
@@ -181,7 +178,6 @@ impl Element for BlockListItem {
 
                 BlockListItemPrepaint::Frozen { view, shaped }
             }
-
             BlockListItem::Live {
                 frame,
                 history_rows,
@@ -248,7 +244,6 @@ impl Element for BlockListItem {
 
                 paint_frozen_images(bounds, view, *cell, window, true);
             }
-
             (
                 BlockListItem::Live { frame, cell, .. },
                 BlockListItemPrepaint::Live {
@@ -278,7 +273,6 @@ impl Element for BlockListItem {
                     cx,
                 );
             }
-
             _ => {}
         }
     }

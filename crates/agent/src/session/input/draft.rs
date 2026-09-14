@@ -75,6 +75,7 @@ impl QuestionDraft {
         }
 
         self.custom[question] = true;
+
         self.touch();
 
         true
@@ -152,6 +153,7 @@ impl QuestionDraft {
         let multi_select = entry.multi_select;
 
         self.touch();
+
         self.custom[question] = false;
 
         let picks = &mut self.selected[question];
@@ -163,9 +165,9 @@ impl QuestionDraft {
                 Some(index) => {
                     picks.remove(index);
                 }
-
                 None => {
                     picks.push(option);
+
                     picks.sort_unstable();
                 }
             }

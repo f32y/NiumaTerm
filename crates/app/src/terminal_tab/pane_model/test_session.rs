@@ -1,14 +1,12 @@
-use crate::terminal_tab::settings::TerminalSettings;
-use gpui::{FontFallbacks, px};
-use nmt_config::appearance::InputStyle;
-
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use gpui::{FontFallbacks, px};
 use nmt_config::CursorShape;
+use nmt_config::appearance::InputStyle;
 use nmt_config::colors::Colors;
 use nmt_config::system::NewlineShortcut;
 use nmt_platform::{EventedPty, Interest, Poll, ProcessReadWrite, Token, Waker, WinsizeBuilder};
@@ -20,6 +18,7 @@ use crate::terminal_tab::block_list::chrome::DurationLabels;
 use crate::terminal_tab::frame_source::TerminalFrameSource;
 use crate::terminal_tab::metrics::CellMetrics;
 use crate::terminal_tab::pane_model::{ClipboardAccess, FrameTheme, PaneController};
+use crate::terminal_tab::settings::TerminalSettings;
 use crate::terminal_tab::wake::wake_channel;
 
 struct TestPty {
@@ -150,6 +149,7 @@ impl EventedPty for TestPty {
 
 pub(crate) fn controller(vt: &[u8], engine_blocks: bool) -> (PaneController, Arc<Mutex<Vec<u8>>>) {
     let input = Arc::new(Mutex::new(Vec::new()));
+
     let mut output = vt.to_vec();
 
     output.extend_from_slice(b"\x1b]0;controller-ready\x07");
@@ -224,6 +224,7 @@ pub(crate) fn controller(vt: &[u8], engine_blocks: bool) -> (PaneController, Arc
     });
 
     controller.content_size = (320.0, 108.0);
+
     controller.refresh_frame();
 
     (controller, input)

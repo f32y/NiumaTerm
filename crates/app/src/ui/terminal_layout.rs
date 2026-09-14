@@ -84,7 +84,6 @@ impl<L> TerminalLayout<L> {
             } => {
                 state.update(cx, |state, cx| state.split_panel(index, before, cx));
             }
-
             SplitOutcome::Wrapped => {}
         }
 
@@ -104,7 +103,6 @@ impl<L> TerminalLayout<L> {
                     }
                 });
             }
-
             RemoveOutcome::Collapsed => {}
         }
 

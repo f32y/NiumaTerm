@@ -82,6 +82,7 @@ async fn noise_echo_through_relay() {
         .expect("client connect must succeed");
 
     let mut client_hs = Handshake::initiator_ik(&client_keys.private, &host_keys.public).unwrap();
+
     let msg1 = client_hs.write_message().unwrap();
 
     client_sock
@@ -256,7 +257,6 @@ async fn buffer_overflow_closes_client() {
 
                 break;
             }
-
             Some(Ok(_)) => continue,
             // Depending on timing the close can surface as a protocol error
             // after the relay drops us; that still proves the disconnect.

@@ -96,7 +96,6 @@ impl fmt::Display for RestartManagerError {
                 formatter,
                 "a Restart Manager session needs at least one file"
             ),
-
             Self::RelativePath(path) => {
                 write!(
                     formatter,
@@ -104,7 +103,6 @@ impl fmt::Display for RestartManagerError {
                     path.display()
                 )
             }
-
             Self::Windows { operation, code } => {
                 write!(
                     formatter,
@@ -144,6 +142,7 @@ impl<A: Api> Session<A> {
 
         let mut handle = 0;
         let mut key = [0u16; CCH_RM_SESSION_KEY as usize + 1];
+
         let code = api.start_session(&mut handle, key.as_mut_ptr());
 
         check(Operation::StartSession, code)?;
@@ -213,6 +212,7 @@ impl<A: Api> Session<A> {
             }
 
             check(Operation::ListApplications, code)?;
+
             processes.truncate(count as usize);
 
             return Ok(FileUsage {

@@ -28,7 +28,6 @@ pub enum WorkflowAgentState {
     Running,
     Done,
     Failed,
-
     /// The run ended before this agent did. Only a restored run reports it:
     /// a live agent always resolves to one of the states above.
     Stopped,

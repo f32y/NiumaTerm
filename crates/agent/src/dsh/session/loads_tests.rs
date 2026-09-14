@@ -50,15 +50,12 @@ fn failed_background_reads_deliver_results_and_end_pending_discovery() {
             PRESETS_FRAME => load_agent_presets(api, session, None, send),
             HISTORY_FRAME => load_sessions(api, None, send),
             SUBAGENTS_FRAME => load_subagents(api, session, 4, send),
-
             SUBAGENT_TRANSCRIPT_FRAME => {
                 load_subagent_transcript(api, session, "child".into(), true, send)
             }
-
             WORKFLOW_TRANSCRIPT_FRAME => {
                 load_workflow_transcript(api, "task".into(), "child".into(), send)
             }
-
             MODELS_FRAME => load_models(
                 api,
                 session,
@@ -68,7 +65,6 @@ fn failed_background_reads_deliver_results_and_end_pending_discovery() {
                 false,
                 send,
             ),
-
             _ => unreachable!(),
         }
 
@@ -98,14 +94,11 @@ fn failed_background_reads_deliver_results_and_end_pending_discovery() {
             COMMANDS_FRAME => {
                 assert!(matches!(&events[0], Event::Commands(commands) if commands.is_empty()))
             }
-
             SKILLS_FRAME => assert!(matches!(&events[0], Event::Skills(_))),
-
             SUBAGENT_TRANSCRIPT_FRAME => assert!(
                 matches!(&events[0], Event::BackgroundTaskTranscript { update, .. }
                 if !update.replace && matches!(update.state, Some(BackgroundTaskTranscriptState::Unavailable { .. })))
             ),
-
             _ => assert_eq!(
                 events.len(),
                 1,

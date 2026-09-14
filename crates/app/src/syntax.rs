@@ -113,10 +113,12 @@ pub fn register_languages() -> Result<usize> {
     }
 
     let registry = LanguageRegistry::singleton();
+
     let mut registered = 0;
 
     for (aliases, config) in languages {
         registry.register(&config.name, &config);
+
         registered += 1;
 
         for alias in aliases {

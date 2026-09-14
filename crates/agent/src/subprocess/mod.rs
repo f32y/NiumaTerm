@@ -138,7 +138,9 @@ impl JsonLineProcess {
 
             if let Err(message) = read_messages(&mut reader, provider, &deliver) {
                 warn!(provider, reason = %message, "agent protocol reader stopped");
+
                 deliver(json!({"method": OUTPUT_FAILURE_METHOD, "params": {"message": message}}));
+
                 reader_job.lock().take();
             }
 
@@ -172,6 +174,7 @@ impl JsonLineProcess {
             // Callers use this path for required replies and lifecycle controls.
             // A disconnected writer cannot deliver a required reply.
             self.stdin.take();
+
             self.job.lock().take();
         }
 
@@ -204,6 +207,7 @@ impl JsonLineProcess {
 
         if result.is_err() {
             self.stdin.take();
+
             self.job.lock().take();
         }
 
@@ -212,6 +216,7 @@ impl JsonLineProcess {
 
     pub(crate) fn abort(&mut self) {
         self.stdin.take();
+
         self.job.lock().take();
     }
 
@@ -236,11 +241,9 @@ impl JsonLineProcess {
 
                     return Ok(());
                 }
-
                 Ok(None) if started.elapsed() < timeout => {
                     thread::sleep(Duration::from_millis(20));
                 }
-
                 Ok(None) if force => {
                     self.job.lock().take();
 
@@ -250,14 +253,12 @@ impl JsonLineProcess {
 
                     return Ok(());
                 }
-
                 Ok(None) => {
                     return Err(format!(
                         "{} did not stop before the update timeout",
                         self.provider
                     ));
                 }
-
                 Err(error) => {
                     return Err(format!(
                         "could not observe {} process exit: {error}",
@@ -320,15 +321,14 @@ fn read_messages(
         match serde_json::from_slice::<Value>(raw) {
             Ok(message) if message.is_object() => {
                 started = true;
+
                 deliver(message);
             }
-
             Ok(_) => {
                 return Err(
                     "Agent protocol output must be a JSON object; the process was stopped.".into(),
                 );
             }
-
             Err(error) => {
                 let bracketed_notice =
                     [b"[warn]".as_slice(), b"[warning]", b"[info]"]

@@ -31,7 +31,6 @@ enum QuestionSource {
         question_ids: Vec<String>,
         submitted: Option<QuestionResolution>,
     },
-
     Message,
 }
 
@@ -159,7 +158,6 @@ impl QuestionState {
             QuestionSource::Request { submitted, .. } => {
                 submitted.unwrap_or(QuestionResolution::Expired)
             }
-
             QuestionSource::Message => return None,
         };
 
@@ -176,7 +174,6 @@ impl QuestionState {
                     turn_id: requested_turn,
                     ..
                 } if requested_turn == turn_id => Some(*rpc_id),
-
                 _ => None,
             })
             .collect();
@@ -243,7 +240,6 @@ impl Session {
 
         let request = match parsed {
             Ok(request) => request,
-
             Err(message) => {
                 self.send(json!({"jsonrpc": "2.0", "id": rpc_id,
                     "error": {"code": -32602, "message": message}}));
@@ -409,7 +405,6 @@ impl Session {
 
                 Ok(QuestionResponse::Pending)
             }
-
             QuestionSource::Message => {
                 let Some(answers) = answers else {
                     self.conversation.questions.pending.remove(id);

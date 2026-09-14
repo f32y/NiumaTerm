@@ -108,10 +108,8 @@ mod sys {
 #[derive(Debug)]
 pub enum Error {
     Io(io::Error),
-
     /// Error converting into utf8 string.
     IntoString(IntoStringError),
-
     /// Expected return size didn't match libproc's.
     InvalidSize,
 }
@@ -130,11 +128,9 @@ impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Error::InvalidSize => write!(f, "Invalid proc_pidinfo return size"),
-
             Error::Io(err) => {
                 write!(f, "Error getting current working directory: {err}")
             }
-
             Error::IntoString(err) => {
                 write!(f, "Error when parsing current working directory: {err}")
             }
@@ -244,6 +240,7 @@ fn proc_path(pid: i32) -> String {
 
 pub fn macos_cwd(pid: c_int) -> Result<PathBuf, Error> {
     let mut info = MaybeUninit::<sys::proc_vnodepathinfo>::uninit();
+
     let info_ptr = info.as_mut_ptr() as *mut c_void;
     let size = size_of::<sys::proc_vnodepathinfo>() as c_int;
 

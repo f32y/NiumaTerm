@@ -32,7 +32,6 @@ pub(crate) enum FrameImageKind {
         cell_y_offset: u32,
         source: [f32; 4],
     },
-
     /// One row-run of a virtual (Unicode-placeholder) placement, resolved against its
     /// `(image_id, placement_id)` metadata. Final geometry uses `compute_run_geometry`
     /// at paint (aspect-fit needs real cell metrics).
@@ -53,10 +52,8 @@ pub(crate) enum FrameImageKind {
 pub(crate) enum ZLayer {
     /// `z < i32::MIN / 2`: below cell backgrounds.
     BelowBackground,
-
     /// `i32::MIN / 2 <= z < 0`: above backgrounds, below cursor/text.
     BelowText,
-
     /// `z >= 0`: above cursor/text.
     AboveText,
 }
@@ -117,7 +114,6 @@ impl FrameImage {
 
                 Some(([dx, dy, dw, dh], source))
             }
-
             FrameImageKind::Virtual {
                 run,
                 placement_cols,
@@ -179,6 +175,7 @@ pub(crate) fn extract_frame_images(
     let mut out = Vec::new();
 
     extract_ordinary_images(buf, generations, &mut out);
+
     extract_virtual_images(buf, generations, &mut out);
 
     out
@@ -275,7 +272,6 @@ fn extract_virtual_images(
 
             match &mut current {
                 Some((cur, _)) if cur.can_append(&inc) => cur.append(),
-
                 _ => {
                     if let Some((run, start)) = current.take() {
                         push_virtual_run(buf, generations, run, start, row, out);

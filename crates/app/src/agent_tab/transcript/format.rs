@@ -58,7 +58,6 @@ pub(super) fn working_status_label(
             status = &status
         )
         .into_owned(),
-
         None => status,
     }
 }
@@ -94,7 +93,6 @@ pub(super) fn interrupted_status_label(output_tokens: Option<u64>) -> String {
             tokens = &compact_token_count(tokens)
         )
         .into_owned(),
-
         None => t!("agent-transcript-interrupted").to_string(),
     }
 }
@@ -114,7 +112,6 @@ pub(super) fn timed_token_label(verb: &str, seconds: u64, output_tokens: Option<
             tokens = &compact_token_count(tokens)
         )
         .into_owned(),
-
         None => duration,
     }
 }
@@ -168,7 +165,6 @@ pub(crate) fn hidden(item: &SessionItem) -> bool {
         | SessionItem::Reasoning { summary: text, .. } => {
             text.as_deref().is_none_or(|text| text.trim().is_empty())
         }
-
         _ => false,
     }
 }
@@ -246,6 +242,7 @@ pub(crate) fn strip_read_gutter(output: &str) -> Option<String> {
         }
 
         body.push_str(text);
+
         body.push('\n');
     }
 
@@ -276,10 +273,12 @@ pub(crate) fn command_execution_detail(command: &str, aggregated_output: Option<
     );
 
     detail.push_str("$ ");
+
     detail.push_str(command);
 
     if let Some(output) = aggregated_output.filter(|output| !output.is_empty()) {
         detail.push_str("\n\n");
+
         detail.push_str(&clean_output(output));
     }
 
@@ -308,19 +307,15 @@ pub(crate) fn entry_copy_text(item: &SessionItem) -> String {
             .map(visible_prompt)
             .unwrap_or_default()
             .to_string(),
-
         SessionItem::AgentMessage { text, .. } | SessionItem::Reasoning { summary: text, .. } => {
             text.clone().unwrap_or_default()
         }
-
         SessionItem::Error { text } => text.clone(),
-
         SessionItem::CommandExecution {
             command,
             aggregated_output,
             ..
         } => command_execution_detail(command, aggregated_output.as_deref()),
-
         SessionItem::FileChange {
             paths,
             diff,
@@ -334,7 +329,6 @@ pub(crate) fn entry_copy_text(item: &SessionItem) -> String {
                 diff = &clean_output(diff)
             )
             .into_owned(),
-
             None => t!(
                 "agent-transcript-file-edit",
                 paths = paths,
@@ -342,7 +336,6 @@ pub(crate) fn entry_copy_text(item: &SessionItem) -> String {
             )
             .into_owned(),
         },
-
         SessionItem::Other {
             kind,
             title,
@@ -355,13 +348,11 @@ pub(crate) fn entry_copy_text(item: &SessionItem) -> String {
                 status.as_deref().unwrap_or("inProgress"),
                 clean_output(output)
             ),
-
             None => format!(
                 "{kind} {title} — {}",
                 status.as_deref().unwrap_or("inProgress")
             ),
         },
-
         SessionItem::Compaction { detail, .. } => {
             let head = format!(
                 "{}\n{}",
@@ -409,7 +400,6 @@ pub(crate) fn compaction_accounting(detail: &Compaction) -> Vec<String> {
             compact_token_count(pre),
             compact_token_count(post)
         )),
-
         (Some(pre), None) => parts.push(
             t!(
                 "agent-transcript-compaction-from",
@@ -417,7 +407,6 @@ pub(crate) fn compaction_accounting(detail: &Compaction) -> Vec<String> {
             )
             .into_owned(),
         ),
-
         (None, Some(post)) => parts.push(
             t!(
                 "agent-transcript-compaction-to",
@@ -425,7 +414,6 @@ pub(crate) fn compaction_accounting(detail: &Compaction) -> Vec<String> {
             )
             .into_owned(),
         ),
-
         (None, None) => {}
     }
 
@@ -460,9 +448,7 @@ pub(crate) fn relative_time(at: SystemTime) -> String {
     match seconds {
         0..60 => t!("agent-history-now").to_string(),
         60..3600 => t!("agent-history-minutes", count = (seconds / 60)).into_owned(),
-
         3600..86400 => t!("agent-history-hours", count = (seconds / 3600)).into_owned(),
-
         _ => t!("agent-history-days", count = (seconds / 86400)).into_owned(),
     }
 }

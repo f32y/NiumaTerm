@@ -44,7 +44,9 @@ fn answer_pending(engine: &mut GhosttyTerminal, messages: &mpsc::Receiver<Msg>) 
 #[test]
 fn key_dispatch_reports_writes_and_requests_paste_from_the_host() {
     let (session, messages) = test_session();
+
     let mut interaction = TerminalInteraction::default();
+
     let snapshot = session.snapshot();
 
     let enter = TerminalKey {
@@ -104,6 +106,7 @@ fn copying_a_frozen_range_preserves_any_newer_pointer_selection() {
         let end = BlockPoint { col: 3, ..start };
 
         interaction.begin_pointer();
+
         interaction.select_block(&session, start, SelectionType::Simple);
 
         assert!(interaction.block_selection().is_none());
@@ -119,7 +122,9 @@ fn copying_a_frozen_range_preserves_any_newer_pointer_selection() {
 
         if newer_pointer {
             interaction.begin_pointer();
+
             interaction.select_block(&session, start, SelectionType::Simple);
+
             interaction.extend_block_selection(end);
         }
 

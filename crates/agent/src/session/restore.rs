@@ -37,7 +37,6 @@ pub fn directories_match(left: Option<&str>, right: Option<&str>) -> bool {
         (Some(left), Some(right)) => {
             path_identity(Path::new(left)) == path_identity(Path::new(right))
         }
-
         // Missing directory metadata does not establish a different workspace.
         _ => true,
     }
@@ -91,17 +90,14 @@ enum PendingRestore {
         request: ReplayRead,
         previous: Status,
     },
-
     Prepared {
         identity: RecoveryIdentity,
         replay: Vec<ReplayTurn>,
     },
-
     AwaitingReady {
         epoch: u64,
         replay: Vec<ReplayTurn>,
     },
-
     AwaitingReplay {
         epoch: u64,
         previous: Status,
@@ -153,7 +149,6 @@ impl ConversationRestore {
 
                 ResumeStart::Requested
             }
-
             AgentKind::Claude => {
                 self.generation = self
                     .generation
@@ -219,9 +214,9 @@ impl ConversationRestore {
 
                 ReplayLoaded::Restart(request.identity)
             }
-
             Err(message) => {
                 self.pending = None;
+
                 runtime.conversation_change_rejected(previous);
 
                 ReplayLoaded::Failed(message)
@@ -235,7 +230,6 @@ impl ConversationRestore {
             Some(PendingRestore::Prepared { identity, replay }) if recovery == Some(&identity) => {
                 Some(PendingRestore::AwaitingReady { epoch, replay })
             }
-
             _ => None,
         };
     }
@@ -244,11 +238,9 @@ impl ConversationRestore {
     pub fn ready(&mut self, epoch: u64) -> ReadyAction {
         match &self.pending {
             None => ReadyAction::Apply,
-
             Some(PendingRestore::AwaitingReplay { epoch: active, .. }) if *active == epoch => {
                 ReadyAction::Apply
             }
-
             Some(PendingRestore::AwaitingReady { epoch: active, .. }) if *active == epoch => {
                 let Some(PendingRestore::AwaitingReady { replay, .. }) = self.pending.take() else {
                     unreachable!();
@@ -256,7 +248,6 @@ impl ConversationRestore {
 
                 ReadyAction::Replay(replay)
             }
-
             // The old backend can finish its handshake while disk work runs.
             // Its settings must not release the pending conversation change.
             _ => ReadyAction::Ignore,
@@ -266,13 +257,11 @@ impl ConversationRestore {
     pub fn replayed(&mut self, epoch: u64) -> ReplayAction {
         match &self.pending {
             None => ReplayAction::Append,
-
             Some(PendingRestore::AwaitingReplay { epoch: active, .. }) if *active == epoch => {
                 self.pending = None;
 
                 ReplayAction::Replace
             }
-
             _ => ReplayAction::Ignore,
         }
     }
@@ -287,11 +276,9 @@ impl ConversationRestore {
         let prior = match pending {
             PendingRestore::Reading { request, previous } => Some((request.epoch, previous)),
             PendingRestore::AwaitingReplay { epoch, previous } => Some((epoch, previous)),
-
             PendingRestore::AwaitingReady { epoch, .. } if runtime.status() == Status::Starting => {
                 Some((epoch, Status::Idle))
             }
-
             _ => None,
         };
 

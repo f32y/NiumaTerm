@@ -35,9 +35,7 @@ pub enum TextSource {
         end: (u16, u32),
         rectangle: bool,
     },
-
     Blocks(Vec<TextPiece>),
-
     BlockSelection {
         handle: BlockHandle,
         line: usize,
@@ -53,18 +51,15 @@ pub enum Query {
         image_id: u32,
         reply: Reply<GraphicData>,
     },
-
     Rows {
         source: PageSource,
         start: usize,
         reply: Reply<RowPage>,
     },
-
     Text {
         source: TextSource,
         reply: Reply<String>,
     },
-
     ExpandSelection {
         handle: BlockHandle,
         line: usize,

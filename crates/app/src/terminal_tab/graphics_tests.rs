@@ -34,6 +34,7 @@ fn frozen_image_cache_prunes_with_block_lifecycle() {
     let cache: FrozenImageCache = Default::default();
 
     cache.lock().insert((10, 1), g.clone());
+
     cache.lock().insert((11, 1), g.clone());
 
     // Block 10 evicted engine-side; block 11 survives.
@@ -67,6 +68,7 @@ fn uploaded_images_release_after_store_and_pane_owners_are_gone() {
     generation.mark_uploaded();
 
     let queue = store.release_queue();
+
     let mut receiver = queue.lock().attach().unwrap();
 
     assert!(queue.lock().attach().is_none());
@@ -78,7 +80,9 @@ fn uploaded_images_release_after_store_and_pane_owners_are_gone() {
 
     // A displayed frame can outlive the pane and the live image mapping.
     drop(store);
+
     drop(queue);
+
     drop(generation);
 
     assert!(receiver.try_recv().is_ok());
@@ -89,6 +93,7 @@ fn uploaded_images_release_after_store_and_pane_owners_are_gone() {
 fn frozen_eviction_releases_without_any_live_images_or_repaint() {
     let store = GenerationStore::default();
     let queue = store.release_queue();
+
     let mut receiver = queue.lock().attach().unwrap();
 
     let generation =
@@ -210,6 +215,7 @@ fn remove_and_id_reuse() {
     let mut store = GenerationStore::default();
 
     store.install(3, data(3, 1, 1, ColorType::Rgb, vec![1, 1, 1]));
+
     store.remove(3);
 
     assert!(store.get(3).is_none());
@@ -269,6 +275,7 @@ fn replacement_releases_old_when_uploaded_and_unreferenced() {
         .unwrap();
 
     old.mark_uploaded();
+
     drop(old); // store still holds a ref
 
     assert!(
@@ -302,7 +309,9 @@ fn independent_sessions_do_not_share() {
         .unwrap();
 
     g.mark_uploaded();
+
     s2.remove(1);
+
     drop(g);
 
     assert!(

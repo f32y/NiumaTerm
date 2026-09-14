@@ -25,13 +25,10 @@ struct StoredKey {
 pub enum KeyStoreError {
     #[error("key file I/O failed: {0}")]
     Io(#[from] io::Error),
-
     #[error("key file is corrupt")]
     Corrupt,
-
     #[error("DPAPI refused the key material (wrong user context?): {0}")]
     Dpapi(io::Error),
-
     #[error("key generation failed: {0}")]
     Generate(#[from] NoiseError),
 }
@@ -53,7 +50,6 @@ pub fn load_or_create_keypair(path: &Path) -> Result<StaticKeypair, KeyStoreErro
                 public: stored.public,
             })
         }
-
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             let keypair = generate_keypair()?;
 
@@ -71,7 +67,6 @@ pub fn load_or_create_keypair(path: &Path) -> Result<StaticKeypair, KeyStoreErro
 
             Ok(keypair)
         }
-
         Err(e) => Err(e.into()),
     }
 }

@@ -23,13 +23,11 @@ const VERSION_OUTPUT_LIMIT: usize = 8 * 1024;
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum VersionSupport {
     Supported,
-
     /// Installed and readable, but outside the tested range.
     Unsupported {
         installed: String,
         supported: String,
     },
-
     /// The version could not be read at all. Reported, but not treated as a
     /// reason to refuse: a harness that answers its interface works whether or
     /// not it can describe itself.

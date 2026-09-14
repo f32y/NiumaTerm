@@ -65,6 +65,7 @@ fn assert_rows_match_rebuild(view: &mut TranscriptView, mode: CollapseRows) {
 #[test]
 fn streaming_rebuilds_only_the_changed_turn() {
     let mut view = history(1_000);
+
     let mode = CollapseRows::WorkAndToolCalls;
 
     assert_rows_match_rebuild(&mut view, mode);
@@ -183,26 +184,37 @@ fn cached_rows_follow_disclosures_turns_and_mirrored_revisions(cx: &mut TestAppC
             );
 
             view.start_working(cx);
+
             assert_rows_match_rebuild(view, mode);
+
             view.set_compacting(true, cx);
+
             assert_rows_match_rebuild(view, mode);
+
             view.set_compacting(false, cx);
+
             view.settle_turn(4, cx);
+
             assert_rows_match_rebuild(view, mode);
 
             for key in [RevealKey::Turn(4), RevealKey::Group(8), RevealKey::Row(8)] {
                 view.toggle_disclosure(key, cx);
+
                 assert_rows_match_rebuild(view, mode);
             }
 
             for key in [RevealKey::Row(8), RevealKey::Group(8), RevealKey::Turn(4)] {
                 view.toggle_disclosure(key, cx);
+
                 assert_rows_match_rebuild(view, mode);
             }
 
             view.mark_interrupted(4);
+
             assert_rows_match_rebuild(view, mode);
+
             view.discard_turn(4, cx);
+
             assert_rows_match_rebuild(view, mode);
 
             view.append_replay(
@@ -239,7 +251,9 @@ fn cached_rows_follow_disclosures_turns_and_mirrored_revisions(cx: &mut TestAppC
             assert!(!view.contains_item("live"));
 
             assert_rows_match_rebuild(view, mode);
+
             view.clear();
+
             view.show_items(&mirrored, 1, cx);
 
             assert!(view.contains_item("mirror"));
@@ -274,11 +288,14 @@ fn typed_edges_invalidate_cached_rows_until_the_reply_is_complete() {
 
     for elapsed in [16, 32, 80, 500, 2_000] {
         view.advance_typing(now + Duration::from_millis(elapsed));
+
         assert_rows_match_rebuild(&mut view, mode);
     }
 
     view.finish_typing();
+
     assert_rows_match_rebuild(&mut view, mode);
+
     view.refresh_rows(mode);
 
     assert_eq!(view.row_cache.rebuilt_entries, 0);
@@ -288,6 +305,7 @@ fn typed_edges_invalidate_cached_rows_until_the_reply_is_complete() {
 #[ignore = "manual timing of long transcript updates"]
 fn long_transcript_timing() {
     let mut view = history(5_000);
+
     let started = Instant::now();
 
     for _ in 0..200 {
@@ -296,10 +314,12 @@ fn long_transcript_timing() {
         let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
 
         view.sync_transcript_list(specs);
+
         black_box(&view.rows);
     }
 
     let full = started.elapsed();
+
     let mut view = history(5_000);
 
     view.refresh_rows(CollapseRows::WorkAndToolCalls);
@@ -310,6 +330,7 @@ fn long_transcript_timing() {
         assert!(view.append_delta("live", "x", TextField::ReasoningSummary));
 
         view.refresh_rows(CollapseRows::WorkAndToolCalls);
+
         black_box(&view.rows);
     }
 
@@ -423,6 +444,7 @@ fn readers_share_long_content_but_keep_folds_and_missed_revisions_independent(
     });
 
     first.update(cx, |view, _| assert!(view.disclosures.row_expanded(500)));
+
     content.borrow_mut().retain_last(1);
 
     first.update(cx, |view, _| {

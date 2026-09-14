@@ -1,5 +1,3 @@
-use crate::subprocess::pending_requests::PendingRequests;
-
 #[cfg(windows)]
 use std::thread;
 use std::time::Instant;
@@ -8,11 +6,13 @@ use crate::chat::{ContextComposition, Item, TokenUsageBreakdown};
 use crate::claude_code::stream_json::*;
 use crate::request_policy::RequestClass;
 use crate::subprocess::InputTicket;
+use crate::subprocess::pending_requests::PendingRequests;
 use crate::workspace::AgentWorkspace;
 
 #[test]
 fn retiring_control_state_cancels_pending_writes_but_preserves_cleanup() {
     let mut state = ControlState::default();
+
     let title = InputTicket::queued_for_test(false);
     let restore = InputTicket::queued_for_test(false);
     let interrupt = InputTicket::queued_for_test(false);
@@ -38,7 +38,9 @@ fn retiring_control_state_cancels_pending_writes_but_preserves_cleanup() {
         ),
     ] {
         state.record_admitted(id.into(), class, Instant::now());
+
         state.attach_input(id, ticket);
+
         state.track(id.into(), operation);
     }
 
@@ -65,6 +67,7 @@ fn request_deadlines_wake_without_output_and_release_the_delivery_on_close() {
     use crate::deadline_timer::DeadlineTimer;
 
     let (tx, rx) = channel();
+
     let mut state = ControlState::default();
 
     state.set_timer(
@@ -163,6 +166,7 @@ fn a_blocked_stdout_delivery_does_not_block_request_deadlines() {
     let delivered = deadlines.recv_timeout(Duration::from_secs(1));
 
     release.send(()).unwrap();
+
     drop(session);
 
     assert!(
@@ -174,17 +178,22 @@ fn a_blocked_stdout_delivery_does_not_block_request_deadlines() {
 #[test]
 fn large_pending_control_sets_keep_independent_deadlines() {
     let now = Instant::now();
+
     let mut state = ControlState::default();
 
     for index in 0..2048 {
         state.check_connected().unwrap();
+
         state.record_admitted(index.to_string(), RequestClass::Query, now);
+
         state.track(index.to_string(), PendingControlOperation::Other);
     }
 
     for index in 2048..2064 {
         state.check_connected().unwrap();
+
         state.record_admitted(index.to_string(), RequestClass::Control, now);
+
         state.track(index.to_string(), PendingControlOperation::Other);
     }
 
@@ -664,7 +673,9 @@ fn transcript_snapshots_complete_their_streamed_items() {
 fn transcript_state_isolates_children_and_tool_results() {
     let mut parent = TranscriptState::default();
     let mut other = TranscriptState::default();
+
     let tool = json!({"message":{"content":[{"type":"tool_use","id":"tool-1","name":"Bash","input":{"command":"pwd"}}]}});
+
     let mut child = tool.clone();
 
     child["parent_tool_use_id"] = json!("child");
@@ -1287,6 +1298,7 @@ fn a_failed_compaction_reports_its_reason() {
 
     // A failure with no detail still has to surface as a failure.
     let mut active = true;
+
     let events = compaction_progress(&mut active, &json!({"compact_result": "failed"}));
 
     assert!(matches!(

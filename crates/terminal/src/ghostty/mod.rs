@@ -159,7 +159,6 @@ impl GhosttyTerminal {
         // failure paths below only have to release the terminal.
         let render = match RenderStateReader::new(rows) {
             Ok(render) => render,
-
             Err(err) => {
                 unsafe { ghostty_terminal_free(terminal) };
 
@@ -169,7 +168,6 @@ impl GhosttyTerminal {
 
         let kitty = match KittyState::new() {
             Ok(kitty) => kitty,
-
             Err(err) => {
                 unsafe { ghostty_terminal_free(terminal) };
 
@@ -195,6 +193,7 @@ impl GhosttyTerminal {
         // Register synchronous callbacks. Userdata points at the boxed
         // `Callbacks`; its heap address is stable across moves of `Self`.
         let mut callbacks = Box::new(Callbacks::default());
+
         let userdata = &mut *callbacks as *mut Callbacks as *mut os::raw::c_void;
 
         unsafe {
@@ -683,7 +682,6 @@ impl GhosttyTerminal {
         } {
             VtResult::SUCCESS => Ok(Some((out.x, out.y))),
             VtResult::NO_VALUE => Ok(None),
-
             other => {
                 Error::from_code(other)?;
 
@@ -751,7 +749,6 @@ impl GhosttyTerminal {
         match unsafe { ghostty_terminal_finish_block(self.terminal, &mut handle) } {
             VtResult::SUCCESS => Ok(Some(handle)),
             VtResult::NO_VALUE => Ok(None),
-
             other => {
                 Error::from_code(other)?;
 
@@ -884,7 +881,6 @@ impl GhosttyTerminal {
         {
             VtResult::SUCCESS => {}
             VtResult::NO_VALUE | VtResult::INVALID_VALUE => return Ok(None),
-
             other => {
                 Error::from_code(other)?;
 
@@ -901,6 +897,7 @@ impl GhosttyTerminal {
     pub fn read_block_row(&self, handle: BlockHandle, row: usize) -> Result<Option<ScreenRowRead>> {
         let palette = self.color_palette();
         let cols = self.block_cols(handle).unwrap_or(self.cols) as usize;
+
         let mut cells = Vec::with_capacity(cols);
 
         let meta = self.read_block_row_visit(handle, row, &palette, |x, text, wide, style| {
@@ -1127,6 +1124,7 @@ impl GhosttyTerminal {
         theme_revision: u64,
     ) -> Result<()> {
         self.render.update(self.terminal)?;
+
         self.render.consume_damage(self.rows)?;
 
         let cursor = self.render.cursor()?;

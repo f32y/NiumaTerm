@@ -53,7 +53,6 @@ pub(crate) fn normalize(
         "SessionStart" => (AgentEventKind::SessionStarted, "", ""),
         "UserPromptSubmit" => (AgentEventKind::PromptSubmitted, "", ""),
         "PreToolUse" => (AgentEventKind::ToolStarted, "", ""),
-
         // Claude Code surfaces both permission prompts and idle-input prompts
         // through the Notification hook; both mean the pane needs attention.
         "Notification" => (
@@ -64,9 +63,7 @@ pub(crate) fn normalize(
                 .and_then(Value::as_str)
                 .unwrap_or("Claude Code is waiting for input"),
         ),
-
         "PostToolUse" => (AgentEventKind::ToolFinished, "", ""),
-
         // SubagentStop is deliberately ignored: the parent turn is still
         // running when a subagent finishes.
         "Stop" => (
@@ -74,7 +71,6 @@ pub(crate) fn normalize(
             "Claude Code finished",
             "Claude Code completed the turn",
         ),
-
         _ => return None,
     };
 

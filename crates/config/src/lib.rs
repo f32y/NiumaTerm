@@ -1,7 +1,8 @@
 #[cfg(feature = "application")]
-pub use crate::application::*;
-#[cfg(feature = "application")]
 pub use nmt_profile as profile;
+
+#[cfg(feature = "application")]
+pub use crate::application::*;
 
 pub mod agent;
 pub mod appearance;
@@ -38,15 +39,12 @@ pub enum CursorShape {
     #[default]
     #[serde(alias = "block")]
     Block,
-
     /// Cursor is an underscore like `_`.
     #[serde(alias = "underline")]
     Underline,
-
     /// Cursor is a vertical bar `⎸`.
     #[serde(alias = "beam", alias = "line", alias = "Line")]
     Beam,
-
     /// Cursor is hidden.
     #[serde(alias = "hidden")]
     Hidden,

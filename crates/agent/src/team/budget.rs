@@ -41,16 +41,12 @@ pub struct Budget {
 pub enum BudgetError {
     #[error("add scheduled turns or finish with a report")]
     InsufficientTurns,
-
     #[error("attempt already has a budget reservation")]
     DuplicateAttempt,
-
     #[error("attempt has no budget reservation")]
     MissingAttempt,
-
     #[error("a dispatched or uncertain attempt keeps its charge")]
     AlreadyDispatched,
-
     #[error("scheduled turn limit is too large")]
     Overflow,
 }
@@ -164,7 +160,6 @@ impl Budget {
 
                 Ok(())
             }
-
             ReservationState::Charged => Err(BudgetError::AlreadyDispatched),
         }
     }

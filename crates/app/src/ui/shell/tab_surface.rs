@@ -24,23 +24,18 @@ pub(crate) struct AgentTab {
 pub(crate) enum TabSurface {
     Pending(Box<TabState>),
     Live(TerminalPaneTree),
-
     /// An agent conversation rendered as chat bubbles instead of a terminal
     /// grid. It owns an agent route but no terminal panes or child-process
     /// accounting exposed through `tree()`.
     Agent(AgentTab),
-
     /// The settings UI filling the main area. It is rebuilt from the settings
     /// global on every render, so the variant carries no state of its own.
     Settings,
-
     Team(Entity<TeamPane>),
-
     TeamUnavailable {
         saved: Box<TabState>,
         message: String,
     },
-
     TeamDisabled(Box<TabState>),
 }
 
@@ -50,11 +45,9 @@ impl TabSurface {
             Self::Team(_) | Self::TeamUnavailable { .. } | Self::TeamDisabled(_) => {
                 Icon::new(IconName::Network).xsmall()
             }
-
             Self::Pending(state) if state.team_room.is_some() => {
                 Icon::new(IconName::Network).xsmall()
             }
-
             _ => tab_icon(self.agent_kind(cx), self.is_settings()),
         }
     }
@@ -91,7 +84,6 @@ impl TabSurface {
         match self {
             Self::Agent(tab) => Some(tab.owner.session().read(cx).profile().kind),
             Self::Pending(state) => state.agent.as_deref().and_then(AgentKind::from_id),
-
             Self::Live(_)
             | Self::Settings
             | Self::Team(_)
@@ -103,13 +95,11 @@ impl TabSurface {
     pub(super) fn is_agent(&self) -> bool {
         match self {
             Self::Agent(_) => true,
-
             Self::Pending(state) => state
                 .agent
                 .as_deref()
                 .and_then(AgentKind::from_id)
                 .is_some(),
-
             Self::Live(_)
             | Self::Settings
             | Self::Team(_)

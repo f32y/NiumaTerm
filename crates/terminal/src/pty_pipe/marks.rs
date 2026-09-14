@@ -46,6 +46,7 @@ pub(super) fn apply_sniffer_mark(
         // number is registered here, for metadata
         // marriage at the eventual finish.
         *mark_seq += 1;
+
         event_proxy.send_event(TerminalEvent::PromptStarted);
     }
 
@@ -100,10 +101,8 @@ pub(super) fn apply_sniffer_mark(
                         event::BlockEvent::EngineBlocksSync(engine_blocks_live_list(&engine)),
                     ]
                 }
-
                 // Empty command: no block, no segment.
                 Ok(None) => Vec::new(),
-
                 Err(err) => {
                     warn!("finish_block failed: {err:?}");
 

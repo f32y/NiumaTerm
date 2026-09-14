@@ -22,6 +22,7 @@ fn run(chunks: &[&[u8]]) -> Vec<(PromptRegion, Vec<u8>)> {
 /// Concatenate what production writes to the engine: segments plus mark bytes.
 fn engine_stream(chunks: &[&[u8]]) -> Vec<u8> {
     let mut s = PromptSniffer::default();
+
     let out = cell::RefCell::new(Vec::new());
 
     for c in chunks {
@@ -282,6 +283,7 @@ fn ordinary_escape_split_across_reads_keeps_trust() {
         let mut fwd = Vec::new();
 
         s.feed(a, |_, _, seg| fwd.extend_from_slice(seg));
+
         s.feed(b_, |_, _, seg| fwd.extend_from_slice(seg));
 
         assert!(
@@ -526,6 +528,7 @@ fn command_echo_redraws_converge_to_final_line() {
 #[test]
 fn mark_hook_fires_in_stream_order_with_edges() {
     let mut s = primed();
+
     let log = cell::RefCell::new(Vec::<String>::new());
 
     s.feed_hooked(
@@ -572,6 +575,7 @@ fn mark_hook_fires_in_stream_order_with_edges() {
 #[test]
 fn mark_hook_receives_raw_mark_bytes_including_carry() {
     let mut s = PromptSniffer::default();
+
     let marks = cell::RefCell::new(Vec::<Vec<u8>>::new());
 
     let feed = |s: &mut PromptSniffer, input: &[u8]| {
@@ -583,6 +587,7 @@ fn mark_hook_receives_raw_mark_bytes_including_carry() {
     };
 
     feed(&mut s, b"\x1b]133;A\x07p\x1b]13");
+
     feed(&mut s, b"3;B\x07");
 
     let marks = marks.into_inner();
@@ -599,6 +604,7 @@ fn mark_hook_receives_raw_mark_bytes_including_carry() {
 #[test]
 fn command_started_only_for_trusted_nonempty_commands() {
     let mut s = PromptSniffer::default();
+
     let starts = cell::RefCell::new(Vec::<String>::new());
 
     let feed = |s: &mut PromptSniffer, input: &[u8]| {

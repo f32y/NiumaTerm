@@ -47,6 +47,7 @@ fn refresh_state_coalesces_requests_and_updates_presentation() {
 #[test]
 fn changing_directory_discards_in_flight_branch_results() {
     let mut poll = GitBranchPoll::default();
+
     let initial = poll.begin_refresh().unwrap();
 
     poll.complete(initial, Some("main".into()));
@@ -65,6 +66,7 @@ fn changing_directory_discards_in_flight_branch_results() {
     assert!(poll.begin_refresh().is_none());
 
     poll.complete(current, Some("feature/uv-editor".into()));
+
     poll.complete(old, Some("main".into()));
 
     assert_eq!(poll.presentation(), ("feature/uv-editor".into(), 0.72));

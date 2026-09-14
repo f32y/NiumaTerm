@@ -30,6 +30,7 @@ fn b64(input: &[u8]) -> String {
         let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
 
         out.push(T[((n >> 18) & 63) as usize] as char);
+
         out.push(T[((n >> 12) & 63) as usize] as char);
 
         out.push(if chunk.len() > 1 {
@@ -80,6 +81,7 @@ fn drive_conpty_with_title(script: &str, title: Option<&str>) -> Vec<u8> {
 
     let mut collected: Vec<u8> = Vec::new();
     let mut buf = [0u8; 4096];
+
     let deadline = Instant::now() + Duration::from_secs(8);
     let marker = b"MARKER_DONE";
 
@@ -90,7 +92,6 @@ fn drive_conpty_with_title(script: &str, title: Option<&str>) -> Vec<u8> {
 
         match pty.reader().read(&mut buf) {
             Ok(0) => thread::sleep(Duration::from_millis(20)),
-
             Ok(n) => {
                 collected.extend_from_slice(&buf[..n]);
 
@@ -104,7 +105,6 @@ fn drive_conpty_with_title(script: &str, title: Option<&str>) -> Vec<u8> {
                     break;
                 }
             }
-
             Err(_) => break,
         }
     }

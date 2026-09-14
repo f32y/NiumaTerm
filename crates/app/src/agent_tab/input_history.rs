@@ -4,14 +4,16 @@ pub(super) use nmt_agent::input_history::InputHistoryScope;
 #[path = "input_history_tests.rs"]
 mod input_history_tests;
 
-use crate::agent_tab::AgentPane;
-use gpui::{App, Context, Entity, Global};
-use gpui_component::input::TextareaState;
-use nmt_agent::input_history::AgentInputHistory as InputHistoryService;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::{env, io, process};
+
+use gpui::{App, Context, Entity, Global};
+use gpui_component::input::TextareaState;
+use nmt_agent::input_history::AgentInputHistory as InputHistoryService;
+
+use crate::agent_tab::AgentPane;
 
 pub(super) struct AgentInputHistory(pub(super) InputHistoryService);
 
@@ -94,9 +96,7 @@ impl InputHistoryNavigation {
 
                         InputHistoryAction::Replace(self.entries[index].clone())
                     }
-
                     InputHistoryDirection::Older => InputHistoryAction::Keep,
-
                     InputHistoryDirection::Newer if index + 1 < self.entries.len() => {
                         let index = index + 1;
 
@@ -104,7 +104,6 @@ impl InputHistoryNavigation {
 
                         InputHistoryAction::Replace(self.entries[index].clone())
                     }
-
                     InputHistoryDirection::Newer => {
                         self.reset();
 

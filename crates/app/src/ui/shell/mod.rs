@@ -343,6 +343,7 @@ impl Shell {
             (workspaces, restore_next_id)
         } else {
             let mut next_id = 1;
+
             let workspaces = default_session(initial_cwd, default_profile, &mut next_id, cx);
 
             (workspaces, next_id)
@@ -392,6 +393,7 @@ impl Shell {
         };
 
         this.sync_session_memory(cx);
+
         this.refresh_root_availability(cx);
 
         this
@@ -418,6 +420,7 @@ impl Shell {
 
         if self.window_active {
             cx.global_mut::<LastActiveWindow>().0 = Some(self.window_id);
+
             self.acknowledge_visible(window, true, cx);
         } else {
             // A context menu drawn in its own window never takes activation,
@@ -546,6 +549,7 @@ impl Shell {
 
     pub(crate) fn on_active_tab_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.ensure_active_tab_live(window, cx);
+
         self.sync_active_terminal_title(cx);
 
         let tabs = self.workspaces.active_tabs_mut();
@@ -835,7 +839,9 @@ impl Shell {
         drop(pane);
 
         self.on_active_tab_changed(window, cx);
+
         self.focus_active(window, cx);
+
         self.sync_session_memory(cx);
 
         cx.notify();
@@ -880,7 +886,6 @@ impl Shell {
         match count {
             0 => None,
             1 => Some(t!("shell-close-one-temporary-workspace").into()),
-
             _ => Some(
                 t!("shell-close-many-temporary-workspaces", count = count)
                     .into_owned()
@@ -1091,6 +1096,7 @@ impl Shell {
         }
 
         self.focus_active(window, cx);
+
         self.sync_session_memory(cx);
 
         cx.notify();
@@ -1233,6 +1239,7 @@ impl Shell {
             // This command explicitly includes every temporary workspace, so a
             // pin cannot leave an otherwise hidden temporary entry behind.
             self.workspaces.set_pinned(id, false);
+
             self.close_workspace_now(id, window, cx);
         }
     }
@@ -1330,6 +1337,7 @@ impl Shell {
 
         if !saved {
             description.push_str("\n\n");
+
             description.push_str(&t!("settings-save-failed-close-description"));
         }
 
@@ -1501,6 +1509,7 @@ impl Shell {
         self.register_agent_pane(&pane, cx);
 
         self.on_active_tab_changed(window, cx);
+
         self.focus_active(window, cx);
 
         self.sync_session_memory(cx);
@@ -1578,6 +1587,7 @@ impl Shell {
         }
 
         self.on_active_tab_changed(window, cx);
+
         self.focus_active(window, cx);
 
         self.sync_session_memory(cx);
@@ -1606,7 +1616,6 @@ impl Shell {
                     .child(pane.clone())
                     .into_any_element();
             }
-
             TabSurface::TeamUnavailable { message, .. } => {
                 return div()
                     .size_full()
@@ -1614,7 +1623,6 @@ impl Shell {
                     .child(message.clone())
                     .into_any_element();
             }
-
             TabSurface::TeamDisabled(_) => {
                 return div()
                     .size_full()
@@ -1622,7 +1630,6 @@ impl Shell {
                     .child(t!("team-disabled").into_owned())
                     .into_any_element();
             }
-
             _ => {}
         }
 
@@ -1689,7 +1696,6 @@ impl Shell {
                     .child(pane.clone())
                     .into_any_element()
             }
-
             PaneNode::Split {
                 id,
                 axis,
@@ -1732,7 +1738,9 @@ impl Shell {
             .new_tab(surface, id, title);
 
         self.on_active_tab_changed(window, cx);
+
         self.focus_active(window, cx);
+
         self.sync_session_memory(cx);
 
         cx.notify();
@@ -1754,7 +1762,6 @@ impl Shell {
 
         let runtime = match saved {
             Some(id) => TeamRuntime::open(&directory, id, cx),
-
             None => TeamRuntime::create(
                 &directory,
                 agent_workspace(self.workspaces.active_roots()),
@@ -1764,7 +1771,6 @@ impl Shell {
 
         let surface = match runtime {
             Ok(runtime) => TabSurface::Team(cx.new(|cx| TeamPane::new(runtime, window, cx))),
-
             Err(error) => TabSurface::TeamUnavailable {
                 saved: Box::new(TabState {
                     team_room: saved.map(|id| id.to_string()),
@@ -1911,6 +1917,7 @@ impl Shell {
                 Ok(remote) => match attach_remote(cx, id, remote) {
                     Ok(pane) => {
                         this.leave_settings_workspace();
+
                         this.register_agent_pane(&pane, cx);
 
                         this.insert_tab(
@@ -1921,7 +1928,6 @@ impl Shell {
                             cx,
                         );
                     }
-
                     Err(e) => {
                         window.push_notification(
                             t!("shell-remote-session-failed", error = e)
@@ -1931,7 +1937,6 @@ impl Shell {
                         );
                     }
                 },
-
                 Err(e) => {
                     window.push_notification(
                         t!("shell-remote-connect-failed", error = e)
@@ -1987,6 +1992,7 @@ impl Shell {
         let pane = cx.new(|cx| AgentPane::attach(&owner, window, cx));
 
         Self::watch_agent_tab(&pane, cx);
+
         self.register_agent_tab(&pane, cx);
 
         owner.start(resume, cx);
@@ -2031,9 +2037,13 @@ impl Shell {
             // Workspace activation preserves its TabManager's active index,
             // restoring the tab the user last used without spawning a shell.
             self.workspaces.list_mut().activate(index);
+
             window.activate_window();
+
             self.on_active_tab_changed(window, cx);
+
             self.focus_active(window, cx);
+
             self.sync_session_memory(cx);
 
             cx.notify();
@@ -2132,6 +2142,7 @@ impl Shell {
         self.workspaces.active_tabs_mut().list_mut().focus_next();
 
         self.on_active_tab_changed(window, cx);
+
         self.focus_active(window, cx);
 
         self.sync_session_memory(cx);
@@ -2143,6 +2154,7 @@ impl Shell {
         self.workspaces.active_tabs_mut().list_mut().focus_prev();
 
         self.on_active_tab_changed(window, cx);
+
         self.focus_active(window, cx);
 
         self.sync_session_memory(cx);
@@ -2238,6 +2250,7 @@ impl Shell {
             .activate(tab_index);
 
         self.on_active_tab_changed(window, cx);
+
         self.focus_active(window, cx);
 
         self.sync_session_memory(cx);
@@ -2345,9 +2358,11 @@ impl Shell {
         );
 
         self.on_active_tab_changed(window, cx);
+
         self.focus_active(window, cx);
 
         self.refresh_root_availability(cx);
+
         self.sync_session_memory(cx);
 
         cx.notify();
@@ -2367,6 +2382,7 @@ impl Shell {
         self.workspaces.list_mut().activate(next);
 
         self.on_active_tab_changed(window, cx);
+
         self.focus_active(window, cx);
 
         self.sync_session_memory(cx);
@@ -2386,6 +2402,7 @@ impl Shell {
         self.workspaces.list_mut().activate(prev);
 
         self.on_active_tab_changed(window, cx);
+
         self.focus_active(window, cx);
 
         self.sync_session_memory(cx);
@@ -2603,7 +2620,9 @@ impl Shell {
                 .position(|ws| ws.id == id)
             {
                 self.workspaces.list_mut().activate(index);
+
                 self.on_active_tab_changed(window, cx);
+
                 self.focus_active(window, cx);
 
                 cx.notify();
@@ -2635,6 +2654,7 @@ impl Shell {
         );
 
         self.on_active_tab_changed(window, cx);
+
         self.focus_active(window, cx);
 
         cx.notify();
@@ -2727,7 +2747,6 @@ impl Shell {
                         chrome_changed |= tabs.set_title(tab_id, title.clone());
                     }
                 }
-
                 HostEvent::Exit => {
                     self.remove_agent_route(&agent_route, cx);
 
@@ -2772,7 +2791,6 @@ impl Shell {
                         chrome_changed = true;
                     }
                 }
-
                 HostEvent::Bell => {
                     // Only background tabs get the indicator: a bell on the tab
                     // in front of you is already conveyed by the sound and the
@@ -2783,19 +2801,19 @@ impl Shell {
                         && let Some(tabs) = self.workspaces.tabs_for_tab_mut(tab_id)
                     {
                         tabs.ring_bell(tab_id);
+
                         chrome_changed = true;
                     }
                 }
-
                 HostEvent::Progress(report) => {
                     if let Some(tab_id) = self.tab_for_pane(pane_id)
                         && let Some(tabs) = self.workspaces.tabs_for_tab_mut(tab_id)
                     {
                         tabs.set_progress(tab_id, *report);
+
                         chrome_changed = true;
                     }
                 }
-
                 HostEvent::CommandFinished { exit_code } => {
                     if let Some(tab_id) = self.tab_for_pane(pane_id) {
                         let watched = self.workspaces.active_tabs().list().active_id() == tab_id;
@@ -2820,16 +2838,13 @@ impl Shell {
 
                     chrome_changed = true;
                 }
-
                 // A command starting flips the workspace indicator, which lives
                 // in the chrome rather than in the pane's own grid.
                 HostEvent::InteractiveState(_)
                 | HostEvent::PromptBoundaryTrusted(_)
                 | HostEvent::PromptStarted
                 | HostEvent::CommandStarted => chrome_changed = true,
-
                 HostEvent::Cwd(_) => session_changed = true,
-
                 HostEvent::Notification { title, body } => {
                     let mutation =
                         self.agent_notifications
@@ -2842,13 +2857,13 @@ impl Shell {
 
                     self.process_native_notifications(cx);
                 }
-
                 _ => {}
             }
         }
 
         if session_changed {
             self.sync_session_memory(cx);
+
             self.sync_git_target(cx);
         }
 
@@ -2888,8 +2903,11 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         self.workspaces.set_roots(id, roots);
+
         self.sync_agent_workspaces(id, cx);
+
         self.refresh_root_availability(cx);
+
         self.sync_session_memory(cx);
 
         cx.notify();
@@ -3182,13 +3200,13 @@ impl Shell {
 
                 window.focus(&handle, cx);
             }
-
             AgentRouteTarget::Agent(pane) => {
                 pane.update(cx, |pane, cx| pane.focus(window, cx));
             }
         }
 
         self.on_active_tab_changed(window, cx);
+
         self.acknowledge_notification(route, notification_id, cx);
 
         true
@@ -3221,6 +3239,7 @@ impl Shell {
         Self::apply_agent_monitor_display_change(&mutation, cx);
 
         self.agent_notifications.reschedule_agent_timer(cx);
+
         self.process_native_notifications(cx);
     }
 
@@ -3255,9 +3274,7 @@ impl Shell {
                 .agent_notifications
                 .agent_monitor
                 .apply(event.clone(), time::Instant::now()),
-
             AgentPaneEvent::Lifecycle(_) => return,
-
             AgentPaneEvent::WorkflowActivity => {
                 // Sticky: a finished run stays reachable, so the control
                 // never goes away once it has appeared. The running count
@@ -3268,7 +3285,6 @@ impl Shell {
 
                 return;
             }
-
             AgentPaneEvent::BackgroundTaskActivity => {
                 // Sticky: a finished child stays reachable, so the control
                 // never goes away once it has appeared. The running count
@@ -3281,7 +3297,6 @@ impl Shell {
 
                 return;
             }
-
             AgentPaneEvent::ResumeElsewhere { cwd, session_id } => {
                 // Opening a tab needs a window, which an event
                 // subscription has none of; the next render has one.
@@ -3295,7 +3310,6 @@ impl Shell {
 
                 return;
             }
-
             AgentPaneEvent::TitleSuggested(title) => {
                 // A user-authored rename outranks this, so a tab the user
                 // has named keeps its name.
@@ -3308,7 +3322,6 @@ impl Shell {
 
                 return;
             }
-
             AgentPaneEvent::CloseRequested => {
                 // Same reason as the resume above: closing a tab needs a
                 // window, and the next render has one.
@@ -3318,7 +3331,6 @@ impl Shell {
 
                 return;
             }
-
             AgentPaneEvent::Interrupted => self
                 .agent_notifications
                 .agent_monitor
@@ -3328,6 +3340,7 @@ impl Shell {
         Self::apply_agent_monitor_display_change(&mutation, cx);
 
         self.agent_notifications.reschedule_agent_timer(cx);
+
         self.process_native_notifications(cx);
     }
 
@@ -3654,7 +3667,6 @@ impl Shell {
     ) -> impl IntoElement {
         let label = match running {
             0 => t!("tasks-background-title").to_string(),
-
             _ => t!("tasks-background-running-count", count = running).into_owned(),
         };
 
@@ -3737,6 +3749,7 @@ fn close_last_workspace_dialog(
                             }
 
                             quit_shell.update(cx, |this, cx| this.doom_workspace(id, cx));
+
                             cx.quit();
                         }),
                 )
@@ -3919,7 +3932,6 @@ enum AgentRouteTarget {
         pane_id: PaneId,
         pane: Entity<TerminalPane>,
     },
-
     Agent(Entity<AgentPane>),
 }
 
@@ -3985,7 +3997,9 @@ impl Render for Shell {
 
         if self.chrome.needs_focus {
             self.chrome.needs_focus = false;
+
             self.on_active_tab_changed(window, cx);
+
             self.focus_active(window, cx);
         }
 
@@ -4025,6 +4039,7 @@ impl Render for Shell {
         // Any workspace/tab switch re-renders the shell, so this render-time
         // compare-and-set catches every switch path.
         self.sync_git_target(cx);
+
         self.panels.sync_agent_targets(self.active_agent(), cx);
 
         // The sidebar is always mounted so it can animate its width open/closed.
@@ -4039,7 +4054,6 @@ impl Render for Shell {
 
         let sidebar_tabs: Vec<Vec<SidebarTab>> = match vertical_tabs {
             false => Vec::new(),
-
             true => summaries
                 .iter()
                 .map(|ws| {
@@ -4107,7 +4121,6 @@ impl Render for Shell {
 
         let tab_bar = match vertical_tabs {
             true => div().into_any_element(),
-
             false => self.chrome.tab_strip.render(
                 self.workspaces.active_tabs(),
                 &unread_tabs,

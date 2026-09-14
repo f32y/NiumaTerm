@@ -120,11 +120,9 @@ impl AgentUsageView {
             let _ = view.update(cx, |this, cx| {
                 match this.providers[index].complete(fetched) {
                     Completion::Retry => this.refresh_provider(index, cx),
-
                     Completion::Failed(message) => {
                         warn!(provider = index, "account usage refresh failed: {message}")
                     }
-
                     Completion::Updated | Completion::Discarded => {}
                 }
 
@@ -356,7 +354,6 @@ fn format_reset_label(window: &UsageWindow, now: i64) -> Option<String> {
             duration if duration == t!("agent-usage-duration-now") => {
                 t!("agent-usage-resets-now").to_string()
             }
-
             duration => t!("agent-usage-resets-in", duration = &duration).into_owned(),
         })
         .or_else(|| window.reset_description.clone())
@@ -397,7 +394,6 @@ fn reset_credit_label(usage: &UsageSnapshot, now: i64) -> Option<String> {
 
     let count_label = match credits.available_count {
         1 => t!("agent-usage-one-reset-available").to_string(),
-
         count => t!("agent-usage-many-resets-available", count = count).into_owned(),
     };
 
@@ -406,7 +402,6 @@ fn reset_credit_label(usage: &UsageSnapshot, now: i64) -> Option<String> {
             duration if duration == t!("agent-usage-duration-now") => {
                 t!("agent-usage-next-expires-now", count = &count_label).into_owned()
             }
-
             duration => t!(
                 "agent-usage-next-expires-in",
                 count = &count_label,
@@ -414,7 +409,6 @@ fn reset_credit_label(usage: &UsageSnapshot, now: i64) -> Option<String> {
             )
             .into_owned(),
         },
-
         None => count_label,
     })
 }

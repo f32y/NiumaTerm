@@ -18,6 +18,7 @@ use crate::team::tests::config;
 #[test]
 fn native_member_settings_allow_concurrent_work_without_room_permission_gates() {
     let directory = tempdir().unwrap();
+
     let mut room = Room::new(AgentWorkspace::default());
 
     let settings = ThreadSettings {
@@ -108,7 +109,9 @@ fn native_member_settings_allow_concurrent_work_without_room_permission_gates() 
 #[test]
 fn live_dispatch_requires_a_ready_member_and_reopen_rejects_uncertain_retry() {
     let directory = tempdir().unwrap();
+
     let mut room = Room::new(AgentWorkspace::default());
+
     let alice = room.add_member(config("Alice", "C:/frontend")).unwrap();
     let member = room.member(alice).unwrap();
     let room_id = room.id();
@@ -145,6 +148,7 @@ fn live_dispatch_requires_a_ready_member_and_reopen_rejects_uncertain_retry() {
         .unwrap();
 
     let id = session.reserve_dispatches(vec![intent.clone()]).unwrap()[0];
+
     let mut sends = 0;
 
     session
@@ -212,7 +216,9 @@ fn live_dispatch_requires_a_ready_member_and_reopen_rejects_uncertain_retry() {
 #[test]
 fn accepted_coverage_and_root_reply_commit_once_and_survive_reopening() {
     let directory = tempdir().unwrap();
+
     let mut room = Room::new(AgentWorkspace::default());
+
     let alice = room.add_member(config("Alice", "C:/frontend")).unwrap();
     let source = MessageId::new();
 
@@ -226,6 +232,7 @@ fn accepted_coverage_and_root_reply_commit_once_and_survive_reopening() {
     });
 
     let room_id = room.id();
+
     let mut session = TeamSession::create(directory.path(), room).unwrap();
 
     session

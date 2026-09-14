@@ -344,7 +344,6 @@ fn next_message(receiver: &Receiver<Value>, deadline: Instant) -> Option<Value> 
         match receiver.recv_timeout(remaining.min(Duration::from_millis(250))) {
             Ok(message) => return Some(message),
             Err(RecvTimeoutError::Timeout) => continue,
-
             // The sender lives with the reader thread feeding it, so a closed
             // channel means the agent exited and no later message can arrive.
             // Waiting out the deadline would only delay the same failure and
@@ -648,6 +647,7 @@ fn failed_and_unchanged_codex_updates_still_restore_all_threads() {
     ] {
         let fixture = FakeAgentFixture::new();
         let ids = ["thread-outcome-a", "thread-outcome-b"];
+
         let mut launches = ids.map(|id| fixture.launch(ProviderKind::Codex, id));
 
         for launch in &mut launches {
@@ -750,6 +750,7 @@ fn failed_and_unchanged_codex_updates_still_restore_all_threads() {
 fn one_codex_host_starts_threads_for_two_custom_gateways() {
     let _guard = CODEX_TEST_LOCK.lock();
     let fixture = FakeAgentFixture::new();
+
     let mut first = fixture.launch(ProviderKind::Codex, "model-a");
 
     first.provider = Some(CodexProviderConfig {
@@ -847,6 +848,7 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
     );
 
     sessions[0].shutdown(Duration::from_secs(5), false).unwrap();
+
     wait_for_rpc_count(&fixture, "thread/unsubscribe", 1);
 
     assert_eq!(sessions[1].thread_id(), Some("model-b"));
@@ -872,6 +874,7 @@ fn simultaneous_codex_sessions_join_one_host_start() {
     ]);
 
     let barrier = Arc::new(Barrier::new(3));
+
     let mut workers = Vec::new();
 
     for index in 0..2 {
@@ -948,6 +951,7 @@ fn simultaneous_codex_sessions_share_one_startup_failure() {
 
     let launches = Arc::new(raw_launches);
     let barrier = Arc::new(Barrier::new(3));
+
     let mut workers = Vec::new();
 
     for index in 0..2 {
@@ -995,6 +999,7 @@ fn one_codex_host_rejects_incompatible_live_launch_settings() {
     let _guard = CODEX_TEST_LOCK.lock();
     let fixture = FakeAgentFixture::new();
     let first = fixture.launch(ProviderKind::Codex, "thread-compatible");
+
     let mut incompatible = fixture.launch(ProviderKind::Codex, "thread-incompatible");
 
     incompatible
@@ -1049,6 +1054,7 @@ fn two_codex_threads_recover_on_one_replacement_host() {
     let _guard = CODEX_TEST_LOCK.lock();
     let fixture = FakeAgentFixture::new();
     let ids = ["thread-crash-a", "thread-crash-b"];
+
     let mut launches = ids.map(|id| fixture.launch(ProviderKind::Codex, id));
 
     for launch in &mut launches {
@@ -1211,5 +1217,6 @@ fn one_failed_codex_resume_does_not_block_another_session() {
     );
 
     failed.shutdown(Duration::from_secs(5), false).unwrap();
+
     ready.shutdown(Duration::from_secs(5), false).unwrap();
 }

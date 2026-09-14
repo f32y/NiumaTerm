@@ -33,16 +33,13 @@ pub(crate) fn terminal_presentation(
             TerminalVisual::Running,
             t!("terminal-status-command-running"),
         )),
-
         TerminalActivity::Finished(CommandOutcome::Succeeded) => Some((
             TerminalVisual::Succeeded,
             t!("terminal-status-command-succeeded"),
         )),
-
         TerminalActivity::Finished(CommandOutcome::Failed) => {
             Some((TerminalVisual::Failed, t!("terminal-status-command-failed")))
         }
-
         TerminalActivity::Idle => None,
     }
 }

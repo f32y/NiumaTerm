@@ -60,7 +60,6 @@ impl ConversationNaming {
                 RenameOutcome::Accepted | RenameOutcome::Unsupported => {
                     self.pending = None;
                 }
-
                 RenameOutcome::Rejected => {}
             }
         }

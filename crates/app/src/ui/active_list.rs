@@ -29,6 +29,7 @@ impl<T: HasId> ActiveList<T> {
     /// Append an element and make it active.
     pub fn push_active(&mut self, item: T) {
         self.items.push(item);
+
         self.active = self.items.len() - 1;
     }
 
@@ -94,6 +95,7 @@ impl<T: HasId> ActiveList<T> {
         let active_id = self.items[self.active].id();
 
         edit(&mut self.items);
+
         self.active = self.index_of(active_id).unwrap_or(self.active);
     }
 

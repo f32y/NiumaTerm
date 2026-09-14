@@ -238,6 +238,7 @@ fn local_session_publishes_engine_output_and_host_events() {
     session.write_input(format!("title {MARKER}\r\necho {MARKER}\r\n").as_bytes());
 
     let deadline = time::Instant::now() + time::Duration::from_secs(10);
+
     let mut title_seen = false;
 
     loop {
@@ -292,8 +293,11 @@ fn host_events_map_from_terminal_events() {
     let listener = TerminalEventProxy::new(Arc::clone(&shared), 1, None);
 
     listener.send_event(TerminalEvent::Title("t".into()));
+
     listener.send_event(TerminalEvent::ResetTitle);
+
     listener.send_event(TerminalEvent::Bell);
+
     listener.send_event(TerminalEvent::CloseTerminal(0));
 
     listener.send_event(TerminalEvent::DesktopNotification {
@@ -397,6 +401,7 @@ fn in_flight_block_lifecycle() {
 
     // start -> exit: cleared as well.
     proxy.send_event(TerminalEvent::CommandStarted(start("hang")));
+
     proxy.send_event(TerminalEvent::PromptStarted);
 
     assert!(open_prompt.load(Ordering::Acquire));
@@ -597,6 +602,7 @@ fn sustained_output_does_not_grow_ui_queue() {
         ]));
 
         proxy.send_event(rgba_update(1, 1, 1, 1));
+
         proxy.send_event(TerminalEvent::TerminalDamaged(1));
 
         // After each read's damage flush the staging buffer is empty again.
@@ -702,6 +708,7 @@ fn final_damage_callback_observes_published_blocks_after_graphics() {
     }]));
 
     proxy.send_event(rgba_update(1, 42, 2, 2));
+
     proxy.send_event(TerminalEvent::TerminalDamaged(1));
 
     assert_eq!(

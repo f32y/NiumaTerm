@@ -93,6 +93,7 @@ pub(crate) fn sync_modern_menu(cx: &mut App) {
     );
 
     set_default_font(cx, font);
+
     prewarm_modern_menu(cx);
 }
 

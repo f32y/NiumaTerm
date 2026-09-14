@@ -55,6 +55,7 @@ impl WorkflowData {
         }
 
         self.conversations.clear();
+
         self.restored_session = None;
     }
 

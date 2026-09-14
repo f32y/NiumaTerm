@@ -90,42 +90,31 @@ type SessionBuffer = Arc<FrameStore>;
 pub enum HostEvent {
     /// Terminal title changed (OSC 0/2).
     Title(String),
-
     /// Bell (BEL).
     Bell,
-
     /// Progress report (OSC 9;4) from a long-running command.
     Progress(ProgressReport),
-
     /// The shell process exited.
     Exit,
-
     /// Working directory changed (OSC 7).
     Cwd(String),
-
     /// Desktop notification (OSC 9 / OSC 777).
     Notification { title: String, body: String },
-
     /// Entered (`true`) or left (`false`) an interactive full-screen program.
     InteractiveState(bool),
-
     /// A full-screen program entered (`true`) or left (`false`) the alt-screen — a
     /// subset of [`Self::InteractiveState`] that gates command-block chrome.
     AltScreen(bool),
-
     /// The integrated shell boundary lifecycle is trusted for fixed-bottom
     /// prompt ownership.
     PromptBoundaryTrusted(bool),
-
     /// A trusted integrated-shell prompt region is open.
     PromptStarted,
-
     /// Integrated-shell command metadata changed in the block store. The exit
     /// code rides along so the chrome can grade the result without reaching
     /// back into the block store for the entry that just landed; a shell that
     /// reports no code yields `None`.
     CommandFinished { exit_code: Option<i32> },
-
     /// An integrated-shell command began executing; read `in_flight_block`.
     CommandStarted,
 }
@@ -236,6 +225,7 @@ impl TerminalSession {
         )?;
 
         session.supports_powershell_compatibility = is_windows_powershell(&shell);
+
         session.set_powershell_compatibility(config.improve_powershell_compatibility);
 
         Ok(session)
@@ -556,7 +546,6 @@ impl TerminalSession {
                         modifiers,
                     )
                 }
-
                 SurfaceMouseEventKind::Move => {
                     let Some(code) = mouse_motion_code(mode, button) else {
                         return false;

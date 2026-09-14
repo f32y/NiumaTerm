@@ -203,6 +203,7 @@ pub fn new(options: PtyOptions<'_>, job: Option<KillOnCloseJob>) -> Result<Pty> 
     } = options;
 
     let api = ConptyApi::new()?;
+
     let mut pty_handle: HPCON = 0;
 
     // Passing 0 as the size parameter allows the "system default" buffer
@@ -432,8 +433,11 @@ fn build_environment_block(overrides: &[(String, String)]) -> Vec<u16> {
 
     for (key, value) in values {
         block.extend(key.encode_wide());
+
         block.push('=' as u16);
+
         block.extend(value.encode_wide());
+
         block.push(0);
     }
 

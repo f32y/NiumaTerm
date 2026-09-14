@@ -21,6 +21,7 @@ fn completed_swap_leaves_old_files_renamed_aside() {
 
     for name in names {
         fs::write(install.join(name), "installed").unwrap();
+
         fs::write(install.join(format!("{name}{INCOMING_SUFFIX}")), "staged").unwrap();
     }
 
@@ -43,6 +44,7 @@ fn failed_swap_restores_moved_files() {
 
     for name in names {
         fs::write(install.join(name), "installed").unwrap();
+
         fs::write(install.join(format!("{name}{INCOMING_SUFFIX}")), "staged").unwrap();
     }
 

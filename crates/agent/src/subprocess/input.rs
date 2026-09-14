@@ -157,6 +157,7 @@ impl Drop for InputReceiver {
 impl Drop for InputQueue {
     fn drop(&mut self) {
         self.queue.state.lock().sender_open = false;
+
         self.queue.ready.notify_one();
     }
 }

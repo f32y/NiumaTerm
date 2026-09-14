@@ -74,7 +74,9 @@ pub(super) fn replay(journal: &mut File, checkpoint: Checkpoint) -> Result<Repla
             }
 
             record.changes.apply(&mut result.room);
+
             validation::validate(&result.room)?;
+
             result.sequence = record.sequence;
             result.digest = record_digest.clone();
         }

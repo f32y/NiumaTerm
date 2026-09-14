@@ -9,6 +9,7 @@ use crate::agent_tab::composer::attachments::{
 /// A real encoded PNG, because attaching decodes what it is given.
 fn png(width: u32, height: u32) -> Image {
     let buffer = image_rs::RgbaImage::from_pixel(width, height, image_rs::Rgba([9, 9, 9, 255]));
+
     let mut bytes = Vec::new();
 
     image_rs::DynamicImage::ImageRgba8(buffer)
@@ -44,6 +45,7 @@ fn attaching_numbers_placeholders_in_order() {
 #[test]
 fn removing_the_first_attachment_renumbers_the_rest() {
     let (mut pending, text) = attach_three();
+
     let removed = pending.placeholder_at(0).expect("placeholder").to_string();
     let edited = text.replace(&removed, "");
 
@@ -62,6 +64,7 @@ fn removing_a_middle_attachment_keeps_the_text_around_it() {
         let placeholder = attach_png(&mut pending, &png(4, 4)).ok().expect("attach");
 
         text.push_str(word);
+
         text.push_str(&placeholder);
 
         assert_eq!(placeholder, placeholder_text(index + 1));
@@ -86,6 +89,7 @@ fn deleting_every_placeholder_drops_every_attachment() {
 #[test]
 fn a_placeholder_naming_no_attachment_is_left_as_text() {
     let mut pending = PendingAttachments::default();
+
     let placeholder = attach_png(&mut pending, &png(4, 4)).ok().expect("attach");
     let text = format!("{placeholder} and a typed [Image #7]");
 
@@ -97,6 +101,7 @@ fn a_placeholder_naming_no_attachment_is_left_as_text() {
 #[test]
 fn moving_a_placeholder_reorders_the_attachments() {
     let (mut pending, _) = attach_three();
+
     let first = pending.iter().next().expect("first").image.bytes().to_vec();
 
     // The first image now reads last, so it is numbered last.
@@ -114,6 +119,7 @@ fn moving_a_placeholder_reorders_the_attachments() {
 #[test]
 fn only_placeholders_naming_an_attachment_are_links() {
     let mut pending = PendingAttachments::default();
+
     let placeholder = attach_png(&mut pending, &png(4, 4)).ok().expect("attach");
     let text = format!("look at {placeholder} and a typed [Image #7]");
 
@@ -169,6 +175,7 @@ fn a_message_carries_no_more_than_the_cap() {
 #[test]
 fn attaching_shrinks_an_oversized_image() {
     let mut pending = PendingAttachments::default();
+
     let (from_width, from_height) = (MAX_IMAGE_EDGE + 400, 512);
 
     attach_png(&mut pending, &png(from_width, from_height))

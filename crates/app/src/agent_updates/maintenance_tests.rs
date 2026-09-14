@@ -260,6 +260,7 @@ fn partial_suspension_failure_restores_only_stopped_sessions_and_reports_recover
 fn update_and_verification_failures_both_restore_all_suspended_sessions() {
     for failing_stage in ["update", "verify"] {
         let mut environment = MemoryEnvironment::new(2);
+
         let failure = UpdateError::new(UpdateErrorKind::ProviderFailed, failing_stage);
 
         if failing_stage == "update" {
@@ -284,6 +285,7 @@ fn update_and_verification_failures_both_restore_all_suspended_sessions() {
 #[test]
 fn an_installation_without_open_sessions_still_updates_and_verifies() {
     let mut environment = MemoryEnvironment::new(0);
+
     let outcome = block_on(run_transaction(&mut environment, UpdateMode::WhenIdle)).unwrap();
 
     assert!(outcome.verified.is_some());

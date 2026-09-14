@@ -12,10 +12,8 @@ use crate::team::storage::{RoomStore, StorageError};
 pub enum DispatchError {
     #[error(transparent)]
     Storage(#[from] StorageError),
-
     #[error(transparent)]
     Budget(#[from] BudgetError),
-
     #[error("attempt is unavailable, already sent, or belongs to an older owner")]
     Ineligible,
 }
@@ -39,6 +37,7 @@ pub(crate) fn reserve_dispatches(
         let id = AttemptId::new();
 
         budget_mut(&mut next, intent.budget)?.reserve(&[(id, intent.purpose)])?;
+
         ids.push(id);
 
         next.attempts.push(Attempt {
@@ -83,6 +82,7 @@ pub(crate) fn dispatch(
     let intent = attempt.intent.clone();
 
     budget_mut(&mut next, intent.budget)?.charge(id)?;
+
     next.attempts[index].state = AttemptState::Sending;
 
     if let BudgetScope::Discussion(discussion_id) = intent.budget
@@ -114,7 +114,6 @@ pub(crate) fn dispatch(
 
     match &outcome {
         SendOutcome::StartedTurn => {}
-
         SendOutcome::Steered | SendOutcome::Rejected { .. } => {
             let mut next = store.room().clone();
 
@@ -142,11 +141,11 @@ pub(crate) fn dispatch(
 
             store.commit(next)?;
         }
-
         SendOutcome::NotReady => {
             let mut next = store.room().clone();
 
             budget_mut(&mut next, intent.budget)?.release_rejected(id)?;
+
             next.attempts[index].state = AttemptState::Rejected;
 
             if let BudgetScope::Discussion(discussion_id) = intent.budget {
@@ -188,7 +187,6 @@ fn budget_mut(room: &mut Room, scope: BudgetScope) -> Result<&mut Budget, Dispat
             .find(|run| run.id == id)
             .map(|run| &mut run.budget)
             .ok_or(DispatchError::Ineligible),
-
         BudgetScope::Direct(id) => Ok(room
             .direct_allowances
             .entry(id)

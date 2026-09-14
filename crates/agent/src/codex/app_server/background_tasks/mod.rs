@@ -38,13 +38,10 @@ const MAX_PENDING_THREADS: usize = 64;
 pub(super) enum ThreadScope {
     /// The selected parent thread; existing parent handling applies.
     Parent,
-
     /// A thread confirmed to descend from the parent.
     Descendant,
-
     /// Some other thread id, or one whose relationship is not yet known.
     Unrelated,
-
     /// The notification is not scoped to a thread at all.
     Unscoped,
 }
@@ -104,13 +101,21 @@ impl CodexTasks {
         )));
 
         self.confirmed.clear();
+
         self.parents.clear();
+
         self.pending.clear();
+
         self.pending_order.clear();
+
         self.launch_messages.clear();
+
         self.queries.clear();
+
         self.active_turns.clear();
+
         self.seen_cursors.clear();
+
         self.reads.clear();
 
         true
@@ -193,6 +198,7 @@ impl CodexTasks {
         }
 
         self.confirmed.insert(thread_id.to_owned());
+
         self.launch_messages.confirm(thread_id);
 
         true
@@ -226,6 +232,7 @@ impl CodexTasks {
     /// are depth 1. `None` when the chain is not fully known yet.
     fn depth_of(&self, thread_id: &str) -> Option<u32> {
         let root = self.root()?;
+
         let mut seen = HashSet::new();
         let mut current = thread_id.to_owned();
         let mut depth = 1;
@@ -457,7 +464,6 @@ impl CodexTasks {
                 updated_at: Some(SystemTime::now()),
                 ..BackgroundTaskUpdate::default()
             },
-
             "turn/completed" => {
                 let state = match params["turn"]["status"].as_str() {
                     Some("failed") => BackgroundTaskState::Failed,
@@ -475,7 +481,6 @@ impl CodexTasks {
                     ..BackgroundTaskUpdate::default()
                 }
             }
-
             "thread/status/changed" => {
                 let status = &params["status"];
 
@@ -490,7 +495,6 @@ impl CodexTasks {
                     ..BackgroundTaskUpdate::default()
                 }
             }
-
             "item/started" | "item/completed" => {
                 // Child transcript content stays out of the parent conversation;
                 // only the row's latest-status preview reflects it.
@@ -502,7 +506,6 @@ impl CodexTasks {
                     ..BackgroundTaskUpdate::default()
                 }
             }
-
             "error" => BackgroundTaskUpdate {
                 state: Some(BackgroundTaskState::Failed),
                 status: params["error"]["message"]
@@ -513,7 +516,6 @@ impl CodexTasks {
                 updated_at: Some(SystemTime::now()),
                 ..BackgroundTaskUpdate::default()
             },
-
             _ => return turn_changed,
         };
 
@@ -535,7 +537,6 @@ impl CodexTasks {
                     .as_deref()
                     != Some(turn_id);
             }
-
             "turn/completed" | "error" => true,
             // `active` is the only status with a turn behind it; a child that
             // went idle, unloaded, or errored has nothing left to interrupt. A
@@ -557,13 +558,11 @@ impl CodexTasks {
     ) {
         let state = match method {
             "turn/started" => Some(BackgroundTaskState::Working),
-
             "turn/completed" => Some(match params["turn"]["status"].as_str() {
                 Some("failed") => BackgroundTaskState::Failed,
                 Some("interrupted") => BackgroundTaskState::Interrupted,
                 _ => BackgroundTaskState::Done,
             }),
-
             "thread/status/changed" => thread_status_state(&params["status"]),
             _ => None,
         };

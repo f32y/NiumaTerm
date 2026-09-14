@@ -25,7 +25,6 @@ impl ProviderMaintenance for CodexMaintenance {
                 Ok(status) => Ok(status),
                 Err(doctor_error) => version_fallback(launcher, doctor_error.message()),
             },
-
             Err(error) => version_fallback(launcher, &error.to_string()),
         }
     }

@@ -130,6 +130,7 @@ fn can_append_inherits_row_and_col() {
     // Empty cell (no diacritics) right after a fully-decoded cell:
     // inherit row, auto-increment col.
     let mut a = p(Some(0), Some(0));
+
     let b = p(None, None);
 
     assert!(a.can_append(&b));
@@ -233,12 +234,19 @@ fn geom_image_matches_grid_aspect_no_padding() {
         .expect("visible");
 
     approx(g.x, 0.0);
+
     approx(g.y, 0.0);
+
     approx(g.width, 30.0);
+
     approx(g.height, 10.0);
+
     approx(g.source_rect[0], 0.0);
+
     approx(g.source_rect[1], 0.0);
+
     approx(g.source_rect[2], 0.30);
+
     approx(g.source_rect[3], 0.20);
 }
 
@@ -266,12 +274,19 @@ fn geom_image_taller_than_grid_centers_horizontally() {
     // Source x = (30 - 25)..(40 - 25) of fit_w=50 → u 0.10..0.30.
     // Source y = 0..10 of fit_h=100 → v 0..0.10.
     approx(g.x, 30.0);
+
     approx(g.y, 0.0);
+
     approx(g.width, 10.0);
+
     approx(g.height, 10.0);
+
     approx(g.source_rect[0], 0.10);
+
     approx(g.source_rect[1], 0.0);
+
     approx(g.source_rect[2], 0.30);
+
     approx(g.source_rect[3], 0.10);
 }
 
@@ -296,12 +311,19 @@ fn geom_image_wider_than_grid_centers_vertically() {
     // screen_y = 4*10 = 40. Image y 37.5..62.5 → src y 2.5..12.5
     // of fit_h=25 → v 0.10..0.50. Full width: u 0..1.
     approx(g.x, 0.0);
+
     approx(g.y, 40.0);
+
     approx(g.width, 100.0);
+
     approx(g.height, 10.0);
+
     approx(g.source_rect[0], 0.0);
+
     approx(g.source_rect[1], 0.10);
+
     approx(g.source_rect[2], 1.0);
+
     approx(g.source_rect[3], 0.50);
 }
 
@@ -330,12 +352,16 @@ fn geom_partial_visibility_scrolled_off_top() {
     .expect("visible");
 
     approx(g.x, 0.0);
+
     approx(g.y, 0.0); // rendered at top of viewport, not at row*cell
+
     approx(g.width, 100.0);
+
     approx(g.height, 10.0);
 
     // Source rect still picks the row-2 slice of the image.
     approx(g.source_rect[1], 0.20);
+
     approx(g.source_rect[3], 0.30);
 }
 
@@ -347,8 +373,11 @@ fn geom_origin_offset_applies_to_screen_pos_only() {
         .expect("visible");
 
     approx(g.x, 100.0);
+
     approx(g.y, 50.0);
+
     approx(g.source_rect[0], 0.0);
+
     approx(g.source_rect[2], 0.30);
 }
 
@@ -360,6 +389,7 @@ fn geom_screen_line_and_start_col_offset_screen_pos() {
         .expect("visible");
 
     approx(g.x, 50.0);
+
     approx(g.y, 70.0);
 }
 

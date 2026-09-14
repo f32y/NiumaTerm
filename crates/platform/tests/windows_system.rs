@@ -17,6 +17,7 @@ fn protected_data_roundtrips_for_current_user() {
 #[test]
 fn protected_data_rejects_tampering() {
     let mut encrypted = data_protection::protect(b"secret").expect("protect data");
+
     let last = encrypted.len() - 1;
 
     encrypted[last] ^= 0xFF;

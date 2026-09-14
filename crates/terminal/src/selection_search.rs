@@ -137,7 +137,6 @@ impl<'a> VisibleGrid<'a> {
                     last = p;
                     cur = p;
                 }
-
                 None => break,
             }
         }
@@ -162,7 +161,6 @@ impl<'a> VisibleGrid<'a> {
 
                 q
             }
-
             Err(p) => p,
         }
     }

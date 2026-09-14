@@ -93,6 +93,7 @@ impl StyleSet {
     /// Create a new style set with the default style pre-interned at id 0.
     pub fn new() -> Self {
         let default_style = Style::default();
+
         let mut lookup = FxHashMap::default();
 
         lookup.insert(default_style, DEFAULT_STYLE_ID);
@@ -169,6 +170,7 @@ impl StyleSet {
         let id = self.styles.len() as StyleId;
 
         self.styles.push(style);
+
         self.lookup.insert(style, id);
 
         id
@@ -179,7 +181,9 @@ impl StyleSet {
     /// stored ids survive (e.g. right after the grid was cleared).
     pub fn clear(&mut self) {
         self.styles.truncate(1);
+
         self.lookup.clear();
+
         self.lookup.insert(self.styles[0], DEFAULT_STYLE_ID);
     }
 
@@ -214,10 +218,15 @@ impl From<&SnapshotStyle> for Style {
         let mut flags = StyleFlags::empty();
 
         flags.set(StyleFlags::BOLD, s.bold);
+
         flags.set(StyleFlags::ITALIC, s.italic);
+
         flags.set(StyleFlags::DIM, s.faint);
+
         flags.set(StyleFlags::INVERSE, s.inverse);
+
         flags.set(StyleFlags::HIDDEN, s.invisible);
+
         flags.set(StyleFlags::STRIKEOUT, s.strikethrough);
 
         flags |= match s.underline {

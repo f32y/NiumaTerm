@@ -70,6 +70,7 @@ pub fn launch_env_value(launch: &LaunchConfig, target: &str) -> Option<String> {
 /// last-value-wins behavior.
 pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
     let mut env: Vec<(String, String)> = Vec::new();
+
     let model = (!profile.model.trim().is_empty()).then(|| profile.model.trim().to_string());
 
     let codex_provider_id = (profile.kind == AgentProfileKind::Codex
@@ -102,11 +103,9 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
         if !api_key.is_empty() {
             let key_env = match profile.kind {
                 AgentProfileKind::Claude => "ANTHROPIC_API_KEY",
-
                 AgentProfileKind::Codex => codex_credential_env
                     .as_deref()
                     .unwrap_or(OPENAI_API_KEY_ENV),
-
                 AgentProfileKind::DeepSeek => DEEPSEEK_API_KEY_ENV,
             };
 
@@ -170,12 +169,10 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
             dsh::NPX_EXECUTABLE.to_string(),
             dsh::NPX_ARGUMENTS.map(str::to_string).to_vec(),
         ),
-
         (AgentProfileKind::DeepSeek, AgentProfileLauncher::PnpmDlx) => (
             dsh::PNPM_DLX_EXECUTABLE.to_string(),
             dsh::PNPM_DLX_ARGUMENTS.map(str::to_string).to_vec(),
         ),
-
         _ => (profile.executable.trim().to_string(), Vec::new()),
     };
 

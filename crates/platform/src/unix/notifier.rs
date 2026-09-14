@@ -72,6 +72,7 @@ mod platform {
         let content = UNMutableNotificationContent::new();
 
         content.setTitle(&NSString::from_str(&notification.title));
+
         content.setBody(&NSString::from_str(&notification.body));
 
         let identifier = NSString::from_str(&state.identifier);

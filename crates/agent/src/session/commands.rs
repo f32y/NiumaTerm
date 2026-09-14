@@ -43,7 +43,6 @@ impl CommandQueue {
         match policy {
             SlashCommandRunPolicy::Immediate => CommandAdmission::Execute(command),
             SlashCommandRunPolicy::IdleOnly => CommandAdmission::Busy { name: command.name },
-
             SlashCommandRunPolicy::QueueUntilIdle => {
                 let name = command.name.clone();
 
@@ -77,6 +76,7 @@ impl CommandQueue {
         let discarded = !self.queue.is_empty();
 
         self.queue.clear();
+
         self.awaiting_turn = false;
 
         discarded
@@ -85,7 +85,6 @@ impl CommandQueue {
     pub fn settle(&mut self, outcome: &SlashCommandOutcome, status: Status) -> bool {
         match outcome {
             SlashCommandOutcome::Accepted => false,
-
             SlashCommandOutcome::Completed { .. } => {
                 if status == Status::Running {
                     return false;
@@ -93,7 +92,6 @@ impl CommandQueue {
 
                 take(&mut self.awaiting_turn)
             }
-
             SlashCommandOutcome::Rejected { .. } | SlashCommandOutcome::NotReady => {
                 self.awaiting_turn = false;
 

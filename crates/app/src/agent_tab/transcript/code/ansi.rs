@@ -98,6 +98,7 @@ impl Perform for AnsiText {
         // not modify earlier records. CRLF remains a single line break.
         if self.pending_cr {
             self.push('\n');
+
             self.pending_cr = false;
         }
 
@@ -107,12 +108,11 @@ impl Perform for AnsiText {
     fn execute(&mut self, byte: u8) {
         match byte {
             b'\r' => self.pending_cr = true,
-
             b'\n' => {
                 self.pending_cr = false;
+
                 self.push('\n');
             }
-
             b'\t' => self.print('\t'),
             _ => {}
         }
@@ -136,12 +136,10 @@ impl Perform for AnsiText {
                 4 => self.style.underline = true,
                 7 => self.style.reverse = true,
                 9 => self.style.strike = true,
-
                 22 => {
                     self.style.bold = false;
                     self.style.dim = false;
                 }
-
                 23 => self.style.italic = false,
                 24 => self.style.underline = false,
                 27 => self.style.reverse = false,
@@ -149,14 +147,11 @@ impl Perform for AnsiText {
                 30..=37 => self.style.foreground = Some(AnsiColor::Indexed((code - 30) as u8)),
                 40..=47 => self.style.background = Some(AnsiColor::Indexed((code - 40) as u8)),
                 90..=97 => self.style.foreground = Some(AnsiColor::Indexed((code - 90 + 8) as u8)),
-
                 100..=107 => {
                     self.style.background = Some(AnsiColor::Indexed((code - 100 + 8) as u8))
                 }
-
                 39 => self.style.foreground = None,
                 49 => self.style.background = None,
-
                 38 | 48 => {
                     let values = if group.len() > 1 {
                         group[1..].to_vec()
@@ -180,13 +175,11 @@ impl Perform for AnsiText {
 
                     let color = match values.as_slice() {
                         [5, index] => u8::try_from(*index).ok().map(AnsiColor::Indexed),
-
                         [2, r, g, b] | [2, 0, r, g, b] => u8::try_from(*r)
                             .ok()
                             .zip(u8::try_from(*g).ok())
                             .zip(u8::try_from(*b).ok())
                             .map(|((r, g), b)| AnsiColor::Rgb(r, g, b)),
-
                         _ => None,
                     };
 
@@ -198,7 +191,6 @@ impl Perform for AnsiText {
                         }
                     }
                 }
-
                 _ => {}
             }
         }
@@ -215,7 +207,6 @@ impl From<AnsiColor> for Hsla {
 
                 r << 16 | g << 8 | b
             }
-
             AnsiColor::Indexed(index) => match index {
                 0..=15 => {
                     let index: usize = index.into();
@@ -226,7 +217,6 @@ impl From<AnsiColor> for Hsla {
                         0x29b8db, 0xffffff,
                     ][index]
                 }
-
                 16..=231 => {
                     let index: u32 = (index - 16).into();
                     let component = |value| if value == 0 { 0 } else { 55 + 40 * value };
@@ -235,7 +225,6 @@ impl From<AnsiColor> for Hsla {
                         | component(index / 6 % 6) << 8
                         | component(index % 6)
                 }
-
                 232..=255 => {
                     let level: u32 = (8 + 10 * (index - 232)).into();
 

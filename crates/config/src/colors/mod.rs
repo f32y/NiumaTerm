@@ -368,6 +368,7 @@ impl Rgba {
         };
 
         let [r, g, b, a] = rgba.to_be_bytes();
+
         let mut color = Self::from_rgb(ColorRgb { r, g, b });
 
         color.alpha = f64::from(a) / 255.0;

@@ -16,6 +16,7 @@ fn an_untracked_disclosure_is_already_at_rest() {
 #[test]
 fn a_reveal_ramps_from_its_start_to_rest() {
     let mut reveals = Reveals::default();
+
     let start = Instant::now();
 
     reveals.open(RevealKey::Row(1), start);
@@ -38,9 +39,11 @@ fn a_reveal_ramps_from_its_start_to_rest() {
 #[test]
 fn every_kind_of_disclosure_travels_the_same_way() {
     let mut reveals = Reveals::default();
+
     let start = Instant::now();
 
     reveals.open(RevealKey::Row(1), start);
+
     reveals.open(RevealKey::Group(0), start);
 
     let at = start + REVEAL_DURATION / 4;
@@ -57,6 +60,7 @@ fn every_kind_of_disclosure_travels_the_same_way() {
 #[test]
 fn shutting_runs_the_same_ramp_backwards() {
     let mut reveals = Reveals::default();
+
     let start = Instant::now();
 
     reveals.close(RevealKey::Row(1), start);
@@ -79,6 +83,7 @@ fn shutting_runs_the_same_ramp_backwards() {
 #[test]
 fn reversing_resumes_from_what_is_on_screen() {
     let mut reveals = Reveals::default();
+
     let start = Instant::now();
 
     reveals.close(RevealKey::Row(1), start);
@@ -105,6 +110,7 @@ fn reversing_resumes_from_what_is_on_screen() {
 #[test]
 fn reveals_settle_once_their_duration_has_run() {
     let mut reveals = Reveals::default();
+
     let start = Instant::now();
 
     reveals.open(RevealKey::Group(0), start);
@@ -122,9 +128,11 @@ fn reveals_settle_once_their_duration_has_run() {
 #[test]
 fn only_a_finished_exit_asks_to_be_taken_down() {
     let mut reveals = Reveals::default();
+
     let start = Instant::now();
 
     reveals.open(RevealKey::Row(1), start);
+
     reveals.close(RevealKey::Group(0), start);
 
     assert!(reveals.shut(start).is_empty());

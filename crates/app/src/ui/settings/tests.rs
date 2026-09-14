@@ -32,6 +32,7 @@ use crate::ui::settings::*;
 #[gpui::test]
 fn powershell_compatibility_changes_reach_the_live_terminal_snapshot(cx: &mut TestAppContext) {
     cx.set_global(AppSettings::default());
+
     cx.update(install_terminal_settings);
 
     assert!(cx.read(|cx| {
@@ -298,6 +299,7 @@ fn default_profile_command_resolves_by_name() {
 
     // Blank shell path: no override, session uses its built-in default.
     settings.set_profile_shell(0, "  ".into());
+
     settings.set_default_profile("PowerShell".into());
 
     let (shell, args) = settings.default_profile_command();
@@ -311,8 +313,11 @@ fn profile_name_resolves_from_launch_command() {
     let mut settings = AppSettings::default();
 
     settings.add_profile();
+
     settings.rename_profile(1, "Developer PowerShell".into());
+
     settings.set_profile_shell(1, "pwsh.exe".into());
+
     settings.set_profile_args(1, "-NoLogo".into());
 
     assert_eq!(
@@ -327,6 +332,7 @@ fn profile_mutations_keep_default_valid() {
 
     // Add: unique placeholder names.
     settings.add_profile();
+
     settings.add_profile();
 
     assert_eq!(settings.config().profiles.list.len(), 3);
@@ -345,6 +351,7 @@ fn profile_mutations_keep_default_valid() {
 
     // The last profile cannot be removed.
     settings.remove_profile(0);
+
     settings.remove_profile(0);
 
     assert_eq!(settings.config().profiles.list.len(), 1);
@@ -510,6 +517,7 @@ fn default_agent_profile_entry_resolves_by_name() {
     };
 
     settings.save_agent_profile(Some(1), profile);
+
     settings.set_default_agent_profile("Codex".into());
 
     assert_eq!(
@@ -574,8 +582,11 @@ fn failed_settings_save_keeps_edits_for_retry() {
     settings.edit_terminal(|section| section.improve_powershell_compatibility = false);
 
     settings.edit_appearance(|section| section.scroll_to_bottom_when_typing = false);
+
     settings.edit_appearance(|section| section.reduce_motion = true);
+
     settings.edit_appearance(|section| section.human_friendly_agent_ui_layout = false);
+
     settings.edit_appearance(|section| section.smooth_scrolling = SmoothScrollingMode::OnlyAgent);
 
     let error = settings.save_to(&path).unwrap_err();
@@ -589,6 +600,7 @@ fn failed_settings_save_keeps_edits_for_retry() {
     );
 
     fs::write(&path, "# keep this\n[appearance]\nfuture-setting = 42\n").unwrap();
+
     settings.save_to(&path).unwrap();
 
     let saved = fs::read_to_string(&path).unwrap();
@@ -622,6 +634,7 @@ fn settings_io_failure_preserves_edits_until_the_path_is_repaired() {
     assert!(path.is_dir());
 
     fs::remove_dir(&path).unwrap();
+
     settings.save_to(&path).unwrap();
 
     let config: Config = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -686,6 +699,7 @@ fn smooth_scrolling_mode_updates_an_open_terminal_list(cx: &mut TestAppContext) 
     assert_eq!(list_pixel_position(&state), 200.);
 
     cx.executor().advance_clock(Duration::from_millis(100));
+
     draw_settings_aware_list(cx, &view);
 
     let stopped_at = list_pixel_position(&state);
@@ -698,7 +712,9 @@ fn smooth_scrolling_mode_updates_an_open_terminal_list(cx: &mut TestAppContext) 
     });
 
     draw_settings_aware_list(cx, &view);
+
     cx.executor().advance_clock(Duration::from_millis(400));
+
     draw_settings_aware_list(cx, &view);
 
     assert!((list_pixel_position(&state) - stopped_at).abs() < 0.1);

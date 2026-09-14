@@ -57,6 +57,7 @@ fn closing_downlinks_interrupts_handshakes_and_idle_reads_and_joins_delivery() {
                 let mut reader = BufReader::new(stream);
 
                 reader.read_line(&mut String::new()).unwrap();
+
                 reading.send(()).unwrap();
 
                 let _ = reader.read_to_end(&mut Vec::new());
@@ -101,6 +102,7 @@ fn readiness_waits_for_all_subscriptions_and_delivers_the_opening_history() {
     let client = ApiClient::new("http://127.0.0.1:1".into()).unwrap();
     let frames = RefCell::new(Vec::new());
     let deliver = |frame| frames.borrow_mut().push(frame);
+
     let mut streams = Streams::new("session-1");
 
     streams
@@ -142,6 +144,7 @@ fn control_updates_do_not_cross_sessions_and_keep_their_cursor() {
     let client = ApiClient::new("http://127.0.0.1:1".into()).unwrap();
     let frames = RefCell::new(Vec::new());
     let deliver = |frame| frames.borrow_mut().push(frame);
+
     let mut streams = Streams::new("session-1");
 
     streams
@@ -170,6 +173,7 @@ fn interactions_retain_the_generation_and_cancel_the_matching_card() {
     let client = ApiClient::new("http://127.0.0.1:1".into()).unwrap();
     let frames = RefCell::new(Vec::new());
     let deliver = |frame| frames.borrow_mut().push(frame);
+
     let mut streams = Streams::new("session-1");
 
     streams

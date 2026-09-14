@@ -25,7 +25,6 @@ pub(crate) enum Viewport {
         scrollbar: ScrollbarInfo,
         row_offsets: Arc<[f32]>,
     },
-
     BlockList {
         scroll_px: f32,
         max_scroll_px: f32,
@@ -56,7 +55,6 @@ impl Viewport {
             Self::Grid { scrollbar, .. } => {
                 scrollbar.offset < scrollbar.total.saturating_sub(scrollbar.len)
             }
-
             Self::BlockList {
                 scroll_px,
                 max_scroll_px,
@@ -68,7 +66,6 @@ impl Viewport {
     pub(crate) fn scrollbar_info(&self) -> ScrollbarInfo {
         match self {
             Self::Grid { scrollbar, .. } => *scrollbar,
-
             Self::BlockList {
                 scroll_px,
                 max_scroll_px,
@@ -87,7 +84,6 @@ impl Viewport {
             Self::Grid { scrollbar, .. } => {
                 scrollbar_offset_for_thumb(scrollbar.total as f64, scrollbar.len as f64, thumb_top)
             }
-
             Self::BlockList {
                 max_scroll_px,
                 viewport_px,

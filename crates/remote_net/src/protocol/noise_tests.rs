@@ -27,6 +27,7 @@ fn ik_handshake_and_transport() {
     let client = generate_keypair().unwrap();
     let initiator = Handshake::initiator_ik(&client.private, &host.public).unwrap();
     let responder = Handshake::responder_ik(&host.private).unwrap();
+
     let (mut client_chan, mut host_chan) = complete(initiator, responder);
 
     assert_eq!(host_chan.remote_static(), Some(client.public.as_slice()));

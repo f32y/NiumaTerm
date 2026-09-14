@@ -26,10 +26,8 @@ use crate::workspace::roots::path_identity;
 pub enum TerminalActivity {
     #[default]
     Idle,
-
     /// A command is executing right now.
     Running,
-
     /// A command ended in a background tab and the user has not looked yet.
     Finished(CommandOutcome),
 }
@@ -195,6 +193,7 @@ pub fn exact_match(summaries: &[WorkspaceSummary], target: &path::Path) -> Optio
 /// they do not identify a concrete filesystem location.
 pub fn best_match(summaries: &[WorkspaceSummary], target: &path::Path) -> Option<WorkspaceId> {
     let target = path_identity(target);
+
     let mut best: Option<(usize, bool, WorkspaceId)> = None;
 
     for ws in summaries {

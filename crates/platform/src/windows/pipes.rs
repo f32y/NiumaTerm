@@ -44,6 +44,7 @@ impl PipeWorker {
 
         let thread = spawn(move || {
             pump(worker_state.clone(), sender);
+
             // A failed native call must wake a loop waiting for write completion,
             // even when no more pipe data or child-exit event will arrive.
             worker_state.soft.set_ready();
@@ -69,7 +70,6 @@ impl PipeWorker {
 
                 Err(io::Error::new(io::ErrorKind::BrokenPipe, error))
             }
-
             Err(TryRecvError::Disconnected) => Err(io::ErrorKind::BrokenPipe.into()),
             Err(TryRecvError::Empty) => Ok(()),
         }
@@ -83,6 +83,7 @@ impl Drop for PipeWorker {
         // Pair with the worker's predicate check so the stop notification
         // cannot be lost between checking the flag and parking.
         drop(self.state.wait_tag.lock());
+
         self.state.buffer_changed.notify_one();
 
         if let Some(thread) = self.thread.take() {
@@ -216,6 +217,7 @@ impl io::Read for EventedAnonRead {
         // either before its check (and will see the space) or already parked
         // (and will get this notify).
         drop(self.worker.state.wait_tag.lock());
+
         self.worker.state.buffer_changed.notify_one();
 
         Ok(nbytes)
@@ -330,6 +332,7 @@ fn pump_buffer_to_pipe(
             }
 
             written += count;
+
             progress.completed.fetch_add(count as u64, Ordering::SeqCst);
 
             if progress.flush_waiting.swap(false, Ordering::SeqCst) {
@@ -364,6 +367,7 @@ impl io::Write for EventedAnonWrite {
         // worker is either before its check (and will see the data) or already
         // parked (and will get this notify).
         drop(self.worker.state.wait_tag.lock());
+
         self.worker.state.buffer_changed.notify_one();
 
         Ok(nbytes)
@@ -371,6 +375,7 @@ impl io::Write for EventedAnonWrite {
 
     fn flush(&mut self) -> io::Result<()> {
         self.worker.check_error()?;
+
         // Emptying the ring only transfers bytes to the worker's temporary
         // buffer. A resize must wait until its native writes have completed.
         // Register before checking completion so the last write cannot lose

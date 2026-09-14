@@ -103,7 +103,6 @@ impl ModelDirectory {
             .find(|route| route.provider == provider && route.model == model)
         {
             Some(route) => Some(route.key.clone()),
-
             None if !model.is_empty() => {
                 routes.push(ModelRoute {
                     key: model.to_string(),
@@ -115,7 +114,6 @@ impl ModelDirectory {
 
                 Some(model.to_string())
             }
-
             None => None,
         };
 
@@ -171,7 +169,6 @@ impl ModelDirectory {
             {
                 (provider, model)
             }
-
             _ => (self.current_provider.as_str(), key),
         }
     }

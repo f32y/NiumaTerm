@@ -65,13 +65,11 @@ impl RenderOnce for InlineRename {
                 .p_0()
                 .text_center()
                 .appearance(false),
-
             InlineRenameStyle::SidebarTab => Input::new(&self.input)
                 .xsmall()
                 .p_0()
                 .text_xs()
                 .appearance(false),
-
             InlineRenameStyle::Workspace => Input::new(&self.input)
                 .xsmall()
                 .p_0()
@@ -85,6 +83,7 @@ impl RenderOnce for InlineRename {
             .capture_key_down(move |event: &KeyDownEvent, window, cx| {
                 if event.keystroke.key == "escape" {
                     cx.stop_propagation();
+
                     cancel(window, cx);
                 }
             })

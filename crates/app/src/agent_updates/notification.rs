@@ -119,7 +119,6 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
             NotificationProgress::None,
             false,
         ),
-
         UpdatePhase::WaitingForIdle => (
             t!("agent-update-notice-waiting-title", provider = provider).into_owned(),
             t!("agent-update-notice-waiting-message").to_string(),
@@ -128,7 +127,6 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
             NotificationProgress::Indeterminate,
             false,
         ),
-
         UpdatePhase::Suspending => (
             t!("agent-update-notice-stopping-title", provider = provider).into_owned(),
             t!("agent-update-notice-stopping-message").to_string(),
@@ -137,7 +135,6 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
             progress_view(snapshot),
             false,
         ),
-
         UpdatePhase::Updating => (
             t!("agent-update-notice-updating-title", provider = provider).into_owned(),
             t!(
@@ -150,7 +147,6 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
             NotificationProgress::Indeterminate,
             false,
         ),
-
         UpdatePhase::Verifying => (
             t!("agent-update-notice-verifying-title", provider = provider).into_owned(),
             t!("agent-update-notice-verifying-message").to_string(),
@@ -159,7 +155,6 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
             NotificationProgress::Indeterminate,
             false,
         ),
-
         UpdatePhase::Restoring => (
             t!("agent-update-notice-restoring-title", provider = provider).into_owned(),
             t!("agent-update-notice-restoring-message").to_string(),
@@ -168,7 +163,6 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
             progress_view(snapshot),
             false,
         ),
-
         UpdatePhase::Updated => (
             t!("agent-update-notice-updated-title", provider = provider).into_owned(),
             t!("agent-update-notice-updated-message", version = &current).into_owned(),
@@ -177,7 +171,6 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
             NotificationProgress::Determinate(100.0),
             true,
         ),
-
         UpdatePhase::Unchanged => (
             t!("agent-update-notice-unchanged-title", provider = provider).into_owned(),
             bounded_error(snapshot, &t!("agent-update-notice-unchanged-message")),
@@ -186,7 +179,6 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
             NotificationProgress::Determinate(100.0),
             true,
         ),
-
         UpdatePhase::Failed => (
             t!("agent-update-notice-failed-title", provider = provider).into_owned(),
             bounded_error(snapshot, &t!("agent-update-notice-failed-message")),
@@ -195,7 +187,6 @@ pub(crate) fn notification_view(snapshot: &InstallationSnapshot) -> Option<Updat
             NotificationProgress::None,
             false,
         ),
-
         _ => return None,
     };
 

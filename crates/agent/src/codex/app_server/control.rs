@@ -80,6 +80,7 @@ impl ControlState {
         // A unique id is also the generation token: removing the previous
         // request rejects both its late success and its late failure.
         self.pending.operations.retain(|_, operation| !matches!(operation, ControlOperation::Query(previous) if kind.replaces(*previous)));
+
         self.track(id, ControlOperation::Query(kind));
     }
 

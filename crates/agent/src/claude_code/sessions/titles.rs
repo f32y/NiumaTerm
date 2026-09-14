@@ -137,6 +137,7 @@ pub(super) fn resolved_session_title(path: &Path, provisional: Option<String>, i
 /// record of each kind wins, then a user-authored title outranks a model title.
 pub(super) fn recorded_title(path: &Path) -> Option<String> {
     let mut file = fs::File::open(path).ok()?;
+
     let size = file.metadata().ok()?.len();
     let start = size.saturating_sub(RECORDED_TITLE_SCAN_BYTES);
 
@@ -286,7 +287,6 @@ pub(super) fn is_interruption(record: &Value) -> bool {
 fn is_task_notification(record: &Value) -> bool {
     match record["origin"]["kind"].as_str() {
         Some(kind) => kind == "task-notification",
-
         // Older CLI versions recorded no origin, leaving the notification
         // block itself as the only marker.
         None => record_text(record)
@@ -313,7 +313,6 @@ pub(super) fn compaction_summary_text(record: &Value) -> Option<String> {
 fn record_text(record: &Value) -> Option<String> {
     let text = match &record["message"]["content"] {
         Value::String(text) => text.clone(),
-
         Value::Array(blocks) => {
             let parts: Vec<&str> = blocks
                 .iter()
@@ -323,7 +322,6 @@ fn record_text(record: &Value) -> Option<String> {
 
             parts.join("\n")
         }
-
         _ => return None,
     };
 
@@ -368,7 +366,9 @@ pub(super) fn clean_prompt(text: &str) -> String {
 /// It is also the history fallback when no persisted title metadata exists.
 pub(crate) fn provisional_title_from_prompt(text: &str) -> Option<String> {
     let cleaned = clean_prompt(text);
+
     let mut words = cleaned.split_whitespace();
+
     let first = words.next()?;
 
     if first.starts_with('/') {
@@ -381,6 +381,7 @@ pub(crate) fn provisional_title_from_prompt(text: &str) -> Option<String> {
         .join(" ");
 
     let mut chars = normalized.chars();
+
     let prefix: String = chars.by_ref().take(PROVISIONAL_TITLE_CHARS).collect();
 
     if chars.next().is_none() {

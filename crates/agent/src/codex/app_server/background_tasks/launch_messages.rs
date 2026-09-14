@@ -16,7 +16,9 @@ pub(super) struct LaunchMessages {
 impl LaunchMessages {
     pub(super) fn clear(&mut self) {
         self.confirmed.clear();
+
         self.pending.clear();
+
         self.pending_order.clear();
     }
 
@@ -83,6 +85,7 @@ impl LaunchMessages {
         }
 
         self.pending.insert(thread_id.to_owned(), message);
+
         self.pending_order.push(thread_id.to_owned());
 
         while self.pending_order.len() > MAX_PENDING_MESSAGES {

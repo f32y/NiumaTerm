@@ -11,9 +11,7 @@ mod releases;
 #[cfg(test)]
 mod tests;
 
-use nmt_platform::windows::self_update::discard_previous;
 use std::fs;
-
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -22,6 +20,7 @@ use nmt_config::update::UpdateChannel;
 use nmt_platform::windows::restart_manager::{
     AffectedApplication, FileUsage, RestartManagerError, RestartManagerSession, SystemApi,
 };
+use nmt_platform::windows::self_update::discard_previous;
 use nmt_platform::windows::window::show_error_dialog;
 use nmt_version::Version;
 use rust_i18n::t;
@@ -51,30 +50,23 @@ pub(crate) enum Status {
     /// off reports for as long as it stays off.
     #[default]
     Unknown,
-
     Checking,
-
     /// The channel has published nothing this build can be compared against,
     /// which is not the same as being current: an empty channel says nothing
     /// about what is running.
     NothingPublished,
-
     UpToDate,
     Available(Release),
-
     /// The package is being fetched and unpacked, or its captured plan is being
     /// applied without needing a user decision.
     Installing(Release),
-
     InspectingFileUse(Release),
     AwaitingFileUse(Release),
     ClosingFileUsers(Release),
-
     RecoveryWarning {
         release: Release,
         applications: Vec<String>,
     },
-
     Failed(CheckError),
     InstallFailed(InstallError),
 }
@@ -102,9 +94,7 @@ impl Status {
             | Self::InspectingFileUse(release)
             | Self::AwaitingFileUse(release)
             | Self::ClosingFileUsers(release) => Some(release),
-
             Self::RecoveryWarning { release, .. } => Some(release),
-
             Self::Unknown
             | Self::Checking
             | Self::NothingPublished
@@ -123,16 +113,12 @@ impl Status {
 pub(crate) enum InstallError {
     /// The release has no package, or none published beside a checksum.
     NoPackage,
-
     Unreachable,
-
     /// What arrived is not what was published.
     Checksum,
-
     Unpack,
     NotWritable,
     Replace,
-
     /// The files were replaced, so the update did land; only the restart into
     /// it did not.
     Relaunch,
@@ -272,6 +258,7 @@ pub(crate) fn inspect_file_users(cx: &mut App) {
     let dll = pending.install.join(install::SHELL_EXTENSION_DLL);
 
     set_status(Status::InspectingFileUse(release), cx);
+
     cx.refresh_windows();
 
     cx.spawn(async move |cx| {
@@ -296,9 +283,7 @@ fn finish_file_use_inspection(result: Result<FileUsage, RestartManagerError>, cx
 
             return;
         }
-
         Ok(Some(prompt)) => prompt,
-
         Err(error) => {
             warn!("update: checking shell-extension users failed: {error}");
 
@@ -367,6 +352,7 @@ pub(crate) fn cancel_install(cx: &mut App) {
     };
 
     set_status(Status::Available(pending.release), cx);
+
     cx.refresh_windows();
 }
 
@@ -415,7 +401,9 @@ pub(crate) fn complete_relaunch(cx: &mut App) {
 
 fn fail_install(error: InstallError, cx: &mut App) {
     cx.global_mut::<AppUpdate>().pending = None;
+
     set_status(Status::InstallFailed(error), cx);
+
     cx.refresh_windows();
 }
 
@@ -451,12 +439,10 @@ impl FileUserSession for RestartManagerSession {
 
 enum ClosePreparation {
     Clear,
-
     Released {
         session: Box<dyn FileUserSession>,
         applications: Vec<AffectedApplication>,
     },
-
     Prompt(FileUsePrompt),
 }
 
@@ -468,6 +454,7 @@ pub(crate) fn close_file_users(cx: &mut App) {
     let dll = pending.install.join(install::SHELL_EXTENSION_DLL);
 
     set_status(Status::ClosingFileUsers(pending.release), cx);
+
     cx.refresh_windows();
 
     cx.spawn(async move |cx| {
@@ -486,11 +473,9 @@ fn on_close_prepared(prepared: ClosePreparation, cx: &mut AsyncApp) {
         ClosePreparation::Clear => {
             cx.update(continue_install);
         }
-
         ClosePreparation::Prompt(prompt) => {
             cx.update(|cx| show_file_use_prompt(prompt, cx));
         }
-
         ClosePreparation::Released {
             session,
             applications,
@@ -519,7 +504,6 @@ where
 {
     let session = match S::open(path) {
         Ok(session) => session,
-
         Err(error) => {
             warn!("update: starting shell-extension shutdown failed: {error}");
 
@@ -529,7 +513,6 @@ where
 
     let usage = match session.file_usage() {
         Ok(usage) => usage,
-
         Err(error) => {
             warn!("update: refreshing shell-extension users failed: {error}");
 
@@ -566,7 +549,6 @@ where
                 },
                 applications: usage.applications,
             }),
-
             Err(list_error) => {
                 warn!("update: listing applications after failed shutdown failed: {list_error}");
 
@@ -654,6 +636,7 @@ fn show_recovery_warning(applications: Vec<String>, cx: &mut App) {
     .into_owned();
 
     show_error_dialog(&t!("settings-about-recovery-warning-title"), &message);
+
     complete_relaunch(cx);
 }
 
@@ -797,6 +780,7 @@ fn finish_check(found: Result<Option<Release>, CheckError>, channel: UpdateChann
     }
 
     set_status(outcome(found), cx);
+
     cx.refresh_windows();
 }
 

@@ -5,13 +5,12 @@ use std::path::{Path, PathBuf};
 use std::{fs, io, panic, thread};
 
 use chrono::Utc;
+use nmt_platform::environment::data_dir;
 use tracing_appender::non_blocking;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt, registry};
-
-use nmt_platform::environment::data_dir;
 
 pub fn init_logging(testing: bool) -> io::Result<WorkerGuard> {
     let log_path = log_dir(testing);

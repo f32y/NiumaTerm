@@ -188,7 +188,9 @@ fn create_process_receives_exact_agent_overrides() {
 
     unsafe {
         WaitForSingleObject(child.hProcess, INFINITE);
+
         CloseHandle(child.hThread);
+
         CloseHandle(child.hProcess);
     }
 

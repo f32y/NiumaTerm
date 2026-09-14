@@ -61,7 +61,9 @@ pub(crate) fn stage(release: &Release, staging: &Path) -> Result<PathBuf, Instal
     let archive = staging.join(format!("{name}.zip"));
 
     download(&package.url, &archive)?;
+
     verify(&archive, &fetch_text(&checksum.url)?)?;
+
     unpack(&archive, &directory)?;
 
     let _ = fs::remove_file(&archive);
@@ -140,6 +142,7 @@ fn fetch_text(url: &str) -> Result<String, InstallError> {
 
 fn verify(archive: &Path, published: &str) -> Result<(), InstallError> {
     let expected = expected_digest(published).ok_or(InstallError::Checksum)?;
+
     let mut file = File::open(archive).map_err(|_| InstallError::Checksum)?;
     let mut hasher = Sha256::new();
 

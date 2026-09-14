@@ -37,6 +37,7 @@ impl GitSidebar {
 
             if seq != this.seen_snapshot_seq {
                 this.seen_snapshot_seq = seq;
+
                 this.on_snapshot_changed(cx);
             }
 
@@ -71,7 +72,9 @@ impl GitSidebar {
             self.fetch_diff(cx);
         } else {
             self.selected = None;
+
             self.diff.clear();
+
             self.diff_seq += 1;
         }
     }
@@ -245,11 +248,9 @@ impl GitSidebar {
                                 DiffLineKind::Added => theme.green,
                                 DiffLineKind::Removed => theme.red,
                                 DiffLineKind::Hunk => theme.cyan,
-
                                 DiffLineKind::FileHeader | DiffLineKind::Truncated => {
                                     theme.muted_foreground
                                 }
-
                                 DiffLineKind::Context => theme.foreground,
                             };
 

@@ -329,8 +329,11 @@ fn hit_test_maps_block_list_points() {
     let mut hit = FrozenHitInfo::default();
 
     hit.push_row(10.0, 0, 0, 10); // item 0 row 0 at y=10
+
     hit.push_row(20.0, 0, 1, 10);
+
     hit.push_row(50.0, usize::MAX, 0, 10); // live-history sentinel
+
     hit.set_active_top(70.0);
 
     assert_eq!(
@@ -548,7 +551,9 @@ fn frozen_block_images_map_visible_rows() {
     let mut t = GhosttyTerminal::new(20, 5, 10_000).unwrap();
 
     t.resize(20, 5, 10, 20).unwrap(); // cell pixel size for grid math
+
     t.write_vt(b"a\r\nb\r\n");
+
     t.write_vt(b"\x1b_Ga=T,f=32,s=1,v=1,i=1;/wAA/w==\x1b\\");
 
     let handle = t.finish_block().unwrap().expect("block created");
@@ -571,6 +576,7 @@ fn frozen_block_images_map_visible_rows() {
 
     let q: ReleaseQueue = Default::default();
     let generation = graphic_to_generation(data, &q).unwrap();
+
     let mut generations = collections::HashMap::new();
 
     generations.insert(1u32, generation);
@@ -607,6 +613,7 @@ fn kitty_v1_per_block_ownership_deviations() {
     let mut t = GhosttyTerminal::new(20, 5, 10_000).unwrap();
 
     t.resize(20, 5, 10, 20).unwrap();
+
     t.write_vt(b"\x1b_Ga=T,f=32,s=1,v=1,i=7;/wAA/w==\x1b\\");
 
     let frozen = t.finish_block().unwrap().expect("block created");

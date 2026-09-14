@@ -48,6 +48,7 @@ impl Drop for RenderStateReader {
     fn drop(&mut self) {
         unsafe {
             ghostty_render_state_row_iterator_free(self.row_iter);
+
             ghostty_render_state_free(self.render_state);
         }
     }
@@ -175,6 +176,7 @@ impl RenderStateReader {
         })?;
 
         let clean = false;
+
         let mut row = 0usize;
 
         while unsafe { ghostty_render_state_row_iterator_next(self.row_iter) } {
@@ -316,6 +318,7 @@ impl RenderStateReader {
 
         let fg = read(VtRenderStateData::COLOR_FOREGROUND)?;
         let bg = read(VtRenderStateData::COLOR_BACKGROUND)?;
+
         let mut has_cursor = false;
 
         Error::from_code(unsafe {

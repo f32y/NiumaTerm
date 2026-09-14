@@ -35,6 +35,7 @@ fn a_starting_launch_does_not_block_another_launch() {
     let result = received.recv_timeout(Duration::from_secs(3));
 
     drop(starting);
+
     worker.join().unwrap();
 
     assert!(result.unwrap());

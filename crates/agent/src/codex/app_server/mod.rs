@@ -337,6 +337,7 @@ impl Session {
         };
 
         self.control.close();
+
         self.detached = true;
 
         result
@@ -779,8 +780,11 @@ impl Session {
         let id = self.alloc_rpc_id();
 
         message["id"] = json!(id);
+
         self.try_send(message)?;
+
         self.control.track_query(id, kind);
+
         self.retain_request_routes();
 
         Ok(())
@@ -790,8 +794,11 @@ impl Session {
         let id = self.alloc_rpc_id();
 
         message["id"] = json!(id);
+
         self.send(message);
+
         self.control.track_query(id, kind);
+
         self.retain_request_routes();
     }
 
@@ -822,9 +829,7 @@ impl Session {
     fn on_server_request(&mut self, rpc_id: u64, method: &str, message: &Value) -> Vec<Event> {
         match method {
             "item/tool/call" => self.on_team_decision(rpc_id, &message["params"]),
-
             "item/tool/requestUserInput" => self.on_question_request(rpc_id, &message["params"]),
-
             "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
                 let params = &message["params"];
 
@@ -841,7 +846,6 @@ impl Session {
 
                 vec![Event::ApprovalRequested { description }]
             }
-
             // Any other server→client request is unsupported by this client;
             // an error reply keeps the turn from hanging (the same strategy
             // `codex exec` uses for approvals).
@@ -862,13 +866,11 @@ impl Session {
             Some(ControlOperation::Command(command)) => (Some(command), None),
             Some(ControlOperation::Query(kind)) => (None, Some(kind)),
             Some(ControlOperation::Other | ControlOperation::ThreadRequest) => (None, None),
-
             Some(ControlOperation::ThreadName)
                 if message["error"]["data"]["requestTimedOut"].as_bool() == Some(true) =>
             {
                 (None, None)
             }
-
             Some(ControlOperation::ThreadName) | None => return Vec::new(),
         };
 
@@ -928,11 +930,11 @@ impl Session {
                 // History for the empty-tab session list, over whatever scope
                 // the tab last asked for.
                 self.request_history(self.history_scope);
+
                 self.start_descendant_discovery();
 
                 self.finish_team_start(vec![Event::Ready(parse_thread_settings(result))])
             }
-
             Some(QueryKind::Models) => {
                 let models = if self.thread_profile.provider.is_some() {
                     parse_models(&json!({"data": []}), self.thread_profile.model.as_deref())
@@ -942,7 +944,6 @@ impl Session {
 
                 vec![Event::Models(models)]
             }
-
             Some(QueryKind::History) => {
                 let result = &message["result"];
 
@@ -957,18 +958,15 @@ impl Session {
                     self.conversation.thread_id.as_deref(),
                 ))]
             }
-
             Some(QueryKind::Checkpoints) => vec![Event::ForkCheckpoints(Ok(
                 parse_fork_checkpoints(&message["result"]["thread"]["turns"]),
             ))],
-
             // A branch answers with the same payload a resume answers with,
             // down to the settings block, so both switch this session onto the
             // thread the reply names.
             Some(QueryKind::Resume | QueryKind::Fork) => {
                 self.on_thread_switched(&message["result"])
             }
-
             _ => Vec::new(),
         }
     }
@@ -986,7 +984,6 @@ impl Session {
                     message: error.to_owned(),
                 })
             }
-
             // The same parser the parent transcript uses, so a child's
             // tool cards cannot lose output or status relative to it. A
             // child's conversation is presented as one stream, so its turn
@@ -1027,6 +1024,7 @@ impl Session {
                 .descendant_request(next_rpc_id, Some(&cursor))
             {
                 self.send(request);
+
                 changed = true;
             }
         }
@@ -1080,9 +1078,13 @@ impl Session {
 
     fn on_thread_switched(&mut self, result: &Value) -> Vec<Event> {
         self.control.reset_thread();
+
         self.retain_request_routes();
+
         self.conversation.pending_approval = None;
+
         self.conversation.compaction.reset_thread();
+
         self.conversation.questions = QuestionState::default();
         self.conversation.current_turn = None;
         self.conversation.thread_id = result["thread"]["id"].as_str().map(str::to_owned);
@@ -1137,7 +1139,6 @@ impl Session {
 
                     return self.background_events(changed);
                 }
-
                 ThreadScope::Unrelated => {
                     let thread_id = thread_id.unwrap_or_default();
 
@@ -1146,7 +1147,6 @@ impl Session {
 
                     return Vec::new();
                 }
-
                 // A thread-scoped notification that carries no usable thread id
                 // keeps parent handling: the parent's running state is the only
                 // conversation this session can be describing.
@@ -1175,11 +1175,15 @@ impl Session {
 
     fn on_host_exit(&mut self, params: &Value) -> Vec<Event> {
         self.cancel_title_generation();
+
         self.conversation.current_turn = None;
         self.conversation.pending_approval = None;
         self.conversation.questions = QuestionState::default();
+
         self.control.close();
+
         self.skill_refresh = SkillRefreshState::default();
+
         self.conversation.compaction.reset_thread();
 
         vec![Event::HostExited {

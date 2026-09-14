@@ -140,6 +140,7 @@ impl AgentCli {
             .collect();
 
         secrets.sort_unstable_by_key(|value| Reverse(value.len()));
+
         secrets.dedup();
 
         for secret in secrets {
@@ -274,7 +275,6 @@ impl fmt::Display for ProcessError {
             | Self::Containment(message)
             | Self::Wait(message)
             | Self::Reader(message) => formatter.write_str(message),
-
             Self::TimedOut { after, diagnostic } => {
                 write!(formatter, "command timed out after {}s", after.as_secs())?;
 
@@ -304,6 +304,7 @@ where
     S: AsRef<OsStr>,
 {
     let started = Instant::now();
+
     let mut command = launcher.command(arguments);
 
     command
@@ -337,7 +338,6 @@ where
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if started.elapsed() < limits.timeout => thread::sleep(POLL_INTERVAL),
-
             Ok(None) => {
                 drop(job);
 
@@ -358,7 +358,6 @@ where
                     diagnostic: diagnostic.trim().chars().take(4_096).collect(),
                 });
             }
-
             Err(error) => {
                 drop(job);
 
@@ -438,6 +437,7 @@ fn spawn_bounded_reader(
             for byte in &buffer[..read] {
                 if retained.len() == limit {
                     retained.pop_front();
+
                     truncated = true;
                 }
 

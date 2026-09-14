@@ -28,7 +28,9 @@ fn counts_scoped_calls_nested_work_and_unwind_without_other_threads() {
         let buffer = black_box(vec![0_u8; 512]);
 
         black_box(&buffer);
+
         drop(buffer);
+
         worker_barrier.wait();
     });
 
@@ -38,6 +40,7 @@ fn counts_scoped_calls_nested_work_and_unwind_without_other_threads() {
     let outer = AllocationScope::start().unwrap();
 
     barrier.wait();
+
     barrier.wait();
 
     // SAFETY: These layouts are nonzero and valid. Both pointers are checked
@@ -66,6 +69,7 @@ fn counts_scoped_calls_nested_work_and_unwind_without_other_threads() {
     // SAFETY: Both pointers are live, and these are their current layouts.
     unsafe {
         ALLOCATOR.dealloc(pointer, large);
+
         ALLOCATOR.dealloc(zeros, zeroed);
     }
 

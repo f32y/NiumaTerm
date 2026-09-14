@@ -31,6 +31,7 @@ const _: fn() = || {
     fn assert_send_sync<T: Send + Sync>() {}
 
     assert_send_sync::<RenderImage>();
+
     assert_send_sync::<ImageGeneration>();
 };
 
@@ -184,7 +185,6 @@ pub fn graphic_to_bgra(
 
             Some(pixels)
         }
-
         ColorType::Rgb => {
             if pixels.len() != pixel_count.checked_mul(3)? {
                 return None;
@@ -241,7 +241,6 @@ pub(super) fn prune_frozen_images(cache: &FrozenImageCache, events: &[BlockEvent
                     .lock()
                     .retain(|(block_id, _), _| alive.contains(block_id));
             }
-
             BlockEvent::HistoryCleared => cache.lock().clear(),
             BlockEvent::EngineBlock { .. } => {}
         }

@@ -89,6 +89,7 @@ impl SessionHistory {
 
         if count == 0 {
             self.sessions.clear();
+
             self.invalidate_filesystem_history();
 
             CountPublication::Empty
@@ -111,6 +112,7 @@ impl SessionHistory {
         }
 
         self.sessions = sessions;
+
         self.invalidate_filesystem_history();
 
         true
@@ -138,6 +140,7 @@ impl SessionHistory {
         }
 
         self.invalidate_filesystem_history();
+
         self.sessions = sessions;
         self.showing_search = true;
 

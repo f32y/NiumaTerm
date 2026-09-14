@@ -1,10 +1,9 @@
-use nmt_config::appearance::InputStyle;
-
 use std::time::Duration;
 
 use futures::FutureExt;
 use futures::channel::oneshot;
 use nmt_config::CursorShape;
+use nmt_config::appearance::InputStyle;
 use nmt_config::colors::Colors;
 use nmt_terminal::session::request::RequestError;
 use tokio::time::timeout;

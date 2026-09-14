@@ -20,10 +20,12 @@ pub(crate) struct TimerHandle(Arc<(Mutex<State>, Condvar)>);
 impl TimerHandle {
     pub(crate) fn set(&self, next: Option<Instant>) {
         let (state, wake) = &*self.0;
+
         let mut state = state.lock();
 
         if !state.stopped && state.next != next {
             state.next = next;
+
             wake.notify_one();
         }
     }
@@ -32,6 +34,7 @@ impl TimerHandle {
         let (state, wake) = &*self.0;
 
         state.lock().stopped = true;
+
         wake.notify_one();
     }
 }
@@ -59,6 +62,7 @@ impl DeadlineTimer {
 
 fn run_deadlines(worker: TimerHandle, callback: impl Fn()) {
     let (state, wake) = &*worker.0;
+
     let mut state = state.lock();
 
     loop {
@@ -68,17 +72,17 @@ fn run_deadlines(worker: TimerHandle, callback: impl Fn()) {
 
         match state.next {
             None => wake.wait(&mut state),
-
             Some(next) if next > Instant::now() => {
                 wake.wait_until(&mut state, next);
             }
-
             Some(_) => {
                 state.next = None;
 
                 // The callback can re-arm the timer while resolving requests.
                 drop(state);
+
                 callback();
+
                 state = worker.0.0.lock();
             }
         }

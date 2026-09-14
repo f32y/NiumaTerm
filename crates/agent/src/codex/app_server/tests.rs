@@ -67,6 +67,7 @@ fn disconnected_controls_reject_without_consuming_approval_or_switching_state() 
 #[test]
 fn history_refresh_rejects_old_pages_and_keeps_the_latest_cursor() {
     let mut session = disconnected_session();
+
     let old = session.control.next_id();
 
     session.request_history(SessionScope::default());
@@ -181,6 +182,7 @@ fn checkpoint_refresh_and_thread_switch_invalidate_old_results() {
     let resume = session.control.next_id();
 
     session.send_query(QueryKind::Resume, json!({"method": "thread/resume"}));
+
     session.process(json!({"id": resume, "result": {"thread": {"id": "new", "turns": []}}}));
 
     assert!(
@@ -221,6 +223,7 @@ fn rejected_initial_requests_keep_their_fatal_error_semantics() {
 #[test]
 fn control_responses_complete_once_and_ignore_unknown_ids() {
     let mut session = disconnected_session();
+
     let id = session.alloc_rpc_id();
 
     session
@@ -263,6 +266,7 @@ fn thread_switch_retires_commands_but_keeps_catalog_responses() {
         let catalog = session.alloc_rpc_id();
 
         session.control.track(catalog, ControlOperation::Other);
+
         session.skill_refresh.start(catalog);
 
         let turn_request = session.alloc_rpc_id();
@@ -314,6 +318,7 @@ fn thread_switch_retires_commands_but_keeps_catalog_responses() {
 #[test]
 fn failed_thread_switch_preserves_pending_command() {
     let mut session = disconnected_session();
+
     let id = session.alloc_rpc_id();
 
     session
@@ -323,6 +328,7 @@ fn failed_thread_switch_preserves_pending_command() {
     let transition = session.alloc_rpc_id();
 
     session.control.track_query(transition, QueryKind::Resume);
+
     session.process(json!({"id": transition, "error": {"message": "missing"}}));
 
     assert!(session.has_active_operation());
@@ -334,9 +340,11 @@ fn failed_thread_switch_preserves_pending_command() {
 #[test]
 fn host_exit_closes_requests_and_prevents_late_revival() {
     let mut session = disconnected_session();
+
     let id = session.alloc_rpc_id();
 
     session.control.track(id, ControlOperation::Other);
+
     session.skill_refresh.start(id);
 
     let events =
@@ -383,6 +391,7 @@ fn rejected_name_write_reports_failure_without_pending_state() {
 #[test]
 fn rejected_background_requests_settle_their_pending_state() {
     let mut session = disconnected_session();
+
     let (tx, rx) = channel();
 
     session.deliver = Arc::new(move |message| {
@@ -446,6 +455,7 @@ fn routed_child_completion_does_not_finish_the_parent_turn() {
     let mut session = disconnected_session();
 
     session.conversation.thread_id = Some("parent".into());
+
     session.background.set_root("parent");
 
     session.on_notification(
@@ -1430,6 +1440,7 @@ fn incomplete_manual_compaction_cannot_mark_a_later_auto_run_manual() {
     let mut rejected = CompactionState::default();
 
     rejected.request_manual();
+
     rejected.reject_manual_request();
 
     compaction_started(

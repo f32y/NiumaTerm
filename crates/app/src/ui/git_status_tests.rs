@@ -87,8 +87,11 @@ fn count_lines_handles_trailing_newline_and_binary() {
     };
 
     check("empty", b"", 0);
+
     check("trailing", b"one\ntwo\n", 2);
+
     check("no-trailing", b"one\ntwo", 2);
+
     check("binary", b"bin\0ary", 0);
 
     assert_eq!(count_file_lines(&root, "missing"), 0);

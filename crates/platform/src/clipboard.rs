@@ -39,7 +39,6 @@ impl Clipboard {
 
         match clipboard.set_contents(text.into()) {
             Ok(()) => true,
-
             Err(err) => {
                 warn!("Unable to store text in clipboard: {err}");
 
@@ -60,7 +59,6 @@ impl Clipboard {
 
                 String::new()
             }
-
             Ok(text) => text,
         }
     }

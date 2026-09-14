@@ -57,13 +57,11 @@ fn update_notification_card(
         .content(move |_, _, _| {
             let progress_bar = match progress {
                 NotificationProgress::None => None,
-
                 NotificationProgress::Indeterminate => Some(
                     Progress::new(format!("{progress_key}-progress"))
                         .loading(true)
                         .into_any_element(),
                 ),
-
                 NotificationProgress::Determinate(value) => Some(
                     Progress::new(format!("{progress_key}-progress"))
                         .value(value)
@@ -147,6 +145,7 @@ impl UpdateNotificationLayer {
         self.cards.retain(|key, _| active_keys.contains(key));
 
         let shell = cx.weak_entity();
+
         let mut cards = Vec::with_capacity(views.len());
 
         for view in views {
@@ -164,7 +163,6 @@ impl UpdateNotificationLayer {
 
                     entry
                 }
-
                 collections::hash_map::Entry::Vacant(vacant) => {
                     let card = cx.new(|_| update_notification_card(view.clone(), shell.clone()));
 

@@ -17,9 +17,12 @@ use crate::team::tests::config;
 
 fn ready_team() -> (TempDir, TeamSession, MemberId, MemberId) {
     let directory = tempdir().unwrap();
+
     let mut room = Room::new(AgentWorkspace::default());
+
     let alice = room.add_member(config("Alice", "C:/frontend")).unwrap();
     let bob = room.add_member(config("Bob", "C:/backend")).unwrap();
+
     let mut session = TeamSession::create(directory.path(), room).unwrap();
 
     for id in [alice, bob] {
@@ -131,6 +134,7 @@ fn oversized_context_pauses_without_reserving_unavailable_summary_work() {
     let mut room = session.store.room().clone();
 
     room.members[0].role = "Private role instructions must not reach summaries".into();
+
     session.store.commit(room).unwrap();
 
     for topic in [

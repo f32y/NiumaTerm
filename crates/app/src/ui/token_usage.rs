@@ -92,6 +92,7 @@ impl TokenUsageView {
 
             if enabled != this.enabled {
                 this.enabled = enabled;
+
                 this.refresh.set_enabled(enabled);
 
                 if enabled {
@@ -491,6 +492,7 @@ fn format_price(price_usd: f64) -> String {
 
 fn format_token_count(tokens: u64) -> String {
     let digits = tokens.to_string();
+
     let mut formatted = String::with_capacity(digits.len() + digits.len() / 3);
 
     for (index, digit) in digits.chars().enumerate() {

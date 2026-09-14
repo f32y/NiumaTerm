@@ -152,6 +152,7 @@ impl PromptSniffer {
             let mut tmp = [0u8; OSC133_MAX];
 
             tmp[..cl].copy_from_slice(&self.carry[..cl]);
+
             tmp[cl..cl + take].copy_from_slice(&input[..take]);
 
             match parse_sniffed_osc(&tmp[..cl + take]) {
@@ -171,7 +172,6 @@ impl PromptSniffer {
 
                     pos = len - cl; // skip the input portion of the mark
                 }
-
                 SniffedOsc::Progress { len, report } => {
                     self.note_progress(report);
 
@@ -183,7 +183,6 @@ impl PromptSniffer {
 
                     pos = len - cl;
                 }
-
                 SniffedOsc::Incomplete if cl + take < OSC133_MAX => {
                     self.carry[cl..cl + take].copy_from_slice(&input[..take]);
 
@@ -191,7 +190,6 @@ impl PromptSniffer {
 
                     return; // still incomplete — wait for the next read
                 }
-
                 SniffedOsc::NotMark | SniffedOsc::ProgressMalformed => {
                     // The carried ESC resolved to an ordinary escape split across
                     // reads (any chunk ending in "\x1b" or "\x1b]…" lands here —
@@ -212,7 +210,6 @@ impl PromptSniffer {
 
                     self.carry_len = 0;
                 }
-
                 _ => {
                     // Malformed/maxed carry: forward the carried bytes as native output and
                     // reprocess the new input under cleared trust.
@@ -235,7 +232,6 @@ impl PromptSniffer {
         while pos < input.len() {
             match memchr(0x1b, &input[pos..]) {
                 None => break,
-
                 Some(off) => {
                     let esc = pos + off;
 
@@ -266,7 +262,6 @@ impl PromptSniffer {
 
                             seg_start = pos;
                         }
-
                         SniffedOsc::Progress { len, report } => {
                             if esc > seg_start {
                                 self.pre_forward(&input[seg_start..esc]);
@@ -288,7 +283,6 @@ impl PromptSniffer {
 
                             seg_start = pos;
                         }
-
                         SniffedOsc::Incomplete => {
                             if esc > seg_start {
                                 self.pre_forward(&input[seg_start..esc]);
@@ -305,13 +299,12 @@ impl PromptSniffer {
                             let n = tail.len().min(OSC133_MAX);
 
                             self.carry[..n].copy_from_slice(&tail[..n]);
+
                             self.carry_len = n;
 
                             return;
                         }
-
                         SniffedOsc::NotMark | SniffedOsc::ProgressMalformed => pos = esc + 1,
-
                         SniffedOsc::Malformed => {
                             if esc > seg_start {
                                 self.pre_forward(&input[seg_start..esc]);
@@ -467,7 +460,6 @@ impl PromptSniffer {
 
                 true
             }
-
             // A re-asserted `;B` is how a shell says the prompt ended again:
             // zsh's right prompt is drawn after the left one and closes with a
             // second mark, and any prompt re-render repeats the pair. Each one
@@ -479,20 +471,18 @@ impl PromptSniffer {
 
                 true
             }
-
             (ShellLifecycleProgress::InCommand, PromptRegion::Output) => {
                 self.lifecycle = ShellLifecycleProgress::InOutput;
 
                 true
             }
-
             (ShellLifecycleProgress::InOutput, PromptRegion::None) => {
                 self.lifecycle = ShellLifecycleProgress::AwaitPrompt;
+
                 self.set_boundary_trust(true);
 
                 true
             }
-
             _ => false,
         }
     }
@@ -502,9 +492,13 @@ impl PromptSniffer {
 
         self.lifecycle = ShellLifecycleProgress::AwaitPrompt;
         self.region = PromptRegion::None;
+
         self.command_buf.clear();
+
         self.command_started_at = None;
+
         self.current_command.clear();
+
         self.prompt_start_edge = false;
         self.command_started_edge = false;
 
@@ -600,18 +594,15 @@ fn render_command_echo(bytes: &[u8]) -> String {
                             'G' => col = nth(0, 1).saturating_sub(1), // CHA
                             'C' => col += nth(0, 1).max(1),           // CUF
                             'D' => col = col.saturating_sub(nth(0, 1).max(1)), // CUB
-
                             'K' => match nth(0, 0) {
                                 0 => line.truncate(col), // EL to end
                                 2 => line.clear(),       // EL whole line
-
                                 _ => {
                                     for c in line.iter_mut().take(col) {
                                         *c = ' '; // EL to start
                                     }
                                 }
                             },
-
                             'X' => {
                                 // ECH n: blank n cells at the cursor.
                                 let end = (col + nth(0, 1).max(1)).min(line.len());
@@ -620,11 +611,9 @@ fn render_command_echo(bytes: &[u8]) -> String {
                                     *c = ' ';
                                 }
                             }
-
                             _ => {} // SGR and the rest have no text effect
                         }
                     }
-
                     Some(']') => {
                         // OSC … (BEL or ST)
                         i += 1;
@@ -645,22 +634,18 @@ fn render_command_echo(bytes: &[u8]) -> String {
                             i += 1;
                         }
                     }
-
                     _ => i += 1, // ESC + single intermediate/final
                 }
             }
-
             '\r' => {
                 col = 0;
                 i += 1;
             }
-
             '\x08' => {
                 col = col.saturating_sub(1);
 
                 i += 1;
             }
-
             c if c >= ' ' => {
                 while line.len() < col {
                     line.push(' ');
@@ -675,7 +660,6 @@ fn render_command_echo(bytes: &[u8]) -> String {
                 col += 1;
                 i += 1;
             }
-
             _ => i += 1, // LF (row collapse), TAB, BEL, other controls — drop
         }
     }
@@ -704,21 +688,16 @@ enum SniffedOsc {
         exit: Option<i32>,
         next: Option<PromptRegion>,
     },
-
     Progress {
         len: usize,
         report: ProgressReport,
     },
-
     /// Looks like the start of a 133 mark but the slice ends before the terminator — carry.
     Incomplete,
-
     /// Not a 133 mark; the ESC is an ordinary terminal byte.
     NotMark,
-
     /// Starts like OSC 133 but is malformed or too long.
     Malformed,
-
     /// Starts like OSC 9;4 but is malformed or too long.
     ProgressMalformed,
 }
@@ -757,6 +736,7 @@ fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
 
         let end = s.len().min(OSC133_MAX);
         let arg_start = OSC_PROGRESS_PREFIX.len() + 2;
+
         let mut i = arg_start;
 
         // The percentage argument. Values above 100 are clamped rather than
@@ -780,7 +760,6 @@ fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
                         },
                     };
                 }
-
                 0x1b if i + 1 < s.len() && s[i + 1] == b'\\' => {
                     return SniffedOsc::Progress {
                         len: i + 2,
@@ -790,7 +769,6 @@ fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
                         },
                     };
                 }
-
                 0x1b if i + 1 == s.len() => return SniffedOsc::Incomplete,
                 0x1b => return SniffedOsc::ProgressMalformed,
                 _ => i += 1,
@@ -843,7 +821,6 @@ fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
                     next: region_for(sub),
                 };
             }
-
             0x1b if i + 1 < s.len() && s[i + 1] == 0x5c => {
                 return SniffedOsc::Mark {
                     len: i + 2,
@@ -852,7 +829,6 @@ fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
                     next: region_for(sub),
                 };
             }
-
             0x1b if i + 1 == s.len() => return SniffedOsc::Incomplete, // maybe a split ST
             0x1b => return SniffedOsc::Malformed,                      // ESC mid-mark that isn't ST
             _ => i += 1,

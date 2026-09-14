@@ -121,6 +121,7 @@ impl PendingPrompts {
 
     pub(crate) fn clear(&mut self) {
         self.presentations.clear();
+
         self.active = None;
         self.collapsed = false;
     }

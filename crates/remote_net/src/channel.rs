@@ -28,12 +28,10 @@ pub enum RelayControlMessage {
     Sync {
         connections: Vec<String>,
     },
-
     Connected {
         #[serde(rename = "connectionId")]
         connection_id: String,
     },
-
     Disconnected {
         #[serde(rename = "connectionId")]
         connection_id: String,
@@ -44,29 +42,23 @@ pub enum RelayControlMessage {
 pub enum NetError {
     #[error("websocket failure: {0}")]
     Ws(#[from] WsError),
-
     #[error("{0}")]
     Noise(#[from] NoiseError),
-
     #[error("{0}")]
     Frame(#[from] FrameError),
-
     #[error("peer closed the connection")]
     Closed,
-
     /// The peer (host or relay) violated the protocol or rejected us. Callers
     /// treat this as permanent: the peer made a decision (bad handshake,
     /// revoked device, killed session) that a retry cannot change.
     #[error("protocol violation: {0}")]
     Protocol(String),
-
     /// A failure local to this machine (runtime or thread construction,
     /// request building) that says nothing about the peer's state. Kept
     /// distinct from [`NetError::Protocol`] so reconnect logic keeps retrying:
     /// a transient local failure must not kill a resumable session.
     #[error("local failure: {0}")]
     Internal(String),
-
     #[error("timed out waiting for the remote peer")]
     Timeout,
 }
@@ -107,6 +99,7 @@ pub fn relay_ws_url(relay_url: &str, host_id: &str, role: &str, cid: Option<&str
 
     if let Some(cid) = cid {
         url.push_str("&connection_id=");
+
         url.push_str(cid);
     }
 
@@ -203,13 +196,16 @@ async fn connect_ik(
     device: &StaticKeypair,
 ) -> Result<FrameChannel, NetError> {
     let url = relay_ws_url(relay_url, host_id, "client", None);
+
     let mut ws = ws_connect(&url, None).await?;
 
     let mut handshake = Handshake::initiator_ik(&device.private, host_public_key)?;
     let mut first = vec![CONNECT_MODE_IK];
 
     first.extend_from_slice(&handshake.write_message()?);
+
     ws.send(Message::Binary(first.into())).await?;
+
     handshake.read_message(&next_binary(&mut ws).await?)?;
 
     Ok(FrameChannel {
@@ -235,13 +231,16 @@ async fn connect_pair(
     device_name: &str,
 ) -> Result<FrameChannel, NetError> {
     let url = relay_ws_url(&code.relay_url, &code.host_id, "client", None);
+
     let mut ws = ws_connect(&url, None).await?;
 
     let mut handshake = Handshake::initiator_xx(&device.private)?;
     let mut first = vec![CONNECT_MODE_PAIR];
 
     first.extend_from_slice(&handshake.write_message()?);
+
     ws.send(Message::Binary(first.into())).await?;
+
     handshake.read_message(&next_binary(&mut ws).await?)?;
 
     let msg3 = handshake.write_message()?;
@@ -275,7 +274,6 @@ async fn connect_pair(
     match channel.recv_control::<ClientBound>().await? {
         ClientBound::Paired => Ok(channel),
         ClientBound::Error { message, .. } => Err(NetError::Protocol(message)),
-
         other => Err(NetError::Protocol(format!(
             "unexpected pairing reply: {other:?}"
         ))),

@@ -89,6 +89,7 @@ fn waiting_for_cache_persistence_keeps_update_state_readable() {
     let checked_key = key.clone();
     let worker = thread::spawn(move || checker.check(&checked_key, true));
     let deadline = Instant::now() + Duration::from_secs(3);
+
     let mut available = false;
 
     while Instant::now() < deadline {
@@ -104,6 +105,7 @@ fn waiting_for_cache_persistence_keeps_update_state_readable() {
     }
 
     drop(disk_busy);
+
     worker.join().unwrap().unwrap();
 
     assert!(
@@ -138,6 +140,7 @@ fn fresh_cache_is_reused_and_manual_check_bypasses_it() {
     );
 
     coordinator.check(&key, false).unwrap();
+
     coordinator.check(&key, false).unwrap();
 
     assert_eq!(fake.probes.load(Ordering::SeqCst), 1);
@@ -181,6 +184,7 @@ fn operation_claim_serializes_updates_and_dismissal_is_version_keyed() {
     assert_eq!(coordinator.snapshots().len(), 1);
 
     coordinator.check(&key, true).unwrap();
+
     coordinator.begin_update(&key).unwrap();
 
     assert!(coordinator.begin_update(&key).is_err());
@@ -228,6 +232,7 @@ fn unchanged_and_partial_recovery_outcomes_keep_verified_versions() {
     let available = coordinator.check(&key, true).unwrap();
 
     coordinator.begin_update(&key).unwrap();
+
     coordinator.finish_update(&key, Some(available), None, 0);
 
     let unchanged = coordinator.snapshot(&key).unwrap();
@@ -284,6 +289,7 @@ fn updater_external_lock_is_preserved_as_an_actionable_failure() {
     );
 
     coordinator.check(&key, true).unwrap();
+
     coordinator.begin_update(&key).unwrap();
 
     let error = coordinator.run_vendor_update(&key).unwrap_err();

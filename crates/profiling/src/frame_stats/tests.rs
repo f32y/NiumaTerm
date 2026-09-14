@@ -16,7 +16,9 @@ fn enabled_collection_records_samples_and_disabling_clears_them() {
     assert!(start_timer().is_some());
 
     record_draw(Duration::from_millis(2), 3);
+
     record_main_thread_task(Duration::from_millis(5));
+
     record_redraws_requested(2);
 
     {

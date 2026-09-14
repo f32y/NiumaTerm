@@ -97,6 +97,7 @@ fn workspace_progress_averages_the_tabs_reporting_a_percentage() {
     };
 
     tabs.set_progress(TabId(1), set(Some(50)));
+
     tabs.set_progress(TabId(2), set(Some(100)));
 
     // No percentage to add, so this tab stays out of the average.
@@ -451,6 +452,7 @@ fn the_last_directory_of_a_normal_workspace_cannot_be_removed() {
 #[test]
 fn additional_directories_do_not_displace_the_primary_default() {
     let mut manager = manager(1, false);
+
     let id = manager.list().active_id();
 
     manager.set_roots(
@@ -484,6 +486,7 @@ fn additional_directories_do_not_displace_the_primary_default() {
 #[test]
 fn the_location_free_settings_entry_owns_no_directory() {
     let mut manager = manager(1, true);
+
     let settings = manager.settings_id().expect("settings entry");
 
     assert_eq!(manager.roots_of(settings), None);
@@ -506,6 +509,7 @@ fn the_location_free_settings_entry_owns_no_directory() {
 #[test]
 fn workspace_identity_survives_root_edits() {
     let mut manager = manager(3, false);
+
     let second = WorkspaceId(2);
 
     manager.set_temporary(second, true);
@@ -518,6 +522,7 @@ fn workspace_identity_survives_root_edits() {
     // Adoption, pin state, order, and closeability all key on the workspace
     // id, so attaching a directory leaves every one of them untouched.
     manager.set_temporary(second, false);
+
     manager.set_pinned(second, true);
 
     assert!(manager.is_pinned(second));
@@ -556,13 +561,17 @@ fn workspace_identity_survives_root_edits() {
 #[test]
 fn temporary_ids_include_pinned_normal_workspaces_but_not_settings() {
     let mut manager = manager(3, true);
+
     let second = WorkspaceId(2);
     let third = WorkspaceId(3);
     let settings = WorkspaceId(100);
 
     manager.set_temporary(second, true);
+
     manager.set_temporary(third, true);
+
     manager.set_temporary(settings, true);
+
     manager.set_pinned(second, true);
 
     assert_eq!(manager.temporary_ids().collect::<Vec<_>>(), [second, third]);

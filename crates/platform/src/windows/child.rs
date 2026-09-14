@@ -88,6 +88,7 @@ impl ChildExitWatcher {
             // handle we own are reclaimed here or never.
             unsafe {
                 drop(Box::from_raw(ctx));
+
                 CloseHandle(child_handle);
             }
 
@@ -132,6 +133,7 @@ impl Drop for ChildExitWatcher {
             );
 
             drop(Box::from_raw(self.ctx));
+
             CloseHandle(self.child_handle);
         }
     }

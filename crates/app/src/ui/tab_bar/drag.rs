@@ -50,7 +50,6 @@ impl Render for DragLabelPreview {
                             .child(div().truncate().child(self.label.clone())),
                     )
             }
-
             DragStyle::Sidebar => h_flex()
                 .w(px(self.width))
                 .h(px(TAB_ROW_HEIGHT))

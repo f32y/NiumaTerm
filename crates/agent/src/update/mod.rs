@@ -80,6 +80,7 @@ pub struct InstallationKey(String);
 impl InstallationKey {
     pub fn derive(provider: ProviderKind, launcher: &AgentCli) -> InstallationIdentity {
         let resolved_launcher = launcher.resolved_executable();
+
         let mut digest = Sha256::new();
 
         digest.update(match provider {
@@ -88,10 +89,12 @@ impl InstallationKey {
         });
 
         digest.update(installation_path_spelling(&resolved_launcher).as_bytes());
+
         digest.update([0]);
 
         for name in UPDATE_ENVIRONMENT_NAMES {
             digest.update(name.to_ascii_uppercase().as_bytes());
+
             digest.update(*b"=");
 
             if let Some(value) = launcher.effective_env_os(name) {
@@ -468,6 +471,7 @@ impl UpdateCoordinator {
 
         let identity = InstallationKey::derive(provider, &launcher);
         let key = identity.key.clone();
+
         let mut inner = self.inner.lock();
 
         if inner.records.contains_key(&key) {
@@ -559,7 +563,9 @@ impl UpdateCoordinator {
         };
 
         let result = maintenance.probe(&launcher);
+
         let mut inner = self.inner.lock();
+
         let record = inner.records.get_mut(key).expect("registered installation");
 
         record.busy = false;
@@ -579,11 +585,12 @@ impl UpdateCoordinator {
                     };
 
                     inner.cache.installations.insert(key.to_string(), entry);
+
                     drop(inner);
+
                     self.persist_cache();
                 }
             }
-
             Err(error) => {
                 record.state.phase = UpdatePhase::Failed;
                 record.state.error = Some(error.clone());
@@ -758,6 +765,7 @@ impl UpdateCoordinator {
             );
 
             drop(inner);
+
             self.persist_cache();
         }
     }
@@ -776,6 +784,7 @@ impl UpdateCoordinator {
         }
 
         drop(inner);
+
         self.persist_cache();
     }
 

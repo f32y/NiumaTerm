@@ -55,7 +55,6 @@ pub(super) fn execute(
                 json!({ "agentId": session_id, "line": line, "images": [] }),
             )
         }
-
         result => result,
     }
 }
@@ -81,7 +80,6 @@ pub(crate) fn skills(value: &Value) -> SkillCatalog {
                             skill["description"].as_str().unwrap_or_default()
                         )
                     }
-
                     _ => skill["description"]
                         .as_str()
                         .unwrap_or_default()
@@ -122,11 +120,9 @@ pub(crate) fn outcome(name: &str, value: &Value) -> SlashCommandOutcome {
 
     match value["result"]["kind"].as_str() {
         Some("success") => SlashCommandOutcome::Completed { message: text },
-
         Some(_) => SlashCommandOutcome::Rejected {
             message: text.unwrap_or_else(|| format!("/{name} failed")),
         },
-
         None => SlashCommandOutcome::Rejected {
             message: format!("the harness does not recognize /{name}"),
         },

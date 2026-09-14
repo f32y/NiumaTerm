@@ -154,6 +154,7 @@ impl TeamRuntime {
         let id = self.session.add_member(config)?;
 
         self.attach_member(id, profile, cx);
+
         self.schedule(cx);
 
         Ok(id)
@@ -243,6 +244,7 @@ impl TeamRuntime {
 
     pub fn close(&mut self, cx: &mut Context<Self>) -> Result<(), TeamError> {
         self.closed = true;
+
         self.session.close()?;
 
         for host in self.hosts.values() {
@@ -284,12 +286,10 @@ impl TeamRuntime {
 
                 self.session.abandon_restored_attempt(id)?;
             }
-
             TeamCommand::Direct { input, recipients } => {
                 self.session
                     .direct_request(input, recipients, &CONTEXT_LIMITS)?;
             }
-
             TeamCommand::Start {
                 input,
                 participants,
@@ -297,36 +297,27 @@ impl TeamRuntime {
             } => {
                 self.session.start_discussion(input, participants, mode)?;
             }
-
             TeamCommand::Correction(input) => {
                 self.session.record_user_input(input)?;
             }
-
             TeamCommand::Pause(id) => {
                 self.session.pause_discussion(id, PauseReason::User)?;
             }
-
             TeamCommand::Continue(id) => self.session.continue_discussion(id)?,
-
             TeamCommand::AddTurns { discussion, count } => {
                 self.session.add_turns(discussion, count)?
             }
-
             TeamCommand::Finish(id) => self.session.finish_with_report(id)?,
-
             TeamCommand::Skip {
                 discussion,
                 operation,
             } => self.session.skip_arrangement(discussion, operation)?,
-
             TeamCommand::ChangeMode { discussion, mode } => {
                 self.session.change_mode(discussion, mode)?
             }
-
             TeamCommand::AutomaticSummaries(enabled) => {
                 self.session.set_automatic_summaries(enabled)?
             }
-
             TeamCommand::MemberSettings { member, settings } => {
                 let ownership = self
                     .room()
@@ -359,9 +350,7 @@ impl TeamRuntime {
                     cx.notify();
                 });
             }
-
             TeamCommand::Exclude(member) => self.session.exclude_member(member)?,
-
             TeamCommand::Stop(member) => {
                 let discussions: Vec<_> = self
                     .room()
@@ -389,6 +378,7 @@ impl TeamRuntime {
         }
 
         self.error = None;
+
         self.schedule(cx);
 
         Ok(())
@@ -400,6 +390,7 @@ impl TeamRuntime {
         }
 
         self.sync_work(cx)?;
+
         self.recover_completed_replies(cx)?;
 
         if self.session.pending_recovery().next().is_some() {
@@ -553,7 +544,6 @@ impl TeamRuntime {
                         )?;
                     }
                 }
-
                 Status::Exited => {
                     if let Some(attempt_id) = host.active
                         && let Some(attempt) = self
@@ -580,13 +570,13 @@ impl TeamRuntime {
                     }
 
                     self.session.member_unavailable(*id)?;
+
                     host.ready_epoch = None;
 
                     if let Some(message) = state.runtime.start_failure() {
                         self.error = Some(message.to_owned());
                     }
                 }
-
                 Status::Starting | Status::Running | Status::Idle => {}
             }
         }
@@ -634,6 +624,7 @@ impl TeamRuntime {
                 .unwrap_or_else(|| ModeratorAdmission::unverified(session.kind));
 
             self.session.member_ready(*id, epoch, capabilities)?;
+
             host.ready_epoch = Some(epoch);
         }
 
@@ -797,7 +788,6 @@ impl TeamRuntime {
             ExecutionSignal::Accepted { id, .. } => {
                 self.session.accept_attempt(key, id)?;
             }
-
             ExecutionSignal::Finished {
                 id, error, text, ..
             } => {
@@ -807,6 +797,7 @@ impl TeamRuntime {
 
                 if let Some(error) = error {
                     self.session.fail_attempt(key, false)?;
+
                     self.error = Some(error.clone());
                 } else {
                     let work = work_status(host.owner.session().read(cx));
@@ -814,9 +805,9 @@ impl TeamRuntime {
                     self.session.complete_reply(key, id, text.clone(), work)?;
                 }
             }
-
             ExecutionSignal::Decision { request, .. } => {
                 let execution = host.owner.session().clone();
+
                 let mut accepted = false;
                 let mut failure = None;
 
@@ -828,11 +819,9 @@ impl TeamRuntime {
                             DecisionAction::Invite => Some(ModeratorAction::Invite {
                                 recipients: arguments.recipients,
                             }),
-
                             DecisionAction::Report if arguments.recipients.is_empty() => {
                                 Some(ModeratorAction::Report)
                             }
-
                             DecisionAction::Report => None,
                         };
 

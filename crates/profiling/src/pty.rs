@@ -146,6 +146,7 @@ impl PtyProfiler {
         // without averaging captures of different grid dimensions together.
         if (cols, rows) != (self.cols, self.rows) {
             self.flush();
+
             self.cols = cols;
             self.rows = rows;
         }

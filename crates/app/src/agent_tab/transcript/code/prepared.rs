@@ -36,6 +36,7 @@ impl PreparedCode {
             .flatten();
 
         let output = AnsiText::parse(normalized.as_deref().unwrap_or(&source.output));
+
         let mut text = String::new();
         let mut syntax = Vec::new();
 
@@ -110,6 +111,7 @@ impl PreparedCode {
             }
 
             let mut highlighter = SyntaxHighlighter::new(&region.language);
+
             let text = Rope::from_str(&self.text[region.range.clone()]);
 
             if highlighter.update(None, &text, Some(PARSE_BUDGET)) {
@@ -192,6 +194,7 @@ fn overlay_styles(
         .collect::<Vec<_>>();
 
     boundaries.sort_unstable();
+
     boundaries.dedup();
 
     let mut syntax_index = 0;
@@ -282,6 +285,7 @@ pub(crate) fn transcript_segments(text: &str) -> Vec<Range<usize>> {
                 }
 
                 segments.push(segment_start..segment_end);
+
                 segment_start = segment_end;
             }
         }

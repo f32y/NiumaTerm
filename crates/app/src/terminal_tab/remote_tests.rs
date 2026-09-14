@@ -47,6 +47,7 @@ fn remote_session_renders_through_net_pty() {
     let device = generate_keypair().unwrap();
     let code = host.begin_pairing();
     let rt = tokio_runtime();
+
     let mut paired = false;
 
     for _ in 0..40 {
@@ -93,6 +94,7 @@ fn remote_session_renders_through_net_pty() {
         .write_input(format!("echo {MARKER}\r").as_bytes());
 
     let deadline = time::Instant::now() + time::Duration::from_secs(30);
+
     let mut rendered = false;
 
     while time::Instant::now() < deadline {
@@ -113,6 +115,7 @@ fn remote_session_renders_through_net_pty() {
     );
 
     host.shutdown();
+
     fs::remove_dir_all(&data_dir).ok();
 }
 

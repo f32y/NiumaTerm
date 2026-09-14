@@ -133,7 +133,9 @@ fn a_file_the_installation_lacks_is_taken_from_the_staged_package() {
     let install = scratch("addition-install");
 
     fs::copy(versioned_binary(), package.join(APP_EXE)).unwrap();
+
     fs::copy(versioned_binary(), install.join(APP_EXE)).unwrap();
+
     fs::write(package.join("tree_sitter.dll"), b"staged languages").unwrap();
 
     install_additions(&package, &install);
@@ -150,8 +152,11 @@ fn an_installed_file_is_kept_over_the_staged_copy() {
     let install = scratch("kept-install");
 
     fs::copy(versioned_binary(), package.join(APP_EXE)).unwrap();
+
     fs::copy(versioned_binary(), install.join(APP_EXE)).unwrap();
+
     fs::write(package.join("conpty.dll"), b"staged conpty").unwrap();
+
     fs::write(install.join("conpty.dll"), b"installed conpty").unwrap();
 
     install_additions(&package, &install);
@@ -170,7 +175,9 @@ fn a_package_that_is_not_the_installed_release_contributes_nothing() {
     // An executable whose version cannot be read names no release, so the
     // package holding it cannot be shown to be the one installed.
     fs::write(package.join(APP_EXE), b"not an executable").unwrap();
+
     fs::copy(versioned_binary(), install.join(APP_EXE)).unwrap();
+
     fs::write(package.join("tree_sitter.dll"), b"staged languages").unwrap();
 
     install_additions(&package, &install);

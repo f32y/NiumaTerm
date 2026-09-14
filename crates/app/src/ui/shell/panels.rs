@@ -100,6 +100,7 @@ impl RightPanelController {
         let tasks = panel.tasks().clone();
 
         workflows.update(cx, |view, cx| view.set_target(workflow_target, cx));
+
         tasks.update(cx, |view, cx| view.set_target(task_target, cx));
     }
 

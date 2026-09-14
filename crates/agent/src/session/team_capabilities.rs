@@ -26,9 +26,7 @@ impl ModeratorAdmission {
             Self::CodexDynamicTools {
                 backend_generation: registered,
             } if *registered == backend_generation => Ok(()),
-
             Self::Unavailable(failure) => Err(failure.clone()),
-
             Self::CodexDynamicTools { .. } => Err(CapabilityFailure {
                 reason: "Moderator operations belong to an earlier session.".into(),
                 remedy: "Register moderator operations in the current session.".into(),

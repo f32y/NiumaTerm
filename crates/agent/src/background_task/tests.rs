@@ -33,6 +33,7 @@ fn same_local_id_from_two_providers_stays_distinct() {
 #[test]
 fn a_row_without_optional_metadata_stays_visible_with_a_derived_name() {
     let mut registry = registry();
+
     let key = BackgroundTaskKey::codex("thread-01H9ZQF4");
 
     registry.apply(
@@ -97,6 +98,7 @@ fn lifecycle_states_group_into_running_and_finished() {
 #[test]
 fn an_explicit_update_after_a_terminal_state_resumes_the_task() {
     let mut registry = registry();
+
     let key = BackgroundTaskKey::claude_code("task-1");
 
     registry.apply(
@@ -121,6 +123,7 @@ fn an_explicit_update_after_a_terminal_state_resumes_the_task() {
 #[test]
 fn activity_advances_on_creation_and_lifecycle_change_only() {
     let mut registry = registry();
+
     let key = BackgroundTaskKey::codex("child-1");
 
     registry.apply(
@@ -153,6 +156,7 @@ fn activity_advances_on_creation_and_lifecycle_change_only() {
 #[test]
 fn repeating_a_known_state_changes_nothing() {
     let mut registry = registry();
+
     let key = BackgroundTaskKey::codex("child-1");
 
     registry.apply(
@@ -172,6 +176,7 @@ fn repeating_a_known_state_changes_nothing() {
 #[test]
 fn a_delayed_restored_row_cannot_replace_a_newer_live_state() {
     let mut registry = registry();
+
     let key = BackgroundTaskKey::codex("child-1");
     let starting_sequence = registry.sequence();
 
@@ -199,6 +204,7 @@ fn a_delayed_restored_row_cannot_replace_a_newer_live_state() {
 #[test]
 fn a_restored_row_creates_a_task_that_live_updates_never_reported() {
     let mut registry = registry();
+
     let key = BackgroundTaskKey::codex("child-restored");
     let starting_sequence = registry.sequence();
 
@@ -230,6 +236,7 @@ fn a_restored_row_creates_a_task_that_live_updates_never_reported() {
 #[test]
 fn the_earliest_known_start_time_wins() {
     let mut registry = registry();
+
     let key = BackgroundTaskKey::codex("child-1");
     let late = SystemTime::UNIX_EPOCH + Duration::from_secs(200);
     let early = SystemTime::UNIX_EPOCH + Duration::from_secs(100);

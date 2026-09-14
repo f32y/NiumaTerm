@@ -30,7 +30,6 @@ use crate::workflow::WorkflowSnapshot;
 pub enum CompactionTrigger {
     /// The backend reached its own context threshold and compacted unprompted.
     Automatic,
-
     /// The user asked for it (`/compact`).
     Manual,
 }
@@ -70,18 +69,15 @@ pub enum Item {
     UserMessage {
         text: Option<String>,
     },
-
     AgentMessage {
         id: String,
         text: Option<String>,
         questions: Option<Vec<Question>>,
     },
-
     Reasoning {
         id: String,
         summary: Option<String>,
     },
-
     CommandExecution {
         id: String,
         command: String,
@@ -94,7 +90,6 @@ pub enum Item {
         status: Option<String>,
         exit_code: Option<i64>,
     },
-
     FileChange {
         id: String,
         paths: String,
@@ -105,7 +100,6 @@ pub enum Item {
 
         status: Option<String>,
     },
-
     /// A context-compaction boundary: everything above it was replaced by the
     /// carried summary. It has no status — the record only exists once the
     /// compaction finished.
@@ -113,7 +107,6 @@ pub enum Item {
         id: String,
         detail: Compaction,
     },
-
     /// Every other tool-call kind (mcpToolCall, webSearch, dynamicToolCall,
     /// …): kind + best-effort title, so no activity is invisible.
     Other {
@@ -127,7 +120,6 @@ pub enum Item {
 
         status: Option<String>,
     },
-
     /// A provider failure stored as part of the conversation transcript.
     Error {
         text: String,
@@ -145,7 +137,6 @@ impl Item {
             | Self::FileChange { id, .. }
             | Self::Compaction { id, .. }
             | Self::Other { id, .. } => Some(id),
-
             Self::UserMessage { .. } | Self::Error { .. } => None,
         }
     }
@@ -207,7 +198,6 @@ impl Item {
                     *questions = Some(completed.clone());
                 }
             }
-
             (
                 Self::Reasoning { summary, .. },
                 Self::Reasoning {
@@ -220,7 +210,6 @@ impl Item {
                     *summary = Some(completed.clone());
                 }
             }
-
             (
                 Self::CommandExecution {
                     purpose,
@@ -255,7 +244,6 @@ impl Item {
                     *exit_code = *completed_exit;
                 }
             }
-
             (
                 Self::FileChange { diff, status, .. },
                 Self::FileChange {
@@ -272,7 +260,6 @@ impl Item {
                     *status = Some(completed_status.clone());
                 }
             }
-
             (
                 Self::Other { output, status, .. },
                 Self::Other {
@@ -289,14 +276,12 @@ impl Item {
                     *status = Some(completed_status.clone());
                 }
             }
-
             (
                 Self::Compaction { detail, .. },
                 Self::Compaction {
                     detail: completed, ..
                 },
             ) => *detail = completed.clone(),
-
             _ => return false,
         }
 
@@ -377,9 +362,7 @@ pub enum Event {
     /// Handshake finished; carries the thread's effective settings so the UI
     /// can seed its pickers with real values.
     Ready(ThreadSettings),
-
     Models(Vec<ModelInfo>),
-
     /// The backend refused an effort change, carrying the level the session
     /// stays on. A refused setting is not something the conversation said, so
     /// it is reported beside the control that asked for it rather than as a
@@ -388,7 +371,6 @@ pub enum Event {
         message: String,
         effort: Option<String>,
     },
-
     /// Replacement snapshot of the execution-permission presets this thread can
     /// switch between, and the one it is on. Reported only by a backend whose
     /// preset table belongs to its deployment rather than to this UI.
@@ -396,7 +378,6 @@ pub enum Event {
         presets: Vec<ApprovalPreset>,
         current: Option<String>,
     },
-
     /// Replacement snapshot of the agent compositions this deployment offers,
     /// and the one this conversation was built from. An empty list means the
     /// deployment composes no presets and every conversation shares the host's
@@ -405,116 +386,90 @@ pub enum Event {
         presets: Vec<AgentPreset>,
         current: Option<String>,
     },
-
     /// Replacement snapshot of provider-discovered slash commands.
     Commands(Vec<SlashCommandInfo>),
-
     /// Replacement snapshot of provider-discovered skills and load errors.
     Skills(SkillCatalog),
-
     /// Asynchronous provider/RPC acknowledgement for a command request.
     /// Actual model work still uses the ordinary turn lifecycle events.
     SlashCommandResult {
         name: String,
         outcome: SlashCommandOutcome,
     },
-
     TurnStarted,
-
     /// An opaque provider identifier tied to the accepted root turn. Some
     /// providers identify the turn itself; others identify its first model
     /// response. Local transcript counters cannot establish acceptance.
     ProviderTurnAccepted {
         id: String,
     },
-
     TeamDecision(TeamDecisionRequest),
-
     ProviderTurnFinished {
         id: String,
         error: Option<String>,
     },
-
     TurnCompleted {
         error: Option<String>,
     },
-
     /// Replacement output-token count for the active turn.
     TurnOutputTokensUpdated(u64),
-
     /// Replacement snapshot of the current thread's active context window.
     ContextWindowUpdated(ContextWindowUsage),
-
     /// Replacement breakdown of what fills that window. Reported only by
     /// providers that measure their own context composition.
     ContextCompositionUpdated(ContextComposition),
-
     /// The backend started rewriting the conversation to reclaim context. Turn
     /// output stops until it finishes, so this drives a progress indicator; the
     /// finished boundary arrives separately as [`Item::Compaction`].
     CompactionStarted,
-
     /// Compaction ended. A failure is worth surfacing because the turn that
     /// triggered it usually dies next with an over-length prompt.
     CompactionFinished {
         error: Option<String>,
     },
-
     /// A file-only rewind control request finished. It is not a model turn and
     /// therefore has no transcript item or turn lifecycle of its own.
     FileRewindCompleted {
         error: Option<String>,
     },
-
     ItemStarted(Item),
     ItemCompleted(Item),
-
     AgentMessageDelta {
         item_id: String,
         delta: String,
     },
-
     ReasoningSummaryDelta {
         item_id: String,
         delta: String,
     },
-
     CommandOutputDelta {
         item_id: String,
         delta: String,
     },
-
     /// A server→client approval request is blocking the turn; answer with
     /// the session's `respond_approval`.
     ApprovalRequested {
         description: String,
     },
-
     /// The pending approval was answered or cleared by turn lifecycle.
     ApprovalResolved,
-
     InputRequested(QuestionRequest),
-
     InputResolved {
         id: String,
         resolution: QuestionResolution,
     },
-
     InputSubmissionFailed {
         id: String,
         message: String,
     },
-
     /// Replacement snapshot of the child agents this session spawned. Child
     /// lifecycle is reduced by the adapter, so this never affects the parent
     /// transcript, turn state, or approvals.
     BackgroundTasks(BackgroundTaskSnapshot),
-
     /// Replacement snapshot of this session's workflow runs. Workflow agents
     /// are not child agents, so these rows never reach `Background Tasks` and
     /// never affect the parent transcript or turn state.
     Workflows(WorkflowSnapshot),
-
     /// One workflow agent's own conversation, read from its persisted
     /// transcript. Delivered separately from the run snapshot because it is
     /// read only while someone has that agent open.
@@ -523,7 +478,6 @@ pub enum Event {
         agent_id: String,
         items: Vec<Item>,
     },
-
     /// One child's own conversation, in the same items the parent transcript
     /// uses. Delivered separately from the summary snapshot because a child's
     /// content is only worth carrying once someone is reading it.
@@ -531,61 +485,49 @@ pub enum Event {
         key: BackgroundTaskKey,
         update: BackgroundTaskTranscriptUpdate,
     },
-
     /// Resumable sessions for the tab's working directory, newest first.
     History(Vec<SessionSummary>),
-
     /// The conversations one content search matched, in the backend's own rank
     /// order. Separate from [`Self::History`] because history pages accumulate
     /// while an answer to a query replaces what an earlier query answered.
     SessionSearchResults(Vec<SessionSummary>),
-
     /// Replacement snapshot of the prompts the backend has accepted but not
     /// started. Reported only by a backend that owns the pending queue itself;
     /// where the queue is this side's own bookkeeping, sending it back would
     /// overwrite what this side already knows with a copy of it.
     QueuedPrompts(Vec<QueuedPrompt>),
-
     /// Replacement value of the session's standing objective. `None` is a
     /// session with no goal, which is also what a backend that runs none
     /// reports by never sending this.
     GoalUpdated(Option<GoalStatus>),
-
     /// Whether the backend is currently collaborating on a plan rather than
     /// carrying out work.
     PlanModeUpdated(bool),
-
     /// A name for this conversation, for whatever shows it in a list. Backends
     /// differ in where it comes from — one summarizes the conversation with a
     /// model call, another is told what to call it — so this reports the
     /// settled name rather than the material for one.
     TitleUpdated(String),
-
     /// Replacement whole-log conversation counters.
     SessionStatsUpdated(SessionStats),
-
     /// Reconstructed transcript of a resumed session, to pre-fill the UI.
     Replay(Vec<ReplayTurn>),
-
     /// What the running turn is doing beyond producing output, when the backend
     /// reports something the elapsed time and token count cannot show. `None`
     /// clears it. The words belong to the view: an adapter reports the facts it
     /// was given and does not know the reader's language.
     StatusDetail(Option<TurnRetry>),
-
     /// The prompts this conversation can be branched in front of, newest
     /// first, answering one request for them. Backends that keep their history
     /// behind the connection report it here; where the history is a file this
     /// side can read, the list is read directly instead of asked for.
     ForkCheckpoints(Result<Vec<ForkCheckpoint>, String>),
-
     /// A process shared by several sessions stopped without a requested
     /// shutdown. The UI retains the conversation identity and visible content
     /// so a replacement process can resume it.
     HostExited {
         message: String,
     },
-
     Error {
         message: String,
 
@@ -599,13 +541,10 @@ pub enum Event {
 pub enum SendOutcome {
     /// A new turn was started.
     StartedTurn,
-
     /// The message was steered into the already-running turn.
     Steered,
-
     /// The handshake has not produced a thread yet.
     NotReady,
-
     /// The backend understood the message and refused it, in its own words.
     /// Only backends that admit a prompt over a request-response call can tell
     /// the difference between this and [`Self::NotReady`]; one that writes to a

@@ -50,6 +50,7 @@ fn provider_checks_and_updates_notify_registered_views(cx: &mut TestAppContext) 
     });
 
     cx.update(|cx| manual_check_profiles(&[profile], cx));
+
     cx.run_until_parked();
 
     assert!(first.borrow().contains(&UpdatePhase::Available));
@@ -104,6 +105,7 @@ fn snapshot(phase: UpdatePhase) -> InstallationSnapshot {
 #[test]
 fn reducer_keeps_identity_and_maps_phase_actions() {
     let available = notification_view(&snapshot(UpdatePhase::Available)).unwrap();
+
     let mut running = snapshot(UpdatePhase::Suspending);
 
     running.state.progress = Some(UpdateProgress {
@@ -170,6 +172,7 @@ fn terminal_lifetime_counts_only_focused_visible_time_and_resets_by_phase() {
 #[test]
 fn reducer_stacks_installations_and_never_fabricates_provider_progress() {
     let first = snapshot(UpdatePhase::Updating);
+
     let mut second = snapshot(UpdatePhase::Available);
 
     second.identity =

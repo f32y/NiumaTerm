@@ -14,9 +14,11 @@ fn disabling_and_reenabling_waits_for_cancelled_work_then_retries() {
     });
 
     let mut refresh = Refresh::new(0, source, true);
+
     let first = refresh.begin().unwrap().run();
 
     refresh.set_enabled(false);
+
     refresh.set_enabled(true);
 
     assert!(refresh.begin().is_none());
@@ -43,6 +45,7 @@ fn failed_refresh_retains_the_last_value_until_a_later_success() {
     });
 
     let mut refresh = Refresh::new(7, source, true);
+
     let failed = refresh.begin().unwrap().run();
 
     assert!(

@@ -5,6 +5,7 @@ use crate::pty_pipe::powershell_compatibility::{PowerShellCompatibility, RESIZE_
 #[test]
 fn resize_pauses_expire_and_interleaved_input_has_a_fixed_wait_limit() {
     let now = Instant::now();
+
     let mut compatibility = PowerShellCompatibility::default();
 
     compatibility.set_enabled(true);

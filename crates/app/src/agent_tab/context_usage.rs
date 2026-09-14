@@ -377,7 +377,6 @@ fn context_indicator_label(usage: ContextWindowUsage) -> String {
             percent = remaining_percent
         )
         .into_owned(),
-
         None => t!(
             "agent-context-used",
             tokens = &compact_token_count(usage.used_tokens())
@@ -397,7 +396,6 @@ fn context_capacity_labels(usage: ContextWindowUsage) -> (String, Option<String>
             remaining_context_percent(usage)
                 .map(|percent| t!("agent-context-percent-left", percent = percent).into_owned()),
         ),
-
         None => (
             t!(
                 "agent-context-used",

@@ -176,7 +176,6 @@ fn load_launches(project: &Path, session_id: &str) -> Result<Vec<RestoredTask>, 
     let file = match fs::File::open(&path) {
         Ok(file) => file,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
-
         Err(error) => {
             return Err(format!(
                 "could not read Claude session {session_id}: {error}"
@@ -189,6 +188,7 @@ fn load_launches(project: &Path, session_id: &str) -> Result<Vec<RestoredTask>, 
 
 pub(super) fn parse_task_history(reader: impl BufRead) -> Vec<RestoredTask> {
     let transcript = TranscriptIndex::read(reader);
+
     let mut tasks: Vec<RestoredTask> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
 
@@ -199,6 +199,7 @@ pub(super) fn parse_task_history(reader: impl BufRead) -> Vec<RestoredTask> {
         }
 
         collect_launches(record, &mut tasks, &mut index);
+
         collect_results(record, &mut tasks, &index);
     }
 
@@ -385,14 +386,11 @@ fn child_items(record: &Value, open_tools: &mut HashMap<String, Item>) -> Vec<It
                     questions: None,
                 })
             }
-
             Some("text") => {}
-
             Some("thinking") => items.push(Item::Reasoning {
                 id,
                 summary: block["thinking"].as_str().map(str::to_owned),
             }),
-
             Some("tool_use") => {
                 let item = tool_item(
                     &id,
@@ -401,15 +399,14 @@ fn child_items(record: &Value, open_tools: &mut HashMap<String, Item>) -> Vec<It
                 );
 
                 open_tools.insert(id, item.clone());
+
                 items.push(item);
             }
-
             Some("tool_result") => {
                 if let Some(started) = open_tools.remove(&id) {
                     items.push(complete_tool_item(started, block));
                 }
             }
-
             _ => {}
         }
     }
@@ -487,11 +484,9 @@ fn lifecycle_state(kind: &str, record: &Value) -> Option<BackgroundTaskState> {
     let status = match kind {
         "task_started" | "task_progress" => return Some(BackgroundTaskState::Working),
         "task_notification" => record["status"].as_str()?,
-
         "task_updated" => record["patch"]["status"]
             .as_str()
             .or_else(|| record["status"].as_str())?,
-
         _ => return None,
     };
 

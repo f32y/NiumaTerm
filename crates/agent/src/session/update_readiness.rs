@@ -60,5 +60,6 @@ impl ConversationWork {
 
 pub(crate) fn prepare_stop(commands: &mut CommandQueue, delivery: &mut MessageDelivery) {
     commands.clear();
+
     delivery.stopping_for_update();
 }

@@ -89,7 +89,6 @@ impl ProjectionTracker {
 
                 self.window_event().into_iter().collect()
             }
-
             "contextPressure" => {
                 // `projectedTokens` re-prices what the surface gained since the
                 // provider's last sample, which is what makes the figure react
@@ -103,9 +102,7 @@ impl ProjectionTracker {
 
                 self.window_event().into_iter().collect()
             }
-
             "contextBreakdown" => self.composition_event(value).into_iter().collect(),
-
             // The harness names a conversation itself once it has something to
             // name it from, and republishes the name whenever it changes, so
             // this is the only report a pinned or regenerated title makes. A
@@ -117,7 +114,6 @@ impl ProjectionTracker {
                 .map(|title| Event::TitleUpdated(title.to_string()))
                 .into_iter()
                 .collect(),
-
             "permissions" => {
                 let event = permission_presets(value);
 
@@ -128,12 +124,10 @@ impl ProjectionTracker {
 
                 event.into_iter().collect()
             }
-
             // A cleared goal is reported as a null value rather than by the
             // key disappearing, so the absent case is a value to publish and
             // not a frame to ignore.
             "goal" => vec![Event::GoalUpdated(goal_status(value))],
-
             // `pending` is a selection the host has admitted but not yet
             // recorded, so the state the user is heading for is the pending
             // one's opposite of `active`.
@@ -141,14 +135,12 @@ impl ProjectionTracker {
                 Some(true) => !value["active"].as_bool().unwrap_or_default(),
                 _ => value["active"].as_bool().unwrap_or_default(),
             })],
-
             "sessionStats" => vec![Event::SessionStatsUpdated(SessionStats {
                 turns: value["turns"].as_u64().unwrap_or_default(),
                 steps: value["steps"].as_u64().unwrap_or_default(),
                 model_ms: value["llmMs"].as_u64().unwrap_or_default(),
                 tool_ms: value["toolMs"].as_u64().unwrap_or_default(),
             })],
-
             // The host registers whatever projection units the deployment
             // composed; the ones this build does not read are normal traffic.
             _ => Vec::new(),

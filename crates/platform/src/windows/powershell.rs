@@ -24,7 +24,6 @@ pub fn is_shell(shell: Option<&str>) -> bool {
 
             lower.contains("powershell") || lower.contains("pwsh")
         }
-
         None => true,
     }
 }
@@ -138,6 +137,7 @@ fn decode_command_argument(command: &str) -> Option<String> {
     };
 
     let bytes = STANDARD.decode(encoded).ok()?;
+
     let mut chunks = bytes.chunks_exact(2);
 
     let units = chunks

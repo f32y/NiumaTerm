@@ -208,7 +208,6 @@ impl AppWindow {
                     WindowBounds::Windowed(bounds)
                 }
             }
-
             None => WindowBounds::Windowed(Bounds::centered(None, size(px(960.0), px(620.0)), cx)),
         };
 

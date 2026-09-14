@@ -130,6 +130,7 @@ fn patch_settings(doc: &mut DocumentMut) {
 #[test]
 fn settings_patch_preserves_comments_and_unrelated_keys() {
     let existing = "# my terminal config\ntheme = \"dark\"\n\n[window]\nwidth = 960\n\n[appearance]\n# Keep my font note\nterminal-font-size = 14.0 # reading size\n";
+
     let mut doc = existing.parse::<DocumentMut>().unwrap();
 
     patch_settings(&mut doc);
@@ -464,6 +465,7 @@ fn legacy_plaintext_credentials_load_without_touching_the_file() {
 #[test]
 fn legacy_plaintext_credentials_migrate_on_save() {
     let config: Config = parse_toml(LEGACY_PROFILE_TOML).unwrap();
+
     let mut doc = LEGACY_PROFILE_TOML.parse::<DocumentMut>().unwrap();
 
     profile::patch_agent_table(
@@ -509,6 +511,7 @@ fn invalid_encrypted_credentials_fail_without_legacy_fallback() {
 
     // Corrupt the last Base64 character while keeping the text decodable.
     let mut modified = valid.clone();
+
     let last = modified.pop().unwrap();
 
     modified.push(if last == 'A' { 'B' } else { 'A' });
@@ -740,6 +743,7 @@ fn theme_list_loads_valid_toml_files_in_name_order() {
     .unwrap();
 
     fs::write(dir.join("invalid.toml"), "[colors\n").unwrap();
+
     fs::write(dir.join("ignored.txt"), "[colors.terminal]\n").unwrap();
 
     let themes = Config::load_themes_from(dir);

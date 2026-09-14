@@ -67,6 +67,7 @@ struct ControlledPty {
 impl Read for ControlledPty {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         let mut state = self.state.lock();
+
         let count = buffer.len().min(state.output.len());
 
         if count == 0 {
@@ -148,6 +149,7 @@ impl ProcessReadWrite for ControlledPty {
 
     fn drain_ready(&self) -> Vec<Token> {
         let state = self.state.lock();
+
         let mut ready = vec![self.tokens[1]];
 
         if !state.output.is_empty() {
@@ -204,6 +206,7 @@ fn supplied_output_survives_detach_and_exit_closes_subscriptions() {
         let mut state = state.lock();
 
         state.output.extend(b"detached output");
+
         state.wake();
     }
 
@@ -224,6 +227,7 @@ fn supplied_output_survives_detach_and_exit_closes_subscriptions() {
         let mut state = state.lock();
 
         state.exited = true;
+
         state.wake();
     }
 

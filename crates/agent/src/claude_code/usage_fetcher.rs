@@ -149,13 +149,11 @@ pub fn fetch_with_cancel(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageF
         Ok(usage) => Ok(supplement_from_cli(usage, cancelled)),
         Err(OAuthFetchError::Cancelled) => Err(UsageFetchError::Cancelled),
         Err(OAuthFetchError::Final(error)) => Err(UsageFetchError::Failed(error)),
-
         Err(OAuthFetchError::Fallback(oauth_error)) => match fetch_via_cli(cancelled) {
             Ok(usage) => Ok(usage),
             // Only the OAuth path's own diagnosis is worth pairing with the CLI
             // fallback's; a cancellation says nothing about either.
             Err(UsageFetchError::Cancelled) => Err(UsageFetchError::Cancelled),
-
             Err(UsageFetchError::Failed(cli_error)) => Err(UsageFetchError::Failed(format!(
                 "Claude OAuth usage unavailable: {oauth_error}; interactive CLI fallback failed: {cli_error}"
             ))),
@@ -235,6 +233,7 @@ fn parse_oauth_usage(bytes: &[u8]) -> Result<UsageSnapshot, String> {
 
 fn oauth_window(window: Option<&OAuthUsageWindow>, window_minutes: u32) -> Option<UsageWindow> {
     let window = window?;
+
     let mut usage = UsageWindow::new(remaining_percentage(Some(window))?, window_minutes);
 
     usage.resets_at = window.resets_at.as_ref().and_then(parse_timestamp_millis);
@@ -335,6 +334,7 @@ fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchErro
     }
 
     let working_directory = Some(env::temp_dir().to_string_lossy().into_owned());
+
     let mut environment_overrides = vec![("TERM".to_string(), "xterm-256color".to_string())];
 
     // The same PATH every other CLI spawn in this application uses. A GUI
@@ -366,6 +366,7 @@ fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchErro
 
     let started_at = Instant::now();
     let deadline = started_at + CLI_FETCH_TIMEOUT;
+
     let mut output = Vec::new();
     let mut usage_sent = false;
     let mut trust_accepted = false;
@@ -383,6 +384,7 @@ fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchErro
 
         if !usage_sent && now.duration_since(started_at) >= CLI_STARTUP_DELAY {
             write_pty(&mut pty, b"/usage\r", "Claude usage command")?;
+
             usage_sent = true;
             next_enter_at = Some(now + CLI_ENTER_INTERVAL);
         }
@@ -405,6 +407,7 @@ fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchErro
             && (lower.contains("show plan") || lower.contains("usage limits"))
         {
             write_pty(&mut pty, b"\r", "Claude usage palette response")?;
+
             palette_confirmed = true;
         }
 
@@ -420,6 +423,7 @@ fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchErro
             && settle_at.is_none()
         {
             write_pty(&mut pty, b"\r", "Claude usage panel advance")?;
+
             next_enter_at = Some(now + CLI_ENTER_INTERVAL);
         }
 
@@ -479,6 +483,7 @@ fn drain_pty_output(pty: &mut nmt_platform::Pty, output: &mut Vec<u8>) -> Result
 fn append_bounded(output: &mut Vec<u8>, bytes: &[u8], max_bytes: usize) {
     if bytes.len() >= max_bytes {
         output.clear();
+
         output.extend_from_slice(&bytes[bytes.len() - max_bytes..]);
 
         return;
@@ -678,7 +683,6 @@ fn strip_terminal_sequences(input: &str) -> String {
                     }
                 }
             }
-
             Some(']') => {
                 chars.next();
 
@@ -692,11 +696,9 @@ fn strip_terminal_sequences(input: &str) -> String {
                     escaped = next == '\u{1b}';
                 }
             }
-
             Some(_) => {
                 chars.next();
             }
-
             None => {}
         }
     }

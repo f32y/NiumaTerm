@@ -449,6 +449,7 @@ impl ShellUser {
     /// before falling back on looking in to `passwd`.
     fn from_env() -> Result<Self, Error> {
         let mut buf = [0; 1024];
+
         let pw = get_pw_entry(&mut buf);
 
         // The passwd entry only fills in what the environment does not carry,
@@ -456,7 +457,6 @@ impl ShellUser {
         // failed read is reported only when something is actually missing.
         let (user, home, shell) = match (env::var("USER"), env::var("HOME"), env::var("SHELL")) {
             (Ok(user), Ok(home), Ok(shell)) => (user, home, shell),
-
             (user, home, shell) => {
                 let pw = pw?;
 
@@ -521,6 +521,7 @@ const UNKNOWN_PIXEL_SIZE: u16 = 0;
 /// never consult `ECHO` at all.
 fn queue_bootstrap(main: libc::c_int, child: libc::c_int, bootstrap: &str) -> Result<(), Error> {
     let bytes = bootstrap.as_bytes();
+
     let mut written = 0;
 
     while written < bytes.len() {
@@ -611,7 +612,6 @@ pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
 
     let user = match ShellUser::from_env() {
         Ok(data) => data,
-
         Err(..) => ShellUser {
             shell: shell.to_string(),
             ..Default::default()
@@ -632,6 +632,7 @@ pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
             // On macOS, use /usr/bin/login to ensure proper login shell environment
             // This ensures PATH includes directories like /usr/local/bin
             let shell_name = shell_program.rsplit('/').next().unwrap_or(shell_program);
+
             let mut login_cmd = Command::new("/usr/bin/login");
 
             // Check for .hushlogin in home directory
@@ -662,6 +663,7 @@ pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
 
             for arg in args {
                 exec_cmd.push(' ');
+
                 exec_cmd.push_str(&single_quoted(arg));
             }
 
@@ -711,6 +713,7 @@ pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
             let shell = String::from_utf8_lossy(&output.stdout);
 
             with_args.push(shell.trim().to_string());
+
             with_args.push("-l".to_string());
 
             builder.args(with_args);
@@ -726,10 +729,13 @@ pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
     let owned_child = unsafe { OwnedFd::from_raw_fd(child) };
 
     builder.stdin(owned_child.try_clone()?);
+
     builder.stderr(owned_child.try_clone()?);
+
     builder.stdout(owned_child);
 
     builder.env("USER", user.user);
+
     builder.env("HOME", user.home);
 
     // Name the terminal to what runs inside it. Startup files branch on this —
@@ -738,6 +744,7 @@ pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
     // terminal's machinery to our sessions. Apple's copy, for one, repoints
     // `HISTFILE` into its own session store.
     builder.env("TERM_PROGRAM", APP_ID);
+
     builder.env("TERM", terminal_type());
 
     // Announced rather than inherited for the same reason as `TERM`: the
@@ -745,6 +752,7 @@ pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
     // that only sees it when some outer terminal happened to export it would
     // pick a color depth from how the application was started.
     builder.env("COLORTERM", "truecolor");
+
     builder.envs(environment_overrides.iter().map(|(k, v)| (k, v)));
 
     unsafe {
@@ -783,7 +791,6 @@ pub fn create_pty_with_env(options: PtyOptions<'_>) -> Result<Pty, Error> {
                 job: None,
             })
         }
-
         Err(err) => Err(Error::new(
             err.kind(),
             format!(
@@ -814,13 +821,19 @@ unsafe fn prepare_pty_child(
 
         // No longer need child/main fds.
         libc::close(child);
+
         libc::close(main);
 
         libc::signal(libc::SIGCHLD, libc::SIG_DFL);
+
         libc::signal(libc::SIGHUP, libc::SIG_DFL);
+
         libc::signal(libc::SIGINT, libc::SIG_DFL);
+
         libc::signal(libc::SIGQUIT, libc::SIG_DFL);
+
         libc::signal(libc::SIGTERM, libc::SIG_DFL);
+
         libc::signal(libc::SIGALRM, libc::SIG_DFL);
 
         Ok(())
@@ -859,7 +872,6 @@ fn create_pty_with_fork(
 
     let user = match ShellUser::from_env() {
         Ok(data) => data,
-
         Err(..) => ShellUser {
             shell: shell.to_string(),
             ..Default::default()
@@ -888,7 +900,6 @@ fn create_pty_with_fork(
                 "forkpty has reach unreachable with {shell_program}"
             )))
         }
-
         id if id > 0 => {
             // TODO: Currently we fork the process and don't wait to know if led to failure
             // Whenever it happens it will just simply shut down the teletyperwriter
@@ -920,7 +931,6 @@ fn create_pty_with_fork(
                 job: None,
             })
         }
-
         _ => Err(Error::other(format!(
             "forkpty failed using {shell_program}"
         ))),
@@ -1064,7 +1074,6 @@ impl EventedPty for Pty {
                     // std::process::exit(1);
                     false
                 }
-
                 Ok(None) => false,
                 Ok(Some(..)) => true,
             }
@@ -1168,7 +1177,6 @@ pub fn foreground_process_name(main_fd: RawFd, shell_pid: u32) -> String {
             .trim_end()
             .parse()
             .unwrap_or_default(),
-
         Err(..) => "".into(),
     };
 

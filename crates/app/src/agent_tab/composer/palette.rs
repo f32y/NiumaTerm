@@ -1,11 +1,13 @@
-use crate::agent_tab::AgentPane;
-use crate::agent_tab::composer::{CommandFeedback, CommandFeedbackKind, RewindAction};
+use std::rc::Rc;
+use std::time::Duration;
+
 use gpui::{Context, Pixels, ScrollHandle, SharedString, px};
 use nmt_agent::chat::{ForkCheckpoint, SkillCatalog, SkillInfo, SkillReference, SlashCommandInfo};
 use nmt_agent::claude_code::sessions;
 use nmt_agent::session::commands::CommandQueue;
-use std::rc::Rc;
-use std::time::Duration;
+
+use crate::agent_tab::AgentPane;
+use crate::agent_tab::composer::{CommandFeedback, CommandFeedbackKind, RewindAction};
 
 /// Tallest the palette grows before its own rows scroll: nine rows and the
 /// note under them. The transcript reads this as the height the picker covers
@@ -86,6 +88,7 @@ impl SlashPalette {
     /// resetting discovery must invalidate both together.
     pub(crate) fn reset_discovery(&mut self, commands_ready: bool) {
         self.provider_commands.clear();
+
         self.provider_commands_ready = commands_ready;
         self.catalog = None;
         self.selected = 0;
@@ -177,7 +180,6 @@ pub(super) fn feedback_is_current(kind: CommandFeedbackKind, queue_is_empty: boo
 pub(super) fn feedback_is_transient(kind: CommandFeedbackKind) -> bool {
     match kind {
         CommandFeedbackKind::Notice => true,
-
         CommandFeedbackKind::Status | CommandFeedbackKind::Error | CommandFeedbackKind::Queued => {
             false
         }

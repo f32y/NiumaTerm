@@ -6,9 +6,10 @@ pub(super) mod rewind;
 #[cfg(test)]
 mod tests;
 
-use crate::agent_tab::AgentPane;
 use gpui::{Context, Entity, Window};
 use gpui_component::input::TextareaState;
+
+use crate::agent_tab::AgentPane;
 
 #[derive(Default)]
 pub(crate) struct BranchFlow {
@@ -47,6 +48,7 @@ impl BranchFlow {
             let end = pending.prompt.len();
 
             input.set_value(pending.prompt, window, cx);
+
             input.set_selected_range(end..end, cx);
         });
     }

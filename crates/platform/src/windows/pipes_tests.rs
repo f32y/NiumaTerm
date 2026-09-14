@@ -11,7 +11,9 @@ use crate::windows::pipes::*;
 fn flush_waits_for_native_writes_after_the_ring_has_space() {
     let (mut reader, pipe) = anonymous(64).unwrap();
     let mut writer = EventedAnonWrite::new(pipe);
+
     let bytes = vec![0x5a; 65536];
+
     let mut poll = Poll::new().unwrap();
 
     writer
@@ -62,6 +64,7 @@ fn flush_waits_for_native_writes_after_the_ring_has_space() {
 #[test]
 fn native_write_failure_wakes_a_pending_flush() {
     let (reader, pipe) = anonymous(64).unwrap();
+
     let mut writer = EventedAnonWrite::new(pipe);
     let mut poll = Poll::new().unwrap();
 
@@ -117,6 +120,7 @@ fn a_pipe_error_after_its_consumer_closes_does_not_panic() {
     });
 
     drop(error_receiver);
+
     drop(writer);
 
     assert!(
@@ -129,6 +133,7 @@ fn a_pipe_error_after_its_consumer_closes_does_not_panic() {
 #[test]
 fn dropping_writer_cancels_a_full_native_pipe() {
     let (reader, pipe) = anonymous(64).unwrap();
+
     let mut writer = EventedAnonWrite::new(pipe);
 
     assert_eq!(writer.write(&[0; 65536]).unwrap(), 65536);
@@ -138,6 +143,7 @@ fn dropping_writer_cancels_a_full_native_pipe() {
 
     let closer = spawn(move || {
         drop(writer);
+
         closed_tx.send(()).unwrap();
     });
 
@@ -146,6 +152,7 @@ fn dropping_writer_cancels_a_full_native_pipe() {
     // Release the native write even on failure so the regression cannot leave
     // its helper thread blocked after the assertion.
     drop(reader);
+
     closer.join().unwrap();
 
     assert!(closed, "writer teardown waited for the native pipe reader");
@@ -185,6 +192,7 @@ fn soft_ready_stays_set_until_ring_fully_drained() {
 
     // Read only a slice — data remains buffered.
     let mut small = [0u8; 16];
+
     let got = reader.read(&mut small).expect("partial read");
 
     assert!(got > 0 && got <= 16);
@@ -205,7 +213,6 @@ fn soft_ready_stays_set_until_ring_fully_drained() {
                     break;
                 }
             }
-
             Ok(n) => drained += n,
             Err(e) => panic!("drain read failed: {e}"),
         }

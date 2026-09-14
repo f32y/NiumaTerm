@@ -139,7 +139,6 @@ impl WorkspaceDirsEditor {
                                 t!("shell-workspace-dirs-unusable", path = &path).into_owned()
                             });
                         }
-
                         Resolved::Directory(path) => match &mut editor.roots {
                             Some(roots) => {
                                 if roots.add(path.clone()) == RootChange::Duplicate {
@@ -149,7 +148,6 @@ impl WorkspaceDirsEditor {
                                     });
                                 }
                             }
-
                             // The first usable directory of a workspace being
                             // created becomes its primary directory.
                             slot => *slot = Some(WorkspaceRoots::single(path)),
@@ -158,6 +156,7 @@ impl WorkspaceDirsEditor {
                 }
 
                 editor.notice = notice.map(Into::into);
+
                 editor.refresh_availability(cx);
 
                 cx.notify();
@@ -188,6 +187,7 @@ impl WorkspaceDirsEditor {
         }
 
         self.notice = None;
+
         self.refresh_availability(cx);
 
         cx.notify();

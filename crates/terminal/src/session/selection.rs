@@ -70,7 +70,6 @@ impl SurfaceSelection {
 
                 had_selection || selection_type != SelectionType::Simple
             }
-
             SurfaceMouseEventKind::Move => {
                 let Some(selection) = guard.as_mut() else {
                     return false;
@@ -80,7 +79,6 @@ impl SurfaceSelection {
 
                 true
             }
-
             SurfaceMouseEventKind::Up => {
                 if guard.as_ref().is_some_and(Selection::is_empty) {
                     *guard = None;
@@ -142,13 +140,11 @@ pub(crate) fn block_selection_range(
         SelectionType::Lines => {
             return Some(((first, 0), (last, cols.saturating_sub(1) as u32)));
         }
-
         SelectionType::Simple | SelectionType::Block => {
             let col = col.min(cols.saturating_sub(1) as u32);
 
             return Some(((line, col), (line, col)));
         }
-
         SelectionType::Semantic => {}
     }
 

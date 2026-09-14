@@ -143,7 +143,6 @@ pub(super) fn read_journal(dir: &Path) -> Result<Vec<WorkflowJournalEntry>, Stri
                     entry.result = result;
                 }
             }
-
             None => entries.push(WorkflowJournalEntry { agent_id, result }),
         }
     }
@@ -232,7 +231,6 @@ impl ClaudeWorkflowSource {
                     })
                     .collect()
             }
-
             Err(_) => result.refresh.failed = true,
         }
 
@@ -261,6 +259,7 @@ impl ClaudeWorkflowSource {
         }
 
         let items = read_agent_transcript(dir, agent_id).ok()?;
+
         let mut cache = self.cache.lock();
 
         // Another reader may have published while this transcript was read.
@@ -271,7 +270,6 @@ impl ClaudeWorkflowSource {
 
         let revision = match previous {
             Some((previous_len, revision)) if previous_len == len => revision,
-
             _ => {
                 cache.next_revision += 1;
 

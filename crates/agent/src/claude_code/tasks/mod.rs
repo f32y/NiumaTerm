@@ -26,6 +26,12 @@ mod shells;
 #[cfg(test)]
 mod tests;
 
+use std::collections::{HashMap, VecDeque};
+use std::mem::take;
+use std::time::SystemTime;
+
+use serde_json::Value;
+
 use crate::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskKind, BackgroundTaskRefs,
     BackgroundTaskRegistry, BackgroundTaskSnapshot, BackgroundTaskState,
@@ -40,10 +46,6 @@ use crate::claude_code::tasks::records::{
 use crate::claude_code::tasks::shells::ShellIndex;
 use crate::claude_code::tool_items::{complete_tool_item, tool_item};
 use crate::json::text_field;
-use serde_json::Value;
-use std::collections::{HashMap, VecDeque};
-use std::mem::take;
-use std::time::SystemTime;
 
 /// Tool names that launch a child agent.
 const LAUNCH_TOOLS: [&str; 2] = ["Task", "Agent"];
@@ -204,7 +206,6 @@ impl ClaudeTasks {
 
                 changed | registry.set_discovery(BackgroundTaskDiscoveryState::Ready)
             }
-
             Err(message) => {
                 if registry.is_empty() {
                     registry.set_discovery(BackgroundTaskDiscoveryState::Unavailable { message })
@@ -227,8 +228,11 @@ impl ClaudeTasks {
         )));
 
         self.aliases.clear();
+
         self.created_epoch.clear();
+
         self.children.clear();
+
         self.shells.clear();
 
         true
@@ -389,17 +393,14 @@ impl ClaudeTasks {
 
         match message["type"].as_str() {
             Some("system") => self.observe_system(message),
-
             Some("assistant") | Some("stream_event") => match linked_parent {
                 Some(parent) => self.observe_sidechain(parent, message),
                 None => self.observe_parent_assistant(message),
             },
-
             Some("user") => match linked_parent {
                 Some(parent) => self.observe_sidechain(parent, message),
                 None => self.observe_parent_user(message),
             },
-
             _ => false,
         }
     }
@@ -687,14 +688,11 @@ impl ClaudeTasks {
                         questions: None,
                     })
                 }
-
                 Some("text") => {}
-
                 Some("thinking") => items.push(Item::Reasoning {
                     id,
                     summary: block["thinking"].as_str().map(str::to_owned),
                 }),
-
                 Some("tool_use") => {
                     let item = tool_item(
                         &id,
@@ -703,15 +701,14 @@ impl ClaudeTasks {
                     );
 
                     self.children.open_tool(id, item.clone());
+
                     items.push(item);
                 }
-
                 Some("tool_result") => {
                     if let Some(started) = self.children.close_tool(&id) {
                         items.push(complete_tool_item(started, block));
                     }
                 }
-
                 _ => {}
             }
         }
@@ -847,6 +844,7 @@ struct AliasTable {
 impl AliasTable {
     fn clear(&mut self) {
         self.aliases.clear();
+
         self.order.clear();
     }
 
@@ -870,6 +868,7 @@ impl AliasTable {
             }
 
             self.order.push_back(id.clone());
+
             self.aliases.insert(id.clone(), canonical.to_owned());
         }
     }
@@ -905,7 +904,9 @@ struct ChildTranscripts {
 impl ChildTranscripts {
     fn clear(&mut self) {
         self.pending.clear();
+
         self.open_tools.clear();
+
         self.launch_prompts.clear();
     }
 

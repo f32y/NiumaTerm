@@ -1,4 +1,3 @@
-use crate::session::{SessionId, SessionSnapshot};
 use std::sync::{Arc, mpsc as std_mpsc};
 use std::thread;
 use std::time::Duration;
@@ -11,6 +10,7 @@ use tokio::time;
 
 use crate::client::{ClientWorker, RemoteSession, SessionByteEvent, reconnect};
 use crate::protocol::{Frame, generate_keypair};
+use crate::session::{SessionId, SessionSnapshot};
 
 #[test]
 fn reconnect_starts_without_an_initial_delay() {
@@ -46,6 +46,7 @@ fn splitting_session_moves_snapshot_and_preserves_both_stream_directions() {
     let vt = vec![b'x'; 1024 * 1024];
     let allocation = vt.as_ptr();
     let (output_tx, output) = std_mpsc::channel();
+
     let (commands, mut command_rx) = mpsc::unbounded_channel();
 
     let session = RemoteSession {
@@ -121,8 +122,10 @@ fn remote_pty_reports_closed_input_and_joins_workers_on_drop() {
     use crate::net_pty::NetPty;
 
     let (output_tx, output) = std_mpsc::channel();
+
     let (commands, mut command_rx) = mpsc::unbounded_channel();
     let (cancel, mut stopped) = watch::channel(false);
+
     let (finished, completion) = std_mpsc::channel();
 
     let thread = thread::spawn(move || {
@@ -134,6 +137,7 @@ fn remote_pty_reports_closed_input_and_joins_workers_on_drop() {
             });
 
         drop(output_tx);
+
         finished.send(()).unwrap();
     });
 

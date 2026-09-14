@@ -44,7 +44,6 @@ pub enum Channel {
     /// The default channel, which carries no channel name at all.
     #[default]
     Stable,
-
     Nightly,
 }
 
@@ -98,16 +97,13 @@ pub enum StartError {
     /// Sparkle presents AppKit windows, so it is built and driven from the main
     /// thread only.
     NotMainThread,
-
     /// The running bundle names no update feed. A development build is the
     /// ordinary case: the feed URL and the update signing key are stamped into
     /// the bundle when it is packaged, so a locally assembled one has neither
     /// and has no business reaching the published feed.
     NoFeedConfigured,
-
     /// An initializer returned nil.
     InitFailed(&'static str),
-
     /// Sparkle refused to start and said why.
     Refused(String),
 }

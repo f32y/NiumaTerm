@@ -3,7 +3,6 @@ use std::sync::{Arc, mpsc};
 use std::time::Duration;
 use std::{env, fs, process, thread};
 
-use crate::hub::SessionEvent;
 use futures::StreamExt;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::unbounded_channel;
@@ -12,6 +11,7 @@ use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::host::{SubscriptionBridge, forward_events};
+use crate::hub::SessionEvent;
 use crate::{HostConfig, HostHandle};
 
 #[test]
@@ -24,6 +24,7 @@ fn dropping_an_idle_subscription_joins_its_worker() {
 
     let worker = thread::spawn(move || {
         forward_events(&receiver, 42, events, stopped);
+
         finished.send(()).unwrap();
     });
 
@@ -41,6 +42,7 @@ fn dropping_an_idle_subscription_joins_its_worker() {
 #[test]
 fn a_detached_subscription_reports_stream_loss_after_queued_output() {
     let (sender, receiver) = mpsc::channel();
+
     let (events, mut forwarded) = unbounded_channel();
 
     sender
@@ -51,6 +53,7 @@ fn a_detached_subscription_reports_stream_loss_after_queued_output() {
         .unwrap();
 
     drop(sender);
+
     forward_events(&receiver, 42, events, Arc::new(AtomicBool::new(false)));
 
     assert!(matches!(
@@ -97,6 +100,7 @@ async fn shutdown_disconnects_an_idle_relay() {
     .await;
 
     drop(host);
+
     fs::remove_dir_all(data_dir).unwrap();
 
     assert!(disconnected.is_ok(), "shutdown must close an idle relay");

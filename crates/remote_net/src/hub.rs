@@ -2,7 +2,13 @@
 
 pub use crate::session::{SessionId, SessionSnapshot};
 
-use crate::protocol::ProtocolSessionOptions;
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
+use std::{error, fmt, io, thread};
+
 use nmt_config::{CursorShape, active_colors};
 use nmt_platform::windows::powershell::DEFAULT_SHELL;
 use nmt_platform::windows::process::ProcessTree;
@@ -13,12 +19,8 @@ use nmt_terminal::event::{EventListener, Msg, MsgSender, TerminalEvent};
 use nmt_terminal::pty_pipe::{SessionOptions as PipeOptions, SessionWorker, start_session};
 use nmt_terminal::session::request::{Checkpoint, CheckpointRequest};
 use parking_lot::Mutex;
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
-use std::{error, fmt, io, thread};
+
+use crate::protocol::ProtocolSessionOptions;
 
 const SUBSCRIBER_QUEUE_CAPACITY: usize = 128;
 
@@ -121,14 +123,12 @@ impl fmt::Display for HubError {
         match self {
             Self::SessionNotFound(id) => write!(formatter, "terminal session {id} was not found"),
             Self::SessionExited(id) => write!(formatter, "terminal session {id} has exited"),
-
             Self::InvalidSize { cols, rows } => {
                 write!(
                     formatter,
                     "terminal size must be non-zero, got {cols}x{rows}"
                 )
             }
-
             Self::Spawn(error) => write!(formatter, "failed to start ConPTY session: {error}"),
             Self::Engine(error) => write!(formatter, "terminal engine failed: {error}"),
             Self::ChannelClosed(id) => write!(formatter, "terminal session {id} is unavailable"),

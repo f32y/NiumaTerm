@@ -73,6 +73,7 @@ fn closing_retains_the_image_and_reset_discards_the_preview(cx: &mut gpui::TestA
             );
 
             view.zoom_image(image.clone(), None, cx);
+
             view.reset_presentation();
 
             assert!(matches!(view.preview.image_preview, ImagePreview::Closed));

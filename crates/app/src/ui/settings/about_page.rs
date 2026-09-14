@@ -171,39 +171,30 @@ fn status_text(status: &Status) -> String {
         Status::Checking => t!("settings-about-checking").to_string(),
         Status::NothingPublished => t!("settings-about-nothing-published").to_string(),
         Status::UpToDate => t!("settings-about-up-to-date", version = APP_VERSION).into_owned(),
-
         Status::Available(release) => {
             t!("settings-about-update-available", version = &release.label).into_owned()
         }
-
         Status::Installing(release) => {
             t!("settings-about-installing", version = &release.label).into_owned()
         }
-
         Status::InspectingFileUse(release) => {
             t!("settings-about-file-use-checking", version = &release.label).into_owned()
         }
-
         Status::AwaitingFileUse(release) => {
             t!("settings-about-file-use-waiting", version = &release.label).into_owned()
         }
-
         Status::ClosingFileUsers(release) => {
             t!("settings-about-file-use-closing", version = &release.label).into_owned()
         }
-
         Status::RecoveryWarning { applications, .. } => t!(
             "settings-about-recovery-warning-status",
             applications = &applications.join(", ")
         )
         .into_owned(),
-
         Status::InstallFailed(error) => install_error_text(error),
-
         Status::Failed(CheckError::Unreachable) => {
             t!("settings-about-check-unreachable").to_string()
         }
-
         Status::Failed(CheckError::Unreadable) => t!("settings-about-check-unreadable").to_string(),
     }
 }

@@ -73,7 +73,6 @@ pub(super) fn resolve_preflight(
         match assessment {
             RecoveryReadiness::Ready(snapshot) => snapshots.push(snapshot),
             RecoveryReadiness::Busy(_) => busy = true,
-
             RecoveryReadiness::MissingIdentity(message) => {
                 return PreflightResolution::Failed(PreflightFailure::MissingIdentity(message));
             }
@@ -121,13 +120,11 @@ pub(super) async fn run_transaction(
             environment.now() - started >= Duration::from_secs(15),
         ) {
             PreflightResolution::Ready(snapshots) => break snapshots,
-
             PreflightResolution::Failed(error) => {
                 environment.cancel_wait();
 
                 return Err(error);
             }
-
             PreflightResolution::Wait => environment.wait(Duration::from_millis(100)).await,
         }
     };
@@ -141,13 +138,13 @@ pub(super) async fn run_transaction(
     );
 
     let results = environment.suspend(mode).await;
+
     let mut suspended = Vec::new();
     let mut outcome = TransactionOutcome::default();
 
     for (index, result) in results.into_iter().enumerate() {
         match result {
             Ok(()) => suspended.push(index),
-
             Err(message) => {
                 outcome
                     .operation_error
@@ -168,7 +165,6 @@ pub(super) async fn run_transaction(
                     Err(error) => outcome.operation_error = Some(error),
                 }
             }
-
             Err(error) => outcome.operation_error = Some(error),
         }
     }
@@ -194,10 +190,12 @@ async fn restore_sessions(
     environment.restore(snapshots, suspended);
 
     let started = environment.now();
+
     let mut failures = 0;
 
     loop {
         let readiness = environment.restoration_readiness(suspended);
+
         let mut pending = Vec::new();
         let mut reported_failures = 0;
 

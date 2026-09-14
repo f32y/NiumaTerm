@@ -66,6 +66,7 @@ impl ConversationState {
     pub fn attach_last_images(&mut self, images: Vec<Arc<ConversationImage>>) {
         if let Some(metadata) = self.content.last_metadata_mut() {
             metadata.images = images;
+
             self.changed(self.content.entries().len().saturating_sub(1), None);
         }
     }
@@ -194,7 +195,9 @@ impl ConversationState {
 
     pub fn start(&mut self) {
         self.submitted_at = Some(Instant::now());
+
         self.live.start();
+
         self.changed(self.content.entries().len(), None);
     }
 
@@ -213,6 +216,7 @@ impl ConversationState {
         }
 
         self.last_response_at = Some(Instant::now());
+
         self.changed_turn(turn);
     }
 
@@ -232,7 +236,9 @@ impl ConversationState {
 
         if dropped > 0 {
             self.generation += 1;
+
             self.changes.clear();
+
             self.changed(0, None);
         }
 
@@ -241,8 +247,11 @@ impl ConversationState {
 
     pub fn clear(&mut self) {
         self.content.clear();
+
         self.turns.clear();
+
         self.live.discard();
+
         self.context_window_usage = None;
         self.context_composition = None;
         self.session_stats = None;
@@ -251,6 +260,7 @@ impl ConversationState {
         self.last_response_at = None;
         self.generation += 1;
         self.revision = 0;
+
         self.changes.clear();
     }
 }
@@ -262,7 +272,6 @@ pub fn hidden(item: &Item) -> bool {
         | Item::Reasoning { summary: text, .. } => {
             text.as_deref().is_none_or(|text| text.trim().is_empty())
         }
-
         _ => false,
     }
 }

@@ -104,6 +104,7 @@ fn write_shortcut(exe_path: &Path, shortcut: &Path) -> Result<(), WindowsError> 
         let exe: HSTRING = exe_path.to_string_lossy().as_ref().into();
 
         link.SetPath(&exe)?;
+
         link.SetIconLocation(&exe, 0)?;
 
         const APP_ID_KEY: PROPERTYKEY = PROPERTYKEY {
@@ -115,6 +116,7 @@ fn write_shortcut(exe_path: &Path, shortcut: &Path) -> Result<(), WindowsError> 
         let app_id: PROPVARIANT = APP_ID.into();
 
         store.SetValue(&APP_ID_KEY, &app_id)?;
+
         store.Commit()?;
 
         let persist: IPersistFile = link.cast()?;

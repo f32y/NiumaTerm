@@ -47,6 +47,7 @@ impl TranscriptView {
     /// conversation's expansion and scroll position cannot leak into another's.
     pub(crate) fn clear(&mut self) {
         self.conversation.borrow_mut().clear();
+
         self.reset_presentation();
     }
 
@@ -107,6 +108,7 @@ impl TranscriptView {
 
         if let Some(index) = self.conversation.borrow_mut().content.merge_completed(item) {
             self.code_transcripts.invalidate(index);
+
             self.row_cache.invalidate(index);
         }
     }
@@ -151,6 +153,7 @@ impl TranscriptView {
         }
 
         self.code_transcripts.invalidate(index);
+
         self.row_cache.invalidate(index);
 
         update.non_blank
@@ -174,6 +177,7 @@ impl TranscriptView {
 
     pub(crate) fn mark_interrupted(&mut self, turn: u64) {
         self.conversation.borrow_mut().turns.mark_interrupted(turn);
+
         self.invalidate_turn_rows(turn);
     }
 

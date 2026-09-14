@@ -110,7 +110,6 @@ impl AgentCardTone {
                 icon: cx.theme().muted_foreground,
                 hover: cx.theme().list_hover,
             },
-
             // A wash rather than an outline: an outlined box would be the one
             // bordered thing in the transcript, and it would be drawn hard
             // against the rule that groups the run it sits in. The wash is
@@ -292,7 +291,6 @@ impl AgentDisclosureRow {
             // and squares off where the two meet.
             .map(|this| match self.heads_body {
                 true => this.w_full().rounded_t(px(AGENT_CARD_RADIUS)),
-
                 false => this
                     .self_start()
                     .max_w_full()

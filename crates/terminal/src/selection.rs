@@ -118,7 +118,6 @@ impl Selection {
                         && (start.point.row == end.point.row)
                         && start.point.col + 1 == end.point.col)
             }
-
             SelectionType::Block => {
                 let (start, end) = (self.region.start, self.region.end);
 
@@ -133,7 +132,6 @@ impl Selection {
                         && start.side == Side::Left
                         && end.side == Side::Right)
             }
-
             SelectionType::Semantic | SelectionType::Lines => false,
         }
     }
@@ -190,7 +188,6 @@ impl Selection {
             SelectionType::Simple => self.range_simple(start, end, columns),
             SelectionType::Block => self.range_block(start, end),
             SelectionType::Lines => Some(Self::range_lines_engine(&grid, start.point, end.point)),
-
             SelectionType::Semantic => Some(Self::range_semantic_engine(
                 &grid,
                 start.point,
@@ -291,6 +288,7 @@ impl Selection {
         // Always go top-left -> bottom-right.
         if start.point.col > end.point.col {
             mem::swap(&mut start.side, &mut end.side);
+
             mem::swap(&mut start.point.col, &mut end.point.col);
         }
 

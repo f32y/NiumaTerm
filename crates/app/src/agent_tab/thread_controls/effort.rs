@@ -256,6 +256,7 @@ pub(super) fn effort_panel(
                                             }
 
                                             this.effort_drag = None;
+
                                             set(this, value.clone(), cx);
 
                                             cx.notify();

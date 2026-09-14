@@ -51,7 +51,6 @@ pub(super) fn failed_read_events(payload: &Value, session_id: &str) -> Option<Ve
         MODELS_FRAME => return None,
         COMMANDS_FRAME => vec![Event::Commands(Vec::new())],
         SKILLS_FRAME => vec![Event::Skills(commands::skills(&Value::Null))],
-
         SUBAGENT_TRANSCRIPT_FRAME => vec![Event::BackgroundTaskTranscript {
             key: BackgroundTaskKey::deepseek(payload["childSessionId"].as_str()?),
             update: BackgroundTaskTranscriptUpdate::state(
@@ -60,7 +59,6 @@ pub(super) fn failed_read_events(payload: &Value, session_id: &str) -> Option<Ve
                 },
             ),
         }],
-
         HISTORY_FRAME | PRESETS_FRAME | SUBAGENTS_FRAME | WORKFLOW_TRANSCRIPT_FRAME => Vec::new(),
         _ => return None,
     };
@@ -203,10 +201,8 @@ pub(super) fn load_search(
                     "sessions": listed,
                     "cwd": cwd,
                 }),
-
                 Err(error) => json!({ "type": SEARCH_FRAME, "error": error.message() }),
             },
-
             Err(error) => json!({ "type": SEARCH_FRAME, "error": error.message() }),
         };
 
@@ -366,7 +362,6 @@ pub(super) fn load_fork_checkpoints(
             FORK_CHECKPOINT_MESSAGES,
         ) {
             Ok(page) => json!({ "type": FORK_CHECKPOINTS_FRAME, "page": page }),
-
             Err(error) => json!({
                 "type": FORK_CHECKPOINTS_FRAME,
                 "error": error.message(),
@@ -417,7 +412,6 @@ fn reconcile_models(
 ) -> Value {
     let mut catalog = match read_model_catalog(client, selected) {
         Ok(catalog) => catalog,
-
         Err(error) => {
             return json!({
                 "type": MODELS_FRAME, "sessionId": session_id,
@@ -458,7 +452,6 @@ fn reconcile_models(
                     }
                 },
                 Ok(false) => {}
-
                 // Reported beside the picker rather than only logged: the
                 // alternative is a switch that looks applied while the
                 // first message carrying an image is refused for a reason
@@ -662,6 +655,7 @@ pub(crate) fn models_with_image(models: &Value, model: &str, field: &str) -> Opt
     }
 
     let mut catalog: Vec<Value> = models.as_array().cloned().unwrap_or_default();
+
     let modalities = json!(["text", "image"]);
 
     match catalog

@@ -30,7 +30,6 @@ pub(crate) fn answer_query(
 
             let _ = reply.send(result);
         }
-
         Query::Rows {
             source,
             start,
@@ -44,17 +43,14 @@ pub(crate) fn answer_query(
                 PageSource::Screen { revision } if revision != current_revision => {
                     Err(RequestError::Stale)
                 }
-
                 PageSource::Block { theme, .. } if theme != theme_revision => {
                     Err(RequestError::Stale)
                 }
-
                 _ => read_page(engine, source, start),
             };
 
             let _ = reply.send(result);
         }
-
         Query::Text { source, reply } => {
             if reply.is_canceled() {
                 return;
@@ -97,7 +93,6 @@ pub(crate) fn answer_query(
                             .map_err(|error| RequestError::Engine(error.to_string()))
                     }
                 }
-
                 TextSource::Blocks(pieces) => {
                     let mut text = String::new();
 
@@ -133,7 +128,6 @@ pub(crate) fn answer_query(
 
             let _ = reply.send(result);
         }
-
         Query::ExpandSelection {
             handle,
             line,
@@ -191,7 +185,6 @@ fn read_page(
                 page.rows.push(row);
             }
         }
-
         PageSource::Block { id, generation, .. } => {
             let handle = BlockHandle { id, generation };
 

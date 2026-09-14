@@ -1,12 +1,11 @@
 use nmt_config::system::NewlineShortcut;
 use nmt_input::keyboard::ModifiersState;
 
-use crate::terminal::Mode;
-
 use crate::input::{
     KeyPhase, TerminalKey, TerminalKeyAction, WheelDelta, key_action, pty_bytes_for_key,
     should_defer_to_ime,
 };
+use crate::terminal::Mode;
 
 #[test]
 fn wheel_steps_and_smooth_rows_use_terminal_speed_and_rounding() {

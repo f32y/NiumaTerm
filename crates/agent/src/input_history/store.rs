@@ -123,11 +123,9 @@ impl HistoryStore {
 pub(super) fn load_from_path(path: &Path) -> io::Result<HistoryStore> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
-
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return Ok(HistoryStore::default());
         }
-
         Err(error) => return Err(error),
     };
 
@@ -148,6 +146,7 @@ pub(super) fn load_from_path(path: &Path) -> io::Result<HistoryStore> {
 
             for scope in stored.scopes {
                 let key = history_scope(&scope);
+
                 let mut entries = VecDeque::<HistoryEntry>::new();
 
                 for (index, text) in scope.entries.iter().enumerate() {
@@ -183,14 +182,12 @@ pub(super) fn load_from_path(path: &Path) -> io::Result<HistoryStore> {
                 history.scopes.insert(key, Arc::new(entries));
             }
         }
-
         HISTORY_FILE_VERSION => {
             let stored: StoredHistory = serde_json::from_slice(&bytes)
                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
             history.merge(&stored);
         }
-
         version => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -238,6 +235,7 @@ pub(super) fn save_to_path(path: &Path, history: &StoredHistory) -> io::Result<(
     let mut temporary = NamedTempFile::new_in(parent)?;
 
     temporary.write_all(&content)?;
+
     temporary.as_file().sync_all()?;
 
     let temporary = temporary.into_temp_path();

@@ -1,5 +1,6 @@
-use crate::team::identity::{AttemptId, MemberId, OperationId};
 use serde::{Deserialize, Serialize};
+
+use crate::team::identity::{AttemptId, MemberId, OperationId};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "action", deny_unknown_fields, rename_all = "snake_case")]

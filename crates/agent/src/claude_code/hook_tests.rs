@@ -1,7 +1,7 @@
-use crate::hook_store::{event_commands, uninstall_from};
 use std::{env, fs, process};
 
 use crate::claude_code::hook::*;
+use crate::hook_store::{event_commands, uninstall_from};
 use crate::{AGENT_HOOK_PROTOCOL_VERSION, RawAgentHookMessage};
 
 #[test]

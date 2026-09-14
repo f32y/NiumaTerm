@@ -1,12 +1,13 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::iter;
+use std::sync::Arc;
+
 use gpui::SharedString;
 use nmt_config::colors::ColorRgb;
 use nmt_terminal::ansi::kitty_virtual::PLACEHOLDER;
 use nmt_terminal::ghostty::{CellText, CellWide, SnapshotStyle, Underline};
 use nmt_terminal::terminal::square::Wide;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::iter;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct TerminalLine(Arc<TerminalLineData>);
@@ -154,7 +155,6 @@ impl LineBuilder {
             {
                 last.len += seg_len
             }
-
             _ => self.runs.push(StyleRun {
                 len: seg_len,
                 ..style
@@ -194,12 +194,19 @@ fn hash_line(text: &str, runs: &[StyleRun]) -> u64 {
     // shaped-line cache (otherwise recolored output would keep stale glyph runs).
     for run in runs {
         run.len.hash(&mut hasher);
+
         run.fg.r.hash(&mut hasher);
+
         run.fg.g.hash(&mut hasher);
+
         run.fg.b.hash(&mut hasher);
+
         run.bold.hash(&mut hasher);
+
         run.italic.hash(&mut hasher);
+
         run.underline.hash(&mut hasher);
+
         run.strikethrough.hash(&mut hasher);
     }
 

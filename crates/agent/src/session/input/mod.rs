@@ -147,6 +147,7 @@ impl SessionInput {
         draft.mode = QuestionMode::Async;
         draft.status = QuestionStatus::History;
         draft.key = self.next_key(self.batches.len());
+
         self.batches.push(draft);
 
         self.batches.len() - 1
@@ -184,7 +185,6 @@ impl SessionInput {
             QuestionAction::Answer if draft.is_complete() => Some(draft.answers()),
             QuestionAction::Answer => return Submission::Ignored,
             QuestionAction::Skip => None,
-
             QuestionAction::Timeout
                 if draft
                     .auto_resolve_remaining(now)
@@ -192,7 +192,6 @@ impl SessionInput {
             {
                 None
             }
-
             QuestionAction::Timeout => return Submission::Ignored,
         };
 
@@ -214,14 +213,12 @@ impl SessionInput {
 
                 Submission::Settled
             }
-
             Ok(QuestionResponse::Pending) => {
                 draft.error = None;
                 draft.status = QuestionStatus::Submitting;
 
                 Submission::Waiting
             }
-
             Err(message) => {
                 draft.error = Some(QuestionError::Rejected(message));
 
@@ -252,7 +249,6 @@ impl SessionInput {
                 message,
                 started_turn,
             } => (QuestionStatus::Submitted, message, started_turn),
-
             QuestionResolution::Skipped => (QuestionStatus::Skipped, None, false),
             QuestionResolution::Expired => (QuestionStatus::Expired, None, false),
         };
@@ -281,6 +277,7 @@ impl SessionInput {
 
         draft.status = QuestionStatus::Pending;
         draft.error = Some(QuestionError::Rejected(message));
+
         draft.touch();
 
         true
@@ -288,6 +285,7 @@ impl SessionInput {
 
     pub fn starting(&mut self, epoch: u64) {
         self.epoch = epoch;
+
         self.disconnect();
     }
 
@@ -315,6 +313,7 @@ impl SessionInput {
         };
 
         let identity = backend.recovery_identity();
+
         let mut requests = Vec::new();
 
         for draft in &mut self.batches {
@@ -343,6 +342,7 @@ impl SessionInput {
         }
 
         backend.restore_question_requests(requests);
+
         self.epoch = runtime.epoch();
         self.disconnected = false;
     }
@@ -399,13 +399,11 @@ impl SessionInput {
 
                 ApprovalOutcome::Waiting
             }
-
             ApprovalOutcome::Settled => {
                 self.approval = None;
 
                 ApprovalOutcome::Settled
             }
-
             outcome @ (ApprovalOutcome::Ignored | ApprovalOutcome::Rejected) => outcome,
         }
     }

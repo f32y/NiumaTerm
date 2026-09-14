@@ -65,7 +65,9 @@ fn stalled_http_accepts_large_payloads_and_a_burst_of_distinct_controls() {
         assert_eq!(read_request(&stream)["method"], "session/cancel");
 
         entered_tx.send(()).unwrap();
+
         release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+
         reply(&mut stream, true);
     });
 
@@ -110,8 +112,11 @@ fn stalled_http_accepts_large_payloads_and_a_burst_of_distinct_controls() {
 
     // Clearing while one HTTP request is blocked cancels every unstarted call.
     controls.clear();
+
     release_tx.send(()).unwrap();
+
     drop(controls);
+
     server.join().unwrap();
 
     assert!(done_rx.recv_timeout(Duration::from_secs(3)).is_err());
@@ -127,6 +132,7 @@ fn failure_releases_admission_for_retry_and_old_completion_is_ignored() {
             let (mut stream, _) = listener.accept().unwrap();
 
             read_request(&stream);
+
             reply(&mut stream, success);
         }
     });
@@ -177,6 +183,7 @@ fn cancelled_approval_reports_stop_failure_without_rejecting_the_answer() {
 
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
+
         let request = read_request(&stream);
 
         assert_eq!(request["method"], "$events/result");
@@ -186,6 +193,7 @@ fn cancelled_approval_reports_stop_failure_without_rejecting_the_answer() {
         reply(&mut stream, true);
 
         let (mut stream, _) = listener.accept().unwrap();
+
         let request = read_request(&stream);
 
         assert_eq!(request["method"], "session/cancel");

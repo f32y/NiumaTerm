@@ -58,6 +58,7 @@ fn script(windows: &str, unix: &str) -> Command {
     #[cfg(windows)]
     {
         let _ = unix;
+
         let mut command = hidden_command("powershell.exe");
 
         command.args([
@@ -74,6 +75,7 @@ fn script(windows: &str, unix: &str) -> Command {
     #[cfg(unix)]
     {
         let _ = windows;
+
         let mut command = hidden_command("/bin/sh");
 
         command.args(["-c", unix]);
@@ -162,8 +164,11 @@ fn stalled_input_accepts_a_message_burst_without_closing_the_process() {
     assert!(closed_rx.try_recv().is_err());
 
     process.try_write_line(json!({"interrupt":true})).unwrap();
+
     process.shutdown(Duration::from_millis(20), true).unwrap();
+
     closed_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
     process.shutdown(Duration::from_secs(1), false).unwrap();
 }
 

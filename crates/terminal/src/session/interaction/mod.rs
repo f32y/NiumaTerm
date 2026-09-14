@@ -66,7 +66,6 @@ impl TerminalInteraction {
 
                 Self::write(session, &bytes)
             }
-
             TerminalKeyAction::Write(bytes) => Self::write(session, &bytes),
             TerminalKeyAction::Paste => InputOutcome::PasteRequested,
             TerminalKeyAction::Ignore => InputOutcome::Ignored,
@@ -139,17 +138,15 @@ impl TerminalInteraction {
         match completion.selection {
             CopiedSelection::FrozenPending => {
                 self.pending_expansion = None;
+
                 self.frozen.clear();
             }
-
             CopiedSelection::Frozen(a, b) if self.frozen.current() == Some((a, b)) => {
                 self.frozen.clear();
             }
-
             CopiedSelection::Live(range) if session.selection_range_in(snapshot) == Some(range) => {
                 session.clear_selection();
             }
-
             _ => {}
         }
     }
@@ -235,7 +232,6 @@ impl TerminalInteraction {
                     )));
                 }
             }
-
             Ok(None) => self.pending_expansion = Some(pending),
             _ => {}
         }

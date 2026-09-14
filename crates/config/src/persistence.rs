@@ -56,9 +56,11 @@ pub(crate) fn update(
 
     let current = read(path)?;
     let content = edit(current.as_deref())?;
+
     let mut temporary = NamedTempFile::new_in(parent)?;
 
     temporary.write_all(content.as_bytes())?;
+
     temporary.as_file().sync_all()?;
 
     // Close the temporary handle before replacement; its path still owns

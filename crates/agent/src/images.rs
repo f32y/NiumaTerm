@@ -43,7 +43,6 @@ impl<T> Attachment<T> {
 pub enum AttachError {
     /// The message already carries [`MAX_ATTACHMENTS`].
     Full,
-
     /// The clipboard's bytes could not be read as an image.
     Undecodable,
 }
@@ -94,7 +93,6 @@ impl<T> PendingAttachments<T> {
             Some((to_width, to_height)) => {
                 encode_png(&decoded.resize(to_width, to_height, FilterType::Triangle))?
             }
-
             None => encode_png(&decoded)?,
         };
 
@@ -214,7 +212,9 @@ fn renumber<T>(
         }
 
         rewritten.push_str(&text[cursor..span.start]);
+
         rewritten.push_str(&new);
+
         cursor = span.end;
         changed = true;
     }

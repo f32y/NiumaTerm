@@ -245,6 +245,7 @@ impl RouterState {
             .retain(|_, candidate| *candidate != owner);
 
         self.server_requests.retain(|_, route| route.owner != owner);
+
         self.root_by_owner.insert(owner, thread_id.clone());
 
         self.claim_thread(owner, thread_id)
@@ -255,7 +256,9 @@ impl RouterState {
             .retain(|_, route| route.thread_id != thread_id);
 
         self.thread_owners.remove(thread_id);
+
         self.root_by_owner.retain(|_, root| root != thread_id);
+
         self.early_messages.forget(thread_id);
     }
 }
@@ -279,9 +282,11 @@ impl Router {
 
     pub(super) fn register(&self, delivery: Delivery) -> RegistrationId {
         let mut state = self.state.lock();
+
         let id = state.next_registration_id;
 
         state.next_registration_id = state.next_registration_id.wrapping_add(1).max(1);
+
         state.sessions.insert(id, delivery);
 
         id
@@ -300,6 +305,7 @@ impl Router {
         let state = self.state.lock();
 
         *self.timer.lock() = Some(timer);
+
         self.refresh_timer(&state);
 
         Ok(())
@@ -355,6 +361,7 @@ impl Router {
             );
 
             message["id"] = json!(global_id);
+
             self.refresh_timer(&state);
 
             return Ok(());
@@ -364,13 +371,11 @@ impl Router {
 
         match state.server_requests.remove(&id) {
             Some(route) if route.owner == owner => Ok(()),
-
             Some(route) => {
                 state.server_requests.insert(id, route);
 
                 Err("Codex server request belongs to another Agent Tab".to_string())
             }
-
             None => Err("Codex server request is no longer pending".to_string()),
         }
     }
@@ -379,6 +384,7 @@ impl Router {
         let mut state = self.state.lock();
 
         state.pending_requests.remove(&id);
+
         self.refresh_timer(&state);
     }
 
@@ -467,6 +473,7 @@ impl Router {
         };
 
         self.refresh_timer(&state);
+
         message["id"] = json!(route.purpose.local_id());
 
         if route.deadline <= Instant::now() {
@@ -485,7 +492,6 @@ impl Router {
         {
             match state.replace_root(route.owner, thread_id.to_string()) {
                 Ok(early) => deliveries.extend(early),
-
                 Err(error) => {
                     message = json!({
                         "id": route.purpose.local_id(),
@@ -632,6 +638,7 @@ impl Router {
             .retain(|_, thread_owner| *thread_owner != owner);
 
         state.root_by_owner.remove(&owner);
+
         self.refresh_timer(&state);
 
         state.sessions.is_empty()
@@ -644,6 +651,7 @@ impl Router {
 
         let (startup_tx, deliveries) = {
             let mut state = self.state.lock();
+
             let startup_tx = state.startup_tx.take();
 
             let deliveries = if self.expected_shutdown.load(Ordering::Acquire) {
@@ -653,10 +661,15 @@ impl Router {
             };
 
             state.pending_requests.clear();
+
             self.refresh_timer(&state);
+
             state.server_requests.clear();
+
             state.thread_owners.clear();
+
             state.root_by_owner.clear();
+
             state.early_messages.clear();
 
             (startup_tx, deliveries)

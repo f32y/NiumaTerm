@@ -116,13 +116,11 @@ impl<T> Refresh<T> {
 
                 Completion::Updated
             }
-
             Err(FetchError::Failed(message)) => {
                 self.failed = true;
 
                 Completion::Failed(message)
             }
-
             Err(FetchError::Cancelled) => {
                 if self.enabled {
                     Completion::Retry

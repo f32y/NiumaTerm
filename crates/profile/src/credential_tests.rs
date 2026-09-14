@@ -46,7 +46,9 @@ fn repeated_encryption_produces_different_output() {
 #[test]
 fn modified_data_is_rejected() {
     let stored = encrypt(URL, KEY).unwrap();
+
     let mut bytes = BASE64.decode(stored.strip_prefix(PREFIX).unwrap()).unwrap();
+
     let last = bytes.len() - 1;
 
     bytes[last] ^= 0x01;

@@ -28,16 +28,12 @@ const VERSION: u32 = 1;
 pub enum StorageError {
     #[error("room storage is unavailable: {0}")]
     Io(#[from] io::Error),
-
     #[error("room records cannot be decoded: {0}")]
     Json(#[from] serde_json::Error),
-
     #[error("unsupported Team data version {0}")]
     UnsupportedVersion(u64),
-
     #[error("room records failed validation: {0}")]
     Invalid(&'static str),
-
     #[error("reopen this room to reconcile a failed storage operation")]
     ReopenRequired,
 }
@@ -118,6 +114,7 @@ impl RoomStore {
 
         let truncated = if let Some(valid_bytes) = replay.truncated_at {
             journal.set_len(valid_bytes)?;
+
             journal.sync_all()?;
 
             true
@@ -178,6 +175,7 @@ impl RoomStore {
         };
 
         let mut encoded = encode(&record)?;
+
         let digest = records::digest(&encoded);
 
         encoded.push(b'\n');
@@ -197,6 +195,7 @@ impl RoomStore {
 
     fn append(&mut self, encoded: &[u8]) -> io::Result<()> {
         self.journal.seek(SeekFrom::End(0))?;
+
         self.journal.write_all(encoded)?;
 
         self.journal.sync_all()
@@ -256,6 +255,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut temporary = NamedTempFile::new_in(directory)?;
 
     temporary.write_all(bytes)?;
+
     temporary.as_file().sync_all()?;
 
     replace_file_durable(temporary.path(), path)

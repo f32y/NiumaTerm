@@ -12,9 +12,10 @@
 #[path = "image_preview_tests.rs"]
 mod image_preview_tests;
 
-use crate::agent_tab::fade::{Fade, FrostedLayer};
-use crate::agent_tab::settings::UI_RADIUS;
-use crate::agent_tab::transcript::TranscriptView;
+use std::mem;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
 use gpui::prelude::*;
 use gpui::{
     AnyElement, Bounds, Context, Image, MouseButton, ObjectFit, Pixels, Point, Size, Window,
@@ -23,9 +24,10 @@ use gpui::{
 use gpui_component::IconName;
 use gpui_component::button::{Button, ButtonVariants as _};
 use rust_i18n::t;
-use std::mem;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+
+use crate::agent_tab::fade::{Fade, FrostedLayer};
+use crate::agent_tab::settings::UI_RADIUS;
+use crate::agent_tab::transcript::TranscriptView;
 
 /// How long the image takes to travel between its thumbnail and its full
 /// size. Brisk: the reader asked for the image and is waiting on it, and the
@@ -110,7 +112,6 @@ impl ImagePreviewLayer {
 
                 ImagePreview::Closing(preview)
             }
-
             state => state,
         };
     }

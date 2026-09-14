@@ -1,5 +1,7 @@
 use std::io::BufRead;
 
+use tempfile::tempdir;
+
 use crate::background_task::{BackgroundTaskState, BackgroundTaskTranscriptUpdate};
 use crate::chat::{CompactionTrigger, Item};
 use crate::claude_code::sessions::*;
@@ -240,6 +242,21 @@ fn atomic_fork_write_never_changes_the_source_file() {
     );
 
     fs::remove_dir_all(test_dir).unwrap();
+}
+
+#[test]
+fn failed_fork_publish_removes_the_temporary_file() {
+    let project = tempdir().unwrap();
+    let target = project.path().join("branch.jsonl");
+
+    fs::create_dir(&target).unwrap();
+
+    let records = vec![serde_json::json!({"type": "custom-title"})];
+    let error = write_fork_file(project.path(), "branch", &records).unwrap_err();
+
+    assert!(error.contains("could not publish Claude fork"));
+    assert!(target.is_dir());
+    assert_eq!(fs::read_dir(project.path()).unwrap().count(), 1);
 }
 
 #[test]
@@ -996,6 +1013,7 @@ fn a_session_uses_recorded_title_precedence() {
     }
 
     transcript.push_str(&named("second name"));
+
     transcript.push_str(&filler);
 
     let renamed = root.join("renamed.jsonl");

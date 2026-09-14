@@ -4,7 +4,6 @@ use rust_i18n::t;
 pub(crate) fn operation_error(error: OperationError) -> String {
     match error {
         OperationError::Failed(message) => message,
-
         OperationError::Unsupported(operation) => t!(match operation {
             UnsupportedOperation::Rename => "agent-session-rename-unsupported",
             UnsupportedOperation::Fork => "agent-session-fork-unsupported",

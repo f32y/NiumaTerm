@@ -239,16 +239,13 @@ use crate::agent_tab::workflows::WorkflowUi;
 pub enum AgentPaneEvent {
     Lifecycle(AgentEvent),
     Interrupted,
-
     /// This tab's workflow picture changed: it gained its first run, or its
     /// count of running agents moved. Reported as an event so the chrome can
     /// track it without observing every pane repaint.
     WorkflowActivity,
-
     /// This tab's count of running child agents moved. Reported as an event so
     /// the chrome can track it without observing every pane repaint.
     BackgroundTaskActivity,
-
     /// A conversation this pane listed but cannot continue: it ran in another
     /// directory, and a tab is rooted in the one it was opened for. The chrome
     /// owns tabs, so opening it where it worked is left to the chrome.
@@ -256,14 +253,12 @@ pub enum AgentPaneEvent {
         cwd: String,
         session_id: String,
     },
-
     /// A name for the conversation this pane is holding, derived from the
     /// message that opened it. The pane does not know which tab owns it, so
     /// naming the tab is left to the chrome that does. An empty name means the
     /// pane no longer holds a conversation worth naming, which drops the tab
     /// back to the name its profile gives it.
     TitleSuggested(String),
-
     /// The tab holding this pane should close. A pane owns no tab, so the
     /// chrome that does is asked to close it.
     CloseRequested,
@@ -434,6 +429,7 @@ impl AgentPane {
         self.branch.draft = None;
         self.palette.selected = 0;
         self.palette.feedback = None;
+
         self.release_transcript_from_picker(cx);
 
         cx.notify();
@@ -474,6 +470,7 @@ impl AgentPane {
 
         if let Err(error) = {
             let mut guard = self.session.borrow_mut();
+
             let state = &mut *guard;
 
             state.branch.begin_fork(&mut state.runtime, target)
@@ -490,6 +487,7 @@ impl AgentPane {
         }
 
         self.branch.reset_pending_prompt();
+
         self.palette.selected = 0;
         self.palette.dismissed = false;
 
@@ -509,6 +507,7 @@ impl AgentPane {
     ) {
         let update = {
             let mut guard = self.session.borrow_mut();
+
             let state = &mut *guard;
 
             state
@@ -526,7 +525,6 @@ impl AgentPane {
                 SharedString::from(t!("agent-fork-no-prompts")),
                 cx,
             ),
-
             BranchUpdate::Picker { unresolved } => {
                 self.palette.feedback = None;
                 self.palette.selected = 0;
@@ -540,14 +538,15 @@ impl AgentPane {
                 }
 
                 self.hold_transcript_for_picker(cx);
+
                 self.follow_branch_selection(cx);
 
                 cx.notify();
             }
-
             BranchUpdate::Branching => {
                 self.branch.draft = Some(self.input.read(cx).text().to_string());
                 self.history_ui.mode = RecentSessionsMode::Loading;
+
                 self.session.borrow_mut().begin_branched_conversation();
 
                 self.palette.set_feedback(
@@ -558,14 +557,12 @@ impl AgentPane {
 
                 cx.notify();
             }
-
             BranchUpdate::Failed(failure) => {
                 let message = self.branch_error_message(failure.error, cx);
 
                 self.palette
                     .set_feedback(CommandFeedbackKind::Error, message, cx);
             }
-
             _ => {}
         }
     }
@@ -580,7 +577,6 @@ impl AgentPane {
                 rows: vec![cancel_row()],
                 note: Some(SharedString::from(t!("agent-fork-loading-checkpoints"))),
             }),
-
             BranchView::ForkCheckpoints(checkpoints) => {
                 let mut rows = checkpoints
                     .iter()
@@ -601,7 +597,6 @@ impl AgentPane {
                     note: Some(SharedString::from(t!("agent-fork-choose-prompt"))),
                 })
             }
-
             _ => None,
         }
     }
@@ -617,6 +612,7 @@ impl AgentPane {
 
         let update = {
             let mut guard = self.session.borrow_mut();
+
             let state = &mut *guard;
 
             state.branch.fork(&mut state.runtime, checkpoint)
@@ -639,6 +635,7 @@ impl AgentPane {
         let draft = self.branch.draft.take();
 
         self.clear_conversation_presentation(cx);
+
         self.history_ui.mode = RecentSessionsMode::Hidden;
 
         self.branch.prepare_prompt(draft, completion.prompt);
@@ -687,6 +684,7 @@ impl AgentPane {
 
         let outcome = {
             let mut guard = self.session.borrow_mut();
+
             let state = &mut *guard;
 
             state.branch.begin_rewind(&state.runtime, cwd, target)
@@ -694,7 +692,6 @@ impl AgentPane {
 
         let request = match outcome {
             Ok(request) => request,
-
             Err(error) => {
                 let message = self.branch_error_message(error, cx);
 
@@ -706,6 +703,7 @@ impl AgentPane {
         };
 
         self.branch.reset_pending_prompt();
+
         self.palette.selected = 0;
         self.palette.dismissed = false;
 
@@ -738,7 +736,6 @@ impl AgentPane {
                 }],
                 note: Some(SharedString::from(t!("agent-rewind-loading-active-branch"))),
             }),
-
             BranchView::RewindCheckpoints(checkpoints) => {
                 let mut rows = checkpoints
                     .iter()
@@ -765,13 +762,11 @@ impl AgentPane {
                     note: Some(SharedString::from(t!("agent-rewind-choose-prompt"))),
                 })
             }
-
             BranchView::RewindAction(checkpoint, files) => {
                 let file_disabled = match checkpoint.file_restore_availability {
                     sessions::FileRestoreAvailability::Unavailable => Some(SharedString::from(t!(
                         "agent-rewind-file-checkpoint-unavailable"
                     ))),
-
                     _ => None,
                 };
 
@@ -779,11 +774,9 @@ impl AgentPane {
                     sessions::FileRestoreAvailability::Available => {
                         t!("agent-rewind-files-description-available")
                     }
-
                     sessions::FileRestoreAvailability::Unknown => {
                         t!("agent-rewind-files-description-unknown")
                     }
-
                     sessions::FileRestoreAvailability::Unavailable => {
                         t!("agent-rewind-files-description-unavailable")
                     }
@@ -793,7 +786,6 @@ impl AgentPane {
                     FileProgress::Restored => {
                         Some(SharedString::from(t!("agent-rewind-files-restored")))
                     }
-
                     FileProgress::NotConfirmed => file_disabled.clone(),
                 };
 
@@ -844,7 +836,6 @@ impl AgentPane {
                     ),
                 })
             }
-
             _ => None,
         }
     }
@@ -864,6 +855,7 @@ impl AgentPane {
 
         let update = {
             let mut guard = self.session.borrow_mut();
+
             let state = &mut *guard;
 
             state.branch.rewind(&mut state.runtime, action)
@@ -875,13 +867,11 @@ impl AgentPane {
     pub(crate) fn on_rewind_update(&mut self, update: BranchUpdate, cx: &mut Context<Self>) {
         match update {
             BranchUpdate::Ignored => {}
-
             BranchUpdate::Empty => self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 SharedString::from(t!("agent-rewind-no-prompts")),
                 cx,
             ),
-
             BranchUpdate::Picker { unresolved } => {
                 self.palette.selected = 0;
                 self.palette.feedback = None;
@@ -895,11 +885,11 @@ impl AgentPane {
                 }
 
                 self.hold_transcript_for_picker(cx);
+
                 self.follow_branch_selection(cx);
 
                 cx.notify();
             }
-
             BranchUpdate::RestoringFiles(action) => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Status,
@@ -907,24 +897,23 @@ impl AgentPane {
                         RewindAction::FilesAndConversation => {
                             SharedString::from(t!("agent-rewind-restoring-before-fork"))
                         }
-
                         _ => SharedString::from(t!("agent-rewind-restoring-files")),
                     },
                     cx,
                 );
             }
-
             update @ (BranchUpdate::CreateFork(_) | BranchUpdate::StartSession(_)) => {
                 self.history_ui.mode = RecentSessionsMode::Loading;
+
                 self.palette.reset_discovery(false);
 
                 if let Some(host) = self.host.upgrade() {
                     host.update(cx, |host, cx| host.on_branch_update(update, cx));
                 }
             }
-
             BranchUpdate::FilesRestored => {
                 self.branch.draft = None;
+
                 self.release_transcript_from_picker(cx);
 
                 self.palette.set_feedback(
@@ -933,7 +922,6 @@ impl AgentPane {
                     cx,
                 );
             }
-
             BranchUpdate::Failed(failure) => self.report_branch_failure(failure, cx),
             BranchUpdate::Branching => {}
         }
@@ -948,23 +936,18 @@ impl AgentPane {
 
         match error {
             BranchError::Busy => t!("agent-rewind-idle-only").to_string(),
-
             BranchError::NotReady => t!(
                 "agent-session-still-starting",
                 name = session_kind.display()
             )
             .into_owned(),
-
             BranchError::MissingSession => t!("agent-rewind-no-session-id").to_string(),
-
             BranchError::FilesUnavailable => {
                 t!("agent-rewind-file-checkpoint-unavailable").to_string()
             }
-
             BranchError::InvalidFileResult(message) => {
                 message.unwrap_or_else(|| t!("agent-rewind-invalid-file-state").to_string())
             }
-
             BranchError::Operation(error) => operation_error(error),
             BranchError::Failed(message) => message,
         }
@@ -976,21 +959,17 @@ impl AgentPane {
         let message = match (failure.stage, failure.files) {
             (FailureStage::Checkpoints | FailureStage::ProtocolFork, _) => error,
             (FailureStage::Files, _) => t!("agent-rewind-file-failed", error = &error).into_owned(),
-
             (FailureStage::Conversation, FileProgress::Restored) => t!(
                 "agent-rewind-conversation-failed-after-files",
                 error = &error
             )
             .into_owned(),
-
             (FailureStage::Conversation, FileProgress::NotConfirmed) => {
                 t!("agent-rewind-conversation-failed", error = &error).into_owned()
             }
-
             (FailureStage::Startup, FileProgress::Restored) => {
                 t!("agent-rewind-start-failed-after-files").to_string()
             }
-
             (FailureStage::Startup, FileProgress::NotConfirmed) => {
                 t!("agent-rewind-start-failed").to_string()
             }
@@ -1022,11 +1001,9 @@ impl AgentPane {
             .flat_map(|item| item.into_entries())
             .find_map(|entry| match entry {
                 ClipboardEntry::Image(image) => Some(image),
-
                 ClipboardEntry::ExternalPaths(paths) => {
                     paths.paths().iter().find_map(|path| image_file(path))
                 }
-
                 ClipboardEntry::String(_) => None,
             })
         else {
@@ -1056,7 +1033,6 @@ impl AgentPane {
 
                 true
             }
-
             Err(AttachError::Full) => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,
@@ -1066,7 +1042,6 @@ impl AgentPane {
 
                 true
             }
-
             // Something on the clipboard claimed to be an image and was not.
             // Falling through lets the composer paste whatever text is there.
             Err(AttachError::Undecodable) => false,
@@ -1292,7 +1267,6 @@ impl AgentPane {
                 self.palette.skill_catalog.as_ref(),
             ) {
                 Ok(skill) => skill,
-
                 Err(message) => {
                     self.palette
                         .set_feedback(CommandFeedbackKind::Error, message, cx);
@@ -1378,11 +1352,9 @@ impl AgentPane {
             view @ (BranchView::LoadingRewind
             | BranchView::RewindCheckpoints(_)
             | BranchView::RewindAction(_, _)) => return self.rewind_palette_model(view),
-
             view @ (BranchView::LoadingFork | BranchView::ForkCheckpoints(_)) => {
                 return self.fork_palette_model(view);
             }
-
             BranchView::Working => return None,
             BranchView::Idle => {}
         }
@@ -1502,11 +1474,9 @@ impl AgentPane {
                             Status::Starting => {
                                 Some(SharedString::from(t!("agent-composer-agent-starting")))
                             }
-
                             Status::Exited => {
                                 Some(SharedString::from(t!("agent-composer-agent-exited")))
                             }
-
                             _ => None,
                         }
                     };
@@ -1519,7 +1489,6 @@ impl AgentPane {
                         action: PaletteAction::Command(command.clone()),
                     }
                 }
-
                 PaletteCatalogEntry::Skill(skill) => PaletteRow {
                     label: format!("/{}", skill.name).into(),
                     description: SharedString::new(&skill.description),
@@ -1608,7 +1577,6 @@ impl AgentPane {
             let direction = match control {
                 PaletteControl::Previous => Some(InputHistoryDirection::Older),
                 PaletteControl::Next => Some(InputHistoryDirection::Newer),
-
                 PaletteControl::Activate | PaletteControl::Complete | PaletteControl::Dismiss => {
                     None
                 }
@@ -1634,13 +1602,14 @@ impl AgentPane {
                         move_palette_selection(self.palette.selected, model.rows.len(), direction)
                 {
                     self.palette.selected = selected;
+
                     self.palette.scroll.scroll_to_item(self.palette.selected);
+
                     self.follow_branch_selection(cx);
 
                     cx.notify();
                 }
             }
-
             PaletteControl::Activate => {
                 if model.rows.is_empty() {
                     self.submit_current_slash(window, cx);
@@ -1648,11 +1617,9 @@ impl AgentPane {
                     self.activate_palette_index(self.palette.selected, true, window, cx);
                 }
             }
-
             PaletteControl::Complete => {
                 self.activate_palette_index(self.palette.selected, false, window, cx);
             }
-
             PaletteControl::Dismiss => {
                 self.dismiss_command_palette(cx);
             }
@@ -1712,17 +1679,14 @@ impl AgentPane {
                     cx.notify();
                 }
             }
-
             PaletteControl::Activate => {
                 self.resume_session(self.history_ui.selected, cx);
             }
-
             PaletteControl::Dismiss => {
                 self.history_ui.mode = RecentSessionsMode::Hidden;
 
                 cx.notify();
             }
-
             // Completion belongs to the command palette. The guard above hands
             // it back before the list claims the keys, so there is nothing left
             // for it to do here.
@@ -1745,6 +1709,7 @@ impl AgentPane {
         }
 
         self.palette.selected = index;
+
         self.follow_branch_selection(cx);
 
         cx.notify();
@@ -1794,9 +1759,7 @@ impl AgentPane {
                     !needs_arguments,
                 )
             }
-
             PaletteAction::Choice { command, value } => (format!("/{command} {value}"), true),
-
             // Where a skill is written into the prompt, picking one lands the
             // token the harness will recognize and leaves the caret after it,
             // because what follows is the request the skill serves.
@@ -1805,6 +1768,7 @@ impl AgentPane {
 
                 self.input.update(cx, |input, cx| {
                     input.set_value(text.clone(), window, cx);
+
                     input.set_selected_range(text.len()..text.len(), cx);
                 });
 
@@ -1815,7 +1779,6 @@ impl AgentPane {
 
                 return;
             }
-
             PaletteAction::Skill(skill) => {
                 let Ok((text, binding)) = prepare_skill_selection(&skill) else {
                     self.palette.set_feedback(
@@ -1830,6 +1793,7 @@ impl AgentPane {
 
                 self.input.update(cx, |input, cx| {
                     input.set_value(text.clone(), window, cx);
+
                     input.set_selected_range(text.len()..text.len(), cx);
                 });
 
@@ -1841,10 +1805,10 @@ impl AgentPane {
 
                 return;
             }
-
             PaletteAction::RewindCheckpoint(checkpoint) => {
                 let selected = {
                     let mut guard = self.session.borrow_mut();
+
                     let state = &mut *guard;
 
                     state
@@ -1860,19 +1824,16 @@ impl AgentPane {
 
                 return;
             }
-
             PaletteAction::RewindAction(action) => {
                 self.activate_rewind_action(action, cx);
 
                 return;
             }
-
             PaletteAction::ForkCheckpoint(checkpoint) => {
                 self.start_conversation_branch(checkpoint, cx);
 
                 return;
             }
-
             PaletteAction::ForkCancel => {
                 self.cancel_fork_picker(cx);
 
@@ -1882,6 +1843,7 @@ impl AgentPane {
 
         self.input.update(cx, |input, cx| {
             input.set_value(text.clone(), window, cx);
+
             input.set_selected_range(text.len()..text.len(), cx);
         });
 
@@ -2005,6 +1967,7 @@ impl AgentPane {
         }
 
         TextSelection::clear(window, cx);
+
         self.focus(window, cx);
 
         cx.notify();
@@ -2095,15 +2058,12 @@ impl AgentPane {
         if command.arguments == SlashCommandArguments::Skills {
             let message = match self.palette.skill_catalog.as_ref() {
                 None => t!("agent-composer-skill-discovery-loading-period").to_string(),
-
                 Some(catalog) if catalog.skills.is_empty() && !catalog.errors.is_empty() => {
                     catalog.errors[0].clone()
                 }
-
                 Some(catalog) if catalog.skills.is_empty() => {
                     t!("agent-composer-no-skills-period").to_string()
                 }
-
                 Some(_) => t!("agent-composer-choose-skill").to_string(),
             };
 
@@ -2163,7 +2123,6 @@ impl AgentPane {
 
                     return true;
                 }
-
                 Ok(value) if command.name == "permissions" => {
                     self.session.borrow_mut().controls.settings.approval = Some(value.clone());
 
@@ -2186,9 +2145,7 @@ impl AgentPane {
 
                     return true;
                 }
-
                 Ok(_) => {}
-
                 Err(message) => {
                     self.palette
                         .set_feedback(CommandFeedbackKind::Error, message, cx);
@@ -2214,21 +2171,16 @@ impl AgentPane {
                     true
                 }
             }
-
             "resume" => self.open_recent_sessions(cx),
-
             "status" => {
                 self.show_status(cx);
 
                 true
             }
-
             "rewind" if session_kind.caps().file_rewind => self.open_rewind(cx),
-
             "rename" if session_kind.caps().session_rename => {
                 self.rename_conversation(&parsed.arguments, cx)
             }
-
             "fork" if session_kind.caps().session_fork => self.open_fork(cx),
             // Where the conversation is a file this side rewrites, the rewind
             // picker cuts the same branch and offers restoring the files that
@@ -2236,13 +2188,10 @@ impl AgentPane {
             // smaller half of what one command already does would only hide
             // the choice behind the name it was reached by.
             "fork" if session_kind.caps().file_rewind => self.open_rewind(cx),
-
             "find" if session_kind.caps().session_search => {
                 self.search_conversations(&parsed.arguments, cx)
             }
-
             "model" | "permissions" => false,
-
             _ => self.route_backend_command(
                 PendingSlashCommand {
                     name: command.name,
@@ -2286,7 +2235,6 @@ impl AgentPane {
 
                     true
                 }
-
                 CommandAdmission::Busy { name } => {
                     self.palette.set_feedback(
                         CommandFeedbackKind::Error,
@@ -2296,7 +2244,6 @@ impl AgentPane {
 
                     false
                 }
-
                 CommandAdmission::Execute(command) => self.execute_backend_command(command, cx),
             };
         }
@@ -2333,7 +2280,6 @@ impl AgentPane {
 
                 true
             }
-
             SlashCommandOutcome::Completed { message } => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
@@ -2345,14 +2291,12 @@ impl AgentPane {
 
                 true
             }
-
             SlashCommandOutcome::Rejected { message } => {
                 self.palette
                     .set_feedback(CommandFeedbackKind::Error, message, cx);
 
                 false
             }
-
             SlashCommandOutcome::NotReady => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,
@@ -2525,23 +2469,19 @@ impl AgentPane {
                 .iter()
                 .map(|model| (model.model.clone(), model.display.clone()))
                 .collect(),
-
             "permissions" => match session_kind {
                 AgentKind::Codex => app_server::APPROVAL_OPTIONS
                     .iter()
                     .map(|value| (value.to_string(), setting_value_label(value)))
                     .collect(),
-
                 AgentKind::Claude => stream_json::PERMISSION_OPTIONS
                     .iter()
                     .map(|value| (value.to_string(), setting_value_label(value)))
                     .collect(),
-
                 // Changing the DeepSeek sandbox preset mid-session is part of
                 // the approval work, so the command offers no choices yet.
                 AgentKind::DeepSeek => Vec::new(),
             },
-
             _ => Vec::new(),
         }
     }
@@ -2561,23 +2501,22 @@ impl AgentPane {
 
         match action {
             InputHistoryAction::Declined => false,
-
             InputHistoryAction::Keep => {
                 cx.stop_propagation();
 
                 true
             }
-
             InputHistoryAction::Replace(text) => {
                 self.palette.reset_for_recall();
+
                 replace_input_with_history(&self.input, text, window, cx);
+
                 cx.stop_propagation();
 
                 cx.notify();
 
                 true
             }
-
             InputHistoryAction::Clear => {
                 self.input
                     .update(cx, |input, cx| input.set_value("", window, cx));
@@ -2630,6 +2569,7 @@ impl AgentPane {
     ) {
         if completion.started_turn {
             self.start_working(cx);
+
             self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
         }
 
@@ -2716,7 +2656,6 @@ impl AgentPane {
         let handled = match control {
             PaletteControl::Previous => presentation.move_focus(prompt, false),
             PaletteControl::Next => presentation.move_focus(prompt, true),
-
             PaletteControl::Activate => {
                 let (question, option) = presentation.focus;
 
@@ -2733,7 +2672,6 @@ impl AgentPane {
 
                 true
             }
-
             PaletteControl::Complete | PaletteControl::Dismiss => false,
         };
 
@@ -2785,13 +2723,11 @@ impl AgentPane {
 
         match outcome {
             QuestionSubmission::Ignored => return,
-
             QuestionSubmission::Settled { waiting_finished } => {
                 if waiting_finished {
                     self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
                 }
             }
-
             QuestionSubmission::Waiting | QuestionSubmission::Failed => {}
         }
 
@@ -2940,7 +2876,6 @@ impl AgentPane {
                     "agent-question-pending"
                 }
             }
-
             QuestionStatus::Submitting => "agent-question-submitting",
             QuestionStatus::Submitted => "agent-question-submitted",
             QuestionStatus::Skipped => "agent-question-skipped",
@@ -3356,7 +3291,6 @@ impl AgentPane {
 
         let outcome = match self.session.borrow_mut().runtime.backend_mut() {
             Some(session) => session.rename_conversation(title).map_err(operation_error),
-
             None => Err(t!(
                 "agent-session-still-starting",
                 name = session_kind.display()
@@ -3377,7 +3311,6 @@ impl AgentPane {
 
                 true
             }
-
             Err(error) => {
                 self.palette
                     .set_feedback(CommandFeedbackKind::Error, error, cx);
@@ -3524,13 +3457,10 @@ impl AgentPane {
             SessionEffect::TeamDecision(_) => {}
             SessionEffect::ProviderTurnFinished { .. } => {}
             SessionEffect::Changed => cx.notify(),
-
             SessionEffect::Title(title) => {
                 self.emit_event(AgentPaneEvent::TitleSuggested(title), cx)
             }
-
             SessionEffect::Ready(settings) => self.on_ready(settings, cx),
-
             SessionEffect::Commands(commands) => {
                 self.palette.provider_commands = commands;
                 self.palette.catalog = None;
@@ -3539,14 +3469,12 @@ impl AgentPane {
 
                 cx.notify();
             }
-
             SessionEffect::Skills(catalog) => {
                 self.palette.skill_catalog = Some(catalog);
                 self.palette.selected = 0;
 
                 cx.notify();
             }
-
             SessionEffect::CommandResult {
                 name,
                 outcome,
@@ -3554,11 +3482,8 @@ impl AgentPane {
             } => {
                 self.on_slash_command_result(&name, outcome, advance, cx);
             }
-
             SessionEffect::TurnStarted { opened } => self.on_turn_started(opened, cx),
-
             SessionEffect::TurnCompleted { error, .. } => self.on_turn_completed(error, cx),
-
             SessionEffect::OutputTokens(_)
             | SessionEffect::ContextWindow(_)
             | SessionEffect::ContextComposition(_)
@@ -3572,7 +3497,6 @@ impl AgentPane {
             | SessionEffect::PlanMode(_)
             | SessionEffect::Stats(_)
             | SessionEffect::StatusDetail(_) => cx.notify(),
-
             SessionEffect::ApprovalRequested => {
                 self.emit_lifecycle(
                     AgentEventKind::PermissionRequested,
@@ -3583,19 +3507,15 @@ impl AgentPane {
 
                 cx.notify();
             }
-
             SessionEffect::ApprovalResolved => {
                 self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
 
                 cx.notify();
             }
-
             SessionEffect::InputRequested { index } => self.present_questions(index, cx),
-
             SessionEffect::InputResolved(completion) => {
                 self.present_question_completion(completion, cx)
             }
-
             SessionEffect::Workflows { activity_changed } => {
                 if activity_changed {
                     self.emit_event(AgentPaneEvent::WorkflowActivity, cx);
@@ -3603,25 +3523,20 @@ impl AgentPane {
 
                 cx.notify();
             }
-
             SessionEffect::BackgroundActivity => {
                 self.emit_event(AgentPaneEvent::BackgroundTaskActivity, cx);
 
                 cx.notify();
             }
-
             SessionEffect::Branch(update @ BranchUpdate::Branching) => {
                 self.on_fork_update(update, cx)
             }
-
             SessionEffect::Branch(update) => self.on_rewind_update(update, cx),
-
             SessionEffect::Error {
                 message,
                 fatal,
                 failure,
             } => self.on_error(message, fatal, failure, cx),
-
             SessionEffect::EffortRejected { message } => {
                 remember_defaults(
                     &self.session.borrow().controls,
@@ -3633,10 +3548,8 @@ impl AgentPane {
                 self.palette
                     .set_feedback(CommandFeedbackKind::Error, message, cx);
             }
-
             SessionEffect::History(sessions) => self.on_history(sessions, cx),
             SessionEffect::SearchResults(results) => self.show_search_results(results, cx),
-
             SessionEffect::Replay(replay) => {
                 if let Some(completion) = replay.branch {
                     self.complete_branch(completion, cx);
@@ -3644,6 +3557,7 @@ impl AgentPane {
 
                 if replay.replace || self.history_ui.mode == RecentSessionsMode::Loading {
                     self.clear_conversation_presentation(cx);
+
                     self.history_ui.mode = RecentSessionsMode::Hidden;
                     self.palette.feedback = None;
                 }
@@ -3651,11 +3565,9 @@ impl AgentPane {
                 self.transcript
                     .update(cx, |transcript, _| transcript.sync_content());
             }
-
             SessionEffect::ForkCheckpoints(checkpoints) => {
                 self.show_fork_checkpoints(checkpoints, cx)
             }
-
             SessionEffect::HostExited { message } => self.on_host_exited(message, cx),
         }
 
@@ -3710,6 +3622,7 @@ impl AgentPane {
 
         if ready.replaced {
             self.clear_conversation_presentation(cx);
+
             self.history_ui.mode = RecentSessionsMode::Hidden;
             self.palette.feedback = None;
         }
@@ -3760,7 +3673,6 @@ impl AgentPane {
                     cx,
                 );
             }
-
             SlashCommandOutcome::Completed { message } => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
@@ -3770,12 +3682,10 @@ impl AgentPane {
                     cx,
                 );
             }
-
             SlashCommandOutcome::Rejected { message } => {
                 self.palette
                     .set_feedback(CommandFeedbackKind::Error, message, cx);
             }
-
             SlashCommandOutcome::NotReady => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,
@@ -3837,6 +3747,7 @@ impl AgentPane {
             });
 
         self.turn.refresh_timer(cx);
+
         self.refresh_git_branch(cx);
 
         self.emit_lifecycle(
@@ -3884,6 +3795,7 @@ impl AgentPane {
                 .release_secret_editors(&self.session.borrow().input);
 
             self.emit_event(AgentPaneEvent::Interrupted, cx);
+
             self.publish_queued_user_messages(cx);
         }
 
@@ -3956,6 +3868,7 @@ impl AgentPane {
         };
 
         self.history_ui.data.sessions.clear();
+
         self.history_ui.data.showing_search = false;
         self.history_ui.selected = 0;
 
@@ -4025,13 +3938,11 @@ impl AgentPane {
                     count,
                 ) {
                     CountPublication::Stale => false,
-
                     CountPublication::Empty => {
                         cx.notify();
 
                         false
                     }
-
                     CountPublication::LoadRows => {
                         cx.notify();
 
@@ -4108,6 +4019,7 @@ impl AgentPane {
 
         let outcome = {
             let mut guard = self.session.borrow_mut();
+
             let state = &mut *guard;
 
             state
@@ -4117,7 +4029,6 @@ impl AgentPane {
 
         let request = match outcome {
             ResumeStart::Busy => return,
-
             ResumeStart::Elsewhere { cwd, session_id } => {
                 self.history_ui.selected = index;
 
@@ -4127,7 +4038,6 @@ impl AgentPane {
 
                 return;
             }
-
             ResumeStart::Rejected => {
                 self.history_ui.mode = RecentSessionsMode::Open;
                 self.history_ui.selected = index;
@@ -4140,13 +4050,11 @@ impl AgentPane {
 
                 return;
             }
-
             ResumeStart::Requested => {
                 self.seed_restored_settings(SettingsSeed::resumed(session_kind));
 
                 None
             }
-
             ResumeStart::ReadReplay(request) => Some(request),
         };
 
@@ -4191,9 +4099,11 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) -> Self {
         let owner = AgentSession::create(profile, workspace, None, cx);
+
         let mut pane = Self::attach(&owner, window, cx);
 
         pane.owned_session = Some(owner);
+
         pane.start_session_with_options(resume, false, |_, _, _| {}, cx);
 
         pane
@@ -4251,8 +4161,11 @@ impl AgentPane {
                 // carries, so an edit that removed a placeholder removes its
                 // image here, whichever way the text was edited.
                 this.sync_attachments(&text, window, cx);
+
                 this.input_history_navigation.reset();
+
                 reconcile_skill_binding(&text, &mut this.palette.skill_binding);
+
                 this.palette.selected = 0;
                 this.palette.dismissed = false;
 
@@ -4282,6 +4195,7 @@ impl AgentPane {
             let mut transcript = TranscriptView::new(kind, cwd.clone());
 
             transcript.attach_content(session.borrow().conversation.clone(), cx);
+
             transcript.set_owner(owner);
 
             transcript
@@ -4439,10 +4353,12 @@ impl AgentPane {
         let primary_changed = host.read(cx).workspace.primary() != workspace.primary();
 
         self.input_history_scope = InputHistoryScope::local(host.read(cx).kind, &workspace);
+
         host.update(cx, |host, _| host.workspace = workspace);
 
         if primary_changed {
             self.git_branch_poll.invalidate();
+
             self.refresh_git_branch(cx);
         }
 
@@ -4639,7 +4555,6 @@ impl AgentPane {
                     Some(title) => session.send_user_message_with_title(
                         text, &settings, skill, images, &scratch, title,
                     ),
-
                     None => session.send_user_message(text, &settings, skill, images, &scratch),
                 }
             },
@@ -4655,7 +4570,6 @@ impl AgentPane {
         let started_text = match outcome {
             Ok(Submission::Started { text }) => Some(text),
             Ok(Submission::Queued) => None,
-
             Ok(Submission::NotReady) => {
                 self.push_item(
                     SessionItem::Error {
@@ -4670,24 +4584,20 @@ impl AgentPane {
 
                 return false;
             }
-
             Ok(Submission::Rejected { message }) => {
                 self.push_item(SessionItem::Error { text: message }, cx);
 
                 return false;
             }
-
             Err(reason) => {
                 let (kind, message) = match reason {
                     SubmissionBlock::QuestionResponse => {
                         (CommandFeedbackKind::Notice, "agent-question-send-pending")
                     }
-
                     SubmissionBlock::ConversationChange => (
                         CommandFeedbackKind::Error,
                         "agent-session-rewind-blocks-send",
                     ),
-
                     SubmissionBlock::CommandStarting => {
                         (CommandFeedbackKind::Error, "agent-session-command-starting")
                     }
@@ -4734,6 +4644,7 @@ impl AgentPane {
             Some(text) => {
                 let _ = text;
                 let shared = self.session.borrow().conversation.clone();
+
                 let mut conversation = shared.borrow_mut();
 
                 conversation.attach_last_images(
@@ -4750,7 +4661,6 @@ impl AgentPane {
 
                 self.start_working(cx);
             }
-
             None => {
                 if let Some(text) = image_prompt {
                     let images = sent_images
@@ -4796,6 +4706,7 @@ impl AgentPane {
         }
 
         self.session.borrow_mut().naming.rename(title);
+
         self.sync_pending_rename();
     }
 
@@ -4806,6 +4717,7 @@ impl AgentPane {
 
         {
             let mut guard = self.session.borrow_mut();
+
             let state = &mut *guard;
 
             state.naming.sync(state.runtime.backend_mut())
@@ -4828,6 +4740,7 @@ impl AgentPane {
         }
 
         self.clear_conversation_presentation(cx);
+
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
 
@@ -4835,6 +4748,7 @@ impl AgentPane {
             .reset_discovery(!session_kind.caps().async_command_discovery);
 
         self.session.borrow_mut().commands.clear();
+
         self.palette.feedback = None;
         self.history_ui.mode = RecentSessionsMode::Hidden;
 
@@ -4950,6 +4864,7 @@ impl AgentPane {
 
             self.input.update(cx, |input, cx| {
                 input.set_value(restored, window, cx);
+
                 input.set_selected_range(cursor..cursor, cx);
             });
 
@@ -4967,7 +4882,6 @@ impl AgentPane {
     fn present_interrupt_result(&mut self, outcome: InterruptOutcome, cx: &mut Context<Self>) {
         match outcome {
             InterruptOutcome::Unavailable => {}
-
             InterruptOutcome::Rejected => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,
@@ -4975,7 +4889,6 @@ impl AgentPane {
                     cx,
                 );
             }
-
             InterruptOutcome::Accepted => {
                 self.emit_event(AgentPaneEvent::Interrupted, cx);
 
@@ -4993,13 +4906,10 @@ impl AgentPane {
 
         match outcome {
             ApprovalOutcome::Ignored => return,
-
             ApprovalOutcome::Settled => {
                 self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
             }
-
             ApprovalOutcome::Waiting => {}
-
             ApprovalOutcome::Rejected => {
                 self.palette.set_feedback(
                     CommandFeedbackKind::Error,
@@ -5056,7 +4966,6 @@ impl AgentPane {
 
         match outcome {
             Ok(()) => cx.notify(),
-
             Err(error) => self
                 .palette
                 .set_feedback(CommandFeedbackKind::Error, error, cx),
@@ -5080,7 +4989,6 @@ impl AgentPane {
 
         match outcome {
             Ok(()) => cx.notify(),
-
             Err(error) => self
                 .palette
                 .set_feedback(CommandFeedbackKind::Error, error, cx),
@@ -5225,13 +5133,11 @@ impl AgentPane {
                         t!("agent-update-waiting-detail"),
                         false,
                     ),
-
                     UpdateSuspension::Failed(message) => (
                         t!("agent-update-reconnect-failed-label"),
                         message.as_str().into(),
                         true,
                     ),
-
                     UpdateSuspension::Stopping
                     | UpdateSuspension::Updating
                     | UpdateSuspension::Reconnecting => return None,
@@ -5372,7 +5278,6 @@ impl AgentPane {
                                 })),
                         ),
                 ),
-
             None => v_flex()
                 .items_center()
                 .gap_3()
@@ -6106,13 +6011,10 @@ impl Render for AgentPane {
                     CommandFeedbackKind::Notice => {
                         (cx.theme().primary, t!("agent-feedback-notice"))
                     }
-
                     CommandFeedbackKind::Status => {
                         (cx.theme().muted_foreground, t!("agent-feedback-status"))
                     }
-
                     CommandFeedbackKind::Error => (cx.theme().danger, t!("agent-feedback-error")),
-
                     CommandFeedbackKind::Queued => {
                         (cx.theme().warning, t!("agent-feedback-queued"))
                     }
@@ -6331,12 +6233,11 @@ impl Render for AgentPane {
 
                                                         cx.stop_propagation();
                                                     }
-
                                                     ComposerEnterBehavior::Submit => {
                                                         this.send_user_message(window, cx);
+
                                                         cx.stop_propagation();
                                                     }
-
                                                     ComposerEnterBehavior::ActivateOrSubmit => this
                                                         .handle_palette_control(
                                                             PaletteControl::Activate,
@@ -6491,15 +6392,12 @@ pub(super) fn composer_enter_behavior(
 ) -> ComposerEnterBehavior {
     match (action.secondary, action.shift) {
         (false, false) => ComposerEnterBehavior::ActivateOrSubmit,
-
         (true, false) if shortcut == NewlineShortcut::CtrlEnter => {
             ComposerEnterBehavior::InsertNewline
         }
-
         (false, true) if shortcut == NewlineShortcut::ShiftEnter => {
             ComposerEnterBehavior::InsertNewline
         }
-
         _ => ComposerEnterBehavior::Submit,
     }
 }
@@ -6675,7 +6573,6 @@ fn branch_label(cwd: &str, max_age: Duration) -> Option<String> {
 
     Some(match branch {
         git::CheckedOut::Branch(branch) => branch,
-
         git::CheckedOut::Detached(commit) => {
             t!("git-status-detached", commit = &commit).into_owned()
         }
@@ -6706,6 +6603,7 @@ fn replace_input_with_history<T: 'static>(
 
     input.update(cx, |input, cx| {
         input.set_value(text, window, cx);
+
         input.set_selected_range(end..end, cx);
     });
 }

@@ -34,6 +34,7 @@ fn osc_notification_drains_into_shared_exact_notification_lifecycle() {
     };
 
     let route = AgentRoute::parse("osc-route").unwrap();
+
     let mut monitor = AgentMonitor::new("process");
 
     monitor.register_route(

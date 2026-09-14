@@ -17,7 +17,6 @@ use tracing::warn;
 pub(crate) fn parse<'a, T: Deserialize<'a>>(frame_type: &str, payload: &'a Value) -> Option<T> {
     match T::deserialize(payload) {
         Ok(parsed) => Some(parsed),
-
         Err(error) => {
             warn!("deepseek {frame_type} frame did not parse: {error}");
 

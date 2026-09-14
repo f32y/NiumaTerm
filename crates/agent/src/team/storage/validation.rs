@@ -9,6 +9,7 @@ use crate::team::storage::StorageError;
 
 pub(super) fn validate(room: &Room) -> Result<(), StorageError> {
     let invalid = StorageError::Invalid;
+
     let mut members = BTreeSet::new();
     let mut names = BTreeSet::new();
 
@@ -205,7 +206,6 @@ pub(super) fn validate(room: &Room) -> Result<(), StorageError> {
                 .iter()
                 .find(|run| run.id == id)
                 .map(|run| &run.budget),
-
             BudgetScope::Direct(id) => room.direct_allowances.get(&id),
         }
         .ok_or(invalid("attempt has no budget"))?;
@@ -214,13 +214,11 @@ pub(super) fn validate(room: &Room) -> Result<(), StorageError> {
 
         match attempt.state {
             AttemptState::Rejected if reservation.is_none() => {}
-
             AttemptState::Reserved
                 if reservation.is_some_and(|entry| {
                     entry.state == ReservationState::Unsent
                         && entry.purpose == attempt.intent.purpose
                 }) => {}
-
             AttemptState::Sending
             | AttemptState::Accepted { .. }
             | AttemptState::Completed { .. }
@@ -232,7 +230,6 @@ pub(super) fn validate(room: &Room) -> Result<(), StorageError> {
                     entry.state == ReservationState::Charged
                         && entry.purpose == attempt.intent.purpose
                 }) => {}
-
             _ => return Err(invalid("attempt and budget reservation disagree")),
         }
     }

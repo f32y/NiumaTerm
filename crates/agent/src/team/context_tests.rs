@@ -24,6 +24,7 @@ fn message(text: &str) -> PublicMessage {
 #[test]
 fn partial_summary_does_not_hide_an_uncovered_tail() {
     let mut room = Room::new(AgentWorkspace::default());
+
     let alice = room.add_member(config("Alice", "C:/a")).unwrap();
     let source = message("First half. Second half.");
     let source_id = source.id;
@@ -96,6 +97,7 @@ fn partial_summary_does_not_hide_an_uncovered_tail() {
 #[test]
 fn stage_snapshots_and_coverage_keep_late_replies_without_same_stage_leakage() {
     let mut room = Room::new(AgentWorkspace::default());
+
     let alice = room.add_member(config("Alice", "C:/a")).unwrap();
     let bob = room.add_member(config("Bob", "C:/b")).unwrap();
     let request = message("Original objective");
@@ -146,6 +148,7 @@ fn stage_snapshots_and_coverage_keep_late_replies_without_same_stage_leakage() {
 #[test]
 fn summary_scope_cannot_include_omitted_sources_and_disabling_requires_originals() {
     let mut room = Room::new(AgentWorkspace::default());
+
     let alice = room.add_member(config("Alice", "C:/a")).unwrap();
     let omitted = message("Omitted topic");
     let selected = message("Selected topic");
@@ -210,6 +213,7 @@ fn summary_scope_cannot_include_omitted_sources_and_disabling_requires_originals
 #[test]
 fn oversized_public_context_is_rejected_without_truncating_sources() {
     let mut room = Room::new(AgentWorkspace::default());
+
     let alice = room.add_member(config("Alice", "C:/a")).unwrap();
     let original = message(&"Résumé 😀 ".repeat(1000));
 

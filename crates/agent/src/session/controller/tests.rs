@@ -19,6 +19,7 @@ use crate::session::{AgentKind, Backend};
 
 fn started(kind: AgentKind, id: &str, outcomes: Vec<SendOutcome>) -> SessionController {
     let mut session = SessionController::new(kind);
+
     let epoch = session.starting(None).epoch;
 
     let mut backend = TestBackend::new(outcomes, SlashCommandOutcome::NotReady, Vec::new())
@@ -95,6 +96,7 @@ fn request(session: &mut SessionController, id: &str) -> QuestionKey {
 #[test]
 fn startup_rejects_sends_and_superseded_installation_cannot_replace_current_backend() {
     let mut session = SessionController::new(AgentKind::Codex);
+
     let old = session.starting(None).epoch;
 
     assert_eq!(send(&mut session, "draft"), Submission::NotReady);
@@ -183,10 +185,13 @@ fn rejected_send_preserves_accepted_prompt_and_interrupt_is_consumed_once() {
 #[test]
 fn replacement_rejects_old_completion_settings_and_input_events() {
     let mut session = started(AgentKind::Codex, "first", vec![SendOutcome::StartedTurn]);
+
     let old = session.runtime.epoch();
 
     send(&mut session, "accepted");
+
     apply(&mut session, Event::TurnStarted);
+
     session.starting(None);
 
     for event in [
@@ -224,6 +229,7 @@ fn provider_busy_input_keeps_its_existing_delivery_boundary() {
         );
 
         send(&mut session, "first");
+
         apply(&mut session, Event::TurnStarted);
 
         assert_eq!(send(&mut session, "follow-up"), Submission::Queued);
@@ -297,6 +303,7 @@ fn independent_sessions_route_approval_and_question_answers_to_their_own_backend
 #[test]
 fn child_snapshots_are_visible_only_to_the_matching_parent_and_epoch() {
     let mut session = started(AgentKind::Codex, "current", Vec::new());
+
     let epoch = session.runtime.epoch();
 
     let snapshot = |id| BackgroundTaskSnapshot {
@@ -397,7 +404,9 @@ fn repeated_ready_preserves_the_running_turn_and_selected_settings() {
     let mut session = started(AgentKind::Claude, "current", vec![SendOutcome::StartedTurn]);
 
     session.controls.settings.effort = Some("high".into());
+
     send(&mut session, "prompt");
+
     apply(&mut session, Event::TurnStarted);
 
     let started = session.conversation.borrow().live.started();
@@ -429,18 +438,21 @@ fn settings_changes_and_restart_keep_catalog_state_consistent() {
     apply(&mut session, Event::Commands(Vec::new()));
 
     session.controls.settings.tier = Some("unavailable".into());
+
     session.controls.set_model("selected".into());
 
     assert_eq!(session.controls.settings.model.as_deref(), Some("selected"));
     assert!(session.controls.settings.tier.is_none());
 
     session.controls.settings.tier = Some("fast".into());
+
     session.controls.set_model("selected".into());
 
     assert_eq!(session.controls.settings.tier.as_deref(), Some("fast"));
     assert!(session.command_catalog().is_some());
 
     session.controls.seed_settings(SettingsSeed::Reviewer);
+
     session.begin_branched_conversation();
 
     assert_eq!(session.controls.seed, SettingsSeed::None);

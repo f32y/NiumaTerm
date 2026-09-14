@@ -20,8 +20,11 @@ use crate::ui::workflows::WorkflowsView;
 fn leaving_an_agent_tab_clears_both_panel_targets(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_component::init(cx);
+
         cx.set_global(AppSettings::default());
+
         cx.set_global(AgentSettings::default());
+
         cx.set_global(AgentThreadDefaults::default());
     });
 
@@ -36,6 +39,7 @@ fn leaving_an_agent_tab_clears_both_panel_targets(cx: &mut TestAppContext) {
         let tasks = cx.new(|_| BackgroundTasksView::new());
 
         workflows.update(cx, |view, cx| view.set_target(Some(pane.downgrade()), cx));
+
         tasks.update(cx, |view, cx| view.set_target(Some(pane.downgrade()), cx));
 
         let git_model = cx.new(GitStatusModel::new);
@@ -65,11 +69,13 @@ fn leaving_an_agent_tab_clears_both_panel_targets(cx: &mut TestAppContext) {
     });
 
     cx.update(|_, cx| controller.sync_agent_targets(None, cx));
+
     cx.run_until_parked();
 
     assert_eq!(changes.get(), 2);
 
     cx.update(|_, cx| controller.sync_agent_targets(None, cx));
+
     cx.run_until_parked();
 
     assert_eq!(changes.get(), 2);

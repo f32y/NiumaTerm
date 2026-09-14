@@ -57,6 +57,7 @@ fn earlier_rejection_does_not_replace_a_newer_pending_selection() {
     let mut state = EffortState::new(Some("low".into()));
 
     state.record("first".into(), "high".into());
+
     state.record("second".into(), "max".into());
 
     assert_eq!(
@@ -81,6 +82,7 @@ fn later_rejection_waits_for_the_confirmed_fallback() {
     let mut state = EffortState::new(Some("low".into()));
 
     state.record("first".into(), "high".into());
+
     state.record("second".into(), "max".into());
 
     assert!(
@@ -104,6 +106,7 @@ fn close_settles_unknown_changes_without_discarding_known_successes() {
     let mut state = EffortState::new(Some("low".into()));
 
     state.record("first".into(), "high".into());
+
     state.record("second".into(), "max".into());
 
     assert!(state.resolve("second", None).is_none());

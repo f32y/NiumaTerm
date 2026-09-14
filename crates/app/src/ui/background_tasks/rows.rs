@@ -65,6 +65,7 @@ pub(super) fn render_row(
                 // The row opens the child's conversation, so a click that was
                 // meant for Stop must not also navigate.
                 cx.stop_propagation();
+
                 this.stop_task(&stop_key, cx);
             }))
     });
@@ -159,11 +160,8 @@ pub(super) fn duration_label(now: SystemTime, past: SystemTime) -> String {
 
     match seconds {
         0..60 => t!("tasks-background-duration-seconds", count = seconds).into_owned(),
-
         60..3600 => t!("tasks-background-duration-minutes", count = (seconds / 60)).into_owned(),
-
         3600..86400 => t!("tasks-background-duration-hours", count = (seconds / 3600)).into_owned(),
-
         _ => t!("tasks-background-duration-days", count = (seconds / 86400)).into_owned(),
     }
 }

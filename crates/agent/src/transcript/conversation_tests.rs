@@ -61,6 +61,7 @@ fn indexed_updates_preserve_duplicate_kinds_and_missing_accounting() {
 #[test]
 fn missed_updates_recover_and_clear_releases_accepted_resources() {
     let mut conversation = ConversationState::default();
+
     let image = Arc::new(ConversationImage::new(Arc::from([1, 2, 3])));
     let weak = Arc::downgrade(&image);
 

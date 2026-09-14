@@ -23,6 +23,7 @@ fn session_survives_detach_and_reconnects_from_a_vt_checkpoint() {
         .expect("write first command");
 
     wait_for_live_output(&first, b"NMT_REMOTE_FIRST");
+
     drop(first);
 
     hub.write_input(id, b"Write-Output NMT_REMOTE_DETACHED\r")
@@ -50,6 +51,7 @@ fn session_survives_detach_and_reconnects_from_a_vt_checkpoint() {
         );
 
         drop(subscription);
+
         thread::sleep(Duration::from_millis(25));
     };
 
@@ -57,7 +59,9 @@ fn session_survives_detach_and_reconnects_from_a_vt_checkpoint() {
     assert_eq!(hub.list_sessions()[0].attached_clients, 1);
 
     hub.kill(id).expect("kill session");
+
     wait_for_exit(&second);
+
     drop(second);
 
     assert!(hub.list_sessions().is_empty());
@@ -65,6 +69,7 @@ fn session_survives_detach_and_reconnects_from_a_vt_checkpoint() {
 
 fn wait_for_live_output(subscription: &SessionSubscription, needle: &[u8]) {
     let deadline = Instant::now() + Duration::from_secs(10);
+
     let mut output = Vec::new();
 
     while Instant::now() < deadline {

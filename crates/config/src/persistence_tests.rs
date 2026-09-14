@@ -56,6 +56,7 @@ fn concurrent_processes_preserve_every_update() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("counter");
     let executable = env::current_exe().unwrap();
+
     let mut children = Vec::new();
 
     for _ in 0..4 {

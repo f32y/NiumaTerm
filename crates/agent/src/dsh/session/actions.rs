@@ -70,9 +70,7 @@ impl Session {
 
                 json!({"kind": "result", "value": {"answers": answers}})
             }
-
             Some(_) => return Err("Complete every question before submitting.".into()),
-
             None => json!({"kind": "rejected", "error": {
                 "name": "Error", "code": "cancelled", "message": "the user dismissed the question"
             }}),
@@ -250,7 +248,6 @@ impl Session {
         match self.prompt(text, mode, images) {
             Ok(_) if steering => SendOutcome::Steered,
             Ok(_) => SendOutcome::StartedTurn,
-
             Err(error) => SendOutcome::Rejected {
                 message: error.message().to_string(),
             },
@@ -275,7 +272,6 @@ impl Session {
 
                 true
             }
-
             Err(error) => {
                 tracing::warn!(
                     "deepseek queued prompt could not be removed: {}",
@@ -388,7 +384,6 @@ impl Session {
 
         match answer {
             Ok(value) => commands::outcome(name, &value),
-
             Err(error) => SlashCommandOutcome::Rejected {
                 message: error.message().to_string(),
             },
@@ -496,7 +491,6 @@ pub(crate) fn run_close_actions(
                     "action": { "kind": "remove" },
                 }),
             ),
-
             CloseAction::CancelTurn => ("session/cancel", json!({ "sessionId": session_id })),
         };
 

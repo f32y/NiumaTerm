@@ -32,6 +32,7 @@ fn new_tabs_use_their_profile_names() {
     assert_eq!(mgr.list().items()[0].title(), "PowerShell");
 
     mgr.new_tab(2, TabId(2), "Command Prompt".into());
+
     mgr.new_tab(3, TabId(3), "Developer PowerShell".into());
 
     assert_eq!(mgr.list().items()[1].title(), "Command Prompt");
@@ -64,6 +65,7 @@ fn close_active_falls_to_right_neighbor() {
 #[test]
 fn close_active_with_no_right_neighbor_falls_left() {
     let mut mgr = manager(3); // active = tab3 (index 2, rightmost)
+
     let removed = mgr.close(TabId(3));
 
     assert_eq!(removed, Some(3));
@@ -76,6 +78,7 @@ fn closing_left_of_active_keeps_active_tab() {
     let mut mgr = manager(3);
 
     mgr.list_mut().activate(2); // active = tab3
+
     mgr.close(TabId(1)); // closes a tab left of active
 
     assert_eq!(mgr.list().active_id(), TabId(3));
@@ -87,6 +90,7 @@ fn focus_next_and_prev_wrap_around() {
     let mut mgr = manager(3);
 
     mgr.list_mut().activate(2);
+
     mgr.list_mut().focus_next();
 
     assert_eq!(mgr.list().active_index(), 0); // wrapped to first
@@ -101,6 +105,7 @@ fn reorder_moves_tab_and_active_follows() {
     let mut mgr = manager(3); // [t1, t2, t3], active t3
 
     mgr.list_mut().activate(0); // active = t1
+
     mgr.list_mut().reorder(0, 2); // move t1 to the end -> [t2, t3, t1]
 
     assert_eq!(mgr.list().items()[0].id(), TabId(2));
@@ -127,6 +132,7 @@ fn user_title_takes_precedence_over_terminal_title() {
     let mut mgr = manager(1);
 
     mgr.set_title(TabId(1), "vim".into());
+
     mgr.rename(TabId(1), "editor".into());
 
     assert_eq!(mgr.list().items()[0].title(), "editor");
@@ -169,6 +175,7 @@ fn a_failure_survives_the_successes_that_follow_it() {
     let mut mgr = manager(2); // tab 2 is active
 
     mgr.record_outcome(TabId(1), Some(1).into());
+
     mgr.record_outcome(TabId(1), Some(0).into());
 
     assert_eq!(
@@ -218,6 +225,7 @@ fn progress_state_zero_clears_the_bar() {
     assert_eq!(mgr.list().items()[0].progress(), None);
 
     mgr.set_progress(TabId(1), set);
+
     mgr.clear_progress(TabId(1));
 
     assert_eq!(mgr.list().items()[0].progress(), None);

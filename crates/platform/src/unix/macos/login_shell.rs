@@ -142,23 +142,23 @@ fn capture(shell: &str) -> Option<Vec<(String, String)>> {
         .ok()?;
 
     let mut stdout = child.stdout.take()?;
+
     let (sender, receiver) = mpsc::channel();
 
     thread::spawn(move || {
         let mut output = Vec::new();
+
         let read = stdout.read_to_end(&mut output);
         let _ = sender.send(read.map(|_| output));
     });
 
     let captured = match receiver.recv_timeout(CAPTURE_TIMEOUT) {
         Ok(Ok(output)) => Some(output),
-
         Ok(Err(error)) => {
             warn!("could not read from login shell {shell}: {error}");
 
             None
         }
-
         Err(_) => {
             warn!("login shell {shell} did not finish within {CAPTURE_TIMEOUT:?}");
 

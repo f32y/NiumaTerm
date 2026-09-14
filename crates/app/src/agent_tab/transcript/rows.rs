@@ -1,12 +1,14 @@
 pub(crate) use nmt_agent::transcript::conversation::EntryMetadata as EntryPresentation;
 
-use crate::agent_tab::transcript::compaction_accounting;
-use crate::agent_tab::transcript::view::TranscriptView;
+use std::collections::HashSet;
+
 use gpui::{Context, FollowMode, ListOffset, ListState};
 use nmt_agent::chat::Item as SessionItem;
 use nmt_agent::transcript::TranscriptEntry;
 use nmt_config::agent::CollapseRows;
-use std::collections::HashSet;
+
+use crate::agent_tab::transcript::compaction_accounting;
+use crate::agent_tab::transcript::view::TranscriptView;
 
 pub(crate) type Entry = TranscriptEntry<EntryPresentation>;
 
@@ -20,12 +22,10 @@ pub(crate) enum RowSpec {
         index: usize,
         fingerprint: u64,
     },
-
     Work {
         index: usize,
         fingerprint: u64,
     },
-
     /// The turn's work disclosure, placed above the rows it hides so the
     /// chevron points at its own content.
     TurnFold {
@@ -33,25 +33,21 @@ pub(crate) enum RowSpec {
         row_count: usize,
         folded: bool,
     },
-
     /// The turn's closing "Worked for Ns" line. Reporting only; the work it
     /// accounts for is disclosed by [`RowSpec::TurnFold`] further up.
     TurnSummary {
         seconds: u64,
         output_tokens: Option<u64>,
     },
-
     Interrupted {
         turn: u64,
         output_tokens: Option<u64>,
     },
-
     RunToggle {
         run_start: usize,
         tool_count: usize,
         expanded: bool,
     },
-
     /// The live progress line. `compacting` is part of the spec because the
     /// compaction form is a different, taller row, so flipping it has to
     /// remeasure rather than only repaint.
@@ -76,13 +72,11 @@ pub(crate) enum RowGap {
     /// Inside one block: between the steps of a run of work, and under the
     /// disclosure that heads them.
     Step,
-
     /// Between a turn's work and the prose it is interleaved with. The two
     /// are one answer being assembled, so they are held apart enough to tell
     /// which is which and no further; a reply that alternates a sentence with
     /// a tool call otherwise spends more of the column on air than on text.
     Work,
-
     /// Between turns: around the prompt that opens one and the line that
     /// closes one. This is the boundary a reader scans for to find where one
     /// exchange ends, so it stays the widest thing in the transcript.
@@ -114,7 +108,6 @@ fn is_turn_edge(items: &[Entry], spec: &RowSpec) -> bool {
         RowSpec::Entry { index, .. } => items
             .get(*index)
             .is_some_and(|entry| matches!(entry.item, SessionItem::UserMessage { .. })),
-
         RowSpec::TurnSummary { .. } | RowSpec::Interrupted { .. } => true,
         _ => false,
     }
@@ -201,13 +194,10 @@ pub(crate) fn entry_fingerprint(
             questions.as_ref().map_or(0, Vec::len),
             questions.is_some().into(),
         ),
-
         SessionItem::UserMessage { text } | SessionItem::Reasoning { summary: text, .. } => {
             (text.as_ref().map_or(0, String::len), 0, 0)
         }
-
         SessionItem::Error { text } => (text.len(), 0, 0),
-
         SessionItem::CommandExecution {
             command,
             purpose,
@@ -222,7 +212,6 @@ pub(crate) fn entry_fingerprint(
             status.as_ref().map_or(0, String::len),
             exit_code.map_or(0, |code| (code as u64) ^ (1 << 20)),
         ),
-
         SessionItem::FileChange {
             paths,
             diff,
@@ -233,7 +222,6 @@ pub(crate) fn entry_fingerprint(
             status.as_ref().map_or(0, String::len),
             0,
         ),
-
         SessionItem::Other {
             kind,
             title,
@@ -245,7 +233,6 @@ pub(crate) fn entry_fingerprint(
             status.as_ref().map_or(0, String::len),
             0,
         ),
-
         SessionItem::Compaction { detail, .. } => (
             detail.summary.as_ref().map_or(0, String::len),
             compaction_accounting(detail).len(),
@@ -312,6 +299,7 @@ impl PickerReservation {
         });
 
         list.freeze_scroll_position();
+
         self.reserve_below = true;
     }
 

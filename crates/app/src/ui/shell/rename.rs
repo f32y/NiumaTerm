@@ -98,6 +98,7 @@ fn rename_input(
 
     input.update(cx, |input, cx| {
         input.focus(window, cx);
+
         input.set_selected_range(0..input.text().len(), cx);
     });
 

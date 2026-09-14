@@ -192,11 +192,9 @@ async fn drive_transaction(
             outcome.verified,
             combine_transaction_error(outcome.operation_error, outcome.restore_failures),
         ),
-
         Err(error) => {
             let message = match error {
                 PreflightFailure::MissingIdentity(message) => message,
-
                 PreflightFailure::InterruptionTimeout => {
                     t!("agent-update-interruption-timeout").to_string()
                 }
@@ -210,6 +208,7 @@ async fn drive_transaction(
     };
 
     coordinator.finish_update(&key, verified, error, 0);
+
     environment.cx.update(AgentUpdates::notify_changed);
 }
 
@@ -334,6 +333,7 @@ impl UpdateEnvironment for SessionUpdateEnvironment<'_> {
 
     fn publish(&mut self, phase: UpdatePhase, progress: Option<UpdateProgress>) {
         self.coordinator.transition(&self.key, phase, progress);
+
         self.cx.update(AgentUpdates::notify_changed);
     }
 

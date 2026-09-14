@@ -2,11 +2,13 @@
 #[path = "reveal_tests.rs"]
 mod reveal_tests;
 
-use crate::agent_tab::transcript::{RowSpec, TranscriptView};
-use gpui::prelude::*;
-use gpui::{App, Bounds, Div, Pixels, Window, div, px};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
+
+use gpui::prelude::*;
+use gpui::{App, Bounds, Div, Pixels, Window, div, px};
+
+use crate::agent_tab::transcript::{RowSpec, TranscriptView};
 
 /// One disclosure in the transcript, as the thing whose opening is animated.
 ///
@@ -16,13 +18,10 @@ use std::time::{Duration, Instant};
 pub(crate) enum RevealKey {
     /// A work-log row's detail body, keyed by transcript index.
     Row(usize),
-
     /// A user message's annotation card, keyed by transcript index.
     Annotation(usize),
-
     /// A collapsed run of work steps, keyed by the run's first entry.
     Group(usize),
-
     /// A settled turn's work, folded behind its "Show work" row, keyed by
     /// turn id.
     Turn(u64),
@@ -38,12 +37,10 @@ pub(crate) enum RevealKey {
 pub(crate) enum RevealedPart {
     /// A disclosure's block, opened under its own header.
     Block(RevealKey),
-
     /// One list row drawn from one entry: a step of a run, or a reply
     /// written between steps. An entry draws at most one row, so the index
     /// names the row.
     Entry(usize),
-
     /// A run's toggle, keyed by the run's first entry. Inside a folded turn
     /// the toggle is one of the rows the fold hides; it is keyed apart from
     /// the step drawn for that same entry once the run opens.
@@ -57,7 +54,6 @@ pub(crate) fn revealed_part(spec: &RowSpec) -> Option<RevealedPart> {
         RowSpec::Work { index, .. } | RowSpec::Entry { index, .. } => {
             Some(RevealedPart::Entry(*index))
         }
-
         RowSpec::RunToggle { run_start, .. } => Some(RevealedPart::Toggle(*run_start)),
         _ => None,
     }
@@ -139,7 +135,6 @@ impl Reveals {
 
                 REVEAL_DURATION.mul_f32(ease_out_inverse(covered))
             }
-
             _ => Duration::ZERO,
         };
 
@@ -359,15 +354,12 @@ impl Disclosures {
             RevealKey::Row(index) => {
                 self.expanded_rows.insert(index);
             }
-
             RevealKey::Annotation(index) => {
                 self.expanded_annotations.insert(index);
             }
-
             RevealKey::Group(run_start) => {
                 self.expanded_groups.insert(run_start);
             }
-
             RevealKey::Turn(turn) => self.set_turn_unfolded(turn, true),
         }
 
@@ -389,6 +381,7 @@ impl Disclosures {
     /// whose measured heights leave the list with them.
     pub(crate) fn take_down(&mut self, key: RevealKey, parts: &[RevealedPart]) -> Option<usize> {
         self.reveals.end(key);
+
         self.revealed_heights.remove(&RevealedPart::Block(key));
 
         for part in parts {
@@ -401,19 +394,16 @@ impl Disclosures {
 
                 Some(index)
             }
-
             RevealKey::Annotation(index) => {
                 self.expanded_annotations.remove(&index);
 
                 None
             }
-
             RevealKey::Group(run_start) => {
                 self.expanded_groups.remove(&run_start);
 
                 None
             }
-
             RevealKey::Turn(turn) => {
                 self.set_turn_unfolded(turn, false);
 
@@ -458,10 +448,15 @@ impl Disclosures {
     /// does.
     pub(crate) fn clear(&mut self) {
         self.expanded_rows.clear();
+
         self.expanded_groups.clear();
+
         self.expanded_annotations.clear();
+
         self.toggled_turns.clear();
+
         self.reveals.clear();
+
         self.revealed_heights.clear();
     }
 
@@ -471,9 +466,13 @@ impl Disclosures {
     /// expansions are not departures from that setting, so they stay.
     pub(crate) fn forget_departures(&mut self, turns_fold_by_default: bool) {
         self.expanded_groups.clear();
+
         self.toggled_turns.clear();
+
         self.turns_fold_by_default = turns_fold_by_default;
+
         self.reveals.clear();
+
         self.revealed_heights.clear();
     }
 

@@ -1,7 +1,8 @@
-use crate::agent_tab::execution::AgentSession;
 use nmt_agent::session::lifecycle::Status;
 use nmt_agent::team::context::ContextLimits;
 use nmt_agent::team::execution_slots::WorkStatus;
+
+use crate::agent_tab::execution::AgentSession;
 
 pub(super) const CONTEXT_LIMITS: ContextLimits = ContextLimits {
     max_bytes: 96_000,

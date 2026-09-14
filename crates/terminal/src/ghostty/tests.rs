@@ -135,6 +135,7 @@ fn block_ref_reads_and_survives_removal() {
     assert!(r.bytes() > 0);
 
     let palette = t.color_palette();
+
     let mut text = String::new();
 
     let meta = r
@@ -175,6 +176,7 @@ fn block_ref_reads_and_survives_removal() {
 #[test]
 fn block_ref_cross_thread_reads() {
     let mut t = GhosttyTerminal::new(20, 5, 10_000).unwrap();
+
     let palette = t.color_palette();
 
     let (tx, rx) = sync::mpsc::channel::<BlockRef>();
@@ -212,6 +214,7 @@ fn block_ref_cross_thread_reads() {
             // Reflow of every block: the engine drains reader refs
             // (including any still queued in the channel) per block.
             cols = if cols == 20 { 26 } else { 20 };
+
             t.resize(cols, 5, 10, 20).unwrap();
         }
 
@@ -237,6 +240,7 @@ fn block_budget_evicts_oldest() {
 
     for _ in 0..3 {
         t.write_vt(b"hello");
+
         last = t.finish_block().unwrap();
     }
 
@@ -387,6 +391,7 @@ fn kitty_png_decode() {
 
     // A 1×1 opaque-red PNG, generated so the bytes are unquestionably valid.
     let img = RgbaImage::from_pixel(1, 1, Rgba([255, 0, 0, 255]));
+
     let mut png = Vec::new();
 
     DynamicImage::ImageRgba8(img)
@@ -479,7 +484,9 @@ fn kitty_image_scroll() {
     // Lay down `a b c <image> d e f g h` so the image lands at absolute row 3
     // and is pushed into scrollback (9 rows, 5-row viewport).
     t.write_vt(b"a\r\nb\r\nc\r\n");
+
     t.write_vt(b"\x1b_Ga=T,f=32,s=1,v=1,i=1;/wAA/w==\x1b\\");
+
     t.write_vt(b"\r\nd\r\ne\r\nf\r\ng\r\nh");
 
     let find_row = |t: &mut GhosttyTerminal| -> Option<i32> {
@@ -493,6 +500,7 @@ fn kitty_image_scroll() {
 
     // Scroll up so the image is visible; record its viewport row, ship it.
     t.scroll_viewport_bottom();
+
     t.scroll_viewport_delta(-2);
 
     let r0 = find_row(&mut t).expect("image visible after scrolling up 2");
@@ -615,6 +623,7 @@ fn configured_cursor_shape_is_the_decscusr_default() {
     assert_eq!(t.snapshot().unwrap().cursor_shape(), CursorShape::Beam);
 
     t.write_vt(b"\x1b[2 q");
+
     t.set_default_cursor_shape(CursorShape::Underline).unwrap();
 
     assert_eq!(t.snapshot().unwrap().cursor_shape(), CursorShape::Block);
@@ -673,6 +682,7 @@ fn theme_colors_update_engine_defaults() {
     use nmt_config::colors::{ColorRgb, Colors, NamedColor};
 
     let mut terminal = GhosttyTerminal::new(8, 3, 100).unwrap();
+
     let colors = Colors::default();
 
     terminal.set_theme_colors(&colors);
@@ -732,6 +742,7 @@ fn kitty_storage_limit() {
     let px = STANDARD.encode([0u8; 16]);
 
     t.write_vt(format!("\x1b_Ga=t,f=32,s=2,v=2,i=1;{px}\x1b\\").as_bytes());
+
     t.write_vt(format!("\x1b_Ga=t,f=32,s=2,v=2,i=2;{px}\x1b\\").as_bytes());
 
     // The newest image survives; the oldest was evicted to honour the limit.
@@ -749,6 +760,7 @@ fn sixel_ignored_no_crash() {
     let mut t = GhosttyTerminal::new(20, 5, 100).unwrap();
 
     t.resize(20, 5, 10, 20).unwrap();
+
     t.write_vt(b"\x1bPq#0;2;100;0;0#0~~~~~\x1b\\");
 
     let snap = t.snapshot().unwrap();
@@ -766,6 +778,7 @@ fn iterm2_ignored_no_crash() {
     let mut t = GhosttyTerminal::new(20, 5, 100).unwrap();
 
     t.resize(20, 5, 10, 20).unwrap();
+
     t.write_vt(b"\x1b]1337;File=inline=1:AAAA\x07");
 
     let snap = t.snapshot().unwrap();
@@ -829,6 +842,7 @@ fn osc_11_set_and_111_reset_background() {
     };
 
     run(b"\x1b]111\x07"); // BEL-terminated
+
     run(b"\x1b]111\x1b\\"); // ST-terminated
 }
 
@@ -872,6 +886,7 @@ fn screen_coords_stable_across_output() {
     // The SAME screen coordinate still resolves to "AAAA".
     let start = t.grid_ref_at(VtPointTag::SCREEN, 0, screen_y).unwrap();
     let end = t.grid_ref_at(VtPointTag::SCREEN, 3, screen_y).unwrap();
+
     let mut sel = vt_sized!(VtSelection);
 
     sel.start = start;
@@ -1009,6 +1024,7 @@ fn resize_reflow_does_not_duplicate_viewport_content() {
         t.resize(cols, rows, 10, 20).unwrap();
 
         let snap = t.snapshot().unwrap();
+
         let mut counts: collections::HashMap<String, usize> = Default::default();
 
         for y in 0..snap.rows() {
@@ -1114,6 +1130,7 @@ fn resize_shrink_does_not_double_full_width_padded_lines() {
 fn resize_shrink_keeps_a_padded_prompt_row_in_place() {
     let cols = 119u16;
     let rows = 39u16;
+
     let mut t = GhosttyTerminal::new(cols, rows, 1000).unwrap();
 
     // A two-line zsh prompt as it actually reaches the engine: the first row
@@ -1291,6 +1308,7 @@ fn resize_grow_preserves_cursor_row_on_windows() {
     // relative resize echoes onto a history row. The vendored Windows engine
     // preserves cursor y so Ghostty matches ConHost's cursor placement.
     let rows = 6u16;
+
     let mut t = GhosttyTerminal::new(40, rows, 4000).unwrap();
 
     // Fill past the viewport so there IS scrollback to (wrongly) pull down,
@@ -1551,7 +1569,9 @@ fn custom_palette_applied() {
     let mut palette = [[0u8; 3]; 256];
 
     palette[1] = [10, 20, 30]; // SGR 31 resolves to palette index 1.
+
     terminal.set_colors([255, 255, 255], [0, 0, 0], [255, 255, 255], &palette);
+
     terminal.write_vt(b"\x1b[31mR");
 
     let snapshot = terminal.snapshot().unwrap();
@@ -1808,6 +1828,7 @@ fn read_screen_row_prompt_tag_and_hyperlinks() {
     let mut t = GhosttyTerminal::new(30, 4, 100).unwrap();
 
     t.write_vt(b"\x1b]133;A\x07PS> \r\n");
+
     t.write_vt(b"\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\ text");
 
     let prompt_row = t.read_screen_row(0).unwrap().expect("prompt row");

@@ -85,6 +85,7 @@ impl Drop for Probe {
 
             if let Some(allocations) = allocations {
                 total.allocation_samples += 1;
+
                 total.allocations.accumulate(allocations);
             }
         });

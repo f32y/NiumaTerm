@@ -53,6 +53,7 @@ fn running_turn_messages_wait_for_agent_output_or_completion() {
     assert!(drain(&mut delivery).is_empty());
 
     submit(&mut delivery, SendOutcome::Steered, "fourth");
+
     delivery.completed();
 
     assert_eq!(drain(&mut delivery), ["fourth"]);
@@ -64,6 +65,7 @@ fn following_turn_messages_are_not_published_in_the_previous_turn() {
     let mut delivery = MessageDelivery::new(AgentKind::Claude);
 
     submit(&mut delivery, SendOutcome::StartedTurn, "first");
+
     submit(&mut delivery, SendOutcome::Steered, "second");
 
     delivery.agent_message();
@@ -86,8 +88,11 @@ fn command_turns_do_not_claim_prompts_waiting_for_a_provider_opened_turn() {
     let mut delivery = MessageDelivery::new(AgentKind::Claude);
 
     submit(&mut delivery, SendOutcome::StartedTurn, "first");
+
     submit(&mut delivery, SendOutcome::Steered, "second");
+
     delivery.completed();
+
     delivery.begin_turn();
 
     assert!(!delivery.provider_started());
@@ -104,7 +109,9 @@ fn snapshots_assign_ids_then_claim_disappeared_prompts_in_order() {
     let mut delivery = MessageDelivery::new(AgentKind::DeepSeek);
 
     submit(&mut delivery, SendOutcome::Steered, "run tests");
+
     submit(&mut delivery, SendOutcome::Steered, "push");
+
     submit(&mut delivery, SendOutcome::Steered, "tag");
 
     assert!(
@@ -119,6 +126,7 @@ fn snapshots_assign_ids_then_claim_disappeared_prompts_in_order() {
     assert_eq!(delivery.pending()[2].id.as_deref(), Some("3"));
 
     delivery.agent_message();
+
     delivery.completed();
 
     assert!(drain(&mut delivery).is_empty());
@@ -135,6 +143,7 @@ fn snapshots_suppress_the_already_published_first_prompt_until_it_is_claimed() {
     let mut delivery = MessageDelivery::new(AgentKind::DeepSeek);
 
     submit(&mut delivery, SendOutcome::StartedTurn, "first");
+
     submit(&mut delivery, SendOutcome::Steered, "second");
 
     for _ in 0..2 {
@@ -178,6 +187,7 @@ fn identical_pending_text_keeps_existing_occurrence_order() {
     let mut delivery = MessageDelivery::new(AgentKind::DeepSeek);
 
     submit(&mut delivery, SendOutcome::Steered, "same");
+
     submit(&mut delivery, SendOutcome::Steered, "same");
 
     assert_eq!(delivery.echoed("same").as_deref(), Some("same"));
@@ -247,6 +257,7 @@ fn visible_output_completion_exit_and_another_turn_revoke_prompt_recovery() {
         let mut delivery = MessageDelivery::new(AgentKind::Codex);
 
         recoverable(&mut delivery);
+
         finish(&mut delivery);
 
         assert!(delivery.take_interrupted_prompt().is_none());
@@ -271,11 +282,9 @@ fn refused_and_queued_sends_do_not_build_recovery_or_replace_the_active_draft() 
 
         match outcome {
             SendOutcome::NotReady => assert_eq!(result, Submission::NotReady),
-
             SendOutcome::Rejected { message } => {
                 assert_eq!(result, Submission::Rejected { message })
             }
-
             _ => unreachable!(),
         }
 
@@ -296,13 +305,16 @@ fn exit_flushes_all_policies_while_update_stop_waits_for_turn_completion() {
         let mut delivery = MessageDelivery::new(kind);
 
         recoverable(&mut delivery);
+
         submit(&mut delivery, SendOutcome::Steered, "queued");
+
         delivery.stopping_for_update();
 
         assert_eq!(drain(&mut delivery), ["queued"]);
         assert!(delivery.is_active());
 
         submit(&mut delivery, SendOutcome::Steered, "later");
+
         delivery.exited();
 
         assert_eq!(drain(&mut delivery), ["later"]);
@@ -316,7 +328,9 @@ fn reset_discards_old_pending_and_recovery_and_replay_reserves_turn_numbers() {
     let mut delivery = MessageDelivery::new(AgentKind::DeepSeek);
 
     recoverable(&mut delivery);
+
     submit(&mut delivery, SendOutcome::Steered, "old");
+
     delivery.reset();
 
     assert_eq!(delivery.turn(), 0);
@@ -336,7 +350,9 @@ fn a_failed_start_discards_pending_without_restarting_the_turn_sequence() {
     let mut delivery = MessageDelivery::new(AgentKind::Claude);
 
     recoverable(&mut delivery);
+
     submit(&mut delivery, SendOutcome::Steered, "pending");
+
     delivery.start_failed();
 
     assert_eq!(delivery.turn(), 1);
@@ -360,6 +376,7 @@ fn a_provider_start_after_recovering_a_prompt_opens_a_fresh_turn() {
 #[test]
 fn confirmed_text_keeps_its_allocation_through_echo_and_snapshot_paths() {
     let mut delivery = MessageDelivery::new(AgentKind::DeepSeek);
+
     let text: String = "echoed message".into();
     let address = text.as_ptr();
 
@@ -382,6 +399,7 @@ fn confirmed_text_keeps_its_allocation_through_echo_and_snapshot_paths() {
     let address = text.as_ptr();
 
     delivery.submit(SendOutcome::Steered, text, || None);
+
     delivery.exited();
 
     let flushed = delivery.pop_confirmed().unwrap();

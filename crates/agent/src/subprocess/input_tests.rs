@@ -80,6 +80,7 @@ fn sender_close_drains_accepted_input_then_wakes_the_receiver() {
     let (queue, receiver) = InputQueue::new();
 
     queue.submit(vec![json!(1)]).unwrap();
+
     drop(queue);
 
     assert_eq!(receiver.recv().unwrap().messages, [json!(1)]);

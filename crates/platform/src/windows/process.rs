@@ -39,6 +39,7 @@ pub fn hidden_cmd_command(executable: impl AsRef<OsStr>) -> Command {
     let mut command = hidden_command("cmd.exe");
 
     command.args([OsStr::new("/D"), OsStr::new("/C")]);
+
     command.arg(executable);
 
     command

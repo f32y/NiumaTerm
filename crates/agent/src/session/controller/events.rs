@@ -16,66 +16,51 @@ pub enum SessionEffect {
     Ready(SessionReady),
     Commands(Vec<SlashCommandInfo>),
     Skills(SkillCatalog),
-
     CommandResult {
         name: String,
         outcome: SlashCommandOutcome,
         advance: bool,
     },
-
     TurnStarted {
         opened: bool,
     },
-
     ProviderTurnAccepted {
         id: String,
     },
-
     TeamDecision(TeamDecisionRequest),
-
     ProviderTurnFinished {
         id: String,
         error: Option<String>,
     },
-
     TurnCompleted {
         error: Option<String>,
         interrupted: bool,
     },
-
     OutputTokens(u64),
     ContextWindow(ContextWindowUsage),
     ContextComposition(ContextComposition),
     CompactionStarted,
-
     CompactionFinished {
         error: Option<String>,
     },
-
     Branch(BranchUpdate),
     ItemStarted(Item),
     ItemCompleted(Item),
-
     TextDelta {
         item_id: String,
         delta: String,
         field: TextField,
     },
-
     ApprovalRequested,
     ApprovalResolved,
-
     InputRequested {
         index: usize,
     },
-
     InputResolved(QuestionCompletion),
     BackgroundActivity,
-
     Workflows {
         activity_changed: bool,
     },
-
     History(Vec<SessionSummary>),
     SearchResults(Vec<SessionSummary>),
     ConfirmedPrompts(Vec<String>),
@@ -86,17 +71,14 @@ pub enum SessionEffect {
     Replay(SessionReplay),
     StatusDetail(Option<TurnRetry>),
     ForkCheckpoints(Result<Vec<ForkCheckpoint>, String>),
-
     HostExited {
         message: String,
     },
-
     Error {
         message: String,
         fatal: bool,
         failure: SessionFailure,
     },
-
     EffortRejected {
         message: String,
     },

@@ -32,6 +32,7 @@ fn runtime_dir() -> io::Result<PathBuf> {
     let directory = base.join(format!("NiumaTerm-{uid}"));
 
     fs::create_dir_all(&directory)?;
+
     fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
 
     Ok(directory)
@@ -58,7 +59,6 @@ fn lock_path(testing: bool) -> io::Result<PathBuf> {
 pub fn try_become_primary(testing: bool) -> bool {
     let path = match lock_path(testing) {
         Ok(path) => path,
-
         Err(error) => {
             warn!("IPC lock directory unavailable ({error}); skipping single-instance");
 
@@ -74,7 +74,6 @@ pub fn try_become_primary(testing: bool) -> bool {
         .open(&path)
     {
         Ok(file) => file,
-
         Err(error) => {
             warn!("IPC lock file unavailable ({error}); skipping single-instance");
 

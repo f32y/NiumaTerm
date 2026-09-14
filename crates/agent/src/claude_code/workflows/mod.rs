@@ -61,7 +61,9 @@ impl ClaudeWorkflows {
         }
 
         self.session_id = Some(session_id.to_owned());
+
         self.runs.clear();
+
         self.order.clear();
 
         true
@@ -93,7 +95,6 @@ impl ClaudeWorkflows {
 
                 self.start_run(task_id, message)
             }
-
             "task_progress" | "task_updated" | "task_notification" => {
                 // These omit `task_type` entirely; a run must already be known.
                 if !self.runs.contains_key(task_id) {
@@ -102,7 +103,6 @@ impl ClaudeWorkflows {
 
                 self.update_run(task_id, subtype, message)
             }
-
             _ => false,
         }
     }
@@ -245,7 +245,9 @@ impl ClaudeWorkflows {
             }
 
             self.order.push(run.task_id.clone());
+
             self.runs.insert(run.task_id.clone(), run);
+
             changed = true;
         }
 
@@ -259,11 +261,9 @@ fn run_state(subtype: &str, record: &Value) -> Option<WorkflowRunState> {
     let status = match subtype {
         "task_progress" => return Some(WorkflowRunState::Running),
         "task_notification" => record["status"].as_str()?,
-
         "task_updated" => record["patch"]["status"]
             .as_str()
             .or_else(|| record["status"].as_str())?,
-
         _ => return None,
     };
 
@@ -295,7 +295,6 @@ pub(crate) fn parse_progress(progress: &Value) -> (Vec<WorkflowPhase>, Vec<Workf
                     title: entry["title"].as_str().unwrap_or_default().to_owned(),
                 });
             }
-
             Some("workflow_agent") => {
                 let Some(index) = entry["index"].as_u64() else {
                     continue;
@@ -319,12 +318,12 @@ pub(crate) fn parse_progress(progress: &Value) -> (Vec<WorkflowPhase>, Vec<Workf
                     result_preview: text_field(entry, &["resultPreview"]),
                 });
             }
-
             _ => {}
         }
     }
 
     phases.sort_by_key(|phase| phase.index);
+
     agents.sort_by_key(|agent| agent.index);
 
     (phases, agents)

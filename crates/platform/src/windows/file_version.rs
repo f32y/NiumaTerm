@@ -94,6 +94,7 @@ fn string(block: &[u8], sub_block: &str) -> Option<String> {
 /// pointer addresses `block` and stays valid for as long as it does.
 fn query(block: &[u8], sub_block: &str) -> Option<(*const c_void, u32)> {
     let sub_block = wide(OsStr::new(sub_block));
+
     let mut value = ptr::null_mut();
     let mut length = 0u32;
 

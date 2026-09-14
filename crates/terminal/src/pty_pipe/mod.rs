@@ -168,18 +168,31 @@ fn ghostty_vt_modes(g: &GhosttyTerminal) -> terminal::Mode {
     let mut m = Mode::empty();
 
     m.set(Mode::SHOW_CURSOR, g.mode(gm::CURSOR_VISIBLE));
+
     m.set(Mode::APP_CURSOR, g.mode(gm::CURSOR_KEYS));
+
     m.set(Mode::APP_KEYPAD, g.mode(gm::KEYPAD_KEYS));
+
     m.set(Mode::MOUSE_REPORT_CLICK, g.mode(gm::MOUSE_NORMAL));
+
     m.set(Mode::MOUSE_DRAG, g.mode(gm::MOUSE_BUTTON));
+
     m.set(Mode::MOUSE_MOTION, g.mode(gm::MOUSE_ANY));
+
     m.set(Mode::SGR_MOUSE, g.mode(gm::MOUSE_SGR));
+
     m.set(Mode::UTF8_MOUSE, g.mode(gm::MOUSE_UTF8));
+
     m.set(Mode::ALTERNATE_SCROLL, g.mode(gm::MOUSE_ALTERNATE_SCROLL));
+
     m.set(Mode::BRACKETED_PASTE, g.mode(gm::BRACKETED_PASTE));
+
     m.set(Mode::FOCUS_IN_OUT, g.mode(gm::FOCUS_EVENT));
+
     m.set(Mode::LINE_WRAP, g.mode(gm::WRAPAROUND));
+
     m.set(Mode::INSERT, g.mode(gm::INSERT));
+
     m.set(Mode::ALT_SCREEN, g.mode(gm::ALT_SCREEN));
 
     // Kitty keyboard protocol flags live in a separate engine stack, not the DEC
@@ -365,9 +378,7 @@ where
 
                     break;
                 }
-
                 Ok(got) => unprocessed += got,
-
                 Err(err) => match err.kind() {
                     ErrorKind::Interrupted | ErrorKind::WouldBlock => {
                         // Go back to mio if we're caught up on parsing and the PTY would block.
@@ -377,7 +388,6 @@ where
                             break;
                         }
                     }
-
                     _ => return Err(err),
                 },
             }
@@ -505,7 +515,6 @@ where
         // Explicit view commands and shutdown still publish immediately.
         let capture_due = match reason {
             FlushReason::Command | FlushReason::Exit => true,
-
             FlushReason::Drained | FlushReason::Saturated => self
                 .last_snapshot_at
                 .is_none_or(|at| at.elapsed() >= SNAPSHOT_MIN_INTERVAL),
@@ -672,7 +681,6 @@ where
 
         Some(match self.sync_output_started_at {
             Some(started) => SYNC_OUTPUT_TIMEOUT.saturating_sub(started.elapsed()),
-
             None => self.last_snapshot_at.map_or(time::Duration::ZERO, |at| {
                 SNAPSHOT_MIN_INTERVAL.saturating_sub(at.elapsed())
             }),
@@ -708,11 +716,9 @@ where
             // An input or query between them observes the earlier geometry.
             match msg {
                 Msg::Shutdown => return false,
-
                 Msg::PowerShellCompatibility(enabled) => {
                     self.powershell_compatibility.set_enabled(enabled);
                 }
-
                 Msg::Resize(size) => {
                     if let Some((Msg::Resize(previous), _)) = self.pending_commands.back_mut() {
                         *previous = size;
@@ -720,13 +726,11 @@ where
                         self.pending_commands.push_back((Msg::Resize(size), None));
                     }
                 }
-
                 Msg::Input(input) => self.pending_commands.push_back((
                     Msg::Input(input),
                     self.powershell_compatibility
                         .input_limit(time::Instant::now()),
                 )),
-
                 request => self.pending_commands.push_back((request, None)),
             }
         }
@@ -753,13 +757,11 @@ where
                 match self.pty.writer().flush() {
                     Ok(()) => {}
                     Err(error) if error.kind() == ErrorKind::WouldBlock => return true,
-
                     Err(error) if error.kind() == ErrorKind::Interrupted => {
                         let _ = self.waker.wake();
 
                         return true;
                     }
-
                     Err(error) => {
                         error!("failed to finish PTY input before resize: {error}");
 
@@ -776,11 +778,9 @@ where
                 Msg::Input(input) => {
                     self.on_input(input, state);
                 }
-
                 Msg::Resize(window_size) => {
                     self.on_resize(window_size);
                 }
-
                 Msg::Shutdown => return false,
                 request => self.on_request(request),
             }
@@ -819,6 +819,7 @@ where
         let grid_changed = self.ghostty.cols() != cols || self.ghostty.rows() != rows;
         let cell_w = (window_size.width / cols).max(1) as u32;
         let cell_h = (window_size.height / rows).max(1) as u32;
+
         let mut blocks_sync: Option<Vec<(ghostty::BlockHandle, usize)>> = None;
 
         let snapshot = {
@@ -935,7 +936,6 @@ where
 
                         break 'write_many;
                     }
-
                     Ok(n) => {
                         current.advance(n);
 
@@ -945,7 +945,6 @@ where
                             break 'write_one;
                         }
                     }
-
                     Err(err) => {
                         state.set_current(Some(current));
 
@@ -1028,7 +1027,6 @@ where
             if let Err(err) = polled {
                 match err.kind() {
                     ErrorKind::Interrupted => continue,
-
                     _ => {
                         error!("Event loop polling error: {err}");
 
@@ -1170,9 +1168,9 @@ where
         match request {
             Msg::Scroll(delta) => {
                 self.ghostty.scroll_viewport_delta(delta);
+
                 self.publish_command();
             }
-
             Msg::ScrollTo(target) => {
                 let scrollbar = self.ghostty.scrollbar();
                 let target = target.min(scrollbar.total.saturating_sub(scrollbar.len));
@@ -1183,20 +1181,21 @@ where
                     (target - offset).clamp(isize::MIN as i128, isize::MAX as i128) as isize;
 
                 self.ghostty.scroll_viewport_delta(delta);
+
                 self.publish_command();
             }
-
             Msg::ScrollToEnd => {
                 self.ghostty.scroll_viewport_bottom();
+
                 self.publish_command();
             }
-
             Msg::Theme(colors) => {
                 self.ghostty.set_theme_colors(&colors);
+
                 self.theme_revision = self.theme_revision.wrapping_add(1);
+
                 self.publish_command();
             }
-
             Msg::CursorShape { shape, reply } => {
                 let result = self
                     .ghostty
@@ -1209,7 +1208,6 @@ where
 
                 let _ = reply.send(result);
             }
-
             Msg::Query(query) => {
                 #[cfg(enable_profiling)]
                 let query_started = self.profile.start();
@@ -1226,7 +1224,6 @@ where
 
                 self.event_proxy.send_event(TerminalEvent::ReadReady);
             }
-
             Msg::Checkpoint(request) => {
                 #[cfg(enable_profiling)]
                 let checkpoint_started = self.profile.start();
@@ -1246,7 +1243,6 @@ where
                 #[cfg(enable_profiling)]
                 self.profile.record(Stage::Checkpoint, checkpoint_started);
             }
-
             Msg::Input(_) | Msg::Resize(_) | Msg::Shutdown | Msg::PowerShellCompatibility(_) => {
                 unreachable!("handled by the PTY loop")
             }

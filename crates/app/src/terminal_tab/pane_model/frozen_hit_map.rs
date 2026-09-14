@@ -19,8 +19,11 @@ impl FrozenHitMap {
     /// Drop last frame's record; the prepaint that follows rebuilds it.
     pub(crate) fn begin_frame(&mut self, active_top: f32) {
         self.hit.clear();
+
         self.hit.set_active_top(active_top);
+
         self.chrome.clear();
+
         self.separators.clear();
     }
 
@@ -88,6 +91,7 @@ pub(crate) struct FrozenHitInfo {
 impl FrozenHitInfo {
     pub(crate) fn clear(&mut self) {
         self.rows.clear();
+
         self.active_top = 0.0;
     }
 

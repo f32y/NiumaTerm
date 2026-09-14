@@ -56,13 +56,16 @@ fn explicit_thread_and_host_cleanup_release_retained_messages() {
     let mut early = EarlyMessages::default();
 
     early.hold("closed", json!({"id": 1}));
+
     early.hold("live", json!({"id": 2}));
+
     early.forget("closed");
 
     assert!(early.take("closed").is_empty());
     assert_eq!(early.take("live"), vec![json!({"id": 2})]);
 
     early.hold("shutdown", json!({"id": 3}));
+
     early.clear();
 
     assert!(early.threads.is_empty());

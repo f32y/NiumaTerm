@@ -57,7 +57,9 @@ impl TerminalSessionConfig {
         };
 
         self.args = integration.args;
+
         self.environment_overrides.extend(integration.environment);
+
         self.bootstrap = integration.bootstrap;
 
         self

@@ -205,7 +205,6 @@ impl TryFrom<PersistedAgentProfile> for AgentProfile {
                     persisted.name
                 )
             })?,
-
             None => (persisted.api_base_url, persisted.api_key),
         };
 
@@ -248,6 +247,7 @@ pub fn patch_table(table: &mut Table, profiles: &[Profile], default_profile: &st
         table["name"] = value(&profile.name);
         table["shell"] = value(&profile.shell);
         table["args"] = value(&profile.args);
+
         tables.push(table);
     }
 
@@ -305,7 +305,9 @@ pub fn patch_agent_table(
             let mut entry = InlineTable::new();
 
             entry.insert("name", var.name.as_str().into());
+
             entry.insert("value", var.value.as_str().into());
+
             env.push(entry);
         }
 
@@ -345,7 +347,6 @@ fn deserialize_profile_kind<'de, D: Deserializer<'de>>(
         "claude-code" => Ok(AgentKind::Claude),
         "codex" => Ok(AgentKind::Codex),
         "deepseek" => Ok(AgentKind::DeepSeek),
-
         _ => Err(D::Error::unknown_variant(
             &value,
             &["claude-code", "codex", "deepseek"],

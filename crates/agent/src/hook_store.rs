@@ -98,7 +98,6 @@ impl HookRegistration {
             {
                 HookInstallStatus::Installed
             }
-
             Some(_) | None => HookInstallStatus::Stale,
         }
     }

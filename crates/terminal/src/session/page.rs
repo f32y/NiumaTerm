@@ -16,7 +16,6 @@ pub enum PageSource {
     Screen {
         revision: u64,
     },
-
     Block {
         id: u64,
         generation: u64,
@@ -82,7 +81,6 @@ impl PageCache {
 
                     return Some(data);
                 }
-
                 Ok(None) => {}
                 _ => entry.pending = None,
             }

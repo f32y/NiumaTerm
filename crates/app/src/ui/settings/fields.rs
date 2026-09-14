@@ -35,7 +35,6 @@ impl OpacityTarget {
     fn set(self, value: f64, settings: &mut AppSettings) {
         settings.edit_appearance(|appearance| match self {
             Self::Window => appearance.background_opacity = value,
-
             Self::Image => appearance.background_image_opacity = value,
         });
     }

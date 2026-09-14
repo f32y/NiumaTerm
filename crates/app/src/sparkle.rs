@@ -47,15 +47,14 @@ pub(crate) fn initialize(testing: bool, cx: &mut App) {
     match Updater::start(channel) {
         Ok(updater) => {
             updater.set_automatic_checks(check_updates);
+
             cx.set_global(AppUpdate(updater));
         }
-
         // A build assembled locally names no feed. That is the intended state
         // for it, not a failure.
         Err(StartError::NoFeedConfigured) => {
             info!("this build has no update feed; automatic updates are off");
         }
-
         Err(error) => warn!("the updater did not start: {error}"),
     }
 }
@@ -67,6 +66,7 @@ pub(crate) fn on_settings_changed(cx: &mut App) {
 
     if let Some(update) = cx.try_global::<AppUpdate>() {
         update.0.set_automatic_checks(check_updates);
+
         update.0.set_channel(channel);
     }
 }

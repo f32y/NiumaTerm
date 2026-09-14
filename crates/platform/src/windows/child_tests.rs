@@ -39,6 +39,7 @@ pub fn event_is_emitted_when_child_exits() {
     // The child-exit channel is a plain `std::sync::mpsc`, so the loop is woken
     // through the `Waker` instead of a pollable channel.
     let mut poll = Poll::new().unwrap();
+
     let waker = Arc::new(Waker::new(poll.registry(), WAKER_TOKEN).unwrap());
 
     child_exit_watcher.set_waker(waker);

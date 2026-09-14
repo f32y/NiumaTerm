@@ -33,9 +33,7 @@ impl BackgroundColors {
 
                 Some((r, g, b).into())
             }
-
             ContentTag::BgPalette => Some(self.indexed(cell.bg_palette_index() as usize)),
-
             ContentTag::Codepoint => {
                 let style = buf.style(cell.style_id());
 
@@ -83,7 +81,6 @@ impl BackgroundColors {
 
                 self.named(named)
             }
-
             AnsiColor::Spec(rgb) => {
                 if dim {
                     let color: ColorArray = (*rgb * DIM_FACTOR).into();
@@ -93,7 +90,6 @@ impl BackgroundColors {
                     *rgb
                 }
             }
-
             AnsiColor::Indexed(index) => {
                 let index = match (foreground, dim, bold, *index) {
                     (true, true, _, 8..=15) => *index as usize - 8,

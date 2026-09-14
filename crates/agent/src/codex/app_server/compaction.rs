@@ -62,7 +62,6 @@ impl CompactionState {
 
         let (trigger, pre_tokens) = match active {
             Some(active) => (active.trigger, active.pre_tokens),
-
             None => {
                 let trigger = if take(&mut self.manual_pending) {
                     CompactionTrigger::Manual

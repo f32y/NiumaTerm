@@ -308,12 +308,15 @@ fn run_tree() -> PathBuf {
         .join(RUN_ID);
 
     fs::create_dir_all(&run_dir).expect("create run dir");
+
     fs::write(run_dir.join("journal.jsonl"), JOURNAL).expect("write journal");
+
     fs::write(run_dir.join(format!("agent-{AGENT_TWO}.jsonl")), TRANSCRIPT).expect("write agent");
 
     let snapshots = root.join(SESSION).join("workflows");
 
     fs::create_dir_all(&snapshots).expect("create snapshot dir");
+
     fs::write(snapshots.join(format!("{RUN_ID}.json")), RUN_SNAPSHOT).expect("write snapshot");
 
     root
@@ -375,9 +378,11 @@ fn the_journal_reports_each_agents_completion() {
 fn a_truncated_journal_line_is_dropped_rather_than_failing_the_read() {
     let root = run_tree();
     let path = run_dir_of(&root).join("journal.jsonl");
+
     let mut text = fs::read_to_string(&path).expect("read journal");
 
     text.push_str("{\"type\":\"result\",\"agentId\":\"a5a2");
+
     fs::write(&path, text).expect("append partial line");
 
     let entries = read_journal(&run_dir_of(&root)).expect("partial journal still reads");
@@ -483,6 +488,7 @@ fn source_retries_unaccepted_reads_and_invalidates_grown_transcripts() {
     assert_ne!(grown.revision, transcript.revision);
 
     request.transcript_revision = Some(grown.revision);
+
     fs::remove_file(dir.join("journal.jsonl")).expect("remove journal");
 
     let failed = source.refresh_directory(Some(&dir), &request);
@@ -607,6 +613,7 @@ fn restored_runs_never_replace_a_run_the_stream_already_reported() {
     let mut workflows = reducer();
 
     workflows.observe(&started(json!({})));
+
     workflows.observe(&progress(json!([])));
 
     let root = run_tree();

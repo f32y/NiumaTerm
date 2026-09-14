@@ -100,7 +100,6 @@ impl BlockStore {
 
                     self.items.push(item);
                 }
-
                 // Prune items whose engine block is gone (byte-budget
                 // eviction is oldest-first, so removals are a prefix — the
                 // eviction counter keeps list splicing aligned) and refresh
@@ -119,7 +118,6 @@ impl BlockStore {
 
                                 true
                             }
-
                             None => {
                                 *evicted += 1;
 
@@ -127,7 +125,6 @@ impl BlockStore {
                             }
                         });
                 }
-
                 // The user cleared the terminal (`;K` in-band mark): the
                 // whole frozen history drops with the screen (the PTY side
                 // already cleared the engine blocks).

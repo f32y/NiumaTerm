@@ -92,6 +92,7 @@ impl<M> TranscriptContent<M> {
     #[inline]
     pub fn replace(&mut self, entries: Vec<TranscriptEntry<M>>) {
         self.entries = entries;
+
         self.item_index.clear();
 
         for (index, entry) in self.entries.iter().enumerate() {
@@ -106,6 +107,7 @@ impl<M> TranscriptContent<M> {
 
     pub fn clear(&mut self) {
         self.entries.clear();
+
         self.item_index.clear();
     }
 
@@ -145,14 +147,12 @@ impl<M> TranscriptContent<M> {
             let text = match (field, &mut self.entries[index].item) {
                 (TextField::Reply, Item::AgentMessage { text, .. }) => text,
                 (TextField::ReasoningSummary, Item::Reasoning { summary, .. }) => summary,
-
                 (
                     TextField::CommandOutput,
                     Item::CommandExecution {
                         aggregated_output, ..
                     },
                 ) => aggregated_output,
-
                 _ => continue,
             };
 
@@ -180,7 +180,6 @@ impl<M> TranscriptContent<M> {
                 Item::AgentMessage {
                     text: Some(text), ..
                 } if entry.turn == turn && !text.trim().is_empty() => Some(text.as_str()),
-
                 _ => None,
             })
     }

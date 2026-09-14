@@ -3,6 +3,25 @@ mod drag;
 #[cfg(test)]
 mod tests;
 
+use std::borrow::Cow;
+
+use app::agent_tab::AgentKind;
+use gpui::prelude::*;
+use gpui::{
+    AnyElement, App, ClipboardItem, Context, DragMoveEvent, ElementId, Entity, FontWeight, Role,
+    ScrollHandle, SharedString, div, px, relative,
+};
+use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
+use gpui_component::modern_menu::ModernMenuExt as _;
+use gpui_component::scroll::Scrollbar;
+use gpui_component::{
+    ActiveTheme, Disableable, Icon, IconName, IconNamed, Selectable, Sizable, h_flex, v_flex,
+};
+use nmt_agent::{AgentProjection, AgentRuntimeStatus};
+use nmt_config::appearance::TabBarStyle;
+use nmt_terminal::event::ProgressReport;
+use rust_i18n::t;
+
 use crate::agent_usage::AgentUsageView;
 use crate::tabs::TabId;
 use crate::ui::composition::{
@@ -24,23 +43,6 @@ use crate::ui::workspace_sidebar::drag::{SidebarTabDrag, WorkspaceDrag, Workspac
 use crate::ui::{AppSettings, NewWorkspace, Shell, UI_RADIUS, modern_dropdown, sidebar_resize};
 use crate::window::WindowRegistry;
 use crate::workspace::{ProgressTally, TerminalActivity, WorkspaceKind, WorkspaceSummary};
-use app::agent_tab::AgentKind;
-use gpui::prelude::*;
-use gpui::{
-    AnyElement, App, ClipboardItem, Context, DragMoveEvent, ElementId, Entity, FontWeight, Role,
-    ScrollHandle, SharedString, div, px, relative,
-};
-use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
-use gpui_component::modern_menu::ModernMenuExt as _;
-use gpui_component::scroll::Scrollbar;
-use gpui_component::{
-    ActiveTheme, Disableable, Icon, IconName, IconNamed, Selectable, Sizable, h_flex, v_flex,
-};
-use nmt_agent::{AgentProjection, AgentRuntimeStatus};
-use nmt_config::appearance::TabBarStyle;
-use nmt_terminal::event::ProgressReport;
-use rust_i18n::t;
-use std::borrow::Cow;
 
 pub(super) struct WorkspaceChrome {
     pub summary: WorkspaceSummary,
@@ -451,8 +453,11 @@ impl Sidebar {
             )
             .capture_any_mouse_down(cx.listener(move |this, _, window, cx| {
                 this.workspaces.list_mut().activate(idx);
+
                 this.on_active_tab_changed(window, cx);
+
                 this.focus_active(window, cx);
+
                 this.sync_session_memory(cx);
 
                 cx.notify();
@@ -481,6 +486,7 @@ impl Sidebar {
             )
             .on_click(cx.listener(move |this, _, window, cx| {
                 cx.stop_propagation();
+
                 this.request_close_workspace(ws_id, window, cx);
             }))
             .into_any_element()
@@ -688,8 +694,11 @@ impl Sidebar {
             )
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.workspaces.list_mut().activate(idx);
+
                 this.on_active_tab_changed(window, cx);
+
                 this.focus_active(window, cx);
+
                 this.sync_session_memory(cx);
 
                 cx.notify();
@@ -861,6 +870,7 @@ impl Sidebar {
         )
         .on_click(cx.listener(move |this, _, window, cx| {
             cx.stop_propagation();
+
             this.request_close_tab(tab_id, window, cx);
         }));
 
@@ -882,7 +892,6 @@ impl Sidebar {
                 .label(t!("sidebar-workspace-status-running"))
                 .into_any_element(),
             ),
-
             _ => terminal_presentation(tab.terminal)
                 .map(|(visual, aria)| {
                     div()
@@ -926,7 +935,6 @@ impl Sidebar {
                 )
                 .into_any_element()
             }
-
             None => div()
                 .flex_1()
                 .overflow_hidden()
@@ -996,11 +1004,9 @@ impl Sidebar {
                     .justify_center()
                     .child(match (status_mark, tab.pending) {
                         (Some(mark), _) => mark,
-
                         (None, true) => {
                             pending_tab_icon(("sidebar-tab-pending", key)).into_any_element()
                         }
-
                         (None, false) => tab.icon.clone().into_any_element(),
                     }),
             )
@@ -1041,7 +1047,9 @@ impl Sidebar {
                     .activate(tab_idx);
 
                 this.on_active_tab_changed(window, cx);
+
                 this.focus_active(window, cx);
+
                 this.sync_session_memory(cx);
 
                 cx.notify();
@@ -1136,12 +1144,10 @@ fn agent_presentation(status: AgentRuntimeStatus) -> Option<(AgentVisual, Cow<'s
         AgentRuntimeStatus::Running => {
             Some((AgentVisual::Running, t!("sidebar-workspace-status-running")))
         }
-
         AgentRuntimeStatus::NeedsInput => Some((
             AgentVisual::NeedsInput,
             t!("sidebar-workspace-status-needs-input"),
         )),
-
         AgentRuntimeStatus::Idle => None,
     }
 }
@@ -1156,7 +1162,6 @@ fn status_column_label(agent: Option<&str>, terminal: Option<&str>) -> String {
             terminal = terminal
         )
         .into_owned(),
-
         (Some(label), None) | (None, Some(label)) => label.to_string(),
         (None, None) => t!("sidebar-workspace-status-idle").to_string(),
     }
@@ -1183,7 +1188,6 @@ fn workspace_status_glyphs(
     let glyphs = agent
         .map(|(visual, label)| match visual {
             AgentVisual::Running => StatusMark::busy(busy_id).into_any_element(),
-
             // Same success color the terminal mark uses when a command
             // finishes: both say the tab has stopped working and is waiting on
             // the user.
@@ -1241,6 +1245,7 @@ fn workspace_dirs_description(cwd: &str, additional: &[String]) -> String {
 
     for path in additional {
         description.push('\n');
+
         description.push_str(path);
     }
 

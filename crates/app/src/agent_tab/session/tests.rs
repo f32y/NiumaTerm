@@ -55,6 +55,7 @@ fn a_snapshot_is_shown_only_for_the_session_it_describes() {
 #[test]
 fn a_later_snapshot_replaces_the_previous_one_and_carries_its_activity() {
     let parent = BackgroundTaskKey::claude_code("session-1");
+
     let mut registry = BackgroundTaskRegistry::new(parent.clone());
 
     registry.apply(
@@ -83,6 +84,7 @@ fn a_later_snapshot_replaces_the_previous_one_and_carries_its_activity() {
 #[test]
 fn a_failed_refresh_reports_unavailable_without_dropping_known_rows() {
     let parent = BackgroundTaskKey::codex("thread-a");
+
     let mut registry = BackgroundTaskRegistry::new(parent);
 
     registry.apply(
@@ -351,7 +353,9 @@ mod conversation_title_tests {
 
         let window = cx.update(|cx| {
             gpui_component::init(cx);
+
             cx.set_global(AgentSettings::default());
+
             cx.set_global(AgentThreadDefaults::default());
 
             cx.open_window(Default::default(), |window, cx| {
@@ -396,6 +400,7 @@ mod conversation_title_tests {
     #[gpui::test]
     fn output_failure_retires_backend_and_marks_session_exited(cx: &mut TestAppContext) {
         let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
+
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
         cx.update(|_, cx| {
@@ -415,6 +420,7 @@ mod conversation_title_tests {
                 ));
 
                 pane.session.borrow_mut().runtime.turn_started();
+
                 pane.stop_for_output_failure("Output limit reached".into(), cx);
 
                 assert!(pane.session.borrow().runtime.backend().is_none());
@@ -430,6 +436,7 @@ mod conversation_title_tests {
         use crate::agent_tab::profile::AgentKind;
 
         let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
+
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
         cx.update(|_, cx| {
@@ -450,6 +457,7 @@ mod conversation_title_tests {
                 ));
 
                 pane.rename_session("first");
+
                 pane.rename_session("latest");
 
                 assert_eq!(
@@ -471,7 +479,9 @@ mod conversation_title_tests {
                 };
 
                 backend.rename_outcome = RenameOutcome::Accepted;
+
                 drop(state);
+
                 pane.sync_pending_rename();
 
                 assert!(pane.session.borrow().naming.pending.is_none());
@@ -483,7 +493,9 @@ mod conversation_title_tests {
                 };
 
                 backend.rename_outcome = RenameOutcome::Unsupported;
+
                 drop(state);
+
                 pane.rename_session("local only");
 
                 assert!(pane.session.borrow().naming.pending.is_none());
@@ -514,6 +526,7 @@ mod conversation_title_tests {
         use nmt_agent::chat::{Event, Question, QuestionInput, QuestionMode, QuestionRequest};
 
         let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
+
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
         cx.update(|_, cx| {
@@ -534,6 +547,7 @@ mod conversation_title_tests {
 
                 {
                     let mut guard = pane.session.borrow_mut();
+
                     let state = &mut *guard;
 
                     state.input.restore(&mut state.runtime)
@@ -562,6 +576,7 @@ mod conversation_title_tests {
         cx.update(|_, cx| {
             pane.update(cx, |pane, _| {
                 pane.session.borrow_mut().runtime.ready();
+
                 pane.restore_question_drafts();
 
                 if let Some(Backend::Test(backend)) =
@@ -607,7 +622,9 @@ mod conversation_title_tests {
     #[gpui::test]
     fn accepted_codex_prompt_publishes_a_provisional_title(cx: &mut TestAppContext) {
         let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
+
         let mut cx = VisualTestContext::from_window(window.into(), cx);
+
         let (titles, _subscription) = collect_titles(&pane, &mut cx);
 
         cx.update(|_, cx| {
@@ -651,7 +668,9 @@ mod conversation_title_tests {
         // Starting the test fixture as Codex avoids a real Claude subprocess;
         // the installed test backend below owns all message behavior.
         let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
+
         let mut cx = VisualTestContext::from_window(window.into(), cx);
+
         let (titles, _subscription) = collect_titles(&pane, &mut cx);
 
         cx.update(|_, cx| {
@@ -710,6 +729,7 @@ mod conversation_title_tests {
         );
 
         let mut cx = VisualTestContext::from_window(window.into(), cx);
+
         let (titles, _subscription) = collect_titles(&pane, &mut cx);
 
         cx.update(|_, cx| {
@@ -786,7 +806,9 @@ mod queued_prompt_placement_tests {
 
         let window = cx.update(|cx| {
             gpui_component::init(cx);
+
             cx.set_global(AgentSettings::default());
+
             cx.set_global(AgentThreadDefaults::default());
 
             cx.open_window(Default::default(), |window, cx| {
@@ -816,7 +838,6 @@ mod queued_prompt_placement_tests {
                 SessionItem::UserMessage { text } => {
                     Some((entry.turn, text.clone().unwrap_or_default()))
                 }
-
                 _ => None,
             })
             .collect()
@@ -827,6 +848,7 @@ mod queued_prompt_placement_tests {
         // Codex initialization stays on the test executor; Claude would start
         // a real stdout reader before the test backend replaces it.
         let (pane, window) = open_pane(cx, AgentProfileKind::Codex);
+
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
         let previous_turn = cx.update(|_, cx| {
@@ -846,6 +868,7 @@ mod queued_prompt_placement_tests {
                 ));
 
                 pane.session.borrow_mut().runtime.ready();
+
                 pane.session.borrow_mut().commands.awaiting_turn = true;
 
                 let previous_turn = pane.session.borrow().delivery.turn();
@@ -883,6 +906,7 @@ mod queued_prompt_placement_tests {
     #[gpui::test]
     fn a_queued_prompt_heads_the_turn_opened_for_it(cx: &mut TestAppContext) {
         let (pane, window) = open_pane(cx, AgentProfileKind::Claude);
+
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
         cx.update(|_, cx| {
@@ -972,6 +996,7 @@ mod queued_prompt_placement_tests {
     #[gpui::test]
     fn a_pending_inbox_omits_the_prompt_its_send_already_drew(cx: &mut TestAppContext) {
         let (pane, window) = open_pane(cx, AgentProfileKind::DeepSeek);
+
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
         let text = cx.update(|_, cx| {
@@ -1071,7 +1096,9 @@ mod turn_error_tests {
 
         let window = cx.update(|cx| {
             gpui_component::init(cx);
+
             cx.set_global(AgentSettings::default());
+
             cx.set_global(AgentThreadDefaults::default());
 
             cx.open_window(Default::default(), |window, cx| {
@@ -1091,6 +1118,7 @@ mod turn_error_tests {
     #[gpui::test]
     fn a_terminal_failure_does_not_repeat_an_error_already_shown(cx: &mut TestAppContext) {
         let (pane, window) = open_pane(cx);
+
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
         deliver_session_event(&pane, SessionEvent::TurnStarted, &cx);
@@ -1175,7 +1203,9 @@ mod session_replacement_tests {
 
         let window = cx.update(|cx| {
             gpui_component::init(cx);
+
             cx.set_global(AgentSettings::default());
+
             cx.set_global(AgentThreadDefaults::default());
 
             cx.open_window(Default::default(), |window, cx| {
@@ -1190,7 +1220,9 @@ mod session_replacement_tests {
         });
 
         let pane = pane.expect("create Agent pane");
+
         let mut cx = VisualTestContext::from_window(window.into(), cx);
+
         let released = Arc::new(AtomicBool::new(false));
 
         cx.update(|_, cx| {
@@ -1254,7 +1286,9 @@ mod shared_host_recovery_tests {
 
         let window = cx.update(|cx| {
             gpui_component::init(cx);
+
             cx.set_global(AgentSettings::default());
+
             cx.set_global(AgentThreadDefaults::default());
 
             cx.open_window(Default::default(), |window, cx| {
@@ -1269,6 +1303,7 @@ mod shared_host_recovery_tests {
         });
 
         let pane = pane.expect("create Agent pane");
+
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
         cx.update(|_, cx| {
@@ -1364,7 +1399,9 @@ mod command_catalog_cache_tests {
 
         let window = cx.update(|cx| {
             gpui_component::init(cx);
+
             cx.set_global(AgentSettings::default());
+
             cx.set_global(AgentThreadDefaults::default());
 
             cx.open_window(Default::default(), |window, cx| {
@@ -1401,6 +1438,7 @@ mod command_catalog_cache_tests {
     #[gpui::test]
     fn discovery_replacements_reach_the_palette(cx: &mut TestAppContext) {
         let (pane, window) = open_pane(cx);
+
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
         // Replaces the launch the pane started for itself, which has no

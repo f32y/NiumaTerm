@@ -12,11 +12,12 @@ mod restore_tests;
 #[cfg(test)]
 mod tests;
 
-use crate::agent_tab::fade::Fade;
 use gpui::{Pixels, Point};
 use gpui_component::VirtualListScrollHandle;
 use nmt_agent::chat::SessionSummary;
 use nmt_agent::session::history::{CountPublication, SessionHistory};
+
+use crate::agent_tab::fade::Fade;
 
 impl SessionHistoryUi {
     pub(crate) fn publish_filesystem_count(

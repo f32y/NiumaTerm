@@ -29,6 +29,7 @@ impl AgentProcess {
         let mut hook_token = [0u8; 32];
 
         fill(&mut nonce).expect("Windows cryptographic random source");
+
         fill(&mut hook_token).expect("Windows cryptographic random source");
 
         Self {

@@ -4,7 +4,6 @@
 //! What they share is the pill chrome and the pickers in the module root; what
 //! differs is which controls exist and what a change to one is sent as.
 
-use crate::agent_tab::thread_controls::remember_defaults;
 use gpui::prelude::*;
 use gpui::{Context, IntoElement, px};
 use gpui_component::{ActiveTheme as _, IconName, h_flex};
@@ -19,8 +18,8 @@ use crate::agent_tab::composer::PendingSlashCommand;
 use crate::agent_tab::profile::AgentKind;
 use crate::agent_tab::thread_controls::effort::{effort_levels, effort_panel};
 use crate::agent_tab::thread_controls::{
-    FoldedSetting, SETTINGS_PILL_GAP, folded_settings_pill, model_options, setting_picker,
-    settings_group,
+    FoldedSetting, SETTINGS_PILL_GAP, folded_settings_pill, model_options, remember_defaults,
+    setting_picker, settings_group,
 };
 use crate::agent_tab::transcript::permission_icon;
 

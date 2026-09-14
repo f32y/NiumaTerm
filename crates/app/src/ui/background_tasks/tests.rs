@@ -1,3 +1,16 @@
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use nmt_agent::background_task::{
+    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRegistry,
+    BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskUpdate,
+};
+
+use crate::ui::background_tasks::rows::{
+    duration_label, finished_heading, finished_rows, row_detail, row_timing, running_heading,
+    running_rows, section_control_label, visible_rows,
+};
+use crate::ui::background_tasks::{COMPACT_FINISHED_ROWS, COMPACT_RUNNING_ROWS};
+
 mod detail_navigation {
     use nmt_agent::background_task::BackgroundTaskKey;
 
@@ -30,6 +43,7 @@ mod detail_navigation {
         let mut mode = PanelMode::List;
 
         mode.open(BackgroundTaskKey::codex("a"), false, false);
+
         mode.open(BackgroundTaskKey::claude_code("a"), false, true);
 
         // Same local id, different providers: the qualified key keeps them apart.
@@ -40,19 +54,6 @@ mod detail_navigation {
         assert_eq!(mode.close(), Some((false, true)));
     }
 }
-
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-use nmt_agent::background_task::{
-    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRegistry,
-    BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskUpdate,
-};
-
-use crate::ui::background_tasks::rows::{
-    duration_label, finished_heading, finished_rows, row_detail, row_timing, running_heading,
-    running_rows, section_control_label, visible_rows,
-};
-use crate::ui::background_tasks::{COMPACT_FINISHED_ROWS, COMPACT_RUNNING_ROWS};
 
 fn at(seconds: u64) -> SystemTime {
     UNIX_EPOCH + Duration::from_secs(seconds)

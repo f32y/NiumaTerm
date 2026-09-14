@@ -260,15 +260,21 @@ impl RenderBuffer {
         } else {
             for row in &mut self.grid {
                 row.inner.fill(Square::default());
+
                 row.kitty_virtual_placeholder = false;
             }
         }
 
         self.extras.clear();
+
         self.next_extras_id = 1;
+
         self.row_wrapped.clear();
+
         self.row_wrapped.resize(rows, false);
+
         self.row_hyperlinks.resize_with(rows, Vec::new);
+
         self.placements.clear();
 
         // Every capture rewrites every visible cell (the grid was just
@@ -301,6 +307,7 @@ impl RenderBuffer {
         let sq = &mut self.grid[y][Column(x)];
 
         sq.set_c(base);
+
         sq.set_style_id(id);
 
         sq.set_wide(match wide {
@@ -379,8 +386,11 @@ impl RenderBuffer {
         self.window_bg_override = colors.bg_override;
         self.placements = placements;
         self.scrollbar = scrollbar;
+
         self.row_versions.clear();
+
         self.row_versions.extend_from_slice(row_versions);
+
         self.content_changed = true;
     }
 

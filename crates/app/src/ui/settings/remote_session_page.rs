@@ -233,6 +233,7 @@ fn remote_host_status(editing: Entity<SettingsEditing>, cx: &mut App) -> Div {
                         .label(t!("settings-remote-revoke"))
                         .on_click(move |_, _, cx: &mut App| {
                             remote::revoke_device(&key);
+
                             cx.refresh_windows();
                         }),
                 )
@@ -315,7 +316,6 @@ fn remote_client_status(editing: Entity<SettingsEditing>, cx: &mut App) -> Div {
                                             )
                                             .into_owned()
                                         }
-
                                         Err(e) => t!("settings-remote-pairing-failed", error = e)
                                             .into_owned(),
                                     };
@@ -369,6 +369,7 @@ fn remote_client_status(editing: Entity<SettingsEditing>, cx: &mut App) -> Div {
                         .label(t!("settings-remote-forget"))
                         .on_click(move |_, _, cx: &mut App| {
                             remote::forget_host(&host_id);
+
                             cx.refresh_windows();
                         }),
                 )

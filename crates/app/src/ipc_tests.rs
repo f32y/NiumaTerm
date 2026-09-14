@@ -95,6 +95,7 @@ fn raw_claude_hook_is_normalized_with_session_scoped_turn() {
 #[test]
 fn rejects_wrong_token_version_malformed_and_second_message() {
     let line = raw_codex_line("route", "UserPromptSubmit", "session", Some("turn"));
+
     let mut wrong_token: Value = from_str(&line).unwrap();
 
     wrong_token["token"] = "old".into();
@@ -118,6 +119,7 @@ fn rejects_wrong_token_version_malformed_and_second_message() {
 fn public_ingress_completes_and_acknowledges_exact_notification() {
     let now = Instant::now();
     let route = AgentRoute::parse("window-a:pane-1").unwrap();
+
     let mut monitor = AgentMonitor::new("test-process");
 
     assert!(monitor.register_route(
@@ -176,6 +178,7 @@ fn public_ingress_completes_and_acknowledges_exact_notification() {
 fn public_ingress_new_prompt_supersedes_needs_input() {
     let now = Instant::now();
     let route = AgentRoute::parse("window-a:pane-1").unwrap();
+
     let mut monitor = AgentMonitor::new("test-process");
 
     monitor.register_route(
@@ -206,6 +209,7 @@ fn public_ingress_new_prompt_supersedes_needs_input() {
 fn public_ingress_non_owner_stop_cannot_complete_parent() {
     let now = Instant::now();
     let route = AgentRoute::parse("window-a:pane-1").unwrap();
+
     let mut monitor = AgentMonitor::new("test-process");
 
     monitor.register_route(
@@ -240,6 +244,7 @@ fn public_ingress_non_owner_stop_cannot_complete_parent() {
 fn public_ingress_replay_closed_route_and_replaced_id_fail_closed() {
     let now = Instant::now();
     let route = AgentRoute::parse("window-a:pane-1").unwrap();
+
     let mut monitor = AgentMonitor::new("test-process");
 
     monitor.register_route(

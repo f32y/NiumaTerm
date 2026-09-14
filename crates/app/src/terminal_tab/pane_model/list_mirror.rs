@@ -51,11 +51,11 @@ impl BlockListMirror {
         live_rows: usize,
     ) -> Vec<ListOp> {
         let mut ops = Vec::new();
+
         let evicted = metrics.evicted_items.saturating_sub(self.evicted_items) as usize;
 
         match plan_list_reconcile(self.item_count, evicted, metrics.item_count) {
             ListReconcile::Reset => ops.push(ListOp::Reset(metrics.item_count)),
-
             ListReconcile::Patch {
                 front_evict,
                 tail_splice,
@@ -81,11 +81,9 @@ impl BlockListMirror {
 
         match plan_remeasure(self.last_measure_key, key) {
             RemeasureScope::All => ops.push(ListOp::RemeasureAll),
-
             RemeasureScope::Tail => ops.push(ListOp::Remeasure(
                 metrics.store_len.saturating_sub(1)..metrics.item_count,
             )),
-
             RemeasureScope::None => {}
         }
 
@@ -104,6 +102,7 @@ impl BlockListMirror {
         target: f32,
     ) -> ListOp {
         let (cols, cell_h, pad_rows) = layout;
+
         let mut y = 0.0;
 
         for (ix, item) in store.items().iter().enumerate() {

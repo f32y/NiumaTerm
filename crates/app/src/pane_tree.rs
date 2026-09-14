@@ -53,7 +53,6 @@ pub enum PaneNode<L> {
         id: PaneId,
         pane: L,
     },
-
     Split {
         /// Stable id for the GPUI element / keyed state of this group.
         id: u64,
@@ -96,7 +95,6 @@ pub enum SplitOutcome {
         index: usize,
         before: bool,
     },
-
     /// The focused leaf was wrapped in a fresh two-child split; the fresh
     /// state lays out 50/50 on its own.
     Wrapped,
@@ -110,7 +108,6 @@ pub enum RemoveOutcome {
         state: Entity<ResizableState>,
         index: usize,
     },
-
     /// The parent split collapsed into its surviving child; its state handle
     /// was dropped with it — nothing to fix up.
     Collapsed,
@@ -165,7 +162,6 @@ impl<L> PaneTree<L> {
         fn walk<'a, L>(node: &'a PaneNode<L>, out: &mut Vec<(PaneId, &'a L)>) {
             match node {
                 PaneNode::Leaf { id, pane, .. } => out.push((*id, pane)),
-
                 PaneNode::Split { children, .. } => {
                     children.iter().for_each(|c| walk(c, out));
                 }
@@ -283,9 +279,7 @@ impl<L> PaneTree<L> {
 
                 Some(SplitOutcome::Wrapped)
             }
-
             PaneNode::Leaf { .. } => None,
-
             PaneNode::Split { children, .. } => {
                 let mut new_pane = Some(new_pane);
                 let mut make_state = Some(make_state);
@@ -431,6 +425,7 @@ impl<L> PaneTree<L> {
             } = node
             {
                 f(state, pending_ratios);
+
                 children.iter_mut().for_each(|c| walk(c, f));
             }
         }

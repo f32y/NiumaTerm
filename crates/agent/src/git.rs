@@ -51,7 +51,6 @@ fn git_output(dir: &str, args: &[&str]) -> Result<Output, String> {
 #[derive(Clone)]
 pub enum CheckedOut {
     Branch(String),
-
     /// Short commit id of a detached `HEAD`, so the caller never presents an
     /// empty branch label.
     Detached(String),

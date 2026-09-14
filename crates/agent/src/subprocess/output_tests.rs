@@ -39,6 +39,7 @@ fn malformed_protocol_stops_before_later_messages_without_exposing_input() {
         Cursor::new(b"{\"ready\":true}\n{\"token\":\"private-value\",\n{\"late\":true}\n");
 
     let mut messages = Vec::new();
+
     let error = read_messages(&mut reader, "Test", |message| messages.push(message)).unwrap_err();
 
     assert_eq!(messages, [json!({"ready":true})]);

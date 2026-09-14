@@ -93,13 +93,13 @@ impl NetPty {
 
                             drain_read_ready.set_ready();
                         }
-
                         SessionByteEvent::Exited => break,
                     }
                 }
 
                 // The channel closing (host gone / session ended) is a child exit.
                 drain_exited.store(true, Ordering::SeqCst);
+
                 drain_child_ready.set_ready();
             })?;
 
@@ -217,6 +217,7 @@ impl ProcessReadWrite for NetPty {
 
         // The drain thread signals the loop through the same waker ConPTY uses.
         self.read_ready.set_waker(waker.clone());
+
         self.child_ready.set_waker(waker.clone());
 
         Ok(())

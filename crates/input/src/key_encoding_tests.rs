@@ -364,6 +364,7 @@ fn terminal_input_reports_release_when_event_type_reporting_is_enabled() {
 #[test]
 fn event_reporting_preserves_text_keys_and_encodes_cursor_repeats() {
     let flags = KeyEncodeFlags::DISAMBIGUATE_ESC_CODES | KeyEncodeFlags::REPORT_EVENT_TYPES;
+
     let mut letter = character("a");
 
     letter.state = ElementState::Released;

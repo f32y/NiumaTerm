@@ -23,6 +23,7 @@ use crate::workflow::{
 #[test]
 fn queued_commands_wait_for_real_turn_and_exit_discards_pending_work() {
     let mut commands = CommandQueue::default();
+
     let command = PendingSlashCommand::new("compact", String::new());
 
     assert!(matches!(
@@ -166,6 +167,7 @@ fn summary(id: &str) -> SessionSummary {
 #[test]
 fn search_retires_disk_reads_and_next_history_page_replaces_matches() {
     let mut history = SessionHistory::default();
+
     let request = history.begin_filesystem_history(None, 1);
 
     assert!(history.search_results(vec![summary("match")]));
@@ -288,6 +290,7 @@ fn workflow_refresh_uses_the_supplied_source_and_keeps_its_session_epoch() {
     runtime.install(runtime.epoch(), Ok(Backend::Test(backend)));
 
     let mut workflows = WorkflowData::default();
+
     let _reader = workflows.open_agent("run", "member");
 
     let plan = workflows
@@ -295,7 +298,9 @@ fn workflow_refresh_uses_the_supplied_source_and_keeps_its_session_epoch() {
         .unwrap();
 
     let epoch = plan.epoch;
+
     let mut results = plan.read();
+
     let result = results.remove(0);
 
     assert!(runtime.is_current(epoch));
@@ -323,7 +328,9 @@ fn rename_waits_for_identity_and_retries_rejection_without_losing_latest_title()
     let mut naming = ConversationNaming::default();
 
     naming.rename("first");
+
     naming.rename("latest");
+
     naming.sync(None);
 
     assert_eq!(naming.pending.as_deref(), Some("latest"));
@@ -352,6 +359,7 @@ fn rename_waits_for_identity_and_retries_rejection_without_losing_latest_title()
 #[test]
 fn update_requires_idle_work_and_identity_only_for_nonempty_conversations() {
     let mut runtime = SessionRuntime::default();
+
     let commands = CommandQueue::default();
     let delivery = MessageDelivery::new(AgentKind::Codex);
 

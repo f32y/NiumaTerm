@@ -1,3 +1,9 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Range;
+
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
 use crate::AgentWorkspace;
 use crate::chat::ThreadSettings;
 use crate::team::attempt::Attempt;
@@ -11,10 +17,6 @@ use crate::team::identity::{
     MemberId, MessageId, OperationId, OwnershipGeneration, RoomId, SummaryId,
 };
 use crate::team::member::{AcceptedCoverage, HistoryScope, Member, MemberConfig};
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
-use std::ops::Range;
-use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Room {
@@ -47,13 +49,10 @@ impl Default for RoomControls {
 pub enum MemberError {
     #[error("member name must be nonempty and contain no control characters")]
     InvalidName,
-
     #[error("a member already uses that name")]
     DuplicateName,
-
     #[error("member no longer belongs to this room")]
     MissingMember,
-
     #[error("session ownership has changed")]
     StaleOwner,
 }
@@ -280,6 +279,7 @@ impl Room {
             }
 
             include_summary(self, summary, &mut source_ranges)?;
+
             represented = complete_sources(self, &source_ranges)?;
         }
 
@@ -365,6 +365,7 @@ impl Room {
                 .ok_or(ContextError::MissingSource)?;
 
             sources.extend(summary.sources.iter().copied());
+
             pending.extend(summary.prior_summaries.iter().copied());
         }
 
@@ -383,7 +384,6 @@ impl Room {
                     .position(|message| message.id == *id)
                     .ok_or(ContextError::MissingSource)?,
             ),
-
             _ => None,
         };
 
@@ -403,7 +403,6 @@ impl Room {
                 HistoryScope::Selected { messages, .. } => {
                     messages.contains(&self.messages[*index].id)
                 }
-
                 _ => true,
             })
             .map(|index| Ok(&self.messages[index]))

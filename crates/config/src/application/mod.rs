@@ -168,7 +168,6 @@ impl Config {
             .iter()
             .filter_map(|builtin| match parse_toml::<Theme>(builtin.source) {
                 Ok(theme) => Some((builtin.name.to_string(), theme)),
-
                 Err(err) => {
                     warn!("ignored invalid built-in theme {}: {err}", builtin.name);
 
@@ -200,7 +199,6 @@ impl Config {
 
                 match Self::load_theme(&path) {
                     Ok(theme) => Some((name, theme)),
-
                     Err(err) => {
                         warn!("ignored invalid theme {}: {err}", path.display());
 
@@ -328,7 +326,6 @@ pub fn save_settings_to(path: &Path, patch: &SettingsPatch<'_>) -> io::Result<()
                     format!("config.toml is not valid TOML, not saving settings: {err}"),
                 )
             })?,
-
             None => DocumentMut::new(),
         };
 
@@ -362,6 +359,7 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> 
     } = patch;
 
     doc["theme"] = value(theme);
+
     patch_group(doc, "appearance", appearance)?;
 
     if appearance.background_image.is_none() {
@@ -372,11 +370,15 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> 
     }
 
     ensure_explicit_table(doc, "cursor");
+
     doc["cursor"]["shape"] = value::<&str>(cursor_shape.into());
 
     patch_group(doc, "system", system)?;
+
     patch_group(doc, "agent", agent)?;
+
     patch_group(doc, "remote-session", remote_session)?;
+
     patch_group(doc, "update", update)?;
 
     profile::patch_table(
@@ -409,6 +411,7 @@ fn patch_group(doc: &mut DocumentMut, key: &str, settings: &impl Serialize) -> R
 
     for (name, item) in values.iter() {
         let target = table.entry(name).or_insert(Item::None);
+
         let mut item = item.clone();
 
         if let (Some(previous), Some(next)) = (target.as_value(), item.as_value_mut()) {

@@ -13,6 +13,16 @@ pub(super) mod compaction_row;
 #[cfg(test)]
 mod working_indicator_tests;
 
+use std::time::{Duration, Instant};
+
+use gpui::prelude::*;
+use gpui::{
+    Animation, AnimationExt as _, AnyElement, App, Context, Div, ElementId, Hsla, RenderOnce,
+    Window, div, ease_in_out, px, relative, rems,
+};
+use gpui_component::{ActiveTheme as _, IconName, h_flex, v_flex};
+use rust_i18n::t;
+
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::transcript::TranscriptView;
 use crate::agent_tab::transcript::disclosure_row::{
@@ -21,14 +31,6 @@ use crate::agent_tab::transcript::disclosure_row::{
 use crate::agent_tab::transcript::format::{interrupted_status_label, worked_status_label};
 use crate::agent_tab::transcript::reveal::{Disclosures, RevealKey};
 use crate::agent_tab::transcript::rows::RowGap;
-use gpui::prelude::*;
-use gpui::{
-    Animation, AnimationExt as _, AnyElement, App, Context, Div, ElementId, Hsla, RenderOnce,
-    Window, div, ease_in_out, px, relative, rems,
-};
-use gpui_component::{ActiveTheme as _, IconName, h_flex, v_flex};
-use rust_i18n::t;
-use std::time::{Duration, Instant};
 
 /// Edge of a transcript thumbnail, matching the composer strip so an image
 /// does not change size when the message it belongs to is sent.

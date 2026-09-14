@@ -181,14 +181,19 @@ impl TurnLedger {
     /// leaves no elapsed-time row behind for work that did not happen.
     pub fn forget(&mut self, turn: u64) {
         self.settled.remove(&turn);
+
         self.seconds.remove(&turn);
+
         self.output_tokens.remove(&turn);
     }
 
     pub fn clear(&mut self) {
         self.settled.clear();
+
         self.seconds.clear();
+
         self.output_tokens.clear();
+
         self.interrupted.clear();
     }
 }

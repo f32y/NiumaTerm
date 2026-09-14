@@ -1,9 +1,10 @@
+use std::collections::HashMap;
+use std::mem::take;
+
 use crate::chat::{AgentPreset, ApprovalPreset, ModelInfo, ThreadSettings};
 use crate::session::capabilities::AgentCapabilities as _;
 use crate::session::restore::SettingsSeed;
 use crate::session::{AgentKind, Backend};
-use std::collections::HashMap;
-use std::mem::take;
 
 #[derive(Default)]
 pub struct ConversationSettings {

@@ -102,10 +102,8 @@ pub enum CollapseRows {
     /// of tool calls collapse to their newest.
     #[default]
     WorkAndToolCalls,
-
     /// Runs of tool calls only; a finished turn shows the work it did.
     ToolCalls,
-
     /// Neither; every row arrives on screen.
     Off,
 }

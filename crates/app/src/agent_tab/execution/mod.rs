@@ -11,16 +11,13 @@ mod registry;
 #[cfg(test)]
 mod tests;
 
-use crate::agent_tab::composer::attachments::scratch_dir;
-use crate::agent_tab::execution::children::ChildReaders;
-use crate::agent_tab::execution::inbox::{
-    EventBatch, MAX_MESSAGES_PER_BATCH, MAX_UPDATE_TIME, channel,
-};
-use crate::agent_tab::profile::{AgentKind, agent_launch};
-use crate::agent_tab::session::RestorationReadiness;
-use crate::agent_tab::settings::AgentSettings;
-use crate::agent_tab::thread_controls::{launch_effort, launch_model, stored_thread_settings};
-use crate::agent_tab::{AgentPaneEvent, RecoveryReadiness};
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
+use std::{fs, thread};
+
 use futures::StreamExt as _;
 use futures::channel::mpsc::UnboundedReceiver;
 use futures::stream::ReadyChunks;
@@ -50,13 +47,18 @@ use nmt_agent::{
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
 use rust_i18n::t;
 use serde_json::Value;
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::rc::Rc;
-use std::time::{Duration, Instant};
-use std::{fs, thread};
 use uuid::Uuid;
+
+use crate::agent_tab::composer::attachments::scratch_dir;
+use crate::agent_tab::execution::children::ChildReaders;
+use crate::agent_tab::execution::inbox::{
+    EventBatch, MAX_MESSAGES_PER_BATCH, MAX_UPDATE_TIME, channel,
+};
+use crate::agent_tab::profile::{AgentKind, agent_launch};
+use crate::agent_tab::session::RestorationReadiness;
+use crate::agent_tab::settings::AgentSettings;
+use crate::agent_tab::thread_controls::{launch_effort, launch_model, stored_thread_settings};
+use crate::agent_tab::{AgentPaneEvent, RecoveryReadiness};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SessionId(Uuid);
@@ -144,14 +146,12 @@ pub(super) enum ExecutionSignal {
         epoch: u64,
         id: String,
     },
-
     Finished {
         epoch: u64,
         id: String,
         error: Option<String>,
         text: String,
     },
-
     Decision {
         epoch: u64,
         request: TeamDecisionRequest,
@@ -201,6 +201,7 @@ impl SessionOwner {
         let backend = controller.runtime.retire();
 
         controller.failed("session closed", true);
+
         controller.clear_conversation();
 
         let scratch = self.scratch.clone();
@@ -306,7 +307,6 @@ impl AgentSession {
                 epoch,
                 id: id.clone(),
             }),
-
             SessionEffect::ProviderTurnFinished { id, error } => {
                 let state = self.controller.borrow();
 
@@ -325,12 +325,10 @@ impl AgentSession {
                     text,
                 });
             }
-
             SessionEffect::TeamDecision(request) => cx.emit(ExecutionSignal::Decision {
                 epoch,
                 request: request.clone(),
             }),
-
             _ => {}
         }
 
@@ -361,6 +359,7 @@ impl AgentSession {
 
                 let update = {
                     let mut state = this.controller.borrow_mut();
+
                     let epoch = state.runtime.epoch();
 
                     state.branch.checkpoints_loaded(epoch, request, result)
@@ -396,6 +395,7 @@ impl AgentSession {
 
                         let update = {
                             let mut state = this.controller.borrow_mut();
+
                             let epoch = state.runtime.epoch();
 
                             state.branch.fork_created(epoch, request, result)
@@ -406,20 +406,20 @@ impl AgentSession {
                 })
                 .detach();
             }
-
             BranchUpdate::StartSession(identity) => {
                 self.controller.borrow_mut().commands.clear();
+
                 self.start(identity, true, |_, _| {}, cx);
             }
-
             BranchUpdate::Branching => {
                 let mut state = self.controller.borrow_mut();
 
                 state.begin_branched_conversation();
+
                 drop(state);
+
                 self.publish(SessionEffect::Branch(BranchUpdate::Branching), cx);
             }
-
             update => self.publish(SessionEffect::Branch(update), cx),
         }
     }
@@ -503,6 +503,7 @@ impl AgentSession {
 
         let first = {
             let mut readers = self.child_refresh.readers.borrow_mut();
+
             let count = readers.entry(reader_key.clone()).or_default();
 
             *count += 1;
@@ -576,6 +577,7 @@ impl AgentSession {
     fn load_child(&mut self, key: &BackgroundTaskKey, cx: &mut Context<Self>) {
         let (epoch, events) = {
             let mut state = self.controller.borrow_mut();
+
             let epoch = state.runtime.epoch();
 
             let Some(backend) = state.runtime.backend_mut() else {
@@ -621,7 +623,6 @@ impl AgentSession {
                     fatal: true,
                 }
             }
-
             event => event,
         };
 
@@ -645,9 +646,11 @@ impl AgentSession {
             });
 
             let state = self.controller.borrow();
+
             let mut conversation = state.conversation.borrow_mut();
 
             conversation.live.set_detail(detail);
+
             conversation.changed_turn(state.delivery.turn());
         }
 
@@ -656,15 +659,16 @@ impl AgentSession {
         match &effect {
             SessionEffect::Ready(_) => {
                 self.restore_background_tasks(cx);
+
                 self.restore_workflows(cx);
             }
-
             SessionEffect::InputRequested { index } => self.expire_optional_question(*index, cx),
             SessionEffect::Workflows { .. } => self.sync_workflow_refresh(cx),
             _ => {}
         }
 
         self.publish(effect, cx);
+
         self.advance_commands(cx);
     }
 
@@ -700,11 +704,9 @@ impl AgentSession {
     fn publish_activity(&mut self, effect: &SessionEffect, cx: &mut Context<Self>) {
         match effect {
             SessionEffect::Title(title) => cx.emit(AgentPaneEvent::TitleSuggested(title.clone())),
-
             SessionEffect::TurnStarted { .. } => {
                 self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx)
             }
-
             SessionEffect::TurnCompleted { error, .. } => {
                 let state = self.controller.borrow();
                 let key = (state.runtime.epoch(), state.delivery.turn());
@@ -728,6 +730,7 @@ impl AgentSession {
                     });
 
                 drop(state);
+
                 self.last_completed = Some(key);
 
                 self.emit_lifecycle(
@@ -740,7 +743,6 @@ impl AgentSession {
                     cx,
                 );
             }
-
             SessionEffect::ApprovalRequested => {
                 let body = self
                     .controller
@@ -757,7 +759,6 @@ impl AgentSession {
                     cx,
                 );
             }
-
             SessionEffect::InputRequested { index } => {
                 let state = self.controller.borrow();
                 let prompt = &state.input.batches()[*index];
@@ -781,11 +782,9 @@ impl AgentSession {
                     cx,
                 );
             }
-
             SessionEffect::ApprovalResolved => {
                 self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx)
             }
-
             SessionEffect::InputResolved(completion) => {
                 if completion.started_turn {
                     self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
@@ -795,11 +794,9 @@ impl AgentSession {
                     self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
                 }
             }
-
             SessionEffect::Workflows {
                 activity_changed: true,
             } => cx.emit(AgentPaneEvent::WorkflowActivity),
-
             SessionEffect::BackgroundActivity => cx.emit(AgentPaneEvent::BackgroundTaskActivity),
             SessionEffect::Error { fatal: true, .. } => cx.emit(AgentPaneEvent::Interrupted),
             _ => {}
@@ -846,6 +843,7 @@ impl AgentSession {
 
                 let result = {
                     let mut guard = this.controller.borrow_mut();
+
                     let state = &mut *guard;
 
                     state.restore.loaded(
@@ -859,7 +857,6 @@ impl AgentSession {
                 match result {
                     ReplayLoaded::Stale => {}
                     ReplayLoaded::Cancelled => cx.notify(),
-
                     ReplayLoaded::Failed(message) => {
                         let epoch = this.controller.borrow().runtime.epoch();
 
@@ -872,7 +869,6 @@ impl AgentSession {
                             cx,
                         );
                     }
-
                     ReplayLoaded::Restart(identity) => {
                         this.start(Some(identity), false, |_, _| {}, cx)
                     }
@@ -939,7 +935,6 @@ impl AgentSession {
                 identity,
                 profile_name: self.profile.name.clone(),
             }),
-
             Readiness::Updating => RecoveryReadiness::Busy(
                 t!(
                     "agent-update-profile-already-updating",
@@ -947,7 +942,6 @@ impl AgentSession {
                 )
                 .into_owned(),
             ),
-
             Readiness::ActiveWork => RecoveryReadiness::Busy(
                 t!(
                     "agent-update-profile-active-work",
@@ -955,7 +949,6 @@ impl AgentSession {
                 )
                 .into_owned(),
             ),
-
             Readiness::MissingIdentity => RecoveryReadiness::MissingIdentity(
                 t!(
                     "agent-update-profile-missing-identity",
@@ -987,6 +980,7 @@ impl AgentSession {
         }
 
         self.controller.borrow_mut().prepare_update_stop();
+
         self.controller.borrow_mut().publish_confirmed();
 
         self.controller.borrow_mut().branch.cancel_picker();
@@ -1018,6 +1012,7 @@ impl AgentSession {
         let (epoch, backend) = self.controller.borrow_mut().runtime.suspend_for_update();
 
         cx.emit(AgentPaneEvent::Interrupted);
+
         cx.notify();
 
         let Some(mut backend) = backend else {
@@ -1211,6 +1206,7 @@ impl AgentSession {
         let retiring = self.controller.borrow_mut().reset_for_restart();
 
         cx.emit(AgentPaneEvent::TitleSuggested(String::new()));
+
         self.start(None, false, move |_, _| drop(retiring), cx);
     }
 
@@ -1238,6 +1234,7 @@ impl AgentSession {
 
         let kind = self.kind;
         let name = kind.display();
+
         let mut launch = agent_launch(&self.profile);
 
         let epoch = {
@@ -1278,6 +1275,7 @@ impl AgentSession {
         };
 
         cx.emit(AgentPaneEvent::Interrupted);
+
         self.prepare_defaults(cx);
 
         let workspace = self.active_workspace.clone();
@@ -1374,6 +1372,7 @@ impl AgentSession {
                 let alive = this
                     .update(cx, |this, cx| {
                         let started = Instant::now();
+
                         let mut events = EventBatch::default();
 
                         for message in messages.by_ref() {
@@ -1385,7 +1384,6 @@ impl AgentSession {
 
                             let message = match message {
                                 Ok(message) => message,
-
                                 Err(error) => {
                                     events.flush(|event| this.on_event(epoch, event, cx));
 
@@ -1467,12 +1465,10 @@ impl AgentSession {
                 model: launch_model(self.kind, &self.profile),
                 effort: launch_effort(&self.profile),
             },
-
             SettingsSeed::Reviewer => ReadyDefaults {
                 stored: stored_thread_settings(self.kind, &self.profile, cx).cloned(),
                 ..ReadyDefaults::default()
             },
-
             SettingsSeed::None => ReadyDefaults::default(),
         };
     }
@@ -1492,7 +1488,6 @@ impl AgentSession {
 
         match outcome {
             StartOutcome::Installed => Some(true),
-
             StartOutcome::Superseded(orphan) => {
                 if let Some(mut orphan) = orphan {
                     cx.background_executor()
@@ -1504,7 +1499,6 @@ impl AgentSession {
 
                 None
             }
-
             StartOutcome::Failed(text) => {
                 let failure = self.controller.borrow_mut().failed(&text, true);
 
@@ -1535,6 +1529,7 @@ impl AgentSession {
                 );
 
                 cx.emit(AgentPaneEvent::Interrupted);
+
                 cx.notify();
 
                 Some(false)

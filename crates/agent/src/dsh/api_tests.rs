@@ -63,6 +63,7 @@ fn startup_token_authenticates_rpc_and_stream_without_corrupting_the_path() {
 
     let server = thread::spawn(move || {
         let (mut login, _) = listener.accept().unwrap();
+
         let (line, _, _) = read_request(&login);
 
         assert_eq!(line, "GET /?token=startup-secret HTTP/1.1\r\n");
@@ -74,6 +75,7 @@ fn startup_token_authenticates_rpc_and_stream_without_corrupting_the_path() {
         .unwrap();
 
         let (mut rpc, _) = listener.accept().unwrap();
+
         let (line, headers, body) = read_request(&rpc);
 
         assert_eq!(line, "POST /api/session/create HTTP/1.1\r\n");
@@ -127,6 +129,7 @@ fn event_reply_keeps_the_generation_and_event_ids() {
 
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
+
         let (line, _, body) = read_request(&stream);
 
         assert_eq!(line, "POST /api/$events/result HTTP/1.1\r\n");
@@ -168,6 +171,7 @@ fn command_server(replies: Vec<(Value, Value)>) -> (ApiClient, thread::JoinHandl
     let server = thread::spawn(move || {
         for (arguments, answer) in replies {
             let (mut stream, _) = listener.accept().unwrap();
+
             let (line, _, body) = read_request(&stream);
 
             assert_eq!(line, "POST /api/commands/execute HTTP/1.1\r\n");

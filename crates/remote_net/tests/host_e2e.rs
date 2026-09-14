@@ -46,6 +46,7 @@ async fn pair_open_shell_reconnect() {
     // so retry while the relay still reports it offline.
     let device = generate_keypair().unwrap();
     let code = host.begin_pairing();
+
     let mut channel = None;
 
     for _ in 0..40 {
@@ -55,7 +56,6 @@ async fn pair_open_shell_reconnect() {
 
                 break;
             }
-
             Err(_) => time::sleep(Duration::from_millis(500)).await,
         }
     }
@@ -122,6 +122,7 @@ async fn pair_open_shell_reconnect() {
 
     // Drop the connection entirely; the shell must survive.
     drop(channel);
+
     time::sleep(Duration::from_secs(1)).await;
 
     // Reconnect as the now-authorized device (IK) and reattach: the fresh
@@ -153,6 +154,7 @@ async fn pair_open_shell_reconnect() {
         .unwrap();
 
     host.shutdown();
+
     fs::remove_dir_all(&data_dir).ok();
 }
 
@@ -228,7 +230,6 @@ async fn client_runtime_byte_stream() {
                         return buf;
                     }
                 }
-
                 Ok(SessionByteEvent::Exited) => return buf,
                 Err(_) => return buf,
             }
@@ -258,6 +259,7 @@ async fn client_runtime_byte_stream() {
     assert!(!sessions.is_empty(), "listing must show the open session");
 
     host.shutdown();
+
     fs::remove_dir_all(&data_dir).ok();
 }
 
@@ -330,6 +332,7 @@ async fn client_runtime_resumes_after_transport_loss() {
     .expect("client runtime attaches");
 
     println!("--- restart `wrangler dev` now; resuming in 45s ---");
+
     time::sleep(Duration::from_secs(45)).await;
 
     // Input after the restart can only arrive if the runtime re-attached.
@@ -349,7 +352,6 @@ async fn client_runtime_resumes_after_transport_loss() {
                         return buf;
                     }
                 }
-
                 Ok(SessionByteEvent::Exited) => panic!("session died instead of resuming"),
                 Err(_) => return buf,
             }
@@ -364,6 +366,7 @@ async fn client_runtime_resumes_after_transport_loss() {
     );
 
     host.shutdown();
+
     fs::remove_dir_all(&data_dir).ok();
 }
 
@@ -407,5 +410,6 @@ async fn unpaired_device_rejected() {
     assert!(host.list_devices().is_empty(), "no device may be persisted");
 
     host.shutdown();
+
     fs::remove_dir_all(&data_dir).ok();
 }

@@ -65,6 +65,7 @@ pub(crate) fn paint_frame(
 
     // Kitty images above backgrounds, below cursor/text (i32::MIN/2 <= z < 0).
     paint_frame_images(bounds, frame, ZLayer::BelowText, cell, offsets, window);
+
     paint_cursor(bounds, frame.cursor(), cell, offsets, window);
 
     paint_glyph_rows(
@@ -255,12 +256,10 @@ pub(crate) fn cursor_bounds(
     Some(match cursor.shape {
         CursorShape::Block => Bounds::new(point(x, y), size(px(cell.width_px), px(cell.height_px))),
         CursorShape::Beam => Bounds::new(point(x, y), size(thickness, px(cell.height_px))),
-
         CursorShape::Underline => Bounds::new(
             point(x, y + px(cell.height_px) - thickness),
             size(px(cell.width_px), thickness),
         ),
-
         CursorShape::Hidden => return None,
     })
 }

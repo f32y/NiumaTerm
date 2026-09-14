@@ -1,6 +1,5 @@
-use crate::agent_tab::team::TeamRuntime;
-use crate::agent_tab::team::view::TeamPane;
-use crate::agent_tab::transcript::{TranscriptAttribution, TranscriptView};
+use std::collections::{BTreeMap, HashMap};
+
 use gpui::{Context, Entity};
 use nmt_agent::chat::Item;
 use nmt_agent::team::attempt::{Attempt, AttemptState, BudgetScope};
@@ -11,7 +10,10 @@ use nmt_agent::team::room::Room;
 use nmt_agent::transcript::TranscriptEntry;
 use nmt_agent::transcript::conversation::EntryMetadata;
 use rust_i18n::t;
-use std::collections::{BTreeMap, HashMap};
+
+use crate::agent_tab::team::TeamRuntime;
+use crate::agent_tab::team::view::TeamPane;
+use crate::agent_tab::transcript::{TranscriptAttribution, TranscriptView};
 
 #[derive(PartialEq)]
 pub(super) struct TimelineRow {
@@ -36,6 +38,7 @@ impl TimelineMirror {
         cx: &mut Context<TeamPane>,
     ) {
         let runtime = runtime.read(cx);
+
         let mut live = BTreeMap::new();
 
         for host in runtime.hosts.values() {
@@ -88,6 +91,7 @@ impl TimelineMirror {
 
                 transcript.update(cx, |transcript, cx| {
                     transcript.conversation.borrow_mut().merge_completed(&item);
+
                     transcript.sync_content();
 
                     cx.notify();
@@ -167,7 +171,6 @@ fn public_rows(room: &Room, live: &BTreeMap<AttemptId, String>) -> Vec<TimelineR
 
         let (heading, cwd, user) = match &message.author {
             Author::User => (String::new(), None, true),
-
             Author::Member { id, name } => (
                 name.clone(),
                 room.member(*id)
@@ -270,7 +273,6 @@ fn attempt_row(room: &Room, attempt: &Attempt, live: &BTreeMap<AttemptId, String
             .map(|message| message.text.clone())
             .filter(|text| !text.is_empty())
             .unwrap_or_else(|| t!("team-no-text").into_owned()),
-
         AttemptState::Summarized { summary } => room
             .summaries()
             .iter()
@@ -295,14 +297,11 @@ fn attempt_row(room: &Room, attempt: &Attempt, live: &BTreeMap<AttemptId, String
                 )
             })
             .unwrap_or_default(),
-
         AttemptState::Reserved => t!("team-waiting").into_owned(),
-
         AttemptState::Sending | AttemptState::Accepted { .. } => live
             .get(&attempt.id)
             .cloned()
             .unwrap_or_else(|| t!("team-responding").into_owned()),
-
         AttemptState::Rejected => t!("team-not-sent").into_owned(),
         AttemptState::Failed => t!("team-response-failed").into_owned(),
         AttemptState::Uncertain => t!("team-response-uncertain").into_owned(),

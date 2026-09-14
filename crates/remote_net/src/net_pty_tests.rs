@@ -57,6 +57,7 @@ fn late_bytes_reset_readiness() {
 
     // Simulate the drain thread appending live output.
     reader.buffer.lock().extend(b"y".iter().copied());
+
     ready.set_ready();
 
     assert_eq!(reader.read(&mut buf).unwrap(), 1);

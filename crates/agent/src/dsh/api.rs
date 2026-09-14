@@ -177,12 +177,10 @@ impl ApiClient {
 
         match (answer.result.ok, answer.result.value, answer.result.error) {
             (true, value, _) => Ok(value.unwrap_or(Value::Null)),
-
             (false, _, Some(error)) => Err(CallError::Business {
                 code: error.code,
                 message: error.message,
             }),
-
             _ => Err(CallError::Transport(format!(
                 "{method} returned a result that was neither a value nor an error"
             ))),

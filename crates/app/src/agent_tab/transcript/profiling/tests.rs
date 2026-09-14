@@ -40,7 +40,9 @@ impl Write for LogBuffer {
 impl Enabled {
     fn new() -> Self {
         take_totals();
+
         ALLOCATOR.set_enabled(true);
+
         frame_stats::set_enabled(true);
 
         Self
@@ -50,7 +52,9 @@ impl Enabled {
 impl Drop for Enabled {
     fn drop(&mut self) {
         frame_stats::set_enabled(false);
+
         ALLOCATOR.set_enabled(false);
+
         take_totals();
     }
 }
@@ -122,6 +126,7 @@ fn profiles_real_updates_and_mirror_revisions_without_changing_results(cx: &mut 
             assert!(!view.append_delta("missing", "ignored", TextField::ReasoningSummary));
 
             view.refresh_rows(CollapseRows::WorkAndToolCalls);
+
             view.refresh_rows(CollapseRows::WorkAndToolCalls);
 
             let totals = take_totals();
@@ -189,7 +194,9 @@ fn profiles_real_updates_and_mirror_revisions_without_changing_results(cx: &mut 
 
             with_default(subscriber, || {
                 view.append_delta("mirrored", " additional", TextField::Reply);
+
                 flush();
+
                 flush();
             });
 
@@ -209,6 +216,7 @@ fn profiles_real_updates_and_mirror_revisions_without_changing_results(cx: &mut 
     let _enabled = Enabled::new();
 
     ALLOCATOR.set_enabled(false);
+
     drop(Probe::start(Operation::AppendDelta));
 
     let unavailable = take_totals()[Operation::AppendDelta as usize];
@@ -238,6 +246,7 @@ fn measure<C, T>(
 
     for _ in 0..5 {
         let mut state = make(context);
+
         let started = Instant::now();
 
         for index in 0..iterations {
@@ -245,12 +254,14 @@ fn measure<C, T>(
         }
 
         samples.push(started.elapsed());
+
         black_box(&state);
     }
 
     samples.sort_unstable();
 
     let mut state = make(context);
+
     let _enabled = Enabled::new();
     let allocations = AllocationScope::start().unwrap();
 
@@ -306,7 +317,9 @@ fn long_transcript_profile(cx: &mut TestAppContext) {
             |_| history(turns, reasoning(4096)),
             |view, _, _| {
                 black_box(view.append_delta("live", "x", TextField::ReasoningSummary));
+
                 view.refresh_rows(CollapseRows::WorkAndToolCalls);
+
                 black_box(&view.rows);
             },
         );
@@ -343,8 +356,11 @@ fn long_transcript_profile(cx: &mut TestAppContext) {
         },
         |(view, started), index, _| {
             black_box(view.append_delta("live", " more \u{4e2d}\u{6587}", TextField::Reply));
+
             view.advance_typing(*started + Duration::from_millis((index as u64 + 1) * 16));
+
             view.refresh_rows(CollapseRows::WorkAndToolCalls);
+
             black_box(&view.rows);
         },
     );
@@ -362,7 +378,9 @@ fn long_transcript_profile(cx: &mut TestAppContext) {
         |_| history(5_000, reasoning(4096)),
         |view, _, _| {
             view.merge_completed(&completed);
+
             view.refresh_rows(CollapseRows::WorkAndToolCalls);
+
             black_box(&view.rows);
         },
     );
@@ -392,6 +410,7 @@ fn long_transcript_profile(cx: &mut TestAppContext) {
                             let mut view = TranscriptView::new(AgentKind::Codex, None);
 
                             view.show_items(&source, 1, cx);
+
                             view.refresh_rows(CollapseRows::WorkAndToolCalls);
 
                             view
@@ -408,7 +427,9 @@ fn long_transcript_profile(cx: &mut TestAppContext) {
                             let revision = if changed { index as u64 + 2 } else { 1 };
 
                             view.show_items(&snapshot, revision, cx);
+
                             view.refresh_rows(CollapseRows::WorkAndToolCalls);
+
                             black_box(&view.rows);
                         },
                     );

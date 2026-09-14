@@ -10,8 +10,7 @@
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{self};
-use std::{env, fmt, fs, time};
+use std::{env, fmt, fs, sync, time};
 
 use crate::ghostty::GhosttyTerminal;
 use crate::render_buffer::RenderBuffer;
@@ -182,7 +181,6 @@ pub(crate) fn trace_read(route: usize, engine: &GhosttyTerminal, bytes: &[u8]) {
         match byte {
             b'\\' => line.push_str("\\\\"),
             0x20..=0x7e => line.push(char::from(byte)),
-
             _ => {
                 let _ = fmt::Write::write_fmt(&mut line, format_args!("\\x{byte:02x}"));
             }
@@ -236,7 +234,6 @@ pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
                 s.scrollbar().len,
             )
         }
-
         Err(e) => format!("[vt-trace] #{seq:06} ts={ts} {label} | {detail} | snapshot_err={e:?}\n"),
     };
 
@@ -252,8 +249,11 @@ pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
     let mut body = String::new();
 
     body.push_str(&summary);
+
     body.push_str("---- detail ----\n");
+
     body.push_str(detail);
+
     body.push('\n');
 
     if let Ok(s) = &snapshot {
@@ -264,10 +264,12 @@ pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
         }
 
         body.push_str("---- trailing-pad style (per row with trailing cells) ----\n");
+
         body.push_str(&trailing_pad_report(s));
     }
 
     body.push_str("---- full screen + scrollback (format_text) ----\n");
+
     body.push_str(&full);
 
     if !full.ends_with('\n') {

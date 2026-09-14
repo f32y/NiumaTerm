@@ -30,6 +30,7 @@ fn marks(stream: &[u8]) -> Vec<String> {
     const INTRODUCER: &str = "\u{1b}]133;";
 
     let text = String::from_utf8_lossy(stream);
+
     let mut found = Vec::new();
     let mut rest = text.as_ref();
 
@@ -39,6 +40,7 @@ fn marks(stream: &[u8]) -> Vec<String> {
         let end = rest.find(['\u{7}', '\u{1b}']).unwrap_or(rest.len());
 
         found.push(rest[..end].to_owned());
+
         rest = &rest[end..];
     }
 
@@ -58,12 +60,12 @@ impl Session {
     /// Read until `done` accepts the marks seen so far, or the deadline passes.
     fn read_until(&mut self, done: impl Fn(&[String]) -> bool) -> Vec<String> {
         let mut buf = [0u8; 8192];
+
         let deadline = Instant::now() + DEADLINE;
 
         while Instant::now() < deadline {
             match self.pty.read(&mut buf) {
                 Ok(0) => break,
-
                 Ok(n) => {
                     self.stream.extend_from_slice(&buf[..n]);
 
@@ -73,7 +75,6 @@ impl Session {
                         return seen;
                     }
                 }
-
                 // The PTY is non-blocking, so "nothing yet" arrives as an
                 // error rather than a short read.
                 Err(_) => thread::sleep(Duration::from_millis(20)),
@@ -87,6 +88,7 @@ impl Session {
     /// passes. Reports whether it arrived.
     fn read_text_until(&mut self, needle: &str) -> bool {
         let mut buf = [0u8; 8192];
+
         let deadline = Instant::now() + DEADLINE;
 
         while Instant::now() < deadline {
@@ -179,7 +181,6 @@ fn start_with_startup_files(
             home,
             stream: Vec::new(),
         }),
-
         Err(error) => {
             eprintln!("skipping: could not spawn {shell}: {error:?}");
 
@@ -244,6 +245,7 @@ fn assert_reports_failing_exit_code(shell: &str) {
     };
 
     session.read_until(|seen| seen.len() >= 6);
+
     session.pty.write_all(b"false\n").expect("write command");
 
     let seen = session.read_until(|seen| seen.iter().any(|mark| mark == "D;1"));
@@ -273,6 +275,7 @@ fn assert_announces_user_clear(shell: &str) {
     };
 
     session.read_until(|seen| seen.len() >= 6);
+
     session.pty.write_all(b"clear\n").expect("write command");
 
     let seen = session.read_until(|seen| seen.iter().any(|mark| mark == "K"));
@@ -314,12 +317,12 @@ fn zsh_still_reads_the_users_startup_files() {
         .expect("write command");
 
     let deadline = Instant::now() + DEADLINE;
+
     let mut buf = [0u8; 8192];
 
     while Instant::now() < deadline {
         match session.pty.read(&mut buf) {
             Ok(0) => break,
-
             Ok(n) => {
                 session.stream.extend_from_slice(&buf[..n]);
 
@@ -327,7 +330,6 @@ fn zsh_still_reads_the_users_startup_files() {
                     return;
                 }
             }
-
             Err(_) => thread::sleep(Duration::from_millis(20)),
         }
     }
@@ -446,6 +448,7 @@ fn assert_empty_enter_keeps_the_lifecycle_ordered(shell: &str) {
     };
 
     session.read_until(|seen| seen.len() >= 6);
+
     session.pty.write_all(b"\n").expect("write empty line");
 
     let seen = session.read_until(|seen| seen.len() >= 9);
@@ -528,6 +531,7 @@ fn assert_the_bootstrap_line_leaves_no_history(shell: &str, write_history: &[u8]
 
     // The entry lingers until a later command is entered, so one has to be.
     session.pty.write_all(b"true\n").expect("write command");
+
     session.read_until(|seen| seen.len() >= 10);
 
     session

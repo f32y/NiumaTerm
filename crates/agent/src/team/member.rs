@@ -20,7 +20,6 @@ pub enum HistoryScope {
     #[default]
     CompletedPublic,
     FromMessage(MessageId),
-
     Selected {
         messages: BTreeSet<MessageId>,
         summaries: BTreeSet<SummaryId>,

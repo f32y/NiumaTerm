@@ -144,7 +144,6 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                             item: Item::Compaction { detail, .. },
                             ..
                         }) => detail.summary = Some(summary),
-
                         _ => {
                             compaction_seq += 1;
                             summary_awaiting_boundary = Some(items.len());
@@ -189,7 +188,6 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                     }
                 }
             }
-
             Some("system") if record["subtype"].as_str() == Some("compact_boundary") => {
                 let detail = parse_compaction(compaction_metadata(record));
 
@@ -209,7 +207,6 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                             ..detail
                         };
                     }
-
                     // Either the summary turn follows the marker, or this
                     // compaction preserved a message segment instead of writing
                     // one at all; the boundary belongs in the transcript now and
@@ -228,7 +225,6 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                     }
                 }
             }
-
             Some("assistant") => {
                 let Some(blocks) = record["message"]["content"].as_array() else {
                     continue;
@@ -261,7 +257,6 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                                 items.push(ReplayItem { item, at });
                             }
                         }
-
                         Some("thinking") => {
                             let summary = block["thinking"].as_str().unwrap_or_default().trim();
 
@@ -285,7 +280,6 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                                 },
                             });
                         }
-
                         Some("tool_use") | Some("server_tool_use") | Some("mcp_tool_use") => {
                             let Some(id) = block["id"].as_str() else {
                                 continue;
@@ -298,14 +292,13 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                             );
 
                             pending_tools.insert(id.to_string(), items.len());
+
                             items.push(ReplayItem { item, at });
                         }
-
                         _ => {}
                     }
                 }
             }
-
             _ => {}
         }
     }

@@ -37,6 +37,7 @@ pub(crate) fn frozen_block_images(
     pad_rows: f32,
 ) -> Vec<FrozenImage> {
     let pad = pad_rows * cell_h;
+
     let mut out = Vec::new();
 
     for p in placements {

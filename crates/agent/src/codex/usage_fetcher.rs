@@ -96,6 +96,7 @@ fn read_rate_limits(
         .map_err(|error| error.to_string())?;
 
     let deadline = Instant::now() + FETCH_TIMEOUT;
+
     let mut requested_limits = false;
 
     loop {
@@ -112,7 +113,6 @@ fn read_rate_limits(
         let message = match messages.recv_timeout(remaining.min(Duration::from_millis(50))) {
             Ok(message) => message,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
-
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 return Err("Codex app-server closed its output".into());
             }
@@ -137,7 +137,6 @@ fn read_rate_limits(
 
                 requested_limits = true;
             }
-
             Some(2) if requested_limits => return parse_rate_limits(&message),
             _ => {}
         }

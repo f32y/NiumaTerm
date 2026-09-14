@@ -48,6 +48,7 @@ pub(crate) fn shell_items(detail: &ShellDetail) -> Vec<Item> {
 /// replaced rather than failing the read.
 fn read_tail(path: &str) -> Option<String> {
     let mut file = File::open(path).ok()?;
+
     let len = file.metadata().ok()?.len();
 
     if len > MAX_OUTPUT_BYTES {

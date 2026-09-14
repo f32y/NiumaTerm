@@ -29,7 +29,9 @@ fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>)
 
     let window = cx.update(|cx| {
         gpui_component::init(cx);
+
         cx.set_global(AgentSettings::default());
+
         cx.set_global(AgentThreadDefaults::default());
 
         cx.open_window(Default::default(), |window, cx| {
@@ -108,6 +110,7 @@ fn prepare_local_replay(pane: &mut AgentPane, cx: &App) -> RecoveryIdentity {
 
     let ResumeStart::ReadReplay(request) = ({
         let mut guard = pane.session.borrow_mut();
+
         let state = &mut *guard;
 
         state.restore.begin(
@@ -122,6 +125,7 @@ fn prepare_local_replay(pane: &mut AgentPane, cx: &App) -> RecoveryIdentity {
 
     let ReplayLoaded::Restart(identity) = ({
         let mut guard = pane.session.borrow_mut();
+
         let state = &mut *guard;
 
         state.restore.loaded(
@@ -142,6 +146,7 @@ fn prepare_local_replay(pane: &mut AgentPane, cx: &App) -> RecoveryIdentity {
 #[gpui::test]
 fn failed_resume_keeps_the_transcript_and_current_controls(cx: &mut TestAppContext) {
     let (pane, window) = open_pane(cx);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     cx.update(|_, cx| {
@@ -195,6 +200,7 @@ fn failed_resume_keeps_the_transcript_and_current_controls(cx: &mut TestAppConte
 #[gpui::test]
 fn failed_replacement_keeps_old_rows_and_never_publishes_pending_history(cx: &mut TestAppContext) {
     let (pane, window) = open_pane(cx);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     cx.update(|_, cx| {
@@ -222,6 +228,7 @@ fn failed_replacement_keeps_old_rows_and_never_publishes_pending_history(cx: &mu
 
             {
                 let mut guard = pane.session.borrow_mut();
+
                 let state = &mut *guard;
 
                 state.restore.failed(&mut state.runtime)
@@ -242,6 +249,7 @@ fn local_history_waits_for_ready_and_repeated_ready_does_not_erase_new_rows(
     cx: &mut TestAppContext,
 ) {
     let (pane, window) = open_pane(cx);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     cx.update(|_, cx| {
@@ -289,11 +297,13 @@ fn local_history_waits_for_ready_and_repeated_ready_does_not_erase_new_rows(
 #[gpui::test]
 fn resumed_codex_controls_keep_provider_values_instead_of_local_defaults(cx: &mut TestAppContext) {
     let (pane, window) = open_pane(cx);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     let settings = cx.update(|_, cx| {
         pane.update(cx, |pane, cx| {
             install_backend(pane);
+
             pane.history_ui.data.sessions = vec![summary()];
             pane.history_ui.mode = RecentSessionsMode::Open;
 
@@ -337,6 +347,7 @@ fn old_backend_events_during_disk_read_leave_visible_rows_and_settings_untouched
     cx: &mut TestAppContext,
 ) {
     let (pane, window) = open_pane(cx);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     cx.update(|_, cx| {
@@ -359,6 +370,7 @@ fn old_backend_events_during_disk_read_leave_visible_rows_and_settings_untouched
 
             let ResumeStart::ReadReplay(request) = ({
                 let mut guard = pane.session.borrow_mut();
+
                 let state = &mut *guard;
 
                 state.restore.begin(

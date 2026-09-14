@@ -4,18 +4,8 @@ mod timeline;
 #[cfg(test)]
 mod tests;
 
-use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
-use crate::agent_tab::team::view::membership::MemberDraft;
-use crate::agent_tab::team::view::timeline::TimelineMirror;
-use crate::agent_tab::team::{TeamCommand, TeamRuntime};
-use crate::agent_tab::thread_controls::settings_pill;
-use crate::agent_tab::transcript::{TranscriptView, transcript_column};
-use crate::agent_tab::view::composer_layout::{
-    composer_card, composer_controls_row, composer_input_row,
-};
-use crate::agent_tab::{
-    AgentPane, ComposerEnterBehavior, StopResponseIcon, composer_enter_behavior,
-};
+use std::collections::BTreeSet;
+
 use gpui::prelude::*;
 use gpui::{
     Anchor, AnyElement, App, Context, Entity, FocusHandle, Focusable, Render, Subscription, Window,
@@ -34,7 +24,19 @@ use nmt_agent::team::discussion::{DiscussionMode, DiscussionState, PauseReason};
 use nmt_agent::team::identity::{MemberId, RoomId};
 use nmt_agent::team::session::TeamError;
 use rust_i18n::t;
-use std::collections::BTreeSet;
+
+use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
+use crate::agent_tab::team::view::membership::MemberDraft;
+use crate::agent_tab::team::view::timeline::TimelineMirror;
+use crate::agent_tab::team::{TeamCommand, TeamRuntime};
+use crate::agent_tab::thread_controls::settings_pill;
+use crate::agent_tab::transcript::{TranscriptView, transcript_column};
+use crate::agent_tab::view::composer_layout::{
+    composer_card, composer_controls_row, composer_input_row,
+};
+use crate::agent_tab::{
+    AgentPane, ComposerEnterBehavior, StopResponseIcon, composer_enter_behavior,
+};
 
 pub struct TeamPane {
     runtime: Entity<TeamRuntime>,
@@ -139,7 +141,6 @@ impl TeamPane {
 
                 true
             }
-
             Err(error) => {
                 self.error = Some(match error {
                     TeamError::Unavailable => self
@@ -148,7 +149,6 @@ impl TeamPane {
                         .error()
                         .map(str::to_owned)
                         .unwrap_or_else(|| t!("team-unavailable").into_owned()),
-
                     error => error.to_string(),
                 });
 
@@ -262,14 +262,15 @@ impl TeamPane {
         {
             Ok(id) => {
                 self.selected.insert(id);
+
                 self.author.get_or_insert(id);
 
                 self.member_draft.clear(window, cx);
 
                 self.error = None;
+
                 window.close_dialog(cx);
             }
-
             Err(error) => self.error = Some(error.to_string()),
         }
 
@@ -694,6 +695,7 @@ impl TeamPane {
     fn status_text(&self, cx: &App) -> String {
         let runtime = self.runtime.read(cx);
         let room = runtime.room();
+
         let mut parts = Vec::new();
 
         for member in room
@@ -751,15 +753,12 @@ impl TeamPane {
                         PauseReason::Interaction(_) => t!("team-interaction-required"),
                         PauseReason::UncertainAttempt(_) => t!("team-response-uncertain"),
                         PauseReason::Budget => t!("team-budget-needed"),
-
                         PauseReason::ContextSelection | PauseReason::SummaryFailed(_) => {
                             t!("team-context-needed")
                         }
-
                         PauseReason::MemberUnavailable(_) | PauseReason::ModeratorUnavailable => {
                             t!("team-unavailable")
                         }
-
                         _ => t!("team-continue-hint"),
                     };
 
@@ -828,6 +827,7 @@ impl Render for TeamPane {
                                 .label(t!("team-back"))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.inspected = None;
+
                                     this.focus(window, cx);
 
                                     cx.notify();
@@ -927,7 +927,6 @@ impl Render for TeamPane {
                                                             input.replace("\n", window, cx)
                                                         })
                                                     }
-
                                                     ComposerEnterBehavior::Submit
                                                     | ComposerEnterBehavior::ActivateOrSubmit => {
                                                         this.submit(window, cx)

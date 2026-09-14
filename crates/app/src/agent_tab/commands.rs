@@ -27,11 +27,9 @@ pub(super) fn validate_skill_binding(
 ) -> Result<Option<SkillReference>, String> {
     validate_core_skill_binding(input, binding, catalog).map_err(|error| match error {
         SkillError::Loading => t!("agent-command-skill-loading").into_owned(),
-
         SkillError::Unavailable(name) => {
             t!("agent-command-skill-unavailable", name = &name).into_owned()
         }
-
         SkillError::Disabled(name) => t!("agent-command-skill-disabled", name = &name).into_owned(),
     })
 }

@@ -76,6 +76,7 @@ pub(super) fn session_from_engine(
     let (tx, rx) = mpsc::channel();
     let poll = Poll::new().unwrap();
     let waker = Arc::new(Waker::new(poll.registry(), Token(0)).unwrap());
+
     let mut buffer = RenderBuffer::new(engine.cols() as usize, engine.rows() as usize);
 
     engine.snapshot_into(&mut buffer, 0, 0).unwrap();
@@ -198,6 +199,7 @@ fn current_directory_is_available_before_event_drain() {
         let mut engine = GhosttyTerminal::new(24, 4, 100).unwrap();
 
         engine.write_vt(format!("\x1b]7;{reported}\x07").as_bytes());
+
         engine.poll_pwd();
 
         let mut snapshot = engine.snapshot().unwrap();

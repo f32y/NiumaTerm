@@ -107,7 +107,9 @@ fn completions_keep_streamed_fields_and_report_the_matching_entry() {
     let mut content = TranscriptContent::default();
 
     content.append(entry(1, reasoning("shared", Some("keep this"))));
+
     content.append(entry(1, reply("shared", Some("streamed answer"))));
+
     content.append(entry(2, reply("shared", Some("later"))));
 
     assert_eq!(content.merge_completed(&reply("shared", None)), Some(1));
@@ -269,7 +271,9 @@ fn content_queries_respect_turns_blank_replies_and_latest_task_lists() {
     ));
 
     content.append(entry(1, reply("first", Some("answer"))));
+
     content.append(entry(1, reply("blank", Some(" \n"))));
+
     content.append(entry(2, reply("second", Some("other turn"))));
 
     assert_eq!(content.latest_agent_message(1), Some("answer"));
@@ -306,6 +310,7 @@ fn appends_move_content_and_metadata_without_cloning_them() {
     let original_text = text.as_ptr();
     let metadata = Metadata("local display data".into());
     let original_metadata = metadata.0.as_ptr();
+
     let mut content = TranscriptContent::default();
 
     content.append(TranscriptEntry {

@@ -30,7 +30,6 @@ mod tests;
 pub enum Version {
     /// `v1.2.0`, ordered by its three numbers.
     Release { major: u32, minor: u32, patch: u32 },
-
     /// `nightly-20260821-7567b41`. The date is the committer date as
     /// `yyyymmdd`, which orders numerically because it is zero-padded.
     Nightly { date: u32, commit: String },
@@ -44,6 +43,7 @@ impl Version {
 
 fn parse_release(label: &str) -> Option<Version> {
     let mut parts = label.strip_prefix('v')?.split('.');
+
     let major = number(parts.next()?)?;
     let minor = number(parts.next()?)?;
     let patch = number(parts.next()?)?;

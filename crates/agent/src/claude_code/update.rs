@@ -118,7 +118,6 @@ impl ProviderMaintenance for ClaudeMaintenance {
                     VersionStatus::unsupported(ProviderKind::Claude, None, error.message())
                 })
             }
-
             Err(error) => {
                 VersionStatus::unsupported(ProviderKind::Claude, None, &error.to_string())
             }
@@ -149,7 +148,6 @@ impl ProviderMaintenance for ClaudeMaintenance {
 
                 Ok(status)
             }
-
             Err(error) => {
                 status.support = DiscoverySupport::Unsupported {
                     reason: error.message().to_string(),

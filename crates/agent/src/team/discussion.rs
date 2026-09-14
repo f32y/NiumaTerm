@@ -124,13 +124,10 @@ pub struct Discussion {
 pub enum DiscussionError {
     #[error("select distinct members and an available report author or moderator")]
     InvalidParticipants,
-
     #[error("this room already has an active discussion")]
     AlreadyActive,
-
     #[error("wait for current work to settle before changing discussion mode")]
     StillRunning,
-
     #[error("this discussion has completed")]
     Completed,
 }

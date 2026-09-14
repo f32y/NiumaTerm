@@ -22,7 +22,6 @@ pub enum BlockEvent {
     /// the whole frozen history drops with the screen (the PTY side already
     /// cleared the engine blocks).
     HistoryCleared,
-
     /// A trusted `;D` froze the command into a finished engine block. The
     /// store keeps only the handle; rendering reads the block through
     /// `BlockRef`. `rows` is the row count at finish time, cached app-side
@@ -32,7 +31,6 @@ pub enum BlockEvent {
         handle: ghostty::BlockHandle,
         rows: usize,
     },
-
     /// The engine's current live block list, oldest first, with per-block
     /// row counts. Emitted after resize (eager reflow bumps generations and
     /// re-wraps rows) and after each finish (budget eviction may have
@@ -83,23 +81,18 @@ pub enum TerminalEventType {
 pub enum Msg {
     /// Data that should be written to the PTY.
     Input(Cow<'static, [u8]>),
-
     Shutdown,
-
     Resize(WinsizeBuilder),
     Scroll(isize),
     ScrollTo(u64),
     ScrollToEnd,
     Theme(Box<Colors>),
-
     CursorShape {
         shape: CursorShape,
         reply: Reply<()>,
     },
-
     Query(Query),
     Checkpoint(CheckpointRequest),
-
     /// Update the local PowerShell resize workaround without waiting behind input.
     PowerShellCompatibility(bool),
 }
@@ -132,78 +125,59 @@ impl MsgSender {
 pub enum TerminalEvent {
     /// New terminal content available.
     Render,
-
     /// Terminal content changed — lightweight notification (no damage payload).
     /// Damage versions travel in the published frame.
     TerminalDamaged(usize),
-
     /// Graphics update available from terminal.
     UpdateGraphics {
         route_id: usize,
         queues: UpdateQueues,
     },
-
     /// Window title change.
     Title(String),
-
     /// Window title change.
     TitleWithSubtitle(String, String),
-
     /// The surface entered (`true`) or left (`false`) an interactive state:
     /// a full-screen program (alt-screen). Edge-triggered.
     InteractiveState(bool),
-
     /// A full-screen program entered (`true`) or left (`false`) the alt-screen — a
     /// mirror of [`Self::InteractiveState`]. Edge-triggered. Lets the app suppress
     /// command-block chrome only when a TUI repaints the whole grid.
     AltScreen(bool),
-
     /// The OSC 133 prompt/command/output lifecycle is currently trusted for
     /// command/prompt block ownership. Edge-triggered by the PTY prompt sniffer.
     PromptBoundaryTrusted(bool),
-
     /// A trusted OSC 133 prompt-start (`;A`) opened an active prompt region.
     PromptStarted,
-
     /// A batch of block events from the PTY thread:
     /// finished-block handles and lifecycle changes, in stream order.
     BlockBatch(Vec<BlockEvent>),
-
     /// An integrated-shell command completed under a trusted OSC 133 lifecycle
     /// (command-blocks). Emitted by the PTY prompt sniffer at the command-finished
     /// (`;D`) mark; the app assigns the per-session block index and stores it.
     CommandFinished(CommandCapture),
-
     /// An integrated-shell command began executing under a trusted OSC 133 lifecycle.
     /// Emitted at the command-output-start (`;C`) mark; the app tracks it as the
     /// session's in-flight block until `CommandFinished`, loss of boundary trust, or
     /// session exit clears it.
     CommandStarted(CommandStart),
-
     /// Reset to the default window title.
     ResetTitle,
-
     Cwd(String),
     ReadReady,
-
     /// Request to store a text string in the clipboard.
     ClipboardStore(ClipboardType, String),
-
     /// Progress bar report from OSC 9;4 sequence
     ProgressReport(ProgressReport),
-
     /// Terminal bell ring.
     Bell,
-
     /// Desktop notification from OSC 9 or OSC 777.
     DesktopNotification {
         title: String,
         body: String,
     },
-
     /// Shutdown request.
     Exit,
-
     /// Leave current terminal.
     CloseTerminal(usize),
 }
@@ -214,18 +188,14 @@ impl Debug for TerminalEvent {
             TerminalEvent::ClipboardStore(ty, text) => {
                 write!(f, "ClipboardStore({ty:?}, {text})")
             }
-
             TerminalEvent::Title(title) => write!(f, "Title({title})"),
-
             TerminalEvent::TitleWithSubtitle(title, subtitle) => {
                 write!(f, "TitleWithSubtitle({title}, {subtitle})")
             }
-
             TerminalEvent::InteractiveState(on) => write!(f, "InteractiveState({on})"),
             TerminalEvent::AltScreen(on) => write!(f, "AltScreen({on})"),
             TerminalEvent::PromptBoundaryTrusted(on) => write!(f, "PromptBoundaryTrusted({on})"),
             TerminalEvent::PromptStarted => write!(f, "PromptStarted"),
-
             TerminalEvent::CommandFinished(cmd) => {
                 write!(
                     f,
@@ -233,37 +203,28 @@ impl Debug for TerminalEvent {
                     cmd.command, cmd.exit_code
                 )
             }
-
             TerminalEvent::CommandStarted(cmd) => {
                 write!(f, "CommandStarted({})", cmd.command)
             }
-
             TerminalEvent::BlockBatch(events) => {
                 write!(f, "BlockBatch({} events)", events.len())
             }
-
             TerminalEvent::ProgressReport(report) => {
                 write!(f, "ProgressReport({:?})", report)
             }
-
             TerminalEvent::ResetTitle => write!(f, "ResetTitle"),
             TerminalEvent::ReadReady => f.write_str("ReadReady"),
             TerminalEvent::Cwd(cwd) => f.debug_tuple("Cwd").field(cwd).finish(),
             TerminalEvent::Render => write!(f, "Render"),
-
             TerminalEvent::TerminalDamaged(route_id) => {
                 write!(f, "TerminalDamaged route {route_id}")
             }
-
             TerminalEvent::Bell => write!(f, "Bell"),
-
             TerminalEvent::DesktopNotification { title, body } => {
                 write!(f, "DesktopNotification({title}, {body})")
             }
-
             TerminalEvent::Exit => write!(f, "Exit"),
             TerminalEvent::CloseTerminal(route) => write!(f, "CloseTerminal {route}"),
-
             TerminalEvent::UpdateGraphics { route_id, .. } => {
                 write!(f, "UpdateGraphics({route_id})")
             }
@@ -298,16 +259,12 @@ impl EventListener for VoidListener {
 pub enum ProgressState {
     /// Remove/hide the progress bar (state 0)
     Remove,
-
     /// Set progress with a specific percentage (state 1)
     Set,
-
     /// Show error state (state 2)
     Error,
-
     /// Indeterminate/pulsing progress (state 3)
     Indeterminate,
-
     /// Paused progress (state 4)
     Pause,
 }

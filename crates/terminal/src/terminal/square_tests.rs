@@ -69,6 +69,7 @@ fn wrapline_updates_preserve_other_cell_flags() {
     let mut s = Square(0);
 
     s.set_cell_flags(CellFlags::GRAPHEME);
+
     s.set_wrapline(true);
 
     assert!(s.wrapline());
@@ -86,9 +87,13 @@ fn fields_are_independent() {
     let mut s = Square(0);
 
     s.set_c('Z');
+
     s.set_style_id(0x1234);
+
     s.set_extras_id(Some(0x5678));
+
     s.set_wide(Wide::Wide);
+
     s.set_wrapline(true);
 
     assert_eq!(s.c(), 'Z');
@@ -141,6 +146,7 @@ fn bg_only_preserves_wrapline() {
     let mut s = Square(0);
 
     s.set_wrapline(true);
+
     s.set_bg_rgb(1, 2, 3);
 
     assert!(s.wrapline());

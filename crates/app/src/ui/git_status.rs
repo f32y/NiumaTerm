@@ -78,6 +78,7 @@ pub(crate) fn fetch_snapshot(root: &str, branch_max_age: Duration) -> Result<Git
     )?;
 
     let entries = parse_status_z(&status);
+
     let mut counts: HashMap<String, (u64, u64)> = HashMap::new();
 
     for args in [
@@ -146,7 +147,6 @@ fn count_file_lines(root: &str, path: &str) -> u64 {
     loop {
         match reader.read(&mut buf) {
             Ok(0) => break,
-
             Ok(n) => {
                 let chunk = &buf[..n];
 
@@ -157,7 +157,6 @@ fn count_file_lines(root: &str, path: &str) -> u64 {
                 newlines += chunk.iter().filter(|b| **b == b'\n').count() as u64;
                 last = chunk[n - 1];
             }
-
             Err(_) => return 0,
         }
     }
@@ -198,7 +197,6 @@ pub(crate) fn fetch_file_diff(root: &str, path: &str, untracked: bool) -> Vec<Di
 
             parse_diff(&text)
         }
-
         Err(err) => vec![line(DiffLineKind::FileHeader, err)],
     }
 }
@@ -215,6 +213,7 @@ fn cap_lines(iter: impl Iterator<Item = DiffLine>) -> Vec<DiffLine> {
 
     if lines.len() > MAX_DIFF_LINES {
         lines.truncate(MAX_DIFF_LINES);
+
         lines.push(line(DiffLineKind::Truncated, "··· diff truncated ···"));
     }
 
@@ -277,7 +276,6 @@ pub(crate) fn parse_numstat_z(raw: &[u8]) -> Vec<(String, u64, u64)> {
                     None => continue,
                 }
             }
-
             Some(path) => path.to_string(),
         };
 
@@ -489,7 +487,6 @@ impl GitStatusModel {
 
                         None
                     }
-
                     Some(root) => {
                         // Different repo: drop the stale snapshot now so
                         // the old repo's data never shows for the new one.
@@ -530,7 +527,6 @@ impl GitStatusModel {
                     this.snapshot = Some(snapshot);
                     this.snapshot_seq += 1;
                 }
-
                 Err(err) => warn!("git status refresh failed: {err}"),
             }
 

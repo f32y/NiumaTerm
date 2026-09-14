@@ -1,10 +1,10 @@
-use crate::hook_store::{event_commands, is_marked, uninstall_from};
 use std::{env, fs, process};
 
 use serde_json::{Map, from_str, to_string, to_string_pretty};
 
 use crate::AGENT_HOOK_PROTOCOL_VERSION;
 use crate::codex::hook::*;
+use crate::hook_store::{event_commands, is_marked, uninstall_from};
 
 fn fixture_events() -> Vec<Value> {
     let fixture: Value = from_str(include_str!("../../tests/fixtures/codex-0.144.1.json")).unwrap();
@@ -155,6 +155,7 @@ fn reinstall_migrates_legacy_entries_without_duplicates() {
 #[test]
 fn uninstall_removes_only_niuma_entries_and_prunes_empty_groups() {
     let original = user_hooks();
+
     let mut settings = original.clone();
 
     REGISTRATION
@@ -246,6 +247,7 @@ fn complete_registration_with_an_old_command_is_stale() {
     fs::create_dir_all(&dir).unwrap();
 
     let path = dir.join("hooks.json");
+
     let mut hooks = Map::new();
 
     for event in HOOK_EVENTS {

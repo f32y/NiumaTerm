@@ -170,7 +170,6 @@ pub enum PaneNodeState {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         grid_size: Option<(u16, u16)>,
     },
-
     #[serde(rename = "split")]
     Split {
         axis: PaneSplitAxis,

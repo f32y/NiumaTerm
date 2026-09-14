@@ -22,6 +22,7 @@ const FRAMES: usize = 1_000;
 /// (worst case: novel program output, e.g. `cat` of a source tree).
 fn line_text(i: usize) -> String {
     let body = format!("{i:06} the quick brown fox jumps over the lazy dog {i:x} 0123456789abcdef");
+
     let mut s: String = body.chars().take(CELLS_PER_LINE).collect();
 
     while s.chars().count() < CELLS_PER_LINE {
@@ -41,14 +42,17 @@ fn profile_full_frame_pipeline() -> Result<(), &'static str> {
     // 1. parse (write_vt)
     let mut engine = GhosttyTerminal::new(COLS, ROWS, 1_000_000).unwrap();
     let mut vt = String::new();
+
     let t = Instant::now();
 
     for i in 0..LINES {
         vt.push_str(&line_text(i));
+
         vt.push_str("\r\n");
 
         if vt.len() >= 16 * 1024 {
             engine.write_vt(vt.as_bytes());
+
             vt.clear();
         }
     }
@@ -63,6 +67,7 @@ fn profile_full_frame_pipeline() -> Result<(), &'static str> {
     // A persistent RenderBuffer is reused across frames, as production does.
     let gens = GenerationMap::new();
     let theme = FrameTheme::default();
+
     let mut render_buf = RenderBuffer::new(COLS as usize, ROWS as usize);
     let mut capture_total = Duration::ZERO;
     let mut extract_total = Duration::ZERO;
@@ -72,6 +77,7 @@ fn profile_full_frame_pipeline() -> Result<(), &'static str> {
         let s = Instant::now();
 
         engine.snapshot_into(&mut render_buf, 0, 0).unwrap();
+
         capture_total += s.elapsed();
 
         let e = Instant::now();
@@ -86,6 +92,7 @@ fn profile_full_frame_pipeline() -> Result<(), &'static str> {
     // Keep the cursor on row 0 and alternate one cell so every iteration has
     // exactly one content-dirty row while cursor rendering stays unchanged.
     engine.write_vt(b"\x1b[1;1H");
+
     engine.snapshot_into(&mut render_buf, 0, 0).unwrap();
 
     let mut previous =
@@ -97,6 +104,7 @@ fn profile_full_frame_pipeline() -> Result<(), &'static str> {
 
     for i in 0..FRAMES + WARMUP_FRAMES {
         engine.write_vt(if i % 2 == 0 { b"\rA" } else { b"\rB" });
+
         engine.snapshot_into(&mut render_buf, 0, 0).unwrap();
 
         let e = Instant::now();
@@ -166,6 +174,7 @@ fn profile_full_frame_pipeline() -> Result<(), &'static str> {
     let per_frame_incremental = incremental_total / FRAMES as u32;
     let per_frame_shape = Duration::from_secs_f64(shape.as_secs_f64() / LINES as f64 * ROWS as f64);
     let ns_cell = |d: Duration, n: f64| d.as_nanos() as f64 / n;
+
     let mut report = String::new();
 
     let _ = writeln!(

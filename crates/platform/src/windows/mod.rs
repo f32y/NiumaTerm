@@ -40,11 +40,10 @@ mod spsc;
 mod tests;
 
 use std::ffi::OsStr;
-use std::io::{self};
 use std::iter::{self, once};
 use std::os::windows::ffi::OsStrExt;
 use std::sync::mpsc::TryRecvError;
-use std::sync::{self};
+use std::{io, sync};
 
 use crate::windows::child::ChildExitWatcher;
 use crate::windows::conpty::Conpty as Backend;
@@ -119,7 +118,9 @@ impl ProcessReadWrite for Pty {
         // ConPTY anon pipes have no real OS readiness source; the worker threads and
         // the child-exit callback signal the loop through this `Waker` instead.
         self.conout.soft().set_waker(waker.clone());
+
         self.conin.soft().set_waker(waker.clone());
+
         self.child_watcher.set_waker(waker.clone());
 
         Ok(())
@@ -228,6 +229,7 @@ fn command_line(shell: &str, args: &[String]) -> String {
 
     for arg in args {
         out.push(' ');
+
         out.push_str(&quote_command_arg(arg));
     }
 
@@ -248,22 +250,25 @@ fn quote_command_arg(arg: &str) -> String {
     for ch in arg.chars() {
         match ch {
             '\\' => backslashes += 1,
-
             '"' => {
                 out.extend(iter::repeat_n('\\', backslashes * 2 + 1));
+
                 out.push('"');
+
                 backslashes = 0;
             }
-
             _ => {
                 out.extend(iter::repeat_n('\\', backslashes));
+
                 out.push(ch);
+
                 backslashes = 0;
             }
         }
     }
 
     out.extend(iter::repeat_n('\\', backslashes * 2));
+
     out.push('"');
 
     out

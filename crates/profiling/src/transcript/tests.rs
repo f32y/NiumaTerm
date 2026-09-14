@@ -18,8 +18,11 @@ fn switch_controls_inclusive_thread_local_samples_and_draining() {
     let buffer = black_box(vec![0_u8; 512]);
 
     black_box(&buffer);
+
     drop(buffer);
+
     drop(inner);
+
     drop(outer);
 
     let totals = take_samples();

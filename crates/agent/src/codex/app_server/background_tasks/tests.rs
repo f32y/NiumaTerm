@@ -479,6 +479,7 @@ fn notification_thread_ids_are_read_from_every_known_location() {
 #[test]
 fn descendant_requests_page_through_subagent_spawns() {
     let mut tasks = rooted();
+
     let request = tasks.descendant_request(7, None).expect("root is known");
 
     assert_eq!(request["method"], "thread/list");
@@ -603,6 +604,7 @@ fn a_delayed_query_response_cannot_replace_a_newer_live_state() {
     let mut tasks = rooted();
 
     tasks.observe_parent_item(&spawn_item("thr_child"));
+
     tasks.descendant_request(7, None);
 
     // The child finishes live while the query is still in flight.
@@ -650,7 +652,9 @@ fn a_failed_query_keeps_known_rows_and_only_reports_unavailable_when_empty() {
     let mut populated = rooted();
 
     populated.observe_parent_item(&spawn_item("thr_child"));
+
     populated.descendant_request(7, None);
+
     populated.fail_query(7, "thread/list unsupported");
 
     let snapshot = populated.snapshot().expect("registry exists");
@@ -756,6 +760,7 @@ fn selecting_another_root_drops_in_flight_reads() {
     let mut tasks = rooted();
 
     tasks.observe_parent_item(&spawn_item("thr_child"));
+
     tasks.transcript_request(9, "thr_child");
 
     tasks.set_root("thr_other_parent");

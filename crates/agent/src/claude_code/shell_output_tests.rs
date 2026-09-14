@@ -36,7 +36,6 @@ fn command_item(detail: &ShellDetail) -> (String, Option<String>, Option<String>
             status,
             ..
         } => (command, aggregated_output, status),
-
         other => panic!("a shell renders as a command card, got {other:?}"),
     }
 }
@@ -74,6 +73,7 @@ fn a_settled_command_carries_the_status_its_row_reports() {
 #[test]
 fn an_output_file_longer_than_the_bound_is_shown_from_its_end() {
     let overflow = MAX_OUTPUT_BYTES as usize + 1024;
+
     let mut contents = vec![b'a'; overflow];
 
     contents.extend_from_slice(b"final line\n");

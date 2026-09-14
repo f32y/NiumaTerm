@@ -45,6 +45,7 @@ pub(crate) fn block_list_render_metrics(
     let items = store.items();
     let store_len = items.len();
     let item_count = store_len + 1;
+
     let mut frozen_px = 0.0;
     let mut offset_px = 0.0;
     let mut last_item_px = 0.0;
@@ -91,7 +92,6 @@ pub(crate) fn block_list_render_metrics(
 pub(crate) enum ListReconcile {
     /// Replace the mirror wholesale with the new item count.
     Reset,
-
     /// Drop `front_evict` items from the front, then replace the
     /// `tail_splice` range with that many new items.
     Patch {
@@ -145,10 +145,8 @@ pub(crate) fn plan_list_reconcile(
 pub(crate) enum RemeasureScope {
     /// Layout inputs (cols/cell/pad) changed: every item height is stale.
     All,
-
     /// Content changed: only the last frozen item and the live tail moved.
     Tail,
-
     None,
 }
 

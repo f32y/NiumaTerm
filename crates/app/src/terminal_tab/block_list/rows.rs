@@ -1,9 +1,6 @@
-use crate::terminal_tab::block_list::chrome::{
-    DurationLabels, FrozenItemChrome, item_accent, item_header,
-};
-use crate::terminal_tab::block_list::selection::expand_wide_span;
-use crate::terminal_tab::block_list::{FrozenRow, FrozenView};
-use crate::terminal_tab::frame::{EngineRowBuilder, TerminalColor, TerminalLine};
+use std::sync::Arc;
+use std::{collections, ops};
+
 use nmt_terminal::block_store::BlockItem;
 use nmt_terminal::ghostty::BlockHandle;
 use nmt_terminal::grid_emit::row_selection_for;
@@ -11,8 +8,13 @@ use nmt_terminal::selection::SelectionRange;
 use nmt_terminal::session::BlockPoint as FrozenPoint;
 use nmt_terminal::session::interaction::block_selection_span;
 use nmt_terminal::session::page::{PageSource, RowPage};
-use std::sync::Arc;
-use std::{collections, ops};
+
+use crate::terminal_tab::block_list::chrome::{
+    DurationLabels, FrozenItemChrome, item_accent, item_header,
+};
+use crate::terminal_tab::block_list::selection::expand_wide_span;
+use crate::terminal_tab::block_list::{FrozenRow, FrozenView};
+use crate::terminal_tab::frame::{EngineRowBuilder, TerminalColor, TerminalLine};
 
 /// Metadata determines the item's height even while its visible pages are
 /// still being materialized by the engine owner.

@@ -11,6 +11,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use nmt_config::remote_session::RemoteSessionConfig;
+use nmt_platform::environment::data_dir;
 use nmt_platform::windows::environment::computer_name;
 use nmt_remote_net::{
     AttachTarget, HostConfig, HostHandle, PairingCode, ProtocolSessionOptions, RemoteSession,
@@ -20,8 +21,6 @@ use parking_lot::Mutex;
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
-
-use nmt_platform::environment::data_dir;
 
 struct RemoteHostState {
     handle: Option<HostHandle>,
@@ -73,7 +72,6 @@ pub fn reconcile(config: &RemoteSessionConfig) {
             state.handle = Some(handle);
             state.started_with = Some(desired);
         }
-
         Err(e) => {
             warn!("failed to start remote host service: {e}");
             state.started_with = None;
@@ -143,7 +141,6 @@ pub fn known_hosts() -> Vec<KnownHost> {
 
             Vec::new()
         }),
-
         Err(_) => Vec::new(),
     }
 }
@@ -161,6 +158,7 @@ pub fn forget_host(host_id: &str) {
     let mut hosts = known_hosts();
 
     hosts.retain(|h| h.host_id != host_id);
+
     save_known_hosts(&hosts);
 }
 
@@ -182,7 +180,9 @@ pub fn pair_with_code(code_text: &str, name: &str) -> Result<KnownHost, String> 
     let mut hosts = known_hosts();
 
     hosts.retain(|h| h.host_id != host.host_id);
+
     hosts.push(host.clone());
+
     save_known_hosts(&hosts);
 
     Ok(host)

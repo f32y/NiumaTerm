@@ -87,10 +87,8 @@ pub struct ReplayItem {
 pub enum ForkAnchor {
     /// The Claude transcript record the copied prefix stops before.
     ClaudeBefore(String),
-
     /// The last Codex turn the copy keeps, inclusive.
     CodexThrough(String),
-
     /// A DeepSeek event seq lying inside the last turn the copy keeps.
     DeepSeekThrough(u64),
 }

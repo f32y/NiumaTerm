@@ -22,8 +22,11 @@ pub fn show_error_dialog(title: &str, message: &str) {
     let alert = NSAlert::new(main_thread);
 
     alert.setAlertStyle(NSAlertStyle::Critical);
+
     alert.setMessageText(&NSString::from_str(title));
+
     alert.setInformativeText(&NSString::from_str(message));
+
     alert.runModal();
 }
 

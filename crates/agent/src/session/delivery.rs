@@ -16,13 +16,11 @@ enum QueuedPromptDelivery {
     /// nothing about it, so assistant output arriving after the submit is the
     /// only sign it landed, and the turn's end is the last chance to say so.
     RunningTurn,
-
     /// The harness holds the prompt until the running turn ends and then opens
     /// a turn of its own for it. The prompt therefore heads that next turn,
     /// and drawing it into the finished one would put it above output written
     /// before it was ever submitted.
     FollowingTurn,
-
     /// The backend republishes its own pending inbox, so a prompt waiting
     /// behind the running turn is known rather than guessed at. Guessing
     /// beside it would show a message as sent while the snapshot still lists
@@ -103,13 +101,11 @@ impl MessageDelivery {
         match outcome {
             SendOutcome::NotReady => Submission::NotReady,
             SendOutcome::Rejected { message } => Submission::Rejected { message },
-
             SendOutcome::Steered => {
                 self.pending.push_back(QueuedPrompt::local(text));
 
                 Submission::Queued
             }
-
             SendOutcome::StartedTurn => {
                 self.begin_turn();
 
@@ -189,6 +185,7 @@ impl MessageDelivery {
     pub fn completed(&mut self) {
         self.active = false;
         self.unanswered = None;
+
         self.agent_message();
     }
 
@@ -209,7 +206,9 @@ impl MessageDelivery {
     pub(crate) fn start_failed(&mut self) {
         self.active = false;
         self.unanswered = None;
+
         self.pending.clear();
+
         self.confirmed = 0;
     }
 
@@ -278,7 +277,9 @@ impl MessageDelivery {
         self.turn = 0;
         self.active = false;
         self.unanswered = None;
+
         self.pending.clear();
+
         self.published_prompt = None;
         self.confirmed = 0;
     }

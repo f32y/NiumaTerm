@@ -41,7 +41,9 @@ fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>)
 
     let window = cx.update(|cx| {
         gpui_component::init(cx);
+
         cx.set_global(AgentSettings::default());
+
         cx.set_global(AgentThreadDefaults::default());
 
         cx.open_window(Default::default(), |window, cx| {
@@ -74,6 +76,7 @@ fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>)
             ));
 
             pane.session.borrow_mut().runtime.ready();
+
             pane.restore_question_drafts();
         })
     });
@@ -84,6 +87,7 @@ fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>)
 #[gpui::test]
 fn question_editors_keep_multiline_text_and_mask_secrets(cx: &mut TestAppContext) {
     let (pane, window) = open_pane(cx);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
     let mut plain = question("Describe the change", false, &[]);
 
@@ -241,6 +245,7 @@ fn a_question_with_no_options_cannot_trap_the_highlight() {
 #[gpui::test]
 fn confirmed_secret_answer_releases_its_widget_and_reveals_the_next_batch(cx: &mut TestAppContext) {
     let (pane, window) = open_pane(cx);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
     let mut secret = question("Token", false, &[]);
 
@@ -333,6 +338,7 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
     cx: &mut TestAppContext,
 ) {
     let (pane, window) = open_pane(cx);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
 
     let asynchronous = QuestionRequest {
@@ -441,6 +447,7 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
 #[gpui::test]
 fn a_new_request_does_not_reuse_the_expired_answer(cx: &mut TestAppContext) {
     let (pane, window) = open_pane(cx);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
     let mut question = question("Answer", false, &[]);
 
@@ -529,6 +536,7 @@ fn a_new_request_does_not_reuse_the_expired_answer(cx: &mut TestAppContext) {
 #[gpui::test]
 fn question_editors_survive_unshown_batches_and_reused_positions(cx: &mut TestAppContext) {
     let (pane, window) = open_pane(cx);
+
     let mut cx = VisualTestContext::from_window(window.into(), cx);
     let mut prompt = question("Answer", false, &[]);
 

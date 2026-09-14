@@ -1,7 +1,8 @@
-use nmt_agent::background_task::BackgroundTaskKey;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+
+use nmt_agent::background_task::BackgroundTaskKey;
 
 pub(super) type ChildReaders = Rc<RefCell<HashMap<(u64, BackgroundTaskKey), usize>>>;
 

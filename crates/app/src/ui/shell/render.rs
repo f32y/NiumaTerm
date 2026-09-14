@@ -43,6 +43,7 @@ impl ShellChrome {
             && let Some(Some(root)) = window.root::<Root>()
         {
             cx.observe(&root, |_, _, cx| cx.notify()).detach();
+
             self.root_observed = true;
         }
     }

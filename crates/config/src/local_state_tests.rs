@@ -111,6 +111,7 @@ fn try_load_defaults_when_missing_and_errors_on_bad_toml() {
     assert_eq!(try_load_from(&path).unwrap(), LocalState::default());
 
     fs::create_dir_all(&dir).unwrap();
+
     fs::write(&path, "not [ valid").unwrap();
 
     assert!(try_load_from(&path).is_err());
@@ -210,6 +211,7 @@ fn windows_and_profile_updates_preserve_other_writers() {
     }];
 
     save_windows_to(&path, &windows).unwrap();
+
     save_agent_defaults_to(&path, &second).unwrap();
 
     let state = try_load_from(&path).unwrap();

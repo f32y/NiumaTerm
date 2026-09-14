@@ -5,18 +5,20 @@
 //! a capability question, so the picks are remembered here and seeded only
 //! where the harness does not restore them itself.
 
-use crate::agent_tab::AgentPane;
-use crate::agent_tab::profile::{
-    AgentKind, AgentThreadDefaults, agent_launch, defaults_from_thread_settings,
-};
+use std::collections::BTreeMap;
+
 use gpui::{App, Context};
 use nmt_agent::chat::ThreadSettings;
 use nmt_agent::profile::launch_model as effective_launch_model;
 use nmt_agent::session::settings::ConversationSettings;
 use nmt_config::local_state;
 use nmt_config::profile::AgentProfile;
-use std::collections::BTreeMap;
 use tracing::warn;
+
+use crate::agent_tab::AgentPane;
+use crate::agent_tab::profile::{
+    AgentKind, AgentThreadDefaults, agent_launch, defaults_from_thread_settings,
+};
 
 /// The picks remembered for this profile, falling back to the bucket its
 /// agent kind shares with unnamed profiles.

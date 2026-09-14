@@ -42,6 +42,7 @@ pub(crate) fn apply_ui_theme(value: Option<&UiTheme>, cx: &mut App) {
     let mode = theme.mode;
 
     ComponentTheme::global_mut(cx).apply_config(&theme);
+
     ComponentTheme::change(mode, None, cx);
 
     apply_ui_constants(&theme, ComponentTheme::global_mut(cx));
@@ -127,7 +128,6 @@ fn select_theme(name: String, cx: &mut App) {
 
             cx.refresh_windows();
         }
-
         Err(err) => warn!("failed to select theme {name}: {err}"),
     }
 }
@@ -165,7 +165,6 @@ pub(crate) fn watch_themes(editing: &Entity<SettingsEditing>, cx: &mut App) -> O
         }
     }) {
         Ok(watcher) => watcher,
-
         Err(err) => {
             warn!("failed to watch themes directory: {err}");
 
@@ -367,6 +366,7 @@ pub(crate) fn apply_window_translucency(cx: &mut App) {
     };
 
     theme.apply_config(&palette);
+
     apply_ui_constants(&palette, theme);
 
     if content_opacity < 1.0 {

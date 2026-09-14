@@ -324,7 +324,9 @@ impl Session {
         // The list is read now rather than when the picker opens, because the
         // picker refuses to open on an empty list and cannot wait for one.
         load_sessions(client.clone(), cwd.clone(), Arc::clone(&deliver));
+
         load_commands(client.clone(), session_id.clone(), Arc::clone(&deliver));
+
         load_skills(client.clone(), session_id.clone(), Arc::clone(&deliver));
 
         load_agent_presets(
@@ -374,7 +376,6 @@ impl Session {
                     Arc::clone(&self.deliver),
                 ) {
                     Ok(opened) => opened,
-
                     Err(message) => {
                         tracing::warn!("deepseek could not follow {thread_id}: {message}");
 
@@ -383,20 +384,26 @@ impl Session {
                 };
 
                 self.session_id = opened.session_id;
+
                 self.controls.clear();
+
                 self._downlinks = downlinks;
 
                 // Everything below describes the conversation this tab just
                 // left; carrying it over would attribute it to the new one.
                 self.running = false;
+
                 self.queued_prompt_ids.clear();
+
                 self.pending_approval = None;
                 self.pending_questions = None;
                 self.tools = ToolTracker::default();
                 self.usage = ProjectionTracker::default();
                 self.models = ModelDirectory::default();
                 self.subagent_activity = 0;
+
                 self.subagent_modes.clear();
+
                 self.workflows = WorkflowTracker::default();
 
                 // The directory belongs to the session, so the resumed one is
@@ -441,7 +448,6 @@ impl Session {
 
                 true
             }
-
             Err(error) => {
                 tracing::warn!("deepseek could not continue {thread_id}: {error}");
 
@@ -496,12 +502,10 @@ impl Session {
                 .pending_approval
                 .as_ref()
                 .map(|request| (&request.client_id, &request.event_id)),
-
             Some("question/resolved") => self
                 .pending_questions
                 .as_ref()
                 .map(|request| (&request.client_id, &request.event_id)),
-
             _ => None,
         };
 
@@ -516,11 +520,9 @@ impl Session {
             Some("question/resolved") if self.is_current_session(payload) => {
                 return self.expire_questions();
             }
-
             Some("nmt/connection-reset") if self.is_current_session(payload) => {
                 return self.on_connection_reset();
             }
-
             Some(SUBAGENTS_FRAME) => return self.on_subagents(payload),
             Some(SUBAGENT_TRANSCRIPT_FRAME) => return self.on_subagent_transcript(payload),
             Some(WORKFLOW_TRANSCRIPT_FRAME) => return workflow_transcript_events(payload),
@@ -529,7 +531,6 @@ impl Session {
             Some(COMMANDS_FRAME) => return self.on_commands(payload),
             Some(HISTORY_FRAME) => return history_events(payload),
             Some(SEARCH_FRAME) => return search_events(payload),
-
             // A queue snapshot for a conversation this tab has since left is
             // not this tab's inbox, but the frame still carries ordinary log
             // events, so it falls through to the mapping below instead of
@@ -537,7 +538,6 @@ impl Session {
             Some(QUEUE_FRAME) if self.is_current_session(payload) => {
                 return self.on_queue(payload);
             }
-
             Some(REPLAY_FRAME) => return self.on_replay(payload),
             Some(FORK_CHECKPOINTS_FRAME) => return fork_checkpoint_events(payload),
             Some(MODELS_FRAME) => return self.on_models(payload),
@@ -572,21 +572,21 @@ impl Session {
         for event in &events {
             match event {
                 Event::TurnStarted => self.running = true,
-
                 Event::TurnCompleted { .. } => {
                     self.running = false;
+
                     self.controls.retire_interrupt();
 
                     // A turn that ended cannot still be waiting on an answer.
                     self.pending_approval = None;
+
                     self.controls.retire_approval();
+
                     resolved.extend(self.expire_questions());
                 }
-
                 Event::ApprovalResolved => {
                     self.pending_approval = None;
                 }
-
                 _ => {}
             }
         }
@@ -636,6 +636,7 @@ impl Session {
 
     fn on_connection_reset(&mut self) -> Vec<Event> {
         self.controls.clear();
+
         self.pending_approval = None;
 
         let mut events = self.expire_questions();
@@ -672,7 +673,6 @@ impl Session {
                 BackgroundTaskRefs::DeepSeek { continuable, .. } => {
                     Some((task.key.id.clone(), *continuable))
                 }
-
                 _ => None,
             })
             .collect();

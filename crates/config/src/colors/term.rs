@@ -92,7 +92,9 @@ impl From<&Colors> for List {
         let mut list = List([ColorArray::default(); COUNT]);
 
         list.fill_named(colors);
+
         list.fill_cube();
+
         list.fill_gray_ramp();
 
         list

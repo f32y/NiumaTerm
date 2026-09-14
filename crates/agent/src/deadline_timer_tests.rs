@@ -22,6 +22,7 @@ fn idle_timer_rearms_for_earlier_work_and_stops_with_its_owner() {
         .set(Some(Instant::now() + Duration::from_secs(30)));
 
     timer.handle().set(Some(Instant::now()));
+
     rx.recv_timeout(Duration::from_secs(2)).unwrap();
 
     assert_eq!(

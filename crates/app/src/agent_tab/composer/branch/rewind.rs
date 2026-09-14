@@ -1,8 +1,9 @@
 pub(crate) use nmt_agent::session::branch::RewindAction;
 
+use std::borrow::Cow;
+
 use chrono::Local;
 use rust_i18n::t;
-use std::borrow::Cow;
 
 pub(crate) fn rewind_prompt_label(prompt: &str) -> String {
     let line = prompt

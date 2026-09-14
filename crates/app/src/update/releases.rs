@@ -55,7 +55,6 @@ const MAX_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 pub(crate) enum CheckError {
     /// The request never produced a response to read.
     Unreachable,
-
     /// A response arrived but was not the releases list.
     Unreadable,
 }
@@ -223,7 +222,6 @@ pub(crate) fn supersedes(current: &Version, candidate: &Release) -> bool {
                 patch,
             },
         ) => (major, minor, patch) > (current_major, current_minor, current_patch),
-
         (
             Version::Nightly {
                 date: current_date,
@@ -237,7 +235,6 @@ pub(crate) fn supersedes(current: &Version, candidate: &Release) -> bool {
             // at all means it is the newest the channel has.
             date > current_date || (date == current_date && commit != current_commit)
         }
-
         // A nightly is cut from the tip of the development line, so a release
         // published before that build existed is behind it however its number
         // reads, and installing it would move the installation backwards. One
@@ -253,7 +250,6 @@ pub(crate) fn supersedes(current: &Version, candidate: &Release) -> bool {
         (Version::Nightly { date, .. }, Version::Release { .. }) => candidate
             .published
             .is_some_and(|published| published > *date),
-
         // The other direction needs no such evidence: the nightly channel is
         // only ever cut from the tip, so what it publishes is never behind a
         // release.

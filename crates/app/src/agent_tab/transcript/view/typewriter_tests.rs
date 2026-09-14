@@ -10,12 +10,14 @@ const FRAME: Duration = Duration::from_millis(16);
 #[test]
 fn a_chunk_is_mostly_typed_within_a_quarter_second() {
     let start = Instant::now();
+
     let mut typewriter = Typewriter::start(0, 0, start);
 
     let mut now = start;
 
     while now < start + Duration::from_millis(250) {
         now += FRAME;
+
         typewriter.advance(40, now);
     }
 
@@ -31,6 +33,7 @@ fn a_chunk_is_mostly_typed_within_a_quarter_second() {
 #[test]
 fn a_single_waiting_character_arrives_at_typing_pace() {
     let start = Instant::now();
+
     let mut typewriter = Typewriter::start(0, 10, start);
 
     let waiting = typewriter.advance(11, start + Duration::from_millis(20));
@@ -44,6 +47,7 @@ fn a_single_waiting_character_arrives_at_typing_pace() {
 #[test]
 fn the_edge_never_passes_the_text() {
     let start = Instant::now();
+
     let mut typewriter = Typewriter::start(0, 0, start);
 
     let waiting = typewriter.advance(5, start + Duration::from_secs(10));

@@ -30,6 +30,7 @@ fn reused_captures_replace_metadata_and_revisions_together() {
     let mut buffer = RenderBuffer::new(20, 2);
 
     engine.write_vt(b"\x1b]0;first\x07one");
+
     engine.snapshot_into(&mut buffer, 7, 2).unwrap();
 
     assert_eq!((buffer.revision(), buffer.theme_revision()), (7, 2));
@@ -37,6 +38,7 @@ fn reused_captures_replace_metadata_and_revisions_together() {
     assert_eq!(buffer.viewport_top(), Some(0));
 
     engine.write_vt(b"\x1b]0;second\x07\rTWO");
+
     engine.snapshot_into(&mut buffer, 9, 3).unwrap();
 
     assert_eq!((buffer.revision(), buffer.theme_revision()), (9, 3));
@@ -95,6 +97,7 @@ fn content_changed_lifecycle() {
 
     // A batch sets it.
     engine.write_vt(b"a");
+
     engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     assert!(buf.take_content_changed(), "capture sets it");
@@ -102,8 +105,11 @@ fn content_changed_lifecycle() {
 
     // Coalesced updates between frames report true exactly once.
     engine.write_vt(b"b");
+
     engine.snapshot_into(&mut buf, 0, 0).unwrap();
+
     engine.write_vt(b"c");
+
     engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     assert!(buf.take_content_changed(), "coalesced updates → true");
@@ -183,6 +189,7 @@ fn buffer_resize_follows_engine() {
     let before_resize = buf.row_versions().to_vec();
 
     engine.resize(10, 2, 8, 16).unwrap();
+
     engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     assert_eq!((buf.cols(), buf.rows()), (10, 2));
@@ -208,6 +215,7 @@ fn row_versions_follow_and_consume_render_damage() {
     let mut buf = RenderBuffer::new(8, 3);
 
     engine.write_vt(b"\x1b[2;1H");
+
     engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let initial = buf.row_versions().to_vec();
@@ -220,6 +228,7 @@ fn row_versions_follow_and_consume_render_damage() {
     assert_eq!(buf.row_versions(), initial, "clean capture keeps versions");
 
     engine.write_vt(b"X");
+
     engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let partial = buf.row_versions().to_vec();
@@ -229,6 +238,7 @@ fn row_versions_follow_and_consume_render_damage() {
     assert_eq!(partial[2], initial[2]);
 
     engine.set_colors([1, 2, 3], [4, 5, 6], [7, 8, 9], &[[0; 3]; 256]);
+
     engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     assert!(
@@ -246,13 +256,17 @@ fn row_versions_accumulate_across_skipped_publications() {
     let mut buf = RenderBuffer::new(8, 3);
 
     engine.write_vt(b"\x1b[2;1H");
+
     engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let initial = buf.row_versions().to_vec();
 
     engine.write_vt(b"A");
+
     engine.snapshot_into(&mut buf, 0, 0).unwrap();
+
     engine.write_vt(b"\x1b[3;1HB");
+
     engine.snapshot_into(&mut buf, 0, 0).unwrap();
 
     let latest = buf.row_versions();

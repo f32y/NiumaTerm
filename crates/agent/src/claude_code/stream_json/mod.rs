@@ -327,17 +327,18 @@ impl Session {
         let started = match self.turn {
             TurnState::Idle if carries_model_output(&message) => {
                 self.accepted_identity = None;
+
                 self.transcript.begin_turn();
 
                 true
             }
-
             TurnState::Pending => true,
             TurnState::Idle | TurnState::Running => false,
         };
 
         if started {
             self.turn = TurnState::Running;
+
             events.push(Event::TurnStarted);
         }
 
@@ -349,13 +350,10 @@ impl Session {
                 Some("stream_event") if message["event"]["type"] == "message_start" => {
                     message["event"]["message"]["id"].as_str()
                 }
-
                 Some("assistant") => message["message"]["id"].as_str(),
-
                 Some("result") if message["is_error"].as_bool() == Some(false) => {
                     message["uuid"].as_str()
                 }
-
                 _ => None,
             };
 
@@ -363,6 +361,7 @@ impl Session {
                 let id = format!("response:{id}");
 
                 self.accepted_identity = Some(id.clone());
+
                 events.push(Event::ProviderTurnAccepted { id });
             }
         }
@@ -375,13 +374,11 @@ impl Session {
             Some("result") => events.extend(self.on_result(&message)),
             Some("control_request") => events.extend(self.on_control_request(&message)),
             Some("control_response") => events.extend(self.on_control_response(&message)),
-
             Some("control_cancel_request") => {
                 if let Some(id) = message["request_id"].as_str() {
                     events.extend(self.control.cancel_prompt(id));
                 }
             }
-
             _ => {}
         }
 
@@ -455,6 +452,7 @@ impl Session {
             }));
 
             messages.push(request);
+
             pending_effort = Some((request_id, effort));
         }
 
@@ -487,7 +485,6 @@ impl Session {
 
         let ticket = match self.process.write_tracked(messages) {
             Ok(ticket) => ticket,
-
             Err(error) => {
                 return SendOutcome::Rejected {
                     message: error.to_string(),
@@ -500,6 +497,7 @@ impl Session {
                 .record_admitted(id.clone(), RequestClass::Mutation, Instant::now());
 
             self.control.attach_input(&id, ticket.clone());
+
             self.control.track(id, PendingControlOperation::Other);
         }
 
@@ -520,6 +518,7 @@ impl Session {
         } else {
             self.turn = TurnState::Pending;
             self.accepted_identity = None;
+
             self.transcript.begin_turn();
 
             SendOutcome::StartedTurn
@@ -558,7 +557,9 @@ impl Session {
         }
 
         self.turn = TurnState::Pending;
+
         self.transcript.begin_turn();
+
         self.active_slash_command = Some(name.to_string());
 
         SlashCommandOutcome::Accepted
@@ -778,7 +779,9 @@ impl Session {
 
             if cancelled && ticket.as_ref().is_some_and(|ticket| ticket.is_batch()) {
                 self.process.abort();
+
                 events.extend(self.control.close(&message));
+
                 events.push(Event::Error { message: format!("{message} The entire settings-and-prompt batch was cancelled. Reopen the session before retrying."), fatal: true });
 
                 break;
@@ -828,6 +831,7 @@ impl Session {
         self.turn = TurnState::Idle;
 
         let message = "Claude exited before the control request completed.";
+
         let mut events = self.control.close(message);
 
         if self.compacting {
@@ -890,7 +894,6 @@ impl Session {
 
         let response = match decision {
             "accept" => json!({"behavior": "allow", "updatedInput": pending.input}),
-
             "acceptForSession" => {
                 let mut response = json!({"behavior": "allow", "updatedInput": pending.input});
 
@@ -900,7 +903,6 @@ impl Session {
 
                 response
             }
-
             "cancel" => json!({"behavior": "deny", "message": "User cancelled tool execution."}),
             _ => json!({"behavior": "deny", "message": "User declined tool execution."}),
         };
@@ -958,7 +960,6 @@ impl Session {
 
                 json!({"behavior": "allow", "updatedInput": updated_input})
             }
-
             // Declining is a deny, which the CLI turns into a "no answer"
             // tool result; the turn continues instead of aborting.
             _ => json!({
@@ -1014,6 +1015,7 @@ impl Session {
     /// because it is read only while someone has that agent open.
     pub fn apply_workflow_refresh(&mut self, result: WorkflowRefreshResult) -> Vec<Event> {
         let mut events = Vec::new();
+
         let task_id = result.task_id;
 
         if self.workflows.apply_refresh(&task_id, result.refresh)
@@ -1092,13 +1094,11 @@ impl Session {
         match message["subtype"].as_str() {
             Some("init") => self.on_init(message),
             Some("status") => compaction_progress(&mut self.compacting, message),
-
             Some("compact_boundary") => {
                 self.compacting = false;
 
                 self.transcript.on_compact_boundary(message)
             }
-
             // Every other subtype (hook_*, thinking_tokens, informational, …)
             // is telemetry the UI ignores.
             _ => Vec::new(),
@@ -1170,6 +1170,7 @@ impl Session {
         // indicator must not outlive the turn that owned it.
         if self.compacting {
             self.compacting = false;
+
             events.push(Event::CompactionFinished { error: None });
         }
 
@@ -1182,7 +1183,6 @@ impl Session {
                     Some(message) => SlashCommandOutcome::Rejected {
                         message: message.clone(),
                     },
-
                     None => SlashCommandOutcome::Completed { message: None },
                 },
             });
@@ -1362,6 +1362,7 @@ impl Session {
             if let Some((commands, structured)) = initialize_command_catalog(&response["response"])
             {
                 self.structured_commands_published = structured;
+
                 events.push(Event::Commands(commands));
             }
 
@@ -1442,6 +1443,7 @@ fn claude_command(
     // anchored on that directory.
     if workspace.is_multi_root() {
         command.arg("--add-dir");
+
         command.args(workspace.additional());
     }
 

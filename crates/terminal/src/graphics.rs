@@ -29,7 +29,6 @@ impl GraphicId {
 pub enum ColorType {
     /// 3 bytes per pixel (red, green, blue).
     Rgb,
-
     /// 4 bytes per pixel (red, green, blue, alpha).
     Rgba,
 }

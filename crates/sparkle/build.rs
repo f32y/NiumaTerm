@@ -89,6 +89,7 @@ fn fetch_framework(out_dir: &Path) -> PathBuf {
         let mut curl = Command::new("curl");
 
         curl.args(["-fsSL", "-o"]).arg(&archive).arg(&url);
+
         run(curl, "download Sparkle");
     }
 
@@ -99,6 +100,7 @@ fn fetch_framework(out_dir: &Path) -> PathBuf {
     let mut tar = Command::new("tar");
 
     tar.arg("-xJf").arg(&archive).arg("-C").arg(&unpacked);
+
     run(tar, "unpack Sparkle");
 
     unpacked
@@ -146,20 +148,19 @@ fn install(framework: &Path, dir: &Path) {
     }
 
     let destination = dir.join("Sparkle.framework");
+
     let mut ditto = Command::new("ditto");
 
     ditto.arg(framework).arg(&destination);
 
     match ditto.status() {
         Ok(status) if status.success() => {}
-
         // A running application can hold the framework open. Warn rather than
         // fail: the copy already in place is the same pinned version.
         Ok(status) => println!(
             "cargo:warning=ditto into {} exited with {status}",
             destination.display()
         ),
-
         Err(e) => println!(
             "cargo:warning=could not run ditto into {}: {e}",
             destination.display()

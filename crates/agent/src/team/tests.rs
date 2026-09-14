@@ -33,9 +33,11 @@ pub(super) fn config(name: &str, root: &str) -> MemberConfig {
 #[test]
 fn shared_profile_members_keep_independent_conversations_settings_and_roots() {
     let mut room = Room::new(AgentWorkspace::single(Some("C:/room".into())));
+
     let alice = room.add_member(config("Alice", "C:/frontend")).unwrap();
     let bob = room.add_member(config("Bob", "C:/backend")).unwrap();
     let original = room.member(bob).unwrap().clone();
+
     let mut settings = room.member(alice).unwrap().settings().clone();
 
     settings.model = Some("another-model".into());
@@ -62,6 +64,7 @@ fn shared_profile_members_keep_independent_conversations_settings_and_roots() {
 #[test]
 fn duplicate_names_and_stale_settings_leave_member_state_unchanged() {
     let mut room = Room::new(AgentWorkspace::default());
+
     let alice = room.add_member(config("Alice", "C:/a")).unwrap();
     let bob = room.add_member(config("Bob", "C:/b")).unwrap();
     let before = room.clone();
@@ -96,6 +99,7 @@ fn duplicate_names_and_stale_settings_leave_member_state_unchanged() {
 #[test]
 fn mode_changes_preserve_checkpoints_budget_and_independent_pause_reasons() {
     let mut room = Room::new(AgentWorkspace::default());
+
     let alice = room.add_member(config("Alice", "C:/a")).unwrap();
     let bob = room.add_member(config("Bob", "C:/b")).unwrap();
 
@@ -142,6 +146,7 @@ fn mode_changes_preserve_checkpoints_budget_and_independent_pause_reasons() {
     let update = PauseReason::Maintenance("codex-installation".into());
 
     run.pause(question.clone());
+
     run.pause(update.clone());
 
     run.change_mode(DiscussionMode::Moderated { moderator: bob })
@@ -201,6 +206,7 @@ fn stage_reservations_are_atomic_and_keep_the_report_turn() {
     let report = AttemptId::new();
 
     budget.reserve(&[(report, TurnPurpose::Report)]).unwrap();
+
     budget.charge(report).unwrap();
 
     assert_eq!(
@@ -216,6 +222,7 @@ fn stage_reservations_are_atomic_and_keep_the_report_turn() {
     );
 
     budget.add_turns(1).unwrap();
+
     budget.reserve(&group[1..]).unwrap();
 
     let charged = budget.clone();
