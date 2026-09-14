@@ -17,6 +17,7 @@ mod scrollback_tests;
 mod ghostty_mirror_tests;
 
 use std::borrow::Cow;
+use std::collections::VecDeque;
 use std::io::{self, ErrorKind, Read, Write};
 use std::sync::atomic::AtomicU32;
 use std::sync::{self, Arc, mpsc};
@@ -68,6 +69,7 @@ enum FlushReason {
 pub struct PtyPipe<T: EventedPty, U: EventListener> {
     sender: MsgSender,
     receiver: mpsc::Receiver<Msg>,
+    pending_commands: VecDeque<Msg>,
     pty: T,
     poll: Poll,
 
@@ -265,6 +267,7 @@ where
         Ok(PtyPipe {
             sender,
             receiver: rx,
+            pending_commands: VecDeque::new(),
             poll,
             waker,
             pty,
@@ -674,12 +677,63 @@ where
         }
     }
 
-    /// Drain the channel.
+    /// Collect a bounded batch and execute commands in submission order.
     ///
-    /// Returns `false` when a shutdown message was received.
+    /// Returns `false` on shutdown or a fatal input write failure.
     fn drain_recv_channel(&mut self, state: &mut PtyState) -> bool {
         for _ in 0..64 {
             let Ok(msg) = self.receiver.try_recv() else {
+                return self.process_pending_commands(state);
+            };
+
+            // Only unexecuted, adjacent size changes are interchangeable.
+            // An input or query between them observes the earlier geometry.
+            match msg {
+                Msg::Shutdown => return false,
+
+                Msg::Resize(size) => {
+                    if let Some(Msg::Resize(previous)) = self.pending_commands.back_mut() {
+                        *previous = size;
+                    } else {
+                        self.pending_commands.push_back(Msg::Resize(size));
+                    }
+                }
+
+                request => self.pending_commands.push_back(request),
+            }
+        }
+
+        let _ = self.waker.wake();
+
+        self.process_pending_commands(state)
+    }
+
+    fn process_pending_commands(&mut self, state: &mut PtyState) -> bool {
+        for _ in 0..64 {
+            if matches!(self.pending_commands.front(), Some(Msg::Resize(_))) {
+                if state.needs_write() {
+                    return true;
+                }
+
+                match self.pty.writer().flush() {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => return true,
+
+                    Err(error) if error.kind() == ErrorKind::Interrupted => {
+                        let _ = self.waker.wake();
+
+                        return true;
+                    }
+
+                    Err(error) => {
+                        error!("failed to finish PTY input before resize: {error}");
+
+                        return false;
+                    }
+                }
+            }
+
+            let Some(msg) = self.pending_commands.pop_front() else {
                 return true;
             };
 
@@ -1012,6 +1066,21 @@ where
                     error!("Error writing to PTY in event loop: {}", err);
 
                     break 'event_loop;
+                }
+
+                // Native writes can finish without another UI message. Resume
+                // the ordered commands here while keeping PTY reads and replies
+                // active whenever a write or its completion is still pending.
+                let had_pending_write = state.needs_write();
+
+                if !self.process_pending_commands(&mut state) {
+                    break 'event_loop;
+                }
+
+                if !had_pending_write && state.needs_write() {
+                    // Resuming a resize can release input after this iteration's
+                    // write pass. Windows writability alone does not wake poll.
+                    let _ = self.waker.wake();
                 }
             }
 

@@ -170,6 +170,9 @@ impl io::Read for FakeReader {
 struct FakeWriter {
     data: Vec<u8>,
     budget: Option<usize>,
+    flush_pending: bool,
+    operations: Vec<String>,
+    observer: Option<sync::mpsc::Sender<Vec<u8>>>,
 }
 
 impl io::Write for FakeWriter {
@@ -190,11 +193,22 @@ impl io::Write for FakeWriter {
 
         self.data.extend_from_slice(buf);
 
+        self.operations
+            .push(format!("input:{}", String::from_utf8_lossy(buf)));
+
+        if let Some(observer) = &self.observer {
+            observer.send(buf.to_vec()).unwrap();
+        }
+
         Ok(buf.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        Ok(())
+        if self.flush_pending {
+            Err(io::ErrorKind::WouldBlock.into())
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -224,7 +238,11 @@ impl ProcessReadWrite for FakePty {
         Token(2)
     }
 
-    fn set_winsize(&mut self, _: WinsizeBuilder) -> io::Result<()> {
+    fn set_winsize(&mut self, size: WinsizeBuilder) -> io::Result<()> {
+        self.writer
+            .operations
+            .push(format!("resize:{}x{}", size.cols, size.rows));
+
         Ok(())
     }
 
@@ -247,7 +265,7 @@ impl ProcessReadWrite for FakePty {
     }
 
     fn drain_ready(&self) -> Vec<Token> {
-        Vec::new()
+        vec![self.write_token()]
     }
 }
 
@@ -259,6 +277,201 @@ impl EventedPty for FakePty {
     fn child_exited(&mut self) -> bool {
         false
     }
+}
+
+#[test]
+fn queued_resize_cannot_overtake_partial_or_buffered_input() {
+    let mut machine = resized_pipe(b"");
+    let mut state = PtyState::default();
+
+    machine.pty.writer.operations.clear();
+    machine.pty.writer.budget = Some(2);
+    machine.pty.writer.flush_pending = true;
+
+    let sender = machine.channel();
+
+    sender
+        .send(event::Msg::Input(b"abc".to_vec().into()))
+        .unwrap();
+
+    sender
+        .send(event::Msg::Resize(WinsizeBuilder {
+            cols: 60,
+            rows: 20,
+            width: 480,
+            height: 360,
+        }))
+        .unwrap();
+
+    sender
+        .send(event::Msg::Input(b"Z".to_vec().into()))
+        .unwrap();
+
+    assert!(machine.drain_recv_channel(&mut state));
+    assert_eq!(machine.ghostty.cols(), 80);
+
+    machine.pty_write(&mut state).unwrap();
+
+    assert!(machine.drain_recv_channel(&mut state));
+    assert_eq!(machine.ghostty.cols(), 80);
+    assert_eq!(machine.pty.writer.data, b"ab");
+
+    machine.pty.writer.budget = None;
+    machine.pty_write(&mut state).unwrap();
+
+    assert!(machine.drain_recv_channel(&mut state));
+    assert_eq!(machine.ghostty.cols(), 80);
+    assert_eq!(machine.pty.writer.data, b"abc");
+
+    machine.pty.writer.flush_pending = false;
+
+    assert!(machine.drain_recv_channel(&mut state));
+
+    machine.pty_write(&mut state).unwrap();
+
+    assert_eq!(
+        machine.pty.writer.operations,
+        ["input:ab", "input:c", "resize:60x20", "input:Z"]
+    );
+}
+
+#[test]
+fn queued_resizes_coalesce_only_until_the_next_input() {
+    let mut machine = resized_pipe(b"");
+    let mut state = PtyState::default();
+
+    machine.pty.writer.operations.clear();
+
+    let sender = machine.channel();
+
+    for cols in [50, 60] {
+        sender
+            .send(event::Msg::Resize(WinsizeBuilder {
+                cols,
+                rows: 20,
+                width: cols * 8,
+                height: 360,
+            }))
+            .unwrap();
+    }
+
+    sender
+        .send(event::Msg::Input(b"A".to_vec().into()))
+        .unwrap();
+
+    sender
+        .send(event::Msg::Resize(WinsizeBuilder {
+            cols: 100,
+            rows: 30,
+            width: 800,
+            height: 540,
+        }))
+        .unwrap();
+
+    sender
+        .send(event::Msg::Input(b"B".to_vec().into()))
+        .unwrap();
+
+    assert!(machine.drain_recv_channel(&mut state));
+
+    machine.pty_write(&mut state).unwrap();
+
+    assert!(machine.drain_recv_channel(&mut state));
+
+    machine.pty_write(&mut state).unwrap();
+
+    assert_eq!(
+        machine.pty.writer.operations,
+        ["resize:60x20", "input:A", "resize:100x30", "input:B"]
+    );
+}
+
+#[test]
+fn input_released_after_resize_wakes_an_otherwise_idle_loop() {
+    use std::thread;
+
+    let mut machine = resized_pipe(b"");
+    let (written, received) = sync::mpsc::channel();
+
+    machine.pty.writer.observer = Some(written);
+
+    let sender = machine.channel();
+
+    sender
+        .send(event::Msg::Input(b"A".to_vec().into()))
+        .unwrap();
+
+    sender
+        .send(event::Msg::Resize(WinsizeBuilder {
+            cols: 60,
+            rows: 20,
+            width: 480,
+            height: 360,
+        }))
+        .unwrap();
+
+    sender
+        .send(event::Msg::Input(b"B".to_vec().into()))
+        .unwrap();
+
+    let worker = thread::Builder::new()
+        .stack_size(4 * 1024 * 1024)
+        .spawn(move || machine.run_event_loop())
+        .unwrap();
+
+    let first = received.recv_timeout(time::Duration::from_secs(2));
+    let second = received.recv_timeout(time::Duration::from_secs(2));
+
+    sender.send(event::Msg::Shutdown).unwrap();
+    worker.join().unwrap();
+
+    assert_eq!(first.unwrap(), b"A");
+    assert_eq!(
+        second.expect("input after resize waited for unrelated activity"),
+        b"B"
+    );
+}
+
+#[test]
+fn pending_resize_allows_cursor_replies_and_immediate_shutdown() {
+    let mut machine = resized_pipe(b"\x1b[4;5H");
+    let mut state = PtyState::default();
+
+    machine.pty.writer.flush_pending = true;
+
+    let sender = machine.channel();
+
+    sender
+        .send(event::Msg::Resize(WinsizeBuilder {
+            cols: 60,
+            rows: 20,
+            width: 480,
+            height: 360,
+        }))
+        .unwrap();
+
+    sender
+        .send(event::Msg::Input(b"later".to_vec().into()))
+        .unwrap();
+
+    assert!(machine.drain_recv_channel(&mut state));
+
+    machine.pty.reader.data.extend_from_slice(b"\x1b[6n");
+
+    machine
+        .pty_read(&mut state, &mut [0; READ_BUFFER_SIZE])
+        .unwrap();
+
+    machine.pty_write(&mut state).unwrap();
+
+    assert_eq!(machine.pty.writer.data, b"\x1b[4;5R");
+    assert_eq!(machine.ghostty.cols(), 80);
+
+    sender.send(event::Msg::Shutdown).unwrap();
+
+    assert!(!machine.drain_recv_channel(&mut state));
+    assert_eq!(machine.ghostty.cols(), 80);
+    assert_eq!(machine.pty.writer.data, b"\x1b[4;5R");
 }
 
 #[test]
