@@ -179,7 +179,7 @@ pub fn graphic_to_bgra(
                 return None;
             }
 
-            for px in pixels.chunks_exact_mut(4) {
+            for px in pixels.as_chunks_mut::<4>().0 {
                 px.swap(0, 2); // RGBA -> BGRA
             }
 
@@ -192,7 +192,7 @@ pub fn graphic_to_bgra(
 
             let mut out = Vec::with_capacity(pixel_count * 4);
 
-            for px in pixels.chunks_exact(3) {
+            for px in pixels.as_chunks::<3>().0 {
                 out.extend_from_slice(&[px[2], px[1], px[0], 255]); // BGRA
             }
 

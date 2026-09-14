@@ -44,6 +44,7 @@ pub(super) fn bottom_anchor_offsets(
     }
 }
 
+#[cfg(all(test, windows))]
 pub(super) fn live_frame_text(frame: &TerminalFrame) -> Option<String> {
     let rows = frame_content_rows(frame);
 
