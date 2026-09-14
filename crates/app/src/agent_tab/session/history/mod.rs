@@ -12,24 +12,18 @@ mod restore_tests;
 #[cfg(test)]
 mod tests;
 
-use std::time::Duration;
-
-use gpui::{AsyncApp, Context, WeakEntity};
-use nmt_agent::chat::{SessionScope, SessionSummary};
-use nmt_agent::session::history::{CountPublication, count_scoped_sessions, list_scoped_sessions};
-use nmt_agent::session::restore::{ResumeStart, SettingsSeed};
-use rust_i18n::t;
-
-use crate::agent_tab::capabilities::AgentCapabilities as _;
-use crate::agent_tab::composer::CommandFeedbackKind;
-use crate::agent_tab::{AgentPane, AgentPaneEvent, RecentSessionsMode, SessionHistoryUi};
+use crate::agent_tab::fade::Fade;
+use gpui::{Pixels, Point};
+use gpui_component::VirtualListScrollHandle;
+use nmt_agent::chat::SessionSummary;
+use nmt_agent::session::history::{CountPublication, SessionHistory};
 
 impl SessionHistoryUi {
-    pub(super) fn invalidate_filesystem_history(&mut self) {
+    pub(crate) fn invalidate_filesystem_history(&mut self) {
         self.data.invalidate_filesystem_history();
     }
 
-    fn begin_filesystem_history(
+    pub(crate) fn begin_filesystem_history(
         &mut self,
         cwd: Option<String>,
         epoch: u64,
@@ -37,7 +31,7 @@ impl SessionHistoryUi {
         self.data.begin_filesystem_history(cwd, epoch)
     }
 
-    fn publish_filesystem_count(
+    pub(crate) fn publish_filesystem_count(
         &mut self,
         request: &FilesystemHistoryRequest,
         cwd: Option<&str>,
@@ -55,7 +49,7 @@ impl SessionHistoryUi {
         result
     }
 
-    fn publish_filesystem_rows(
+    pub(crate) fn publish_filesystem_rows(
         &mut self,
         request: &FilesystemHistoryRequest,
         cwd: Option<&str>,
@@ -72,219 +66,110 @@ impl SessionHistoryUi {
 
         true
     }
+
+    /// Hand the highlight to the row under the pointer, reporting whether the
+    /// highlight moved.
+    ///
+    /// Guarded on the pointer having actually moved. Keyboard navigation
+    /// scrolls the list to keep its row in view, which slides a different row
+    /// under a pointer resting over the strip; letting that count as pointing
+    /// would take the highlight straight back off the arrow keys. Real
+    /// movement takes it back unconditionally, because a reader who has picked
+    /// the pointer up again is looking at where the pointer is.
+    pub(crate) fn point_at(&mut self, index: usize, position: Point<Pixels>) -> bool {
+        if self.pointer == Some(position) {
+            return false;
+        }
+
+        self.pointer = Some(position);
+
+        if self.selected == index {
+            return false;
+        }
+
+        self.selected = index;
+
+        true
+    }
 }
 
-impl AgentPane {
-    /// Widen the session list to every directory, or narrow it back to this
-    /// tab's. The rows on screen answered the previous scope, so they go; the
-    /// reload republishes what the new one covers. A backend that lists over
-    /// the protocol is asked again, one that reads its own transcripts is
-    /// rescanned.
-    pub(crate) fn toggle_history_scope(&mut self, cx: &mut Context<Self>) {
-        self.history_ui.invalidate_filesystem_history();
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum RecentSessionsMode {
+    #[default]
+    Automatic,
+    Hidden,
+    Open,
+    Loading,
+}
 
-        self.history_ui.data.scope = match self.history_ui.data.scope {
-            SessionScope::CurrentDirectory => SessionScope::AllDirectories,
-            SessionScope::AllDirectories => SessionScope::CurrentDirectory,
-        };
-
-        self.history_ui.data.sessions.clear();
-        self.history_ui.data.showing_search = false;
-        self.history_ui.selected = 0;
-
-        if let Some(session) = self.session.borrow_mut().runtime.backend_mut() {
-            session.request_history(self.history_ui.data.scope);
-        }
-
-        self.load_filesystem_history(cx);
-
-        cx.notify();
+impl RecentSessionsMode {
+    /// The automatic list is a blank tab's default surface, and a composer
+    /// with anything in it -- typed text or the placeholder a pasted image
+    /// leaves -- means the tab is being used for a new conversation, so the
+    /// list steps aside and comes back once the composer is empty again. An
+    /// explicit `/resume` list stays up over text: typing into it narrows
+    /// the rows.
+    pub(crate) fn is_visible(
+        self,
+        transcript_empty: bool,
+        composer_empty: bool,
+        rows: usize,
+    ) -> bool {
+        rows > 0
+            && match self {
+                Self::Automatic => transcript_empty && composer_empty,
+                Self::Open => true,
+                Self::Hidden | Self::Loading => false,
+            }
     }
 
-    /// History read from the CLI's transcript directory, for a harness that
-    /// does not deliver it over the protocol as `Event::History`. Two passes,
-    /// both off-thread: a cheap count first, so the list can reserve its final
-    /// height with placeholder rows, then title parsing, which swaps in the
-    /// real rows.
-    pub(super) fn load_filesystem_history(&mut self, cx: &mut Context<Self>) {
-        if !self.kind.caps().filesystem_session_history {
-            return;
-        }
-
-        let cwd = self.cwd();
-        let scope = self.history_ui.data.scope;
-
-        let request = self
-            .history_ui
-            .begin_filesystem_history(cwd.clone(), self.session.borrow().runtime.epoch());
-
-        cx.notify();
-
-        cx.spawn(async move |this, cx| {
-            Self::load_history_passes(this, request, scope, cwd, cx).await
-        })
-        .detach();
+    /// An outside click dismisses only an explicit `/resume` list. The
+    /// automatic list on a blank tab is that tab's default surface, so a
+    /// click on the empty pane keeps it open; hiding it there would strand
+    /// the tab with no way back except `/resume`.
+    pub(crate) fn dismisses_on_outside_click(self) -> bool {
+        !matches!(self, Self::Automatic)
     }
+}
 
-    async fn load_history_passes(
-        this: WeakEntity<Self>,
-        request: FilesystemHistoryRequest,
-        scope: SessionScope,
-        cwd: Option<String>,
-        cx: &mut AsyncApp,
-    ) {
-        let count_cwd = cwd.clone();
+/// Recent-session list shown above the composer.
+pub(crate) struct SessionHistoryUi {
+    pub(crate) data: SessionHistory,
 
-        let count = cx
-            .background_executor()
-            .spawn(async move { count_scoped_sessions(scope, count_cwd.as_deref()) })
-            .await;
+    /// Blank conversations show the list automatically; `/resume` can reopen
+    /// the same list after a conversation has started.
+    pub(crate) mode: RecentSessionsMode,
 
-        let proceed = this
-            .update(cx, |this, cx| {
-                let cwd = this.cwd();
+    /// The one highlighted row, whether the pointer or the arrow keys put it
+    /// there. A list has a single current row: what a click opens and what
+    /// Enter opens are the same row, and only one thing on screen says so.
+    pub(crate) selected: usize,
 
-                match this.history_ui.publish_filesystem_count(
-                    &request,
-                    cwd.as_deref(),
-                    this.session.borrow().runtime.epoch(),
-                    count,
-                ) {
-                    CountPublication::Stale => false,
+    /// Whether the pointer is over the list. A search narrows the rows while
+    /// the arrow keys still belong to the input, so the keyboard's highlight
+    /// is not drawn then; a pointer over the list is reason enough to draw it,
+    /// because the row under the pointer is what a click would open.
+    pub(crate) pointer_inside: bool,
 
-                    CountPublication::Empty => {
-                        cx.notify();
+    /// Where the pointer last was over the list, so a row sliding under a
+    /// pointer that has not moved cannot take the highlight back. Keyboard
+    /// navigation scrolls the list, which does exactly that.
+    pub(crate) pointer: Option<Point<Pixels>>,
 
-                        false
-                    }
+    pub(crate) scroll: VirtualListScrollHandle,
+    pub(crate) transcript_blur: Fade,
+}
 
-                    CountPublication::LoadRows => {
-                        cx.notify();
-
-                        true
-                    }
-                }
-            })
-            .unwrap_or(false);
-
-        if !proceed {
-            return;
-        }
-
-        // Title parsing races a short hold: on a warm SSD it finishes
-        // within a frame, so without the hold the skeleton rows would
-        // never be visible and the swap would read as a flicker.
-        let load = cx
-            .background_executor()
-            .spawn(async move { list_scoped_sessions(scope, cwd.as_deref()) });
-
-        cx.background_executor()
-            .timer(Duration::from_millis(250))
-            .await;
-
-        let sessions = load.await;
-
-        let _ = this.update(cx, |this, cx| {
-            let cwd = this.cwd();
-
-            if this.history_ui.publish_filesystem_rows(
-                &request,
-                cwd.as_deref(),
-                this.session.borrow().runtime.epoch(),
-                sessions,
-            ) {
-                cx.notify();
-            }
-        });
-    }
-
-    pub(super) fn seed_restored_settings(&mut self, seed: SettingsSeed) {
-        if !self.binding.is_current() {
-            return;
-        }
-
-        self.session.borrow_mut().seed_settings(seed);
-    }
-
-    /// Keep the displayed conversation until the replacement supplies its replay.
-    pub(crate) fn resume_session(&mut self, index: usize, cx: &mut Context<Self>) {
-        if !self.binding.is_current() {
-            return;
-        }
-
-        let Some(summary) = self.history_ui.data.sessions.get(index) else {
-            return;
-        };
-
-        // Both operations replace the conversation; a visible history list
-        // must not start a resume while a branch picker or file step owns it.
-        if self.history_ui.mode == RecentSessionsMode::Loading
-            || self.session.borrow().branch.holds_composer()
-        {
-            return;
-        }
-
-        let cwd = self.cwd();
-
-        let outcome = {
-            let mut guard = self.session.borrow_mut();
-            let state = &mut *guard;
-
-            state
-                .restore
-                .begin(&mut state.runtime, self.kind, summary, cwd.as_deref())
-        };
-
-        let request = match outcome {
-            ResumeStart::Busy => return,
-
-            ResumeStart::Elsewhere { cwd, session_id } => {
-                self.history_ui.selected = index;
-
-                self.emit_event(AgentPaneEvent::ResumeElsewhere { cwd, session_id }, cx);
-
-                cx.notify();
-
-                return;
-            }
-
-            ResumeStart::Rejected => {
-                self.history_ui.mode = RecentSessionsMode::Open;
-                self.history_ui.selected = index;
-
-                self.palette.set_feedback(
-                    CommandFeedbackKind::Error,
-                    t!("agent-session-codex-recent-not-ready").to_string(),
-                    cx,
-                );
-
-                return;
-            }
-
-            ResumeStart::Requested => {
-                self.seed_restored_settings(SettingsSeed::resumed(self.kind));
-
-                None
-            }
-
-            ResumeStart::ReadReplay(request) => Some(request),
-        };
-
-        self.history_ui.mode = RecentSessionsMode::Loading;
-        self.history_ui.selected = index;
-
-        self.palette.set_feedback(
-            CommandFeedbackKind::Notice,
-            t!("agent-session-opening-recent").to_string(),
-            cx,
-        );
-
-        let Some(request) = request else {
-            return;
-        };
-
-        if let Some(host) = self.host.upgrade() {
-            host.update(cx, |host, cx| host.read_resume(request, cx));
+impl Default for SessionHistoryUi {
+    fn default() -> Self {
+        Self {
+            data: SessionHistory::default(),
+            mode: RecentSessionsMode::Automatic,
+            selected: 0,
+            pointer_inside: false,
+            pointer: None,
+            scroll: VirtualListScrollHandle::new(),
+            transcript_blur: Fade::default(),
         }
     }
 }

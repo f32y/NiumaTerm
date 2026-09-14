@@ -3,7 +3,7 @@ use tempfile::{TempDir, tempdir};
 use crate::AgentWorkspace;
 use crate::chat::SendOutcome;
 use crate::session::AgentKind;
-use crate::session::team_capabilities::{ModeratorAdmission, TeamCapabilities};
+use crate::session::team_capabilities::ModeratorAdmission;
 use crate::team::attempt::Invocation;
 use crate::team::budget::{ReservationState, TurnPurpose};
 use crate::team::content::UserInput;
@@ -25,7 +25,7 @@ fn ready_team() -> (TempDir, TeamSession, MemberId, MemberId) {
 
     for id in [alice, bob] {
         session
-            .member_ready(id, 1, TeamCapabilities::unverified(AgentKind::Codex))
+            .member_ready(id, 1, ModeratorAdmission::unverified(AgentKind::Codex))
             .unwrap();
     }
 
@@ -34,6 +34,7 @@ fn ready_team() -> (TempDir, TeamSession, MemberId, MemberId) {
 
 fn finish(session: &mut TeamSession, id: AttemptId, text: &str) {
     let intent = session
+        .store
         .room()
         .attempts()
         .iter()
@@ -63,6 +64,7 @@ fn finish(session: &mut TeamSession, id: AttemptId, text: &str) {
 
 fn enable_moderation(session: &mut TeamSession) {
     let members: Vec<_> = session
+        .store
         .room()
         .members()
         .iter()
@@ -70,10 +72,8 @@ fn enable_moderation(session: &mut TeamSession) {
         .collect();
 
     for id in members {
-        let capabilities = TeamCapabilities {
-            moderation: ModeratorAdmission::CodexDynamicTools {
-                backend_generation: 1,
-            },
+        let capabilities = ModeratorAdmission::CodexDynamicTools {
+            backend_generation: 1,
         };
 
         session.member_ready(id, 1, capabilities).unwrap();
@@ -82,6 +82,7 @@ fn enable_moderation(session: &mut TeamSession) {
 
 fn decide(session: &mut TeamSession, id: AttemptId, action: ModeratorAction) {
     let intent = session
+        .store
         .room()
         .attempts()
         .iter()
@@ -128,10 +129,10 @@ fn decide(session: &mut TeamSession, id: AttemptId, action: ModeratorAction) {
 #[test]
 fn summary_preparation_is_isolated_and_charged() {
     let (_directory, mut session, alice, bob) = ready_team();
-    let mut room = session.room().clone();
+    let mut room = session.store.room().clone();
 
     room.members[0].role = "Private role instructions must not reach summaries".into();
-    session.commit_room(room).unwrap();
+    session.store.commit(room).unwrap();
 
     for topic in [
         "First constraint ",
@@ -170,6 +171,7 @@ fn summary_preparation_is_isolated_and_charged() {
 
     for attempt_id in &summaries {
         let intent = session
+            .store
             .room()
             .attempts()
             .iter()
@@ -216,6 +218,7 @@ fn summary_preparation_is_isolated_and_charged() {
 
     assert!(
         session
+            .store
             .room()
             .member(alice)
             .unwrap()
@@ -230,6 +233,7 @@ fn summary_preparation_is_isolated_and_charged() {
     assert!(responses.iter().all(|id| {
         matches!(
             session
+                .store
                 .room()
                 .attempts()
                 .iter()
@@ -241,7 +245,7 @@ fn summary_preparation_is_isolated_and_charged() {
         )
     }));
     assert_eq!(
-        session.room().discussions()[0]
+        session.store.room().discussions()[0]
             .budget()
             .reservations()
             .values()
@@ -250,7 +254,7 @@ fn summary_preparation_is_isolated_and_charged() {
             .count(),
         summaries.len()
     );
-    assert_eq!(session.room().summaries().len(), summaries.len());
+    assert_eq!(session.store.room().summaries().len(), summaries.len());
 }
 
 #[test]
@@ -305,7 +309,7 @@ fn moderator_operations_schedule_once_and_prose_cannot_schedule() {
         "Next step: measure memory. Alice has no separate preference.",
     );
 
-    let discussion = &session.room().discussions()[0];
+    let discussion = &session.store.room().discussions()[0];
 
     assert_eq!(discussion.state(), DiscussionState::Completed);
     assert_eq!(discussion.budget().reservations().len(), 4);
@@ -339,9 +343,9 @@ fn moderator_operations_schedule_once_and_prose_cannot_schedule() {
     );
 
     assert!(session.advance_discussion(next, &limits).is_err());
-    assert_eq!(session.room().discussions()[1].stages().len(), 1);
+    assert_eq!(session.store.room().discussions()[1].stages().len(), 1);
     assert_eq!(
-        session.room().discussions()[1].state(),
+        session.store.room().discussions()[1].state(),
         DiscussionState::Paused
     );
 }
@@ -386,6 +390,7 @@ fn fixed_discussion_advances_all_stages_with_frozen_peer_inputs_and_report_charg
     assert_eq!(peers.len(), 2);
 
     let boundary = session
+        .store
         .room()
         .attempts()
         .iter()
@@ -402,6 +407,7 @@ fn fixed_discussion_advances_all_stages_with_frozen_peer_inputs_and_report_charg
     );
 
     let bob_input = &session
+        .store
         .room()
         .attempts()
         .iter()
@@ -428,6 +434,7 @@ fn fixed_discussion_advances_all_stages_with_frozen_peer_inputs_and_report_charg
     assert_eq!(report.len(), 1);
 
     let report_input = &session
+        .store
         .room()
         .attempts()
         .iter()
@@ -455,7 +462,7 @@ fn fixed_discussion_advances_all_stages_with_frozen_peer_inputs_and_report_charg
 
     assert!(session.advance_discussion(id, &limits).unwrap().is_empty());
 
-    let discussion = &session.room().discussions()[0];
+    let discussion = &session.store.room().discussions()[0];
 
     assert_eq!(discussion.state(), DiscussionState::Completed);
     assert_eq!(discussion.budget().reservations().len(), 5);
@@ -466,7 +473,7 @@ fn fixed_discussion_advances_all_stages_with_frozen_peer_inputs_and_report_charg
             .values()
             .all(|entry| entry.state == ReservationState::Charged)
     );
-    assert_eq!(session.room().input_history().len(), 1);
+    assert_eq!(session.store.room().input_history().len(), 1);
 }
 
 #[test]
@@ -516,6 +523,7 @@ fn user_correction_reprepares_only_unsent_arrangements_without_extra_charge() {
     assert_ne!(resumed[0], first[1]);
 
     let intent = &session
+        .store
         .room()
         .attempts()
         .iter()
@@ -526,13 +534,13 @@ fn user_correction_reprepares_only_unsent_arrangements_without_extra_charge() {
     assert_eq!(intent.recipient, bob);
     assert!(intent.prepared_text.contains("The memory limit is 64 MB"));
     assert_eq!(
-        session.room().discussions()[0]
+        session.store.room().discussions()[0]
             .budget()
             .reservations()
             .len(),
         2
     );
-    assert_eq!(session.room().input_history().len(), 2);
+    assert_eq!(session.store.room().input_history().len(), 2);
 
     finish(&mut session, resumed[0], "Bob's revised answer");
 }

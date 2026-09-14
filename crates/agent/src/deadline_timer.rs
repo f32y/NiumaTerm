@@ -55,10 +55,6 @@ impl DeadlineTimer {
     pub(crate) fn handle(&self) -> TimerHandle {
         self.handle.clone()
     }
-
-    pub(crate) fn set(&self, next: Option<Instant>) {
-        self.handle.set(next);
-    }
 }
 
 fn run_deadlines(worker: TimerHandle, callback: impl Fn()) {

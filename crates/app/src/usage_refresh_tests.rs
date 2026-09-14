@@ -7,7 +7,7 @@ use crate::usage_refresh::{Completion, FetchError, Refresh, UsageSource};
 fn disabling_and_reenabling_waits_for_cancelled_work_then_retries() {
     let calls = Arc::new(AtomicUsize::new(0));
 
-    let source: Arc<dyn UsageSource<usize>> = Arc::new({
+    let source: UsageSource<usize> = Arc::new({
         let calls = calls.clone();
 
         move |_: &AtomicBool| Ok(calls.fetch_add(1, Ordering::Relaxed) + 1)

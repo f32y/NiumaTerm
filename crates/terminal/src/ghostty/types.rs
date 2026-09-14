@@ -216,15 +216,7 @@ pub struct ScreenRowMeta {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScreenRowRead {
     pub cells: Vec<RowCell>,
-
-    /// This row soft-wraps into the next one (logical-line join point).
-    pub wrapped: bool,
-
-    /// OSC 133 `;A` tag: this row starts a prompt (harvest attribution anchor).
-    pub prompt_start: bool,
-
-    /// OSC 8 spans: `(start_col, end_col_inclusive, uri)`.
-    pub hyperlinks: Vec<(u16, u16, String)>,
+    pub meta: ScreenRowMeta,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

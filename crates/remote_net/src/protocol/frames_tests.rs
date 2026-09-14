@@ -1,5 +1,6 @@
 use crate::protocol::frames::*;
-use crate::{ClientBound, HostBound, ProtocolSessionOptions, ProtocolSessionSnapshot};
+use crate::session::{SessionId, SessionSnapshot};
+use crate::{ClientBound, HostBound, ProtocolSessionOptions};
 
 #[test]
 fn data_frames_roundtrip() {
@@ -65,13 +66,24 @@ fn control_messages_roundtrip() {
         assert_eq!(Frame::parse_control::<HostBound>(&payload).unwrap(), msg);
     }
 
-    let msg = ClientBound::Attached(ProtocolSessionSnapshot {
-        session_id: 5,
+    let msg = ClientBound::Attached(SessionSnapshot {
+        session_id: SessionId(5),
         base_seq: 100,
         vt: b"\x1b[2J\x1b[Hprompt>".to_vec(),
         cols: 120,
         rows: 30,
     });
+
+    assert_eq!(
+        serde_json::to_value(&msg).unwrap(),
+        serde_json::json!({"Attached": {
+            "session_id": 5,
+            "base_seq": 100,
+            "vt": b"\x1b[2J\x1b[Hprompt>".to_vec(),
+            "cols": 120,
+            "rows": 30
+        }})
+    );
 
     let frame = Frame::control(&msg).unwrap();
 

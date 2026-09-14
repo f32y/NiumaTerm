@@ -23,7 +23,6 @@ use crate::ui::shell::tab_surface::AgentTab;
 use crate::ui::shell::{TabSurface, agent_workspace};
 use crate::ui::terminal_launch::spawn_pane;
 use crate::ui::terminal_layout::TerminalLayout;
-use crate::window::WindowRegistry;
 use crate::workspace::{
     WorkspaceId, WorkspaceKind, WorkspaceManager, WorkspaceRoots, default_workspace_name,
 };
@@ -140,7 +139,7 @@ fn axis_from_state(axis: PaneSplitAxis) -> Axis {
 /// live launch state (cwd tracks OSC 7), splits carry their axis and the
 /// current panel sizes normalized to ratios.
 fn pane_node_state(
-    node: &PaneNode<Entity<TerminalPane>, Entity<ResizableState>>,
+    node: &PaneNode<Entity<TerminalPane>>,
     default_profile: &(Option<String>, Vec<String>),
     cx: &App,
 ) -> PaneNodeState {
@@ -298,7 +297,9 @@ pub(super) fn restore_session(
 
     let mut workspaces = workspaces?;
 
-    workspaces.activate(saved_active.min(workspaces.len() - 1));
+    let active_index = saved_active.min(workspaces.list().len() - 1);
+
+    workspaces.list_mut().activate(active_index);
 
     // The initially visible tab spawns right away; everything else stays
     // pending, so this window's other `active_pane` readers (activation
@@ -505,7 +506,9 @@ fn restore_tabs(
         }
     }
 
-    tab_manager.activate(active_tab.min(tab_manager.len() - 1));
+    let active_index = active_tab.min(tab_manager.list().len() - 1);
+
+    tab_manager.list_mut().activate(active_index);
 
     Some(tab_manager)
 }
@@ -518,7 +521,7 @@ fn restore_pane_node(
     node: &PaneNodeState,
     next_id: &mut u64,
     cx: &mut Context<Shell>,
-) -> Option<PaneNode<Entity<TerminalPane>, Entity<ResizableState>>> {
+) -> Option<PaneNode<Entity<TerminalPane>>> {
     match node {
         PaneNodeState::Leaf { shell, args, cwd } => {
             let surface_id = Shell::alloc_id(next_id);
@@ -645,7 +648,7 @@ pub(super) fn spawn_default_pane(
 }
 
 /// The window's workspaces and tabs in the shape `local_state` stores.
-fn session_state(
+pub(super) fn session_state(
     workspaces: &WorkspaceManager,
     doomed: Option<WorkspaceId>,
     cx: &App,
@@ -689,9 +692,10 @@ fn session_state(
             cwd: (!workspace.cwd.is_empty()).then_some(workspace.cwd),
             additional_cwds: workspace.additional_cwds,
             pinned: workspace.pinned,
-            active_tab: tabs.active_index(),
+            active_tab: tabs.list().active_index(),
             tabs: tabs
-                .tabs()
+                .list()
+                .items()
                 .iter()
                 .map(|tab| {
                     let mut state = match tab.surface() {
@@ -705,10 +709,10 @@ fn session_state(
                         // and an old build restores something sensible
                         // from a split one.
                         TabSurface::Live(tree) => {
-                            let mut state = tree.focused_pane().read(cx).tab_state();
+                            let mut state = tree.tree().focused_pane().read(cx).tab_state();
 
-                            state.panes = (!tree.is_single_leaf())
-                                .then(|| pane_node_state(tree.root(), &default_profile, cx));
+                            state.panes = (!tree.tree().is_single_leaf())
+                                .then(|| pane_node_state(tree.tree().root(), &default_profile, cx));
 
                             state
                         }
@@ -717,12 +721,12 @@ fn session_state(
                         // agent process and its thread die with the app);
                         // the saved kind reopens a fresh agent tab.
                         TabSurface::Agent(tab) => {
-                            let pane = &tab.pane;
-                            let agent: &str = pane.read(cx).kind().into();
+                            let profile = tab.owner.session().read(cx).profile();
+                            let agent: &str = profile.kind.into();
 
                             TabState {
                                 agent: Some(agent.into()),
-                                agent_profile: Some(pane.read(cx).profile_name().to_string()),
+                                agent_profile: Some(profile.name.clone()),
                                 ..TabState::default()
                             }
                         }
@@ -754,18 +758,6 @@ fn session_state(
     SessionState {
         active_workspace,
         workspaces: saved,
-    }
-}
-
-impl Shell {
-    /// Publish this window's session to the registry the app writes out on
-    /// quit. Called from every path that changes what a restore would rebuild.
-    pub(super) fn sync_session_memory(&self, cx: &mut Context<Shell>) {
-        let session = session_state(&self.workspaces, self.doomed_workspace, cx);
-
-        if let Some(entry) = cx.global_mut::<WindowRegistry>().get_mut(self.window_id) {
-            entry.session = Some(session);
-        }
     }
 }
 
@@ -836,8 +828,8 @@ mod launch_resolution_tests {
 
             let tabs = restore_tabs(vec![saved, named], 0, &mut 0, cx).unwrap();
 
-            assert_eq!(tabs.tabs()[0].title(), rust_i18n::t!("team-title"));
-            assert_eq!(tabs.tabs()[1].title(), "Review team");
+            assert_eq!(tabs.list().items()[0].title(), rust_i18n::t!("team-title"));
+            assert_eq!(tabs.list().items()[1].title(), "Review team");
         });
     }
 

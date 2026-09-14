@@ -10,30 +10,19 @@ pub(crate) enum FetchError {
     Failed(String),
 }
 
-pub(crate) trait UsageSource<T>: Send + Sync {
-    fn fetch(&self, cancelled: &AtomicBool) -> Result<T, FetchError>;
-}
-
-impl<T, F> UsageSource<T> for F
-where
-    F: Fn(&AtomicBool) -> Result<T, FetchError> + Send + Sync,
-{
-    fn fetch(&self, cancelled: &AtomicBool) -> Result<T, FetchError> {
-        self(cancelled)
-    }
-}
+pub(crate) type UsageSource<T> = Arc<dyn Fn(&AtomicBool) -> Result<T, FetchError> + Send + Sync>;
 
 pub(crate) struct Refresh<T> {
     pub(crate) value: T,
     pub(crate) failed: bool,
     enabled: bool,
     pending: Option<Arc<AtomicBool>>,
-    source: Arc<dyn UsageSource<T>>,
+    source: UsageSource<T>,
 }
 
 pub(crate) struct Fetch<T> {
     cancelled: Arc<AtomicBool>,
-    source: Arc<dyn UsageSource<T>>,
+    source: UsageSource<T>,
 }
 
 pub(crate) struct Fetched<T> {
@@ -53,7 +42,7 @@ impl<T> Fetch<T> {
         let result = if self.cancelled.load(Ordering::Relaxed) {
             Err(FetchError::Cancelled)
         } else {
-            self.source.fetch(&self.cancelled)
+            (self.source)(&self.cancelled)
         };
 
         Fetched {
@@ -64,7 +53,7 @@ impl<T> Fetch<T> {
 }
 
 impl<T> Refresh<T> {
-    pub(crate) fn new(value: T, source: Arc<dyn UsageSource<T>>, enabled: bool) -> Self {
+    pub(crate) fn new(value: T, source: UsageSource<T>, enabled: bool) -> Self {
         Self {
             value,
             failed: false,

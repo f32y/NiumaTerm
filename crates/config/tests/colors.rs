@@ -1,20 +1,18 @@
 use nmt_config::colors::*;
-use nmt_config::render_types::Color;
 
 #[test]
 fn test_conversion_from_hex_invalid_character() {
-    let invalid_character_color =
-        match ColorBuilder::from_hex("#invalid-color".into(), Format::SRGB0_255) {
-            Ok(d) => d.to_string(),
-            Err(e) => e,
-        };
+    let invalid_character_color = match Rgba::from_hex("#invalid-color".into()) {
+        Ok(d) => d.to_string(),
+        Err(e) => e,
+    };
 
     assert_eq!(invalid_character_color, "Error: Character is not valid");
 }
 
 #[test]
 fn test_conversion_from_hex_invalid_size() {
-    let invalid_invalid_size = match ColorBuilder::from_hex("abc".into(), Format::SRGB0_255) {
+    let invalid_invalid_size = match Rgba::from_hex("abc".into()) {
         Ok(d) => d.to_string(),
         Err(e) => e,
     };
@@ -24,25 +22,23 @@ fn test_conversion_from_hex_invalid_size() {
 
 #[test]
 fn test_conversion_from_hex_sgb_255() {
-    let color: Color = ColorBuilder::from_hex("#151515".into(), Format::SRGB0_1)
-        .unwrap()
-        .into();
+    let color = Rgba::from_hex("#151515".into()).unwrap();
 
     assert_eq!(
         color,
-        ColorWGPU {
-            r: 0.08235294117647059,
-            g: 0.08235294117647059,
-            b: 0.08235294117647059,
-            a: 1.0
+        Rgba {
+            red: 0.08235294117647059,
+            green: 0.08235294117647059,
+            blue: 0.08235294117647059,
+            alpha: 1.0
         }
     );
 
-    let color = ColorBuilder::from_hex("#FFFFFF".into(), Format::SRGB0_1).unwrap();
+    let color = Rgba::from_hex("#FFFFFF".into()).unwrap();
 
     assert_eq!(
         color,
-        ColorBuilder {
+        Rgba {
             red: 1.0,
             green: 1.0,
             blue: 1.0,
@@ -53,28 +49,26 @@ fn test_conversion_from_hex_sgb_255() {
 
 #[test]
 fn test_conversion_from_hex_sgb_1() {
-    let color: Color = ColorBuilder::from_hex("#151515".into(), Format::SRGB0_255)
-        .unwrap()
-        .into();
+    let color = Rgba::from_hex("#151515".into()).unwrap();
 
     assert_eq!(
         color,
-        ColorWGPU {
-            r: 21.0,
-            g: 21.0,
-            b: 21.0,
-            a: 1.0
+        Rgba {
+            red: 21.0 / 255.0,
+            green: 21.0 / 255.0,
+            blue: 21.0 / 255.0,
+            alpha: 1.0
         }
     );
 
-    let color = ColorBuilder::from_hex("#FFFFFF".into(), Format::SRGB0_255).unwrap();
+    let color = Rgba::from_hex("#FFFFFF".into()).unwrap();
 
     assert_eq!(
         color,
-        ColorBuilder {
-            red: 255.0,
-            green: 255.0,
-            blue: 255.0,
+        Rgba {
+            red: 255.0 / 255.0,
+            green: 255.0 / 255.0,
+            blue: 255.0 / 255.0,
             alpha: 1.0
         }
     );
@@ -82,24 +76,23 @@ fn test_conversion_from_hex_sgb_1() {
 
 #[test]
 fn test_conversion_from_gray_hex_with_alpha() {
-    let color_with_alpha = ColorBuilder::from_hex("#15151580".into(), Format::SRGB0_255).unwrap();
+    let color_with_alpha = Rgba::from_hex("#15151580".into()).unwrap();
 
     assert_eq!(
         color_with_alpha,
-        ColorBuilder {
-            red: 21.0,
-            green: 21.0,
-            blue: 21.0,
+        Rgba {
+            red: 21.0 / 255.0,
+            green: 21.0 / 255.0,
+            blue: 21.0 / 255.0,
             alpha: 128.0 / 255.0
         }
     );
 
-    let color_with_alpha_srgb0_1 =
-        ColorBuilder::from_hex("#15151580".into(), Format::SRGB0_1).unwrap();
+    let color_with_alpha_srgb0_1 = Rgba::from_hex("#15151580".into()).unwrap();
 
     assert_eq!(
         color_with_alpha_srgb0_1,
-        ColorBuilder {
+        Rgba {
             red: 21.0 / 255.0,
             green: 21.0 / 255.0,
             blue: 21.0 / 255.0,
@@ -110,24 +103,23 @@ fn test_conversion_from_gray_hex_with_alpha() {
 
 #[test]
 fn test_conversion_from_teal_hex_with_alpha() {
-    let color_with_alpha = ColorBuilder::from_hex("#06a49b99".into(), Format::SRGB0_255).unwrap();
+    let color_with_alpha = Rgba::from_hex("#06a49b99".into()).unwrap();
 
     assert_eq!(
         color_with_alpha,
-        ColorBuilder {
-            red: 6.0,
-            green: 164.0,
-            blue: 155.0,
+        Rgba {
+            red: 6.0 / 255.0,
+            green: 164.0 / 255.0,
+            blue: 155.0 / 255.0,
             alpha: 153.0 / 255.0
         }
     );
 
-    let color_with_alpha_srgb0_1 =
-        ColorBuilder::from_hex("#06a49b99".into(), Format::SRGB0_1).unwrap();
+    let color_with_alpha_srgb0_1 = Rgba::from_hex("#06a49b99".into()).unwrap();
 
     assert_eq!(
         color_with_alpha_srgb0_1,
-        ColorBuilder {
+        Rgba {
             red: 6.0 / 255.0,
             green: 164.0 / 255.0,
             blue: 155.0 / 255.0,

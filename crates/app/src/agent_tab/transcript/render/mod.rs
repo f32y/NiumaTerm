@@ -1,48 +1,38 @@
 #[cfg(test)]
-pub(super) use crate::agent_tab::transcript::render::text_style::{
-    highlight_theme_for_surface, is_dark_surface, transcript_code_block_style,
-};
+pub(super) use crate::agent_tab::transcript::render::text_style::highlight_theme_for_surface;
+#[cfg(test)]
+pub(super) use crate::agent_tab::transcript::render::text_style::is_dark_surface;
+#[cfg(test)]
+pub(super) use crate::agent_tab::transcript::render::text_style::transcript_code_block_style;
 
 pub(super) mod image_preview;
 pub(super) mod text_style;
 
-mod compaction_row;
-
-mod questions;
-mod user_row;
-mod work_row;
+pub(super) mod compaction_row;
 
 #[cfg(test)]
 mod working_indicator_tests;
 
-use std::time::{Duration, Instant};
-
-use gpui::prelude::*;
-use gpui::{
-    Animation, AnimationExt as _, AnyElement, App, Context, Div, ElementId, FontWeight, Hsla,
-    Pixels, RenderOnce, Window, div, ease_in_out, px, relative, rems,
-};
-use gpui_component::modern_menu::ModernMenuExt as _;
-use gpui_component::shimmer::ShimmerText;
-use gpui_component::spinner::Spinner;
-use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
-use nmt_agent::chat::Item as SessionItem;
-use rust_i18n::t;
-
-use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
+use crate::agent_tab::settings::AgentSettings;
+use crate::agent_tab::transcript::TranscriptView;
 use crate::agent_tab::transcript::disclosure_row::{
-    AGENT_CARD_DETAIL_SIZE, AGENT_CARD_GAP, AGENT_CARD_ICON_BLOCK, AGENT_CARD_PADDING_X,
-    AgentDisclosureRow, agent_card,
+    AGENT_CARD_DETAIL_SIZE, AGENT_CARD_ICON_BLOCK, AgentDisclosureRow, agent_card,
 };
 use crate::agent_tab::transcript::format::{interrupted_status_label, worked_status_label};
-use crate::agent_tab::transcript::render::text_style::{markdown_view, transcript_text_style};
-use crate::agent_tab::transcript::reveal::{Disclosures, RevealKey, revealed_block, revealed_part};
-use crate::agent_tab::transcript::rows::{RowGap, TranscriptRow, is_run_row, row_gap};
-use crate::agent_tab::transcript::{RowSpec, TranscriptView, is_work_row, working_label};
+use crate::agent_tab::transcript::reveal::{Disclosures, RevealKey};
+use crate::agent_tab::transcript::rows::RowGap;
+use gpui::prelude::*;
+use gpui::{
+    Animation, AnimationExt as _, AnyElement, App, Context, Div, ElementId, Hsla, RenderOnce,
+    Window, div, ease_in_out, px, relative, rems,
+};
+use gpui_component::{ActiveTheme as _, IconName, h_flex, v_flex};
+use rust_i18n::t;
+use std::time::{Duration, Instant};
 
 /// Edge of a transcript thumbnail, matching the composer strip so an image
 /// does not change size when the message it belongs to is sent.
-const TRANSCRIPT_THUMBNAIL: f32 = 56.0;
+pub(super) const TRANSCRIPT_THUMBNAIL: f32 = 56.0;
 
 /// Share of the pane the conversation column takes, and the margin on each
 /// side that leaves. A share rather than a fixed measure on a narrow pane,
@@ -106,7 +96,7 @@ const TRANSCRIPT_WORK_TEXT_GAP: f32 = 12.0;
 const TRANSCRIPT_STEP_GAP: f32 = 8.0;
 
 /// How many pixels a rank of space is worth.
-fn gap_px(gap: RowGap) -> f32 {
+pub(super) fn gap_px(gap: RowGap) -> f32 {
     match gap {
         RowGap::Step => TRANSCRIPT_STEP_GAP,
         RowGap::Work => TRANSCRIPT_WORK_TEXT_GAP,
@@ -119,401 +109,18 @@ fn gap_px(gap: RowGap) -> f32 {
 /// rows reading as one block. It holds the rows off nothing: a gap after it
 /// would indent the run's labels away from the column the conversation is
 /// read in, and the rule already separates them from it.
-const TRANSCRIPT_RUN_RULE: f32 = 2.0;
+pub(super) const TRANSCRIPT_RUN_RULE: f32 = 2.0;
 
 /// Where the conversation's own text starts inside the reading column, which
 /// every prose row and status line sets on itself. The run rule stands on
 /// that edge rather than left of it, so a run reads as part of the column
 /// instead of hanging off it.
-const TRANSCRIPT_TEXT_INSET: f32 = 4.0;
+pub(super) const TRANSCRIPT_TEXT_INSET: f32 = 4.0;
 
 /// Leading for transcript text, as a multiple of the font size. Conversation
 /// prose is read in paragraphs rather than scanned line by line the way
 /// terminal output is, so it is set looser than the chrome around it.
 pub(super) const TRANSCRIPT_LINE_HEIGHT: f32 = 1.6;
-
-impl TranscriptView {
-    /// Build the element for one visible row. Row indices come from the list
-    /// element during layout/paint, resolved through the spec snapshot taken
-    /// in the current render pass.
-    pub(crate) fn render_row(
-        &mut self,
-        ix: usize,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let Some(TranscriptRow { spec, gap }) = self.rows.get(ix).cloned() else {
-            return div().into_any_element();
-        };
-
-        // The list lays each row out on its own, so a run's grouping rule is
-        // drawn per row rather than around the run. A segment has to carry
-        // the gap below it or consecutive segments meet with a break between
-        // them, and a run continues past a boundary exactly when that
-        // boundary is step-ranked. The wider ranks all end the run, so their
-        // space belongs below the rule rather than inside it.
-        let in_run = is_run_row(&spec);
-        let rule_carries_gap = in_run && gap == RowGap::Step;
-        let gap = gap_px(gap);
-
-        // The rows a run or a fold splices in open and shut as list rows of
-        // their own, so each one ramps its own height and needs a height of
-        // its own to ramp towards.
-        let part = revealed_part(&spec);
-        let now = Instant::now();
-
-        let row = match spec {
-            RowSpec::Entry { index, .. } => self.render_entry_row(index, window, cx),
-            RowSpec::Work { index, .. } => self.render_work_row(index, window, cx),
-
-            RowSpec::TurnFold {
-                turn,
-                row_count,
-                folded,
-            } => render_turn_fold(&self.disclosures, turn, row_count, folded, cx),
-
-            RowSpec::TurnSummary {
-                seconds,
-                output_tokens,
-            } => render_turn_summary(seconds, output_tokens, cx),
-
-            RowSpec::Interrupted { output_tokens, .. } => render_interrupted_row(output_tokens, cx),
-
-            RowSpec::RunToggle {
-                run_start,
-                tool_count,
-                expanded,
-            } => render_run_toggle(&self.disclosures, run_start, tool_count, expanded, cx),
-
-            RowSpec::Working { compacting } => self.render_working_row(compacting, cx),
-        };
-
-        // Each row is laid out on its own by the virtual list, so the reading
-        // column has to be re-established per row rather than once around the
-        // conversation.
-        let body = div()
-            .w_full()
-            .when(in_run, |this| {
-                this.border_l(px(TRANSCRIPT_RUN_RULE))
-                    .border_color(cx.theme().border)
-            })
-            .when(rule_carries_gap, |this| this.pb(px(gap)))
-            .child(row);
-
-        // A border is drawn at the element's own leading edge, outside any
-        // padding it carries, so the inset that puts the rule on the text
-        // column has to come from a level above it. Only a run needs one,
-        // and only a run pays for it.
-        let row = transcript_column(
-            match in_run {
-                true => div()
-                    .w_full()
-                    .pl(px(TRANSCRIPT_TEXT_INSET))
-                    .child(body)
-                    .into_any_element(),
-
-                false => body.into_any_element(),
-            },
-            cx,
-        )
-        .when(!rule_carries_gap, |this| this.pb(px(gap)));
-
-        // A row a run toggle or a turn fold spliced in grows and shrinks
-        // rather than appearing and vanishing, so the conversation below it
-        // travels with it the whole way instead of catching up in one jump at
-        // the end. The ramp wraps the row entire — its slice of the grouping
-        // rule and the space it owes the row below it — because a rule drawn
-        // down to a step of no height, or a gap left where a step used to be,
-        // is the part that would still jump.
-        match (part, self.revealed_by(ix, now)) {
-            (Some(part), Some(key)) => revealed_block(
-                row,
-                part,
-                self.disclosures.progress(key, now),
-                self.disclosures.height(part),
-                self.shut_height(ix, key, now),
-                cx.entity().downgrade(),
-            )
-            .into_any_element(),
-
-            _ => row.into_any_element(),
-        }
-    }
-
-    /// What a shutting row still occupies once it has finished shutting.
-    ///
-    /// When a block of rows leaves the list, the row above the block stops
-    /// holding its space off the block's first row and starts holding it off
-    /// whatever followed the block, and those two boundaries can rank apart:
-    /// a toggle sits a step off its first step and a work rank off the reply
-    /// after the run. The block's last row holds back exactly that
-    /// difference, so the space the row above gains at the removal is the
-    /// space the block gives up, and the removal itself moves nothing. Every
-    /// row above the last owes nothing, because the boundary it leaves
-    /// behind is inside the block.
-    fn shut_height(&self, ix: usize, key: RevealKey, now: Instant) -> Pixels {
-        if self.revealed_by(ix + 1, now) == Some(key) {
-            return px(0.);
-        }
-
-        let first = (0..ix)
-            .rev()
-            .take_while(|cursor| self.revealed_by(*cursor, now) == Some(key))
-            .last()
-            .unwrap_or(ix);
-
-        let Some(above) = first.checked_sub(1).map(|above| &self.rows[above]) else {
-            return px(0.);
-        };
-
-        let below = self.rows.get(ix + 1).map(|row| &row.spec);
-
-        let merged = row_gap(
-            self.conversation.borrow().content.entries(),
-            &above.spec,
-            below,
-        );
-
-        px(gap_px(merged) - gap_px(above.gap))
-    }
-
-    /// The live progress line. While the backend is compacting it names that
-    /// explicitly and spins: compaction produces no streamed output, so a bare
-    /// seconds counter would read as a hung turn for as long as a minute.
-    pub(crate) fn render_working_row(
-        &self,
-        compacting: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let Some(started) = self.conversation.borrow().live.started() else {
-            return div().into_any_element();
-        };
-
-        if compacting {
-            let accent = cx.theme().info;
-
-            return h_flex()
-                .w_full()
-                .gap(px(AGENT_CARD_GAP))
-                .items_center()
-                .px(px(AGENT_CARD_PADDING_X))
-                .child(
-                    div()
-                        .size(px(AGENT_CARD_ICON_BLOCK))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(
-                            Spinner::new()
-                                .icon(IconName::LoaderCircle)
-                                .with_size(px(12.))
-                                .color(accent),
-                        ),
-                )
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(accent)
-                                .child(t!("agent-transcript-compacting")),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(working_label(
-                                    started,
-                                    self.conversation.borrow().live.output_tokens(),
-                                    self.conversation.borrow().live.detail(),
-                                )),
-                        ),
-                )
-                .into_any_element();
-        }
-
-        // The dots stand in the slot a card gives its type icon, so the label
-        // starts on the column a tool call's title starts on and the live line
-        // reads as the next step of the work above it rather than as a stray
-        // line under it. A ring turning in that slot reads as one more step
-        // with an icon; a travelling swell reads as the pane waiting.
-        h_flex()
-            .w_full()
-            .gap(px(AGENT_CARD_GAP))
-            .items_center()
-            .px(px(AGENT_CARD_PADDING_X))
-            .child(
-                div()
-                    .size(px(AGENT_CARD_ICON_BLOCK))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(WorkingIndicator::new(cx.theme().warning)),
-            )
-            .child(
-                div()
-                    .text_size(px(AGENT_CARD_DETAIL_SIZE))
-                    .text_color(cx.theme().muted_foreground)
-                    .child(
-                        // The label text changes every second, so it cannot
-                        // serve as the animation identity; a fixed id keeps
-                        // one animation state alive across those rewrites.
-                        //
-                        // The band lifts the muted label to full foreground
-                        // contrast. The component's theme-derived default
-                        // mixes the text toward the background on light
-                        // themes, which fades the band into the page instead,
-                        // and its default peak leaves the muted label only
-                        // slightly lifted at the twelve-pixel detail size.
-                        ShimmerText::new(working_label(
-                            started,
-                            self.conversation.borrow().live.output_tokens(),
-                            self.conversation.borrow().live.detail(),
-                        ))
-                        .id("agent-working-label")
-                        .highlight_color(cx.theme().foreground)
-                        .peak_opacity(0.9),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    pub(crate) fn render_entry_row(
-        &mut self,
-        index: usize,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let shared = self.conversation.clone();
-        let conversation = shared.borrow();
-        let entry = &conversation.content.entries()[index];
-
-        match &entry.item {
-            SessionItem::UserMessage { text: Some(text) } => self.render_user_row(index, text, cx),
-
-            SessionItem::AgentMessage {
-                id,
-                text: Some(text),
-                questions: Some(questions),
-            } => {
-                self.render_question_message(index, id.clone(), text.clone(), questions.clone(), cx)
-            }
-
-            SessionItem::AgentMessage {
-                text: Some(text), ..
-            } => self.render_agent_row(index, self.shown_reply(index, text).to_string(), cx),
-
-            SessionItem::Error { text } => self.render_error_row(index, text.clone(), cx),
-
-            SessionItem::Compaction { detail, .. } => {
-                let detail = detail.clone();
-
-                compaction_row::render_compaction_row(
-                    self.kind,
-                    self.cwd.as_deref(),
-                    &self.disclosures,
-                    index,
-                    detail,
-                    window,
-                    cx,
-                )
-            }
-
-            item if is_work_row(item) => self.render_work_row(index, window, cx),
-            _ => div().into_any_element(),
-        }
-    }
-
-    pub(crate) fn render_agent_row(
-        &self,
-        index: usize,
-        text: String,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let shared = self.conversation.clone();
-        let conversation = shared.borrow();
-
-        let attribution = conversation.content.entries()[index]
-            .item
-            .id()
-            .and_then(|id| self.attribution.get(id));
-
-        let cwd = attribution.map_or_else(|| self.cwd.clone(), |author| author.cwd.clone());
-
-        h_flex()
-            .id(("entry", index))
-            .group("entry")
-            .relative()
-            .w_full()
-            .items_end()
-            .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
-            .child(
-                v_flex()
-                    .debug_selector(move || format!("transcript-agent-{index}"))
-                    .flex_1()
-                    .min_w_0()
-                    .px_1()
-                    .when_some(attribution, |view, author| {
-                        view.child(
-                            div()
-                                .debug_selector(move || format!("transcript-author-{index}"))
-                                .mb_2()
-                                .text_sm()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(cx.theme().muted_foreground)
-                                .child(author.name.clone()),
-                        )
-                    })
-                    .child(
-                        markdown_view(("agent-md", index), text, cwd)
-                            .style(transcript_text_style(cx))
-                            .selectable(true),
-                    ),
-            )
-            .child(
-                // A stamp in the flow would reserve its width on every row,
-                // ending assistant output short of the pane by a strip that is
-                // blank whenever the pointer is elsewhere. Out of the flow it
-                // costs nothing until it appears, and the tinted chip keeps it
-                // legible where it lands over the last line.
-                self.hover_stamp(index, cx)
-                    .absolute()
-                    .right_1()
-                    .bottom_0()
-                    .px_1()
-                    .rounded(UI_RADIUS)
-                    .bg(cx.theme().muted),
-            )
-            .into_any_element()
-    }
-
-    pub(crate) fn render_error_row(
-        &self,
-        index: usize,
-        text: String,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        h_flex()
-            .id(("entry", index))
-            .w_full()
-            .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
-            .child(
-                div()
-                    .max_w(relative(0.9))
-                    .px_3()
-                    .py_2()
-                    .rounded(UI_RADIUS)
-                    .bg(cx.theme().danger.opacity(0.15))
-                    .text_color(cx.theme().danger)
-                    .text_sm()
-                    .child(text),
-            )
-            .into_any_element()
-    }
-}
 
 // Rows that stand for a turn rather than for something inside one: the fold
 // that hides a finished turn's work, the summary on it, an interruption, and
@@ -521,7 +128,7 @@ impl TranscriptView {
 
 /// The settled turn's work disclosure. It heads the rows it hides, so the
 /// chevron keeps its usual meaning: the content it reveals is below it.
-fn render_turn_fold(
+pub(super) fn render_turn_fold(
     disclosures: &Disclosures,
     turn: u64,
     row_count: usize,
@@ -565,7 +172,7 @@ fn render_turn_fold(
 /// divider (bottom hairline). Reporting only: it accounts for work the
 /// disclosure above it owns, so making it clickable too would give one
 /// turn two controls over the same rows.
-fn render_turn_summary(
+pub(super) fn render_turn_summary(
     seconds: u64,
     output_tokens: Option<u64>,
     cx: &mut Context<TranscriptView>,
@@ -586,7 +193,7 @@ fn render_turn_summary(
         .into_any_element()
 }
 
-fn render_interrupted_row(
+pub(super) fn render_interrupted_row(
     output_tokens: Option<u64>,
     cx: &mut Context<TranscriptView>,
 ) -> AnyElement {
@@ -605,7 +212,7 @@ fn render_interrupted_row(
 }
 
 /// The "+N tool calls" / "Show fewer tool calls" toggle for a work run.
-fn render_run_toggle(
+pub(super) fn render_run_toggle(
     disclosures: &Disclosures,
     run_start: usize,
     tool_count: usize,
@@ -667,12 +274,12 @@ const DOT_MAX_OPACITY: f32 = 0.88;
 
 /// Three pulsing dots for an ongoing operation with no measurable completion.
 #[derive(IntoElement)]
-struct WorkingIndicator {
+pub(super) struct WorkingIndicator {
     color: Hsla,
 }
 
 impl WorkingIndicator {
-    fn new(color: Hsla) -> Self {
+    pub(super) fn new(color: Hsla) -> Self {
         Self { color }
     }
 }

@@ -3,7 +3,7 @@ use std::io::Cursor;
 use gpui::{Image, ImageFormat};
 
 use crate::agent_tab::composer::attachments::{
-    AttachError, MAX_ATTACHMENTS, MAX_IMAGE_EDGE, PendingAttachments, placeholder_text,
+    AttachError, MAX_ATTACHMENTS, MAX_IMAGE_EDGE, PendingAttachments, attach_png, placeholder_text,
 };
 
 /// A real encoded PNG, because attaching decodes what it is given.
@@ -23,7 +23,7 @@ fn attach_three() -> (PendingAttachments, String) {
     let mut text = String::new();
 
     for _ in 0..3 {
-        let placeholder = pending.attach(&png(4, 4)).ok().expect("attach");
+        let placeholder = attach_png(&mut pending, &png(4, 4)).ok().expect("attach");
 
         text.push_str(&placeholder);
     }
@@ -57,7 +57,7 @@ fn removing_a_middle_attachment_keeps_the_text_around_it() {
     let mut text = String::new();
 
     for (index, word) in ["one ", "two ", "three "].iter().enumerate() {
-        let placeholder = pending.attach(&png(4, 4)).ok().expect("attach");
+        let placeholder = attach_png(&mut pending, &png(4, 4)).ok().expect("attach");
 
         text.push_str(word);
         text.push_str(&placeholder);
@@ -84,7 +84,7 @@ fn deleting_every_placeholder_drops_every_attachment() {
 #[test]
 fn a_placeholder_naming_no_attachment_is_left_as_text() {
     let mut pending = PendingAttachments::default();
-    let placeholder = pending.attach(&png(4, 4)).ok().expect("attach");
+    let placeholder = attach_png(&mut pending, &png(4, 4)).ok().expect("attach");
     let text = format!("{placeholder} and a typed [Image #7]");
 
     // Nothing to renumber, and the typed one is the user's text to send.
@@ -95,7 +95,7 @@ fn a_placeholder_naming_no_attachment_is_left_as_text() {
 #[test]
 fn moving_a_placeholder_reorders_the_attachments() {
     let (mut pending, _) = attach_three();
-    let first = pending.iter().next().expect("first").bytes().to_vec();
+    let first = pending.iter().next().expect("first").image.bytes().to_vec();
 
     // The first image now reads last, so it is numbered last.
     let rewritten = pending
@@ -104,7 +104,7 @@ fn moving_a_placeholder_reorders_the_attachments() {
 
     assert_eq!(rewritten, "[Image #1][Image #2][Image #3]");
     assert_eq!(
-        pending.iter().last().expect("last").bytes(),
+        pending.iter().last().expect("last").image.bytes(),
         first.as_slice()
     );
 }
@@ -112,7 +112,7 @@ fn moving_a_placeholder_reorders_the_attachments() {
 #[test]
 fn only_placeholders_naming_an_attachment_are_links() {
     let mut pending = PendingAttachments::default();
-    let placeholder = pending.attach(&png(4, 4)).ok().expect("attach");
+    let placeholder = attach_png(&mut pending, &png(4, 4)).ok().expect("attach");
     let text = format!("look at {placeholder} and a typed [Image #7]");
 
     assert_eq!(pending.placeholder_links(&text), vec![8..18]);
@@ -122,7 +122,14 @@ fn only_placeholders_naming_an_attachment_are_links() {
 #[test]
 fn a_link_resolves_to_the_image_its_placeholder_names() {
     let (pending, text) = attach_three();
-    let second = pending.iter().nth(1).expect("second").bytes().to_vec();
+
+    let second = pending
+        .iter()
+        .nth(1)
+        .expect("second")
+        .image
+        .bytes()
+        .to_vec();
 
     let links = pending.placeholder_links(&text);
 
@@ -147,10 +154,13 @@ fn a_message_carries_no_more_than_the_cap() {
     let mut pending = PendingAttachments::default();
 
     for _ in 0..MAX_ATTACHMENTS {
-        assert!(pending.attach(&png(4, 4)).is_ok());
+        assert!(attach_png(&mut pending, &png(4, 4)).is_ok());
     }
 
-    assert!(matches!(pending.attach(&png(4, 4)), Err(AttachError::Full)));
+    assert!(matches!(
+        attach_png(&mut pending, &png(4, 4)),
+        Err(AttachError::Full)
+    ));
     assert_eq!(pending.iter().count(), MAX_ATTACHMENTS);
 }
 
@@ -159,13 +169,13 @@ fn attaching_shrinks_an_oversized_image() {
     let mut pending = PendingAttachments::default();
     let (from_width, from_height) = (MAX_IMAGE_EDGE + 400, 512);
 
-    pending
-        .attach(&png(from_width, from_height))
+    attach_png(&mut pending, &png(from_width, from_height))
         .ok()
         .expect("attach");
 
-    let attached = image_rs::load_from_memory(pending.iter().next().expect("attached").bytes())
-        .expect("decode attached");
+    let attached =
+        image_rs::load_from_memory(pending.iter().next().expect("attached").image.bytes())
+            .expect("decode attached");
 
     let (width, height) = (attached.width(), attached.height());
 
@@ -190,7 +200,10 @@ fn bytes_that_are_not_an_image_do_not_attach() {
     let mut pending = PendingAttachments::default();
 
     assert!(matches!(
-        pending.attach(&Image::from_bytes(ImageFormat::Png, b"not a png".to_vec())),
+        attach_png(
+            &mut pending,
+            &Image::from_bytes(ImageFormat::Png, b"not a png".to_vec())
+        ),
         Err(AttachError::Undecodable)
     ));
     assert!(pending.is_empty());

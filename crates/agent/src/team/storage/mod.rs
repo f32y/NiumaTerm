@@ -1,7 +1,6 @@
-pub use crate::team::storage::dispatch::DispatchError;
+pub use crate::team::session::DispatchError;
 
-mod attachments;
-mod dispatch;
+pub(super) use crate::team::storage::records::digest;
 
 mod records;
 mod replay;
@@ -43,11 +42,6 @@ pub enum StorageError {
     ReopenRequired,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RecoveryNotice {
-    TornFinalRecord,
-}
-
 pub struct RoomStore {
     directory: PathBuf,
     _lock: File,
@@ -59,6 +53,10 @@ pub struct RoomStore {
 }
 
 impl RoomStore {
+    pub(super) fn directory(&self) -> &Path {
+        &self.directory
+    }
+
     pub fn create(data_directory: &Path, room: Room) -> Result<Self, StorageError> {
         validation::validate(&room)?;
 
@@ -100,10 +98,7 @@ impl RoomStore {
         })
     }
 
-    pub fn open(
-        data_directory: &Path,
-        id: RoomId,
-    ) -> Result<(Self, Vec<RecoveryNotice>), StorageError> {
+    pub fn open(data_directory: &Path, id: RoomId) -> Result<(Self, bool), StorageError> {
         let directory = data_directory.join("agent-teams").join(id.to_string());
         let lock = lock_room(&directory)?;
         let checkpoint: Checkpoint = decode(&fs::read(directory.join("checkpoint.json"))?)?;
@@ -121,13 +116,13 @@ impl RoomStore {
 
         let replay = replay::replay(&mut journal, checkpoint)?;
 
-        let notices = if let Some(valid_bytes) = replay.truncated_at {
+        let truncated = if let Some(valid_bytes) = replay.truncated_at {
             journal.set_len(valid_bytes)?;
             journal.sync_all()?;
 
-            vec![RecoveryNotice::TornFinalRecord]
+            true
         } else {
-            Vec::new()
+            false
         };
 
         journal.seek(SeekFrom::End(0))?;
@@ -142,7 +137,7 @@ impl RoomStore {
                 digest: replay.digest,
                 failed: false,
             },
-            notices,
+            truncated,
         ))
     }
 
@@ -150,7 +145,7 @@ impl RoomStore {
         &self.room
     }
 
-    pub(super) fn revision(&self) -> u64 {
+    pub fn revision(&self) -> u64 {
         self.sequence
     }
 

@@ -11,18 +11,13 @@
 //! conversation the user has open. That bound is the reason the poll is cheap
 //! enough to run every second regardless of how many agents a run fans out to.
 
-pub use nmt_agent::session::workflows::OpenWorkflowAgent;
-
-use std::cell::{Cell, Ref};
-use std::rc::Rc;
-
-use gpui::Context;
-use nmt_agent::session::workflows::WorkflowReader;
-use nmt_agent::workflow::WorkflowRun;
-
 use crate::agent_tab::AgentPane;
-use crate::agent_tab::capabilities::AgentCapabilities as _;
-use crate::agent_tab::session::Backend;
+use crate::agent_tab::execution::AgentSession;
+use gpui::{Context, WeakEntity};
+use nmt_agent::session::controller::SessionController;
+use nmt_agent::session::workflows::{OpenWorkflowAgent, WorkflowReader};
+use std::cell::{Cell, Ref, RefCell};
+use std::rc::Rc;
 
 #[derive(Default)]
 pub(super) struct WorkflowUi {
@@ -37,37 +32,37 @@ impl WorkflowUi {
             readers.set(readers.get().saturating_sub(1));
         }
     }
-}
 
-impl Drop for WorkflowUi {
-    fn drop(&mut self) {
-        self.release();
-    }
-}
-
-impl AgentPane {
     /// Stop polling the old conversation when its state is cleared.
     pub(super) fn clear_workflows(&mut self) {
-        self.workflows.reader = None;
+        self.reader = None;
     }
 
     /// Show or hide the view. Refreshing follows visibility, so this is what
     /// starts and stops the one-second poll.
-    pub fn set_workflows_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
-        if self.workflows.visible == visible {
+    pub fn set_workflows_visible(
+        &mut self,
+        host: &WeakEntity<AgentSession>,
+        visible: bool,
+        cx: &mut Context<AgentPane>,
+    ) {
+        if self.visible == visible {
             return;
         }
 
-        self.workflows.visible = visible;
+        self.visible = visible;
 
-        if let Some(host) = self.host.upgrade() {
+        if let Some(host) = host.upgrade() {
             host.update(cx, |host, cx| {
                 if visible {
-                    host.workflow_readers.set(host.workflow_readers.get() + 1);
-                    self.workflows.interest = Some(host.workflow_readers.clone());
+                    host.workflow_refresh
+                        .readers
+                        .set(host.workflow_refresh.readers.get() + 1);
+
+                    self.interest = Some(host.workflow_refresh.readers.clone());
                     host.restore_workflows(cx);
                 } else {
-                    self.workflows.release();
+                    self.release();
                 }
 
                 host.sync_workflow_refresh(cx);
@@ -77,36 +72,14 @@ impl AgentPane {
         cx.notify();
     }
 
-    /// Session id when this pane runs a harness that reports workflows, which
-    /// is what scopes runs to the conversation they belong to.
-    pub fn workflow_session_id(&self) -> Option<String> {
-        if !self.kind.caps().workflows {
-            return None;
-        }
-
-        self.session
-            .borrow()
-            .runtime
-            .backend()
-            .and_then(Backend::session_id)
-            .map(str::to_owned)
-    }
-
-    /// Runs of the scoped session, in provider order.
-    pub fn workflow_runs(&self) -> Ref<'_, [WorkflowRun]> {
-        Ref::map(self.session.borrow(), |session| session.workflows.runs())
-    }
-
-    /// Agents of this tab the provider currently reports as running.
-    pub fn running_workflow_agents(&self) -> usize {
-        self.session.borrow().workflows.running_agents()
-    }
-
     /// The agent conversation the user has open, if any.
-    pub fn open_workflow_conversation(&self) -> Option<Ref<'_, OpenWorkflowAgent>> {
-        let reader = self.workflows.reader.as_ref()?;
+    pub fn open_workflow_conversation<'a>(
+        &self,
+        session: &'a RefCell<SessionController>,
+    ) -> Option<Ref<'a, OpenWorkflowAgent>> {
+        let reader = self.reader.as_ref()?;
 
-        Ref::filter_map(self.session.borrow(), |session| {
+        Ref::filter_map(session.borrow(), |session| {
             session.workflows.conversation(&reader.key.0, &reader.key.1)
         })
         .ok()
@@ -114,15 +87,17 @@ impl AgentPane {
 
     /// Open one agent's conversation, reading it immediately rather than
     /// waiting for the next tick.
-    pub fn open_workflow_agent(&mut self, task_id: &str, agent_id: &str, cx: &mut Context<Self>) {
-        self.workflows.reader = Some(
-            self.session
-                .borrow_mut()
-                .workflows
-                .open_agent(task_id, agent_id),
-        );
+    pub fn open_workflow_agent(
+        &mut self,
+        session: &RefCell<SessionController>,
+        host: &WeakEntity<AgentSession>,
+        task_id: &str,
+        agent_id: &str,
+        cx: &mut Context<AgentPane>,
+    ) {
+        self.reader = Some(session.borrow_mut().workflows.open_agent(task_id, agent_id));
 
-        if let Some(host) = self.host.upgrade() {
+        if let Some(host) = host.upgrade() {
             host.update(cx, |host, cx| {
                 host.read_open_workflow_agent(task_id, agent_id, cx)
             });
@@ -131,9 +106,15 @@ impl AgentPane {
         cx.notify();
     }
 
-    pub fn close_workflow_agent(&mut self, cx: &mut Context<Self>) {
-        self.workflows.reader = None;
+    pub fn close_workflow_agent(&mut self, cx: &mut Context<AgentPane>) {
+        self.reader = None;
 
         cx.notify();
+    }
+}
+
+impl Drop for WorkflowUi {
+    fn drop(&mut self) {
+        self.release();
     }
 }

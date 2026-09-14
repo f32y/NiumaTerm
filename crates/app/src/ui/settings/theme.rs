@@ -223,7 +223,7 @@ fn theme_preview(colors: Colors) -> Div {
         .p_3()
         .gap_2()
         .rounded(UI_RADIUS)
-        .bg(preview_color(colors.background.0))
+        .bg(preview_color(colors.background))
         .child(
             h_flex()
                 .gap_2()

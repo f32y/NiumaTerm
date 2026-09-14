@@ -5,7 +5,7 @@ use nmt_agent::AgentRuntimeStatus;
 use nmt_config::appearance::TabBarStyle;
 
 use crate::tabs::TabId;
-use crate::ui::workspace_sidebar::{TAB_ROW_HEIGHT, workspace_status_glyphs};
+use crate::ui::workspace_sidebar::workspace_status_glyphs;
 use crate::ui::{AppSettings, UI_RADIUS};
 use crate::workspace::TerminalActivity;
 
@@ -15,31 +15,6 @@ pub(super) struct SidebarTabDrag {
     pub(super) workspace: usize,
     pub(super) from: usize,
     pub(super) tab: TabId,
-}
-
-pub(super) struct SidebarTabDragPreview {
-    pub(super) label: SharedString,
-    pub(super) width: f32,
-}
-
-impl Render for SidebarTabDragPreview {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        h_flex()
-            .w(px(self.width))
-            .h(px(TAB_ROW_HEIGHT))
-            .px_2()
-            .items_center()
-            .rounded(UI_RADIUS)
-            .overflow_hidden()
-            .text_xs()
-            .bg(cx
-                .theme()
-                .background
-                .blend(cx.theme().sidebar)
-                .blend(cx.theme().sidebar_accent))
-            .text_color(cx.theme().sidebar_accent_foreground)
-            .child(div().truncate().child(self.label.clone()))
-    }
 }
 
 pub(super) struct WorkspaceDrag {

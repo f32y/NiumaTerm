@@ -64,7 +64,7 @@ pub(crate) fn key_action(
     newline_shortcut: NewlineShortcut,
     mode: Mode,
 ) -> TerminalKeyAction {
-    let flags = KeyEncodeFlags::from(mode);
+    let flags = key_encode_flags(mode);
 
     if event.phase != KeyPhase::Release {
         if !mode.intersects(Mode::DISAMBIGUATE_ESC_CODES | Mode::REPORT_ALL_KEYS_AS_ESC)
@@ -94,28 +94,38 @@ pub(crate) fn key_action(
         .unwrap_or(TerminalKeyAction::Ignore)
 }
 
-impl From<Mode> for KeyEncodeFlags {
-    fn from(mode: Mode) -> Self {
-        let mut flags = Self::empty();
+pub(crate) fn key_encode_flags(mode: Mode) -> KeyEncodeFlags {
+    let mut flags = KeyEncodeFlags::empty();
 
-        for (terminal, input) in [
-            (Mode::APP_CURSOR, Self::APP_CURSOR),
-            (Mode::APP_KEYPAD, Self::APP_KEYPAD),
-            (Mode::DISAMBIGUATE_ESC_CODES, Self::DISAMBIGUATE_ESC_CODES),
-            (Mode::REPORT_EVENT_TYPES, Self::REPORT_EVENT_TYPES),
-            (Mode::REPORT_ALTERNATE_KEYS, Self::REPORT_ALTERNATE_KEYS),
-            (Mode::REPORT_ALL_KEYS_AS_ESC, Self::REPORT_ALL_KEYS_AS_ESC),
-            (Mode::REPORT_ASSOCIATED_TEXT, Self::REPORT_ASSOCIATED_TEXT),
-        ] {
-            flags.set(input, mode.contains(terminal));
-        }
-
-        flags
+    for (terminal, input) in [
+        (Mode::APP_CURSOR, KeyEncodeFlags::APP_CURSOR),
+        (Mode::APP_KEYPAD, KeyEncodeFlags::APP_KEYPAD),
+        (
+            Mode::DISAMBIGUATE_ESC_CODES,
+            KeyEncodeFlags::DISAMBIGUATE_ESC_CODES,
+        ),
+        (Mode::REPORT_EVENT_TYPES, KeyEncodeFlags::REPORT_EVENT_TYPES),
+        (
+            Mode::REPORT_ALTERNATE_KEYS,
+            KeyEncodeFlags::REPORT_ALTERNATE_KEYS,
+        ),
+        (
+            Mode::REPORT_ALL_KEYS_AS_ESC,
+            KeyEncodeFlags::REPORT_ALL_KEYS_AS_ESC,
+        ),
+        (
+            Mode::REPORT_ASSOCIATED_TEXT,
+            KeyEncodeFlags::REPORT_ASSOCIATED_TEXT,
+        ),
+    ] {
+        flags.set(input, mode.contains(terminal));
     }
+
+    flags
 }
 
 fn encoded_key(event: &TerminalKey<'_>, flags: KeyEncodeFlags) -> Option<Vec<u8>> {
-    let input: KeyInput = event.into();
+    let input = key_input(event);
 
     encode_terminal_input(&input, event.modifiers, flags, fallback_text(event)).or_else(|| {
         (event.phase != KeyPhase::Release)
@@ -299,32 +309,28 @@ impl WheelDelta {
     }
 }
 
-impl From<&TerminalKey<'_>> for KeyInput {
-    fn from(event: &TerminalKey<'_>) -> Self {
-        let key = if event.key == "space" { " " } else { event.key };
+fn key_input(event: &TerminalKey<'_>) -> KeyInput {
+    let key = if event.key == "space" { " " } else { event.key };
 
-        let base_key = named_key(key)
-            .map(Key::Named)
-            .unwrap_or_else(|| Key::Character(key.into()));
+    let base_key = named_key(key)
+        .map(Key::Named)
+        .unwrap_or_else(|| Key::Character(key.into()));
 
-        let logical_key = match (&base_key, event.key_char) {
-            (Key::Character(_), Some(text)) if text.chars().count() == 1 => {
-                Key::Character(text.into())
-            }
+    let logical_key = match (&base_key, event.key_char) {
+        (Key::Character(_), Some(text)) if text.chars().count() == 1 => Key::Character(text.into()),
 
-            _ => base_key.clone(),
-        };
+        _ => base_key.clone(),
+    };
 
-        KeyInput {
-            logical_key,
-            key_without_modifiers: base_key,
-            text_with_all_modifiers: event.key_char.map(Into::into),
-            location: KeyLocation::Standard,
-            state: match event.phase {
-                KeyPhase::Press | KeyPhase::Repeat => ElementState::Pressed,
-                KeyPhase::Release => ElementState::Released,
-            },
-            repeat: event.phase == KeyPhase::Repeat,
-        }
+    KeyInput {
+        logical_key,
+        key_without_modifiers: base_key,
+        text_with_all_modifiers: event.key_char.map(Into::into),
+        location: KeyLocation::Standard,
+        state: match event.phase {
+            KeyPhase::Press | KeyPhase::Repeat => ElementState::Pressed,
+            KeyPhase::Release => ElementState::Released,
+        },
+        repeat: event.phase == KeyPhase::Repeat,
     }
 }

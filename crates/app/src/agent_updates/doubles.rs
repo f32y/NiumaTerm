@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use nmt_agent::launcher::AgentCli;
 use nmt_agent::update::{
     DiscoverySupport, ProviderKind, ProviderMaintenance, UpdateError, UpdateErrorKind,
-    VendorUpdateResult, VersionStatus,
+    VersionStatus,
 };
 use semver::Version;
 
@@ -21,7 +21,7 @@ impl ProviderMaintenance for UnavailableMaintenance {
         Err(UpdateError::new(UpdateErrorKind::Unsupported, &self.reason))
     }
 
-    fn update(&self, _: &AgentCli) -> Result<VendorUpdateResult, UpdateError> {
+    fn update(&self, _: &AgentCli) -> Result<String, UpdateError> {
         Err(UpdateError::new(UpdateErrorKind::Unsupported, &self.reason))
     }
 }
@@ -66,11 +66,9 @@ impl ProviderMaintenance for FakeMaintenance {
         })
     }
 
-    fn update(&self, _: &AgentCli) -> Result<VendorUpdateResult, UpdateError> {
+    fn update(&self, _: &AgentCli) -> Result<String, UpdateError> {
         self.updated.store(true, Ordering::SeqCst);
 
-        Ok(VendorUpdateResult {
-            diagnostic: "testing provider updated".to_string(),
-        })
+        Ok("testing provider updated".to_string())
     }
 }

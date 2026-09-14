@@ -24,8 +24,7 @@ use std::thread;
 
 use nmt_config::colors::Colors;
 use nmt_platform::{
-    ChildEvent, EventedPty, Interest, Poll, ProcessReadWrite, SoftReady, Token, Waker,
-    WinsizeBuilder,
+    EventedPty, Interest, Poll, ProcessReadWrite, SoftReady, Token, Waker, WinsizeBuilder,
 };
 use nmt_terminal::pty_pipe::SessionOptions;
 use nmt_terminal::session::{EngineError, EngineErrorCode, SessionObserver, TerminalSession};
@@ -287,13 +286,9 @@ impl EventedPty for NetPty {
         self.child_token
     }
 
-    fn next_child_event(&mut self) -> Option<ChildEvent> {
+    fn child_exited(&mut self) -> bool {
         // Report the exit exactly once; the event loop breaks on the first.
-        if self.exited.swap(false, Ordering::SeqCst) {
-            Some(ChildEvent::Exited)
-        } else {
-            None
-        }
+        self.exited.swap(false, Ordering::SeqCst)
     }
 }
 

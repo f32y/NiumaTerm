@@ -92,7 +92,7 @@ impl Element for BlockListItem {
 
         style.size.width = relative(1.0).into();
 
-        let pad_rows = self.pane().read(cx).model.settings.pad_rows;
+        let pad_rows = self.pane().read(cx).model.pad_rows;
 
         let height = match self {
             BlockListItem::Frozen {
@@ -144,7 +144,7 @@ impl Element for BlockListItem {
         let theme = self.pane().read(cx).model.theme;
         let origin_y = self.pane().read(cx).content_origin().y;
         let item_top = (bounds.top() - origin_y).as_f32();
-        let pad_rows = self.pane().read(cx).model.settings.pad_rows;
+        let pad_rows = self.pane().read(cx).model.pad_rows;
 
         let viewport = ItemViewport {
             top: bounds.top().as_f32(),

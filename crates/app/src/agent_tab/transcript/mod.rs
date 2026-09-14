@@ -11,7 +11,7 @@ pub(super) use crate::agent_tab::transcript::format::{
     strip_read_gutter, truncated_user_prompt, working_label,
 };
 pub(super) use crate::agent_tab::transcript::render::transcript_column;
-pub(super) use crate::agent_tab::transcript::rows::{Entry, ReadingPosition, RowSpec};
+pub(super) use crate::agent_tab::transcript::rows::{Entry, RowSpec};
 #[cfg(test)]
 pub(super) use crate::agent_tab::transcript::rows::{TurnSummary, turn_summary};
 pub(super) use crate::agent_tab::transcript::view::TranscriptAttribution;

@@ -16,12 +16,12 @@ fn manager(n: u32) -> TabManager<u32> {
 fn new_tab_becomes_active() {
     let mut mgr = manager(1);
 
-    assert_eq!(mgr.active_id(), TabId(1));
+    assert_eq!(mgr.list().active_id(), TabId(1));
 
     mgr.new_tab(2, TabId(2), "PowerShell".into());
 
-    assert_eq!(mgr.active_index(), 1);
-    assert_eq!(mgr.active_id(), TabId(2));
+    assert_eq!(mgr.list().active_index(), 1);
+    assert_eq!(mgr.list().active_id(), TabId(2));
     assert_eq!(*mgr.active(), 2);
 }
 
@@ -29,13 +29,13 @@ fn new_tab_becomes_active() {
 fn new_tabs_use_their_profile_names() {
     let mut mgr = manager(1);
 
-    assert_eq!(mgr.tabs()[0].title(), "PowerShell");
+    assert_eq!(mgr.list().items()[0].title(), "PowerShell");
 
     mgr.new_tab(2, TabId(2), "Command Prompt".into());
     mgr.new_tab(3, TabId(3), "Developer PowerShell".into());
 
-    assert_eq!(mgr.tabs()[1].title(), "Command Prompt");
-    assert_eq!(mgr.tabs()[2].title(), "Developer PowerShell");
+    assert_eq!(mgr.list().items()[1].title(), "Command Prompt");
+    assert_eq!(mgr.list().items()[2].title(), "Developer PowerShell");
 }
 
 #[test]
@@ -43,22 +43,22 @@ fn close_is_refused_for_single_tab() {
     let mut mgr = manager(1);
 
     assert!(mgr.close(TabId(1)).is_none());
-    assert_eq!(mgr.len(), 1);
+    assert_eq!(mgr.list().len(), 1);
 }
 
 #[test]
 fn close_active_falls_to_right_neighbor() {
     let mut mgr = manager(3); // active = tab3 (index 2)
 
-    mgr.activate(1); // active = tab2 (index 1)
+    mgr.list_mut().activate(1); // active = tab2 (index 1)
 
     let removed = mgr.close(TabId(2));
 
     assert_eq!(removed, Some(2));
 
     // tab3 was to the right; it is now active at index 1.
-    assert_eq!(mgr.active_id(), TabId(3));
-    assert_eq!(mgr.active_index(), 1);
+    assert_eq!(mgr.list().active_id(), TabId(3));
+    assert_eq!(mgr.list().active_index(), 1);
 }
 
 #[test]
@@ -67,48 +67,48 @@ fn close_active_with_no_right_neighbor_falls_left() {
     let removed = mgr.close(TabId(3));
 
     assert_eq!(removed, Some(3));
-    assert_eq!(mgr.active_id(), TabId(2));
-    assert_eq!(mgr.active_index(), 1);
+    assert_eq!(mgr.list().active_id(), TabId(2));
+    assert_eq!(mgr.list().active_index(), 1);
 }
 
 #[test]
 fn closing_left_of_active_keeps_active_tab() {
     let mut mgr = manager(3);
 
-    mgr.activate(2); // active = tab3
+    mgr.list_mut().activate(2); // active = tab3
     mgr.close(TabId(1)); // closes a tab left of active
 
-    assert_eq!(mgr.active_id(), TabId(3));
-    assert_eq!(mgr.active_index(), 1);
+    assert_eq!(mgr.list().active_id(), TabId(3));
+    assert_eq!(mgr.list().active_index(), 1);
 }
 
 #[test]
 fn focus_next_and_prev_wrap_around() {
     let mut mgr = manager(3);
 
-    mgr.activate(2);
-    mgr.focus_next();
+    mgr.list_mut().activate(2);
+    mgr.list_mut().focus_next();
 
-    assert_eq!(mgr.active_index(), 0); // wrapped to first
+    assert_eq!(mgr.list().active_index(), 0); // wrapped to first
 
-    mgr.focus_prev();
+    mgr.list_mut().focus_prev();
 
-    assert_eq!(mgr.active_index(), 2); // wrapped to last
+    assert_eq!(mgr.list().active_index(), 2); // wrapped to last
 }
 
 #[test]
 fn reorder_moves_tab_and_active_follows() {
     let mut mgr = manager(3); // [t1, t2, t3], active t3
 
-    mgr.activate(0); // active = t1
-    mgr.reorder(0, 2); // move t1 to the end -> [t2, t3, t1]
+    mgr.list_mut().activate(0); // active = t1
+    mgr.list_mut().reorder(0, 2); // move t1 to the end -> [t2, t3, t1]
 
-    assert_eq!(mgr.tabs()[0].id(), TabId(2));
-    assert_eq!(mgr.tabs()[2].id(), TabId(1));
+    assert_eq!(mgr.list().items()[0].id(), TabId(2));
+    assert_eq!(mgr.list().items()[2].id(), TabId(1));
 
     // active still t1, now at index 2.
-    assert_eq!(mgr.active_id(), TabId(1));
-    assert_eq!(mgr.active_index(), 2);
+    assert_eq!(mgr.list().active_id(), TabId(1));
+    assert_eq!(mgr.list().active_index(), 2);
 }
 
 #[test]
@@ -116,10 +116,10 @@ fn terminal_title_replaces_default_and_empty_restores_it() {
     let mut mgr = manager(2);
 
     assert!(mgr.set_title(TabId(1), "vim".into()));
-    assert_eq!(mgr.tabs()[0].title(), "vim");
-    assert_eq!(mgr.tabs()[1].title(), "PowerShell");
+    assert_eq!(mgr.list().items()[0].title(), "vim");
+    assert_eq!(mgr.list().items()[1].title(), "PowerShell");
     assert!(mgr.set_title(TabId(1), String::new()));
-    assert_eq!(mgr.tabs()[0].title(), "PowerShell");
+    assert_eq!(mgr.list().items()[0].title(), "PowerShell");
 }
 
 #[test]
@@ -129,10 +129,10 @@ fn user_title_takes_precedence_over_terminal_title() {
     mgr.set_title(TabId(1), "vim".into());
     mgr.rename(TabId(1), "editor".into());
 
-    assert_eq!(mgr.tabs()[0].title(), "editor");
-    assert_eq!(mgr.tabs()[0].user_title(), Some("editor"));
+    assert_eq!(mgr.list().items()[0].title(), "editor");
+    assert_eq!(mgr.list().items()[0].user_title(), Some("editor"));
     assert!(!mgr.set_title(TabId(1), "shell".into()));
-    assert_eq!(mgr.tabs()[0].title(), "editor");
+    assert_eq!(mgr.list().items()[0].title(), "editor");
 }
 
 #[test]
@@ -141,8 +141,8 @@ fn mark_exited_keeps_tab_and_flags_it() {
 
     mgr.mark_exited(TabId(1));
 
-    assert!(mgr.tabs()[0].exited());
-    assert_eq!(mgr.len(), 2);
+    assert!(mgr.list().items()[0].exited());
+    assert_eq!(mgr.list().len(), 2);
 }
 
 #[test]
@@ -151,16 +151,16 @@ fn bell_flags_a_tab_until_it_is_activated() {
 
     mgr.ring_bell(TabId(1));
 
-    assert!(mgr.tabs()[0].bell());
+    assert!(mgr.list().items()[0].bell());
 
     // Clearing acts on the active tab, so the ringing one keeps its flag.
     assert!(!mgr.clear_active_bell());
-    assert!(mgr.tabs()[0].bell());
+    assert!(mgr.list().items()[0].bell());
 
-    mgr.activate(0);
+    mgr.list_mut().activate(0);
 
     assert!(mgr.clear_active_bell());
-    assert!(!mgr.tabs()[0].bell());
+    assert!(!mgr.list().items()[0].bell());
     assert!(!mgr.clear_active_bell());
 }
 
@@ -171,16 +171,19 @@ fn a_failure_survives_the_successes_that_follow_it() {
     mgr.record_outcome(TabId(1), Some(1).into());
     mgr.record_outcome(TabId(1), Some(0).into());
 
-    assert_eq!(mgr.tabs()[0].last_outcome(), Some(CommandOutcome::Failed));
+    assert_eq!(
+        mgr.list().items()[0].last_outcome(),
+        Some(CommandOutcome::Failed)
+    );
 
     // Clearing acts on the active tab, so the flagged one keeps its result
     // until the user goes there.
     assert!(!mgr.clear_active_outcome());
 
-    mgr.activate(0);
+    mgr.list_mut().activate(0);
 
     assert!(mgr.clear_active_outcome());
-    assert_eq!(mgr.tabs()[0].last_outcome(), None);
+    assert_eq!(mgr.list().items()[0].last_outcome(), None);
     assert!(!mgr.clear_active_outcome());
 }
 
@@ -202,7 +205,7 @@ fn progress_state_zero_clears_the_bar() {
 
     mgr.set_progress(TabId(1), set);
 
-    assert_eq!(mgr.tabs()[0].progress(), Some(set));
+    assert_eq!(mgr.list().items()[0].progress(), Some(set));
 
     mgr.set_progress(
         TabId(1),
@@ -212,12 +215,12 @@ fn progress_state_zero_clears_the_bar() {
         },
     );
 
-    assert_eq!(mgr.tabs()[0].progress(), None);
+    assert_eq!(mgr.list().items()[0].progress(), None);
 
     mgr.set_progress(TabId(1), set);
     mgr.clear_progress(TabId(1));
 
-    assert_eq!(mgr.tabs()[0].progress(), None);
+    assert_eq!(mgr.list().items()[0].progress(), None);
 }
 
 #[test]
@@ -226,12 +229,12 @@ fn id_is_stable_across_close_and_reorder() {
 
     mgr.close(TabId(1)); // indices shift, ids do not
 
-    assert_eq!(mgr.tabs()[0].id(), TabId(2));
+    assert_eq!(mgr.list().items()[0].id(), TabId(2));
 
-    mgr.reorder(0, 1);
+    mgr.list_mut().reorder(0, 1);
 
-    assert_eq!(mgr.tabs()[1].id(), TabId(2));
+    assert_eq!(mgr.list().items()[1].id(), TabId(2));
 
     // tab3 keeps its id throughout.
-    assert!(mgr.tabs().iter().any(|t| t.id() == TabId(3)));
+    assert!(mgr.list().items().iter().any(|t| t.id() == TabId(3)));
 }

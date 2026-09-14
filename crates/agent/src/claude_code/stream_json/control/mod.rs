@@ -2,7 +2,6 @@
 mod effort_tests;
 
 use std::collections::{HashMap, VecDeque};
-use std::mem::take;
 use std::time::Instant;
 
 use serde_json::{Value, json};
@@ -14,6 +13,7 @@ use crate::chat::{
 use crate::deadline_timer::DeadlineTimer;
 use crate::request_policy::RequestClass;
 use crate::subprocess::InputTicket;
+use crate::subprocess::pending_requests::PendingRequests;
 
 struct Deadline {
     at: Instant,
@@ -31,10 +31,8 @@ pub(super) enum PendingControlOperation {
 
 pub(super) struct ControlState {
     timer: Option<DeadlineTimer>,
-    next_request_id: u64,
-    operations: HashMap<String, PendingControlOperation>,
+    requests: PendingRequests<String, PendingControlOperation>,
     deadlines: HashMap<String, Deadline>,
-    closed: bool,
     effort: EffortState,
     pub(super) pending_approval: Option<PendingApproval>,
     pub(super) pending_questions: Option<PendingQuestions>,
@@ -44,10 +42,8 @@ impl Default for ControlState {
     fn default() -> Self {
         Self {
             timer: None,
-            next_request_id: 1,
-            operations: HashMap::new(),
+            requests: PendingRequests::new(1),
             deadlines: HashMap::new(),
-            closed: false,
             effort: EffortState::default(),
             pending_approval: None,
             pending_questions: None,
@@ -63,12 +59,14 @@ impl ControlState {
 
     fn refresh_timer(&self) {
         if let Some(timer) = &self.timer {
-            timer.set(self.deadlines.values().map(|deadline| deadline.at).min());
+            timer
+                .handle()
+                .set(self.deadlines.values().map(|deadline| deadline.at).min());
         }
     }
 
     pub(super) fn check_connected(&self) -> Result<(), String> {
-        if self.closed {
+        if self.requests.is_closed() {
             return Err("Claude is not connected".into());
         }
 
@@ -132,16 +130,14 @@ impl ControlState {
     }
 
     pub(super) fn record_effort(&mut self, id: String, value: String) {
-        if !self.closed {
-            self.operations.remove(&id);
+        if !self.requests.is_closed() {
+            self.requests.finish(&id);
             self.effort.record(id, value);
         }
     }
 
     pub(super) fn request(&mut self, request: Value) -> (String, Value) {
-        let request_id = format!("nmt-{}", self.next_request_id);
-
-        self.next_request_id += 1;
+        let request_id = format!("nmt-{}", self.requests.alloc_id());
 
         let message = json!({
             "type": "control_request", "request_id": request_id, "request": request,
@@ -151,13 +147,14 @@ impl ControlState {
     }
 
     pub(super) fn track(&mut self, id: String, operation: PendingControlOperation) {
-        if !self.closed {
-            self.operations.insert(id, operation);
-        }
+        self.requests.track(id, operation);
     }
 
     pub(super) fn contains(&self, operation: &PendingControlOperation) -> bool {
-        self.operations.values().any(|pending| pending == operation)
+        self.requests
+            .operations
+            .values()
+            .any(|pending| pending == operation)
     }
 
     pub(super) fn has_active_request(&self) -> bool {
@@ -165,6 +162,7 @@ impl ControlState {
             || self.pending_approval.is_some()
             || self.pending_questions.is_some()
             || self
+                .requests
                 .operations
                 .values()
                 .any(|operation| !matches!(operation, PendingControlOperation::Other))
@@ -181,11 +179,11 @@ impl ControlState {
             return self.effort.resolve(id, control_response_error(response));
         }
 
-        resolve_pending_control_operation(&mut self.operations, response)
+        resolve_pending_control_operation(&mut self.requests, response)
     }
 
     pub(super) fn cancel_generated_title(&mut self) {
-        self.operations.retain(|id, operation| {
+        self.requests.operations.retain(|id, operation| {
             if matches!(operation, PendingControlOperation::SessionTitle) {
                 if let Some(deadline) = self.deadlines.remove(id)
                     && let Some(input) = deadline.input
@@ -248,7 +246,7 @@ impl ControlState {
     }
 
     pub(super) fn close(&mut self, message: &str) -> Vec<Event> {
-        self.closed = true;
+        let pending = self.requests.close();
 
         for deadline in self.deadlines.drain().map(|(_, deadline)| deadline) {
             if deadline.class != RequestClass::Control
@@ -264,16 +262,13 @@ impl ControlState {
 
         events.extend(self.effort.close(message));
 
-        events.extend(fail_pending_control_operations(
-            &mut self.operations,
-            message,
-        ));
+        events.extend(fail_pending_control_operations(pending, message));
 
         events
     }
 
     pub(super) fn is_closed(&self) -> bool {
-        self.closed
+        self.requests.is_closed()
     }
 }
 
@@ -371,11 +366,14 @@ pub(super) fn parse_questions(input: &Value) -> Vec<Question> {
 }
 
 pub(super) fn resolve_pending_control_operation(
-    pending: &mut HashMap<String, PendingControlOperation>,
+    pending: &mut PendingRequests<String, PendingControlOperation>,
     response: &Value,
 ) -> Option<Event> {
-    let request_id = response["request_id"].as_str()?;
-    let operation = pending.remove(request_id)?;
+    let Value::String(request_id) = &response["request_id"] else {
+        return None;
+    };
+
+    let operation = pending.finish(request_id)?;
     let error = control_response_error(response);
 
     match operation {
@@ -469,12 +467,10 @@ fn parse_context_composition(payload: &Value) -> Option<ContextComposition> {
 }
 
 pub(super) fn fail_pending_control_operations(
-    pending: &mut HashMap<String, PendingControlOperation>,
+    pending: HashMap<String, PendingControlOperation>,
     message: &str,
 ) -> Vec<Event> {
-    let operations = take(pending);
-
-    operations
+    pending
         .into_values()
         .filter_map(|operation| match operation {
             PendingControlOperation::Other => None,

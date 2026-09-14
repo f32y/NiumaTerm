@@ -8,7 +8,7 @@ use nmt_config::colors::Colors;
 use nmt_platform::conpty_realign::{
     max_cup_row_col, rewrite_conpty_resize_echo_cup_rows, su_realign_count,
 };
-use nmt_platform::{ChildEvent, EventedPty, ProcessReadWrite, WinsizeBuilder};
+use nmt_platform::{EventedPty, ProcessReadWrite, WinsizeBuilder};
 use parking_lot::Mutex;
 
 use crate::event::{self, VoidListener};
@@ -249,8 +249,8 @@ impl EventedPty for FakePty {
         Token(3)
     }
 
-    fn next_child_event(&mut self) -> Option<ChildEvent> {
-        None
+    fn child_exited(&mut self) -> bool {
+        false
     }
 }
 
@@ -271,7 +271,6 @@ fn terminal_replies_resume_after_partial_writes_in_input_order() {
         Arc::new(AtomicU32::new(0)),
         pty,
         VoidListener {},
-        0.into(),
         &SessionOptions {
             cols: 20,
             rows: 3,
@@ -365,7 +364,6 @@ fn disabled_terminal_responses_are_forwarded_without_replying() {
         Arc::new(AtomicU32::new(0)),
         pty,
         VoidListener {},
-        0.into(),
         &SessionOptions {
             cols: 20,
             rows: 3,
@@ -409,7 +407,6 @@ fn resize_message_publishes_snapshot_to_render_buffer() {
         vt_modes,
         pty,
         VoidListener {},
-        0.into(),
         &SessionOptions {
             cols: 20,
             rows: 3,
@@ -466,7 +463,6 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
         Arc::new(AtomicU32::new(0)),
         pty,
         VoidListener {},
-        0.into(),
         &SessionOptions {
             cols: 20,
             rows: 3,
@@ -561,7 +557,6 @@ fn osc_progress_hides_published_cursor_until_removed() {
         Arc::new(AtomicU32::new(0)),
         pty,
         VoidListener {},
-        0.into(),
         &SessionOptions {
             cols: 80,
             rows: 3,
@@ -638,7 +633,6 @@ fn conpty_resize_echo_realigns_machine_pty_read_to_cursor_row() {
         vt_modes,
         pty,
         VoidListener {},
-        0.into(),
         &SessionOptions {
             cols: 134,
             rows: 42,
@@ -703,7 +697,6 @@ fn conpty_resize_repaint_realigns_clear_without_new_input() {
         vt_modes,
         pty,
         VoidListener {},
-        0.into(),
         &SessionOptions {
             cols: 134,
             rows: 42,
@@ -769,7 +762,6 @@ fn conpty_resize_repaint_realigns_to_active_cursor_when_scrolled() {
         vt_modes,
         pty,
         VoidListener {},
-        0.into(),
         &SessionOptions {
             cols: 20,
             rows: 4,
@@ -861,7 +853,6 @@ fn conpty_resize_echo_routes_to_active_cursor_when_scrolled_typing() {
         vt_modes,
         pty,
         VoidListener {},
-        0.into(),
         &SessionOptions {
             cols: 20,
             rows: 4,
@@ -945,11 +936,7 @@ fn conpty_resize_echo_routes_to_active_cursor_when_scrolled_typing() {
 struct CollectingListener(Arc<Mutex<Vec<event::TerminalEvent>>>);
 
 impl event::EventListener for CollectingListener {
-    fn event(&self) -> (Option<event::TerminalEvent>, bool) {
-        (None, false)
-    }
-
-    fn send_event(&self, event: event::TerminalEvent, _: event::WindowId) {
+    fn send_event(&self, event: event::TerminalEvent) {
         self.0.lock().push(event);
     }
 }
@@ -976,7 +963,6 @@ fn pty_read_events(
         Arc::new(AtomicU32::new(0)),
         pty,
         CollectingListener(Arc::clone(&events)),
-        0.into(),
         &SessionOptions {
             cols: 80,
             rows: 24,

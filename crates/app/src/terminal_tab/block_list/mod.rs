@@ -19,7 +19,7 @@ pub(super) use crate::terminal_tab::block_list::reconcile::{
     plan_list_reconcile,
 };
 pub(super) use crate::terminal_tab::block_list::rows::{
-    EngineRowBuilder, frozen_block_view, handle_item_info, live_history_view,
+    frozen_block_view, handle_item_info, live_history_view,
 };
 pub(super) use crate::terminal_tab::block_list::selection::BlockListPoint;
 

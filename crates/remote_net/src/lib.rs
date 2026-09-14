@@ -17,6 +17,7 @@ pub use crate::host::*;
 #[cfg(windows)]
 pub use crate::keys::*;
 pub use crate::protocol::*;
+pub use crate::session::{SessionId, SessionSnapshot};
 
 #[cfg(windows)]
 pub mod hub;
@@ -31,3 +32,4 @@ mod devices;
 mod host;
 #[cfg(windows)]
 mod keys;
+mod session;

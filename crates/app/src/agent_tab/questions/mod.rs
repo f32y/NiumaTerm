@@ -2,9 +2,6 @@
 
 pub(super) use nmt_agent::session::input::QuestionStatus;
 
-mod actions;
-mod render;
-
 #[cfg(test)]
 mod tests;
 
@@ -90,5 +87,22 @@ impl QuestionPresentation {
         self.focus = order[next];
 
         true
+    }
+}
+
+impl QuestionEditor {
+    pub(super) fn new(state: QuestionEditorState, subscription: Subscription) -> Self {
+        Self {
+            state,
+            _subscription: subscription,
+        }
+    }
+
+    pub(super) fn focus(&self, window: &mut Window, cx: &mut App) {
+        self.state.focus(window, cx);
+    }
+
+    pub(super) fn render(&self, disabled: bool) -> AnyElement {
+        self.state.render(disabled)
     }
 }

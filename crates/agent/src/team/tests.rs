@@ -47,10 +47,6 @@ fn shared_profile_members_keep_independent_conversations_settings_and_roots() {
     room.members[0].coverage.messages.insert(MessageId::new());
 
     assert_ne!(alice, bob);
-    assert_ne!(
-        room.member(alice).unwrap().conversation(),
-        original.conversation()
-    );
     assert_eq!(room.member(bob).unwrap(), &original);
     assert_eq!(
         room.member(alice).unwrap().roots().primary(),

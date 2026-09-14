@@ -42,7 +42,7 @@ impl TurnOutputUsage {
 
 /// State belonging to the parent conversation, independent of host routing.
 #[derive(Default)]
-pub(super) struct ConversationState {
+pub(super) struct ThreadState {
     pub(super) thread_id: Option<String>,
     pub(super) current_turn: Option<String>,
     pub(super) pending_approval: Option<u64>,
@@ -51,7 +51,7 @@ pub(super) struct ConversationState {
     turn_output_usage: TurnOutputUsage,
 }
 
-impl ConversationState {
+impl ThreadState {
     pub(super) fn on_notification(&mut self, method: &str, params: &Value) -> Vec<Event> {
         match method {
             "turn/started" => {

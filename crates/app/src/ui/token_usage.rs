@@ -9,7 +9,6 @@
 mod token_usage_tests;
 
 use std::borrow::Cow;
-use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::prelude::*;
@@ -69,7 +68,7 @@ pub(crate) struct TokenUsageView {
 
 impl TokenUsageView {
     pub(crate) fn new(
-        source: Arc<dyn UsageSource<Option<DailyTokenUsage>>>,
+        source: UsageSource<Option<DailyTokenUsage>>,
         cx: &mut Context<Self>,
     ) -> Self {
         let enabled = cx

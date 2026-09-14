@@ -51,8 +51,7 @@ use crate::windows::conpty::Conpty as Backend;
 use crate::windows::pipes::{EventedAnonRead as ReadPipe, EventedAnonWrite as WritePipe};
 use crate::windows::process::{KillOnCloseJob, ProcessTree};
 use crate::{
-    ChildEvent, EventedPty, Interest, Poll, ProcessReadWrite, PtyOptions, Token, Waker, Winsize,
-    WinsizeBuilder,
+    EventedPty, Interest, Poll, ProcessReadWrite, PtyOptions, Token, Waker, Winsize, WinsizeBuilder,
 };
 
 pub struct Pty {
@@ -206,11 +205,10 @@ impl EventedPty for Pty {
         self.child_event_token
     }
 
-    fn next_child_event(&mut self) -> Option<ChildEvent> {
+    fn child_exited(&mut self) -> bool {
         match self.child_watcher.event_rx().try_recv() {
-            Ok(ev) => Some(ev),
-            Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => Some(ChildEvent::Exited),
+            Ok(()) | Err(TryRecvError::Disconnected) => true,
+            Err(TryRecvError::Empty) => false,
         }
     }
 }

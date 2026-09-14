@@ -7,10 +7,11 @@
 #[path = "lifecycle_tests.rs"]
 mod lifecycle_tests;
 
-use serde_json::Value;
-
+use crate::background_task::BackgroundTaskKey;
 use crate::chat::{Event, SendOutcome};
 use crate::session::backend::{Backend, RecoveryIdentity};
+use crate::session::children::ChildAgents;
+use serde_json::Value;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -327,5 +328,20 @@ impl SessionRuntime {
 
             _ => RestorationReadiness::Pending,
         }
+    }
+
+    pub fn background_task_parent(&self) -> Option<BackgroundTaskKey> {
+        ChildAgents::parent(self.backend()?.recovery_identity()?)
+    }
+
+    pub fn refresh_background_tasks(&mut self) {
+        if let Some(backend) = self.backend_mut() {
+            backend.refresh_background_tasks();
+        }
+    }
+
+    pub fn interrupt_background_task(&mut self, key: &BackgroundTaskKey) -> bool {
+        self.backend_mut()
+            .is_some_and(|backend| backend.interrupt_background_task(key))
     }
 }

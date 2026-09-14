@@ -1,3 +1,5 @@
+use nmt_config::appearance::InputStyle;
+
 use std::time::Duration;
 
 use futures::FutureExt;
@@ -14,11 +16,11 @@ use crate::terminal_tab::pane_model::test_session::controller;
 #[tokio::test]
 async fn settings_refresh_colors_metrics_and_layout_without_repeating_cursor_requests() {
     let (mut model, _) = controller(b"text", false);
-    let mut settings = model.settings;
+    let mut settings = model.settings.clone();
 
     settings.cursor_shape = CursorShape::Beam;
-    settings.fixed_bottom = true;
-    settings.pad_rows = 0.0;
+    settings.input_style = InputStyle::FixedBottom;
+    settings.command_blocks = false;
 
     let colors = Colors {
         foreground: [12.0 / 255.0, 34.0 / 255.0, 56.0 / 255.0, 1.0],
@@ -31,11 +33,11 @@ async fn settings_refresh_colors_metrics_and_layout_without_repeating_cursor_req
     };
 
     let update = model
-        .update_settings(settings, &colors, labels.clone())
+        .update_settings(settings.clone(), &colors, labels.clone())
         .unwrap();
 
     assert_eq!(model.settings.cursor_shape, CursorShape::Beam);
-    assert_eq!(model.settings.pad_rows, 0.0);
+    assert_eq!(model.pad_rows, 0.0);
 
     let foreground: u32 = model.theme.foreground.into();
 
@@ -75,12 +77,16 @@ fn failed_or_canceled_cursor_requests_restore_only_the_current_requested_shape()
     for rejected in [false, true] {
         for superseded in [false, true] {
             let (mut model, _) = controller(b"", false);
-            let mut settings = model.settings;
+            let mut settings = model.settings.clone();
 
             settings.cursor_shape = CursorShape::Beam;
 
             let mut update = model
-                .update_settings(settings, &Colors::default(), DurationLabels::default())
+                .update_settings(
+                    settings.clone(),
+                    &Colors::default(),
+                    DurationLabels::default(),
+                )
                 .unwrap();
 
             let (reply, request) = oneshot::channel();
@@ -97,6 +103,7 @@ fn failed_or_canceled_cursor_requests_restore_only_the_current_requested_shape()
 
             if superseded {
                 settings.cursor_shape = CursorShape::Underline;
+
                 model.update_settings(settings, &Colors::default(), DurationLabels::default());
             }
 

@@ -2,14 +2,11 @@
 #[path = "reveal_tests.rs"]
 mod reveal_tests;
 
+use crate::agent_tab::transcript::{RowSpec, TranscriptView};
+use gpui::prelude::*;
+use gpui::{App, Bounds, Div, Pixels, Window, div, px};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
-
-use gpui::prelude::*;
-use gpui::{App, Bounds, Context, Div, Pixels, Window, div, px};
-
-use crate::agent_tab::settings::AgentSettings;
-use crate::agent_tab::transcript::{RowSpec, TranscriptView};
 
 /// One disclosure in the transcript, as the thing whose opening is animated.
 ///
@@ -479,235 +476,31 @@ impl Disclosures {
         self.reveals.clear();
         self.revealed_heights.clear();
     }
-}
 
-#[cfg(test)]
-impl Disclosures {
+    #[cfg(test)]
     pub(crate) fn expanded_rows(&self) -> &HashSet<usize> {
         &self.expanded_rows
     }
 
+    #[cfg(test)]
     pub(crate) fn expanded_groups(&self) -> &HashSet<usize> {
         &self.expanded_groups
     }
 
+    #[cfg(test)]
     pub(crate) fn toggled_turns(&self) -> &HashSet<u64> {
         &self.toggled_turns
     }
 
+    #[cfg(test)]
     pub(crate) fn expanded_annotations(&self) -> &HashSet<usize> {
         &self.expanded_annotations
     }
 
     /// Every piece a height has been measured for.
+    #[cfg(test)]
     pub(crate) fn measured_parts(&self) -> Vec<RevealedPart> {
         self.revealed_heights.keys().copied().collect()
-    }
-}
-
-impl TranscriptView {
-    /// Flip one disclosure open or shut, holding the reader's place while its
-    /// content changes and setting that content moving either way.
-    ///
-    /// The list stores its live end as a sentinel meaning "wherever the end
-    /// now is", so rows appearing above that sentinel would carry the view
-    /// down with them and take the row the reader just clicked out from under
-    /// their cursor. Naming the position first pins it. A reader already
-    /// sitting at the live end keeps following it, because a conversation
-    /// growing under an open disclosure should still scroll itself.
-    ///
-    /// Shutting leaves the expanded state in place and only starts the exit;
-    /// [`Self::settle_shut_disclosures`] takes the content down once there is
-    /// no exit left to run.
-    pub(crate) fn toggle_disclosure(&mut self, key: RevealKey, cx: &mut Context<Self>) {
-        self.invalidate_disclosure_rows(key);
-
-        if !self.transcript_list.is_following_tail() {
-            self.transcript_list.freeze_scroll_position();
-        }
-
-        // Reduced motion is read here rather than where progress is reported:
-        // a disclosure that never records a start has nothing in flight, so
-        // the motion, the chevron's turn and the frames the transcript asks
-        // for all fall away together while the pinning stays.
-        let reduce_motion = cx.global::<AgentSettings>().reduce_motion;
-        let now = Instant::now();
-
-        // A disclosure part-way through its exit is still on screen but is on
-        // its way out, so the click that catches it there is asking for it
-        // back rather than asking again for what it is already doing.
-        match self.disclosures.is_disclosing(key) {
-            true if reduce_motion => self.take_down_disclosure(key),
-            true => self.disclosures.begin_close(key, now),
-            false => self.disclosures.open(key, now, !reduce_motion),
-        }
-
-        cx.notify();
-    }
-
-    /// Remove a shut disclosure's content and everything measured or cached
-    /// for it. Splitting this from the click is what gives the exit something
-    /// to move; by the time it runs there is nothing left on screen to lose.
-    pub(crate) fn take_down_disclosure(&mut self, key: RevealKey) {
-        self.invalidate_disclosure_rows(key);
-
-        // The rows a run or a fold spliced in are measured a row at a time,
-        // and those rows leave the list with it. Their heights are read off
-        // the rows still standing, which is why they are collected before the
-        // disclosure stops reporting itself as open.
-        let parts = self.revealed_parts(key);
-
-        // A closed row's segmented source would otherwise keep a second copy
-        // of a large output resident behind a row showing none of it.
-        if let Some(index) = self.disclosures.take_down(key, &parts) {
-            self.code_transcripts.drop_row(index);
-        }
-    }
-
-    fn invalidate_disclosure_rows(&mut self, key: RevealKey) {
-        match key {
-            RevealKey::Turn(turn) => self.invalidate_turn_rows(turn),
-
-            RevealKey::Row(index) | RevealKey::Annotation(index) | RevealKey::Group(index) => {
-                self.row_cache.invalidate(index);
-            }
-        }
-    }
-
-    /// The list rows a run toggle or a turn fold currently has on screen,
-    /// whichever ramp they happen to be travelling on this frame.
-    fn revealed_parts(&self, key: RevealKey) -> Vec<RevealedPart> {
-        (0..self.rows.len())
-            .filter(|ix| match key {
-                RevealKey::Group(run_start) => self.run_over(*ix) == Some(run_start),
-                RevealKey::Turn(turn) => self.fold_over(*ix) == Some(turn),
-                RevealKey::Row(_) | RevealKey::Annotation(_) => false,
-            })
-            .filter_map(|ix| revealed_part(&self.rows[ix].spec))
-            .collect()
-    }
-
-    /// Take down every disclosure whose exit has finished, re-pinning the
-    /// reading position first.
-    ///
-    /// The pin from the click has held through the exit, but a run's rows
-    /// leave the list here rather than there, and the reader may have scrolled
-    /// in between. Naming the position against the layout this frame is built
-    /// on is what keeps that removal from moving it.
-    pub(crate) fn settle_shut_disclosures(&mut self, now: Instant) {
-        let shut = self.disclosures.shut(now);
-
-        if shut.is_empty() {
-            return;
-        }
-
-        if !self.transcript_list.is_following_tail() {
-            self.transcript_list.freeze_scroll_position();
-        }
-
-        for key in shut {
-            self.take_down_disclosure(key);
-        }
-    }
-
-    /// The disclosure whose ramp this list row travels on this frame.
-    ///
-    /// Rows that were already there report `None` and render at rest. A step
-    /// of a run inside an unfolded turn is on screen by two disclosures at
-    /// once; it follows the fold while the fold is moving, because the fold is
-    /// then moving everything under it, and its run the rest of the time, so
-    /// a run opened inside a resting turn still travels.
-    pub(crate) fn revealed_by(&self, ix: usize, now: Instant) -> Option<RevealKey> {
-        let fold = self.fold_over(ix).map(RevealKey::Turn);
-        let run = self.run_over(ix).map(RevealKey::Group);
-
-        match (fold, run) {
-            (Some(fold), Some(run)) if !self.disclosures.moving(fold, now) => Some(run),
-            (Some(fold), _) => Some(fold),
-            (None, run) => run,
-        }
-    }
-
-    /// The run whose expanded toggle put this row on screen. A run's steps
-    /// follow its toggle contiguously, so walking back over them to the
-    /// toggle is what identifies the run without the row specs having to
-    /// carry it.
-    fn run_over(&self, ix: usize) -> Option<usize> {
-        if !matches!(self.rows.get(ix)?.spec, RowSpec::Work { .. }) {
-            return None;
-        }
-
-        for cursor in (0..ix).rev() {
-            match self.rows[cursor].spec {
-                RowSpec::Work { .. } => continue,
-
-                RowSpec::RunToggle {
-                    run_start,
-                    expanded: true,
-                    ..
-                } => return Some(run_start),
-
-                _ => break,
-            }
-        }
-
-        None
-    }
-
-    /// The turn whose unfolded "Show work" row put this row on screen.
-    ///
-    /// The fold heads its turn, and every row of the turn below it that a
-    /// folded turn would not show is the fold's. Rows a folded turn keeps —
-    /// the final reply, an error, a steered prompt — sit among them and are
-    /// walked over, so the work after a steered prompt still finds its fold.
-    /// Only a settled turn has one, which spares an unsettled conversation
-    /// the walk.
-    fn fold_over(&self, ix: usize) -> Option<u64> {
-        let turn = self.row_turn(ix)?;
-
-        if !self.conversation.borrow().turns.is_settled(turn) || !self.hidden_by_fold(ix) {
-            return None;
-        }
-
-        for cursor in (0..ix).rev() {
-            match self.rows[cursor].spec {
-                RowSpec::TurnFold {
-                    turn: heads,
-                    folded: false,
-                    ..
-                } if heads == turn => return Some(turn),
-
-                _ if self.row_turn(cursor) == Some(turn) => continue,
-                _ => break,
-            }
-        }
-
-        None
-    }
-
-    /// Whether this row is one a folded turn would take off the screen.
-    fn hidden_by_fold(&self, ix: usize) -> bool {
-        match self.rows[ix].spec {
-            RowSpec::Work { .. } | RowSpec::RunToggle { .. } => true,
-            RowSpec::Entry { index, .. } => !self.survives_fold(index),
-            _ => false,
-        }
-    }
-
-    /// The turn a list row belongs to, for the rows that belong to one.
-    fn row_turn(&self, ix: usize) -> Option<u64> {
-        match self.rows.get(ix)?.spec {
-            RowSpec::Entry { index, .. } | RowSpec::Work { index, .. } => {
-                Some(self.conversation.borrow().content.entries()[index].turn)
-            }
-
-            RowSpec::RunToggle { run_start, .. } => {
-                Some(self.conversation.borrow().content.entries()[run_start].turn)
-            }
-
-            RowSpec::TurnFold { turn, .. } | RowSpec::Interrupted { turn, .. } => Some(turn),
-            RowSpec::TurnSummary { .. } | RowSpec::Working { .. } => None,
-        }
     }
 }
 

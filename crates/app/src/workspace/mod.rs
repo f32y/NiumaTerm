@@ -241,6 +241,14 @@ pub struct WorkspaceSummary {
 }
 
 impl WorkspaceManager {
+    pub(crate) fn list(&self) -> &ActiveList<Workspace> {
+        &self.workspaces
+    }
+
+    pub(crate) fn list_mut(&mut self) -> &mut ActiveList<Workspace> {
+        &mut self.workspaces
+    }
+
     /// Start with a single active workspace. There is no empty state.
     pub fn new(
         tabs: TabManager<TabSurface>,
@@ -405,11 +413,6 @@ impl WorkspaceManager {
         self.workspaces.close(id)
     }
 
-    /// Activate by position. Out-of-range indices are ignored.
-    pub fn activate(&mut self, index: usize) {
-        self.workspaces.activate(index);
-    }
-
     pub fn active_tabs(&self) -> &TabManager<TabSurface> {
         &self.workspaces.active().tabs
     }
@@ -482,7 +485,7 @@ impl WorkspaceManager {
         self.workspaces
             .items()
             .iter()
-            .find(|ws| ws.tabs.find(tab_id).is_some())
+            .find(|ws| ws.tabs.list().find(tab_id).is_some())
             .map(|ws| ws.id)
     }
 
@@ -493,7 +496,7 @@ impl WorkspaceManager {
             .items()
             .iter()
             .map(|ws| &ws.tabs)
-            .find(|tabs| tabs.find(tab_id).is_some())
+            .find(|tabs| tabs.list().find(tab_id).is_some())
     }
 
     /// Id of the tab whose surface matches `pred`, searched across all
@@ -502,7 +505,7 @@ impl WorkspaceManager {
         self.workspaces
             .items()
             .iter()
-            .flat_map(|ws| ws.tabs.tabs())
+            .flat_map(|ws| ws.tabs.list().items())
             .find(|tab| pred(tab.surface()))
             .map(|tab| tab.id())
     }
@@ -512,12 +515,7 @@ impl WorkspaceManager {
             .items_mut()
             .iter_mut()
             .map(|ws| &mut ws.tabs)
-            .find(|tabs| tabs.find(tab_id).is_some())
-    }
-
-    /// Number of workspaces (always >= 1).
-    pub fn len(&self) -> usize {
-        self.workspaces.len()
+            .find(|tabs| tabs.list().find(tab_id).is_some())
     }
 
     /// Lightweight per-workspace summary for chrome (name/active), in order.
@@ -551,16 +549,6 @@ impl WorkspaceManager {
             })
             .collect()
     }
-
-    /// Index of the active workspace.
-    pub fn active_index(&self) -> usize {
-        self.workspaces.active_index()
-    }
-
-    /// Id of the active workspace (the set is never empty).
-    pub fn active_id(&self) -> WorkspaceId {
-        self.workspaces.active_id()
-    }
 }
 
 /// OSC 9;4 progress of a workspace's tabs. Only tabs carrying a number take
@@ -568,7 +556,8 @@ impl WorkspaceManager {
 /// running command has no progress at all, so neither drags the bar down while
 /// the others advance.
 fn tabs_progress(tabs: &TabManager<TabSurface>) -> ProgressTally {
-    tabs.tabs()
+    tabs.list()
+        .items()
         .iter()
         .filter_map(|tab| tab.progress())
         .filter_map(|report| report.progress)

@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use crate::subprocess::pending_requests::PendingRequests;
+
 #[cfg(windows)]
 use std::thread;
 use std::time::Instant;
@@ -1053,8 +1054,9 @@ fn file_rewind_request_matches_the_sdk_control_shape() {
 
 #[test]
 fn file_rewind_control_response_is_correlated_by_request_id() {
-    let mut pending: HashMap<_, _> =
-        [("nmt-7".to_string(), PendingControlOperation::FileRewind)].into();
+    let mut pending = PendingRequests::new(1);
+
+    pending.track("nmt-7".to_string(), PendingControlOperation::FileRewind);
 
     assert_eq!(
         resolve_pending_control_operation(
@@ -1063,7 +1065,7 @@ fn file_rewind_control_response_is_correlated_by_request_id() {
         ),
         None
     );
-    assert!(pending.contains_key("nmt-7"));
+    assert!(pending.operations.contains_key("nmt-7"));
     assert_eq!(
         resolve_pending_control_operation(
             &mut pending,
@@ -1071,7 +1073,7 @@ fn file_rewind_control_response_is_correlated_by_request_id() {
         ),
         Some(Event::FileRewindCompleted { error: None })
     );
-    assert!(pending.is_empty());
+    assert!(pending.operations.is_empty());
 }
 
 #[test]
@@ -1083,8 +1085,9 @@ fn file_rewind_rejection_and_malformed_responses_are_nonfatal_results() {
             "Claude returned a malformed file restore response.",
         ),
     ] {
-        let mut pending: HashMap<_, _> =
-            [("nmt-8".to_string(), PendingControlOperation::FileRewind)].into();
+        let mut pending = PendingRequests::new(1);
+
+        pending.track("nmt-8".to_string(), PendingControlOperation::FileRewind);
 
         let response = if subtype == "error" {
             json!({
@@ -1102,22 +1105,23 @@ fn file_rewind_rejection_and_malformed_responses_are_nonfatal_results() {
                 error: Some(expected.to_string()),
             })
         );
-        assert!(pending.is_empty());
+        assert!(pending.operations.is_empty());
     }
 }
 
 #[test]
 fn process_exit_fails_and_clears_pending_file_rewinds() {
-    let mut pending: HashMap<_, _> =
-        [("nmt-9".to_string(), PendingControlOperation::FileRewind)].into();
+    let mut pending = PendingRequests::new(1);
+
+    pending.track("nmt-9".to_string(), PendingControlOperation::FileRewind);
 
     assert_eq!(
-        fail_pending_control_operations(&mut pending, "Claude exited."),
+        fail_pending_control_operations(pending.close(), "Claude exited."),
         vec![Event::FileRewindCompleted {
             error: Some("Claude exited.".into()),
         }]
     );
-    assert!(pending.is_empty());
+    assert!(pending.operations.is_empty());
 }
 
 #[test]
@@ -1500,11 +1504,12 @@ fn a_context_usage_response_becomes_a_composition_breakdown() {
         },
     });
 
-    let mut pending: HashMap<_, _> = [(
+    let mut pending = PendingRequests::new(1);
+
+    pending.track(
         "nmt-3".to_string(),
         PendingControlOperation::ContextComposition,
-    )]
-    .into();
+    );
 
     let event = resolve_pending_control_operation(&mut pending, &response);
 
@@ -1530,7 +1535,10 @@ fn a_context_usage_response_becomes_a_composition_breakdown() {
         "the window's free room is not one of the parts filling it"
     );
     assert!(composition.segments[2].deferred);
-    assert!(pending.is_empty(), "the request is no longer outstanding");
+    assert!(
+        pending.operations.is_empty(),
+        "the request is no longer outstanding"
+    );
 }
 
 #[test]
@@ -1541,16 +1549,17 @@ fn a_failed_context_usage_request_leaves_the_previous_breakdown_alone() {
         "error": "context usage unavailable",
     });
 
-    let mut pending: HashMap<_, _> = [(
+    let mut pending = PendingRequests::new(1);
+
+    pending.track(
         "nmt-3".to_string(),
         PendingControlOperation::ContextComposition,
-    )]
-    .into();
+    );
 
     // Nothing is waiting on this, and the accounting beside it is still
     // accurate, so a failure reports nothing rather than blanking the card.
     assert!(resolve_pending_control_operation(&mut pending, &response).is_none());
-    assert!(pending.is_empty());
+    assert!(pending.operations.is_empty());
 }
 
 #[test]
@@ -1561,11 +1570,12 @@ fn a_composition_without_categories_is_not_published() {
         "response": {"totalTokens": 100, "categories": []},
     });
 
-    let mut pending: HashMap<_, _> = [(
+    let mut pending = PendingRequests::new(1);
+
+    pending.track(
         "nmt-3".to_string(),
         PendingControlOperation::ContextComposition,
-    )]
-    .into();
+    );
 
     assert!(resolve_pending_control_operation(&mut pending, &response).is_none());
 }

@@ -42,7 +42,6 @@ macro_rules! identities {
 identities!(
     RoomId,
     MemberId,
-    ConversationId,
     DiscussionId,
     StageId,
     OperationId,

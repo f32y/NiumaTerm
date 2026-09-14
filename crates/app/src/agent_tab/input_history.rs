@@ -4,30 +4,18 @@ pub(super) use nmt_agent::input_history::InputHistoryScope;
 #[path = "input_history_tests.rs"]
 mod input_history_tests;
 
+use crate::agent_tab::AgentPane;
+use gpui::{App, Context, Entity, Global};
+use gpui_component::input::TextareaState;
+use nmt_agent::input_history::AgentInputHistory as InputHistoryService;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::{env, io, process};
 
-use gpui::{App, Context, Entity, Global, Window};
-use gpui_component::input::TextareaState;
-use nmt_agent::input_history::AgentInputHistory as InputHistoryService;
-
-use crate::agent_tab::AgentPane;
-
-pub(super) struct AgentInputHistory(InputHistoryService);
+pub(super) struct AgentInputHistory(pub(super) InputHistoryService);
 
 impl Global for AgentInputHistory {}
-
-impl AgentInputHistory {
-    fn entries(&self, scope: &InputHistoryScope) -> Arc<[String]> {
-        self.0.entries(scope)
-    }
-
-    fn record(&mut self, scope: &InputHistoryScope, text: String) -> bool {
-        self.0.record(scope, text)
-    }
-}
 
 pub fn initialize(testing: bool, cx: &mut App) {
     cx.set_global(AgentInputHistory(InputHistoryService::open(
@@ -57,7 +45,7 @@ pub(super) enum InputHistoryDirection {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum InputHistoryAction {
+pub(super) enum InputHistoryAction {
     Declined,
     Keep,
     Replace(String),
@@ -141,17 +129,35 @@ impl InputHistoryNavigation {
 
         InputHistoryAction::Replace(text)
     }
-}
 
-impl AgentPane {
-    pub(super) fn handle_input_history_control(
+    pub(super) fn record_input_history(
+        &mut self,
+        scope: &InputHistoryScope,
+        text: &str,
+        cx: &mut Context<AgentPane>,
+    ) {
+        let text = text.trim();
+
+        if text.is_empty() {
+            return;
+        }
+
+        cx.global_mut::<AgentInputHistory>()
+            .0
+            .record(scope, text.to_string());
+
+        self.reset();
+    }
+
+    pub(super) fn navigate_input(
         &mut self,
         direction: InputHistoryDirection,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
+        input: &Entity<TextareaState>,
+        scope: &InputHistoryScope,
+        cx: &App,
+    ) -> InputHistoryAction {
         let (text, selection, cursor) = {
-            let input = self.input.read(cx);
+            let input = input.read(cx);
 
             (
                 input.text().to_string(),
@@ -160,70 +166,8 @@ impl AgentPane {
             )
         };
 
-        let available = cx
-            .global::<AgentInputHistory>()
-            .entries(&self.input_history_scope);
+        let available = cx.global::<AgentInputHistory>().0.entries(scope);
 
-        let action = self
-            .input_history_navigation
-            .navigate(direction, &text, selection, cursor, available);
-
-        match action {
-            InputHistoryAction::Declined => false,
-
-            InputHistoryAction::Keep => {
-                cx.stop_propagation();
-
-                true
-            }
-
-            InputHistoryAction::Replace(text) => {
-                self.palette.reset_for_recall();
-                replace_input_with_history(&self.input, text, window, cx);
-                cx.stop_propagation();
-
-                cx.notify();
-
-                true
-            }
-
-            InputHistoryAction::Clear => {
-                self.input
-                    .update(cx, |input, cx| input.set_value("", window, cx));
-
-                cx.stop_propagation();
-
-                cx.notify();
-
-                true
-            }
-        }
+        self.navigate(direction, &text, selection, cursor, available)
     }
-
-    pub(super) fn record_input_history(&mut self, text: &str, cx: &mut Context<Self>) {
-        let text = text.trim();
-
-        if text.is_empty() {
-            return;
-        }
-
-        cx.global_mut::<AgentInputHistory>()
-            .record(&self.input_history_scope, text.to_string());
-
-        self.input_history_navigation.reset();
-    }
-}
-
-fn replace_input_with_history<T: 'static>(
-    input: &Entity<TextareaState>,
-    text: String,
-    window: &mut Window,
-    cx: &mut Context<T>,
-) {
-    let end = text.len();
-
-    input.update(cx, |input, cx| {
-        input.set_value(text, window, cx);
-        input.set_selected_range(end..end, cx);
-    });
 }

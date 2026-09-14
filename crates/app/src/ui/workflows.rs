@@ -105,7 +105,11 @@ impl WorkflowsView {
         let (kind, cwd) = {
             let pane = pane.read(cx);
 
-            (pane.agent_kind(), pane.working_directory())
+            (pane.agent_kind(cx), pane.working_directory(cx))
+        };
+
+        let Some(kind) = kind else {
+            return;
         };
 
         self.detail_transcript = Some(cx.new(|_| TranscriptView::new(kind, cwd)));
@@ -126,39 +130,7 @@ impl WorkflowsView {
 
         cx.notify();
     }
-}
 
-impl Render for WorkflowsView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // The sibling `Background Tasks` panel reads in the agent's own font,
-        // and the two are the same surface to a user, so both follow the agent
-        // typography rather than the app chrome's.
-        let settings = cx.global::<AppSettings>();
-        let font_family = settings.config().appearance.agent_font_family.clone();
-        let font_size = px(settings.config().appearance.agent_font_size as f32);
-        let showing_conversation = self.detail_transcript.is_some();
-
-        v_flex()
-            .size_full()
-            // A flex item defaults to its content's size, so without these an
-            // agent conversation wider than the panel pushes past its edge and
-            // a long run list stretches the whole window row.
-            .min_w_0()
-            .overflow_hidden()
-            .font_family(font_family)
-            .text_size(font_size)
-            // An open conversation carries its own header with the way back,
-            // so the panel title stands down rather than stacking two bars.
-            .children((!showing_conversation).then(|| {
-                h_flex()
-                    .refine_style(&panel_header(cx))
-                    .child(div().text_sm().child(t!("workflows-title")))
-            }))
-            .child(self.render_body(cx))
-    }
-}
-
-impl WorkflowsView {
     fn render_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let Some(pane) = self.target.as_ref().and_then(WeakEntity::upgrade) else {
             return empty_state(
@@ -169,7 +141,7 @@ impl WorkflowsView {
         };
 
         // Only Claude Code reports workflows; every other pane has none.
-        if pane.read(cx).workflow_session_id().is_none() {
+        if pane.read(cx).workflow_session_id(cx).is_none() {
             return empty_state(
                 t!("workflows-no-session"),
                 t!("workflows-no-session-detail"),
@@ -458,6 +430,36 @@ impl WorkflowsView {
                 .child(body)
                 .into_any_element(),
         )
+    }
+}
+
+impl Render for WorkflowsView {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The sibling `Background Tasks` panel reads in the agent's own font,
+        // and the two are the same surface to a user, so both follow the agent
+        // typography rather than the app chrome's.
+        let settings = cx.global::<AppSettings>();
+        let font_family = settings.config().appearance.agent_font_family.clone();
+        let font_size = px(settings.config().appearance.agent_font_size as f32);
+        let showing_conversation = self.detail_transcript.is_some();
+
+        v_flex()
+            .size_full()
+            // A flex item defaults to its content's size, so without these an
+            // agent conversation wider than the panel pushes past its edge and
+            // a long run list stretches the whole window row.
+            .min_w_0()
+            .overflow_hidden()
+            .font_family(font_family)
+            .text_size(font_size)
+            // An open conversation carries its own header with the way back,
+            // so the panel title stands down rather than stacking two bars.
+            .children((!showing_conversation).then(|| {
+                h_flex()
+                    .refine_style(&panel_header(cx))
+                    .child(div().text_sm().child(t!("workflows-title")))
+            }))
+            .child(self.render_body(cx))
     }
 }
 

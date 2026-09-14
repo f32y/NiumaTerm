@@ -70,44 +70,44 @@ pub struct AgentThreadDefaults(pub(super) RememberedSettings);
 
 impl Global for AgentThreadDefaults {}
 
-impl From<&BTreeMap<String, StoredAgentDefaults>> for AgentThreadDefaults {
-    fn from(stored: &BTreeMap<String, StoredAgentDefaults>) -> Self {
-        Self(RememberedSettings::from_entries(stored.iter().map(
-            |(kind, d)| {
-                (
-                    kind.clone(),
-                    ThreadSettings {
-                        model: d.model.clone(),
-                        approval: d.approval.clone(),
-                        approvals_reviewer: d.approvals_reviewer.clone(),
-                        sandbox: d.sandbox.clone(),
-                        effort: d.effort.clone(),
-                        tier: d.tier.clone(),
-                    },
-                )
-            },
-        )))
-    }
+pub fn thread_settings_from_defaults(
+    stored: &BTreeMap<String, StoredAgentDefaults>,
+) -> AgentThreadDefaults {
+    AgentThreadDefaults(RememberedSettings::from_entries(stored.iter().map(
+        |(kind, d)| {
+            (
+                kind.clone(),
+                ThreadSettings {
+                    model: d.model.clone(),
+                    approval: d.approval.clone(),
+                    approvals_reviewer: d.approvals_reviewer.clone(),
+                    sandbox: d.sandbox.clone(),
+                    effort: d.effort.clone(),
+                    tier: d.tier.clone(),
+                },
+            )
+        },
+    )))
 }
 
-impl From<&AgentThreadDefaults> for BTreeMap<String, StoredAgentDefaults> {
-    fn from(value: &AgentThreadDefaults) -> Self {
-        value
-            .0
-            .iter()
-            .map(|(kind, s)| {
-                (
-                    kind.clone(),
-                    StoredAgentDefaults {
-                        model: s.model.clone(),
-                        approval: s.approval.clone(),
-                        approvals_reviewer: s.approvals_reviewer.clone(),
-                        sandbox: s.sandbox.clone(),
-                        effort: s.effort.clone(),
-                        tier: s.tier.clone(),
-                    },
-                )
-            })
-            .collect()
-    }
+pub fn defaults_from_thread_settings(
+    value: &AgentThreadDefaults,
+) -> BTreeMap<String, StoredAgentDefaults> {
+    value
+        .0
+        .iter()
+        .map(|(kind, s)| {
+            (
+                kind.clone(),
+                StoredAgentDefaults {
+                    model: s.model.clone(),
+                    approval: s.approval.clone(),
+                    approvals_reviewer: s.approvals_reviewer.clone(),
+                    sandbox: s.sandbox.clone(),
+                    effort: s.effort.clone(),
+                    tier: s.tier.clone(),
+                },
+            )
+        })
+        .collect()
 }

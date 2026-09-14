@@ -116,6 +116,14 @@ pub struct TabManager<S> {
 }
 
 impl<S> TabManager<S> {
+    pub(crate) fn list(&self) -> &ActiveList<Tab<S>> {
+        &self.tabs
+    }
+
+    pub(crate) fn list_mut(&mut self) -> &mut ActiveList<Tab<S>> {
+        &mut self.tabs
+    }
+
     /// Start with a single active tab. There is no empty state.
     pub fn new(surface: S, id: TabId, default_title: String) -> Self {
         Self {
@@ -136,25 +144,6 @@ impl<S> TabManager<S> {
     /// there is no right neighbor.
     pub fn close(&mut self, id: TabId) -> Option<S> {
         self.tabs.close(id).map(|tab| tab.surface)
-    }
-
-    /// Activate by position. Out-of-range indices are ignored.
-    pub fn activate(&mut self, index: usize) {
-        self.tabs.activate(index);
-    }
-
-    pub fn focus_next(&mut self) {
-        self.tabs.focus_next();
-    }
-
-    pub fn focus_prev(&mut self) {
-        self.tabs.focus_prev();
-    }
-
-    /// Move the tab at `from` to position `to`, keeping the same tab active.
-    /// No-op for out-of-range or equal indices.
-    pub fn reorder(&mut self, from: usize, to: usize) {
-        self.tabs.reorder(from, to);
     }
 
     /// Set the terminal-supplied title. An empty OSC title restores the default,
@@ -243,31 +232,6 @@ impl<S> TabManager<S> {
 
     pub fn active_mut(&mut self) -> &mut S {
         &mut self.tabs.active_mut().surface
-    }
-
-    pub fn active_id(&self) -> TabId {
-        self.tabs.active_id()
-    }
-
-    pub fn active_index(&self) -> usize {
-        self.tabs.active_index()
-    }
-
-    pub fn len(&self) -> usize {
-        self.tabs.len()
-    }
-
-    pub fn tabs(&self) -> &[Tab<S>] {
-        self.tabs.items()
-    }
-
-    /// Find a tab by id (host-event routing). Index may have shifted; id is stable.
-    pub fn find(&self, id: TabId) -> Option<&Tab<S>> {
-        self.tabs.find(id)
-    }
-
-    pub fn find_mut(&mut self, id: TabId) -> Option<&mut Tab<S>> {
-        self.tabs.find_mut(id)
     }
 }
 

@@ -73,6 +73,8 @@ pub(crate) fn on_settings_changed(cx: &mut App) {
 
 /// The channel the user has chosen, in the terms Sparkle understands.
 fn channel(settings: &AppSettings) -> Channel {
+    // Translate here so the thin Sparkle FFI crate stays independent of the
+    // application configuration crate and its settings model.
     match settings.config().update.channel {
         UpdateChannel::Stable => Channel::Stable,
         UpdateChannel::Nightly => Channel::Nightly,

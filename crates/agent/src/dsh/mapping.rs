@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use serde_json::{Value, from_str, json};
 
 use crate::chat::{
-    Compaction, CompactionTrigger, Event, Item, Question, QuestionOption, TurnActivity,
+    Compaction, CompactionTrigger, Event, Item, Question, QuestionOption, TurnRetry,
 };
 
 /// The status vocabulary the transcript renders: anything else reads as still
@@ -547,7 +547,7 @@ fn map_retry(data: &Value) -> Vec<Event> {
         .or_else(|| data["failure"]["code"].as_str())
         .unwrap_or("a provider failure");
 
-    vec![Event::StatusDetail(Some(TurnActivity::Retrying {
+    vec![Event::StatusDetail(Some(TurnRetry {
         attempt,
         total,
         reason: reason.to_string(),

@@ -262,6 +262,25 @@ impl WorkflowData {
     pub fn forget_restore(&mut self) {
         self.restored_session = None;
     }
+
+    pub fn refresh_plan(
+        &self,
+        runtime: &SessionRuntime,
+        cwd: Option<String>,
+    ) -> Option<RefreshPlan> {
+        let session = runtime.backend()?;
+        let session_id = session.session_id()?.to_owned();
+        let source = session.workflow_source()?;
+        let requests = self.scope_requests(session.workflow_refresh_requests());
+
+        (!requests.is_empty()).then_some(RefreshPlan {
+            cwd,
+            session_id,
+            epoch: runtime.epoch(),
+            requests,
+            source,
+        })
+    }
 }
 
 pub struct RefreshPlan {
@@ -281,27 +300,6 @@ impl RefreshPlan {
                     .refresh(self.cwd.as_deref(), &self.session_id, request)
             })
             .collect()
-    }
-}
-
-impl WorkflowData {
-    pub fn refresh_plan(
-        &self,
-        runtime: &SessionRuntime,
-        cwd: Option<String>,
-    ) -> Option<RefreshPlan> {
-        let session = runtime.backend()?;
-        let session_id = session.session_id()?.to_owned();
-        let source = session.workflow_source()?;
-        let requests = self.scope_requests(session.workflow_refresh_requests());
-
-        (!requests.is_empty()).then_some(RefreshPlan {
-            cwd,
-            session_id,
-            epoch: runtime.epoch(),
-            requests,
-            source,
-        })
     }
 }
 

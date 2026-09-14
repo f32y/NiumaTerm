@@ -8,11 +8,13 @@ mod profile_tests;
 #[cfg(test)]
 mod tests;
 
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::{collections, ops, sync, time};
-
+use crate::terminal_tab::block_list::FrozenView;
+use crate::terminal_tab::block_list::chrome::DurationLabels;
+use crate::terminal_tab::frame::{EngineRowBuilder, TerminalColor, TerminalFrame};
+use crate::terminal_tab::graphics::{FrozenImageCache, GenerationStore, prune_frozen_images};
+use crate::terminal_tab::pane_model::FrameTheme;
+use crate::terminal_tab::wake::{Wake, WakeSender, WakeSignal};
+use crate::terminal_tab::{block_list, frame, graphics, metrics};
 use nmt_config::colors::Colors;
 use nmt_terminal::clipboard::{Clipboard, ClipboardType};
 use nmt_terminal::event::BlockEvent;
@@ -24,15 +26,11 @@ use nmt_terminal::session::{
     BlockPoint, EngineError, SessionChange, SessionObserver, TerminalSession, TerminalSessionConfig,
 };
 use parking_lot::Mutex;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{collections, ops, sync, time};
 use tracing::trace;
-
-use crate::terminal_tab::block_list::FrozenView;
-use crate::terminal_tab::block_list::chrome::DurationLabels;
-use crate::terminal_tab::frame::{TerminalColor, TerminalFrame};
-use crate::terminal_tab::graphics::{FrozenImageCache, GenerationStore, prune_frozen_images};
-use crate::terminal_tab::pane_model::FrameTheme;
-use crate::terminal_tab::wake::{Wake, WakeSender, WakeSignal};
-use crate::terminal_tab::{block_list, frame, graphics, metrics};
 
 pub struct TerminalFrameSource {
     pub(super) session: TerminalSession,
@@ -336,7 +334,7 @@ impl TerminalFrameSource {
                 .screen_page_at(self.snapshot.revision(), usize::try_from(row).ok()?)?;
 
             let data = page.row(row as usize)?;
-            let mut builder = block_list::EngineRowBuilder::default();
+            let mut builder = EngineRowBuilder::default();
 
             for cell in &data.cells {
                 builder.push(

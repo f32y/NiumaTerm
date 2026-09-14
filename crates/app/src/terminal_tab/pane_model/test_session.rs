@@ -1,3 +1,7 @@
+use crate::terminal_tab::settings::TerminalSettings;
+use gpui::{FontFallbacks, px};
+use nmt_config::appearance::InputStyle;
+
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::sync::Arc;
@@ -7,9 +11,7 @@ use std::time::{Duration, Instant};
 use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
 use nmt_config::system::NewlineShortcut;
-use nmt_platform::{
-    ChildEvent, EventedPty, Interest, Poll, ProcessReadWrite, Token, Waker, WinsizeBuilder,
-};
+use nmt_platform::{EventedPty, Interest, Poll, ProcessReadWrite, Token, Waker, WinsizeBuilder};
 use nmt_terminal::pty_pipe::SessionOptions;
 use nmt_terminal::session::TerminalSession;
 use parking_lot::Mutex;
@@ -17,7 +19,7 @@ use parking_lot::Mutex;
 use crate::terminal_tab::block_list::chrome::DurationLabels;
 use crate::terminal_tab::frame_source::TerminalFrameSource;
 use crate::terminal_tab::metrics::CellMetrics;
-use crate::terminal_tab::pane_model::{ClipboardAccess, FrameTheme, PaneController, PaneSettings};
+use crate::terminal_tab::pane_model::{ClipboardAccess, FrameTheme, PaneController};
 use crate::terminal_tab::wake::wake_channel;
 
 struct TestPty {
@@ -141,8 +143,8 @@ impl EventedPty for TestPty {
         self.child_token
     }
 
-    fn next_child_event(&mut self) -> Option<ChildEvent> {
-        None
+    fn child_exited(&mut self) -> bool {
+        false
     }
 }
 
@@ -191,10 +193,16 @@ pub(crate) fn controller(vt: &[u8], engine_blocks: bool) -> (PaneController, Arc
         thread::sleep(Duration::from_millis(1));
     }
 
-    let settings = PaneSettings {
-        fixed_bottom: false,
-        pad_rows: 1.0,
-        show_block_chrome: true,
+    let settings = TerminalSettings {
+        input_style: InputStyle::Waterfall,
+        manage_subprocess_job: false,
+        command_blocks: true,
+        font_family: "Consolas".into(),
+        font_size: 14.0,
+        line_height: 1.0,
+        background_opacity: 1.0,
+        corner_radius: px(0.0),
+        font_fallbacks: FontFallbacks::default(),
         smooth_wheel: true,
         scroll_to_bottom_when_typing: true,
         newline_shortcut: NewlineShortcut::ShiftEnter,

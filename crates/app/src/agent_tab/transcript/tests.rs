@@ -1015,7 +1015,7 @@ mod branch_point_targeting_tests {
                 view.hold_for_picker();
 
                 assert!(
-                    view.reserve_below,
+                    view.picker.reserve_below,
                     "a held transcript can scroll past its last row"
                 );
                 assert!(
@@ -1027,7 +1027,7 @@ mod branch_point_targeting_tests {
                 view.release_from_picker(cx);
 
                 assert!(view.transcript_list.is_following_tail());
-                assert!(!view.reserve_below);
+                assert!(!view.picker.reserve_below);
 
                 // Reading an earlier turn: that offset comes back.
                 view.transcript_list.scroll_to(ListOffset {

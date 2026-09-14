@@ -17,8 +17,9 @@ use tracing::{info, warn};
 use crate::channel::reconnect_delay;
 use crate::protocol::{
     ClientBound, Frame, HostBound, PairingCode, ProtocolSessionInfo, ProtocolSessionOptions,
-    ProtocolSessionSnapshot, SecureChannel, StaticKeypair,
+    SecureChannel, StaticKeypair,
 };
+use crate::session::SessionSnapshot;
 use crate::{FrameChannel, NET_TIMEOUT, NetError, client_connect_ik, with_timeout};
 
 /// One remote session's byte stream as the terminal engine wants to consume
@@ -35,7 +36,7 @@ pub enum SessionByteEvent {
 /// use them directly without touching the async runtime.
 pub struct RemoteSession {
     pub session_id: u64,
-    pub snapshot: ProtocolSessionSnapshot,
+    pub snapshot: SessionSnapshot,
     output: std_mpsc::Receiver<SessionByteEvent>,
     commands: mpsc::UnboundedSender<Frame>,
     worker: Arc<ClientWorker>,
@@ -69,7 +70,7 @@ impl RemoteSession {
         &self.output
     }
 
-    pub fn snapshot(&self) -> &ProtocolSessionSnapshot {
+    pub fn snapshot(&self) -> &SessionSnapshot {
         &self.snapshot
     }
 }
@@ -155,7 +156,7 @@ pub fn open_remote_session(
         .map_err(|_| NetError::Timeout)??;
 
     Ok(RemoteSession {
-        session_id: snapshot.session_id,
+        session_id: snapshot.session_id.0,
         snapshot,
         output: output_rx,
         commands: command_tx,
@@ -200,7 +201,7 @@ async fn session_thread(
     host_public_key: Vec<u8>,
     device: StaticKeypair,
     target: AttachTarget,
-    ready: std_mpsc::Sender<Result<ProtocolSessionSnapshot, NetError>>,
+    ready: std_mpsc::Sender<Result<SessionSnapshot, NetError>>,
     output: std_mpsc::Sender<SessionByteEvent>,
     mut commands: mpsc::UnboundedReceiver<Frame>,
 ) {
@@ -215,7 +216,7 @@ async fn session_thread(
             }
         };
 
-    let session_id = snapshot.session_id;
+    let session_id = snapshot.session_id.0;
 
     // Everything up to and including `base_seq` is already in the snapshot the
     // caller renders, so the pump only forwards events past it. After a resume
@@ -274,7 +275,7 @@ async fn connect_and_attach(
     host_public_key: &[u8],
     device: &StaticKeypair,
     target: AttachTarget,
-) -> Result<(FrameChannel, ProtocolSessionSnapshot), NetError> {
+) -> Result<(FrameChannel, SessionSnapshot), NetError> {
     let mut channel = client_connect_ik(relay_url, host_id, host_public_key, device).await?;
 
     let session_id = match target {
@@ -317,7 +318,7 @@ async fn reconnect(
     device: &StaticKeypair,
     session_id: u64,
     commands: &mpsc::UnboundedReceiver<Frame>,
-) -> Option<(FrameChannel, ProtocolSessionSnapshot)> {
+) -> Option<(FrameChannel, SessionSnapshot)> {
     for attempt in 1..=RECONNECT_ATTEMPTS {
         if commands.is_closed() {
             return None; // Tab closed while we were retrying.
@@ -518,7 +519,7 @@ async fn fetch_session_list(
 
 impl From<RemoteSession>
     for (
-        ProtocolSessionSnapshot,
+        SessionSnapshot,
         RemoteInput,
         std_mpsc::Receiver<SessionByteEvent>,
     )

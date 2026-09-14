@@ -115,26 +115,7 @@ impl SessionHistory {
 
         true
     }
-}
 
-/// The filesystem history a scope covers. Only a backend that reads its own
-/// transcripts takes this route; one that lists over the protocol asks its
-/// server for the scope instead.
-pub fn count_scoped_sessions(scope: SessionScope, cwd: Option<&str>) -> usize {
-    match scope {
-        SessionScope::CurrentDirectory => sessions::count_sessions(cwd),
-        SessionScope::AllDirectories => sessions::count_all_sessions(),
-    }
-}
-
-pub fn list_scoped_sessions(scope: SessionScope, cwd: Option<&str>) -> Vec<SessionSummary> {
-    match scope {
-        SessionScope::CurrentDirectory => sessions::list_sessions(cwd),
-        SessionScope::AllDirectories => sessions::list_all_sessions(),
-    }
-}
-
-impl SessionHistory {
     pub fn append_page(&mut self, sessions: Vec<SessionSummary>) {
         if take(&mut self.showing_search) {
             self.sessions.clear();
@@ -161,5 +142,22 @@ impl SessionHistory {
         self.showing_search = true;
 
         true
+    }
+}
+
+/// The filesystem history a scope covers. Only a backend that reads its own
+/// transcripts takes this route; one that lists over the protocol asks its
+/// server for the scope instead.
+pub fn count_scoped_sessions(scope: SessionScope, cwd: Option<&str>) -> usize {
+    match scope {
+        SessionScope::CurrentDirectory => sessions::count_sessions(cwd),
+        SessionScope::AllDirectories => sessions::count_all_sessions(),
+    }
+}
+
+pub fn list_scoped_sessions(scope: SessionScope, cwd: Option<&str>) -> Vec<SessionSummary> {
+    match scope {
+        SessionScope::CurrentDirectory => sessions::list_sessions(cwd),
+        SessionScope::AllDirectories => sessions::list_all_sessions(),
     }
 }

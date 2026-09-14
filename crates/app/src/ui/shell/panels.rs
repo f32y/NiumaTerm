@@ -9,13 +9,11 @@
 mod tests;
 
 use app::agent_tab::AgentPane;
-use gpui::{App, Context, Entity, Window};
-use nmt_config::get;
+use gpui::{App, Context, Entity};
 
 use crate::ui::git_status::GitStatusModel;
 use crate::ui::right_panel::{RightPanel, RightPanelKind};
 use crate::ui::shell::Shell;
-use crate::ui::shell::actions::{ToggleBackgroundTasks, ToggleGitSidebar, ToggleWorkflows};
 
 /// The right-side area and everything that decides what it shows. The git
 /// model sits here because opening or leaving the Git view is what turns its
@@ -92,7 +90,7 @@ impl RightPanelController {
             let view = pane.read(cx);
 
             (
-                view.workflow_session_id().map(|_| pane.downgrade()),
+                view.workflow_session_id(cx).map(|_| pane.downgrade()),
                 view.background_task_parent().map(|_| pane.downgrade()),
             )
         });
@@ -121,80 +119,5 @@ impl RightPanelController {
                 model.refresh(cx);
             }
         });
-    }
-}
-
-impl Shell {
-    /// Centralized target-CWD sync: read the active pane's
-    /// OSC7-tracked CWD (falling back to the configured working-dir) and
-    /// hand it to the git model, which no-ops when unchanged. Called on
-    /// every render and on `HostEvent::Cwd`, so no switch path is missed.
-    pub(super) fn sync_git_target(&self, cx: &mut Context<Self>) {
-        // Agent tabs have no OSC7-tracking pane; the configured working dir
-        // keeps the git indicator on something sensible.
-        let cwd = self
-            .try_active_pane()
-            .and_then(|pane| pane.read(cx).tab_state().cwd)
-            .or_else(|| get().working_dir.clone());
-
-        self.panels.set_git_target(cwd, cx);
-    }
-
-    pub(super) fn on_toggle_git_sidebar(
-        &mut self,
-        _: &ToggleGitSidebar,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let open = self.panels.select(RightPanelKind::Git, cx);
-
-        self.panels.set_git_sidebar_open(open, cx);
-
-        cx.notify();
-    }
-
-    pub(super) fn on_toggle_background_tasks(
-        &mut self,
-        _: &ToggleBackgroundTasks,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let open = self.panels.select(RightPanelKind::BackgroundTasks, cx);
-
-        if open {
-            self.panels.sync_agent_targets(self.active_agent(), cx);
-
-            // Asking for fresher data happens on the open edge, not on every
-            // render, so a visible panel does not re-query the provider each
-            // frame. The adapter still ignores overlapping requests.
-            if let Some(pane) = self.active_agent() {
-                pane.update(cx, |pane, _| pane.refresh_background_tasks());
-            }
-        }
-
-        // Git content owns the poller's own visibility flag; leaving Git for
-        // another view stops the polling it turned on.
-        self.panels.set_git_sidebar_open(false, cx);
-
-        cx.notify();
-    }
-
-    pub(super) fn on_toggle_workflows(
-        &mut self,
-        _: &ToggleWorkflows,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let open = self.panels.select(RightPanelKind::Workflows, cx);
-
-        if open {
-            self.panels.sync_agent_targets(self.active_agent(), cx);
-        }
-
-        // Git owns the poller's own visibility flag; leaving Git for another
-        // view stops the polling it turned on.
-        self.panels.set_git_sidebar_open(false, cx);
-
-        cx.notify();
     }
 }

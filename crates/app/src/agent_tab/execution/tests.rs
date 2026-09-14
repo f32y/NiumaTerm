@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use gpui::{AppContext as _, Image, ImageFormat, TestAppContext, VisualTestContext};
+use gpui::{AppContext as _, Image, ImageFormat, Render, TestAppContext, VisualTestContext};
 use gpui_component::Root;
 use image_rs::{DynamicImage, ImageFormat as EncodedImageFormat, RgbaImage};
 use nmt_agent::chat::{Event, Item, SendOutcome, SlashCommandOutcome, ThreadSettings};
@@ -119,7 +119,7 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
             let state = pane.session.borrow();
             let conversation = state.conversation.borrow();
             let image = &conversation.content.entries()[0].metadata.images[0];
-            let scratch = scratch_dir(pane.agent_route.as_str());
+            let scratch = scratch_dir(pane.agent_route(cx).unwrap().as_str());
 
             fs::create_dir_all(&scratch).unwrap();
             fs::write(scratch.join("delayed-read.png"), &image.bytes).unwrap();
@@ -268,4 +268,22 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
     assert!(!scratch.exists());
 
     drop(subscription);
+    drop(owner);
+    drop(host);
+    cx.run_until_parked();
+
+    cx.update(|window, cx| {
+        second.update(cx, |pane, cx| {
+            assert!(pane.agent_session().is_none());
+            assert!(pane.agent_route(cx).is_none());
+            assert!(pane.agent_kind(cx).is_none());
+            assert!(pane.profile(cx).is_none());
+            assert!(pane.configured_workspace(cx).is_none());
+            assert!(!pane.send_text_inner("released".into(), None, None, cx));
+
+            pane.set_workspace(AgentWorkspace::single(Some("replacement".into())), cx);
+
+            let _ = pane.render(window, cx);
+        });
+    });
 }

@@ -261,27 +261,23 @@ fn local_session_publishes_engine_output_and_host_events() {
 /// desktop notification.
 #[test]
 fn host_events_map_from_terminal_events() {
-    use crate::event::{EventListener, TerminalEvent, WindowId};
+    use crate::event::{EventListener, TerminalEvent};
 
     let shared = Arc::new(SessionSharedState::default());
     let events = &shared.events;
     let listener = TerminalEventProxy::new(Arc::clone(&shared), 1, None);
-    let wid = WindowId::dummy();
 
-    listener.send_event(TerminalEvent::Title("t".into()), wid);
-    listener.send_event(TerminalEvent::ResetTitle, wid);
-    listener.send_event(TerminalEvent::Bell, wid);
-    listener.send_event(TerminalEvent::CloseTerminal(0), wid);
+    listener.send_event(TerminalEvent::Title("t".into()));
+    listener.send_event(TerminalEvent::ResetTitle);
+    listener.send_event(TerminalEvent::Bell);
+    listener.send_event(TerminalEvent::CloseTerminal(0));
 
-    listener.send_event(
-        TerminalEvent::DesktopNotification {
-            title: "T".into(),
-            body: "B".into(),
-        },
-        wid,
-    );
+    listener.send_event(TerminalEvent::DesktopNotification {
+        title: "T".into(),
+        body: "B".into(),
+    });
 
-    listener.send_event(TerminalEvent::PromptBoundaryTrusted(true), wid);
+    listener.send_event(TerminalEvent::PromptBoundaryTrusted(true));
 
     let q = events.lock();
     let v: Vec<&HostEvent> = q.iter().collect();
@@ -300,7 +296,7 @@ fn host_events_map_from_terminal_events() {
 fn in_flight_block_lifecycle() {
     use std::time::SystemTime;
 
-    use crate::event::{CommandCapture, CommandStart, EventListener, TerminalEvent, WindowId};
+    use crate::event::{CommandCapture, CommandStart, EventListener, TerminalEvent};
 
     fn start(cmd: &str) -> CommandStart {
         CommandStart {
@@ -329,14 +325,13 @@ fn in_flight_block_lifecycle() {
     let in_flight = &shared.in_flight;
     let open_prompt = &shared.open_prompt;
     let proxy = TerminalEventProxy::new(Arc::clone(&shared), 1, None);
-    let wid = WindowId::dummy();
 
-    proxy.send_event(TerminalEvent::PromptStarted, wid);
+    proxy.send_event(TerminalEvent::PromptStarted);
 
     assert!(open_prompt.load(Ordering::Acquire));
 
     // start -> finish: in-flight visible while running, then cleared.
-    proxy.send_event(TerminalEvent::CommandStarted(start("sleep 5")), wid);
+    proxy.send_event(TerminalEvent::CommandStarted(start("sleep 5")));
 
     assert!(
         !open_prompt.load(Ordering::Acquire),
@@ -349,7 +344,7 @@ fn in_flight_block_lifecycle() {
         assert_eq!(running.command.as_str(), "sleep 5");
     }
 
-    proxy.send_event(TerminalEvent::CommandFinished(capture("sleep 5")), wid);
+    proxy.send_event(TerminalEvent::CommandFinished(capture("sleep 5")));
 
     assert!(
         in_flight.lock().is_none(),
@@ -357,15 +352,15 @@ fn in_flight_block_lifecycle() {
     );
 
     // start -> trust loss: cleared.
-    proxy.send_event(TerminalEvent::CommandStarted(start("nested")), wid);
+    proxy.send_event(TerminalEvent::CommandStarted(start("nested")));
 
     assert_eq!(in_flight.lock().clone().unwrap().command, "nested");
 
-    proxy.send_event(TerminalEvent::PromptStarted, wid);
+    proxy.send_event(TerminalEvent::PromptStarted);
 
     assert!(open_prompt.load(Ordering::Acquire));
 
-    proxy.send_event(TerminalEvent::PromptBoundaryTrusted(false), wid);
+    proxy.send_event(TerminalEvent::PromptBoundaryTrusted(false));
 
     assert!(
         in_flight.lock().is_none(),
@@ -377,12 +372,12 @@ fn in_flight_block_lifecycle() {
     );
 
     // start -> exit: cleared as well.
-    proxy.send_event(TerminalEvent::CommandStarted(start("hang")), wid);
-    proxy.send_event(TerminalEvent::PromptStarted, wid);
+    proxy.send_event(TerminalEvent::CommandStarted(start("hang")));
+    proxy.send_event(TerminalEvent::PromptStarted);
 
     assert!(open_prompt.load(Ordering::Acquire));
 
-    proxy.send_event(TerminalEvent::CloseTerminal(0), wid);
+    proxy.send_event(TerminalEvent::CloseTerminal(0));
 
     assert!(in_flight.lock().is_none(), "exit drops the running block");
     assert!(!open_prompt.load(Ordering::Acquire), "exit closes prompt");
@@ -403,61 +398,50 @@ fn in_flight_block_lifecycle() {
 fn block_batches_and_seq_metadata_reach_the_block_store() {
     use std::time::SystemTime;
 
-    use crate::event::{
-        BlockEvent, CommandCapture, CommandStart, EventListener, TerminalEvent, WindowId,
-    };
+    use crate::event::{BlockEvent, CommandCapture, CommandStart, EventListener, TerminalEvent};
     use crate::ghostty::BlockHandle;
 
     let shared = Arc::new(SessionSharedState::default());
     let store = &shared.block_store;
     let proxy = TerminalEventProxy::new(Arc::clone(&shared), 1, None);
-    let wid = WindowId::dummy();
+
     let now = SystemTime::now();
 
     // Marks fire first (write time)...
-    proxy.send_event(
-        TerminalEvent::CommandStarted(CommandStart {
-            seq: 1,
-            command: "cargo build".into(),
-            cwd: Some("C:/w".into()),
-            started_at: now,
-        }),
-        wid,
-    );
+    proxy.send_event(TerminalEvent::CommandStarted(CommandStart {
+        seq: 1,
+        command: "cargo build".into(),
+        cwd: Some("C:/w".into()),
+        started_at: now,
+    }));
 
-    proxy.send_event(
-        TerminalEvent::CommandFinished(CommandCapture {
-            seq: 1,
-            command: "cargo build".into(),
-            exit_code: Some(0),
-            cwd: Some("C:/w".into()),
-            started_at: now,
-            ended_at: now,
-        }),
-        wid,
-    );
+    proxy.send_event(TerminalEvent::CommandFinished(CommandCapture {
+        seq: 1,
+        command: "cargo build".into(),
+        exit_code: Some(0),
+        cwd: Some("C:/w".into()),
+        started_at: now,
+        ended_at: now,
+    }));
 
     // ...the item materializes later, at the block's finish. The batch is
     // staged and only flushed to the store on the read's damage wake, so
     // nothing lands until the following `TerminalDamaged`.
-    proxy.send_event(
-        TerminalEvent::BlockBatch(vec![BlockEvent::EngineBlock {
-            seq: 1,
-            handle: BlockHandle {
-                id: 1,
-                generation: 1,
-            },
-            rows: 3,
-        }]),
-        wid,
-    );
+    proxy.send_event(TerminalEvent::BlockBatch(vec![BlockEvent::EngineBlock {
+        seq: 1,
+        handle: BlockHandle {
+            id: 1,
+            generation: 1,
+        },
+        rows: 3,
+    }]));
 
     assert!(
         store.lock().items().is_empty(),
         "staged batch must not reach the store before the damage flush"
     );
 
-    proxy.send_event(TerminalEvent::TerminalDamaged(1), wid);
+    proxy.send_event(TerminalEvent::TerminalDamaged(1));
 
     let store = store.lock();
     let items = store.items();
@@ -543,12 +527,11 @@ fn rgba_update(route_id: usize, image_id: u32, w: usize, h: usize) -> TerminalEv
 /// but never enqueues a host event; a mismatched route is ignored entirely.
 #[test]
 fn graphics_events_bypass_host_queue_and_are_route_scoped() {
-    use crate::event::{EventListener, WindowId};
+    use crate::event::EventListener;
 
     let (proxy, p) = graphics_proxy(4);
-    let wid = WindowId::dummy();
 
-    proxy.send_event(rgba_update(4, 7, 2, 2), wid);
+    proxy.send_event(rgba_update(4, 7, 2, 2));
 
     assert!(
         p.shared.events.lock().is_empty(),
@@ -562,7 +545,7 @@ fn graphics_events_bypass_host_queue_and_are_route_scoped() {
     );
 
     // A cross-session route is dropped: no install, no wake.
-    proxy.send_event(rgba_update(999, 8, 2, 2), wid);
+    proxy.send_event(rgba_update(999, 8, 2, 2));
 
     assert!(p.images.lock().get(&8).is_none(), "wrong route ignored");
     assert_eq!(p.wakes.lock().len(), 1, "no wake for wrong route");
@@ -573,26 +556,24 @@ fn graphics_events_bypass_host_queue_and_are_route_scoped() {
 /// never touched, so neither the staging buffer nor the host queue accumulates.
 #[test]
 fn sustained_output_does_not_grow_ui_queue() {
-    use crate::event::{BlockEvent, EventListener, WindowId};
+    use crate::event::{BlockEvent, EventListener};
     use crate::ghostty::BlockHandle;
 
     let (proxy, p) = graphics_proxy(1);
-    let wid = WindowId::dummy();
 
     for seq in 0..1000u64 {
-        proxy.send_event(
-            TerminalEvent::BlockBatch(vec![BlockEvent::EngineBlocksSync(vec![(
+        proxy.send_event(TerminalEvent::BlockBatch(vec![
+            BlockEvent::EngineBlocksSync(vec![(
                 BlockHandle {
                     id: seq,
                     generation: 1,
                 },
                 1,
-            )])]),
-            wid,
-        );
+            )]),
+        ]));
 
-        proxy.send_event(rgba_update(1, 1, 1, 1), wid);
-        proxy.send_event(TerminalEvent::TerminalDamaged(1), wid);
+        proxy.send_event(rgba_update(1, 1, 1, 1));
+        proxy.send_event(TerminalEvent::TerminalDamaged(1));
 
         // After each read's damage flush the staging buffer is empty again.
         assert!(
@@ -615,32 +596,28 @@ fn sustained_output_does_not_grow_ui_queue() {
 /// before flushing the block batch that froze the same content.
 #[test]
 fn active_and_frozen_state_coherent_at_wake() {
-    use crate::event::{BlockEvent, EventListener, WindowId};
+    use crate::event::{BlockEvent, EventListener};
     use crate::ghostty::BlockHandle;
 
     let (proxy, p) = graphics_proxy(1);
-    let wid = WindowId::dummy();
 
     // Order within a read: block event staged, then generation installed,
     // then damage.
-    proxy.send_event(
-        TerminalEvent::BlockBatch(vec![BlockEvent::EngineBlock {
-            seq: 1,
-            handle: BlockHandle {
-                id: 1,
-                generation: 1,
-            },
-            rows: 2,
-        }]),
-        wid,
-    );
+    proxy.send_event(TerminalEvent::BlockBatch(vec![BlockEvent::EngineBlock {
+        seq: 1,
+        handle: BlockHandle {
+            id: 1,
+            generation: 1,
+        },
+        rows: 2,
+    }]));
 
-    proxy.send_event(rgba_update(1, 42, 2, 2), wid);
+    proxy.send_event(rgba_update(1, 42, 2, 2));
 
     // Before the flush the frozen row is not yet in the store.
     assert!(p.shared.block_store.lock().items().is_empty());
 
-    proxy.send_event(TerminalEvent::TerminalDamaged(1), wid);
+    proxy.send_event(TerminalEvent::TerminalDamaged(1));
 
     // At the wake both sides are coherent: live generation present AND frozen row
     // committed to history.
@@ -658,7 +635,7 @@ fn active_and_frozen_state_coherent_at_wake() {
 
 #[test]
 fn final_damage_callback_observes_published_blocks_after_graphics() {
-    use crate::event::{BlockEvent, EventListener, WindowId};
+    use crate::event::{BlockEvent, EventListener};
     use crate::ghostty::BlockHandle;
 
     struct PublicationObserver {
@@ -690,22 +667,18 @@ fn final_damage_callback_observes_published_blocks_after_graphics() {
     });
 
     let proxy = TerminalEventProxy::new(shared, 1, Some(observer.clone()));
-    let window = WindowId::dummy();
 
-    proxy.send_event(
-        TerminalEvent::BlockBatch(vec![BlockEvent::EngineBlock {
-            seq: 1,
-            handle: BlockHandle {
-                id: 1,
-                generation: 1,
-            },
-            rows: 2,
-        }]),
-        window,
-    );
+    proxy.send_event(TerminalEvent::BlockBatch(vec![BlockEvent::EngineBlock {
+        seq: 1,
+        handle: BlockHandle {
+            id: 1,
+            generation: 1,
+        },
+        rows: 2,
+    }]));
 
-    proxy.send_event(rgba_update(1, 42, 2, 2), window);
-    proxy.send_event(TerminalEvent::TerminalDamaged(1), window);
+    proxy.send_event(rgba_update(1, 42, 2, 2));
+    proxy.send_event(TerminalEvent::TerminalDamaged(1));
 
     assert_eq!(
         *observer.steps.lock(),

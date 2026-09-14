@@ -12,21 +12,11 @@ use nmt_agent::message_memory::OUTPUT_FAILURE_METHOD;
 use parking_lot::Mutex;
 use serde_json::Value;
 
-pub(crate) struct Message {
-    value: Option<Value>,
-}
-
-impl Message {
-    pub(crate) fn take(&mut self) -> Value {
-        self.value.take().expect("queued message is consumed once")
-    }
-}
-
 pub(crate) struct Sender {
-    sender: Mutex<Option<mpsc::UnboundedSender<Result<Message, String>>>>,
+    sender: Mutex<Option<mpsc::UnboundedSender<Result<Value, String>>>>,
 }
 
-pub(crate) fn channel() -> (Sender, mpsc::UnboundedReceiver<Result<Message, String>>) {
+pub(crate) fn channel() -> (Sender, mpsc::UnboundedReceiver<Result<Value, String>>) {
     let (sender, receiver) = mpsc::unbounded();
 
     (
@@ -58,9 +48,7 @@ impl Sender {
             return;
         }
 
-        let message = Message { value: Some(value) };
-
-        if tx.unbounded_send(Ok(message)).is_err() {
+        if tx.unbounded_send(Ok(value)).is_err() {
             sender.take();
         }
     }

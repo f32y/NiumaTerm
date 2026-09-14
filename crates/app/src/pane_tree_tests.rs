@@ -1,16 +1,21 @@
+use gpui::{AppContext, TestAppContext};
+use gpui_component::resizable::ResizableState;
+
 use crate::pane_tree::*;
 
-type Tree = PaneTree<u32, u8>;
+type Tree = PaneTree<u32>;
 
 /// Leaf ids double as pane payloads for easy assertions.
 fn leaf_ids(tree: &Tree) -> Vec<u64> {
     tree.leaves().into_iter().map(|(id, _)| id.0).collect()
 }
 
-#[test]
-fn split_right_wraps_root_leaf_and_focuses_new() {
+#[gpui::test]
+fn split_right_wraps_root_leaf_and_focuses_new(cx: &mut TestAppContext) {
+    let state10 = cx.new(|_| ResizableState::default());
+
     let mut tree = Tree::new_leaf(PaneId(1), 1);
-    let outcome = tree.split(PaneId(2), 2, SplitDirection::Right, || 10);
+    let outcome = tree.split(PaneId(2), 2, SplitDirection::Right, || state10.clone());
 
     assert!(matches!(outcome, SplitOutcome::Wrapped));
     assert_eq!(leaf_ids(&tree), vec![1, 2]);
@@ -18,23 +23,28 @@ fn split_right_wraps_root_leaf_and_focuses_new() {
     assert!(!tree.is_single_leaf());
 }
 
-#[test]
-fn split_left_puts_new_leaf_first() {
+#[gpui::test]
+fn split_left_puts_new_leaf_first(cx: &mut TestAppContext) {
+    let state10 = cx.new(|_| ResizableState::default());
+
     let mut tree = Tree::new_leaf(PaneId(1), 1);
 
-    tree.split(PaneId(2), 2, SplitDirection::Left, || 10);
+    tree.split(PaneId(2), 2, SplitDirection::Left, || state10.clone());
 
     assert_eq!(leaf_ids(&tree), vec![2, 1]);
 }
 
-#[test]
-fn same_axis_split_inserts_sibling() {
+#[gpui::test]
+fn same_axis_split_inserts_sibling(cx: &mut TestAppContext) {
+    let state10 = cx.new(|_| ResizableState::default());
+    let state11 = cx.new(|_| ResizableState::default());
+
     let mut tree = Tree::new_leaf(PaneId(1), 1);
 
-    tree.split(PaneId(2), 2, SplitDirection::Right, || 10);
+    tree.split(PaneId(2), 2, SplitDirection::Right, || state10.clone());
     tree.set_focused(PaneId(1));
 
-    let outcome = tree.split(PaneId(3), 3, SplitDirection::Right, || 11);
+    let outcome = tree.split(PaneId(3), 3, SplitDirection::Right, || state11.clone());
 
     // Sibling insert into the existing horizontal split, after leaf 1.
     let SplitOutcome::Inserted {
@@ -46,18 +56,21 @@ fn same_axis_split_inserts_sibling() {
         panic!("expected sibling insert");
     };
 
-    assert_eq!((state, index, before), (10, 0, false));
+    assert_eq!((state, index, before), (state10, 0, false));
     assert_eq!(leaf_ids(&tree), vec![1, 3, 2]);
 }
 
-#[test]
-fn cross_axis_split_wraps_the_leaf() {
+#[gpui::test]
+fn cross_axis_split_wraps_the_leaf(cx: &mut TestAppContext) {
+    let state10 = cx.new(|_| ResizableState::default());
+    let state11 = cx.new(|_| ResizableState::default());
+
     let mut tree = Tree::new_leaf(PaneId(1), 1);
 
-    tree.split(PaneId(2), 2, SplitDirection::Right, || 10);
+    tree.split(PaneId(2), 2, SplitDirection::Right, || state10.clone());
     tree.set_focused(PaneId(1));
 
-    let outcome = tree.split(PaneId(3), 3, SplitDirection::Down, || 11);
+    let outcome = tree.split(PaneId(3), 3, SplitDirection::Down, || state11.clone());
 
     assert!(matches!(outcome, SplitOutcome::Wrapped));
 
@@ -84,11 +97,13 @@ fn remove_refuses_last_leaf() {
     assert!(tree.remove(PaneId(1)).is_none());
 }
 
-#[test]
-fn remove_collapses_two_child_split() {
+#[gpui::test]
+fn remove_collapses_two_child_split(cx: &mut TestAppContext) {
+    let state10 = cx.new(|_| ResizableState::default());
+
     let mut tree = Tree::new_leaf(PaneId(1), 1);
 
-    tree.split(PaneId(2), 2, SplitDirection::Right, || 10);
+    tree.split(PaneId(2), 2, SplitDirection::Right, || state10.clone());
 
     let (pane, outcome) = tree.remove(PaneId(2)).expect("removable");
 
@@ -98,12 +113,15 @@ fn remove_collapses_two_child_split() {
     assert_eq!(tree.focused(), PaneId(1));
 }
 
-#[test]
-fn remove_from_wider_split_reports_index() {
+#[gpui::test]
+fn remove_from_wider_split_reports_index(cx: &mut TestAppContext) {
+    let state10 = cx.new(|_| ResizableState::default());
+    let state11 = cx.new(|_| ResizableState::default());
+
     let mut tree = Tree::new_leaf(PaneId(1), 1);
 
-    tree.split(PaneId(2), 2, SplitDirection::Right, || 10);
-    tree.split(PaneId(3), 3, SplitDirection::Right, || 11);
+    tree.split(PaneId(2), 2, SplitDirection::Right, || state10.clone());
+    tree.split(PaneId(3), 3, SplitDirection::Right, || state11.clone());
 
     // Row is [1, 2, 3]; remove the middle.
     let (_, outcome) = tree.remove(PaneId(2)).expect("removable");
@@ -112,16 +130,19 @@ fn remove_from_wider_split_reports_index() {
         panic!("split still has two children");
     };
 
-    assert_eq!((state, index), (10, 1));
+    assert_eq!((state, index), (state10, 1));
     assert_eq!(leaf_ids(&tree), vec![1, 3]);
 }
 
-#[test]
-fn remove_collapses_nested_split_and_refocuses() {
+#[gpui::test]
+fn remove_collapses_nested_split_and_refocuses(cx: &mut TestAppContext) {
+    let state10 = cx.new(|_| ResizableState::default());
+    let state11 = cx.new(|_| ResizableState::default());
+
     let mut tree = Tree::new_leaf(PaneId(1), 1);
 
-    tree.split(PaneId(2), 2, SplitDirection::Right, || 10);
-    tree.split(PaneId(3), 3, SplitDirection::Down, || 11);
+    tree.split(PaneId(2), 2, SplitDirection::Right, || state10.clone());
+    tree.split(PaneId(3), 3, SplitDirection::Down, || state11.clone());
 
     // Root: h[1, v[2, 3]]; removing 3 collapses the nested split.
     assert_eq!(tree.focused(), PaneId(3));
@@ -141,11 +162,13 @@ fn remove_collapses_nested_split_and_refocuses() {
     assert!(children.iter().all(|c| matches!(c, PaneNode::Leaf { .. })));
 }
 
-#[test]
-fn focus_only_moves_to_existing_leaves() {
+#[gpui::test]
+fn focus_only_moves_to_existing_leaves(cx: &mut TestAppContext) {
+    let state10 = cx.new(|_| ResizableState::default());
+
     let mut tree = Tree::new_leaf(PaneId(1), 1);
 
-    tree.split(PaneId(2), 2, SplitDirection::Right, || 10);
+    tree.split(PaneId(2), 2, SplitDirection::Right, || state10.clone());
 
     assert!(tree.set_focused(PaneId(1)));
     assert_eq!(tree.focused(), PaneId(1));
@@ -153,19 +176,22 @@ fn focus_only_moves_to_existing_leaves() {
     assert_eq!(tree.focused(), PaneId(1));
 }
 
-#[test]
-fn resize_split_finds_nearest_matching_axis() {
+#[gpui::test]
+fn resize_split_finds_nearest_matching_axis(cx: &mut TestAppContext) {
+    let state10 = cx.new(|_| ResizableState::default());
+    let state11 = cx.new(|_| ResizableState::default());
+
     let mut tree = Tree::new_leaf(PaneId(1), 1);
 
-    tree.split(PaneId(2), 2, SplitDirection::Right, || 10);
-    tree.split(PaneId(3), 3, SplitDirection::Down, || 11);
+    tree.split(PaneId(2), 2, SplitDirection::Right, || state10.clone());
+    tree.split(PaneId(3), 3, SplitDirection::Down, || state11.clone());
 
     // Focused leaf 3 sits in v-split 11 (index 1 of 2) inside h-split 10.
-    assert_eq!(tree.resize_split(Axis::Vertical), Some((11, 1, 2)));
+    assert_eq!(tree.resize_split(Axis::Vertical), Some((state11, 1, 2)));
 
     // The horizontal match is the root split; the focused subtree is its
     // second child.
-    assert_eq!(tree.resize_split(Axis::Horizontal), Some((10, 1, 2)));
+    assert_eq!(tree.resize_split(Axis::Horizontal), Some((state10, 1, 2)));
 
     tree.set_focused(PaneId(1));
 

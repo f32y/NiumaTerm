@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::fmt::{self, Debug, Formatter};
 use std::sync::{self, Arc};
-use std::{option, path, time};
+use std::{path, time};
 
 use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
@@ -11,24 +11,6 @@ use crate::clipboard::ClipboardType;
 use crate::ghostty;
 use crate::graphics::UpdateQueues;
 use crate::session::request::{CheckpointRequest, Query, Reply};
-
-/// Opaque window identifier carried on terminal events. In the GPUI shell this
-/// is just an id value (the old winit `WindowId` is gone); headless sessions use
-/// `dummy()`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct WindowId(pub u64);
-
-impl WindowId {
-    pub const fn dummy() -> Self {
-        Self(0)
-    }
-}
-
-impl From<u64> for WindowId {
-    fn from(id: u64) -> Self {
-        Self(id)
-    }
-}
 
 /// One PTY-thread block event: a trusted
 /// `;D` freezes the whole command into a finished engine block
@@ -125,24 +107,19 @@ pub enum Msg {
 #[derive(Clone)]
 pub struct MsgSender {
     tx: sync::mpsc::Sender<Msg>,
-    waker: Option<Arc<Waker>>,
+    waker: Arc<Waker>,
 }
 
 impl MsgSender {
     pub fn new(tx: sync::mpsc::Sender<Msg>, waker: Arc<Waker>) -> Self {
-        Self {
-            tx,
-            waker: Some(waker),
-        }
+        Self { tx, waker }
     }
 
     pub fn send(&self, msg: Msg) -> Result<(), sync::mpsc::SendError<Msg>> {
         self.tx.send(msg)?;
 
         // Wake the loop so it drains the receiver. A failed wake means the loop is gone.
-        if let Some(waker) = &self.waker {
-            let _ = waker.wake();
-        }
+        let _ = self.waker.wake();
 
         Ok(())
     }
@@ -297,15 +274,7 @@ impl Debug for TerminalEvent {
 /// not wait for commands sent back to the same event loop, since parsing and
 /// shutdown cannot proceed until the callback returns.
 pub trait EventListener {
-    fn event(&self) -> (Option<TerminalEvent>, bool);
-
-    fn send_event(&self, _event: TerminalEvent, _id: WindowId) {}
-
-    fn send_event_with_high_priority(&self, _event: TerminalEvent, _id: WindowId) {}
-
-    fn send_redraw(&self, _id: WindowId) {}
-
-    fn send_global_event(&self, _event: TerminalEvent) {}
+    fn send_event(&self, event: TerminalEvent);
 }
 
 #[derive(Clone)]
@@ -318,9 +287,7 @@ impl From<TerminalEvent> for TerminalEventType {
 }
 
 impl EventListener for VoidListener {
-    fn event(&self) -> (option::Option<TerminalEvent>, bool) {
-        (None, false)
-    }
+    fn send_event(&self, _event: TerminalEvent) {}
 }
 
 /// Progress bar state for OSC 9;4 ConEmu/Windows Terminal progress reporting

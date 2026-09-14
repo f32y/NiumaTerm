@@ -1,3 +1,5 @@
+use nmt_config::appearance::InputStyle;
+
 use std::sync::Arc;
 
 use futures::executor::block_on;
@@ -198,7 +200,7 @@ fn resize_updates_content_geometry_and_only_invalidates_for_a_new_grid() {
 fn pending_repaint_retains_shared_grid_coordinates_and_coalesces_wakes() {
     let (mut model, _) = controller(b"text", false);
 
-    model.settings.fixed_bottom = true;
+    model.settings.input_style = InputStyle::FixedBottom;
     model.update_viewport();
 
     let cell = model.cell_metrics.unwrap();
@@ -588,7 +590,6 @@ fn presentation_modules_do_not_import_host_services() {
                     && !line.contains("crate::terminal_tab::view")
                     && !line.contains("crate::terminal_tab::paint")
                     && !line.contains("rust_i18n::")
-                    && !line.contains("TerminalSettings")
                     && !line.contains("active_colors"),
                 "host dependency in {}: {line}",
                 path.display()

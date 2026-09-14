@@ -35,7 +35,7 @@ use std::future::{Ready, ready};
 use std::rc::Rc;
 use std::{env, mem, path, process, time};
 
-use app::agent_tab::{AgentThreadDefaults, input_history};
+use app::agent_tab::{AgentThreadDefaults, input_history, thread_settings_from_defaults};
 use app::assets::AppAssets;
 use app::{syntax, utils};
 use clap::{Arg, ArgAction, Command as ClapCommand};
@@ -348,7 +348,10 @@ fn main() {
         cx.set_global(WindowRegistry(Vec::new()));
         cx.set_global(ShellRegistry(Vec::new()));
         cx.set_global(LastActiveWindow(None));
-        cx.set_global::<AgentThreadDefaults>((&remembered_state.agent_defaults).into());
+
+        cx.set_global::<AgentThreadDefaults>(thread_settings_from_defaults(
+            &remembered_state.agent_defaults,
+        ));
 
         // A closed window is discarded — except the last one, whose
         // geometry and session the quit hook still has to write out. On

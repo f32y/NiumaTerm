@@ -30,7 +30,7 @@ use crate::agent_tab::transcript::{
 /// because it is a structural break in the conversation: the rows above it
 /// are no longer what the model sees. Expanding reveals the accounting and
 /// the summary the thread continued from when the provider exposes it.
-pub(super) fn render_compaction_row(
+pub(crate) fn render_compaction_row(
     kind: AgentKind,
     cwd: Option<&str>,
     disclosures: &Disclosures,

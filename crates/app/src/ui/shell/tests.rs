@@ -11,8 +11,10 @@ use nmt_agent::team::session::TeamSession;
 use nmt_config::local_state::TabState;
 use tempfile::tempdir;
 
-use crate::ui::shell::render::{TAB_STRIP_MIN_WIDTH, title_bar_leading_region};
-use crate::ui::shell::{InlineRename, InlineRenameStyle, TabSurface, should_confirm_close};
+use crate::ui::shell::{
+    InlineRename, InlineRenameStyle, TAB_STRIP_MIN_WIDTH, TabSurface, should_confirm_close,
+    title_bar_leading_region,
+};
 use crate::window::MIN_WINDOW_WIDTH;
 
 struct InlineRenameProbe {
@@ -83,7 +85,7 @@ fn disabling_agent_team_releases_the_runtime_and_keeps_the_saved_room(cx: &mut T
 
     let (restored, _) = TeamSession::open(directory.path(), room_id).unwrap();
 
-    assert_eq!(restored.room().id(), room_id);
+    assert_eq!(restored.store().room().id(), room_id);
 }
 
 #[test]
@@ -299,7 +301,7 @@ fn title_bar_controls_stay_inside_a_narrow_window(cx: &mut TestAppContext) {
 /// same one being reopened.
 #[test]
 fn marked_tab_search_wraps_past_the_active_tab() {
-    use crate::ui::shell::workspaces::next_marked_position;
+    use crate::ui::shell::next_marked_position;
 
     let marks = [true, false, true, false];
 

@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 use tracing::debug;
 
 use crate::block_store::SegmentMeta;
-use crate::event::{BlockEvent, EventListener, TerminalEvent, WindowId};
+use crate::event::{BlockEvent, EventListener, TerminalEvent};
 use crate::session::{
     HostEvent, InFlightBlock, SessionChange, SessionObserver, SessionSharedState,
 };
@@ -64,11 +64,7 @@ impl TerminalEventProxy {
 }
 
 impl EventListener for TerminalEventProxy {
-    fn event(&self) -> (Option<TerminalEvent>, bool) {
-        (None, false)
-    }
-
-    fn send_event(&self, event: TerminalEvent, _id: WindowId) {
+    fn send_event(&self, event: TerminalEvent) {
         if matches!(event, TerminalEvent::ReadReady) {
             self.signal(SessionChange::Content);
 

@@ -5,9 +5,7 @@ use std::time::SystemTime;
 
 use nmt_platform::{Poll, Token, Waker};
 
-use crate::event::{
-    BlockEvent, CommandCapture, EventListener, Msg, MsgSender, TerminalEvent, WindowId,
-};
+use crate::event::{BlockEvent, CommandCapture, EventListener, Msg, MsgSender, TerminalEvent};
 use crate::ghostty::{BlockHandle, GhosttyTerminal};
 use crate::pty_pipe::SessionWorker;
 use crate::publication::FrameStore;
@@ -125,13 +123,12 @@ fn writes_report_queue_acceptance_and_reject_closed_or_read_only_sessions() {
 fn runtime_transitions_do_not_require_host_event_consumption() {
     let (session, rx) = test_session();
     let proxy = TerminalEventProxy::new(session.shared.clone(), 1, None);
-    let window = WindowId::dummy();
 
-    proxy.send_event(TerminalEvent::AltScreen(true), window);
+    proxy.send_event(TerminalEvent::AltScreen(true));
 
     assert!(session.alt_screen());
 
-    proxy.send_event(TerminalEvent::AltScreen(false), window);
+    proxy.send_event(TerminalEvent::AltScreen(false));
 
     assert!(!session.alt_screen());
 
@@ -146,21 +143,18 @@ fn runtime_transitions_do_not_require_host_event_consumption() {
 
     let now = SystemTime::now();
 
-    proxy.send_event(
-        TerminalEvent::CommandFinished(CommandCapture {
-            seq: 1,
-            command: "echo hello".into(),
-            cwd: None,
-            exit_code: Some(0),
-            started_at: now,
-            ended_at: now,
-        }),
-        window,
-    );
+    proxy.send_event(TerminalEvent::CommandFinished(CommandCapture {
+        seq: 1,
+        command: "echo hello".into(),
+        cwd: None,
+        exit_code: Some(0),
+        started_at: now,
+        ended_at: now,
+    }));
 
     assert!(session.selection_range_in(&session.snapshot()).is_none());
 
-    proxy.send_event(TerminalEvent::CloseTerminal(0), window);
+    proxy.send_event(TerminalEvent::CloseTerminal(0));
 
     assert!(session.exited());
     assert!(!session.write_text("after exit"));

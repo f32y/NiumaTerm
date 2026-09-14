@@ -351,19 +351,16 @@ pub struct GoalStatus {
     pub max_rounds: u64,
 }
 
-/// Something a turn is doing that produces no output while it lasts.
+/// A provider request failed and is being tried again. The turn is waiting
+/// rather than working, which is otherwise indistinguishable: elapsed time
+/// climbs the same either way and the token count sits still for both.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TurnActivity {
-    /// A provider request failed and is being tried again. The turn is waiting
-    /// rather than working, which is otherwise indistinguishable: elapsed time
-    /// climbs the same either way and the token count sits still for both.
-    Retrying {
-        attempt: u64,
-        total: u64,
+pub struct TurnRetry {
+    pub attempt: u64,
+    pub total: u64,
 
-        /// The provider's own account of the failure, already user-facing.
-        reason: String,
-    },
+    /// The provider's own account of the failure, already user-facing.
+    pub reason: String,
 }
 
 /// A registered scheduling operation delivered through the provider's tool API.
@@ -574,7 +571,7 @@ pub enum Event {
     /// reports something the elapsed time and token count cannot show. `None`
     /// clears it. The words belong to the view: an adapter reports the facts it
     /// was given and does not know the reader's language.
-    StatusDetail(Option<TurnActivity>),
+    StatusDetail(Option<TurnRetry>),
 
     /// The prompts this conversation can be branched in front of, newest
     /// first, answering one request for them. Backends that keep their history

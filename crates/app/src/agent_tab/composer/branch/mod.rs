@@ -6,17 +6,13 @@ pub(super) mod rewind;
 #[cfg(test)]
 mod tests;
 
-use gpui::{Context, SharedString};
-use nmt_agent::session::branch::FileProgress;
-use nmt_agent::session::controller::SessionBranch;
-use rust_i18n::t;
-
-use crate::agent_tab::composer::CommandFeedbackKind;
-use crate::agent_tab::{AgentPane, RecentSessionsMode};
+use crate::agent_tab::AgentPane;
+use gpui::{Context, Entity, Window};
+use gpui_component::input::TextareaState;
 
 #[derive(Default)]
 pub(crate) struct BranchFlow {
-    draft: Option<String>,
+    pub(crate) draft: Option<String>,
     pending_prompt: Option<PendingBranchPrompt>,
 }
 
@@ -30,36 +26,39 @@ impl BranchFlow {
         self.draft = None;
         self.pending_prompt = None;
     }
-}
 
-impl AgentPane {
-    pub(crate) fn branch_flow_holds_composer(&self) -> bool {
-        self.session.borrow().branch.holds_composer()
-    }
-
-    pub(crate) fn complete_branch(&mut self, completion: SessionBranch, cx: &mut Context<Self>) {
-        let message = match (completion.replayed, completion.files) {
-            (_, FileProgress::Restored) => "agent-rewind-complete-with-files",
-            (true, FileProgress::NotConfirmed) => "agent-rewind-complete",
-            (false, FileProgress::NotConfirmed) => "agent-fork-complete",
+    /// Ready may arrive without a window. The next render applies the prompt
+    /// only if the editor still contains the draft captured for this operation.
+    pub(crate) fn fill_branch_prompt(
+        &mut self,
+        input: &Entity<TextareaState>,
+        window: &mut Window,
+        cx: &mut Context<AgentPane>,
+    ) {
+        let Some(pending) = self.pending_prompt.take() else {
+            return;
         };
 
-        let draft = self.branch.draft.take();
+        if *input.read(cx).text() != pending.expected_draft {
+            return;
+        }
 
-        self.clear_conversation_presentation(cx);
-        self.history_ui.mode = RecentSessionsMode::Hidden;
+        input.update(cx, |input, cx| {
+            let end = pending.prompt.len();
 
-        self.branch.pending_prompt = draft.map(|expected_draft| PendingBranchPrompt {
-            expected_draft,
-            prompt: completion.prompt,
+            input.set_value(pending.prompt, window, cx);
+            input.set_selected_range(end..end, cx);
         });
+    }
 
-        self.palette.set_feedback(
-            CommandFeedbackKind::Notice,
-            SharedString::from(t!(message)),
-            cx,
-        );
+    pub(crate) fn prepare_prompt(&mut self, draft: Option<String>, prompt: String) {
+        self.pending_prompt = draft.map(|expected_draft| PendingBranchPrompt {
+            expected_draft,
+            prompt,
+        });
+    }
 
-        cx.notify();
+    pub(crate) fn reset_pending_prompt(&mut self) {
+        self.pending_prompt = None;
     }
 }

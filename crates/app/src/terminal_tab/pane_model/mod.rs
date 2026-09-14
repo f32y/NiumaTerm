@@ -1,4 +1,4 @@
-pub(super) use crate::terminal_tab::pane_model::settings::{FrameTheme, PaneSettings};
+pub(super) use crate::terminal_tab::pane_model::settings::FrameTheme;
 
 pub(super) mod frame_cache;
 pub(super) mod frame_record;
@@ -27,6 +27,8 @@ pub(super) mod test_session;
 #[cfg(test)]
 mod tests;
 
+use crate::terminal_tab::block_list::ITEM_PAD_ROWS;
+use crate::terminal_tab::settings::TerminalSettings;
 use nmt_config::colors::Colors;
 use nmt_input::keyboard::ModifiersState;
 use nmt_terminal::input::{TerminalKey, WheelDelta};
@@ -78,7 +80,8 @@ pub(super) trait ClipboardAccess {
 pub(super) struct PaneController {
     pub source: TerminalFrameSource,
     pub interaction: TerminalInteraction,
-    pub settings: PaneSettings,
+    pub settings: TerminalSettings,
+    pub pad_rows: f32,
     pub theme: FrameTheme,
     pub duration_labels: DurationLabels,
     pub frame_cache: TerminalFrameCache,
@@ -103,7 +106,7 @@ pub(super) struct PaneController {
 impl PaneController {
     pub(super) fn new(
         source: TerminalFrameSource,
-        settings: PaneSettings,
+        settings: TerminalSettings,
         theme: FrameTheme,
         duration_labels: DurationLabels,
         clipboard: Box<dyn ClipboardAccess>,
@@ -111,6 +114,11 @@ impl PaneController {
         Self {
             source,
             interaction: TerminalInteraction::default(),
+            pad_rows: if settings.command_blocks {
+                ITEM_PAD_ROWS
+            } else {
+                0.0
+            },
             settings,
             theme,
             duration_labels,
@@ -176,7 +184,7 @@ impl PaneController {
                 row_offsets: self
                     .cell_metrics
                     .map_or_else(Vec::new, |cell| {
-                        bottom_anchor_offsets(&frame, cell.height_px, self.settings.fixed_bottom)
+                        bottom_anchor_offsets(&frame, cell.height_px, self.settings.fixed_bottom())
                     })
                     .into(),
             }
@@ -233,7 +241,7 @@ impl PaneController {
             cell.width_px,
             cell.height_px,
             self.content_cols(),
-            self.settings.pad_rows,
+            self.pad_rows,
         )
     }
 
@@ -277,7 +285,7 @@ impl PaneController {
             history_rows,
             cols,
             cell.height_px,
-            self.settings.pad_rows,
+            self.pad_rows,
             position,
         );
 
@@ -287,11 +295,9 @@ impl PaneController {
 
         self.gutter.shift_for_eviction(evicted, metrics.store_len);
 
-        let ops = self.block_list.sync(
-            &metrics,
-            (cols, cell.height_px, self.settings.pad_rows),
-            live_rows,
-        );
+        let ops = self
+            .block_list
+            .sync(&metrics, (cols, cell.height_px, self.pad_rows), live_rows);
 
         let max_scroll = (metrics.total_px - viewport_px).max(0.0);
         let offset = metrics.offset_px.min(max_scroll);
@@ -302,7 +308,7 @@ impl PaneController {
             metrics.frozen_px,
             metrics.tail_px,
             cell.height_px,
-            self.settings.pad_rows,
+            self.pad_rows,
             offset,
         );
 
@@ -609,7 +615,7 @@ impl PaneController {
         if BLOCK_GUTTER_SELECTION_ENABLED
             && left
             && self.block_list_mode()
-            && self.settings.show_block_chrome
+            && self.settings.command_blocks
             && !self.source.session.mouse_reporting_active()
         {
             if block_gutter_hit(input.position.x, 0.0)
@@ -899,7 +905,7 @@ impl PaneController {
             &store.lock(),
             self.live_history_rows(&frame),
             frame_content_rows(&frame),
-            (self.content_cols(), cell.height_px, self.settings.pad_rows),
+            (self.content_cols(), cell.height_px, self.pad_rows),
             target,
         );
 
@@ -920,7 +926,7 @@ impl PaneController {
             &store.lock(),
             self.content_cols(),
             cell.height_px,
-            self.settings.pad_rows,
+            self.pad_rows,
             self.block_list.scrollbar.0,
             direction,
         );
@@ -930,7 +936,7 @@ impl PaneController {
 
     pub(super) fn update_settings(
         &mut self,
-        settings: PaneSettings,
+        settings: TerminalSettings,
         colors: &Colors,
         duration_labels: DurationLabels,
     ) -> Option<CursorShapeUpdate> {
@@ -944,6 +950,12 @@ impl PaneController {
                     requested: settings.cursor_shape,
                 },
             });
+
+        self.pad_rows = if settings.command_blocks {
+            ITEM_PAD_ROWS
+        } else {
+            0.0
+        };
 
         self.settings = settings;
         self.theme = colors.into();

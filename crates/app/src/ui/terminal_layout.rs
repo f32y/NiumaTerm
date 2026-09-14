@@ -10,42 +10,22 @@ use gpui_component::resizable::{PANEL_MIN_SIZE, ResizableState};
 use crate::pane_tree::{PaneId, PaneNode, PaneTree, RemoveOutcome, SplitDirection, SplitOutcome};
 
 pub(crate) struct TerminalLayout<L> {
-    tree: PaneTree<L, Entity<ResizableState>>,
+    tree: PaneTree<L>,
 }
 
 impl<L> TerminalLayout<L> {
+    pub(crate) fn tree(&self) -> &PaneTree<L> {
+        &self.tree
+    }
+
+    pub(crate) fn tree_mut(&mut self) -> &mut PaneTree<L> {
+        &mut self.tree
+    }
+
     pub(super) fn new_leaf(id: PaneId, pane: L) -> Self {
         Self {
             tree: PaneTree::new_leaf(id, pane),
         }
-    }
-
-    pub(super) fn root(&self) -> &PaneNode<L, Entity<ResizableState>> {
-        self.tree.root()
-    }
-
-    pub(super) fn focused(&self) -> PaneId {
-        self.tree.focused()
-    }
-
-    pub(super) fn set_focused(&mut self, id: PaneId) -> bool {
-        self.tree.set_focused(id)
-    }
-
-    pub(super) fn focused_pane(&self) -> &L {
-        self.tree.focused_pane()
-    }
-
-    pub(super) fn contains(&self, id: PaneId) -> bool {
-        self.tree.contains(id)
-    }
-
-    pub(super) fn leaves(&self) -> Vec<(PaneId, &L)> {
-        self.tree.leaves()
-    }
-
-    pub(super) fn is_single_leaf(&self) -> bool {
-        self.tree.is_single_leaf()
     }
 
     /// Split sizes and child order change together. A group that has not been
@@ -60,7 +40,7 @@ impl<L> TerminalLayout<L> {
         // Only an immediate same-axis parent receives another slot. A more
         // distant matching ancestor keeps its child count when a leaf wraps.
         fn parent_state<L>(
-            node: &PaneNode<L, Entity<ResizableState>>,
+            node: &PaneNode<L>,
             id: PaneId,
             direction: SplitDirection,
         ) -> Option<(Entity<ResizableState>, usize)> {
@@ -166,8 +146,8 @@ impl<L> TerminalLayout<L> {
     }
 }
 
-impl<L> From<PaneNode<L, Entity<ResizableState>>> for TerminalLayout<L> {
-    fn from(root: PaneNode<L, Entity<ResizableState>>) -> Self {
+impl<L> From<PaneNode<L>> for TerminalLayout<L> {
+    fn from(root: PaneNode<L>) -> Self {
         Self { tree: root.into() }
     }
 }

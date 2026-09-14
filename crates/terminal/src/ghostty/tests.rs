@@ -679,7 +679,7 @@ fn theme_colors_update_engine_defaults() {
 
     let snapshot = terminal.snapshot().unwrap();
     let foreground: ColorRgb = colors.foreground.into();
-    let background: ColorRgb = colors.background.0.into();
+    let background: ColorRgb = colors.background.into();
 
     assert_eq!(
         snapshot.colors()[NamedColor::Foreground],
@@ -1797,9 +1797,9 @@ fn read_screen_row_reaches_scrollback_with_wrap_flag() {
     assert_eq!(t.scrollbar().offset, offset_before, "viewport untouched");
 
     assert_eq!(row_read_text(&row0), "0123456789");
-    assert!(row0.wrapped, "row 0 soft-wraps into row 1");
+    assert!(row0.meta.wrapped, "row 0 soft-wraps into row 1");
     assert_eq!(row_read_text(&row1), "ABC");
-    assert!(!row1.wrapped, "row 1 ends the logical line");
+    assert!(!row1.meta.wrapped, "row 1 ends the logical line");
 }
 
 /// OSC 133 `;A` surfaces as `prompt_start`; OSC 8 spans surface with URIs.
@@ -1812,13 +1812,13 @@ fn read_screen_row_prompt_tag_and_hyperlinks() {
 
     let prompt_row = t.read_screen_row(0).unwrap().expect("prompt row");
 
-    assert!(prompt_row.prompt_start, "OSC 133;A row tagged");
+    assert!(prompt_row.meta.prompt_start, "OSC 133;A row tagged");
 
     let link_row = t.read_screen_row(1).unwrap().expect("link row");
 
-    assert!(!link_row.prompt_start);
+    assert!(!link_row.meta.prompt_start);
     assert_eq!(
-        link_row.hyperlinks,
+        link_row.meta.hyperlinks,
         vec![(0u16, 3u16, "https://example.com".to_string())]
     );
 }

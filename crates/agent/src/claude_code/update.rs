@@ -10,8 +10,8 @@ use semver::Version;
 use crate::launcher::{AgentCli, run_bounded};
 use crate::update::{
     DiscoverySupport, MAX_LABEL_CHARS, PROBE_LIMITS, ProviderKind, ProviderMaintenance,
-    UpdateError, UpdateErrorKind, VendorUpdateResult, VersionStatus, bounded_label,
-    current_version_fallback, parse_strict_version, vendor_update,
+    UpdateError, UpdateErrorKind, VersionStatus, bounded_label, current_version_fallback,
+    parse_strict_version, vendor_update,
 };
 
 const RELEASE_BASE_URL: &str = "https://downloads.claude.ai/claude-code-releases";
@@ -94,20 +94,17 @@ impl ClaudeReleaseChannel for HttpClaudeReleaseChannel {
     }
 }
 
-pub struct ClaudeMaintenance<C> {
-    releases: C,
+pub struct ClaudeMaintenance {
+    releases: Box<dyn ClaudeReleaseChannel>,
 }
 
-impl<C> ClaudeMaintenance<C> {
-    pub fn new(releases: C) -> Self {
+impl ClaudeMaintenance {
+    pub fn new(releases: Box<dyn ClaudeReleaseChannel>) -> Self {
         Self { releases }
     }
 }
 
-impl<C> ProviderMaintenance for ClaudeMaintenance<C>
-where
-    C: ClaudeReleaseChannel,
-{
+impl ProviderMaintenance for ClaudeMaintenance {
     fn provider(&self) -> ProviderKind {
         ProviderKind::Claude
     }
@@ -163,7 +160,7 @@ where
         }
     }
 
-    fn update(&self, launcher: &AgentCli) -> Result<VendorUpdateResult, UpdateError> {
+    fn update(&self, launcher: &AgentCli) -> Result<String, UpdateError> {
         vendor_update(launcher, ProviderKind::Claude)
     }
 }

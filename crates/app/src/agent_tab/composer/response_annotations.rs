@@ -1,11 +1,6 @@
 //! Encoding and reading selected response excerpts in user messages.
 
-use gpui::{Context, Window};
-use gpui_base::TextSelection;
 use rust_i18n::t;
-
-use crate::agent_tab::AgentPane;
-
 use serde::Deserialize;
 use serde_json::json;
 
@@ -74,28 +69,4 @@ pub(crate) fn annotation_count_label(count: usize) -> String {
     };
 
     t!(key, count = count).into_owned()
-}
-
-impl AgentPane {
-    pub(crate) fn add_response_annotation(
-        &mut self,
-        text: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.attachments.add_annotation(text) {
-            return;
-        }
-
-        TextSelection::clear(window, cx);
-        self.focus(window, cx);
-
-        cx.notify();
-    }
-
-    pub(crate) fn remove_response_annotation(&mut self, index: usize, cx: &mut Context<Self>) {
-        if self.attachments.remove_annotation(index) {
-            cx.notify();
-        }
-    }
 }

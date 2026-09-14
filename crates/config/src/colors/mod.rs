@@ -9,16 +9,8 @@ use serde::{Deserialize, Serialize, de};
 use tracing::trace;
 
 use crate::colors::defaults::*;
-use crate::render_types;
-
-// `ColorWGPU` is the legacy name; `crate::render_types::Color` is the actual
-// type now (mirrors `wgpu::Color`'s shape, but doesn't drag wgpu
-// into the dep tree on Linux/macOS native builds).
-pub type ColorWGPU = render_types::Color;
 
 pub type ColorArray = [f32; 4];
-
-pub type ColorComposition = (ColorArray, ColorWGPU);
 
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct ColorRgb {
@@ -52,7 +44,7 @@ impl Mul<f32> for ColorRgb {
 
 impl From<&ColorRgb> for ColorArray {
     fn from(color: &ColorRgb) -> ColorArray {
-        ColorBuilder::from_rgb(*color, Format::SRGB0_1).into()
+        Rgba::from_rgb(*color).into()
     }
 }
 
@@ -60,12 +52,6 @@ impl From<(u8, u8, u8)> for ColorRgb {
     fn from((r, g, b): (u8, u8, u8)) -> Self {
         Self { r, g, b }
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum Format {
-    SRGB0_255,
-    SRGB0_1,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -78,13 +64,10 @@ pub enum AnsiColor {
 #[derive(Debug, Copy, Deserialize, PartialEq, Clone)]
 pub struct Colors {
     #[serde(
-        deserialize_with = "deserialize_to_composition",
+        deserialize_with = "deserialize_to_arr",
         default = "defaults::background"
     )]
-    /// Background is a special color type called ColorComposition
-    /// ColorComposition type is (ColorArray, ColorWGPU)
-    /// See more in colors definition
-    pub background: ColorComposition,
+    pub background: ColorArray,
 
     #[serde(
         deserialize_with = "deserialize_to_arr",
@@ -272,9 +255,7 @@ impl Default for Colors {
 }
 
 pub fn hex_to_color_arr(s: &str) -> ColorArray {
-    ColorBuilder::from_hex(s.to_string(), Format::SRGB0_1)
-        .unwrap_or_default()
-        .into()
+    Rgba::from_hex(s.to_string()).unwrap_or_default().into()
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
@@ -363,15 +344,15 @@ impl NamedColor {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone, Copy)]
-pub struct ColorBuilder {
+pub struct Rgba {
     pub red: f64,
     pub green: f64,
     pub blue: f64,
     pub alpha: f64,
 }
 
-impl ColorBuilder {
-    pub fn from_hex(hex: String, conversion_type: Format) -> Result<Self, String> {
+impl Rgba {
+    pub fn from_hex(hex: String) -> Result<Self, String> {
         let hex = hex.strip_prefix('#').unwrap_or(&hex);
 
         if !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -391,33 +372,24 @@ impl ColorBuilder {
         };
 
         let [r, g, b, a] = rgba.to_be_bytes();
-        let mut color = Self::from_rgb(ColorRgb { r, g, b }, conversion_type);
+        let mut color = Self::from_rgb(ColorRgb { r, g, b });
 
         color.alpha = f64::from(a) / 255.0;
 
         Ok(color)
     }
 
-    pub fn from_rgb(rgb: ColorRgb, conversion_type: Format) -> Self {
-        match conversion_type {
-            Format::SRGB0_1 => Self {
-                red: (rgb.r as f64) / 255.0,
-                green: (rgb.g as f64) / 255.0,
-                blue: (rgb.b as f64) / 255.0,
-                alpha: 1.0,
-            },
-
-            Format::SRGB0_255 => Self {
-                red: (rgb.r as f64),
-                green: (rgb.g as f64),
-                blue: (rgb.b as f64),
-                alpha: 1.0,
-            },
+    pub fn from_rgb(rgb: ColorRgb) -> Self {
+        Self {
+            red: (rgb.r as f64) / 255.0,
+            green: (rgb.g as f64) / 255.0,
+            blue: (rgb.b as f64) / 255.0,
+            alpha: 1.0,
         }
     }
 }
 
-impl Default for ColorBuilder {
+impl Default for Rgba {
     // #000000 Color Hex Black #000
     fn default() -> Self {
         Self {
@@ -429,23 +401,11 @@ impl Default for ColorBuilder {
     }
 }
 
-impl fmt::Display for ColorBuilder {
+impl fmt::Display for Rgba {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         let text: String = self.into();
 
         fmt::Display::fmt(&text, f)
-    }
-}
-
-pub fn deserialize_to_composition<'de, D>(deserializer: D) -> Result<ColorComposition, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-
-    match ColorBuilder::from_hex(s, Format::SRGB0_1) {
-        Ok(color) => Ok((color.into(), color.into())),
-        Err(e) => Err(DeError::custom(e)),
     }
 }
 
@@ -455,7 +415,7 @@ where
 {
     let s = String::deserialize(deserializer)?;
 
-    match ColorBuilder::from_hex(s, Format::SRGB0_1) {
+    match Rgba::from_hex(s) {
         Ok(color) => Ok(color.into()),
         Err(e) => Err(DeError::custom(e)),
     }
@@ -467,7 +427,7 @@ where
 {
     let s = String::deserialize(deserializer)?;
 
-    match ColorBuilder::from_hex(s, Format::SRGB0_1) {
+    match Rgba::from_hex(s) {
         Ok(color) => Ok(Some(color.into())),
         Err(e) => Err(DeError::custom(e)),
     }
@@ -494,14 +454,8 @@ impl From<ColorRgb> for u32 {
     }
 }
 
-impl From<&ColorRgb> for ColorWGPU {
-    fn from(value: &ColorRgb) -> Self {
-        ColorBuilder::from_rgb(*value, Format::SRGB0_1).into()
-    }
-}
-
-impl From<&ColorBuilder> for ColorArray {
-    fn from(value: &ColorBuilder) -> Self {
+impl From<&Rgba> for ColorArray {
+    fn from(value: &Rgba) -> Self {
         [
             value.red as f32,
             value.green as f32,
@@ -511,37 +465,14 @@ impl From<&ColorBuilder> for ColorArray {
     }
 }
 
-impl From<&ColorBuilder> for ColorWGPU {
-    fn from(value: &ColorBuilder) -> Self {
-        render_types::Color {
-            r: value.red,
-            g: value.green,
-            b: value.blue,
-            a: value.alpha,
-        }
-    }
-}
-
 impl From<ColorRgb> for ColorArray {
     fn from(value: ColorRgb) -> Self {
         (&value).into()
     }
 }
 
-impl From<ColorRgb> for ColorWGPU {
-    fn from(value: ColorRgb) -> Self {
-        (&value).into()
-    }
-}
-
-impl From<ColorBuilder> for ColorArray {
-    fn from(value: ColorBuilder) -> Self {
-        (&value).into()
-    }
-}
-
-impl From<ColorBuilder> for ColorWGPU {
-    fn from(value: ColorBuilder) -> Self {
+impl From<Rgba> for ColorArray {
+    fn from(value: Rgba) -> Self {
         (&value).into()
     }
 }
@@ -557,8 +488,8 @@ impl From<u32> for ColorRgb {
     }
 }
 
-impl From<&ColorBuilder> for String {
-    fn from(value: &ColorBuilder) -> Self {
+impl From<&Rgba> for String {
+    fn from(value: &Rgba) -> Self {
         format!(
             "r: {:?}, g: {:?}, b: {:?}, a: {:?}",
             value.red, value.green, value.blue, value.alpha
@@ -568,27 +499,24 @@ impl From<&ColorBuilder> for String {
 
 #[cfg(test)]
 mod tests {
-    use crate::colors::{ColorBuilder, Format};
+    use crate::colors::Rgba;
 
     #[test]
     fn hex_colors_accept_rgb_and_rgba_and_reject_non_ascii_digits() {
         for input in [
             "12345٣", "#12٣456", "#12345", "##123456", "+12345", "#GG0000",
         ] {
-            assert!(
-                ColorBuilder::from_hex(input.into(), Format::SRGB0_1).is_err(),
-                "{input}"
-            );
+            assert!(Rgba::from_hex(input.into()).is_err(), "{input}");
         }
 
-        let rgb = ColorBuilder::from_hex("#ff8040".into(), Format::SRGB0_255).unwrap();
+        let rgb = Rgba::from_hex("#ff8040".into()).unwrap();
 
         assert_eq!(
             (rgb.red, rgb.green, rgb.blue, rgb.alpha),
-            (255.0, 128.0, 64.0, 1.0)
+            (1.0, 128.0 / 255.0, 64.0 / 255.0, 1.0)
         );
 
-        let rgba = ColorBuilder::from_hex("FF804020".into(), Format::SRGB0_1).unwrap();
+        let rgba = Rgba::from_hex("FF804020".into()).unwrap();
 
         assert_eq!(
             (rgba.red, rgba.green, rgba.blue, rgba.alpha),

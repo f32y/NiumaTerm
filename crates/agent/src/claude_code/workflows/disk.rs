@@ -24,9 +24,8 @@ use crate::claude_code::sessions::{parse_child_replay, project_dir};
 use crate::claude_code::workflows::parse_progress;
 use crate::json::text_field;
 use crate::workflow::{
-    RestoredWorkflowRun, WorkflowAgent, WorkflowAgentProgress, WorkflowAgentState,
-    WorkflowRefreshRequest, WorkflowRefreshResult, WorkflowRun, WorkflowRunState, WorkflowSource,
-    WorkflowTranscriptRead,
+    WorkflowAgent, WorkflowAgentProgress, WorkflowAgentState, WorkflowRefreshRequest,
+    WorkflowRefreshResult, WorkflowRun, WorkflowRunState, WorkflowSource, WorkflowTranscriptRead,
 };
 
 /// One agent's line in a run journal. `result` is present once the agent has
@@ -182,11 +181,7 @@ struct TranscriptCache {
 }
 
 impl WorkflowSource for ClaudeWorkflowSource {
-    fn restore(
-        &self,
-        cwd: Option<&str>,
-        session_id: &str,
-    ) -> Result<Vec<RestoredWorkflowRun>, String> {
+    fn restore(&self, cwd: Option<&str>, session_id: &str) -> Result<Vec<WorkflowRun>, String> {
         read_run_snapshots(cwd, session_id)
     }
 
@@ -297,10 +292,7 @@ impl ClaudeWorkflowSource {
 }
 
 /// Every run a resumed session completed, newest last.
-fn read_run_snapshots(
-    cwd: Option<&str>,
-    session_id: &str,
-) -> Result<Vec<RestoredWorkflowRun>, String> {
+fn read_run_snapshots(cwd: Option<&str>, session_id: &str) -> Result<Vec<WorkflowRun>, String> {
     let project =
         project_dir(cwd).ok_or_else(|| format!("session {session_id} has no project directory"))?;
 
@@ -310,7 +302,7 @@ fn read_run_snapshots(
 pub(super) fn read_run_snapshots_at(
     project: &Path,
     session_id: &str,
-) -> Result<Vec<RestoredWorkflowRun>, String> {
+) -> Result<Vec<WorkflowRun>, String> {
     let dir = project.join(session_id).join("workflows");
 
     let entries = match fs::read_dir(&dir) {
@@ -319,7 +311,7 @@ pub(super) fn read_run_snapshots_at(
         Err(_) => return Ok(Vec::new()),
     };
 
-    let mut runs: Vec<(u64, RestoredWorkflowRun)> = Vec::new();
+    let mut runs: Vec<(u64, WorkflowRun)> = Vec::new();
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -341,11 +333,11 @@ pub(super) fn read_run_snapshots_at(
 
     runs.sort_by_key(|(started_at, _)| *started_at);
 
-    let mut restored: Vec<RestoredWorkflowRun> = runs.into_iter().map(|(_, run)| run).collect();
+    let mut restored: Vec<WorkflowRun> = runs.into_iter().map(|(_, run)| run).collect();
 
     let recorded: HashSet<String> = restored
         .iter()
-        .filter_map(|run| run.run.run_id.clone())
+        .filter_map(|run| run.run_id.clone())
         .collect();
 
     restored.extend(restore_interrupted_runs(
@@ -364,10 +356,7 @@ pub(super) fn read_run_snapshots_at(
 /// conversations. Phases, ordering, and per-agent accounting live in the
 /// snapshot alone, so a run restored this way reports what it has and omits
 /// the rest rather than inventing it.
-fn restore_interrupted_runs(
-    session: &Path,
-    recorded: &HashSet<String>,
-) -> Vec<RestoredWorkflowRun> {
+fn restore_interrupted_runs(session: &Path, recorded: &HashSet<String>) -> Vec<WorkflowRun> {
     let Ok(entries) = fs::read_dir(session.join("subagents").join("workflows")) else {
         return Vec::new();
     };
@@ -395,23 +384,21 @@ fn restore_interrupted_runs(
             continue;
         }
 
-        runs.push(RestoredWorkflowRun {
-            run: WorkflowRun {
-                // With no snapshot there is no stream task id to key on. The
-                // directory id is unique and cannot collide with a live run's,
-                // so it stands in as this run's identity.
-                task_id: run_id.clone(),
-                name: interrupted_run_name(session, &run_id),
-                run_id: Some(run_id),
-                summary: None,
-                state: WorkflowRunState::Stopped,
-                phases: Vec::new(),
-                agents,
-                total_tokens: None,
-                total_tool_calls: None,
-                result: None,
-                refresh_failed: false,
-            },
+        runs.push(WorkflowRun {
+            // With no snapshot there is no stream task id to key on. The
+            // directory id is unique and cannot collide with a live run's,
+            // so it stands in as this run's identity.
+            task_id: run_id.clone(),
+            name: interrupted_run_name(session, &run_id),
+            run_id: Some(run_id),
+            summary: None,
+            state: WorkflowRunState::Stopped,
+            phases: Vec::new(),
+            agents,
+            total_tokens: None,
+            total_tool_calls: None,
+            result: None,
+            refresh_failed: false,
         });
     }
 
@@ -555,30 +542,28 @@ fn agent_prompt_label(path: &Path) -> Option<String> {
     None
 }
 
-fn restore_run(snapshot: &Value) -> Option<RestoredWorkflowRun> {
+fn restore_run(snapshot: &Value) -> Option<WorkflowRun> {
     let task_id = text_field(snapshot, &["taskId"])?;
     let (phases, agents) = parse_progress(&snapshot["workflowProgress"]);
 
-    Some(RestoredWorkflowRun {
-        run: WorkflowRun {
-            task_id,
-            run_id: text_field(snapshot, &["runId"]),
-            name: text_field(snapshot, &["workflowName"]),
-            summary: text_field(snapshot, &["summary"]),
-            // A run recorded by a previous process cannot still be advancing,
-            // so an unrecognized status settles as stopped rather than active.
-            state: match snapshot["status"].as_str() {
-                Some("completed") => WorkflowRunState::Done,
-                Some("failed") => WorkflowRunState::Failed,
-                _ => WorkflowRunState::Stopped,
-            },
-            phases,
-            agents,
-            total_tokens: snapshot["totalTokens"].as_u64(),
-            total_tool_calls: snapshot["totalToolCalls"].as_u64(),
-            result: restored_result(snapshot),
-            refresh_failed: false,
+    Some(WorkflowRun {
+        task_id,
+        run_id: text_field(snapshot, &["runId"]),
+        name: text_field(snapshot, &["workflowName"]),
+        summary: text_field(snapshot, &["summary"]),
+        // A run recorded by a previous process cannot still be advancing,
+        // so an unrecognized status settles as stopped rather than active.
+        state: match snapshot["status"].as_str() {
+            Some("completed") => WorkflowRunState::Done,
+            Some("failed") => WorkflowRunState::Failed,
+            _ => WorkflowRunState::Stopped,
         },
+        phases,
+        agents,
+        total_tokens: snapshot["totalTokens"].as_u64(),
+        total_tool_calls: snapshot["totalToolCalls"].as_u64(),
+        result: restored_result(snapshot),
+        refresh_failed: false,
     })
 }
 

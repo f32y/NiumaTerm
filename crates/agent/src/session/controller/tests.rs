@@ -428,28 +428,25 @@ fn settings_changes_and_restart_keep_catalog_state_consistent() {
 
     apply(&mut session, Event::Commands(Vec::new()));
 
-    session.set_tier(Some("unavailable".into()));
-    session.set_model("selected".into());
+    session.controls.settings.tier = Some("unavailable".into());
+    session.controls.set_model("selected".into());
 
-    assert_eq!(
-        session.controls().settings.model.as_deref(),
-        Some("selected")
-    );
-    assert!(session.controls().settings.tier.is_none());
+    assert_eq!(session.controls.settings.model.as_deref(), Some("selected"));
+    assert!(session.controls.settings.tier.is_none());
 
-    session.set_tier(Some("fast".into()));
-    session.set_model("selected".into());
+    session.controls.settings.tier = Some("fast".into());
+    session.controls.set_model("selected".into());
 
-    assert_eq!(session.controls().settings.tier.as_deref(), Some("fast"));
+    assert_eq!(session.controls.settings.tier.as_deref(), Some("fast"));
     assert!(session.command_catalog().is_some());
 
-    session.seed_settings(SettingsSeed::Reviewer);
+    session.controls.seed_settings(SettingsSeed::Reviewer);
     session.begin_branched_conversation();
 
-    assert_eq!(session.controls().seed, SettingsSeed::None);
+    assert_eq!(session.controls.seed, SettingsSeed::None);
     assert!(session.reset_for_restart().is_some());
-    assert_eq!(session.controls().settings, ThreadSettings::default());
-    assert!(session.controls().models.is_empty());
+    assert_eq!(session.controls.settings, ThreadSettings::default());
+    assert!(session.controls.models.is_empty());
     assert!(session.command_catalog().is_none());
     assert!(session.skill_catalog().is_none());
 }

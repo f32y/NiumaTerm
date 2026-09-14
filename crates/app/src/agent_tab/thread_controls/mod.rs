@@ -1,5 +1,5 @@
 pub(super) use crate::agent_tab::thread_controls::defaults::{
-    launch_effort, launch_model, stored_thread_settings,
+    launch_effort, launch_model, remember_defaults, stored_thread_settings,
 };
 
 pub(super) mod effort;
@@ -14,7 +14,7 @@ use gpui::prelude::*;
 use gpui::{AnyElement, App, Context, Div, IntoElement, Pixels, SharedString, Stateful, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
-use gpui_component::{ActiveTheme as _, Icon, IconName, IconNamed, Sizable as _, h_flex};
+use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex};
 use nmt_agent::session::settings::ConversationSettings;
 use rust_i18n::t;
 
@@ -22,12 +22,9 @@ use crate::agent_tab::AgentPane;
 use crate::agent_tab::commands::setting_value_label;
 use crate::agent_tab::profile::AgentKind;
 use crate::agent_tab::settings::AgentSettings;
-use crate::agent_tab::thread_controls::effort::EffortGaugeIcon;
-
-/// Widget interaction state; the session owns settings and provider catalogs.
-pub(super) struct ThreadControls {
-    pub(super) effort_drag: Option<usize>,
-}
+use crate::agent_tab::thread_controls::harness_rows::{
+    render_claude_row, render_codex_row, render_deepseek_row,
+};
 
 /// One composer setting, drawn as its own pill. Each pill opens its own menu
 /// and changes one value, so each carries its own outline: a shared frame
@@ -48,12 +45,6 @@ const SETTINGS_PILL_CHEVRON: f32 = 10.0;
 /// longest ladder any harness offers needs, so every level of every ladder
 /// lands on a face of its own.
 const EFFORT_GAUGE_STEPS: usize = 6;
-
-impl IconNamed for EffortGaugeIcon {
-    fn path(self) -> SharedString {
-        format!("icons/effort-gauge-{}.svg", self.0.min(EFFORT_GAUGE_STEPS)).into()
-    }
-}
 
 /// One setting the composer row keeps off its surface, as the menu behind the
 /// row needs it: what it is called, what it stands at, what it could stand at,
@@ -84,44 +75,37 @@ pub(super) const EFFORT_TRACK_HEIGHT: Pixels = px(26.0);
 
 pub(super) const EFFORT_THUMB_INSET: Pixels = px(3.0);
 
-impl ThreadControls {
-    /// The dropdown row under the input, per agent kind.
-    pub(super) fn render_row(
-        &self,
-        state: &ConversationSettings,
-        kind: AgentKind,
-        cx: &mut Context<AgentPane>,
-    ) -> AnyElement {
-        match kind {
-            AgentKind::Codex => self.render_codex_row(state, kind, cx).into_any_element(),
-            AgentKind::Claude => self.render_claude_row(state, kind, cx).into_any_element(),
-            AgentKind::DeepSeek => self.render_deepseek_row(state, kind, cx).into_any_element(),
-        }
+/// The dropdown row under the input, per agent kind.
+pub(super) fn render_row(
+    state: &ConversationSettings,
+    kind: AgentKind,
+    cx: &mut Context<AgentPane>,
+) -> AnyElement {
+    match kind {
+        AgentKind::Codex => render_codex_row(state, kind, cx).into_any_element(),
+        AgentKind::Claude => render_claude_row(state, kind, cx).into_any_element(),
+        AgentKind::DeepSeek => render_deepseek_row(state, kind, cx).into_any_element(),
     }
+}
 
-    /// The model catalog as picker entries, spelled the way the settings ask
-    /// for. A catalog entry carries both names of one model - the one the
-    /// harness displays and the route id a pick is sent as - and which of them
-    /// tells the user what they are choosing depends on the deployment, so the
-    /// pairing is a setting rather than a decision made here.
-    pub(super) fn model_options(
-        &self,
-        state: &ConversationSettings,
-        cx: &App,
-    ) -> Vec<(String, String)> {
-        let model_list_style = cx.global::<AgentSettings>().model_list_style;
+/// The model catalog as picker entries, spelled the way the settings ask
+/// for. A catalog entry carries both names of one model - the one the
+/// harness displays and the route id a pick is sent as - and which of them
+/// tells the user what they are choosing depends on the deployment, so the
+/// pairing is a setting rather than a decision made here.
+pub(super) fn model_options(state: &ConversationSettings, cx: &App) -> Vec<(String, String)> {
+    let model_list_style = cx.global::<AgentSettings>().model_list_style;
 
-        state
-            .models
-            .iter()
-            .map(|m| {
-                (
-                    m.model.clone(),
-                    model_list_style.label(&m.display, &m.model),
-                )
-            })
-            .collect()
-    }
+    state
+        .models
+        .iter()
+        .map(|m| {
+            (
+                m.model.clone(),
+                model_list_style.label(&m.display, &m.model),
+            )
+        })
+        .collect()
 }
 
 /// The control the folded settings live behind: one menu listing them by

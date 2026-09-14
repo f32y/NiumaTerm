@@ -142,7 +142,7 @@ fn an_unseen_result_outranks_a_running_command() {
 fn settings_entry_is_left_out_of_the_real_count() {
     let manager = manager(1, true);
 
-    assert_eq!(manager.len(), 2);
+    assert_eq!(manager.list().len(), 2);
     assert_eq!(manager.real_len(), 1);
     assert_eq!(manager.settings_id(), Some(WorkspaceId(100)));
     assert_eq!(manager.kind_of(WorkspaceId(1)), Some(WorkspaceKind::Normal));
@@ -163,9 +163,9 @@ fn settings_closes_without_taking_the_last_slot() {
     let mut manager = manager(1, true);
 
     assert!(manager.close_workspace(WorkspaceId(100)).is_some());
-    assert_eq!(manager.len(), 1);
+    assert_eq!(manager.list().len(), 1);
     assert_eq!(manager.settings_id(), None);
-    assert_eq!(manager.active_id(), WorkspaceId(1));
+    assert_eq!(manager.list().active_id(), WorkspaceId(1));
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn settings_reorders_like_any_other_entry() {
     );
 
     // The settings entry was active before the move and stays active.
-    assert_eq!(manager.active_id(), WorkspaceId(100));
+    assert_eq!(manager.list().active_id(), WorkspaceId(100));
 }
 
 #[test]
@@ -191,9 +191,11 @@ fn leaving_settings_lands_on_a_normal_workspace() {
 
     assert_eq!(manager.active_kind(), WorkspaceKind::Settings);
 
-    manager.activate(manager.first_normal_index());
+    let active_index = manager.first_normal_index();
 
-    assert_eq!(manager.active_id(), WorkspaceId(1));
+    manager.list_mut().activate(active_index);
+
+    assert_eq!(manager.list().active_id(), WorkspaceId(1));
     assert_eq!(manager.active_kind(), WorkspaceKind::Normal);
 }
 
@@ -449,7 +451,7 @@ fn the_last_directory_of_a_normal_workspace_cannot_be_removed() {
 #[test]
 fn additional_directories_do_not_displace_the_primary_default() {
     let mut manager = manager(1, false);
-    let id = manager.active_id();
+    let id = manager.list().active_id();
 
     manager.set_roots(
         id,

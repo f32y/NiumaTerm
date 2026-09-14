@@ -675,7 +675,7 @@ fn test_change_theme_with_colors() {
     // Colors
     assert_eq!(result.colors.cursor, colors::defaults::cursor());
     assert_eq!(result.colors.foreground, hex_to_color_arr("#F8F8F2"));
-    assert_eq!(result.colors.background.0, hex_to_color_arr("#2B3E50"));
+    assert_eq!(result.colors.background, hex_to_color_arr("#2B3E50"));
     assert_eq!(result.ui_theme.as_ref().unwrap().name, "Lucario");
     assert_eq!(
         result.ui_theme.as_ref().unwrap().mode,

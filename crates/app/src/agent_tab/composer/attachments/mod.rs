@@ -12,25 +12,31 @@
 
 pub(crate) use nmt_agent::images::{AttachError, MAX_ATTACHMENTS};
 
-pub(super) mod render;
-
 #[cfg(test)]
 mod tests;
 
-use std::env;
-use std::ops::Range;
-use std::path::PathBuf;
-use std::sync::Arc;
-
-use gpui::{Context, Entity, Image, ImageFormat, Window};
-use gpui_component::input::TextareaState;
-use nmt_agent::images::{
-    Attachment as CoreAttachment, PendingAttachments as CorePendingAttachments,
-};
-#[cfg(test)]
-use nmt_agent::images::{MAX_IMAGE_EDGE, placeholder_text};
-
 use crate::agent_tab::AgentPane;
+use crate::agent_tab::settings::UI_RADIUS;
+use gpui::prelude::*;
+use gpui::{
+    AnyElement, Bounds, Context, Entity, FontWeight, Image, ImageFormat, ObjectFit, SharedString,
+    Window, div, img, px,
+};
+use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::input::TextareaState;
+use gpui_component::tooltip::Tooltip;
+use gpui_component::{ActiveTheme as _, ElementExt as _, IconName, Sizable as _, h_flex, v_flex};
+#[cfg(test)]
+use nmt_agent::images::MAX_IMAGE_EDGE;
+#[cfg(test)]
+use nmt_agent::images::placeholder_text;
+use nmt_agent::images::{Attachment, PendingAttachments as CorePendingAttachments};
+use rust_i18n::t;
+use std::cell::Cell;
+use std::env;
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::Arc;
 
 /// The placeholder as it is written into the composer. A space on each side
 /// keeps it a word of its own, so the prompt around it does not run into the
@@ -115,7 +121,7 @@ impl ComposerAttachments {
         window: &mut Window,
         cx: &mut Context<AgentPane>,
     ) -> Result<(), AttachError> {
-        let placeholder = self.images.attach(image)?;
+        let placeholder = attach_png(&mut self.images, image)?;
 
         input.update(cx, |input, cx| {
             let preceding = input.text().chars_at(input.cursor()).prev();
@@ -196,65 +202,193 @@ impl ComposerAttachments {
 
         true
     }
+
+    /// The images the pending message carries, above the composer text they
+    /// are anchored in. Absent while nothing is attached, so an ordinary
+    /// message keeps the composer where it has always been.
+    pub(crate) fn render(&self, cx: &mut Context<AgentPane>) -> Option<AnyElement> {
+        if self.images().is_empty() && self.annotations().is_empty() {
+            return None;
+        }
+
+        Some(
+            h_flex()
+                .id("agent-attachments")
+                .aria_label(t!("agent-composer-context-label"))
+                .w_full()
+                .px_3()
+                .pt_3()
+                .gap_2()
+                .flex_wrap()
+                .children(
+                    self.images()
+                        .iter()
+                        .enumerate()
+                        .map(|(index, attachment)| self.render_attachment(index, attachment, cx)),
+                )
+                .children(
+                    self.annotations()
+                        .iter()
+                        .enumerate()
+                        .map(|(index, text)| self.render_response_annotation(index, text, cx)),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// One thumbnail with the control that takes it back off. The image
+    /// renders from the bytes the paste produced, so no file is written for
+    /// something the user may still remove.
+    fn render_attachment(
+        &self,
+        index: usize,
+        attachment: &Attachment<Arc<Image>>,
+        cx: &mut Context<AgentPane>,
+    ) -> AnyElement {
+        let image = attachment.image.clone();
+
+        // A click carries the pointer's position, not the thumbnail's; the
+        // bounds the layout gave it are kept from the prepaint that precedes
+        // the click, so the preview knows where to grow from.
+        let placed = Rc::new(Cell::new(Bounds::default()));
+
+        div()
+            .id(("agent-attachment", index))
+            .group("agent-attachment")
+            .relative()
+            .size(px(THUMBNAIL))
+            .flex_none()
+            .rounded(UI_RADIUS)
+            .overflow_hidden()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().muted)
+            .aria_label(attachment.placeholder().to_string())
+            // A thumbnail is cropped to a square this small, so opening it is
+            // the only way to check what is about to be sent.
+            .cursor_pointer()
+            .on_prepaint({
+                let placed = placed.clone();
+
+                move |bounds, _, _| placed.set(bounds)
+            })
+            .on_click(cx.listener({
+                let image = image.clone();
+
+                move |this, _, _, cx| this.open_image(image.clone(), Some(placed.get()), cx)
+            }))
+            .child(img(image).size_full().object_fit(ObjectFit::Cover))
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .right_0()
+                    .invisible()
+                    .group_hover("agent-attachment", |this| this.visible())
+                    .child(
+                        Button::new(("agent-attachment-remove", index))
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::Close)
+                            .accessibility_label(t!("agent-composer-image-remove"))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                // The control sits on the thumbnail, which
+                                // opens the image; taking the image off is not
+                                // a request to look at it.
+                                cx.stop_propagation();
+
+                                this.remove_attachment(index, window, cx)
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// One annotation, as its own chip. They stay separate rather than folding
+    /// into a single count because each one is a different quotation the user
+    /// chose, and one of them being wrong is a reason to drop that one.
+    ///
+    /// The chip shows as much as fits and carries the whole selection in its
+    /// tooltip: a quotation is often several lines, and a strip that grew to
+    /// hold them would take the composer's room.
+    fn render_response_annotation(
+        &self,
+        index: usize,
+        text: &str,
+        cx: &mut Context<AgentPane>,
+    ) -> AnyElement {
+        let mut chars = text.chars();
+        let mut preview: String = chars.by_ref().take(ANNOTATION_PREVIEW_CHARS).collect();
+
+        if chars.next().is_some() {
+            preview.push('…');
+        }
+
+        let label = t!("agent-composer-annotation-item", index = (index + 1)).into_owned();
+
+        let group: SharedString = format!("agent-response-annotation-{index}").into();
+        let full: SharedString = text.to_string().into();
+
+        div()
+            .id(("agent-response-annotation", index))
+            .group(group.clone())
+            .relative()
+            .w(px(ANNOTATION_WIDTH))
+            .max_w_full()
+            .h(px(THUMBNAIL))
+            .flex_none()
+            .rounded(UI_RADIUS)
+            .overflow_hidden()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().muted)
+            .aria_label(format!("{label}: {text}"))
+            .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx))
+            .child(
+                v_flex()
+                    .size_full()
+                    .px_2()
+                    .py_1p5()
+                    .pr_7()
+                    .overflow_hidden()
+                    .gap_0p5()
+                    .child(div().text_xs().font_weight(FontWeight::MEDIUM).child(label))
+                    .child(
+                        div()
+                            .truncate()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(preview),
+                    ),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .right_0()
+                    .invisible()
+                    .group_hover(group, |this| this.visible())
+                    .child(
+                        Button::new(("agent-response-annotation-remove", index))
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::Close)
+                            .accessibility_label(t!("agent-composer-annotations-remove"))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.remove_response_annotation(index, cx)
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
 }
 
-pub(crate) struct Attachment<'a>(&'a CoreAttachment<Arc<Image>>);
+pub(crate) type PendingAttachments = CorePendingAttachments<Arc<Image>>;
 
-impl<'a> Attachment<'a> {
-    pub(crate) fn bytes(&self) -> &'a [u8] {
-        self.0.image.bytes()
-    }
-
-    pub(crate) fn format(&self) -> ImageFormat {
-        self.0.image.format()
-    }
-
-    pub(crate) fn placeholder(&self) -> &'a str {
-        self.0.placeholder()
-    }
-
-    pub(crate) fn image(&self) -> Arc<Image> {
-        self.0.image.clone()
-    }
-}
-
-#[derive(Default)]
-pub(crate) struct PendingAttachments(CorePendingAttachments<Arc<Image>>);
-
-impl PendingAttachments {
-    pub(crate) fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    pub(crate) fn iter(&self) -> impl Iterator<Item = Attachment<'_>> {
-        self.0.iter().map(Attachment)
-    }
-
-    pub(crate) fn clear(&mut self) {
-        self.0.clear();
-    }
-
-    pub(crate) fn attach(&mut self, image: &Image) -> Result<String, AttachError> {
-        self.0.attach(image.bytes(), |bytes| {
-            Arc::new(Image::from_bytes(ImageFormat::Png, bytes))
-        })
-    }
-
-    pub(crate) fn placeholder_links(&self, text: &str) -> Vec<Range<usize>> {
-        self.0.placeholder_links(text)
-    }
-
-    pub(crate) fn linked_image(&self, text: &str, range: Range<usize>) -> Option<Arc<Image>> {
-        self.0.linked_image(text, range).cloned()
-    }
-
-    pub(crate) fn placeholder_at(&self, index: usize) -> Option<&str> {
-        self.0.placeholder_at(index)
-    }
-
-    pub(crate) fn reconcile(&mut self, text: &str) -> Option<String> {
-        self.0.reconcile(text)
-    }
+fn attach_png(pending: &mut PendingAttachments, image: &Image) -> Result<String, AttachError> {
+    pending.attach(image.bytes(), |bytes| {
+        Arc::new(Image::from_bytes(ImageFormat::Png, bytes))
+    })
 }
 
 /// Where a pane writes the attachment files a harness reads by path. Keyed by
@@ -268,3 +402,12 @@ pub(crate) fn scratch_dir(route: &str) -> PathBuf {
 
     env::temp_dir().join(format!("niumaterm-agent-{key}"))
 }
+
+/// Edge of a thumbnail. Large enough to recognize a screenshot by, small
+/// enough that a full message's worth of them does not push the composer off
+/// the pane.
+pub(crate) const THUMBNAIL: f32 = 56.0;
+
+const ANNOTATION_WIDTH: f32 = 240.0;
+
+const ANNOTATION_PREVIEW_CHARS: usize = 160;

@@ -7,8 +7,8 @@ use serde_json::Value;
 use crate::launcher::{AgentCli, run_bounded};
 use crate::update::{
     DiscoverySupport, MAX_LABEL_CHARS, PROBE_LIMITS, ProviderKind, ProviderMaintenance,
-    UpdateError, UpdateErrorKind, VendorUpdateResult, VersionStatus, bounded_label,
-    current_version_fallback, parse_strict_version, vendor_update,
+    UpdateError, UpdateErrorKind, VersionStatus, bounded_label, current_version_fallback,
+    parse_strict_version, vendor_update,
 };
 
 #[derive(Default)]
@@ -30,7 +30,7 @@ impl ProviderMaintenance for CodexMaintenance {
         }
     }
 
-    fn update(&self, launcher: &AgentCli) -> Result<VendorUpdateResult, UpdateError> {
+    fn update(&self, launcher: &AgentCli) -> Result<String, UpdateError> {
         vendor_update(launcher, ProviderKind::Codex)
     }
 }

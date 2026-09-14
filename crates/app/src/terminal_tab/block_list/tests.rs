@@ -672,12 +672,7 @@ fn frozen_block_view(
                         .unwrap()
                         .unwrap();
 
-                    ScreenRowRead {
-                        cells,
-                        wrapped: meta.wrapped,
-                        prompt_start: meta.prompt_start,
-                        hyperlinks: meta.hyperlinks,
-                    }
+                    ScreenRowRead { cells, meta }
                 })
                 .collect();
 

@@ -1,6 +1,8 @@
 #[cfg(windows)]
-use crate::hub::{SessionInfo, SessionOptions, SessionSnapshot};
+use crate::hub::SessionInfo;
 use serde::{Deserialize, Serialize};
+
+use crate::session::SessionSnapshot;
 
 /// Options a remote client may request when opening a session. Deliberately a
 /// strict subset of the hub's `SessionOptions`: environment overrides, args,
@@ -23,19 +25,6 @@ pub struct ProtocolSessionInfo {
     pub title: String,
     pub exited: bool,
     pub attached_clients: u32,
-}
-
-/// Reconnect checkpoint: everything the client needs to rebuild terminal
-/// state. Bytes are either inside `vt` or arrive in Output frames with
-/// `seq > base_seq` — never both, never neither. All chunks of one output
-/// event share its sequence number and must be applied together.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProtocolSessionSnapshot {
-    pub session_id: u64,
-    pub base_seq: u64,
-    pub vt: Vec<u8>,
-    pub cols: u16,
-    pub rows: u16,
 }
 
 /// Control messages travelling client → host.
@@ -72,36 +61,13 @@ pub enum ClientBound {
         session_id: u64,
     },
 
-    Attached(ProtocolSessionSnapshot),
+    Attached(SessionSnapshot),
     Paired,
 
     Error {
         session_id: Option<u64>,
         message: String,
     },
-}
-
-#[cfg(windows)]
-impl From<ProtocolSessionOptions> for SessionOptions {
-    fn from(request: ProtocolSessionOptions) -> Self {
-        let mut options = SessionOptions::default();
-
-        if let Some(shell) = request.shell {
-            options.shell = shell;
-        }
-
-        options.working_directory = request.working_directory;
-
-        if request.cols > 0 {
-            options.cols = request.cols;
-        }
-
-        if request.rows > 0 {
-            options.rows = request.rows;
-        }
-
-        options
-    }
 }
 
 #[cfg(windows)]
@@ -113,19 +79,6 @@ impl From<SessionInfo> for ProtocolSessionInfo {
             title: info.title.unwrap_or_default(),
             exited: info.exited,
             attached_clients: info.attached_clients as u32,
-        }
-    }
-}
-
-#[cfg(windows)]
-impl From<&SessionSnapshot> for ProtocolSessionSnapshot {
-    fn from(snapshot: &SessionSnapshot) -> Self {
-        ProtocolSessionSnapshot {
-            session_id: snapshot.session_id.0,
-            base_seq: snapshot.base_seq,
-            vt: snapshot.vt.clone(),
-            cols: snapshot.cols,
-            rows: snapshot.rows,
         }
     }
 }

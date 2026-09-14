@@ -111,18 +111,11 @@ pub trait ProcessReadWrite {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum ChildEvent {
-    Exited,
-}
-
 pub trait EventedPty: ProcessReadWrite {
     fn child_event_token(&self) -> Token;
 
-    /// Tries to retrieve an event.
-    ///
-    /// Returns `Some(event)` on success, or `None` if there are no events to retrieve.
-    fn next_child_event(&mut self) -> Option<ChildEvent>;
+    /// Reports whether a child exit has been observed without waiting.
+    fn child_exited(&mut self) -> bool;
 }
 
 #[derive(Debug, Clone)]

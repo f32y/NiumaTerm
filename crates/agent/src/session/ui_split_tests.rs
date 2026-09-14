@@ -16,7 +16,7 @@ use crate::session::update_readiness::{ConversationWork, Readiness};
 use crate::session::workflows::WorkflowData;
 use crate::session::{AgentKind, Backend, RenameOutcome};
 use crate::workflow::{
-    RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult, WorkflowSource,
+    WorkflowRefreshRequest, WorkflowRefreshResult, WorkflowRun, WorkflowSource,
     WorkflowTranscriptRead,
 };
 
@@ -233,7 +233,7 @@ fn workflow_refresh_uses_the_supplied_source_and_keeps_its_session_epoch() {
     struct MemorySource;
 
     impl WorkflowSource for MemorySource {
-        fn restore(&self, _: Option<&str>, _: &str) -> Result<Vec<RestoredWorkflowRun>, String> {
+        fn restore(&self, _: Option<&str>, _: &str) -> Result<Vec<WorkflowRun>, String> {
             Ok(Vec::new())
         }
 

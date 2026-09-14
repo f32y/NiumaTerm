@@ -91,7 +91,7 @@ pub(crate) fn initialize(testing: bool, profiles: &[AgentProfile], cx: &mut App)
                     reason: error.to_string(),
                 }) as Arc<dyn ProviderMaintenance>
             },
-            |releases| Arc::new(ClaudeMaintenance::new(releases)),
+            |releases| Arc::new(ClaudeMaintenance::new(Box::new(releases))),
         );
 
         (claude, Arc::new(CodexMaintenance))

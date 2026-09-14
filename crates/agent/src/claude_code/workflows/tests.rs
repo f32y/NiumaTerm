@@ -500,7 +500,7 @@ fn a_resumed_session_restores_its_completed_runs() {
 
     assert_eq!(restored.len(), 1);
 
-    let run = &restored[0].run;
+    let run = &restored[0];
 
     assert_eq!(run.task_id, TASK);
     assert_eq!(run.run_id.as_deref(), Some(RUN_ID));
@@ -653,7 +653,7 @@ fn a_run_whose_snapshot_never_landed_still_restores() {
 
     assert_eq!(restored.len(), 1);
 
-    let run = &restored[0].run;
+    let run = &restored[0];
 
     // With no snapshot there is no stream task id, so the directory names it.
     assert_eq!(run.task_id, RUN_ID);
@@ -703,8 +703,8 @@ fn a_completed_run_is_not_restored_twice() {
     let restored = read_run_snapshots_at(&root, SESSION).expect("snapshots read");
 
     assert_eq!(restored.len(), 1);
-    assert_eq!(restored[0].run.task_id, TASK);
-    assert_eq!(restored[0].run.state, WorkflowRunState::Done);
+    assert_eq!(restored[0].task_id, TASK);
+    assert_eq!(restored[0].state, WorkflowRunState::Done);
 
     fs::remove_dir_all(&root).ok();
 }

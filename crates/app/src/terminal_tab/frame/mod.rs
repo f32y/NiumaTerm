@@ -4,7 +4,7 @@ pub(super) use crate::terminal_tab::frame::images::{FrameImage, ZLayer};
 #[cfg(test)]
 pub(super) use crate::terminal_tab::frame::line::line_from_parts;
 pub(super) use crate::terminal_tab::frame::line::{
-    LineBuilder, StyleRun, TerminalCell, TerminalColor, TerminalLine,
+    EngineRowBuilder, LineBuilder, StyleRun, TerminalCell, TerminalColor, TerminalLine,
 };
 
 mod colors;

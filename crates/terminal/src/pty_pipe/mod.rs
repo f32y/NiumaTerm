@@ -25,12 +25,12 @@ use std::{cell, error, fmt, path, time};
 
 #[cfg(target_os = "linux")]
 use libc::EIO;
-use nmt_platform::{ChildEvent, EventedPty, Events, Interest, Poll, Token, Waker, WinsizeBuilder};
+use nmt_platform::{EventedPty, Events, Interest, Poll, Token, Waker, WinsizeBuilder};
 #[cfg(enable_profiling)]
 use nmt_profiling::pty::{BatchEnd, PtyProfiler, Stage};
 use tracing::{error, warn};
 
-use crate::event::{self, EventListener, Msg, MsgSender, TerminalEvent, WindowId};
+use crate::event::{self, EventListener, Msg, MsgSender, TerminalEvent};
 use crate::ghostty::{self, GhosttyTerminal, mode};
 use crate::prompt_sniffer::PromptSniffer;
 use crate::pty_pipe::conpty_resize::{ConptyResize, ResizeRead};
@@ -128,7 +128,6 @@ pub struct PtyPipe<T: EventedPty, U: EventListener> {
 
     terminal_responses_enabled: bool,
     event_proxy: U,
-    window_id: WindowId,
     route_id: usize,
     conpty_resize: ConptyResize,
 
@@ -248,7 +247,6 @@ where
         vt_modes: Arc<AtomicU32>,
         pty: T,
         event_proxy: U,
-        window_id: WindowId,
         options: &SessionOptions,
     ) -> Result<PtyPipe<T, U>, Box<dyn error::Error>> {
         let poll = Poll::new()?;
@@ -302,7 +300,6 @@ where
             output_sink: None,
             terminal_responses_enabled: true,
             event_proxy,
-            window_id,
             route_id: options.route_id,
             conpty_resize: ConptyResize::default(),
             sniffer: PromptSniffer::default(),
@@ -315,7 +312,7 @@ where
             snapshot_pending: false,
             sync_output_started_at: None,
             #[cfg(enable_profiling)]
-            profile: PtyProfiler::new(window_id.0, options.route_id, cols, rows),
+            profile: PtyProfiler::new(0, options.route_id, cols, rows),
         })
     }
 
@@ -327,10 +324,9 @@ where
             self.prev_alt_screen_sent = on;
 
             self.event_proxy
-                .send_event(TerminalEvent::InteractiveState(on), self.window_id);
+                .send_event(TerminalEvent::InteractiveState(on));
 
-            self.event_proxy
-                .send_event(TerminalEvent::AltScreen(on), self.window_id);
+            self.event_proxy.send_event(TerminalEvent::AltScreen(on));
         }
     }
 
@@ -499,7 +495,7 @@ where
         let launch_cwd = &mut self.launch_cwd;
         let mark_seq = &mut self.mark_seq;
         let event_proxy = &self.event_proxy;
-        let window_id = self.window_id;
+
         let engine_blocks = self.engine_blocks;
 
         self.sniffer.feed_hooked(
@@ -513,7 +509,6 @@ where
                     launch_cwd,
                     mark_seq,
                     event_proxy,
-                    window_id,
                     engine_blocks,
                     mark,
                 );
@@ -521,10 +516,8 @@ where
         );
 
         if let Some(trusted) = self.sniffer.take_boundary_trust_changed() {
-            self.event_proxy.send_event(
-                TerminalEvent::PromptBoundaryTrusted(trusted),
-                self.window_id,
-            );
+            self.event_proxy
+                .send_event(TerminalEvent::PromptBoundaryTrusted(trusted));
         }
 
         // No steady-state work per read: the whole command is
@@ -662,8 +655,7 @@ where
         };
 
         if let Some(cwd) = pwd {
-            self.event_proxy
-                .send_event(TerminalEvent::Cwd(cwd), self.window_id);
+            self.event_proxy.send_event(TerminalEvent::Cwd(cwd));
         }
 
         // Ship new/changed kitty image pixels + removals via the existing graphics
@@ -673,35 +665,30 @@ where
         if !pending_images.is_empty() || !removed_ids.is_empty() {
             use crate::graphics::{GraphicId, UpdateQueues};
 
-            self.event_proxy.send_event(
-                TerminalEvent::UpdateGraphics {
-                    route_id: self.route_id,
-                    queues: UpdateQueues {
-                        pending: Vec::new(),
-                        pending_images,
-                        remove_queue: removed_ids
-                            .into_iter()
-                            .map(|id| GraphicId(id as u64))
-                            .collect(),
-                    },
+            self.event_proxy.send_event(TerminalEvent::UpdateGraphics {
+                route_id: self.route_id,
+                queues: UpdateQueues {
+                    pending: Vec::new(),
+                    pending_images,
+                    remove_queue: removed_ids
+                        .into_iter()
+                        .map(|id| GraphicId(id as u64))
+                        .collect(),
                 },
-                self.window_id,
-            );
+            });
         }
 
         if bell > 0 {
-            self.event_proxy
-                .send_event(TerminalEvent::Bell, self.window_id);
+            self.event_proxy.send_event(TerminalEvent::Bell);
         }
 
         for (ty, text) in clipboard_writes {
             self.event_proxy
-                .send_event(TerminalEvent::ClipboardStore(ty, text), self.window_id);
+                .send_event(TerminalEvent::ClipboardStore(ty, text));
         }
 
         if let Some(title) = title {
-            self.event_proxy
-                .send_event(TerminalEvent::Title(title), self.window_id);
+            self.event_proxy.send_event(TerminalEvent::Title(title));
         }
 
         // Publish VT modes lock-free; this PTY thread is the sole writer.
@@ -745,10 +732,8 @@ where
         self.profile.record(Stage::Publish, publish_started);
 
         if published {
-            self.event_proxy.send_event(
-                TerminalEvent::TerminalDamaged(self.route_id),
-                self.window_id,
-            );
+            self.event_proxy
+                .send_event(TerminalEvent::TerminalDamaged(self.route_id));
         }
 
         Ok(())
@@ -885,10 +870,9 @@ where
         };
 
         if let Some(live) = blocks_sync {
-            self.event_proxy.send_event(
-                TerminalEvent::BlockBatch(vec![event::BlockEvent::EngineBlocksSync(live)]),
-                self.window_id,
-            );
+            self.event_proxy.send_event(TerminalEvent::BlockBatch(vec![
+                event::BlockEvent::EngineBlocksSync(live),
+            ]));
         }
 
         self.last_snapshot_at = Some(time::Instant::now());
@@ -909,10 +893,8 @@ where
         if published {
             // VT modes do not change on resize, so the lock-free
             // atomic remains valid from the last PTY read.
-            self.event_proxy.send_event(
-                TerminalEvent::TerminalDamaged(self.route_id),
-                self.window_id,
-            );
+            self.event_proxy
+                .send_event(TerminalEvent::TerminalDamaged(self.route_id));
         }
 
         self.conpty_resize
@@ -986,10 +968,9 @@ where
             error!("Failed to register PTY event sources: {err}");
 
             self.event_proxy
-                .send_event(TerminalEvent::CloseTerminal(self.route_id), self.window_id);
+                .send_event(TerminalEvent::CloseTerminal(self.route_id));
 
-            self.event_proxy
-                .send_event(TerminalEvent::Render, self.window_id);
+            self.event_proxy.send_event(TerminalEvent::Render);
 
             return (self, state);
         }
@@ -1084,15 +1065,14 @@ where
                 // The waker token (and any stray token) needs no handling.
             }
 
-            if child_exited && let Some(ChildEvent::Exited) = self.pty.next_child_event() {
+            if child_exited && self.pty.child_exited() {
                 self.flush_pending_on_exit();
 
                 // Emit `CloseTerminal` directly; PtyPipe owns the event proxy and route id.
                 self.event_proxy
-                    .send_event(TerminalEvent::CloseTerminal(self.route_id), self.window_id);
+                    .send_event(TerminalEvent::CloseTerminal(self.route_id));
 
-                self.event_proxy
-                    .send_event(TerminalEvent::Render, self.window_id);
+                self.event_proxy.send_event(TerminalEvent::Render);
 
                 break 'event_loop;
             }
@@ -1144,10 +1124,9 @@ where
                 error!("Failed to reregister PTY event sources: {err}");
 
                 self.event_proxy
-                    .send_event(TerminalEvent::CloseTerminal(self.route_id), self.window_id);
+                    .send_event(TerminalEvent::CloseTerminal(self.route_id));
 
-                self.event_proxy
-                    .send_event(TerminalEvent::Render, self.window_id);
+                self.event_proxy.send_event(TerminalEvent::Render);
 
                 break 'event_loop;
             }
@@ -1222,8 +1201,7 @@ where
                 #[cfg(enable_profiling)]
                 self.profile.record(Stage::Query, query_started);
 
-                self.event_proxy
-                    .send_event(TerminalEvent::ReadReady, self.window_id);
+                self.event_proxy.send_event(TerminalEvent::ReadReady);
             }
 
             Msg::Checkpoint(request) => {

@@ -278,17 +278,12 @@ impl fmt::Display for UpdateError {
 
 impl Error for UpdateError {}
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct VendorUpdateResult {
-    pub diagnostic: String,
-}
-
 pub trait ProviderMaintenance: Send + Sync {
     fn provider(&self) -> ProviderKind;
 
     fn probe(&self, launcher: &AgentCli) -> Result<VersionStatus, UpdateError>;
 
-    fn update(&self, launcher: &AgentCli) -> Result<VendorUpdateResult, UpdateError>;
+    fn update(&self, launcher: &AgentCli) -> Result<String, UpdateError>;
 }
 
 pub(crate) fn current_version_fallback(launcher: &AgentCli) -> Option<Version> {
@@ -300,7 +295,7 @@ pub(crate) fn current_version_fallback(launcher: &AgentCli) -> Option<Version> {
 pub(crate) fn vendor_update(
     launcher: &AgentCli,
     provider: ProviderKind,
-) -> Result<VendorUpdateResult, UpdateError> {
+) -> Result<String, UpdateError> {
     let output = run_bounded(launcher, ["update"], UPDATE_LIMITS).map_err(|error| {
         let kind = if matches!(error, ProcessError::TimedOut { .. }) {
             UpdateErrorKind::TimedOut
@@ -315,9 +310,7 @@ pub(crate) fn vendor_update(
         return Err(classify_vendor_failure(provider, &output));
     }
 
-    Ok(VendorUpdateResult {
-        diagnostic: bounded_label(&output.diagnostic(), MAX_DIAGNOSTIC_CHARS),
-    })
+    Ok(bounded_label(&output.diagnostic(), MAX_DIAGNOSTIC_CHARS))
 }
 
 fn classify_vendor_failure(provider: ProviderKind, output: &ProcessOutput) -> UpdateError {
@@ -651,10 +644,7 @@ impl UpdateCoordinator {
         }
     }
 
-    pub fn run_vendor_update(
-        &self,
-        key: &InstallationKey,
-    ) -> Result<VendorUpdateResult, UpdateError> {
+    pub fn run_vendor_update(&self, key: &InstallationKey) -> Result<String, UpdateError> {
         let (launcher, maintenance) = self.operation_parts(key)?;
 
         maintenance.update(&launcher)

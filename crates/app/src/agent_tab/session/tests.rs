@@ -1,19 +1,14 @@
-use std::time::Duration;
-
+use crate::agent_tab::session::{conversation_title_request, directories_match, directory_label};
+use crate::agent_tab::transcript::LAST_RESPONSE_LIMIT;
+use crate::agent_tab::{AgentKind, replayed_response_age, tab_title_from_prompt};
 use nmt_agent::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRegistry,
     BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskUpdate,
 };
 use nmt_agent::chat::ThreadSettings;
-
-use crate::agent_tab::AgentKind;
-use crate::agent_tab::session::background_tasks::scoped_background_tasks;
-use crate::agent_tab::session::events::resolve_ready_settings;
-use crate::agent_tab::session::turn::replayed_response_age;
-use crate::agent_tab::session::{
-    conversation_title_request, directories_match, directory_label, tab_title_from_prompt,
-};
-use crate::agent_tab::transcript::LAST_RESPONSE_LIMIT;
+use nmt_agent::session::children::scoped_background_tasks;
+use nmt_agent::session::settings::resolve_ready_settings;
+use std::time::Duration;
 
 fn snapshot_for(parent: BackgroundTaskKey) -> BackgroundTaskSnapshot {
     let mut registry = BackgroundTaskRegistry::new(parent);
@@ -392,14 +387,14 @@ mod conversation_title_tests {
         let (pane, _) = open_pane(cx, AgentProfileKind::Codex, None);
 
         cx.update(|cx| {
-            pane.update(cx, |pane, _| {
-                let initial = pane.command_catalog();
+            pane.update(cx, |pane, cx| {
+                let initial = pane.command_catalog(cx);
 
-                assert!(Rc::ptr_eq(&initial, &pane.command_catalog()));
+                assert!(Rc::ptr_eq(&initial, &pane.command_catalog(cx)));
 
                 pane.palette.catalog.as_mut().unwrap().language = "previous-language".into();
 
-                let refreshed = pane.command_catalog();
+                let refreshed = pane.command_catalog(cx);
 
                 assert!(!Rc::ptr_eq(&initial, &refreshed));
                 assert_eq!(initial.as_ref(), refreshed.as_ref());
@@ -659,7 +654,10 @@ mod conversation_title_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                pane.kind = AgentKind::Claude;
+                pane.host
+                    .upgrade()
+                    .unwrap()
+                    .update(cx, |host, _| host.kind = AgentKind::Claude);
 
                 let epoch = pane.session.borrow_mut().runtime.begin_start();
 
@@ -716,7 +714,10 @@ mod conversation_title_tests {
             pane.update(cx, |pane, cx| {
                 assert!(pane.session.borrow().naming.named);
 
-                pane.kind = AgentKind::Claude;
+                pane.host
+                    .upgrade()
+                    .unwrap()
+                    .update(cx, |host, _| host.kind = AgentKind::Claude);
 
                 let epoch = pane.session.borrow_mut().runtime.begin_start();
 
@@ -1282,7 +1283,7 @@ mod shared_host_recovery_tests {
 /// one, so the two ways of getting it wrong are keeping a command the harness
 /// has withdrawn and never showing one it has just published.
 mod command_catalog_cache_tests {
-    use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, WindowHandle};
+    use gpui::{App, AppContext as _, Entity, TestAppContext, VisualTestContext, WindowHandle};
     use nmt_agent::AgentWorkspace;
     use nmt_agent::chat::{
         Event as SessionEvent, SendOutcome, SlashCommandArguments, SlashCommandInfo,
@@ -1338,8 +1339,8 @@ mod command_catalog_cache_tests {
         }
     }
 
-    fn offers(pane: &mut AgentPane, name: &str) -> bool {
-        pane.command_catalog()
+    fn offers(pane: &mut AgentPane, name: &str, cx: &App) -> bool {
+        pane.command_catalog(cx)
             .iter()
             .any(|command| command.name == name)
     }
@@ -1374,17 +1375,20 @@ mod command_catalog_cache_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                assert!(!offers(pane, "deploy"), "nothing published this yet");
+                assert!(!offers(pane, "deploy", cx), "nothing published this yet");
 
                 pane.on_event(SessionEvent::Commands(vec![discovered("deploy")]), cx);
 
-                assert!(offers(pane, "deploy"), "a published command must show up");
+                assert!(
+                    offers(pane, "deploy", cx),
+                    "a published command must show up"
+                );
 
                 // Discovery is a replacement snapshot, so a later one that
                 // omits the command withdraws it.
                 pane.on_event(SessionEvent::Commands(vec![discovered("status")]), cx);
 
-                assert!(!offers(pane, "deploy"), "a withdrawn command must go");
+                assert!(!offers(pane, "deploy", cx), "a withdrawn command must go");
             });
         });
 

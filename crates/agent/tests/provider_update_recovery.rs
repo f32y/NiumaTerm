@@ -470,7 +470,7 @@ fn one_claude_update_restores_multiple_sessions_in_place() {
     }
 
     let maintenance: Arc<dyn ProviderMaintenance> =
-        Arc::new(ClaudeMaintenance::new(FixedClaudeRelease));
+        Arc::new(ClaudeMaintenance::new(Box::new(FixedClaudeRelease)));
 
     let (coordinator, key) =
         register_available(&fixture, ProviderKind::Claude, &launches[0], maintenance);

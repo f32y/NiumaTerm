@@ -33,9 +33,12 @@ impl<T: PartialEq> PartialEq for Row<T> {
     }
 }
 
-impl<T: Clone + Default> Row<T> {
+impl<T> Row<T> {
     /// Create a new terminal row.
-    pub fn new(columns: usize) -> Row<T> {
+    pub fn new(columns: usize) -> Row<T>
+    where
+        T: Clone + Default,
+    {
         // The previous hand-rolled pointer initialization was UB for
         // `columns == 0` (it wrote one element past a zero-capacity Vec) and
         // compiles to the same fill loop as the safe version below.
@@ -48,10 +51,8 @@ impl<T: Clone + Default> Row<T> {
             kitty_virtual_placeholder: false,
         }
     }
-}
 
-#[allow(clippy::len_without_is_empty)]
-impl<T> Row<T> {
+    #[allow(clippy::len_without_is_empty)]
     #[inline]
     pub fn len(&self) -> usize {
         self.inner.len()

@@ -31,7 +31,7 @@ pub(super) fn materialized_pointer_row(row: &ScreenRowRead, cols: u16) -> RowTex
 
     RowText {
         text: chars.into_iter().collect(),
-        wrapped: row.wrapped,
-        hyperlinks: row.hyperlinks.clone(),
+        wrapped: row.meta.wrapped,
+        hyperlinks: row.meta.hyperlinks.clone(),
     }
 }

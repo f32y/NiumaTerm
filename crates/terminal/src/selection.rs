@@ -56,9 +56,7 @@ impl SelectionRange {
             is_block,
         }
     }
-}
 
-impl SelectionRange {
     /// The visible row indices this selection damages, clamped to a `rows`-tall
     /// viewport, or `None` when the selection is fully outside it.
     /// Mirrors the retired `TermDamageState::damage_selection` at

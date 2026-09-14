@@ -41,7 +41,7 @@ use crate::terminal_tab::pane_model::list_mirror::ListPosition;
 use crate::terminal_tab::pane_model::mouse::{MouseInput, MouseOutcome};
 use crate::terminal_tab::pane_model::scroll::ScrollOutcome;
 use crate::terminal_tab::pane_model::viewport::LocalPoint;
-use crate::terminal_tab::pane_model::{ClipboardAccess, PaneController, PaneSettings};
+use crate::terminal_tab::pane_model::{ClipboardAccess, PaneController};
 use crate::terminal_tab::scrollbar::geometry::SCROLLBAR_AUTO_HIDE_DELAY;
 use crate::terminal_tab::scrollbar::scrollbar_element;
 use crate::terminal_tab::settings::{TerminalSettings, duration_labels};
@@ -198,7 +198,7 @@ impl TerminalPane {
             identity,
             model: PaneController::new(
                 surface,
-                settings.into(),
+                settings.clone(),
                 (&active_colors()).into(),
                 duration_labels(),
                 Box::new(DesktopClipboard),
@@ -211,12 +211,12 @@ impl TerminalPane {
     }
 
     fn on_terminal_settings_changed(&mut self, cx: &mut Context<Self>) {
-        let settings: PaneSettings = cx.global::<TerminalSettings>().into();
+        let settings = cx.global::<TerminalSettings>().clone();
         let colors = active_colors();
 
         self.block_list
             .list
-            .set_alignment(block_list_alignment(settings.fixed_bottom));
+            .set_alignment(block_list_alignment(settings.fixed_bottom()));
 
         if let Some(update) = self
             .model
@@ -983,7 +983,7 @@ impl Render for TerminalPane {
         let cell = self.cell_metrics(window, cx);
 
         let frame = self.model.begin_frame();
-        let show_block_chrome = self.model.settings.show_block_chrome;
+        let show_block_chrome = self.model.settings.command_blocks;
 
         self.block_list
             .list

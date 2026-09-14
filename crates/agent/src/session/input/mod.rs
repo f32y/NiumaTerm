@@ -1,9 +1,7 @@
 //! User input requests, response admission, and reconnect recovery.
 
-pub use crate::session::input::approval::ApprovalOutcome;
 pub use crate::session::input::draft::{QuestionDraft, QuestionStatus};
 
-mod approval;
 mod draft;
 
 #[cfg(test)]
@@ -59,7 +57,7 @@ pub struct SessionInput {
     epoch: u64,
     sequence: u64,
     disconnected: bool,
-    approval: Option<approval::Approval>,
+    approval: Option<Approval>,
     batches: Vec<QuestionDraft>,
 }
 
@@ -352,4 +350,76 @@ impl SessionInput {
     pub fn clear_questions(&mut self) {
         self.batches.clear();
     }
+
+    pub fn approval(&self) -> Option<&str> {
+        self.approval
+            .as_ref()
+            .map(|approval| approval.description.as_str())
+    }
+
+    pub(crate) fn ask_approval(&mut self, description: String) {
+        self.approval = Some(Approval {
+            description,
+            submitted: false,
+        });
+    }
+
+    pub(crate) fn dismiss_approval(&mut self) {
+        self.approval = None;
+    }
+
+    pub(crate) fn resolve_approval(&mut self, epoch: u64) -> bool {
+        epoch == self.epoch && !self.disconnected && self.approval.take().is_some()
+    }
+
+    pub fn respond_approval(
+        &mut self,
+        runtime: &mut SessionRuntime,
+        decision: &str,
+    ) -> ApprovalOutcome {
+        if self.epoch != runtime.epoch() || self.disconnected {
+            return ApprovalOutcome::Ignored;
+        }
+
+        let Some(approval) = &mut self.approval else {
+            return ApprovalOutcome::Ignored;
+        };
+
+        if approval.submitted {
+            return ApprovalOutcome::Ignored;
+        }
+
+        let Some(backend) = runtime.backend_mut() else {
+            return ApprovalOutcome::Rejected;
+        };
+
+        match backend.respond_approval(decision) {
+            ApprovalOutcome::Waiting => {
+                approval.submitted = true;
+
+                ApprovalOutcome::Waiting
+            }
+
+            ApprovalOutcome::Settled => {
+                self.approval = None;
+
+                ApprovalOutcome::Settled
+            }
+
+            outcome @ (ApprovalOutcome::Ignored | ApprovalOutcome::Rejected) => outcome,
+        }
+    }
+}
+
+struct Approval {
+    description: String,
+    submitted: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApprovalOutcome {
+    Ignored,
+    Rejected,
+    Waiting,
+    Settled,
 }

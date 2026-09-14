@@ -16,14 +16,13 @@ use windows_sys::Win32::System::Threading::{
     WT_EXECUTEONLYONCE,
 };
 
-use crate::ChildEvent;
 use crate::windows::readiness::SoftReady;
 
 /// Context handed to the WinAPI wait callback. The exit event is delivered over a
 /// `std::sync::mpsc` channel (mio 1.2 has no pollable channel); the soft-ready handle
 /// wakes the event loop's `Poll` so it re-checks the receiver.
 struct CallbackCtx {
-    event_tx: Sender<ChildEvent>,
+    event_tx: Sender<()>,
     soft: SoftReady,
 }
 
@@ -39,7 +38,7 @@ extern "system" fn child_exit_callback(ctx: *mut c_void, timed_out: bool) {
     // watcher (the callback never fires, nobody frees the allocation).
     let ctx = unsafe { &*(ctx as *const CallbackCtx) };
 
-    let _ = ctx.event_tx.send(ChildEvent::Exited);
+    let _ = ctx.event_tx.send(());
 
     ctx.soft.set_ready();
 }
@@ -48,7 +47,7 @@ extern "system" fn child_exit_callback(ctx: *mut c_void, timed_out: bool) {
 /// hand over a handle (or a duplicate) they will not close themselves.
 pub struct ChildExitWatcher {
     wait_handle: AtomicPtr<c_void>,
-    event_rx: Receiver<ChildEvent>,
+    event_rx: Receiver<()>,
     soft: SoftReady,
     child_handle: HANDLE,
     ctx: *mut CallbackCtx,
@@ -61,7 +60,7 @@ unsafe impl Send for ChildExitWatcher {}
 
 impl ChildExitWatcher {
     pub fn new(child_handle: HANDLE) -> Result<ChildExitWatcher, Error> {
-        let (event_tx, event_rx) = channel::<ChildEvent>();
+        let (event_tx, event_rx) = channel::<()>();
         let soft = SoftReady::new();
 
         let mut wait_handle: HANDLE = ptr::null_mut();
@@ -104,7 +103,7 @@ impl ChildExitWatcher {
         }
     }
 
-    pub fn event_rx(&self) -> &Receiver<ChildEvent> {
+    pub fn event_rx(&self) -> &Receiver<()> {
         &self.event_rx
     }
 

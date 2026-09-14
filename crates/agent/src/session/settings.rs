@@ -1,10 +1,9 @@
-use std::collections::HashMap;
-use std::mem::take;
-
 use crate::chat::{AgentPreset, ApprovalPreset, ModelInfo, ThreadSettings};
 use crate::session::capabilities::AgentCapabilities as _;
 use crate::session::restore::SettingsSeed;
 use crate::session::{AgentKind, Backend};
+use std::collections::HashMap;
+use std::mem::take;
 
 #[derive(Default)]
 pub struct ConversationSettings {
@@ -149,6 +148,32 @@ impl ConversationSettings {
         self.settings.effort = effort.map(str::to_owned);
 
         Some(outcome)
+    }
+
+    pub fn seed_settings(&mut self, seed: SettingsSeed) {
+        self.seed = seed;
+    }
+
+    pub fn restore_settings_on_ready(&mut self, settings: Option<ThreadSettings>) {
+        self.restore_on_ready = settings;
+    }
+
+    pub fn set_settings(&mut self, settings: ThreadSettings) {
+        self.settings = settings;
+    }
+
+    pub fn set_model(&mut self, model: String) {
+        if let Some(info) = self.models.iter().find(|info| info.model == model)
+            && !self
+                .settings
+                .tier
+                .as_ref()
+                .is_some_and(|tier| info.tiers.iter().any(|(id, _)| id == tier))
+        {
+            self.settings.tier = info.default_tier.clone();
+        }
+
+        self.settings.model = Some(model);
     }
 }
 

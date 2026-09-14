@@ -5,27 +5,17 @@
 //! share or a sleeping disk, so every one of them runs on the background
 //! executor and only its result reaches the view.
 
-use gpui_component::dialog::Dialog;
-
-use std::{collections, fs, iter, path};
+use std::{collections, fs, path};
 
 use gpui::prelude::*;
-use gpui::{
-    App, Context, Div, Entity, PathPromptOptions, Render, SharedString, Window, div, px, relative,
-};
-use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::dialog::{
-    DIALOG_BUTTON_MIN_WIDTH, DialogAction, DialogButtonProps, DialogClose, DialogFooter,
-};
+use gpui::{Context, Div, PathPromptOptions, Render, SharedString, Window, div};
+use gpui_component::button::Button;
 use gpui_component::tooltip::Tooltip;
-use gpui_component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
-};
+use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use rust_i18n::t;
 
 use crate::ui::Shell;
-use crate::ui::shell::agent_workspace;
-use crate::workspace::{RootChange, WorkspaceId, WorkspaceRoots, root_identity};
+use crate::workspace::{RootChange, WorkspaceRoots, root_identity};
 
 /// A user-selected path resolved to something a workspace can own, or the
 /// reason it cannot be attached.
@@ -363,136 +353,6 @@ impl Render for WorkspaceDirsEditor {
     }
 }
 
-impl Shell {
-    /// Open the directory editor for an existing normal workspace. Confirming
-    /// replaces that workspace's directory list; the tabs and conversations
-    /// already running keep the directories they started with.
-    pub(crate) fn edit_workspace_dirs(
-        &mut self,
-        id: WorkspaceId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(roots) = self.workspaces.roots_of(id).cloned() else {
-            return;
-        };
-
-        let editor = cx.new(|cx| WorkspaceDirsEditor::new(Some(roots), cx));
-        let shell = cx.entity();
-
-        window.open_dialog(cx, move |dialog, window, cx| {
-            workspace_dirs_dialog(dialog, &editor, &shell, id, window, cx)
-        });
-    }
-
-    /// Adopt an edited directory list. Open Agent Tabs of this workspace pick
-    /// the new list up for their next conversation; the one they are running
-    /// keeps the snapshot it started with.
-    fn replace_workspace_roots(
-        &mut self,
-        id: WorkspaceId,
-        roots: WorkspaceRoots,
-        cx: &mut Context<Self>,
-    ) {
-        self.workspaces.set_roots(id, roots);
-        self.sync_agent_workspaces(id, cx);
-        self.refresh_root_availability(cx);
-        self.sync_session_memory(cx);
-
-        cx.notify();
-    }
-
-    /// Hand the edited directory list to every Agent Tab of this workspace.
-    /// A pane holds its configured list apart from the snapshot its running
-    /// conversation was started with, so this reaches the next conversation
-    /// without disturbing the one in flight.
-    fn sync_agent_workspaces(&mut self, id: WorkspaceId, cx: &mut Context<Self>) {
-        let workspace = agent_workspace(self.workspaces.roots_of(id));
-
-        let Some(tabs) = self.workspaces.tabs_of(id) else {
-            return;
-        };
-
-        let panes: Vec<_> = tabs
-            .tabs()
-            .iter()
-            .filter_map(|tab| tab.surface().agent().cloned())
-            .collect();
-
-        for pane in panes {
-            pane.update(cx, |pane, cx| {
-                pane.set_workspace(workspace.clone(), cx);
-            });
-        }
-    }
-}
-
-fn workspace_dirs_dialog(
-    dialog: Dialog,
-    editor: &Entity<WorkspaceDirsEditor>,
-    shell: &Entity<Shell>,
-    id: WorkspaceId,
-    window: &Window,
-    cx: &App,
-) -> Dialog {
-    let editor = editor.clone();
-    let content_editor = editor.clone();
-    let shell = shell.clone();
-    let margin_top = ((window.viewport_size().height - px(300.)) * 0.5).max(px(16.));
-
-    dialog
-        .title(t!("shell-workspace-edit-title"))
-        .overlay_closable(false)
-        .margin_top(margin_top)
-        .button_props(
-            DialogButtonProps::default()
-                .ok_text(t!("shell-workspace-save"))
-                .cancel_text(t!("shell-workspace-cancel"))
-                .show_cancel(true),
-        )
-        .footer(
-            DialogFooter::new()
-                .w_full()
-                .border_t_1()
-                .border_color(cx.theme().border)
-                .pt_4()
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_xs()
-                        .line_height(relative(1.5))
-                        .text_color(cx.theme().muted_foreground)
-                        .child(t!("shell-workspace-dirs-applies-next")),
-                )
-                .child(
-                    DialogAction::new().child(
-                        Button::new("save-ws-dirs")
-                            .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                            .label(t!("shell-workspace-save"))
-                            .primary(),
-                    ),
-                )
-                .child(
-                    DialogClose::new().child(
-                        Button::new("cancel-ws-dirs")
-                            .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                            .label(t!("shell-workspace-cancel")),
-                    ),
-                ),
-        )
-        .content(move |content, _, _| content.child(content_editor.clone()))
-        .on_ok(move |_, _, cx| {
-            let Some(roots) = editor.read(cx).roots().cloned() else {
-                return false;
-            };
-
-            shell.update(cx, |this, cx| this.replace_workspace_roots(id, roots, cx));
-
-            true
-        })
-}
-
 /// Workspace directories the last background check could not reach, keyed by
 /// normalized path identity. A saved directory keeps its place in its
 /// workspace whether or not the filesystem can see it, so this drives
@@ -540,33 +400,6 @@ impl RootAvailability {
     /// flashes a warning it has no evidence for.
     pub(crate) fn is_available(&self, path: &str) -> bool {
         root_key(path).is_none_or(|key| !self.unavailable.contains(&key))
-    }
-}
-
-impl Shell {
-    /// Re-check every directory the open workspaces name.
-    pub(crate) fn refresh_root_availability(&mut self, cx: &mut Context<Self>) {
-        let paths: Vec<String> = self
-            .workspaces
-            .summaries()
-            .iter()
-            .flat_map(|ws| iter::once(ws.cwd.clone()).chain(ws.additional_cwds.iter().cloned()))
-            .filter(|path| !path.trim().is_empty())
-            .collect();
-
-        self.root_availability.refresh(paths, cx);
-    }
-
-    /// The active workspace's directories paired with their last known
-    /// availability, primary first. The New Tab menu snapshots this as it
-    /// opens instead of touching the filesystem while the pointer waits.
-    pub(crate) fn active_root_availability(&self) -> Vec<(String, bool)> {
-        self.workspaces
-            .active_roots()
-            .into_iter()
-            .flat_map(|roots| roots.ordered())
-            .map(|path| (path.to_string(), self.root_availability.is_available(path)))
-            .collect()
     }
 }
 

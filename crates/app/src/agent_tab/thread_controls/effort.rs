@@ -7,11 +7,12 @@
 
 use gpui::prelude::*;
 use gpui::{
-    App, Context, Entity, FontWeight, IntoElement, MouseButton, MouseMoveEvent, div, px, relative,
+    App, Context, Entity, FontWeight, IntoElement, MouseButton, MouseMoveEvent, SharedString, div,
+    px, relative,
 };
 use gpui_component::button::Button;
 use gpui_component::popover::Popover;
-use gpui_component::{ActiveTheme as _, Icon, IconName, h_flex, v_flex};
+use gpui_component::{ActiveTheme as _, Icon, IconName, IconNamed, h_flex, v_flex};
 use nmt_agent::claude_code::stream_json;
 use rust_i18n::t;
 
@@ -131,7 +132,7 @@ pub(super) fn effort_panel(
 
             // While a drag is in flight the thumb sits where the pointer
             // is rather than where the session is.
-            let thumb = pane.read(cx).controls.effort_drag.or(selected);
+            let thumb = pane.read(cx).effort_drag.or(selected);
 
             v_flex()
                 .w(px(260.))
@@ -181,7 +182,7 @@ pub(super) fn effort_panel(
                                         return;
                                     }
 
-                                    if this.controls.effort_drag.take().is_some() {
+                                    if this.effort_drag.take().is_some() {
                                         cx.notify();
                                     }
                                 });
@@ -254,7 +255,7 @@ pub(super) fn effort_panel(
                                                 return;
                                             }
 
-                                            this.controls.effort_drag = None;
+                                            this.effort_drag = None;
                                             set(this, value.clone(), cx);
 
                                             cx.notify();
@@ -274,7 +275,7 @@ fn on_effort_drag_start(pane: &Entity<AgentPane>, index: usize, cx: &mut App) {
             return;
         }
 
-        this.controls.effort_drag = Some(index);
+        this.effort_drag = Some(index);
 
         cx.notify();
     });
@@ -301,12 +302,18 @@ fn on_effort_drag_move(
         // move with no drag in
         // flight started outside
         // the track.
-        if this.controls.effort_drag.is_none() || this.controls.effort_drag == Some(index) {
+        if this.effort_drag.is_none() || this.effort_drag == Some(index) {
             return;
         }
 
-        this.controls.effort_drag = Some(index);
+        this.effort_drag = Some(index);
 
         cx.notify();
     });
+}
+
+impl IconNamed for EffortGaugeIcon {
+    fn path(self) -> SharedString {
+        format!("icons/effort-gauge-{}.svg", self.0.min(EFFORT_GAUGE_STEPS)).into()
+    }
 }

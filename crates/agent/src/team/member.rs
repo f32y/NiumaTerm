@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::AgentWorkspace;
 use crate::chat::ThreadSettings;
 use crate::session::AgentKind;
-use crate::team::identity::{ConversationId, MemberId, MessageId, OwnershipGeneration, SummaryId};
+use crate::team::identity::{MemberId, MessageId, OwnershipGeneration, SummaryId};
 
 /// A lookup into protected profile storage, without resolved launch credentials.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,7 +38,6 @@ pub struct Member {
     pub(super) id: MemberId,
     pub(super) name: String,
     pub(super) profile: ProfileReference,
-    pub(super) conversation: ConversationId,
     pub(super) ownership: OwnershipGeneration,
     pub(super) roots: AgentWorkspace,
     pub(super) settings: ThreadSettings,
@@ -82,10 +81,6 @@ impl Member {
 
     pub fn profile(&self) -> &ProfileReference {
         &self.profile
-    }
-
-    pub fn conversation(&self) -> ConversationId {
-        self.conversation
     }
 
     pub fn ownership(&self) -> OwnershipGeneration {

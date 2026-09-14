@@ -5,20 +5,18 @@
 //! a capability question, so the picks are remembered here and seeded only
 //! where the harness does not restore them itself.
 
-use std::collections::BTreeMap;
-
+use crate::agent_tab::AgentPane;
+use crate::agent_tab::profile::{
+    AgentKind, AgentThreadDefaults, agent_launch, defaults_from_thread_settings,
+};
 use gpui::{App, Context};
 use nmt_agent::chat::ThreadSettings;
 use nmt_agent::profile::launch_model as effective_launch_model;
 use nmt_agent::session::settings::ConversationSettings;
 use nmt_config::local_state;
 use nmt_config::profile::AgentProfile;
+use std::collections::BTreeMap;
 use tracing::warn;
-
-use crate::agent_tab::AgentPane;
-use crate::agent_tab::composer::CommandFeedbackKind;
-use crate::agent_tab::profile::{AgentKind, AgentThreadDefaults, agent_launch};
-use crate::agent_tab::thread_controls::ThreadControls;
 
 /// The picks remembered for this profile, falling back to the bucket its
 /// agent kind shares with unnamed profiles.
@@ -46,83 +44,30 @@ pub(crate) fn launch_effort(profile: &AgentProfile) -> Option<String> {
     agent_launch(profile).effort
 }
 
-impl ThreadControls {
-    /// Remember the current thread settings as the defaults for future
-    /// conversations launched from this profile. Called after every
-    /// user-driven settings change (dropdowns and slash commands).
-    pub(crate) fn remember_defaults(
-        &self,
-        state: &ConversationSettings,
-        kind: AgentKind,
-        profile: &AgentProfile,
-        cx: &mut Context<AgentPane>,
-    ) {
-        let stored = {
-            let defaults = cx.default_global::<AgentThreadDefaults>();
+/// Remember the current thread settings as the defaults for future
+/// conversations launched from this profile. Called after every
+/// user-driven settings change (dropdowns and slash commands).
+pub(crate) fn remember_defaults(
+    state: &ConversationSettings,
+    kind: AgentKind,
+    profile: &AgentProfile,
+    cx: &mut Context<AgentPane>,
+) {
+    let stored = {
+        let defaults = cx.default_global::<AgentThreadDefaults>();
 
-            let key = defaults
-                .0
-                .remember(kind, &profile.name, state.settings.clone());
+        let key = defaults
+            .0
+            .remember(kind, &profile.name, state.settings.clone());
 
-            let mut stored: BTreeMap<_, _> = (&*defaults).into();
+        let mut stored: BTreeMap<_, _> = defaults_from_thread_settings(defaults);
 
-            stored.retain(|name, _| name == &key);
+        stored.retain(|name, _| name == &key);
 
-            stored
-        };
+        stored
+    };
 
-        if let Err(err) = local_state::save_agent_defaults(&stored) {
-            warn!("failed to save agent defaults to local_state.toml: {err}");
-        }
-    }
-}
-
-impl AgentPane {
-    /// Push the current model and effort picks to a harness that applies them
-    /// as their own request.
-    ///
-    /// A refusal restores both pickers from what the session is actually set
-    /// to, because a picker left showing a value the harness never adopted
-    /// would misreport which model the next turn runs on.
-    pub(crate) fn apply_model_selection(&mut self, cx: &mut Context<Self>) {
-        if !self.binding.is_current() {
-            return;
-        }
-
-        let Some(outcome) = self.session.borrow_mut().apply_model_selection() else {
-            return;
-        };
-
-        match outcome {
-            Ok(()) => cx.notify(),
-
-            Err(error) => self
-                .palette
-                .set_feedback(CommandFeedbackKind::Error, error, cx),
-        }
-    }
-
-    /// Rebuild this conversation's agent from another composition.
-    ///
-    /// The harness allows this only before the conversation has run anything,
-    /// because the logged history was produced under the previous composition's
-    /// tools. That rule is not repeated here: the picker reports whatever the
-    /// harness answers, and the row stays on the preset still in force.
-    pub(crate) fn apply_agent_preset(&mut self, preset: String, cx: &mut Context<Self>) {
-        if !self.binding.is_current() {
-            return;
-        }
-
-        let Some(outcome) = self.session.borrow_mut().select_agent_preset(preset) else {
-            return;
-        };
-
-        match outcome {
-            Ok(()) => cx.notify(),
-
-            Err(error) => self
-                .palette
-                .set_feedback(CommandFeedbackKind::Error, error, cx),
-        }
+    if let Err(err) = local_state::save_agent_defaults(&stored) {
+        warn!("failed to save agent defaults to local_state.toml: {err}");
     }
 }

@@ -32,22 +32,12 @@ pub enum ApplicationKind {
     Critical,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ApplicationStatus(u32);
-
-impl ApplicationStatus {
-    pub fn bits(self) -> u32 {
-        self.0
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AffectedApplication {
     pub name: String,
     pub service_name: Option<String>,
     pub process_id: u32,
     pub kind: ApplicationKind,
-    pub status: ApplicationStatus,
     pub terminal_session_id: Option<u32>,
     pub restartable: bool,
 }
@@ -127,33 +117,23 @@ impl fmt::Display for RestartManagerError {
 
 impl Error for RestartManagerError {}
 
-pub struct RestartManagerSession(Session<SystemApi>);
+pub type RestartManagerSession = Session<SystemApi>;
 
-impl RestartManagerSession {
-    pub fn for_files(paths: &[&Path]) -> Result<Self, RestartManagerError> {
-        Session::for_files(SystemApi, paths).map(Self)
-    }
-
-    pub fn file_usage(&self) -> Result<FileUsage, RestartManagerError> {
-        self.0.file_usage()
-    }
-
-    pub fn shutdown(&self) -> Result<(), RestartManagerError> {
-        self.0.shutdown()
-    }
-
-    pub fn restart(&self) -> Result<(), RestartManagerError> {
-        self.0.restart()
-    }
-}
-
-struct Session<A: Api> {
+#[expect(
+    private_bounds,
+    reason = "Raw Windows calls stay internal to the session implementation."
+)]
+pub struct Session<A: Api> {
     api: A,
     handle: u32,
 }
 
+#[expect(
+    private_bounds,
+    reason = "Callers use the system session alias without supplying raw operations."
+)]
 impl<A: Api> Session<A> {
-    fn for_files(api: A, paths: &[&Path]) -> Result<Self, RestartManagerError> {
+    pub fn for_files(api: A, paths: &[&Path]) -> Result<Self, RestartManagerError> {
         if paths.is_empty() {
             return Err(RestartManagerError::NoFiles);
         }
@@ -191,7 +171,7 @@ impl<A: Api> Session<A> {
         check(Operation::RegisterResources, code)
     }
 
-    fn file_usage(&self) -> Result<FileUsage, RestartManagerError> {
+    pub fn file_usage(&self) -> Result<FileUsage, RestartManagerError> {
         let mut needed = 0;
         let mut count = 0;
         let mut reboot_reasons = 0;
@@ -244,14 +224,14 @@ impl<A: Api> Session<A> {
         Err(windows_error(Operation::ListApplications, ERROR_MORE_DATA))
     }
 
-    fn shutdown(&self) -> Result<(), RestartManagerError> {
+    pub fn shutdown(&self) -> Result<(), RestartManagerError> {
         check(
             Operation::ShutdownApplications,
             self.api.shutdown(self.handle, 0, None),
         )
     }
 
-    fn restart(&self) -> Result<(), RestartManagerError> {
+    pub fn restart(&self) -> Result<(), RestartManagerError> {
         check(
             Operation::RestartApplications,
             self.api.restart(self.handle, 0, None),
@@ -311,7 +291,7 @@ trait Api {
     fn restart(&self, handle: u32, flags: u32, callback: RM_WRITE_STATUS_CALLBACK) -> WIN32_ERROR;
 }
 
-struct SystemApi;
+pub struct SystemApi;
 
 impl Api for SystemApi {
     fn start_session(&self, handle: *mut u32, key: *mut u16) -> WIN32_ERROR {
@@ -356,12 +336,6 @@ impl Api for SystemApi {
     }
 }
 
-impl From<u32> for ApplicationStatus {
-    fn from(bits: u32) -> Self {
-        Self(bits)
-    }
-}
-
 impl From<RM_PROCESS_INFO> for AffectedApplication {
     fn from(process: RM_PROCESS_INFO) -> Self {
         let service_name = wide_text(&process.strServiceShortName);
@@ -371,7 +345,6 @@ impl From<RM_PROCESS_INFO> for AffectedApplication {
             service_name: (!service_name.is_empty()).then_some(service_name),
             process_id: process.Process.dwProcessId,
             kind: process.ApplicationType.into(),
-            status: ApplicationStatus(process.AppStatus),
             terminal_session_id: (process.TSSessionId != u32::MAX).then_some(process.TSSessionId),
             restartable: process.bRestartable != 0,
         }

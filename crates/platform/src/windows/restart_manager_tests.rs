@@ -17,7 +17,7 @@ use windows_sys::Win32::System::RestartManager::{
 };
 
 use crate::windows::restart_manager::{
-    Api, ApplicationKind, Operation, RestartManagerError, RestartManagerSession, Session,
+    Api, ApplicationKind, Operation, RestartManagerError, RestartManagerSession, Session, SystemApi,
 };
 use crate::windows::self_update::discard_previous;
 
@@ -356,7 +356,7 @@ fn a_loaded_dll_is_reported_and_old_copy_cleans_up_after_exit() {
 
     assert!(ready, "child process loaded the isolated DLL");
 
-    let usage = RestartManagerSession::for_files(&[&target])
+    let usage = RestartManagerSession::for_files(SystemApi, &[&target])
         .unwrap()
         .file_usage()
         .unwrap();

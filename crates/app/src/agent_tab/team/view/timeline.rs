@@ -1,6 +1,7 @@
-use std::collections::{BTreeMap, HashMap};
-
-use gpui::Context;
+use crate::agent_tab::team::TeamRuntime;
+use crate::agent_tab::team::view::TeamPane;
+use crate::agent_tab::transcript::{TranscriptAttribution, TranscriptView};
+use gpui::{Context, Entity};
 use nmt_agent::chat::Item;
 use nmt_agent::team::attempt::{Attempt, AttemptState, BudgetScope};
 use nmt_agent::team::budget::TurnPurpose;
@@ -10,9 +11,7 @@ use nmt_agent::team::room::Room;
 use nmt_agent::transcript::TranscriptEntry;
 use nmt_agent::transcript::conversation::EntryMetadata;
 use rust_i18n::t;
-
-use crate::agent_tab::team::view::TeamPane;
-use crate::agent_tab::transcript::TranscriptAttribution;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(PartialEq)]
 pub(super) struct TimelineRow {
@@ -23,9 +22,20 @@ pub(super) struct TimelineRow {
     cwd: Option<String>,
 }
 
-impl TeamPane {
-    pub(super) fn sync_timeline(&mut self, cx: &mut Context<Self>) {
-        let runtime = self.runtime.read(cx);
+#[derive(Default)]
+pub(super) struct TimelineMirror {
+    pub(super) rows: Vec<TimelineRow>,
+    revision: Option<u64>,
+}
+
+impl TimelineMirror {
+    pub(super) fn sync_timeline(
+        &mut self,
+        runtime: &Entity<TeamRuntime>,
+        transcript: &Entity<TranscriptView>,
+        cx: &mut Context<TeamPane>,
+    ) {
+        let runtime = runtime.read(cx);
         let mut live = BTreeMap::new();
 
         for host in runtime.hosts.values() {
@@ -54,7 +64,7 @@ impl TeamPane {
             }
         }
 
-        let revision = runtime.session.revision();
+        let revision = runtime.session.store().revision();
 
         if self.revision == Some(revision) {
             for (id, text) in live {
@@ -76,7 +86,7 @@ impl TeamPane {
                     questions: None,
                 };
 
-                self.transcript.update(cx, |transcript, cx| {
+                transcript.update(cx, |transcript, cx| {
                     transcript.conversation.borrow_mut().merge_completed(&item);
                     transcript.sync_content();
 
@@ -136,7 +146,7 @@ impl TeamPane {
             })
             .collect();
 
-        self.transcript.update(cx, |transcript, cx| {
+        transcript.update(cx, |transcript, cx| {
             transcript.show_attributed_entries(entries, attribution, first, cx)
         });
 

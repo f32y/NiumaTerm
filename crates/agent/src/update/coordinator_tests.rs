@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 use std::{env, process, thread};
 
-use crate::update::{DiscoverySupport, VendorUpdateResult, *};
+use crate::update::{DiscoverySupport, *};
 
 struct FakeMaintenance {
     provider: ProviderKind,
@@ -30,7 +30,7 @@ impl ProviderMaintenance for LockedMaintenance {
         })
     }
 
-    fn update(&self, _: &AgentCli) -> Result<VendorUpdateResult, UpdateError> {
+    fn update(&self, _: &AgentCli) -> Result<String, UpdateError> {
         Err(UpdateError::new(
             UpdateErrorKind::ExternalLock,
             "provider files are locked",
@@ -58,12 +58,10 @@ impl ProviderMaintenance for FakeMaintenance {
         })
     }
 
-    fn update(&self, _: &AgentCli) -> Result<VendorUpdateResult, UpdateError> {
+    fn update(&self, _: &AgentCli) -> Result<String, UpdateError> {
         self.updates.fetch_add(1, Ordering::SeqCst);
 
-        Ok(VendorUpdateResult {
-            diagnostic: "updated".into(),
-        })
+        Ok("updated".into())
     }
 }
 

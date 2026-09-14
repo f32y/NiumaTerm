@@ -24,8 +24,8 @@ use serde_json::Value;
 use crate::background_task::replace_text;
 use crate::json::text_field;
 use crate::workflow::{
-    RestoredWorkflowRun, WorkflowAgent, WorkflowAgentState, WorkflowPhase, WorkflowRefresh,
-    WorkflowRun, WorkflowRunState, WorkflowSnapshot,
+    WorkflowAgent, WorkflowAgentState, WorkflowPhase, WorkflowRefresh, WorkflowRun,
+    WorkflowRunState, WorkflowSnapshot,
 };
 
 /// Reduces the Claude stream into workflow runs. Mirrors the shape of the
@@ -236,16 +236,16 @@ impl ClaudeWorkflows {
 
     /// Fold restored runs of a resumed session in. A run the live stream has
     /// already reported keeps its live state.
-    pub(crate) fn merge_restored(&mut self, restored: Vec<RestoredWorkflowRun>) -> bool {
+    pub(crate) fn merge_restored(&mut self, restored: Vec<WorkflowRun>) -> bool {
         let mut changed = false;
 
         for run in restored {
-            if self.runs.contains_key(&run.run.task_id) {
+            if self.runs.contains_key(&run.task_id) {
                 continue;
             }
 
-            self.order.push(run.run.task_id.clone());
-            self.runs.insert(run.run.task_id.clone(), run.run);
+            self.order.push(run.task_id.clone());
+            self.runs.insert(run.task_id.clone(), run);
             changed = true;
         }
 

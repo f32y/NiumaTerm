@@ -20,7 +20,7 @@ use std::time::Duration;
 use gpui::{AnyWindowHandle, App, AsyncApp, Global, Window};
 use nmt_config::update::UpdateChannel;
 use nmt_platform::windows::restart_manager::{
-    AffectedApplication, FileUsage, RestartManagerError, RestartManagerSession,
+    AffectedApplication, FileUsage, RestartManagerError, RestartManagerSession, SystemApi,
 };
 use nmt_platform::windows::window::show_error_dialog;
 use nmt_version::Version;
@@ -286,7 +286,7 @@ pub(crate) fn inspect_file_users(cx: &mut App) {
 }
 
 fn file_usage(path: &Path) -> Result<FileUsage, RestartManagerError> {
-    RestartManagerSession::for_files(&[path])?.file_usage()
+    RestartManagerSession::for_files(SystemApi, &[path])?.file_usage()
 }
 
 fn finish_file_use_inspection(result: Result<FileUsage, RestartManagerError>, cx: &mut App) {
@@ -419,7 +419,11 @@ fn fail_install(error: InstallError, cx: &mut App) {
     cx.refresh_windows();
 }
 
-trait FileUserSession {
+trait FileUserSession: Send {
+    fn open(path: &Path) -> Result<Self, RestartManagerError>
+    where
+        Self: Sized;
+
     fn file_usage(&self) -> Result<FileUsage, RestartManagerError>;
 
     fn shutdown(&self) -> Result<(), RestartManagerError>;
@@ -428,6 +432,10 @@ trait FileUserSession {
 }
 
 impl FileUserSession for RestartManagerSession {
+    fn open(path: &Path) -> Result<Self, RestartManagerError> {
+        RestartManagerSession::for_files(SystemApi, &[path])
+    }
+
     fn file_usage(&self) -> Result<FileUsage, RestartManagerError> {
         RestartManagerSession::file_usage(self)
     }
@@ -441,27 +449,11 @@ impl FileUserSession for RestartManagerSession {
     }
 }
 
-trait FileUserSessionSource {
-    type Session: FileUserSession;
-
-    fn open(&self, path: &Path) -> Result<Self::Session, RestartManagerError>;
-}
-
-struct SystemSessionSource;
-
-impl FileUserSessionSource for SystemSessionSource {
-    type Session = RestartManagerSession;
-
-    fn open(&self, path: &Path) -> Result<Self::Session, RestartManagerError> {
-        RestartManagerSession::for_files(&[path])
-    }
-}
-
-enum ClosePreparation<S> {
+enum ClosePreparation {
     Clear,
 
     Released {
-        session: S,
+        session: Box<dyn FileUserSession>,
         applications: Vec<AffectedApplication>,
     },
 
@@ -481,7 +473,7 @@ pub(crate) fn close_file_users(cx: &mut App) {
     cx.spawn(async move |cx| {
         let prepared = cx
             .background_executor()
-            .spawn(async move { prepare_close_with(&SystemSessionSource, &dll) })
+            .spawn(async move { prepare_close_with::<RestartManagerSession>(&dll) })
             .await;
 
         on_close_prepared(prepared, cx);
@@ -489,7 +481,7 @@ pub(crate) fn close_file_users(cx: &mut App) {
     .detach();
 }
 
-fn on_close_prepared(prepared: ClosePreparation<RestartManagerSession>, cx: &mut AsyncApp) {
+fn on_close_prepared(prepared: ClosePreparation, cx: &mut AsyncApp) {
     match prepared {
         ClosePreparation::Clear => {
             cx.update(continue_install);
@@ -521,11 +513,11 @@ fn on_close_prepared(prepared: ClosePreparation<RestartManagerSession>, cx: &mut
     }
 }
 
-fn prepare_close_with<S>(source: &S, path: &Path) -> ClosePreparation<S::Session>
+fn prepare_close_with<S>(path: &Path) -> ClosePreparation
 where
-    S: FileUserSessionSource,
+    S: FileUserSession + 'static,
 {
-    let session = match source.open(path) {
+    let session = match S::open(path) {
         Ok(session) => session,
 
         Err(error) => {
@@ -584,12 +576,12 @@ where
     }
 
     ClosePreparation::Released {
-        session,
+        session: Box::new(session),
         applications,
     }
 }
 
-fn check_failed_prompt<S>() -> ClosePreparation<S> {
+fn check_failed_prompt() -> ClosePreparation {
     ClosePreparation::Prompt(FileUsePrompt {
         reason: FileUsePromptReason::CheckFailed,
         applications: Vec::new(),

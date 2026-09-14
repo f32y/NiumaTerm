@@ -1,11 +1,12 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::sync::Arc;
-
 use gpui::SharedString;
 use nmt_config::colors::ColorRgb;
 use nmt_terminal::ansi::kitty_virtual::PLACEHOLDER;
+use nmt_terminal::ghostty::{CellText, CellWide, SnapshotStyle, Underline};
 use nmt_terminal::terminal::square::Wide;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::iter;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct TerminalLine(Arc<TerminalLineData>);
@@ -208,5 +209,98 @@ fn hash_line(text: &str, runs: &[StyleRun]) -> u64 {
 impl From<LineBuilder> for TerminalLine {
     fn from(value: LineBuilder) -> Self {
         line_from_parts(value.text, value.cells, value.runs)
+    }
+}
+
+/// Builds one display line from an engine row visit (frozen-block row or
+/// active-grid history row): every column contributes a char (gaps become
+/// NBSP), spacer cells are dropped. Display conventions (wide placeholder,
+/// run merging) come from the shared `LineBuilder`, so frozen rows shape and
+/// paint exactly like live ones.
+#[derive(Default)]
+pub(crate) struct EngineRowBuilder {
+    line: LineBuilder,
+    col: u16,
+}
+
+impl EngineRowBuilder {
+    pub(crate) fn push(
+        &mut self,
+        x: u16,
+        cell_text: CellText,
+        wide: CellWide,
+        style: &SnapshotStyle,
+        default_fg: TerminalColor,
+    ) {
+        use nmt_terminal::ghostty::CellWide;
+
+        match wide {
+            CellWide::SpacerTail | CellWide::SpacerHead => return,
+            CellWide::Narrow | CellWide::Wide => {}
+        }
+
+        let default_style = StyleRun {
+            len: 0,
+            fg: default_fg,
+            bold: false,
+            italic: false,
+            underline: false,
+            strikethrough: false,
+        };
+
+        while self.col < x {
+            self.line
+                .push_segment(iter::once('\u{00a0}'), default_style, false);
+
+            self.col += 1;
+        }
+
+        let (fg, bg) = if style.inverse {
+            (
+                style.bg.unwrap_or(default_fg),
+                Some(style.fg.unwrap_or(default_fg)),
+            )
+        } else {
+            (style.fg.unwrap_or(default_fg), style.bg)
+        };
+
+        let is_wide = wide == CellWide::Wide;
+
+        let display: String = if cell_text.is_empty() {
+            "\u{00a0}".into()
+        } else {
+            cell_text.replace([' ', '\t'], "\u{00a0}")
+        };
+
+        self.line.push_segment(
+            display.chars(),
+            StyleRun {
+                len: 0,
+                fg,
+                bold: style.bold,
+                italic: style.italic,
+                underline: style.underline != Underline::None,
+                strikethrough: style.strikethrough,
+            },
+            is_wide,
+        );
+
+        self.line.push_cell(TerminalCell {
+            col: x,
+            ch: cell_text.chars().next().unwrap_or('\0'),
+            style_id: 0,
+            background: bg,
+            wide: if is_wide { Wide::Wide } else { Wide::Narrow },
+            extras: cell_text.chars().skip(1).collect(),
+            has_cursor: false,
+        });
+
+        self.col = x + if is_wide { 2 } else { 1 };
+    }
+}
+
+impl From<EngineRowBuilder> for TerminalLine {
+    fn from(value: EngineRowBuilder) -> Self {
+        value.line.into()
     }
 }

@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,14 +16,13 @@ use parking_lot::Mutex;
 use crate::update::file_users::display_names;
 use crate::update::releases::{CheckError, Release, select, select_latest, supersedes};
 use crate::update::{
-    AppUpdate, ClosePreparation, FileUsePromptReason, FileUserSession, FileUserSessionSource,
-    InstallError, PendingInstall, Status, cancel_install, classify_file_usage, continue_install,
-    install, prepare_close_with, recovery_application_names, status,
+    AppUpdate, ClosePreparation, FileUsePromptReason, FileUserSession, InstallError,
+    PendingInstall, Status, cancel_install, classify_file_usage, continue_install, install,
+    prepare_close_with, recovery_application_names, status,
 };
 
-#[derive(Clone)]
-struct ScriptedSessionSource {
-    state: Arc<Mutex<CloseState>>,
+thread_local! {
+    static NEXT_SESSION: RefCell<Option<Arc<Mutex<CloseState>>>> = const { RefCell::new(None) };
 }
 
 struct ScriptedSession {
@@ -35,19 +36,15 @@ struct CloseState {
     events: Vec<&'static str>,
 }
 
-impl FileUserSessionSource for ScriptedSessionSource {
-    type Session = ScriptedSession;
-
-    fn open(&self, _path: &Path) -> Result<Self::Session, RestartManagerError> {
-        self.state.lock().events.push("open");
-
-        Ok(ScriptedSession {
-            state: self.state.clone(),
-        })
-    }
-}
-
 impl FileUserSession for ScriptedSession {
+    fn open(_path: &Path) -> Result<Self, RestartManagerError> {
+        let state = NEXT_SESSION.with_borrow_mut(|next| next.take().expect("configured session"));
+
+        state.lock().events.push("open");
+
+        Ok(Self { state })
+    }
+
     fn file_usage(&self) -> Result<FileUsage, RestartManagerError> {
         let mut state = self.state.lock();
 
@@ -122,7 +119,6 @@ fn application(name: &str, process_id: u32, restartable: bool) -> AffectedApplic
         service_name: None,
         process_id,
         kind: ApplicationKind::Explorer,
-        status: 0.into(),
         terminal_session_id: Some(1),
         restartable,
     }
@@ -435,11 +431,9 @@ fn close_preparation_uses_a_fresh_session_application_list() {
         events: Vec::new(),
     }));
 
-    let source = ScriptedSessionSource {
-        state: state.clone(),
-    };
+    NEXT_SESSION.with_borrow_mut(|next| *next = Some(state.clone()));
 
-    let result = prepare_close_with(&source, Path::new(r"C:\NiumaTerm\dll"));
+    let result = prepare_close_with::<ScriptedSession>(Path::new(r"C:\NiumaTerm\dll"));
 
     match result {
         ClosePreparation::Released { applications, .. } => {
@@ -473,11 +467,9 @@ fn failed_shutdown_restarts_before_remaining_users_are_reported() {
         events: Vec::new(),
     }));
 
-    let source = ScriptedSessionSource {
-        state: state.clone(),
-    };
+    NEXT_SESSION.with_borrow_mut(|next| *next = Some(state.clone()));
 
-    let result = prepare_close_with(&source, Path::new(r"C:\NiumaTerm\dll"));
+    let result = prepare_close_with::<ScriptedSession>(Path::new(r"C:\NiumaTerm\dll"));
 
     match result {
         ClosePreparation::Prompt(prompt) => {

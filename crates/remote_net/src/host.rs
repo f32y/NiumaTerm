@@ -23,8 +23,7 @@ use tracing::{info, warn};
 use crate::channel::reconnect_delay;
 use crate::protocol::{
     CONNECT_MODE_IK, CONNECT_MODE_PAIR, ClientBound, Frame, Handshake, HostBound, MAX_DATA_LEN,
-    PairingCode, ProtocolSessionSnapshot, SecureChannel, StaticKeypair, derive_host_id,
-    new_pairing_token,
+    PairingCode, SecureChannel, StaticKeypair, derive_host_id, new_pairing_token,
 };
 use crate::{
     AuthorizedDevices, KeyStoreError, NetError, RelayControlMessage, WsStream, hex_encode,
@@ -693,7 +692,7 @@ fn handle_frame(
                 HostBound::Attach { session_id } => {
                     match shared.hub.attach(SessionId(session_id)) {
                         Ok(subscription) => {
-                            let snapshot: ProtocolSessionSnapshot = subscription.snapshot().into();
+                            let snapshot = subscription.snapshot().clone();
 
                             let bridge = match SubscriptionBridge::spawn(
                                 subscription,

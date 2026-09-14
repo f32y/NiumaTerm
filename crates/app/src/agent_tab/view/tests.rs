@@ -1,23 +1,18 @@
-use std::time::Duration;
-
+use crate::agent_tab::capabilities::AgentCapabilities as _;
+use crate::agent_tab::composer::prompt_with_response_annotations;
+use crate::agent_tab::session::UpdateSuspension;
+use crate::agent_tab::thread_controls::effort::effort_gauge_step;
+use crate::agent_tab::{
+    AgentKind, ComposerEnterBehavior, LastResponseTone, SessionHistoryUi, UpdateOverlayPhase,
+    composer_enter_behavior, composer_stats_label, last_response_tone, multi_root_notice,
+    queued_message_label, update_overlay_phase,
+};
 use gpui::{point, px};
 use gpui_component::input::Enter;
 use nmt_agent::chat::QueuedPrompt;
 use nmt_agent::{AgentWorkspace, MultiRootAccess};
 use nmt_config::system::NewlineShortcut;
-
-use crate::agent_tab::capabilities::AgentCapabilities as _;
-use crate::agent_tab::composer::prompt_with_response_annotations;
-use crate::agent_tab::session::UpdateSuspension;
-use crate::agent_tab::thread_controls::effort::effort_gauge_step;
-use crate::agent_tab::view::banners::{
-    UpdateOverlayPhase, composer_stats_label, multi_root_notice, update_overlay_phase,
-};
-use crate::agent_tab::view::history::queued_message_label;
-use crate::agent_tab::view::{
-    ComposerEnterBehavior, LastResponseTone, composer_enter_behavior, last_response_tone,
-};
-use crate::agent_tab::{AgentKind, SessionHistoryUi};
+use std::time::Duration;
 
 #[test]
 fn queued_message_label_flattens_a_multi_line_prompt() {

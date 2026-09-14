@@ -2,7 +2,7 @@ use std::{cell, path};
 
 use tracing::warn;
 
-use crate::event::{self, EventListener, TerminalEvent, WindowId};
+use crate::event::{self, EventListener, TerminalEvent};
 use crate::ghostty::{self, GhosttyTerminal, mode};
 use crate::prompt_sniffer::SnifferMark;
 
@@ -36,7 +36,6 @@ pub(super) fn apply_sniffer_mark(
     launch_cwd: &mut Option<Option<path::PathBuf>>,
     mark_seq: &mut u64,
     event_proxy: &impl EventListener,
-    window_id: WindowId,
     engine_blocks: bool,
     mut mark: SnifferMark<'_>,
 ) {
@@ -47,11 +46,11 @@ pub(super) fn apply_sniffer_mark(
         // number is registered here, for metadata
         // marriage at the eventual finish.
         *mark_seq += 1;
-        event_proxy.send_event(TerminalEvent::PromptStarted, window_id);
+        event_proxy.send_event(TerminalEvent::PromptStarted);
     }
 
     if let Some(report) = mark.progress.take() {
-        event_proxy.send_event(TerminalEvent::ProgressReport(report), window_id);
+        event_proxy.send_event(TerminalEvent::ProgressReport(report));
     }
 
     if let Some(mut start) = mark.command_started.take() {
@@ -64,7 +63,7 @@ pub(super) fn apply_sniffer_mark(
 
         *launch_cwd = Some(cwd);
 
-        event_proxy.send_event(TerminalEvent::CommandStarted(start), window_id);
+        event_proxy.send_event(TerminalEvent::CommandStarted(start));
     }
 
     if let Some(mut cmd) = mark.command_finished.take() {
@@ -113,7 +112,7 @@ pub(super) fn apply_sniffer_mark(
             };
 
             if !events.is_empty() {
-                event_proxy.send_event(TerminalEvent::BlockBatch(events), window_id);
+                event_proxy.send_event(TerminalEvent::BlockBatch(events));
             }
 
             engine.write_vt(BLOCK_BOUNDARY_CLEAR);
@@ -122,7 +121,7 @@ pub(super) fn apply_sniffer_mark(
         // Classic mode keeps one continuous grid:
         // no finish, no boundary clear — plain single
         // grid; only the metadata event fires.
-        event_proxy.send_event(TerminalEvent::CommandFinished(cmd), window_id);
+        event_proxy.send_event(TerminalEvent::CommandFinished(cmd));
     }
 
     if mark.history_cleared && mark.trusted && engine_blocks {
@@ -137,10 +136,9 @@ pub(super) fn apply_sniffer_mark(
 
             engine_cell.borrow_mut().clear_blocks();
 
-            event_proxy.send_event(
-                TerminalEvent::BlockBatch(vec![event::BlockEvent::HistoryCleared]),
-                window_id,
-            );
+            event_proxy.send_event(TerminalEvent::BlockBatch(vec![
+                event::BlockEvent::HistoryCleared,
+            ]));
         }
     }
 }

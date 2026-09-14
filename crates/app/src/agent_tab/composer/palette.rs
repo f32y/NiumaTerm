@@ -1,26 +1,11 @@
-use gpui::prelude::*;
-use gpui::{
-    AnyElement, Context, FontWeight, Pixels, ScrollStrategy, SharedString, Window, div, px,
-};
-use gpui_component::{ActiveTheme as _, h_flex, v_flex};
-use nmt_agent::chat::{
-    ForkCheckpoint, SkillInfo, SlashCommandArguments, SlashCommandInfo, SlashCommandRunPolicy,
-    SlashCommandSource,
-};
+use crate::agent_tab::AgentPane;
+use crate::agent_tab::composer::{CommandFeedback, CommandFeedbackKind, RewindAction};
+use gpui::{Context, Pixels, ScrollHandle, SharedString, px};
+use nmt_agent::chat::{ForkCheckpoint, SkillCatalog, SkillInfo, SkillReference, SlashCommandInfo};
 use nmt_agent::claude_code::sessions;
-use nmt_agent::session::branch::BranchView;
-use rust_i18n::t;
-
-use crate::agent_tab::capabilities::AgentCapabilities as _;
-use crate::agent_tab::commands::{
-    PaletteCatalogEntry, PaletteDirection, filter_palette_catalog, filter_skill_catalog,
-    move_palette_selection, parse_skill_prefix, parse_slash_command, prepare_skill_selection,
-};
-use crate::agent_tab::composer::{CommandFeedbackKind, RewindAction};
-use crate::agent_tab::input_history::InputHistoryDirection;
-use crate::agent_tab::session::Status;
-use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
-use crate::agent_tab::{AgentPane, RecentSessionsMode};
+use nmt_agent::session::commands::CommandQueue;
+use std::rc::Rc;
+use std::time::Duration;
 
 /// Tallest the palette grows before its own rows scroll: nine rows and the
 /// note under them. The transcript reads this as the height the picker covers
@@ -56,726 +41,145 @@ pub(crate) struct PaletteModel {
     pub(crate) note: Option<SharedString>,
 }
 
-#[derive(Clone, Copy)]
-pub(crate) enum PaletteControl {
-    Previous,
-    Next,
-    Activate,
-    Complete,
-    Dismiss,
+/// The merged `/` catalog, held so it is not rebuilt from the local, adapter,
+/// and provider lists on every frame the palette paints. `language` is part of
+/// the key because local entries carry translated descriptions and the user can
+/// switch language while a pane is open.
+pub(crate) struct CachedCatalog {
+    pub(crate) language: String,
+    pub(crate) commands: Rc<[SlashCommandInfo]>,
 }
 
-impl PaletteControl {
-    /// Which way this control moves a highlighted row, or `None` where it moves
-    /// none. Several lists take the same keys — the command palette, the recent
-    /// conversations, the rewind and fork pickers — so the reading lives here
-    /// rather than beside each list that acts on it.
-    fn direction(self) -> Option<PaletteDirection> {
-        match self {
-            PaletteControl::Previous => Some(PaletteDirection::Previous),
-            PaletteControl::Next => Some(PaletteDirection::Next),
-            PaletteControl::Activate | PaletteControl::Complete | PaletteControl::Dismiss => None,
-        }
+/// Slash-command palette, skill picker, and pending-command state.
+#[derive(Default)]
+pub(crate) struct SlashPalette {
+    /// Provider discovery is a replacement snapshot; adapter/local entries
+    /// remain available independently of whether discovery has arrived.
+    pub(crate) provider_commands: Vec<SlashCommandInfo>,
+
+    pub(crate) provider_commands_ready: bool,
+
+    /// Derived from `provider_commands`; every write to that list must drop
+    /// this, or the palette keeps offering commands the harness has withdrawn.
+    pub(crate) catalog: Option<CachedCatalog>,
+
+    /// `None` means Codex discovery is still loading. A populated catalog can
+    /// contain both usable skills and non-fatal per-file errors.
+    pub(crate) skill_catalog: Option<SkillCatalog>,
+
+    /// Exact picker identity retained while the composer keeps its `$name`
+    /// token. It is validated against `skill_catalog` before every send.
+    pub(crate) skill_binding: Option<SkillReference>,
+
+    pub(crate) selected: usize,
+    pub(crate) dismissed: bool,
+    pub(crate) scroll: ScrollHandle,
+    pub(crate) feedback: Option<CommandFeedback>,
+
+    /// Order of the latest feedback shown. A delayed dismissal compares
+    /// against it so it can only retire the message it was started for.
+    pub(crate) feedback_seq: u64,
+}
+
+impl SlashPalette {
+    /// Provider commands and their cached catalog belong to one session, so
+    /// resetting discovery must invalidate both together.
+    pub(crate) fn reset_discovery(&mut self, commands_ready: bool) {
+        self.provider_commands.clear();
+        self.provider_commands_ready = commands_ready;
+        self.catalog = None;
+        self.selected = 0;
+        self.dismissed = false;
     }
-}
 
-impl AgentPane {
-    pub(crate) fn open_recent_sessions(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.is_command_busy() {
-            self.palette.set_feedback(
-                CommandFeedbackKind::Error,
-                SharedString::from(t!("agent-composer-resume-idle-only")),
-                cx,
-            );
+    /// Stand down for text the composer did not type. A recalled entry is a
+    /// whole message, so a skill bound to what was there no longer applies and
+    /// the palette must not reopen on the leading `/` the entry may carry.
+    pub(crate) fn reset_for_recall(&mut self) {
+        self.skill_binding = None;
+        self.dismissed = true;
+        self.selected = 0;
+    }
 
-            return false;
-        }
+    /// Show a one-line result above the composer, replacing whatever was
+    /// there.
+    pub(crate) fn set_feedback(
+        &mut self,
+        kind: CommandFeedbackKind,
+        message: impl Into<SharedString>,
+        cx: &mut Context<AgentPane>,
+    ) {
+        self.feedback_seq += 1;
 
-        let rows = self
-            .history_ui
-            .data
-            .pending
-            .unwrap_or(self.history_ui.data.sessions.len());
+        let seq = self.feedback_seq;
 
-        if rows == 0 {
-            self.history_ui.mode = RecentSessionsMode::Hidden;
-
-            self.palette.set_feedback(
-                CommandFeedbackKind::Notice,
-                SharedString::from(t!("agent-composer-no-recent-sessions")),
-                cx,
-            );
-
-            return true;
-        }
-
-        self.history_ui.mode = RecentSessionsMode::Open;
-        self.history_ui.selected = 0;
-
-        // A list opened from a command was opened without the pointer, and a
-        // strip that was on screen the last time the pointer crossed it has
-        // no way to report that the pointer has since left.
-        self.history_ui.pointer_inside = false;
-        self.history_ui.pointer = None;
-        self.palette.feedback = None;
+        self.feedback = Some(CommandFeedback {
+            kind,
+            message: message.into(),
+        });
 
         cx.notify();
 
-        true
-    }
-
-    /// Rows for a skill query, shared by the `/` picker stage and the `$`
-    /// prefix. Discovery runs in the background, so a missing catalog is a
-    /// loading state rather than an empty result.
-    fn skill_palette_model(&self, query: &str) -> PaletteModel {
-        let Some(skill_catalog) = self.palette.skill_catalog.as_ref() else {
-            return PaletteModel {
-                rows: Vec::new(),
-                note: Some(SharedString::from(t!(
-                    "agent-composer-skill-discovery-loading"
-                ))),
-            };
-        };
-
-        let rows = filter_skill_catalog(&skill_catalog.skills, query)
-            .into_iter()
-            .map(|skill| PaletteRow {
-                label: format!("${}", skill.name).into(),
-                description: SharedString::new(&skill.description),
-                hint: Some(SharedString::new(&skill.scope)),
-                disabled_reason: self.skill_disabled_reason(&skill),
-                action: PaletteAction::Skill(skill),
-            })
-            .collect::<Vec<_>>();
-
-        let note = if rows.is_empty() && !skill_catalog.errors.is_empty() {
-            Some(SharedString::new(&skill_catalog.errors[0]))
-        } else if rows.is_empty() && query.is_empty() {
-            Some(SharedString::from(t!("agent-composer-no-skills")))
-        } else if rows.is_empty() {
-            Some(SharedString::from(t!("agent-composer-no-matching-skills")))
-        } else {
-            skill_catalog.errors.first().map(|error| {
-                t!("agent-composer-skill-load-partial", error = error)
-                    .into_owned()
-                    .into()
-            })
-        };
-
-        PaletteModel { rows, note }
-    }
-
-    pub(crate) fn palette_model(&mut self, cx: &Context<Self>) -> Option<PaletteModel> {
-        match (&self.session.borrow().branch).into() {
-            view @ (BranchView::LoadingRewind
-            | BranchView::RewindCheckpoints(_)
-            | BranchView::RewindAction(_, _)) => return self.rewind_palette_model(view),
-
-            view @ (BranchView::LoadingFork | BranchView::ForkCheckpoints(_)) => {
-                return self.fork_palette_model(view);
-            }
-
-            BranchView::Working => return None,
-            BranchView::Idle => {}
+        if !feedback_is_transient(kind) {
+            return;
         }
 
-        if self.palette.dismissed {
-            return None;
-        }
+        // A notice acknowledges a request before anything visible happens. A
+        // command that then runs a whole turn fills the transcript with its
+        // real answer, and the acknowledgement above the composer becomes a
+        // line the user cannot dismiss, because only typing clears it.
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(FEEDBACK_LIFETIME).await;
 
-        let (text, cursor) = {
-            let input = self.input.read(cx);
-            let document = input.text();
+            let _ = this.update(cx, |this, cx| {
+                if this.palette.feedback_seq == seq {
+                    this.palette.feedback = None;
 
-            // Reached from `render`, so this runs on every frame the pane
-            // paints. Only a document opening with one of the two picker
-            // sigils can produce a model, and its first character settles that
-            // without walking the rope to copy the whole document out.
-            if !matches!(document.chars().next(), Some('/' | '$')) {
-                return None;
-            }
-
-            (document.to_string(), input.cursor())
-        };
-
-        if self.kind.caps().skill_references
-            && let Some(query) = parse_skill_prefix(&text)
-        {
-            return Some(self.skill_palette_model(&query));
-        }
-
-        let parsed = parse_slash_command(&text)?;
-        let catalog = self.command_catalog();
-
-        // A harness with `$name` skill references reaches them that way.
-        // Listing them under `/` too is a convenience for users who expect one
-        // command key, so it follows the compatibility setting as well. Where
-        // `/name` is instead the only way to reach a skill, the listing is not
-        // a convenience and follows nothing.
-        let caps = self.kind.caps();
-
-        let slash_skills = caps.slash_skills_are_prompts
-            || (caps.skill_references && cx.global::<AgentSettings>().codex_skill_command_compat);
-
-        if parsed.has_argument_separator {
-            let command = catalog.iter().find(|command| command.name == parsed.name)?;
-
-            if command.arguments == SlashCommandArguments::Skills {
-                let query = parsed.arguments.trim().to_ascii_lowercase();
-
-                return Some(self.skill_palette_model(&query));
-            }
-
-            if command.arguments != SlashCommandArguments::Choices {
-                return None;
-            }
-
-            let query = parsed.arguments.to_ascii_lowercase();
-
-            let rows = self
-                .command_choices(&command.name)
-                .into_iter()
-                .filter(|(value, label)| {
-                    query.is_empty()
-                        || value.to_ascii_lowercase().contains(&query)
-                        || label.to_ascii_lowercase().contains(&query)
-                })
-                .map(|(value, label)| PaletteRow {
-                    description: SharedString::new(&value),
-                    label: label.into(),
-                    hint: None,
-                    disabled_reason: None,
-                    action: PaletteAction::Choice {
-                        command: command.name.clone(),
-                        value,
-                    },
-                })
-                .collect::<Vec<_>>();
-
-            return Some(PaletteModel {
-                note: rows
-                    .is_empty()
-                    .then(|| SharedString::from(t!("agent-composer-no-matching-values"))),
-                rows,
+                    cx.notify();
+                }
             });
-        }
-
-        // Moving the caret into later prose must not turn an ordinary edit
-        // into palette navigation; only the first slash token owns the keys.
-        if cursor > 1 + parsed.name.len() {
-            return None;
-        }
-
-        let skills: &[SkillInfo] = if slash_skills {
-            self.palette
-                .skill_catalog
-                .as_ref()
-                .map(|catalog| catalog.skills.as_slice())
-                .unwrap_or_default()
-        } else {
-            &[]
-        };
-
-        let rows = filter_palette_catalog(&catalog, skills, &parsed.name)
-            .into_iter()
-            .map(|entry| match entry {
-                PaletteCatalogEntry::Command(command) => {
-                    // A local command runs against the pane and stays available
-                    // whatever the harness is doing; anything the harness owns
-                    // needs a session that has finished starting and not ended.
-                    let disabled_reason = if command.run_policy == SlashCommandRunPolicy::IdleOnly
-                        && self.is_command_busy()
-                    {
-                        Some(SharedString::from(t!("agent-composer-available-when-idle")))
-                    } else if command.source == SlashCommandSource::Local {
-                        None
-                    } else {
-                        match self.session.borrow().runtime.status() {
-                            Status::Starting => {
-                                Some(SharedString::from(t!("agent-composer-agent-starting")))
-                            }
-
-                            Status::Exited => {
-                                Some(SharedString::from(t!("agent-composer-agent-exited")))
-                            }
-
-                            _ => None,
-                        }
-                    };
-
-                    PaletteRow {
-                        label: format!("/{}", command.name).into(),
-                        description: SharedString::new(&command.description),
-                        hint: command.argument_hint.as_deref().map(SharedString::new),
-                        disabled_reason,
-                        action: PaletteAction::Command(command.clone()),
-                    }
-                }
-
-                PaletteCatalogEntry::Skill(skill) => PaletteRow {
-                    label: format!("/{}", skill.name).into(),
-                    description: SharedString::new(&skill.description),
-                    hint: Some(
-                        t!("agent-composer-skill-scope", scope = &skill.scope)
-                            .into_owned()
-                            .into(),
-                    ),
-                    disabled_reason: self.skill_disabled_reason(skill),
-                    action: PaletteAction::Skill(skill.clone()),
-                },
-            })
-            .collect::<Vec<_>>();
-
-        let note = if rows.is_empty() {
-            if slash_skills && self.palette.skill_catalog.is_none() {
-                Some(SharedString::from(t!(
-                    "agent-composer-skill-discovery-loading"
-                )))
-            } else if slash_skills
-                && self
-                    .palette
-                    .skill_catalog
-                    .as_ref()
-                    .is_some_and(|catalog| !catalog.errors.is_empty())
-            {
-                self.palette
-                    .skill_catalog
-                    .as_ref()
-                    .and_then(|catalog| catalog.errors.first())
-                    .map(SharedString::new)
-            } else if slash_skills {
-                Some(SharedString::from(t!(
-                    "agent-composer-no-matching-commands-skills"
-                )))
-            } else {
-                Some(SharedString::from(t!(
-                    "agent-composer-no-matching-commands"
-                )))
-            }
-        } else if self.kind.caps().async_command_discovery && !self.palette.provider_commands_ready
-        {
-            Some(SharedString::from(t!(
-                "agent-composer-claude-command-loading"
-            )))
-        } else if slash_skills && self.palette.skill_catalog.is_none() {
-            Some(SharedString::from(t!(
-                "agent-composer-skill-discovery-loading"
-            )))
-        } else if slash_skills {
-            self.palette
-                .skill_catalog
-                .as_ref()
-                .and_then(|catalog| catalog.errors.first())
-                .map(|error| {
-                    t!("agent-composer-skill-load-partial", error = error)
-                        .into_owned()
-                        .into()
-                })
-        } else {
-            None
-        };
-
-        Some(PaletteModel { rows, note })
+        })
+        .detach();
     }
 
-    pub(crate) fn handle_palette_control(
-        &mut self,
-        control: PaletteControl,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(model) = self.palette_model(cx) else {
-            // The card is answered before the recent-sessions list or the input
-            // history get a look, because the turn is blocked on it and neither
-            // of those can lead anywhere until it is.
-            if self.handle_question_control(control, cx) {
-                return;
-            }
-
-            if self.handle_recent_sessions_control(control, cx) {
-                return;
-            }
-
-            let direction = match control {
-                PaletteControl::Previous => Some(InputHistoryDirection::Older),
-                PaletteControl::Next => Some(InputHistoryDirection::Newer),
-
-                PaletteControl::Activate | PaletteControl::Complete | PaletteControl::Dismiss => {
-                    None
-                }
-            };
-
-            if direction
-                .is_some_and(|direction| self.handle_input_history_control(direction, window, cx))
-            {
-                return;
-            }
-
-            cx.propagate();
-
-            return;
-        };
-
-        cx.stop_propagation();
-
-        match control {
-            PaletteControl::Previous | PaletteControl::Next => {
-                if let Some(direction) = control.direction()
-                    && let Some(selected) =
-                        move_palette_selection(self.palette.selected, model.rows.len(), direction)
-                {
-                    self.palette.selected = selected;
-                    self.palette.scroll.scroll_to_item(self.palette.selected);
-                    self.follow_branch_selection(cx);
-
-                    cx.notify();
-                }
-            }
-
-            PaletteControl::Activate => {
-                if model.rows.is_empty() {
-                    self.submit_current_slash(window, cx);
-                } else {
-                    self.activate_palette_index(self.palette.selected, true, window, cx);
-                }
-            }
-
-            PaletteControl::Complete => {
-                self.activate_palette_index(self.palette.selected, false, window, cx);
-            }
-
-            PaletteControl::Dismiss => {
-                self.dismiss_command_palette(cx);
-            }
-        }
+    /// The message worth showing right now, if any.
+    pub(crate) fn visible_feedback(&self, commands: &CommandQueue) -> Option<&CommandFeedback> {
+        self.feedback
+            .as_ref()
+            .filter(|feedback| feedback_is_current(feedback.kind, commands.queue.is_empty()))
     }
 
-    fn dismiss_command_palette(&mut self, cx: &mut Context<Self>) {
-        if !self.cancel_branch_picker(cx) {
-            self.palette.dismissed = true;
-
-            cx.notify();
-        }
+    /// Whether the discovered skill catalog carries this name.
+    pub(crate) fn names_a_skill(&self, name: &str) -> bool {
+        self.skill_catalog
+            .as_ref()
+            .is_some_and(|catalog| catalog.skills.iter().any(|skill| skill.name == name))
     }
+}
 
-    fn handle_recent_sessions_control(
-        &mut self,
-        control: PaletteControl,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let composer_empty = self.input.read(cx).text().len() == 0;
+/// How long an acknowledgement stays before retiring itself. Long enough to
+/// read after a glance away, short enough that it does not outlive the command
+/// it describes.
+const FEEDBACK_LIFETIME: Duration = Duration::from_secs(6);
 
-        if matches!(control, PaletteControl::Complete) || !composer_empty {
-            return false;
+/// Whether a message still describes the situation. A queued message counts
+/// the command queue, and several paths empty that queue without going through
+/// the palette -- a failed spawn, an update stopping active work, a
+/// conversation reset. Deciding this where the message is shown keeps a future
+/// path from reintroducing a count of commands that are no longer waiting.
+pub(super) fn feedback_is_current(kind: CommandFeedbackKind, queue_is_empty: bool) -> bool {
+    !(kind == CommandFeedbackKind::Queued && queue_is_empty)
+}
+
+/// Whether a message is a passing acknowledgement rather than something the
+/// user still has to act on. An error stays until it is read, and a queued
+/// list describes work still waiting rather than work already accepted.
+pub(super) fn feedback_is_transient(kind: CommandFeedbackKind) -> bool {
+    match kind {
+        CommandFeedbackKind::Notice => true,
+
+        CommandFeedbackKind::Status | CommandFeedbackKind::Error | CommandFeedbackKind::Queued => {
+            false
         }
-
-        let rows = self
-            .history_ui
-            .data
-            .pending
-            .unwrap_or(self.history_ui.data.sessions.len());
-
-        if !self.history_ui.mode.is_visible(
-            self.transcript.read(cx).is_empty(),
-            composer_empty,
-            rows,
-        ) {
-            return false;
-        }
-
-        cx.stop_propagation();
-
-        match control {
-            PaletteControl::Previous | PaletteControl::Next => {
-                if let Some(direction) = control.direction()
-                    && let Some(selected) = move_palette_selection(
-                        self.history_ui.selected,
-                        self.history_ui.data.sessions.len(),
-                        direction,
-                    )
-                {
-                    self.history_ui.selected = selected;
-
-                    self.history_ui
-                        .scroll
-                        .scroll_to_item(selected, ScrollStrategy::Nearest);
-
-                    cx.notify();
-                }
-            }
-
-            PaletteControl::Activate => {
-                self.resume_session(self.history_ui.selected, cx);
-            }
-
-            PaletteControl::Dismiss => {
-                self.history_ui.mode = RecentSessionsMode::Hidden;
-
-                cx.notify();
-            }
-
-            // Completion belongs to the command palette. The guard above hands
-            // it back before the list claims the keys, so there is nothing left
-            // for it to do here.
-            PaletteControl::Complete => {}
-        }
-
-        true
-    }
-
-    /// Move the highlight to the row under the pointer without acting on it.
-    ///
-    /// Only a picker of branch points does this: there the highlight is what
-    /// the transcript follows, so pointing at a prompt has to reach it the
-    /// same way the arrow keys do. In the command palette the pointer often
-    /// rests over the list while the user types, and moving the highlight
-    /// there would change what Enter runs.
-    fn hover_palette_index(&mut self, index: usize, cx: &mut Context<Self>) {
-        if self.palette.selected == index {
-            return;
-        }
-
-        self.palette.selected = index;
-        self.follow_branch_selection(cx);
-
-        cx.notify();
-    }
-
-    pub(crate) fn activate_palette_index(
-        &mut self,
-        index: usize,
-        execute: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.binding.is_current() {
-            return;
-        }
-
-        let Some(row) = self
-            .palette_model(cx)
-            .and_then(|model| model.rows.get(index).cloned())
-        else {
-            return;
-        };
-
-        if let Some(reason) = row.disabled_reason {
-            self.palette
-                .set_feedback(CommandFeedbackKind::Error, reason, cx);
-
-            return;
-        }
-
-        let (text, can_execute) = match row.action {
-            PaletteAction::Command(command) => {
-                let needs_arguments = command.arguments != SlashCommandArguments::None;
-
-                (
-                    format!(
-                        "/{}{}",
-                        command.name,
-                        if needs_arguments { " " } else { "" }
-                    ),
-                    !needs_arguments,
-                )
-            }
-
-            PaletteAction::Choice { command, value } => (format!("/{command} {value}"), true),
-
-            // Where a skill is written into the prompt, picking one lands the
-            // token the harness will recognize and leaves the caret after it,
-            // because what follows is the request the skill serves.
-            PaletteAction::Skill(skill) if self.kind.caps().slash_skills_are_prompts => {
-                let text = format!("/{} ", skill.name);
-
-                self.input.update(cx, |input, cx| {
-                    input.set_value(text.clone(), window, cx);
-                    input.set_selected_range(text.len()..text.len(), cx);
-                });
-
-                self.palette.selected = 0;
-                self.palette.dismissed = true;
-
-                cx.notify();
-
-                return;
-            }
-
-            PaletteAction::Skill(skill) => {
-                let Ok((text, binding)) = prepare_skill_selection(&skill) else {
-                    self.palette.set_feedback(
-                        CommandFeedbackKind::Error,
-                        t!("agent-command-skill-disabled-by-codex", name = &skill.name)
-                            .into_owned(),
-                        cx,
-                    );
-
-                    return;
-                };
-
-                self.input.update(cx, |input, cx| {
-                    input.set_value(text.clone(), window, cx);
-                    input.set_selected_range(text.len()..text.len(), cx);
-                });
-
-                self.palette.skill_binding = Some(binding);
-                self.palette.selected = 0;
-                self.palette.dismissed = true;
-
-                cx.notify();
-
-                return;
-            }
-
-            PaletteAction::RewindCheckpoint(checkpoint) => {
-                let selected = {
-                    let mut guard = self.session.borrow_mut();
-                    let state = &mut *guard;
-
-                    state
-                        .branch
-                        .select_checkpoint(state.runtime.epoch(), checkpoint)
-                };
-
-                if selected {
-                    self.palette.selected = 0;
-
-                    cx.notify();
-                }
-
-                return;
-            }
-
-            PaletteAction::RewindAction(action) => {
-                self.activate_rewind_action(action, cx);
-
-                return;
-            }
-
-            PaletteAction::ForkCheckpoint(checkpoint) => {
-                self.start_conversation_branch(checkpoint, cx);
-
-                return;
-            }
-
-            PaletteAction::ForkCancel => {
-                self.cancel_fork_picker(cx);
-
-                return;
-            }
-        };
-
-        self.input.update(cx, |input, cx| {
-            input.set_value(text.clone(), window, cx);
-            input.set_selected_range(text.len()..text.len(), cx);
-        });
-
-        self.palette.selected = 0;
-
-        if execute && can_execute {
-            self.submit_current_slash(window, cx);
-        } else {
-            cx.notify();
-        }
-    }
-
-    pub(crate) fn render_command_palette(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let model = self.palette_model(cx)?;
-
-        let selected = self
-            .palette
-            .selected
-            .min(model.rows.len().saturating_sub(1));
-
-        let hover_selects = self.branch_picker_is_open();
-
-        let rows = model
-            .rows
-            .into_iter()
-            .enumerate()
-            .map(|(index, row)| {
-                let disabled = row.disabled_reason.is_some();
-                let detail = row.disabled_reason.clone().unwrap_or(row.description);
-                let background = (index == selected).then(|| cx.theme().muted.opacity(0.7));
-
-                div()
-                    .id(("agent-slash-command", index))
-                    .h(px(48.))
-                    .flex_none()
-                    .px_3()
-                    .py_1p5()
-                    .rounded(UI_RADIUS)
-                    .when_some(background, |this, color| this.bg(color))
-                    .when(disabled, |this| this.opacity(0.5))
-                    .when(!disabled, |this| {
-                        this.hover(|style| style.bg(cx.theme().muted.opacity(0.45)))
-                    })
-                    .when(hover_selects && !disabled, |this| {
-                        this.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                            if *hovered {
-                                this.hover_palette_index(index, cx);
-                            }
-                        }))
-                    })
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.activate_palette_index(index, true, window, cx)
-                    }))
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .items_center()
-                            .justify_between()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(cx.theme().foreground)
-                                    .child(row.label),
-                            )
-                            .children(row.hint.map(|hint| {
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground.opacity(0.75))
-                                    .child(hint)
-                            })),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .truncate()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(detail),
-                    )
-                    .into_any_element()
-            })
-            .collect::<Vec<_>>();
-
-        let note = model.note.map(|note| {
-            div()
-                .px_3()
-                .py_2()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground.opacity(0.75))
-                .child(note)
-        });
-
-        Some(
-            v_flex()
-                .id("agent-slash-command-palette")
-                .on_mouse_down_out(cx.listener(|this, _, _, cx| this.dismiss_command_palette(cx)))
-                .w_full()
-                .max_h(PALETTE_MAX_HEIGHT)
-                .overflow_y_scroll()
-                .track_scroll(&self.palette.scroll)
-                .p_1()
-                .rounded(UI_RADIUS)
-                .border_1()
-                .border_color(cx.theme().border)
-                .bg(cx.theme().popover)
-                .shadow_lg()
-                .children(rows)
-                .children(note)
-                .into_any_element(),
-        )
     }
 }

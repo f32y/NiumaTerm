@@ -15,7 +15,7 @@ use nmt_config::profile::AgentProfileKind;
 use crate::ui::AppSettings;
 use crate::usage_refresh::{FetchError, UsageSource};
 
-pub(crate) fn account_sources(launcher: AgentCli) -> [Arc<dyn UsageSource<UsageSnapshot>>; 2] {
+pub(crate) fn account_sources(launcher: AgentCli) -> [UsageSource<UsageSnapshot>; 2] {
     [
         codex_source(launcher),
         Arc::new(|cancelled: &AtomicBool| {
@@ -49,11 +49,11 @@ pub(crate) fn codex_usage_launcher(settings: &AppSettings) -> AgentCli {
     AgentCli::from_launch(&launch, "codex")
 }
 
-pub(crate) fn codex_source(launcher: AgentCli) -> Arc<dyn UsageSource<UsageSnapshot>> {
+pub(crate) fn codex_source(launcher: AgentCli) -> UsageSource<UsageSnapshot> {
     Arc::new(move |cancelled: &AtomicBool| fetch(&launcher, cancelled).map_err(FetchError::Failed))
 }
 
-pub(crate) fn daily_source() -> Arc<dyn UsageSource<Option<DailyTokenUsage>>> {
+pub(crate) fn daily_source() -> UsageSource<Option<DailyTokenUsage>> {
     Arc::new(fetch_daily_usage)
 }
 

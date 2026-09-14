@@ -53,9 +53,6 @@ pub fn event_is_emitted_when_child_exits() {
     assert_eq!(events.iter().next().unwrap().token(), WAKER_TOKEN);
     assert!(child_exit_watcher.soft().is_ready());
 
-    // Verify that at least one `ChildEvent::Exited` was received.
-    assert_eq!(
-        child_exit_watcher.event_rx().try_recv(),
-        Ok(ChildEvent::Exited)
-    );
+    // The callback delivers an exit notification before marking the watcher ready.
+    assert_eq!(child_exit_watcher.event_rx().try_recv(), Ok(()));
 }

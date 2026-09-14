@@ -3,7 +3,7 @@ use tempfile::tempdir;
 use crate::AgentWorkspace;
 use crate::chat::{SendOutcome, ThreadSettings};
 use crate::session::AgentKind;
-use crate::session::team_capabilities::TeamCapabilities;
+use crate::session::team_capabilities::ModeratorAdmission;
 use crate::team::attempt::{AttemptState, BudgetScope, DispatchIntent};
 use crate::team::budget::TurnPurpose;
 use crate::team::content::{Author, PublicMessage, Publication, UserInput};
@@ -38,7 +38,7 @@ fn native_member_settings_allow_concurrent_work_without_room_permission_gates() 
 
     for id in [alice, bob] {
         session
-            .member_ready(id, 1, TeamCapabilities::unverified(AgentKind::Codex))
+            .member_ready(id, 1, ModeratorAdmission::unverified(AgentKind::Codex))
             .unwrap();
     }
 
@@ -76,7 +76,7 @@ fn native_member_settings_allow_concurrent_work_without_room_permission_gates() 
         );
     }
 
-    let ownership = session.room().member(alice).unwrap().ownership();
+    let ownership = session.store.room().member(alice).unwrap().ownership();
 
     let updated = ThreadSettings {
         sandbox: Some("read-only".into()),
@@ -88,12 +88,18 @@ fn native_member_settings_allow_concurrent_work_without_room_permission_gates() 
         .set_member_settings(alice, ownership, updated.clone())
         .unwrap();
 
-    assert_eq!(session.room().member(alice).unwrap().settings(), &updated);
-    assert_eq!(session.room().member(bob).unwrap().settings(), &settings);
+    assert_eq!(
+        session.store.room().member(alice).unwrap().settings(),
+        &updated
+    );
+    assert_eq!(
+        session.store.room().member(bob).unwrap().settings(),
+        &settings
+    );
     assert!(session.validate_member(alice).is_ok());
     assert!(session.validate_member(bob).is_ok());
 
-    let run = &session.room().discussions()[0];
+    let run = &session.store.room().discussions()[0];
 
     assert!(run.pauses().is_empty());
     assert_eq!(run.state(), DiscussionState::Running);
@@ -135,7 +141,7 @@ fn live_dispatch_requires_a_ready_member_and_reopen_rejects_uncertain_retry() {
     ));
 
     session
-        .member_ready(alice, 1, TeamCapabilities::unverified(AgentKind::Codex))
+        .member_ready(alice, 1, ModeratorAdmission::unverified(AgentKind::Codex))
         .unwrap();
 
     let id = session.reserve_dispatches(vec![intent.clone()]).unwrap()[0];
@@ -164,7 +170,7 @@ fn live_dispatch_requires_a_ready_member_and_reopen_rejects_uncertain_retry() {
     let (mut session, _) = TeamSession::open(directory.path(), room_id).unwrap();
 
     session
-        .member_ready(alice, 2, TeamCapabilities::unverified(AgentKind::Codex))
+        .member_ready(alice, 2, ModeratorAdmission::unverified(AgentKind::Codex))
         .unwrap();
 
     assert!(
@@ -176,19 +182,31 @@ fn live_dispatch_requires_a_ready_member_and_reopen_rejects_uncertain_retry() {
             .is_err()
     );
     assert_eq!(sends, 1);
-    assert_eq!(session.room().attempts()[0].intent.input, intent.input);
+    assert_eq!(
+        session.store.room().attempts()[0].intent.input,
+        intent.input
+    );
 
     session.abandon_restored_attempt(id).unwrap();
 
-    assert_eq!(session.room().attempts()[0].state, AttemptState::Abandoned);
+    assert_eq!(
+        session.store.room().attempts()[0].state,
+        AttemptState::Abandoned
+    );
 
     drop(session);
 
     let (session, _) = TeamSession::open(directory.path(), room_id).unwrap();
 
     assert!(session.pending_recovery().next().is_none());
-    assert_eq!(session.room().attempts()[0].state, AttemptState::Abandoned);
-    assert_eq!(session.room().attempts()[0].intent.input, intent.input);
+    assert_eq!(
+        session.store.room().attempts()[0].state,
+        AttemptState::Abandoned
+    );
+    assert_eq!(
+        session.store.room().attempts()[0].intent.input,
+        intent.input
+    );
 }
 
 #[test]
@@ -211,13 +229,13 @@ fn accepted_coverage_and_root_reply_commit_once_and_survive_reopening() {
     let mut session = TeamSession::create(directory.path(), room).unwrap();
 
     session
-        .member_ready(alice, 7, TeamCapabilities::unverified(AgentKind::Codex))
+        .member_ready(alice, 7, ModeratorAdmission::unverified(AgentKind::Codex))
         .unwrap();
 
     let operation = OperationId::new();
-    let member = session.room().member(alice).unwrap();
+    let member = session.store.room().member(alice).unwrap();
     let ownership = member.ownership();
-    let snapshot = session.room().public_snapshot();
+    let snapshot = session.store.room().public_snapshot();
 
     let input = UserInput {
         text: "Compare".into(),
@@ -230,6 +248,7 @@ fn accepted_coverage_and_root_reply_commit_once_and_survive_reopening() {
     };
 
     let prepared = session
+        .store
         .room()
         .prepare_context(alice, &snapshot, &input, &limits)
         .unwrap();
@@ -256,6 +275,7 @@ fn accepted_coverage_and_root_reply_commit_once_and_survive_reopening() {
 
     assert!(
         session
+            .store
             .room()
             .member(alice)
             .unwrap()
@@ -286,6 +306,7 @@ fn accepted_coverage_and_root_reply_commit_once_and_survive_reopening() {
     assert!(!session.accept_attempt(key, "turn-1").unwrap());
     assert!(
         session
+            .store
             .room()
             .member(alice)
             .unwrap()
@@ -321,9 +342,10 @@ fn accepted_coverage_and_root_reply_commit_once_and_survive_reopening() {
             .unwrap()
             .is_none()
     );
-    assert_eq!(session.room().messages().len(), 2);
+    assert_eq!(session.store.room().messages().len(), 2);
     assert!(
         session
+            .store
             .room()
             .member(alice)
             .unwrap()
@@ -337,15 +359,16 @@ fn accepted_coverage_and_root_reply_commit_once_and_survive_reopening() {
     let (session, _) = TeamSession::open(directory.path(), room_id).unwrap();
 
     assert_eq!(
-        session.room().attempts()[0].provider_turn.as_deref(),
+        session.store.room().attempts()[0].provider_turn.as_deref(),
         Some("turn-1")
     );
 
     let prepared = session
+        .store
         .room()
         .prepare_context(
             alice,
-            &session.room().public_snapshot(),
+            &session.store.room().public_snapshot(),
             &UserInput::default(),
             &limits,
         )

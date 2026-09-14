@@ -1,10 +1,13 @@
-use std::io::Cursor;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::SystemTime;
-use std::{env, fs, process};
-
+use crate::agent_tab::input_history::{
+    AgentInputHistory, InputHistoryAction, InputHistoryDirection, InputHistoryNavigation,
+    InputHistoryScope,
+};
+use crate::agent_tab::session::{Backend, TestBackend};
+use crate::agent_tab::settings::AgentSettings;
+use crate::agent_tab::{
+    AgentKind, AgentPane, AgentThreadDefaults, PaletteControl, RecentSessionsMode,
+    replace_input_with_history,
+};
 use gpui::{Entity, Image, ImageFormat, TestAppContext, VisualTestContext, WindowHandle};
 use image_rs::{DynamicImage, ImageFormat as EncodedImageFormat, RgbaImage};
 use nmt_agent::AgentWorkspace;
@@ -14,15 +17,12 @@ use nmt_agent::input_history::AgentInputHistory as InputHistoryService;
 use nmt_agent::session::lifecycle::StartOutcome;
 use nmt_agent::transcript::TextField;
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
-
-use crate::agent_tab::composer::PaletteControl;
-use crate::agent_tab::input_history::{
-    AgentInputHistory, InputHistoryAction, InputHistoryDirection, InputHistoryNavigation,
-    InputHistoryScope, replace_input_with_history,
-};
-use crate::agent_tab::session::{Backend, TestBackend};
-use crate::agent_tab::settings::AgentSettings;
-use crate::agent_tab::{AgentKind, AgentPane, AgentThreadDefaults, RecentSessionsMode};
+use std::io::Cursor;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::SystemTime;
+use std::{env, fs, process};
 
 static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(1);
 
@@ -272,6 +272,7 @@ fn pane_navigation_keeps_palette_and_recent_sessions_ahead_of_history(cx: &mut T
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
             cx.global_mut::<AgentInputHistory>()
+                .0
                 .record(&pane.input_history_scope, "history entry".into());
 
             pane.input
@@ -366,6 +367,7 @@ fn accepted_new_turn_and_steering_record_only_typed_input(cx: &mut TestAppContex
 
             assert_eq!(
                 &*cx.global::<AgentInputHistory>()
+                    .0
                     .entries(&pane.input_history_scope),
                 ["start the turn", "steer the turn"]
             );
@@ -443,6 +445,7 @@ fn slash_history_requires_a_successful_action(cx: &mut TestAppContext) {
 
             assert_eq!(
                 &*cx.global::<AgentInputHistory>()
+                    .0
                     .entries(&pane.input_history_scope),
                 ["/compact", "/status"]
             );
@@ -502,6 +505,7 @@ fn rejected_submission_preserves_draft_images_and_unnamed_state(cx: &mut TestApp
             assert!(!pane.session.borrow().naming.named);
             assert!(
                 cx.global::<AgentInputHistory>()
+                    .0
                     .entries(&pane.input_history_scope)
                     .is_empty()
             );
@@ -532,6 +536,7 @@ fn unavailable_session_keeps_input_without_recording(cx: &mut TestAppContext) {
             assert_eq!(pane.input.read(cx).text().to_string(), "not accepted");
             assert!(
                 cx.global::<AgentInputHistory>()
+                    .0
                     .entries(&pane.input_history_scope)
                     .is_empty()
             );
@@ -601,14 +606,14 @@ async fn editing_a_workspace_reaches_the_next_conversation_only(cx: &mut TestApp
 
     pane.update(cx, |pane, cx| {
         // The pane's first start already cloned its configured list.
-        assert_eq!(pane.active_workspace(), &started);
+        assert_eq!(pane.active_workspace(cx).unwrap(), &started);
 
         pane.set_workspace(edited.clone(), cx);
 
         // The conversation in flight keeps what it was granted; only the
         // configured list moved.
-        assert_eq!(pane.configured_workspace(), &edited);
-        assert_eq!(pane.active_workspace(), &started);
+        assert_eq!(pane.configured_workspace(cx).unwrap(), &edited);
+        assert_eq!(pane.active_workspace(cx).unwrap(), &started);
 
         // The scope follows the configured list, so the edited workspace has
         // its own prompt history from here on.
@@ -622,13 +627,14 @@ async fn editing_a_workspace_reaches_the_next_conversation_only(cx: &mut TestApp
         );
 
         cx.global_mut::<AgentInputHistory>()
+            .0
             .record(&pane.input_history_scope, "after the edit".into());
     });
 
     // The prompts recorded before the edit stay with the root set they were
     // typed in.
     let entries = cx.update(|cx| {
-        cx.global::<AgentInputHistory>().entries(&scope(
+        cx.global::<AgentInputHistory>().0.entries(&scope(
             "local",
             AgentKind::Codex,
             directory.path(),
@@ -721,6 +727,7 @@ fn interruption_restores_only_unanswered_input_and_preserves_new_drafts(cx: &mut
 
                 assert_eq!(
                     cx.global::<AgentInputHistory>()
+                        .0
                         .entries(&pane.input_history_scope)
                         .len(),
                     1,

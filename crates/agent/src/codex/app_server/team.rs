@@ -10,7 +10,7 @@ use crate::codex::app_server::control::QueryKind;
 use crate::codex::app_server::protocol::initial_thread_request;
 use crate::codex::app_server::{ConversationStart, Event, Session};
 use crate::session::AgentKind;
-use crate::session::team_capabilities::{ModeratorAdmission, TeamCapabilities, TeamLaunch};
+use crate::session::team_capabilities::{ModeratorAdmission, TeamLaunch};
 use crate::session::team_recovery::RecoveredTeamTurn;
 use crate::{AgentWorkspace, LaunchConfig};
 
@@ -100,15 +100,15 @@ impl Session {
         )
     }
 
-    pub fn team_capabilities(&self, backend_generation: u64) -> TeamCapabilities {
-        let mut capabilities = TeamCapabilities::unverified(AgentKind::Codex);
+    pub fn team_capabilities(&self, backend_generation: u64) -> ModeratorAdmission {
+        let mut capabilities = ModeratorAdmission::unverified(AgentKind::Codex);
 
         if self
             .team
             .as_ref()
             .is_some_and(|team| team.ready && team.moderation_registered)
         {
-            capabilities.moderation = ModeratorAdmission::CodexDynamicTools { backend_generation };
+            capabilities = ModeratorAdmission::CodexDynamicTools { backend_generation };
         }
 
         capabilities

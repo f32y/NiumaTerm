@@ -49,14 +49,6 @@ pub(super) enum ThreadScope {
     Unscoped,
 }
 
-/// One in-flight `thread/list` descendant page.
-#[derive(Clone, Copy, Debug)]
-struct DescendantQuery {
-    /// Registry order when the request was written. A row that changed after
-    /// this point keeps its live state instead of taking the queried one.
-    starting_sequence: u64,
-}
-
 #[derive(Default)]
 pub(super) struct CodexTasks {
     registry: Option<BackgroundTaskRegistry>,
@@ -79,7 +71,10 @@ pub(super) struct CodexTasks {
     pending_order: Vec<String>,
 
     launch_messages: LaunchMessages,
-    queries: HashMap<u64, DescendantQuery>,
+
+    /// Registry order when the request was written. A row that changed after
+    /// this point keeps its live state instead of taking the queried one.
+    queries: HashMap<u64, u64>,
 
     /// Turn each descendant is currently running, by thread id. `turn/interrupt`
     /// names both the thread and the turn and refuses a turn id that is not the
@@ -606,8 +601,7 @@ impl CodexTasks {
         let root = self.root()?.to_owned();
         let starting_sequence = self.registry.as_ref()?.sequence();
 
-        self.queries
-            .insert(rpc_id, DescendantQuery { starting_sequence });
+        self.queries.insert(rpc_id, starting_sequence);
 
         if let Some(registry) = self.registry.as_mut() {
             registry.set_discovery(BackgroundTaskDiscoveryState::Loading);
@@ -707,11 +701,7 @@ impl CodexTasks {
             };
 
             if let Some(registry) = self.registry.as_mut() {
-                changed |= registry.merge_restored(
-                    BackgroundTaskKey::codex(&id),
-                    update,
-                    query.starting_sequence,
-                );
+                changed |= registry.merge_restored(BackgroundTaskKey::codex(&id), update, query);
             }
         }
 

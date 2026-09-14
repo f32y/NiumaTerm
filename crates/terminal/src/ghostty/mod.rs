@@ -912,12 +912,7 @@ impl GhosttyTerminal {
             })
         })?;
 
-        Ok(meta.map(|meta| ScreenRowRead {
-            cells,
-            wrapped: meta.wrapped,
-            prompt_start: meta.prompt_start,
-            hyperlinks: meta.hyperlinks,
-        }))
+        Ok(meta.map(|meta| ScreenRowRead { cells, meta }))
     }
 
     /// Export terminal text via the engine formatter. `selection = None`
@@ -1021,12 +1016,7 @@ impl GhosttyTerminal {
                 })
             })?;
 
-        Ok(meta.map(|meta| ScreenRowRead {
-            cells,
-            wrapped: meta.wrapped,
-            prompt_start: meta.prompt_start,
-            hyperlinks: meta.hyperlinks,
-        }))
+        Ok(meta.map(|meta| ScreenRowRead { cells, meta }))
     }
 
     /// Walk one absolute `SCREEN` row with styles, invoking `on_cell` for each

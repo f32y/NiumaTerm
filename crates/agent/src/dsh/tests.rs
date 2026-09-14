@@ -954,7 +954,7 @@ fn a_compaction_records_itself_only_once_it_produced_a_summary() {
 
 #[test]
 fn a_retry_says_the_turn_is_waiting_rather_than_thinking() {
-    use crate::chat::TurnActivity;
+    use crate::chat::TurnRetry;
 
     let retry = session_frame(json!({
         "type": "llm/retry",
@@ -974,7 +974,7 @@ fn a_retry_says_the_turn_is_waiting_rather_than_thinking() {
 
     assert_eq!(
         map_frame(&retry, SESSION, &mut ToolTracker::default()),
-        vec![Event::StatusDetail(Some(TurnActivity::Retrying {
+        vec![Event::StatusDetail(Some(TurnRetry {
             attempt: 1,
             total: 2,
             reason: "429 rate limited".into(),
@@ -1000,7 +1000,7 @@ fn a_retry_says_the_turn_is_waiting_rather_than_thinking() {
 
     assert_eq!(
         map_frame(&coded, SESSION, &mut ToolTracker::default()),
-        vec![Event::StatusDetail(Some(TurnActivity::Retrying {
+        vec![Event::StatusDetail(Some(TurnRetry {
             attempt: 2,
             total: 2,
             reason: "overloaded".into(),

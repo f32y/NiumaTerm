@@ -13,7 +13,6 @@ pub mod defaults;
 pub mod local_state;
 
 pub mod remote_session;
-pub mod render_types;
 pub mod system;
 #[cfg(feature = "application")]
 pub mod theme;

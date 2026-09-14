@@ -5,7 +5,7 @@ use gpui_component::Root;
 use nmt_agent::AgentWorkspace;
 use nmt_agent::chat::{Event, Item, SendOutcome, SlashCommandOutcome, ThreadSettings};
 use nmt_agent::session::lifecycle::Status;
-use nmt_agent::session::team_capabilities::TeamCapabilities;
+use nmt_agent::session::team_capabilities::ModeratorAdmission;
 use nmt_agent::session::team_recovery::RecoveredTeamTurn;
 use nmt_agent::session::test_support::TestBackend;
 use nmt_agent::session::{AgentKind, Backend};
@@ -140,7 +140,7 @@ async fn reopened_request(cx: &mut TestAppContext, completed: bool) {
         .unwrap();
 
     saved
-        .member_ready(member, 1, TeamCapabilities::unverified(AgentKind::Codex))
+        .member_ready(member, 1, ModeratorAdmission::unverified(AgentKind::Codex))
         .unwrap();
 
     let discussion = saved
@@ -160,7 +160,7 @@ async fn reopened_request(cx: &mut TestAppContext, completed: bool) {
         .advance_discussion(discussion, &CONTEXT_LIMITS)
         .unwrap();
 
-    let attempt = saved.room().attempts()[0].clone();
+    let attempt = saved.store().room().attempts()[0].clone();
 
     saved
         .dispatch(attempt.id, |_| SendOutcome::StartedTurn)
@@ -182,7 +182,7 @@ async fn reopened_request(cx: &mut TestAppContext, completed: bool) {
         .record_provider_identity(member, attempt.intent.ownership, "saved-team-thread", false)
         .unwrap();
 
-    let room_id = saved.room().id();
+    let room_id = saved.store().room().id();
 
     saved.member_unavailable(member).unwrap();
     drop(saved);
@@ -274,13 +274,19 @@ async fn reopened_request(cx: &mut TestAppContext, completed: bool) {
     pane.update(&mut cx, |pane, cx| {
         assert!(
             !pane
+                .timeline
                 .rows
                 .iter()
                 .any(|row| row.text == rust_i18n::t!("team-responding"))
         );
 
         if completed {
-            assert!(pane.rows.iter().any(|row| row.text == "Recovered answer"));
+            assert!(
+                pane.timeline
+                    .rows
+                    .iter()
+                    .any(|row| row.text == "Recovered answer")
+            );
         } else {
             assert!(
                 !pane
@@ -484,7 +490,8 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
 
     pane.update(&mut cx, |pane, _| {
         assert!(
-            pane.rows
+            pane.timeline
+                .rows
                 .iter()
                 .any(|row| row.heading.contains("Alice") && row.text == "Hello from Alice"),
             "an accepted turn's streamed answer must be visible before completion"
@@ -528,7 +535,7 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
     cx.run_until_parked();
 
     pane.update(&mut cx, |pane, cx| {
-        assert!(pane.rows.iter().any(|row| row.text == "Hello from Alice again"));
+        assert!(pane.timeline.rows.iter().any(|row| row.text == "Hello from Alice again"));
 
         let transcript = pane.transcript.read(cx).conversation.borrow();
 
@@ -560,7 +567,8 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
 
     pane.update(&mut cx, |pane, _| {
         assert_eq!(
-            pane.rows
+            pane.timeline
+                .rows
                 .iter()
                 .filter(|row| row.text == "Hello from Alice again")
                 .count(),

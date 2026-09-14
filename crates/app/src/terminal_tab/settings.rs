@@ -14,11 +14,10 @@ use nmt_config::system::NewlineShortcut;
 use nmt_config::{CursorShape, with_active_colors};
 use rust_i18n::t;
 
-use crate::terminal_tab::block_list::ITEM_PAD_ROWS;
 use crate::terminal_tab::block_list::chrome::DurationLabels;
 use crate::terminal_tab::frame::TerminalColor;
-use crate::terminal_tab::pane_model::PaneSettings;
 
+#[derive(Clone)]
 pub struct TerminalSettings {
     pub input_style: InputStyle,
     pub cursor_shape: CursorShape,
@@ -68,26 +67,8 @@ impl TerminalSettings {
     }
 }
 
-impl From<&TerminalSettings> for PaneSettings {
-    fn from(settings: &TerminalSettings) -> Self {
-        Self {
-            fixed_bottom: settings.fixed_bottom(),
-            pad_rows: if settings.command_blocks {
-                ITEM_PAD_ROWS
-            } else {
-                0.0
-            },
-            show_block_chrome: settings.command_blocks,
-            smooth_wheel: settings.smooth_wheel,
-            scroll_to_bottom_when_typing: settings.scroll_to_bottom_when_typing,
-            newline_shortcut: settings.newline_shortcut,
-            cursor_shape: settings.cursor_shape,
-        }
-    }
-}
-
 pub fn theme_default_background() -> TerminalColor {
-    with_active_colors(|colors| colors.background.0.into())
+    with_active_colors(|colors| colors.background.into())
 }
 
 pub(super) fn duration_labels() -> DurationLabels {

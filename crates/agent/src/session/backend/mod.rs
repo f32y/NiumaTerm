@@ -1,35 +1,37 @@
-mod team;
+#[cfg(test)]
+#[cfg(windows)]
+mod team_tests;
 
 #[cfg(test)]
 mod attachment_tests;
-
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Duration;
-
-use serde_json::Value;
-use tracing::trace;
 
 use crate::background_task::{BackgroundTaskKey, BackgroundTaskProvider};
 use crate::catalog::adapter_commands;
 use crate::chat::{
     Event as SessionEvent, ForkAnchor, MessageImage, QuestionRequest, QuestionResponse,
     SendOutcome, SessionScope, SkillReference, SlashCommandInfo, SlashCommandOutcome,
-    ThreadSettings,
+    TeamDecisionRequest, ThreadSettings,
 };
 use crate::claude_code::sessions::RestoredTask;
 use crate::claude_code::stream_json;
 use crate::codex::app_server;
 use crate::session::capabilities::AgentCapabilities as _;
 use crate::session::input::ApprovalOutcome;
+use crate::session::team_capabilities::{ModeratorAdmission, TeamLaunch};
+use crate::session::team_recovery::RecoveredTeamTurn;
 #[cfg(any(test, feature = "test-support"))]
-use crate::session::test_support::{InputResponse, TestBackend};
+use crate::session::test_support::InputResponse;
+#[cfg(any(test, feature = "test-support"))]
+use crate::session::test_support::TestBackend;
 use crate::session::{AgentKind, ImageAttachment, OperationError, UnsupportedOperation};
-use crate::workflow::{
-    RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult, WorkflowSource,
-};
+use crate::workflow::{WorkflowRefreshRequest, WorkflowRefreshResult, WorkflowRun, WorkflowSource};
 use crate::{AgentWorkspace, LaunchConfig, dsh};
+use serde_json::Value;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+use tracing::trace;
 
 /// The conversation a restarted backend should continue, qualified by the
 /// harness that issued the id. Ids are only meaningful to the harness that
@@ -716,7 +718,7 @@ impl Backend {
         }
     }
 
-    pub fn restore_workflows(&mut self, restored: Vec<RestoredWorkflowRun>) -> Vec<SessionEvent> {
+    pub fn restore_workflows(&mut self, restored: Vec<WorkflowRun>) -> Vec<SessionEvent> {
         match self {
             Backend::Claude(session) => session.restore_workflows(restored),
             Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
@@ -797,6 +799,84 @@ impl Backend {
 
                 Ok(outcome)
             }
+        }
+    }
+
+    pub fn team_recovered_turns(&self) -> &[RecoveredTeamTurn] {
+        match self {
+            Self::Codex(session) => session.team_recovered_turns(),
+
+            #[cfg(any(test, feature = "test-support"))]
+            Self::Test(backend) => &backend.team_recovered_turns,
+
+            Self::Claude(_) | Self::DeepSeek(_) => &[],
+        }
+    }
+
+    pub fn spawn_team(
+        kind: AgentKind,
+        launch: &LaunchConfig,
+        host_catalog: &[LaunchConfig],
+        workspace: &AgentWorkspace,
+        recovery: Option<RecoveryIdentity>,
+        policy: TeamLaunch,
+        deliver: impl Fn(Value) + Send + Sync + 'static,
+    ) -> Result<Self, String> {
+        if recovery
+            .as_ref()
+            .is_some_and(|identity| identity.kind != kind)
+        {
+            return Err("The saved Team conversation belongs to another provider.".into());
+        }
+
+        match kind {
+            AgentKind::Codex => app_server::Session::spawn_team(
+                launch,
+                host_catalog,
+                workspace,
+                recovery.map(|identity| identity.id),
+                policy,
+                deliver,
+                |line| trace!("codex app-server: {line}"),
+            )
+            .map(Self::Codex),
+
+            AgentKind::DeepSeek if recovery.is_some() => Err(
+                "DeepSeek cannot resume this saved Team conversation. Keep its history and explicitly create a new member.".into(),
+            ),
+
+            AgentKind::Claude | AgentKind::DeepSeek => {
+                Self::spawn(kind, launch, host_catalog, workspace, recovery, deliver)
+            }
+        }
+    }
+
+    pub fn team_capabilities(
+        &self,
+        kind: AgentKind,
+        backend_generation: u64,
+    ) -> ModeratorAdmission {
+        match self {
+            Self::Codex(session) => session.team_capabilities(backend_generation),
+            Self::Claude(_) | Self::DeepSeek(_) => ModeratorAdmission::unverified(kind),
+
+            #[cfg(any(test, feature = "test-support"))]
+            Self::Test(_) => ModeratorAdmission::unverified(kind),
+        }
+    }
+
+    pub fn respond_team_decision(
+        &mut self,
+        request: &TeamDecisionRequest,
+        accepted: bool,
+        explanation: &str,
+    ) -> bool {
+        match self {
+            Self::Codex(session) => session.respond_team_decision(request, accepted, explanation),
+            Self::Claude(_) | Self::DeepSeek(_) => false,
+
+            #[cfg(any(test, feature = "test-support"))]
+            Self::Test(_) => false,
         }
     }
 }

@@ -1,5 +1,5 @@
-use std::time::SystemTime;
-
+use crate::agent_tab::settings::AgentSettings;
+use crate::agent_tab::{AgentPane, AgentThreadDefaults, RecentSessionsMode};
 use gpui::{
     App, AppContext as _, Context, Entity, TestAppContext, VisualTestContext, WindowHandle,
 };
@@ -16,9 +16,7 @@ use nmt_agent::session::test_support::TestBackend;
 use nmt_agent::session::{AgentKind, Backend};
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
 use rust_i18n::t;
-
-use crate::agent_tab::settings::AgentSettings;
-use crate::agent_tab::{AgentPane, AgentThreadDefaults, RecentSessionsMode};
+use std::time::SystemTime;
 
 fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>) {
     let profile = AgentProfile {
@@ -130,7 +128,9 @@ fn prepare_local(pane: &mut AgentPane, action: RewindAction, cx: &mut Context<Ag
         let mut guard = pane.session.borrow_mut();
         let state = &mut *guard;
 
-        state.branch.begin_rewind(&state.runtime, pane.cwd(), None)
+        state
+            .branch
+            .begin_rewind(&state.runtime, pane.cwd(cx), None)
     }
     .expect("load");
 
@@ -210,7 +210,7 @@ fn protocol_branch_keeps_old_rows_until_replay_and_fills_the_prompt_once(cx: &mu
             install(pane);
             pane.on_replay(replay("current"), cx);
             fork(pane, cx);
-            pane.fill_branch_prompt(window, cx);
+            pane.branch.fill_branch_prompt(&pane.input, window, cx);
 
             assert_eq!(rows(pane, cx), ["current"]);
             assert!(pane.input.read(cx).text().len() == 0);
@@ -221,14 +221,14 @@ fn protocol_branch_keeps_old_rows_until_replay_and_fills_the_prompt_once(cx: &mu
             assert_eq!(rows(pane, cx), ["copy"]);
             assert!(!pane.session.borrow().branch.holds_composer());
 
-            pane.fill_branch_prompt(window, cx);
+            pane.branch.fill_branch_prompt(&pane.input, window, cx);
 
             assert_eq!(pane.input.read(cx).text().to_string(), "cut prompt");
 
             pane.input
                 .update(cx, |input, cx| input.set_value("new draft", window, cx));
 
-            pane.fill_branch_prompt(window, cx);
+            pane.branch.fill_branch_prompt(&pane.input, window, cx);
 
             assert_eq!(pane.input.read(cx).text().to_string(), "new draft");
         })
@@ -249,7 +249,7 @@ fn late_protocol_replay_does_not_overwrite_a_new_draft(cx: &mut TestAppContext) 
                 .update(cx, |input, cx| input.set_value("new draft", window, cx));
 
             pane.on_event(Event::Replay(replay("copy")), cx);
-            pane.fill_branch_prompt(window, cx);
+            pane.branch.fill_branch_prompt(&pane.input, window, cx);
 
             assert_eq!(pane.input.read(cx).text().to_string(), "new draft");
             assert_eq!(rows(pane, cx), ["copy"]);
@@ -276,7 +276,7 @@ fn protocol_failure_preserves_conversation_and_does_not_refill_the_prompt(cx: &m
                 cx,
             );
 
-            pane.fill_branch_prompt(window, cx);
+            pane.branch.fill_branch_prompt(&pane.input, window, cx);
 
             assert_eq!(rows(pane, cx), ["current"]);
             assert!(pane.input.read(cx).text().len() == 0);
@@ -295,7 +295,12 @@ fn local_branch_waits_for_ready_preserves_controls_and_keeps_later_drafts(cx: &m
         pane.update(cx, |pane, cx| {
             install(pane);
             pane.on_replay(replay("current"), cx);
-            pane.session.borrow_mut().set_model("selected-model".into());
+
+            pane.session
+                .borrow_mut()
+                .controls
+                .set_model("selected-model".into());
+
             prepare_local(pane, RewindAction::Conversation, cx);
 
             assert_eq!(rows(pane, cx), ["current"]);
@@ -305,11 +310,11 @@ fn local_branch_waits_for_ready_preserves_controls_and_keeps_later_drafts(cx: &m
                 .update(cx, |input, cx| input.set_value("later draft", window, cx));
 
             pane.on_event(Event::Ready(ThreadSettings::default()), cx);
-            pane.fill_branch_prompt(window, cx);
+            pane.branch.fill_branch_prompt(&pane.input, window, cx);
 
             assert_eq!(rows(pane, cx), ["kept prefix"]);
             assert_eq!(
-                pane.session.borrow().controls().settings.model.as_deref(),
+                pane.session.borrow().controls.settings.model.as_deref(),
                 Some("selected-model")
             );
             assert_eq!(pane.input.read(cx).text().to_string(), "later draft");
@@ -359,7 +364,7 @@ fn local_start_failure_keeps_old_rows_and_reports_files_already_restored(cx: &mu
                 cx,
             );
 
-            pane.fill_branch_prompt(window, cx);
+            pane.branch.fill_branch_prompt(&pane.input, window, cx);
 
             assert_eq!(rows(pane, cx), ["current"]);
             assert!(pane.input.read(cx).text().len() == 0);
@@ -397,7 +402,9 @@ fn partial_success_picker_disables_repeating_files_but_allows_continuing_the_con
                 let mut guard = pane.session.borrow_mut();
                 let state = &mut *guard;
 
-                state.branch.begin_rewind(&state.runtime, pane.cwd(), None)
+                state
+                    .branch
+                    .begin_rewind(&state.runtime, pane.cwd(cx), None)
             }
             .expect("read");
 

@@ -35,32 +35,22 @@ impl ModeratorAdmission {
             }),
         }
     }
-}
 
-#[derive(Clone, Debug)]
-pub struct TeamCapabilities {
-    pub moderation: ModeratorAdmission,
-}
-
-impl TeamCapabilities {
     pub fn unverified(kind: AgentKind) -> Self {
-        Self {
-            moderation: ModeratorAdmission::Unavailable(CapabilityFailure {
-                reason: format!(
-                    "{} has no registered moderator operations for this session.",
-                    kind.display()
-                ),
-                remedy: "Choose fixed rounds or a member with registered moderator operations."
-                    .into(),
-            }),
-        }
+        ModeratorAdmission::Unavailable(CapabilityFailure {
+            reason: format!(
+                "{} has no registered moderator operations for this session.",
+                kind.display()
+            ),
+            remedy: "Choose fixed rounds or a member with registered moderator operations.".into(),
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::session::AgentKind;
-    use crate::session::team_capabilities::{ModeratorAdmission, TeamCapabilities};
+    use crate::session::team_capabilities::ModeratorAdmission;
 
     #[test]
     fn moderator_operations_belong_to_the_registered_session() {
@@ -72,12 +62,7 @@ mod tests {
         assert!(registered.check(5).is_err());
 
         for kind in AgentKind::ALL {
-            assert!(
-                TeamCapabilities::unverified(kind)
-                    .moderation
-                    .check(4)
-                    .is_err()
-            );
+            assert!(ModeratorAdmission::unverified(kind).check(4).is_err());
         }
     }
 }

@@ -7,7 +7,7 @@ use nmt_config::colors::Colors;
 use nmt_platform::EventedPty;
 
 use crate::ansi::CursorShape;
-use crate::event::{EventListener, Msg, MsgSender, WindowId};
+use crate::event::{EventListener, Msg, MsgSender};
 use crate::pty_pipe::PtyPipe;
 use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
@@ -113,7 +113,6 @@ where
         Arc::clone(&vt_modes),
         pty,
         event_proxy,
-        WindowId::dummy(),
         &options,
     )?;
 

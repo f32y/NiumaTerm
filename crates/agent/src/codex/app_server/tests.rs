@@ -23,7 +23,7 @@ fn replayed_items(turns: &Value) -> Vec<Item> {
 pub(super) fn disconnected_session() -> Session {
     Session {
         host: None,
-        conversation: ConversationState::default(),
+        conversation: ThreadState::default(),
         registration_id: 0,
         deliver: Arc::new(|_| {}),
         detached: false,
@@ -497,7 +497,7 @@ fn routed_child_completion_does_not_finish_the_parent_turn() {
 
 #[test]
 fn conversation_approval_resolution_requires_its_thread_and_request() {
-    let mut state = ConversationState::default();
+    let mut state = ThreadState::default();
 
     state.thread_id = Some("parent".into());
     state.pending_approval = Some(8);
@@ -533,8 +533,8 @@ fn conversation_approval_resolution_requires_its_thread_and_request() {
 
 #[test]
 fn conversation_turns_and_output_baselines_are_independent() {
-    let mut first = ConversationState::default();
-    let mut second = ConversationState::default();
+    let mut first = ThreadState::default();
+    let mut second = ThreadState::default();
 
     for state in [&mut first, &mut second] {
         assert!(matches!(

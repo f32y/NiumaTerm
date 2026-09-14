@@ -1,3 +1,4 @@
+use crate::session::{SessionId, SessionSnapshot};
 use std::sync::{Arc, mpsc as std_mpsc};
 use std::thread;
 use std::time::Duration;
@@ -9,7 +10,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::time;
 
 use crate::client::{ClientWorker, RemoteSession, SessionByteEvent, reconnect};
-use crate::protocol::{Frame, ProtocolSessionSnapshot, generate_keypair};
+use crate::protocol::{Frame, generate_keypair};
 
 #[test]
 fn reconnect_starts_without_an_initial_delay() {
@@ -49,8 +50,8 @@ fn splitting_session_moves_snapshot_and_preserves_both_stream_directions() {
 
     let session = RemoteSession {
         session_id: 42,
-        snapshot: ProtocolSessionSnapshot {
-            session_id: 42,
+        snapshot: SessionSnapshot {
+            session_id: SessionId(42),
             base_seq: 7,
             vt,
             cols: 90,
@@ -138,8 +139,8 @@ fn remote_pty_reports_closed_input_and_joins_workers_on_drop() {
 
     let mut pty = NetPty::new(RemoteSession {
         session_id: 42,
-        snapshot: ProtocolSessionSnapshot {
-            session_id: 42,
+        snapshot: SessionSnapshot {
+            session_id: SessionId(42),
             base_seq: 0,
             vt: Vec::new(),
             cols: 80,

@@ -10,13 +10,9 @@ use gpui::{App, AppContext as _, Context, Entity, Task, Window};
 use gpui_component::setting::{SelectIndex, Settings, SettingsState};
 use rust_i18n::t;
 
-use crate::tabs::{TabId, TabManager};
 use crate::ui;
 use crate::ui::settings::SettingsEditing;
 use crate::ui::shell::Shell;
-use crate::ui::shell::actions::ShowSettings;
-use crate::ui::shell::tab_surface::TabSurface;
-use crate::workspace::{WorkspaceId, WorkspaceKind};
 
 /// Sidebar entry name and tab title of the settings pseudo workspace, in the
 /// active language. Looked up at creation time; the entry is never persisted,
@@ -64,88 +60,6 @@ impl SettingsSurface {
         let open = self.open.as_ref()?;
 
         Some(ui::settings::settings_view(open.editing.clone(), cx).state(open.state.clone()))
-    }
-}
-
-impl Shell {
-    /// Show settings as a pseudo workspace: a sidebar entry holding a single
-    /// `Settings` tab whose surface fills the main area. A modal would block
-    /// the terminal the user is adjusting settings for, while an entry can be
-    /// left open and switched away from.
-    ///
-    /// Field edits mutate the `AppSettings` global live (for preview); the set
-    /// is written when the entry closes and again on quit, since an entry the
-    /// user never closes would otherwise never reach the file.
-    pub(super) fn on_show_settings(
-        &mut self,
-        _: &ShowSettings,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(id) = self.workspaces.settings_id() {
-            if let Some(index) = self
-                .workspaces
-                .summaries()
-                .iter()
-                .position(|ws| ws.id == id)
-            {
-                self.workspaces.activate(index);
-                self.on_active_tab_changed(window, cx);
-                self.focus_active(window, cx);
-
-                cx.notify();
-            }
-
-            return;
-        }
-
-        self.settings.open(window, cx);
-
-        let id = Self::alloc_id(&mut self.next_id);
-
-        let tabs = TabManager::new(
-            TabSurface::Settings,
-            TabId(id),
-            settings_title().to_string(),
-        );
-
-        let ws_id = Self::alloc_id(&mut self.next_id);
-
-        self.workspaces.new_workspace_of_kind(
-            tabs,
-            WorkspaceId(ws_id),
-            settings_title().to_string(),
-            // The settings entry is a view of the configuration file, so it
-            // owns no directory and never contributes to path routing.
-            None,
-            WorkspaceKind::Settings,
-        );
-
-        self.on_active_tab_changed(window, cx);
-        self.focus_active(window, cx);
-
-        cx.notify();
-    }
-
-    /// Drop the settings surface after its edits have been saved successfully.
-    /// Reached from every path that removes the settings entry.
-    pub(super) fn retire_settings_workspace(&mut self, _cx: &mut Context<Self>) {
-        // Pick up relay URL / token edits made while the entry was open.
-        #[cfg(windows)]
-        ui::settings::reconcile_remote_host(_cx);
-
-        self.settings.retire();
-    }
-
-    /// Leave the settings entry for a normal workspace. Every path that adds a
-    /// tab funnels through this, so a new tab never lands in the settings
-    /// entry and breaks its single-tab presentation.
-    pub(crate) fn leave_settings_workspace(&mut self) {
-        if self.workspaces.active_kind() == WorkspaceKind::Settings {
-            let index = self.workspaces.first_normal_index();
-
-            self.workspaces.activate(index);
-        }
     }
 }
 

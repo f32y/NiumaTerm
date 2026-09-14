@@ -1,7 +1,7 @@
 //! Per-tab split-pane tree: leaves are terminal panes, splits are resizable
 //! groups with one axis each (same-axis children flatten into siblings, so the
-//! tree stays shallow, tmux-style). Pure logic — generic over the leaf pane
-//! type `L` and the split-state handle `S` so it unit-tests without GPUI.
+//! tree stays shallow, tmux-style). The leaf pane type remains generic for
+//! layout tests; split groups hold the same resizable state used by rendering.
 //!
 //! Invariant: a `PaneTree` always has at least one leaf, and `focused` always
 //! names an existing leaf. `remove` refuses the last leaf.
@@ -13,7 +13,8 @@ mod pane_tree_tests;
 use std::mem;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use gpui::Axis;
+use gpui::{Axis, Entity};
+use gpui_component::resizable::ResizableState;
 
 /// Stable per-pane identity (same monotonic id source as tabs/workspaces).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -47,7 +48,7 @@ fn alloc_split_id() -> u64 {
     NEXT_SPLIT_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-pub enum PaneNode<L, S> {
+pub enum PaneNode<L> {
     Leaf {
         id: PaneId,
         pane: L,
@@ -58,10 +59,10 @@ pub enum PaneNode<L, S> {
         id: u64,
 
         axis: Axis,
-        children: Vec<PaneNode<L, S>>,
+        children: Vec<PaneNode<L>>,
 
         /// The resizable group's size/drag state handle.
-        state: S,
+        state: Entity<ResizableState>,
 
         /// Saved size ratios awaiting application once the group has real
         /// bounds (session restore); cleared after applying.
@@ -69,7 +70,7 @@ pub enum PaneNode<L, S> {
     },
 }
 
-impl<L, S> PaneNode<L, S> {
+impl<L> PaneNode<L> {
     fn first_leaf_id(&self) -> PaneId {
         match self {
             Self::Leaf { id, .. } => *id,
@@ -86,12 +87,12 @@ impl<L, S> PaneNode<L, S> {
 }
 
 /// What the caller must do to the split-state handle after a [`PaneTree::split`].
-pub enum SplitOutcome<S> {
+pub enum SplitOutcome {
     /// The new leaf was inserted as a sibling at `index` in an existing
     /// same-axis split: halve the panel at the focused index into it
     /// (`ResizableState::split_panel`).
     Inserted {
-        state: S,
+        state: Entity<ResizableState>,
         index: usize,
         before: bool,
     },
@@ -102,22 +103,25 @@ pub enum SplitOutcome<S> {
 }
 
 /// What the caller must do after a [`PaneTree::remove`].
-pub enum RemoveOutcome<S> {
+pub enum RemoveOutcome {
     /// Removed from a split that still has 2+ children: call
     /// `ResizableState::remove_panel(index)` on `state`.
-    RemovedFromSplit { state: S, index: usize },
+    RemovedFromSplit {
+        state: Entity<ResizableState>,
+        index: usize,
+    },
 
     /// The parent split collapsed into its surviving child; its state handle
     /// was dropped with it — nothing to fix up.
     Collapsed,
 }
 
-pub struct PaneTree<L, S> {
-    root: PaneNode<L, S>,
+pub struct PaneTree<L> {
+    root: PaneNode<L>,
     focused: PaneId,
 }
 
-impl<L, S: Clone> PaneTree<L, S> {
+impl<L> PaneTree<L> {
     pub fn new_leaf(id: PaneId, pane: L) -> Self {
         Self {
             root: PaneNode::Leaf { id, pane },
@@ -125,7 +129,7 @@ impl<L, S: Clone> PaneTree<L, S> {
         }
     }
 
-    pub fn root(&self) -> &PaneNode<L, S> {
+    pub fn root(&self) -> &PaneNode<L> {
         &self.root
     }
 
@@ -158,7 +162,7 @@ impl<L, S: Clone> PaneTree<L, S> {
 
     /// All leaves in layout order.
     pub fn leaves(&self) -> Vec<(PaneId, &L)> {
-        fn walk<'a, L, S>(node: &'a PaneNode<L, S>, out: &mut Vec<(PaneId, &'a L)>) {
+        fn walk<'a, L>(node: &'a PaneNode<L>, out: &mut Vec<(PaneId, &'a L)>) {
             match node {
                 PaneNode::Leaf { id, pane, .. } => out.push((*id, pane)),
 
@@ -188,8 +192,8 @@ impl<L, S: Clone> PaneTree<L, S> {
         new_id: PaneId,
         new_pane: L,
         direction: SplitDirection,
-        make_state: impl FnOnce() -> S,
-    ) -> SplitOutcome<S> {
+        make_state: impl FnOnce() -> Entity<ResizableState>,
+    ) -> SplitOutcome {
         let axis: Axis = direction.into();
         let before = direction.before();
         let focused = self.focused;
@@ -211,14 +215,14 @@ impl<L, S: Clone> PaneTree<L, S> {
     }
 
     fn split_at(
-        node: &mut PaneNode<L, S>,
+        node: &mut PaneNode<L>,
         at: PaneId,
         new_id: PaneId,
         new_pane: L,
         axis: Axis,
         before: bool,
-        make_state: impl FnOnce() -> S,
-    ) -> Option<SplitOutcome<S>> {
+        make_state: impl FnOnce() -> Entity<ResizableState>,
+    ) -> Option<SplitOutcome> {
         // Same-axis parent: insert the new leaf as a direct sibling.
         if let PaneNode::Split {
             axis: split_axis,
@@ -309,7 +313,7 @@ impl<L, S: Clone> PaneTree<L, S> {
     /// state fix-up the caller must apply. Refuses the last leaf (`None`).
     /// A split left with one child collapses into that child; focus falls to
     /// the leaf now occupying the removed leaf's neighborhood.
-    pub fn remove(&mut self, id: PaneId) -> Option<(L, RemoveOutcome<S>)> {
+    pub fn remove(&mut self, id: PaneId) -> Option<(L, RemoveOutcome)> {
         if self.is_single_leaf() {
             return None;
         }
@@ -330,7 +334,7 @@ impl<L, S: Clone> PaneTree<L, S> {
         Some((pane, outcome))
     }
 
-    fn remove_at(node: &mut PaneNode<L, S>, id: PaneId) -> Option<(L, RemoveOutcome<S>)> {
+    fn remove_at(node: &mut PaneNode<L>, id: PaneId) -> Option<(L, RemoveOutcome)> {
         let PaneNode::Split {
             children, state, ..
         } = node
@@ -380,12 +384,12 @@ impl<L, S: Clone> PaneTree<L, S> {
     /// The nearest ancestor split of the focused leaf whose axis matches:
     /// `(state, child index of the focused subtree, child count)`. `None` when
     /// no matching-axis split exists (resize is a no-op then).
-    pub fn resize_split(&self, axis: Axis) -> Option<(S, usize, usize)> {
-        fn walk<L, S: Clone>(
-            node: &PaneNode<L, S>,
+    pub fn resize_split(&self, axis: Axis) -> Option<(Entity<ResizableState>, usize, usize)> {
+        fn walk<L>(
+            node: &PaneNode<L>,
             at: PaneId,
             axis: Axis,
-        ) -> Option<(S, usize, usize)> {
+        ) -> Option<(Entity<ResizableState>, usize, usize)> {
             let PaneNode::Split {
                 axis: split_axis,
                 children,
@@ -411,8 +415,14 @@ impl<L, S: Clone> PaneTree<L, S> {
 
     /// Visit every split's `(state, pending_ratios)` pair mutably (ratio
     /// application after a session restore).
-    pub fn for_each_split_mut(&mut self, f: &mut impl FnMut(&S, &mut Option<Vec<f32>>)) {
-        fn walk<L, S>(node: &mut PaneNode<L, S>, f: &mut impl FnMut(&S, &mut Option<Vec<f32>>)) {
+    pub fn for_each_split_mut(
+        &mut self,
+        f: &mut impl FnMut(&Entity<ResizableState>, &mut Option<Vec<f32>>),
+    ) {
+        fn walk<L>(
+            node: &mut PaneNode<L>,
+            f: &mut impl FnMut(&Entity<ResizableState>, &mut Option<Vec<f32>>),
+        ) {
             if let PaneNode::Split {
                 children,
                 state,
@@ -431,10 +441,10 @@ impl<L, S: Clone> PaneTree<L, S> {
     /// Build a split node for session restore (children already built).
     pub fn restored_split(
         axis: Axis,
-        children: Vec<PaneNode<L, S>>,
-        state: S,
+        children: Vec<PaneNode<L>>,
+        state: Entity<ResizableState>,
         ratios: Option<Vec<f32>>,
-    ) -> PaneNode<L, S> {
+    ) -> PaneNode<L> {
         let ratios = ratios.filter(|r| r.len() == children.len());
 
         PaneNode::Split {
@@ -447,14 +457,14 @@ impl<L, S: Clone> PaneTree<L, S> {
     }
 
     /// Build a leaf node for session restore.
-    pub fn restored_leaf(id: PaneId, pane: L) -> PaneNode<L, S> {
+    pub fn restored_leaf(id: PaneId, pane: L) -> PaneNode<L> {
         PaneNode::Leaf { id, pane }
     }
 }
 
-impl<L, S> From<PaneNode<L, S>> for PaneTree<L, S> {
+impl<L> From<PaneNode<L>> for PaneTree<L> {
     /// Build from a restored root; focus falls to the first leaf.
-    fn from(root: PaneNode<L, S>) -> Self {
+    fn from(root: PaneNode<L>) -> Self {
         let focused = root.first_leaf_id();
 
         Self { root, focused }

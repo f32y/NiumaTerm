@@ -11,10 +11,8 @@ use serde_json::Value;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
-pub(crate) enum InputError {
-    #[error("The agent input is closed")]
-    Closed,
-}
+#[error("The agent input is closed")]
+pub(crate) struct InputClosed;
 
 pub(super) struct QueuedInput {
     pub(super) messages: Vec<Value>,
@@ -183,11 +181,11 @@ impl InputQueue {
     }
 
     #[cfg(test)]
-    pub(super) fn submit(&self, messages: Vec<Value>) -> Result<(), InputError> {
+    pub(super) fn submit(&self, messages: Vec<Value>) -> Result<(), InputClosed> {
         self.submit_tracked(messages).map(|_| ())
     }
 
-    pub(super) fn submit_tracked(&self, messages: Vec<Value>) -> Result<InputTicket, InputError> {
+    pub(super) fn submit_tracked(&self, messages: Vec<Value>) -> Result<InputTicket, InputClosed> {
         let mut ticket = InputTicket::new(
             messages.len() > 1 || messages.iter().any(|message| message["type"] == "user"),
         );
@@ -201,7 +199,7 @@ impl InputQueue {
         let mut state = self.queue.state.lock();
 
         if !state.receiver_open {
-            return Err(InputError::Closed);
+            return Err(InputClosed);
         }
 
         state.pending.push_back(QueuedInput {

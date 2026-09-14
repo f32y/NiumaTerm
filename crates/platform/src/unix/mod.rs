@@ -56,9 +56,7 @@ use crate::unix::hook_command::single_quoted;
 use crate::unix::macos::*;
 use crate::unix::process::{KillOnCloseJob, ProcessTree};
 use crate::unix::signals::Signals;
-use crate::{
-    APP_ID, ChildEvent, EventedPty, ProcessReadWrite, PtyOptions, Winsize, WinsizeBuilder,
-};
+use crate::{APP_ID, EventedPty, ProcessReadWrite, PtyOptions, Winsize, WinsizeBuilder};
 
 #[cfg(all(target_os = "linux", not(target_env = "musl")))]
 const TIOCSWINSZ: libc::c_ulong = 0x5414;
@@ -1017,20 +1015,20 @@ fn command_per_pid(pid: libc::pid_t) -> String {
 
 impl EventedPty for Pty {
     #[inline]
-    fn next_child_event(&mut self) -> Option<ChildEvent> {
-        self.signals.pending().next().and_then(|signal| {
+    fn child_exited(&mut self) -> bool {
+        self.signals.pending().next().is_some_and(|signal| {
             if signal != sigconsts::SIGCHLD {
-                return None;
+                return false;
             }
 
             match self.child.waitpid() {
                 Err(_e) => {
                     // std::process::exit(1);
-                    None
+                    false
                 }
 
-                Ok(None) => None,
-                Ok(Some(..)) => Some(ChildEvent::Exited),
+                Ok(None) => false,
+                Ok(Some(..)) => true,
             }
         })
     }

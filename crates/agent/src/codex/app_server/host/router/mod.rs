@@ -307,7 +307,7 @@ impl Router {
 
     fn refresh_timer(&self, state: &RouterState) {
         if let Some(timer) = self.timer.lock().as_ref() {
-            timer.set(
+            timer.handle().set(
                 state
                     .pending_requests
                     .values()

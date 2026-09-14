@@ -2,7 +2,9 @@
 //! Job Object containment and the newline-delimited-JSON process shape used
 //! by the chat sessions.
 
-pub(crate) use crate::subprocess::input::{InputError, InputTicket};
+pub(crate) use crate::subprocess::input::{InputClosed, InputTicket};
+
+pub(crate) mod pending_requests;
 
 mod input;
 
@@ -161,7 +163,7 @@ impl JsonLineProcess {
 
     /// Queue a required control line. Failure ends the
     /// process tree so a missing reply cannot leave the session waiting forever.
-    pub(crate) fn write_line(&mut self, message: Value) -> Result<(), InputError> {
+    pub(crate) fn write_line(&mut self, message: Value) -> Result<(), InputClosed> {
         let result = self.try_write_line(message);
 
         if let Err(error) = &result {
@@ -177,27 +179,27 @@ impl JsonLineProcess {
     }
 
     /// Success means the writer accepted the message, not completed I/O.
-    pub(crate) fn try_write_line(&mut self, message: Value) -> Result<(), InputError> {
+    pub(crate) fn try_write_line(&mut self, message: Value) -> Result<(), InputClosed> {
         self.try_write_batch(vec![message])
     }
 
     /// Queue settings and prompt lines together so cancellation cannot split them.
-    pub(crate) fn try_write_batch(&mut self, messages: Vec<Value>) -> Result<(), InputError> {
+    pub(crate) fn try_write_batch(&mut self, messages: Vec<Value>) -> Result<(), InputClosed> {
         self.write_tracked(messages).map(|_| ())
     }
 
     pub(crate) fn write_tracked(
         &mut self,
         messages: Vec<Value>,
-    ) -> Result<InputTicket, InputError> {
+    ) -> Result<InputTicket, InputClosed> {
         if !self.has_stdin() {
-            return Err(InputError::Closed);
+            return Err(InputClosed);
         }
 
         let result = self
             .stdin
             .as_ref()
-            .ok_or(InputError::Closed)?
+            .ok_or(InputClosed)?
             .submit_tracked(messages);
 
         if result.is_err() {

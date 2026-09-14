@@ -6,9 +6,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Sender, channel};
 use std::time::Duration;
 
-use nmt_platform::{
-    ChildEvent, EventedPty, Interest, Poll, ProcessReadWrite, Token, Waker, WinsizeBuilder,
-};
+use nmt_platform::{EventedPty, Interest, Poll, ProcessReadWrite, Token, Waker, WinsizeBuilder};
 use nmt_remote_net::hub::{
     HubError, OpenedPty, PtySource, RemoteSessionHub, SessionEvent, SessionOptions,
 };
@@ -175,8 +173,8 @@ impl EventedPty for ControlledPty {
         self.tokens[2]
     }
 
-    fn next_child_event(&mut self) -> Option<ChildEvent> {
-        self.state.lock().exited.then_some(ChildEvent::Exited)
+    fn child_exited(&mut self) -> bool {
+        self.state.lock().exited
     }
 }
 

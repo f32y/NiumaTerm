@@ -97,7 +97,7 @@ impl HistoryStore {
 
     fn merge(&mut self, snapshot: &StoredHistory) {
         for scope in &snapshot.scopes {
-            let key: InputHistoryScope = scope.into();
+            let key = history_scope(scope);
             let entries = self.scopes.entry(key).or_default();
 
             // Stable identities make repeated saves idempotent even when a
@@ -147,7 +147,7 @@ pub(super) fn load_from_path(path: &Path) -> io::Result<HistoryStore> {
                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
             for scope in stored.scopes {
-                let key: InputHistoryScope = (&scope).into();
+                let key = history_scope(&scope);
                 let mut entries = VecDeque::<HistoryEntry>::new();
 
                 for (index, text) in scope.entries.iter().enumerate() {
@@ -264,13 +264,11 @@ impl From<&HistoryStore> for StoredHistory {
     }
 }
 
-impl<E> From<&StoredScope<E>> for InputHistoryScope {
-    fn from(value: &StoredScope<E>) -> Self {
-        InputHistoryScope {
-            target: value.target.clone(),
-            backend: value.backend.clone(),
-            cwd: value.cwd.clone(),
-            additional: value.additional.clone(),
-        }
+fn history_scope<E>(value: &StoredScope<E>) -> InputHistoryScope {
+    InputHistoryScope {
+        target: value.target.clone(),
+        backend: value.backend.clone(),
+        cwd: value.cwd.clone(),
+        additional: value.additional.clone(),
     }
 }

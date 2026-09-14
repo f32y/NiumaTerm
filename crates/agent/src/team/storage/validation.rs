@@ -11,10 +11,9 @@ pub(super) fn validate(room: &Room) -> Result<(), StorageError> {
     let invalid = StorageError::Invalid;
     let mut members = BTreeSet::new();
     let mut names = BTreeSet::new();
-    let mut conversations = BTreeSet::new();
 
     for member in &room.members {
-        if !members.insert(member.id) || !conversations.insert(member.conversation) {
+        if !members.insert(member.id) {
             return Err(invalid("duplicate member or conversation identity"));
         }
 

@@ -1,9 +1,8 @@
-use crate::colors::{ColorArray, ColorComposition};
-use crate::render_types;
+use crate::colors::ColorArray;
 
 /// Parse a `"#RRGGBB"` literal into an `[r, g, b, 1.0]` sRGB array at compile
 /// time. Defaults are constant, so this avoids the per-call regex compile and
-/// String allocation that `ColorBuilder::from_hex` does at runtime.
+/// String allocation that `Rgba::from_hex` does at runtime.
 const fn hex(s: &str) -> ColorArray {
     let b = s.as_bytes();
     let r = (nibble(b[1]) << 4 | nibble(b[2])) as f32 / 255.0;
@@ -23,18 +22,8 @@ const fn nibble(c: u8) -> u8 {
 }
 
 #[inline]
-pub fn background() -> ColorComposition {
-    let color = hex("#0F0D0E");
-
-    (
-        color,
-        render_types::Color {
-            r: color[0] as f64,
-            g: color[1] as f64,
-            b: color[2] as f64,
-            a: color[3] as f64,
-        },
-    )
+pub fn background() -> ColorArray {
+    hex("#0F0D0E")
 }
 
 #[inline]

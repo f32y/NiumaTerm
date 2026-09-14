@@ -158,11 +158,7 @@ impl From<WorkflowAgentState> for &'static str {
 
 /// Blocking reads owned by a provider and scheduled by the session executor.
 pub trait WorkflowSource: Send + Sync {
-    fn restore(
-        &self,
-        cwd: Option<&str>,
-        session_id: &str,
-    ) -> Result<Vec<RestoredWorkflowRun>, String>;
+    fn restore(&self, cwd: Option<&str>, session_id: &str) -> Result<Vec<WorkflowRun>, String>;
 
     fn refresh(
         &self,
@@ -170,11 +166,6 @@ pub trait WorkflowSource: Send + Sync {
         session_id: &str,
         request: &WorkflowRefreshRequest,
     ) -> WorkflowRefreshResult;
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RestoredWorkflowRun {
-    pub run: WorkflowRun,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

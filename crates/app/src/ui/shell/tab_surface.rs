@@ -89,7 +89,7 @@ impl TabSurface {
 
     pub(crate) fn agent_kind(&self, cx: &App) -> Option<AgentKind> {
         match self {
-            Self::Agent(tab) => Some(tab.pane.read(cx).kind()),
+            Self::Agent(tab) => Some(tab.owner.session().read(cx).profile().kind),
             Self::Pending(state) => state.agent.as_deref().and_then(AgentKind::from_id),
 
             Self::Live(_)
@@ -169,10 +169,12 @@ impl TabSurface {
     /// Live leaves. A pending tab has none — it owns no panes and no
     /// processes, which is exactly what route/process sweeps should see.
     pub(crate) fn leaves(&self) -> Vec<(PaneId, &Entity<TerminalPane>)> {
-        self.tree().map(|tree| tree.leaves()).unwrap_or_default()
+        self.tree()
+            .map(|tree| tree.tree().leaves())
+            .unwrap_or_default()
     }
 
     pub(crate) fn contains(&self, id: PaneId) -> bool {
-        self.tree().is_some_and(|tree| tree.contains(id))
+        self.tree().is_some_and(|tree| tree.tree().contains(id))
     }
 }

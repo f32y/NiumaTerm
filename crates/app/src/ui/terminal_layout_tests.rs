@@ -9,7 +9,7 @@ use crate::ui::terminal_layout::TerminalLayout;
 
 struct LayoutView(TerminalLayout<u32>);
 
-fn render_node(node: &PaneNode<u32, Entity<ResizableState>>) -> AnyElement {
+fn render_node(node: &PaneNode<u32>) -> AnyElement {
     match node {
         PaneNode::Leaf { .. } => div().size_full().into_any_element(),
 
@@ -38,7 +38,7 @@ impl Render for LayoutView {
         div()
             .w(px(800.))
             .h(px(600.))
-            .child(render_node(self.0.root()))
+            .child(render_node(self.0.tree().root()))
     }
 }
 
@@ -64,14 +64,14 @@ fn draw(cx: &mut VisualTestContext) {
 }
 
 fn root_state(layout: &TerminalLayout<u32>) -> Entity<ResizableState> {
-    let PaneNode::Split { state, .. } = layout.root() else {
+    let PaneNode::Split { state, .. } = layout.tree().root() else {
         panic!("expected a split");
     };
 
     state.clone()
 }
 
-fn assert_aligned(node: &PaneNode<u32, Entity<ResizableState>>, cx: &App) {
+fn assert_aligned(node: &PaneNode<u32>, cx: &App) {
     if let PaneNode::Split {
         children, state, ..
     } = node
@@ -96,10 +96,11 @@ fn same_axis_split_and_removal_update_sizes_before_render(cx: &mut TestAppContex
 
         let original = state.read(cx).sizes().clone();
 
-        assert!(layout.set_focused(PaneId(1)));
+        assert!(layout.tree_mut().set_focused(PaneId(1)));
         assert!(layout.split(PaneId(3), 3, SplitDirection::Left, cx));
         assert_eq!(
             layout
+                .tree()
                 .leaves()
                 .iter()
                 .map(|(id, _)| *id)
@@ -112,15 +113,16 @@ fn same_axis_split_and_removal_update_sizes_before_render(cx: &mut TestAppContex
         );
         assert_eq!(root_state(layout), state);
 
-        assert_aligned(layout.root(), cx);
+        assert_aligned(layout.tree().root(), cx);
 
         assert_eq!(layout.remove(PaneId(1), cx), Some(1));
 
-        assert_aligned(layout.root(), cx);
+        assert_aligned(layout.tree().root(), cx);
 
-        assert_eq!(layout.focused(), PaneId(3));
+        assert_eq!(layout.tree().focused(), PaneId(3));
         assert_eq!(
             layout
+                .tree()
                 .leaves()
                 .iter()
                 .map(|(_, value)| **value)
@@ -133,8 +135,8 @@ fn same_axis_split_and_removal_update_sizes_before_render(cx: &mut TestAppContex
         assert!((sizes[0] / sizes[1] - 1.5).abs() < 0.001);
 
         assert_eq!(layout.remove(PaneId(3), cx), Some(3));
-        assert!(layout.is_single_leaf());
-        assert_eq!(layout.focused(), PaneId(2));
+        assert!(layout.tree().is_single_leaf());
+        assert_eq!(layout.tree().focused(), PaneId(2));
         assert_eq!(layout.remove(PaneId(2), cx), None);
         assert_eq!(layout.remove(PaneId(99), cx), None);
     });
@@ -158,9 +160,9 @@ fn nested_split_collapse_preserves_outer_sizes_and_identity(cx: &mut TestAppCont
         let layout = &mut view.0;
         let before = outer.read(cx).sizes().clone();
 
-        assert_aligned(layout.root(), cx);
+        assert_aligned(layout.tree().root(), cx);
 
-        let PaneNode::Split { children, .. } = layout.root() else {
+        let PaneNode::Split { children, .. } = layout.tree().root() else {
             panic!("expected outer split");
         };
 
@@ -175,12 +177,12 @@ fn nested_split_collapse_preserves_outer_sizes_and_identity(cx: &mut TestAppCont
         assert_eq!(root_state(layout), outer);
         assert_eq!(outer.read(cx).sizes(), &before);
 
-        assert_aligned(layout.root(), cx);
+        assert_aligned(layout.tree().root(), cx);
 
-        assert_eq!(layout.focused(), PaneId(3));
+        assert_eq!(layout.tree().focused(), PaneId(3));
         assert_eq!(layout.remove(PaneId(1), cx), Some(1));
-        assert_eq!(*layout.focused_pane(), 3);
-        assert!(layout.is_single_leaf());
+        assert_eq!(*layout.tree().focused_pane(), 3);
+        assert!(layout.tree().is_single_leaf());
     });
 }
 
@@ -197,11 +199,11 @@ fn too_small_split_leaves_tree_focus_and_sizes_unchanged(cx: &mut TestAppContext
         let sizes = state.read(cx).sizes().clone();
 
         assert!(!layout.split(PaneId(3), 3, SplitDirection::Right, cx));
-        assert!(!layout.contains(PaneId(3)));
-        assert_eq!(layout.focused(), PaneId(2));
+        assert!(!layout.tree().contains(PaneId(3)));
+        assert_eq!(layout.tree().focused(), PaneId(2));
         assert_eq!(state.read(cx).sizes(), &sizes);
 
-        assert_aligned(layout.root(), cx);
+        assert_aligned(layout.tree().root(), cx);
     });
 }
 
@@ -216,6 +218,7 @@ fn mutations_before_first_render_keep_remaining_panes(cx: &mut TestAppContext) {
         assert_eq!(layout.remove(PaneId(3), cx), Some(3));
         assert_eq!(
             layout
+                .tree()
                 .leaves()
                 .iter()
                 .map(|(_, value)| **value)
@@ -223,6 +226,6 @@ fn mutations_before_first_render_keep_remaining_panes(cx: &mut TestAppContext) {
             [1, 2]
         );
         assert_eq!(layout.remove(PaneId(1), cx), Some(1));
-        assert_eq!(*layout.focused_pane(), 2);
+        assert_eq!(*layout.tree().focused_pane(), 2);
     });
 }

@@ -12,10 +12,9 @@
 #[path = "image_preview_tests.rs"]
 mod image_preview_tests;
 
-use std::mem;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-
+use crate::agent_tab::fade::{Fade, FrostedLayer};
+use crate::agent_tab::settings::UI_RADIUS;
+use crate::agent_tab::transcript::TranscriptView;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, Bounds, Context, Image, MouseButton, ObjectFit, Pixels, Point, Size, Window,
@@ -24,11 +23,9 @@ use gpui::{
 use gpui_component::IconName;
 use gpui_component::button::{Button, ButtonVariants as _};
 use rust_i18n::t;
-
-use crate::agent_tab::fade::{Fade, FrostedLayer};
-use crate::agent_tab::settings::UI_RADIUS;
-use crate::agent_tab::transcript::TranscriptView;
-use crate::agent_tab::transcript::view::{ImagePreview, ZoomedImage};
+use std::mem;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// How long the image takes to travel between its thumbnail and its full
 /// size. Brisk: the reader asked for the image and is waiting on it, and the
@@ -49,7 +46,39 @@ const PREVIEW_CLOSE_EDGE: f32 = 28.0;
 
 const PREVIEW_CLOSE_OFFSET: f32 = 10.0;
 
-impl TranscriptView {
+#[derive(Default)]
+pub(crate) struct ImagePreviewLayer {
+    /// Virtual rows cache measured heights; a width change can rewrap prose
+    /// without changing row fingerprints, so the viewport width is tracked too.
+    pub(crate) transcript_width: Option<Pixels>,
+
+    /// Last measured viewport height, which is how much empty space below the
+    /// conversation lets its final row reach the top of the screen.
+    pub(crate) transcript_height: Option<Pixels>,
+
+    /// Where the viewport sits in the window, which is what turns the window
+    /// bounds a thumbnail reports into a position inside the preview layer.
+    pub(crate) transcript_origin: Option<Point<Pixels>>,
+
+    pub(crate) image_preview: ImagePreview,
+}
+
+#[derive(Default)]
+pub(crate) enum ImagePreview {
+    #[default]
+    Closed,
+    Open(ZoomedImage),
+    Closing(ZoomedImage),
+}
+
+/// The image and thumbnail stay alive until the closing animation completes.
+pub(crate) struct ZoomedImage {
+    image: Arc<Image>,
+    origin: Option<Bounds<Pixels>>,
+    fade: Fade,
+}
+
+impl ImagePreviewLayer {
     /// Open `image` over the conversation. `origin` is the thumbnail it was
     /// opened from, in window coordinates, for the image to grow out of; an
     /// image opened from something with no place on screen fades in where it
@@ -58,7 +87,7 @@ impl TranscriptView {
         &mut self,
         image: Arc<Image>,
         origin: Option<Bounds<Pixels>>,
-        cx: &mut Context<Self>,
+        cx: &mut Context<TranscriptView>,
     ) {
         let fade = match &self.image_preview {
             ImagePreview::Closed => Fade::lasting(ZOOM_DURATION),
@@ -74,7 +103,7 @@ impl TranscriptView {
         cx.notify();
     }
 
-    pub(crate) fn close_zoomed_image(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn close_zoomed_image(&mut self, cx: &mut Context<TranscriptView>) {
         self.image_preview = match mem::take(&mut self.image_preview) {
             ImagePreview::Open(preview) => {
                 cx.notify();
@@ -95,7 +124,7 @@ impl TranscriptView {
         &mut self,
         now: Instant,
         window: &mut Window,
-        cx: &mut Context<Self>,
+        cx: &mut Context<TranscriptView>,
     ) -> Vec<AnyElement> {
         let (preview, open) = match &mut self.image_preview {
             ImagePreview::Closed => return Vec::new(),
@@ -119,7 +148,7 @@ impl TranscriptView {
                 // The conversation underneath is context for the image now,
                 // so clicking it dismisses the image rather than acting on
                 // the row that happens to be under the pointer.
-                .on_click(cx.listener(|this, _, _, cx| this.close_zoomed_image(cx)))
+                .on_click(cx.listener(|this, _, _, cx| this.preview.close_zoomed_image(cx)))
                 .into_any_element(),
         ];
 
@@ -147,7 +176,7 @@ impl TranscriptView {
         origin: Option<Bounds<Pixels>>,
         progress: f32,
         window: &mut Window,
-        cx: &mut Context<Self>,
+        cx: &mut Context<TranscriptView>,
     ) -> Option<AnyElement> {
         // The image element takes its size from the style rather than from the
         // pixels, so the decoded frame is the only place the image's own
@@ -227,9 +256,9 @@ impl TranscriptView {
                                 .icon(IconName::Close)
                                 .tooltip(t!("agent-transcript-image-close"))
                                 .accessibility_label(t!("agent-transcript-image-close"))
-                                .on_click(
-                                    cx.listener(|this, _, _, cx| this.close_zoomed_image(cx)),
-                                ),
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.preview.close_zoomed_image(cx)
+                                })),
                         ),
                 )
                 .into_any_element(),

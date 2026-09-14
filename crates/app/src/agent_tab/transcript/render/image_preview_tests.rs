@@ -46,7 +46,7 @@ fn closing_retains_the_image_and_reset_discards_the_preview(cx: &mut gpui::TestA
     use crate::agent_tab::AgentKind;
     use crate::agent_tab::settings::AgentSettings;
     use crate::agent_tab::transcript::TranscriptView;
-    use crate::agent_tab::transcript::view::ImagePreview;
+    use crate::agent_tab::transcript::render::image_preview::ImagePreview;
 
     let mut bytes = Cursor::new(Vec::new());
 
@@ -65,15 +65,17 @@ fn closing_retains_the_image_and_reset_discards_the_preview(cx: &mut gpui::TestA
         view.update(cx, |view, cx| {
             view.zoom_image(image.clone(), None, cx);
 
-            view.close_zoomed_image(cx);
+            view.preview.close_zoomed_image(cx);
 
-            assert!(matches!(&view.image_preview, ImagePreview::Closing(preview)
-            if Arc::ptr_eq(&preview.image, &image)));
+            assert!(
+                matches!(&view.preview.image_preview, ImagePreview::Closing(preview)
+            if Arc::ptr_eq(&preview.image, &image))
+            );
 
             view.zoom_image(image.clone(), None, cx);
             view.reset_presentation();
 
-            assert!(matches!(view.image_preview, ImagePreview::Closed));
+            assert!(matches!(view.preview.image_preview, ImagePreview::Closed));
         })
     });
 }

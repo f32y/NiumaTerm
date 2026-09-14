@@ -1,3 +1,5 @@
+pub(super) use crate::ui::tab_bar::drag::{DragLabelPreview, DragStyle, TAB_ROW_HEIGHT};
+
 pub(super) use crate::ui::tab_bar::menu::new_tab_menu;
 
 pub(super) mod menu;
@@ -29,7 +31,7 @@ use crate::ui::composition::{
 use crate::ui::shell::{
     InlineRename, InlineRenameSession, InlineRenameStyle, TabSurface, pending_tab_icon,
 };
-use crate::ui::tab_bar::drag::{TabDrag, TabDragPreview};
+use crate::ui::tab_bar::drag::TabDrag;
 use crate::ui::terminal_status::{TerminalVisual, terminal_dot, terminal_presentation};
 use crate::ui::{AppSettings, Shell, UI_RADIUS, modern_dropdown};
 use crate::workspace::TerminalActivity;
@@ -147,10 +149,11 @@ impl TabStrip {
         renames: &InlineRenameSession,
         cx: &mut Context<Shell>,
     ) -> AnyElement {
-        let active_idx = tabs.active_index();
+        let active_idx = tabs.list().active_index();
 
         let items: Vec<TabItem> = tabs
-            .tabs()
+            .list()
+            .items()
             .iter()
             .map(|tab| TabItem {
                 id: tab.id().0,
@@ -592,7 +595,8 @@ impl TabStrip {
                     // Drag a tab to reorder it; drop maps the source position
                     // (`from`) onto this tab's position.
                     .on_drag(TabDrag { from: index }, move |_, _, _, cx| {
-                        cx.new(|_| TabDragPreview {
+                        cx.new(|_| DragLabelPreview {
+                            style: DragStyle::Tab,
                             label: drag_label.clone(),
                             width: tab_width,
                         })
@@ -606,8 +610,8 @@ impl TabStrip {
                         // there is a no-op.
                         let target = (e.drag(cx).from != index).then_some(index);
 
-                        if this.tab_strip.drag_over != target {
-                            this.tab_strip.drag_over = target;
+                        if this.tab_strip_mut().drag_over != target {
+                            this.tab_strip_mut().drag_over = target;
 
                             cx.notify();
                         }
@@ -617,8 +621,12 @@ impl TabStrip {
                         // also reorder this drop.
                         cx.stop_propagation();
 
-                        this.tab_strip.drag_over = None;
-                        this.workspaces.active_tabs_mut().reorder(drag.from, index);
+                        this.tab_strip_mut().drag_over = None;
+
+                        this.workspaces
+                            .active_tabs_mut()
+                            .list_mut()
+                            .reorder(drag.from, index);
 
                         this.focus_active(window, cx);
                         this.sync_session_memory(cx);
@@ -627,7 +635,7 @@ impl TabStrip {
                     }))
             }))
             .on_click(cx.listener(|this, ix: &usize, window, cx| {
-                this.workspaces.active_tabs_mut().activate(*ix);
+                this.workspaces.active_tabs_mut().list_mut().activate(*ix);
                 this.on_active_tab_changed(window, cx);
 
                 this.focus_active(window, cx);
@@ -664,8 +672,11 @@ impl TabStrip {
                 })
             })
             .on_drop(cx.listener(|this, drag: &TabDrag, window, cx| {
-                if let Some(to) = this.tab_strip.drag_over.take() {
-                    this.workspaces.active_tabs_mut().reorder(drag.from, to);
+                if let Some(to) = this.tab_strip_mut().drag_over.take() {
+                    this.workspaces
+                        .active_tabs_mut()
+                        .list_mut()
+                        .reorder(drag.from, to);
 
                     this.focus_active(window, cx);
                     this.sync_session_memory(cx);

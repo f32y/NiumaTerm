@@ -131,6 +131,12 @@ impl EventedAnonRead {
 
         Self { worker, consumer }
     }
+
+    /// The soft-ready handle, so the `Pty` can inject the loop `Waker` at
+    /// `register()` time and query readiness in `drain_ready()`.
+    pub fn soft(&self) -> &SoftReady {
+        &self.worker.state.soft
+    }
 }
 
 fn pump_pipe_to_buffer(
@@ -210,14 +216,6 @@ impl io::Read for EventedAnonRead {
     }
 }
 
-impl EventedAnonRead {
-    /// The soft-ready handle, so the `Pty` can inject the loop `Waker` at
-    /// `register()` time and query readiness in `drain_ready()`.
-    pub fn soft(&self) -> &SoftReady {
-        &self.worker.state.soft
-    }
-}
-
 /// Wraps an AnonWrite pipe so that it can be written asynchronously using mio.
 ///
 /// This is achieved by spawning a worker thread which continuously attempts
@@ -241,6 +239,12 @@ impl EventedAnonWrite {
         });
 
         Self { worker, producer }
+    }
+
+    /// The soft-ready handle, so the `Pty` can inject the loop `Waker` at
+    /// `register()` time and query writability in `drain_ready()`.
+    pub fn soft(&self) -> &SoftReady {
+        &self.worker.state.soft
     }
 }
 
@@ -330,13 +334,5 @@ impl io::Write for EventedAnonWrite {
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
-    }
-}
-
-impl EventedAnonWrite {
-    /// The soft-ready handle, so the `Pty` can inject the loop `Waker` at
-    /// `register()` time and query writability in `drain_ready()`.
-    pub fn soft(&self) -> &SoftReady {
-        &self.worker.state.soft
     }
 }

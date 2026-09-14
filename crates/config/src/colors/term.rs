@@ -5,7 +5,7 @@ mod term_tests;
 use std::ops::{Index, IndexMut};
 
 use crate::Colors;
-use crate::colors::{ColorArray, ColorBuilder, ColorRgb, Format, NamedColor};
+use crate::colors::{ColorArray, ColorRgb, NamedColor, Rgba};
 
 /// Number of terminal colors.
 pub const COUNT: usize = 269;
@@ -130,7 +130,7 @@ impl List {
 
         // Foreground and background.
         self[NamedColor::Foreground] = colors.foreground;
-        self[NamedColor::Background] = colors.background.0;
+        self[NamedColor::Background] = colors.background;
         self[NamedColor::Cursor] = colors.cursor;
 
         // Dims.
@@ -220,7 +220,7 @@ impl List {
                         g: if g == 0 { 0 } else { g * 40 + 55 },
                     };
 
-                    let arr = ColorBuilder::from_rgb(rgb, Format::SRGB0_1).into();
+                    let arr = Rgba::from_rgb(rgb).into();
 
                     self[index] = arr;
                     index += 1;
@@ -243,7 +243,7 @@ impl List {
                 b: value,
             };
 
-            let arr = ColorBuilder::from_rgb(rgb, Format::SRGB0_1).into();
+            let arr = Rgba::from_rgb(rgb).into();
 
             self[index] = arr;
             index += 1;

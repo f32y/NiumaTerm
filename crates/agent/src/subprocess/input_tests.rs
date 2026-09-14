@@ -3,7 +3,7 @@ use std::thread;
 
 use serde_json::{Value, json};
 
-use crate::subprocess::input::{InputError, InputQueue};
+use crate::subprocess::input::{InputClosed, InputQueue};
 
 #[test]
 fn large_input_and_queued_burst_preserve_order_while_a_write_is_active() {
@@ -128,5 +128,5 @@ fn submission_moves_strings_and_disconnect_cancels_pending_input() {
     drop(receiver);
 
     assert!(ticket.is_cancelled());
-    assert_eq!(queue.submit(vec![json!("closed")]), Err(InputError::Closed));
+    assert_eq!(queue.submit(vec![json!("closed")]), Err(InputClosed));
 }

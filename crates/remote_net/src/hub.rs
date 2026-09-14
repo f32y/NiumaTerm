@@ -1,5 +1,18 @@
 //! Headless ConPTY sessions retained independently of client subscriptions.
 
+pub use crate::session::{SessionId, SessionSnapshot};
+
+use crate::protocol::ProtocolSessionOptions;
+use nmt_config::{CursorShape, active_colors};
+use nmt_platform::windows::powershell::DEFAULT_SHELL;
+use nmt_platform::windows::process::ProcessTree;
+use nmt_platform::{
+    EventedPty, Pty, PtyOptions, WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env,
+};
+use nmt_terminal::event::{EventListener, Msg, MsgSender, TerminalEvent};
+use nmt_terminal::pty_pipe::{SessionOptions as PipeOptions, SessionWorker, start_session};
+use nmt_terminal::session::request::{Checkpoint, CheckpointRequest};
+use parking_lot::Mutex;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -7,27 +20,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::{error, fmt, io, thread};
 
-use nmt_config::{CursorShape, active_colors};
-use nmt_platform::windows::powershell::DEFAULT_SHELL;
-use nmt_platform::windows::process::ProcessTree;
-use nmt_platform::{
-    EventedPty, Pty, PtyOptions, WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env,
-};
-use nmt_terminal::event::{EventListener, Msg, MsgSender, TerminalEvent, WindowId};
-use nmt_terminal::pty_pipe::{SessionOptions as PipeOptions, SessionWorker, start_session};
-use nmt_terminal::session::request::{Checkpoint, CheckpointRequest};
-use parking_lot::Mutex;
-
 const SUBSCRIBER_QUEUE_CAPACITY: usize = 128;
-
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct SessionId(pub u64);
-
-impl fmt::Display for SessionId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct SessionOptions {
@@ -56,15 +49,6 @@ impl Default for SessionOptions {
             manage_process_tree: false,
         }
     }
-}
-
-#[derive(Debug)]
-pub struct SessionSnapshot {
-    pub session_id: SessionId,
-    pub base_seq: u64,
-    pub vt: Vec<u8>,
-    pub cols: u16,
-    pub rows: u16,
 }
 
 #[derive(Clone, Debug)]
@@ -249,11 +233,7 @@ struct HubEventProxy {
 }
 
 impl EventListener for HubEventProxy {
-    fn event(&self) -> (Option<TerminalEvent>, bool) {
-        (None, false)
-    }
-
-    fn send_event(&self, event: TerminalEvent, _id: WindowId) {
+    fn send_event(&self, event: TerminalEvent) {
         if matches!(event, TerminalEvent::CloseTerminal(_) | TerminalEvent::Exit) {
             self.stream.lock().publish_exit();
         }
@@ -546,5 +526,28 @@ fn validate_size(cols: u16, rows: u16) -> Result<(), HubError> {
         Err(HubError::InvalidSize { cols, rows })
     } else {
         Ok(())
+    }
+}
+
+#[cfg(windows)]
+impl From<ProtocolSessionOptions> for SessionOptions {
+    fn from(request: ProtocolSessionOptions) -> Self {
+        let mut options = SessionOptions::default();
+
+        if let Some(shell) = request.shell {
+            options.shell = shell;
+        }
+
+        options.working_directory = request.working_directory;
+
+        if request.cols > 0 {
+            options.cols = request.cols;
+        }
+
+        if request.rows > 0 {
+            options.rows = request.rows;
+        }
+
+        options
     }
 }

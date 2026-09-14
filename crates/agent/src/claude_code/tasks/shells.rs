@@ -4,14 +4,11 @@
 //! is written to, so what is kept for it is the command line, that file, and
 //! whether the row is a shell at all.
 
-use std::collections::{HashMap, VecDeque};
-
-use serde_json::Value;
-
-use crate::background_task::{BackgroundTaskKey, BackgroundTaskKind};
+use crate::claude_code::tasks::ShellMeta;
 use crate::claude_code::tasks::records::result_content;
-use crate::claude_code::tasks::{ClaudeTasks, ShellDetail, ShellMeta};
 use crate::json::text_field;
+use serde_json::Value;
+use std::collections::{HashMap, VecDeque};
 
 /// Shell entries retained per session, applied to both the metadata table and
 /// the command table beside it. Each entry is a few short strings, so this only
@@ -177,40 +174,5 @@ impl ShellIndex {
 
     pub(super) fn shell_command(&self, canonical: &str) -> Option<String> {
         self.shell_meta.get(canonical)?.command.clone()
-    }
-}
-
-impl ClaudeTasks {
-    pub(super) fn is_shell(&self, canonical: &str) -> bool {
-        self.registry
-            .as_ref()
-            .and_then(|registry| registry.get(&BackgroundTaskKey::claude_code(canonical)))
-            .is_some_and(|task| task.kind == BackgroundTaskKind::Shell)
-    }
-
-    /// The command and output file behind one background shell row. Returns
-    /// nothing for a row that is not a shell, which is what tells the caller
-    /// to read a child conversation instead.
-    pub(crate) fn shell_detail(&self, id: &str) -> Option<ShellDetail> {
-        let canonical = self.canonical(id)?;
-
-        let task = self
-            .registry
-            .as_ref()?
-            .get(&BackgroundTaskKey::claude_code(&canonical))?;
-
-        if task.kind != BackgroundTaskKind::Shell {
-            return None;
-        }
-
-        let meta = self.shells.meta(&canonical);
-
-        Some(ShellDetail {
-            id: canonical.clone(),
-            command: meta.and_then(|meta| meta.command.clone()),
-            description: meta.and_then(|meta| meta.description.clone()),
-            output_file: meta.and_then(|meta| meta.output_file.clone()),
-            state: task.state,
-        })
     }
 }

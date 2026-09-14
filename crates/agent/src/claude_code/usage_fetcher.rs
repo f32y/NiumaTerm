@@ -16,7 +16,7 @@ use std::{env, fmt, thread};
 use nmt_platform::process::launch_env_var;
 #[cfg(not(windows))]
 use nmt_platform::shell::default_shell;
-use nmt_platform::{ChildEvent, EventedPty as _, ProcessReadWrite as _, PtyOptions};
+use nmt_platform::{EventedPty as _, ProcessReadWrite as _, PtyOptions};
 use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use serde::Deserialize;
@@ -456,7 +456,7 @@ fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchErro
             return parse_output(&clean).map_err(UsageFetchError::Failed);
         }
 
-        if pipe_closed || matches!(pty.next_child_event(), Some(ChildEvent::Exited)) {
+        if pipe_closed || pty.child_exited() {
             return parse_output(&clean).map_err(|_| {
                 UsageFetchError::Failed("Claude exited before the usage panel rendered".to_string())
             });

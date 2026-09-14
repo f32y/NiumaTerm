@@ -4,6 +4,7 @@
 //! What they share is the pill chrome and the pickers in the module root; what
 //! differs is which controls exist and what a change to one is sent as.
 
+use crate::agent_tab::thread_controls::remember_defaults;
 use gpui::prelude::*;
 use gpui::{Context, IntoElement, px};
 use gpui_component::{ActiveTheme as _, IconName, h_flex};
@@ -18,155 +19,250 @@ use crate::agent_tab::composer::PendingSlashCommand;
 use crate::agent_tab::profile::AgentKind;
 use crate::agent_tab::thread_controls::effort::{effort_levels, effort_panel};
 use crate::agent_tab::thread_controls::{
-    FoldedSetting, SETTINGS_PILL_GAP, ThreadControls, folded_settings_pill, setting_picker,
+    FoldedSetting, SETTINGS_PILL_GAP, folded_settings_pill, model_options, setting_picker,
     settings_group,
 };
 use crate::agent_tab::transcript::permission_icon;
 
-impl ThreadControls {
-    /// Claude settings: model, permission mode, and reasoning effort. The
-    /// model catalog comes from the initialize handshake, and all three apply
-    /// via control requests before the next message. Models without effort
-    /// support (e.g. Haiku) get no effort control.
-    pub(super) fn render_claude_row(
-        &self,
-        state: &ConversationSettings,
-        kind: AgentKind,
-        cx: &mut Context<AgentPane>,
-    ) -> impl IntoElement + use<> {
-        let model_options = self.model_options(state, cx);
+/// Claude settings: model, permission mode, and reasoning effort. The
+/// model catalog comes from the initialize handshake, and all three apply
+/// via control requests before the next message. Models without effort
+/// support (e.g. Haiku) get no effort control.
+pub(super) fn render_claude_row(
+    state: &ConversationSettings,
+    kind: AgentKind,
+    cx: &mut Context<AgentPane>,
+) -> impl IntoElement + use<> {
+    let model_options = model_options(state, cx);
 
-        let permission_options: Vec<(String, String)> = stream_json::PERMISSION_OPTIONS
-            .iter()
-            .map(|v| (v.to_string(), setting_value_label(v)))
-            .collect();
+    let permission_options: Vec<(String, String)> = stream_json::PERMISSION_OPTIONS
+        .iter()
+        .map(|v| (v.to_string(), setting_value_label(v)))
+        .collect();
 
-        // Which levels exist is this application's call, but whether the
-        // model has the setting at all stays the harness's: a model that
-        // advertises none (Haiku) gets no control rather than one whose every
-        // value it would reject.
-        let supports_effort = state
-            .models
-            .iter()
-            .find(|m| Some(&m.model) == state.settings.model.as_ref())
-            .is_some_and(|m| !m.efforts.is_empty());
+    // Which levels exist is this application's call, but whether the
+    // model has the setting at all stays the harness's: a model that
+    // advertises none (Haiku) gets no control rather than one whose every
+    // value it would reject.
+    let supports_effort = state
+        .models
+        .iter()
+        .find(|m| Some(&m.model) == state.settings.model.as_ref())
+        .is_some_and(|m| !m.efforts.is_empty());
 
-        let model = setting_picker(
+    let model = setting_picker(
+        cx,
+        "agent-model",
+        t!("agent-setting-model"),
+        IconName::Cpu,
+        state.settings.model.clone(),
+        model_options,
+        |this, value, cx| {
+            let Some(session_host) = this.host.upgrade() else {
+                return;
+            };
+
+            let session_kind = session_host.read(cx).kind;
+            let session_profile = session_host.read(cx).profile.clone();
+
+            this.session.borrow_mut().controls.set_model(value);
+
+            remember_defaults(
+                &this.session.borrow().controls,
+                session_kind,
+                &session_profile,
+                cx,
+            );
+        },
+    )
+    .into_any_element();
+
+    let folded = vec![FoldedSetting {
+        name: t!("agent-setting-permissions"),
+        icon: permission_icon(state.settings.approval.as_deref()),
+        current: state.settings.approval.clone(),
+        options: permission_options,
+        set: |this, value, cx| {
+            let Some(session_host) = this.host.upgrade() else {
+                return;
+            };
+            let session_kind = session_host.read(cx).kind;
+            let session_profile = session_host.read(cx).profile.clone();
+
+            this.session.borrow_mut().controls.settings.approval = Some(value);
+            remember_defaults(
+                &this.session.borrow().controls,
+                session_kind,
+                &session_profile,
+                cx,
+            );
+        },
+    }];
+
+    let mut row = h_flex()
+        .w_full()
+        .gap(px(SETTINGS_PILL_GAP))
+        .flex_wrap()
+        .text_color(cx.theme().muted_foreground)
+        .child(settings_group(t!("agent-settings-model"), vec![model]));
+
+    if supports_effort {
+        let effort = effort_panel(
             cx,
-            "agent-model",
-            t!("agent-setting-model"),
-            IconName::Cpu,
-            state.settings.model.clone(),
-            model_options,
+            // The protocol never reports the session's current effort;
+            // until the user picks one, the honest label is the CLI's
+            // own per-model default rather than an empty dash.
+            state
+                .settings
+                .effort
+                .clone()
+                .or_else(|| Some("default".to_string())),
+            effort_levels(kind),
             |this, value, cx| {
-                this.session.borrow_mut().set_model(value);
+                let Some(session_host) = this.host.upgrade() else {
+                    return;
+                };
 
-                this.controls.remember_defaults(
-                    this.session.borrow().controls(),
-                    this.kind,
-                    &this.profile,
+                let session_kind = session_host.read(cx).kind;
+                let session_profile = session_host.read(cx).profile.clone();
+
+                this.session.borrow_mut().controls.settings.effort = Some(value);
+
+                remember_defaults(
+                    &this.session.borrow().controls,
+                    session_kind,
+                    &session_profile,
                     cx,
                 );
             },
         )
         .into_any_element();
 
-        let folded = vec![FoldedSetting {
+        row = row.child(settings_group(
+            t!("agent-settings-quality-cost"),
+            vec![effort],
+        ));
+    }
+
+    row.children(folded_settings_pill(cx, folded))
+}
+
+/// DeepSeek settings: model, reasoning effort, and permission preset. Each
+/// takes effect on the session immediately rather than riding along with
+/// the next turn.
+///
+/// The presets come from the harness because its preset table belongs to
+/// the deployment; a list written here would offer values a deployment does
+/// not serve and hide the ones it does. A composition with no permission
+/// service reports none, and then the control is absent rather than empty.
+pub(super) fn render_deepseek_row(
+    state: &ConversationSettings,
+    kind: AgentKind,
+    cx: &mut Context<AgentPane>,
+) -> impl IntoElement + use<> {
+    let model_options = model_options(state, cx);
+
+    // The setting belongs to the exact model route, so a model that
+    // advertises no levels simply has no effort control; the levels it
+    // then offers are the shared ladder.
+    let supports_effort = state
+        .models
+        .iter()
+        .find(|m| Some(&m.model) == state.settings.model.as_ref())
+        .is_some_and(|m| !m.efforts.is_empty());
+
+    let model = setting_picker(
+        cx,
+        "agent-model",
+        t!("agent-setting-model"),
+        IconName::Cpu,
+        state.settings.model.clone(),
+        model_options,
+        |this, value, cx| {
+            let Some(session_host) = this.host.upgrade() else {
+                return;
+            };
+
+            let session_kind = session_host.read(cx).kind;
+            let session_profile = session_host.read(cx).profile.clone();
+
+            this.session.borrow_mut().controls.set_model(value);
+
+            remember_defaults(
+                &this.session.borrow().controls,
+                session_kind,
+                &session_profile,
+                cx,
+            );
+
+            this.apply_model_selection(cx);
+        },
+    )
+    .into_any_element();
+
+    let mut folded = Vec::new();
+
+    // A deployment that composes no presets has one composition for every
+    // conversation, so the control would offer a choice that does not exist.
+    if !state.agent_presets.is_empty() {
+        folded.push(FoldedSetting {
+            name: t!("agent-setting-agent-preset"),
+            icon: IconName::Bot,
+            current: state.agent_preset.clone(),
+            options: state
+                .agent_presets
+                .iter()
+                .map(|preset| (preset.value.clone(), preset.label.clone()))
+                .collect(),
+            set: |this, value, cx| this.apply_agent_preset(value, cx),
+        });
+    }
+
+    if !state.approval_presets.is_empty() {
+        folded.push(FoldedSetting {
             name: t!("agent-setting-permissions"),
             icon: permission_icon(state.settings.approval.as_deref()),
             current: state.settings.approval.clone(),
-            options: permission_options,
+            options: state
+                .approval_presets
+                .iter()
+                .map(|preset| (preset.value.clone(), preset.label.clone()))
+                .collect(),
             set: |this, value, cx| {
-                this.session.borrow_mut().set_approval(value);
-                this.controls.remember_defaults(
-                    this.session.borrow().controls(),
-                    this.kind,
-                    &this.profile,
-                    cx,
-                );
+                // The harness owns the switch, and its own command is what
+                // performs it; the projection that follows is what moves
+                // the row, so nothing is recorded here in advance.
+                this.execute_backend_command(PendingSlashCommand::new("permission", value), cx);
             },
-        }];
-
-        let mut row = h_flex()
-            .w_full()
-            .gap(px(SETTINGS_PILL_GAP))
-            .flex_wrap()
-            .text_color(cx.theme().muted_foreground)
-            .child(settings_group(t!("agent-settings-model"), vec![model]));
-
-        if supports_effort {
-            let effort = effort_panel(
-                cx,
-                // The protocol never reports the session's current effort;
-                // until the user picks one, the honest label is the CLI's
-                // own per-model default rather than an empty dash.
-                state
-                    .settings
-                    .effort
-                    .clone()
-                    .or_else(|| Some("default".to_string())),
-                effort_levels(kind),
-                |this, value, cx| {
-                    this.session.borrow_mut().set_effort(value);
-
-                    this.controls.remember_defaults(
-                        this.session.borrow().controls(),
-                        this.kind,
-                        &this.profile,
-                        cx,
-                    );
-                },
-            )
-            .into_any_element();
-
-            row = row.child(settings_group(
-                t!("agent-settings-quality-cost"),
-                vec![effort],
-            ));
-        }
-
-        row.children(folded_settings_pill(cx, folded))
+        });
     }
 
-    /// DeepSeek settings: model, reasoning effort, and permission preset. Each
-    /// takes effect on the session immediately rather than riding along with
-    /// the next turn.
-    ///
-    /// The presets come from the harness because its preset table belongs to
-    /// the deployment; a list written here would offer values a deployment does
-    /// not serve and hide the ones it does. A composition with no permission
-    /// service reports none, and then the control is absent rather than empty.
-    pub(super) fn render_deepseek_row(
-        &self,
-        state: &ConversationSettings,
-        kind: AgentKind,
-        cx: &mut Context<AgentPane>,
-    ) -> impl IntoElement + use<> {
-        let model_options = self.model_options(state, cx);
+    let mut row = h_flex()
+        .w_full()
+        .gap(px(SETTINGS_PILL_GAP))
+        .flex_wrap()
+        .text_color(cx.theme().muted_foreground)
+        .child(settings_group(t!("agent-settings-model"), vec![model]));
 
-        // The setting belongs to the exact model route, so a model that
-        // advertises no levels simply has no effort control; the levels it
-        // then offers are the shared ladder.
-        let supports_effort = state
-            .models
-            .iter()
-            .find(|m| Some(&m.model) == state.settings.model.as_ref())
-            .is_some_and(|m| !m.efforts.is_empty());
-
-        let model = setting_picker(
+    if supports_effort {
+        let effort = effort_panel(
             cx,
-            "agent-model",
-            t!("agent-setting-model"),
-            IconName::Cpu,
-            state.settings.model.clone(),
-            model_options,
+            state.settings.effort.clone(),
+            effort_levels(kind),
             |this, value, cx| {
-                this.session.borrow_mut().set_model(value);
+                let Some(session_host) = this.host.upgrade() else {
+                    return;
+                };
 
-                this.controls.remember_defaults(
-                    this.session.borrow().controls(),
-                    this.kind,
-                    &this.profile,
+                let session_kind = session_host.read(cx).kind;
+                let session_profile = session_host.read(cx).profile.clone();
+
+                this.session.borrow_mut().controls.settings.effort = Some(value);
+
+                remember_defaults(
+                    &this.session.borrow().controls,
+                    session_kind,
+                    &session_profile,
                     cx,
                 );
 
@@ -175,233 +271,208 @@ impl ThreadControls {
         )
         .into_any_element();
 
-        let mut folded = Vec::new();
+        row = row.child(settings_group(
+            t!("agent-settings-quality-cost"),
+            vec![effort],
+        ));
+    }
 
-        // A deployment that composes no presets has one composition for every
-        // conversation, so the control would offer a choice that does not exist.
-        if !state.agent_presets.is_empty() {
-            folded.push(FoldedSetting {
-                name: t!("agent-setting-agent-preset"),
-                icon: IconName::Bot,
-                current: state.agent_preset.clone(),
-                options: state
-                    .agent_presets
-                    .iter()
-                    .map(|preset| (preset.value.clone(), preset.label.clone()))
-                    .collect(),
-                set: |this, value, cx| this.apply_agent_preset(value, cx),
-            });
-        }
+    row.children(folded_settings_pill(cx, folded))
+}
 
-        if !state.approval_presets.is_empty() {
-            folded.push(FoldedSetting {
-                name: t!("agent-setting-permissions"),
-                icon: permission_icon(state.settings.approval.as_deref()),
-                current: state.settings.approval.clone(),
-                options: state
-                    .approval_presets
-                    .iter()
-                    .map(|preset| (preset.value.clone(), preset.label.clone()))
-                    .collect(),
-                set: |this, value, cx| {
-                    // The harness owns the switch, and its own command is what
-                    // performs it; the projection that follows is what moves
-                    // the row, so nothing is recorded here in advance.
-                    this.execute_backend_command(PendingSlashCommand::new("permission", value), cx);
-                },
-            });
-        }
+/// Codex settings: model, approval policy, approval reviewer, sandbox,
+/// reasoning effort, and service tier. Values are thread settings sent as
+/// overrides on the next `turn/start`.
+pub(super) fn render_codex_row(
+    state: &ConversationSettings,
+    kind: AgentKind,
+    cx: &mut Context<AgentPane>,
+) -> impl IntoElement + use<> {
+    let model_options = model_options(state, cx);
 
-        let mut row = h_flex()
-            .w_full()
-            .gap(px(SETTINGS_PILL_GAP))
-            .flex_wrap()
-            .text_color(cx.theme().muted_foreground)
-            .child(settings_group(t!("agent-settings-model"), vec![model]));
+    // Service tiers are per model, and the catalog only lists the
+    // additional tiers (e.g. "Fast") — the normal tier is implicit, so
+    // the menu carries a synthetic entry for it. Empty protocol value =
+    // normal = explicit `serviceTier: null` on the next turn.
+    let mut tier_options: Vec<(String, String)> =
+        vec![(String::new(), setting_value_label("normal"))];
 
-        if supports_effort {
-            let effort = effort_panel(
+    tier_options.extend(
+        state
+            .models
+            .iter()
+            .find(|m| Some(&m.model) == state.settings.model.as_ref())
+            .map(|m| m.tiers.clone())
+            .unwrap_or_default(),
+    );
+
+    let approval_options: Vec<(String, String)> = app_server::APPROVAL_OPTIONS
+        .iter()
+        .map(|v| (v.to_string(), setting_value_label(v)))
+        .collect();
+
+    let reviewer_options: Vec<(String, String)> = app_server::APPROVAL_REVIEWER_OPTIONS
+        .iter()
+        .map(|v| (v.to_string(), setting_value_label(v)))
+        .collect();
+
+    let sandbox_options: Vec<(String, String)> = app_server::SANDBOX_OPTIONS
+        .iter()
+        .map(|(v, label)| (v.to_string(), setting_value_label(label)))
+        .collect();
+
+    let model = setting_picker(
+        cx,
+        "agent-model",
+        t!("agent-setting-model"),
+        IconName::Cpu,
+        state.settings.model.clone(),
+        model_options,
+        |this, value, cx| {
+            let Some(session_host) = this.host.upgrade() else {
+                return;
+            };
+
+            let session_kind = session_host.read(cx).kind;
+            let session_profile = session_host.read(cx).profile.clone();
+
+            this.session.borrow_mut().controls.set_model(value);
+
+            remember_defaults(
+                &this.session.borrow().controls,
+                session_kind,
+                &session_profile,
                 cx,
-                state.settings.effort.clone(),
-                effort_levels(kind),
-                |this, value, cx| {
-                    this.session.borrow_mut().set_effort(value);
+            );
+        },
+    )
+    .into_any_element();
 
-                    this.controls.remember_defaults(
-                        this.session.borrow().controls(),
-                        this.kind,
-                        &this.profile,
-                        cx,
-                    );
+    let folded = vec![
+        FoldedSetting {
+            name: t!("agent-setting-approval"),
+            icon: permission_icon(state.settings.approval.as_deref()),
+            current: state.settings.approval.clone(),
+            options: approval_options,
+            set: |this, value, cx| {
+                let Some(session_host) = this.host.upgrade() else {
+                    return;
+                };
+                let session_kind = session_host.read(cx).kind;
+                let session_profile = session_host.read(cx).profile.clone();
 
-                    this.apply_model_selection(cx);
-                },
-            )
-            .into_any_element();
-
-            row = row.child(settings_group(
-                t!("agent-settings-quality-cost"),
-                vec![effort],
-            ));
-        }
-
-        row.children(folded_settings_pill(cx, folded))
-    }
-
-    /// Codex settings: model, approval policy, approval reviewer, sandbox,
-    /// reasoning effort, and service tier. Values are thread settings sent as
-    /// overrides on the next `turn/start`.
-    pub(super) fn render_codex_row(
-        &self,
-        state: &ConversationSettings,
-        kind: AgentKind,
-        cx: &mut Context<AgentPane>,
-    ) -> impl IntoElement + use<> {
-        let model_options = self.model_options(state, cx);
-
-        // Service tiers are per model, and the catalog only lists the
-        // additional tiers (e.g. "Fast") — the normal tier is implicit, so
-        // the menu carries a synthetic entry for it. Empty protocol value =
-        // normal = explicit `serviceTier: null` on the next turn.
-        let mut tier_options: Vec<(String, String)> =
-            vec![(String::new(), setting_value_label("normal"))];
-
-        tier_options.extend(
-            state
-                .models
-                .iter()
-                .find(|m| Some(&m.model) == state.settings.model.as_ref())
-                .map(|m| m.tiers.clone())
-                .unwrap_or_default(),
-        );
-
-        let approval_options: Vec<(String, String)> = app_server::APPROVAL_OPTIONS
-            .iter()
-            .map(|v| (v.to_string(), setting_value_label(v)))
-            .collect();
-
-        let reviewer_options: Vec<(String, String)> = app_server::APPROVAL_REVIEWER_OPTIONS
-            .iter()
-            .map(|v| (v.to_string(), setting_value_label(v)))
-            .collect();
-
-        let sandbox_options: Vec<(String, String)> = app_server::SANDBOX_OPTIONS
-            .iter()
-            .map(|(v, label)| (v.to_string(), setting_value_label(label)))
-            .collect();
-
-        let model = setting_picker(
-            cx,
-            "agent-model",
-            t!("agent-setting-model"),
-            IconName::Cpu,
-            state.settings.model.clone(),
-            model_options,
-            |this, value, cx| {
-                this.session.borrow_mut().set_model(value);
-
-                this.controls.remember_defaults(
-                    this.session.borrow().controls(),
-                    this.kind,
-                    &this.profile,
+                this.session.borrow_mut().controls.settings.approval = Some(value);
+                remember_defaults(
+                    &this.session.borrow().controls,
+                    session_kind,
+                    &session_profile,
                     cx,
                 );
             },
-        )
-        .into_any_element();
+        },
+        FoldedSetting {
+            name: t!("agent-setting-approval-reviewer"),
+            icon: IconName::User,
+            current: state.settings.approvals_reviewer.clone(),
+            options: reviewer_options,
+            set: |this, value, cx| {
+                let Some(session_host) = this.host.upgrade() else {
+                    return;
+                };
+                let session_kind = session_host.read(cx).kind;
+                let session_profile = session_host.read(cx).profile.clone();
 
-        let folded = vec![
-            FoldedSetting {
-                name: t!("agent-setting-approval"),
-                icon: permission_icon(state.settings.approval.as_deref()),
-                current: state.settings.approval.clone(),
-                options: approval_options,
-                set: |this, value, cx| {
-                    this.session.borrow_mut().set_approval(value);
-                    this.controls.remember_defaults(
-                        this.session.borrow().controls(),
-                        this.kind,
-                        &this.profile,
-                        cx,
-                    );
-                },
-            },
-            FoldedSetting {
-                name: t!("agent-setting-approval-reviewer"),
-                icon: IconName::User,
-                current: state.settings.approvals_reviewer.clone(),
-                options: reviewer_options,
-                set: |this, value, cx| {
-                    this.session.borrow_mut().set_approval_reviewer(value);
-                    this.controls.remember_defaults(
-                        this.session.borrow().controls(),
-                        this.kind,
-                        &this.profile,
-                        cx,
-                    );
-                },
-            },
-            FoldedSetting {
-                name: t!("agent-setting-sandbox"),
-                icon: IconName::Shield,
-                current: state.settings.sandbox.clone(),
-                options: sandbox_options,
-                set: |this, value, cx| {
-                    this.session.borrow_mut().set_sandbox(value);
-                    this.controls.remember_defaults(
-                        this.session.borrow().controls(),
-                        this.kind,
-                        &this.profile,
-                        cx,
-                    );
-                },
-            },
-            FoldedSetting {
-                name: t!("agent-setting-tier"),
-                icon: IconName::Zap,
-                current: Some(state.settings.tier.clone().unwrap_or_default()),
-                options: tier_options,
-                set: |this, value, cx| {
-                    this.session
-                        .borrow_mut()
-                        .set_tier((!value.is_empty()).then_some(value));
-                    this.controls.remember_defaults(
-                        this.session.borrow().controls(),
-                        this.kind,
-                        &this.profile,
-                        cx,
-                    );
-                },
-            },
-        ];
-
-        let effort = effort_panel(
-            cx,
-            state.settings.effort.clone(),
-            effort_levels(kind),
-            |this, value, cx| {
-                this.session.borrow_mut().set_effort(value);
-
-                this.controls.remember_defaults(
-                    this.session.borrow().controls(),
-                    this.kind,
-                    &this.profile,
+                this.session
+                    .borrow_mut()
+                    .controls
+                    .settings
+                    .approvals_reviewer = Some(value);
+                remember_defaults(
+                    &this.session.borrow().controls,
+                    session_kind,
+                    &session_profile,
                     cx,
                 );
             },
-        )
-        .into_any_element();
+        },
+        FoldedSetting {
+            name: t!("agent-setting-sandbox"),
+            icon: IconName::Shield,
+            current: state.settings.sandbox.clone(),
+            options: sandbox_options,
+            set: |this, value, cx| {
+                let Some(session_host) = this.host.upgrade() else {
+                    return;
+                };
+                let session_kind = session_host.read(cx).kind;
+                let session_profile = session_host.read(cx).profile.clone();
 
-        h_flex()
-            .w_full()
-            .gap(px(SETTINGS_PILL_GAP))
-            .flex_wrap()
-            .text_color(cx.theme().muted_foreground)
-            .child(settings_group(t!("agent-settings-model"), vec![model]))
-            .child(settings_group(
-                t!("agent-settings-quality-cost"),
-                vec![effort],
-            ))
-            .children(folded_settings_pill(cx, folded))
-    }
+                this.session.borrow_mut().controls.settings.sandbox = Some(value);
+                remember_defaults(
+                    &this.session.borrow().controls,
+                    session_kind,
+                    &session_profile,
+                    cx,
+                );
+            },
+        },
+        FoldedSetting {
+            name: t!("agent-setting-tier"),
+            icon: IconName::Zap,
+            current: Some(state.settings.tier.clone().unwrap_or_default()),
+            options: tier_options,
+            set: |this, value, cx| {
+                let Some(session_host) = this.host.upgrade() else {
+                    return;
+                };
+                let session_kind = session_host.read(cx).kind;
+                let session_profile = session_host.read(cx).profile.clone();
+
+                this.session.borrow_mut().controls.settings.tier =
+                    (!value.is_empty()).then_some(value);
+                remember_defaults(
+                    &this.session.borrow().controls,
+                    session_kind,
+                    &session_profile,
+                    cx,
+                );
+            },
+        },
+    ];
+
+    let effort = effort_panel(
+        cx,
+        state.settings.effort.clone(),
+        effort_levels(kind),
+        |this, value, cx| {
+            let Some(session_host) = this.host.upgrade() else {
+                return;
+            };
+
+            let session_kind = session_host.read(cx).kind;
+            let session_profile = session_host.read(cx).profile.clone();
+
+            this.session.borrow_mut().controls.settings.effort = Some(value);
+
+            remember_defaults(
+                &this.session.borrow().controls,
+                session_kind,
+                &session_profile,
+                cx,
+            );
+        },
+    )
+    .into_any_element();
+
+    h_flex()
+        .w_full()
+        .gap(px(SETTINGS_PILL_GAP))
+        .flex_wrap()
+        .text_color(cx.theme().muted_foreground)
+        .child(settings_group(t!("agent-settings-model"), vec![model]))
+        .child(settings_group(
+            t!("agent-settings-quality-cost"),
+            vec![effort],
+        ))
+        .children(folded_settings_pill(cx, folded))
 }

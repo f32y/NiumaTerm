@@ -48,7 +48,7 @@ use serde_json::{Value, json};
 use crate::codex::app_server::background_tasks::{CodexTasks, ThreadScope, notification_thread_id};
 use crate::codex::app_server::compaction::is_legacy_compaction_notification;
 use crate::codex::app_server::control::{ControlOperation, ControlState, QueryKind};
-use crate::codex::app_server::conversation::ConversationState;
+use crate::codex::app_server::conversation::ThreadState;
 #[cfg(test)]
 use crate::codex::app_server::conversation::TurnOutputUsage;
 use crate::codex::app_server::host::{CodexHost, HOST_EXIT_METHOD, RegistrationId};
@@ -115,7 +115,7 @@ type SessionDelivery = Arc<dyn Fn(Value) + Send + Sync>;
 
 pub struct Session {
     host: Option<Arc<CodexHost>>,
-    conversation: ConversationState,
+    conversation: ThreadState,
     registration_id: RegistrationId,
     deliver: SessionDelivery,
     detached: bool,
@@ -257,7 +257,7 @@ impl Session {
 
         let mut session = Self {
             host: Some(host),
-            conversation: ConversationState::default(),
+            conversation: ThreadState::default(),
             registration_id,
             deliver,
             detached: false,

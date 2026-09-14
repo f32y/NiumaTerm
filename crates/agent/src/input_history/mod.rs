@@ -129,9 +129,7 @@ impl AgentInputHistory {
 
         save_to_path(&self.path, &snapshot)
     }
-}
 
-impl AgentInputHistory {
     pub fn open(path: PathBuf) -> Self {
         let store = load_from_path(&path).unwrap_or_else(|error| {
             warn!("failed to load Agent input history: {error}");

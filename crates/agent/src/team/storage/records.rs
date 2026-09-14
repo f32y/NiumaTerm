@@ -84,7 +84,7 @@ impl RoomDelta {
                 .member(member.id)
                 .ok_or(StorageError::Invalid("member is missing"))?;
 
-            if member.conversation == new.conversation && member.roots != new.roots {
+            if member.roots != new.roots {
                 return Err(StorageError::Invalid("existing conversation roots changed"));
             }
         }
@@ -169,7 +169,7 @@ impl RoomDelta {
     }
 }
 
-pub(super) fn digest(bytes: &[u8]) -> String {
+pub(crate) fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
@@ -194,7 +194,11 @@ pub(super) fn decode<T: Serialize + DeserializeOwned>(bytes: &[u8]) -> Result<T,
 
     let checked: Checked<T> = serde_json::from_slice(bytes)?;
 
-    if digest(&serde_json::to_vec(&checked.payload)?) != checked.digest {
+    // Older records can retain removed member fields. Their stored values
+    // must pass the checksum before the decoded representation drops them.
+    if digest(&serde_json::to_vec(&checked.payload)?) != checked.digest
+        && digest(&serde_json::to_vec(&raw["payload"])?) != checked.digest
+    {
         return Err(StorageError::Invalid("record checksum mismatch"));
     }
 

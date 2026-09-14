@@ -66,7 +66,7 @@ use crate::block_store::{BlockItem, BlockStore};
 use crate::event::{Msg, MsgSender, ProgressReport};
 use crate::ghostty::BlockHandle;
 use crate::graphics::GraphicData;
-use crate::input::{TerminalKey, should_defer_to_ime};
+use crate::input::{TerminalKey, key_encode_flags, should_defer_to_ime};
 use crate::pty_pipe::{SessionOptions, SessionWorker, start_session};
 use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
@@ -484,7 +484,7 @@ impl TerminalSession {
     }
 
     pub fn commit_text(&self, text: &str) -> bool {
-        let flags = KeyEncodeFlags::from(self.modes());
+        let flags = key_encode_flags(self.modes());
 
         if !flags.contains(KeyEncodeFlags::REPORT_ALL_KEYS_AS_ESC) {
             return self.write_text(text);
