@@ -34,9 +34,15 @@ opening that reference.
 In Rust files you add or edit, anchor every `use` path at `crate` or an
 external crate name. `use super::...`, `use self::...`, and bare relative
 module paths are forbidden. Leave imports in untouched files unchanged.
-This rule applies to import paths; visibility markers such as `pub(super)`
-and `pub(in ...)` are allowed. Use the narrowest visibility a real caller
-needs: private, `pub(super)`, `pub(crate)`, or `pub`.
+This rule applies to import paths. Use the narrowest visibility a real
+caller needs: private, `pub(super)`, `pub(crate)`, or `pub`.
+
+Every `impl` block for a first-party struct or enum, inherent or trait,
+lives in the file that defines the type. Behavior that belongs in another
+file is a free function there, or a method on a sub-struct that file owns.
+The only exceptions are `#[cfg]` platform pairs that each define their own
+type, test-only impls in the module's tests file, and extension or blanket
+traits on types this crate does not own, which live with the trait.
 
 ## Technical taste
 
