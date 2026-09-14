@@ -12,7 +12,7 @@ mod tests;
 use std::{cell, collections, rc};
 
 use app::agent_tab::AgentKind;
-use app::design::{SETTINGS_NAV_WIDTH, SURFACE_RADIUS};
+use app::design::{SETTINGS_NAV_WIDTH, SPACE_2, SPACE_3, SURFACE_RADIUS};
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Context, DragMoveEvent, Hsla, IsZero as _, MouseButton, Pixels, ScrollHandle,
@@ -67,15 +67,14 @@ pub(super) struct TabStrip {
 /// (2 borders + 32 padding + 16 slot + 4 gap).
 const MIN_AUTO_TAB_WIDTH: f32 = 54.0;
 
-/// Below this a tab can no longer stand the leading icon, the pill's content
-/// padding and the close control side by side (2 + 12 + 4 + 32 + 4 + 16), so
-/// it collapses to the single glyph slot.
-const COMPACT_TAB_WIDTH: f32 = 70.0;
+/// Below this the leading icon and close control cannot retain their content
+/// padding side by side, so the tab collapses to the single glyph slot.
+const COMPACT_TAB_WIDTH: f32 = 90.0;
 
 /// Below this the title has under four characters of room left over from the
 /// icon, the padding and the close control, which renders as an ellipsis and
 /// little else, so the tab spends the width on the two controls instead.
-const FULL_TAB_WIDTH: f32 = 100.0;
+const FULL_TAB_WIDTH: f32 = 120.0;
 
 /// What a tab still has room to draw. The close control outranks the tab
 /// icon, which outranks the title: a tab nobody can close is worse than a tab
@@ -283,6 +282,7 @@ impl TabStrip {
                     .h_full()
                     .flex()
                     .items_center()
+                    .when(!icon_only, |this| this.pr(SPACE_2))
                     .children(suffix_close)
                     .children(progress.map(|report| progress_bar(report, tab_width, cx)));
 
@@ -315,12 +315,13 @@ impl TabStrip {
                     div()
                         .id(("tab-menu", id as usize))
                         // Fill the tab body so the whole tab is right-clickable,
-                        // keeping the label centered and clipped with ellipsis.
+                        // keeping the title left-aligned and clipped with ellipsis.
                         .flex_1()
                         .h_full()
                         .flex()
                         .items_center()
-                        .justify_center()
+                        .justify_start()
+                        .when(icon_only, |this| this.justify_center())
                         .overflow_hidden()
                         .modern_context_menu(move |menu, _, _| {
                             let rename_shell = menu_shell.clone();
@@ -484,8 +485,7 @@ impl TabStrip {
                         // command is running and never shifts when one starts.
                         this.prefix(
                             div()
-                                .relative()
-                                .left(px(4.0))
+                                .pl(SPACE_3)
                                 .flex_none()
                                 .flex()
                                 .items_center()
@@ -536,8 +536,7 @@ impl TabStrip {
 
                         this.prefix(
                             div()
-                                .relative()
-                                .left(px(4.0))
+                                .pl(SPACE_3)
                                 .flex_none()
                                 .flex()
                                 .items_center()

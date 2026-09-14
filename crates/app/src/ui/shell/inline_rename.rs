@@ -63,7 +63,7 @@ impl RenderOnce for InlineRename {
             InlineRenameStyle::HorizontalTab => Input::new(&self.input)
                 .small()
                 .p_0()
-                .text_center()
+                .text_left()
                 .appearance(false),
             InlineRenameStyle::SidebarTab => Input::new(&self.input)
                 .xsmall()
