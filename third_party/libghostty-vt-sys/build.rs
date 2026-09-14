@@ -21,11 +21,13 @@ const PREBUILT_ENV: &str = "NMT_USE_PREBUILT_LIBGHOSTTY";
 /// [`localize_simdutf_lib`]) and cannot proceed without it.
 fn find_llvm_tool(tool: &str) -> PathBuf {
     let env_key = tool.to_uppercase().replace('-', "_"); // llvm-objcopy -> LLVM_OBJCOPY
+
     if let Ok(p) = env::var(&env_key) {
         let pb = PathBuf::from(&p);
         assert!(pb.exists(), "{env_key}={p} does not exist");
         return pb;
     }
+
     if Command::new(tool)
         .arg("--version")
         .output()
@@ -34,6 +36,7 @@ fn find_llvm_tool(tool: &str) -> PathBuf {
     {
         return PathBuf::from(tool);
     }
+
     for base in [
         "C:/Program Files/Microsoft Visual Studio",
         "C:/Program Files (x86)/Microsoft Visual Studio",
@@ -41,10 +44,12 @@ fn find_llvm_tool(tool: &str) -> PathBuf {
         let Ok(years) = std::fs::read_dir(base) else {
             continue;
         };
+
         for year in years.flatten() {
             let Ok(editions) = std::fs::read_dir(year.path()) else {
                 continue;
             };
+
             for edition in editions.flatten() {
                 let cand = edition
                     .path()
@@ -56,6 +61,7 @@ fn find_llvm_tool(tool: &str) -> PathBuf {
             }
         }
     }
+
     panic!(
         "could not find `{tool}`. The Windows static link rewrites ghostty-vt's \
          vendored simdutf symbols and needs LLVM binutils. Install the \"C++ Clang \
@@ -87,8 +93,10 @@ fn localize_simdutf_lib(search_dirs: &[PathBuf], lib_file: &str) -> PathBuf {
     let objcopy = find_llvm_tool("llvm-objcopy");
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR set by cargo"));
     let dst_dir = out_dir.join("simdutf-localized");
-    std::fs::create_dir_all(&dst_dir).expect("create simdutf-localized dir");
     let dst = dst_dir.join(lib_file);
+
+    std::fs::create_dir_all(&dst_dir).expect("create simdutf-localized dir");
+
     std::fs::copy(&src, &dst)
         .unwrap_or_else(|e| panic!("copy {} -> {}: {e}", src.display(), dst.display()));
 
@@ -96,17 +104,22 @@ fn localize_simdutf_lib(search_dirs: &[PathBuf], lib_file: &str) -> PathBuf {
         .arg(&dst)
         .output()
         .unwrap_or_else(|e| panic!("run {}: {e}", nm.display()));
+
     assert!(
         nm_out.status.success(),
         "llvm-nm failed on {}",
         dst.display()
     );
+
     let listing = String::from_utf8_lossy(&nm_out.stdout);
+
     let mut syms = std::collections::BTreeSet::new();
+
     for line in listing.lines() {
         let Some(sym) = line.split_whitespace().last() else {
             continue;
         };
+
         // Mangled C++ symbols contain `simdutf` but no path separators; skip
         // archive-member header tokens (object/library file paths).
         if sym.contains("simdutf")
@@ -118,6 +131,7 @@ fn localize_simdutf_lib(search_dirs: &[PathBuf], lib_file: &str) -> PathBuf {
             syms.insert(sym.to_string());
         }
     }
+
     assert!(
         !syms.is_empty(),
         "no simdutf symbols found in {} — ghostty-vt layout changed; revisit the rewrite",
@@ -125,7 +139,9 @@ fn localize_simdutf_lib(search_dirs: &[PathBuf], lib_file: &str) -> PathBuf {
     );
 
     let map_path = dst_dir.join(format!("{lib_file}.redefine.txt"));
+
     let mut map = String::with_capacity(syms.len() * 64);
+
     for s in &syms {
         map.push_str(s);
         map.push(' ');
@@ -133,6 +149,7 @@ fn localize_simdutf_lib(search_dirs: &[PathBuf], lib_file: &str) -> PathBuf {
         map.push_str(s);
         map.push('\n');
     }
+
     std::fs::write(&map_path, map).expect("write redefine map");
 
     // Rewrite per member, not whole-archive: zig's COFF writer emits the big
@@ -143,10 +160,13 @@ fn localize_simdutf_lib(search_dirs: &[PathBuf], lib_file: &str) -> PathBuf {
     // symbol, and re-archive; members we don't touch are never parsed by
     // objcopy at all.
     let ar = find_llvm_tool("llvm-ar");
+
     let members_dir = dst_dir.join(format!("{lib_file}.members"));
+
     if members_dir.exists() {
         std::fs::remove_dir_all(&members_dir).expect("clear members dir");
     }
+
     std::fs::create_dir_all(&members_dir).expect("create members dir");
 
     let order_out = Command::new(&ar)
@@ -154,11 +174,13 @@ fn localize_simdutf_lib(search_dirs: &[PathBuf], lib_file: &str) -> PathBuf {
         .arg(&dst)
         .output()
         .unwrap_or_else(|e| panic!("run {}: {e}", ar.display()));
+
     assert!(
         order_out.status.success(),
         "llvm-ar t failed on {}",
         dst.display()
     );
+
     let member_order: Vec<String> = String::from_utf8_lossy(&order_out.stdout)
         .lines()
         .map(|l| {
@@ -171,6 +193,7 @@ fn localize_simdutf_lib(search_dirs: &[PathBuf], lib_file: &str) -> PathBuf {
         .collect();
     {
         let unique: std::collections::BTreeSet<&String> = member_order.iter().collect();
+
         assert_eq!(
             unique.len(),
             member_order.len(),
@@ -185,6 +208,7 @@ fn localize_simdutf_lib(search_dirs: &[PathBuf], lib_file: &str) -> PathBuf {
         .current_dir(&members_dir)
         .status()
         .unwrap_or_else(|e| panic!("run {}: {e}", ar.display()));
+
     assert!(extract.success(), "llvm-ar x failed on {}", dst.display());
 
     for member in &member_order {
@@ -193,19 +217,23 @@ fn localize_simdutf_lib(search_dirs: &[PathBuf], lib_file: &str) -> PathBuf {
             .arg(&member_path)
             .output()
             .unwrap_or_else(|e| panic!("run {}: {e}", nm.display()));
+
         let needs_rewrite = nm_member.status.success()
             && String::from_utf8_lossy(&nm_member.stdout)
                 .lines()
                 .filter_map(|l| l.split_whitespace().last())
                 .any(|sym| syms.contains(sym));
+
         if !needs_rewrite {
             continue;
         }
+
         let status = Command::new(&objcopy)
             .arg(format!("--redefine-syms={}", map_path.display()))
             .arg(&member_path)
             .status()
             .unwrap_or_else(|e| panic!("run {}: {e}", objcopy.display()));
+
         assert!(
             status.success(),
             "llvm-objcopy --redefine-syms failed on member {member} of {lib_file}"
@@ -213,23 +241,30 @@ fn localize_simdutf_lib(search_dirs: &[PathBuf], lib_file: &str) -> PathBuf {
     }
 
     std::fs::remove_file(&dst).expect("remove pre-rewrite archive");
+
     let mut rebuild = Command::new(&ar);
+
     rebuild.arg("rcs").arg(&dst).current_dir(&members_dir);
+
     for member in &member_order {
         rebuild.arg(member);
     }
+
     let status = rebuild
         .status()
         .unwrap_or_else(|e| panic!("run {}: {e}", ar.display()));
+
     assert!(
         status.success(),
         "llvm-ar rcs failed rebuilding {}",
         dst.display()
     );
+
     std::fs::remove_dir_all(&members_dir).ok();
 
     println!("cargo:rerun-if-env-changed=LLVM_OBJCOPY");
     println!("cargo:rerun-if-env-changed=LLVM_NM");
+
     dst_dir
 }
 
@@ -314,7 +349,9 @@ fn main() {
             !dir.is_empty(),
             "LIBGHOSTTY_VT_INSTALL_DIR must not be empty when set"
         );
-        link_install_prefix(link_mode, PathBuf::from(dir));
+
+        link_install_prefix_impl(link_mode, PathBuf::from(dir), true, &[]);
+
         return;
     }
 
@@ -326,7 +363,7 @@ fn main() {
         return;
     }
 
-    if should_link_prebuilt(env_flag_enabled(PREBUILT_ENV)) {
+    if env_flag_enabled(PREBUILT_ENV) {
         link_prebuilt(link_mode);
         return;
     }
@@ -343,18 +380,12 @@ fn main() {
 }
 
 fn env_flag_enabled(name: &str) -> bool {
-    env::var(name).is_ok_and(|value| env_flag_value_enabled(&value))
-}
-
-fn env_flag_value_enabled(value: &str) -> bool {
-    !matches!(
-        value,
-        "" | "0" | "false" | "False" | "FALSE" | "no" | "No" | "NO" | "off" | "Off" | "OFF"
-    )
-}
-
-fn should_link_prebuilt(use_prebuilt: bool) -> bool {
-    use_prebuilt
+    env::var(name).is_ok_and(|value| {
+        !matches!(
+            value.as_str(),
+            "" | "0" | "false" | "False" | "FALSE" | "no" | "No" | "NO" | "off" | "Off" | "OFF"
+        )
+    })
 }
 
 /// Build libghostty-vt from source via zig. The zig build itself generates
@@ -386,6 +417,7 @@ fn build_vendored(link_mode: LinkMode) {
     let optimize = zig_optimize_mode();
 
     let mut build = Command::new("zig");
+
     // Zig's std.http proxy support mangles CONNECT-style HTTPS proxying (the
     // dep CDN answers 400 through a local proxy while direct fetches succeed),
     // so package fetching must bypass any ambient proxy configuration.
@@ -413,12 +445,15 @@ fn build_vendored(link_mode: LinkMode) {
             !dir.is_empty(),
             "GHOSTTY_ZIG_SYSTEM_DIR must not be empty when set"
         );
+
         let zig_system_dir = PathBuf::from(dir);
+
         assert!(
             zig_system_dir.exists(),
             "GHOSTTY_ZIG_SYSTEM_DIR does not exist: {}",
             zig_system_dir.display()
         );
+
         build
             .arg("--system")
             .arg(&zig_system_dir)
@@ -433,6 +468,7 @@ fn build_vendored(link_mode: LinkMode) {
     let lib_dir = install_prefix.join("lib");
     let include_dir = install_prefix.join("include");
     let search_dirs = library_search_dirs(&target, &install_prefix);
+
     warn_unused_xcframework(&lib_dir);
 
     let has_requested_library = search_dirs.iter().any(|dir| {
@@ -442,7 +478,9 @@ fn build_vendored(link_mode: LinkMode) {
                 let entry = entry.unwrap_or_else(|error| {
                     panic!("failed to read entry from {}: {error}", dir.display())
                 });
+
                 let file_name = entry.file_name();
+
                 let Some(file_name) = file_name.to_str() else {
                     return false;
                 };
@@ -450,12 +488,14 @@ fn build_vendored(link_mode: LinkMode) {
                 link_mode.matches_library(&target, file_name)
             })
     });
+
     assert!(
         has_requested_library,
         "expected libghostty-vt {} in one of {:?}",
         link_mode.artifact_kind(),
         search_dirs
     );
+
     assert!(
         include_dir.join("ghostty").join("vt.h").exists(),
         "expected header at {}",
@@ -467,21 +507,20 @@ fn build_vendored(link_mode: LinkMode) {
     emit_include_metadata(&[include_dir]);
 }
 
-fn prebuilt_install_prefix(target: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("prebuilt")
-        .join(target)
-}
-
 fn link_prebuilt(link_mode: LinkMode) {
     assert!(
         matches!(link_mode, LinkMode::Static),
         "prebuilt libghostty-vt only supports the default static link mode; unset {PREBUILT_ENV} to build from source"
     );
 
-    let target = env::var("TARGET").expect("TARGET must be set");
-    let install_prefix = prebuilt_install_prefix(&target);
+    let target_path = env::var("TARGET").expect("TARGET must be set");
+    let target = target_path.as_str();
+    let install_prefix = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("prebuilt")
+        .join(target);
+
     println!("cargo:rerun-if-changed={}", install_prefix.display());
+
     assert!(
         install_prefix.exists(),
         "prebuilt libghostty-vt for {target} not found at {}; unset {PREBUILT_ENV} to build from source or generate the prebuilt package",
@@ -489,11 +528,8 @@ fn link_prebuilt(link_mode: LinkMode) {
     );
 
     let static_deps_dir = install_prefix.join("lib");
-    link_install_prefix_impl(link_mode, install_prefix, false, &[static_deps_dir]);
-}
 
-fn link_install_prefix(link_mode: LinkMode, install_prefix: PathBuf) {
-    link_install_prefix_impl(link_mode, install_prefix, true, &[]);
+    link_install_prefix_impl(link_mode, install_prefix, false, &[static_deps_dir]);
 }
 
 fn link_install_prefix_impl(
@@ -511,6 +547,7 @@ fn link_install_prefix_impl(
         "expected header at {}",
         include_dir.join("ghostty").join("vt.h").display()
     );
+
     assert!(
         search_dirs
             .iter()
@@ -521,10 +558,13 @@ fn link_install_prefix_impl(
     );
 
     let mut dependency_roots = Vec::new();
+
     if let Some(parent) = install_prefix.parent() {
         dependency_roots.push(parent.join(".zig-cache").join("o"));
     }
+
     dependency_roots.extend(extra_dependency_roots.iter().cloned());
+
     if let Ok(dir) = env::var("LIBGHOSTTY_VT_STATIC_DEPS_DIR") {
         dependency_roots.push(PathBuf::from(dir));
     }
@@ -556,9 +596,11 @@ fn emit_link_metadata(
         let localized = localize_simdutf_lib(search_dirs, "ghostty-vt-static.lib");
         println!("cargo:rustc-link-search=native={}", localized.display());
     }
+
     for dir in search_dirs {
         println!("cargo:rustc-link-search=native={}", dir.display());
     }
+
     match link_mode {
         LinkMode::Dynamic => println!("cargo:rustc-link-lib=dylib=ghostty-vt"),
         LinkMode::Static if target.contains("windows") => {
@@ -601,9 +643,11 @@ fn emit_windows_static_dependency_links(
                     "expected {dependency}.lib for static Windows linking under one of {roots:?}"
                 )
             });
+
         let library_dir = library
             .parent()
             .unwrap_or_else(|| panic!("{} has no parent directory", library.display()));
+
         // Rewrite the standalone simdutf archive to the same `gvt_` namespace as
         // the bundled copy in ghostty-vt-static.lib, and search the rewritten
         // copy first, so no plain `simdutf` symbol reaches the final link.
@@ -614,6 +658,7 @@ fn emit_windows_static_dependency_links(
             );
             println!("cargo:rustc-link-search=native={}", localized.display());
         }
+
         println!("cargo:rustc-link-search=native={}", library_dir.display());
         println!("cargo:rustc-link-lib=static={dependency}");
     }
@@ -621,9 +666,11 @@ fn emit_windows_static_dependency_links(
 
 fn find_newest_library(roots: &[PathBuf], file_name: &str) -> Option<PathBuf> {
     let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
+
     for root in roots.iter().filter(|root| root.exists()) {
         find_library_recursive(root, file_name, &mut newest);
     }
+
     newest.map(|(_, path)| path)
 }
 
@@ -635,19 +682,24 @@ fn find_library_recursive(
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
+
     for entry in entries.flatten() {
         let path = entry.path();
+
         if path.is_dir() {
             find_library_recursive(&path, file_name, newest);
             continue;
         }
+
         if path.file_name().and_then(|name| name.to_str()) != Some(file_name) {
             continue;
         }
+
         let modified = entry
             .metadata()
             .and_then(|metadata| metadata.modified())
             .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+
         if newest
             .as_ref()
             .is_none_or(|(current, _)| modified > *current)
@@ -670,6 +722,7 @@ fn warn_unused_xcframework(lib_dir: &Path) {
 #[cfg(feature = "pkg-config")]
 fn try_pkg_config(link_mode: LinkMode) -> bool {
     let mut config = pkg_config::Config::new();
+
     let lib = match link_mode {
         LinkMode::Dynamic => config.probe(link_mode.pkg_config_name()),
         LinkMode::Static => config
@@ -677,6 +730,7 @@ fn try_pkg_config(link_mode: LinkMode) -> bool {
             .cargo_metadata(false)
             .probe(link_mode.pkg_config_name()),
     };
+
     let lib = match lib {
         Ok(lib) => lib,
         Err(_) => return false,
@@ -685,7 +739,9 @@ fn try_pkg_config(link_mode: LinkMode) -> bool {
     if let LinkMode::Static = link_mode {
         emit_static_pkg_config_metadata(&lib);
     }
+
     emit_include_metadata(&lib.include_paths);
+
     true
 }
 
@@ -694,24 +750,29 @@ fn emit_static_pkg_config_metadata(lib: &pkg_config::Library) {
     for path in &lib.link_paths {
         println!("cargo:rustc-link-search=native={}", path.display());
     }
+
     for path in &lib.link_files {
         if let Some(parent) = path.parent() {
             println!("cargo:rustc-link-search=native={}", parent.display());
         }
     }
+
     for path in &lib.framework_paths {
         println!("cargo:rustc-link-search=framework={}", path.display());
     }
+
     for framework in &lib.frameworks {
         println!("cargo:rustc-link-lib=framework={framework}");
     }
 
     println!("cargo:rustc-link-lib=static=ghostty-vt");
+
     for library in &lib.libs {
         if library != "ghostty-vt" {
             println!("cargo:rustc-link-lib={library}");
         }
     }
+
     for args in &lib.ld_args {
         if !args.is_empty() {
             println!("cargo:rustc-link-arg=-Wl,{}", args.join(","));
@@ -893,56 +954,5 @@ fn configure_zig_target(build: &mut Command, target: &str, host: &str) {
 
     if is_windows_target && target.starts_with("x86_64-") {
         build.arg("-Dcpu=baseline+avx2");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn env_flag_value_accepts_common_false_values() {
-        for value in ["", "0", "false", "False", "FALSE", "no", "off"] {
-            assert!(!env_flag_value_enabled(value), "{value:?}");
-        }
-        assert!(env_flag_value_enabled("1"));
-        assert!(env_flag_value_enabled("true"));
-    }
-
-    #[test]
-    fn prebuilt_env_name_is_contract() {
-        assert_eq!(PREBUILT_ENV, "NMT_USE_PREBUILT_LIBGHOSTTY");
-    }
-
-    #[test]
-    fn prebuilt_link_is_opt_in() {
-        assert!(!should_link_prebuilt(false));
-        assert!(should_link_prebuilt(true));
-    }
-
-    #[test]
-    fn prebuilt_install_prefix_is_target_specific() {
-        let prefix = prebuilt_install_prefix("x86_64-pc-windows-msvc");
-        assert!(prefix.ends_with(Path::new("prebuilt").join("x86_64-pc-windows-msvc")));
-    }
-
-    #[test]
-    fn native_windows_build_pins_zig_target_and_avx2() {
-        let mut command = Command::new("zig");
-
-        configure_zig_target(
-            &mut command,
-            "x86_64-pc-windows-msvc",
-            "x86_64-pc-windows-msvc",
-        );
-
-        let command_args: Vec<_> = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(
-            command_args,
-            ["-Dtarget=x86_64-windows-msvc", "-Dcpu=baseline+avx2"]
-        );
     }
 }
