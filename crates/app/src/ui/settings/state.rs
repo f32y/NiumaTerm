@@ -48,6 +48,9 @@ pub struct SettingsEditing {
     /// Parsed theme files refreshed by the settings surface's watcher.
     pub themes: Vec<(String, Theme)>,
 
+    pub theme_columns: u16,
+    pub theme_load_failed: bool,
+
     #[cfg(windows)]
     pub remote_pairing_code: Option<String>,
     #[cfg(windows)]

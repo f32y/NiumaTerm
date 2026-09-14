@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 use std::{io, sync, time};
 
-use nmt_config::colors::Colors;
+use nmt_config::colors::{Colors, NamedColor};
 use nmt_platform::{EventedPty, ProcessReadWrite, WinsizeBuilder};
 use parking_lot::Mutex;
 
@@ -897,7 +897,7 @@ fn resize_message_publishes_snapshot_to_render_buffer() {
 }
 
 #[test]
-fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
+fn theme_refresh_preserves_synchronized_output_until_commit() {
     let render_buffer = Arc::new(FrameStore::new(RenderBuffer::new(20, 3)));
 
     let pty = FakePty {
@@ -926,6 +926,11 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
     )
     .unwrap();
 
+    let colors = Colors {
+        foreground: [0.2, 0.4, 0.6, 1.0],
+        ..Colors::default()
+    };
+
     let mut state = PtyState::default();
     let mut buf = [0u8; READ_BUFFER_SIZE];
 
@@ -940,6 +945,13 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
         .extend_from_slice(b"\x1b[?2026h\x1b[1;1HWorking");
 
     machine.pty_read(&mut state, &mut buf).unwrap();
+
+    machine
+        .sender
+        .send(event::Msg::Theme(Box::new(colors)))
+        .unwrap();
+
+    assert!(machine.drain_recv_channel(&mut state));
 
     {
         let buffer = render_buffer.load();
@@ -968,6 +980,10 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
 
         assert_eq!(buffer.cursor().row.0, 2);
         assert_eq!(render_buffer_row_text(&buffer, 0), "Working");
+        assert_eq!(
+            buffer.colors()[NamedColor::Foreground],
+            Some(colors.foreground)
+        );
     }
 
     machine
@@ -993,7 +1009,7 @@ fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
 }
 
 #[test]
-fn osc_progress_hides_published_cursor_until_removed() {
+fn theme_refresh_preserves_progress_cursor_suppression() {
     let render_buffer = Arc::new(FrameStore::new(RenderBuffer::new(80, 3)));
 
     let pty = FakePty {
@@ -1027,6 +1043,11 @@ fn osc_progress_hides_published_cursor_until_removed() {
         .set_default_cursor_shape(ansi::CursorShape::Beam)
         .unwrap();
 
+    let colors = Colors {
+        foreground: [0.2, 0.4, 0.6, 1.0],
+        ..Colors::default()
+    };
+
     let mut state = PtyState::default();
     let mut buf = [0u8; READ_BUFFER_SIZE];
 
@@ -1042,11 +1063,22 @@ fn osc_progress_hides_published_cursor_until_removed() {
 
     machine.pty_read(&mut state, &mut buf).unwrap();
 
+    machine
+        .sender
+        .send(event::Msg::Theme(Box::new(colors)))
+        .unwrap();
+
+    assert!(machine.drain_recv_channel(&mut state));
+
     {
         let buffer = render_buffer.load();
 
         assert_eq!(buffer.cursor_shape(), ansi::CursorShape::Beam);
         assert!(!buffer.cursor_visible(), "active progress hides the cursor");
+        assert_eq!(
+            buffer.colors()[NamedColor::Foreground],
+            Some(colors.foreground)
+        );
     }
 
     machine
@@ -1566,4 +1598,50 @@ echo two\r\n\x1b]133;C\x07two\r\n\
         machine.ghostty.has_prompt_tagged_row(),
         "engine rows must carry semantic prompt tags after mark forwarding"
     );
+}
+
+#[test]
+fn idle_theme_requests_publish_colors_without_replacing_retained_frames() {
+    let (_, mut machine) = pty_read_events(b"idle text");
+
+    let original = machine.render_buffer.load();
+
+    let mut state = PtyState::default();
+
+    for (foreground, background) in [
+        ([0.2, 0.4, 0.6, 1.0], [1.0, 1.0, 1.0, 1.0]),
+        ([1.0, 1.0, 1.0, 1.0], [0.0, 0.0, 0.0, 1.0]),
+    ] {
+        let colors = Colors {
+            foreground,
+            background,
+            ..Colors::default()
+        };
+
+        machine.event_proxy.0.lock().clear();
+
+        machine
+            .sender
+            .send(event::Msg::Theme(Box::new(colors)))
+            .unwrap();
+
+        assert!(machine.drain_recv_channel(&mut state));
+
+        let frame = machine.render_buffer.load();
+
+        assert_eq!(frame.colors()[NamedColor::Foreground], Some(foreground));
+        assert_eq!(frame.colors()[NamedColor::Background], Some(background));
+        assert_eq!(render_buffer_row_text(&frame, 0), "idle text");
+        assert!(
+            machine
+                .event_proxy
+                .0
+                .lock()
+                .iter()
+                .any(|event| { matches!(event, event::TerminalEvent::TerminalDamaged(_)) })
+        );
+        assert!(!Arc::ptr_eq(&original, &frame));
+    }
+
+    assert_eq!(render_buffer_row_text(&original, 0), "idle text");
 }

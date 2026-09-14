@@ -3,9 +3,9 @@ pub(crate) use crate::ui::shell::actions::NewRemoteTab;
 
 pub(crate) use crate::ui::shell::actions::{
     CloseTab, NewAgentTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace, PrevTab,
-    PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp, ShowSettings,
-    SplitDown, SplitLeft, SplitRight, SplitUp, ToggleBackgroundTasks, ToggleGitSidebar,
-    ToggleSidebar, ToggleWorkflows,
+    PrevWorkspace, QuoteGitLine, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp,
+    ReturnFromGit, ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp, ToggleBackgroundTasks,
+    ToggleGitSidebar, ToggleSidebar, ToggleWorkflows,
 };
 
 pub(crate) use crate::ui::shell::tab_surface::TabSurface;
@@ -69,7 +69,7 @@ use gpui::{
     img, px, relative,
 };
 
-use gpui_component::button::{Button, ButtonVariants, Toggle, ToggleVariants};
+use gpui_component::button::{Button, ButtonVariants};
 
 use gpui_component::dialog::{
     DIALOG_BUTTON_MIN_WIDTH, Dialog, DialogAction, DialogButtonProps, DialogClose, DialogFooter,
@@ -133,7 +133,9 @@ use crate::tabs::{Tab, TabId, TabManager};
 
 use crate::ui::background_tasks::BackgroundTasksView;
 
-use crate::ui::composition::FLOATING_SURFACE_SIDE_INSET;
+use crate::ui::composition::{
+    FLOATING_SURFACE_SIDE_INSET, TOOLBAR_BUTTON_SIZE, toolbar_button, toolbar_toggle,
+};
 
 use crate::ui::git_sidebar::GitSidebar;
 
@@ -157,7 +159,7 @@ use crate::ui::shell::render::ShellChrome;
 
 use crate::ui::shell::settings_workspace::{SettingsSurface, settings_title};
 
-use crate::ui::shell::tab_surface::AgentTab;
+use crate::ui::shell::tab_surface::{AgentTab, GitTab};
 
 use crate::ui::shell::updates_layer::UpdateNotificationLayer;
 
@@ -165,6 +167,7 @@ use crate::ui::shell::workspace_dirs::{RootAvailability, WorkspaceDirsEditor};
 
 use crate::ui::tab_bar::TabStrip;
 
+#[cfg(windows)]
 use crate::ui::terminal_launch::attach_remote;
 
 use crate::ui::terminal_layout::TerminalLayout;
@@ -175,7 +178,7 @@ use crate::ui::workflows::WorkflowsView;
 
 use crate::ui::workspace_sidebar::{Sidebar, SidebarTab, SidebarUsage, WorkspaceChrome};
 
-use crate::ui::{UI_RADIUS, main_view_background_opacity, workspace_sidebar};
+use crate::ui::{main_view_background_opacity, workspace_sidebar};
 
 #[cfg(windows)]
 use crate::update::check;
@@ -380,10 +383,9 @@ impl Shell {
             focus: cx.focus_handle(),
             window_id,
             panels: {
-                let git = cx.new(|cx| GitSidebar::new(git_model.clone(), cx));
                 let tasks = cx.new(|_| BackgroundTasksView::new());
                 let workflows = cx.new(|_| WorkflowsView::new());
-                let panel = cx.new(|_| RightPanel::new(git, tasks, workflows));
+                let panel = cx.new(|_| RightPanel::new(tasks, workflows));
 
                 RightPanelController::new(panel, git_model)
             },
@@ -551,6 +553,7 @@ impl Shell {
         self.ensure_active_tab_live(window, cx);
 
         self.sync_active_terminal_title(cx);
+        self.sync_git_tab_visibility(cx);
 
         let tabs = self.workspaces.active_tabs_mut();
 
@@ -562,6 +565,14 @@ impl Shell {
     }
 
     pub(crate) fn focus_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(git) = self.workspaces.active_tabs().active().git() {
+            let view = git.view.clone();
+
+            view.update(cx, |view, cx| view.focus(window, cx));
+
+            return;
+        }
+
         // Settings owns its controls' focus and has no pane to focus.
         if self.workspaces.active_tabs().active().is_settings() {
             window.focus(&self.focus, cx);
@@ -1089,9 +1100,22 @@ impl Shell {
             self.remove_agent_route(&route, cx);
         }
 
+        let return_to = tree.git().and_then(|git| git.return_to);
+
         drop(tree);
 
         if was_active {
+            if let Some(index) = return_to.and_then(|id| {
+                self.workspaces
+                    .active_tabs()
+                    .list()
+                    .items()
+                    .iter()
+                    .position(|tab| tab.id() == id)
+            }) {
+                self.workspaces.active_tabs_mut().list_mut().activate(index);
+            }
+
             self.on_active_tab_changed(window, cx);
         }
 
@@ -1609,6 +1633,13 @@ impl Shell {
     /// owns the outer frame, so a single pane renders without another card.
     pub(super) fn render_active_tree(&self, cx: &mut Context<Self>) -> AnyElement {
         match self.workspaces.active_tabs().active() {
+            TabSurface::Git(tab) => {
+                return div()
+                    .size_full()
+                    .overflow_hidden()
+                    .child(tab.view.clone())
+                    .into_any_element();
+            }
             TabSurface::Team(pane) => {
                 return div()
                     .size_full()
@@ -2525,32 +2556,28 @@ impl Shell {
         cx.notify();
     }
 
-    /// Centralized target-CWD sync: read the active pane's
-    /// OSC7-tracked CWD (falling back to the configured working-dir) and
-    /// hand it to the git model, which no-ops when unchanged. Called on
-    /// every render and on `HostEvent::Cwd`, so no switch path is missed.
+    /// Follow the active terminal's OSC7 directory or the active Agent's
+    /// primary directory, falling back to the configured directory only when
+    /// neither provides one. Rendering and CWD events both synchronize the
+    /// target so tab switches and workspace directory edits refresh the summary.
     pub(super) fn sync_git_target(&self, cx: &mut Context<Self>) {
-        // Agent tabs have no OSC7-tracking pane; the configured working dir
-        // keeps the git indicator on something sensible.
         let cwd = self
-            .try_active_pane()
-            .and_then(|pane| pane.read(cx).tab_state().cwd)
+            .workspaces
+            .active_tabs()
+            .active()
+            .git()
+            .map(|tab| tab.view.read(cx).cwd().to_string())
+            .or_else(|| {
+                self.try_active_pane()
+                    .and_then(|pane| pane.read(cx).tab_state().cwd)
+            })
+            .or_else(|| {
+                self.active_agent()
+                    .and_then(|pane| pane.read(cx).working_directory(cx))
+            })
             .or_else(|| get().working_dir.clone());
 
         self.panels.set_git_target(cwd, cx);
-    }
-
-    pub(super) fn on_toggle_git_sidebar(
-        &mut self,
-        _: &ToggleGitSidebar,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let open = self.panels.select(RightPanelKind::Git, cx);
-
-        self.panels.set_git_sidebar_open(open, cx);
-
-        cx.notify();
     }
 
     pub(super) fn on_toggle_background_tasks(
@@ -2572,10 +2599,6 @@ impl Shell {
             }
         }
 
-        // Git content owns the poller's own visibility flag; leaving Git for
-        // another view stops the polling it turned on.
-        self.panels.set_git_sidebar_open(false, cx);
-
         cx.notify();
     }
 
@@ -2590,10 +2613,6 @@ impl Shell {
         if open {
             self.panels.sync_agent_targets(self.active_agent(), cx);
         }
-
-        // Git owns the poller's own visibility flag; leaving Git for another
-        // view stops the polling it turned on.
-        self.panels.set_git_sidebar_open(false, cx);
 
         cx.notify();
     }
@@ -3034,7 +3053,12 @@ impl Shell {
     }
 
     pub(super) fn process_native_notifications(&mut self, cx: &mut Context<Self>) {
-        let system_notifications_enabled = system_notification_enabled();
+        let system_notifications_enabled = cx
+            .global::<AppSettings>()
+            .config()
+            .system
+            .send_system_notifications
+            && system_notification_enabled();
 
         let visible_route = self
             .window_active
@@ -3367,6 +3391,8 @@ impl Shell {
             .on_action(cx.listener(Self::on_resize_pane_right))
             .on_action(cx.listener(Self::on_toggle_sidebar))
             .on_action(cx.listener(Self::on_toggle_git_sidebar))
+            .on_action(cx.listener(Self::on_quote_git_line))
+            .on_action(cx.listener(Self::on_return_from_git))
             .on_action(cx.listener(Self::on_toggle_background_tasks))
             .on_action(cx.listener(Self::on_show_settings))
             .on_action(cx.listener(Self::on_new_agent_tab))
@@ -3383,12 +3409,17 @@ impl Shell {
         let vertical_tabs =
             cx.global::<AppSettings>().config().appearance.tab_bar_style == TabBarStyle::Vertical;
 
+        let sidebar_width = if self.sidebar.collapsed {
+            0.0
+        } else {
+            self.sidebar.width
+        };
+
         let leading_width = if cfg!(target_os = "macos") {
-            (self.sidebar.width + ui::composition::FLOATING_SURFACE_SIDE_INSET
-                - TITLE_BAR_LEADING_INSET)
+            (sidebar_width + ui::composition::FLOATING_SURFACE_SIDE_INSET - TITLE_BAR_LEADING_INSET)
                 .max(0.0)
         } else {
-            self.sidebar.width - ui::composition::FLOATING_SURFACE_SIDE_INSET
+            sidebar_width - ui::composition::FLOATING_SURFACE_SIDE_INSET
         };
 
         // Interactive chrome lives in the titlebar but is wrapped in
@@ -3419,17 +3450,8 @@ impl Shell {
                             .child(self.render_app_menu_button(cx)),
                     )
                     .child(
-                        div()
-                            .flex_none()
-                            .w(px(1.))
-                            .h(px(TITLE_BAR_DIVIDER_HEIGHT))
-                            .bg(cx.theme().border),
-                    )
-                    .child(
                         div().flex_none().occlude().child(
-                            Button::new("toggle-sidebar")
-                                .ghost()
-                                .size(px(TITLE_BAR_BUTTON))
+                            toolbar_button("toggle-sidebar")
                                 .icon(if self.sidebar.collapsed {
                                     SideBarIcon::Expand
                                 } else {
@@ -3448,9 +3470,7 @@ impl Shell {
                     // to jump, which is what keeps that position stable.
                     .child(
                         div().flex_none().occlude().child(
-                            Button::new("next-ready-tab")
-                                .ghost()
-                                .size(px(TITLE_BAR_BUTTON))
+                            toolbar_button("next-ready-tab")
                                 .icon(IconName::Bell)
                                 .tooltip(t!("shell-next-ready-tab"))
                                 .disabled(self.next_ready_tab(cx).is_none())
@@ -3471,9 +3491,7 @@ impl Shell {
                     )
                     .child(
                         div().flex_none().occlude().child(
-                            Button::new("next-busy-tab")
-                                .ghost()
-                                .size(px(TITLE_BAR_BUTTON))
+                            toolbar_button("next-busy-tab")
                                 .icon(NextBusyTabIcon)
                                 .tooltip(t!("shell-next-busy-tab"))
                                 .disabled(self.next_busy_tab(cx).is_none())
@@ -3504,20 +3522,15 @@ impl Shell {
                     .min_w(px(TAB_STRIP_MIN_WIDTH))
                     .h_full()
                     .flex()
-                    .items_center()
-                    .min_w_0()
+                    .items_end()
                     .map(|this| match vertical_tabs {
                         true => this.child(self.render_session_heading(cx)),
                         false => this.child(tab_bar),
                     }),
             )
+            .child(title_bar_git_summary().child(self.chrome.git_status.clone()))
             .child(
-                h_flex()
-                    // The window controls sit to the right of this group, so
-                    // any width it concedes would be reclaimed by the tab
-                    // strip and push them off the window.
-                    .flex_none()
-                    .child(div().occlude().child(self.chrome.git_status.clone()))
+                title_bar_trailing_region()
                     // The sidebar itself stays reachable through the
                     // `ToggleGitSidebar` action while the button is hidden.
                     .children(
@@ -3526,10 +3539,9 @@ impl Shell {
                             .appearance
                             .show_git_status_on_title_bar
                             .then(|| {
-                                div().occlude().child(
-                                    Toggle::new("toggle-git-sidebar")
-                                        .ghost()
-                                        .checked(self.panels.shows(RightPanelKind::Git, cx))
+                                div().flex_none().occlude().child(
+                                    toolbar_toggle("toggle-git-sidebar")
+                                        .checked(self.workspaces.active_tabs().active().is_git())
                                         .icon(GitIcon)
                                         .on_click(cx.listener(|this, _: &bool, window, cx| {
                                             this.on_toggle_git_sidebar(
@@ -3554,6 +3566,7 @@ impl Shell {
                             .unwrap_or(0);
 
                         div()
+                            .flex_none()
                             .occlude()
                             .child(self.render_workflows_button(running, cx))
                     }))
@@ -3568,6 +3581,7 @@ impl Shell {
                             let running = pane.read(cx).running_background_tasks();
 
                             div()
+                                .flex_none()
                                 .occlude()
                                 .child(self.render_background_tasks_button(running, cx))
                         })
@@ -3584,9 +3598,7 @@ impl Shell {
         let shell = cx.entity();
 
         ui::modern_dropdown(
-            Button::new("app-menu")
-                .ghost()
-                .size(px(TITLE_BAR_BUTTON))
+            toolbar_button("app-menu")
                 .icon(IconName::Menu)
                 .tooltip(t!("shell-app-menu"))
                 .accessibility_label(t!("shell-app-menu")),
@@ -3641,8 +3653,7 @@ impl Shell {
     fn render_workflows_button(&self, running: usize, cx: &mut Context<Self>) -> impl IntoElement {
         let label = t!("workflows-running-agents", count = running).into_owned();
 
-        Toggle::new("toggle-workflows")
-            .ghost()
+        toolbar_toggle("toggle-workflows")
             .checked(self.panels.shows(RightPanelKind::Workflows, cx))
             // Matches the gap a Button puts between its icon and label; the
             // toggle centres its children without one.
@@ -3670,8 +3681,7 @@ impl Shell {
             _ => t!("tasks-background-running-count", count = running).into_owned(),
         };
 
-        Toggle::new("toggle-background-tasks")
-            .ghost()
+        toolbar_toggle("toggle-background-tasks")
             .checked(self.panels.shows(RightPanelKind::BackgroundTasks, cx))
             .gap_2()
             .icon(IconName::Bot)
@@ -3947,28 +3957,18 @@ pub(super) const TAB_STRIP_MIN_WIDTH: f32 = 120.0;
 pub(crate) const TITLE_BAR_HEIGHT: f32 = 44.0;
 
 const TITLE_BAR_LEADING_INSET: f32 = 80.0;
-
-/// A leading-zone control: square, and spaced tightly enough that the group
-/// reads as one cluster rather than as separate buttons.
-const TITLE_BAR_BUTTON: f32 = 26.0;
-
+pub(super) const MACOS_TITLE_BAR_TRAILING_INSET: f32 = 12.0;
 const TITLE_BAR_BUTTON_GAP: f32 = 4.0;
 
-// Four controls, the divider, four internal gaps, and a trailing gap must
-// stay visible before the first tab, including at the sidebar's drag limit.
-const TITLE_BAR_CONTROLS_WIDTH: f32 = 4.0 * TITLE_BAR_BUTTON + 1.0 + 5.0 * TITLE_BAR_BUTTON_GAP;
+// Four controls, three internal gaps, and a trailing gap stay reachable
+// before the first tab, including at the sidebar's drag limit.
+const TITLE_BAR_CONTROLS_WIDTH: f32 = 4.0 * (TOOLBAR_BUTTON_SIZE + TITLE_BAR_BUTTON_GAP);
 
 pub(crate) const MIN_SIDEBAR_WIDTH: f32 = if cfg!(target_os = "macos") {
     TITLE_BAR_LEADING_INSET + TITLE_BAR_CONTROLS_WIDTH - FLOATING_SURFACE_SIDE_INSET
 } else {
     140.0
 };
-
-/// A hairline between the application menu and the layout controls beside it.
-/// At 26px the two icon clusters would otherwise read as one undifferentiated
-/// row, and the menu opens application-wide commands while its neighbours only
-/// move the view around.
-const TITLE_BAR_DIVIDER_HEIGHT: f32 = 18.0;
 
 /// The session heading in the middle of the bar, and the branch chip beside
 /// it. The chip is set smaller than the title because it qualifies the title
@@ -3981,6 +3981,21 @@ const TITLE_BAR_CHIP_RADIUS: f32 = 6.0;
 const TITLE_BAR_CHIP_PADDING_X: f32 = 8.0;
 const TITLE_BAR_CHIP_PADDING_Y: f32 = 2.0;
 const TITLE_BAR_CHIP_ICON: f32 = 11.0;
+
+pub(super) fn title_bar_trailing_region() -> Div {
+    // Keep toggled and hovered controls inside the macOS window's curved edge.
+    // Windows already reserves native caption controls after this group.
+    h_flex()
+        .flex_none()
+        .when(cfg!(target_os = "macos"), |group| {
+            group.mr(px(MACOS_TITLE_BAR_TRAILING_INSET))
+        })
+}
+
+pub(super) fn title_bar_git_summary() -> Div {
+    // Counts can yield space before the buttons or tab strip become unreachable.
+    div().flex_initial().min_w_0().overflow_hidden().occlude()
+}
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -4039,8 +4054,19 @@ impl Render for Shell {
         // Any workspace/tab switch re-renders the shell, so this render-time
         // compare-and-set catches every switch path.
         self.sync_git_target(cx);
-
         self.panels.sync_agent_targets(self.active_agent(), cx);
+
+        let sidebar_width = if self.sidebar.collapsed {
+            0.0
+        } else {
+            self.sidebar.width
+        };
+
+        let content_width = window.viewport_size().width - px(sidebar_width);
+
+        self.panels.panel().update(cx, |panel, cx| {
+            panel.set_available_width(content_width, cx);
+        });
 
         // The sidebar is always mounted so it can animate its width open/closed.
         let summaries = self.workspace_chrome(cx);
@@ -4220,6 +4246,7 @@ impl Render for Shell {
                                     .min_w_0()
                                     .relative()
                                     .child(pane_tree)
+                                    .child(surface_border(cx))
                                     // Notifications are anchored to the pane
                                     // viewport inside the clipped card.
                                     .children(notification_layer),
@@ -4323,21 +4350,195 @@ impl IconNamed for NextBusyTabIcon {
     }
 }
 
-/// Frame for the main terminal or Agent surface. The surface runs into the
-/// window's right and bottom edges, so it is framed only where it actually
-/// borders other chrome: a left edge against the sidebar gutter, a top edge
-/// under the tab strip, and a single rounded corner between them. Drawing a
-/// border or radius on the other two sides would trace a line just inside the
-/// window frame.
+/// Clip terminal and agent content within the sidebar-colored backing surface.
 fn floating_surface_card(cx: &App) -> Div {
+    div().size_full().overflow_hidden().bg(cx.theme().sidebar)
+}
+
+/// Borders overlay content so attached tab and navigation bounds share one origin.
+fn surface_border(cx: &App) -> Div {
     div()
-        .size_full()
-        .overflow_hidden()
+        .absolute()
+        .inset_0()
         .border_l_1()
         .border_t_1()
         .border_color(cx.theme().sidebar_border)
-        .rounded_tl(UI_RADIUS)
-        .bg(cx.theme().background)
 }
 
 const PANE_RESIZE_STEP: Pixels = px(30.0);
+
+impl Shell {
+    pub(super) fn on_toggle_git_sidebar(
+        &mut self,
+        _: &ToggleGitSidebar,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.leave_settings_workspace();
+
+        if self.workspaces.active_tabs().active().is_git() {
+            let id = self.workspaces.active_tabs().list().active_id();
+
+            self.request_close_tab(id, window, cx);
+
+            return;
+        }
+
+        let tabs = self.workspaces.active_tabs();
+        let return_to = (!tabs.active().is_git()).then_some(tabs.list().active_id());
+
+        let existing = tabs
+            .list()
+            .items()
+            .iter()
+            .position(|tab| tab.surface().is_git());
+
+        if let Some(index) = existing {
+            self.workspaces.active_tabs_mut().list_mut().activate(index);
+            self.ensure_active_tab_live(window, cx);
+
+            if let TabSurface::Git(tab) = self.workspaces.active_tabs_mut().active_mut()
+                && return_to.is_some()
+            {
+                tab.return_to = return_to;
+            }
+        } else {
+            let cwd = self
+                .try_active_pane()
+                .and_then(|pane| pane.read(cx).tab_state().cwd)
+                .or_else(|| {
+                    self.active_agent()
+                        .and_then(|pane| pane.read(cx).working_directory(cx))
+                })
+                .or_else(|| {
+                    self.workspaces
+                        .active_roots()
+                        .map(|roots| roots.primary().to_string())
+                })
+                .unwrap_or_default();
+
+            let view = cx.new(|cx| GitSidebar::new(cwd, window, cx));
+            let id = TabId(Self::alloc_id(&mut self.next_id));
+
+            self.workspaces.active_tabs_mut().new_tab(
+                TabSurface::Git(GitTab { view, return_to }),
+                id,
+                t!("git-tab-title").into_owned(),
+            );
+        }
+
+        self.on_active_tab_changed(window, cx);
+        self.focus_active(window, cx);
+        self.sync_session_memory(cx);
+
+        cx.notify();
+    }
+
+    pub(super) fn sync_git_tab_visibility(&self, cx: &mut Context<Self>) {
+        let active = self.workspaces.active_tabs().list().active_id();
+
+        let can_quote = self
+            .workspaces
+            .active_tabs()
+            .list()
+            .items()
+            .iter()
+            .any(|tab| tab.surface().is_agent());
+
+        let views: Vec<_> = self
+            .workspaces
+            .all_tabs()
+            .flat_map(|tabs| tabs.list().items())
+            .filter_map(|tab| {
+                tab.surface()
+                    .git()
+                    .map(|git| (tab.id() == active, git.view.clone()))
+            })
+            .collect();
+
+        for (visible, view) in views {
+            view.update(cx, |view, cx| {
+                view.set_quote_available(visible && can_quote);
+                view.set_visible(visible, cx);
+            });
+        }
+    }
+
+    pub(super) fn on_return_from_git(
+        &mut self,
+        _: &ReturnFromGit,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(git) = self.workspaces.active_tabs().active().git() else {
+            return;
+        };
+
+        let preferred = git.return_to;
+        let tabs = self.workspaces.active_tabs();
+
+        let index = preferred
+            .and_then(|id| tabs.list().items().iter().position(|tab| tab.id() == id))
+            .or_else(|| {
+                tabs.list()
+                    .items()
+                    .iter()
+                    .position(|tab| !tab.surface().is_git())
+            });
+
+        if let Some(index) = index {
+            self.workspaces.active_tabs_mut().list_mut().activate(index);
+            self.on_active_tab_changed(window, cx);
+            self.focus_active(window, cx);
+            self.sync_session_memory(cx);
+
+            cx.notify();
+        }
+    }
+
+    pub(super) fn on_quote_git_line(
+        &mut self,
+        _: &QuoteGitLine,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(git) = self.workspaces.active_tabs().active().git() else {
+            return;
+        };
+
+        let Some(reference) = git.view.read(cx).selected_reference(cx) else {
+            return;
+        };
+
+        let preferred = git.return_to;
+        let tabs = self.workspaces.active_tabs();
+
+        let index = tabs
+            .list()
+            .items()
+            .iter()
+            .position(|tab| Some(tab.id()) == preferred && tab.surface().is_agent())
+            .or_else(|| {
+                tabs.list()
+                    .items()
+                    .iter()
+                    .position(|tab| tab.surface().is_agent())
+            });
+
+        let Some(index) = index else { return };
+
+        self.workspaces.active_tabs_mut().list_mut().activate(index);
+        self.on_active_tab_changed(window, cx);
+
+        if let Some(agent) = self.active_agent() {
+            agent.update(cx, |pane, cx| {
+                pane.append_code_reference(&reference, window, cx)
+            });
+        }
+
+        self.focus_active(window, cx);
+        self.sync_session_memory(cx);
+
+        cx.notify();
+    }
+}

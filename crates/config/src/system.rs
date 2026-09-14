@@ -70,6 +70,10 @@ pub struct SystemConfig {
     /// contains it, instead of always opening a workspace of its own.
     #[serde(default = "default_bool_true", rename = "open-in-best-workspace")]
     pub open_in_best_workspace: bool,
+
+    /// Allow the application to send native notifications.
+    #[serde(default = "default_bool_true", rename = "send-system-notifications")]
+    pub send_system_notifications: bool,
 }
 
 impl Default for SystemConfig {
@@ -82,6 +86,7 @@ impl Default for SystemConfig {
             prioritize_ui_threads: false,
             newline_shortcut: NewlineShortcut::default(),
             open_in_best_workspace: true,
+            send_system_notifications: true,
         }
     }
 }

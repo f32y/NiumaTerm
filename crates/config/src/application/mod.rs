@@ -147,8 +147,23 @@ impl Config {
                 .ok_or_else(|| -> String { "filepath does not exist".into() })?
         };
 
-        parse_toml::<Theme>(&content)
-            .map_err(|err_message| format!("error parsing: {err_message:?}"))
+        let mut theme = parse_toml::<Theme>(&content)
+            .map_err(|err_message| format!("error parsing: {err_message:?}"))?;
+
+        // Older installations may have copied built-in files before family
+        // metadata existed. Keep those copies paired while preserving their
+        // customized colors and unrelated user themes.
+        if theme.family.is_empty()
+            && let Some(name) = path.file_stem().and_then(|name| name.to_str())
+            && let Some(source) = get_builtin_theme(name)
+            && let Ok(builtin) = parse_toml::<Theme>(source)
+            && builtin.name == theme.name
+            && builtin.mode == theme.mode
+        {
+            theme.family = builtin.family;
+        }
+
+        Ok(theme)
     }
 
     /// Load a named theme from the per-user `themes` directory.

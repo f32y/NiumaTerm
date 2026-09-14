@@ -5,7 +5,7 @@ mod platform {
     use std::collections::HashMap;
     use std::process;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, OnceLock};
 
     use block2::RcBlock;
     use objc2::runtime::Bool;
@@ -14,12 +14,14 @@ mod platform {
         UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationRequest,
         UNUserNotificationCenter,
     };
+    use parking_lot::Mutex;
     use tracing::warn;
 
     use crate::NativeNotification;
 
-    static REQUESTS: OnceLock<Mutex<HashMap<(String, String), Arc<RequestState>>>> =
-        OnceLock::new();
+    type RequestMap = HashMap<(String, String), Arc<RequestState>>;
+
+    static REQUESTS: OnceLock<Mutex<RequestMap>> = OnceLock::new();
 
     static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
@@ -55,14 +57,10 @@ mod platform {
             cancelled: AtomicBool::new(false),
         });
 
-        let previous = REQUESTS
-            .get_or_init(Mutex::default)
-            .lock()
-            .map_err(|error| error.to_string())?
-            .insert(
-                (notification.group.clone(), notification.tag.clone()),
-                Arc::clone(&state),
-            );
+        let previous = REQUESTS.get_or_init(Mutex::default).lock().insert(
+            (notification.group.clone(), notification.tag.clone()),
+            Arc::clone(&state),
+        );
 
         if let Some(previous) = previous {
             previous.cancel();
@@ -142,7 +140,6 @@ mod platform {
         let state = REQUESTS
             .get_or_init(Mutex::default)
             .lock()
-            .map_err(|error| error.to_string())?
             .remove(&(group.to_string(), tag.to_string()));
 
         if let Some(state) = state {
@@ -166,14 +163,17 @@ mod platform {
 #[cfg(not(target_os = "macos"))]
 mod platform {
     use std::collections::HashMap;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::OnceLock;
 
+    use parking_lot::Mutex;
     use zbus::blocking::{Connection, Proxy};
     use zbus::zvariant::Value;
 
     use crate::NativeNotification;
 
-    static IDS: OnceLock<Mutex<HashMap<(String, String), u32>>> = OnceLock::new();
+    type NotificationIds = HashMap<(String, String), u32>;
+
+    static IDS: OnceLock<Mutex<NotificationIds>> = OnceLock::new();
 
     pub(crate) fn show(notification: &NativeNotification) -> Result<(), String> {
         let connection = Connection::session().map_err(|error| error.to_string())?;
@@ -189,10 +189,7 @@ mod platform {
         let hints: HashMap<&str, Value<'_>> = HashMap::new();
         let key = (notification.group.clone(), notification.tag.clone());
 
-        let mut ids = IDS
-            .get_or_init(Mutex::default)
-            .lock()
-            .map_err(|error| error.to_string())?;
+        let mut ids = IDS.get_or_init(Mutex::default).lock();
 
         let previous = ids.get(&key).copied().unwrap_or(0);
 
@@ -218,10 +215,7 @@ mod platform {
     }
 
     pub(crate) fn remove(tag: &str, group: &str) -> Result<(), String> {
-        let mut ids = IDS
-            .get_or_init(Mutex::default)
-            .lock()
-            .map_err(|error| error.to_string())?;
+        let mut ids = IDS.get_or_init(Mutex::default).lock();
 
         let key = (group.to_string(), tag.to_string());
 

@@ -336,6 +336,7 @@ dependencies = [
  "tree-sitter-language",
  "tree-sitter-powershell",
  "tree-sitter-rust",
+ "unicode-width-16",
  "uuid",
  "vte",
  "winres",

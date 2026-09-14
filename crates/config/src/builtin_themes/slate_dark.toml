@@ -1,0 +1,221 @@
+name = "Slate Dark"
+mode = "dark"
+family = "Slate"
+
+# Blue-gray chrome and restrained source colors keep navigation distinct
+# from the working surface without adding another accent family.
+
+[colors.terminal]
+"background" = "#1D242C"
+"foreground" = "#E5EBF1"
+"cursor" = "#92B8DF"
+"selection-background" = "#314559"
+"black" = "#171D24"
+"red" = "#E6A4AA"
+"green" = "#9ACAAB"
+"yellow" = "#CDB174"
+"blue" = "#92B8DF"
+"magenta" = "#C2A2DE"
+"cyan" = "#8FC1C8"
+"white" = "#A4B0BC"
+"light-black" = "#A4B0BC"
+"light-red" = "#E6A4AA"
+"light-green" = "#9ACAAB"
+"light-yellow" = "#CDB174"
+"light-blue" = "#92B8DF"
+"light-magenta" = "#C2A2DE"
+"light-cyan" = "#8FC1C8"
+"light-white" = "#E5EBF1"
+"tabs" = "#232A33"
+"bar" = "#232A33"
+"split" = "#36414C"
+
+[colors.ui]
+radius = 6
+"radius.lg" = 10
+"background" = "#232A33"
+"foreground" = "#E5EBF1"
+"border" = "#36414C"
+"caret" = "#E5EBF1"
+"ring" = "#92B8DF"
+"overlay" = "#18263366"
+"window.border" = "#36414C"
+"primary.background" = "#92B8DF"
+"primary.hover.background" = "#B0CEE9"
+"primary.active.background" = "#B0CEE9"
+"primary.foreground" = "#171D24"
+"secondary.background" = "#303B47"
+"secondary.hover.background" = "#303B47"
+"secondary.active.background" = "#314559"
+"secondary.foreground" = "#E5EBF1"
+"muted.background" = "#242C35"
+"muted.foreground" = "#A4B0BC"
+"accent.background" = "#314559"
+"accent.foreground" = "#E5EBF1"
+"accordion.background" = "#1D242C"
+"accordion.hover.background" = "#303B47"
+"button.background" = "#303B47"
+"button.hover.background" = "#303B47"
+"button.active.background" = "#314559"
+"button.foreground" = "#E5EBF1"
+"button.primary.background" = "#92B8DF"
+"button.primary.hover.background" = "#B0CEE9"
+"button.primary.active.background" = "#B0CEE9"
+"button.primary.foreground" = "#171D24"
+"button.secondary.background" = "#303B47"
+"button.secondary.hover.background" = "#303B47"
+"button.secondary.active.background" = "#314559"
+"button.secondary.foreground" = "#E5EBF1"
+"button.danger.background" = "#E6A4AA"
+"button.danger.hover.background" = "#E6A4AA"
+"button.danger.active.background" = "#E6A4AA"
+"button.danger.foreground" = "#171D24"
+"button.success.background" = "#9ACAAB"
+"button.success.hover.background" = "#9ACAAB"
+"button.success.active.background" = "#9ACAAB"
+"button.success.foreground" = "#171D24"
+"button.warning.background" = "#CDB174"
+"button.warning.hover.background" = "#CDB174"
+"button.warning.active.background" = "#CDB174"
+"button.warning.foreground" = "#171D24"
+"button.info.background" = "#92B8DF"
+"button.info.hover.background" = "#B0CEE9"
+"button.info.active.background" = "#B0CEE9"
+"button.info.foreground" = "#171D24"
+"input.border" = "#36414C"
+"selection.background" = "#314559"
+"link" = "#92B8DF"
+"link.hover" = "#B0CEE9"
+"link.active" = "#B0CEE9"
+"list.background" = "#00000000"
+"list.even.background" = "#00000000"
+"list.head.background" = "#00000000"
+"list.hover.background" = "#303B47"
+"list.active.background" = "#314559"
+"list.active.border" = "#92B8DF"
+"sidebar.background" = "#1D242C"
+"sidebar.foreground" = "#E5EBF1"
+"sidebar.border" = "#36414C"
+"sidebar.accent.background" = "#314559"
+"sidebar.accent.foreground" = "#E5EBF1"
+"sidebar.primary.background" = "#92B8DF"
+"sidebar.primary.foreground" = "#171D24"
+"tab.background" = "#00000000"
+"tab.foreground" = "#A4B0BC"
+"tab.active.background" = "#1D242C"
+"tab.active.foreground" = "#E5EBF1"
+"tab_bar.background" = "#232A33"
+"tab_bar.segmented.background" = "#242C35"
+"title_bar.background" = "#232A33"
+"title_bar.border" = "#36414C"
+"status_bar.background" = "#232A33"
+"status_bar.border" = "#36414C"
+"popover.background" = "#28323D"
+"popover.foreground" = "#E5EBF1"
+"group_box.background" = "#28323D"
+"group_box.foreground" = "#E5EBF1"
+"group_box.title.foreground" = "#E5EBF1"
+"description_list.label.background" = "#1D242C"
+"description_list.label.foreground" = "#A4B0BC"
+"table.background" = "#00000000"
+"table.even.background" = "#00000000"
+"table.head.background" = "#1D242C"
+"table.head.foreground" = "#A4B0BC"
+"table.foot.background" = "#1D242C"
+"table.foot.foreground" = "#A4B0BC"
+"table.hover.background" = "#303B47"
+"table.active.background" = "#314559"
+"table.active.border" = "#92B8DF"
+"table.row.border" = "#36414C"
+"scrollbar.background" = "#00000000"
+"scrollbar.thumb.background" = "#A4B0BC55"
+"scrollbar.thumb.hover.background" = "#A4B0BC99"
+"skeleton.background" = "#303B47"
+"progress.bar.background" = "#92B8DF"
+"slider.background" = "#92B8DF"
+"slider.thumb.background" = "#28323D"
+"switch.background" = "#A4B0BC"
+"switch.thumb.background" = "#28323D"
+"drag.border" = "#92B8DF"
+"drop_target.background" = "#314559"
+"tiles.background" = "#171D24"
+"danger.background" = "#E6A4AA"
+"danger.hover.background" = "#E6A4AA"
+"danger.active.background" = "#E6A4AA"
+"danger.foreground" = "#171D24"
+"success.background" = "#9ACAAB"
+"success.hover.background" = "#9ACAAB"
+"success.active.background" = "#9ACAAB"
+"success.foreground" = "#171D24"
+"warning.background" = "#CDB174"
+"warning.hover.background" = "#CDB174"
+"warning.active.background" = "#CDB174"
+"warning.foreground" = "#171D24"
+"info.background" = "#92B8DF"
+"info.hover.background" = "#B0CEE9"
+"info.active.background" = "#B0CEE9"
+"info.foreground" = "#171D24"
+"chart.1" = "#92B8DF"
+"chart.2" = "#8FC1C8"
+"chart.3" = "#9ACAAB"
+"chart.4" = "#CDB174"
+"chart.5" = "#C2A2DE"
+"chart_bullish" = "#9ACAAB"
+"chart_bearish" = "#E6A4AA"
+"base.red" = "#E6A4AA"
+"base.red.light" = "#E6A4AA"
+"base.green" = "#9ACAAB"
+"base.green.light" = "#9ACAAB"
+"base.yellow" = "#CDB174"
+"base.yellow.light" = "#CDB174"
+"base.blue" = "#92B8DF"
+"base.blue.light" = "#92B8DF"
+"base.magenta" = "#C2A2DE"
+"base.magenta.light" = "#C2A2DE"
+"base.cyan" = "#8FC1C8"
+"base.cyan.light" = "#8FC1C8"
+
+[colors.ui.highlight]
+"editor.background" = "#1D242C"
+"editor.foreground" = "#E5EBF1"
+"editor.active_line.background" = "#303B47"
+"editor.line_number" = "#A4B0BC"
+"editor.active_line_number" = "#E5EBF1"
+"editor.invisible" = "#A4B0BC66"
+
+[colors.ui.highlight.syntax]
+"comment" = { color = "#A4B0BC" }
+"comment.doc" = { color = "#A4B0BC" }
+"keyword" = { color = "#C2A2DE" }
+"preproc" = { color = "#C2A2DE" }
+"operator" = { color = "#E5EBF1" }
+"function" = { color = "#92B8DF" }
+"type" = { color = "#8FC1C8" }
+"constructor" = { color = "#8FC1C8" }
+"enum" = { color = "#8FC1C8" }
+"variant" = { color = "#92B8DF" }
+"constant" = { color = "#92B8DF" }
+"boolean" = { color = "#C2A2DE" }
+"number" = { color = "#92B8DF" }
+"variable" = { color = "#E5EBF1" }
+"variable.special" = { color = "#E5EBF1" }
+"property" = { color = "#92B8DF" }
+"label" = { color = "#E5EBF1" }
+"string" = { color = "#9ACAAB" }
+"string.escape" = { color = "#9ACAAB" }
+"string.regex" = { color = "#9ACAAB" }
+"string.special" = { color = "#9ACAAB" }
+"string.special.symbol" = { color = "#9ACAAB" }
+"tag" = { color = "#8FC1C8" }
+"tag.doctype" = { color = "#8FC1C8" }
+"attribute" = { color = "#92B8DF" }
+"embedded" = { color = "#E5EBF1" }
+"punctuation.special" = { color = "#E5EBF1" }
+"punctuation.list_marker" = { color = "#E5EBF1" }
+"text.literal" = { color = "#E5EBF1" }
+"text.code.span" = { color = "#E5EBF1" }
+"link_text" = { color = "#92B8DF" }
+"link_uri" = { color = "#92B8DF" }
+"title" = { color = "#92B8DF", font_weight = 700 }
+"emphasis" = { font_style = "italic" }
+"emphasis.strong" = { font_weight = 700 }

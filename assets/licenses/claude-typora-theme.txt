@@ -1,0 +1,13 @@
+Claude palette reference
+Source: https://github.com/Tsumugii24/claude-typora-theme
+Version: 1.0.0
+
+Copyright (c) 2026 Tsumugii24
+SPDX-License-Identifier: MIT
+
+NiumaTerm uses adapted colors from claude.css and claude-dark.css under the
+MIT license. The full permission notice and disclaimer are reproduced in
+the repository root LICENSE file and apply with the copyright above.
+Distributions of these palettes must retain this notice and that license.
+
+The reference theme font files are not included.

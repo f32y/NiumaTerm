@@ -10,7 +10,6 @@ use nmt_config::profile::AgentProfile;
 
 use crate::ui::AppSettings;
 use crate::ui::background_tasks::BackgroundTasksView;
-use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::GitStatusModel;
 use crate::ui::right_panel::RightPanel;
 use crate::ui::shell::panels::RightPanelController;
@@ -43,8 +42,7 @@ fn leaving_an_agent_tab_clears_both_panel_targets(cx: &mut TestAppContext) {
         tasks.update(cx, |view, cx| view.set_target(Some(pane.downgrade()), cx));
 
         let git_model = cx.new(GitStatusModel::new);
-        let git = cx.new(|cx| GitSidebar::new(git_model.clone(), cx));
-        let panel = cx.new(|_| RightPanel::new(git, tasks.clone(), workflows.clone()));
+        let panel = cx.new(|_| RightPanel::new(tasks.clone(), workflows.clone()));
 
         (
             owner,

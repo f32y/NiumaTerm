@@ -10,6 +10,8 @@ pub use crate::windows::*;
 pub mod clipboard;
 
 pub mod library;
+#[cfg(target_os = "macos")]
+pub mod macos_notifications;
 
 #[cfg(windows)]
 pub mod windows;

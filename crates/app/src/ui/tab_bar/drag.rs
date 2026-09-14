@@ -1,3 +1,4 @@
+use app::design::TAB_HEIGHT;
 use gpui::prelude::*;
 use gpui::{Context, Render, SharedString, Window, div, px};
 use gpui_component::{ActiveTheme as _, h_flex};
@@ -37,7 +38,7 @@ impl Render for DragLabelPreview {
                     .child(
                         div()
                             .w(px(self.width))
-                            .h(px(30.0))
+                            .h(TAB_HEIGHT)
                             .px_2()
                             .flex()
                             .items_center()

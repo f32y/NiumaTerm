@@ -36,7 +36,7 @@ use crate::ui::background_tasks::rows::{
     render_row, row_detail, row_timing, running_heading, running_rows, section_control_label,
     state_color, visible_rows,
 };
-use crate::ui::composition::{empty_state, panel_header};
+use crate::ui::composition::{empty_state, panel_header, toolbar_button};
 
 /// Rows shown before the section control offers the rest. Running work is the
 /// part a user watches, so the finished list stays shorter per row of interest.
@@ -503,9 +503,7 @@ impl BackgroundTasksView {
                     .gap_1()
                     .items_center()
                     .child(
-                        Button::new("background-task-back")
-                            .ghost()
-                            .xsmall()
+                        toolbar_button("background-task-back")
                             .icon(IconName::ArrowLeft)
                             .tooltip(t!("tasks-background-back-tooltip"))
                             .accessibility_label(t!("tasks-background-back-tooltip"))

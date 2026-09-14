@@ -81,6 +81,7 @@ confirm-before-closing-workspace = true
 prioritize-ui-threads = false
 newline-shortcut = "ctrl-enter"
 open-in-best-workspace = true
+send-system-notifications = true
 
 [remote-session]
 host-enabled = false

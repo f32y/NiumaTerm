@@ -5,7 +5,7 @@ use nmt_agent::AgentRuntimeStatus;
 use nmt_config::appearance::TabBarStyle;
 
 use crate::tabs::TabId;
-use crate::ui::workspace_sidebar::workspace_status_glyphs;
+use crate::ui::workspace_sidebar::{WORKSPACE_NAME_INSET, workspace_status_glyphs};
 use crate::ui::{AppSettings, UI_RADIUS};
 use crate::workspace::TerminalActivity;
 
@@ -63,7 +63,8 @@ impl Render for WorkspaceDragPreview {
 
         h_flex()
             .w(px(self.width))
-            .px_2()
+            .pl(px(WORKSPACE_NAME_INSET))
+            .pr_2()
             .py_1()
             .gap_2()
             .items_center()
@@ -71,7 +72,6 @@ impl Render for WorkspaceDragPreview {
             .overflow_hidden()
             .bg(background)
             .text_color(cx.theme().sidebar_accent_foreground)
-            .children(indicator)
             // Laid out like the row it was lifted from, so the ghost stays the
             // same height as the gap it will drop into.
             .child(
@@ -99,5 +99,6 @@ impl Render for WorkspaceDragPreview {
                             .child(self.cwd.clone()),
                     ),
             )
+            .children(indicator)
     }
 }

@@ -38,6 +38,22 @@ pub const THEMES: &[BuiltinTheme] = &[
         name: "warm_light",
         source: include_str!("warm_light.toml"),
     },
+    BuiltinTheme {
+        name: "slate_light",
+        source: include_str!("slate_light.toml"),
+    },
+    BuiltinTheme {
+        name: "slate_dark",
+        source: include_str!("slate_dark.toml"),
+    },
+    BuiltinTheme {
+        name: "claude_light",
+        source: include_str!("claude_light.toml"),
+    },
+    BuiltinTheme {
+        name: "claude_dark",
+        source: include_str!("claude_dark.toml"),
+    },
 ];
 
 pub fn get(name: &str) -> Option<&'static str> {

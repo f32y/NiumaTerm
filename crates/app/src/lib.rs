@@ -2,6 +2,7 @@
 
 pub mod agent_tab;
 pub mod assets;
+pub mod design;
 pub mod syntax;
 pub mod terminal_tab;
 pub mod utils;

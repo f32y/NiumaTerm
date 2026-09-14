@@ -15,14 +15,13 @@ use app::agent_tab::AgentPane;
 use app::agent_tab::transcript::TranscriptView;
 use gpui::prelude::*;
 use gpui::{AnyElement, Context, Entity, Hsla, ScrollHandle, WeakEntity, Window, div, px};
-use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::{ActiveTheme as _, IconName, Sizable as _, StyledExt as _, h_flex, v_flex};
+use gpui_component::{ActiveTheme as _, IconName, StyledExt as _, h_flex, v_flex};
 use nmt_agent::workflow::{WorkflowAgent, WorkflowAgentState, WorkflowRun, WorkflowRunState};
 use nmt_profiling::transcript::{Operation, Probe};
 use rust_i18n::t;
 
 use crate::ui::AppSettings;
-use crate::ui::composition::{empty_state, panel_header};
+use crate::ui::composition::{empty_state, panel_header, toolbar_button};
 
 pub(crate) struct WorkflowsView {
     /// The Agent pane whose runs are shown. Weak because the tab can close
@@ -421,9 +420,7 @@ impl WorkflowsView {
                         .border_b_1()
                         .border_color(cx.theme().sidebar_border)
                         .child(
-                            Button::new("workflow-agent-back")
-                                .ghost()
-                                .xsmall()
+                            toolbar_button("workflow-agent-back")
                                 .icon(IconName::ArrowLeft)
                                 .on_click(cx.listener(|this, _, _, cx| this.close_agent(cx))),
                         )

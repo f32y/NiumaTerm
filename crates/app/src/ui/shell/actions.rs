@@ -27,5 +27,7 @@ actions!(
         NewRemoteTab,
         NewAgentTab,
         NewTeamTab,
+        QuoteGitLine,
+        ReturnFromGit,
     ]
 );

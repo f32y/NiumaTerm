@@ -11,10 +11,6 @@
 
 use gpui::{Pixels, px};
 
-/// `ControlCornerRadius`: buttons, list rows, and input fields. Larger
-/// surfaces (dialogs, cards, the pane frame) use `crate::ui::UI_RADIUS`.
-pub(crate) const CONTROL_RADIUS: Pixels = px(4.0);
-
 /// `ButtonPadding` (11px) plus the 1px control stroke it sits inside, which is
 /// what the eye measures from the button's outer edge.
 pub(crate) const BUTTON_PADDING_X: Pixels = px(12.0);

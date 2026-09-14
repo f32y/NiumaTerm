@@ -8,6 +8,8 @@ use nmt_config::local_state::TabState;
 use tracing::warn;
 
 use crate::pane_tree::PaneId;
+use crate::tabs::TabId;
+use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::tab_bar::menu::tab_icon;
 use crate::ui::terminal_layout::TerminalLayout;
 
@@ -16,6 +18,11 @@ pub(crate) type TerminalPaneTree = TerminalLayout<Entity<TerminalPane>>;
 pub(crate) struct AgentTab {
     pub(crate) owner: SessionOwner,
     pub(crate) pane: Entity<AgentPane>,
+}
+
+pub(crate) struct GitTab {
+    pub(crate) view: Entity<GitSidebar>,
+    pub(crate) return_to: Option<TabId>,
 }
 
 /// A tab's surface. Restored tabs start `Pending` — the saved snapshot with no
@@ -31,6 +38,7 @@ pub(crate) enum TabSurface {
     /// The settings UI filling the main area. It is rebuilt from the settings
     /// global on every render, so the variant carries no state of its own.
     Settings,
+    Git(GitTab),
     Team(Entity<TeamPane>),
     TeamUnavailable {
         saved: Box<TabState>,
@@ -42,6 +50,10 @@ pub(crate) enum TabSurface {
 impl TabSurface {
     pub(crate) fn icon(&self, cx: &App) -> Icon {
         match self {
+            Self::Git(_) => Icon::new(IconName::GitBranch).xsmall(),
+            Self::Pending(state) if state.git_cwd.is_some() => {
+                Icon::new(IconName::GitBranch).xsmall()
+            }
             Self::Team(_) | Self::TeamUnavailable { .. } | Self::TeamDisabled(_) => {
                 Icon::new(IconName::Network).xsmall()
             }
@@ -85,6 +97,7 @@ impl TabSurface {
             Self::Agent(tab) => Some(tab.owner.session().read(cx).profile().kind),
             Self::Pending(state) => state.agent.as_deref().and_then(AgentKind::from_id),
             Self::Live(_)
+            | Self::Git(_)
             | Self::Settings
             | Self::Team(_)
             | Self::TeamUnavailable { .. }
@@ -101,11 +114,24 @@ impl TabSurface {
                 .and_then(AgentKind::from_id)
                 .is_some(),
             Self::Live(_)
+            | Self::Git(_)
             | Self::Settings
             | Self::Team(_)
             | Self::TeamUnavailable { .. }
             | Self::TeamDisabled(_) => false,
         }
+    }
+
+    pub(crate) fn git(&self) -> Option<&GitTab> {
+        match self {
+            Self::Git(tab) => Some(tab),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn is_git(&self) -> bool {
+        matches!(self, Self::Git(_))
+            || matches!(self, Self::Pending(state) if state.git_cwd.is_some())
     }
 
     pub(crate) fn is_settings(&self) -> bool {

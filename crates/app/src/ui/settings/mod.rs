@@ -35,6 +35,8 @@ mod agent_profile_list;
 mod appearance_page;
 mod card;
 mod fields;
+#[cfg(target_os = "macos")]
+mod macos_page;
 mod opacity;
 mod profiles_page;
 #[cfg(windows)]
@@ -45,12 +47,14 @@ mod table;
 mod terminal_bridge;
 mod terminal_page;
 mod theme;
+mod theme_gallery;
 
 #[cfg(test)]
 mod tests;
 
 use std::{io, path};
 
+use app::design::SETTINGS_NAV_WIDTH;
 #[cfg(test)]
 use gpui::AppContext as _;
 #[cfg(test)]
@@ -83,6 +87,7 @@ use nmt_agent::update::{DiscoverySupport, InstallationKey, ProviderKind, UpdateP
 #[cfg(test)]
 use nmt_config::CursorShape;
 use nmt_config::system::{NewlineShortcut, WarnBeforeTerminatingShell};
+#[cfg(windows)]
 use nmt_platform::{
     is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
     shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
@@ -128,7 +133,7 @@ use crate::ui::settings::table::{
     ENV_OPERATION_COLUMN, TABLE_OPERATION_BUTTON, TrashIcon, table_frame, table_header, table_row,
 };
 use crate::ui::settings::terminal_page::terminal_page;
-use crate::ui::settings::theme::theme_list;
+use crate::ui::settings::theme_gallery::theme_list;
 use crate::{agent_updates, ui};
 
 const APP_VERSION: &str = env!("NIUMATERM_VERSION");
@@ -197,12 +202,17 @@ pub fn settings_view(editing: Entity<SettingsEditing>, cx: &App) -> Settings {
         .background_image
         .is_some();
 
+    #[cfg(windows)]
     let shell_integration_mismatched = shell_integration_dll_mismatched();
 
-    let sidebar_style = sidebar_surface(cx).border_r_0();
+    #[cfg(not(windows))]
+    let shell_integration_mismatched = false;
+
+    let sidebar_style = sidebar_surface(cx).rounded_none().border_0().border_r_1();
 
     let settings = Settings::new("app-settings")
-        .sidebar_width(px(240.0))
+        .sidebar_width(SETTINGS_NAV_WIDTH)
+        .sidebar_size_range(SETTINGS_NAV_WIDTH..SETTINGS_NAV_WIDTH)
         .sidebar_style(&sidebar_style)
         // Each subcategory is its own page; the alternative scrolls the
         // whole category top to bottom.

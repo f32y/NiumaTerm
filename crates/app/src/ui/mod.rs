@@ -1,11 +1,12 @@
+pub(crate) use app::design::SURFACE_RADIUS as UI_RADIUS;
 pub(crate) use gpui_component::modern_menu::dismiss_modern_menu;
 
 pub(crate) use crate::ui::active_list::{ActiveList, HasId};
 pub(crate) use crate::ui::modern_dropdown::modern_dropdown;
 pub(crate) use crate::ui::settings::{
     AppSettings, apply_ui_theme, apply_window_translucency, background_image_layer_opacity,
-    install_agent_settings, install_terminal_settings, main_view_background_opacity, watch_themes,
-    window_background_appearance,
+    install_agent_settings, install_terminal_settings, main_view_background_opacity, save_settings,
+    watch_themes, window_background_appearance,
 };
 // Remote sessions connect to a Windows host, so only the Windows key table
 // names the action that opens one.
@@ -47,10 +48,9 @@ mod tests;
 
 use std::sync::LazyLock;
 
-use gpui::{App, Font, FontFallbacks, Pixels, SharedString, font, px};
+use gpui::{App, Font, FontFallbacks, SharedString, font};
 use gpui_component::modern_menu::{prewarm_modern_menu, set_default_font};
 
-pub(crate) const UI_RADIUS: Pixels = px(8.0);
 pub(crate) const UI_BORDER_OPACITY: f32 = 0.5;
 
 /// The Chinese face preferred ahead of the system's own list, chosen per

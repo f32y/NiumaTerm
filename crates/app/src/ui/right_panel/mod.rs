@@ -1,15 +1,19 @@
-//! The single right-side area. Git, `Background Tasks`, and `Workflows` are
-//! contents of one host rather than separate sidebars, so choosing one replaces
-//! the visible one at the current width and the main pane can never be narrowed
-//! by a second column.
+//! Background tasks and workflows share one auxiliary column. Git review
+//! belongs to the workspace tab strip and uses the central content area.
 
+#[cfg(test)]
+mod tests;
+
+use app::design::{
+    AUXILIARY_MAX_WIDTH, AUXILIARY_MIN_WIDTH, AUXILIARY_WIDTH_SHARE, PRIMARY_CONTENT_MIN_WIDTH,
+    SPACE_2,
+};
 use gpui::prelude::*;
-use gpui::{AnyElement, Context, DragMoveEvent, Entity, Pixels, Window, div, px};
+use gpui::{AnyElement, Context, DragMoveEvent, Entity, Pixels, Window, div};
 use gpui_component::{StyledExt as _, v_flex};
 
 use crate::ui::background_tasks::BackgroundTasksView;
 use crate::ui::composition::sidebar_surface;
-use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::sidebar_resize::{self, ResizeDrag};
 use crate::ui::workflows::WorkflowsView;
 
@@ -17,16 +21,33 @@ use crate::ui::workflows::WorkflowsView;
 /// every other column's drag-move events, so this is what distinguishes them.
 pub(super) const RESIZE_HANDLE: &str = "right-panel-resize";
 
-const PANEL_WIDTH: f32 = 360.0;
+#[derive(Default)]
+struct PanelSizing {
+    available: Pixels,
+    preferred: Option<Pixels>,
+}
 
-/// Drag limits: keep the panel usable and leave room for the terminal.
-const MIN_WIDTH: f32 = 240.0;
+impl PanelSizing {
+    fn width(&self) -> Pixels {
+        let maximum = (self.available - PRIMARY_CONTENT_MIN_WIDTH)
+            .max(Pixels::ZERO)
+            .min(AUXILIARY_MAX_WIDTH);
 
-const MAX_WIDTH: f32 = 900.0;
+        let minimum = AUXILIARY_MIN_WIDTH.min(maximum);
+
+        self.preferred
+            .unwrap_or(self.available * AUXILIARY_WIDTH_SHARE)
+            .clamp(minimum, maximum)
+    }
+
+    fn resize(&mut self, requested: Pixels) {
+        self.preferred = Some(requested);
+        self.preferred = Some(self.width());
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RightPanelKind {
-    Git,
     BackgroundTasks,
     Workflows,
 }
@@ -42,7 +63,7 @@ pub(crate) struct RightPanelSelection {
 impl RightPanelSelection {
     pub(crate) fn new() -> Self {
         Self {
-            kind: RightPanelKind::Git,
+            kind: RightPanelKind::BackgroundTasks,
             open: false,
         }
     }
@@ -67,29 +88,37 @@ impl RightPanelSelection {
 
 pub(crate) struct RightPanel {
     selection: RightPanelSelection,
-    width: Pixels,
+    sizing: PanelSizing,
 
     /// False on startup and during a live drag so only explicit toggles slide.
     animated: bool,
 
-    git: Entity<GitSidebar>,
     tasks: Entity<BackgroundTasksView>,
     workflows: Entity<WorkflowsView>,
 }
 
 impl RightPanel {
     pub(crate) fn new(
-        git: Entity<GitSidebar>,
         tasks: Entity<BackgroundTasksView>,
         workflows: Entity<WorkflowsView>,
     ) -> Self {
         Self {
             selection: RightPanelSelection::new(),
-            width: px(PANEL_WIDTH),
+            sizing: PanelSizing::default(),
             animated: false,
-            git,
             tasks,
             workflows,
+        }
+    }
+
+    pub(crate) fn set_available_width(&mut self, available: Pixels, cx: &mut Context<Self>) {
+        let available = available.max(Pixels::ZERO);
+
+        if self.sizing.available != available {
+            self.sizing.available = available;
+            self.animated = false;
+
+            cx.notify();
         }
     }
 
@@ -107,8 +136,7 @@ impl RightPanel {
 
     /// Choose what the right-side area shows. Selecting the visible content
     /// closes the area; selecting the other replaces it at the current width.
-    /// Returns the open state so the caller can react (Git refreshes on open,
-    /// `Background Tasks` records its activity as seen).
+    /// Returns the open state so callers can mark newly visible activity as seen.
     pub(crate) fn select(&mut self, kind: RightPanelKind, cx: &mut Context<Self>) -> bool {
         let open = self.selection.select(kind);
 
@@ -138,25 +166,20 @@ impl RightPanel {
 
 impl Render for RightPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let width = self.width;
+        let width = self.sizing.width();
 
-        let open = self.selection.shows(RightPanelKind::Git)
-            || self.selection.shows(RightPanelKind::BackgroundTasks)
+        let open = self.selection.shows(RightPanelKind::BackgroundTasks)
             || self.selection.shows(RightPanelKind::Workflows);
 
         // One content is mounted at a time; two right-side columns are not
         // representable by this layout.
         let body: AnyElement = match self.selection.kind {
-            RightPanelKind::Git => self.git.clone().into_any_element(),
             RightPanelKind::BackgroundTasks => self.tasks.clone().into_any_element(),
             RightPanelKind::Workflows => self.workflows.clone().into_any_element(),
         };
 
-        // The panel surface is a floating card (own background, 1px border,
-        // large radius) in a gutter cut from the fixed width: right inset
-        // clears the window edge, the top inset lines up with the tab pills,
-        // and the left inset separates the card from the terminal column,
-        // which now runs flush up to this panel.
+        // The auxiliary card shares the content baseline and uses the same
+        // spacing scale as other surfaces while leaving a readable gutter.
         let card = v_flex()
             .refine_style(&sidebar_surface(cx))
             .size_full()
@@ -167,10 +190,8 @@ impl Render for RightPanel {
             .h_full()
             .flex_none()
             .relative()
-            .pl(px(6.))
-            .pr(px(6.))
-            .pt(px(4.))
-            .pb(px(6.))
+            .px(SPACE_2)
+            .pb(SPACE_2)
             .child(card);
 
         let wrapper = div()
@@ -188,13 +209,11 @@ impl Render for RightPanel {
 
                 // The panel's right edge is pinned to the window edge, so
                 // the new width is right edge minus pointer x.
-                let width = (e.bounds.right() - e.event.position.x)
-                    .max(px(MIN_WIDTH))
-                    .min(px(MAX_WIDTH));
+                let previous = this.sizing.width();
 
-                if width != this.width {
-                    this.width = width;
+                this.sizing.resize(e.bounds.right() - e.event.position.x);
 
+                if this.sizing.width() != previous {
                     // Render at the live drag width; the next toggle re-arms
                     // the slide animation.
                     this.animated = false;

@@ -782,3 +782,30 @@ fn interruption_restores_only_unanswered_input_and_preserves_new_drafts(cx: &mut
         });
     }
 }
+
+#[gpui::test]
+fn git_reference_appends_to_the_draft_without_submitting(cx: &mut TestAppContext) {
+    let directory = TestDirectory::new();
+    let (pane, window) = open_test_pane(cx, &directory);
+
+    let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
+            pane.input.update(cx, |input, cx| {
+                input.set_value("Existing question", window, cx)
+            });
+
+            pane.append_code_reference(
+                "/project/src/main.rs:12 (new)\n    let count = 2;",
+                window,
+                cx,
+            );
+
+            assert_eq!(
+                pane.input.read(cx).text().to_string(),
+                "Existing question\n\n/project/src/main.rs:12 (new)\n    let count = 2;\n"
+            );
+        });
+    });
+}

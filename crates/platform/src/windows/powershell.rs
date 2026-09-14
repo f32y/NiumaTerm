@@ -138,16 +138,17 @@ fn decode_command_argument(command: &str) -> Option<String> {
 
     let bytes = STANDARD.decode(encoded).ok()?;
 
-    let mut chunks = bytes.chunks_exact(2);
+    let (chunks, remainder) = bytes.as_chunks::<2>();
 
-    let units = chunks
-        .by_ref()
-        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-        .collect::<Vec<_>>();
-
-    if !chunks.remainder().is_empty() {
+    if !remainder.is_empty() {
         return None;
     }
+
+    let units = chunks
+        .iter()
+        .copied()
+        .map(u16::from_le_bytes)
+        .collect::<Vec<_>>();
 
     String::from_utf16(&units).ok()
 }

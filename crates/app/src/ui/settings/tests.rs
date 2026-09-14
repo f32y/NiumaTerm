@@ -50,6 +50,135 @@ fn powershell_compatibility_changes_reach_the_live_terminal_snapshot(cx: &mut Te
     }));
 }
 
+struct ThemeGalleryProbe {
+    editing: Entity<SettingsEditing>,
+    width: gpui::Pixels,
+    _updates: gpui::Subscription,
+}
+
+impl gpui::Render for ThemeGalleryProbe {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::ui::settings::theme_gallery::theme_list;
+
+        div().size_full().relative().child(
+            div()
+                .w(self.width)
+                .child(theme_list(self.editing.clone(), cx)),
+        )
+    }
+}
+
+#[gpui::test]
+fn theme_grid_measures_its_own_width_inside_a_wider_settings_page(cx: &mut TestAppContext) {
+    use gpui::VisualTestContext;
+
+    cx.update(gpui_component::init);
+    cx.set_global(AppSettings::default());
+
+    let handle = cx.add_window(|_, cx| {
+        let editing = cx.new(|_| SettingsEditing {
+            themes: BUILTIN_THEMES
+                .iter()
+                .map(|builtin| {
+                    (
+                        builtin.name.to_owned(),
+                        toml::from_str(builtin.source).unwrap(),
+                    )
+                })
+                .collect(),
+            ..SettingsEditing::default()
+        });
+
+        let updates = cx.observe(&editing, |_, _, cx| cx.notify());
+
+        ThemeGalleryProbe {
+            editing,
+            width: px(650.),
+            _updates: updates,
+        }
+    });
+
+    let mut cx = VisualTestContext::from_window(handle.into(), cx);
+
+    cx.simulate_resize(size(px(1400.), px(900.)));
+
+    for (width, columns) in [(650., 3), (396., 1), (900., 4)] {
+        cx.update(|window, cx| {
+            window
+                .root::<ThemeGalleryProbe>()
+                .flatten()
+                .unwrap()
+                .update(cx, |probe, cx| {
+                    probe.width = px(width);
+
+                    cx.notify();
+                });
+        });
+
+        // Layout measures the grid, the next frame applies its column count,
+        // and the final frame renders the new rows without keyboard input.
+        for _ in 0..3 {
+            cx.update(|window, cx| {
+                window.simulate_next_frame(cx);
+                window.draw(cx).clear(cx);
+            });
+
+            cx.run_until_parked();
+        }
+
+        cx.update(|window, cx| {
+            let probe = window.root::<ThemeGalleryProbe>().flatten().unwrap();
+
+            assert_eq!(probe.read(cx).editing.read(cx).theme_columns, columns);
+        });
+    }
+}
+
+#[gpui::test]
+fn paired_theme_switch_preserves_geometry_and_survives_config_reload(cx: &mut TestAppContext) {
+    use crate::ui::settings::theme::select_theme;
+    use app::design::{CARD_RADIUS, CONTROL_RADIUS};
+    use gpui_component::ActiveTheme as _;
+    use nmt_config::theme::AppearanceTheme;
+
+    cx.update(gpui_component::init);
+    cx.set_global(AppSettings::default());
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+
+    for (id, mode) in [
+        ("claude_light", AppearanceTheme::Light),
+        ("claude_dark", AppearanceTheme::Dark),
+    ] {
+        cx.update(|cx| {
+            assert!(select_theme(id.into(), cx));
+            assert_eq!(cx.theme().mode.is_dark(), mode == AppearanceTheme::Dark);
+            assert_eq!(cx.theme().radius, CONTROL_RADIUS);
+            assert_eq!(cx.theme().radius_lg, CARD_RADIUS);
+
+            fs::write(
+                &path,
+                toml::to_string(cx.global::<AppSettings>().config()).unwrap(),
+            )
+            .unwrap();
+
+            let restored = Config::load_for_startup_from(&path, directory.path()).unwrap();
+
+            assert_eq!(restored.theme, id);
+            assert_eq!(restored.ui_theme.unwrap().mode, mode);
+        });
+    }
+
+    cx.update(|cx| {
+        let background = cx.theme().background;
+
+        assert!(!select_theme("../missing-theme".into(), cx));
+        assert_eq!(cx.global::<AppSettings>().config().theme, "claude_dark");
+        assert_eq!(cx.theme().background, background);
+    });
+}
+
 #[test]
 fn cursor_shape_dropdown_values_match_config_shapes() {
     let parsed: CursorShape = "block".into();
@@ -860,4 +989,103 @@ fn fluent_themes_carry_their_own_corner_radii() {
 
     assert_eq!(config.radius, Some(4));
     assert_eq!(config.radius_lg, Some(8));
+}
+
+#[gpui::test]
+fn windows_notification_switch_restores_imported_disabled_setting(cx: &mut TestAppContext) {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use gpui_component::setting::AnySettingField;
+
+    use crate::ui::settings::system_page::windows_notification_field;
+
+    let mut settings = AppSettings::default();
+
+    settings.edit_system(|section| section.send_system_notifications = false);
+    cx.set_global(settings);
+
+    let registered = Rc::new(Cell::new(true));
+
+    let field = windows_notification_field(
+        {
+            let registered = registered.clone();
+
+            move || registered.get()
+        },
+        {
+            let registered = registered.clone();
+
+            move |enabled| {
+                registered.set(enabled);
+
+                Ok(())
+            }
+        },
+    )
+    .default_value(true);
+
+    let cx = cx.add_empty_window();
+
+    cx.update(|window, cx| {
+        // Reset uses the same setter as clicking the switch, and dirty state
+        // reads its displayed value through the same getter.
+        assert!(field.is_resettable(cx));
+
+        field.reset(window, cx);
+
+        assert!(!field.is_resettable(cx));
+        assert!(
+            cx.global::<AppSettings>()
+                .config()
+                .system
+                .send_system_notifications
+        );
+        assert!(registered.get());
+
+        let field = field.default_value(false);
+
+        assert!(field.is_resettable(cx));
+
+        field.reset(window, cx);
+
+        assert!(!field.is_resettable(cx));
+        assert!(
+            !cx.global::<AppSettings>()
+                .config()
+                .system
+                .send_system_notifications
+        );
+        assert!(!registered.get());
+    });
+}
+
+#[gpui::test]
+fn windows_notification_switch_keeps_setting_after_registration_failure(cx: &mut TestAppContext) {
+    use anyhow::anyhow;
+    use gpui_component::setting::AnySettingField;
+
+    use crate::ui::settings::system_page::windows_notification_field;
+
+    let mut settings = AppSettings::default();
+
+    settings.edit_system(|section| section.send_system_notifications = false);
+    cx.set_global(settings);
+
+    let field = windows_notification_field(|| false, |_| Err(anyhow!("registration failed")))
+        .default_value(true);
+
+    let cx = cx.add_empty_window();
+
+    cx.update(|window, cx| {
+        field.reset(window, cx);
+
+        assert!(
+            !cx.global::<AppSettings>()
+                .config()
+                .system
+                .send_system_notifications
+        );
+        assert!(field.is_resettable(cx));
+    });
 }

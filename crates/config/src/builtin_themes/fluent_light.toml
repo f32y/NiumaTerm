@@ -1,5 +1,6 @@
 name = "Fluent Light"
 mode = "light"
+family = "Fluent"
 
 # WinUI 3 / Fluent 2 light tokens. Chrome sits on SolidBackgroundFillColorBase
 # (#F3F3F3) and content on the card layer above it (#FAFAFA), which is the
