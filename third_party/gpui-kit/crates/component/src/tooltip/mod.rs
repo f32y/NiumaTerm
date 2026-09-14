@@ -1,9 +1,11 @@
 use std::{cell::Cell, rc::Rc, time::Duration};
 
+#[cfg(test)]
+use gpui::InteractiveElement;
 use gpui::{
     Action, AnyElement, AnyView, App, AppContext, Bounds, Context, ElementId, IntoElement,
     MouseButton, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement,
-    StyleRefinement, Styled, Window, div, prelude::FluentBuilder, px,
+    StyleRefinement, Styled, Window, canvas, div, prelude::FluentBuilder, px,
 };
 use gpui_base::{
     Tooltip as BaseTooltip, TooltipOverlay as BaseTooltipOverlay,
@@ -105,7 +107,7 @@ impl Render for Tooltip {
             }
         };
 
-        div().child(
+        let view = div().child(
             // Wrap in a child, to ensure the left margin is applied to the tooltip
             BaseTooltip::new("tooltip-popup")
                 .h_flex()
@@ -139,7 +141,10 @@ impl Render for Tooltip {
                             .child(kbd.appearance(false)),
                     )
                 }),
-        )
+        );
+        #[cfg(test)]
+        let view = view.debug_selector(|| "tooltip-view".into());
+        view
     }
 }
 
@@ -226,14 +231,12 @@ impl ComponentTooltip {
 
 // ── Internal managed tooltip trait ──────────────────────────────────────────
 
-pub(crate) trait ManagedTooltipExt:
-    StatefulInteractiveElement + crate::ElementExt + Sized
-{
+pub trait ManagedTooltipExt: StatefulInteractiveElement + crate::ElementExt + Sized {
     fn managed_tooltip(
         self,
         build_tooltip: impl Fn(&mut Window, &mut App) -> AnyView + 'static,
     ) -> Self {
-        self.managed_tooltip_with_placement(None, build_tooltip)
+        self.managed_tooltip_with_placement(None, move |_, window, cx| build_tooltip(window, cx))
     }
 
     fn managed_tooltip_at(
@@ -241,21 +244,48 @@ pub(crate) trait ManagedTooltipExt:
         placement: Placement,
         build_tooltip: impl Fn(&mut Window, &mut App) -> AnyView + 'static,
     ) -> Self {
-        self.managed_tooltip_with_placement(Some(placement), build_tooltip)
+        self.managed_tooltip_with_placement(Some(placement), move |_, window, cx| {
+            build_tooltip(window, cx)
+        })
+    }
+
+    /// Show directory text beside its row while retaining the shared hover timing.
+    fn managed_tooltip_right(self, text: impl Into<SharedString>) -> Self {
+        let text = text.into();
+        self.managed_tooltip_with_placement(Some(Placement::Right), move |bounds, window, cx| {
+            let margin = px(4.) + window.client_inset().unwrap_or(px(0.));
+            let width = (window.viewport_size().width - bounds.right() - px(8.) - margin)
+                .clamp(px(1.), px(720.));
+            let text = text.clone();
+            Tooltip::element(move |_, _| {
+                div()
+                    .max_w((width - px(18.)).max(px(1.)))
+                    .child(text.clone())
+            })
+            .m_0()
+            .ml(px(8.))
+            .build(window, cx)
+        })
     }
 
     fn managed_tooltip_with_placement(
         self,
         preferred_placement: Option<Placement>,
-        build_tooltip: impl Fn(&mut Window, &mut App) -> AnyView + 'static,
+        build_tooltip: impl Fn(Bounds<Pixels>, &mut Window, &mut App) -> AnyView + 'static,
     ) -> Self {
         let build_tooltip = Rc::new(build_tooltip);
         let trigger_bounds_cell: Rc<Cell<Bounds<Pixels>>> = Rc::new(Cell::new(Bounds::default()));
         let bounds_writer = trigger_bounds_cell.clone();
 
-        self.on_prepaint(move |bounds, _, _| {
-            bounds_writer.set(bounds);
-        })
+        // Absolute insets measure the trigger independently of its child layout.
+        self.child(
+            canvas(
+                move |bounds, _, _| bounds_writer.set(bounds),
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .inset_0(),
+        )
         .on_hover({
             let trigger_bounds_cell = trigger_bounds_cell.clone();
             let build_tooltip = build_tooltip.clone();
@@ -272,7 +302,7 @@ pub(crate) trait ManagedTooltipExt:
                         overlay.update(cx, |o: &mut BaseTooltipOverlay, cx| {
                             let build = build_tooltip.clone();
                             let request = BaseTooltipRequest::new(bounds, move |window, cx| {
-                                build(window, cx)
+                                build(bounds, window, cx)
                             });
                             let request = match preferred_placement {
                                 Some(placement) => request.placement(placement),
@@ -299,3 +329,6 @@ pub(crate) trait ManagedTooltipExt:
 }
 
 impl<E: StatefulInteractiveElement + crate::ElementExt> ManagedTooltipExt for E {}
+
+#[cfg(test)]
+mod tests;
