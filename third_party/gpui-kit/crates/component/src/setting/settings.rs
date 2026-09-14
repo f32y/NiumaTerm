@@ -471,6 +471,7 @@ impl RenderOnce for Settings {
             .with_size(self.size)
             .with_group_variant(self.group_variant);
         let sidebar_size_range = self.sidebar_size_range.clone();
+        let sidebar_resizable = sidebar_size_range.start < sidebar_size_range.end;
         let sidebar = self
             .render_sidebar(&state, &filtered_pages, window, cx)
             .into_any_element();
@@ -480,6 +481,7 @@ impl RenderOnce for Settings {
                 resizable_panel()
                     .size(self.sidebar_width)
                     .size_range(sidebar_size_range)
+                    .divider_visible(sidebar_resizable)
                     .child(sidebar),
             )
             .child(

@@ -9,9 +9,9 @@ use gpui_base::spring;
 use rust_i18n::t;
 use smallvec::SmallVec;
 
-use super::{Tab, TabVariant};
 use crate::button::{Button, ButtonVariants as _};
 use crate::menu::{DropdownMenu as _, PopupMenuItem};
+use crate::tab::{Tab, TabVariant};
 use crate::{
     ActiveTheme, ElementExt, Icon, InteractiveElementExt as _, Selectable, Sizable, Size,
     StyledExt, h_flex, styled::raised_shadow,
@@ -51,6 +51,7 @@ pub struct TabBar {
     variant: TabVariant,
     size: Size,
     menu: bool,
+    bottom_border: bool,
     max_width: Option<Pixels>,
     on_click: Option<Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>>,
 }
@@ -74,8 +75,15 @@ impl TabBar {
             selected_index: None,
             on_click: None,
             menu: false,
+            bottom_border: true,
             max_width: None,
         }
+    }
+
+    /// Hide the baseline when the adjoining content draws the shared edge.
+    pub fn bottom_border(mut self, visible: bool) -> Self {
+        self.bottom_border = visible;
+        self
     }
 
     /// Set the Tab variant, all children will inherit the variant.
@@ -487,7 +495,8 @@ impl RenderOnce for TabBar {
             .bg(bg)
             .text_color(cx.theme().tab_foreground)
             .when(
-                self.variant == TabVariant::Underline || self.variant == TabVariant::Tab,
+                self.bottom_border
+                    && matches!(self.variant, TabVariant::Underline | TabVariant::Tab),
                 |this| {
                     this.child(
                         div()
