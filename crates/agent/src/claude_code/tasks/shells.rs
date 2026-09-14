@@ -55,11 +55,8 @@ pub(super) struct ShellIndex {
 impl ShellIndex {
     pub(super) fn clear(&mut self) {
         self.shell_meta.clear();
-
         self.shell_meta_order.clear();
-
         self.bash_commands.clear();
-
         self.bash_command_order.clear();
     }
 
