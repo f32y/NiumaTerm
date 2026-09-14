@@ -1,6 +1,10 @@
+use std::backtrace::Backtrace;
+use std::fs::File;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::{fs, io};
+use std::{fs, io, panic, thread};
 
+use chrono::Utc;
 use tracing_appender::non_blocking;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
@@ -21,6 +25,8 @@ pub fn init_logging(testing: bool) -> io::Result<WorkerGuard> {
         .append(true)
         .open(log_file)?;
 
+    install_panic_hook(file.try_clone()?);
+
     let (non_blocking, guard) = non_blocking(file);
 
     let file_layer = fmt::layer()
@@ -35,6 +41,37 @@ pub fn init_logging(testing: bool) -> io::Result<WorkerGuard> {
     registry().with(filter).with(file_layer).init();
 
     Ok(guard)
+}
+
+fn install_panic_hook(file: File) {
+    let previous_hook = panic::take_hook();
+
+    panic::set_hook(Box::new(move |info| {
+        let message = info.payload_as_str().unwrap_or("Box<dyn Any>");
+
+        let location = info
+            .location()
+            .map(|location| location.to_string())
+            .unwrap_or_else(|| "<unknown>".into());
+
+        let thread = thread::current();
+        let name = thread.name().unwrap_or("<unnamed>");
+        let id = thread.id();
+        let timestamp = Utc::now().to_rfc3339();
+        let backtrace = Backtrace::force_capture();
+
+        let report = format!(
+            "{timestamp} ERROR {name} {id:?} panic at {location}: {message}\nBacktrace:\n{backtrace}\n"
+        );
+
+        // Aborting skips the appender guard, and a panic can occur inside tracing.
+        // Write directly so neither the background queue nor log filters can lose
+        // the report, then preserve the existing stderr or custom hook behavior.
+        let _ = (&file).write_all(report.as_bytes());
+        let _ = file.sync_data();
+
+        previous_hook(info);
+    }));
 }
 
 /// Testing instances keep their own log directory so a test run cannot rotate
