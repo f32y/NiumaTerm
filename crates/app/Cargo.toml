@@ -16,7 +16,7 @@ path = "src/main.rs"
 unicode-width.workspace = true
 nmt_profiling.workspace = true
 nmt_agent.workspace = true
-nmt_config = { workspace = true, features = ["application"] }
+nmt_config.workspace = true
 nmt_terminal.workspace = true
 nmt_platform.workspace = true
 nmt_version.workspace = true

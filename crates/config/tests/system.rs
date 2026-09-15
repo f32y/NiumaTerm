@@ -1,5 +1,3 @@
-#![cfg(feature = "application")]
-
 use nmt_config::Config;
 use nmt_config::system::*;
 use toml::{Value, from_str};

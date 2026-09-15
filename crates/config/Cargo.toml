@@ -8,23 +8,12 @@ authors.workspace = true
 [lints]
 workspace = true
 
-[features]
-default = ["application"]
-application = [
-    "dep:nmt_profile",
-    "dep:dirs",
-    "dep:toml",
-    "dep:toml_edit",
-    "dep:nmt_platform",
-    "dep:tempfile",
-]
-
 [dependencies]
-dirs = { workspace = true, optional = true }
+dirs.workspace = true
 serde.workspace = true
-toml = { workspace = true, optional = true }
-toml_edit = { workspace = true, optional = true }
+toml.workspace = true
+toml_edit.workspace = true
 tracing.workspace = true
-nmt_platform = { workspace = true, optional = true }
-tempfile = { workspace = true, optional = true }
-nmt_profile = { workspace = true, optional = true }
+nmt_platform.workspace = true
+tempfile.workspace = true
+nmt_profile.workspace = true
