@@ -4,18 +4,9 @@ use gpui_component::{ActiveTheme as _, h_flex, v_flex};
 use nmt_agent::AgentRuntimeStatus;
 use nmt_config::appearance::TabBarStyle;
 
-use crate::tabs::TabId;
 use crate::ui::workspace_sidebar::{WORKSPACE_NAME_INSET, workspace_status_glyphs};
 use crate::ui::{AppSettings, UI_RADIUS};
 use crate::workspace::TerminalActivity;
-
-/// A tab row picked up for reordering. The workspace id prevents a row from
-/// being reordered into a different workspace's tab manager.
-pub(super) struct SidebarTabDrag {
-    pub(super) workspace: usize,
-    pub(super) from: usize,
-    pub(super) tab: TabId,
-}
 
 pub(super) struct WorkspaceDrag {
     pub(super) from: usize,

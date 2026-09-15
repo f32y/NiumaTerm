@@ -4,6 +4,10 @@ pub(super) struct ShellChrome {
     /// Tab-strip view state (scroll + active-tab reveal) and its renderer.
     pub(super) tab_strip: TabStrip,
 
+    /// Drag state of the tab rows the vertical tab-bar style lists under each
+    /// workspace, and their renderer.
+    pub(super) vertical_tabs: VerticalTabList,
+
     /// Titlebar daily-token-usage widget; rendered only while the
     /// `show_daily_token_usage` setting is on. Rendered by the sidebar status
     /// cluster; the shell owns it so it outlives a sidebar collapse.
@@ -28,6 +32,7 @@ impl ShellChrome {
     pub(super) fn new(git_model: Entity<GitStatusModel>, cx: &mut Context<Shell>) -> Self {
         Self {
             tab_strip: TabStrip::new(),
+            vertical_tabs: VerticalTabList::new(),
             token_usage: cx.new(|cx| TokenUsageView::new(daily_source(), cx)),
             agent_usage: cx.new(AgentUsageView::new),
             git_status: cx.new(|cx| GitStatusView::new(git_model.clone(), cx)),
