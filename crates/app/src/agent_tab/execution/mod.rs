@@ -276,6 +276,26 @@ impl AgentSession {
         }
     }
 
+    /// Run `read` on the background executor and hand its result to `apply`
+    /// back on this session. Filesystem and history reads can block for
+    /// seconds, so none of them runs on the UI thread; `apply` decides whether
+    /// the answer is still wanted, since the session may have closed or moved
+    /// on to another epoch in the meantime.
+    fn read_in_background<R: Send + 'static>(
+        cx: &mut Context<Self>,
+        read: impl FnOnce() -> R + Send + 'static,
+        apply: impl FnOnce(&mut Self, R, &mut Context<Self>) + 'static,
+    ) {
+        let task = cx.background_executor().spawn(async move { read() });
+
+        cx.spawn(async move |this, cx| {
+            let value = task.await;
+
+            let _ = this.update(cx, |this, cx| apply(this, value, cx));
+        })
+        .detach();
+    }
+
     pub fn is_closed(&self) -> bool {
         self.closed.get()
     }
@@ -342,17 +362,14 @@ impl AgentSession {
     }
 
     pub(crate) fn read_checkpoints(&mut self, request: CheckpointRead, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let (request, result) = cx
-                .background_executor()
-                .spawn(async move {
-                    let result = request.load();
+        Self::read_in_background(
+            cx,
+            move || {
+                let result = request.load();
 
-                    (request, result)
-                })
-                .await;
-
-            let _ = this.update(cx, |this, cx| {
+                (request, result)
+            },
+            |this, (request, result), cx| {
                 if this.is_closed() {
                     return;
                 }
@@ -366,9 +383,8 @@ impl AgentSession {
                 };
 
                 this.on_branch_update(update, cx);
-            });
-        })
-        .detach();
+            },
+        );
     }
 
     pub(crate) fn on_branch_update(&mut self, update: BranchUpdate, cx: &mut Context<Self>) {
@@ -377,35 +393,29 @@ impl AgentSession {
         }
 
         match update {
-            BranchUpdate::CreateFork(request) => {
-                cx.spawn(async move |this, cx| {
-                    let (request, result) = cx
-                        .background_executor()
-                        .spawn(async move {
-                            let result = request.run();
+            BranchUpdate::CreateFork(request) => Self::read_in_background(
+                cx,
+                move || {
+                    let result = request.run();
 
-                            (request, result)
-                        })
-                        .await;
+                    (request, result)
+                },
+                |this, (request, result), cx| {
+                    if this.is_closed() {
+                        return;
+                    }
 
-                    let _ = this.update(cx, |this, cx| {
-                        if this.is_closed() {
-                            return;
-                        }
+                    let update = {
+                        let mut state = this.controller.borrow_mut();
 
-                        let update = {
-                            let mut state = this.controller.borrow_mut();
+                        let epoch = state.runtime.epoch();
 
-                            let epoch = state.runtime.epoch();
+                        state.branch.fork_created(epoch, request, result)
+                    };
 
-                            state.branch.fork_created(epoch, request, result)
-                        };
-
-                        this.on_branch_update(update, cx);
-                    });
-                })
-                .detach();
-            }
+                    this.on_branch_update(update, cx);
+                },
+            ),
             BranchUpdate::StartSession(identity) => {
                 self.controller.borrow_mut().commands.clear();
 
@@ -461,13 +471,10 @@ impl AgentSession {
         let cwd = self.active_workspace.primary().map(str::to_owned);
         let epoch = self.controller.borrow().runtime.epoch();
 
-        cx.spawn(async move |this, cx| {
-            let restored = cx
-                .background_executor()
-                .spawn(async move { sessions::load_task_history(cwd.as_deref(), &session_id) })
-                .await;
-
-            let _ = this.update(cx, |this, cx| {
+        Self::read_in_background(
+            cx,
+            move || sessions::load_task_history(cwd.as_deref(), &session_id),
+            move |this, restored, cx| {
                 if !this.controller.borrow().runtime.is_current(epoch) {
                     return;
                 }
@@ -485,9 +492,8 @@ impl AgentSession {
                 for event in events {
                     this.on_event(epoch, event, cx);
                 }
-            });
-        })
-        .detach();
+            },
+        );
     }
 
     pub(crate) fn watch_child(
@@ -826,17 +832,14 @@ impl AgentSession {
     }
 
     pub(crate) fn read_resume(&mut self, request: ReplayRead, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let (request, replay) = cx
-                .background_executor()
-                .spawn(async move {
-                    let replay = request.load();
+        Self::read_in_background(
+            cx,
+            move || {
+                let replay = request.load();
 
-                    (request, replay)
-                })
-                .await;
-
-            let _ = this.update(cx, |this, cx| {
+                (request, replay)
+            },
+            |this, (request, replay), cx| {
                 if this.is_closed() {
                     return;
                 }
@@ -873,9 +876,8 @@ impl AgentSession {
                         this.start(Some(identity), false, |_, _| {}, cx)
                     }
                 }
-            });
-        })
-        .detach();
+            },
+        );
     }
 
     /// `None` when this tab's harness has no vendor-managed installation, which
@@ -1038,17 +1040,13 @@ impl AgentSession {
 
         if result.is_err() {
             let _ = this.update(cx, |this, cx| {
-                if let Err(mut orphan) = this
+                if let Err(orphan) = this
                     .controller
                     .borrow_mut()
                     .runtime
                     .shutdown_failed(epoch, backend)
                 {
-                    cx.background_executor()
-                        .spawn(async move {
-                            let _ = orphan.shutdown(Duration::from_secs(5), true);
-                        })
-                        .detach();
+                    shutdown_in_background(orphan, Duration::from_secs(5), cx);
                 }
 
                 cx.notify();
@@ -1500,12 +1498,8 @@ impl AgentSession {
         match outcome {
             StartOutcome::Installed => Some(true),
             StartOutcome::Superseded(orphan) => {
-                if let Some(mut orphan) = orphan {
-                    cx.background_executor()
-                        .spawn(async move {
-                            let _ = orphan.shutdown(Duration::from_secs(5), true);
-                        })
-                        .detach();
+                if let Some(orphan) = orphan {
+                    shutdown_in_background(orphan, Duration::from_secs(5), cx);
                 }
 
                 None
@@ -1557,11 +1551,7 @@ impl AgentSession {
                 self.on_event(epoch, event, cx);
             }
 
-            cx.background_executor()
-                .spawn(async move {
-                    let _ = backend.shutdown(Duration::from_millis(250), true);
-                })
-                .detach();
+            shutdown_in_background(Box::new(backend), Duration::from_millis(250), cx);
         }
 
         self.on_event(
@@ -1619,14 +1609,10 @@ impl AgentSession {
         let cwd = self.active_workspace.primary().map(str::to_owned);
         let epoch = self.controller.borrow().runtime.epoch();
 
-        let read = cx
-            .background_executor()
-            .spawn(async move { source.restore(cwd.as_deref(), &session_id) });
-
-        cx.spawn(async move |this, cx| {
-            let restored = read.await;
-
-            this.update(cx, |this, cx| {
+        Self::read_in_background(
+            cx,
+            move || source.restore(cwd.as_deref(), &session_id),
+            move |this, restored, cx| {
                 // A restoration that outlived its session says nothing about
                 // the conversation now open.
                 if this.is_closed() || !this.controller.borrow().runtime.is_current(epoch) {
@@ -1634,10 +1620,8 @@ impl AgentSession {
                 }
 
                 this.merge_restored_workflows(restored, cx);
-            })
-            .ok();
-        })
-        .detach();
+            },
+        );
     }
 
     fn merge_restored_workflows(
@@ -1834,22 +1818,26 @@ impl AgentSession {
         let cwd = self.active_workspace.primary().map(str::to_owned);
         let epoch = self.controller.borrow().runtime.epoch();
 
-        let read = cx
-            .background_executor()
-            .spawn(async move { source.refresh(cwd.as_deref(), &session_id, &request) });
-
-        cx.spawn(async move |this, cx| {
-            let result = read.await;
-
-            this.update(cx, |this, cx| {
+        Self::read_in_background(
+            cx,
+            move || source.refresh(cwd.as_deref(), &session_id, &request),
+            move |this, result, cx| {
                 if this.is_closed() || !this.controller.borrow().runtime.is_current(epoch) {
                     return;
                 }
 
                 this.on_workflow_refresh_results(epoch, vec![result], cx);
-            })
-            .ok();
+            },
+        );
+    }
+}
+
+/// Stop a backend nothing reads from any more, off the UI thread, forcing it
+/// down once `timeout` passes.
+fn shutdown_in_background(mut backend: Box<Backend>, timeout: Duration, cx: &App) {
+    cx.background_executor()
+        .spawn(async move {
+            let _ = backend.shutdown(timeout, true);
         })
         .detach();
-    }
 }
