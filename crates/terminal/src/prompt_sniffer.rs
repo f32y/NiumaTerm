@@ -739,12 +739,16 @@ fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
             _ => return SniffedOsc::ProgressMalformed,
         };
 
-        if s[OSC_PROGRESS_PREFIX.len() + 1] != b';' {
-            return SniffedOsc::ProgressMalformed;
-        }
+        // The percentage field is optional: PowerShell's progress host ends its
+        // indicator with `ESC ] 9 ; 4 ; 0 ST`. Rejecting that form would leave the
+        // progress state active and the cursor hidden after the command.
+        let arg_start = match s[OSC_PROGRESS_PREFIX.len() + 1] {
+            b';' => OSC_PROGRESS_PREFIX.len() + 2,
+            0x07 | 0x1b => OSC_PROGRESS_PREFIX.len() + 1,
+            _ => return SniffedOsc::ProgressMalformed,
+        };
 
         let end = s.len().min(SHORT_MARK_MAX);
-        let arg_start = OSC_PROGRESS_PREFIX.len() + 2;
 
         let mut i = arg_start;
 

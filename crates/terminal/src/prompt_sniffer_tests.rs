@@ -688,6 +688,18 @@ fn osc_progress_carries_state_and_percentage() {
             progress: None,
         }
     );
+
+    // PowerShell's progress host ends its indicator with no percentage field.
+    for stream in [b"\x1b]9;4;0\x1b\\".as_slice(), b"\x1b]9;4;0\x07"] {
+        assert_eq!(
+            report(stream),
+            ProgressReport {
+                state: ProgressState::Remove,
+                progress: None,
+            }
+        );
+    }
+
     assert!(matches!(
         parse_sniffed_osc(b"\x1b]9;4;7;10\x07"),
         SniffedOsc::ProgressMalformed
