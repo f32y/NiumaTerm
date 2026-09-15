@@ -240,6 +240,16 @@ EOF
     other_packages=$(printf '%s\n' "$package_classes" |
         awk -F '\t' '$1 == "other" { print $2 }')
 
+    # Clippy reports through check mode, so a run writes metadata-only artifacts
+    # for the whole dependency graph where a build writes linked libraries. In a
+    # shared target directory both sets stay on disk under different hashes and no
+    # build reuses the check copies, so every crate accumulates a second artifact
+    # set that only a manual delete removes. A nested directory keeps the check
+    # artifacts disposable on their own, and an existing CARGO_TARGET_DIR is
+    # extended rather than replaced so CI cache paths keep working.
+    repo_root=$(git rev-parse --show-toplevel)
+    clippy_target_dir="${CARGO_TARGET_DIR:-$repo_root/target}/pre-commit-check"
+
     if [ -n "$other_packages" ]; then
         set --
         for package in $other_packages; do
@@ -247,7 +257,7 @@ EOF
         done
 
         echo "pre-commit: running clippy on changed non-first-party members"
-        cargo clippy --all-targets --no-deps --quiet "$@"
+        CARGO_TARGET_DIR="$clippy_target_dir" cargo clippy --all-targets --no-deps --quiet "$@"
     fi
 
     first_party_packages=$(printf '%s\n' "$first_party_packages" | tr -d '\r')
@@ -262,7 +272,7 @@ EOF
     done
 
     echo "pre-commit: running strict clippy groups on changed first-party members"
-    cargo clippy --all-targets --no-deps --quiet "$@" --         -D clippy::absolute_paths         -D clippy::complexity         -D clippy::perf         -D clippy::style
+    CARGO_TARGET_DIR="$clippy_target_dir" cargo clippy --all-targets --no-deps --quiet "$@" -- -D clippy::absolute_paths -D clippy::complexity -D clippy::perf -D clippy::style
 }
 
 branch=$(git symbolic-ref --quiet --short HEAD || true)
