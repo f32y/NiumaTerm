@@ -414,7 +414,11 @@ pub(super) fn appearance_page(
                     // Auto Size derives the width from the strip, so the entry
                     // would report a value the tabs no longer use.
                     .disabled(tab_auto_size),
-                ),
+                )
+                .item(SettingItem::new(
+                    t!("settings-appearance-tab-shape"),
+                    tab_shape_field(),
+                )),
         )
         .group(
             SettingGroup::new()

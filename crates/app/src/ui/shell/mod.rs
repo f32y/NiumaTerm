@@ -99,6 +99,7 @@ use nmt_agent::{
     AgentRuntimeStatus, AgentWorkspace, MonitorMutation, agent_process, request_native_delivery,
 };
 
+use nmt_config::appearance::TabShape;
 use nmt_config::local_state::{TabState, WindowState};
 
 use nmt_config::system::WarnBeforeTerminatingShell;
@@ -3416,6 +3417,8 @@ impl Shell {
         let vertical_tabs =
             cx.global::<AppSettings>().config().appearance.tab_bar_style == TabBarStyle::Vertical;
 
+        let tab_shape = cx.global::<AppSettings>().config().appearance.tab_shape;
+
         let sidebar_width = if self.sidebar.collapsed {
             0.0
         } else {
@@ -3527,11 +3530,15 @@ impl Shell {
                     .h_full()
                     .flex()
                     .items_end()
-                    .map(|this| match vertical_tabs {
-                        true => this
+                    .map(|this| match (vertical_tabs, tab_shape) {
+                        (true, _) => this
                             .map(Host::session_heading_slot)
                             .child(self.render_session_heading(cx)),
-                        false => this.child(tab_bar),
+                        // Pills float apart from the content, so they center
+                        // in the bar. Attached tabs keep the bottom edge they
+                        // share with the content below.
+                        (false, TabShape::Rounded) => this.items_center().child(tab_bar),
+                        (false, TabShape::Attached) => this.child(tab_bar),
                     }),
             )
             .child(title_bar_git_summary().child(self.chrome.git_status.clone()))

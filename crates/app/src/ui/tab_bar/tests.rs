@@ -2,13 +2,14 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui::px;
+use nmt_config::appearance::TabShape;
 use nmt_config::profile::Profile;
 
 use crate::ui::platform_style::{Host, PlatformStyle as _};
 use crate::ui::tab_bar::menu::profile_root_choices;
 use crate::ui::tab_bar::{
-    AgentTabIndicator, MIN_AUTO_TAB_WIDTH, NEW_TAB_BUTTON_WIDTH, TAB_BAR_PADDING, TAB_GAP,
-    TabDensity, agent_tab_indicator, auto_tab_width, progress_bar_width, shell_tab, tab_density,
+    AgentTabIndicator, MIN_AUTO_TAB_WIDTH, NEW_TAB_BUTTON_WIDTH, TabDensity, agent_tab_indicator,
+    auto_tab_width, progress_bar_width, shell_tab, tab_density, tab_gap,
 };
 
 struct TabGestureProbe {
@@ -32,16 +33,18 @@ impl gpui::Render for TabGestureProbe {
             .on_mouse_down(MouseButton::Left, move |_, _, _| {
                 presses.set(presses.get() + 1);
             })
-            .child(shell_tab().w(px(160.)).label("Codex").on_drag(
-                TabDrag { from: 0 },
-                |_, _, _, cx| {
-                    cx.new(|_| DragLabelPreview {
-                        style: DragStyle::Tab,
-                        label: "Codex".into(),
-                        width: 160.,
-                    })
-                },
-            ))
+            .child(
+                shell_tab(TabShape::Attached)
+                    .w(px(160.))
+                    .label("Codex")
+                    .on_drag(TabDrag { from: 0 }, |_, _, _, cx| {
+                        cx.new(|_| DragLabelPreview {
+                            style: DragStyle::Tab,
+                            label: "Codex".into(),
+                            width: 160.,
+                        })
+                    }),
+            )
     }
 }
 
@@ -106,28 +109,32 @@ fn progress_bar_stops_at_rounded_tab_edges() {
 /// icon. It also survives a strip that has not been measured yet.
 #[test]
 fn auto_size_shares_the_strip_between_tabs() {
-    let configured = 120.0;
-    let width = |strip: f32, count: usize| auto_tab_width(strip, count, configured);
+    for shape in [TabShape::Rounded, TabShape::Attached] {
+        let configured = 120.0;
+        let width = |strip: f32, count: usize| auto_tab_width(strip, count, configured, shape);
 
-    assert_eq!(width(1200.0, 2), configured);
+        assert_eq!(width(1200.0, 2), configured);
 
-    let crowded = width(800.0, 8);
+        let crowded = width(800.0, 8);
 
-    assert!(
-        crowded < configured,
-        "{crowded} should be under {configured}"
-    );
-    assert!(crowded > MIN_AUTO_TAB_WIDTH);
-    assert!(
-        (crowded * 8.0 + TAB_GAP * 8.0 + TAB_BAR_PADDING + NEW_TAB_BUTTON_WIDTH - 800.0).abs()
-            < 0.001,
-        "the tabs and their gaps should consume the strip exactly",
-    );
+        assert!(
+            crowded < configured,
+            "{crowded} should be under {configured}"
+        );
+        assert!(crowded > MIN_AUTO_TAB_WIDTH);
 
-    assert_eq!(width(800.0, 40), MIN_AUTO_TAB_WIDTH);
-    assert_eq!(width(0.0, 8), configured);
-    assert_eq!(width(1200.0, 0), configured);
-    assert_eq!(auto_tab_width(800.0, 40, 30.0), 30.0);
+        let gap = tab_gap(shape);
+
+        assert!(
+            (crowded * 8.0 + gap * 8.0 + gap * 2.0 + NEW_TAB_BUTTON_WIDTH - 800.0).abs() < 0.001,
+            "the tabs and their gaps should consume the strip exactly with {shape:?}",
+        );
+
+        assert_eq!(width(800.0, 40), MIN_AUTO_TAB_WIDTH);
+        assert_eq!(width(0.0, 8), configured);
+        assert_eq!(width(1200.0, 0), configured);
+        assert_eq!(auto_tab_width(800.0, 40, 30.0, shape), 30.0);
+    }
 }
 
 #[test]

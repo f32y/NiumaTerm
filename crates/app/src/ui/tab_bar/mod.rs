@@ -12,7 +12,7 @@ mod tests;
 use std::{cell, collections, rc};
 
 use app::agent_tab::AgentKind;
-use app::design::{SETTINGS_NAV_WIDTH, SURFACE_RADIUS};
+use app::design::{SETTINGS_NAV_WIDTH, SURFACE_RADIUS, TAB_HEIGHT};
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Context, DragMoveEvent, Hsla, IsZero as _, MouseButton, Pixels, ScrollHandle,
@@ -20,7 +20,8 @@ use gpui::{
 };
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
-use gpui_component::{ActiveTheme, ElementExt as _, Icon, IconName};
+use gpui_component::{ActiveTheme, ElementExt as _, Icon, IconName, Sizable as _, h_flex, v_flex};
+use nmt_config::appearance::TabShape;
 use nmt_terminal::event::{ProgressReport, ProgressState};
 use rust_i18n::t;
 
@@ -184,11 +185,17 @@ impl TabStrip {
         let settings = cx.global::<AppSettings>();
         let configured_width = settings.config().appearance.tab_width as f32;
         let auto_size = settings.config().appearance.tab_auto_size;
+        let tab_shape = settings.config().appearance.tab_shape;
 
         let tab_width = if settings_workspace {
             SETTINGS_NAV_WIDTH.into()
         } else if auto_size {
-            auto_tab_width(self.measured_width.get(), tab_count, configured_width)
+            auto_tab_width(
+                self.measured_width.get(),
+                tab_count,
+                configured_width,
+                tab_shape,
+            )
         } else {
             configured_width
         };
@@ -197,9 +204,15 @@ impl TabStrip {
         let icon_only = density == TabDensity::IconOnly;
 
         let bar = TabBar::new("shell-tabs")
-            // Attached tabs share the content edge and keep their own horizontal scroll.
-            .with_variant(TabVariant::Tab)
-            .bottom_border(false)
+            .map(|bar| match tab_shape {
+                // Large gives a 30px pill row, an easier click and drag target
+                // than the compact 24px one while leaving the terminal below
+                // its room.
+                TabShape::Rounded => bar.with_variant(TabVariant::Modern).large(),
+                // Attached tabs sit on the content edge, which already draws
+                // the line a bar baseline would repeat.
+                TabShape::Attached => bar.with_variant(TabVariant::Tab).bottom_border(false),
+            })
             .map(Host::tab_bar)
             .w_full()
             .min_w_0()
@@ -434,7 +447,7 @@ impl TabStrip {
                 // prepaint clamps the offset to the scrollable range.
                 let scroll = self.scroll.clone();
 
-                shell_tab()
+                shell_tab(tab_shape)
                     .aria_label(drag_label.clone())
                     .map(|tab| Host::tab(tab, density))
                     .on_scroll_wheel(move |event, window, _| {
@@ -696,10 +709,16 @@ fn tab_density(tab_width: f32) -> TabDensity {
     }
 }
 
-/// Attached tabs have no inter-tab gap or outer strip padding.
-const TAB_GAP: f32 = 0.0;
-
-const TAB_BAR_PADDING: f32 = 0.0;
+/// Gap the bar leaves between neighbouring tabs, and around the whole strip.
+/// `TabVariant::Modern` fixes both at 4px while attached tabs have neither,
+/// and the tab widths have to be reduced by that much to keep the row from
+/// overflowing.
+fn tab_gap(shape: TabShape) -> f32 {
+    match shape {
+        TabShape::Rounded => 4.0,
+        TabShape::Attached => 0.0,
+    }
+}
 
 /// Room held back for the trailing new-tab button, which shares the row with
 /// the tabs.
@@ -709,7 +728,7 @@ const NEW_TAB_BUTTON_WIDTH: f32 = TOOLBAR_BUTTON_SIZE;
 /// has room and then shrink together, never past the point where the leading
 /// icon would be clipped. Below that the row overflows and the strip's
 /// horizontal scroll takes over.
-fn auto_tab_width(strip_width: f32, tab_count: usize, configured: f32) -> f32 {
+fn auto_tab_width(strip_width: f32, tab_count: usize, configured: f32, shape: TabShape) -> f32 {
     let floor = MIN_AUTO_TAB_WIDTH.min(configured);
 
     // A strip that has never been laid out reports no width. Starting from the
@@ -720,7 +739,8 @@ fn auto_tab_width(strip_width: f32, tab_count: usize, configured: f32) -> f32 {
     }
 
     // One gap per tab: between neighbours, plus one before the new-tab button.
-    let reserved = TAB_BAR_PADDING + NEW_TAB_BUTTON_WIDTH + TAB_GAP * tab_count as f32;
+    let gap = tab_gap(shape);
+    let reserved = gap * 2.0 + NEW_TAB_BUTTON_WIDTH + gap * tab_count as f32;
     let share = (strip_width - reserved) / tab_count as f32;
 
     if share.is_finite() {
@@ -815,9 +835,89 @@ fn progress_bar(report: ProgressReport, tab_width: f32, cx: &App) -> AnyElement 
 
 /// Native hit testing and the title bar's mouse handlers both leave tab
 /// gestures to the tab, including movement before the reorder threshold.
-fn shell_tab() -> Tab {
-    Tab::new()
-        .top_corner_radius(SURFACE_RADIUS)
-        .occlude()
+/// Pills take the variant's radius on all four corners, while an attached tab
+/// rounds only the corners away from the content it rests on.
+fn shell_tab(shape: TabShape) -> Tab {
+    let tab = match shape {
+        TabShape::Rounded => Tab::new(),
+        TabShape::Attached => Tab::new().top_corner_radius(SURFACE_RADIUS),
+    };
+
+    tab.occlude()
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+}
+
+/// Width of each tab in [`tab_shape_preview`].
+const PREVIEW_TAB_WIDTH: f32 = 96.0;
+
+/// An active and an inactive tab over a band of content surface, drawn with
+/// the strip's metrics and theme colors. Plain elements register no hitbox,
+/// so the preview takes no hover styles and leaves every click to the picker
+/// row that holds it; a real `Tab` swallows the left mouse press.
+pub(crate) fn tab_shape_preview(shape: TabShape, cx: &App) -> AnyElement {
+    let theme = cx.theme();
+    let gap = px(tab_gap(shape));
+
+    let tab = |active: bool, title_width: f32| {
+        let fill = match active {
+            true => theme.tab_active,
+            false => theme.transparent,
+        };
+
+        let tab = div()
+            .w(px(PREVIEW_TAB_WIDTH))
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(fill)
+            .child(
+                div()
+                    .w(px(title_width))
+                    .h(px(4.0))
+                    .rounded_full()
+                    .bg(theme.muted_foreground.opacity(0.5)),
+            );
+
+        // `TabVariant::Modern` at the large size draws a 30px pill outlined
+        // with the sidebar border while selected. `TabVariant::Tab` draws a
+        // full-height tab whose side and top borders show while selected.
+        match (shape, active) {
+            (TabShape::Rounded, true) => tab
+                .h(px(30.0))
+                .rounded(theme.radius)
+                .border_1()
+                .border_color(theme.sidebar_border),
+            (TabShape::Rounded, false) => tab.h(px(30.0)).rounded(theme.radius),
+            (TabShape::Attached, true) => tab
+                .h(TAB_HEIGHT)
+                .rounded_t(SURFACE_RADIUS)
+                .border_x_1()
+                .border_t_1()
+                .border_color(theme.border),
+            (TabShape::Attached, false) => tab.h(TAB_HEIGHT),
+        }
+    };
+
+    let bar_fill = match shape {
+        TabShape::Rounded => theme.transparent,
+        TabShape::Attached => theme.tab_bar,
+    };
+
+    v_flex()
+        .w_full()
+        .overflow_hidden()
+        .rounded(UI_RADIUS)
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.title_bar)
+        .child(
+            h_flex()
+                .p(gap)
+                .gap(gap)
+                .bg(bar_fill)
+                .child(tab(true, 44.0))
+                .child(tab(false, 32.0)),
+        )
+        .child(div().h(px(12.0)).bg(theme.tab_active))
+        .into_any_element()
 }
