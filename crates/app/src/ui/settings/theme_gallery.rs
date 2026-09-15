@@ -3,7 +3,10 @@ use app::design::{
     THEME_PREVIEW_HEIGHT,
 };
 use gpui::prelude::*;
-use gpui::{App, Div, Entity, Hsla, Rgba, div, px, rgba};
+use gpui::{
+    App, Bounds, ContentMask, Corners, Div, Entity, Hsla, Rgba, TextAlign, TextRun, canvas, div,
+    fill, point, px, rgba, size,
+};
 use gpui_base::Button;
 use gpui_component::switch::Switch;
 use gpui_component::{
@@ -12,7 +15,7 @@ use gpui_component::{
 };
 use nmt_config::colors::ColorArray;
 use nmt_config::theme::{AppearanceTheme, Theme};
-use nmt_config::theme_catalog::theme_families;
+use nmt_config::theme_catalog::ThemeFamily;
 use rust_i18n::t;
 
 use crate::ui::settings::state::{AppSettings, SettingsEditing};
@@ -57,7 +60,23 @@ fn theme_preview(theme: &Theme) -> Div {
 
     let text = terminal_color(colors.foreground);
 
-    v_flex()
+    let snippets = [
+        ("let", terminal_color(colors.magenta)),
+        ("theme =", text),
+        ("\"hello\"", terminal_color(colors.green)),
+    ];
+
+    let ansi = [
+        colors.red,
+        colors.yellow,
+        colors.green,
+        colors.cyan,
+        colors.blue,
+        colors.magenta,
+    ]
+    .map(terminal_color);
+
+    div()
         .w_full()
         .h(THEME_PREVIEW_HEIGHT)
         .flex_none()
@@ -66,80 +85,123 @@ fn theme_preview(theme: &Theme) -> Div {
         .border_color(border)
         .overflow_hidden()
         .bg(surface)
+        // Preview geometry is fixed decoration. Direct drawing avoids flex
+        // layout for dozens of tiny boxes in every visible card.
         .child(
-            h_flex()
-                .h(px(16.))
-                .flex_none()
-                .px_2()
-                .gap_1()
-                .bg(chrome)
-                .child(
-                    div()
-                        .w(px(4.))
-                        .h(px(4.))
-                        .rounded_full()
-                        .bg(text.opacity(0.35)),
-                )
-                .child(div().w(px(36.)).h(px(8.)).rounded_t(px(3.)).bg(surface)),
-        )
-        .child(
-            h_flex()
-                .flex_1()
-                .min_h_0()
-                .child(
-                    v_flex()
-                        .w(px(30.))
-                        .h_full()
-                        .p_1()
-                        .gap_1()
-                        .bg(chrome)
-                        .child(div().h(px(4.)).w_full().bg(text.opacity(0.16)))
-                        .child(div().h(px(4.)).w_full().bg(text.opacity(0.08))),
-                )
-                .child(
-                    v_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .p_2()
-                        .gap_2()
-                        .child(
-                            h_flex()
-                                .gap_1()
-                                .text_size(px(10.))
-                                .overflow_hidden()
-                                .child(
-                                    div()
-                                        .text_color(terminal_color(colors.magenta))
-                                        .child("let"),
-                                )
-                                .child(div().text_color(text).child("theme ="))
-                                .child(
-                                    div()
-                                        .text_color(terminal_color(colors.green))
-                                        .child("\"hello\""),
-                                ),
+            canvas(
+                move |_, window, _| {
+                    let mut style = window.text_style();
+
+                    style.font_size = px(10.).into();
+
+                    let font = style.font();
+
+                    let lines = snippets.map(|(label, color)| {
+                        window.text_system().shape_line(
+                            label.into(),
+                            px(10.),
+                            &[TextRun {
+                                len: label.len(),
+                                font: font.clone(),
+                                color,
+                                background_color: None,
+                                underline: None,
+                                strikethrough: None,
+                            }],
+                            None,
                         )
-                        .child(
-                            h_flex().gap_1().children(
-                                [
-                                    colors.red,
-                                    colors.yellow,
-                                    colors.green,
-                                    colors.cyan,
-                                    colors.blue,
-                                    colors.magenta,
-                                ]
-                                .into_iter()
-                                .map(|color| {
-                                    div()
-                                        .w(px(12.))
-                                        .h(px(4.))
-                                        .rounded(px(2.))
-                                        .bg(terminal_color(color))
-                                }),
-                            ),
+                    });
+
+                    (lines, style.line_height_in_pixels(window.rem_size()))
+                },
+                move |bounds, (lines, line_height), window, cx| {
+                    let rect = |x, y, width, height| {
+                        Bounds::new(bounds.origin + point(x, y), size(width, height))
+                    };
+
+                    window.paint_quad(fill(
+                        rect(px(0.), px(0.), bounds.size.width, px(16.)),
+                        chrome,
+                    ));
+
+                    window.paint_quad(
+                        fill(rect(px(8.), px(6.), px(4.), px(4.)), text.opacity(0.35))
+                            .corner_radii(px(2.)),
+                    );
+
+                    window.paint_quad(
+                        fill(rect(px(16.), px(4.), px(36.), px(8.)), surface).corner_radii(
+                            Corners {
+                                top_left: px(3.),
+                                top_right: px(3.),
+                                ..Default::default()
+                            },
                         ),
-                ),
+                    );
+
+                    window.paint_quad(fill(
+                        rect(
+                            px(0.),
+                            px(16.),
+                            px(30.),
+                            (bounds.size.height - px(16.)).max(px(0.)),
+                        ),
+                        chrome,
+                    ));
+
+                    for (y, opacity) in [(20., 0.16), (28., 0.08)] {
+                        window.paint_quad(fill(
+                            rect(px(4.), px(y), px(22.), px(4.)),
+                            text.opacity(opacity),
+                        ));
+                    }
+
+                    let code_bounds = rect(
+                        px(38.),
+                        px(24.),
+                        (bounds.size.width - px(46.)).max(px(0.)),
+                        line_height,
+                    );
+
+                    window.with_content_mask(
+                        Some(ContentMask {
+                            bounds: code_bounds,
+                        }),
+                        |window| {
+                            let mut origin = code_bounds.origin;
+
+                            for line in lines {
+                                let _ = line.paint(
+                                    origin,
+                                    line_height,
+                                    TextAlign::Left,
+                                    None,
+                                    window,
+                                    cx,
+                                );
+
+                                origin.x += line.width + px(4.);
+                            }
+                        },
+                    );
+
+                    for (index, color) in ansi.into_iter().enumerate() {
+                        window.paint_quad(
+                            fill(
+                                rect(
+                                    px(38. + index as f32 * 16.),
+                                    px(32.) + line_height,
+                                    px(12.),
+                                    px(4.),
+                                ),
+                                color,
+                            )
+                            .corner_radii(px(2.)),
+                        );
+                    }
+                },
+            )
+            .size_full(),
         )
 }
 
@@ -159,7 +221,7 @@ pub(super) fn theme_list(editing: Entity<SettingsEditing>, cx: &mut App) -> Div 
     let filter = state.theme_filter.to_lowercase();
     let columns = state.theme_columns.max(1);
     let failed = state.theme_load_failed;
-    let families = theme_families(state.themes.clone());
+    let families = &state.theme_families;
     let current = families.iter().find(|family| family.contains(&selected));
 
     let mode = if cx.theme().mode.is_dark() {
@@ -192,8 +254,9 @@ pub(super) fn theme_list(editing: Entity<SettingsEditing>, cx: &mut App) -> Div 
         });
 
     let families = families
-        .into_iter()
-        .filter(|family| {
+        .iter()
+        .enumerate()
+        .filter(|(_, family)| {
             filter.is_empty()
                 || family.name.to_lowercase().contains(&filter)
                 || family.variants.iter().any(|choice| {
@@ -201,13 +264,14 @@ pub(super) fn theme_list(editing: Entity<SettingsEditing>, cx: &mut App) -> Div 
                         || choice.theme.name.to_lowercase().contains(&filter)
                 })
         })
+        .map(|(index, _)| index)
         .collect::<Vec<_>>();
 
-    let border = cx.theme().border;
-    let accent = cx.theme().primary;
-    let background = cx.theme().popover;
-    let hover = cx.theme().secondary;
+    let catalog = state.theme_families.clone();
     let measure = editing.downgrade();
+    let row_height = THEME_CARD_HEIGHT + SPACE_3;
+    let rows = families.len().div_ceil(usize::from(columns));
+    let grid_height = (row_height * rows as f32 - SPACE_3).max(px(0.));
 
     v_flex()
         .w_full()
@@ -240,12 +304,10 @@ pub(super) fn theme_list(editing: Entity<SettingsEditing>, cx: &mut App) -> Div 
         })
         .child(
             div()
+                .id("theme-grid")
                 .w_full()
                 .min_w_0()
                 .relative()
-                .grid()
-                .grid_cols(columns)
-                .gap(SPACE_3)
                 .on_prepaint(move |bounds, window, cx| {
                     let columns = ((bounds.size.width + SPACE_3).as_f32()
                         / (THEME_CARD_MIN_WIDTH + SPACE_3).as_f32())
@@ -270,61 +332,149 @@ pub(super) fn theme_list(editing: Entity<SettingsEditing>, cx: &mut App) -> Div 
                         });
                     }
                 })
-                .children(families.into_iter().enumerate().map(|(index, family)| {
-                    let choice = family.variant(mode);
-                    let active = family.contains(&selected);
-                    let id = choice.id.clone();
-                    let target = editing.clone();
+                .child(
+                    canvas(
+                        move |bounds, window, cx| {
+                            let visible = bounds.intersect(&window.content_mask().bounds);
 
-                    let name = if family.name.is_empty() {
-                        id.clone()
-                    } else {
-                        family.name.clone()
-                    };
+                            let mut cards = Vec::new();
 
-                    Button::new(("theme-card", index))
-                        .accessibility_label(name.clone())
-                        .selected(active)
-                        .w_full()
-                        .min_w_0()
-                        .h(THEME_CARD_HEIGHT)
-                        .p_2()
-                        .flex_col()
-                        .gap_2()
-                        .rounded(SURFACE_RADIUS)
-                        .border_1()
-                        .border_color(if active { accent } else { border })
-                        .bg(background)
-                        .cursor_pointer()
-                        .hover(move |this| this.bg(hover))
-                        .focus_visible(move |this| this.border_color(accent))
-                        .on_click(move |_, _, cx| choose_theme(id.clone(), &target, cx))
-                        .child(theme_preview(&choice.theme))
-                        .child(
-                            h_flex()
-                                .w_full()
-                                .min_w_0()
-                                .gap_1()
-                                .text_size(px(12.))
-                                .child(div().flex_1().min_w_0().truncate().child(name))
-                                .when(!family.supports_both_modes(), |this| {
-                                    this.child(
-                                        div()
-                                            .text_size(px(10.))
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child(if choice.theme.mode == AppearanceTheme::Dark {
-                                                t!("settings-theme-dark-only")
-                                            } else {
-                                                t!("settings-theme-light-only")
-                                            }),
-                                    )
-                                })
-                                .when(active, |this| {
-                                    this.child(
-                                        Icon::new(IconName::Check).size(px(14.)).text_color(accent),
-                                    )
-                                }),
-                        )
-                })),
+                            if visible.size.height <= px(0.) || visible.size.width <= px(0.) {
+                                return cards;
+                            }
+
+                            let first_row = ((visible.top() - bounds.top()) / row_height)
+                                .floor()
+                                .max(0.) as usize;
+
+                            let end_row = ((visible.bottom() - bounds.top()) / row_height)
+                                .ceil()
+                                .max(0.) as usize;
+
+                            let width = ((bounds.size.width + SPACE_3) / f32::from(columns)
+                                - SPACE_3)
+                                .max(px(0.));
+
+                            // The outer settings list owns scrolling. Reserve the entire
+                            // grid height, but only lay out cards intersecting its clip.
+                            for row in first_row..end_row.min(rows) {
+                                for column in 0..usize::from(columns) {
+                                    let Some(&index) =
+                                        families.get(row * usize::from(columns) + column)
+                                    else {
+                                        break;
+                                    };
+
+                                    let mut card = div()
+                                        .debug_selector(move || format!("theme-card-{index}"))
+                                        .w(width)
+                                        .h(THEME_CARD_HEIGHT)
+                                        .child(theme_card(
+                                            index,
+                                            &catalog[index],
+                                            mode,
+                                            &selected,
+                                            &editing,
+                                            cx,
+                                        ))
+                                        .into_any_element();
+
+                                    card.layout_as_root(
+                                        size(width, THEME_CARD_HEIGHT).into(),
+                                        window,
+                                        cx,
+                                    );
+
+                                    card.prepaint_at(
+                                        bounds.origin
+                                            + point(
+                                                (width + SPACE_3) * column as f32,
+                                                row_height * row as f32,
+                                            ),
+                                        window,
+                                        cx,
+                                    );
+
+                                    cards.push(card);
+                                }
+                            }
+
+                            cards
+                        },
+                        |_, cards, window, cx| {
+                            for mut card in cards {
+                                card.paint(window, cx);
+                            }
+                        },
+                    )
+                    .w_full()
+                    .h(grid_height),
+                ),
+        )
+}
+
+fn theme_card(
+    index: usize,
+    family: &ThemeFamily,
+    mode: AppearanceTheme,
+    selected: &str,
+    editing: &Entity<SettingsEditing>,
+    cx: &App,
+) -> Button {
+    let choice = family.variant(mode);
+    let active = family.contains(selected);
+    let id = choice.id.clone();
+    let target = editing.clone();
+
+    let name = if family.name.is_empty() {
+        id.clone()
+    } else {
+        family.name.clone()
+    };
+
+    let border = cx.theme().border;
+    let accent = cx.theme().primary;
+    let hover = cx.theme().secondary;
+
+    Button::new(("theme-card", index))
+        .accessibility_label(name.clone())
+        .selected(active)
+        .w_full()
+        .min_w_0()
+        .h(THEME_CARD_HEIGHT)
+        .p_2()
+        .flex_col()
+        .gap_2()
+        .rounded(SURFACE_RADIUS)
+        .border_1()
+        .border_color(if active { accent } else { border })
+        .bg(cx.theme().popover)
+        .cursor_pointer()
+        .hover(move |this| this.bg(hover))
+        .focus_visible(move |this| this.border_color(accent))
+        .on_click(move |_, _, cx| choose_theme(id.clone(), &target, cx))
+        .child(theme_preview(&choice.theme))
+        .child(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .gap_1()
+                .text_size(px(12.))
+                .child(div().flex_1().min_w_0().truncate().child(name))
+                .when(!family.supports_both_modes(), |this| {
+                    this.child(
+                        div()
+                            .text_size(px(10.))
+                            .text_color(cx.theme().muted_foreground)
+                            .child(if choice.theme.mode == AppearanceTheme::Dark {
+                                t!("settings-theme-dark-only")
+                            } else {
+                                t!("settings-theme-light-only")
+                            }),
+                    )
+                })
+                .when(active, |this| {
+                    this.child(Icon::new(IconName::Check).size(px(14.)).text_color(accent))
+                }),
         )
 }

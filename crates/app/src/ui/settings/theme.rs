@@ -12,6 +12,7 @@ use gpui_component::{
     ThemeRegistry as ComponentThemeRegistry, ThemeToken as ComponentThemeToken,
 };
 use nmt_config::theme::{AppearanceTheme, Theme, UiTheme};
+use nmt_config::theme_catalog::theme_families;
 use nmt_config::{Config, config_dir_path, set_active_colors};
 use notify::{
     Event as NotifyEvent, RecursiveMode, Result as NotifyResult, Watcher as _, recommended_watcher,
@@ -145,12 +146,17 @@ fn reload_themes(editing: &Entity<SettingsEditing>, cx: &mut App) {
         if !applied {
             themes.retain(|(id, _)| id != &selected);
 
-            if let Some(previous) = editing.themes.iter().find(|(id, _)| id == &selected) {
-                themes.push(previous.clone());
+            if let Some(previous) = editing
+                .theme_families
+                .iter()
+                .flat_map(|family| &family.variants)
+                .find(|choice| choice.id == selected)
+            {
+                themes.push((previous.id.clone(), previous.theme.clone()));
             }
         }
 
-        editing.themes = themes;
+        editing.theme_families = Rc::new(theme_families(themes));
         editing.theme_load_failed = !applied;
 
         cx.notify();

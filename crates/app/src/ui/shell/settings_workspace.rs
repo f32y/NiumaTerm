@@ -4,14 +4,19 @@
 //! tabs while it is up, which means it also has to be retired again and the
 //! previous workspace restored when the user leaves.
 
+#[cfg(enable_profiling)]
+pub(super) mod profiling;
+
 use std::borrow::Cow;
 
 use gpui::{App, AppContext as _, Context, Entity, Task, Window};
-use gpui_component::setting::{SelectIndex, Settings, SettingsState};
+use gpui_component::Theme;
+use gpui_component::setting::{SelectIndex, SettingsState, SettingsView};
 use rust_i18n::t;
 
+use crate::agent_updates::AgentUpdates;
 use crate::ui;
-use crate::ui::settings::SettingsEditing;
+use crate::ui::settings::{AppSettings, SettingsEditing};
 use crate::ui::shell::Shell;
 
 /// Sidebar entry name and tab title of the settings pseudo workspace, in the
@@ -30,8 +35,9 @@ pub(super) struct SettingsSurface {
 }
 
 struct OpenSettings {
+    #[cfg(enable_profiling)]
     state: Entity<SettingsState>,
-    editing: Entity<SettingsEditing>,
+    view: Entity<SettingsView>,
     _theme_watcher: Option<Task<()>>,
 }
 
@@ -40,15 +46,13 @@ impl SettingsSurface {
         let state = SettingsState::owned(SelectIndex::default(), window, cx);
         let editing = cx.new(|_| SettingsEditing::default());
 
-        cx.observe(&state, |_, _, cx| cx.notify()).detach();
-
-        cx.observe(&editing, |_, _, cx| cx.notify()).detach();
-
         let theme_watcher = ui::watch_themes(&editing, cx);
+        let view = new_settings_view(state.clone(), editing.clone(), cx);
 
         self.open = Some(OpenSettings {
+            #[cfg(enable_profiling)]
             state,
-            editing,
+            view,
             _theme_watcher: theme_watcher,
         });
     }
@@ -57,11 +61,37 @@ impl SettingsSurface {
         self.open = None;
     }
 
-    pub(super) fn render(&self, cx: &App) -> Option<Settings> {
+    pub(super) fn render(&self, _: &App) -> Option<Entity<SettingsView>> {
         let open = self.open.as_ref()?;
 
-        Some(ui::settings::settings_view(open.editing.clone(), cx).state(open.state.clone()))
+        Some(open.view.clone())
     }
+}
+
+fn new_settings_view(
+    state: Entity<SettingsState>,
+    editing: Entity<SettingsEditing>,
+    cx: &mut App,
+) -> Entity<SettingsView> {
+    cx.new(|cx| {
+        cx.observe(&editing, |view: &mut SettingsView, _, cx| view.refresh(cx))
+            .detach();
+
+        cx.observe_global::<AppSettings>(|view, cx| view.refresh(cx))
+            .detach();
+
+        cx.observe_global::<AgentUpdates>(|view, cx| view.refresh(cx))
+            .detach();
+
+        cx.observe_global::<Theme>(|view, cx| view.refresh(cx))
+            .detach();
+
+        SettingsView::new(
+            state,
+            move |cx| ui::settings::settings_view(editing.clone(), cx),
+            cx,
+        )
+    })
 }
 
 #[cfg(test)]
@@ -73,7 +103,7 @@ mod tests {
     use gpui_component::setting::{SelectIndex, SettingsState};
 
     use crate::ui::settings::{AppSettings, SettingsEditing};
-    use crate::ui::shell::settings_workspace::{OpenSettings, SettingsSurface};
+    use crate::ui::shell::settings_workspace::{OpenSettings, SettingsSurface, new_settings_view};
 
     struct SettingsHost(SettingsSurface);
 
@@ -112,11 +142,14 @@ mod tests {
                         cx,
                     );
 
+                    let view = new_settings_view(state.clone(), editing.clone(), cx);
+
                     cx.new(|_| {
                         SettingsHost(SettingsSurface {
                             open: Some(OpenSettings {
+                                #[cfg(enable_profiling)]
                                 state,
-                                editing,
+                                view,
                                 _theme_watcher: None,
                             }),
                         })
