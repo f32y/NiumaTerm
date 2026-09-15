@@ -115,6 +115,7 @@ fn resumed_codex_thread_uses_only_the_locally_remembered_reviewer() {
         sandbox: Some("readOnly".into()),
         effort: Some("low".into()),
         tier: Some("priority".into()),
+        agent_preset: None,
     };
 
     let stored = ThreadSettings {
@@ -124,6 +125,7 @@ fn resumed_codex_thread_uses_only_the_locally_remembered_reviewer() {
         sandbox: Some("workspaceWrite".into()),
         effort: Some("high".into()),
         tier: None,
+        agent_preset: None,
     };
 
     assert_eq!(
@@ -135,6 +137,7 @@ fn resumed_codex_thread_uses_only_the_locally_remembered_reviewer() {
             sandbox: Some("readOnly".into()),
             effort: Some("low".into()),
             tier: Some("priority".into()),
+            agent_preset: None,
         }
     );
 }

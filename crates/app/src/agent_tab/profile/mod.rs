@@ -84,6 +84,7 @@ pub fn thread_settings_from_defaults(
                     sandbox: d.sandbox.clone(),
                     effort: d.effort.clone(),
                     tier: d.tier.clone(),
+                    agent_preset: d.agent_preset.clone(),
                 },
             )
         },
@@ -106,6 +107,7 @@ pub fn defaults_from_thread_settings(
                     sandbox: s.sandbox.clone(),
                     effort: s.effort.clone(),
                     tier: s.tier.clone(),
+                    agent_preset: s.agent_preset.clone(),
                 },
             )
         })

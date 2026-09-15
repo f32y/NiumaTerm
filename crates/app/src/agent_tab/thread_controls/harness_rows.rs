@@ -207,7 +207,7 @@ pub(super) fn render_deepseek_row(
         folded.push(FoldedSetting {
             name: t!("agent-setting-agent-preset"),
             icon: IconName::Bot,
-            current: state.agent_preset.clone(),
+            current: state.settings.agent_preset.clone(),
             options: state
                 .agent_presets
                 .iter()
@@ -229,31 +229,9 @@ pub(super) fn render_deepseek_row(
                 .collect(),
             set: |this, value, cx| {
                 // The harness owns the switch, and its own command is what
-                // performs it, so nothing is recorded before it accepts.
-                if !this.execute_backend_command(
-                    PendingSlashCommand::new("permission", value.clone()),
-                    cx,
-                ) {
-                    return;
-                }
-
-                let Some(session_host) = this.host.upgrade() else {
-                    return;
-                };
-
-                let session_kind = session_host.read(cx).kind;
-                let session_profile = session_host.read(cx).profile.clone();
-
-                // The harness pins its own default into every conversation it
-                // opens, so the pick is remembered here for the next one.
-                this.session.borrow_mut().controls.settings.approval = Some(value);
-
-                remember_defaults(
-                    &this.session.borrow().controls,
-                    session_kind,
-                    &session_profile,
-                    cx,
-                );
+                // performs it; the command path records the pick once the
+                // harness accepts it.
+                this.execute_backend_command(PendingSlashCommand::new("permission", value), cx);
             },
         });
     }

@@ -255,15 +255,23 @@ pub(super) fn load_skills(
 /// The roster belongs to the deployment rather than to the session, but the
 /// current pick belongs to the session, so both are read here: reattaching to a
 /// conversation composed from another preset has to move the picker with it.
+/// `refusal` travels with them because it explains why `current` is not the
+/// preset that was asked for.
 pub(super) fn load_agent_presets(
     client: ApiClient,
     session_id: String,
     current: Option<String>,
+    refusal: Option<String>,
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
     thread::spawn(move || {
         deliver_read(
-            json!({ "type": PRESETS_FRAME, "sessionId": session_id, "current": current }),
+            json!({
+                "type": PRESETS_FRAME,
+                "sessionId": session_id,
+                "current": current,
+                "refusal": refusal,
+            }),
             "presets",
             client
                 .call("agentPresets/list", json!({}))

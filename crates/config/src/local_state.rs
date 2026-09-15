@@ -51,6 +51,8 @@ pub struct AgentDefaults {
     pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_preset: Option<String>,
 }
 
 /// One window's persisted state: geometry plus its session snapshot.

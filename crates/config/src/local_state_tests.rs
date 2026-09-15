@@ -23,6 +23,7 @@ fn save_load_roundtrip_and_legacy_file_defaults() {
                 sandbox: None,
                 effort: Some("high".to_string()),
                 tier: None,
+                agent_preset: None,
             },
         )]
         .into(),

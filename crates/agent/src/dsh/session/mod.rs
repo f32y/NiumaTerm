@@ -173,12 +173,12 @@ pub(crate) fn ready_settings(
 }
 
 /// A conversation this tab has just opened or reattached to.
-struct OpenedConversation {
-    session_id: String,
+pub(super) struct OpenedConversation {
+    pub(super) session_id: String,
 
     /// The composition it was built from, absent when the deployment composes
     /// no presets at all and every conversation shares the host's own.
-    agent_preset: Option<String>,
+    pub(super) agent_preset: Option<String>,
 }
 
 /// Open a conversation on the host, or reattach to an existing one.
@@ -194,7 +194,15 @@ struct OpenedConversation {
 /// deliberately absent rather than approximated: no common ancestor is
 /// substituted, and no broader permission preset is selected on the user's
 /// behalf. The Agent Tab discloses what that leaves out.
-pub(crate) fn session_create_payload(cwd: Option<&str>, session_id: Option<&str>) -> Value {
+///
+/// A preset is only named for a new conversation: reattaching to one composed
+/// from another preset is refused, and the composition it already has is the
+/// one its history was produced under.
+pub(crate) fn session_create_payload(
+    cwd: Option<&str>,
+    session_id: Option<&str>,
+    agent_preset: Option<&str>,
+) -> Value {
     let mut payload = json!({});
 
     if let Some(cwd) = cwd {
@@ -205,6 +213,10 @@ pub(crate) fn session_create_payload(cwd: Option<&str>, session_id: Option<&str>
         payload["sessionId"] = json!(session_id);
     }
 
+    if let Some(agent_preset) = agent_preset {
+        payload["agentPreset"] = json!(agent_preset);
+    }
+
     payload
 }
 
@@ -212,9 +224,13 @@ fn open_conversation(
     client: &ApiClient,
     cwd: Option<&str>,
     session_id: Option<&str>,
+    agent_preset: Option<&str>,
 ) -> Result<OpenedConversation, String> {
     let created = client
-        .request("session/create", session_create_payload(cwd, session_id))
+        .request(
+            "session/create",
+            session_create_payload(cwd, session_id, agent_preset),
+        )
         .map_err(|error| error.message().to_string())?;
 
     let session_id = created["sessionId"]
@@ -226,6 +242,34 @@ fn open_conversation(
         session_id,
         agent_preset: created["agentPreset"].as_str().map(str::to_string),
     })
+}
+
+/// Open a new conversation composed from `agent_preset`, and the reason the
+/// preset could not be used when the conversation fell back to the default.
+///
+/// The preset is a remembered pick, and the deployment can since have removed
+/// it or lost the ability to compose it. Failing the tab for that would leave
+/// every new conversation of the profile unable to start, so a refused preset
+/// is retried once on the deployment's default composition.
+pub(super) fn open_new_conversation(
+    client: &ApiClient,
+    cwd: Option<&str>,
+    agent_preset: Option<&str>,
+) -> Result<(OpenedConversation, Option<String>), String> {
+    match (
+        open_conversation(client, cwd, None, agent_preset),
+        agent_preset,
+    ) {
+        (Err(error), Some(preset)) => open_conversation(client, cwd, None, None).map(|opened| {
+            let refusal = format!(
+                "The agent preset \"{preset}\" could not be used, so this conversation \
+                 runs on the default one: {error}"
+            );
+
+            (opened, Some(refusal))
+        }),
+        (opened, _) => opened.map(|opened| (opened, None)),
+    }
 }
 
 impl Session {
@@ -290,11 +334,13 @@ impl Session {
         let host = host::shared(launch)?;
         let client = host.client().clone();
 
-        let opened = open_conversation(&client, cwd.as_deref(), None).map_err(|error| {
-            HostError::FailedToStart(format!(
-                "the harness could not open a conversation: {error}"
-            ))
-        })?;
+        let (opened, preset_refusal) =
+            open_new_conversation(&client, cwd.as_deref(), launch.agent_preset.as_deref())
+                .map_err(|error| {
+                    HostError::FailedToStart(format!(
+                        "the harness could not open a conversation: {error}"
+                    ))
+                })?;
 
         let session_id = opened.session_id;
 
@@ -333,6 +379,7 @@ impl Session {
             client.clone(),
             session_id.clone(),
             opened.agent_preset,
+            preset_refusal,
             Arc::clone(&deliver),
         );
 
@@ -367,7 +414,7 @@ impl Session {
     /// The new streams must open successfully before releasing the old ones,
     /// so a rejected resume leaves the current conversation usable.
     pub fn resume_thread(&mut self, thread_id: &str) -> bool {
-        match open_conversation(&self.client, self.cwd.as_deref(), Some(thread_id)) {
+        match open_conversation(&self.client, self.cwd.as_deref(), Some(thread_id), None) {
             Ok(opened) => {
                 let (downlinks, snapshot) = match Downlinks::open(
                     self.client.clone(),
@@ -443,6 +490,7 @@ impl Session {
                     self.client.clone(),
                     self.session_id.clone(),
                     opened.agent_preset,
+                    None,
                     Arc::clone(&self.deliver),
                 );
 
@@ -735,10 +783,16 @@ impl Session {
             return Vec::new();
         }
 
-        vec![Event::AgentPresets {
+        let mut events = vec![Event::AgentPresets {
             presets: presets::catalog(&frame.presets),
             current: frame.current,
-        }]
+        }];
+
+        if let Some(text) = frame.refusal {
+            events.push(Event::ItemStarted(Item::Error { text }));
+        }
+
+        events
     }
 
     fn on_commands(&self, payload: &Value) -> Vec<Event> {

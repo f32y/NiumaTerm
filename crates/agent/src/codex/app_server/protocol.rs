@@ -282,6 +282,7 @@ pub(super) fn parse_thread_settings(result: &Value) -> ThreadSettings {
         sandbox: result["sandbox"]["type"].as_str().map(str::to_owned),
         effort: result["reasoningEffort"].as_str().map(str::to_owned),
         tier: result["serviceTier"].as_str().map(str::to_owned),
+        agent_preset: None,
     }
 }
 

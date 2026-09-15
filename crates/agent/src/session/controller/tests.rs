@@ -552,6 +552,36 @@ fn a_refused_remembered_permission_leaves_the_picker_on_the_session_preset() {
 }
 
 #[test]
+fn a_remembered_agent_preset_never_overrides_the_reported_composition() {
+    let (mut session, epoch) = deepseek_with_remembered_permission(Ok(()));
+
+    session.ready_defaults.stored = Some(ThreadSettings {
+        agent_preset: Some("reviewer".into()),
+        ..ThreadSettings::default()
+    });
+
+    session.apply_event(
+        epoch,
+        Event::AgentPresets {
+            presets: Vec::new(),
+            current: Some("default".into()),
+        },
+    );
+
+    // The composition reaches the harness with the creation request, so the
+    // one the conversation reports is what it runs on even while a remembered
+    // pick is seeded, and a Ready carrying no composition keeps it.
+    assert!(matches!(
+        session.apply_event(epoch, harness_default_ready()),
+        SessionEffect::Ready(_)
+    ));
+    assert_eq!(
+        session.controls.settings.agent_preset.as_deref(),
+        Some("default")
+    );
+}
+
+#[test]
 fn settings_changes_and_restart_keep_catalog_state_consistent() {
     let mut session = started(AgentKind::Codex, "current", Vec::new());
 

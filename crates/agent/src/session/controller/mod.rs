@@ -518,7 +518,7 @@ impl SessionController {
             }
             Event::AgentPresets { presets, current } => {
                 self.controls.agent_presets = presets;
-                self.controls.agent_preset = current;
+                self.controls.settings.agent_preset = current;
 
                 SessionEffect::Changed
             }
@@ -923,14 +923,14 @@ impl SessionController {
     }
 
     pub fn select_agent_preset(&mut self, preset: String) -> Option<Result<(), String>> {
-        if self.controls.agent_preset.as_deref() == Some(&preset) {
+        if self.controls.settings.agent_preset.as_deref() == Some(&preset) {
             return None;
         }
 
         let result = self.runtime.backend_mut()?.select_agent_preset(&preset);
 
         if result.is_ok() {
-            self.controls.agent_preset = Some(preset);
+            self.controls.settings.agent_preset = Some(preset);
         }
 
         Some(result)

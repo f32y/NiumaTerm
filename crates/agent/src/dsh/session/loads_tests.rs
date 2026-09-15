@@ -47,7 +47,7 @@ fn failed_background_reads_deliver_results_and_end_pending_discovery() {
         match kind {
             COMMANDS_FRAME => load_commands(api, session, send),
             SKILLS_FRAME => load_skills(api, session, send),
-            PRESETS_FRAME => load_agent_presets(api, session, None, send),
+            PRESETS_FRAME => load_agent_presets(api, session, None, None, send),
             HISTORY_FRAME => load_sessions(api, None, send),
             SUBAGENTS_FRAME => load_subagents(api, session, 4, send),
             SUBAGENT_TRANSCRIPT_FRAME => {

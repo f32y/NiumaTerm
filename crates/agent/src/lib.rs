@@ -81,6 +81,11 @@ pub struct LaunchConfig {
     /// such a catalog: it refuses an image unless the selected model is listed
     /// there as taking one, and a model named by hand is never listed.
     pub declares_image_input: bool,
+
+    /// The agent composition a new DeepSeek Harness conversation is created
+    /// from. `None` leaves the deployment's default. The shared host is keyed
+    /// without it, because the composition belongs to a conversation.
+    pub agent_preset: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

@@ -188,6 +188,9 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
         declares_image_input: profile.kind == AgentProfileKind::DeepSeek
             && profile.vision_model
             && !profile.model.trim().is_empty(),
+        // A profile names no composition; the pane supplies the one the user
+        // last picked when it starts a conversation.
+        agent_preset: None,
     }
 }
 
