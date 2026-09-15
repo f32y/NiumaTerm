@@ -523,6 +523,9 @@ impl Session {
             Some("nmt/connection-reset") if self.is_current_session(payload) => {
                 return self.on_connection_reset();
             }
+            Some("nmt/host-exited") if self.is_current_session(payload) => {
+                return self.on_host_exited();
+            }
             Some(SUBAGENTS_FRAME) => return self.on_subagents(payload),
             Some(SUBAGENT_TRANSCRIPT_FRAME) => return self.on_subagent_transcript(payload),
             Some(WORKFLOW_TRANSCRIPT_FRAME) => return workflow_transcript_events(payload),
@@ -642,6 +645,20 @@ impl Session {
         let mut events = self.expire_questions();
 
         events.push(Event::ApprovalResolved);
+
+        events
+    }
+
+    /// The host took this conversation with it, so no turn is running and the
+    /// tab is told to replace the host instead of sending into a closed port.
+    fn on_host_exited(&mut self) -> Vec<Event> {
+        self.running = false;
+
+        let mut events = self.on_connection_reset();
+
+        events.push(Event::HostExited {
+            message: "DeepSeek Harness host stopped unexpectedly".to_string(),
+        });
 
         events
     }

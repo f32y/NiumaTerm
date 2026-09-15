@@ -6,7 +6,7 @@
 mod tests;
 
 use std::io::{BufRead as _, BufReader};
-use std::process::{Child, Stdio};
+use std::process::{Child, ExitStatus, Stdio};
 use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::sync::{Arc, Weak};
 use std::thread;
@@ -274,6 +274,12 @@ impl Host {
     /// their next call.
     pub fn is_running(&self) -> bool {
         matches!(self.child.lock().try_wait(), Ok(None))
+    }
+
+    /// How the host ended, once it has. The code tells an external kill apart
+    /// from a crash or a clean exit when the host disappears under open tabs.
+    pub(crate) fn exit_status(&self) -> Option<ExitStatus> {
+        self.child.lock().try_wait().ok().flatten()
     }
 }
 
