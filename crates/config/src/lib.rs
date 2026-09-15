@@ -1,30 +1,21 @@
-#[cfg(feature = "application")]
 pub use nmt_profile as profile;
 
-#[cfg(feature = "application")]
 pub use crate::application::*;
 
 pub mod agent;
 pub mod appearance;
-#[cfg(feature = "application")]
 pub mod builtin_themes;
 pub mod colors;
 pub mod defaults;
-#[cfg(feature = "application")]
 pub mod local_state;
-
 pub mod remote_session;
 pub mod system;
 pub mod terminal;
-#[cfg(feature = "application")]
 pub mod theme;
-#[cfg(feature = "application")]
 pub mod theme_catalog;
 pub mod update;
 
-#[cfg(feature = "application")]
 mod application;
-#[cfg(feature = "application")]
 mod persistence;
 
 use std::sync::{OnceLock, RwLock};
