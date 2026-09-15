@@ -11,7 +11,8 @@ use nmt_agent::team::session::TeamSession;
 use nmt_config::local_state::TabState;
 use tempfile::tempdir;
 
-use crate::ui::shell::{InlineRename, InlineRenameStyle, TabSurface, should_confirm_close};
+use crate::ui::shell::close_confirm::should_confirm_close;
+use crate::ui::shell::{InlineRename, InlineRenameStyle, TabSurface};
 
 struct InlineRenameProbe {
     input: gpui::Entity<InputState>,

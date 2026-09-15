@@ -4,6 +4,7 @@ use app::agent_tab::{AgentKind, AgentPane};
 use app::terminal_tab::view::TerminalPane;
 use gpui::{App, Entity};
 use gpui_component::{Icon, IconName, Sizable as _};
+use nmt_agent::AgentRoute;
 use nmt_config::local_state::TabState;
 use tracing::warn;
 
@@ -48,6 +49,22 @@ pub(crate) enum TabSurface {
 }
 
 impl TabSurface {
+    /// Every agent route this surface holds: one per terminal pane, and the
+    /// Agent session's when it has one.
+    pub(crate) fn agent_routes(&self, cx: &App) -> Vec<AgentRoute> {
+        let mut routes: Vec<_> = self
+            .leaves()
+            .into_iter()
+            .map(|(_, pane)| pane.read(cx).agent_route().clone())
+            .collect();
+
+        if let Some(session) = self.agent_session() {
+            routes.push(session.read(cx).agent_route().clone());
+        }
+
+        routes
+    }
+
     pub(crate) fn icon(&self, cx: &App) -> Icon {
         match self {
             Self::Git(_) => Icon::new(IconName::GitBranch).xsmall(),
