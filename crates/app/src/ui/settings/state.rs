@@ -15,6 +15,7 @@ pub use nmt_config::profile::{
 use std::borrow::Cow;
 use std::io;
 use std::path::Path;
+use std::rc::Rc;
 
 use app::agent_tab::AgentKind;
 use gpui::Global;
@@ -28,7 +29,7 @@ use nmt_config::defaults::default_theme;
 use nmt_config::remote_session::RemoteSessionConfig;
 use nmt_config::system::SystemConfig;
 use nmt_config::terminal::TerminalConfig;
-use nmt_config::theme::Theme;
+use nmt_config::theme_catalog::ThemeFamily;
 use nmt_config::update::UpdateConfig;
 use nmt_config::{Config, CursorShape, SettingsPatch, config_file_path, get, save_settings_to};
 use nmt_platform::default_shell;
@@ -45,8 +46,8 @@ pub struct AppSettings {
 pub struct SettingsEditing {
     pub theme_filter: String,
 
-    /// Parsed theme files refreshed by the settings surface's watcher.
-    pub themes: Vec<(String, Theme)>,
+    /// Grouped theme files refreshed by the settings surface's watcher.
+    pub theme_families: Rc<Vec<ThemeFamily>>,
 
     pub theme_columns: u16,
     pub theme_load_failed: bool,

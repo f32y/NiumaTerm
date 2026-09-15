@@ -159,6 +159,8 @@ use crate::ui::shell::panels::RightPanelController;
 
 use crate::ui::shell::render::ShellChrome;
 
+#[cfg(enable_profiling)]
+use crate::ui::shell::settings_workspace::profiling::start_settings_profile;
 use crate::ui::shell::settings_workspace::{SettingsSurface, settings_title};
 
 use crate::ui::shell::tab_surface::{AgentTab, GitTab};
@@ -399,6 +401,9 @@ impl Shell {
         this.sync_session_memory(cx);
 
         this.refresh_root_availability(cx);
+
+        #[cfg(enable_profiling)]
+        start_settings_profile(window, cx);
 
         this
     }

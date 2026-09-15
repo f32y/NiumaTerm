@@ -22,6 +22,7 @@ use nmt_config::builtin_themes::{THEMES as BUILTIN_THEMES, get as builtin_theme_
 use nmt_config::profile::ProfilesConfig;
 
 use nmt_config::theme::Theme as ConfigTheme;
+use nmt_config::theme_catalog::theme_families;
 
 use nmt_platform::default_shell;
 
@@ -53,6 +54,7 @@ fn powershell_compatibility_changes_reach_the_live_terminal_snapshot(cx: &mut Te
 struct ThemeGalleryProbe {
     editing: Entity<SettingsEditing>,
     width: gpui::Pixels,
+    scroll: gpui::ScrollHandle,
     _updates: gpui::Subscription,
 }
 
@@ -60,11 +62,17 @@ impl gpui::Render for ThemeGalleryProbe {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         use crate::ui::settings::theme_gallery::theme_list;
 
-        div().size_full().relative().child(
-            div()
-                .w(self.width)
-                .child(theme_list(self.editing.clone(), cx)),
-        )
+        div()
+            .id("theme-gallery-probe")
+            .size_full()
+            .relative()
+            .overflow_y_scroll()
+            .track_scroll(&self.scroll)
+            .child(
+                div()
+                    .w(self.width)
+                    .child(theme_list(self.editing.clone(), cx)),
+            )
     }
 }
 
@@ -77,15 +85,18 @@ fn theme_grid_measures_its_own_width_inside_a_wider_settings_page(cx: &mut TestA
 
     let handle = cx.add_window(|_, cx| {
         let editing = cx.new(|_| SettingsEditing {
-            themes: BUILTIN_THEMES
-                .iter()
-                .map(|builtin| {
-                    (
-                        builtin.name.to_owned(),
-                        toml::from_str(builtin.source).unwrap(),
-                    )
-                })
-                .collect(),
+            theme_families: theme_families(
+                BUILTIN_THEMES
+                    .iter()
+                    .map(|builtin| {
+                        (
+                            builtin.name.to_owned(),
+                            toml::from_str(builtin.source).unwrap(),
+                        )
+                    })
+                    .collect(),
+            )
+            .into(),
             ..SettingsEditing::default()
         });
 
@@ -94,6 +105,7 @@ fn theme_grid_measures_its_own_width_inside_a_wider_settings_page(cx: &mut TestA
         ThemeGalleryProbe {
             editing,
             width: px(650.),
+            scroll: gpui::ScrollHandle::default(),
             _updates: updates,
         }
     });
@@ -132,6 +144,102 @@ fn theme_grid_measures_its_own_width_inside_a_wider_settings_page(cx: &mut TestA
             assert_eq!(probe.read(cx).editing.read(cx).theme_columns, columns);
         });
     }
+}
+
+#[gpui::test]
+fn theme_grid_only_builds_visible_cards_and_keeps_scrolled_cards_selectable(
+    cx: &mut TestAppContext,
+) {
+    use gpui::{Modifiers, VisualTestContext};
+    use nmt_config::theme::AppearanceTheme;
+
+    cx.update(gpui_component::init);
+    cx.set_global(AppSettings::default());
+    cx.update(|cx| cx.set_smooth_wheel_scrolling(false));
+
+    let handle = cx.add_window(|_, cx| {
+        let editing = cx.new(|_| SettingsEditing {
+            theme_families: theme_families(
+                BUILTIN_THEMES
+                    .iter()
+                    .map(|builtin| {
+                        (
+                            builtin.name.to_owned(),
+                            toml::from_str(builtin.source).unwrap(),
+                        )
+                    })
+                    .collect(),
+            )
+            .into(),
+            ..Default::default()
+        });
+
+        ThemeGalleryProbe {
+            _updates: cx.observe(&editing, |_, _, cx| cx.notify()),
+            editing,
+            width: px(396.),
+            scroll: gpui::ScrollHandle::default(),
+        }
+    });
+
+    let mut cx = VisualTestContext::from_window(handle.into(), cx);
+
+    cx.simulate_resize(size(px(800.), px(220.)));
+
+    for _ in 0..3 {
+        cx.update(|window, cx| {
+            window.simulate_next_frame(cx);
+        });
+    }
+
+    assert!(cx.debug_bounds("theme-card-0").is_some());
+    assert!(cx.debug_bounds("theme-card-6").is_none());
+
+    cx.simulate_event(ScrollWheelEvent {
+        position: point(px(200.), px(100.)),
+        delta: ScrollDelta::Pixels(point(px(0.), px(-1000.))),
+        ..Default::default()
+    });
+
+    assert!(cx.debug_bounds("theme-card-0").is_none());
+
+    let last_card = cx
+        .debug_bounds("theme-card-6")
+        .expect("the last row must become visible");
+
+    let (editing, expected) = cx.update(|window, cx| {
+        let editing = window
+            .root::<ThemeGalleryProbe>()
+            .flatten()
+            .unwrap()
+            .read(cx)
+            .editing
+            .clone();
+
+        let expected = editing.read(cx).theme_families[6]
+            .variant(AppearanceTheme::Dark)
+            .id
+            .clone();
+
+        (editing, expected)
+    });
+
+    cx.simulate_click(last_card.center(), Modifiers::default());
+    cx.update(|_, cx| assert_eq!(cx.global::<AppSettings>().config().theme, expected));
+
+    cx.update(|_, cx| {
+        editing.update(cx, |editing, cx| {
+            editing.theme_filter = expected;
+
+            cx.notify();
+        })
+    });
+
+    assert!(
+        cx.debug_bounds("theme-card-6").is_some(),
+        "filtering must retain the matching card"
+    );
+    assert!(cx.debug_bounds("theme-card-0").is_none());
 }
 
 #[gpui::test]
