@@ -14,6 +14,12 @@ rustflags = [
     # Rust std also use /MT, avoiding LNK2038 RuntimeLibrary mismatches.
     "-C",
     "target-feature=+crt-static",
+    # Warnings fail Windows builds so they are fixed where they appear. macOS
+    # builds keep them non-fatal: code gated to macOS is never checked on a
+    # Windows machine, so a warning there would otherwise stop a Mac build
+    # nobody could have seen coming.
+    "-D",
+    "warnings",
 ]
 
 [alias]
