@@ -6,6 +6,8 @@ use gpui::{
 use gpui_component::Sizable as _;
 use gpui_component::input::{Input, InputState};
 
+use crate::ui::platform_style::{Host, PlatformStyle as _};
+
 /// Callback invoked when the rename input is dismissed without committing.
 type CancelRename = Box<dyn Fn(&mut Window, &mut App)>;
 
@@ -63,7 +65,7 @@ impl RenderOnce for InlineRename {
             InlineRenameStyle::HorizontalTab => Input::new(&self.input)
                 .small()
                 .p_0()
-                .text_left()
+                .map(Host::tab_rename_input)
                 .appearance(false),
             InlineRenameStyle::SidebarTab => Input::new(&self.input)
                 .xsmall()

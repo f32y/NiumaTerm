@@ -145,6 +145,8 @@ use crate::ui::persistence::{
     default_session, materialize_active_tab, restore_session, session_state, spawn_default_pane,
 };
 
+use crate::ui::platform_style::{Host, PlatformStyle as _};
+
 use crate::ui::right_panel::{RightPanel, RightPanelKind};
 
 use crate::ui::settings::{AgentProfile, AppSettings, TabBarStyle};
@@ -3415,12 +3417,11 @@ impl Shell {
             self.sidebar.width
         };
 
-        let leading_width = if cfg!(target_os = "macos") {
-            (sidebar_width + ui::composition::FLOATING_SURFACE_SIDE_INSET - TITLE_BAR_LEADING_INSET)
-                .max(0.0)
-        } else {
-            sidebar_width - ui::composition::FLOATING_SURFACE_SIDE_INSET
-        };
+        // The leading region ends on the sidebar's edge, measured from where
+        // the bar's content starts, so it shrinks by the host's leading inset.
+        let leading_width = (sidebar_width + ui::composition::FLOATING_SURFACE_SIDE_INSET
+            - Host::TITLE_BAR_LEADING_INSET)
+            .max(0.0);
 
         // Interactive chrome lives in the titlebar but is wrapped in
         // `occlude()`: that blocks the drag hitbox beneath it, so Windows
@@ -3430,9 +3431,7 @@ impl Shell {
         // Add future titlebar buttons the same way.
         TitleBar::new()
             .h(px(TITLE_BAR_HEIGHT))
-            .when(cfg!(target_os = "macos"), |bar| {
-                bar.pl(px(TITLE_BAR_LEADING_INSET))
-            })
+            .map(Host::title_bar)
             // The default X calls `remove_window()` directly (no
             // WM_CLOSE), skipping `on_window_should_close` — so the
             // shared close confirmation is handled here too.
@@ -3524,7 +3523,9 @@ impl Shell {
                     .flex()
                     .items_end()
                     .map(|this| match vertical_tabs {
-                        true => this.child(self.render_session_heading(cx)),
+                        true => this
+                            .map(Host::session_heading_slot)
+                            .child(self.render_session_heading(cx)),
                         false => this.child(tab_bar),
                     }),
             )
@@ -3951,24 +3952,24 @@ enum AgentRouteTarget {
 pub(super) const TAB_STRIP_MIN_WIDTH: f32 = 120.0;
 
 /// The bar is taller than the Fluent standard strip because it carries
-/// controls and a session heading rather than a title alone. Window creation
-/// reads it to re-anchor the macOS close/minimize/zoom buttons, which AppKit
-/// would otherwise center in its own, shorter strip.
+/// controls and a session heading rather than a title alone. A host that
+/// draws its own window buttons over the bar measures their inset from this
+/// height, since it would otherwise center them in a shorter strip.
 pub(crate) const TITLE_BAR_HEIGHT: f32 = 44.0;
 
-const TITLE_BAR_LEADING_INSET: f32 = 80.0;
-pub(super) const MACOS_TITLE_BAR_TRAILING_INSET: f32 = 12.0;
 const TITLE_BAR_BUTTON_GAP: f32 = 4.0;
 
 // Four controls, three internal gaps, and a trailing gap stay reachable
 // before the first tab, including at the sidebar's drag limit.
 const TITLE_BAR_CONTROLS_WIDTH: f32 = 4.0 * (TOOLBAR_BUTTON_SIZE + TITLE_BAR_BUTTON_GAP);
 
-pub(crate) const MIN_SIDEBAR_WIDTH: f32 = if cfg!(target_os = "macos") {
-    TITLE_BAR_LEADING_INSET + TITLE_BAR_CONTROLS_WIDTH - FLOATING_SURFACE_SIDE_INSET
-} else {
-    140.0
-};
+/// The sidebar never drops below the width its workspace rows need, and
+/// never below the leading control row, which starts past the host's leading
+/// inset and so needs more room where the window buttons come first.
+pub(crate) const MIN_SIDEBAR_WIDTH: f32 = f32::max(
+    140.0,
+    Host::TITLE_BAR_LEADING_INSET + TITLE_BAR_CONTROLS_WIDTH - FLOATING_SURFACE_SIDE_INSET,
+);
 
 /// The session heading in the middle of the bar, and the branch chip beside
 /// it. The chip is set smaller than the title because it qualifies the title
@@ -3983,13 +3984,10 @@ const TITLE_BAR_CHIP_PADDING_Y: f32 = 2.0;
 const TITLE_BAR_CHIP_ICON: f32 = 11.0;
 
 pub(super) fn title_bar_trailing_region() -> Div {
-    // Keep toggled and hovered controls inside the macOS window's curved edge.
-    // Windows already reserves native caption controls after this group.
-    h_flex()
-        .flex_none()
-        .when(cfg!(target_os = "macos"), |group| {
-            group.mr(px(MACOS_TITLE_BAR_TRAILING_INSET))
-        })
+    // The host's trailing inset keeps toggled and hovered controls inside a
+    // curved window edge; a host whose caption controls follow this group
+    // reserves that room itself.
+    h_flex().flex_none().mr(px(Host::TITLE_BAR_TRAILING_INSET))
 }
 
 pub(super) fn title_bar_git_summary() -> Div {

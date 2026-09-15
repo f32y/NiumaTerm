@@ -17,6 +17,7 @@ use rust_i18n::t;
 use tracing::warn;
 
 use crate::ui::AppSettings;
+use crate::ui::platform_style::{Host, PlatformStyle as _};
 use crate::usage_refresh::{Completion, Refresh};
 use crate::usage_sources::{account_sources, codex_source, codex_usage_launcher};
 
@@ -219,9 +220,7 @@ impl Render for AgentUsageView {
             .small()
             .w_full()
             .h(px(QUOTA_ROW_HEIGHT))
-            .pl_0()
-            .pr_1()
-            .border_0()
+            .map(Host::agent_usage_row)
             .accessibility_label(self.accessibility_label())
             // Opacity communicates in-flight work without replacing or moving
             // the last successful values in this tightly packed status line.

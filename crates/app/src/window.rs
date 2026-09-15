@@ -11,42 +11,21 @@ use gpui_component::{Root, Theme as ComponentTheme};
 use nmt_config::local_state::{SessionState, WindowLocalState, WindowState};
 use rust_i18n::t;
 
+use crate::ui::platform_style::{Host, PlatformStyle as _};
 use crate::ui::{self, Shell};
 
-/// Height of a macOS close/minimize/zoom button, measured from the frame
-/// AppKit gives the standard window buttons. Their vertical inset is applied
-/// symmetrically from the top of the window, so half the leftover space
-/// centers them.
-#[cfg(target_os = "macos")]
-const TRAFFIC_LIGHT_HEIGHT: f32 = 14.0;
-
-/// Leading edge shared by the native close button and workspace row fills.
-#[cfg(target_os = "macos")]
-pub(crate) const TRAFFIC_LIGHT_INSET: f32 = (ui::TITLE_BAR_HEIGHT - TRAFFIC_LIGHT_HEIGHT) / 2.0;
-
-/// Titlebar setup for a shell window. macOS keeps drawing its own window
-/// buttons over the transparent titlebar, and AppKit centers them in a 32px
-/// strip; this bar is taller, so the buttons are re-anchored to its middle to
-/// line up with the controls the bar draws itself. Windows and Linux draw
-/// their controls as part of the bar and need no such adjustment.
+/// Titlebar setup for a shell window. A host that keeps drawing its own
+/// window buttons over the transparent titlebar centers them in a
+/// standard-height strip; this bar is taller, so the buttons are re-anchored
+/// to its middle to line up with the controls the bar draws itself. A host
+/// that draws its controls as part of the bar needs no such adjustment.
 fn titlebar_options() -> TitlebarOptions {
-    #[allow(unused_mut)]
-    let mut titlebar = TitlebarOptions {
+    TitlebarOptions {
         title: Some(t!("app-window-title").into()),
         appears_transparent: true,
-        ..Default::default()
-    };
-
-    #[cfg(target_os = "macos")]
-    {
-        // Equal top and leading insets center the close button within the
-        // rounded corner instead of retaining the narrower native titlebar inset.
-        let inset = px(TRAFFIC_LIGHT_INSET);
-
-        titlebar.traffic_light_position = Some(point(inset, inset));
+        traffic_light_position: Host::WINDOW_CONTROLS_INSET
+            .map(|inset| point(px(inset), px(inset))),
     }
-
-    titlebar
 }
 
 /// One terminal window's runtime state: last-known geometry (stashed by the
