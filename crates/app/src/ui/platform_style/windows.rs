@@ -2,22 +2,23 @@ use gpui::{AnyElement, Div, Stateful, Styled as _, px};
 use gpui_component::TitleBar;
 use gpui_component::button::Button;
 use gpui_component::input::Input;
-use gpui_component::tab::{Tab, TabBar};
+use gpui_component::tab::Tab;
 
 use crate::ui::platform_style::PlatformStyle;
 use crate::ui::tab_bar::TabDensity;
 
 /// The caption controls are part of the title bar at its trailing edge, so
-/// the chrome starts at the window's leading edge and the tab strip keeps the
-/// variant's own spacing.
+/// the chrome needs only a small gap at the window's leading edge and the tab
+/// strip keeps the variant's own spacing.
 pub(crate) struct Windows;
 
 impl PlatformStyle for Windows {
     const WINDOW_CONTROLS_INSET: Option<f32> = None;
 
-    /// The leading region starts on the window's edge, so the controls in it
-    /// stand on the same column as the sidebar below.
-    const TITLE_BAR_LEADING_INSET: f32 = 0.0;
+    /// A small gap keeps the first control off the window edge. The leading
+    /// region is measured from past it, so the region still ends on the
+    /// sidebar's edge and the first tab starts where the content does.
+    const TITLE_BAR_LEADING_INSET: f32 = 8.0;
 
     const TITLE_BAR_TRAILING_INSET: f32 = 0.0;
 
@@ -27,14 +28,11 @@ impl PlatformStyle for Windows {
 
     const FULL_TAB_WIDTH: f32 = 100.0;
 
-    /// The bar carries a small leading padding of its own, which is the gap
-    /// the first control needs away from the window edge.
+    /// State the leading gap on the bar itself rather than relying on the
+    /// component's default padding, so the gap and the width the leading
+    /// region is measured against cannot drift apart.
     fn title_bar(bar: TitleBar) -> TitleBar {
-        bar
-    }
-
-    fn tab_bar(bar: TabBar) -> TabBar {
-        bar
+        bar.pl(px(Self::TITLE_BAR_LEADING_INSET))
     }
 
     /// The variant's own symmetric content padding frames the centered title.

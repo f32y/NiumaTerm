@@ -213,7 +213,10 @@ impl TabStrip {
                 // the line a bar baseline would repeat.
                 TabShape::Attached => bar.with_variant(TabVariant::Tab).bottom_border(false),
             })
-            .map(Host::tab_bar)
+            // The leading region already ends on the content's edge, so the
+            // variant's own leading padding would set the first tab apart
+            // from the content below it.
+            .pl_0()
             .w_full()
             .min_w_0()
             .selected_index(active_idx)
@@ -739,8 +742,9 @@ fn auto_tab_width(strip_width: f32, tab_count: usize, configured: f32, shape: Ta
     }
 
     // One gap per tab: between neighbours, plus one before the new-tab button.
+    // The strip keeps only its trailing padding.
     let gap = tab_gap(shape);
-    let reserved = gap * 2.0 + NEW_TAB_BUTTON_WIDTH + gap * tab_count as f32;
+    let reserved = gap + NEW_TAB_BUTTON_WIDTH + gap * tab_count as f32;
     let share = (strip_width - reserved) / tab_count as f32;
 
     if share.is_finite() {

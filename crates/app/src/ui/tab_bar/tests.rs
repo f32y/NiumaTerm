@@ -126,7 +126,7 @@ fn auto_size_shares_the_strip_between_tabs() {
         let gap = tab_gap(shape);
 
         assert!(
-            (crowded * 8.0 + gap * 8.0 + gap * 2.0 + NEW_TAB_BUTTON_WIDTH - 800.0).abs() < 0.001,
+            (crowded * 8.0 + gap * 8.0 + gap + NEW_TAB_BUTTON_WIDTH - 800.0).abs() < 0.001,
             "the tabs and their gaps should consume the strip exactly with {shape:?}",
         );
 
