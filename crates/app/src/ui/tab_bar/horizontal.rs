@@ -643,13 +643,7 @@ impl TabStrip {
             .on_click(cx.listener(|this, ix: &usize, window, cx| {
                 this.workspaces.active_tabs_mut().list_mut().activate(*ix);
 
-                this.on_active_tab_changed(window, cx);
-
-                this.focus_active(window, cx);
-
-                this.sync_session_memory(cx);
-
-                cx.notify();
+                this.show_active_tab(window, cx);
             }));
 
         // Releasing over the strip's trailing space keeps the last visible

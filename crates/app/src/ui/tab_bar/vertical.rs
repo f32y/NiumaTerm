@@ -2,9 +2,7 @@ use std::collections;
 
 use app::agent_tab::AgentKind;
 use gpui::prelude::*;
-use gpui::{
-    AnyElement, Context, Div, DragMoveEvent, Role, SharedString, Stateful, div, px, relative,
-};
+use gpui::{AnyElement, Context, Div, DragMoveEvent, Role, SharedString, Stateful, div, px};
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::{ActiveTheme as _, Icon, IconName, h_flex};
 use nmt_terminal::event::ProgressReport;
@@ -13,7 +11,7 @@ use rust_i18n::t;
 use crate::tabs::{TabId, TabManager};
 use crate::ui::composition::{
     HoverActionLayout, HoverActionVisibility, StatusMark, StatusMarkTone, hover_action,
-    sidebar_selection,
+    progress_edge, sidebar_selection,
 };
 use crate::ui::shell::{
     InlineRename, InlineRenameSession, InlineRenameStyle, TabSurface, pending_tab_icon,
@@ -352,35 +350,10 @@ impl VerticalTabList {
             .children(tab.progress.map(|report| {
                 let (color, fraction) = progress_visual(report, cx);
 
-                div()
-                    .absolute()
-                    .bottom_0()
-                    .left(UI_RADIUS)
-                    .right(UI_RADIUS)
-                    .h(px(2.0))
-                    .child(
-                        div()
-                            .h_full()
-                            .w(relative(fraction))
-                            .rounded_full()
-                            .bg(color),
-                    )
+                progress_edge(fraction, color)
             }))
             .on_click(cx.listener(move |this, _, window, cx| {
-                this.workspaces.list_mut().activate(ws_idx);
-
-                this.workspaces
-                    .active_tabs_mut()
-                    .list_mut()
-                    .activate(tab_idx);
-
-                this.on_active_tab_changed(window, cx);
-
-                this.focus_active(window, cx);
-
-                this.sync_session_memory(cx);
-
-                cx.notify();
+                this.jump_to_tab(ws_idx, tab_idx, window, cx);
             }));
 
         div()
