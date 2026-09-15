@@ -182,3 +182,23 @@ fn modern_variant_reserves_border_space_in_every_state(cx: &mut gpui::TestAppCon
         assert_eq!(variant.disabled(false, cx).borders, selected);
     });
 }
+
+/// A suffix that fills the tab's height can anchor overlays, such as a
+/// progress track, to the tab's bottom edge.
+#[gpui::test]
+fn full_height_suffix_spans_the_tab(cx: &mut TestAppContext) {
+    let cx = show(cx, TabVariant::Tab, None, |tab| {
+        tab.label("Go").suffix(
+            div()
+                .h_full()
+                .w(px(16.))
+                .debug_selector(|| "suffix".to_string()),
+        )
+    });
+
+    let tab = cx.debug_bounds("tab").expect("tab not rendered");
+    let suffix = cx.debug_bounds("suffix").expect("suffix not rendered");
+
+    assert_eq!(suffix.top(), tab.top());
+    assert_eq!(suffix.bottom(), tab.bottom());
+}

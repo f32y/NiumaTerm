@@ -936,9 +936,15 @@ impl RenderOnce for Tab {
             })
             // Under `max_width` the label is the only part that gives way, so
             // hold the prefix and suffix (e.g. a close button) at their full size.
+            // The wrappers span the tab's height and center their content, so
+            // a full-height prefix or suffix still resolves against the tab
+            // and can anchor overlays to its edges.
             .when_some(self.prefix, |this, prefix| {
                 this.child(
                     div()
+                        .h_full()
+                        .flex()
+                        .items_center()
                         .when_some(max_width, |this, _| this.flex_shrink_0())
                         .child(prefix),
                 )
@@ -947,6 +953,9 @@ impl RenderOnce for Tab {
             .when_some(self.suffix, |this, suffix| {
                 this.child(
                     div()
+                        .h_full()
+                        .flex()
+                        .items_center()
                         .when_some(max_width, |this, _| this.flex_shrink_0())
                         .child(suffix),
                 )
