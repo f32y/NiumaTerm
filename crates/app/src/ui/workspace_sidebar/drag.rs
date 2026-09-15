@@ -1,10 +1,11 @@
 use gpui::prelude::*;
 use gpui::{Context, Render, SharedString, Window, div, px};
-use gpui_component::{ActiveTheme as _, h_flex, v_flex};
+use gpui_component::{ActiveTheme as _, h_flex};
 use nmt_agent::AgentRuntimeStatus;
 use nmt_config::appearance::TabBarStyle;
 
-use crate::ui::workspace_sidebar::{WORKSPACE_NAME_INSET, workspace_status_glyphs};
+use crate::ui::workspace_sidebar::WORKSPACE_NAME_INSET;
+use crate::ui::workspace_sidebar::status::WorkspaceStatus;
 use crate::ui::{AppSettings, UI_RADIUS};
 use crate::workspace::TerminalActivity;
 
@@ -22,28 +23,17 @@ pub(super) struct WorkspaceDragPreview {
 
 impl Render for WorkspaceDragPreview {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (glyphs, status_label) = workspace_status_glyphs(
-            self.agent_status,
-            self.terminal_activity,
-            "workspace-drag-busy",
-            cx,
-        );
-
         let vertical_tabs =
             cx.global::<AppSettings>().config().appearance.tab_bar_style == TabBarStyle::Vertical;
 
         // Dropped along with the lane on the row itself, so the ghost keeps
         // its name on the same leading edge as the list it came out of.
         let indicator = (!vertical_tabs).then(|| {
-            v_flex()
-                .id("workspace-drag-status")
-                .w_4()
-                .flex_none()
-                .gap_0p5()
-                .items_center()
-                .justify_center()
-                .aria_label(status_label)
-                .children(glyphs)
+            WorkspaceStatus {
+                agent: self.agent_status,
+                terminal: self.terminal_activity,
+            }
+            .column("workspace-drag-status", "workspace-drag-busy", cx)
         });
 
         let background = cx

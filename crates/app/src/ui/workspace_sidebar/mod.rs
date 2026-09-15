@@ -1,29 +1,22 @@
 mod drag;
 mod list;
-
-#[cfg(test)]
-mod tests;
-
-use std::borrow::Cow;
+mod status;
 
 use gpui::prelude::*;
-use gpui::{
-    AnyElement, Context, DragMoveEvent, ElementId, Entity, FontWeight, SharedString, div, px,
-};
+use gpui::{AnyElement, Context, DragMoveEvent, Entity, FontWeight, SharedString, div, px};
 use gpui_component::{ActiveTheme, Disableable, IconName, IconNamed, h_flex, v_flex};
-use nmt_agent::{AgentProjection, AgentRuntimeStatus};
+use nmt_agent::AgentProjection;
 use rust_i18n::t;
 
 use crate::agent_usage::AgentUsageView;
 use crate::ui::composition::{
     FLOATING_SURFACE_BOTTOM_INSET, FLOATING_SURFACE_SIDE_INSET, FLOATING_SURFACE_TOP_INSET,
-    StatusMark, StatusMarkTone, toolbar_button,
+    toolbar_button,
 };
 use crate::ui::fluent::SELECTION_BAR_WIDTH;
 use crate::ui::platform_style::{Host, PlatformStyle as _};
 use crate::ui::shell::InlineRenameSession;
 use crate::ui::sidebar_resize::ResizeDrag;
-use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
 use crate::ui::title_bar::TITLE_BAR_CONTROLS_WIDTH;
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workspace_sidebar::list::WorkspaceList;
@@ -57,17 +50,6 @@ pub(super) const MIN_WIDTH: f32 = f32::max(
 );
 
 pub(crate) const MAX_WIDTH: f32 = 480.0;
-
-/// Diameter of a status dot in the sidebar column. Smaller than the agent
-/// spinner's `size_3`, so a stacked pair reads as a spinner with a mark under
-/// it rather than as two equal glyphs.
-const STATUS_DOT: f32 = 8.0;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AgentVisual {
-    Running,
-    NeedsInput,
-}
 
 /// Workspace-sidebar view state: collapse/expand plus the persisted expanded
 /// width. Rendered against the workspace summaries the shell passes in.
@@ -260,72 +242,6 @@ impl Sidebar {
         // startup.
         sidebar_resize::slide_width(wrapper, "sidebar", !collapsed, px(width), self.animated)
     }
-}
-
-/// The agent half of the status column, absent while the agent is idle.
-fn agent_presentation(status: AgentRuntimeStatus) -> Option<(AgentVisual, Cow<'static, str>)> {
-    match status {
-        AgentRuntimeStatus::Running => {
-            Some((AgentVisual::Running, t!("sidebar-workspace-status-running")))
-        }
-        AgentRuntimeStatus::NeedsInput => Some((
-            AgentVisual::NeedsInput,
-            t!("sidebar-workspace-status-needs-input"),
-        )),
-        AgentRuntimeStatus::Idle => None,
-    }
-}
-
-/// One accessible label for whatever the column holds. The two halves report
-/// independent things, so both are named when both are showing.
-fn status_column_label(agent: Option<&str>, terminal: Option<&str>) -> String {
-    match (agent, terminal) {
-        (Some(agent), Some(terminal)) => t!(
-            "sidebar-workspace-status-pair",
-            agent = agent,
-            terminal = terminal
-        )
-        .into_owned(),
-        (Some(label), None) | (None, Some(label)) => label.to_string(),
-        (None, None) => t!("sidebar-workspace-status-idle").to_string(),
-    }
-}
-
-/// Glyphs for the status column, agent above terminal. The caller stacks them;
-/// with one glyph the stack collapses to a centered single mark.
-fn workspace_status_glyphs(
-    status: AgentRuntimeStatus,
-    terminal: TerminalActivity,
-    busy_id: impl Into<ElementId>,
-    cx: &gpui::App,
-) -> (Vec<AnyElement>, String) {
-    let agent = agent_presentation(status);
-    let terminal = terminal_presentation(terminal);
-
-    let label = status_column_label(
-        agent.as_ref().map(|(_, label)| label.as_ref()),
-        terminal.as_ref().map(|(_, label)| label.as_ref()),
-    );
-
-    let busy_id = busy_id.into();
-
-    let glyphs = agent
-        .map(|(visual, label)| match visual {
-            AgentVisual::Running => StatusMark::busy(busy_id).into_any_element(),
-            // Same success color the terminal mark uses when a command
-            // finishes: both say the tab has stopped working and is waiting on
-            // the user.
-            AgentVisual::NeedsInput => {
-                StatusMark::new(busy_id, StatusMarkTone::Success, px(STATUS_DOT))
-                    .label(label)
-                    .into_any_element()
-            }
-        })
-        .into_iter()
-        .chain(terminal.map(|(visual, _)| terminal_dot(visual, STATUS_DOT, cx)))
-        .collect();
-
-    (glyphs, label)
 }
 
 /// Terminal with a lower-right close mark
