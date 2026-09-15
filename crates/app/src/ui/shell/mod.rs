@@ -498,6 +498,32 @@ impl Shell {
         self.acknowledge_visible(window, true, cx);
     }
 
+    /// Put the active workspace, tab, and pane on screen after any of them
+    /// changed: refresh the tab's own state, move keyboard focus into it,
+    /// record the session a restore would rebuild, and repaint.
+    pub(super) fn show_active_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.on_active_tab_changed(window, cx);
+
+        self.focus_active(window, cx);
+
+        self.sync_session_memory(cx);
+
+        cx.notify();
+    }
+
+    /// Switch to the workspace at `index`. The workspace keeps its own active
+    /// tab, so the user returns to the tab they last used there.
+    pub(super) fn activate_workspace(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.workspaces.list_mut().activate(index);
+
+        self.show_active_tab(window, cx);
+    }
+
     pub(crate) fn focus_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(git) = self.workspaces.active_tabs().active().git() {
             let view = git.view.clone();
@@ -783,13 +809,7 @@ impl Shell {
         // and ConPTY handle (same Drop chain as a tab close).
         drop(pane);
 
-        self.on_active_tab_changed(window, cx);
-
-        self.focus_active(window, cx);
-
-        self.sync_session_memory(cx);
-
-        cx.notify();
+        self.show_active_tab(window, cx);
     }
 
     fn close_description(count: io::Result<usize>, plain: &str, with_processes: &str) -> String {
@@ -1466,13 +1486,7 @@ impl Shell {
 
         self.register_agent_pane(&pane, cx);
 
-        self.on_active_tab_changed(window, cx);
-
-        self.focus_active(window, cx);
-
-        self.sync_session_memory(cx);
-
-        cx.notify();
+        self.show_active_tab(window, cx);
     }
 
     pub(super) fn on_resize_pane_up(
@@ -1544,13 +1558,7 @@ impl Shell {
             return;
         }
 
-        self.on_active_tab_changed(window, cx);
-
-        self.focus_active(window, cx);
-
-        self.sync_session_memory(cx);
-
-        cx.notify();
+        self.show_active_tab(window, cx);
     }
 
     /// Apply saved split ratios once their groups have real bounds (the first
@@ -1702,13 +1710,7 @@ impl Shell {
             .active_tabs_mut()
             .new_tab(surface, id, title);
 
-        self.on_active_tab_changed(window, cx);
-
-        self.focus_active(window, cx);
-
-        self.sync_session_memory(cx);
-
-        cx.notify();
+        self.show_active_tab(window, cx);
     }
 
     pub(crate) fn open_team_tab(
@@ -2005,13 +2007,7 @@ impl Shell {
 
             window.activate_window();
 
-            self.on_active_tab_changed(window, cx);
-
-            self.focus_active(window, cx);
-
-            self.sync_session_memory(cx);
-
-            cx.notify();
+            self.show_active_tab(window, cx);
 
             return;
         }
@@ -2106,25 +2102,13 @@ impl Shell {
     pub(super) fn on_next_tab(&mut self, _: &NextTab, window: &mut Window, cx: &mut Context<Self>) {
         self.workspaces.active_tabs_mut().list_mut().focus_next();
 
-        self.on_active_tab_changed(window, cx);
-
-        self.focus_active(window, cx);
-
-        self.sync_session_memory(cx);
-
-        cx.notify();
+        self.show_active_tab(window, cx);
     }
 
     pub(super) fn on_prev_tab(&mut self, _: &PrevTab, window: &mut Window, cx: &mut Context<Self>) {
         self.workspaces.active_tabs_mut().list_mut().focus_prev();
 
-        self.on_active_tab_changed(window, cx);
-
-        self.focus_active(window, cx);
-
-        self.sync_session_memory(cx);
-
-        cx.notify();
+        self.show_active_tab(window, cx);
     }
 
     /// Position of the next tab `marked` accepts, searching after the active
@@ -2214,13 +2198,7 @@ impl Shell {
             .list_mut()
             .activate(tab_index);
 
-        self.on_active_tab_changed(window, cx);
-
-        self.focus_active(window, cx);
-
-        self.sync_session_memory(cx);
-
-        cx.notify();
+        self.show_active_tab(window, cx);
     }
 
     /// Open the new-workspace dialog: a name plus the shared directory editor,
@@ -2344,15 +2322,7 @@ impl Shell {
         let len = self.workspaces.list().len();
         let next = (self.workspaces.list().active_index() + 1) % len;
 
-        self.workspaces.list_mut().activate(next);
-
-        self.on_active_tab_changed(window, cx);
-
-        self.focus_active(window, cx);
-
-        self.sync_session_memory(cx);
-
-        cx.notify();
+        self.activate_workspace(next, window, cx);
     }
 
     pub(super) fn on_prev_workspace(
@@ -2364,15 +2334,7 @@ impl Shell {
         let len = self.workspaces.list().len();
         let prev = (self.workspaces.list().active_index() + len - 1) % len;
 
-        self.workspaces.list_mut().activate(prev);
-
-        self.on_active_tab_changed(window, cx);
-
-        self.focus_active(window, cx);
-
-        self.sync_session_memory(cx);
-
-        cx.notify();
+        self.activate_workspace(prev, window, cx);
     }
 
     /// Start renaming a workspace inline in the sidebar: the item swaps its
@@ -3331,6 +3293,7 @@ impl Shell {
             .on_action(cx.listener(Self::on_show_settings))
             .on_action(cx.listener(Self::on_new_agent_tab))
             .on_action(cx.listener(Self::on_new_team_tab))
+            .on_action(cx.listener(Self::on_toggle_workflows))
     }
 
     fn render_title_bar(
@@ -4360,11 +4323,7 @@ impl Shell {
             );
         }
 
-        self.on_active_tab_changed(window, cx);
-        self.focus_active(window, cx);
-        self.sync_session_memory(cx);
-
-        cx.notify();
+        self.show_active_tab(window, cx);
     }
 
     pub(super) fn sync_git_tab_visibility(&self, cx: &mut Context<Self>) {
@@ -4421,11 +4380,7 @@ impl Shell {
 
         if let Some(index) = index {
             self.workspaces.active_tabs_mut().list_mut().activate(index);
-            self.on_active_tab_changed(window, cx);
-            self.focus_active(window, cx);
-            self.sync_session_memory(cx);
-
-            cx.notify();
+            self.show_active_tab(window, cx);
         }
     }
 

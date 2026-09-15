@@ -25,7 +25,7 @@ use crate::agent_usage::AgentUsageView;
 use crate::ui::composition::{
     FLOATING_SURFACE_BOTTOM_INSET, FLOATING_SURFACE_SIDE_INSET, FLOATING_SURFACE_TOP_INSET,
     HoverActionLayout, HoverActionVisibility, StatusMark, StatusMarkTone, hover_action,
-    sidebar_selection, toolbar_button,
+    progress_edge, sidebar_selection, toolbar_button,
 };
 use crate::ui::fluent::{SELECTION_BAR_HEIGHT, SELECTION_BAR_RADIUS, SELECTION_BAR_WIDTH};
 use crate::ui::platform_style::{Host, PlatformStyle as _};
@@ -407,15 +407,7 @@ impl Sidebar {
                 ),
             )
             .capture_any_mouse_down(cx.listener(move |this, _, window, cx| {
-                this.workspaces.list_mut().activate(idx);
-
-                this.on_active_tab_changed(window, cx);
-
-                this.focus_active(window, cx);
-
-                this.sync_session_memory(cx);
-
-                cx.notify();
+                this.activate_workspace(idx, window, cx);
             }))
             .into_any_element()
         } else if ws.pinned {
@@ -637,15 +629,7 @@ impl Sidebar {
                     .child(suffix),
             )
             .on_click(cx.listener(move |this, _, window, cx| {
-                this.workspaces.list_mut().activate(idx);
-
-                this.on_active_tab_changed(window, cx);
-
-                this.focus_active(window, cx);
-
-                this.sync_session_memory(cx);
-
-                cx.notify();
+                this.activate_workspace(idx, window, cx);
             }));
 
         // Right-click menu. Close reuses the same confirm-gated path as the
@@ -667,7 +651,7 @@ impl Sidebar {
         let progress = (!vertical_tabs)
             .then(|| chrome.progress.fraction())
             .flatten()
-            .map(|fraction| workspace_progress_bar(fraction, cx));
+            .map(|fraction| progress_edge(fraction, cx.theme().primary));
 
         div()
             .id(("workspace-menu", idx))
@@ -856,26 +840,6 @@ fn workspace_status_glyphs(
         .collect();
 
     (glyphs, label)
-}
-
-/// Progress bar along the bottom edge of a sidebar item, driven by the combined
-/// OSC 9;4 progress of the workspace's tabs. One corner radius of space at each
-/// side keeps the track on the straight part of the bottom edge.
-fn workspace_progress_bar(fraction: f32, cx: &gpui::App) -> AnyElement {
-    div()
-        .absolute()
-        .bottom_0()
-        .left(UI_RADIUS)
-        .right(UI_RADIUS)
-        .h(px(2.0))
-        .child(
-            div()
-                .h_full()
-                .w(relative(fraction))
-                .rounded_full()
-                .bg(cx.theme().primary),
-        )
-        .into_any_element()
 }
 
 fn workspace_display_label(name: &str, cwd: &str) -> String {
