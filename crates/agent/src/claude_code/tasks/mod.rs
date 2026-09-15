@@ -20,14 +20,15 @@
 //! therefore still admitted from their own `local_agent` records. Monitors and
 //! workflows appear in the snapshot too and stay out by task type.
 
+mod aliases;
+mod children;
 mod records;
 mod shells;
 
 #[cfg(test)]
 mod tests;
 
-use std::collections::{HashMap, VecDeque};
-use std::mem::take;
+use std::collections::HashMap;
 use std::time::SystemTime;
 
 use serde_json::Value;
@@ -37,14 +38,14 @@ use crate::background_task::{
     BackgroundTaskRegistry, BackgroundTaskSnapshot, BackgroundTaskState,
     BackgroundTaskTranscriptUpdate, BackgroundTaskUpdate,
 };
-use crate::chat::Item;
 use crate::claude_code::sessions::RestoredTask;
+use crate::claude_code::tasks::aliases::AliasTable;
+use crate::claude_code::tasks::children::ChildTranscripts;
 use crate::claude_code::tasks::records::{
     admits_new_row, lifecycle_state, record_identifiers, refs_from, result_text, sidechain_preview,
     stop_target,
 };
 use crate::claude_code::tasks::shells::ShellIndex;
-use crate::claude_code::tool_items::{complete_tool_item, tool_item};
 use crate::json::text_field;
 
 /// Tool names that launch a child agent.
@@ -91,18 +92,6 @@ pub(crate) struct ClaudeTasks {
 
     /// Background shell metadata and the `Bash` commands behind it.
     shells: ShellIndex,
-}
-
-/// What one shell's records have said about it so far. No single record
-/// carries all of it: the command comes from the `Bash` block, the description
-/// and tool-use id from `task_started`, and the output file from whichever of
-/// the handoff result and the completion notification arrives first.
-#[derive(Default)]
-pub(crate) struct ShellMeta {
-    tool_use_id: Option<String>,
-    description: Option<String>,
-    command: Option<String>,
-    output_file: Option<String>,
 }
 
 /// One background shell as the detail view reads it. Owned because the caller
@@ -621,7 +610,7 @@ impl ClaudeTasks {
 
         // The same content the parent transcript drops becomes the child's own
         // conversation; it still never reaches the parent.
-        let items = self.child_items(&canonical, message);
+        let items = self.children.sidechain_items(&canonical, message);
 
         self.children.push(&canonical, items);
 
@@ -642,78 +631,6 @@ impl ClaudeTasks {
                 ..BackgroundTaskUpdate::default()
             },
         )
-    }
-
-    /// Transcript items for one sidechain record, using the same item shapes
-    /// the parent conversation renders so a child reads identically.
-    fn child_items(&mut self, canonical: &str, message: &Value) -> Vec<Item> {
-        let mut items = Vec::new();
-
-        if message["type"].as_str() == Some("user") {
-            let text = message["message"]["content"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|block| block["type"].as_str() == Some("text"))
-                .filter_map(|block| block["text"].as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
-
-            let repeats_launch = self.children.repeats_launch(canonical, &text);
-
-            if !text.trim().is_empty() && !repeats_launch {
-                items.push(Item::UserMessage { text: Some(text) });
-            }
-        }
-
-        for block in message["message"]["content"]
-            .as_array()
-            .into_iter()
-            .flatten()
-        {
-            let Some(id) = block["id"]
-                .as_str()
-                .or_else(|| block["tool_use_id"].as_str())
-                .map(str::to_owned)
-                .or_else(|| message["uuid"].as_str().map(str::to_owned))
-            else {
-                continue;
-            };
-
-            match block["type"].as_str() {
-                Some("text") if message["type"].as_str() != Some("user") => {
-                    items.push(Item::AgentMessage {
-                        id,
-                        text: block["text"].as_str().map(str::to_owned),
-                        questions: None,
-                    })
-                }
-                Some("text") => {}
-                Some("thinking") => items.push(Item::Reasoning {
-                    id,
-                    summary: block["thinking"].as_str().map(str::to_owned),
-                }),
-                Some("tool_use") => {
-                    let item = tool_item(
-                        &id,
-                        block["name"].as_str().unwrap_or("tool"),
-                        &block["input"],
-                    );
-
-                    self.children.open_tool(id, item.clone());
-
-                    items.push(item);
-                }
-                Some("tool_result") => {
-                    if let Some(started) = self.children.close_tool(&id) {
-                        items.push(complete_tool_item(started, block));
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        items
     }
 
     /// Admit the background shells the CLI currently reports as running. This
@@ -820,154 +737,5 @@ impl ClaudeTasks {
             output_file: meta.and_then(|meta| meta.output_file.clone()),
             state: task.state,
         })
-    }
-}
-
-// Identifier aliases for one session.
-//
-// One child is named several ways over its life: by task id, by the tool-use
-// id of the call that launched it, and by an agent id. Only a record that
-// carried two of them together proves they describe the same child, so this
-// records exactly those pairings and nothing inferred from recency.
-
-/// Identifier aliases retained per session. One child contributes at most a
-/// handful (task, tool-use, agent), so this only bounds a stream that keeps
-/// inventing identifiers.
-const MAX_ALIASES: usize = 512;
-
-#[derive(Default)]
-struct AliasTable {
-    aliases: HashMap<String, String>,
-    order: VecDeque<String>,
-}
-
-impl AliasTable {
-    fn clear(&mut self) {
-        self.aliases.clear();
-
-        self.order.clear();
-    }
-
-    /// The canonical id this identifier was recorded against, if any.
-    fn lookup(&self, id: &str) -> Option<&str> {
-        self.aliases.get(id).map(String::as_str)
-    }
-
-    /// Record that these identifiers describe the same child. Only called with
-    /// identifiers a single record carried together.
-    fn link_all(&mut self, canonical: &str, ids: &[String]) {
-        for id in ids {
-            if id == canonical || self.aliases.contains_key(id) {
-                continue;
-            }
-
-            if self.order.len() >= MAX_ALIASES
-                && let Some(oldest) = self.order.pop_front()
-            {
-                self.aliases.remove(&oldest);
-            }
-
-            self.order.push_back(id.clone());
-
-            self.aliases.insert(id.clone(), canonical.to_owned());
-        }
-    }
-}
-
-// Child conversations accumulated from the sidechain stream.
-//
-// A child agent has a conversation of its own that the parent transcript
-// never shows. The reducer forwards its content rather than retaining it, so
-// what lives here is only what a later record needs: the items observed since
-// the caller last drained, the tool calls still waiting for their results, and
-// the launch instruction already published as the opening message.
-
-#[derive(Default)]
-struct ChildTranscripts {
-    /// Child conversation content observed since the caller last drained it.
-    pending: Vec<(BackgroundTaskKey, BackgroundTaskTranscriptUpdate)>,
-
-    /// Tool calls a child started, so its matching result completes the same
-    /// row instead of appearing as a second one.
-    open_tools: HashMap<String, Item>,
-
-    /// Launch instructions already published as a child's opening message, by
-    /// canonical id. Claude Code 2.1.2x keeps a child's conversation entirely
-    /// in its own file and streams only the child's assistant output, so the
-    /// launch block is the one place the live stream states what the child was
-    /// asked to do. Older versions also replay that text as a sidechain user
-    /// record, which `repeats_launch` recognizes as the same instruction rather
-    /// than a second one.
-    launch_prompts: HashMap<String, String>,
-}
-
-impl ChildTranscripts {
-    fn clear(&mut self) {
-        self.pending.clear();
-
-        self.open_tools.clear();
-
-        self.launch_prompts.clear();
-    }
-
-    /// Publish a child's launch instruction as the opening message of its
-    /// conversation, reporting whether this is the first time. A second launch
-    /// block for the same call states nothing new.
-    fn open(&mut self, tool_use_id: &str, prompt: String) -> bool {
-        if self.launch_prompts.contains_key(tool_use_id) {
-            return false;
-        }
-
-        self.launch_prompts
-            .insert(tool_use_id.to_owned(), prompt.clone());
-
-        self.pending.push((
-            BackgroundTaskKey::claude_code(tool_use_id),
-            BackgroundTaskTranscriptUpdate::appended(vec![Item::UserMessage {
-                text: Some(prompt),
-            }]),
-        ));
-
-        true
-    }
-
-    /// Add live content to a child's conversation.
-    fn push(&mut self, canonical: &str, items: Vec<Item>) {
-        if items.is_empty() {
-            return;
-        }
-
-        self.pending.push((
-            BackgroundTaskKey::claude_code(canonical),
-            BackgroundTaskTranscriptUpdate::appended(items),
-        ));
-    }
-
-    /// Offer stored history for a child. History predates whatever the live
-    /// stream produced, so it fills a child nothing has been seen for and
-    /// never replaces newer live content.
-    fn push_restored(&mut self, key: BackgroundTaskKey, items: Vec<Item>) {
-        self.pending
-            .push((key, BackgroundTaskTranscriptUpdate::restored(items)));
-    }
-
-    fn drain(&mut self) -> Vec<(BackgroundTaskKey, BackgroundTaskTranscriptUpdate)> {
-        take(&mut self.pending)
-    }
-
-    /// Whether this text is the launch instruction already published as the
-    /// child's opening message.
-    fn repeats_launch(&self, canonical: &str, text: &str) -> bool {
-        self.launch_prompts
-            .get(canonical)
-            .is_some_and(|prompt| prompt.trim() == text.trim())
-    }
-
-    fn open_tool(&mut self, id: String, item: Item) {
-        self.open_tools.insert(id, item);
-    }
-
-    fn close_tool(&mut self, id: &str) -> Option<Item> {
-        self.open_tools.remove(id)
     }
 }

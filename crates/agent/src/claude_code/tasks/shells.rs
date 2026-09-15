@@ -8,7 +8,6 @@ use std::collections::{HashMap, VecDeque};
 
 use serde_json::Value;
 
-use crate::claude_code::tasks::ShellMeta;
 use crate::claude_code::tasks::records::result_content;
 use crate::json::text_field;
 
@@ -28,6 +27,18 @@ pub(super) fn handoff_output_file(text: &str, task_id: &str) -> Option<String> {
     let path = text[start..end].trim();
 
     (!path.is_empty()).then(|| path.to_owned())
+}
+
+/// What one shell's records have said about it so far. No single record
+/// carries all of it: the command comes from the `Bash` block, the description
+/// and tool-use id from `task_started`, and the output file from whichever of
+/// the handoff result and the completion notification arrives first.
+#[derive(Default)]
+pub(super) struct ShellMeta {
+    pub(super) tool_use_id: Option<String>,
+    pub(super) description: Option<String>,
+    pub(super) command: Option<String>,
+    pub(super) output_file: Option<String>,
 }
 
 /// What the stream has said about each background shell, and the `Bash`
