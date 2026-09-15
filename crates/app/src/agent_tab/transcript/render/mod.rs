@@ -7,7 +7,11 @@ pub(super) use crate::agent_tab::transcript::render::text_style::transcript_code
 
 pub(super) mod compaction_row;
 pub(super) mod image_preview;
+pub(super) mod menus;
+pub(super) mod message_rows;
 pub(super) mod text_style;
+pub(super) mod user_row;
+pub(super) mod work_card;
 
 #[cfg(test)]
 mod working_indicator_tests;
@@ -17,8 +21,9 @@ use std::time::{Duration, Instant};
 use gpui::prelude::*;
 use gpui::{
     Animation, AnimationExt as _, AnyElement, App, Context, Div, ElementId, Hsla, RenderOnce,
-    Window, div, ease_in_out, px, relative, rems,
+    ScrollHandle, Stateful, Window, div, ease_in_out, px, relative, rems,
 };
+use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme as _, IconName, h_flex, v_flex};
 use rust_i18n::t;
 
@@ -326,4 +331,29 @@ fn dot_pulse(delta: f32, index: usize) -> f32 {
     let pulse = (1.0 - distance / interval).clamp(0.0, 1.0);
 
     ease_in_out(pulse)
+}
+
+/// A detail surface bounded to its own height inside the virtual list: `area`
+/// scrolls with `scroll`, and the scrollbar rides a non-scrolling wrapper so
+/// it stays in view as the content moves. The list handles wheel input before
+/// child listeners run, so the area occludes the list's earlier hitbox to be
+/// the only scroll target under the pointer, even at either limit.
+pub(super) fn bounded_scroll(
+    scroll: &ScrollHandle,
+    scrollbar_id: impl Into<ElementId>,
+    area: Stateful<Div>,
+) -> Div {
+    div()
+        .w_full()
+        .relative()
+        .child(area.overflow_y_scroll().track_scroll(scroll).occlude())
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .right_0()
+                .bottom_0()
+                .w(px(16.0))
+                .child(Scrollbar::vertical(scroll).id(scrollbar_id)),
+        )
 }

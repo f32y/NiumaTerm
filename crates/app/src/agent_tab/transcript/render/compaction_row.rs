@@ -9,7 +9,6 @@ use std::time::Instant;
 use gpui::prelude::*;
 use gpui::{AnyElement, Context, ScrollHandle, Window, div, px};
 use gpui_component::modern_menu::ModernMenuExt as _;
-use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme as _, IconName, h_flex, v_flex};
 use nmt_agent::chat::Compaction;
 use rust_i18n::t;
@@ -19,6 +18,8 @@ use crate::agent_tab::settings::UI_RADIUS;
 use crate::agent_tab::transcript::disclosure_row::{
     AGENT_CARD_BODY_PADDING_Y, AGENT_CARD_PADDING_X, AgentDisclosureRow, agent_card,
 };
+use crate::agent_tab::transcript::render::bounded_scroll;
+use crate::agent_tab::transcript::render::menus::copy_entry_menu;
 use crate::agent_tab::transcript::render::text_style::markdown_view;
 use crate::agent_tab::transcript::reveal::{Disclosures, RevealKey, RevealedPart, revealed_block};
 use crate::agent_tab::transcript::{
@@ -81,7 +82,7 @@ pub(crate) fn render_compaction_row(
         .id(("entry", index))
         .w_full()
         .gap_1()
-        .modern_context_menu(TranscriptView::copy_menu(cx.entity().downgrade(), index))
+        .modern_context_menu(copy_entry_menu(cx.entity().downgrade(), index))
         // The rule sits above the heading: it closes off the conversation
         // that the summary below replaced.
         .child(div().w_full().h(px(1.)).bg(accent.opacity(0.35)))
@@ -171,52 +172,25 @@ fn render_compaction_detail(
             )
         }))
         .children(detail.summary.clone().map(|summary| {
-            div()
-                .w_full()
-                .mt_1()
-                .relative()
-                .child(
-                    div()
-                        .id(("compaction-summary", index))
-                        .w_full()
-                        .max_h(px(320.))
-                        .overflow_y_scroll()
-                        .track_scroll(&summary_scroll)
-                        // The virtual conversation list handles wheel input
-                        // before child listeners run. Occluding its earlier
-                        // hitbox makes this the only scroll target under the
-                        // pointer, even at either limit.
-                        .occlude()
-                        .modern_context_menu(TranscriptView::copy_menu(
-                            cx.entity().downgrade(),
-                            index,
-                        ))
-                        .px_3()
-                        .py_2()
-                        .rounded(UI_RADIUS)
-                        .bg(cx.theme().tokens.muted)
-                        .text_color(cx.theme().muted_foreground)
-                        .child(
-                            markdown_view(
-                                ("compaction-md", index),
-                                summary,
-                                cwd.map(str::to_owned),
-                            )
+            bounded_scroll(
+                &summary_scroll,
+                ("compaction-scrollbar", index),
+                div()
+                    .id(("compaction-summary", index))
+                    .w_full()
+                    .max_h(px(320.))
+                    .modern_context_menu(copy_entry_menu(cx.entity().downgrade(), index))
+                    .px_3()
+                    .py_2()
+                    .rounded(UI_RADIUS)
+                    .bg(cx.theme().tokens.muted)
+                    .text_color(cx.theme().muted_foreground)
+                    .child(
+                        markdown_view(("compaction-md", index), summary, cwd.map(str::to_owned))
                             .selectable(true),
-                        ),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .right_0()
-                        .bottom_0()
-                        .w(px(16.0))
-                        .child(
-                            Scrollbar::vertical(&summary_scroll)
-                                .id(("compaction-scrollbar", index)),
-                        ),
-                )
+                    ),
+            )
+            .mt_1()
         }));
 
     let part = RevealedPart::Block(RevealKey::Row(index));

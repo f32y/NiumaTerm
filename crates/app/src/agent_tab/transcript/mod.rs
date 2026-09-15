@@ -22,6 +22,7 @@ mod format;
 mod incremental;
 mod render;
 mod reveal;
+mod row_structure;
 mod rows;
 mod typewriter;
 mod view;
