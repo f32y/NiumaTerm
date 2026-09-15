@@ -15,13 +15,14 @@ mod control;
 mod launch;
 mod parse;
 mod transcript;
+mod turn;
 
 #[cfg(test)]
 mod tests;
 
-use std::env;
 #[cfg(all(test, windows))]
 use std::fs;
+#[cfg(test)]
 use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -51,10 +52,12 @@ use crate::claude_code::stream_json::control::{
     fail_pending_control_operations, resolve_pending_control_operation,
 };
 #[cfg(test)]
-use crate::claude_code::stream_json::launch::{ANTHROPIC_MODEL_ENV, FILE_CHECKPOINTING_ENV};
 use crate::claude_code::stream_json::launch::{
-    configured_permission_mode, enable_file_checkpointing, file_rewind_request,
-    initial_ready_model, launch_model,
+    ANTHROPIC_MODEL_ENV, FILE_CHECKPOINTING_ENV, enable_file_checkpointing,
+};
+use crate::claude_code::stream_json::launch::{
+    claude_command, configured_permission_mode, file_rewind_request, initial_ready_model,
+    launch_model,
 };
 #[cfg(test)]
 use crate::claude_code::stream_json::parse::parse_claude_usage;
@@ -69,6 +72,9 @@ use crate::claude_code::stream_json::parse::{
 use crate::claude_code::stream_json::transcript::TranscriptState;
 #[cfg(test)]
 use crate::claude_code::stream_json::transcript::{TurnOutputUsage, window_from_composition};
+#[cfg(test)]
+use crate::claude_code::stream_json::turn::TurnState;
+use crate::claude_code::stream_json::turn::TurnTracker;
 use crate::claude_code::tasks::ClaudeTasks;
 #[cfg(test)]
 use crate::claude_code::tool_items::{edit_diff, input_detail, tool_item};
@@ -111,13 +117,6 @@ fn session_title_description(description: &str) -> String {
         .collect()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TurnState {
-    Idle,
-    Pending,
-    Running,
-}
-
 pub struct Session {
     process: JsonLineProcess,
     transcript: TranscriptState,
@@ -128,11 +127,7 @@ pub struct Session {
     /// needs to `--resume` this conversation.
     session_id: Option<String>,
 
-    /// A locally sent turn becomes running when the first output arrives;
-    /// the CLI announces completion but has no explicit start notification.
-    turn: TurnState,
-
-    accepted_identity: Option<String>,
+    turn: TurnTracker,
 
     /// Model and permission selections sent to the backend. Effort changes
     /// additionally need ordered confirmation and are owned by control state.
@@ -268,8 +263,7 @@ impl Session {
             // same cwd's history, so it is immediately valid for local
             // checkpoint lookup; a later init can still confirm or replace it.
             session_id: resume,
-            turn: TurnState::Idle,
-            accepted_identity: None,
+            turn: TurnTracker::default(),
             applied_model: initial_model,
             applied_permission: None,
             active_slash_command: None,
@@ -306,7 +300,7 @@ impl Session {
     }
 
     pub fn has_active_operation(&self) -> bool {
-        self.turn != TurnState::Idle || self.control.has_active_request() || self.compacting
+        !self.turn.is_idle() || self.control.has_active_request() || self.compacting
     }
 
     /// Request EOF shutdown and wait for the launcher plus every contained
@@ -356,51 +350,18 @@ impl Session {
         let tasks_changed = self.tasks.observe(&message);
         let workflows_changed = self.workflows.observe(&message);
 
-        // A message written while a turn was still running is queued by the
-        // CLI and then run as a turn of its own, opened with no send from this
-        // side. Model output is the only announcement that turn makes, so it
-        // has to be adopted here; otherwise it is never reported as started,
-        // and everything it produces is filed under the turn that preceded it.
-        let started = match self.turn {
-            TurnState::Idle if carries_model_output(&message) => {
-                self.accepted_identity = None;
+        let turn = self.turn.observe(&message);
 
-                self.transcript.begin_turn();
+        if turn.adopted {
+            self.transcript.begin_turn();
+        }
 
-                true
-            }
-            TurnState::Pending => true,
-            TurnState::Idle | TurnState::Running => false,
-        };
-
-        if started {
-            self.turn = TurnState::Running;
-
+        if turn.started {
             events.push(Event::TurnStarted);
         }
 
-        if self.turn != TurnState::Idle
-            && self.accepted_identity.is_none()
-            && message["parent_tool_use_id"].is_null()
-        {
-            let provider_id = match message["type"].as_str() {
-                Some("stream_event") if message["event"]["type"] == "message_start" => {
-                    message["event"]["message"]["id"].as_str()
-                }
-                Some("assistant") => message["message"]["id"].as_str(),
-                Some("result") if message["is_error"].as_bool() == Some(false) => {
-                    message["uuid"].as_str()
-                }
-                _ => None,
-            };
-
-            if let Some(id) = provider_id.filter(|id| !id.is_empty()) {
-                let id = format!("response:{id}");
-
-                self.accepted_identity = Some(id.clone());
-
-                events.push(Event::ProviderTurnAccepted { id });
-            }
+        if let Some(id) = turn.accepted {
+            events.push(Event::ProviderTurnAccepted { id });
         }
 
         match message["type"].as_str() {
@@ -556,16 +517,13 @@ impl Session {
             self.control.record_effort(request_id, effort);
         }
 
-        if self.turn != TurnState::Idle {
-            SendOutcome::Steered
-        } else {
-            self.turn = TurnState::Pending;
-            self.accepted_identity = None;
-
-            self.transcript.begin_turn();
-
-            SendOutcome::StartedTurn
+        if !self.turn.begin_message_turn() {
+            return SendOutcome::Steered;
         }
+
+        self.transcript.begin_turn();
+
+        SendOutcome::StartedTurn
     }
 
     /// Send a provider command through Claude's stream-json command path.
@@ -582,7 +540,7 @@ impl Session {
             return SlashCommandOutcome::NotReady;
         }
 
-        if self.turn != TurnState::Idle {
+        if !self.turn.is_idle() {
             return SlashCommandOutcome::Rejected {
                 message: "Claude is already running a turn.".to_string(),
             };
@@ -599,7 +557,7 @@ impl Session {
             };
         }
 
-        self.turn = TurnState::Pending;
+        self.turn.begin_command_turn();
 
         self.transcript.begin_turn();
 
@@ -712,7 +670,7 @@ impl Session {
             return SlashCommandOutcome::NotReady;
         }
 
-        if self.turn != TurnState::Idle || self.control.pending_approval.is_some() {
+        if !self.turn.is_idle() || self.control.pending_approval.is_some() {
             return SlashCommandOutcome::Rejected {
                 message: "Claude must be idle before restoring files.".to_string(),
             };
@@ -871,7 +829,8 @@ impl Session {
 
     pub(crate) fn on_exit(&mut self) -> Vec<Event> {
         self.ready = false;
-        self.turn = TurnState::Idle;
+
+        self.turn.exit();
 
         let message = "Claude exited before the control request completed.";
 
@@ -1204,7 +1163,7 @@ impl Session {
     }
 
     fn on_result(&mut self, message: &Value) -> Vec<Event> {
-        self.turn = TurnState::Idle;
+        let accepted = self.turn.finish();
 
         let mut events = self.control.finish_turn();
 
@@ -1237,7 +1196,7 @@ impl Session {
             error: error.clone(),
         });
 
-        if let Some(id) = self.accepted_identity.take() {
+        if let Some(id) = accepted {
             events.push(Event::ProviderTurnFinished { id, error });
         }
 
@@ -1420,97 +1379,4 @@ impl Session {
 
         Vec::new()
     }
-}
-
-/// Assemble the CLI invocation for one conversation. Kept apart from the spawn
-/// so the exact argument boundaries can be inspected without starting a
-/// process: a path pushed as its own argument is never re-parsed, which is what
-/// keeps a directory containing spaces or shell metacharacters intact.
-fn claude_command(
-    launcher: &AgentCli,
-    launch: &LaunchConfig,
-    workspace: &AgentWorkspace,
-    resume: Option<&str>,
-    initial_model: &Option<String>,
-) -> Command {
-    let mut command = launcher.command([
-        "-p",
-        "--output-format",
-        "stream-json",
-        "--input-format",
-        "stream-json",
-        "--verbose",
-        "--include-partial-messages",
-        "--permission-prompt-tool",
-        "stdio",
-        "--allow-dangerously-skip-permissions",
-    ]);
-
-    // File snapshots are opt-in for stream-json SDK clients. This is
-    // applied after profile overrides so every NiumaTerm Claude session
-    // can create checkpoints for subsequent `/rewind` operations.
-    enable_file_checkpointing(&mut command);
-
-    // Recent models omit checklist tools unless the client opts in. Keep an
-    // explicit profile or inherited choice while enabling progress by default.
-    if !launch
-        .env
-        .iter()
-        .any(|(name, _)| name.eq_ignore_ascii_case("CLAUDE_CODE_ENABLE_TODO_TOOLS"))
-        && env::var_os("CLAUDE_CODE_ENABLE_TODO_TOOLS").is_none()
-    {
-        command.env("CLAUDE_CODE_ENABLE_TODO_TOOLS", "1");
-    }
-
-    // Recent models omit thinking text by default and emit signature-only
-    // thinking blocks, which would leave the chat's reasoning sections
-    // permanently empty. Asking for the summarized form at launch is the only
-    // way to get that text for the whole session; the per-session control
-    // request only overrides a mode that was already chosen here.
-    command.args(["--thinking-display", "summarized"]);
-
-    // The CLI takes effort as a launch flag; its `/effort` command is the
-    // only other way in, and that costs a visible turn on every new
-    // conversation.
-    if let Some(effort) = &launch.effort {
-        command.args(["--effort", effort]);
-    }
-
-    // The CLI resolves the model once during its handshake and builds the
-    // system prompt from it, including the identity it states to the model
-    // itself. A later `set_model` reroutes the requests while that prompt
-    // keeps describing the startup model, so a model the tab already knows
-    // about has to arrive as a launch flag. Without one the CLI starts on
-    // the model from its own configuration.
-    if let Some(model) = initial_model {
-        command.args(["--model", model]);
-    }
-
-    if let Some(session_id) = resume {
-        command.args(["--resume", session_id]);
-    }
-
-    // Additional workspace directories reach the CLI through its own
-    // `--add-dir` flag, applied to new and resumed conversations alike. The
-    // primary directory is not repeated because the process already starts
-    // there, and Claude keeps its session storage and configuration discovery
-    // anchored on that directory.
-    if workspace.is_multi_root() {
-        command.arg("--add-dir");
-
-        command.args(workspace.additional());
-    }
-
-    if let Some(cwd) = workspace.primary() {
-        command.current_dir(cwd);
-    }
-
-    command
-}
-
-/// Whether a line is model output, which the CLI only emits inside a turn.
-/// The turn's `system`/`init` line arrives first but is also emitted on
-/// startup and on resume, where no turn has opened yet.
-fn carries_model_output(message: &Value) -> bool {
-    matches!(message["type"].as_str(), Some("assistant" | "stream_event"))
 }
