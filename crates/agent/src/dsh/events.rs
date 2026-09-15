@@ -123,9 +123,25 @@ fn run_downlink(
             }
         }
 
-        if control.stopped.load(Ordering::Relaxed)
-            || !host.upgrade().is_some_and(|host| host.is_running())
-        {
+        if control.stopped.load(Ordering::Relaxed) {
+            return;
+        }
+
+        // Every later call on this session targets a port nobody serves, so
+        // the tab must learn the host is gone; ending the thread quietly would
+        // leave it looking ready while each action fails. A missing host is
+        // reported the same way because no replacement can reach this session.
+        let host = host.upgrade();
+
+        if !host.as_ref().is_some_and(|host| host.is_running()) {
+            let status = host.and_then(|host| host.exit_status());
+
+            warn!(?status, "deepseek harness host exited");
+
+            deliver(json!({ "payload": {
+                "type": "nmt/host-exited", "sessionId": session_id,
+            } }));
+
             return;
         }
 

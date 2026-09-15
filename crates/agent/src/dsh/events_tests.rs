@@ -98,6 +98,69 @@ fn closing_downlinks_interrupts_handshakes_and_idle_reads_and_joins_delivery() {
 }
 
 #[test]
+fn a_lost_stream_without_a_serving_host_reports_the_host_exit() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let client = ApiClient::new(format!("http://{}", listener.local_addr().unwrap())).unwrap();
+
+    let server = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+
+        let mut socket = accept(stream).unwrap();
+
+        for _ in 0..3 {
+            socket.read().unwrap();
+        }
+
+        for frame in [
+            item(
+                "events",
+                json!({ "type": "ready", "clientId": "generation" }),
+            ),
+            item("control", json!({ "type": "baseline", "value": {} })),
+            item("follow", json!({ "type": "snapshot", "records": [] })),
+        ] {
+            socket
+                .send(Message::Text(frame.to_string().into()))
+                .unwrap();
+        }
+
+        // Dropping the listener with the socket leaves nothing to reconnect to,
+        // which is what a host that exited looks like from the tab.
+    });
+
+    let (frames_tx, frames) = mpsc::channel();
+
+    let (_downlinks, _) = Downlinks::open(
+        client,
+        Weak::new(),
+        "session-1".into(),
+        Arc::new(move |frame: Value| {
+            let _ = frames_tx.send(frame);
+        }),
+    )
+    .unwrap();
+
+    server.join().unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    let exited = loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+
+        match frames.recv_timeout(remaining) {
+            Ok(frame) if frame["payload"]["type"] == "nmt/host-exited" => break Some(frame),
+            Ok(_) => {}
+            Err(_) => break None,
+        }
+    };
+
+    assert_eq!(
+        exited.expect("the tab must be told the host exited")["payload"]["sessionId"],
+        "session-1"
+    );
+}
+
+#[test]
 fn readiness_waits_for_all_subscriptions_and_delivers_the_opening_history() {
     let client = ApiClient::new("http://127.0.0.1:1".into()).unwrap();
     let frames = RefCell::new(Vec::new());
