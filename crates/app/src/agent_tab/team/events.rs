@@ -1,18 +1,36 @@
 use nmt_agent::team::identity::{MemberId, OperationId, StageId};
+use nmt_agent::team::moderation::ModeratorAction;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct DecisionArguments {
-    pub(super) operation: OperationId,
-    pub(super) stage: StageId,
-    pub(super) action: DecisionAction,
-    pub(super) recipients: Vec<MemberId>,
+    operation: OperationId,
+    stage: StageId,
+    action: DecisionAction,
+    recipients: Vec<MemberId>,
+}
+
+impl DecisionArguments {
+    /// The scheduling action the moderator's `team_decide` call asks for, at
+    /// the stage and operation it names. A report names no recipients, so a
+    /// report that lists some is malformed and asks for nothing.
+    pub(super) fn moderator_action(self) -> Option<(StageId, OperationId, ModeratorAction)> {
+        let action = match self.action {
+            DecisionAction::Invite => ModeratorAction::Invite {
+                recipients: self.recipients,
+            },
+            DecisionAction::Report if self.recipients.is_empty() => ModeratorAction::Report,
+            DecisionAction::Report => return None,
+        };
+
+        Some((self.stage, self.operation, action))
+    }
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum DecisionAction {
+enum DecisionAction {
     Invite,
     Report,
 }
