@@ -1,202 +1,128 @@
 #[cfg(windows)]
 pub(crate) use crate::ui::shell::actions::NewRemoteTab;
-
 pub(crate) use crate::ui::shell::actions::{
     CloseTab, NewAgentTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace, PrevTab,
     PrevWorkspace, QuoteGitLine, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp,
     ReturnFromGit, ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp, ToggleBackgroundTasks,
     ToggleGitSidebar, ToggleSidebar, ToggleWorkflows,
 };
-
 pub(crate) use crate::ui::shell::tab_surface::TabSurface;
 
 pub(super) use crate::ui::shell::inline_rename::{InlineRename, InlineRenameStyle};
-
 pub(super) use crate::ui::shell::rename::InlineRenameSession;
-
 pub(super) use crate::ui::shell::tab_presentation::pending_tab_icon;
 
 pub(crate) mod tab_surface;
 
 mod actions;
-
 mod agent_notifications;
-
 mod inline_rename;
-
 mod panels;
-
 mod rename;
-
 mod render;
-
 mod settings_workspace;
-
 mod tab_presentation;
-
 mod updates_layer;
-
 mod workspace_dirs;
 
 #[cfg(test)]
 mod tests;
 
 use std::borrow::Cow;
-
 use std::path::PathBuf;
-
 use std::rc::Rc;
-
 use std::{collections, io, iter, path, thread, time};
 
 use app::agent_tab::execution::AgentSession;
-
 use app::agent_tab::team::{TeamPane, TeamRuntime};
-
 use app::agent_tab::{AgentPane, AgentPaneEvent, RecoveryIdentity};
-
 use app::terminal_tab::session::HostEvent;
-
 use app::terminal_tab::view::{AgentInterrupted, TerminalGridResized, TerminalPane};
-
 use dirs::home_dir;
-
 use gpui::prelude::*;
-
 use gpui::{
     Anchor, AnyElement, App, Axis, Context, Div, Entity, FocusHandle, Focusable, KeyDownEvent,
     MouseDownEvent, ObjectFit, Pixels, Render, SharedString, Window, WindowBounds, WindowId, div,
     img, px, relative,
 };
-
 use gpui_component::button::{Button, ButtonVariants};
-
 use gpui_component::dialog::{
     DIALOG_BUTTON_MIN_WIDTH, Dialog, DialogAction, DialogButtonProps, DialogClose, DialogFooter,
 };
-
 use gpui_component::input::{Input, InputState};
-
 use gpui_component::modern_menu::{ModernMenu, dispatch_modern_menu_key};
-
 use gpui_component::notification::{Notification, NotificationType};
-
 use gpui_component::progress::Progress;
-
 use gpui_component::resizable::{PANEL_MIN_SIZE, ResizablePanelGroup, resizable_panel};
-
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, IconNamed, Root, StyledExt, TitleBar, WindowExt,
     h_flex, v_flex,
 };
-
 use nmt_agent::team::identity::RoomId;
-
 use nmt_agent::update::{ProviderKind, UpdatePhase};
-
 use nmt_agent::{
     AgentActivityPolicy, AgentEvent, AgentMonitor, AgentNotification, AgentRoute,
     AgentRuntimeStatus, AgentWorkspace, MonitorMutation, agent_process, request_native_delivery,
 };
-
 use nmt_config::appearance::TabShape;
 use nmt_config::local_state::{TabState, WindowState};
-
 use nmt_config::system::WarnBeforeTerminatingShell;
-
 use nmt_config::{config_dir_path, get};
-
 use nmt_platform::window::native_active_state;
-
 use nmt_platform::{
     NativeNotification, remove_notification, show_notification, system_notification_enabled,
 };
-
 use rust_i18n::t;
-
 use tracing::warn;
 
 use crate::agent_updates::{
     AgentUpdates, FocusedVisibleLifetime, NotificationPrimaryAction, NotificationProgress,
     UpdateNotificationTone, UpdateNotificationView,
 };
-
 use crate::agent_usage::AgentUsageView;
-
 use crate::cli::CliAction;
-
 use crate::pane_tree::{PaneId, PaneNode, SplitDirection};
-
 #[cfg(windows)]
 use crate::remote;
-
 use crate::tabs::{Tab, TabId, TabManager};
-
 use crate::ui::background_tasks::BackgroundTasksView;
-
 use crate::ui::composition::{
     FLOATING_SURFACE_SIDE_INSET, TOOLBAR_BUTTON_SIZE, toolbar_button, toolbar_toggle,
 };
-
 use crate::ui::git_sidebar::GitSidebar;
-
 use crate::ui::git_status::{GitStatusModel, GitStatusView};
-
 use crate::ui::persistence::{
     default_session, materialize_active_tab, restore_session, session_state, spawn_default_pane,
 };
-
 use crate::ui::platform_style::{Host, PlatformStyle as _};
-
 use crate::ui::right_panel::{RightPanel, RightPanelKind};
-
 use crate::ui::settings::{AgentProfile, AppSettings, TabBarStyle};
-
 use crate::ui::shell::actions::NewTeamTab;
-
 use crate::ui::shell::agent_notifications::AgentNotificationState;
-
 use crate::ui::shell::panels::RightPanelController;
-
 use crate::ui::shell::render::ShellChrome;
-
 #[cfg(enable_profiling)]
 use crate::ui::shell::settings_workspace::profiling::start_settings_profile;
 use crate::ui::shell::settings_workspace::{SettingsSurface, settings_title};
-
 use crate::ui::shell::tab_surface::{AgentTab, GitTab};
-
 use crate::ui::shell::updates_layer::UpdateNotificationLayer;
-
 use crate::ui::shell::workspace_dirs::{RootAvailability, WorkspaceDirsEditor};
-
 use crate::ui::tab_bar::{TabStrip, VerticalTabList, WorkspaceTabs};
-
 #[cfg(windows)]
 use crate::ui::terminal_launch::attach_remote;
-
 use crate::ui::terminal_layout::TerminalLayout;
-
 use crate::ui::token_usage::TokenUsageView;
-
 use crate::ui::workflows::WorkflowsView;
-
 use crate::ui::workspace_sidebar::{Sidebar, SidebarUsage, WorkspaceChrome};
-
 use crate::ui::{main_view_background_opacity, workspace_sidebar};
-
 #[cfg(windows)]
 use crate::update::check;
-
 use crate::usage_sources::daily_source;
-
 use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
-
 use crate::workspace::{
     ProgressTally, TerminalActivity, WorkspaceId, WorkspaceKind, WorkspaceManager, WorkspaceRoots,
     best_match, exact_match,
 };
-
 use crate::{agent_updates, ui};
 
 /// A workspace cwd as a shell working directory: `None` for empty or the

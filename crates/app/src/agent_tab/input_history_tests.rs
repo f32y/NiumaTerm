@@ -1,44 +1,27 @@
 use std::io::Cursor;
-
 use std::path::{Path, PathBuf};
-
 use std::sync::Arc;
-
 use std::sync::atomic::{AtomicU64, Ordering};
-
 use std::time::SystemTime;
-
 use std::{env, fs, process};
 
 use gpui::{Entity, Image, ImageFormat, TestAppContext, VisualTestContext, WindowHandle};
-
 use image_rs::{DynamicImage, ImageFormat as EncodedImageFormat, RgbaImage};
-
 use nmt_agent::AgentWorkspace;
-
 use nmt_agent::chat::{SendOutcome, SessionSummary, SlashCommandOutcome};
-
 use nmt_agent::codex::app_server;
-
 use nmt_agent::input_history::AgentInputHistory as InputHistoryService;
-
 use nmt_agent::session::lifecycle::StartOutcome;
-
 use nmt_agent::transcript::TextField;
-
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
 use crate::agent_tab::input_history::{
     AgentInputHistory, InputHistoryAction, InputHistoryDirection, InputHistoryNavigation,
     InputHistoryScope,
 };
-
 use crate::agent_tab::session::{Backend, TestBackend};
-
 use crate::agent_tab::settings::AgentSettings;
-
 use crate::agent_tab::tests::deliver_session_event;
-
 use crate::agent_tab::{
     AgentKind, AgentPane, AgentThreadDefaults, PaletteControl, RecentSessionsMode,
     replace_input_with_history,

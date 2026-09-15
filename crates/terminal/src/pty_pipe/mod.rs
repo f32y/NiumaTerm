@@ -7,15 +7,13 @@ pub(crate) mod requests;
 
 mod marks;
 mod powershell_compatibility;
-
 mod session;
 mod write_queue;
 
 #[cfg(test)]
-mod scrollback_tests;
-
-#[cfg(test)]
 mod ghostty_mirror_tests;
+#[cfg(test)]
+mod scrollback_tests;
 
 use std::borrow::Cow;
 use std::collections::VecDeque;

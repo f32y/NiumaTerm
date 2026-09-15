@@ -38,14 +38,12 @@ mod settings;
 mod shell;
 mod sidebar_resize;
 mod tab_bar;
+mod terminal_launch;
 mod terminal_layout;
 mod terminal_status;
-
 mod token_usage;
 mod workflows;
 mod workspace_sidebar;
-
-mod terminal_launch;
 
 #[cfg(test)]
 mod tests;

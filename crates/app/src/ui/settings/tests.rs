@@ -1,33 +1,22 @@
 use std::collections::BTreeSet;
-
 use std::time::Duration;
-
 use std::{fs, io};
 
 use app::agent_tab::AgentKind;
-
 use app::terminal_tab::settings::TerminalSettings;
-
 use gpui::{
     Context, Entity, IntoElement, ListAlignment, ListOffset, ListState, ScrollDelta,
     ScrollWheelEvent, TestAppContext, list, point, size,
 };
-
 use nmt_config::Config;
-
 use nmt_config::appearance::SmoothScrollingMode;
-
 use nmt_config::builtin_themes::{THEMES as BUILTIN_THEMES, get as builtin_theme_source};
-
 use nmt_config::profile::ProfilesConfig;
-
 use nmt_config::theme::Theme as ConfigTheme;
 use nmt_config::theme_catalog::theme_families;
-
 use nmt_platform::default_shell;
 
 use crate::ui::settings::theme::ui_theme_config;
-
 use crate::ui::settings::*;
 
 #[gpui::test]

@@ -5,10 +5,9 @@ pub(super) use crate::agent_tab::transcript::render::text_style::is_dark_surface
 #[cfg(test)]
 pub(super) use crate::agent_tab::transcript::render::text_style::transcript_code_block_style;
 
+pub(super) mod compaction_row;
 pub(super) mod image_preview;
 pub(super) mod text_style;
-
-pub(super) mod compaction_row;
 
 #[cfg(test)]
 mod working_indicator_tests;

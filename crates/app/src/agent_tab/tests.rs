@@ -1,11 +1,8 @@
 use gpui::{App, Context, Entity, TestAppContext};
-
 use nmt_agent::AgentWorkspace;
-
 use nmt_agent::chat::Event;
 
 use crate::agent_tab::session::Backend;
-
 use crate::agent_tab::{AgentPane, GitBranchPoll};
 
 pub(super) fn deliver_session_event(pane: &Entity<AgentPane>, event: Event, cx: &TestAppContext) {

@@ -2,7 +2,6 @@ pub use nmt_platform::clipboard;
 
 pub mod ansi;
 pub mod block_store;
-
 pub mod event;
 pub mod ghostty;
 pub mod graphics;

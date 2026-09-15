@@ -1,11 +1,8 @@
 use std::num::NonZeroIsize;
-
 use std::ptr;
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
 use windows_sys::Win32::Foundation::HWND;
-
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, IsIconic, MB_ICONERROR, MB_OK, MessageBoxW,
 };

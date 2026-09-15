@@ -10,24 +10,22 @@ pub use crate::session::mouse::{
 pub use crate::session::observer::{SessionChange, SessionObserver};
 pub use crate::session::rows::RowText;
 
+pub mod interaction;
 pub mod page;
 pub mod request;
-
-pub mod interaction;
 
 pub(crate) mod selection;
 
 mod blocks;
-
-mod rows;
-
 mod config;
 mod error;
-
 mod mouse;
 mod observer;
 mod proxy;
+mod rows;
 
+#[cfg(test)]
+mod block_tests;
 #[cfg(test)]
 mod interaction_tests;
 #[cfg(test)]
@@ -38,9 +36,6 @@ mod state_tests;
 mod tests;
 #[cfg(test)]
 mod vtebench_tests;
-
-#[cfg(test)]
-mod block_tests;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;

@@ -9,10 +9,9 @@ pub(crate) mod pending_requests;
 mod input;
 
 #[cfg(test)]
-mod tests;
-
-#[cfg(test)]
 mod output_tests;
+#[cfg(test)]
+mod tests;
 
 use std::io::{BufRead, BufReader, Write as _};
 use std::process::{Child, Command, Stdio};

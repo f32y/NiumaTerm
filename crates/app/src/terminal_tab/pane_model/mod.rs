@@ -1,101 +1,62 @@
 pub(super) use crate::terminal_tab::pane_model::settings::FrameTheme;
 
 pub(super) mod frame_cache;
-
 pub(super) mod frame_record;
-
-pub(super) mod key_action;
-
 pub(super) mod frozen_hit_map;
-
+pub(super) mod key_action;
 pub(super) mod list_mirror;
-
 pub(super) mod mouse;
-
 pub(super) mod scroll;
-
 pub(super) mod selection_geometry;
-
 pub(super) mod viewport;
 
-mod settings;
-
 mod blocks;
-
 mod links;
-
 mod scrollbar_activity;
+mod settings;
 
 #[cfg(test)]
 pub(super) mod test_session;
-
 #[cfg(test)]
 mod tests;
 
 use nmt_config::colors::Colors;
-
 use nmt_input::keyboard::ModifiersState;
-
 use nmt_terminal::input::{TerminalKey, WheelDelta};
-
 use nmt_terminal::links::{follows_link, resolve_link};
-
 use nmt_terminal::selection::SelectionType;
-
 use nmt_terminal::session::interaction::{
     CopyCompletion, InputOutcome, TerminalInteraction, selection_type_for_click_count,
 };
-
 use nmt_terminal::session::{
     HostEvent, InFlightBlock, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
 };
 
 use crate::terminal_tab::block_list::ITEM_PAD_ROWS;
-
 use crate::terminal_tab::block_list::chrome::DurationLabels;
-
 use crate::terminal_tab::block_list::{
     BlockListPoint, block_list_active_top_px, block_list_render_metrics, nav_item_top,
 };
-
 use crate::terminal_tab::dirty::DirtyState;
-
 use crate::terminal_tab::frame::TerminalFrame;
-
 use crate::terminal_tab::frame_source::TerminalFrameSource;
-
 use crate::terminal_tab::layout::{bottom_anchor_offsets, frame_content_rows};
-
 use crate::terminal_tab::metrics::CellMetrics;
-
 use crate::terminal_tab::pane_model::blocks::ListPlan;
-
 use crate::terminal_tab::pane_model::frame_cache::TerminalFrameCache;
-
 use crate::terminal_tab::pane_model::frame_record::FrameRecord;
-
 use crate::terminal_tab::pane_model::frozen_hit_map::FrozenHitMap;
-
 use crate::terminal_tab::pane_model::key_action::{KeyOutcome, TextInput};
-
 use crate::terminal_tab::pane_model::links::{LinkHit, LinkHover};
-
 use crate::terminal_tab::pane_model::list_mirror::{BlockListMirror, ListOp, ListPosition};
-
 use crate::terminal_tab::pane_model::mouse::{
     MouseInput, MouseOutcome, MouseRelease, WheelOutcome,
 };
-
 use crate::terminal_tab::pane_model::scroll::ScrollOutcome;
-
 use crate::terminal_tab::pane_model::scrollbar_activity::ScrollbarActivity;
-
 use crate::terminal_tab::pane_model::selection_geometry::selection_drag_started;
-
 use crate::terminal_tab::pane_model::settings::{CursorShapeFailure, CursorShapeUpdate};
-
 use crate::terminal_tab::pane_model::viewport::{LocalPoint, LocalRect, Viewport};
-
 use crate::terminal_tab::settings::TerminalSettings;
 
 pub(super) trait ClipboardAccess {

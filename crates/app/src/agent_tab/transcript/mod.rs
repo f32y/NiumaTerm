@@ -20,7 +20,6 @@ mod code;
 mod disclosure_row;
 mod format;
 mod incremental;
-
 mod render;
 mod reveal;
 mod rows;
@@ -34,7 +33,6 @@ mod profiling_disabled_tests;
 #[cfg(all(test, enable_profiling))]
 #[path = "profiling/tests.rs"]
 mod profiling_tests;
-
 #[cfg(test)]
 mod tests;
 

@@ -3,34 +3,22 @@ use std::time::SystemTime;
 use gpui::{
     App, AppContext as _, Context, Entity, TestAppContext, VisualTestContext, WindowHandle,
 };
-
 use gpui_component::Root;
-
 use nmt_agent::AgentWorkspace;
-
 use nmt_agent::chat::{
     Event, ForkAnchor, ForkCheckpoint, Item, ReplayItem, ReplayTurn, SessionSummary,
     SlashCommandOutcome, ThreadSettings,
 };
-
 use nmt_agent::claude_code::sessions::{ClaudeCheckpoint, ClaudeFork, FileRestoreAvailability};
-
 use nmt_agent::session::branch::{BranchUpdate, RewindAction};
-
 use nmt_agent::session::lifecycle::{StartOutcome, Status};
-
 use nmt_agent::session::test_support::TestBackend;
-
 use nmt_agent::session::{AgentKind, Backend};
-
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
-
 use rust_i18n::t;
 
 use crate::agent_tab::settings::AgentSettings;
-
 use crate::agent_tab::tests::deliver_session_event;
-
 use crate::agent_tab::{AgentPane, AgentThreadDefaults, RecentSessionsMode};
 
 fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>) {

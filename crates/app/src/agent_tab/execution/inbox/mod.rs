@@ -1,6 +1,5 @@
 #[cfg(test)]
 mod inbox_tests;
-
 #[cfg(test)]
 mod output_tests;
 

@@ -7,7 +7,6 @@ pub use crate::codex::update::CodexMaintenance;
 
 #[cfg(test)]
 mod coordinator_tests;
-
 #[cfg(test)]
 mod tests;
 

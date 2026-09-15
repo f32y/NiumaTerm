@@ -8,9 +8,6 @@ pub(super) use crate::terminal_tab::frame::line::{
 };
 
 mod colors;
-mod images;
-mod line;
-
 /// Full-pipeline performance profile (manual, release-only). Puts every stage of
 /// a fast-scrollback frame on ONE scale so engine-side costs can be compared
 /// against the real render-thread cost.
@@ -32,6 +29,8 @@ mod line;
 /// GPU submission is excluded (GPUI's own bench harness excludes it off-macOS).
 #[cfg(all(test, enable_profiling))]
 mod full_frame_profile;
+mod images;
+mod line;
 
 #[cfg(test)]
 mod tests;

@@ -6,15 +6,10 @@ pub(crate) mod login_shell;
 mod tests;
 
 use std::ffi::{CStr, CString, IntoStringError, OsStr};
-
 use std::fmt::{self, Display, Formatter};
-
 use std::mem::{MaybeUninit, size_of_val};
-
 use std::os::raw::c_int;
-
 use std::path::{Path, PathBuf};
-
 use std::{error, io, ptr};
 
 use libc::{__error, c_void};

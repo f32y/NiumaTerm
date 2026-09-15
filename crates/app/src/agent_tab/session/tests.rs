@@ -2,19 +2,13 @@ use nmt_agent::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRegistry,
     BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskUpdate,
 };
-
 use nmt_agent::chat::ThreadSettings;
-
 use nmt_agent::session::ConversationTitleRequest;
-
 use nmt_agent::session::children::scoped_background_tasks;
-
 use nmt_agent::session::naming::conversation_title_request as build_title_request;
-
 use nmt_agent::session::settings::resolve_ready_settings;
 
 use crate::agent_tab::session::{directories_match, directory_label};
-
 use crate::agent_tab::{AgentKind, tab_title_from_prompt};
 
 fn snapshot_for(parent: BackgroundTaskKey) -> BackgroundTaskSnapshot {
