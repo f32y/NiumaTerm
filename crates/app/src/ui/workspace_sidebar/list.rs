@@ -23,9 +23,9 @@ use crate::ui::fluent::{SELECTION_BAR_HEIGHT, SELECTION_BAR_RADIUS, SELECTION_BA
 use crate::ui::shell::{InlineRename, InlineRenameSession, InlineRenameStyle};
 use crate::ui::tab_bar::{accept_row_drops, new_tab_menu};
 use crate::ui::workspace_sidebar::drag::{WorkspaceDrag, WorkspaceDragPreview};
+use crate::ui::workspace_sidebar::status::WorkspaceStatus;
 use crate::ui::workspace_sidebar::{
     SELECTION_BAR_INSET, SIDEBAR_ROW_GUTTER, WORKSPACE_NAME_INSET, WorkspaceChrome,
-    workspace_status_glyphs,
 };
 use crate::ui::{AppSettings, Shell, UI_RADIUS, modern_dropdown};
 use crate::workspace::WorkspaceKind;
@@ -163,29 +163,18 @@ impl WorkspaceList {
 
         let highlight_active = ws.active && !vertical_tabs;
 
-        let (glyphs, status_label) = workspace_status_glyphs(
-            chrome.agent.status,
-            chrome.terminal_activity,
-            ("workspace-busy", idx),
-            cx,
-        );
+        let status = WorkspaceStatus {
+            agent: chrome.agent.status,
+            terminal: chrome.terminal_activity,
+        };
+
+        let status_label = status.label();
 
         // Runtime marks share the trailing controls so names keep a stable
         // leading edge in both tab layouts, including idle workspaces.
         let indicator = (!vertical_tabs).then(|| {
-            v_flex()
-                .id(("workspace-status", idx))
-                // The column's width is fixed so an idle workspace can suppress
-                // its glyphs without shifting its name relative to active
-                // neighbours; the height follows its contents so a stacked pair
-                // centers as a group and a lone glyph centers on its own.
-                .w_4()
-                .flex_none()
-                .gap_0p5()
-                .items_center()
-                .justify_center()
-                .aria_label(status_label.clone())
-                .children(glyphs)
+            status
+                .column(("workspace-status", idx), ("workspace-busy", idx), cx)
                 .into_any_element()
         });
 

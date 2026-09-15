@@ -2,7 +2,7 @@ use nmt_agent::AgentRuntimeStatus;
 
 use crate::tabs::CommandOutcome;
 use crate::ui::terminal_status::terminal_presentation;
-use crate::ui::workspace_sidebar::{AgentVisual, agent_presentation, status_column_label};
+use crate::ui::workspace_sidebar::status::{AgentVisual, agent_presentation, status_column_label};
 use crate::workspace::TerminalActivity;
 
 #[test]
