@@ -48,6 +48,66 @@ pub fn scoped_background_tasks<'a>(
 }
 
 impl ChildAgents {
+    /// The held snapshot, when it was produced for `parent`.
+    pub fn scoped(&self, parent: Option<&BackgroundTaskKey>) -> Option<&BackgroundTaskSnapshot> {
+        scoped_background_tasks(parent, self.background_tasks.as_ref())
+    }
+
+    /// Child `key`'s conversation, withheld with the snapshot when that
+    /// snapshot belongs to a session other than `parent`.
+    pub fn transcript(
+        &self,
+        parent: Option<&BackgroundTaskKey>,
+        key: &BackgroundTaskKey,
+    ) -> Option<&ChildTranscript> {
+        self.scoped(parent)?;
+
+        self.transcripts.get(key)
+    }
+
+    /// The children `parent` shows, and how many of them are still active.
+    pub fn activity(&self, parent: Option<&BackgroundTaskKey>) -> (usize, usize) {
+        self.scoped(parent)
+            .map_or((0, 0), |tasks| (tasks.tasks.len(), tasks.active_count()))
+    }
+
+    /// Take a replacement snapshot, reporting whether the activity `parent`
+    /// shows changed. The chrome shows those counts, so it is told on a
+    /// change rather than on every republished snapshot.
+    pub(crate) fn set_snapshot(
+        &mut self,
+        parent: Option<&BackgroundTaskKey>,
+        snapshot: BackgroundTaskSnapshot,
+    ) -> bool {
+        let before = self.activity(parent);
+
+        self.background_tasks = Some(snapshot);
+
+        self.activity(parent) != before
+    }
+
+    /// Apply `update` to child `key`'s conversation, starting one for a child
+    /// not seen before. Returns whether the conversation changed.
+    pub(crate) fn apply_transcript(
+        &mut self,
+        key: BackgroundTaskKey,
+        update: BackgroundTaskTranscriptUpdate,
+    ) -> bool {
+        self.transcripts.entry(key).or_default().apply(update)
+    }
+
+    /// Drop the snapshot and every child conversation. Readers may still
+    /// hold a child's shared conversation, so each is emptied in place too.
+    pub(crate) fn clear(&mut self) {
+        self.background_tasks = None;
+
+        for child in self.transcripts.values() {
+            child.conversation.borrow_mut().clear();
+        }
+
+        self.transcripts.clear();
+    }
+
     pub fn claim_restore(&mut self, session_id: &str) -> bool {
         if self.restored_session.as_deref() == Some(session_id) {
             return false;
