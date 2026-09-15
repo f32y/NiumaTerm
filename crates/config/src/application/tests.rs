@@ -50,6 +50,7 @@ fn sample_appearance() -> AppearanceConfig {
         agent_transcript_font_size: 12.5,
         reduce_motion: true,
         human_friendly_agent_ui_layout: false,
+        tab_shape: appearance::TabShape::Rounded,
     }
 }
 

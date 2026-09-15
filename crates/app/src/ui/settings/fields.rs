@@ -1,15 +1,19 @@
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    App, AppContext as _, Entity, FileDialogFilter, ParentElement as _, PathPromptOptions,
-    SharedString, Styled as _, Subscription, div,
+    App, AppContext as _, Entity, FileDialogFilter, IntoElement, ParentElement as _,
+    PathPromptOptions, SharedString, Styled as _, Subscription, Window, div, px,
 };
 use gpui_component::button::Button;
+use gpui_component::searchable_list::{SearchableListItem, SearchableVec};
+use gpui_component::select::{Select, SelectEvent, SelectState};
 use gpui_component::setting::SettingField;
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
-use gpui_component::{ActiveTheme as _, AxisExt as _, Disableable as _, h_flex};
+use gpui_component::{ActiveTheme as _, AxisExt as _, Disableable as _, h_flex, v_flex};
+use nmt_config::appearance::TabShape;
 use rust_i18n::t;
 
 use crate::ui::settings::state::AppSettings;
+use crate::ui::tab_bar::tab_shape_preview;
 
 #[derive(Clone, Copy)]
 enum OpacityTarget {
@@ -189,5 +193,85 @@ pub(super) fn background_image_field() -> SettingField<SharedString> {
                             .edit_appearance(|section| section.background_image = None);
                     })
             }))
+    })
+}
+
+#[derive(Clone)]
+struct TabShapeItem(TabShape);
+
+impl SearchableListItem for TabShapeItem {
+    type Value = TabShape;
+
+    /// Read from the catalog on each call, so the rows follow a language
+    /// switch made while the picker's state is kept alive.
+    fn title(&self) -> SharedString {
+        match self.0 {
+            TabShape::Rounded => t!("settings-appearance-tab-shape-rounded"),
+            TabShape::Attached => t!("settings-appearance-tab-shape-attached"),
+        }
+        .into()
+    }
+
+    fn value(&self) -> &TabShape {
+        &self.0
+    }
+
+    fn render(&self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        v_flex()
+            .w_full()
+            .gap_1()
+            .py_1()
+            .child(self.title())
+            .child(tab_shape_preview(self.0, cx))
+    }
+}
+
+type TabShapeSelectState = SelectState<SearchableVec<TabShapeItem>>;
+
+struct TabShapePicker {
+    select: Entity<TabShapeSelectState>,
+    _confirm: Subscription,
+}
+
+/// Wide enough for the two preview tabs and the rounded strip's gaps beside
+/// the row's check mark.
+const TAB_SHAPE_MENU_WIDTH: f32 = 280.0;
+
+pub(super) fn tab_shape_field() -> SettingField<SharedString> {
+    SettingField::render(|options, window, cx| {
+        let picker = window.use_keyed_state("tab-shape-picker", cx, |window, cx| {
+            let items = vec![
+                TabShapeItem(TabShape::Rounded),
+                TabShapeItem(TabShape::Attached),
+            ];
+
+            let select = cx.new(|cx| SelectState::new(SearchableVec::new(items), None, window, cx));
+
+            let confirm = cx.subscribe(&select, |_, _, event: &SelectEvent<_>, cx| {
+                if let SelectEvent::Confirm(Some(shape)) = event {
+                    cx.global_mut::<AppSettings>()
+                        .edit_appearance(|section| section.tab_shape = *shape);
+                }
+            });
+
+            TabShapePicker {
+                select,
+                _confirm: confirm,
+            }
+        });
+
+        let select = picker.read(cx).select.clone();
+
+        // A config reload or another window can change the shape while this
+        // picker's state lives on, so the selection is reconciled every render.
+        let shape = cx.global::<AppSettings>().config().appearance.tab_shape;
+
+        if select.read(cx).selected_value() != Some(&shape) {
+            select.update(cx, |state, cx| state.set_selected_value(&shape, window, cx));
+        }
+
+        Select::new(&select)
+            .menu_width(px(TAB_SHAPE_MENU_WIDTH))
+            .when(options.layout().is_vertical(), |this| this.w_full())
     })
 }

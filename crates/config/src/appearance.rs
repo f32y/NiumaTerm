@@ -102,6 +102,18 @@ pub enum TabBarStyle {
     Vertical,
 }
 
+/// How each tab in the horizontal strip is drawn.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum TabShape {
+    /// Pills with four rounded corners floating on the title bar, apart from
+    /// the content below them.
+    #[default]
+    Rounded,
+    /// Tabs with rounded top corners that rest on the content edge.
+    Attached,
+}
+
 /// The window backdrop material. Acrylic honors the opacity slider; the Mica
 /// variants hand the chrome entirely to DWM, and Off keeps the window opaque.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -416,6 +428,10 @@ pub struct AppearanceConfig {
         rename = "human-friendly-agent-ui-layout"
     )]
     pub human_friendly_agent_ui_layout: bool,
+
+    /// Corner style of the tabs in the horizontal strip.
+    #[serde(default, rename = "tab-shape")]
+    pub tab_shape: TabShape,
 }
 
 fn default_command_blocks() -> bool {
@@ -457,6 +473,7 @@ impl Default for AppearanceConfig {
             agent_transcript_font_size: default_agent_transcript_font_size(),
             reduce_motion: false,
             human_friendly_agent_ui_layout: true,
+            tab_shape: TabShape::default(),
         }
     }
 }
