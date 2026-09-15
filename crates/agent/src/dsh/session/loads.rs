@@ -18,8 +18,8 @@ use crate::dsh::events::session_address;
 use crate::dsh::models::ModelDirectory;
 use crate::dsh::session::{
     COMMANDS_FRAME, FORK_CHECKPOINT_MESSAGES, FORK_CHECKPOINTS_FRAME, HISTORY_FRAME, MODELS_FRAME,
-    PRESETS_FRAME, REPLAY_MESSAGES, SEARCH_FRAME, SKILLS_FRAME, SUBAGENT_TRANSCRIPT_FRAME,
-    SUBAGENTS_FRAME, WORKFLOW_TRANSCRIPT_FRAME,
+    OpenedConversation, PRESETS_FRAME, REPLAY_MESSAGES, SEARCH_FRAME, SKILLS_FRAME,
+    SUBAGENT_TRANSCRIPT_FRAME, SUBAGENTS_FRAME, WORKFLOW_TRANSCRIPT_FRAME,
 };
 use crate::dsh::{commands, events, frames, history};
 
@@ -70,6 +70,59 @@ pub(super) fn failed_read_events(payload: &Value, session_id: &str) -> Option<Ve
     }));
 
     Some(events)
+}
+
+/// The model a profile starts its conversations on.
+pub(super) struct ModelProfile {
+    pub(super) model: Option<String>,
+    pub(super) effort: Option<String>,
+
+    /// Whether that model is declared image-capable in the provider's
+    /// configured catalog when a conversation starts.
+    pub(super) declares_image_input: bool,
+}
+
+/// Read what a conversation just opened or reattached to offers: its model
+/// directory with `profile`'s pick applied, the session list, its commands,
+/// skills and agent presets. Each is scoped to the session rather than the
+/// tab, since a resumed conversation may have been composed from a different
+/// preset or rooted elsewhere, so every open asks afresh. The session list is
+/// read now rather than when the picker opens, because the picker refuses to
+/// open on an empty list and cannot wait for one.
+pub(super) fn load_conversation(
+    client: &ApiClient,
+    opened: &OpenedConversation,
+    preset_refusal: Option<String>,
+    cwd: Option<String>,
+    snapshot: &Value,
+    profile: &ModelProfile,
+    deliver: &Arc<dyn Fn(Value) + Send + Sync>,
+) {
+    let session_id = &opened.session_id;
+
+    load_models(
+        client.clone(),
+        session_id.clone(),
+        snapshot["projections"]["values"]["modelSelection"]["next"].clone(),
+        profile.model.clone(),
+        profile.effort.clone(),
+        profile.declares_image_input,
+        Arc::clone(deliver),
+    );
+
+    load_sessions(client.clone(), cwd, Arc::clone(deliver));
+
+    load_commands(client.clone(), session_id.clone(), Arc::clone(deliver));
+
+    load_skills(client.clone(), session_id.clone(), Arc::clone(deliver));
+
+    load_agent_presets(
+        client.clone(),
+        session_id.clone(),
+        opened.agent_preset.clone(),
+        preset_refusal,
+        Arc::clone(deliver),
+    );
 }
 
 /// Read the conversations this tab's directory can continue.
@@ -257,7 +310,7 @@ pub(super) fn load_skills(
 /// conversation composed from another preset has to move the picker with it.
 /// `refusal` travels with them because it explains why `current` is not the
 /// preset that was asked for.
-pub(super) fn load_agent_presets(
+fn load_agent_presets(
     client: ApiClient,
     session_id: String,
     current: Option<String>,
@@ -387,7 +440,7 @@ pub(super) fn load_fork_checkpoints(
 /// and a tab must not wait on a slow provider before it can be typed in. The
 /// selection is applied here rather than reported and applied later, so what
 /// the pane displays is what the harness will actually route.
-pub(super) fn load_models(
+fn load_models(
     client: ApiClient,
     session_id: String,
     selected: Value,

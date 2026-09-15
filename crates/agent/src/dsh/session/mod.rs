@@ -38,9 +38,7 @@ use crate::dsh::mapping::{self, ApprovalRequest, QuestionRequest, ToolTracker};
 use crate::dsh::models::ModelDirectory;
 use crate::dsh::projections::ProjectionTracker;
 use crate::dsh::session::controls::{COMPLETED_FRAME, Controls, question_id};
-use crate::dsh::session::loads::{
-    failed_read_events, load_agent_presets, load_commands, load_models, load_sessions, load_skills,
-};
+use crate::dsh::session::loads::{ModelProfile, failed_read_events, load_conversation};
 use crate::dsh::workflows::WorkflowTracker;
 use crate::dsh::{commands, frames, history, presets, subagents};
 use crate::workspace::AgentWorkspace;
@@ -67,16 +65,9 @@ pub struct Session {
     /// because that is the only path that wakes the tab.
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 
-    /// The profile's model and effort, reapplied to a conversation this tab
+    /// The profile's model pick, reapplied to a conversation this tab
     /// continues later: the directory belongs to the session, not to the tab.
-    model: Option<String>,
-
-    effort: Option<String>,
-
-    /// Whether that model is declared image-capable in the provider's
-    /// configured catalog when a conversation starts. Kept for the same reason
-    /// the model is: a resumed conversation reads its directory afresh.
-    declares_image_input: bool,
+    profile: ModelProfile,
 
     /// The turn state this side knows about, so a stop is only offered while a
     /// turn is actually running.
@@ -342,7 +333,7 @@ impl Session {
                     ))
                 })?;
 
-        let session_id = opened.session_id;
+        let session_id = opened.session_id.clone();
 
         // Opening the downlinks after the session exists means its first frames
         // cannot be missed: the stream replays a baseline for every attached
@@ -357,30 +348,20 @@ impl Session {
         )
         .map_err(HostError::FailedToStart)?;
 
-        load_models(
-            client.clone(),
-            session_id.clone(),
-            snapshot["projections"]["values"]["modelSelection"]["next"].clone(),
-            launch.model.clone(),
-            launch.effort.clone(),
-            launch.declares_image_input,
-            Arc::clone(&deliver),
-        );
+        let profile = ModelProfile {
+            model: launch.model.clone(),
+            effort: launch.effort.clone(),
+            declares_image_input: launch.declares_image_input,
+        };
 
-        // The list is read now rather than when the picker opens, because the
-        // picker refuses to open on an empty list and cannot wait for one.
-        load_sessions(client.clone(), cwd.clone(), Arc::clone(&deliver));
-
-        load_commands(client.clone(), session_id.clone(), Arc::clone(&deliver));
-
-        load_skills(client.clone(), session_id.clone(), Arc::clone(&deliver));
-
-        load_agent_presets(
-            client.clone(),
-            session_id.clone(),
-            opened.agent_preset,
+        load_conversation(
+            &client,
+            &opened,
             preset_refusal,
-            Arc::clone(&deliver),
+            cwd.clone(),
+            &snapshot,
+            &profile,
+            &deliver,
         );
 
         Ok(Self {
@@ -392,9 +373,7 @@ impl Session {
             host,
             _downlinks: downlinks,
             deliver,
-            model: launch.model.clone(),
-            effort: launch.effort.clone(),
-            declares_image_input: launch.declares_image_input,
+            profile,
             running: false,
             queued_prompt_ids: Vec::new(),
             pending_approval: None,
@@ -430,7 +409,7 @@ impl Session {
                     }
                 };
 
-                self.session_id = opened.session_id;
+                self.session_id = opened.session_id.clone();
 
                 self.controls.clear();
 
@@ -453,45 +432,14 @@ impl Session {
 
                 self.workflows = WorkflowTracker::default();
 
-                // The directory belongs to the session, so the resumed one is
-                // asked afresh and the profile's pick applied to it in turn.
-                load_models(
-                    self.client.clone(),
-                    self.session_id.clone(),
-                    snapshot["projections"]["values"]["modelSelection"]["next"].clone(),
-                    self.model.clone(),
-                    self.effort.clone(),
-                    self.declares_image_input,
-                    Arc::clone(&self.deliver),
-                );
-
-                load_sessions(
-                    self.client.clone(),
-                    self.cwd.clone(),
-                    Arc::clone(&self.deliver),
-                );
-
-                // Commands and skills are scoped to the agent and its project,
-                // and a resumed conversation may have been composed from a
-                // different preset or rooted elsewhere.
-                load_commands(
-                    self.client.clone(),
-                    self.session_id.clone(),
-                    Arc::clone(&self.deliver),
-                );
-
-                load_skills(
-                    self.client.clone(),
-                    self.session_id.clone(),
-                    Arc::clone(&self.deliver),
-                );
-
-                load_agent_presets(
-                    self.client.clone(),
-                    self.session_id.clone(),
-                    opened.agent_preset,
+                load_conversation(
+                    &self.client,
+                    &opened,
                     None,
-                    Arc::clone(&self.deliver),
+                    self.cwd.clone(),
+                    &snapshot,
+                    &self.profile,
+                    &self.deliver,
                 );
 
                 true
