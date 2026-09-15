@@ -1,3 +1,5 @@
+mod env;
+
 #[cfg(test)]
 #[path = "agent_profile_dialog_tests.rs"]
 mod tests;
@@ -5,11 +7,12 @@ mod tests;
 use std::borrow::Cow;
 
 use app::agent_tab::AgentKind;
-use gpui::{AppContext as _, ClickEvent, Context, Entity, IntoElement, Render};
+use gpui::{AppContext as _, Context, Entity, IntoElement, Render};
 use gpui_component::dialog::Dialog;
 use gpui_component::input::InputState;
 use rust_i18n::t;
 
+use crate::ui::settings::agent_profile_dialog::env::EnvVarEditor;
 use crate::ui::settings::*;
 
 /// Reasoning-effort choices a profile can pin. `default` is stored as an
@@ -57,13 +60,6 @@ fn cache_warn_label(minutes: u32) -> Cow<'static, str> {
     }
 }
 
-/// Which half of an environment-variable row is open for editing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EnvField {
-    Name,
-    Value,
-}
-
 /// Draft edited in the agent-profile dialog: `target` is the list index in
 /// edit mode, `None` while adding. Inputs write here; only Save commits the
 /// draft into `AppSettings`, so Cancel is a plain close.
@@ -72,10 +68,7 @@ struct AgentProfileDraft {
     target: Option<usize>,
     profile: AgentProfile,
 
-    /// Environment-variable cell currently open for editing. The table shows
-    /// plain text until a cell is double-clicked, so only one input exists at
-    /// a time and the rows stay readable.
-    editing_env: Option<(usize, EnvField)>,
+    env_editor: EnvVarEditor,
 }
 
 impl Render for AgentProfileDraft {
@@ -108,7 +101,7 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
     let draft = cx.new(|_| AgentProfileDraft {
         target,
         profile,
-        editing_env: None,
+        env_editor: EnvVarEditor::default(),
     });
 
     window.open_dialog(cx, move |dialog, window, _| {
@@ -242,193 +235,46 @@ fn draft_text_input(
     )
 }
 
-/// One editable cell of the environment-variable table. It shows plain text
-/// until double-clicked, then swaps in an input that writes straight into the
-/// draft; leaving the field closes the editor, so there is nothing to commit.
-fn env_cell(
-    row: usize,
-    field: EnvField,
-    text: &str,
-    placeholder: Cow<'static, str>,
-    editing: bool,
-    window: &mut Window,
-    cx: &mut Context<AgentProfileDraft>,
+/// A picker of `options` for one draft field, labelled with the current
+/// choice. `is_selected` marks the checked option, and `apply` writes a picked
+/// option into the draft.
+fn draft_choice<T: Copy + 'static>(
+    id: &'static str,
+    label: impl Into<SharedString>,
+    options: Vec<(T, SharedString)>,
+    is_selected: impl Fn(T) -> bool + 'static,
+    apply: impl Fn(&mut AgentProfileDraft, T) + Copy + 'static,
+    cx: &Context<AgentProfileDraft>,
 ) -> AnyElement {
-    let key = match field {
-        EnvField::Name => "name",
-        EnvField::Value => "value",
-    };
+    let owner = cx.weak_entity();
 
-    if editing {
-        let input = draft_text_input(
-            format!("agent-profile-dialog-env-{row}-{key}"),
-            text.to_string().into(),
-            move |draft, value| {
-                if let Some(var) = draft.profile.env.get_mut(row) {
-                    match field {
-                        EnvField::Name => var.name = value,
-                        EnvField::Value => var.value = value,
-                    }
-                }
-            },
-            window,
-            cx,
-        );
+    Button::new(id)
+        .outline()
+        .w_64()
+        .label(label)
+        .dropdown_caret(true)
+        .dropdown_menu(move |menu, _, cx| {
+            let Some(owner) = owner.upgrade() else {
+                return menu;
+            };
 
-        // Enter and clicking away end the edit. The value is already in the
-        // draft, so closing the editor is all that is left to do. The
-        // subscription is held in its own keyed slot, which lives exactly as
-        // long as this cell is the one being edited.
-        let draft = cx.weak_entity();
-        let subscribed_input = input.clone();
+            owner.update(cx, |_, cx| {
+                options.iter().fold(menu, |menu, (option, label)| {
+                    let option = *option;
 
-        window.use_keyed_state(
-            format!("agent-profile-dialog-env-{row}-{key}-close"),
-            cx,
-            move |_, cx| {
-                cx.subscribe(&subscribed_input, move |_, _, event: &InputEvent, cx| {
-                    if matches!(event, InputEvent::Blur | InputEvent::PressEnter { .. }) {
-                        let _ = draft.update(cx, |draft, cx| {
-                            draft.editing_env = None;
+                    menu.item(
+                        PopupMenuItem::new(label.clone())
+                            .checked(is_selected(option))
+                            .on_click(cx.listener(move |draft, _, _, cx| {
+                                apply(draft, option);
 
-                            cx.notify();
-                        });
-                    }
+                                cx.notify();
+                            })),
+                    )
                 })
-            },
-        );
-
-        // The cell is rendered because the user just asked to edit it, so the
-        // caret belongs here without a second click.
-        input.update(cx, |input, cx| input.focus(window, cx));
-
-        return div()
-            .flex_1()
-            .min_w_0()
-            .child(
-                Input::new(&input)
-                    .xsmall()
-                    .appearance(false)
-                    .p_0()
-                    .text_sm(),
-            )
-            .into_any_element();
-    }
-
-    let empty = text.trim().is_empty();
-
-    let label = if empty {
-        placeholder.to_string()
-    } else {
-        text.to_string()
-    };
-
-    div()
-        .id(("env-cell", row * 2 + field as usize))
-        .flex_1()
-        .min_w_0()
-        .truncate()
-        .text_sm()
-        .when(empty, |this| {
-            this.text_color(cx.theme().muted_foreground.opacity(0.6))
+            })
         })
-        .child(label)
-        .on_click(cx.listener(move |draft, event: &ClickEvent, _, cx| {
-            if event.click_count() == 2 {
-                draft.editing_env = Some((row, field));
-
-                cx.notify();
-            }
-        }))
         .into_any_element()
-}
-
-/// The environment variables of the draft as a Name / Value / Operation
-/// table, matching the agent-profile table on the Profiles page.
-fn env_var_table(
-    env: &[EnvVar],
-    editing: Option<(usize, EnvField)>,
-    window: &mut Window,
-    cx: &mut Context<AgentProfileDraft>,
-) -> AnyElement {
-    let mut table = table_frame(cx).child(
-        table_header(cx)
-            .child(div().flex_1().min_w_0().child(t!("settings-common-name")))
-            .child(div().flex_1().min_w_0().child(t!("settings-common-value")))
-            .child(
-                div()
-                    .w(ENV_OPERATION_COLUMN)
-                    .flex_none()
-                    .text_right()
-                    .child(t!("settings-common-operation")),
-            ),
-    );
-
-    if env.is_empty() {
-        return table
-            .child(
-                table_row(false, cx)
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(t!("settings-agent-profile-no-variables")),
-            )
-            .into_any_element();
-    }
-
-    for (row, var) in env.iter().enumerate() {
-        let ruled = row + 1 < env.len();
-
-        table = table.child(
-            table_row(ruled, cx)
-                .child(env_cell(
-                    row,
-                    EnvField::Name,
-                    &var.name,
-                    t!("settings-common-name"),
-                    editing == Some((row, EnvField::Name)),
-                    window,
-                    cx,
-                ))
-                .child(env_cell(
-                    row,
-                    EnvField::Value,
-                    &var.value,
-                    t!("settings-common-value"),
-                    editing == Some((row, EnvField::Value)),
-                    window,
-                    cx,
-                ))
-                .child(
-                    h_flex()
-                        .w(ENV_OPERATION_COLUMN)
-                        .flex_none()
-                        .justify_end()
-                        .child(
-                            // Removing a row the user can still cancel out of
-                            // by closing the dialog needs no confirmation.
-                            Button::new(format!("agent-profile-dialog-env-remove-{row}"))
-                                .ghost()
-                                .with_size(TABLE_OPERATION_BUTTON)
-                                .icon(TrashIcon)
-                                .accessibility_label(t!("settings-common-delete"))
-                                .tooltip(t!("settings-common-delete"))
-                                .on_click(cx.listener(move |draft, _, _, cx| {
-                                    if row < draft.profile.env.len() {
-                                        draft.profile.env.remove(row);
-                                    }
-
-                                    // Indices shift under the editor, so the open
-                                    // cell would follow the wrong variable.
-                                    draft.editing_env = None;
-
-                                    cx.notify();
-                                })),
-                        ),
-                ),
-        );
-    }
-
-    table.into_any_element()
 }
 
 fn agent_profile_dialog_content(
@@ -499,35 +345,18 @@ fn agent_profile_dialog_content(
         // front of the user; a hand-written list here is why one could be
         // selectable everywhere else and still impossible to create.
         let current = profile.kind;
-        let owner = cx.weak_entity();
 
-        Button::new("agent-profile-dialog-kind")
-            .outline()
-            .w_64()
-            .label(kind_label)
-            .dropdown_caret(true)
-            .dropdown_menu(move |menu, _, cx| {
-                let Some(owner) = owner.upgrade() else {
-                    return menu;
-                };
-
-                owner.update(cx, |_, cx| {
-                    AgentKind::ALL.into_iter().fold(menu, |menu, kind| {
-                        let profile_kind = kind;
-
-                        menu.item(
-                            PopupMenuItem::new(agent_kind_display_label(profile_kind))
-                                .checked(profile_kind == current)
-                                .on_click(cx.listener(move |draft, _, _, cx| {
-                                    select_profile_kind(draft, profile_kind);
-
-                                    cx.notify();
-                                })),
-                        )
-                    })
-                })
-            })
-            .into_any_element()
+        draft_choice(
+            "agent-profile-dialog-kind",
+            kind_label,
+            AgentKind::ALL
+                .into_iter()
+                .map(|kind| (kind, agent_kind_display_label(kind).into()))
+                .collect(),
+            move |kind| kind == current,
+            select_profile_kind,
+            cx,
+        )
     };
 
     // An empty stored effort and the literal `default` are the same state;
@@ -538,72 +367,39 @@ fn agent_profile_dialog_content(
         profile.effort.trim().to_string()
     };
 
-    let effort_owner = cx.weak_entity();
-
-    let effort_control = Button::new("agent-profile-dialog-effort")
-        .outline()
-        .w_64()
-        .label(effort_label(&selected_effort))
-        .dropdown_caret(true)
-        .dropdown_menu(move |menu, _, cx| {
-            let Some(owner) = effort_owner.upgrade() else {
-                return menu;
+    let effort_control = draft_choice(
+        "agent-profile-dialog-effort",
+        effort_label(&selected_effort),
+        profile_effort_options(profile.kind)
+            .into_iter()
+            .map(|option| (option, effort_label(option).into()))
+            .collect(),
+        move |option| option == selected_effort,
+        |draft, option| {
+            // `default` is the absence of a choice, so it is stored empty
+            // rather than as a level the agent would be asked to honor.
+            draft.profile.effort = if option == PROFILE_EFFORT_OPTIONS[0] {
+                String::new()
+            } else {
+                option.to_string()
             };
-
-            owner.update(cx, |_, cx| {
-                let selected = selected_effort.clone();
-
-                profile_effort_options(profile.kind)
-                    .into_iter()
-                    .fold(menu, |menu, option| {
-                        menu.item(
-                            PopupMenuItem::new(effort_label(option))
-                                .checked(option == selected)
-                                .on_click(cx.listener(move |draft, _, _, cx| {
-                                    // `default` is the absence of a choice, so it
-                                    // is stored empty rather than as a level the
-                                    // agent would be asked to honor.
-                                    draft.profile.effort = if option == PROFILE_EFFORT_OPTIONS[0] {
-                                        String::new()
-                                    } else {
-                                        option.to_string()
-                                    };
-
-                                    cx.notify();
-                                })),
-                        )
-                    })
-            })
-        });
+        },
+        cx,
+    );
 
     let cache_warn_minutes = profile.cache_warn_minutes;
 
-    let cache_owner = cx.weak_entity();
-
-    let cache_warn_control = Button::new("agent-profile-dialog-cache-warn")
-        .outline()
-        .w_64()
-        .label(cache_warn_label(cache_warn_minutes))
-        .dropdown_caret(true)
-        .dropdown_menu(move |menu, _, cx| {
-            let Some(owner) = cache_owner.upgrade() else {
-                return menu;
-            };
-
-            owner.update(cx, |_, cx| {
-                CACHE_WARN_OPTIONS.into_iter().fold(menu, |menu, minutes| {
-                    menu.item(
-                        PopupMenuItem::new(cache_warn_label(minutes))
-                            .checked(minutes == cache_warn_minutes)
-                            .on_click(cx.listener(move |draft, _, _, cx| {
-                                draft.profile.cache_warn_minutes = minutes;
-
-                                cx.notify();
-                            })),
-                    )
-                })
-            })
-        });
+    let cache_warn_control = draft_choice(
+        "agent-profile-dialog-cache-warn",
+        cache_warn_label(cache_warn_minutes),
+        CACHE_WARN_OPTIONS
+            .into_iter()
+            .map(|minutes| (minutes, cache_warn_label(minutes).into()))
+            .collect(),
+        move |minutes| minutes == cache_warn_minutes,
+        |draft, minutes| draft.profile.cache_warn_minutes = minutes,
+        cx,
+    );
 
     // DeepSeek Harness is published as a package, so it can run through either
     // package manager; every other harness is launched from a binary the user
@@ -616,47 +412,27 @@ fn agent_profile_dialog_content(
         AgentProfileLauncher::PnpmDlx => t!("settings-agent-profile-launcher-pnpm-dlx"),
     };
 
-    let launcher_owner = cx.weak_entity();
-
-    let launcher_control = Button::new("agent-profile-dialog-launcher")
-        .outline()
-        .w_64()
-        .label(launcher_label)
-        .dropdown_caret(true)
-        .dropdown_menu(move |menu, _, cx| {
-            let Some(owner) = launcher_owner.upgrade() else {
-                return menu;
-            };
-
-            owner.update(cx, |_, cx| {
-                [
-                    (
-                        AgentProfileLauncher::Npx,
-                        t!("settings-agent-profile-launcher-npx"),
-                    ),
-                    (
-                        AgentProfileLauncher::PnpmDlx,
-                        t!("settings-agent-profile-launcher-pnpm-dlx"),
-                    ),
-                    (
-                        AgentProfileLauncher::Custom,
-                        t!("settings-agent-profile-launcher-custom"),
-                    ),
-                ]
-                .into_iter()
-                .fold(menu, |menu, (option, label)| {
-                    menu.item(
-                        PopupMenuItem::new(label)
-                            .checked(launcher == option)
-                            .on_click(cx.listener(move |draft, _, _, cx| {
-                                draft.profile.launcher = option;
-
-                                cx.notify();
-                            })),
-                    )
-                })
-            })
-        });
+    let launcher_control = draft_choice(
+        "agent-profile-dialog-launcher",
+        launcher_label,
+        vec![
+            (
+                AgentProfileLauncher::Npx,
+                t!("settings-agent-profile-launcher-npx").into(),
+            ),
+            (
+                AgentProfileLauncher::PnpmDlx,
+                t!("settings-agent-profile-launcher-pnpm-dlx").into(),
+            ),
+            (
+                AgentProfileLauncher::Custom,
+                t!("settings-agent-profile-launcher-custom").into(),
+            ),
+        ],
+        move |option| option == launcher,
+        |draft, option| draft.profile.launcher = option,
+        cx,
+    );
 
     let sub_models_switch = Switch::new("agent-profile-dialog-sub-models")
         .checked(profile.replace_sub_models)
@@ -682,33 +458,7 @@ fn agent_profile_dialog_content(
             cx.notify();
         }));
 
-    let env_section = v_flex()
-        .w_full()
-        .gap_2()
-        .child(
-            h_flex()
-                .gap_1()
-                .items_center()
-                .child(Label::new(t!("settings-agent-profile-environment")).text_sm())
-                .child(description_hint(
-                    "environment",
-                    t!("settings-agent-profile-environment-description").into(),
-                    cx,
-                )),
-        )
-        .child(env_var_table(&profile.env, draft.editing_env, window, cx))
-        .child(
-            h_flex().child(
-                Button::new("agent-profile-dialog-env-add")
-                    .outline()
-                    .label(t!("settings-agent-profile-add-variable"))
-                    .on_click(cx.listener(|draft, _, _, cx| {
-                        draft.profile.env.push(EnvVar::default());
-
-                        cx.notify();
-                    })),
-            ),
-        );
+    let env_section = draft.env_editor.render(&profile.env, window, cx);
 
     v_flex()
         .w_full()
