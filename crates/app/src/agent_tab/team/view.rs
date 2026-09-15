@@ -1,10 +1,9 @@
 mod membership;
+mod targeting;
 mod timeline;
 
 #[cfg(test)]
 mod tests;
-
-use std::collections::BTreeSet;
 
 use gpui::prelude::*;
 use gpui::{
@@ -20,22 +19,22 @@ use gpui_component::{
 use nmt_agent::session::AgentKind;
 use nmt_agent::session::lifecycle::Status;
 use nmt_agent::team::content::UserInput;
-use nmt_agent::team::discussion::{DiscussionMode, DiscussionState, PauseReason};
+use nmt_agent::team::discussion::{DiscussionState, PauseReason};
 use nmt_agent::team::identity::{MemberId, RoomId};
 use nmt_agent::team::session::TeamError;
 use rust_i18n::t;
 
+use crate::agent_tab::AgentPane;
 use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
 use crate::agent_tab::team::view::membership::MemberDraft;
+use crate::agent_tab::team::view::targeting::{DiscussionTargeting, MissingAuthor};
 use crate::agent_tab::team::view::timeline::TimelineMirror;
 use crate::agent_tab::team::{TeamCommand, TeamRuntime};
 use crate::agent_tab::thread_controls::settings_pill;
 use crate::agent_tab::transcript::{TranscriptView, transcript_column};
 use crate::agent_tab::view::composer_layout::{
-    composer_card, composer_controls_row, composer_input_row,
-};
-use crate::agent_tab::{
-    AgentPane, ComposerEnterBehavior, StopResponseIcon, composer_enter_behavior,
+    ComposerEnterBehavior, composer_card, composer_controls_row, composer_enter_behavior,
+    composer_input_row, send_button,
 };
 
 pub struct TeamPane {
@@ -43,10 +42,7 @@ pub struct TeamPane {
     focus: FocusHandle,
     input: Entity<TextareaState>,
     transcript: Entity<TranscriptView>,
-    selected: BTreeSet<MemberId>,
-    author: Option<MemberId>,
-    moderated: bool,
-    discussion_mode: bool,
+    targeting: DiscussionTargeting,
     inspected: Option<(MemberId, Entity<AgentPane>)>,
     timeline: TimelineMirror,
     member_draft: MemberDraft,
@@ -74,38 +70,14 @@ impl TeamPane {
             cx.notify();
         });
 
-        let room = runtime.read(cx).room();
-
-        let selected = room
-            .members()
-            .iter()
-            .filter(|member| !member.excluded())
-            .map(|member| member.id())
-            .collect::<BTreeSet<_>>();
-
-        let active = room
-            .discussions()
-            .iter()
-            .find(|run| run.state() != DiscussionState::Completed);
-
-        let author = active
-            .map(|run| run.mode().report_author())
-            .or_else(|| room.members().first().map(|member| member.id()));
-
-        let moderated =
-            active.is_some_and(|run| matches!(run.mode(), DiscussionMode::Moderated { .. }));
-
-        let discussion_mode = active.is_some();
+        let targeting = DiscussionTargeting::from_room(runtime.read(cx).room());
 
         let mut pane = Self {
             runtime,
             focus: cx.focus_handle(),
             input,
             transcript,
-            selected,
-            author,
-            moderated,
-            discussion_mode,
+            targeting,
             inspected: None,
             timeline: TimelineMirror::default(),
             member_draft,
@@ -177,34 +149,14 @@ impl TeamPane {
             .iter()
             .any(|run| run.state() != DiscussionState::Completed);
 
-        let command = if active {
-            TeamCommand::Correction(input)
-        } else if self.discussion_mode {
-            let Some(author) = self.author else {
+        let command = match self.targeting.command(input, active) {
+            Ok(command) => command,
+            Err(MissingAuthor) => {
                 self.error = Some(t!("team-select-author").into_owned());
 
                 cx.notify();
 
                 return;
-            };
-
-            let mode = if self.moderated {
-                DiscussionMode::Moderated { moderator: author }
-            } else {
-                DiscussionMode::Fixed {
-                    report_author: author,
-                }
-            };
-
-            TeamCommand::Start {
-                input,
-                participants: self.selected.iter().copied().collect(),
-                mode,
-            }
-        } else {
-            TeamCommand::Direct {
-                input,
-                recipients: self.selected.iter().copied().collect(),
             }
         };
 
@@ -261,9 +213,7 @@ impl TeamPane {
             .update(cx, |runtime, cx| runtime.add_member(profile, config, cx))
         {
             Ok(id) => {
-                self.selected.insert(id);
-
-                self.author.get_or_insert(id);
+                self.targeting.member_added(id);
 
                 self.member_draft.clear(window, cx);
 
@@ -295,94 +245,7 @@ impl TeamPane {
             })
             .collect();
 
-        let members: Vec<_> = room
-            .members()
-            .iter()
-            .map(|member| (member.id(), member.name().to_owned(), member.excluded()))
-            .collect();
-
-        let selected = self.selected.clone();
-
-        let names = members
-            .iter()
-            .filter(|(id, _, _)| selected.contains(id))
-            .map(|(_, name, _)| name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        let recipient_label = if names.is_empty() {
-            t!("team-select-members").into_owned()
-        } else {
-            names
-        };
-
-        let pane = cx.entity();
-
-        let recipients = settings_pill(Button::new("team-recipients"))
-            .label(recipient_label)
-            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, window, cx| {
-                let mut menu = menu;
-
-                for (id, name, excluded) in &members {
-                    let id = *id;
-                    let pane = pane.clone();
-
-                    menu = menu.item(
-                        PopupMenuItem::new(name.clone())
-                            .checked(selected.contains(&id))
-                            .disabled(*excluded)
-                            .on_click(move |_, _, cx| {
-                                pane.update(cx, |pane, cx| {
-                                    if !pane.selected.remove(&id) {
-                                        pane.selected.insert(id);
-                                    }
-
-                                    cx.notify();
-                                });
-                            }),
-                    );
-                }
-
-                if !members.is_empty() {
-                    let inspect = members.clone();
-                    let view = pane.clone();
-
-                    menu = menu.separator().submenu(
-                        t!("team-conversations"),
-                        window,
-                        cx,
-                        move |menu, _, _| {
-                            let mut menu = menu;
-
-                            for (id, name, _) in &inspect {
-                                let id = *id;
-                                let view = view.clone();
-
-                                menu = menu.item(PopupMenuItem::new(name.clone()).on_click(
-                                    move |_, window, cx| {
-                                        view.update(cx, |pane, cx| {
-                                            pane.inspect_member(id, window, cx)
-                                        });
-                                    },
-                                ));
-                            }
-
-                            menu
-                        },
-                    );
-                }
-
-                let pane = pane.clone();
-
-                menu.item(PopupMenuItem::new(t!("team-add-member")).on_click(
-                    move |_, window, cx| {
-                        pane.update(cx, |pane, cx| {
-                            pane.member_draft
-                                .open_member_form(&pane.runtime, window, cx)
-                        });
-                    },
-                ))
-            });
+        let recipients = self.targeting.render_recipients(room, cx.entity());
 
         let active = room
             .discussions()
@@ -390,80 +253,9 @@ impl TeamPane {
             .find(|run| run.state() != DiscussionState::Completed)
             .map(|run| (run.id(), run.mode()));
 
-        let mode_label = if !self.discussion_mode {
-            t!("team-send-direct")
-        } else if self.moderated {
-            t!("team-moderated")
-        } else {
-            t!("team-fixed")
-        };
-
-        let authors: Vec<_> = room
-            .members()
-            .iter()
-            .filter(|member| !member.excluded())
-            .map(|member| (member.id(), member.name().to_owned()))
-            .collect();
-
-        let author = self.author;
-        let moderated = self.moderated;
-        let discussion_mode = self.discussion_mode;
-        let pane = cx.entity();
-
-        let mode = settings_pill(Button::new("team-mode"))
-            .label(mode_label)
-            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, window, cx| {
-                let mut menu = menu;
-
-                for (index, label) in [
-                    t!("team-send-direct"),
-                    t!("team-fixed"),
-                    t!("team-moderated"),
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    let pane = pane.clone();
-
-                    let checked = match index {
-                        0 => !discussion_mode,
-                        1 => discussion_mode && !moderated,
-                        _ => discussion_mode && moderated,
-                    };
-
-                    menu = menu.item(
-                        PopupMenuItem::new(label)
-                            .checked(checked)
-                            .disabled(index == 0 && active.is_some())
-                            .on_click(move |_, _, cx| {
-                                pane.update(cx, |pane, cx| pane.select_mode(index, cx));
-                            }),
-                    );
-                }
-
-                let pane = pane.clone();
-                let authors = authors.clone();
-
-                menu.separator()
-                    .submenu(t!("team-select-author"), window, cx, move |menu, _, _| {
-                        let mut menu = menu;
-
-                        for (id, name) in &authors {
-                            let id = *id;
-                            let pane = pane.clone();
-
-                            menu = menu.item(
-                                PopupMenuItem::new(name.clone())
-                                    .checked(author == Some(id))
-                                    .on_click(move |_, _, cx| {
-                                        pane.update(cx, |pane, cx| pane.select_author(id, cx));
-                                    }),
-                            );
-                        }
-
-                        menu
-                    })
-            });
+        let mode = self
+            .targeting
+            .render_mode(room, active.is_some(), cx.entity());
 
         let controls = room.controls().clone();
         let pane = cx.entity();
@@ -630,29 +422,18 @@ impl TeamPane {
             .map(|run| run.id());
 
         if let Some(id) = active {
-            let Some(author) = self.author else { return };
-
-            let mode = if selection == 2 {
-                DiscussionMode::Moderated { moderator: author }
-            } else {
-                DiscussionMode::Fixed {
-                    report_author: author,
-                }
+            let Some(command) =
+                DiscussionTargeting::change_mode(id, selection == 2, self.targeting.author())
+            else {
+                return;
             };
 
-            if !self.perform(
-                TeamCommand::ChangeMode {
-                    discussion: id,
-                    mode,
-                },
-                cx,
-            ) {
+            if !self.perform(command, cx) {
                 return;
             }
         }
 
-        self.discussion_mode = selection != 0;
-        self.moderated = selection == 2;
+        self.targeting.set_mode(selection);
 
         cx.notify();
     }
@@ -667,27 +448,15 @@ impl TeamPane {
             .find(|run| run.state() != DiscussionState::Completed)
             .map(|run| run.id());
 
-        if let Some(id) = active {
-            let mode = if self.moderated {
-                DiscussionMode::Moderated { moderator: author }
-            } else {
-                DiscussionMode::Fixed {
-                    report_author: author,
-                }
-            };
-
-            if !self.perform(
-                TeamCommand::ChangeMode {
-                    discussion: id,
-                    mode,
-                },
-                cx,
-            ) {
-                return;
-            }
+        if let Some(id) = active
+            && let Some(command) =
+                DiscussionTargeting::change_mode(id, self.targeting.moderated(), Some(author))
+            && !self.perform(command, cx)
+        {
+            return;
         }
 
-        self.author = Some(author);
+        self.targeting.set_author(author);
 
         cx.notify();
     }
@@ -701,7 +470,7 @@ impl TeamPane {
         for member in room
             .members()
             .iter()
-            .filter(|member| self.selected.contains(&member.id()))
+            .filter(|member| self.targeting.selected().contains(&member.id()))
         {
             let status = runtime.hosts.get(&member.id()).map(|host| {
                 host.owner
@@ -852,30 +621,18 @@ impl Render for TeamPane {
         let status = self.status_text(cx);
         let controls = self.render_controls(cx);
 
-        let send = Button::new("team-send")
-            .primary()
-            .size(px(32.))
-            .rounded_full()
-            .disabled(!running && self.selected.is_empty())
-            .when(running, |button| button.icon(StopResponseIcon))
-            .when(!running, |button| button.icon(IconName::ArrowUp))
-            .tooltip(if running {
-                t!("agent-action-stop-response")
+        let send = send_button(
+            "team-send",
+            running,
+            !running && self.targeting.selected().is_empty(),
+        )
+        .on_click(cx.listener(move |this, _, window, cx| {
+            if running {
+                this.stop(cx);
             } else {
-                t!("agent-action-send-message")
-            })
-            .accessibility_label(if running {
-                t!("agent-action-stop-response")
-            } else {
-                t!("agent-action-send-message")
-            })
-            .on_click(cx.listener(move |this, _, window, cx| {
-                if running {
-                    this.stop(cx);
-                } else {
-                    this.submit(window, cx);
-                }
-            }));
+                this.submit(window, cx);
+            }
+        }));
 
         surface
             .on_action(cx.listener(|this, _: &Escape, _, cx| this.stop(cx)))
