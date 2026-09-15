@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use crate::agent_tab::transcript::view::*;
+use crate::agent_tab::transcript::typewriter::{Typewriter, shown_prefix};
 
 const FRAME: Duration = Duration::from_millis(16);
 
