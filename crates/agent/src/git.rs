@@ -6,17 +6,12 @@
 //! consumer.
 
 use std::collections::HashMap;
-
 use std::process::Output;
-
 use std::sync::OnceLock;
-
 use std::time::{Duration, Instant};
 
 use nmt_platform::process::hidden_command;
-
 use parking_lot::Mutex;
-
 use tracing::warn;
 
 /// Run one git command in `dir` and return its stdout, with stderr folded

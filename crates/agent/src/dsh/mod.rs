@@ -33,6 +33,5 @@ mod workflows;
 
 #[cfg(test)]
 mod tests;
-
 #[cfg(test)]
 mod version_tests;

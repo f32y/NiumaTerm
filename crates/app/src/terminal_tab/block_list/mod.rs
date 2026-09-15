@@ -24,21 +24,18 @@ pub(super) use crate::terminal_tab::block_list::rows::{
 pub(super) use crate::terminal_tab::block_list::selection::BlockListPoint;
 
 pub(super) mod chrome;
-
 pub(super) mod live;
 pub(super) mod reconcile;
 
 mod geometry;
 mod images;
-
 mod rows;
 mod selection;
 
 #[cfg(test)]
-mod tests;
-
-#[cfg(test)]
 mod layout_tests;
+#[cfg(test)]
+mod tests;
 
 use crate::terminal_tab::frame::TerminalLine;
 

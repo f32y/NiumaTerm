@@ -4,7 +4,6 @@ pub(super) use crate::team::storage::records::digest;
 
 mod records;
 mod replay;
-
 mod validation;
 
 #[cfg(test)]

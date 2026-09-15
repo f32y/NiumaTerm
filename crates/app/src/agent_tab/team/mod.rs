@@ -1,59 +1,35 @@
 pub use crate::agent_tab::team::controls::TeamCommand;
-
 pub use crate::agent_tab::team::view::TeamPane;
 
 mod controls;
-
 mod dispatch;
-
 mod events;
-
 mod view;
 
 use std::collections::BTreeMap;
-
 use std::path::Path;
 
 use gpui::{App, AppContext as _, Context, Entity, Subscription};
-
 use nmt_agent::AgentWorkspace;
-
 use nmt_agent::chat::SendOutcome;
-
 use nmt_agent::session::delivery::Submission;
-
 use nmt_agent::session::lifecycle::Status;
-
 use nmt_agent::session::team_capabilities::{ModeratorAdmission, TeamLaunch};
-
 use nmt_agent::session::{AgentKind, ImageAttachment, RecoveryIdentity};
-
 use nmt_agent::team::attempt::{AttemptState, BudgetScope, Invocation};
-
 use nmt_agent::team::discussion::{DiscussionState, PauseReason};
-
 use nmt_agent::team::execution_slots::{ExecutionKey, WorkStatus};
-
 use nmt_agent::team::identity::{AttemptId, InteractionId, MemberId, RoomId};
-
 use nmt_agent::team::member::MemberConfig;
-
 use nmt_agent::team::moderation::ModeratorAction;
-
 use nmt_agent::team::room::Room;
-
 use nmt_agent::team::session::{AttemptEventKey, TeamError, TeamSession};
-
 use nmt_config::profile::AgentProfile;
 
 use crate::agent_tab::composer::attachments::scratch_dir;
-
 use crate::agent_tab::execution::{AgentSession, ExecutionSignal, SessionOwner};
-
 use crate::agent_tab::settings::AgentSettings;
-
 use crate::agent_tab::team::dispatch::{CONTEXT_LIMITS, work_status};
-
 use crate::agent_tab::team::events::{DecisionAction, DecisionArguments};
 
 struct MemberHost {

@@ -24,10 +24,9 @@ pub mod window;
 
 pub(crate) mod library;
 
+mod child;
 #[cfg(feature = "clipboard")]
 mod clipboard;
-
-mod child;
 mod conpty;
 mod notifier;
 mod pipes;

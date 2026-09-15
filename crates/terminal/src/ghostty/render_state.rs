@@ -2,7 +2,6 @@ use std::ptr;
 
 #[cfg(test)]
 use libghostty_vt_sys::Result as VtResult;
-
 use libghostty_vt_sys::{
     ColorRgb as VtColorRgb, RenderState as VtRenderState,
     RenderStateCursorVisualStyle as VtRenderStateCursorVisualStyle,
@@ -16,14 +15,12 @@ use libghostty_vt_sys::{
     ghostty_render_state_row_set, ghostty_render_state_set, ghostty_render_state_update,
     ghostty_terminal_get,
 };
-
 #[cfg(test)]
 use libghostty_vt_sys::{
     Row as VtRow, RowData as VtRowData, RowSemanticPrompt as VtRowSemanticPrompt, ghostty_row_get,
 };
 
 use crate::ansi;
-
 use crate::ghostty::{Error, Result, SnapshotColors, SnapshotCursor};
 
 /// The engine's render state and the row damage derived from it.

@@ -10,231 +10,150 @@
 pub use crate::agent_tab::profile::{
     AgentKind, AgentKindExt, AgentThreadDefaults, agent_launch, thread_settings_from_defaults,
 };
-
 pub use crate::agent_tab::session::{
     RecoveryIdentity, RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
 };
 
 pub mod execution;
-
 pub mod input_history;
-
 pub mod profile;
-
 pub mod settings;
-
 pub mod team;
-
 pub mod transcript;
 
 mod capabilities;
-
 mod commands;
-
 mod composer;
-
 mod context_usage;
-
 mod fade;
-
 mod pane_state;
-
 mod questions;
-
 mod session;
-
 mod thread_controls;
-
 mod view;
-
 mod workflows;
 
 #[cfg(test)]
 mod tests;
 
 use std::borrow::Cow;
-
 use std::cell::{Ref, RefCell};
-
 use std::ops::Range;
-
 use std::path::Path;
-
 use std::rc::Rc;
-
 use std::sync::Arc;
-
 use std::time::{Duration, Instant};
-
 use std::{env, fs};
 
 use gpui::prelude::*;
-
 use gpui::{
     AnyElement, App, AsyncApp, Bounds, ClipboardEntry, ClipboardItem, Context, Entity, FocusHandle,
     FontWeight, Hsla, Image, ImageFormat, IntoElement, ListSizingBehavior, MouseButton,
     MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollStrategy, SharedString, WeakEntity,
     Window, div, px, relative, size,
 };
-
 use gpui_base::TextSelection;
-
 use gpui_component::button::{Button, ButtonVariants as _};
-
 use gpui_component::checkbox::Checkbox;
-
 use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, Dialog, DialogClose, DialogFooter};
-
 use gpui_component::input::{
     Enter, Escape, IndentInline, InputEvent, InputState, MoveDown, MoveUp, Paste, Textarea,
     TextareaState,
 };
-
 use gpui_component::modern_menu::ModernMenu;
-
 use gpui_component::progress::ProgressCircle;
-
 use gpui_component::radio::Radio;
-
 use gpui_component::scroll::Scrollbar;
-
 use gpui_component::skeleton::Skeleton;
-
 use gpui_component::spinner::Spinner;
-
 use gpui_component::tooltip::Tooltip;
-
 use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, IconNamed, Sizable as _, WindowExt, h_flex,
     v_flex, v_virtual_list,
 };
-
 use nmt_agent::background_task::{BackgroundTaskKey, BackgroundTaskSnapshot};
-
 use nmt_agent::catalog::adapter_commands;
-
 use nmt_agent::chat::{
     ForkCheckpoint, Item as SessionItem, Question, QuestionInput, QuestionMode, QueuedPrompt,
     SessionScope, SessionSummary, SkillInfo, SkillReference, SlashCommandArguments,
     SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
 };
-
 use nmt_agent::claude_code::{sessions, stream_json};
-
 use nmt_agent::codex::app_server;
-
 use nmt_agent::session::ImageAttachment;
-
 use nmt_agent::session::branch::{
     BranchError, BranchFailure, BranchUpdate, BranchView, FailureStage, FileProgress, PromptTarget,
 };
-
 use nmt_agent::session::children::ChildTranscript;
-
 use nmt_agent::session::commands::CommandAdmission;
-
 use nmt_agent::session::controller::{
     QuestionSubmission, SessionBranch, SessionController, SessionEffect, SessionFailure,
     SessionReady, SubmissionBlock,
 };
-
 use nmt_agent::session::delivery::{RecoverablePrompt, Submission};
-
 use nmt_agent::session::history::{CountPublication, count_scoped_sessions, list_scoped_sessions};
-
 use nmt_agent::session::input::{
     ApprovalOutcome, QuestionAction, QuestionCompletion, QuestionError, QuestionKey,
 };
-
 use nmt_agent::session::lifecycle::InterruptOutcome;
-
 use nmt_agent::session::restore::{ResumeStart, SettingsSeed};
-
 use nmt_agent::session::workflows::OpenWorkflowAgent;
-
 #[cfg(test)]
 use nmt_agent::transcript::TextField;
-
 use nmt_agent::transcript::conversation::ConversationImage;
-
 use nmt_agent::workflow::WorkflowRun;
-
 use nmt_agent::{AgentEvent, AgentEventKind, AgentRoute, AgentWorkspace, MultiRootAccess, git};
-
 use nmt_config::profile::AgentProfile;
-
 use nmt_config::system::NewlineShortcut;
-
 use rust_i18n::t;
-
 use tracing::info;
 
 use crate::agent_tab::capabilities::AgentCapabilities as _;
-
 use crate::agent_tab::commands::{
     PaletteCatalogEntry, PaletteDirection, filter_palette_catalog, filter_skill_catalog,
     local_commands, merge_catalog, move_palette_selection, parse_skill_prefix, parse_slash_command,
     prepare_skill_selection, reconcile_skill_binding, resolve_choice, setting_value_label,
     validate_skill_binding,
 };
-
 use crate::agent_tab::composer::attachments::{
     AttachError, ComposerAttachments, MAX_ATTACHMENTS, THUMBNAIL, scratch_dir,
 };
-
 use crate::agent_tab::composer::{
     BranchFlow, CachedCatalog, CommandFeedbackKind, ComposerAction, PALETTE_MAX_HEIGHT,
     PaletteAction, PaletteModel, PaletteRow, PendingSlashCommand, RewindAction, SlashPalette,
     prompt_with_response_annotations, restored_input_after_interruption, rewind_prompt_label,
     rewind_timestamp, row_prompt_target, visible_prompt,
 };
-
 use crate::agent_tab::context_usage::{ContextUsageIndicator, cache_hit_percent};
-
 use crate::agent_tab::execution::{
     AgentSession, ChildReader, CommandBinding, PresentationEffect, SessionOwner,
 };
-
 use crate::agent_tab::fade::{Fade, FrostedLayer};
-
 use crate::agent_tab::input_history::{
     InputHistoryAction, InputHistoryDirection, InputHistoryNavigation, InputHistoryScope,
 };
-
 use crate::agent_tab::pane_state::TurnPresentation;
-
 use crate::agent_tab::questions::{
     QuestionEditor, QuestionEditorState, QuestionPresentation, QuestionStatus,
 };
-
 use crate::agent_tab::session::errors::operation_error;
-
 use crate::agent_tab::session::history::{
     FilesystemHistoryRequest, RecentSessionsMode, SessionHistoryUi,
 };
-
 use crate::agent_tab::session::prompts::PendingPrompts;
-
 use crate::agent_tab::session::{
     Backend, Status, UpdateSuspension, directories_match, directory_label,
 };
-
 use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
-
 use crate::agent_tab::thread_controls::{launch_model, remember_defaults, render_row};
-
 use crate::agent_tab::transcript::{
     LAST_RESPONSE_LIMIT, TranscriptView, last_response_label, relative_time, transcript_column,
 };
-
 use crate::agent_tab::view::composer_layout::{
     composer_card, composer_controls_row, composer_input_row,
 };
-
 use crate::agent_tab::view::progress_panel::{PROGRESS_PANEL_TUCK, ProgressPanel};
-
 use crate::agent_tab::workflows::WorkflowUi;
-
 use crate::platform_style::{Host, PlatformStyle as _};
 
 #[derive(Clone)]

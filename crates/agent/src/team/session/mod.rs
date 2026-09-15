@@ -1,70 +1,47 @@
 //! Durable room operations and live dispatch readiness owned by one Team.
 
 pub use crate::team::session::dispatch::DispatchError;
-
 pub use crate::team::session::outcomes::AttemptEventKey;
 
 pub(super) mod attachments;
-
 pub(super) mod dispatch;
 
 mod controls;
-
 mod outcomes;
-
 mod planning;
 
 #[cfg(test)]
 mod planning_tests;
-
 #[cfg(test)]
 mod tests;
 
 use std::collections::{BTreeMap, BTreeSet};
-
 use std::fs;
-
 use std::path::Path;
 
 use serde_json::json;
-
 use thiserror::Error;
 
 use crate::chat::{SendOutcome, ThreadSettings};
-
 use crate::session::team_capabilities::ModeratorAdmission;
-
 use crate::team::attempt::{Attempt, AttemptState, BudgetScope, DispatchIntent, Invocation};
-
 use crate::team::budget::{BudgetError, TurnPurpose};
-
 use crate::team::content::{AttachmentReference, Author, PublicMessage, Publication, UserInput};
-
 use crate::team::context::{ContextError, ContextLimits};
-
 use crate::team::discussion::{
     Arrangement, ArrangementState, Discussion, DiscussionError, DiscussionMode, DiscussionState,
     PauseReason, PublicSnapshot, Stage, StageKind,
 };
-
 use crate::team::execution_slots::{ExecutionKey, ExecutionSlots, WorkStatus};
-
 use crate::team::identity::{
     AttemptId, DiscussionId, MemberId, MessageId, OperationId, OwnershipGeneration, RoomId, StageId,
 };
-
 use crate::team::member::MemberConfig;
-
 use crate::team::moderation::{ModeratorAction, ModeratorDecision};
-
 use crate::team::room::{MemberError, Room};
-
 use crate::team::session::attachments::read_attachment;
-
 use crate::team::session::controls::cancel_pending_reservations;
-
 use crate::team::session::planning::{DispatchPlan, public_request};
-
 use crate::team::storage::{RoomStore, StorageError};
 
 pub struct TeamSession {

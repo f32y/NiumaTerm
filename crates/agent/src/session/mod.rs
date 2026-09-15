@@ -21,7 +21,6 @@ pub mod restore;
 pub mod settings;
 pub mod team_capabilities;
 pub mod team_recovery;
-
 pub mod update_readiness;
 pub mod workflows;
 
@@ -30,10 +29,8 @@ mod backend;
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
 pub mod test_support;
-
 #[cfg(test)]
 mod tests;
-
 #[cfg(test)]
 mod ui_split_tests;
 

@@ -22,7 +22,6 @@ mod format;
 mod grid_read;
 mod kitty;
 mod render_state;
-
 mod types;
 
 #[cfg(test)]

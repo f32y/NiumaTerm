@@ -3,7 +3,6 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use app::design::{CARD_RADIUS, CONTROL_RADIUS};
-
 use futures::StreamExt as _;
 use futures::channel::mpsc::unbounded;
 use gpui::{App, BorrowAppContext as _, Entity, Task};

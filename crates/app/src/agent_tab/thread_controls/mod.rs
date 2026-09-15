@@ -5,7 +5,6 @@ pub(super) use crate::agent_tab::thread_controls::defaults::{
 pub(super) mod effort;
 
 mod defaults;
-
 mod harness_rows;
 
 use std::borrow::Cow;

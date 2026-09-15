@@ -1,56 +1,37 @@
 #[cfg(test)]
+mod attachment_tests;
+#[cfg(test)]
 #[cfg(windows)]
 mod team_tests;
 
-#[cfg(test)]
-mod attachment_tests;
-
 use std::path::{Path, PathBuf};
-
 use std::sync::Arc;
-
 use std::time::Duration;
-
 use std::{fs, io};
 
 use serde_json::Value;
-
 use tracing::trace;
 
 use crate::background_task::{BackgroundTaskKey, BackgroundTaskProvider};
-
 use crate::catalog::adapter_commands;
-
 use crate::chat::{
     Event as SessionEvent, ForkAnchor, MessageImage, QuestionRequest, QuestionResponse,
     SendOutcome, SessionScope, SkillReference, SlashCommandInfo, SlashCommandOutcome,
     TeamDecisionRequest, ThreadSettings,
 };
-
 use crate::claude_code::sessions::RestoredTask;
-
 use crate::claude_code::stream_json;
-
 use crate::codex::app_server;
-
 use crate::session::capabilities::AgentCapabilities as _;
-
 use crate::session::input::ApprovalOutcome;
-
 use crate::session::team_capabilities::{ModeratorAdmission, TeamLaunch};
-
 use crate::session::team_recovery::RecoveredTeamTurn;
-
 #[cfg(any(test, feature = "test-support"))]
 use crate::session::test_support::InputResponse;
-
 #[cfg(any(test, feature = "test-support"))]
 use crate::session::test_support::TestBackend;
-
 use crate::session::{AgentKind, ImageAttachment, OperationError, UnsupportedOperation};
-
 use crate::workflow::{WorkflowRefreshRequest, WorkflowRefreshResult, WorkflowRun, WorkflowSource};
-
 use crate::{AgentWorkspace, LaunchConfig, dsh};
 
 /// The conversation a restarted backend should continue, qualified by the

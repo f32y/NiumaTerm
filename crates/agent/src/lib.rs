@@ -36,15 +36,14 @@ pub mod workflow;
 pub mod workspace;
 
 mod deadline_timer;
-mod hook_store;
-mod request_policy;
-mod subprocess;
-
 mod event;
 mod hook_command;
+mod hook_store;
 mod json;
 mod monitor;
 mod process;
+mod request_policy;
+mod subprocess;
 
 #[cfg(test)]
 mod tests;

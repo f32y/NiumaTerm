@@ -1,23 +1,16 @@
 use std::ffi::{OsStr, OsString};
-
 #[cfg(not(target_os = "macos"))]
 use std::fs;
-
 use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
-
 use std::process::{Child, Command, ExitStatus};
-
 use std::sync::{Arc, Weak};
-
 use std::{env, io};
 
 use tracing::warn;
 
 use crate::process_lifetime::cleanup_failed_attachment;
-
 #[cfg(target_os = "macos")]
 use crate::unix::macos::login_shell;
-
 #[cfg(target_os = "macos")]
 use crate::unix::macos::process_group_count as group_process_count;
 

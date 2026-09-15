@@ -2,28 +2,22 @@ pub use mio::{Events, Interest, Poll, Token, Waker};
 
 #[cfg(not(windows))]
 pub use crate::unix::*;
-
 #[cfg(windows)]
 pub use crate::windows::*;
 
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
-
 pub mod library;
 #[cfg(target_os = "macos")]
 pub mod macos_notifications;
-
 #[cfg(windows)]
 pub mod windows;
 
+mod environment_override;
+mod ipc_message;
+mod process_lifetime;
 #[cfg(not(windows))]
 mod unix;
-
-mod environment_override;
-
-mod ipc_message;
-
-mod process_lifetime;
 
 use std::{io, sync};
 
@@ -32,15 +26,12 @@ use std::{io, sync};
 /// `nmt_platform::{Poll, ...}` without taking their own (possibly mismatched)
 /// `mio` dependency.
 use libc::c_ushort;
-
 use mio::event::Event;
 
 #[cfg(not(windows))]
 use crate::unix as platform;
-
 #[cfg(windows)]
 use crate::windows as platform;
-
 #[cfg(windows)]
 use crate::windows::powershell::DEFAULT_CONFIG_SHELL;
 

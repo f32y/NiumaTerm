@@ -1,28 +1,19 @@
 use std::ffi::OsStr;
-
 use std::os::windows::io::AsRawHandle as _;
-
 use std::os::windows::process::{CommandExt as _, ExitStatusExt as _};
-
 use std::process::{Child, Command, ExitStatus};
-
 use std::sync::{Arc, Weak};
-
 use std::{env, ffi, io, mem, ptr, str};
 
 use tracing::warn;
-
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_MORE_DATA, GetLastError, HANDLE};
-
 use windows_sys::Win32::Globalization::{CP_OEMCP, MB_ERR_INVALID_CHARS, MultiByteToWideChar};
-
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JobObjectBasicProcessIdList, JobObjectExtendedLimitInformation, QueryInformationJobObject,
     SetInformationJobObject,
 };
-
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::process_lifetime::cleanup_failed_attachment;

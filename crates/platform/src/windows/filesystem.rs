@@ -1,9 +1,7 @@
 pub use crate::windows::filesystem::replace_file as replace_file_durable;
 
 use std::io;
-
 use std::os::windows::ffi::OsStrExt as _;
-
 use std::path::{Component, Path};
 
 use windows_sys::Win32::Storage::FileSystem::{
