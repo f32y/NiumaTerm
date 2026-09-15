@@ -1,29 +1,63 @@
 #[cfg(test)]
 mod tests;
 
+use std::cell::Cell;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
+
 use gpui::prelude::*;
-use gpui::{AnyElement, Context, FontWeight, Hsla, ScrollHandle, div, px, relative};
+use gpui::{
+    AnyElement, App, Bounds, Context, FontWeight, Hsla, Pixels, ScrollHandle, Window, div, px,
+    relative,
+};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use nmt_agent::progress::{GoalStatus, Task, TaskList, TaskStatus};
 use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
+use crate::agent_tab::fade::Fade;
 use crate::agent_tab::settings::UI_RADIUS;
 
-#[derive(Default)]
+/// How far the panel's lower edge runs behind the composer card. The panel
+/// pads its bottom by the same amount, so the part left visible holds only the
+/// header's own symmetric padding and the header reads as centred in it.
+pub(crate) const PROGRESS_PANEL_TUCK: f32 = 14.0;
+
+/// Opening the details pushes the transcript up, and a moving edge needs longer
+/// than an opacity change before the eye reads it as travel instead of a jump.
+const DETAILS_DURATION: Duration = Duration::from_millis(160);
+
 pub(crate) struct ProgressPanel {
     expanded: bool,
     scroll: ScrollHandle,
+    details_fade: Fade,
+
+    /// The details' laid-out height, recorded during prepaint. The height ramp
+    /// runs towards it, and the details always lay out at full size so the
+    /// ramp never measures its own animated box.
+    details_height: Rc<Cell<Option<Pixels>>>,
+}
+
+impl Default for ProgressPanel {
+    fn default() -> Self {
+        Self {
+            expanded: false,
+            scroll: ScrollHandle::default(),
+            details_fade: Fade::lasting(DETAILS_DURATION),
+            details_height: Rc::default(),
+        }
+    }
 }
 
 impl ProgressPanel {
     pub(crate) fn render(
-        &self,
+        &mut self,
         goal: Option<&GoalStatus>,
         tasks: Option<&TaskList>,
         plan_mode: bool,
         background: Hsla,
+        window: &mut Window,
         cx: &mut Context<AgentPane>,
     ) -> Option<AnyElement> {
         let empty = TaskList::default();
@@ -74,10 +108,10 @@ impl ProgressPanel {
         let expanded = self.expanded;
 
         let header = h_flex()
+            .debug_selector(|| "agent-progress-header".into())
             .w_full()
             .px_3()
-            .pt_1()
-            .pb_1()
+            .py_1()
             .gap_2()
             .items_center()
             .child(Icon::new(IconName::Map).size_3().flex_none())
@@ -109,8 +143,12 @@ impl ProgressPanel {
                     ),
             );
 
-        let details = expanded.then(|| {
-            v_flex()
+        let frame = self
+            .details_fade
+            .drive(expanded, Instant::now(), window, cx);
+
+        let details = (!frame.gone()).then(|| {
+            let body = v_flex()
                 .id("agent-progress-details")
                 .debug_selector(|| "agent-progress-details".into())
                 .w_full()
@@ -135,7 +173,40 @@ impl ProgressPanel {
                         .as_ref()
                         .map(|text| div().child(text.clone())),
                 )
-                .children(tasks.items.iter().map(|task| task_row(task, cx)))
+                .children(tasks.items.iter().map(|task| task_row(task, cx)));
+
+            let recorded = Rc::clone(&self.details_height);
+
+            // Recorded without notifying: only a running ramp reads the value,
+            // and it is already asking for frames.
+            let measure = move |bounds: Vec<Bounds<Pixels>>, _: &mut Window, _: &mut App| {
+                if let Some(bounds) = bounds.first() {
+                    recorded.set(Some(bounds.size.height));
+                }
+            };
+
+            let progress = frame.progress();
+
+            if progress >= 1.0 {
+                return div()
+                    .w_full()
+                    .on_children_prepainted(measure)
+                    .child(body)
+                    .into_any_element();
+            }
+
+            // While the ramp runs, the box is what grows and the details sit
+            // out of flow inside it at their full height. A first opening has
+            // nothing measured yet and starts from zero for one frame.
+            div()
+                .w_full()
+                .relative()
+                .h(self.details_height.get().unwrap_or_default() * progress)
+                .overflow_hidden()
+                .opacity(progress)
+                .on_children_prepainted(measure)
+                .child(div().absolute().top_0().w_full().child(body))
+                .into_any_element()
         });
 
         Some(
@@ -152,7 +223,7 @@ impl ProgressPanel {
                         .border_b_0()
                         .border_color(cx.theme().border.opacity(0.6))
                         .bg(background.blend(cx.theme().muted))
-                        .pb(px(20.))
+                        .pb(px(PROGRESS_PANEL_TUCK))
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(header)
@@ -239,7 +310,7 @@ fn task_row(task: &Task, cx: &Context<AgentPane>) -> AnyElement {
     let (icon, color) = match task.status {
         TaskStatus::Pending => (IconName::Minus, cx.theme().muted_foreground),
         TaskStatus::InProgress => (IconName::LoaderCircle, cx.theme().primary),
-        TaskStatus::Completed => (IconName::CircleCheck, cx.theme().success),
+        TaskStatus::Completed => (IconName::Check, cx.theme().success),
     };
 
     h_flex()
