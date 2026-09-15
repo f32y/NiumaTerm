@@ -85,6 +85,13 @@ pub struct Capabilities {
 
     /// Accepted approvals remain pending until the harness confirms resolution.
     pub async_approval_resolution: bool,
+
+    /// The permission preset is switched per conversation by a command, and
+    /// the harness pins its own default into every conversation it opens, so
+    /// a remembered pick has to be sent again before a new conversation runs
+    /// under it. Where the pick rides the launch or each turn's overrides,
+    /// seeding the picker is the whole of applying it.
+    pub approval_selection_is_a_command: bool,
 }
 
 const CODEX: Capabilities = Capabilities {
@@ -104,6 +111,7 @@ const CODEX: Capabilities = Capabilities {
     model_selection_is_a_request: false,
     multi_root_access: MultiRootAccess::Full,
     async_approval_resolution: false,
+    approval_selection_is_a_command: false,
 };
 
 const CLAUDE: Capabilities = Capabilities {
@@ -123,6 +131,7 @@ const CLAUDE: Capabilities = Capabilities {
     model_selection_is_a_request: false,
     multi_root_access: MultiRootAccess::Full,
     async_approval_resolution: false,
+    approval_selection_is_a_command: false,
 };
 
 /// `skill_references` is false because the harness has no structured skill
@@ -152,6 +161,7 @@ const DEEPSEEK: Capabilities = Capabilities {
     // adapter passes every selected root.
     multi_root_access: MultiRootAccess::PrimaryOnly,
     async_approval_resolution: true,
+    approval_selection_is_a_command: true,
 };
 
 pub trait AgentCapabilities {

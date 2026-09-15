@@ -721,6 +721,23 @@ impl Backend {
         }
     }
 
+    /// Switch the conversation's permission preset. Only DeepSeek switches it
+    /// by its own command: Codex carries the approval policy as an override on
+    /// the next turn, and Claude applies its mode through the settings update
+    /// sent with each turn.
+    pub(crate) fn select_approval(&mut self, preset: &str) -> Result<(), String> {
+        match self {
+            Backend::DeepSeek(session) => session.select_permission(preset),
+            Backend::Codex(_) | Backend::Claude(_) => Ok(()),
+            #[cfg(any(test, feature = "test-support"))]
+            Backend::Test(session) => {
+                session.approval_selections.push(preset.to_owned());
+
+                session.approval_selection.clone()
+            }
+        }
+    }
+
     /// Rebuild the conversation's agent from another composition. Only DeepSeek
     /// composes an agent from a preset at all; the other two launch one CLI
     /// whose capabilities are fixed for the life of the process.

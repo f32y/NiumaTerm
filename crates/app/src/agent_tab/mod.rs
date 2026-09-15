@@ -3639,6 +3639,11 @@ impl AgentPane {
                 .set_feedback(CommandFeedbackKind::Error, error, cx);
         }
 
+        if let Some(Err(error)) = ready.approval {
+            self.palette
+                .set_feedback(CommandFeedbackKind::Error, error, cx);
+        }
+
         info!(
             "agent thread ready: profile=\"{}\", model={:?}, profile_model={:?}",
             session_profile.name,

@@ -229,9 +229,31 @@ pub(super) fn render_deepseek_row(
                 .collect(),
             set: |this, value, cx| {
                 // The harness owns the switch, and its own command is what
-                // performs it; the projection that follows is what moves
-                // the row, so nothing is recorded here in advance.
-                this.execute_backend_command(PendingSlashCommand::new("permission", value), cx);
+                // performs it, so nothing is recorded before it accepts.
+                if !this.execute_backend_command(
+                    PendingSlashCommand::new("permission", value.clone()),
+                    cx,
+                ) {
+                    return;
+                }
+
+                let Some(session_host) = this.host.upgrade() else {
+                    return;
+                };
+
+                let session_kind = session_host.read(cx).kind;
+                let session_profile = session_host.read(cx).profile.clone();
+
+                // The harness pins its own default into every conversation it
+                // opens, so the pick is remembered here for the next one.
+                this.session.borrow_mut().controls.settings.approval = Some(value);
+
+                remember_defaults(
+                    &this.session.borrow().controls,
+                    session_kind,
+                    &session_profile,
+                    cx,
+                );
             },
         });
     }
