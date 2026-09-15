@@ -541,6 +541,109 @@ fn separates_visibility_groups_before_attributes_and_comments_with_crlf() {
 }
 
 #[test]
+fn removes_blank_lines_inside_declaration_groups() {
+    for visibility in ["pub ", "pub(crate) ", "pub(super) ", ""] {
+        for (first, second, rule) in [
+            ("use std::fmt;", "use std::io;", "import-blank-lines"),
+            (
+                "use anyhow::Result;",
+                "use serde::Serialize;",
+                "import-blank-lines",
+            ),
+            (
+                "use crate::Alpha;",
+                "use crate::Beta;",
+                "import-blank-lines",
+            ),
+            ("mod alpha;", "mod beta;", "module-blank-lines"),
+        ] {
+            for newline in ["\n", "\r\n"] {
+                let source =
+                    format!("{visibility}{first}{newline}  {newline}{newline}{visibility}{second}");
+                let expected = format!("{visibility}{first}{newline}{visibility}{second}");
+                let issues = inspect(&source).unwrap();
+
+                assert_eq!(issues.len(), 2, "{source}");
+                assert!(issues.values().all(|issue| issue.rule == rule), "{source}");
+                assert_eq!(apply(&source, &issues).unwrap(), expected);
+                assert!(inspect(&expected).unwrap().is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn compacts_members_while_separating_declaration_groups() {
+    let source = "pub use crate::Alpha;\n\npub use crate::Beta;\npub(crate) use crate::Gamma;\npub mod api;\n\npub mod shared;\nmod alpha;\n\nmod beta;\n#[cfg(test)]\npub mod alpha_tests;\n\n#[cfg(test)]\nmod beta_tests;\nuse std::fmt;\n\nuse std::io;\nuse anyhow::Result;\n\nuse serde::Serialize;\nuse crate::Alpha;\n\nuse crate::Beta;\n";
+    let expected = "pub use crate::Alpha;\npub use crate::Beta;\n\npub(crate) use crate::Gamma;\n\npub mod api;\npub mod shared;\n\nmod alpha;\nmod beta;\n\n#[cfg(test)]\npub mod alpha_tests;\n#[cfg(test)]\nmod beta_tests;\n\nuse std::fmt;\nuse std::io;\n\nuse anyhow::Result;\nuse serde::Serialize;\n\nuse crate::Alpha;\nuse crate::Beta;\n";
+
+    for (source, expected) in [
+        (source.to_owned(), expected.to_owned()),
+        (
+            format!("mod outer {{\n{source}}}\n"),
+            format!("mod outer {{\n{expected}}}\n"),
+        ),
+    ] {
+        let issues = inspect(&source).unwrap();
+
+        assert_eq!(apply(&source, &issues).unwrap(), expected);
+        assert!(inspect(&expected).unwrap().is_empty());
+    }
+}
+
+#[test]
+fn compacts_declaration_gaps_without_changing_comments_or_attributes() {
+    let source = r#"mod alpha; /* Keep the nested comment.
+    /* Nested detail.
+
+    */
+
+*/
+
+// Both modules share the same visibility.
+
+#[cfg(unix)]
+mod beta;
+
+use crate::Alpha;
+
+/// The platform-specific type.
+#[doc = "First paragraph.
+
+Second paragraph."]
+#[cfg(unix)]
+use crate::{
+    Beta,
+    Gamma,
+};
+
+use crate::Zeta;
+"#;
+
+    let expected = source
+        .replace("*/\n\n//", "*/\n//")
+        .replace("visibility.\n\n", "visibility.\n")
+        .replace("Alpha;\n\n", "Alpha;\n")
+        .replace("};\n\n", "};\n");
+    let issues = inspect(source).unwrap();
+
+    assert_eq!(issues.len(), 4);
+    assert_eq!(apply(source, &issues).unwrap(), expected);
+    assert!(inspect(&expected).unwrap().is_empty());
+}
+
+#[test]
+fn leaves_declaration_spacing_inside_skipped_modules_and_local_blocks_unchanged() {
+    for source in [
+        "#[rustfmt::skip]\nmod outer {\n    mod alpha;\n\n    mod beta;\n\n    use std::fmt;\n\n    use std::io;\n}\n",
+        "fn run() {\n    use std::fmt;\n\n    use std::io;\n}\n",
+        "mod alpha {}\n\nmod beta {}\n",
+    ] {
+        assert!(inspect(source).unwrap().is_empty(), "{source}");
+    }
+}
+
+#[test]
 fn separates_import_sources_without_detaching_comments_or_attributes() {
     for visibility in ["pub ", "pub(crate) ", "pub(super) ", ""] {
         let source = format!(

@@ -174,18 +174,20 @@ impl Spacing<'_> {
 
             if self.block_depth == 0
                 && let (Some(a_group), Some(b_group)) = (group(a), group(b))
-                && a_group != b_group
             {
-                self.separate(a.span(), b.span(), "declaration-groups");
-
-                continue;
-            }
-
-            if self.block_depth == 0
-                && let (Some(a_group), Some(b_group)) = (imports::group(a), imports::group(b))
-                && a_group != b_group
-            {
-                self.separate(a.span(), b.span(), "import-groups");
+                if a_group != b_group {
+                    self.separate(a.span(), b.span(), "declaration-groups");
+                } else if let (Some(a_source), Some(b_source)) =
+                    (imports::group(a), imports::group(b))
+                {
+                    if a_source != b_source {
+                        self.separate(a.span(), b.span(), "import-groups");
+                    } else {
+                        self.compact(a.span(), b.span(), "import-blank-lines");
+                    }
+                } else if matches!((a, b), (Item::Mod(_), Item::Mod(_))) {
+                    self.compact(a.span(), b.span(), "module-blank-lines");
+                }
 
                 continue;
             }

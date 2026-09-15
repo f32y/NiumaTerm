@@ -60,12 +60,16 @@ The parser checks boundaries around control flow, bindings followed by actions,
 multiline statements, returned values, and assertion groups. It also separates
 items, documented fields, and UI notification calls after other actions.
 
-Two rules are enabled by default in all modes, including the pre-commit check:
+These rules are enabled by default in all modes, including the pre-commit check:
 
 - `spacing/match-arm-blank-lines` forbids blank lines between adjacent match arms.
 - `spacing/enum-variant-blank-lines` forbids blank lines between adjacent enum variants.
+- `spacing/import-blank-lines` forbids blank lines between adjacent imports in the
+  same visibility and source group.
+- `spacing/module-blank-lines` forbids blank lines between adjacent module
+  declarations in the same declaration group.
 
-Both rules apply to single-line and multiline entries, including documented or
+These rules apply to single-line and multiline entries, including documented or
 attributed entries. Each unwanted blank line produces an `unexpected blank line`
 diagnostic. `--fix` removes these lines, including whitespace-only lines and blank
 lines around intervening comments. Comment text, blank lines inside block comments,
@@ -88,8 +92,9 @@ lines. `spacing/enum-variants` separates adjacent variants if either has documen
 an `#[error(...)]` attribute, or fields spanning multiple lines. These options also
 work with `--staged`.
 
-Consecutive short declarations, imports, assertions, and single-line mapping
-arms stay compact within their groups. Other spacing rules accept existing blank lines.
+Module declarations and imports must stay compact within their groups. Consecutive
+short bindings, assertions, and single-line mapping arms may also stay compact.
+Other spacing rules accept existing blank lines.
 Comments remain attached to the following statement; boundaries inside trailing
 block comments are skipped.
 Function, method, module, and other item bodies marked `#[rustfmt::skip]` are
@@ -248,7 +253,8 @@ mod implementation {
 ```
 
 Each change of declaration group requires a blank line. Groups may be omitted;
-module names within a group do not need sorting, and extra blank lines are accepted.
+module names within a group do not need sorting. Blank lines within a module
+declaration group are forbidden; extra blank lines between groups are accepted.
 Attributes and documentation stay attached to their declarations. File-level
 documentation and inner attributes may precede the header. Non-private inline
 modules whose names do not contain `test` count as `mod` declarations at their
@@ -271,8 +277,8 @@ with a blank line between source categories:
 
 Source order restarts for each visibility group, so a `pub use crate::...` may
 precede a private `use std::...`. Imports within each source category must also
-be alphabetically ordered by path. Extra blank lines are accepted but do not
-restart the alphabetical order. Attributes, aliases, leading `::`,
+be alphabetically ordered by path, with no blank lines between declarations in the
+same visibility and source group. Attributes, aliases, leading `::`,
 and braces do not change a path's category. A single declaration such as
 `use {std::fmt, crate::api::Public};` must be split because it mixes categories.
 
@@ -287,10 +293,15 @@ precede their children. Identical paths may repeat under different attributes or
 aliases. Comments and attributes stay attached to their declarations.
 
 The diagnostics are `declarations/import-order`, `declarations/mixed-imports`,
-`declarations/import-alphabetical`, and `spacing/import-groups`.
+`declarations/import-alphabetical`, `spacing/import-groups`,
+`spacing/import-blank-lines`, and `spacing/module-blank-lines`.
 Different categories on one line produce
 `declarations/group-spacing`. `--fix` inserts missing blank lines between
-declarations; reordering or splitting imports requires manual edits.
+groups and removes blank lines within groups; reordering or splitting imports
+requires manual edits. Comment text, attributes, and blank lines inside block
+comments or literals are preserved. These group spacing rules apply to module-level
+declarations, including headers inside inline modules; declarations in local blocks
+are excluded. Bodies marked `#[rustfmt::skip]` retain their spacing exemption.
 
 Bodyless module declarations whose names contain the lowercase substring `test`,
 such as `mod tests;`, `mod parser_tests;`, and `mod test_support;`, form one group

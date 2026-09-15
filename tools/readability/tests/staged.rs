@@ -123,7 +123,7 @@ fn rejects_missing_or_unknown_optional_rules_before_fixing_files() {
 }
 
 #[test]
-fn rejects_and_removes_blank_lines_between_arms_and_variants_using_the_index() {
+fn rejects_and_removes_group_blank_lines_using_the_index() {
     for (clean, boundary, rule) in [
         (
             "enum Value {\n    First,\n    Second,\n    Third,\n}\n",
@@ -134,6 +134,16 @@ fn rejects_and_removes_blank_lines_between_arms_and_variants_using_the_index() {
             "fn run() {\n    match value {\n        0 => first(),\n        1 => second(),\n        _ => third(),\n    }\n}\n",
             "        0 => first(),\n",
             "spacing/match-arm-blank-lines",
+        ),
+        (
+            "use crate::First;\nuse crate::Second;\nuse crate::Third;\n",
+            "use crate::First;\n",
+            "spacing/import-blank-lines",
+        ),
+        (
+            "mod first;\nmod second;\nmod third;\n",
+            "mod first;\n",
+            "spacing/module-blank-lines",
         ),
     ] {
         let repo = Repository::new();
@@ -175,7 +185,7 @@ fn rejects_and_removes_blank_lines_between_arms_and_variants_using_the_index() {
         repo.baseline(&spaced);
         repo.write(
             SOURCE,
-            &spaced.replace("Third", "Last").replace("third()", "last()"),
+            &spaced.replace("Third", "Zeta").replace("third", "last"),
         );
         repo.git(&["add", SOURCE]);
 
@@ -1088,12 +1098,12 @@ fn staged_private_inline_module_checks_follow_the_header_and_exclude_the_body() 
 fn staged_alphabetical_checks_follow_both_imports_and_preserve_manual_fixes() {
     for (ordered, reversed) in [
         (
-            "use crate::alpha::Value;\n\nuse crate::middle::Value;\n",
-            "use crate::zeta::Value;\n\nuse crate::middle::Value;\n",
+            "use crate::alpha::Value;\nuse crate::middle::Value;\n",
+            "use crate::zeta::Value;\nuse crate::middle::Value;\n",
         ),
         (
-            "use crate::middle::Value;\n\nuse crate::zeta::Value;\n",
-            "use crate::middle::Value;\n\nuse crate::alpha::Value;\n",
+            "use crate::middle::Value;\nuse crate::zeta::Value;\n",
+            "use crate::middle::Value;\nuse crate::alpha::Value;\n",
         ),
     ] {
         let repo = Repository::new();
