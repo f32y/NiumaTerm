@@ -16,8 +16,8 @@ pub(super) struct ShellChrome {
     /// Compact Codex and Claude rate limits, refreshed independently of terminals.
     pub(super) agent_usage: Entity<AgentUsageView>,
 
-    /// Titlebar `+N -M` indicator (self-gating on its setting).
-    pub(super) git_status: Entity<GitStatusView>,
+    /// The window's title bar and the git summary it owns.
+    pub(super) title_bar: WindowTitleBar,
 
     /// Whether we've started observing the wrapping `Root` (so dialog open/close
     /// re-renders the shell, which draws the dialog layer). Set on first render.
@@ -35,7 +35,7 @@ impl ShellChrome {
             vertical_tabs: VerticalTabList::new(),
             token_usage: cx.new(|cx| TokenUsageView::new(daily_source(), cx)),
             agent_usage: cx.new(AgentUsageView::new),
-            git_status: cx.new(|cx| GitStatusView::new(git_model.clone(), cx)),
+            title_bar: WindowTitleBar::new(git_model.clone(), cx),
             root_observed: false,
             needs_focus: true,
         }

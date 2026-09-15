@@ -7,8 +7,8 @@ use gpui_component::input::Input;
 use gpui_component::tab::Tab;
 
 use crate::ui::platform_style::PlatformStyle;
-use crate::ui::shell::TITLE_BAR_HEIGHT;
 use crate::ui::tab_bar::TabDensity;
+use crate::ui::title_bar::TITLE_BAR_HEIGHT;
 use crate::ui::workspace_sidebar::SIDEBAR_ROW_GUTTER;
 
 /// Height of a close/minimize/zoom button, measured from the frame AppKit
