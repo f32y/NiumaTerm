@@ -170,7 +170,7 @@ use crate::ui::shell::updates_layer::UpdateNotificationLayer;
 
 use crate::ui::shell::workspace_dirs::{RootAvailability, WorkspaceDirsEditor};
 
-use crate::ui::tab_bar::TabStrip;
+use crate::ui::tab_bar::{TabStrip, VerticalTabList, WorkspaceTabs};
 
 #[cfg(windows)]
 use crate::ui::terminal_launch::attach_remote;
@@ -181,7 +181,7 @@ use crate::ui::token_usage::TokenUsageView;
 
 use crate::ui::workflows::WorkflowsView;
 
-use crate::ui::workspace_sidebar::{Sidebar, SidebarTab, SidebarUsage, WorkspaceChrome};
+use crate::ui::workspace_sidebar::{Sidebar, SidebarUsage, WorkspaceChrome};
 
 use crate::ui::{main_view_background_opacity, workspace_sidebar};
 
@@ -3718,6 +3718,10 @@ impl Shell {
     pub(super) fn tab_strip_mut(&mut self) -> &mut TabStrip {
         &mut self.chrome.tab_strip
     }
+
+    pub(super) fn vertical_tabs_mut(&mut self) -> &mut VerticalTabList {
+        &mut self.chrome.vertical_tabs
+    }
 }
 
 fn close_last_workspace_dialog(
@@ -4088,49 +4092,42 @@ impl Render for Shell {
 
         let (unread_tabs, busy_agent_tabs) = self.tab_agent_indicators(cx);
 
-        let sidebar_tabs: Vec<Vec<SidebarTab>> = match vertical_tabs {
+        let tab_rows: Vec<Vec<AnyElement>> = match vertical_tabs {
             false => Vec::new(),
-            true => summaries
-                .iter()
-                .map(|ws| {
-                    let Some(tabs) = self.workspaces.tabs_of(ws.summary.id) else {
-                        return Vec::new();
-                    };
+            true => {
+                self.chrome.vertical_tabs.end_cancelled_drag(cx);
 
-                    let active_id = tabs.list().active_id();
+                let row_width = self.sidebar.tab_row_width();
 
-                    tabs.list()
-                        .items()
-                        .iter()
-                        .map(|tab| SidebarTab {
-                            id: tab.id(),
-                            label: match tab.title().is_empty() {
-                                true => SharedString::new_static("PowerShell"),
-                                false => tab.title().to_string().into(),
+                summaries
+                    .iter()
+                    .enumerate()
+                    .map(|(index, ws)| {
+                        let Some(tabs) = self.workspaces.tabs_of(ws.summary.id) else {
+                            return Vec::new();
+                        };
+
+                        self.chrome.vertical_tabs.render(
+                            WorkspaceTabs {
+                                index,
+                                tabs,
+                                active: ws.summary.active,
+                                closeable: ws.summary.closeable,
                             },
-                            // Every workspace keeps its own active tab, but
-                            // only one of them is the tab on screen. Marking
-                            // the others would put a selection highlight on
-                            // every workspace's list at once.
-                            active: ws.summary.active && tab.id() == active_id,
-                            unread: unread_tabs.contains(&tab.id()),
-                            busy: busy_agent_tabs.contains(&tab.id()),
-                            bell: tab.bell(),
-                            agent_kind: tab.surface().agent_kind(cx),
-                            icon: tab.surface().icon(cx),
-                            pending: matches!(tab.surface(), TabSurface::Pending(_)),
-                            exited: tab.exited(),
-                            progress: tab.progress(),
-                            terminal: Self::tab_terminal_activity(tab, cx),
-                        })
-                        .collect()
-                })
-                .collect(),
+                            &unread_tabs,
+                            &busy_agent_tabs,
+                            &self.renames,
+                            row_width,
+                            cx,
+                        )
+                    })
+                    .collect()
+            }
         };
 
         let sidebar = self.sidebar.render(
             summaries,
-            sidebar_tabs,
+            tab_rows,
             &self.renames,
             SidebarUsage {
                 daily: self.chrome.token_usage.clone(),
