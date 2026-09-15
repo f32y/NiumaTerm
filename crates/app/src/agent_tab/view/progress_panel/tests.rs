@@ -16,7 +16,13 @@ fn progress_panel_is_narrower_and_expands_above_the_composer(cx: &mut TestAppCon
     cx.update(|cx| {
         gpui_component::init(cx);
 
-        cx.set_global(AgentSettings::default());
+        // Reduced motion settles each toggle within one frame; the ramp runs on
+        // wall-clock time, which a test frame does not advance.
+        cx.set_global(AgentSettings {
+            reduce_motion: true,
+            ..AgentSettings::default()
+        });
+
         cx.set_global(AgentThreadDefaults::default());
     });
 
@@ -95,6 +101,15 @@ fn progress_panel_is_narrower_and_expands_above_the_composer(cx: &mut TestAppCon
 
     let composer = cx.debug_bounds("agent-progress-composer").unwrap();
     let collapsed = cx.debug_bounds("agent-progress-panel").unwrap();
+    let header = cx.debug_bounds("agent-progress-header").unwrap();
+    let transcript = cx.debug_bounds("agent-progress-transcript").unwrap();
+
+    // The panel's lower edge runs behind the card, so the header is centred in
+    // the band between the panel's top and the card's top.
+    let visible_center = (collapsed.top() + composer.top()) / 2.;
+
+    assert!((header.center().y - visible_center).abs() < px(1.));
+    assert!(transcript.bottom() <= collapsed.top());
 
     assert!((collapsed.size.width - composer.size.width * 0.95).abs() < px(1.));
     assert!((collapsed.center().x - composer.center().x).abs() < px(1.));
@@ -117,6 +132,13 @@ fn progress_panel_is_narrower_and_expands_above_the_composer(cx: &mut TestAppCon
     let objective = cx.debug_bounds("agent-progress-objective").unwrap();
 
     assert!(expanded.size.height > collapsed.size.height);
+
+    // Opening the details takes space from the transcript instead of covering
+    // its last rows.
+    let pushed = cx.debug_bounds("agent-progress-transcript").unwrap();
+
+    assert!(pushed.bottom() <= expanded.top());
+    assert!(pushed.bottom() < transcript.bottom());
     assert!(
         objective.size.height > px(30.),
         "the full objective must wrap"
