@@ -67,6 +67,17 @@ pub(super) fn codex_command_request(rpc_id: u64, thread_id: &str, name: &str) ->
     }
 }
 
+/// Stop the turn `turn_id` of thread `thread_id`. The request is scoped to
+/// the thread it names, so it ends only that thread's turn.
+pub(super) fn turn_interrupt_request(rpc_id: u64, thread_id: &str, turn_id: &str) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": rpc_id,
+        "method": "turn/interrupt",
+        "params": {"threadId": thread_id, "turnId": turn_id},
+    })
+}
+
 pub(super) fn thread_name_request(rpc_id: u64, thread_id: &str, name: &str) -> Value {
     json!({
         "jsonrpc": "2.0",
