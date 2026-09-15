@@ -22,6 +22,7 @@ use crate::background_task::{
 };
 use crate::chat::Item;
 use crate::codex::app_server::background_tasks::launch_messages::LaunchMessages;
+use crate::codex::app_server::protocol::turn_interrupt_request;
 use crate::json::{condense, text_field};
 
 /// Page size for descendant discovery. Threads are cheap metadata rows and the
@@ -723,12 +724,7 @@ impl CodexTasks {
     pub(super) fn interrupt_request(&self, rpc_id: u64, thread_id: &str) -> Option<Value> {
         let turn_id = self.active_turns.get(thread_id)?;
 
-        Some(json!({
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "method": "turn/interrupt",
-            "params": {"threadId": thread_id, "turnId": turn_id},
-        }))
+        Some(turn_interrupt_request(rpc_id, thread_id, turn_id))
     }
 
     /// Build a request for one descendant's stored conversation. `thread/read`

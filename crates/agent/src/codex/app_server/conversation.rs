@@ -55,6 +55,17 @@ pub(super) struct ThreadState {
 }
 
 impl ThreadState {
+    /// Drop what belonged to the thread being left: its running turn, the
+    /// approval and questions it asked, and its compaction in progress. The
+    /// next thread, or none after the host exits, owes answers to none of it.
+    pub(super) fn end_thread(&mut self) {
+        self.current_turn = None;
+        self.pending_approval = None;
+        self.questions = QuestionState::default();
+
+        self.compaction.reset_thread();
+    }
+
     pub(super) fn on_notification(&mut self, method: &str, params: &Value) -> Vec<Event> {
         match method {
             "turn/plan/updated" => {

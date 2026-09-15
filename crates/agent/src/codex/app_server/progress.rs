@@ -3,10 +3,12 @@ mod tests;
 
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::thread;
 
 use serde_json::{Value, json};
 
+use crate::codex::app_server::SessionDelivery;
 use crate::progress::{GoalStatus, Task, TaskList, TaskStatus};
 
 pub(super) const PLAN_RESTORED: &str = "nmt/codexPlanRestored";
@@ -63,6 +65,25 @@ pub(super) fn read_plan(path: &Path) -> Option<Value> {
     }
 
     plan
+}
+
+/// Read the plan recorded in the thread log at `path` off the caller's thread
+/// and deliver it as a `PLAN_RESTORED` notification. The log can be large,
+/// and `thread_id` with `revision` let the receiver drop a plan that a newer
+/// thread switch or checklist update has already superseded.
+pub(super) fn spawn_plan_restore(
+    path: PathBuf,
+    thread_id: Option<String>,
+    revision: u64,
+    deliver: SessionDelivery,
+) {
+    let _ = thread::Builder::new()
+        .name("codex-plan-restore".into())
+        .spawn(move || {
+            deliver(json!({"method": PLAN_RESTORED, "params": {
+                "threadId": thread_id, "revision": revision, "value": read_plan(&path)
+            }}));
+        });
 }
 
 pub(super) fn goal_request(id: u64, thread_id: &str, arguments: &str) -> Value {

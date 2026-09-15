@@ -40,7 +40,6 @@ mod tests;
 use std::mem::take;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 #[cfg(test)]
 use std::time::UNIX_EPOCH;
@@ -54,16 +53,15 @@ use crate::codex::app_server::conversation::ThreadState;
 #[cfg(test)]
 use crate::codex::app_server::conversation::TurnOutputUsage;
 use crate::codex::app_server::host::{CodexHost, HOST_EXIT_METHOD, RegistrationId};
-use crate::codex::app_server::progress::{PLAN_RESTORED, goal_request, goal_status, read_plan};
+use crate::codex::app_server::progress::{goal_request, goal_status, spawn_plan_restore};
 #[cfg(test)]
 use crate::codex::app_server::protocol::thread_start_params;
 use crate::codex::app_server::protocol::{
     codex_command_request, codex_command_response, codex_user_input, file_change_paths,
     parse_fork_checkpoints, parse_models, parse_replay, parse_thread_settings,
     parse_thread_summaries, resumed_thread_events, skills_list_request, stringify_command,
-    thread_list_params, thread_resume_params, turn_start_params,
+    thread_list_params, thread_resume_params, turn_interrupt_request, turn_start_params,
 };
-use crate::codex::app_server::questions::QuestionState;
 #[cfg(test)]
 use crate::codex::app_server::skills::parse_skill_catalog;
 use crate::codex::app_server::skills::{SkillRefreshState, skill_catalog_from_response};
@@ -334,12 +332,7 @@ impl Session {
         ) {
             let rpc_id = self.alloc_rpc_id();
 
-            self.send(json!({
-                "jsonrpc": "2.0",
-                "id": rpc_id,
-                "method": "turn/interrupt",
-                "params": {"threadId": thread_id, "turnId": turn_id},
-            }));
+            self.send(turn_interrupt_request(rpc_id, &thread_id, &turn_id));
         }
 
         if let Some(thread_id) = self.conversation.thread_id.clone() {
@@ -537,13 +530,8 @@ impl Session {
 
         let rpc_id = self.alloc_rpc_id();
 
-        self.try_send(json!({
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "method": "turn/interrupt",
-            "params": {"threadId": thread_id, "turnId": turn_id},
-        }))
-        .is_ok()
+        self.try_send(turn_interrupt_request(rpc_id, &thread_id, &turn_id))
+            .is_ok()
     }
 
     /// Switch this session onto a persisted thread. The response carries the
@@ -1139,12 +1127,8 @@ impl Session {
 
         self.retain_request_routes();
 
-        self.conversation.pending_approval = None;
+        self.conversation.end_thread();
 
-        self.conversation.compaction.reset_thread();
-
-        self.conversation.questions = QuestionState::default();
-        self.conversation.current_turn = None;
         self.conversation.thread_id = result["thread"]["id"].as_str().map(str::to_owned);
         self.initial_resume = None;
         self.conversation.plan_revision += 1;
@@ -1153,18 +1137,12 @@ impl Session {
         self.request_goal();
 
         if let Some(path) = result["thread"]["path"].as_str() {
-            let path = PathBuf::from(path);
-            let deliver = self.deliver.clone();
-            let thread_id = self.conversation.thread_id.clone();
-            let revision = self.conversation.plan_revision;
-
-            let _ = thread::Builder::new()
-                .name("codex-plan-restore".into())
-                .spawn(move || {
-                    deliver(json!({"method": PLAN_RESTORED, "params": {
-                        "threadId": thread_id, "revision": revision, "value": read_plan(&path)
-                    }}));
-                });
+            spawn_plan_restore(
+                PathBuf::from(path),
+                self.conversation.thread_id.clone(),
+                self.conversation.plan_revision,
+                self.deliver.clone(),
+            );
         }
 
         // A resumed parent can already have finished descendants, and
@@ -1253,15 +1231,11 @@ impl Session {
     fn on_host_exit(&mut self, params: &Value) -> Vec<Event> {
         self.cancel_title_generation();
 
-        self.conversation.current_turn = None;
-        self.conversation.pending_approval = None;
-        self.conversation.questions = QuestionState::default();
+        self.conversation.end_thread();
 
         self.control.close();
 
         self.skill_refresh = SkillRefreshState::default();
-
-        self.conversation.compaction.reset_thread();
 
         vec![Event::HostExited {
             message: params["message"]
