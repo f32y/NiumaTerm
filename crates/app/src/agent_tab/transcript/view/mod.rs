@@ -1,29 +1,25 @@
 #[cfg(test)]
 mod tests;
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
-use chrono::{DateTime, Local, Utc};
+use chrono::Utc;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Bounds, ClipboardItem, Context, Div, FollowMode, FontWeight, Image,
-    ImageFormat, IntoElement, ListAlignment, ListOffset, ListState, ObjectFit, Pixels, Render,
-    ScrollHandle, SharedString, Window, div, img, list, px, relative,
+    AnyElement, Bounds, Context, FollowMode, Image, ImageFormat, IntoElement, ListAlignment,
+    ListOffset, ListState, Pixels, Render, ScrollHandle, SharedString, Window, div, list, px,
+    relative,
 };
-use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::modern_menu::{ModernMenu, ModernMenuExt as _};
+use gpui_component::button::Button;
+use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::scroll::Scrollbar;
-use gpui_component::shimmer::ShimmerText;
-use gpui_component::spinner::Spinner;
-use gpui_component::{
-    ActiveTheme as _, ElementExt as _, Icon, IconName, Sizable as _, h_flex, text, v_flex,
-};
-use nmt_agent::chat::{Item as SessionItem, Question};
+use gpui_component::{ActiveTheme as _, ElementExt as _, IconName, Sizable as _};
+use nmt_agent::chat::Item as SessionItem;
 use nmt_agent::transcript::conversation::{ConversationImage, ConversationState};
 use nmt_config::agent::CollapseRows;
 use nmt_profiling::transcript::{Operation, Probe};
@@ -31,39 +27,33 @@ use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
 use crate::agent_tab::capabilities::AgentCapabilities as _;
-use crate::agent_tab::composer::attachments::MAX_ATTACHMENTS;
-use crate::agent_tab::composer::{
-    PALETTE_MAX_HEIGHT, PromptTarget, annotation_count_label, parse_annotated_prompt,
-};
+use crate::agent_tab::composer::{PALETTE_MAX_HEIGHT, PromptTarget};
 use crate::agent_tab::profile::AgentKind;
 use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
 use crate::agent_tab::transcript::code::is_code_item;
-use crate::agent_tab::transcript::disclosure_row::{
-    AGENT_CARD_BODY_PADDING_Y, AGENT_CARD_DETAIL_SIZE, AGENT_CARD_GAP, AGENT_CARD_ICON_BLOCK,
-    AGENT_CARD_PADDING_X, AGENT_CARD_RADIUS, AGENT_DISCLOSURE_DETAIL_INSET, AgentCardTone,
-    AgentDisclosureRow, USER_ANNOTATION_PADDING_Y, USER_BUBBLE_PADDING_X, USER_BUBBLE_PADDING_Y,
-    USER_BUBBLE_RADIUS, USER_BUBBLE_TAIL_RADIUS, USER_BUBBLE_WIDTH_FRACTION, agent_card,
-};
 use crate::agent_tab::transcript::incremental::RowCache;
 use crate::agent_tab::transcript::render::image_preview::{ImagePreview, ImagePreviewLayer};
+use crate::agent_tab::transcript::render::menus::{copy_entry_menu, prompt_row_menu};
+use crate::agent_tab::transcript::render::message_rows::{
+    agent_reply_row, error_row, question_message, working_row,
+};
 use crate::agent_tab::transcript::render::text_style::{markdown_view, transcript_text_style};
+use crate::agent_tab::transcript::render::user_row::user_prompt_row;
+use crate::agent_tab::transcript::render::work_card::{work_card, work_step};
 use crate::agent_tab::transcript::render::{
-    TRANSCRIPT_LINE_HEIGHT, TRANSCRIPT_RUN_RULE, TRANSCRIPT_TEXT_INSET, TRANSCRIPT_THUMBNAIL,
-    WorkingIndicator, compaction_row, gap_px, render_interrupted_row, render_run_toggle,
-    render_turn_fold, render_turn_summary, transcript_column,
+    TRANSCRIPT_LINE_HEIGHT, TRANSCRIPT_RUN_RULE, TRANSCRIPT_TEXT_INSET, bounded_scroll,
+    compaction_row, gap_px, render_interrupted_row, render_run_toggle, render_turn_fold,
+    render_turn_summary, transcript_column,
 };
-use crate::agent_tab::transcript::reveal::{
-    Disclosures, RevealKey, RevealedPart, revealed, revealed_block, revealed_part,
-};
+use crate::agent_tab::transcript::reveal::{Disclosures, RevealKey, revealed_block, revealed_part};
+use crate::agent_tab::transcript::row_structure::{RowGeometry, RowSource};
 use crate::agent_tab::transcript::rows::{
-    EntryPresentation, PickerReservation, RowGap, TranscriptRow, TurnSummary, entry_fingerprint,
-    folds_turns, is_run_row, row_gap, spaced_rows, turn_opening_prompts, turn_summary,
+    EntryPresentation, PickerReservation, RowGap, TranscriptRow, folds_turns, is_run_row,
+    spaced_rows, turn_opening_prompts,
 };
 use crate::agent_tab::transcript::typewriter::ReplyTyping;
 use crate::agent_tab::transcript::{
-    CodeTranscriptCache, Entry, RowSpec, command_execution_heading, command_failure_reason,
-    entry_copy_text, hidden, is_work_row, should_show_jump_to_latest, truncated_user_prompt,
-    working_label,
+    CodeTranscriptCache, Entry, RowSpec, is_work_row, should_show_jump_to_latest,
 };
 
 /// One agent conversation as the user reads it: the entry list, the row
@@ -310,6 +300,7 @@ impl TranscriptView {
     /// height-relevant part of that row's signature. The row lays out to what
     /// the edge lets through, so the signature has to move with the edge for
     /// the list to remeasure the row as it grows.
+    #[cfg(test)]
     pub(crate) fn typed_edge(&self, index: usize) -> Option<usize> {
         self.typing.typed_edge(index)
     }
@@ -455,7 +446,20 @@ impl TranscriptView {
                 tool_count,
                 expanded,
             } => render_run_toggle(&self.disclosures, run_start, tool_count, expanded, cx),
-            RowSpec::Working { compacting } => self.render_working_row(compacting, cx),
+            RowSpec::Working { compacting } => {
+                let conversation = self.conversation.borrow();
+
+                match conversation.live.started() {
+                    Some(started) => working_row(
+                        started,
+                        conversation.live.output_tokens(),
+                        conversation.live.detail(),
+                        compacting,
+                        cx,
+                    ),
+                    None => div().into_any_element(),
+                }
+            }
         };
 
         // Each row is laid out on its own by the virtual list, so the reading
@@ -494,13 +498,20 @@ impl TranscriptView {
         // rule and the space it owes the row below it — because a rule drawn
         // down to a step of no height, or a gap left where a step used to be,
         // is the part that would still jump.
-        match (part, self.revealed_by(ix, now)) {
+        let conversation = self.conversation.borrow();
+
+        let geometry = RowGeometry {
+            rows: &self.rows,
+            source: self.row_source(&conversation),
+        };
+
+        match (part, geometry.revealed_by(ix, now)) {
             (Some(part), Some(key)) => revealed_block(
                 row,
                 part,
                 self.disclosures.progress(key, now),
                 self.disclosures.height(part),
-                self.shut_height(ix, key, now),
+                geometry.shut_height(ix, key, now),
                 cx.entity().downgrade(),
             )
             .into_any_element(),
@@ -508,147 +519,9 @@ impl TranscriptView {
         }
     }
 
-    /// What a shutting row still occupies once it has finished shutting.
-    ///
-    /// When a block of rows leaves the list, the row above the block stops
-    /// holding its space off the block's first row and starts holding it off
-    /// whatever followed the block, and those two boundaries can rank apart:
-    /// a toggle sits a step off its first step and a work rank off the reply
-    /// after the run. The block's last row holds back exactly that
-    /// difference, so the space the row above gains at the removal is the
-    /// space the block gives up, and the removal itself moves nothing. Every
-    /// row above the last owes nothing, because the boundary it leaves
-    /// behind is inside the block.
-    fn shut_height(&self, ix: usize, key: RevealKey, now: Instant) -> Pixels {
-        if self.revealed_by(ix + 1, now) == Some(key) {
-            return px(0.);
-        }
-
-        let first = (0..ix)
-            .rev()
-            .take_while(|cursor| self.revealed_by(*cursor, now) == Some(key))
-            .last()
-            .unwrap_or(ix);
-
-        let Some(above) = first.checked_sub(1).map(|above| &self.rows[above]) else {
-            return px(0.);
-        };
-
-        let below = self.rows.get(ix + 1).map(|row| &row.spec);
-
-        let merged = row_gap(
-            self.conversation.borrow().content.entries(),
-            &above.spec,
-            below,
-        );
-
-        px(gap_px(merged) - gap_px(above.gap))
-    }
-
     /// The live progress line. While the backend is compacting it names that
     /// explicitly and spins: compaction produces no streamed output, so a bare
     /// seconds counter would read as a hung turn for as long as a minute.
-    pub(crate) fn render_working_row(
-        &self,
-        compacting: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let Some(started) = self.conversation.borrow().live.started() else {
-            return div().into_any_element();
-        };
-
-        if compacting {
-            let accent = cx.theme().info;
-
-            return h_flex()
-                .w_full()
-                .gap(px(AGENT_CARD_GAP))
-                .items_center()
-                .px(px(AGENT_CARD_PADDING_X))
-                .child(
-                    div()
-                        .size(px(AGENT_CARD_ICON_BLOCK))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(
-                            Spinner::new()
-                                .icon(IconName::LoaderCircle)
-                                .with_size(px(12.))
-                                .color(accent),
-                        ),
-                )
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(accent)
-                                .child(t!("agent-transcript-compacting")),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(working_label(
-                                    started,
-                                    self.conversation.borrow().live.output_tokens(),
-                                    self.conversation.borrow().live.detail(),
-                                )),
-                        ),
-                )
-                .into_any_element();
-        }
-
-        // The dots stand in the slot a card gives its type icon, so the label
-        // starts on the column a tool call's title starts on and the live line
-        // reads as the next step of the work above it rather than as a stray
-        // line under it. A ring turning in that slot reads as one more step
-        // with an icon; a travelling swell reads as the pane waiting.
-        h_flex()
-            .w_full()
-            .gap(px(AGENT_CARD_GAP))
-            .items_center()
-            .px(px(AGENT_CARD_PADDING_X))
-            .child(
-                div()
-                    .size(px(AGENT_CARD_ICON_BLOCK))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(WorkingIndicator::new(cx.theme().warning)),
-            )
-            .child(
-                div()
-                    .text_size(px(AGENT_CARD_DETAIL_SIZE))
-                    .text_color(cx.theme().muted_foreground)
-                    .child(
-                        // The label text changes every second, so it cannot
-                        // serve as the animation identity; a fixed id keeps
-                        // one animation state alive across those rewrites.
-                        //
-                        // The band lifts the muted label to full foreground
-                        // contrast. The component's theme-derived default
-                        // mixes the text toward the background on light
-                        // themes, which fades the band into the page instead,
-                        // and its default peak leaves the muted label only
-                        // slightly lifted at the twelve-pixel detail size.
-                        ShimmerText::new(working_label(
-                            started,
-                            self.conversation.borrow().live.output_tokens(),
-                            self.conversation.borrow().live.detail(),
-                        ))
-                        .id("agent-working-label")
-                        .highlight_color(cx.theme().foreground)
-                        .peak_opacity(0.9),
-                    ),
-            )
-            .into_any_element()
-    }
-
     pub(crate) fn render_entry_row(
         &mut self,
         index: usize,
@@ -660,18 +533,51 @@ impl TranscriptView {
         let entry = &conversation.content.entries()[index];
 
         match &entry.item {
-            SessionItem::UserMessage { text: Some(text) } => self.render_user_row(index, text, cx),
+            SessionItem::UserMessage { text: Some(text) } => {
+                let caps = self.kind.caps();
+
+                // Resolved now rather than when the menu opens: a prompt's
+                // place among the turns is a property of the transcript as it
+                // stands, and the rows can move under a menu that is already up.
+                let target = self
+                    .owner()
+                    .filter(|_| caps.session_fork || caps.file_rewind)
+                    .zip(self.prompt_target(index))
+                    .map(|(owner, target)| (owner.clone(), target));
+
+                let menu =
+                    prompt_row_menu(cx.entity().downgrade(), index, caps.session_fork, target);
+
+                user_prompt_row(
+                    index,
+                    text,
+                    &self.disclosures,
+                    self.entry_thumbnails(index),
+                    entry.metadata.at,
+                    menu,
+                    cx,
+                )
+            }
             SessionItem::AgentMessage {
                 id,
                 text: Some(text),
                 questions: Some(questions),
             } => {
-                self.render_question_message(index, id.clone(), text.clone(), questions.clone(), cx)
+                let reply = self.render_agent_row(index, text.clone(), cx);
+
+                question_message(
+                    index,
+                    id.clone(),
+                    questions.clone(),
+                    reply,
+                    self.owner().cloned(),
+                    cx,
+                )
             }
             SessionItem::AgentMessage {
                 text: Some(text), ..
             } => self.render_agent_row(index, self.shown_reply(index, text).to_string(), cx),
-            SessionItem::Error { text } => self.render_error_row(index, text.clone(), cx),
+            SessionItem::Error { text } => error_row(index, text.clone(), cx),
             SessionItem::Compaction { detail, .. } => {
                 let detail = detail.clone();
 
@@ -690,494 +596,55 @@ impl TranscriptView {
         }
     }
 
+    /// An assistant reply at entry `index`, credited to its author on a
+    /// conversation that mixes several agents.
     pub(crate) fn render_agent_row(
         &self,
         index: usize,
         text: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let shared = self.conversation.clone();
-        let conversation = shared.borrow();
+        let conversation = self.conversation.borrow();
+        let entry = &conversation.content.entries()[index];
 
-        let attribution = conversation.content.entries()[index]
-            .item
-            .id()
-            .and_then(|id| self.attribution.get(id));
+        let attribution = entry.item.id().and_then(|id| self.attribution.get(id));
 
         let cwd = attribution.map_or_else(|| self.cwd.clone(), |author| author.cwd.clone());
 
-        h_flex()
-            .id(("entry", index))
-            .group("entry")
-            .relative()
-            .w_full()
-            .items_end()
-            .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
-            .child(
-                v_flex()
-                    .debug_selector(move || format!("transcript-agent-{index}"))
-                    .flex_1()
-                    .min_w_0()
-                    .px_1()
-                    .when_some(attribution, |view, author| {
-                        view.child(
-                            div()
-                                .debug_selector(move || format!("transcript-author-{index}"))
-                                .mb_2()
-                                .text_sm()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(cx.theme().muted_foreground)
-                                .child(author.name.clone()),
-                        )
-                    })
-                    .child(
-                        markdown_view(("agent-md", index), text, cwd)
-                            .style(transcript_text_style(cx))
-                            .selectable(true),
-                    ),
-            )
-            .child(
-                // A stamp in the flow would reserve its width on every row,
-                // ending assistant output short of the pane by a strip that is
-                // blank whenever the pointer is elsewhere. Out of the flow it
-                // costs nothing until it appears, and the tinted chip keeps it
-                // legible where it lands over the last line.
-                self.hover_stamp(index, cx)
-                    .absolute()
-                    .right_1()
-                    .bottom_0()
-                    .px_1()
-                    .rounded(UI_RADIUS)
-                    .bg(cx.theme().muted),
-            )
-            .into_any_element()
+        agent_reply_row(
+            index,
+            text,
+            cwd,
+            attribution.map(|author| author.name.clone()),
+            entry.metadata.at,
+            cx,
+        )
     }
 
-    pub(crate) fn render_error_row(
-        &self,
-        index: usize,
-        text: String,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        h_flex()
-            .id(("entry", index))
-            .w_full()
-            .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
-            .child(
-                div()
-                    .max_w(relative(0.9))
-                    .px_3()
-                    .py_2()
-                    .rounded(UI_RADIUS)
-                    .bg(cx.theme().danger.opacity(0.15))
-                    .text_color(cx.theme().danger)
-                    .text_sm()
-                    .child(text),
-            )
-            .into_any_element()
-    }
+    /// Thumbnails of the images entry `index` carried, decoded once and kept
+    /// for as long as the conversation is on screen.
+    fn entry_thumbnails(&self, index: usize) -> Vec<Arc<Image>> {
+        let conversation = self.conversation.borrow();
 
-    /// Hover-revealed timestamp; the row declares `.group("entry")`.
-    pub(crate) fn hover_stamp(&self, index: usize, cx: &mut Context<Self>) -> Div {
-        div()
-            .flex_none()
-            .text_xs()
-            .text_color(cx.theme().muted_foreground)
-            .invisible()
-            .group_hover("entry", |this| this.visible())
-            .child(
-                self.conversation.borrow().content.entries()[index]
-                    .metadata
-                    .at
-                    .and_then(|at| DateTime::from_timestamp(at, 0))
-                    .map(|at| at.with_timezone(&Local).format("%H:%M").to_string())
-                    .unwrap_or_default(),
-            )
-    }
-
-    pub(crate) fn copy_menu(
-        pane: gpui::WeakEntity<Self>,
-        index: usize,
-    ) -> impl Fn(ModernMenu, &mut Window, &mut App) -> ModernMenu + 'static {
-        move |menu, _, cx| {
-            // Full transcript payloads can be very large. Resolve and clone the
-            // text only after a right click opens the menu, keeping ordinary
-            // list layout independent of the hidden message size.
-            let copy_text = pane
-                .read_with(cx, |pane, _| {
-                    pane.conversation
-                        .borrow()
-                        .content
-                        .entries()
-                        .get(index)
-                        .map(|entry| entry_copy_text(&entry.item))
-                })
-                .ok()
-                .flatten();
-
-            match copy_text {
-                Some(copy_text) => menu
-                    .item(t!("agent-transcript-copy"), move |_, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
-                    })
-                    .icon(IconName::Copy),
-                None => menu,
-            }
-        }
-    }
-
-    /// The copy item plus the actions a prompt offers over the conversation
-    /// it opened: branching in front of it, or returning to it.
-    ///
-    /// Which of the two appears follows the backend. Where a branch is a
-    /// request the harness answers, the prompt names a cut and nothing else;
-    /// where the conversation is a transcript file this side rewrites, the
-    /// same cut also decides what happens to the files that turn touched, so
-    /// the rewind actions are what the prompt leads to.
-    fn user_row_menu(
-        &self,
-        index: usize,
-        cx: &Context<Self>,
-    ) -> impl Fn(ModernMenu, &mut Window, &mut App) -> ModernMenu + 'static {
-        let copy = Self::copy_menu(cx.entity().downgrade(), index);
-        let caps = self.kind.caps();
-
-        // Resolved now rather than when the menu opens: a prompt's place among
-        // the turns is a property of the transcript as it stands, and the rows
-        // can move under a menu that is already up.
-        let target = self
-            .owner()
-            .filter(|_| caps.session_fork || caps.file_rewind)
-            .zip(self.prompt_target(index))
-            .map(|(owner, target)| (owner.clone(), target));
-
-        move |menu, window, cx| {
-            let menu = copy(menu, window, cx);
-
-            let Some((pane, target)) = target.clone() else {
-                return menu;
-            };
-
-            if caps.session_fork {
-                menu.separator()
-                    .item(t!("agent-transcript-fork-from-here"), move |_, cx| {
-                        let target = target.clone();
-
-                        pane.update(cx, |pane, cx| pane.fork_from_prompt(target, cx))
-                            .ok();
-                    })
-                    .icon(IconName::GitBranch)
-            } else {
-                menu.separator()
-                    .item(t!("agent-transcript-rewind-to-here"), move |_, cx| {
-                        let target = target.clone();
-
-                        pane.update(cx, |pane, cx| pane.rewind_to_prompt(target, cx))
-                            .ok();
-                    })
-                    .icon(IconName::Undo)
-            }
-        }
-    }
-
-    /// User prompt: right-aligned quiet bubble (muted surface, no border).
-    ///
-    /// Oversized prompts (huge pastes) collapse to their head by default:
-    /// a visible row re-lays-out its full text every frame, so an unbounded
-    /// prompt would make every frame O(paste size). Expansion is an explicit
-    /// per-row choice, and the right-click Copy always carries the full text.
-    pub(crate) fn render_user_row(
-        &self,
-        index: usize,
-        text: &str,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let parsed = parse_annotated_prompt(text);
-        let text = parsed.as_ref().map_or(text, |parsed| parsed.prompt);
-        let head_len = truncated_user_prompt(text).map(str::len);
-        let expanded = head_len.is_some() && self.disclosures.row_expanded(index);
-
-        let shown = match (head_len, expanded) {
-            (Some(len), false) => text[..len].to_string(),
-            _ => text.to_string(),
+        let Some(entry) = conversation.content.entries().get(index) else {
+            return Vec::new();
         };
 
-        // A prompt long enough to fold is a pasted block rather than a
-        // sentence, and it takes the column's whole measure. Sized to its
-        // content it would instead be as wide as the longest line of whichever
-        // half is on screen, so opening it would move its edges as well as its
-        // height; measuring the hidden half to avoid that is the layout pass
-        // the fold exists to skip.
-        let fills_column = head_len.is_some();
-
-        let toggle = head_len.is_some().then(|| {
-            div()
-                .mt_1()
-                .text_xs()
-                .text_color(cx.theme().primary)
-                .cursor_pointer()
-                .child(if expanded {
-                    t!("agent-transcript-show-less").to_string()
-                } else {
-                    t!("agent-transcript-show-full-message").to_string()
-                })
-                .id(("user-expand", index))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.toggle_disclosure(RevealKey::Row(index), cx)
-                }))
-        });
-
-        // The prompt fold above swaps the text inside one bubble rather than
-        // opening a block below it, so it takes no entrance of its own: fading
-        // it in would fade the half of the prompt that was already on screen.
-        // Its toggle still pins the reading position, which is what a paste
-        // long enough to fold actually needs.
-        let annotations_reveal = self
-            .disclosures
-            .progress(RevealKey::Annotation(index), Instant::now());
-
-        // The quotations open a rounded bubble, and a clip box is a rectangle,
-        // so they fade in place rather than growing by height: squaring off
-        // the corner the bubble is known by would cost more than the height
-        // ramp buys on a block this size. The card is shaped for as long as
-        // they are on screen and the wording answers the click at once.
-        let annotations_shown =
-            self.disclosures.annotation_expanded(index) && annotations_reveal > 0.0;
-
-        let annotations_disclosing = self.disclosures.is_disclosing(RevealKey::Annotation(index));
-
-        let annotations = parsed.as_ref().and_then(|parsed| {
-            (!parsed.annotations.is_empty()).then(|| {
-                let action_label = if annotations_disclosing {
-                    t!("agent-transcript-annotations-collapse")
-                } else {
-                    t!("agent-transcript-annotations-expand")
-                };
-
-                let content = annotations_shown.then(|| {
-                    v_flex()
-                        .w_full()
-                        .gap_2()
-                        .map(|this| revealed(this, annotations_reveal))
-                        // Closes the bubble the header opens, and takes the
-                        // header's own edge inset so a quotation starts on the
-                        // same column the header's label does.
-                        .rounded_b(px(USER_BUBBLE_RADIUS))
-                        .bg(cx.theme().muted)
-                        .border_t_1()
-                        .border_color(cx.theme().border)
-                        .px(px(USER_BUBBLE_PADDING_X))
-                        .py(px(USER_BUBBLE_PADDING_Y))
-                        .children(parsed.annotations.iter().enumerate().map(
-                            |(position, annotation)| {
-                                h_flex()
-                                    .w_full()
-                                    .items_start()
-                                    .gap_2()
-                                    .child(
-                                        div()
-                                            .flex_none()
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child(format!("{}.", position + 1)),
-                                    )
-                                    .child(
-                                        div().flex_1().min_w_0().child(
-                                            text::TextView::plain(
-                                                format!(
-                                                    "entry-response-annotation-{index}-{position}"
-                                                ),
-                                                annotation.text.clone(),
-                                            )
-                                            .selectable(true),
-                                        ),
-                                    )
-                            },
-                        ))
-                });
-
-                v_flex()
-                    // Sized to what it says, like the prompt below it, and
-                    // right-aligned with it by the column both sit in. The
-                    // quotations are the wider of the two, so opening them is
-                    // what grows the bubble.
-                    .min_w_0()
-                    .child(
-                        // A second bubble in the prompt's own language: same
-                        // fill, same corner, same edge inset, quieter text.
-                        // Its padding and inherited text size come from the
-                        // bubble rather than from a button size, because the
-                        // transcript's text size is a setting and a control
-                        // with a fixed height would stop matching the bubble
-                        // below it as soon as that setting moves.
-                        h_flex()
-                            .id(("entry-response-annotations", index))
-                            .role(gpui::Role::Button)
-                            .aria_label(action_label)
-                            .w_full()
-                            .px(px(USER_BUBBLE_PADDING_X))
-                            .py(px(USER_ANNOTATION_PADDING_Y))
-                            .bg(cx.theme().muted)
-                            .text_color(cx.theme().muted_foreground)
-                            // Squares off where the quotations meet it, and is
-                            // a closed capsule while they are hidden.
-                            .map(|this| match annotations_shown {
-                                true => this.rounded_t(px(USER_BUBBLE_RADIUS)),
-                                false => this.rounded(px(USER_BUBBLE_RADIUS)),
-                            })
-                            .gap_2()
-                            .items_center()
-                            .cursor_pointer()
-                            .hover(|style| style.bg(cx.theme().accent))
-                            .child(Icon::new(IconName::TextSelect).xsmall())
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .child(annotation_count_label(parsed.annotations.len())),
-                            )
-                            .child(
-                                Icon::new(if annotations_disclosing {
-                                    IconName::ChevronUp
-                                } else {
-                                    IconName::ChevronDown
-                                })
-                                .xsmall(),
-                            )
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.toggle_disclosure(RevealKey::Annotation(index), cx)
-                            })),
-                    )
-                    .children(content)
-            })
-        });
-
-        let message = div()
-            // The width cap lives on the column below, which has a definite
-            // width to take a fraction of. A fraction here would resolve
-            // against this bubble's own shrink-to-fit parent instead, wrapping
-            // every prompt at a fraction of its natural single-line width.
-            .min_w_0()
-            .when(fills_column, |this| this.w_full())
-            .px(px(USER_BUBBLE_PADDING_X))
-            .py(px(USER_BUBBLE_PADDING_Y))
-            .rounded_tl(px(USER_BUBBLE_RADIUS))
-            .rounded_tr(px(USER_BUBBLE_RADIUS))
-            .rounded_bl(px(USER_BUBBLE_RADIUS))
-            // The one square-ish corner faces the conversation the prompt was
-            // sent into, which is what marks the bubble as this side of it.
-            .rounded_br(px(USER_BUBBLE_TAIL_RADIUS))
-            .bg(cx.theme().muted)
-            // Plain, not markdown: the prompt is user-authored text and
-            // must render verbatim, but stays drag-selectable.
-            .child(text::TextView::plain(("user-text", index), shown).selectable(true))
-            .children(toggle)
-            .children(self.render_entry_images(index, cx));
-
-        h_flex()
-            .id(("entry", index))
-            .group("entry")
-            .w_full()
-            .justify_end()
-            .items_end()
-            .gap_2()
-            .modern_context_menu(self.user_row_menu(index, cx))
-            .child(self.hover_stamp(index, cx))
-            .child(
-                v_flex()
-                    // Both bubbles size to their own content and end on this
-                    // column's trailing edge, so the cap that keeps a prompt
-                    // off the full width lives here rather than on either. The
-                    // row above is `w_full`, so the fraction has a definite
-                    // width to resolve against and tracks the pane.
-                    //
-                    // A foldable prompt takes that measure as its width rather
-                    // than as a ceiling: a bubble asking for the full width of
-                    // a shrink-to-fit column would still be sized by its own
-                    // longest line, since a percentage contributes nothing to
-                    // what a column asks for.
-                    .map(|this| match fills_column {
-                        true => this.w(relative(USER_BUBBLE_WIDTH_FRACTION)),
-                        false => this.max_w(relative(USER_BUBBLE_WIDTH_FRACTION)),
+        entry
+            .metadata
+            .images
+            .iter()
+            .enumerate()
+            .map(|(position, image)| {
+                self.image_previews
+                    .borrow_mut()
+                    .entry((index, position))
+                    .or_insert_with(|| {
+                        Arc::new(Image::from_bytes(ImageFormat::Png, image.bytes.to_vec()))
                     })
-                    .min_w_0()
-                    .items_end()
-                    .gap_1()
-                    .children(annotations)
-                    .child(message),
-            )
-            .into_any_element()
-    }
-
-    /// The images a message carried, under its text. A reader who scrolls back
-    /// should see what was sent, not the placeholder that stood in for it while
-    /// the message was being written.
-    fn render_entry_images(&self, index: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let conversation = self.conversation.borrow();
-        let images = &conversation.content.entries().get(index)?.metadata.images;
-
-        if images.is_empty() {
-            return None;
-        }
-
-        Some(
-            h_flex()
-                .mt_2()
-                .gap_2()
-                .flex_wrap()
-                .justify_end()
-                .children(images.iter().enumerate().map(|(position, image)| {
-                    let image = self
-                        .image_previews
-                        .borrow_mut()
-                        .entry((index, position))
-                        .or_insert_with(|| {
-                            Arc::new(Image::from_bytes(ImageFormat::Png, image.bytes.to_vec()))
-                        })
-                        .clone();
-
-                    // A click carries the pointer's position, not the
-                    // thumbnail's; the bounds the layout gave it are kept from
-                    // the prepaint that precedes the click, so the preview
-                    // knows where to grow from.
-                    let placed = Rc::new(Cell::new(Bounds::default()));
-
-                    div()
-                        // The measuring child is positioned absolutely, and
-                        // an absolute child measures its nearest positioned
-                        // ancestor; without this it would report the row.
-                        .relative()
-                        .size(px(TRANSCRIPT_THUMBNAIL))
-                        .flex_none()
-                        .rounded(UI_RADIUS)
-                        .overflow_hidden()
-                        .border_1()
-                        .border_color(cx.theme().border)
-                        // Unique across rows: a row carries at most
-                        // `MAX_ATTACHMENTS` images, so its band cannot overlap
-                        // the next row's.
-                        .id(("entry-image", index * MAX_ATTACHMENTS + position))
-                        // A thumbnail is cropped to a square and small enough
-                        // to only recognize the image by, so opening it is the
-                        // only way to read what was sent.
-                        .cursor_pointer()
-                        .aria_label(t!("agent-transcript-image-open"))
-                        .on_prepaint({
-                            let placed = placed.clone();
-
-                            move |bounds, _, _| placed.set(bounds)
-                        })
-                        .on_click(cx.listener({
-                            let image = image.clone();
-
-                            move |this, _, _, cx| {
-                                this.zoom_image(image.clone(), Some(placed.get()), cx)
-                            }
-                        }))
-                        .child(img(image.clone()).size_full().object_fit(ObjectFit::Cover))
-                }))
-                .into_any_element(),
-        )
+                    .clone()
+            })
+            .collect()
     }
 
     /// One step of the work log, as a card: icon block · heading · outcome
@@ -1197,305 +664,50 @@ impl TranscriptView {
 
         let shared = self.conversation.clone();
         let conversation = shared.borrow();
+        let item = &conversation.content.entries()[index].item;
 
-        let (icon, heading, reason, status, detail) =
-            match &conversation.content.entries()[index].item {
-                SessionItem::CommandExecution {
-                    purpose,
-                    aggregated_output,
-                    status,
-                    exit_code,
-                    ..
-                } => {
-                    // Belt and braces: a non-zero exit code is a failure even if
-                    // the provider reported the execution as completed.
-                    let state = status.as_deref().unwrap_or("inProgress");
-
-                    let failed = matches!(state, "failed" | "declined")
-                        || exit_code.is_some_and(|code| code != 0);
-
-                    let state = if failed { "failed" } else { state };
-
-                    let detail = aggregated_output.as_deref().unwrap_or("");
-
-                    (
-                        IconName::SquareTerminal,
-                        command_execution_heading(purpose.as_deref()).to_string(),
-                        failed
-                            .then(|| command_failure_reason(aggregated_output.as_deref()))
-                            .flatten(),
-                        Some(state.to_string()),
-                        Some(detail),
-                    )
-                }
-                SessionItem::FileChange {
-                    paths,
-                    diff,
-                    status,
-                    ..
-                } => (
-                    IconName::File,
-                    t!("agent-transcript-edit-paths", paths = paths).into_owned(),
-                    None,
-                    Some(status.as_deref().unwrap_or("inProgress").to_string()),
-                    diff.as_deref().filter(|diff| !diff.trim().is_empty()),
-                ),
-                SessionItem::Other {
-                    kind,
-                    title,
-                    output,
-                    status,
-                    ..
-                } => (
-                    if kind == "webSearch" {
-                        IconName::Globe
-                    } else {
-                        IconName::Settings2
-                    },
-                    if title.trim().is_empty() {
-                        kind.clone()
-                    } else {
-                        format!("{kind} {title}")
-                    },
-                    None,
-                    Some(status.as_deref().unwrap_or("inProgress").to_string()),
-                    output.as_deref().filter(|output| !output.trim().is_empty()),
-                ),
-                SessionItem::Reasoning { summary, .. } => (
-                    IconName::Bot,
-                    t!("agent-transcript-thinking").to_string(),
-                    None,
-                    None,
-                    summary.as_deref().filter(|text| !text.trim().is_empty()),
-                ),
-                _ => return div().into_any_element(),
-            };
-
-        let expandable = detail.is_some();
-        let expanded = expandable && self.disclosures.row_expanded(index);
-
-        let detail_reveal = self
-            .disclosures
-            .progress(RevealKey::Row(index), Instant::now());
-
-        let detail_part = RevealedPart::Block(RevealKey::Row(index));
-        let detail_height = self.disclosures.height(detail_part);
-        let detail_view = cx.entity().downgrade();
-
-        let status_label = match status.as_deref() {
-            Some("failed") => t!("agent-transcript-status-failed"),
-            Some("declined") => t!("agent-transcript-status-declined"),
-            Some("completed") => t!("agent-transcript-status-completed"),
-            Some("inProgress") => t!("agent-transcript-status-in-progress"),
-            Some(status) => status.into(),
-            None => t!("agent-transcript-no-status"),
+        let Some(step) = work_step(item) else {
+            return div().into_any_element();
         };
 
-        // The outcome is a mark rather than a word: it lands in the same slot
-        // on every card, so a run of steps can be scanned down that column
-        // instead of read. The wording stays in the row's accessible label.
-        let tone = match status.as_deref() {
-            Some("failed" | "declined") => AgentCardTone::Failed,
-            _ => AgentCardTone::Neutral,
-        };
+        let expanded = step.detail.is_some() && self.disclosures.row_expanded(index);
 
-        let status_icon = status.as_deref().map(|state| match state {
-            "failed" | "declined" => (IconName::CircleX, cx.theme().danger),
-            "completed" => (IconName::Check, cx.theme().success),
-            _ => (IconName::Minus, cx.theme().muted_foreground),
-        });
+        let body = step.detail.filter(|_| expanded).map(|detail| {
+            if is_code_item(item) {
+                let view = self.code_transcripts.ensure(index, item, cx);
 
-        let accessible_label = format!(
-            "{}. {}{}",
-            heading,
-            status_label,
-            if expandable {
-                if self.disclosures.is_disclosing(RevealKey::Row(index)) {
-                    t!("agent-transcript-accessibility-expanded")
-                } else {
-                    t!("agent-transcript-accessibility-collapsed")
-                }
-            } else {
-                "".into()
+                return div()
+                    .w_full()
+                    .modern_context_menu(copy_entry_menu(cx.entity().downgrade(), index))
+                    .child(view)
+                    .into_any_element();
             }
-        );
 
-        // A failure reason shows whether or not the step is expanded, so a
-        // failed row usually heads a block even while its output is hidden.
-        // Otherwise the header heads a block for exactly as long as there is
-        // one: it squares off with the detail's arrival and returns to a pill
-        // the moment the detail has finished shrinking away.
-        let heads_body = reason.is_some() || (expanded && detail_reveal > 0.0);
+            let detail_scroll = window
+                .use_keyed_state(("wl-scroll", index), cx, |_, _| ScrollHandle::default())
+                .read(cx)
+                .clone();
 
-        let mut header = AgentDisclosureRow::new(("wl-head", index), heading)
-            .type_icon(icon)
-            .tone(tone)
-            .heads_body(heads_body)
-            .accessible_label(accessible_label);
-
-        if let Some((icon, color)) = status_icon {
-            header = header.status(icon, color);
-        }
-
-        if expandable {
-            header = header.expanded(expanded).opening(detail_reveal);
-        }
-
-        let header =
-            header.render(cx).when(expandable, |this| {
-                this.on_click(cx.listener(move |this, _, _, cx| {
-                    this.toggle_disclosure(RevealKey::Row(index), cx)
-                }))
-            });
-
-        // The block under the header carries the header's own fill, so a
-        // failed step reads as one tinted shape rather than as a tinted
-        // heading with untinted output hanging off it.
-        let card_body = heads_body.then(|| {
-            div()
-                .w_full()
-                .bg(tone.colors(cx).background)
-                .rounded_b(px(AGENT_CARD_RADIUS))
-                // Why a step failed belongs on the card rather than behind the
-                // disclosure: it is what the reader decides their next move from,
-                // and the full transcript below it is usually a stack trace.
-                .children(reason.map(|reason| {
-                    div()
-                        .w_full()
-                        .pl(px(AGENT_DISCLOSURE_DETAIL_INSET))
-                        .pr(px(AGENT_CARD_PADDING_X))
-                        .pb(px(AGENT_CARD_BODY_PADDING_Y))
-                        .text_size(px(AGENT_CARD_DETAIL_SIZE))
-                        .text_color(cx.theme().danger.opacity(0.85))
-                        .child(reason)
-                }))
-                .children(detail.filter(|_| expanded).map(|detail| {
-                    let body = if is_code_item(
-                        &self.conversation.borrow().content.entries()[index].item,
-                    ) {
-                        let view = self.code_transcripts.ensure(
-                            index,
-                            &self.conversation.borrow().content.entries()[index].item,
-                            cx,
-                        );
-
-                        div()
-                            .w_full()
-                            .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
-                            .child(view)
-                            .into_any_element()
-                    } else {
-                        let detail_scroll = window
-                            .use_keyed_state(("wl-scroll", index), cx, |_, _| {
-                                ScrollHandle::default()
-                            })
-                            .read(cx)
-                            .clone();
-
-                        div()
-                            .w_full()
-                            .relative()
-                            .child(
-                                div()
-                                    .id(("wl-out", index))
-                                    .w_full()
-                                    .max_h(px(256.))
-                                    .overflow_y_scroll()
-                                    .track_scroll(&detail_scroll)
-                                    .occlude()
-                                    .modern_context_menu(Self::copy_menu(
-                                        cx.entity().downgrade(),
-                                        index,
-                                    ))
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(
-                                        markdown_view(
-                                            ("wl-md", index),
-                                            detail.to_owned(),
-                                            cwd.clone(),
-                                        )
-                                        .style(transcript_text_style(cx))
-                                        .selectable(true),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .absolute()
-                                    .top_0()
-                                    .right_0()
-                                    .bottom_0()
-                                    .w(px(16.0))
-                                    .child(
-                                        Scrollbar::vertical(&detail_scroll)
-                                            .id(("wl-scrollbar", index)),
-                                    ),
-                            )
-                            .into_any_element()
-                    };
-
-                    let block = div()
-                        // Expanded content takes the card's own inset on both
-                        // sides. The rule above it already says the detail belongs
-                        // to the header, so indenting it as well would spend a
-                        // third of a narrow card on saying it twice — and command
-                        // output is exactly the content that needs the width.
-                        .w_full()
-                        .border_t_1()
-                        .border_color(cx.theme().border.opacity(0.6))
-                        .px(px(AGENT_CARD_PADDING_X))
-                        .py(px(AGENT_CARD_BODY_PADDING_Y))
-                        .child(body);
-
-                    revealed_block(
-                        block,
-                        detail_part,
-                        detail_reveal,
-                        detail_height,
-                        px(0.),
-                        detail_view,
-                    )
-                }))
+            bounded_scroll(
+                &detail_scroll,
+                ("wl-scrollbar", index),
+                div()
+                    .id(("wl-out", index))
+                    .w_full()
+                    .max_h(px(256.))
+                    .modern_context_menu(copy_entry_menu(cx.entity().downgrade(), index))
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(
+                        markdown_view(("wl-md", index), detail.to_owned(), cwd)
+                            .style(transcript_text_style(cx))
+                            .selectable(true),
+                    ),
+            )
+            .into_any_element()
         });
 
-        agent_card()
-            .id(("entry", index))
-            .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
-            .child(header)
-            .children(card_body)
-            .into_any_element()
-    }
-
-    fn render_question_message(
-        &self,
-        index: usize,
-        id: String,
-        text: String,
-        questions: Vec<Question>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let owner = self.owner().cloned();
-
-        v_flex()
-            .w_full()
-            .gap_2()
-            .p_3()
-            .rounded(UI_RADIUS)
-            .border_1()
-            .border_color(cx.theme().border)
-            .child(self.render_agent_row(index, text, cx))
-            .child(div().children(owner.map(|owner| {
-                Button::new(("message-questions", index))
-                    .ghost()
-                    .small()
-                    .label(t!("agent-question-open"))
-                    .on_click(move |_, _, cx| {
-                        let _ = owner.update(cx, |pane, cx| {
-                            pane.open_message_questions(&id, questions.clone(), cx)
-                        });
-                    })
-            })))
-            .into_any_element()
+        work_card(index, step, &self.disclosures, body, cx)
     }
 
     pub(super) fn append_entry(&mut self, entry: Entry) {
@@ -1579,7 +791,12 @@ impl TranscriptView {
                 end += 1;
             }
 
-            self.turn_specs(turn, start, end, collapse, &mut specs);
+            RowSource {
+                conversation: &conversation,
+                disclosures: &self.disclosures,
+                typing: &self.typing,
+            }
+            .turn_specs(turn, start, end, collapse, &mut specs);
 
             self.row_cache.turns.push((end, row_start + specs.len()));
 
@@ -1648,7 +865,15 @@ impl TranscriptView {
         // and those rows leave the list with it. Their heights are read off
         // the rows still standing, which is why they are collected before the
         // disclosure stops reporting itself as open.
-        let parts = self.revealed_parts(key);
+        let parts = {
+            let conversation = self.conversation.borrow();
+
+            RowGeometry {
+                rows: &self.rows,
+                source: self.row_source(&conversation),
+            }
+            .revealed_parts(key)
+        };
 
         // A closed row's segmented source would otherwise keep a second copy
         // of a large output resident behind a row showing none of it.
@@ -1664,19 +889,6 @@ impl TranscriptView {
                 self.row_cache.invalidate(index);
             }
         }
-    }
-
-    /// The list rows a run toggle or a turn fold currently has on screen,
-    /// whichever ramp they happen to be travelling on this frame.
-    fn revealed_parts(&self, key: RevealKey) -> Vec<RevealedPart> {
-        (0..self.rows.len())
-            .filter(|ix| match key {
-                RevealKey::Group(run_start) => self.run_over(*ix) == Some(run_start),
-                RevealKey::Turn(turn) => self.fold_over(*ix) == Some(turn),
-                RevealKey::Row(_) | RevealKey::Annotation(_) => false,
-            })
-            .filter_map(|ix| revealed_part(&self.rows[ix].spec))
-            .collect()
     }
 
     /// Take down every disclosure whose exit has finished, re-pinning the
@@ -1699,101 +911,6 @@ impl TranscriptView {
 
         for key in shut {
             self.take_down_disclosure(key);
-        }
-    }
-
-    /// The disclosure whose ramp this list row travels on this frame.
-    ///
-    /// Rows that were already there report `None` and render at rest. A step
-    /// of a run inside an unfolded turn is on screen by two disclosures at
-    /// once; it follows the fold while the fold is moving, because the fold is
-    /// then moving everything under it, and its run the rest of the time, so
-    /// a run opened inside a resting turn still travels.
-    pub(crate) fn revealed_by(&self, ix: usize, now: Instant) -> Option<RevealKey> {
-        let fold = self.fold_over(ix).map(RevealKey::Turn);
-        let run = self.run_over(ix).map(RevealKey::Group);
-
-        match (fold, run) {
-            (Some(fold), Some(run)) if !self.disclosures.moving(fold, now) => Some(run),
-            (Some(fold), _) => Some(fold),
-            (None, run) => run,
-        }
-    }
-
-    /// The run whose expanded toggle put this row on screen. A run's steps
-    /// follow its toggle contiguously, so walking back over them to the
-    /// toggle is what identifies the run without the row specs having to
-    /// carry it.
-    fn run_over(&self, ix: usize) -> Option<usize> {
-        if !matches!(self.rows.get(ix)?.spec, RowSpec::Work { .. }) {
-            return None;
-        }
-
-        for cursor in (0..ix).rev() {
-            match self.rows[cursor].spec {
-                RowSpec::Work { .. } => continue,
-                RowSpec::RunToggle {
-                    run_start,
-                    expanded: true,
-                    ..
-                } => return Some(run_start),
-                _ => break,
-            }
-        }
-
-        None
-    }
-
-    /// The turn whose unfolded "Show work" row put this row on screen.
-    ///
-    /// The fold heads its turn, and every row of the turn below it that a
-    /// folded turn would not show is the fold's. Rows a folded turn keeps —
-    /// the final reply, an error, a steered prompt — sit among them and are
-    /// walked over, so the work after a steered prompt still finds its fold.
-    /// Only a settled turn has one, which spares an unsettled conversation
-    /// the walk.
-    fn fold_over(&self, ix: usize) -> Option<u64> {
-        let turn = self.row_turn(ix)?;
-
-        if !self.conversation.borrow().turns.is_settled(turn) || !self.hidden_by_fold(ix) {
-            return None;
-        }
-
-        for cursor in (0..ix).rev() {
-            match self.rows[cursor].spec {
-                RowSpec::TurnFold {
-                    turn: heads,
-                    folded: false,
-                    ..
-                } if heads == turn => return Some(turn),
-                _ if self.row_turn(cursor) == Some(turn) => continue,
-                _ => break,
-            }
-        }
-
-        None
-    }
-
-    /// Whether this row is one a folded turn would take off the screen.
-    fn hidden_by_fold(&self, ix: usize) -> bool {
-        match self.rows[ix].spec {
-            RowSpec::Work { .. } | RowSpec::RunToggle { .. } => true,
-            RowSpec::Entry { index, .. } => !self.survives_fold(index),
-            _ => false,
-        }
-    }
-
-    /// The turn a list row belongs to, for the rows that belong to one.
-    fn row_turn(&self, ix: usize) -> Option<u64> {
-        match self.rows.get(ix)?.spec {
-            RowSpec::Entry { index, .. } | RowSpec::Work { index, .. } => {
-                Some(self.conversation.borrow().content.entries()[index].turn)
-            }
-            RowSpec::RunToggle { run_start, .. } => {
-                Some(self.conversation.borrow().content.entries()[run_start].turn)
-            }
-            RowSpec::TurnFold { turn, .. } | RowSpec::Interrupted { turn, .. } => Some(turn),
-            RowSpec::TurnSummary { .. } | RowSpec::Working { .. } => None,
         }
     }
 
@@ -1850,283 +967,35 @@ impl TranscriptView {
         cx.notify();
     }
 
-    /// Render one turn: the opening prompt, the work disclosure and the rows
-    /// it hides, the final reply, and last the "Worked for Ns" summary.
-    /// Running turns render chronologically.
-    pub(crate) fn entry_spec(&self, index: usize) -> RowSpec {
-        let fingerprint = entry_fingerprint(
-            &self.conversation.borrow().content.entries()[index].item,
-            self.disclosures.row_expanded(index),
-            self.disclosures.annotation_expanded(index),
-        );
-
-        // A reply being typed lays out to the part let through so far, so its
-        // signature follows that edge rather than the text behind it. The
-        // edge sits above the length bits, which keeps every position of it
-        // distinct from every length the text could have.
-        let fingerprint = match self.typed_edge(index) {
-            Some(shown) => fingerprint ^ ((shown as u64) << 32),
-            None => fingerprint,
-        };
-
-        RowSpec::Entry { index, fingerprint }
-    }
-
-    pub(crate) fn work_spec(&self, index: usize) -> RowSpec {
-        RowSpec::Work {
-            index,
-            fingerprint: entry_fingerprint(
-                &self.conversation.borrow().content.entries()[index].item,
-                self.disclosures.row_expanded(index),
-                false,
-            ),
-        }
-    }
-
     /// Data-only description of every transcript row, in render order. This
     /// is the single source of truth for the transcript's structure; the
     /// virtualized list builds elements only for the visible slice of it.
     #[cfg(test)]
     pub(crate) fn build_row_specs(&self, collapse: CollapseRows) -> Vec<RowSpec> {
-        let mut rows = Vec::new();
-        let mut start = 0;
+        let conversation = self.conversation.borrow();
 
-        let shared = self.conversation.clone();
-        let conversation = shared.borrow();
-        let items = conversation.content.entries();
-
-        while start < items.len() {
-            let turn = items[start].turn;
-
-            let mut end = start + 1;
-
-            while end < items.len() && items[end].turn == turn {
-                end += 1;
-            }
-
-            self.turn_specs(turn, start, end, collapse, &mut rows);
-
-            start = end;
-        }
-
-        // Live progress row, pinned below everything the running turn has
-        // produced; replaced by the turn's fold header on completion.
-        if self.conversation.borrow().live.is_working() {
-            rows.push(RowSpec::Working {
-                compacting: self.conversation.borrow().live.is_compacting(),
-            });
-        }
-
-        rows
+        self.row_source(&conversation).all_specs(collapse)
     }
 
-    pub(crate) fn turn_specs(
-        &self,
-        turn: u64,
-        start: usize,
-        end: usize,
-        collapse: CollapseRows,
-        rows: &mut Vec<RowSpec>,
-    ) {
-        // How the turn closes, once it has one. A stopped turn is closed by its
-        // own marker; otherwise an elapsed-time line, when the session reported
-        // a duration at all.
-        let summary = turn_summary(
-            self.conversation.borrow().turns.was_interrupted(turn),
-            self.conversation.borrow().turns.seconds(turn),
-        );
-
-        if summary == Some(TurnSummary::Interrupted) {
-            self.stream_specs(start, end, &|_| false, collapse, rows);
-
-            rows.push(RowSpec::Interrupted {
-                turn,
-                output_tokens: self.conversation.borrow().turns.output_tokens(turn),
-            });
-
-            return;
-        }
-
-        // Running (or pre-thread) turn: plain chronological stream, because its
-        // work is what the user is watching happen. Folding keys off the turn
-        // having settled rather than off a known duration, so a replayed turn
-        // folds too — the transcript file carries no timing for it.
-        if !self.conversation.borrow().turns.is_settled(turn) {
-            self.stream_specs(start, end, &|_| false, collapse, rows);
-
-            return;
-        }
-
-        // Only the mode that names work folds a settled turn's work away by
-        // default, and only the modes that offer the disclosure can fold at
-        // all. "Only tool calls" reads the work inline, so it carries no
-        // disclosure and no per-turn toggle; the other two keep the control
-        // and record hand-folds against whichever direction their default
-        // points.
-        let discloses_work = !matches!(collapse, CollapseRows::ToolCalls);
-        let folded = discloses_work && folds_turns(collapse) != self.disclosures.turn_toggled(turn);
-
-        // Only the prompt that opened the turn heads it. A message steered
-        // into a turn already in flight was written after part of the reply
-        // existed, so hoisting it here would show it above output it never
-        // saw; it keeps its place in the stream instead.
-        let shared = self.conversation.clone();
-        let conversation = shared.borrow();
-        let items = conversation.content.entries();
-
-        let opening_user =
-            (start..end).find(|&i| matches!(&items[i].item, SessionItem::UserMessage { .. }));
-
-        if let Some(i) = opening_user {
-            rows.push(self.entry_spec(i));
-        }
-
-        // What the fold owns: everything the expanded turn shows that the
-        // folded one does not. Counting it here keeps the disclosure's label
-        // honest and lets a turn with nothing to hide skip the control.
-        let shown = |i: usize| !hidden(&items[i].item) && Some(i) != opening_user;
-
-        let row_count = (start..end)
-            .filter(|&i| shown(i) && !self.survives_fold(i))
-            .count();
-
-        // Above the rows it discloses, so expanding inserts them below the
-        // control the user just clicked instead of further up the turn.
-        if discloses_work && row_count > 0 {
-            rows.push(RowSpec::TurnFold {
-                turn,
-                row_count,
-                folded,
-            });
-        }
-
-        if folded {
-            for i in (start..end).filter(|&i| shown(i) && self.survives_fold(i)) {
-                rows.push(self.entry_spec(i));
-            }
-        } else {
-            let skip = |i: usize| Some(i) == opening_user;
-
-            self.stream_specs(start, end, &skip, collapse, rows);
-        }
-
-        // The turn's summary closes it, below the answer it accounts for, the
-        // same place the interrupted marker sits. A replayed turn reaches here
-        // with no duration to state and simply ends after its reply.
-        if let Some(TurnSummary::Worked(seconds)) = summary {
-            rows.push(RowSpec::TurnSummary {
-                seconds,
-                output_tokens: self.conversation.borrow().turns.output_tokens(turn),
-            });
+    /// The row structure's source as this view holds it.
+    fn row_source<'a>(&'a self, conversation: &'a ConversationState) -> RowSource<'a> {
+        RowSource {
+            conversation,
+            disclosures: &self.disclosures,
+            typing: &self.typing,
         }
     }
 
-    /// Chronological rows for a slice of the transcript, collapsing runs of
-    /// consecutive work-log rows into a "+N tool calls" toggle (unless the
-    /// collapse setting is off). Hidden entries are transparent: they neither
-    /// render nor split a run.
-    pub(crate) fn stream_specs(
-        &self,
-        start: usize,
-        end: usize,
-        skip: &dyn Fn(usize) -> bool,
-        collapse: CollapseRows,
-        rows: &mut Vec<RowSpec>,
-    ) {
-        let mut i = start;
+    /// The disclosure whose ramp list row `ix` travels on this frame.
+    #[cfg(test)]
+    pub(crate) fn revealed_by(&self, ix: usize, now: Instant) -> Option<RevealKey> {
+        let conversation = self.conversation.borrow();
 
-        let shared = self.conversation.clone();
-        let conversation = shared.borrow();
-        let items = conversation.content.entries();
-
-        while i < end {
-            let item = &items[i].item;
-
-            if skip(i) || hidden(item) {
-                i += 1;
-
-                continue;
-            }
-
-            if !is_work_row(item) {
-                rows.push(self.entry_spec(i));
-
-                i += 1;
-
-                continue;
-            }
-
-            // Extend the run across consecutive (possibly hidden) work rows.
-            let run_start = i;
-
-            let mut visible: Vec<usize> = Vec::new();
-            let mut j = i;
-
-            while j < end && !skip(j) && (hidden(&items[j].item) || is_work_row(&items[j].item)) {
-                if !hidden(&items[j].item) {
-                    visible.push(j);
-                }
-
-                j += 1;
-            }
-
-            if !matches!(collapse, CollapseRows::Off) && visible.len() > 1 {
-                let expanded = self.disclosures.group_expanded(run_start);
-
-                rows.push(RowSpec::RunToggle {
-                    run_start,
-                    tool_count: visible.len(),
-                    expanded,
-                });
-
-                if expanded {
-                    for &k in &visible {
-                        rows.push(self.work_spec(k));
-                    }
-                }
-            } else {
-                for &k in &visible {
-                    rows.push(self.work_spec(k));
-                }
-            }
-
-            i = j;
+        RowGeometry {
+            rows: &self.rows,
+            source: self.row_source(&conversation),
         }
-    }
-
-    /// Whether an entry stays on screen while its turn is folded. Errors,
-    /// compaction boundaries and steered prompts do: an error is what the
-    /// user needs to act on, a boundary marks where the conversation above
-    /// it stopped being verbatim, and words the user typed are never work to
-    /// hide. The final reply does too, selected by identity rather than
-    /// moved, because visible events can still arrive after it while the
-    /// turn closes; everything between the prompt and that answer is what the
-    /// fold hides.
-    pub(crate) fn survives_fold(&self, index: usize) -> bool {
-        let shared = self.conversation.clone();
-        let conversation = shared.borrow();
-        let items = conversation.content.entries();
-        let entry = &items[index];
-
-        match &entry.item {
-            SessionItem::Error { .. }
-            | SessionItem::Compaction { .. }
-            | SessionItem::UserMessage { .. } => true,
-            SessionItem::AgentMessage {
-                questions: Some(_), ..
-            } => true,
-            SessionItem::AgentMessage { .. } => {
-                !hidden(&entry.item)
-                    && items[index + 1..]
-                        .iter()
-                        .take_while(|later| later.turn == entry.turn)
-                        .all(|later| {
-                            hidden(&later.item)
-                                || !matches!(later.item, SessionItem::AgentMessage { .. })
-                        })
-            }
-            _ => false,
-        }
+        .revealed_by(ix, now)
     }
 
     /// Diff freshly built specs against the list's current contents and
