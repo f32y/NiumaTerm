@@ -274,8 +274,7 @@ impl BackgroundTasksView {
             .children(
                 rows.iter()
                     .take(shown)
-                    .enumerate()
-                    .map(|(index, task)| render_row(index, task, now, cx))
+                    .map(|task| render_row(task, now, cx))
                     .collect::<Vec<_>>(),
             )
             .children(control.map(|control| div().px_2().pb_1().child(control)))
