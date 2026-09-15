@@ -1,22 +1,28 @@
+use std::borrow::Cow;
 use std::ops::Range;
+use std::rc::Rc;
 
 use crate::{
     IconName, Sizable, Size, StyledExt,
     group_box::GroupBoxVariant,
     h_resizable,
-    input::{Input, InputState},
+    input::{Input, InputEvent, InputState},
     resizable_panel,
     setting::{SettingGroup, SettingPage},
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
 };
 use gpui::{
-    App, AppContext as _, Axis, ElementId, Entity, IntoElement, ParentElement as _, Pixels,
-    RenderOnce, StyleRefinement, Styled, Window, container_query, div, prelude::FluentBuilder as _,
-    px, relative,
+    App, AppContext as _, Axis, Context, ElementId, Entity, IntoElement, ParentElement as _,
+    Pixels, Render, RenderOnce, StyleRefinement, Styled, Window, container_query, div,
+    prelude::FluentBuilder as _, px, relative,
 };
 use rust_i18n::t;
 
 const STACKED_LAYOUT_MAX_WIDTH: Pixels = px(480.);
+
+#[cfg(test)]
+#[path = "settings_view_tests.rs"]
+mod view_tests;
 
 /// The settings structure containing multiple pages for app settings.
 ///
@@ -158,43 +164,53 @@ impl Settings {
         });
     }
 
-    fn filtered_pages(&self, query: &str, cx: &App) -> Vec<SettingPage> {
-        self.pages
-            .iter()
-            .filter_map(|page| {
-                let filtered_groups: Vec<SettingGroup> = page
-                    .groups
-                    .iter()
-                    .filter_map(|group| {
-                        let mut group = group.clone();
-                        group.items = group
-                            .items
-                            .iter()
-                            .filter(|item| item.is_match(&query, cx))
-                            .cloned()
-                            .collect();
-                        if group.items.is_empty() {
-                            None
-                        } else {
-                            Some(group)
-                        }
-                    })
-                    .collect();
-                let mut page = page.clone();
-                page.groups = filtered_groups;
-                if page.groups.is_empty() {
-                    None
-                } else {
-                    Some(page)
-                }
+    fn filtered_pages(&self, query: &str, cx: &App) -> Cow<'_, [SettingPage]> {
+        if query.is_empty()
+            && self.pages.iter().all(|page| {
+                !page.groups.is_empty() && page.groups.iter().all(|group| !group.items.is_empty())
             })
-            .collect()
+        {
+            return Cow::Borrowed(&self.pages);
+        }
+
+        Cow::Owned(
+            self.pages
+                .iter()
+                .filter_map(|page| {
+                    let filtered_groups: Vec<SettingGroup> = page
+                        .groups
+                        .iter()
+                        .filter_map(|group| {
+                            let mut group = group.clone();
+                            group.items = group
+                                .items
+                                .iter()
+                                .filter(|item| item.is_match(&query, cx))
+                                .cloned()
+                                .collect();
+                            if group.items.is_empty() {
+                                None
+                            } else {
+                                Some(group)
+                            }
+                        })
+                        .collect();
+                    let mut page = page.clone();
+                    page.groups = filtered_groups;
+                    if page.groups.is_empty() {
+                        None
+                    } else {
+                        Some(page)
+                    }
+                })
+                .collect(),
+        )
     }
 
     fn render_active_page(
         &self,
         state: &Entity<SettingsState>,
-        pages: &Vec<SettingPage>,
+        pages: &[SettingPage],
         options: &RenderOptions,
         window: &mut Window,
         cx: &mut App,
@@ -215,7 +231,7 @@ impl Settings {
     fn render_sidebar(
         &self,
         state: &Entity<SettingsState>,
-        pages: &Vec<SettingPage>,
+        pages: &[SettingPage],
         _: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement {
@@ -325,6 +341,13 @@ pub struct SettingsState {
 }
 
 impl SettingsState {
+    /// Select a page in a settings view backed by this state.
+    pub fn select(&mut self, index: SelectIndex, cx: &mut Context<Self>) {
+        self.selected_index = index;
+        self.deferred_scroll_group_ix = index.group_ix;
+        cx.notify();
+    }
+
     /// Build a state the caller owns, for a settings view that unmounts and
     /// remounts (a view behind a tab, or one switched away from) and should
     /// come back showing the page and query the user left it on. Pass it to
@@ -466,7 +489,7 @@ impl RenderOnce for Settings {
         });
 
         let query = state.read(cx).search_input.read(cx).value();
-        let filtered_pages = self.filtered_pages(&query, cx);
+        let filtered_pages = self.filtered_pages(&query, cx).into_owned();
         let options = RenderOptions::new()
             .with_size(self.size)
             .with_group_variant(self.group_variant);
@@ -497,5 +520,128 @@ impl RenderOnce for Settings {
                         self.render_active_page(&state, &filtered_pages, &options, window, cx)
                     })),
             )
+    }
+}
+
+/// A settings surface with independently cached navigation and page content.
+/// Scrolling either panel redraws that panel alone. The builder reads current
+/// application values whenever a panel renders; call [`Self::refresh`] when
+/// external settings or editor data change to invalidate both panels.
+pub struct SettingsView {
+    layout: Settings,
+    build: Rc<dyn Fn(&App) -> Settings>,
+    sidebar: Entity<SettingsPanel>,
+    content: Entity<SettingsPanel>,
+}
+
+impl SettingsView {
+    /// Build an owned settings view. The supplied state controls both panels,
+    /// including selection and search, independently of state set by the builder.
+    pub fn new(
+        state: Entity<SettingsState>,
+        build: impl Fn(&App) -> Settings + 'static,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let build: Rc<dyn Fn(&App) -> Settings> = Rc::new(build);
+        let layout = build(cx);
+        let sidebar = cx.new(|_| SettingsPanel {
+            build: build.clone(),
+            state: state.clone(),
+            kind: SettingsPanelKind::Sidebar,
+        });
+        let content = cx.new(|_| SettingsPanel {
+            build: build.clone(),
+            state: state.clone(),
+            kind: SettingsPanelKind::Content,
+        });
+        let search_input = state.read(cx).search_input.clone();
+        cx.observe(&state, |view, _, cx| view.refresh(cx)).detach();
+        cx.subscribe(&search_input, |view, _, event, cx| {
+            if matches!(event, InputEvent::Change) {
+                view.refresh(cx);
+            }
+        })
+        .detach();
+
+        Self {
+            layout,
+            build,
+            sidebar,
+            content,
+        }
+    }
+
+    /// Refresh layout options and redraw both panels after external data changes.
+    pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.layout = (self.build)(cx);
+        self.sidebar.update(cx, |_, cx| cx.notify());
+        self.content.update(cx, |_, cx| cx.notify());
+        cx.notify();
+    }
+}
+
+impl Render for SettingsView {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let range = self.layout.sidebar_size_range.clone();
+        h_resizable(self.layout.id.clone())
+            .child(
+                resizable_panel()
+                    .size(self.layout.sidebar_width)
+                    .size_range(range.clone())
+                    .divider_visible(range.start < range.end)
+                    .child(
+                        self.sidebar
+                            .clone()
+                            .cached(StyleRefinement::default().size_full()),
+                    ),
+            )
+            .child(
+                resizable_panel().divider_visible(false).child(
+                    self.content
+                        .clone()
+                        .cached(StyleRefinement::default().size_full()),
+                ),
+            )
+    }
+}
+
+enum SettingsPanelKind {
+    Sidebar,
+    Content,
+}
+
+struct SettingsPanel {
+    build: Rc<dyn Fn(&App) -> Settings>,
+    state: Entity<SettingsState>,
+    kind: SettingsPanelKind,
+}
+
+impl Render for SettingsPanel {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let settings = (self.build)(cx);
+        let state = self.state.clone();
+        match self.kind {
+            SettingsPanelKind::Sidebar => {
+                let query = state.read(cx).search_input.read(cx).value();
+                let pages = settings.filtered_pages(&query, cx);
+                settings
+                    .render_sidebar(&state, &pages, window, cx)
+                    .into_any_element()
+            }
+            SettingsPanelKind::Content => container_query(move |size, window, cx| {
+                let options = RenderOptions::new()
+                    .with_size(settings.size)
+                    .with_group_variant(settings.group_variant)
+                    .with_layout(if size.width <= STACKED_LAYOUT_MAX_WIDTH {
+                        Axis::Vertical
+                    } else {
+                        Axis::Horizontal
+                    });
+                let query = state.read(cx).search_input.read(cx).value();
+                let pages = settings.filtered_pages(&query, cx);
+                settings.render_active_page(&state, &pages, &options, window, cx)
+            })
+            .into_any_element(),
+        }
     }
 }

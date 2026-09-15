@@ -2449,6 +2449,14 @@ impl<M: InputModeKind> Element for TextElement<M> {
         );
 
         self.state.update(cx, |state, cx| {
+            let layout_changed = state.last_bounds != Some(bounds)
+                || state.last_selected_range.as_ref() != Some(&selected_range)
+                || state.scroll_size != prepaint.scroll_size
+                || state.last_layout.as_ref().is_none_or(|layout| {
+                    layout.cursor_bounds != prepaint.last_layout.cursor_bounds
+                        || layout.line_height != prepaint.last_layout.line_height
+                        || layout.visible_range != prepaint.last_layout.visible_range
+                });
             state.last_layout = Some(prepaint.last_layout.clone());
             state.last_bounds = Some(bounds);
             state.last_cursor = Some(state.cursor());
@@ -2458,7 +2466,12 @@ impl<M: InputModeKind> Element for TextElement<M> {
             state.update_scroll_offset(Some(prepaint.cursor_scroll_offset), cx);
             state.deferred_scroll_offset = None;
 
-            cx.notify();
+            // Re-publishing identical layout keeps the input's parent panel dirty
+            // during unrelated scrolling. Only changed overlay geometry needs a
+            // follow-up render; text edits already publish their own changes.
+            if layout_changed {
+                cx.notify();
+            }
         });
 
         if let Some(hitbox) = prepaint.hover_definition_hitbox.as_ref() {
