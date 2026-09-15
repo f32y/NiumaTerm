@@ -4,7 +4,7 @@ use gpui::{AnyElement, Div, Edges, Stateful, div, px};
 use gpui_component::TitleBar;
 use gpui_component::button::Button;
 use gpui_component::input::Input;
-use gpui_component::tab::{Tab, TabBar};
+use gpui_component::tab::Tab;
 
 use crate::ui::platform_style::PlatformStyle;
 use crate::ui::shell::TITLE_BAR_HEIGHT;
@@ -45,12 +45,6 @@ impl PlatformStyle for MacOs {
     /// measured against cannot drift apart.
     fn title_bar(bar: TitleBar) -> TitleBar {
         bar.pl(px(Self::TITLE_BAR_LEADING_INSET))
-    }
-
-    /// The bar already starts past the window buttons, so the variant's own
-    /// leading padding would open a second gap before the first tab.
-    fn tab_bar(bar: TabBar) -> TabBar {
-        bar.pl_0()
     }
 
     /// The title sits close to the icon while the trailing padding keeps the

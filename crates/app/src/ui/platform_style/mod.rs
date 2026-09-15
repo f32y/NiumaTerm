@@ -8,7 +8,7 @@
 //!
 //! Add a hook here when a view needs a platform-specific measurement or
 //! builder step, then answer it in both implementations. Views compose a
-//! builder hook with `map`, for example `.map(Host::tab_bar)`. Styling that
+//! builder hook with `map`, for example `.map(Host::title_bar)`. Styling that
 //! holds everywhere stays in the view, so a hook carries only what actually
 //! differs between platforms.
 //!
@@ -28,7 +28,7 @@ use gpui::{AnyElement, Div, Stateful};
 use gpui_component::TitleBar;
 use gpui_component::button::Button;
 use gpui_component::input::Input;
-use gpui_component::tab::{Tab, TabBar};
+use gpui_component::tab::Tab;
 
 #[cfg(target_os = "macos")]
 use crate::ui::platform_style::macos::MacOs;
@@ -65,9 +65,6 @@ pub(crate) trait PlatformStyle {
 
     /// The title bar itself.
     fn title_bar(bar: TitleBar) -> TitleBar;
-
-    /// The horizontal tab strip.
-    fn tab_bar(bar: TabBar) -> TabBar;
 
     /// One tab of the strip, at the density its width allows.
     fn tab(tab: Tab, density: TabDensity) -> Tab;
