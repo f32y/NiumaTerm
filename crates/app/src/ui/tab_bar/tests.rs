@@ -4,11 +4,11 @@ use std::rc::Rc;
 use gpui::px;
 use nmt_config::profile::Profile;
 
+use crate::ui::platform_style::{Host, PlatformStyle as _};
 use crate::ui::tab_bar::menu::profile_root_choices;
 use crate::ui::tab_bar::{
-    AgentTabIndicator, COMPACT_TAB_WIDTH, FULL_TAB_WIDTH, MIN_AUTO_TAB_WIDTH, NEW_TAB_BUTTON_WIDTH,
-    TAB_BAR_PADDING, TAB_GAP, TabDensity, agent_tab_indicator, auto_tab_width, progress_bar_width,
-    shell_tab, tab_density,
+    AgentTabIndicator, MIN_AUTO_TAB_WIDTH, NEW_TAB_BUTTON_WIDTH, TAB_BAR_PADDING, TAB_GAP,
+    TabDensity, agent_tab_indicator, auto_tab_width, progress_bar_width, shell_tab, tab_density,
 };
 
 struct TabGestureProbe {
@@ -133,12 +133,15 @@ fn auto_size_shares_the_strip_between_tabs() {
 #[test]
 fn a_shrinking_tab_gives_up_the_title_first() {
     assert_eq!(tab_density(120.0), TabDensity::Full);
-    assert_eq!(tab_density(FULL_TAB_WIDTH), TabDensity::Full);
-    assert_eq!(tab_density(FULL_TAB_WIDTH - 1.0), TabDensity::Compact);
-    assert_eq!(tab_density(COMPACT_TAB_WIDTH), TabDensity::Compact);
-    assert_eq!(tab_density(COMPACT_TAB_WIDTH - 1.0), TabDensity::IconOnly);
+    assert_eq!(tab_density(Host::FULL_TAB_WIDTH), TabDensity::Full);
+    assert_eq!(tab_density(Host::FULL_TAB_WIDTH - 1.0), TabDensity::Compact);
+    assert_eq!(tab_density(Host::COMPACT_TAB_WIDTH), TabDensity::Compact);
+    assert_eq!(
+        tab_density(Host::COMPACT_TAB_WIDTH - 1.0),
+        TabDensity::IconOnly
+    );
 
-    const { assert!(MIN_AUTO_TAB_WIDTH < COMPACT_TAB_WIDTH) };
+    const { assert!(MIN_AUTO_TAB_WIDTH < Host::COMPACT_TAB_WIDTH) };
 
     assert_eq!(tab_density(MIN_AUTO_TAB_WIDTH), TabDensity::IconOnly);
 }

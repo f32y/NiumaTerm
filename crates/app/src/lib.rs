@@ -7,6 +7,8 @@ pub mod syntax;
 pub mod terminal_tab;
 pub mod utils;
 
+pub(crate) mod platform_style;
+
 #[cfg(test)]
 mod localization_tests;
 

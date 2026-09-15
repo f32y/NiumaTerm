@@ -72,9 +72,9 @@ use gpui::prelude::*;
 
 use gpui::{
     AnyElement, App, AsyncApp, Bounds, ClipboardEntry, ClipboardItem, Context, Entity, FocusHandle,
-    FontWeight, Image, ImageFormat, IntoElement, ListSizingBehavior, MouseButton, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point, Render, ScrollStrategy, SharedString, WeakEntity, Window, div, px,
-    relative, size,
+    FontWeight, Hsla, Image, ImageFormat, IntoElement, ListSizingBehavior, MouseButton,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollStrategy, SharedString, WeakEntity,
+    Window, div, px, relative, size,
 };
 
 use gpui_base::TextSelection;
@@ -234,6 +234,8 @@ use crate::agent_tab::view::composer_layout::{
 use crate::agent_tab::view::progress_panel::ProgressPanel;
 
 use crate::agent_tab::workflows::WorkflowUi;
+
+use crate::platform_style::{Host, PlatformStyle as _};
 
 #[derive(Clone)]
 pub enum AgentPaneEvent {
@@ -5455,7 +5457,11 @@ impl AgentPane {
 
     /// Recent sessions share the composer's width and keep a stable height
     /// while loading, so returning results do not move the input field.
-    pub(super) fn render_history(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    pub(super) fn render_history(
+        &self,
+        background: Hsla,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
         let rows = self
             .history_ui
             .data
@@ -5570,6 +5576,7 @@ impl AgentPane {
             .child(
                 v_flex()
                     .w_full()
+                    .map(|strip| Host::history_strip(strip, background, cx))
                     .pb(px(2.))
                     .child(
                         h_flex()
@@ -6069,7 +6076,7 @@ impl Render for AgentPane {
             .history_ui
             .mode
             .is_visible(transcript_empty, composer_empty, history_rows)
-            .then(|| self.render_history(cx));
+            .then(|| self.render_history(background, cx));
 
         // A list opened over a live conversation is a picker, and the
         // transcript behind it is not what the next click should reach. Blur

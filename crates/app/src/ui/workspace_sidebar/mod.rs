@@ -31,6 +31,7 @@ use crate::ui::composition::{
     sidebar_selection, toolbar_button,
 };
 use crate::ui::fluent::{SELECTION_BAR_HEIGHT, SELECTION_BAR_RADIUS, SELECTION_BAR_WIDTH};
+use crate::ui::platform_style::{Host, PlatformStyle as _};
 use crate::ui::shell::{
     InlineRename, InlineRenameSession, InlineRenameStyle, MIN_SIDEBAR_WIDTH, pending_tab_icon,
 };
@@ -42,8 +43,6 @@ use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workspace_sidebar::drag::{SidebarTabDrag, WorkspaceDrag, WorkspaceDragPreview};
 use crate::ui::{AppSettings, NewWorkspace, Shell, UI_RADIUS, modern_dropdown, sidebar_resize};
-#[cfg(target_os = "macos")]
-use crate::window::TRAFFIC_LIGHT_INSET;
 use crate::window::WindowRegistry;
 use crate::workspace::{ProgressTally, TerminalActivity, WorkspaceKind, WorkspaceSummary};
 
@@ -298,7 +297,7 @@ impl Sidebar {
                     .children(show_daily_token_usage.then_some(usage.daily))
                     .children(
                         show_agent_usage
-                            .then(|| div().ml(px(-SIDEBAR_ROW_GUTTER)).child(usage.quotas)),
+                            .then(|| Host::sidebar_agent_usage(usage.quotas.into_any_element())),
                     )
             }));
 
@@ -1319,16 +1318,16 @@ const SIDEBAR_PADDING_X: f32 = 12.0;
 /// column's edge. Without it the highlight stops exactly where the first
 /// glyph starts and reads as clipped; the leading half of it is also the lane
 /// the selected-row mark stands in.
-const SIDEBAR_ROW_GUTTER: f32 = 6.0;
+pub(super) const SIDEBAR_ROW_GUTTER: f32 = 6.0;
 
-// Remove the outer panel offset and restore the row's negative margin so
-// the visible row fill starts directly below the native close button.
-#[cfg(target_os = "macos")]
-const SIDEBAR_PADDING_LEFT: f32 =
-    TRAFFIC_LIGHT_INSET - FLOATING_SURFACE_SIDE_INSET + SIDEBAR_ROW_GUTTER;
-
-#[cfg(not(target_os = "macos"))]
-const SIDEBAR_PADDING_LEFT: f32 = SIDEBAR_PADDING_X;
+/// Where the host draws its window buttons over the title bar, the visible
+/// row fill starts directly below the close button: the outer panel offset
+/// comes off and the row's negative margin is restored. Elsewhere the panel's
+/// own inset applies.
+const SIDEBAR_PADDING_LEFT: f32 = match Host::WINDOW_CONTROLS_INSET {
+    Some(inset) => inset - FLOATING_SURFACE_SIDE_INSET + SIDEBAR_ROW_GUTTER,
+    None => SIDEBAR_PADDING_X,
+};
 
 const SIDEBAR_GROUP_GAP: f32 = 8.0;
 const WORKSPACE_LIST_GAP: f32 = 6.0;

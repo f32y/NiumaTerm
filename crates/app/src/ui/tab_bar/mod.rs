@@ -12,11 +12,11 @@ mod tests;
 use std::{cell, collections, rc};
 
 use app::agent_tab::AgentKind;
-use app::design::{SETTINGS_NAV_WIDTH, SPACE_2, SPACE_3, SURFACE_RADIUS};
+use app::design::{SETTINGS_NAV_WIDTH, SURFACE_RADIUS};
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Context, DragMoveEvent, Edges, Hsla, IsZero as _, MouseButton, Pixels,
-    ScrollHandle, SharedString, div, px, relative,
+    AnyElement, App, Context, DragMoveEvent, Hsla, IsZero as _, MouseButton, Pixels, ScrollHandle,
+    SharedString, div, px, relative,
 };
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
@@ -29,6 +29,7 @@ use crate::ui::composition::{
     HoverActionLayout, HoverActionVisibility, StatusMark, StatusMarkTone, TOOLBAR_BUTTON_SIZE,
     hover_action, toolbar_button,
 };
+use crate::ui::platform_style::{Host, PlatformStyle as _};
 use crate::ui::shell::{
     InlineRename, InlineRenameSession, InlineRenameStyle, TabSurface, pending_tab_icon,
 };
@@ -67,20 +68,11 @@ pub(super) struct TabStrip {
 /// (2 borders + 32 padding + 16 slot + 4 gap).
 const MIN_AUTO_TAB_WIDTH: f32 = 54.0;
 
-/// Below this the leading icon and close control cannot retain their content
-/// padding side by side, so the tab collapses to the single glyph slot.
-const COMPACT_TAB_WIDTH: f32 = 82.0;
-
-/// Below this the title has under four characters of room left over from the
-/// icon, the padding and the close control, which renders as an ellipsis and
-/// little else, so the tab spends the width on the two controls instead.
-const FULL_TAB_WIDTH: f32 = 112.0;
-
 /// What a tab still has room to draw. The close control outranks the tab
 /// icon, which outranks the title: a tab nobody can close is worse than a tab
 /// nobody can identify at a glance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TabDensity {
+pub(crate) enum TabDensity {
     /// Icon, title, and the close control on hover.
     Full,
     /// Icon and the close control on hover; the title is dropped.
@@ -208,7 +200,7 @@ impl TabStrip {
             // Attached tabs share the content edge and keep their own horizontal scroll.
             .with_variant(TabVariant::Tab)
             .bottom_border(false)
-            .when(cfg!(target_os = "macos"), |bar| bar.pl_0())
+            .map(Host::tab_bar)
             .w_full()
             .min_w_0()
             .selected_index(active_idx)
@@ -282,7 +274,7 @@ impl TabStrip {
                     .h_full()
                     .flex()
                     .items_center()
-                    .when(!icon_only, |this| this.pr(SPACE_2))
+                    .map(|suffix| Host::tab_suffix(suffix, density))
                     .children(suffix_close)
                     .children(progress.map(|report| progress_bar(report, tab_width, cx)));
 
@@ -315,13 +307,12 @@ impl TabStrip {
                     div()
                         .id(("tab-menu", id as usize))
                         // Fill the tab body so the whole tab is right-clickable,
-                        // keeping the title left-aligned and clipped with ellipsis.
+                        // keeping the title clipped with ellipsis.
                         .flex_1()
                         .h_full()
                         .flex()
                         .items_center()
-                        .justify_start()
-                        .when(icon_only, |this| this.justify_center())
+                        .map(|title| Host::tab_title(title, density))
                         .overflow_hidden()
                         .modern_context_menu(move |menu, _, _| {
                             let rename_shell = menu_shell.clone();
@@ -445,13 +436,7 @@ impl TabStrip {
 
                 shell_tab()
                     .aria_label(drag_label.clone())
-                    .when(!icon_only, |this| {
-                        this.content_paddings(Edges {
-                            left: px(4.0),
-                            right: SPACE_3,
-                            ..Default::default()
-                        })
-                    })
+                    .map(|tab| Host::tab(tab, density))
                     .on_scroll_wheel(move |event, window, _| {
                         let delta = event.delta.pixel_delta(window.line_height());
 
@@ -492,7 +477,7 @@ impl TabStrip {
                         // command is running and never shifts when one starts.
                         this.prefix(
                             div()
-                                .pl(SPACE_3)
+                                .map(Host::tab_prefix)
                                 .flex_none()
                                 .flex()
                                 .items_center()
@@ -543,7 +528,7 @@ impl TabStrip {
 
                         this.prefix(
                             div()
-                                .pl(SPACE_3)
+                                .map(Host::tab_prefix)
                                 .flex_none()
                                 .flex()
                                 .items_center()
@@ -702,9 +687,9 @@ impl TabStrip {
 }
 
 fn tab_density(tab_width: f32) -> TabDensity {
-    if tab_width >= FULL_TAB_WIDTH {
+    if tab_width >= Host::FULL_TAB_WIDTH {
         TabDensity::Full
-    } else if tab_width >= COMPACT_TAB_WIDTH {
+    } else if tab_width >= Host::COMPACT_TAB_WIDTH {
         TabDensity::Compact
     } else {
         TabDensity::IconOnly
