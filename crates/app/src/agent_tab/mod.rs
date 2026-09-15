@@ -5457,8 +5457,8 @@ impl AgentPane {
     /// the virtual list precompute its scroll geometry.
     const HISTORY_ROW_HEIGHT: f32 = 32.0;
 
-    /// Three rows remain visible; older sessions scroll within this viewport.
-    const HISTORY_MAX_HEIGHT: f32 = Self::HISTORY_ROW_HEIGHT * 3.0;
+    /// Ten rows remain visible; older sessions scroll within this viewport.
+    const HISTORY_MAX_HEIGHT: f32 = Self::HISTORY_ROW_HEIGHT * 10.0;
 
     /// Recent sessions share the composer's width and keep a stable height
     /// while loading, so returning results do not move the input field.
