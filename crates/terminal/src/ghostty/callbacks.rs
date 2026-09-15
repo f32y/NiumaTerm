@@ -5,7 +5,7 @@ use libghostty_vt_sys::{
     Allocator as VtAllocator, ClipboardLocation as VtClipboardLocation,
     ClipboardWrite as VtClipboardWrite, ClipboardWriteResult as VtClipboardWriteResult,
     String as VtString, SysImage as VtSysImage, SysOption as VtSysOption, Terminal as VtTerminal,
-    ghostty_alloc, ghostty_sys_set,
+    TerminalOption as VtTerminalOption, ghostty_alloc, ghostty_sys_set, ghostty_terminal_set,
 };
 
 use crate::clipboard;
@@ -24,7 +24,45 @@ pub(super) struct Callbacks {
     pub(super) clipboard_writes: Vec<(clipboard::ClipboardType, String)>,
 }
 
-pub(super) unsafe extern "C" fn write_pty_cb(
+/// Register the terminal's synchronous callbacks, which write into the
+/// returned `Callbacks`. The terminal keeps the box's heap address as its
+/// userdata, which stays put when the box moves.
+///
+/// # Safety
+///
+/// `terminal` must be a live terminal handle, and the returned box must
+/// outlive it: every later `write_vt` can call back through the pointer.
+pub(super) unsafe fn install_callbacks(terminal: VtTerminal) -> Box<Callbacks> {
+    let mut callbacks = Box::new(Callbacks::default());
+
+    let userdata = &mut *callbacks as *mut Callbacks as *mut os::raw::c_void;
+
+    unsafe {
+        ghostty_terminal_set(terminal, VtTerminalOption::USERDATA, userdata);
+
+        ghostty_terminal_set(
+            terminal,
+            VtTerminalOption::WRITE_PTY,
+            write_pty_cb as *const os::raw::c_void,
+        );
+
+        ghostty_terminal_set(
+            terminal,
+            VtTerminalOption::BELL,
+            bell_cb as *const os::raw::c_void,
+        );
+
+        ghostty_terminal_set(
+            terminal,
+            VtTerminalOption::CLIPBOARD_WRITE,
+            clipboard_write_cb as *const os::raw::c_void,
+        );
+    }
+
+    callbacks
+}
+
+unsafe extern "C" fn write_pty_cb(
     _terminal: VtTerminal,
     userdata: *mut os::raw::c_void,
     data: *const u8,
@@ -40,7 +78,7 @@ pub(super) unsafe extern "C" fn write_pty_cb(
         .extend_from_slice(unsafe { slice::from_raw_parts(data, len) });
 }
 
-pub(super) unsafe extern "C" fn bell_cb(_terminal: VtTerminal, userdata: *mut os::raw::c_void) {
+unsafe extern "C" fn bell_cb(_terminal: VtTerminal, userdata: *mut os::raw::c_void) {
     if userdata.is_null() {
         return;
     }
@@ -62,7 +100,7 @@ unsafe fn vt_string_bytes(value: &VtString) -> Option<&[u8]> {
     Some(unsafe { slice::from_raw_parts(value.ptr, value.len) })
 }
 
-pub(super) unsafe extern "C" fn clipboard_write_cb(
+unsafe extern "C" fn clipboard_write_cb(
     _terminal: VtTerminal,
     userdata: *mut os::raw::c_void,
     write: *const VtClipboardWrite,

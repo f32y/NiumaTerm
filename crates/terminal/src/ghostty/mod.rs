@@ -29,7 +29,7 @@ mod tests;
 
 #[cfg(test)]
 use std::sync;
-use std::{array, mem, os, path, ptr, slice};
+use std::{array, mem, path, ptr, slice};
 
 #[cfg(test)]
 use libghostty_vt_sys::RowSemanticPrompt as VtRowSemanticPrompt;
@@ -59,12 +59,11 @@ use nmt_config::colors::ColorRgb;
 use nmt_config::colors::Colors;
 
 use crate::ghostty::callbacks::{
-    Callbacks, KITTY_IMAGE_STORAGE_LIMIT_BYTES, bell_cb, clipboard_write_cb, register_png_decoder,
-    write_pty_cb,
+    Callbacks, KITTY_IMAGE_STORAGE_LIMIT_BYTES, install_callbacks, register_png_decoder,
 };
 use crate::ghostty::format::format_terminal;
 use crate::ghostty::grid_read::visit_row_cells;
-use crate::ghostty::kitty::{KittyState, kitty_image_graphic_data};
+use crate::ghostty::kitty::{KittyState, kitty_image_graphic_data, set_kitty_storage_limit};
 use crate::ghostty::render_state::RenderStateReader;
 use crate::pwd::pwd_to_path;
 use crate::render_buffer::RenderBuffer;
@@ -179,43 +178,11 @@ impl GhosttyTerminal {
 
         // Raise the kitty image storage limit from the conservative 10 MB `.lib`
         // default; a non-zero limit also enables the protocol.
-        let limit = KITTY_IMAGE_STORAGE_LIMIT_BYTES;
+        set_kitty_storage_limit(terminal, KITTY_IMAGE_STORAGE_LIMIT_BYTES);
 
-        unsafe {
-            ghostty_terminal_set(
-                terminal,
-                VtTerminalOption::KITTY_IMAGE_STORAGE_LIMIT,
-                (&limit as *const u64).cast(),
-            );
-        }
-
-        // Register synchronous callbacks. Userdata points at the boxed
-        // `Callbacks`; its heap address is stable across moves of `Self`.
-        let mut callbacks = Box::new(Callbacks::default());
-
-        let userdata = &mut *callbacks as *mut Callbacks as *mut os::raw::c_void;
-
-        unsafe {
-            ghostty_terminal_set(terminal, VtTerminalOption::USERDATA, userdata);
-
-            ghostty_terminal_set(
-                terminal,
-                VtTerminalOption::WRITE_PTY,
-                write_pty_cb as *const os::raw::c_void,
-            );
-
-            ghostty_terminal_set(
-                terminal,
-                VtTerminalOption::BELL,
-                bell_cb as *const os::raw::c_void,
-            );
-
-            ghostty_terminal_set(
-                terminal,
-                VtTerminalOption::CLIPBOARD_WRITE,
-                clipboard_write_cb as *const os::raw::c_void,
-            );
-        }
+        // The callbacks write through a pointer to this box, which `Self` owns
+        // and drops only after the terminal is freed.
+        let callbacks = unsafe { install_callbacks(terminal) };
 
         // Match conhost/ConPTY, which defaults to grapheme clustering (mode 2027,
         // permanently on). Without this ghostty measures ZWJ/multi-emoji clusters
@@ -384,13 +351,7 @@ impl GhosttyTerminal {
     /// Set the Kitty-image storage limit in bytes; `new()` applies the default. A non-zero limit
     /// also enables the protocol; 0 disables it. Exposed for tests/eviction.
     pub fn set_kitty_storage_limit(&mut self, bytes: u64) {
-        unsafe {
-            ghostty_terminal_set(
-                self.terminal,
-                VtTerminalOption::KITTY_IMAGE_STORAGE_LIMIT,
-                (&bytes as *const u64).cast(),
-            );
-        }
+        set_kitty_storage_limit(self.terminal, bytes);
     }
 
     /// Whether the engine currently holds a kitty image with this id —
@@ -676,17 +637,11 @@ impl GhosttyTerminal {
     ) -> Result<Option<(u16, u32)>> {
         let mut out = VtPointCoordinate::default();
 
-        match unsafe {
+        let found = Error::optional(unsafe {
             ghostty_terminal_point_from_grid_ref(self.terminal, grid_ref, tag, &mut out)
-        } {
-            VtResult::SUCCESS => Ok(Some((out.x, out.y))),
-            VtResult::NO_VALUE => Ok(None),
-            other => {
-                Error::from_code(other)?;
+        })?;
 
-                Ok(None)
-            }
-        }
+        Ok(found.then_some((out.x, out.y)))
     }
 
     /// Scroll the viewport by `delta` rows (negative = up into scrollback).
@@ -696,12 +651,7 @@ impl GhosttyTerminal {
             return;
         }
 
-        let behavior = VtTerminalScrollViewport {
-            tag: VtTerminalScrollViewportTag::DELTA,
-            value: VtTerminalScrollViewportValue { delta },
-        };
-
-        unsafe { ghostty_terminal_scroll_viewport(self.terminal, behavior) };
+        self.scroll_viewport(VtTerminalScrollViewportTag::DELTA, delta);
     }
 
     /// Scroll the viewport to the bottom (active area).
@@ -710,12 +660,7 @@ impl GhosttyTerminal {
             return;
         }
 
-        let behavior = VtTerminalScrollViewport {
-            tag: VtTerminalScrollViewportTag::BOTTOM,
-            value: VtTerminalScrollViewportValue { delta: 0 },
-        };
-
-        unsafe { ghostty_terminal_scroll_viewport(self.terminal, behavior) };
+        self.scroll_viewport(VtTerminalScrollViewportTag::BOTTOM, 0);
     }
 
     /// Scroll the viewport to the top of the scrollback.
@@ -728,9 +673,14 @@ impl GhosttyTerminal {
     }
 
     fn scroll_viewport_top_raw(&mut self) {
+        self.scroll_viewport(VtTerminalScrollViewportTag::TOP, 0);
+    }
+
+    /// Move the viewport as `tag` says, by `delta` rows for a relative move.
+    fn scroll_viewport(&mut self, tag: VtTerminalScrollViewportTag::Type, delta: isize) {
         let behavior = VtTerminalScrollViewport {
-            tag: VtTerminalScrollViewportTag::TOP,
-            value: VtTerminalScrollViewportValue { delta: 0 },
+            tag,
+            value: VtTerminalScrollViewportValue { delta },
         };
 
         unsafe { ghostty_terminal_scroll_viewport(self.terminal, behavior) };
@@ -745,15 +695,10 @@ impl GhosttyTerminal {
     pub fn finish_block(&mut self) -> Result<Option<BlockHandle>> {
         let mut handle = BlockHandle::default();
 
-        match unsafe { ghostty_terminal_finish_block(self.terminal, &mut handle) } {
-            VtResult::SUCCESS => Ok(Some(handle)),
-            VtResult::NO_VALUE => Ok(None),
-            other => {
-                Error::from_code(other)?;
+        let finished =
+            Error::optional(unsafe { ghostty_terminal_finish_block(self.terminal, &mut handle) })?;
 
-                Ok(None)
-            }
-        }
+        Ok(finished.then_some(handle))
     }
 
     /// Remove and destroy all finished blocks (user clear; `;K` path).
