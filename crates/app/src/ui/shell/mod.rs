@@ -16,7 +16,9 @@ pub(crate) mod tab_surface;
 
 mod actions;
 mod agent_notifications;
+mod close_confirm;
 mod inline_rename;
+mod main_surface;
 mod panels;
 mod rename;
 mod render;
@@ -28,9 +30,7 @@ mod workspace_dirs;
 #[cfg(test)]
 mod tests;
 
-use std::borrow::Cow;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::{collections, io, iter, path, thread, time};
 
 use app::agent_tab::execution::AgentSession;
@@ -42,19 +42,14 @@ use dirs::home_dir;
 use gpui::prelude::*;
 use gpui::{
     Anchor, AnyElement, App, Axis, Context, Div, Entity, FocusHandle, Focusable, KeyDownEvent,
-    MouseDownEvent, ObjectFit, Pixels, Render, SharedString, Window, WindowBounds, WindowId, div,
-    img, px, relative,
+    ObjectFit, Pixels, Render, SharedString, Window, WindowBounds, WindowId, div, img, px,
 };
 use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::dialog::{
-    DIALOG_BUTTON_MIN_WIDTH, Dialog, DialogAction, DialogButtonProps, DialogClose, DialogFooter,
-};
-use gpui_component::input::{Input, InputState};
 use gpui_component::modern_menu::dispatch_modern_menu_key;
 use gpui_component::notification::{Notification, NotificationType};
 use gpui_component::progress::Progress;
-use gpui_component::resizable::{PANEL_MIN_SIZE, ResizablePanelGroup, resizable_panel};
-use gpui_component::{ActiveTheme, Icon, IconNamed, Root, StyledExt, WindowExt, v_flex};
+use gpui_component::resizable::PANEL_MIN_SIZE;
+use gpui_component::{ActiveTheme, Icon, IconNamed, Root, WindowExt, v_flex};
 use nmt_agent::team::identity::RoomId;
 use nmt_agent::update::{ProviderKind, UpdatePhase};
 use nmt_agent::{
@@ -77,7 +72,7 @@ use crate::agent_updates::{
 };
 use crate::agent_usage::AgentUsageView;
 use crate::cli::CliAction;
-use crate::pane_tree::{PaneId, PaneNode, SplitDirection};
+use crate::pane_tree::{PaneId, SplitDirection};
 #[cfg(windows)]
 use crate::remote;
 use crate::tabs::{Tab, TabId, TabManager};
@@ -90,7 +85,14 @@ use crate::ui::persistence::{
 use crate::ui::right_panel::{RightPanel, RightPanelKind};
 use crate::ui::settings::{AgentProfile, AppSettings, TabBarStyle};
 use crate::ui::shell::actions::NewTeamTab;
-use crate::ui::shell::agent_notifications::AgentNotificationState;
+use crate::ui::shell::agent_notifications::{
+    AgentNotificationState, apply_monitor_display_change, remove_native_notifications,
+};
+use crate::ui::shell::close_confirm::{
+    close_description, close_last_workspace_dialog, open_close_confirm, open_save_failed_close,
+    should_confirm_close,
+};
+use crate::ui::shell::main_surface::{floating_surface_card, surface_border, tab_surface_view};
 use crate::ui::shell::panels::RightPanelController;
 use crate::ui::shell::render::ShellChrome;
 #[cfg(enable_profiling)]
@@ -98,7 +100,9 @@ use crate::ui::shell::settings_workspace::profiling::start_settings_profile;
 use crate::ui::shell::settings_workspace::{SettingsSurface, settings_title};
 use crate::ui::shell::tab_surface::{AgentTab, GitTab};
 use crate::ui::shell::updates_layer::UpdateNotificationLayer;
-use crate::ui::shell::workspace_dirs::{RootAvailability, WorkspaceDirsEditor};
+use crate::ui::shell::workspace_dirs::{
+    RootAvailability, open_new_workspace_dialog, open_workspace_dirs_dialog,
+};
 use crate::ui::tab_bar::{TabStrip, VerticalTabList, WorkspaceTabs};
 #[cfg(windows)]
 use crate::ui::terminal_launch::attach_remote;
@@ -106,8 +110,8 @@ use crate::ui::terminal_layout::TerminalLayout;
 use crate::ui::title_bar::{PanelToggle, TitleBarInputs, TitleCenter, WindowTitleBar};
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workflows::WorkflowsView;
+use crate::ui::workspace_sidebar;
 use crate::ui::workspace_sidebar::{Sidebar, SidebarUsage, WorkspaceChrome};
-use crate::ui::{main_view_background_opacity, workspace_sidebar};
 use crate::usage_sources::daily_source;
 use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
 use crate::workspace::{
@@ -195,7 +199,7 @@ pub(crate) struct Shell {
 
 impl Drop for Shell {
     fn drop(&mut self) {
-        Self::remove_native_notifications(&self.agent_notifications.agent_monitor.notifications());
+        remove_native_notifications(&self.agent_notifications.agent_monitor.notifications());
     }
 }
 
@@ -285,7 +289,7 @@ impl Shell {
                     _ => AgentActivityPolicy::ExpireAfterInactivity,
                 };
 
-                for route in Self::agent_routes_in_surface(tab.surface(), cx) {
+                for route in tab.surface().agent_routes(cx) {
                     agent_monitor.register_route(route, activity_policy, now);
                 }
             }
@@ -420,7 +424,7 @@ impl Shell {
             _ => AgentActivityPolicy::ExpireAfterInactivity,
         };
 
-        let routes = Self::agent_routes_in_surface(surface, cx);
+        let routes = surface.agent_routes(cx);
 
         let now = time::Instant::now();
 
@@ -581,7 +585,7 @@ impl Shell {
             return;
         };
 
-        self.acknowledge_notification(&route, &id, cx);
+        self.agent_notifications.acknowledge(&route, &id, cx);
     }
 
     /// One tab's terminal activity: a live command outranks the tab's recorded
@@ -611,7 +615,7 @@ impl Shell {
                 let routes: Vec<_> = tabs
                     .into_iter()
                     .flat_map(|tabs| tabs.list().items())
-                    .flat_map(|tab| Self::agent_routes_in_surface(tab.surface(), cx))
+                    .flat_map(|tab| tab.surface().agent_routes(cx))
                     .collect();
 
                 let agent = self.agent_notifications.agent_monitor.project(&routes);
@@ -660,7 +664,7 @@ impl Shell {
             .all_tabs()
             .flat_map(|tabs| tabs.list().items())
         {
-            let routes = Self::agent_routes_in_surface(tab.surface(), cx);
+            let routes = tab.surface().agent_routes(cx);
             let projection = self.agent_notifications.agent_monitor.project(&routes);
 
             if projection.unread_count > 0 {
@@ -769,13 +773,13 @@ impl Shell {
             return;
         }
 
-        let description = Self::close_description(
+        let description = close_description(
             count,
             "shell-close-pane-description",
             "shell-close-pane-processes-description",
         );
 
-        Self::open_close_confirm(
+        open_close_confirm(
             window,
             cx,
             t!("shell-close-pane-title"),
@@ -794,37 +798,13 @@ impl Shell {
 
         let route = pane.read(cx).agent_route().clone();
 
-        self.remove_agent_route(&route, cx);
+        self.agent_notifications.remove_route(&route, cx);
 
         // Dropping the pane entity drops its surface, releasing the IO thread
         // and ConPTY handle (same Drop chain as a tab close).
         drop(pane);
 
         self.show_active_tab(window, cx);
-    }
-
-    fn close_description(count: io::Result<usize>, plain: &str, with_processes: &str) -> String {
-        match count {
-            Ok(count) if count > 0 => {
-                t!(with_processes, processes = &Self::processes_running(count)).into_owned()
-            }
-            Ok(_) => t!(plain).into_owned(),
-            Err(error) => {
-                warn!("failed to count processes before closing: {error}");
-
-                t!(plain).into_owned()
-            }
-        }
-    }
-
-    /// "1 child process is running" / "N child processes are running" — the
-    /// lead-in of every close-confirmation description.
-    fn processes_running(count: usize) -> String {
-        if count == 1 {
-            t!("shell-close-one-process-running").to_string()
-        } else {
-            t!("shell-close-many-processes-running", count = count).into_owned()
-        }
     }
 
     /// "You have N temporary workspaces." for the dialogs that end this
@@ -859,46 +839,6 @@ impl Shell {
                 .map(|tab| self.close_process_count(tab.surface(), cx))
                 .sum()
         })
-    }
-
-    /// Shared scaffolding of every close-confirmation alert: title +
-    /// description, OK runs `on_confirm` against this shell. `note` adds a
-    /// bold line under the description for a consequence the description
-    /// itself does not cover.
-    fn open_close_confirm(
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        // Dialog callbacks can rebuild their content, so they retain a
-        // translated title that can be reused on each invocation.
-        title: Cow<'static, str>,
-        description: String,
-        note: Option<SharedString>,
-        on_confirm: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
-    ) {
-        let shell = cx.entity();
-        let on_confirm = Rc::new(on_confirm);
-
-        window.open_alert_dialog(cx, move |alert, _, _| {
-            let shell = shell.clone();
-            let on_confirm = Rc::clone(&on_confirm);
-
-            alert
-                .confirm()
-                .title(title.clone())
-                .description(
-                    v_flex()
-                        .gap_1()
-                        .child(description.clone())
-                        .children(note.clone().map(|note| div().font_bold().child(note))),
-                )
-                .on_ok(move |_, window, cx| {
-                    let on_confirm = Rc::clone(&on_confirm);
-
-                    shell.update(cx, |this, cx| on_confirm(this, window, cx));
-
-                    true
-                })
-        });
     }
 
     /// Child processes running across every pane of this tab, summed over
@@ -972,7 +912,7 @@ impl Shell {
                 return;
             }
 
-            let description = Self::close_description(
+            let description = close_description(
                 count,
                 if is_agent {
                     "shell-close-last-tab-agent-description"
@@ -982,7 +922,7 @@ impl Shell {
                 "shell-close-last-tab-processes-description",
             );
 
-            Self::open_close_confirm(
+            open_close_confirm(
                 window,
                 cx,
                 t!("shell-close-last-tab-title"),
@@ -1010,14 +950,14 @@ impl Shell {
         let description = if is_agent {
             t!("shell-close-tab-agent-description").to_string()
         } else {
-            Self::close_description(
+            close_description(
                 count,
                 "shell-close-tab-description",
                 "shell-close-tab-processes-description",
             )
         };
 
-        Self::open_close_confirm(
+        open_close_confirm(
             window,
             cx,
             t!("shell-close-tab-title"),
@@ -1041,8 +981,8 @@ impl Shell {
             return;
         };
 
-        for route in Self::agent_routes_in_surface(&tree, cx) {
-            self.remove_agent_route(&route, cx);
+        for route in tree.agent_routes(cx) {
+            self.agent_notifications.remove_route(&route, cx);
         }
 
         let return_to = tree.git().and_then(|git| git.return_to);
@@ -1122,13 +1062,13 @@ impl Shell {
             return;
         }
 
-        let description = Self::close_description(
+        let description = close_description(
             count,
             "shell-close-workspace-description",
             "shell-close-workspace-processes-description",
         );
 
-        Self::open_close_confirm(
+        open_close_confirm(
             window,
             cx,
             t!("shell-close-workspace-title"),
@@ -1174,13 +1114,13 @@ impl Shell {
             return;
         }
 
-        let description = Self::close_description(
+        let description = close_description(
             process_count,
             "shell-close-temporary-workspaces-description",
             "shell-close-temporary-workspaces-processes-description",
         );
 
-        Self::open_close_confirm(
+        open_close_confirm(
             window,
             cx,
             t!("shell-close-temporary-workspaces-title"),
@@ -1225,7 +1165,7 @@ impl Shell {
     ) {
         let count = self.workspace_process_count(id, cx);
 
-        let message = Self::close_description(
+        let message = close_description(
             count,
             "shell-close-last-workspace-message",
             "shell-close-last-workspace-processes-message",
@@ -1298,7 +1238,7 @@ impl Shell {
             return true;
         }
 
-        let mut description = Self::close_description(
+        let mut description = close_description(
             count,
             "shell-close-window-description",
             "shell-close-window-processes-description",
@@ -1312,39 +1252,13 @@ impl Shell {
 
         let note = self.temporary_workspace_note();
 
-        // `remove_window` tears the window down directly (no WM_CLOSE
-        // round-trip), so this dialog won't re-trigger.
         if !saved {
-            window.open_alert_dialog(cx, move |alert, _, _| {
-                alert
-                    .title(t!("settings-save-failed-title"))
-                    .description(
-                        v_flex()
-                            .gap_1()
-                            .child(description.clone())
-                            .children(note.clone().map(|note| div().font_bold().child(note))),
-                    )
-                    .button_props(
-                        DialogButtonProps::default()
-                            .show_cancel(true)
-                            .ok_text(t!("settings-close-without-saving"))
-                            .cancel_text(t!("shell-close-cancel")),
-                    )
-                    .on_ok(|_, window, cx| {
-                        if cx.windows().len() == 1 {
-                            cx.global_mut::<AppSettings>().discard_on_exit();
-                        }
-
-                        window.remove_window();
-
-                        true
-                    })
-            });
+            open_save_failed_close(description, note, window, cx);
 
             return false;
         }
 
-        Self::open_close_confirm(
+        open_close_confirm(
             window,
             cx,
             t!("shell-close-window-title"),
@@ -1369,7 +1283,7 @@ impl Shell {
                 tabs.list()
                     .items()
                     .iter()
-                    .flat_map(|tab| Self::agent_routes_in_surface(tab.surface(), cx))
+                    .flat_map(|tab| tab.surface().agent_routes(cx))
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
@@ -1384,7 +1298,7 @@ impl Shell {
 
         if self.workspaces.close_workspace(id).is_some() {
             for route in routes {
-                self.remove_agent_route(&route, cx);
+                self.agent_notifications.remove_route(&route, cx);
             }
 
             if settings {
@@ -1560,133 +1474,6 @@ impl Shell {
         };
 
         tree.apply_pending_ratios(cx);
-    }
-
-    /// The active tab's pane tree as nested resizable groups. The main surface
-    /// owns the outer frame, so a single pane renders without another card.
-    pub(super) fn render_active_tree(&self, cx: &mut Context<Self>) -> AnyElement {
-        match self.workspaces.active_tabs().active() {
-            TabSurface::Git(tab) => {
-                return div()
-                    .size_full()
-                    .overflow_hidden()
-                    .child(tab.view.clone())
-                    .into_any_element();
-            }
-            TabSurface::Team(pane) => {
-                return div()
-                    .size_full()
-                    .overflow_hidden()
-                    .child(pane.clone())
-                    .into_any_element();
-            }
-            TabSurface::TeamUnavailable { message, .. } => {
-                return div()
-                    .size_full()
-                    .p_4()
-                    .child(message.clone())
-                    .into_any_element();
-            }
-            TabSurface::TeamDisabled(_) => {
-                return div()
-                    .size_full()
-                    .p_4()
-                    .child(t!("team-disabled").into_owned())
-                    .into_any_element();
-            }
-            _ => {}
-        }
-
-        if self.workspaces.active_tabs().active().is_settings() {
-            let settings = self.settings.render(cx);
-
-            return div()
-                .size_full()
-                .overflow_hidden()
-                // The Settings widget paints no fill of its own, so without
-                // this the translucent surface card shows the window backdrop
-                // through the page area while the sidebar, which carries an
-                // explicit fill, stays opaque.
-                .bg(cx
-                    .theme()
-                    .background
-                    .alpha(main_view_background_opacity(cx)))
-                .children(settings)
-                .into_any_element();
-        }
-
-        if let Some(agent) = self.active_agent() {
-            return div()
-                .size_full()
-                .overflow_hidden()
-                .child(agent)
-                .into_any_element();
-        }
-
-        let tree = self.workspaces.active_tabs().active().live();
-
-        let multi = !tree.tree().is_single_leaf();
-
-        Self::render_pane_node(tree.tree().root(), tree.tree().focused(), multi, cx)
-    }
-
-    fn render_pane_node(
-        node: &PaneNode<Entity<TerminalPane>>,
-        focused: PaneId,
-        multi: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        match node {
-            PaneNode::Leaf { id, pane, .. } => {
-                let id = *id;
-
-                div()
-                    .size_full()
-                    // Split leaves retain equal-width borders so focus changes
-                    // never shift layout; the parent surface clips their outer
-                    // edges and provides the single-pane frame.
-                    .when(multi, |this| {
-                        this.border_1().border_color(if id == focused {
-                            cx.theme().primary
-                        } else {
-                            cx.theme().border
-                        })
-                    })
-                    .capture_any_mouse_down(cx.listener(
-                        move |this, _: &MouseDownEvent, window, cx| {
-                            this.focus_pane(id, window, cx);
-                        },
-                    ))
-                    .child(pane.clone())
-                    .into_any_element()
-            }
-            PaneNode::Split {
-                id,
-                axis,
-                children,
-                state,
-                ..
-            } => {
-                let shell = cx.entity();
-
-                let mut group = ResizablePanelGroup::new(("pane-split", *id as usize))
-                    .axis(*axis)
-                    .with_state(state)
-                    // Keep the in-memory session mirror's split ratios fresh
-                    // after divider drags (the quit hook reads it).
-                    .on_resize(move |_, _, cx| {
-                        shell.update(cx, |this, cx| this.sync_session_memory(cx));
-                    });
-
-                for child in children {
-                    group = group.child(
-                        resizable_panel().child(Self::render_pane_node(child, focused, multi, cx)),
-                    );
-                }
-
-                group.into_any_element()
-            }
-        }
     }
 
     fn insert_tab(
@@ -2140,7 +1927,7 @@ impl Shell {
     /// because focusing a tab is what clears both marks.
     pub(super) fn next_ready_tab(&self, cx: &App) -> Option<(usize, usize)> {
         self.next_marked_tab(|tab| {
-            let routes = Self::agent_routes_in_surface(tab.surface(), cx);
+            let routes = tab.surface().agent_routes(cx);
 
             tab.last_outcome().is_some()
                 || self
@@ -2165,7 +1952,7 @@ impl Shell {
                 return true;
             }
 
-            let routes = Self::agent_routes_in_surface(tab.surface(), cx);
+            let routes = tab.surface().agent_routes(cx);
 
             self.agent_notifications
                 .agent_monitor
@@ -2201,21 +1988,7 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let name_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .default_value(t!("shell-workspace-default-name").to_string())
-        });
-
-        // A new workspace starts with no directory at all, which the editor's
-        // non-empty invariant cannot express; the picker fills the first one
-        // in and Create stays refused until it does.
-        let dirs = cx.new(|cx| WorkspaceDirsEditor::new(None, cx));
-
-        let shell = cx.entity();
-
-        window.open_dialog(cx, move |dialog, window, _| {
-            new_workspace_dialog(dialog, &name_input, &dirs, &shell, window)
-        });
+        open_new_workspace_dialog(window, cx);
     }
 
     /// Adopt a temporary workspace: from here on it is saved with the session
@@ -2613,7 +2386,7 @@ impl Shell {
             .agent_monitor
             .interrupt(&route, time::Instant::now());
 
-        Self::apply_agent_monitor_display_change(&mutation, cx);
+        apply_monitor_display_change(&mutation, cx);
 
         self.agent_notifications.reschedule_agent_timer(cx);
     }
@@ -2654,7 +2427,7 @@ impl Shell {
                     }
                 }
                 HostEvent::Exit => {
-                    self.remove_agent_route(&agent_route, cx);
+                    self.agent_notifications.remove_route(&agent_route, cx);
 
                     if let Some(tab_id) = self.tab_for_pane(pane_id) {
                         // A pane whose shell exits auto-closes when the tab has
@@ -2757,7 +2530,7 @@ impl Shell {
                             .agent_monitor
                             .notify(&agent_route, title, body);
 
-                    Self::remove_native_notifications(&mutation.removed_notifications);
+                    remove_native_notifications(&mutation.removed_notifications);
 
                     chrome_changed |= mutation.visible_changed;
 
@@ -2791,12 +2564,7 @@ impl Shell {
             return;
         };
 
-        let editor = cx.new(|cx| WorkspaceDirsEditor::new(Some(roots), cx));
-        let shell = cx.entity();
-
-        window.open_dialog(cx, move |dialog, window, cx| {
-            workspace_dirs_dialog(dialog, &editor, &shell, id, window, cx)
-        });
+        open_workspace_dirs_dialog(id, roots, window, cx);
     }
 
     /// Adopt an edited directory list. Open Agent Tabs of this workspace pick
@@ -2869,17 +2637,6 @@ impl Shell {
             .collect()
     }
 
-    pub(super) fn apply_agent_monitor_display_change(
-        mutation: &MonitorMutation,
-        cx: &mut Context<Self>,
-    ) {
-        Self::remove_native_notifications(&mutation.removed_notifications);
-
-        if mutation.visible_changed {
-            cx.notify();
-        }
-    }
-
     pub(super) fn register_agent_pane(&mut self, pane: &Entity<TerminalPane>, cx: &App) {
         self.agent_notifications.agent_monitor.register_route(
             pane.read(cx).agent_route().clone(),
@@ -2900,120 +2657,27 @@ impl Shell {
         );
     }
 
-    pub(super) fn remove_agent_route(&mut self, route: &AgentRoute, cx: &mut Context<Self>) {
-        let mutation = self.agent_notifications.agent_monitor.remove_route(route);
-
-        Self::apply_agent_monitor_display_change(&mutation, cx);
-
-        self.agent_notifications.reschedule_agent_timer(cx);
-    }
-
-    pub(super) fn remove_native_notifications(notifications: &[AgentNotification]) {
-        for notification in notifications {
-            let tag = notification.native_tag.clone();
-            let group = notification.native_group.clone();
-
-            thread::spawn(move || {
-                let _ = remove_notification(&tag, &group);
-            });
-        }
-    }
-
     pub(super) fn exact_window_active(window: &Window) -> bool {
         native_active_state(window).unwrap_or_else(|| window.is_window_active())
     }
 
-    pub(super) fn acknowledge_notification(
-        &mut self,
-        route: &AgentRoute,
-        notification_id: &str,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let mutation = self
-            .agent_notifications
-            .agent_monitor
-            .acknowledge(route, notification_id);
-
-        Self::apply_agent_monitor_display_change(&mutation, cx);
-
-        mutation.visible_changed
-    }
-
+    /// Offer the monitor's pending notifications to the system, keeping back
+    /// the one for the agent the user is looking at right now.
     pub(super) fn process_native_notifications(&mut self, cx: &mut Context<Self>) {
-        let system_notifications_enabled = cx
-            .global::<AppSettings>()
-            .config()
-            .system
-            .send_system_notifications
-            && system_notification_enabled();
-
         let visible_route = self
             .window_active
             .then(|| self.active_agent_route(cx))
             .flatten();
 
-        for notification in self
-            .agent_notifications
-            .agent_monitor
-            .pending_native_notifications()
-        {
-            if !request_native_delivery(visible_route.as_ref(), &notification.route) {
-                self.acknowledge_notification(&notification.route, &notification.id, cx);
-
-                continue;
-            }
-
-            if !self
-                .agent_notifications
-                .agent_monitor
-                .mark_native_requested(&notification.route, &notification.id)
-            {
-                continue;
-            }
-
-            if !system_notifications_enabled {
-                continue;
-            }
-
-            let activation_url: String = (&CliAction::FocusNotification {
-                route: notification.route.clone(),
-                notification_id: notification.id.clone(),
-            })
-                .into();
-
-            thread::spawn(move || {
-                match show_notification(&NativeNotification {
-                    title: notification.title,
-                    body: notification.body,
-                    activation_url,
-                    tag: notification.native_tag,
-                    group: notification.native_group,
-                }) {
-                    Ok(()) => {}
-                    Err(error) => warn!("native notification failed: {error}"),
-                }
-            });
-        }
-    }
-
-    pub(super) fn agent_routes_in_surface(surface: &TabSurface, cx: &App) -> Vec<AgentRoute> {
-        let mut routes: Vec<_> = surface
-            .leaves()
-            .into_iter()
-            .map(|(_, pane)| pane.read(cx).agent_route().clone())
-            .collect();
-
-        if let Some(session) = surface.agent_session() {
-            routes.push(session.read(cx).agent_route().clone());
-        }
-
-        routes
+        self.agent_notifications
+            .process_native_notifications(visible_route.as_ref(), cx);
     }
 
     fn owns_agent_route(&self, route: &AgentRoute, cx: &App) -> bool {
         self.workspaces.all_tabs().any(|tabs| {
             tabs.list().items().iter().any(|tab| {
-                Self::agent_routes_in_surface(tab.surface(), cx)
+                tab.surface()
+                    .agent_routes(cx)
                     .iter()
                     .any(|candidate| candidate == route)
             })
@@ -3118,7 +2782,8 @@ impl Shell {
 
         self.on_active_tab_changed(window, cx);
 
-        self.acknowledge_notification(route, notification_id, cx);
+        self.agent_notifications
+            .acknowledge(route, notification_id, cx);
 
         true
     }
@@ -3133,7 +2798,7 @@ impl Shell {
             .agent_monitor
             .apply(event, time::Instant::now());
 
-        Self::apply_agent_monitor_display_change(&mutation, cx);
+        apply_monitor_display_change(&mutation, cx);
 
         self.agent_notifications.reschedule_agent_timer(cx);
 
@@ -3147,7 +2812,7 @@ impl Shell {
             return;
         };
 
-        Self::apply_agent_monitor_display_change(&mutation, cx);
+        apply_monitor_display_change(&mutation, cx);
 
         self.agent_notifications.reschedule_agent_timer(cx);
 
@@ -3248,7 +2913,7 @@ impl Shell {
                 .interrupt(&route, time::Instant::now()),
         };
 
-        Self::apply_agent_monitor_display_change(&mutation, cx);
+        apply_monitor_display_change(&mutation, cx);
 
         self.agent_notifications.reschedule_agent_timer(cx);
 
@@ -3344,153 +3009,6 @@ impl Shell {
     }
 }
 
-fn close_last_workspace_dialog(
-    dialog: Dialog,
-    shell: &Entity<Shell>,
-    id: WorkspaceId,
-    message: &str,
-    note: &Option<SharedString>,
-) -> Dialog {
-    let quit_shell = shell.clone();
-    let replace_shell = shell.clone();
-    let message = message.to_string();
-    let note = note.clone();
-
-    dialog
-        .title(t!("shell-close-last-workspace-title"))
-        .overlay_closable(false)
-        .content(move |content, _, cx| {
-            content.child(
-                v_flex()
-                    .gap_1()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(message.clone())
-                    .children(note.clone().map(|note| div().font_bold().child(note))),
-            )
-        })
-        .footer(
-            DialogFooter::new()
-                .child(
-                    Button::new("replace-ws")
-                        .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                        .label(t!("shell-close-new-default-workspace"))
-                        .primary()
-                        .on_click(move |_, window, cx| {
-                            window.close_dialog(cx);
-
-                            replace_shell
-                                .update(cx, |this, cx| this.replace_last_workspace(id, window, cx));
-                        }),
-                )
-                .child(
-                    Button::new("quit-app")
-                        .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                        .label(t!("shell-close-quit"))
-                        .danger()
-                        .on_click(move |_, window, cx| {
-                            if !ui::settings::save_settings(window, cx) {
-                                window.close_dialog(cx);
-
-                                return;
-                            }
-
-                            quit_shell.update(cx, |this, cx| this.doom_workspace(id, cx));
-
-                            cx.quit();
-                        }),
-                )
-                .child(
-                    DialogClose::new().child(
-                        Button::new("keep-ws")
-                            .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                            .label(t!("shell-close-cancel")),
-                    ),
-                ),
-        )
-}
-
-pub(super) fn should_confirm_close(
-    confirm: bool,
-    warn: WarnBeforeTerminatingShell,
-    child_process_count: &io::Result<usize>,
-) -> bool {
-    confirm
-        || match child_process_count {
-            Ok(count) => warn.should_warn(*count),
-            Err(_) => warn != WarnBeforeTerminatingShell::Disabled,
-        }
-}
-
-fn new_workspace_dialog(
-    dialog: Dialog,
-    name_input: &Entity<InputState>,
-    dirs: &Entity<WorkspaceDirsEditor>,
-    shell: &Entity<Shell>,
-    window: &Window,
-) -> Dialog {
-    let name_input = name_input.clone();
-    let dirs = dirs.clone();
-    let content_name = name_input.clone();
-    let content_dirs = dirs.clone();
-    let shell = shell.clone();
-    let margin_top = ((window.viewport_size().height - px(300.)) * 0.5).max(px(16.));
-
-    dialog
-        .title(t!("shell-workspace-new-title"))
-        .overlay_closable(false)
-        .margin_top(margin_top)
-        .button_props(
-            DialogButtonProps::default()
-                .ok_text(t!("shell-workspace-create"))
-                .cancel_text(t!("shell-workspace-cancel"))
-                .show_cancel(true),
-        )
-        // Plain `Dialog` never renders `button_props` buttons (only
-        // `AlertDialog` does), so the footer supplies them; the
-        // wrappers dispatch Confirm/CancelDialog into on_ok/on_cancel.
-        .footer(
-            DialogFooter::new()
-                .child(
-                    DialogAction::new().child(
-                        Button::new("create-ws")
-                            .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                            .label(t!("shell-workspace-create"))
-                            .primary(),
-                    ),
-                )
-                .child(
-                    DialogClose::new().child(
-                        Button::new("cancel-ws")
-                            .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                            .label(t!("shell-workspace-cancel")),
-                    ),
-                ),
-        )
-        .content(move |content, _, _| {
-            content.child(
-                v_flex()
-                    .gap_2()
-                    .child(div().text_sm().child(t!("shell-workspace-name-label")))
-                    .child(Input::new(&content_name))
-                    .child(content_dirs.clone()),
-            )
-        })
-        .on_ok(move |_, window, cx| {
-            let name = name_input.read(cx).value().trim().to_string();
-
-            let Some(roots) = dirs.read(cx).roots().cloned() else {
-                return false;
-            };
-
-            shell.update(cx, |this, cx| {
-                this.create_workspace(name, roots, window, cx);
-            });
-
-            true
-        })
-}
-
 /// Walk from just after `active` and wrap around, returning the first marked
 /// slot. `active` itself is visited last, so a tab that gets marked while it is
 /// the one on screen stays reachable instead of being skipped forever.
@@ -3498,72 +3016,6 @@ pub(super) fn next_marked_position(marks: &[bool], active: usize) -> Option<usiz
     (1..=marks.len())
         .map(|offset| (active + offset) % marks.len())
         .find(|&index| marks[index])
-}
-
-fn workspace_dirs_dialog(
-    dialog: Dialog,
-    editor: &Entity<WorkspaceDirsEditor>,
-    shell: &Entity<Shell>,
-    id: WorkspaceId,
-    window: &Window,
-    cx: &App,
-) -> Dialog {
-    let editor = editor.clone();
-    let content_editor = editor.clone();
-    let shell = shell.clone();
-    let margin_top = ((window.viewport_size().height - px(300.)) * 0.5).max(px(16.));
-
-    dialog
-        .title(t!("shell-workspace-edit-title"))
-        .overlay_closable(false)
-        .margin_top(margin_top)
-        .button_props(
-            DialogButtonProps::default()
-                .ok_text(t!("shell-workspace-save"))
-                .cancel_text(t!("shell-workspace-cancel"))
-                .show_cancel(true),
-        )
-        .footer(
-            DialogFooter::new()
-                .w_full()
-                .border_t_1()
-                .border_color(cx.theme().border)
-                .pt_4()
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_xs()
-                        .line_height(relative(1.5))
-                        .text_color(cx.theme().muted_foreground)
-                        .child(t!("shell-workspace-dirs-applies-next")),
-                )
-                .child(
-                    DialogAction::new().child(
-                        Button::new("save-ws-dirs")
-                            .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                            .label(t!("shell-workspace-save"))
-                            .primary(),
-                    ),
-                )
-                .child(
-                    DialogClose::new().child(
-                        Button::new("cancel-ws-dirs")
-                            .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                            .label(t!("shell-workspace-cancel")),
-                    ),
-                ),
-        )
-        .content(move |content, _, _| content.child(content_editor.clone()))
-        .on_ok(move |_, _, cx| {
-            let Some(roots) = editor.read(cx).roots().cloned() else {
-                return false;
-            };
-
-            shell.update(cx, |this, cx| this.replace_workspace_roots(id, roots, cx));
-
-            true
-        })
 }
 
 struct AgentRouteLocation {
@@ -3751,7 +3203,12 @@ impl Render for Shell {
 
         self.apply_pending_ratios(cx);
 
-        let pane_tree = self.render_active_tree(cx);
+        let pane_tree = tab_surface_view(
+            self.workspaces.active_tabs().active(),
+            self.active_agent(),
+            self.settings.render(cx),
+            cx,
+        );
 
         let background_image = cx
             .global::<AppSettings>()
@@ -3856,21 +3313,6 @@ impl Focusable for Shell {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
     }
-}
-
-/// Clip terminal and agent content within the sidebar-colored backing surface.
-fn floating_surface_card(cx: &App) -> Div {
-    div().size_full().overflow_hidden().bg(cx.theme().sidebar)
-}
-
-/// Borders overlay content so attached tab and navigation bounds share one origin.
-fn surface_border(cx: &App) -> Div {
-    div()
-        .absolute()
-        .inset_0()
-        .border_l_1()
-        .border_t_1()
-        .border_color(cx.theme().sidebar_border)
 }
 
 const PANE_RESIZE_STEP: Pixels = px(30.0);
