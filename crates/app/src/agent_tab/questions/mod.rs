@@ -2,6 +2,8 @@
 
 pub(super) use nmt_agent::session::input::QuestionStatus;
 
+pub(super) mod panel;
+
 #[cfg(test)]
 mod tests;
 

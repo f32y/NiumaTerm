@@ -256,7 +256,7 @@ fn confirmed_secret_answer_releases_its_widget_and_reveals_the_next_batch(cx: &m
                 .unwrap()
                 .set_text(0, "sensitive".into());
 
-            pane.prepare_question_editors(window, cx);
+            pane.prompts.prepare_editors(&pane.session, window, cx);
 
             assert!(
                 pane.prompts.presentations[&pane.session.borrow().input.batches()[0].key()].editors
@@ -347,7 +347,7 @@ fn blocking_requests_reveal_without_discarding_async_drafts_and_duplicates_keep_
                 .unwrap()
                 .set_text(0, "keep this".into());
 
-            pane.prepare_question_editors(window, cx);
+            pane.prompts.prepare_editors(&pane.session, window, cx);
 
             let QuestionEditorState::Text(editor) = &pane.prompts.presentations
                 [&pane.session.borrow().input.batches()[0].key()]
@@ -551,7 +551,7 @@ fn question_editors_survive_unshown_batches_and_reused_positions(cx: &mut TestAp
 
     let old_key = cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
-            pane.prepare_question_editors(window, cx);
+            pane.prompts.prepare_editors(&pane.session, window, cx);
 
             let old_key = pane.prompts.active.unwrap();
 
@@ -576,7 +576,7 @@ fn question_editors_survive_unshown_batches_and_reused_positions(cx: &mut TestAp
 
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
-            pane.prepare_question_editors(window, cx);
+            pane.prompts.prepare_editors(&pane.session, window, cx);
 
             let key = pane.prompts.active.unwrap();
 

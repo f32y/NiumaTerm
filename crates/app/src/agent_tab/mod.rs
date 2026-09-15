@@ -48,35 +48,29 @@ use std::{env, fs};
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, AsyncApp, Bounds, ClipboardEntry, ClipboardItem, Context, Entity, FocusHandle,
-    FontWeight, Hsla, Image, ImageFormat, IntoElement, ListSizingBehavior, MouseButton,
-    MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollStrategy, SharedString, WeakEntity,
-    Window, div, px, relative, size,
+    FontWeight, Image, ImageFormat, IntoElement, MouseButton, MouseUpEvent, Pixels, Point, Render,
+    SharedString, WeakEntity, Window, div, px, relative, size,
 };
 use gpui_base::TextSelection;
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::checkbox::Checkbox;
 use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, Dialog, DialogClose, DialogFooter};
 use gpui_component::input::{
-    Enter, Escape, IndentInline, InputEvent, InputState, MoveDown, MoveUp, Paste, Textarea,
-    TextareaState,
+    Enter, Escape, IndentInline, InputEvent, MoveDown, MoveUp, Paste, Textarea, TextareaState,
 };
 use gpui_component::modern_menu::ModernMenu;
 use gpui_component::progress::ProgressCircle;
-use gpui_component::radio::Radio;
-use gpui_component::scroll::Scrollbar;
-use gpui_component::skeleton::Skeleton;
 use gpui_component::spinner::Spinner;
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, IconNamed, Sizable as _, WindowExt, h_flex,
-    v_flex, v_virtual_list,
+    v_flex,
 };
 use nmt_agent::background_task::{BackgroundTaskKey, BackgroundTaskSnapshot};
 use nmt_agent::catalog::adapter_commands;
 use nmt_agent::chat::{
-    ForkCheckpoint, Item as SessionItem, Question, QuestionInput, QuestionMode, QueuedPrompt,
-    SessionScope, SessionSummary, SkillInfo, SkillReference, SlashCommandArguments,
-    SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
+    ForkCheckpoint, Item as SessionItem, Question, QuestionMode, QueuedPrompt, SessionScope,
+    SessionSummary, SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo,
+    SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
 };
 use nmt_agent::claude_code::{sessions, stream_json};
 use nmt_agent::codex::app_server;
@@ -92,9 +86,7 @@ use nmt_agent::session::controller::{
 };
 use nmt_agent::session::delivery::{RecoverablePrompt, Submission};
 use nmt_agent::session::history::{CountPublication, count_scoped_sessions, list_scoped_sessions};
-use nmt_agent::session::input::{
-    ApprovalOutcome, QuestionAction, QuestionCompletion, QuestionError, QuestionKey,
-};
+use nmt_agent::session::input::{ApprovalOutcome, QuestionAction, QuestionCompletion, QuestionKey};
 use nmt_agent::session::lifecycle::InterruptOutcome;
 use nmt_agent::session::restore::{ResumeStart, SettingsSeed};
 use nmt_agent::session::workflows::OpenWorkflowAgent;
@@ -133,28 +125,21 @@ use crate::agent_tab::input_history::{
     InputHistoryAction, InputHistoryDirection, InputHistoryNavigation, InputHistoryScope,
 };
 use crate::agent_tab::pane_state::TurnPresentation;
-use crate::agent_tab::questions::{
-    QuestionEditor, QuestionEditorState, QuestionPresentation, QuestionStatus,
-};
+use crate::agent_tab::questions::panel::QuestionPanel;
 use crate::agent_tab::session::errors::operation_error;
-use crate::agent_tab::session::history::{
-    FilesystemHistoryRequest, RecentSessionsMode, SessionHistoryUi,
-};
-use crate::agent_tab::session::prompts::PendingPrompts;
-use crate::agent_tab::session::{
-    Backend, Status, UpdateSuspension, directories_match, directory_label,
-};
+use crate::agent_tab::session::history::FilesystemHistoryRequest;
+use crate::agent_tab::session::{Backend, Status, UpdateSuspension};
 use crate::agent_tab::settings::{AgentSettings, UI_RADIUS};
 use crate::agent_tab::thread_controls::{launch_model, remember_defaults, render_row};
 use crate::agent_tab::transcript::{
-    LAST_RESPONSE_LIMIT, TranscriptView, last_response_label, relative_time, transcript_column,
+    LAST_RESPONSE_LIMIT, TranscriptView, last_response_label, transcript_column,
 };
 use crate::agent_tab::view::composer_layout::{
     composer_card, composer_controls_row, composer_input_row,
 };
 use crate::agent_tab::view::progress_panel::{PROGRESS_PANEL_TUCK, ProgressPanel};
+use crate::agent_tab::view::recent_sessions::{ListControl, RecentSessionsMode, SessionHistoryUi};
 use crate::agent_tab::workflows::WorkflowUi;
-use crate::platform_style::{Host, PlatformStyle as _};
 
 #[derive(Clone)]
 pub enum AgentPaneEvent {
@@ -271,7 +256,7 @@ pub struct AgentPane {
     turn: TurnPresentation,
 
     /// The approval and question cards that block a turn until answered.
-    prompts: PendingPrompts,
+    prompts: QuestionPanel,
 
     palette: SlashPalette,
 
@@ -1232,15 +1217,7 @@ impl AgentPane {
             return false;
         }
 
-        let rows = self
-            .history_ui
-            .data
-            .pending
-            .unwrap_or(self.history_ui.data.sessions.len());
-
-        if rows == 0 {
-            self.history_ui.mode = RecentSessionsMode::Hidden;
-
+        if !self.history_ui.open() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Notice,
                 SharedString::from(t!("agent-composer-no-recent-sessions")),
@@ -1250,14 +1227,6 @@ impl AgentPane {
             return true;
         }
 
-        self.history_ui.mode = RecentSessionsMode::Open;
-        self.history_ui.selected = 0;
-
-        // A list opened from a command was opened without the pointer, and a
-        // strip that was on screen the last time the pointer crossed it has
-        // no way to report that the pointer has since left.
-        self.history_ui.pointer_inside = false;
-        self.history_ui.pointer = None;
         self.palette.feedback = None;
 
         cx.notify();
@@ -1488,12 +1457,45 @@ impl AgentPane {
             // The card is answered before the recent-sessions list or the input
             // history get a look, because the turn is blocked on it and neither
             // of those can lead anywhere until it is.
-            if self.handle_question_control(control, cx) {
+            if self.binding.is_current()
+                && self
+                    .prompts
+                    .handle_control(control, &mut self.session.borrow_mut().input)
+            {
+                cx.stop_propagation();
+
+                cx.notify();
+
                 return;
             }
 
-            if self.handle_recent_sessions_control(control, cx) {
-                return;
+            let composer_empty = self.input.read(cx).text().len() == 0;
+            let transcript_empty = self.transcript.read(cx).is_empty();
+
+            match self
+                .history_ui
+                .handle_control(control, transcript_empty, composer_empty)
+            {
+                ListControl::Ignored => {}
+                ListControl::Unchanged => {
+                    cx.stop_propagation();
+
+                    return;
+                }
+                ListControl::Changed => {
+                    cx.stop_propagation();
+
+                    cx.notify();
+
+                    return;
+                }
+                ListControl::Resume(index) => {
+                    cx.stop_propagation();
+
+                    self.resume_session(index, cx);
+
+                    return;
+                }
             }
 
             let direction = match control {
@@ -1554,68 +1556,6 @@ impl AgentPane {
 
             cx.notify();
         }
-    }
-
-    fn handle_recent_sessions_control(
-        &mut self,
-        control: PaletteControl,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let composer_empty = self.input.read(cx).text().len() == 0;
-
-        if matches!(control, PaletteControl::Complete) || !composer_empty {
-            return false;
-        }
-
-        let rows = self
-            .history_ui
-            .data
-            .pending
-            .unwrap_or(self.history_ui.data.sessions.len());
-
-        if !self.history_ui.mode.is_visible(
-            self.transcript.read(cx).is_empty(),
-            composer_empty,
-            rows,
-        ) {
-            return false;
-        }
-
-        cx.stop_propagation();
-
-        match control {
-            PaletteControl::Previous | PaletteControl::Next => {
-                if let Some(direction) = control.direction()
-                    && let Some(selected) = move_palette_selection(
-                        self.history_ui.selected,
-                        self.history_ui.data.sessions.len(),
-                        direction,
-                    )
-                {
-                    self.history_ui.selected = selected;
-
-                    self.history_ui
-                        .scroll
-                        .scroll_to_item(selected, ScrollStrategy::Nearest);
-
-                    cx.notify();
-                }
-            }
-            PaletteControl::Activate => {
-                self.resume_session(self.history_ui.selected, cx);
-            }
-            PaletteControl::Dismiss => {
-                self.history_ui.mode = RecentSessionsMode::Hidden;
-
-                cx.notify();
-            }
-            // Completion belongs to the command palette. The guard above hands
-            // it back before the list claims the keys, so there is nothing left
-            // for it to do here.
-            PaletteControl::Complete => {}
-        }
-
-        true
     }
 
     /// Move the highlight to the row under the pointer without acting on it.
@@ -2554,78 +2494,12 @@ impl AgentPane {
             return;
         }
 
-        if let Some(prompt) = self
+        if self
             .prompts
-            .questions_mut(&mut self.session.borrow_mut().input)
+            .toggle_option(&mut self.session.borrow_mut().input, question, option)
         {
-            prompt.toggle(question, option);
-
-            if let Some(active) = self.prompts.active
-                && let Some(presentation) = self.prompts.presentations.get_mut(&active)
-            {
-                presentation.focus = (question, option);
-            }
-
             cx.notify();
         }
-    }
-
-    fn handle_question_control(&mut self, control: PaletteControl, cx: &mut Context<Self>) -> bool {
-        if !self.binding.is_current() {
-            return false;
-        }
-
-        if self.prompts.collapsed {
-            return false;
-        }
-
-        let Some(key) = self.prompts.active else {
-            return false;
-        };
-
-        let mut state = self.session.borrow_mut();
-
-        let Some(prompt) = state.input.draft_mut(key) else {
-            return false;
-        };
-
-        if prompt.mode() == QuestionMode::Async || prompt.status() != QuestionStatus::Pending {
-            return false;
-        }
-
-        let Some(presentation) = self.prompts.presentations.get_mut(&key) else {
-            return false;
-        };
-
-        let handled = match control {
-            PaletteControl::Previous => presentation.move_focus(prompt, false),
-            PaletteControl::Next => presentation.move_focus(prompt, true),
-            PaletteControl::Activate => {
-                let (question, option) = presentation.focus;
-
-                if prompt
-                    .questions()
-                    .get(question)
-                    .and_then(|question| question.options.get(option))
-                    .is_none()
-                {
-                    return false;
-                }
-
-                prompt.toggle(question, option);
-
-                true
-            }
-            PaletteControl::Complete | PaletteControl::Dismiss => false,
-        };
-
-        if handled {
-            cx.stop_propagation();
-
-            cx.notify();
-        }
-
-        handled
     }
 
     pub(crate) fn submit_current_questions(&mut self, cx: &mut Context<Self>) {
@@ -2678,458 +2552,6 @@ impl AgentPane {
         self.prompts.hide_settled(&self.session.borrow().input);
 
         cx.notify();
-    }
-
-    pub(crate) fn prepare_question_editors(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.prompts.collapsed {
-            return;
-        }
-
-        let Some(batch) = self.prompts.active else {
-            return;
-        };
-
-        let shared = self.session.clone();
-        let state = shared.borrow();
-
-        let Some(prompt) = state.input.draft(batch) else {
-            return;
-        };
-
-        let count = prompt.questions().len();
-
-        self.prompts
-            .presentations
-            .entry(batch)
-            .or_insert_with(|| QuestionPresentation::new(prompt));
-
-        drop(state);
-
-        for index in 0..count {
-            let shared = self.session.clone();
-            let state = shared.borrow();
-
-            let Some(prompt) = state.input.draft(batch) else {
-                return;
-            };
-
-            let input = prompt.questions()[index].input;
-
-            if input == QuestionInput::SelectionOnly
-                || self.prompts.presentations[&batch].editors[index].is_some()
-                || !prompt.pending()
-            {
-                continue;
-            }
-
-            let text = prompt.text(index).to_string();
-            let key = prompt.key();
-            let epoch = self.session.borrow().runtime.epoch();
-
-            let on_change = move |this: &mut Self, value: String, cx: &mut Context<Self>| {
-                if !this.binding.is_current() || !this.session.borrow().runtime.is_current(epoch) {
-                    return;
-                }
-
-                let mut state = this.session.borrow_mut();
-
-                let Some(prompt) = state.input.draft_mut(key) else {
-                    return;
-                };
-
-                if !prompt.set_text(index, value) {
-                    return;
-                }
-
-                cx.notify();
-            };
-
-            let (state, subscription) = if input == QuestionInput::Secret {
-                let state = cx.new(|cx| {
-                    InputState::new(window, cx)
-                        .masked(true)
-                        .placeholder(t!("agent-question-free-text"))
-                        .default_value(text)
-                });
-
-                let subscription = cx.subscribe(&state, move |this, input, event, cx| {
-                    if matches!(event, InputEvent::Change) {
-                        on_change(this, input.read(cx).value().to_string(), cx);
-                    }
-                });
-
-                (QuestionEditorState::Secret(state), subscription)
-            } else {
-                let state = cx.new(|cx| {
-                    TextareaState::new(window, cx)
-                        .auto_grow(1, 4)
-                        .placeholder(t!("agent-question-free-text"))
-                        .default_value(text)
-                });
-
-                let subscription = cx.subscribe(&state, move |this, input, event, cx| {
-                    if matches!(event, InputEvent::Change) {
-                        on_change(this, input.read(cx).value().to_string(), cx);
-                    }
-                });
-
-                (QuestionEditorState::Text(state), subscription)
-            };
-
-            if let Some(presentation) = self.prompts.presentations.get_mut(&batch) {
-                presentation.editors[index] = Some(QuestionEditor::new(state, subscription));
-            }
-        }
-    }
-
-    pub(crate) fn render_question_panel(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let count = self.session.borrow().input.pending_count();
-
-        if self.prompts.collapsed && count == 0 {
-            return None;
-        }
-
-        self.prepare_question_editors(window, cx);
-
-        let active = self.prompts.active?;
-        let shared = self.session.clone();
-        let state = shared.borrow();
-        let prompt = self.prompts.questions(&state.input)?;
-        let collapsed = self.prompts.collapsed;
-        let pending = prompt.pending();
-
-        let enabled = self
-            .session
-            .borrow()
-            .input
-            .can_submit(&self.session.borrow().runtime, prompt.key())
-            && !self.branch_flow_holds_composer()
-            && !self.session.borrow().commands.awaiting_turn;
-
-        let presentation = self.prompts.presentations.get(&active)?;
-
-        let status = match prompt.status() {
-            QuestionStatus::Pending => {
-                if prompt.mode() == QuestionMode::Async {
-                    "agent-question-async"
-                } else {
-                    "agent-question-pending"
-                }
-            }
-            QuestionStatus::Submitting => "agent-question-submitting",
-            QuestionStatus::Submitted => "agent-question-submitted",
-            QuestionStatus::Skipped => "agent-question-skipped",
-            QuestionStatus::Expired => "agent-question-expired",
-            QuestionStatus::History => "agent-question-history",
-        };
-
-        let count_label = t!("agent-question-count", count = count).into_owned();
-
-        let mut heading = h_flex().w_full().items_center().gap_2().child(
-            div()
-                .flex_1()
-                .text_xs()
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(cx.theme().muted_foreground)
-                .child(if count > 0 {
-                    count_label
-                } else {
-                    t!(status).to_string()
-                }),
-        );
-
-        let candidates: Vec<QuestionKey> = self
-            .session
-            .borrow()
-            .input
-            .batches()
-            .iter()
-            .filter_map(|prompt| {
-                (prompt.pending() || prompt.key() == active).then_some(prompt.key())
-            })
-            .collect();
-
-        if candidates.len() > 1 {
-            let position = candidates
-                .iter()
-                .position(|index| *index == active)
-                .unwrap_or(0);
-
-            let previous = candidates[(position + candidates.len() - 1) % candidates.len()];
-            let next = candidates[(position + 1) % candidates.len()];
-
-            heading = heading
-                .child(
-                    Button::new("question-previous-batch")
-                        .ghost()
-                        .small()
-                        .label("<")
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.prompts.active = Some(previous);
-                            this.prompts.collapsed = false;
-
-                            cx.notify();
-                        })),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .child(format!("{} / {}", position + 1, candidates.len())),
-                )
-                .child(
-                    Button::new("question-next-batch")
-                        .ghost()
-                        .small()
-                        .label(">")
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.prompts.active = Some(next);
-                            this.prompts.collapsed = false;
-
-                            cx.notify();
-                        })),
-                );
-        }
-
-        heading = heading.child(
-            Button::new("question-collapse")
-                .ghost()
-                .small()
-                .label(t!(if collapsed {
-                    "agent-question-open"
-                } else {
-                    "agent-question-collapse"
-                }))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.prompts.collapsed = !this.prompts.collapsed;
-
-                    cx.notify();
-                })),
-        );
-
-        let mut panel = v_flex()
-            .w_full()
-            .px_4()
-            .py_2()
-            .gap_2()
-            .border_b_1()
-            .border_color(cx.theme().border.opacity(0.65))
-            .bg(cx.theme().muted.opacity(0.2))
-            .child(heading)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
-                    if let Some(prompt) = this
-                        .prompts
-                        .questions_mut(&mut this.session.borrow_mut().input)
-                    {
-                        prompt.touch();
-                    }
-
-                    cx.notify();
-                }),
-            )
-            .capture_key_down(cx.listener(|this, _, _, cx| {
-                if let Some(prompt) = this
-                    .prompts
-                    .questions_mut(&mut this.session.borrow_mut().input)
-                {
-                    prompt.touch();
-                }
-
-                cx.notify();
-            }));
-
-        if collapsed {
-            return Some(panel.into_any_element());
-        }
-
-        let mut rows = Vec::new();
-
-        for (index, question) in prompt.questions().iter().enumerate() {
-            let group: SharedString = format!("question-{active:?}-{index}").into();
-
-            let mut row = v_flex()
-                .w_full()
-                .gap_1p5()
-                .children(
-                    question
-                        .header
-                        .as_ref()
-                        .filter(|header| !header.is_empty())
-                        .map(|header| {
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(header.clone())
-                        }),
-                )
-                .child(div().text_sm().child(question.question.clone()));
-
-            for (option_index, option) in question.options.iter().enumerate() {
-                let label = option
-                    .description
-                    .as_ref()
-                    .filter(|description| !description.is_empty())
-                    .map_or_else(
-                        || option.label.clone(),
-                        |description| format!("{} — {description}", option.label),
-                    );
-
-                let control = if question.multi_select {
-                    Checkbox::new((group.clone(), option_index))
-                        .label(label)
-                        .checked(prompt.is_selected(index, option_index))
-                        .disabled(!enabled)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_question_option(index, option_index, cx)
-                        }))
-                        .into_any_element()
-                } else {
-                    Radio::new((group.clone(), option_index))
-                        .label(label)
-                        .checked(prompt.is_selected(index, option_index))
-                        .disabled(!enabled)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_question_option(index, option_index, cx)
-                        }))
-                        .into_any_element()
-                };
-
-                row = row.child(
-                    div()
-                        .w_full()
-                        .px_1p5()
-                        .py_0p5()
-                        .rounded(UI_RADIUS)
-                        .when(
-                            presentation.is_focused(index, option_index)
-                                && prompt.mode() != QuestionMode::Async
-                                && enabled,
-                            |this| this.bg(cx.theme().list_active),
-                        )
-                        .child(control),
-                );
-            }
-
-            if question.input != QuestionInput::SelectionOnly {
-                if !question.options.is_empty() {
-                    row = row.child(
-                        Radio::new((group.clone(), question.options.len()))
-                            .label(t!("agent-question-custom").into_owned())
-                            .checked(prompt.is_custom(index))
-                            .disabled(!enabled)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                if let Some(prompt) = this
-                                    .prompts
-                                    .questions_mut(&mut this.session.borrow_mut().input)
-                                {
-                                    if !prompt.choose_custom(index) {
-                                        return;
-                                    }
-
-                                    if let Some(active) = this.prompts.active
-                                        && let Some(presentation) =
-                                            this.prompts.presentations.get(&active)
-                                        && let Some(editor) = &presentation.editors[index]
-                                    {
-                                        editor.focus(window, cx);
-                                    }
-
-                                    cx.notify();
-                                }
-                            })),
-                    );
-                }
-
-                if pending {
-                    if let Some(editor) = &presentation.editors[index] {
-                        row = row.child(editor.render(!enabled));
-                    }
-                } else if prompt.status() == QuestionStatus::Submitted && prompt.is_custom(index) {
-                    row = row.child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(if question.input == QuestionInput::Secret {
-                                t!("agent-question-secret-submitted").to_string()
-                            } else {
-                                prompt.text(index).to_string()
-                            }),
-                    );
-                }
-            }
-
-            rows.push(row.into_any_element());
-        }
-
-        panel = panel.child(
-            v_flex()
-                .id(SharedString::from(format!("question-scroll-{active:?}")))
-                .w_full()
-                .max_h((window.viewport_size().height * 0.4).min(px(280.)))
-                .overflow_y_scroll()
-                .gap_3()
-                .children(rows),
-        );
-
-        if let Some(error) = prompt.error() {
-            let error = match error {
-                QuestionError::Disconnected => t!("agent-question-disconnected").to_string(),
-                QuestionError::Rejected(message) => message.clone(),
-            };
-
-            panel = panel.child(div().text_sm().text_color(cx.theme().danger).child(error));
-        }
-
-        if let Some(remaining) = prompt
-            .auto_resolve_remaining(Instant::now())
-            .filter(|remaining| remaining.as_secs() <= 60)
-        {
-            panel = panel.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(
-                        t!("agent-question-timeout", seconds = remaining.as_secs()).into_owned(),
-                    ),
-            );
-        }
-
-        let mut footer = h_flex().w_full().items_center().gap_2().child(
-            div()
-                .flex_1()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child(t!(status)),
-        );
-
-        if pending {
-            footer = footer
-                .child(
-                    Button::new("question-skip")
-                        .ghost()
-                        .disabled(!enabled)
-                        .label(t!(if prompt.mode() == QuestionMode::Async {
-                            "agent-question-dismiss"
-                        } else {
-                            "agent-question-skip"
-                        }))
-                        .on_click(cx.listener(|this, _, _, cx| this.skip_current_questions(cx))),
-                )
-                .child(
-                    Button::new("question-submit")
-                        .primary()
-                        .disabled(!enabled || !prompt.is_complete())
-                        .label(t!("agent-question-submit"))
-                        .on_click(cx.listener(|this, _, _, cx| this.submit_current_questions(cx))),
-                );
-        }
-
-        Some(panel.child(footer).into_any_element())
     }
 
     pub fn refresh_background_tasks(&mut self) {
@@ -4166,7 +3588,7 @@ impl AgentPane {
             owned_session: None,
             history_ui: SessionHistoryUi::default(),
             progress_panel: ProgressPanel::default(),
-            prompts: PendingPrompts::default(),
+            prompts: QuestionPanel::default(),
             effort_drag: None,
             turn: TurnPresentation::default(),
             palette: SlashPalette {
@@ -5412,301 +4834,6 @@ impl AgentPane {
         )
     }
 
-    /// Height of one history row; all rows are uniform, which is what lets
-    /// the virtual list precompute its scroll geometry.
-    const HISTORY_ROW_HEIGHT: f32 = 32.0;
-
-    /// Ten rows remain visible; older sessions scroll within this viewport.
-    const HISTORY_MAX_HEIGHT: f32 = Self::HISTORY_ROW_HEIGHT * 10.0;
-
-    /// Recent sessions share the composer's width and keep a stable height
-    /// while loading, so returning results do not move the input field.
-    pub(super) fn render_history(
-        &self,
-        background: Hsla,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement + use<> {
-        let rows = self
-            .history_ui
-            .data
-            .pending
-            .unwrap_or(self.history_ui.data.sessions.len());
-
-        let body_height =
-            px((Self::HISTORY_ROW_HEIGHT * rows as f32).min(Self::HISTORY_MAX_HEIGHT));
-
-        let body: AnyElement = if self.history_ui.data.pending.is_some() {
-            // Both loading and loaded bodies use the same explicit viewport
-            // height. The virtual list's inferred first-frame measurement
-            // must not move the composer when it replaces these placeholders.
-            v_flex()
-                .w_full()
-                .h(body_height)
-                .flex_none()
-                .px_2()
-                .gap_0()
-                .children((0..rows.min(3)).map(|i| {
-                    h_flex()
-                        .h(px(Self::HISTORY_ROW_HEIGHT))
-                        .w_full()
-                        .px_2()
-                        .items_center()
-                        .child(
-                            Skeleton::new()
-                                .h(px(14.))
-                                .w(relative(if i % 2 == 0 { 0.72 } else { 0.55 }))
-                                .rounded(UI_RADIUS),
-                        )
-                }))
-                .into_any_element()
-        } else {
-            let row_sizes = Rc::new(vec![size(px(0.), px(Self::HISTORY_ROW_HEIGHT)); rows]);
-
-            div()
-                .id("agent-history-rows")
-                .relative()
-                .w_full()
-                .h(body_height)
-                .flex_none()
-                .overflow_hidden()
-                .px_2()
-                // The highlight is drawn for a pointer over the strip even
-                // while a search is being typed, where the arrow keys belong
-                // to the input and the keyboard has no highlight of its own.
-                // The last pointer position goes with it: a pointer that left
-                // and came back to the same place has moved.
-                .on_hover(cx.listener(|this, inside: &bool, _, cx| {
-                    if this.history_ui.pointer_inside == *inside {
-                        return;
-                    }
-
-                    this.history_ui.pointer_inside = *inside;
-
-                    if !*inside {
-                        this.history_ui.pointer = None;
-                    }
-
-                    cx.notify();
-                }))
-                .child(
-                    v_virtual_list(
-                        cx.entity(),
-                        "agent-history",
-                        row_sizes,
-                        move |this, visible_range, _, cx| {
-                            // The final page in view is the cue to fetch
-                            // the next one (no-op without a cursor, and
-                            // only Codex pages from the backend).
-                            if visible_range.end >= this.history_ui.data.sessions.len()
-                                && let Some(session) =
-                                    this.session.borrow_mut().runtime.backend_mut()
-                            {
-                                session.request_more_history();
-                            }
-
-                            visible_range
-                                .map(|index| this.render_history_row(index, cx))
-                                .collect()
-                        },
-                    )
-                    .track_scroll(&self.history_ui.scroll)
-                    .with_sizing_behavior(ListSizingBehavior::Infer),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .right_0()
-                        .bottom_0()
-                        .w(px(16.))
-                        .child(Scrollbar::vertical(&self.history_ui.scroll)),
-                )
-                .into_any_element()
-        };
-
-        // The picker shares the composer width and leaves a visible gap above it.
-        div()
-            .w_full()
-            .flex()
-            .justify_center()
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
-            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                if this.history_ui.mode.dismisses_on_outside_click() {
-                    this.history_ui.mode = RecentSessionsMode::Hidden;
-
-                    cx.notify();
-                }
-            }))
-            .child(
-                v_flex()
-                    .w_full()
-                    .map(|strip| Host::history_strip(strip, background, cx))
-                    .pb(px(2.))
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .px_2()
-                            .pt_2()
-                            .pb_1()
-                            .gap_2()
-                            .items_center()
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_xs()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(t!("agent-history-recent-sessions")),
-                            )
-                            .child(
-                                Button::new("history-scope")
-                                    .ghost()
-                                    .small()
-                                    .label(
-                                        t!(if self.history_ui.data.scope
-                                            == SessionScope::AllDirectories
-                                        {
-                                            "agent-history-all-directories"
-                                        } else {
-                                            "agent-history-current-directory"
-                                        })
-                                        .into_owned(),
-                                    )
-                                    .tooltip(t!("agent-history-show-all-sessions-tooltip"))
-                                    .on_click(
-                                        cx.listener(|this, _, _, cx| this.toggle_history_scope(cx)),
-                                    ),
-                            ),
-                    )
-                    .child(body),
-            )
-    }
-
-    /// The directory a listed conversation ran in, when that is not this
-    /// tab's. A row from this tab's own directory says nothing by repeating
-    /// it, so only the ones that will open elsewhere carry it.
-    fn foreign_directory(&self, session: &SessionSummary, cx: &App) -> Option<String> {
-        let cwd = session.cwd.as_deref()?;
-
-        (!directories_match(Some(cwd), self.working_directory(cx).as_deref()))
-            .then(|| directory_label(cwd))
-    }
-
-    /// One history row: title, branch, and relative time, in the settings
-    /// row's ghost-control idiom (small, muted, hover lifts the foreground).
-    fn render_history_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
-        let Some(session) = self.history_ui.data.sessions.get(index) else {
-            return div().into_any_element();
-        };
-
-        // One fill, for the one current row. The pointer and the arrow keys
-        // move the same highlight, so a hover tint on top of it would be a
-        // second mark for a state the list only has one of.
-        let selected = self.history_ui.selected == index
-            && matches!(
-                self.history_ui.mode,
-                RecentSessionsMode::Automatic | RecentSessionsMode::Open
-            )
-            && (self.history_ui.pointer_inside || self.input.read(cx).text().len() == 0);
-
-        h_flex()
-            .id(("history-row", index))
-            .h(px(Self::HISTORY_ROW_HEIGHT))
-            .w_full()
-            .px_2()
-            .gap_2()
-            .items_center()
-            .rounded(UI_RADIUS)
-            .cursor_pointer()
-            .when(selected, |this| this.bg(cx.theme().list_active))
-            .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
-                if this.history_ui.point_at(index, event.position) {
-                    cx.notify();
-                }
-            }))
-            .on_click(cx.listener(move |this, _, _, cx| this.resume_session(index, cx)))
-            .child(
-                h_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap_2()
-                    .items_baseline()
-                    .child(
-                        div()
-                            .flex_none()
-                            .max_w(relative(1.0))
-                            .truncate()
-                            .text_sm()
-                            .text_color(cx.theme().foreground.opacity(0.82))
-                            .child(session.title.clone()),
-                    )
-                    // A search excerpt is why this row is on screen at all, so
-                    // it shares the title's line rather than adding a second
-                    // one that would change the list's fixed row height.
-                    .children(session.snippet.clone().map(|snippet| {
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground.opacity(0.7))
-                            .child(snippet.lines().collect::<Vec<_>>().join(" "))
-                    })),
-            )
-            // Where the conversation ran, on rows that ran somewhere else.
-            // Clicking one opens it there rather than continuing it here, so
-            // the directory is the row's most load-bearing detail.
-            .children(self.foreign_directory(session, cx).map(|directory| {
-                h_flex()
-                    .flex_none()
-                    .gap_1()
-                    .items_center()
-                    .max_w(px(180.))
-                    .child(
-                        Icon::new(IconName::Folder)
-                            .size_3()
-                            .text_color(cx.theme().muted_foreground.opacity(0.7)),
-                    )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground.opacity(0.7))
-                            .child(directory),
-                    )
-            }))
-            .children(session.branch.clone().map(|branch| {
-                h_flex()
-                    .flex_none()
-                    .gap_1()
-                    .items_center()
-                    .max_w(px(180.))
-                    .child(
-                        Icon::new(IconName::GitBranch)
-                            .size_3()
-                            .text_color(cx.theme().muted_foreground.opacity(0.7)),
-                    )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground.opacity(0.7))
-                            .child(branch),
-                    )
-            }))
-            .child(
-                div()
-                    .flex_none()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground.opacity(0.55))
-                    .child(relative_time(session.last_active)),
-            )
-            .into_any_element()
-    }
-
     fn show_selected_text_menu(
         pane: WeakEntity<Self>,
         released_at: Point<Pixels>,
@@ -5949,7 +5076,12 @@ impl Render for AgentPane {
                 .track_focus(&self.focus)
                 .child(div().flex_1().min_h_0().child(self.transcript.clone()))
                 .children(self.render_approval_panel(cx))
-                .children(self.render_question_panel(window, cx))
+                .children({
+                    let composer_free = !self.branch_flow_holds_composer();
+
+                    self.prompts
+                        .render(&self.session, composer_free, window, cx)
+                })
                 .child(self.render_composer_status(cx))
                 .into_any_element();
         }
@@ -5996,7 +5128,11 @@ impl Render for AgentPane {
         let queued_message = self.render_queued_prompts(cx);
 
         let approval = self.render_approval_panel(cx);
-        let questions = self.render_question_panel(window, cx);
+        let composer_free = !self.branch_flow_holds_composer();
+
+        let questions = self
+            .prompts
+            .render(&self.session, composer_free, window, cx);
 
         let action: ComposerAction = self.session.borrow().runtime.status().into();
         let running = action == ComposerAction::Stop;
@@ -6027,20 +5163,13 @@ impl Render for AgentPane {
         // Blank tabs expose recent sessions automatically; `/resume` can
         // request the same list after a conversation has started. A count
         // result reserves placeholder rows until the full entries arrive.
-        let history_rows = self
-            .history_ui
-            .data
-            .pending
-            .unwrap_or(self.history_ui.data.sessions.len());
-
         let transcript_empty = self.transcript.read(cx).is_empty();
         let composer_empty = self.input.read(cx).text().len() == 0;
 
         let history = self
             .history_ui
-            .mode
-            .is_visible(transcript_empty, composer_empty, history_rows)
-            .then(|| self.render_history(background, cx));
+            .is_visible(transcript_empty, composer_empty)
+            .then(|| self.history_ui.render(background, cx));
 
         // A list opened over a live conversation is a picker, and the
         // transcript behind it is not what the next click should reach. Blur
