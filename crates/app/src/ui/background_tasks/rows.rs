@@ -20,7 +20,6 @@ use crate::ui::background_tasks::{BackgroundTasksView, StopTaskIcon};
 use crate::ui::composition::toolbar_button;
 
 pub(super) fn render_row(
-    index: usize,
     task: &BackgroundTaskSummary,
     now: SystemTime,
     cx: &mut Context<BackgroundTasksView>,
@@ -32,6 +31,7 @@ pub(super) fn render_row(
     let timing = row_timing(task, now);
     let state_label = background_task_state_label(task.state);
     let provider: &str = task.key.provider.full_name();
+    let provider_id: &str = task.key.provider.into();
 
     // Everything the row shows visually, in one string. A screen reader
     // announces the row as a whole, so it needs the parts the layout separates
@@ -53,8 +53,7 @@ pub(super) fn render_row(
     // not have published yet, not on the lifecycle state alone, so the control
     // follows what the snapshot reports rather than being inferred here.
     let stop = task.can_stop.then(|| {
-        // Keyed by the child rather than by row position: the two sections
-        // enumerate independently, so a positional id is not unique across them.
+        // Keep the control attached to this child as rows move between sections.
         toolbar_button(SharedString::from(format!(
             "background-task-stop-{}",
             task.key.id
@@ -72,8 +71,12 @@ pub(super) fn render_row(
     });
 
     h_flex()
-        // Activating a row opens that child's own conversation.
-        .id(("background-task-row", index))
+        // Both sections share element state, so each row needs a task ID that
+        // stays unique and stable when tasks reorder or finish.
+        .id(SharedString::from(format!(
+            "background-task-row-{provider_id}-{}",
+            task.key.id
+        )))
         .px_2()
         .py_1()
         .gap_2()
