@@ -21,9 +21,10 @@ use crate::ui::composition::{
 };
 use crate::ui::fluent::SELECTION_BAR_WIDTH;
 use crate::ui::platform_style::{Host, PlatformStyle as _};
-use crate::ui::shell::{InlineRenameSession, MIN_SIDEBAR_WIDTH};
+use crate::ui::shell::InlineRenameSession;
 use crate::ui::sidebar_resize::ResizeDrag;
 use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
+use crate::ui::title_bar::TITLE_BAR_CONTROLS_WIDTH;
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workspace_sidebar::list::WorkspaceList;
 use crate::ui::{AppSettings, NewWorkspace, Shell, sidebar_resize};
@@ -46,7 +47,14 @@ pub(super) const SIDEBAR_WIDTH: f32 = 180.0;
 /// every other column's drag-move events, so this is what distinguishes them.
 pub(super) const RESIZE_HANDLE: &str = "workspace-sidebar-resize";
 
-pub(super) const MIN_WIDTH: f32 = MIN_SIDEBAR_WIDTH;
+/// The sidebar never drops below the width its workspace rows need, and
+/// never below the title bar's leading control row, which starts past the
+/// host's leading inset and so needs more room where the window buttons come
+/// first.
+pub(super) const MIN_WIDTH: f32 = f32::max(
+    140.0,
+    Host::TITLE_BAR_LEADING_INSET + TITLE_BAR_CONTROLS_WIDTH - FLOATING_SURFACE_SIDE_INSET,
+);
 
 pub(crate) const MAX_WIDTH: f32 = 480.0;
 

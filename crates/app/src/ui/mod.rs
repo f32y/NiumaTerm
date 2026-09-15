@@ -41,6 +41,7 @@ mod tab_bar;
 mod terminal_launch;
 mod terminal_layout;
 mod terminal_status;
+mod title_bar;
 mod token_usage;
 mod workflows;
 mod workspace_sidebar;
