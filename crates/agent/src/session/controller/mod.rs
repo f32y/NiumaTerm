@@ -32,7 +32,7 @@ use crate::chat::{
 use crate::progress::TaskList;
 use crate::session::branch::{BranchCompletion, BranchReplay, ConversationBranch};
 use crate::session::capabilities::AgentCapabilities as _;
-use crate::session::children::{ChildAgents, ChildTranscript, scoped_background_tasks};
+use crate::session::children::{ChildAgents, ChildTranscript};
 use crate::session::commands::{CommandQueue, PendingSlashCommand};
 use crate::session::delivery::{MessageDelivery, RecoverablePrompt, Submission};
 use crate::session::input::{
@@ -216,29 +216,18 @@ impl SessionController {
     }
 
     pub fn background_tasks(&self) -> Option<&BackgroundTaskSnapshot> {
-        scoped_background_tasks(
-            self.runtime.background_task_parent().as_ref(),
-            self.children.background_tasks.as_ref(),
-        )
+        self.children
+            .scoped(self.runtime.background_task_parent().as_ref())
     }
 
     pub fn background_task_transcript(&self, key: &BackgroundTaskKey) -> Option<&ChildTranscript> {
-        self.background_tasks()?;
-
-        self.children.transcripts.get(key)
+        self.children
+            .transcript(self.runtime.background_task_parent().as_ref(), key)
     }
 
     pub fn background_activity(&self) -> (usize, usize) {
-        self.background_tasks()
-            .map_or((0, 0), |tasks| (tasks.tasks.len(), tasks.active_count()))
-    }
-
-    fn set_background_tasks(&mut self, snapshot: BackgroundTaskSnapshot) -> bool {
-        let before = self.background_activity();
-
-        self.children.background_tasks = Some(snapshot);
-
-        self.background_activity() != before
+        self.children
+            .activity(self.runtime.background_task_parent().as_ref())
     }
 
     pub fn update_readiness(&self, work: ConversationWork) -> Readiness {
@@ -627,20 +616,16 @@ impl SessionController {
                 }
             }
             Event::BackgroundTasks(snapshot) => {
-                if self.set_background_tasks(snapshot) {
+                let parent = self.runtime.background_task_parent();
+
+                if self.children.set_snapshot(parent.as_ref(), snapshot) {
                     SessionEffect::BackgroundActivity
                 } else {
                     SessionEffect::Changed
                 }
             }
             Event::BackgroundTaskTranscript { key, update } => {
-                if self
-                    .children
-                    .transcripts
-                    .entry(key)
-                    .or_default()
-                    .apply(update)
-                {
+                if self.children.apply_transcript(key, update) {
                     SessionEffect::Changed
                 } else {
                     SessionEffect::Unchanged
@@ -1047,13 +1032,7 @@ impl SessionController {
 
         self.input.clear_questions();
 
-        self.children.background_tasks = None;
-
-        for child in self.children.transcripts.values() {
-            child.conversation.borrow_mut().clear();
-        }
-
-        self.children.transcripts.clear();
+        self.children.clear();
 
         self.goal = None;
         self.task_list = None;
