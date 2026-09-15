@@ -89,9 +89,7 @@ pub(crate) fn dispatch(
         && intent.purpose != TurnPurpose::Summary
     {
         let discussion = next
-            .discussions
-            .iter_mut()
-            .find(|run| run.id == discussion_id)
+            .discussion_mut(discussion_id)
             .ok_or(DispatchError::Ineligible)?;
 
         let arrangement = discussion
@@ -121,20 +119,10 @@ pub(crate) fn dispatch(
 
             if let BudgetScope::Discussion(discussion_id) = intent.budget {
                 let discussion = next
-                    .discussions
-                    .iter_mut()
-                    .find(|run| run.id == discussion_id)
+                    .discussion_mut(discussion_id)
                     .ok_or(DispatchError::Ineligible)?;
 
-                for arrangement in discussion
-                    .stages
-                    .iter_mut()
-                    .flat_map(|stage| &mut stage.arrangements)
-                {
-                    if arrangement.operation == intent.operation {
-                        arrangement.state = ArrangementState::Uncertain(id);
-                    }
-                }
+                discussion.mark_operation(intent.operation, ArrangementState::Uncertain(id));
 
                 discussion.pause(PauseReason::UncertainAttempt(id));
             }
@@ -150,26 +138,12 @@ pub(crate) fn dispatch(
 
             if let BudgetScope::Discussion(discussion_id) = intent.budget {
                 let discussion = next
-                    .discussions
-                    .iter_mut()
-                    .find(|run| run.id == discussion_id)
+                    .discussion_mut(discussion_id)
                     .ok_or(DispatchError::Ineligible)?;
 
-                for arrangement in discussion
-                    .stages
-                    .iter_mut()
-                    .flat_map(|stage| &mut stage.arrangements)
-                {
-                    if arrangement.operation == intent.operation {
-                        arrangement.state = ArrangementState::Failed(id);
-                    }
-                }
+                discussion.mark_operation(intent.operation, ArrangementState::Failed(id));
 
-                discussion.pause(if intent.purpose == TurnPurpose::Summary {
-                    PauseReason::SummaryFailed(id)
-                } else {
-                    PauseReason::AttemptFailed(id)
-                });
+                discussion.pause(PauseReason::attempt_failed(id, intent.purpose));
             }
 
             store.commit(next)?;
@@ -182,9 +156,7 @@ pub(crate) fn dispatch(
 fn budget_mut(room: &mut Room, scope: BudgetScope) -> Result<&mut Budget, DispatchError> {
     match scope {
         BudgetScope::Discussion(id) => room
-            .discussions
-            .iter_mut()
-            .find(|run| run.id == id)
+            .discussion_mut(id)
             .map(|run| &mut run.budget)
             .ok_or(DispatchError::Ineligible),
         BudgetScope::Direct(id) => Ok(room
