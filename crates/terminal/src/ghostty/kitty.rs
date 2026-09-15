@@ -6,13 +6,13 @@ use libghostty_vt_sys::{
     KittyGraphicsPlacementData as VtKittyGraphicsPlacementData,
     KittyGraphicsPlacementIterator as VtKittyGraphicsPlacementIterator,
     KittyImageFormat as VtKittyImageFormat, Result as VtResult, Terminal as VtTerminal,
-    TerminalData as VtTerminalData, ghostty_block_ref_placement_pos, ghostty_kitty_graphics_get,
-    ghostty_kitty_graphics_image, ghostty_kitty_graphics_image_get,
-    ghostty_kitty_graphics_placement_get, ghostty_kitty_graphics_placement_grid_size,
-    ghostty_kitty_graphics_placement_iterator_free, ghostty_kitty_graphics_placement_iterator_new,
-    ghostty_kitty_graphics_placement_next, ghostty_kitty_graphics_placement_pixel_size,
-    ghostty_kitty_graphics_placement_source_rect, ghostty_kitty_graphics_placement_viewport_pos,
-    ghostty_terminal_get,
+    TerminalData as VtTerminalData, TerminalOption as VtTerminalOption,
+    ghostty_block_ref_placement_pos, ghostty_kitty_graphics_get, ghostty_kitty_graphics_image,
+    ghostty_kitty_graphics_image_get, ghostty_kitty_graphics_placement_get,
+    ghostty_kitty_graphics_placement_grid_size, ghostty_kitty_graphics_placement_iterator_free,
+    ghostty_kitty_graphics_placement_iterator_new, ghostty_kitty_graphics_placement_next,
+    ghostty_kitty_graphics_placement_pixel_size, ghostty_kitty_graphics_placement_source_rect,
+    ghostty_kitty_graphics_placement_viewport_pos, ghostty_terminal_get, ghostty_terminal_set,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -420,6 +420,18 @@ fn placement_geometry(
 /// # Safety
 /// `image` must be a live image handle from the storage the caller currently
 /// pins (engine lock or an acquired block ref).
+/// Set the kitty image storage limit of `terminal` in bytes. A non-zero limit
+/// also enables the protocol; 0 disables it.
+pub(super) fn set_kitty_storage_limit(terminal: VtTerminal, bytes: u64) {
+    unsafe {
+        ghostty_terminal_set(
+            terminal,
+            VtTerminalOption::KITTY_IMAGE_STORAGE_LIMIT,
+            (&bytes as *const u64).cast(),
+        );
+    }
+}
+
 pub(super) unsafe fn kitty_image_graphic_data(
     image: VtKittyGraphicsImage,
     image_id: u32,

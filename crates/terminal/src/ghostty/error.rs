@@ -24,6 +24,15 @@ impl Error {
             other => Err(Self::Unknown(other)),
         }
     }
+
+    /// Decode a result for a query that may have no answer: `true` when it
+    /// answered, `false` for `NO_VALUE`.
+    pub(super) fn optional(code: VtResult::Type) -> Result<bool> {
+        match code {
+            VtResult::NO_VALUE => Ok(false),
+            other => Self::from_code(other).map(|()| true),
+        }
+    }
 }
 
 impl fmt::Display for Error {

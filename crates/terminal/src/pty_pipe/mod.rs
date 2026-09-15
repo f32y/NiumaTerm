@@ -15,7 +15,6 @@ mod ghostty_mirror_tests;
 #[cfg(test)]
 mod scrollback_tests;
 
-use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::io::{self, ErrorKind, Read, Write};
 use std::sync::atomic::AtomicU32;
@@ -650,6 +649,14 @@ where
         self.last_snapshot_at = Some(time::Instant::now());
         self.snapshot_pending = false;
 
+        self.publish_capture(capture);
+
+        Ok(())
+    }
+
+    /// Swap a finished capture into the shared frame store and announce the
+    /// new frame. A failed capture leaves the previous frame published.
+    fn publish_capture(&mut self, capture: ghostty::Result<()>) {
         #[cfg(enable_profiling)]
         let publish_started = self.profile.start();
 
@@ -668,8 +675,14 @@ where
             self.event_proxy
                 .send_event(TerminalEvent::TerminalDamaged(self.route_id));
         }
+    }
 
-        Ok(())
+    /// Tell the view this terminal closed.
+    fn announce_closed(&self) {
+        self.event_proxy
+            .send_event(TerminalEvent::CloseTerminal(self.route_id));
+
+        self.event_proxy.send_event(TerminalEvent::Render);
     }
 
     fn pending_snapshot_timeout(&self) -> Option<time::Duration> {
@@ -774,7 +787,7 @@ where
 
             match msg {
                 Msg::Input(input) => {
-                    self.on_input(input, state);
+                    state.write_list.push_back(input);
                 }
                 Msg::Resize(window_size) => {
                     self.on_resize(window_size);
@@ -788,10 +801,6 @@ where
         let _ = self.waker.wake();
 
         true
-    }
-
-    fn on_input(&mut self, input: Cow<'static, [u8]>, state: &mut PtyState) {
-        state.write_list.push_back(input)
     }
 
     fn pending_input_timeout(&self) -> Option<time::Duration> {
@@ -890,26 +899,9 @@ where
 
         self.last_snapshot_at = Some(time::Instant::now());
 
-        #[cfg(enable_profiling)]
-        let publish_started = self.profile.start();
-
-        let published = publish_render_buffer(
-            &self.render_buffer,
-            &mut self.back_buffer,
-            snapshot,
-            self.sniffer.progress_active(),
-            &mut self.capture_failed,
-        );
-
-        #[cfg(enable_profiling)]
-        self.profile.record(Stage::Publish, publish_started);
-
-        if published {
-            // VT modes do not change on resize, so the lock-free
-            // atomic remains valid from the last PTY read.
-            self.event_proxy
-                .send_event(TerminalEvent::TerminalDamaged(self.route_id));
-        }
+        // VT modes do not change on resize, so the lock-free atomic remains
+        // valid from the last PTY read.
+        self.publish_capture(snapshot);
 
         if let Err(err) = self.pty.set_winsize(window_size) {
             warn!("pty set_winsize failed: {err}");
@@ -924,38 +916,7 @@ where
 
     #[inline]
     fn pty_write(&mut self, state: &mut PtyState) -> io::Result<()> {
-        state.ensure_next();
-
-        'write_many: while let Some(mut current) = state.take_current() {
-            'write_one: loop {
-                match self.pty.writer().write(current.remaining_bytes()) {
-                    Ok(0) => {
-                        state.set_current(Some(current));
-
-                        break 'write_many;
-                    }
-                    Ok(n) => {
-                        current.advance(n);
-
-                        if current.finished() {
-                            state.goto_next();
-
-                            break 'write_one;
-                        }
-                    }
-                    Err(err) => {
-                        state.set_current(Some(current));
-
-                        match err.kind() {
-                            ErrorKind::Interrupted | ErrorKind::WouldBlock => break 'write_many,
-                            _ => return Err(err),
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(())
+        state.write_to(self.pty.writer())
     }
 
     pub(crate) fn channel(&self) -> MsgSender {
@@ -982,10 +943,7 @@ where
         {
             error!("Failed to register PTY event sources: {err}");
 
-            self.event_proxy
-                .send_event(TerminalEvent::CloseTerminal(self.route_id));
-
-            self.event_proxy.send_event(TerminalEvent::Render);
+            self.announce_closed();
 
             return (self, state);
         }
@@ -1083,11 +1041,7 @@ where
             if child_exited && self.pty.child_exited() {
                 self.flush_pending_on_exit();
 
-                // Emit `CloseTerminal` directly; PtyPipe owns the event proxy and route id.
-                self.event_proxy
-                    .send_event(TerminalEvent::CloseTerminal(self.route_id));
-
-                self.event_proxy.send_event(TerminalEvent::Render);
+                self.announce_closed();
 
                 break 'event_loop;
             }
@@ -1142,10 +1096,7 @@ where
             if let Err(err) = self.pty.reregister(&self.poll, interest) {
                 error!("Failed to reregister PTY event sources: {err}");
 
-                self.event_proxy
-                    .send_event(TerminalEvent::CloseTerminal(self.route_id));
-
-                self.event_proxy.send_event(TerminalEvent::Render);
+                self.announce_closed();
 
                 break 'event_loop;
             }
