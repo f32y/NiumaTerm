@@ -23,6 +23,7 @@ mod incremental;
 mod render;
 mod reveal;
 mod rows;
+mod typewriter;
 mod view;
 
 #[cfg(test)]

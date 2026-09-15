@@ -1,14 +1,12 @@
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod typewriter_tests;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::mem;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use chrono::{DateTime, Local, Utc};
 use gpui::prelude::*;
@@ -61,6 +59,7 @@ use crate::agent_tab::transcript::rows::{
     EntryPresentation, PickerReservation, RowGap, TranscriptRow, TurnSummary, entry_fingerprint,
     folds_turns, is_run_row, row_gap, spaced_rows, turn_opening_prompts, turn_summary,
 };
+use crate::agent_tab::transcript::typewriter::ReplyTyping;
 use crate::agent_tab::transcript::{
     CodeTranscriptCache, Entry, RowSpec, command_execution_heading, command_failure_reason,
     entry_copy_text, hidden, is_work_row, should_show_jump_to_latest, truncated_user_prompt,
@@ -108,10 +107,8 @@ pub struct TranscriptView {
     /// Collapsing a row releases the extra source, syntax trees, and worker.
     pub(crate) code_transcripts: CodeTranscriptCache,
 
-    /// The reply being let onto the screen a character at a time, while one
-    /// is. Only text that streams in through this view is typed: a restored
-    /// or mirrored conversation arrives whole and is shown whole.
-    typewriter: Option<Typewriter>,
+    /// The reply being let onto the screen a character at a time.
+    typing: ReplyTyping,
 
     /// Presentation inputs rather than owned state: the working directory
     /// resolves transcript links, and the provider decides a few labels.
@@ -166,7 +163,7 @@ impl TranscriptView {
             disclosures: Disclosures::new(folds_turns(collapse_mode)),
             collapse_mode,
             code_transcripts: CodeTranscriptCache::default(),
-            typewriter: None,
+            typing: ReplyTyping::new(),
             cwd,
             kind,
             source_revision: None,
@@ -190,25 +187,14 @@ impl TranscriptView {
         if version.0 != self.observed_version.0 {
             self.reset_presentation();
         } else if let Some((index, previous_bytes)) = change.reply {
-            if !self
-                .typewriter
-                .as_ref()
-                .is_some_and(|typing| typing.index() == index)
+            if let SessionItem::AgentMessage {
+                text: Some(text), ..
+            } = &conversation.content.entries()[index].item
+                && let Some(previous) =
+                    self.typing
+                        .begin(index, text, previous_bytes, Instant::now())
             {
-                if let Some(previous) = &self.typewriter {
-                    self.row_cache.invalidate(previous.index());
-                }
-
-                if let SessionItem::AgentMessage {
-                    text: Some(text), ..
-                } = &conversation.content.entries()[index].item
-                {
-                    self.typewriter = Some(Typewriter::start(
-                        index,
-                        text[..previous_bytes].chars().count(),
-                        Instant::now(),
-                    ));
-                }
+                self.row_cache.invalidate(previous);
             }
 
             self.code_transcripts.invalidate(index);
@@ -311,18 +297,13 @@ impl TranscriptView {
 
         self.code_transcripts.clear();
 
-        self.typewriter = None;
+        self.typing.finish();
     }
 
     /// The part of reply `index` the reader sees this frame: the whole of it
     /// unless its edge is still crossing the text.
     pub(crate) fn shown_reply<'a>(&self, index: usize, text: &'a str) -> &'a str {
-        match &self.typewriter {
-            Some(typewriter) if typewriter.index() == index => {
-                shown_prefix(text, typewriter.shown())
-            }
-            _ => text,
-        }
+        self.typing.shown_reply(index, text)
     }
 
     /// How far the typed edge of a reply is from the text behind it, as the
@@ -330,41 +311,34 @@ impl TranscriptView {
     /// the edge lets through, so the signature has to move with the edge for
     /// the list to remeasure the row as it grows.
     pub(crate) fn typed_edge(&self, index: usize) -> Option<usize> {
-        self.typewriter
-            .as_ref()
-            .filter(|typewriter| typewriter.index() == index)
-            .map(Typewriter::shown)
+        self.typing.typed_edge(index)
     }
 
     pub(super) fn finish_typing(&mut self) {
-        if let Some(typewriter) = self.typewriter.take() {
-            self.row_cache.invalidate(typewriter.index());
+        if let Some(index) = self.typing.finish() {
+            self.row_cache.invalidate(index);
         }
     }
 
     pub(super) fn advance_typing(&mut self, now: Instant) -> bool {
-        let Some(typewriter) = &mut self.typewriter else {
+        if !self.typing.is_typing() {
+            return false;
+        }
+
+        let _profile = Probe::start(Operation::Typewriter);
+        let conversation = self.conversation.borrow();
+
+        let Some(step) = self.typing.advance(now, |index| {
+            reply_chars(conversation.content.entries(), index)
+        }) else {
             return false;
         };
 
-        let _profile = Probe::start(Operation::Typewriter);
-        let index = typewriter.index();
-        let previous = typewriter.shown();
-
-        let moving = typewriter.advance(
-            reply_chars(self.conversation.borrow().content.entries(), index),
-            now,
-        );
-
-        if typewriter.shown() != previous {
-            self.row_cache.invalidate(index);
+        if step.remeasure {
+            self.row_cache.invalidate(step.index);
         }
 
-        if !moving {
-            self.finish_typing();
-        }
-
-        moving
+        step.moving
     }
 
     /// Latest non-empty assistant reply of `turn`, for notification bodies.
@@ -2518,92 +2492,4 @@ impl Render for TranscriptView {
             })
             .children(self.preview.render_zoomed_image(now, window, cx))
     }
-}
-
-// The streamed reply, let onto the screen a character at a time.
-//
-// A backend delivers a reply a few words at a time, and each chunk landing
-// whole makes the text jump in by fits and starts. The typewriter holds a
-// moving edge behind what has arrived and lets the reply through it one
-// character at a time, closing on the streamed text fast enough that the
-// edge never trails it by more than a fraction of a second.
-
-/// How quickly the edge closes on what has arrived: the backlog behind it
-/// shrinks by a factor of e over this span. A chunk of forty characters is
-/// most of the way on screen a quarter of a second after landing, so the reply
-/// reads as being typed rather than as being held back, and once the stream
-/// stops the last chunk finishes within a beat.
-const CATCH_UP: Duration = Duration::from_millis(125);
-
-/// The slowest the edge moves while anything waits behind it, in characters
-/// per second. Closing by a share alone would let the final characters of a
-/// chunk trickle in over many frames, which reads as the reply stalling on
-/// its last word; the floor keeps that tail arriving at a steady typing pace.
-const FLOOR_RATE: f32 = 60.0;
-
-/// The edge of a reply being let onto the screen, and the entry it crosses.
-///
-/// One reply is typed at a time. A new reply starting while an older one
-/// still has text waiting lets the older one land whole: the reader's eye
-/// has already moved on to where the new text appears.
-struct Typewriter {
-    index: usize,
-
-    /// Characters shown, carrying the fraction between frames so a rate
-    /// below one character a frame still moves.
-    shown: f32,
-
-    ticked: Instant,
-}
-
-impl Typewriter {
-    /// Start typing entry `index` from `shown` characters, which is what the
-    /// entry already had on screen before streamed text reached it.
-    fn start(index: usize, shown: usize, now: Instant) -> Self {
-        Self {
-            index,
-            shown: shown as f32,
-            ticked: now,
-        }
-    }
-
-    fn index(&self) -> usize {
-        self.index
-    }
-
-    /// Move the edge towards `total`, the reply's length in characters as of
-    /// now. Returns whether anything is still waiting behind it.
-    ///
-    /// The step is the larger of the catch-up share and the floor, so a big
-    /// chunk closes quickly while a lone character still arrives promptly.
-    /// A long gap between frames — a pane that was hidden — closes the whole
-    /// backlog at once rather than typing text the reader was not watching.
-    fn advance(&mut self, total: usize, now: Instant) -> bool {
-        let elapsed = now.saturating_duration_since(self.ticked).as_secs_f32();
-
-        self.ticked = now;
-
-        let total = total as f32;
-        let backlog = (total - self.shown).max(0.0);
-        let share = 1.0 - (-elapsed / CATCH_UP.as_secs_f32()).exp();
-        let step = (backlog * share).max(FLOOR_RATE * elapsed).min(backlog);
-
-        self.shown = (self.shown + step).min(total);
-
-        self.shown < total
-    }
-
-    /// How many characters of the reply are on screen.
-    fn shown(&self) -> usize {
-        self.shown as usize
-    }
-}
-
-/// The part of `text` an edge `chars` characters in lets through. Counted in
-/// characters rather than bytes so a CJK reply types at the same pace as a
-/// latin one and the cut never lands inside a character.
-fn shown_prefix(text: &str, chars: usize) -> &str {
-    text.char_indices()
-        .nth(chars)
-        .map_or(text, |(end, _)| &text[..end])
 }

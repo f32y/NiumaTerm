@@ -8,7 +8,7 @@ use nmt_profiling::transcript::{Operation, Probe};
 
 use crate::agent_tab::transcript::Entry;
 use crate::agent_tab::transcript::rows::EntryPresentation;
-use crate::agent_tab::transcript::view::{TranscriptView, Typewriter};
+use crate::agent_tab::transcript::view::TranscriptView;
 
 impl TranscriptView {
     /// Mirror a conversation this view does not own. `revision` identifies the
@@ -131,25 +131,14 @@ impl TranscriptView {
         // Only a newly selected reply needs its old prefix counted. Existing
         // typed edges keep advancing in the view without rescanning each delta.
         if matches!(field, TextField::Reply)
-            && !self
-                .typewriter
-                .as_ref()
-                .is_some_and(|typing| typing.index() == index)
-        {
-            if let Some(previous) = &self.typewriter {
-                self.row_cache.invalidate(previous.index());
-            }
-
-            if let SessionItem::AgentMessage {
+            && let SessionItem::AgentMessage {
                 text: Some(text), ..
             } = &self.conversation.borrow().content.entries()[index].item
-            {
-                self.typewriter = Some(Typewriter::start(
-                    index,
-                    text[..update.previous_bytes].chars().count(),
-                    Instant::now(),
-                ));
-            }
+            && let Some(previous) =
+                self.typing
+                    .begin(index, text, update.previous_bytes, Instant::now())
+        {
+            self.row_cache.invalidate(previous);
         }
 
         self.code_transcripts.invalidate(index);
