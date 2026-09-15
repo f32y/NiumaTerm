@@ -151,6 +151,29 @@ impl ConversationSettings {
         Some(outcome)
     }
 
+    /// Send the approval the picker shows when it differs from the one the
+    /// session reported. Only a remembered or restored pick can make them
+    /// differ, and a refusal puts the picker back on what the session runs.
+    pub(crate) fn apply_approval(
+        &mut self,
+        session: &mut Backend,
+        reported: Option<String>,
+    ) -> Option<Result<(), String>> {
+        let approval = self.settings.approval.clone()?;
+
+        if reported.as_deref() == Some(approval.as_str()) {
+            return None;
+        }
+
+        let outcome = session.select_approval(&approval);
+
+        if outcome.is_err() {
+            self.settings.approval = reported;
+        }
+
+        Some(outcome)
+    }
+
     pub fn seed_settings(&mut self, seed: SettingsSeed) {
         self.seed = seed;
     }

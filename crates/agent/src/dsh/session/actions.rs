@@ -200,6 +200,18 @@ impl Session {
         (self.models.selected(), self.models.effort())
     }
 
+    /// Switch this conversation's permission preset.
+    ///
+    /// The harness exposes the switch only as its `/permission` command, and
+    /// selecting the preset already in effect records nothing, so sending a
+    /// pick that already holds is harmless.
+    pub fn select_permission(&mut self, preset: &str) -> Result<(), String> {
+        match self.execute_slash_command("permission", preset) {
+            SlashCommandOutcome::Rejected { message } => Err(message),
+            _ => Ok(()),
+        }
+    }
+
     /// Recompose this conversation's agent from another preset.
     ///
     /// The harness allows this only while no turn has run: the logged history

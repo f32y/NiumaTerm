@@ -468,6 +468,89 @@ fn repeated_ready_preserves_the_running_turn_and_selected_settings() {
     assert_eq!(session.conversation.borrow().content.entries().len(), 1);
 }
 
+fn deepseek_with_remembered_permission(selection: Result<(), String>) -> (SessionController, u64) {
+    let mut session = SessionController::new(AgentKind::DeepSeek);
+
+    let epoch = session.starting(None).epoch;
+
+    session.controls.seed_settings(SettingsSeed::Defaults);
+
+    session.ready_defaults.stored = Some(ThreadSettings {
+        approval: Some("danger-full-access".into()),
+        ..ThreadSettings::default()
+    });
+
+    let mut backend = TestBackend::new(Vec::new(), SlashCommandOutcome::NotReady, Vec::new());
+
+    backend.approval_selection = selection;
+
+    assert!(matches!(
+        session.install(epoch, Ok(Backend::Test(backend))),
+        StartOutcome::Installed
+    ));
+
+    (session, epoch)
+}
+
+fn harness_default_ready() -> Event {
+    Event::Ready(ThreadSettings {
+        approval: Some("workspace-write".into()),
+        ..ThreadSettings::default()
+    })
+}
+
+fn approval_selections(session: &SessionController) -> Vec<String> {
+    match session.runtime.backend() {
+        Some(Backend::Test(backend)) => backend.approval_selections.clone(),
+        _ => panic!("the test backend must be installed"),
+    }
+}
+
+#[test]
+fn a_new_deepseek_conversation_runs_under_the_remembered_permission() {
+    let (mut session, epoch) = deepseek_with_remembered_permission(Ok(()));
+
+    let SessionEffect::Ready(ready) = session.apply_event(epoch, harness_default_ready()) else {
+        panic!("startup must expose effective settings");
+    };
+
+    assert!(matches!(ready.approval, Some(Ok(()))));
+    assert_eq!(approval_selections(&session), ["danger-full-access"]);
+    assert_eq!(
+        session.controls.settings.approval.as_deref(),
+        Some("danger-full-access")
+    );
+
+    // A conversation resumed in place reports the preset its own log holds,
+    // which is kept rather than replaced by the remembered pick.
+    let SessionEffect::Ready(resumed) = session.apply_event(epoch, harness_default_ready()) else {
+        panic!("a resumed conversation must expose effective settings");
+    };
+
+    assert!(resumed.approval.is_none());
+    assert_eq!(approval_selections(&session).len(), 1);
+    assert_eq!(
+        session.controls.settings.approval.as_deref(),
+        Some("workspace-write")
+    );
+}
+
+#[test]
+fn a_refused_remembered_permission_leaves_the_picker_on_the_session_preset() {
+    let (mut session, epoch) =
+        deepseek_with_remembered_permission(Err("unknown preset".to_string()));
+
+    let SessionEffect::Ready(ready) = session.apply_event(epoch, harness_default_ready()) else {
+        panic!("startup must expose effective settings");
+    };
+
+    assert_eq!(ready.approval, Some(Err("unknown preset".to_string())));
+    assert_eq!(
+        session.controls.settings.approval.as_deref(),
+        Some("workspace-write")
+    );
+}
+
 #[test]
 fn settings_changes_and_restart_keep_catalog_state_consistent() {
     let mut session = started(AgentKind::Codex, "current", Vec::new());

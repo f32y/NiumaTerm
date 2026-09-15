@@ -787,6 +787,7 @@ impl SessionController {
         }
 
         let defaults = self.ready_defaults.clone();
+        let reported_approval = settings.approval.clone();
 
         let selection = self.finish_ready(
             self.kind,
@@ -796,10 +797,19 @@ impl SessionController {
             defaults.effort.as_deref(),
         );
 
+        let approval = if self.kind.caps().approval_selection_is_a_command {
+            self.runtime
+                .backend_mut()
+                .and_then(|backend| self.controls.apply_approval(backend, reported_approval))
+        } else {
+            None
+        };
+
         Some(SessionReady {
             branch,
             replaced,
             selection,
+            approval,
         })
     }
 
