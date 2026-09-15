@@ -29,6 +29,7 @@ Immediately calling an anonymous closure is forbidden and requires a manual rewr
 --enable RULE opts into spacing/match-arms, spacing/enum-variants, or
 expressions/fixed-option-return; repeat to enable multiple rules.
 By default, blank lines between match arms and enum variants are forbidden.
+Blank lines within module declaration groups and import groups are also forbidden.
 Enabling either optional spacing rule replaces its corresponding default rule.
 Exit codes: 0 clean or fixed, 1 readability issues, 2 invalid input or tool failure.";
 
