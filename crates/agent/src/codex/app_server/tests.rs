@@ -874,6 +874,7 @@ fn turn_start_sends_the_selected_approval_reviewer() {
         sandbox: Some("workspaceWrite".into()),
         effort: Some("high".into()),
         tier: None,
+        agent_preset: None,
     };
 
     assert_eq!(

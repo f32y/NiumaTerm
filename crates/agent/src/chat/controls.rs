@@ -23,6 +23,12 @@ pub struct ThreadSettings {
     /// tiers, so normal is expressed as an explicit `serviceTier: null`
     /// (double-optional in the serialized payload — null resets, absent keeps).
     pub tier: Option<String>,
+
+    /// The agent composition a DeepSeek Harness conversation is built from.
+    /// The harness composes an agent once, when the conversation is created,
+    /// so this is chosen at creation and never overlaid onto a conversation
+    /// that already runs.
+    pub agent_preset: Option<String>,
 }
 
 /// One selectable execution-permission preset a backend advertises.

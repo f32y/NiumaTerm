@@ -31,13 +31,11 @@ pub struct ConversationSettings {
     /// itself.
     pub approval_presets: Vec<ApprovalPreset>,
 
-    /// Agent compositions this deployment offers, and the one this
-    /// conversation was built from. Empty where the deployment composes none,
-    /// which is a picker with nothing to choose between rather than an
-    /// unsupported one.
+    /// Agent compositions this deployment offers; the one this conversation
+    /// was built from is `settings.agent_preset`. Empty where the deployment
+    /// composes none, which is a picker with nothing to choose between rather
+    /// than an unsupported one.
     pub agent_presets: Vec<AgentPreset>,
-
-    pub agent_preset: Option<String>,
 }
 
 /// Fold the thread's reported settings together with what the pane
@@ -60,6 +58,10 @@ pub fn resolve_ready_settings(
             sandbox: local.sandbox.clone().or(next.sandbox),
             effort: local.effort.clone().or(next.effort),
             tier: local.tier.clone().or(next.tier),
+            // A remembered composition already travelled with the creation
+            // request, and the harness refuses to recompose a conversation, so
+            // the one reported is what this conversation runs on.
+            agent_preset: next.agent_preset,
         };
     }
 
@@ -91,7 +93,18 @@ impl ConversationSettings {
     ) {
         let effort = settings.effort.clone().or(self.settings.effort.clone());
 
-        let mut next = ThreadSettings { effort, ..settings };
+        // The composition is reported by its own event rather than with the
+        // other controls, so a Ready that carries none keeps the one known.
+        let agent_preset = settings
+            .agent_preset
+            .clone()
+            .or(self.settings.agent_preset.clone());
+
+        let mut next = ThreadSettings {
+            effort,
+            agent_preset,
+            ..settings
+        };
 
         // Fresh conversations, and resumes into a harness that does not
         // replay its own controls, seed all remembered picks. Where

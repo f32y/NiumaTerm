@@ -2284,6 +2284,28 @@ impl AgentPane {
                 true
             }
             SlashCommandOutcome::Completed { message } => {
+                // The harness pins its own default preset into every
+                // conversation it opens, so a switch it accepted is remembered
+                // for the next one, whether it was picked or typed. A bare
+                // `/permission` only reports the preset in effect.
+                let preset = command.arguments.trim();
+
+                if session_kind.caps().approval_selection_is_a_command
+                    && command.name == "permission"
+                    && !preset.is_empty()
+                {
+                    let session_profile = session_host.read(cx).profile.clone();
+
+                    self.session.borrow_mut().controls.settings.approval = Some(preset.to_owned());
+
+                    remember_defaults(
+                        &self.session.borrow().controls,
+                        session_kind,
+                        &session_profile,
+                        cx,
+                    );
+                }
+
                 self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
                     message.unwrap_or_else(|| {
@@ -5000,7 +5022,25 @@ impl AgentPane {
         };
 
         match outcome {
-            Ok(()) => cx.notify(),
+            Ok(()) => {
+                let Some(session_host) = self.host.upgrade() else {
+                    return;
+                };
+
+                let session_kind = session_host.read(cx).kind;
+                let session_profile = session_host.read(cx).profile.clone();
+
+                // The harness composes an agent only when a conversation is
+                // created, so the pick is remembered for the next creation.
+                remember_defaults(
+                    &self.session.borrow().controls,
+                    session_kind,
+                    &session_profile,
+                    cx,
+                );
+
+                cx.notify()
+            }
             Err(error) => self
                 .palette
                 .set_feedback(CommandFeedbackKind::Error, error, cx),

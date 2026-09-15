@@ -1271,6 +1271,17 @@ impl AgentSession {
                 });
             }
 
+            // A harness that composes the agent from a preset does so only when
+            // the conversation is created, so the pick has to ride the creation
+            // request. Preserved controls keep the composition in use; any other
+            // start takes the one last picked for this profile.
+            launch.agent_preset = if preserve_settings {
+                session.controls.settings.agent_preset.clone()
+            } else {
+                stored_thread_settings(kind, &self.profile, cx)
+                    .and_then(|stored| stored.agent_preset.clone())
+            };
+
             session.starting(recovery.as_ref()).epoch
         };
 

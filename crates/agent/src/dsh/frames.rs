@@ -69,6 +69,8 @@ pub(crate) struct PresetsFrame {
     pub(crate) presets: Value,
     #[serde(default)]
     pub(crate) current: Option<String>,
+    #[serde(default)]
+    pub(crate) refusal: Option<String>,
 }
 
 #[derive(Deserialize)]

@@ -17,7 +17,9 @@ use crate::dsh::api::ApiClient;
 use crate::dsh::events::pump_for_test;
 use crate::dsh::history::sessions;
 use crate::dsh::mapping::{ToolTracker, map_frame};
-use crate::dsh::session::{CloseAction, run_close_actions, session_create_payload};
+use crate::dsh::session::{
+    CloseAction, open_new_conversation, run_close_actions, session_create_payload,
+};
 use crate::dsh::{history, mapping};
 use crate::workspace::AgentWorkspace;
 
@@ -33,12 +35,22 @@ fn session_frame(event: Value) -> Value {
 }
 
 fn api_server(request_count: usize) -> (String, mpsc::Receiver<Value>, thread::JoinHandle<()>) {
+    scripted_api_server(vec![
+        r#"{"result":{"ok":true,"value":{"accepted":true}}}"#;
+        request_count
+    ])
+}
+
+/// A loopback API server answering each request with the next of `answers`.
+fn scripted_api_server(
+    answers: Vec<&'static str>,
+) -> (String, mpsc::Receiver<Value>, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback API server");
     let address = listener.local_addr().unwrap();
     let (request_tx, request_rx) = mpsc::channel();
 
     let server = thread::spawn(move || {
-        for _ in 0..request_count {
+        for answer in answers {
             let (mut stream, _) = listener.accept().expect("accept API client");
             let mut reader = BufReader::new(stream.try_clone().unwrap());
             let mut content_length = 0;
@@ -64,8 +76,6 @@ fn api_server(request_count: usize) -> (String, mpsc::Receiver<Value>, thread::J
             request_tx
                 .send(serde_json::from_slice(&body).expect("parse request body"))
                 .unwrap();
-
-            let answer = r#"{"result":{"ok":true,"value":{"accepted":true}}}"#;
 
             write!(
                 stream,
@@ -2073,15 +2083,67 @@ fn a_conversation_opens_with_the_primary_directory_alone() {
     // Only the primary directory has a field in the session header, so this is
     // the whole of what a multi-directory workspace can send.
     assert_eq!(
-        session_create_payload(workspace.primary(), None),
+        session_create_payload(workspace.primary(), None, None),
         json!({"cwd": r"C:\Work\api"})
     );
 
     // Resuming reopens the same conversation in the same directory.
     assert_eq!(
-        session_create_payload(workspace.primary(), Some("sess_1")),
+        session_create_payload(workspace.primary(), Some("sess_1"), None),
         json!({"cwd": r"C:\Work\api", "sessionId": "sess_1"})
     );
+}
+
+#[test]
+fn a_new_conversation_is_composed_from_the_remembered_preset() {
+    let (base, requests, server) = scripted_api_server(vec![
+        r#"{"result":{"ok":true,"value":{"sessionId":"sess_1","agentPreset":"reviewer"}}}"#,
+    ]);
+
+    let client = ApiClient::new(base).expect("create API client");
+
+    let (opened, refusal) = open_new_conversation(&client, Some(r"C:\Work\api"), Some("reviewer"))
+        .expect("the conversation must open");
+
+    server.join().expect("API server should exit");
+
+    assert_eq!(
+        requests.recv().unwrap()["payload"]["args"]["request"],
+        json!({"cwd": r"C:\Work\api", "agentPreset": "reviewer"})
+    );
+    assert_eq!(opened.session_id, "sess_1");
+    assert_eq!(opened.agent_preset.as_deref(), Some("reviewer"));
+    assert!(refusal.is_none());
+}
+
+#[test]
+fn a_refused_remembered_preset_opens_the_conversation_on_the_default() {
+    let (base, requests, server) = scripted_api_server(vec![
+        r#"{"result":{"ok":false,"error":{"code":"agent-presets/not-found","message":"no preset reviewer"}}}"#,
+        r#"{"result":{"ok":true,"value":{"sessionId":"sess_1","agentPreset":"default"}}}"#,
+    ]);
+
+    let client = ApiClient::new(base).expect("create API client");
+
+    let (opened, refusal) = open_new_conversation(&client, Some(r"C:\Work\api"), Some("reviewer"))
+        .expect("a refused preset must not keep the conversation from opening");
+
+    server.join().expect("API server should exit");
+
+    let sent: Vec<_> = requests
+        .try_iter()
+        .map(|request| request["payload"]["args"]["request"].clone())
+        .collect();
+
+    assert_eq!(
+        sent,
+        [
+            json!({"cwd": r"C:\Work\api", "agentPreset": "reviewer"}),
+            json!({"cwd": r"C:\Work\api"}),
+        ]
+    );
+    assert_eq!(opened.agent_preset.as_deref(), Some("default"));
+    assert!(refusal.is_some_and(|refusal| refusal.contains("no preset reviewer")));
 }
 
 #[test]
