@@ -14,7 +14,7 @@ use crate::team::discussion::{
     Discussion, DiscussionError, DiscussionMode, DiscussionState, PublicSnapshot,
 };
 use crate::team::identity::{
-    MemberId, MessageId, OperationId, OwnershipGeneration, RoomId, SummaryId,
+    DiscussionId, MemberId, MessageId, OperationId, OwnershipGeneration, RoomId, SummaryId,
 };
 use crate::team::member::{AcceptedCoverage, HistoryScope, Member, MemberConfig};
 
@@ -91,6 +91,18 @@ impl Room {
 
     pub fn discussions(&self) -> &[Discussion] {
         &self.discussions
+    }
+
+    pub(crate) fn discussion(&self, id: DiscussionId) -> Option<&Discussion> {
+        self.discussions
+            .iter()
+            .find(|discussion| discussion.id == id)
+    }
+
+    pub(super) fn discussion_mut(&mut self, id: DiscussionId) -> Option<&mut Discussion> {
+        self.discussions
+            .iter_mut()
+            .find(|discussion| discussion.id == id)
     }
 
     pub fn controls(&self) -> &RoomControls {

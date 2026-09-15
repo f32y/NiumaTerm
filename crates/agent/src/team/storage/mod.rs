@@ -23,6 +23,9 @@ use crate::team::storage::records::{Checkpoint, JournalRecord, RoomDelta, decode
 
 const VERSION: u32 = 1;
 
+/// The directory under the data directory that holds one directory per room.
+const ROOMS_DIRECTORY: &str = "agent-teams";
+
 #[derive(Debug, Error)]
 pub enum StorageError {
     #[error("room storage is unavailable: {0}")]
@@ -55,7 +58,7 @@ impl RoomStore {
     pub fn create(data_directory: &Path, room: Room) -> Result<Self, StorageError> {
         validation::validate(&room)?;
 
-        let parent = data_directory.join("agent-teams");
+        let parent = data_directory.join(ROOMS_DIRECTORY);
 
         fs::create_dir_all(&parent)?;
 
@@ -93,8 +96,36 @@ impl RoomStore {
         })
     }
 
+    /// The rooms saved under `data_directory`, in id order.
+    pub fn saved_rooms(data_directory: &Path) -> Result<Vec<RoomId>, StorageError> {
+        let directory = data_directory.join(ROOMS_DIRECTORY);
+
+        if !directory.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut rooms = Vec::new();
+
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+
+            if entry.file_type()?.is_dir()
+                && let Some(id) = entry
+                    .file_name()
+                    .to_str()
+                    .and_then(|name| name.parse().ok())
+            {
+                rooms.push(id);
+            }
+        }
+
+        rooms.sort();
+
+        Ok(rooms)
+    }
+
     pub fn open(data_directory: &Path, id: RoomId) -> Result<(Self, bool), StorageError> {
-        let directory = data_directory.join("agent-teams").join(id.to_string());
+        let directory = data_directory.join(ROOMS_DIRECTORY).join(id.to_string());
         let lock = lock_room(&directory)?;
         let checkpoint: Checkpoint = decode(&fs::read(directory.join("checkpoint.json"))?)?;
 

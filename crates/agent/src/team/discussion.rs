@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::team::budget::Budget;
+use crate::team::budget::{Budget, TurnPurpose};
 use crate::team::content::UserInput;
 use crate::team::identity::{
     AttemptId, DiscussionId, InteractionId, MemberId, MessageId, OperationId, StageId, SummaryId,
@@ -60,6 +60,18 @@ pub enum PauseReason {
     Closed,
 }
 
+impl PauseReason {
+    /// The pause for attempt `attempt`, sent for `purpose`, failing with a
+    /// known outcome. A failed summary is reported apart from a failed turn.
+    pub(super) fn attempt_failed(attempt: AttemptId, purpose: TurnPurpose) -> Self {
+        if purpose == TurnPurpose::Summary {
+            Self::SummaryFailed(attempt)
+        } else {
+            Self::AttemptFailed(attempt)
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StageKind {
@@ -104,6 +116,31 @@ pub struct Stage {
     pub arrangements: Vec<Arrangement>,
     pub segments: Vec<PublicSnapshot>,
     pub decision: Option<ModeratorDecision>,
+}
+
+impl Stage {
+    /// A new stage of `kind` opened on the public `snapshot`, with a pending
+    /// arrangement for each of `recipients`.
+    pub(super) fn pending(
+        kind: StageKind,
+        recipients: Vec<MemberId>,
+        snapshot: PublicSnapshot,
+    ) -> Self {
+        Self {
+            decision: None,
+            id: StageId::new(),
+            kind,
+            arrangements: recipients
+                .into_iter()
+                .map(|recipient| Arrangement {
+                    operation: OperationId::new(),
+                    recipient,
+                    state: ArrangementState::Pending,
+                })
+                .collect(),
+            segments: vec![snapshot],
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -210,6 +247,29 @@ impl Discussion {
         } else {
             DiscussionState::Paused
         };
+    }
+
+    /// Whether work may be sent for this discussion: it is running or
+    /// finishing, and nothing holds it paused.
+    pub(super) fn is_dispatchable(&self) -> bool {
+        self.pauses.is_empty()
+            && matches!(
+                self.state,
+                DiscussionState::Running | DiscussionState::Finishing
+            )
+    }
+
+    /// Set every arrangement made for `operation` to `state`.
+    pub(super) fn mark_operation(&mut self, operation: OperationId, state: ArrangementState) {
+        for arrangement in self
+            .stages
+            .iter_mut()
+            .flat_map(|stage| &mut stage.arrangements)
+        {
+            if arrangement.operation == operation {
+                arrangement.state = state;
+            }
+        }
     }
 
     /// Resolving one condition leaves the explicit continuation gate closed.
