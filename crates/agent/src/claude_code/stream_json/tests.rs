@@ -393,7 +393,8 @@ fn acceptance_uses_one_root_provider_identity_per_turn() {
         Session::spawn(&launch, &AgentWorkspace::default(), None, |_| {}, |_| {}).unwrap();
 
     session.ready = true;
-    session.turn = TurnState::Pending;
+
+    assert!(session.turn.begin_message_turn());
 
     let child = json!({"type":"stream_event", "parent_tool_use_id":"child", "event":{"type":"message_start", "message":{"id":"child-response"}}});
 
@@ -895,7 +896,7 @@ fn pending_queries_do_not_block_an_atomic_settings_and_prompt_batch() {
         session.send_user_message("queued prompt", &settings, &[]),
         SendOutcome::StartedTurn
     );
-    assert_eq!(session.turn, TurnState::Pending);
+    assert_eq!(session.turn.state(), TurnState::Pending);
     assert_eq!(session.applied_model.as_deref(), Some("test-model"));
     assert_eq!(session.applied_permission.as_deref(), Some("plan"));
     assert_eq!(session.control.effort(), Some("high"));
