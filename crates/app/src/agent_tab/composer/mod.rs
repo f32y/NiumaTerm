@@ -1,11 +1,15 @@
 pub(super) use nmt_agent::session::commands::PendingSlashCommand;
 
-pub(super) use crate::agent_tab::composer::branch::BranchFlow;
 #[cfg(test)]
 pub(super) use crate::agent_tab::composer::branch::fork::checkpoint_at_depth;
-pub(super) use crate::agent_tab::composer::branch::fork::{PromptTarget, row_prompt_target};
+pub(super) use crate::agent_tab::composer::branch::fork::{
+    PromptTarget, fork_palette_model, row_prompt_target,
+};
 pub(super) use crate::agent_tab::composer::branch::rewind::{
-    RewindAction, rewind_prompt_label, rewind_timestamp,
+    RewindAction, rewind_palette_model, rewind_prompt_label, rewind_timestamp,
+};
+pub(super) use crate::agent_tab::composer::branch::{
+    BranchFlow, branch_error_message, branch_failure_message,
 };
 pub(super) use crate::agent_tab::composer::palette::{
     CachedCatalog, PALETTE_MAX_HEIGHT, PaletteAction, PaletteModel, PaletteRow, SlashPalette,

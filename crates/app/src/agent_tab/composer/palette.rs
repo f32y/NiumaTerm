@@ -1,13 +1,17 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui::{Context, Pixels, ScrollHandle, SharedString, px};
+use gpui::prelude::*;
+use gpui::{AnyElement, App, Context, FontWeight, Pixels, ScrollHandle, SharedString, div, px};
+use gpui_component::{ActiveTheme as _, h_flex, v_flex};
 use nmt_agent::chat::{ForkCheckpoint, SkillCatalog, SkillInfo, SkillReference, SlashCommandInfo};
 use nmt_agent::claude_code::sessions;
 use nmt_agent::session::commands::CommandQueue;
+use rust_i18n::t;
 
 use crate::agent_tab::AgentPane;
 use crate::agent_tab::composer::{CommandFeedback, CommandFeedbackKind, RewindAction};
+use crate::agent_tab::settings::UI_RADIUS;
 
 /// Tallest the palette grows before its own rows scroll: nine rows and the
 /// note under them. The transcript reads this as the height the picker covers
@@ -152,11 +156,140 @@ impl SlashPalette {
             .filter(|feedback| feedback_is_current(feedback.kind, commands.queue.is_empty()))
     }
 
-    /// Whether the discovered skill catalog carries this name.
-    pub(crate) fn names_a_skill(&self, name: &str) -> bool {
-        self.skill_catalog
-            .as_ref()
-            .is_some_and(|catalog| catalog.skills.iter().any(|skill| skill.name == name))
+    /// The palette listing `model`'s rows. `hover_selects` moves the highlight
+    /// with the pointer, which only a picker of branch points wants.
+    pub(crate) fn render(
+        &self,
+        model: PaletteModel,
+        hover_selects: bool,
+        cx: &mut Context<AgentPane>,
+    ) -> AnyElement {
+        let selected = self.selected.min(model.rows.len().saturating_sub(1));
+
+        let rows = model
+            .rows
+            .into_iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let disabled = row.disabled_reason.is_some();
+                let detail = row.disabled_reason.clone().unwrap_or(row.description);
+                let background = (index == selected).then(|| cx.theme().muted.opacity(0.7));
+
+                div()
+                    .id(("agent-slash-command", index))
+                    .h(px(48.))
+                    .flex_none()
+                    .px_3()
+                    .py_1p5()
+                    .rounded(UI_RADIUS)
+                    .when_some(background, |this, color| this.bg(color))
+                    .when(disabled, |this| this.opacity(0.5))
+                    .when(!disabled, |this| {
+                        this.hover(|style| style.bg(cx.theme().muted.opacity(0.45)))
+                    })
+                    .when(hover_selects && !disabled, |this| {
+                        this.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                            if *hovered {
+                                this.hover_palette_index(index, cx);
+                            }
+                        }))
+                    })
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.activate_palette_index(index, true, window, cx)
+                    }))
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(cx.theme().foreground)
+                                    .child(row.label),
+                            )
+                            .children(row.hint.map(|hint| {
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground.opacity(0.75))
+                                    .child(hint)
+                            })),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .truncate()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(detail),
+                    )
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+
+        let note = model.note.map(|note| {
+            div()
+                .px_3()
+                .py_2()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground.opacity(0.75))
+                .child(note)
+        });
+
+        v_flex()
+            .id("agent-slash-command-palette")
+            .on_mouse_down_out(cx.listener(|this, _, _, cx| this.dismiss_command_palette(cx)))
+            .w_full()
+            .max_h(PALETTE_MAX_HEIGHT)
+            .overflow_y_scroll()
+            .track_scroll(&self.scroll)
+            .p_1()
+            .rounded(UI_RADIUS)
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().popover)
+            .shadow_lg()
+            .children(rows)
+            .children(note)
+            .into_any_element()
+    }
+
+    /// The line inside the composer card reporting the latest command result
+    /// still worth showing against `commands`.
+    pub(crate) fn render_feedback(
+        &self,
+        commands: &CommandQueue,
+        cx: &App,
+    ) -> Option<impl IntoElement + use<>> {
+        self.visible_feedback(commands).map(|feedback| {
+            let (color, label) = match feedback.kind {
+                CommandFeedbackKind::Notice => (cx.theme().primary, t!("agent-feedback-notice")),
+                CommandFeedbackKind::Status => {
+                    (cx.theme().muted_foreground, t!("agent-feedback-status"))
+                }
+                CommandFeedbackKind::Error => (cx.theme().danger, t!("agent-feedback-error")),
+                CommandFeedbackKind::Queued => (cx.theme().warning, t!("agent-feedback-queued")),
+            };
+
+            h_flex()
+                .w_full()
+                .gap_2()
+                .px_3()
+                .pb_2()
+                .text_xs()
+                .child(
+                    div()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(color)
+                        .child(label),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(feedback.message.clone()),
+                )
+        })
     }
 }
 

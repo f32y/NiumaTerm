@@ -12,7 +12,13 @@ pub(crate) use nmt_agent::session::branch::PromptTarget;
 #[cfg(test)]
 pub(crate) use nmt_agent::session::branch::checkpoint_at_depth;
 
-use crate::agent_tab::composer::PaletteAction;
+use gpui::SharedString;
+use nmt_agent::session::branch::BranchView;
+use rust_i18n::t;
+
+use crate::agent_tab::composer::{
+    PaletteAction, PaletteModel, PaletteRow, rewind_prompt_label, rewind_timestamp,
+};
 
 /// Name the prompt one picker row stands for.
 ///
@@ -28,4 +34,46 @@ pub(crate) fn row_prompt_target(row: usize, action: &PaletteAction) -> Option<Pr
     };
 
     Some(PromptTarget { prompt, depth: row })
+}
+
+/// The fork picker for `state`: the prompts a branch can start in front of,
+/// newest first, and the row that cancels.
+pub(crate) fn fork_palette_model(state: BranchView<'_>) -> Option<PaletteModel> {
+    match state {
+        BranchView::LoadingFork => Some(PaletteModel {
+            rows: vec![cancel_row()],
+            note: Some(SharedString::from(t!("agent-fork-loading-checkpoints"))),
+        }),
+        BranchView::ForkCheckpoints(checkpoints) => {
+            let mut rows = checkpoints
+                .iter()
+                .cloned()
+                .map(|checkpoint| PaletteRow {
+                    label: rewind_prompt_label(&checkpoint.prompt).into(),
+                    description: SharedString::from(t!("agent-fork-branch-before-prompt")),
+                    hint: rewind_timestamp(checkpoint.timestamp.as_deref()).map(Into::into),
+                    disabled_reason: None,
+                    action: PaletteAction::ForkCheckpoint(checkpoint),
+                })
+                .collect::<Vec<_>>();
+
+            rows.push(cancel_row());
+
+            Some(PaletteModel {
+                rows,
+                note: Some(SharedString::from(t!("agent-fork-choose-prompt"))),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn cancel_row() -> PaletteRow {
+    PaletteRow {
+        label: SharedString::from(t!("agent-fork-cancel")),
+        description: SharedString::from(t!("agent-fork-cancel-description")),
+        hint: None,
+        disabled_reason: None,
+        action: PaletteAction::ForkCancel,
+    }
 }

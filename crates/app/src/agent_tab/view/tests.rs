@@ -10,11 +10,13 @@ use crate::agent_tab::capabilities::AgentCapabilities as _;
 use crate::agent_tab::composer::prompt_with_response_annotations;
 use crate::agent_tab::session::UpdateSuspension;
 use crate::agent_tab::thread_controls::effort::effort_gauge_step;
-use crate::agent_tab::{
-    AgentKind, ComposerEnterBehavior, LastResponseTone, SessionHistoryUi, UpdateOverlayPhase,
-    composer_enter_behavior, composer_stats_label, last_response_tone, multi_root_notice,
-    queued_message_label, update_overlay_phase,
+use crate::agent_tab::view::blocking_overlay::{UpdateOverlayPhase, update_overlay_phase};
+use crate::agent_tab::view::composer_layout::{ComposerEnterBehavior, composer_enter_behavior};
+use crate::agent_tab::view::composer_notices::{
+    LastResponseTone, last_response_tone, multi_root_notice, queued_message_label,
 };
+use crate::agent_tab::view::composer_status::composer_stats_label;
+use crate::agent_tab::{AgentKind, SessionHistoryUi};
 
 #[test]
 fn queued_message_label_flattens_a_multi_line_prompt() {

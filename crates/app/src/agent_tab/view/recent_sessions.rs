@@ -1,9 +1,10 @@
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, FontWeight, Hsla, IntoElement, ListSizingBehavior, MouseMoveEvent, Pixels,
-    Point, ScrollStrategy, div, px, relative, size,
+    AnyElement, AsyncApp, Context, FontWeight, Hsla, IntoElement, ListSizingBehavior,
+    MouseMoveEvent, Pixels, Point, ScrollStrategy, WeakEntity, div, px, relative, size,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::scroll::Scrollbar;
@@ -13,7 +14,9 @@ use gpui_component::{
     v_virtual_list,
 };
 use nmt_agent::chat::{SessionScope, SessionSummary};
-use nmt_agent::session::history::{CountPublication, SessionHistory};
+use nmt_agent::session::history::{
+    CountPublication, SessionHistory, count_scoped_sessions, list_scoped_sessions,
+};
 use rust_i18n::t;
 
 use crate::agent_tab::commands::move_palette_selection;
@@ -217,6 +220,45 @@ impl SessionHistoryUi {
         self.selected = index;
 
         true
+    }
+
+    /// Widen the list to every directory, or narrow it back to the tab's own.
+    /// The rows on screen answered the previous scope, so they go. Returns the
+    /// new scope, which the list has to be reloaded for.
+    pub(crate) fn toggle_scope(&mut self) -> SessionScope {
+        self.data.invalidate_filesystem_history();
+
+        self.data.scope = match self.data.scope {
+            SessionScope::CurrentDirectory => SessionScope::AllDirectories,
+            SessionScope::AllDirectories => SessionScope::CurrentDirectory,
+        };
+
+        self.data.sessions.clear();
+
+        self.data.showing_search = false;
+        self.selected = 0;
+
+        self.data.scope
+    }
+
+    /// Read the list from the harness's transcript directory for `cwd`, off
+    /// the pane's thread, as of session `epoch`. A cheap count comes first so
+    /// the list can reserve its final height with placeholder rows, then title
+    /// parsing swaps in the real rows.
+    pub(crate) fn load_filesystem_history(
+        &mut self,
+        cwd: Option<String>,
+        epoch: u64,
+        cx: &mut Context<AgentPane>,
+    ) {
+        let scope = self.data.scope;
+
+        let request = self.data.begin_filesystem_history(cwd.clone(), epoch);
+
+        cx.notify();
+
+        cx.spawn(async move |this, cx| load_history_passes(this, request, scope, cwd, cx).await)
+            .detach();
     }
 
     /// Answer a navigation key while the list is on screen. The composer has
@@ -560,4 +602,76 @@ fn foreign_directory(session: &SessionSummary, cwd: Option<&str>) -> Option<Stri
     let session_cwd = session.cwd.as_deref()?;
 
     (!directories_match(Some(session_cwd), cwd)).then(|| directory_label(session_cwd))
+}
+
+/// The two off-thread passes of a filesystem history read for `this` pane:
+/// the count that reserves the list's height, then the rows themselves.
+async fn load_history_passes(
+    this: WeakEntity<AgentPane>,
+    request: FilesystemHistoryRequest,
+    scope: SessionScope,
+    cwd: Option<String>,
+    cx: &mut AsyncApp,
+) {
+    let count_cwd = cwd.clone();
+
+    let count = cx
+        .background_executor()
+        .spawn(async move { count_scoped_sessions(scope, count_cwd.as_deref()) })
+        .await;
+
+    let proceed = this
+        .update(cx, |this, cx| {
+            let cwd = this.cwd(cx);
+
+            match this.history_ui.publish_filesystem_count(
+                &request,
+                cwd.as_deref(),
+                this.session.borrow().runtime.epoch(),
+                count,
+            ) {
+                CountPublication::Stale => false,
+                CountPublication::Empty => {
+                    cx.notify();
+
+                    false
+                }
+                CountPublication::LoadRows => {
+                    cx.notify();
+
+                    true
+                }
+            }
+        })
+        .unwrap_or(false);
+
+    if !proceed {
+        return;
+    }
+
+    // Title parsing races a short hold: on a warm SSD it finishes
+    // within a frame, so without the hold the skeleton rows would
+    // never be visible and the swap would read as a flicker.
+    let load = cx
+        .background_executor()
+        .spawn(async move { list_scoped_sessions(scope, cwd.as_deref()) });
+
+    cx.background_executor()
+        .timer(Duration::from_millis(250))
+        .await;
+
+    let sessions = load.await;
+
+    let _ = this.update(cx, |this, cx| {
+        let cwd = this.cwd(cx);
+
+        if this.history_ui.publish_filesystem_rows(
+            &request,
+            cwd.as_deref(),
+            this.session.borrow().runtime.epoch(),
+            sessions,
+        ) {
+            cx.notify();
+        }
+    });
 }
