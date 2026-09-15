@@ -4,41 +4,31 @@ pub use crate::agent_tab::team::view::TeamPane;
 mod controls;
 mod dispatch;
 mod events;
+mod member_host;
 mod view;
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use gpui::{App, AppContext as _, Context, Entity, Subscription};
+use gpui::{App, AppContext as _, Context, Entity};
 use nmt_agent::AgentWorkspace;
-use nmt_agent::chat::SendOutcome;
-use nmt_agent::session::delivery::Submission;
 use nmt_agent::session::lifecycle::Status;
 use nmt_agent::session::team_capabilities::{ModeratorAdmission, TeamLaunch};
-use nmt_agent::session::{AgentKind, ImageAttachment, RecoveryIdentity};
+use nmt_agent::session::{AgentKind, RecoveryIdentity};
 use nmt_agent::team::attempt::{AttemptState, BudgetScope, Invocation};
 use nmt_agent::team::discussion::{DiscussionState, PauseReason};
 use nmt_agent::team::execution_slots::{ExecutionKey, WorkStatus};
 use nmt_agent::team::identity::{AttemptId, InteractionId, MemberId, RoomId};
 use nmt_agent::team::member::MemberConfig;
-use nmt_agent::team::moderation::ModeratorAction;
 use nmt_agent::team::room::Room;
 use nmt_agent::team::session::{AttemptEventKey, TeamError, TeamSession};
 use nmt_config::profile::AgentProfile;
 
-use crate::agent_tab::composer::attachments::scratch_dir;
 use crate::agent_tab::execution::{AgentSession, ExecutionSignal, SessionOwner};
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::team::dispatch::{CONTEXT_LIMITS, work_status};
-use crate::agent_tab::team::events::{DecisionAction, DecisionArguments};
-
-struct MemberHost {
-    owner: SessionOwner,
-    active: Option<AttemptId>,
-    interaction: Option<InteractionId>,
-    ready_epoch: Option<u64>,
-    _subscriptions: Vec<Subscription>,
-}
+use crate::agent_tab::team::events::DecisionArguments;
+use crate::agent_tab::team::member_host::MemberHost;
 
 /// Session owners stay alive when the Team view is hidden. Provider events
 /// update the durable room before another arrangement becomes eligible.
@@ -151,22 +141,16 @@ impl TeamRuntime {
             restore_transcript: true,
         };
 
-        let owner = AgentSession::create_team(profile, member.roots().clone(), options, cx);
+        let settings = member.settings().clone();
 
-        owner.session().update(cx, |session, _| {
-            session
-                .controller
-                .borrow_mut()
-                .controls
-                .set_settings(member.settings().clone());
-        });
+        let owner = AgentSession::create_team(profile, member.roots().clone(), options, cx);
 
         self.attach_member_owner(id, owner, cx);
 
         if let Some(host) = self.hosts.get(&id) {
-            host.owner.session().update(cx, |session, cx| {
-                session.start(recovery, true, |_, _| {}, cx);
-            });
+            host.apply_settings(settings, cx);
+
+            host.start(recovery, cx);
         }
     }
 
@@ -179,16 +163,8 @@ impl TeamRuntime {
 
         let changed = cx.observe(&session, move |this, _, cx| this.schedule(cx));
 
-        self.hosts.insert(
-            id,
-            MemberHost {
-                owner,
-                active: None,
-                interaction: None,
-                ready_epoch: None,
-                _subscriptions: vec![events, changed],
-            },
-        );
+        self.hosts
+            .insert(id, MemberHost::new(owner, vec![events, changed]));
     }
 
     pub fn member_session(&self, member: MemberId) -> Option<&Entity<AgentSession>> {
@@ -224,11 +200,7 @@ impl TeamRuntime {
         self.session.close()?;
 
         for host in self.hosts.values() {
-            host.owner.session().update(cx, |session, cx| {
-                session.controller.borrow_mut().interrupt_from_user();
-
-                cx.notify();
-            });
+            host.interrupt(cx);
 
             host.owner.close();
         }
@@ -252,10 +224,7 @@ impl TeamRuntime {
                 if self
                     .hosts
                     .get(&attempt.intent.recipient)
-                    .is_some_and(|host| {
-                        host.active.is_some()
-                            || work_status(host.owner.session().read(cx)) != Default::default()
-                    })
+                    .is_some_and(|host| host.is_busy(cx))
                 {
                     return Err(TeamError::Busy);
                 }
@@ -304,11 +273,6 @@ impl TeamRuntime {
                 self.session
                     .set_member_settings(member, ownership, settings)?;
 
-                let execution = self
-                    .member_session(member)
-                    .cloned()
-                    .ok_or(TeamError::Unavailable)?;
-
                 let settings = self
                     .room()
                     .member(member)
@@ -316,15 +280,10 @@ impl TeamRuntime {
                     .settings()
                     .clone();
 
-                execution.update(cx, |session, cx| {
-                    session
-                        .controller
-                        .borrow_mut()
-                        .controls
-                        .set_settings(settings);
-
-                    cx.notify();
-                });
+                self.hosts
+                    .get(&member)
+                    .ok_or(TeamError::Unavailable)?
+                    .apply_settings(settings, cx);
             }
             TeamCommand::Exclude(member) => self.session.exclude_member(member)?,
             TeamCommand::Stop(member) => {
@@ -340,16 +299,10 @@ impl TeamRuntime {
                         .pause_discussion(discussion, PauseReason::User)?;
                 }
 
-                let execution = self
-                    .member_session(member)
-                    .cloned()
-                    .ok_or(TeamError::Unavailable)?;
-
-                execution.update(cx, |session, cx| {
-                    session.controller.borrow_mut().interrupt_from_user();
-
-                    cx.notify();
-                });
+                self.hosts
+                    .get(&member)
+                    .ok_or(TeamError::Unavailable)?
+                    .interrupt(cx);
             }
         }
 
@@ -625,13 +578,9 @@ impl TeamRuntime {
             .get(&attempt.intent.recipient)
             .ok_or(TeamError::Unavailable)?;
 
-        if host.active.is_some()
-            || work_status(host.owner.session().read(cx)) != WorkStatus::default()
-        {
+        if host.is_busy(cx) {
             return Err(TeamError::Busy);
         }
-
-        let execution = host.owner.session().clone();
 
         let attachments: Vec<_> = attempt
             .intent
@@ -647,50 +596,7 @@ impl TeamRuntime {
             .ok_or(TeamError::Unavailable)?;
 
         let outcome = self.session.dispatch(id, |intent| {
-            execution.update(cx, |session, cx| {
-                let mut state = session.controller.borrow_mut();
-
-                if state.runtime.status() != Status::Idle
-                    || state.runtime.update_suspension().is_some()
-                {
-                    return SendOutcome::NotReady;
-                }
-
-                let scratch = scratch_dir(session.agent_route().as_str());
-
-                let result = state.submit(
-                    intent.prepared_text.clone(),
-                    |backend, text| {
-                        backend.send_user_message(
-                            text,
-                            &settings,
-                            None,
-                            attachments.iter().zip(&intent.attachments).map(
-                                |(bytes, reference)| ImageAttachment {
-                                    bytes,
-                                    media_type: &reference.media_type,
-                                },
-                            ),
-                            &scratch,
-                        )
-                    },
-                    || None,
-                );
-
-                cx.notify();
-
-                match result {
-                    Ok(Submission::Started { .. }) => SendOutcome::StartedTurn,
-                    Ok(Submission::Queued) => SendOutcome::Steered,
-                    Ok(Submission::Rejected { message }) => SendOutcome::Rejected { message },
-                    Ok(Submission::NotReady) => SendOutcome::NotReady,
-                    Err(blocker) => {
-                        tracing::warn!(?blocker, "team submission was blocked before sending");
-
-                        SendOutcome::NotReady
-                    }
-                }
-            })
+            host.submit(intent, &settings, &attachments, cx)
         });
 
         if self.room().attempts().iter().any(|attempt| {
@@ -782,35 +688,21 @@ impl TeamRuntime {
                 }
             }
             ExecutionSignal::Decision { request, .. } => {
-                let execution = host.owner.session().clone();
-
                 let mut accepted = false;
                 let mut failure = None;
 
                 if attempt.provider_turn.as_deref() == Some(request.provider_turn.as_str()) {
-                    if let Ok(arguments) =
+                    if let Some((stage, operation, action)) =
                         serde_json::from_value::<DecisionArguments>(request.arguments.clone())
+                            .ok()
+                            .and_then(DecisionArguments::moderator_action)
                     {
-                        let action = match arguments.action {
-                            DecisionAction::Invite => Some(ModeratorAction::Invite {
-                                recipients: arguments.recipients,
-                            }),
-                            DecisionAction::Report if arguments.recipients.is_empty() => {
-                                Some(ModeratorAction::Report)
-                            }
-                            DecisionAction::Report => None,
-                        };
-
-                        if let Some(action) = action {
-                            match self.session.moderator_decision(
-                                key,
-                                arguments.stage,
-                                arguments.operation,
-                                action,
-                            ) {
-                                Ok(result) => accepted = result,
-                                Err(error) => failure = Some(error),
-                            }
+                        match self
+                            .session
+                            .moderator_decision(key, stage, operation, action)
+                        {
+                            Ok(result) => accepted = result,
+                            Err(error) => failure = Some(error),
                         }
                     }
 
@@ -825,13 +717,7 @@ impl TeamRuntime {
                     }
                 }
 
-                execution.update(cx, |session, cx| {
-                    if let Some(backend) = session.controller.borrow_mut().runtime.backend_mut() {
-                        backend.respond_team_decision(request, accepted, if accepted { "The decision is saved. It will run after this moderator turn finishes." } else { "The decision was rejected. The discussion is paused for user review." });
-                    }
-
-                    cx.notify();
-                });
+                host.respond_decision(request, accepted, cx);
 
                 if let Some(error) = failure {
                     return Err(error);
