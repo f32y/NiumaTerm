@@ -2,11 +2,13 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 use std::{io, sync, time};
 
+use nmt_config::CursorShape;
 use nmt_config::colors::{Colors, NamedColor};
 use nmt_platform::{EventedPty, ProcessReadWrite, WinsizeBuilder};
 use parking_lot::Mutex;
 
 use crate::event::{self, VoidListener};
+use crate::ghostty;
 use crate::pty_pipe::powershell_compatibility::RESIZE_INPUT_DELAY;
 use crate::pty_pipe::{
     Interest, Poll, PtyPipe, PtyState, READ_BUFFER_SIZE, SNAPSHOT_MIN_INTERVAL,
@@ -14,7 +16,6 @@ use crate::pty_pipe::{
 };
 use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
-use crate::{ansi, ghostty};
 
 #[test]
 fn failed_capture_does_not_publish_back_buffer() {
@@ -76,7 +77,7 @@ fn resized_pipe(initial: &[u8]) -> PtyPipe<FakePty, VoidListener> {
             rows: 24,
             route_id: 0,
             colors: Colors::default(),
-            cursor_shape: ansi::CursorShape::Block,
+            cursor_shape: CursorShape::Block,
             scrollback_lines: 1000,
             engine_blocks: false,
             terminal_responses: true,
@@ -722,7 +723,7 @@ fn terminal_replies_resume_after_partial_writes_in_input_order() {
             rows: 3,
             route_id: 0,
             colors: Colors::default(),
-            cursor_shape: ansi::CursorShape::Block,
+            cursor_shape: CursorShape::Block,
             scrollback_lines: 1000,
             engine_blocks: false,
             terminal_responses: true,
@@ -777,7 +778,7 @@ fn dropping_session_handles_releases_worker_resources_before_returning() {
             rows: 3,
             route_id: 0,
             colors: Colors::default(),
-            cursor_shape: ansi::CursorShape::Block,
+            cursor_shape: CursorShape::Block,
             scrollback_lines: 1000,
             engine_blocks: false,
             terminal_responses: true,
@@ -817,7 +818,7 @@ fn disabled_terminal_responses_are_forwarded_without_replying() {
             rows: 3,
             route_id: 0,
             colors: Colors::default(),
-            cursor_shape: ansi::CursorShape::Block,
+            cursor_shape: CursorShape::Block,
             scrollback_lines: 1000,
             engine_blocks: false,
             terminal_responses: true,
@@ -861,7 +862,7 @@ fn resize_message_publishes_snapshot_to_render_buffer() {
             rows: 3,
             route_id: 0,
             colors: Colors::default(),
-            cursor_shape: ansi::CursorShape::Block,
+            cursor_shape: CursorShape::Block,
             scrollback_lines: 1000,
             engine_blocks: false,
             terminal_responses: true,
@@ -917,7 +918,7 @@ fn theme_refresh_preserves_synchronized_output_until_commit() {
             rows: 3,
             route_id: 0,
             colors: Colors::default(),
-            cursor_shape: ansi::CursorShape::Block,
+            cursor_shape: CursorShape::Block,
             scrollback_lines: 1000,
             engine_blocks: false,
             terminal_responses: true,
@@ -1065,7 +1066,7 @@ fn theme_refresh_preserves_progress_cursor_suppression() {
             rows: 3,
             route_id: 0,
             colors: Colors::default(),
-            cursor_shape: ansi::CursorShape::Block,
+            cursor_shape: CursorShape::Block,
             scrollback_lines: 1000,
             engine_blocks: false,
             terminal_responses: true,
@@ -1076,7 +1077,7 @@ fn theme_refresh_preserves_progress_cursor_suppression() {
 
     machine
         .ghostty
-        .set_default_cursor_shape(ansi::CursorShape::Beam)
+        .set_default_cursor_shape(CursorShape::Beam)
         .unwrap();
 
     let colors = Colors {
@@ -1109,7 +1110,7 @@ fn theme_refresh_preserves_progress_cursor_suppression() {
     {
         let buffer = render_buffer.load();
 
-        assert_eq!(buffer.cursor_shape(), ansi::CursorShape::Beam);
+        assert_eq!(buffer.cursor_shape(), CursorShape::Beam);
         assert!(!buffer.cursor_visible(), "active progress hides the cursor");
         assert_eq!(buffer.layout_cursor_row(), Some(0));
         assert_eq!(
@@ -1156,7 +1157,7 @@ fn conpty_echo_after_resize_preserves_addressed_row() {
             rows: 42,
             route_id: 0,
             colors: Colors::default(),
-            cursor_shape: ansi::CursorShape::Block,
+            cursor_shape: CursorShape::Block,
             scrollback_lines: 1000,
             engine_blocks: false,
             terminal_responses: true,
@@ -1220,7 +1221,7 @@ fn conpty_repaint_after_resize_uses_active_screen_when_scrolled() {
             rows: 4,
             route_id: 0,
             colors: Colors::default(),
-            cursor_shape: ansi::CursorShape::Block,
+            cursor_shape: CursorShape::Block,
             scrollback_lines: 1000,
             engine_blocks: false,
             terminal_responses: true,
@@ -1316,7 +1317,7 @@ fn pty_read_events(
             rows: 24,
             route_id: 0,
             colors: Colors::default(),
-            cursor_shape: ansi::CursorShape::Block,
+            cursor_shape: CursorShape::Block,
             scrollback_lines: 1000,
             engine_blocks: true,
             terminal_responses: true,

@@ -578,7 +578,7 @@ fn kitty_image_delete() {
 /// DECSCUSR shape and DECTCEM visibility land in the snapshot cursor.
 #[test]
 fn snapshot_captures_cursor_style() {
-    use crate::ansi::CursorShape;
+    use nmt_config::CursorShape;
 
     let mut t = GhosttyTerminal::new(20, 5, 100).unwrap();
 
@@ -610,7 +610,7 @@ fn snapshot_captures_cursor_style() {
 
 #[test]
 fn configured_cursor_shape_is_the_decscusr_default() {
-    use crate::ansi::CursorShape;
+    use nmt_config::CursorShape;
 
     let mut t = GhosttyTerminal::new(20, 5, 100).unwrap();
 

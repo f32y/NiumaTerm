@@ -39,8 +39,8 @@ mod tests;
 use std::iter;
 use std::sync::Arc;
 
+use nmt_config::CursorShape;
 use nmt_config::colors::NamedColor;
-use nmt_terminal::ansi::CursorShape;
 use nmt_terminal::cell::Wide;
 use nmt_terminal::ghostty::ScrollbarInfo;
 use nmt_terminal::grid_emit::{RowSelection, row_selection_for};

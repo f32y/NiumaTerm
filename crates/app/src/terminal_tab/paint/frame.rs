@@ -4,7 +4,7 @@ use gpui::{
     App, Bounds, ContentMask, Corners, Pixels, RenderImage, ShapedLine, Window, fill, point, px,
     rgb, size,
 };
-use nmt_terminal::ansi::CursorShape;
+use nmt_config::CursorShape;
 use tracing::error;
 
 use crate::terminal_tab::frame::{TerminalCursor, TerminalFrame};

@@ -1,4 +1,6 @@
-// Kitty graphics protocol virtual placement encoding/decoding
+//! Kitty graphics protocol Unicode placeholders: decoding the placeholder
+//! cells a program writes to position an image, and the geometry of the
+//! image slice each run of cells shows.
 
 use nmt_config::colors::AnsiColor;
 

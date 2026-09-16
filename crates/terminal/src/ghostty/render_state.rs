@@ -19,8 +19,8 @@ use libghostty_vt_sys::{
 use libghostty_vt_sys::{
     Row as VtRow, RowData as VtRowData, RowSemanticPrompt as VtRowSemanticPrompt, ghostty_row_get,
 };
+use nmt_config::CursorShape;
 
-use crate::ansi;
 use crate::ghostty::{Error, Result, SnapshotColors, SnapshotCursor};
 
 /// The engine's render state and the row damage derived from it.
@@ -239,10 +239,10 @@ impl RenderStateReader {
         })?;
 
         let shape = match style {
-            VtRenderStateCursorVisualStyle::BAR => ansi::CursorShape::Beam,
-            VtRenderStateCursorVisualStyle::UNDERLINE => ansi::CursorShape::Underline,
+            VtRenderStateCursorVisualStyle::BAR => CursorShape::Beam,
+            VtRenderStateCursorVisualStyle::UNDERLINE => CursorShape::Underline,
             // BLOCK and BLOCK_HOLLOW → Block (terminal renders hollow from focus state).
-            _ => ansi::CursorShape::Block,
+            _ => CursorShape::Block,
         };
 
         let mut has_viewport = false;

@@ -1,8 +1,8 @@
 use std::collections;
 use std::sync::{self, Arc};
 
-use nmt_terminal::ansi::kitty_virtual::{self, IncompletePlacement, PLACEHOLDER, PlaceholderRun};
 use nmt_terminal::ghostty::SnapshotPlacement;
+use nmt_terminal::kitty_virtual::{self, IncompletePlacement, PLACEHOLDER, PlaceholderRun};
 use nmt_terminal::render_buffer::RenderBuffer;
 
 use crate::terminal_tab::graphics;
