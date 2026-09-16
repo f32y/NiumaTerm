@@ -11,7 +11,6 @@ pub mod kitty_virtual;
 pub mod links;
 pub mod pos;
 pub mod pty_pipe;
-pub mod publication;
 pub mod render_buffer;
 pub mod row;
 pub mod selection;

@@ -14,8 +14,7 @@ use crate::pty_pipe::{
     Interest, Poll, PtyPipe, PtyState, READ_BUFFER_SIZE, SNAPSHOT_MIN_INTERVAL,
     SYNC_OUTPUT_TIMEOUT, SessionOptions, Token, Waker, mode, publish_render_buffer, start_session,
 };
-use crate::publication::FrameStore;
-use crate::render_buffer::RenderBuffer;
+use crate::render_buffer::{FrameStore, RenderBuffer};
 
 #[test]
 fn failed_capture_does_not_publish_back_buffer() {
