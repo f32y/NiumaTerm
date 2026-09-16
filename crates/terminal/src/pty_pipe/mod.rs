@@ -12,8 +12,6 @@ mod write_queue;
 
 #[cfg(test)]
 mod ghostty_mirror_tests;
-#[cfg(test)]
-mod scrollback_tests;
 
 use std::collections::VecDeque;
 use std::io::{self, ErrorKind, Read, Write};

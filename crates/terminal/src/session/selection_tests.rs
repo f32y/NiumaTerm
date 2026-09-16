@@ -1,4 +1,4 @@
-use crate::pos::{Column, Line, Pos};
+use crate::grid::{Column, Line, Pos};
 use crate::selection::SelectionType;
 use crate::session::mouse::{SurfaceCellSide, SurfaceMouseEventKind};
 use crate::session::selection::SurfaceSelection;

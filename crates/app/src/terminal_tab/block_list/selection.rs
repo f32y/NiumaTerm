@@ -1,4 +1,4 @@
-use nmt_terminal::cell::Wide;
+use nmt_terminal::grid::Wide;
 use nmt_terminal::session::BlockPoint as FrozenPoint;
 
 use crate::terminal_tab::frame::TerminalLine;

@@ -13,8 +13,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::{env, fmt, fs, sync, time};
 
 use crate::ghostty::GhosttyTerminal;
+use crate::grid::Style;
 use crate::render_buffer::RenderBuffer;
-use crate::style::Style;
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 

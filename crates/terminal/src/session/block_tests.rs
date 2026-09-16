@@ -8,8 +8,8 @@ use crate::ghostty::{BlockHandle, GhosttyTerminal};
 use crate::pty_pipe::requests::answer_query;
 use crate::render_buffer::RenderBuffer;
 use crate::selection::SelectionType;
-use crate::session::blocks::frozen_selection_pieces;
 use crate::session::request::Request;
+use crate::session::selection::frozen_selection_pieces;
 use crate::session::state_tests::session_from_engine;
 use crate::session::{BlockPoint, TerminalSession};
 

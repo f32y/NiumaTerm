@@ -12,7 +12,8 @@ use crate::ghostty;
 use crate::pty_pipe::powershell_compatibility::RESIZE_INPUT_DELAY;
 use crate::pty_pipe::{
     Interest, Poll, PtyPipe, PtyState, READ_BUFFER_SIZE, SNAPSHOT_MIN_INTERVAL,
-    SYNC_OUTPUT_TIMEOUT, SessionOptions, Token, Waker, mode, publish_render_buffer, start_session,
+    SYNC_OUTPUT_TIMEOUT, SessionOptions, Token, Waker, mode, publish_render_buffer,
+    scrollback_bytes, start_session,
 };
 use crate::render_buffer::{FrameStore, RenderBuffer};
 
@@ -1713,4 +1714,24 @@ fn idle_theme_requests_publish_colors_without_replacing_retained_frames() {
     }
 
     assert_eq!(render_buffer_row_text(&original, 0), "idle text");
+}
+
+/// The engine scrollback budget is derived from the config line limit
+/// (not the old hardcoded 10 MB) — proportional to lines × cols, 0 → 0.
+#[test]
+fn scrollback_bytes_from_config() {
+    // Default 10k lines @ 80 cols → ~12.8 MB (config-driven, ≈ the old 10 MB).
+    assert_eq!(scrollback_bytes(10_000, 80), 12_800_000);
+
+    // Scales with the configured line count.
+    assert!(scrollback_bytes(100_000, 80) > scrollback_bytes(10_000, 80));
+
+    // Scales with width (byte budget, not lines).
+    assert!(scrollback_bytes(10_000, 200) > scrollback_bytes(10_000, 80));
+
+    // Disabled scrollback → 0 budget.
+    assert_eq!(scrollback_bytes(0, 80), 0);
+
+    // No overflow on absurd input.
+    assert_eq!(scrollback_bytes(usize::MAX, 80), usize::MAX);
 }

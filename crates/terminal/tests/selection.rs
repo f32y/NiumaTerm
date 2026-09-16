@@ -1,6 +1,6 @@
 //! Selection tests.
 
-use nmt_terminal::pos::{Column, Line, Pos, Side};
+use nmt_terminal::grid::{Column, Line, Pos, Side};
 use nmt_terminal::selection::*;
 
 /// `to_range_engine` maps SCREEN-coord anchors to visible rows via

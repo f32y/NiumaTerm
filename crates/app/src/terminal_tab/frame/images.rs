@@ -2,7 +2,9 @@ use std::collections;
 use std::sync::{self, Arc};
 
 use nmt_terminal::ghostty::SnapshotPlacement;
-use nmt_terminal::kitty_virtual::{self, IncompletePlacement, PLACEHOLDER, PlaceholderRun};
+use nmt_terminal::graphics::{
+    IncompletePlacement, PLACEHOLDER, PlaceholderRun, compute_run_geometry,
+};
 use nmt_terminal::render_buffer::RenderBuffer;
 
 use crate::terminal_tab::graphics;
@@ -126,7 +128,7 @@ impl FrameImage {
                 // row at screen line 0 of the adjusted origin.
                 let oy = origin_y + screen_line as f32 * cell_h + row_offset;
 
-                let g = kitty_virtual::compute_run_geometry(
+                let g = compute_run_geometry(
                     &run,
                     placement_cols,
                     placement_rows,
