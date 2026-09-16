@@ -41,22 +41,26 @@ use app::terminal_tab::view::{AgentInterrupted, TerminalGridResized, TerminalPan
 use dirs::home_dir;
 use gpui::prelude::*;
 use gpui::{
-    Anchor, AnyElement, App, Axis, Context, Div, Entity, FocusHandle, Focusable, KeyDownEvent,
-    ObjectFit, Pixels, Render, SharedString, Window, WindowBounds, WindowId, div, img, px,
+    Anchor, AnyElement, AnyView, AnyWindowHandle, App, AppContext, Axis, Bounds, Context, Div,
+    Entity, FocusHandle, Focusable, Global, KeyDownEvent, ObjectFit, Pixels, Render, SharedString,
+    TitlebarOptions, WeakEntity, Window, WindowAppearance, WindowBounds, WindowDecorations,
+    WindowHandle, WindowId, WindowOptions, div, img, point, px, size, transparent_black,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::modern_menu::dispatch_modern_menu_key;
 use gpui_component::notification::{Notification, NotificationType};
 use gpui_component::progress::Progress;
 use gpui_component::resizable::PANEL_MIN_SIZE;
-use gpui_component::{ActiveTheme, Icon, IconNamed, Root, WindowExt, v_flex};
+use gpui_component::{
+    ActiveTheme, Icon, IconNamed, Root, Theme as ComponentTheme, WindowExt, v_flex,
+};
 use nmt_agent::team::identity::RoomId;
 use nmt_agent::update::{ProviderKind, UpdatePhase};
 use nmt_agent::{
     AgentActivityPolicy, AgentEvent, AgentMonitor, AgentNotification, AgentRoute,
     AgentRuntimeStatus, AgentWorkspace, MonitorMutation, agent_process, request_native_delivery,
 };
-use nmt_config::local_state::{TabState, WindowState};
+use nmt_config::local_state::{TabState, WindowLocalState, WindowState};
 use nmt_config::system::WarnBeforeTerminatingShell;
 use nmt_config::{config_dir_path, get};
 use nmt_platform::window::native_active_state;
@@ -82,6 +86,7 @@ use crate::ui::git_status::GitStatusModel;
 use crate::ui::persistence::{
     default_session, materialize_active_tab, restore_session, session_state,
 };
+use crate::ui::platform_style::{Host, PlatformStyle as _};
 use crate::ui::right_panel::{RightPanel, RightPanelKind};
 use crate::ui::settings::{AgentProfile, AppSettings, TabBarStyle};
 use crate::ui::shell::actions::NewTeamTab;
@@ -114,12 +119,229 @@ use crate::ui::workflows::WorkflowsView;
 use crate::ui::workspace_sidebar;
 use crate::ui::workspace_sidebar::{Sidebar, SidebarUsage, WorkspaceChrome};
 use crate::usage_sources::daily_source;
-use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
 use crate::workspace::{
     ProgressTally, TerminalActivity, WorkspaceId, WorkspaceKind, WorkspaceManager, WorkspaceRoots,
     best_match, exact_match,
 };
 use crate::{agent_updates, ui};
+
+/// Open terminal windows in creation order, plus the last closed window's
+/// state for saving on quit or restoring when the application is reopened.
+#[derive(Default)]
+pub(crate) struct WindowRegistry {
+    windows: Vec<WindowEntry>,
+    last_closed: Option<WindowLocalState>,
+}
+
+impl Global for WindowRegistry {}
+
+/// A window's current state and the references used to reach its interface
+/// share one entry so closing it cannot leave a stale dispatch target.
+pub(crate) struct WindowEntry {
+    pub(crate) handle: AnyWindowHandle,
+    pub(crate) view: WeakEntity<AppWindow>,
+    state: WindowLocalState,
+}
+
+impl WindowRegistry {
+    fn register(
+        &mut self,
+        handle: AnyWindowHandle,
+        view: WeakEntity<AppWindow>,
+        state: WindowLocalState,
+    ) {
+        // A newly opened window replaces the retained state even when its
+        // caller requested a fresh session instead of restoring the old one.
+        self.last_closed = None;
+
+        self.windows.push(WindowEntry {
+            handle,
+            view,
+            state,
+        });
+    }
+
+    pub(crate) fn dispatch(
+        cx: &mut App,
+        mut action: impl FnMut(AnyWindowHandle, &WeakEntity<AppWindow>, &mut App) -> bool,
+    ) -> bool {
+        // Actions can change the registry. Copy only the dispatch references
+        // so they run without borrowing it or cloning session snapshots.
+        let targets: Vec<_> = cx
+            .global::<Self>()
+            .windows
+            .iter()
+            .map(|entry| (entry.handle, entry.view.clone()))
+            .collect();
+
+        targets
+            .iter()
+            .any(|(handle, view)| action(*handle, view, cx))
+    }
+
+    pub(crate) fn windows(&self) -> &[WindowEntry] {
+        &self.windows
+    }
+
+    pub(crate) fn states(&self) -> impl Iterator<Item = &WindowLocalState> {
+        self.windows
+            .iter()
+            .map(|entry| &entry.state)
+            .chain(self.last_closed.iter())
+    }
+
+    pub(crate) fn prioritized(&self, last: Option<WindowId>) -> impl Iterator<Item = &WindowEntry> {
+        self.windows
+            .iter()
+            .find(|entry| Some(entry.handle.window_id()) == last)
+            .into_iter()
+            .chain(
+                self.windows
+                    .iter()
+                    .rev()
+                    .filter(move |entry| Some(entry.handle.window_id()) != last),
+            )
+    }
+
+    pub(crate) fn get(&self, id: WindowId) -> Option<&WindowLocalState> {
+        self.windows
+            .iter()
+            .find(|entry| entry.handle.window_id() == id)
+            .map(|entry| &entry.state)
+    }
+
+    pub(crate) fn get_mut(&mut self, id: WindowId) -> Option<&mut WindowLocalState> {
+        self.windows
+            .iter_mut()
+            .find(|entry| entry.handle.window_id() == id)
+            .map(|entry| &mut entry.state)
+    }
+
+    pub(crate) fn close(&mut self, id: WindowId) -> bool {
+        let Some(index) = self
+            .windows
+            .iter()
+            .position(|entry| entry.handle.window_id() == id)
+        else {
+            return false;
+        };
+
+        let entry = self.windows.remove(index);
+
+        if self.windows.is_empty() {
+            self.last_closed = Some(entry.state);
+        }
+
+        true
+    }
+
+    pub(crate) fn take_last_closed(&mut self) -> Option<WindowLocalState> {
+        self.last_closed.take()
+    }
+}
+
+/// The window that most recently gained focus; CLI `new_tab`/`activate`
+/// target it. `None` until any window activates.
+pub(crate) struct LastActiveWindow(pub(crate) Option<WindowId>);
+
+impl Global for LastActiveWindow {}
+
+pub(crate) fn selected_window_appearance(cx: &App) -> WindowAppearance {
+    if ComponentTheme::global(cx).is_dark() {
+        WindowAppearance::Dark
+    } else {
+        WindowAppearance::Light
+    }
+}
+
+/// Narrower than this the title bar cannot hold the tab strip alongside the
+/// window controls, and shorter than this a terminal pane stops showing a
+/// usable number of rows. Enforced by the platform through WM_GETMINMAXINFO,
+/// so it also bounds interactive resize, not just the initial geometry.
+pub(super) const MIN_WINDOW_WIDTH: f32 = 640.0;
+
+const MIN_WINDOW_HEIGHT: f32 = 400.0;
+
+/// Open a terminal window using the saved geometry and session. Register its
+/// state before constructing the view so workspace updates during restoration
+/// can publish the resulting session.
+pub(crate) fn open_window(
+    cx: &mut App,
+    initial: WindowLocalState,
+    initial_cwd: Option<String>,
+) -> WindowHandle<Root> {
+    let window_bounds = match &initial.window {
+        Some(w) => {
+            // WM_GETMINMAXINFO bounds interactive resize only, so geometry
+            // saved by an older build (or edited by hand) is clamped here
+            // as well; otherwise the window would restore below its
+            // minimum and stay there until the user resized it.
+            let bounds = Bounds::new(
+                point(px(w.x), px(w.y)),
+                size(
+                    px(w.width.max(MIN_WINDOW_WIDTH)),
+                    px(w.height.max(MIN_WINDOW_HEIGHT)),
+                ),
+            );
+
+            if w.maximized {
+                WindowBounds::Maximized(bounds)
+            } else {
+                WindowBounds::Windowed(bounds)
+            }
+        }
+        None => WindowBounds::Windowed(Bounds::centered(None, size(px(960.0), px(620.0)), cx)),
+    };
+
+    // Titlebar setup for a shell window. A host that keeps drawing its own
+    // window buttons over the transparent titlebar centers them in a
+    // standard-height strip; this bar is taller, so the buttons are re-anchored
+    // to its middle to line up with the controls the bar draws itself. A host
+    // that draws its controls as part of the bar needs no such adjustment.
+    let titlebar_options = TitlebarOptions {
+        title: Some(t!("app-window-title").into()),
+        appears_transparent: true,
+        traffic_light_position: Host::WINDOW_CONTROLS_INSET
+            .map(|inset| point(px(inset), px(inset))),
+    };
+
+    cx.open_window(
+        WindowOptions {
+            window_bounds: Some(window_bounds),
+            // Borderless: the app draws its own titlebar (gpui-component
+            // `TitleBar`); the Windows backend routes controls/drag/resize.
+            window_decorations: Some(WindowDecorations::Client),
+            titlebar: Some(titlebar_options),
+            window_background: ui::window_background_appearance(cx),
+            window_appearance_override: Some(selected_window_appearance(cx)),
+            window_min_size: Some(size(px(MIN_WINDOW_WIDTH), px(MIN_WINDOW_HEIGHT))),
+            ..Default::default()
+        },
+        // Wrap the shell in gpui-component's `Root` so modal/dialog layers
+        // render. The shell focuses its active pane on first render.
+        move |window, cx| {
+            let view: AnyView = cx
+                .new(|cx| {
+                    let view = cx.weak_entity();
+
+                    cx.global_mut::<WindowRegistry>().register(
+                        window.window_handle(),
+                        view,
+                        initial,
+                    );
+
+                    AppWindow::new(initial_cwd, window, cx)
+                })
+                .into();
+
+            // Each top-level region paints the configured alpha once. A
+            // background on Root would sit underneath all of them and make
+            // the effective opacity higher than the requested value.
+            cx.new(|cx| Root::new(view, window, cx).bg(transparent_black()))
+        },
+    )
+    .expect("open GPUI terminal window")
+}
 
 /// A workspace cwd as a shell working directory: `None` for empty or the
 /// legacy `"."` placeholder (shells then start in their default directory).
@@ -155,7 +377,7 @@ pub(super) struct PendingAgentResume {
     pub(super) session_id: String,
 }
 
-pub(crate) struct Shell {
+pub(crate) struct AppWindow {
     pub(crate) workspaces: WorkspaceManager,
 
     /// Monotonic surface-id source shared by tabs and workspaces.
@@ -198,14 +420,18 @@ pub(crate) struct Shell {
     pub(crate) doomed_workspace: Option<WorkspaceId>,
 }
 
-impl Drop for Shell {
+impl Drop for AppWindow {
     fn drop(&mut self) {
         remove_native_notifications(&self.agent_notifications.agent_monitor.notifications());
     }
 }
 
-impl Shell {
-    pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+impl AppWindow {
+    pub(crate) fn new(
+        initial_cwd: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         cx.observe_global_in::<AppSettings>(window, |this, window, cx| {
             this.sync_team_setting(window, cx);
 
@@ -225,16 +451,6 @@ impl Shell {
         cx.observe_window_bounds(window, Self::on_window_bounds_changed)
             .detach();
 
-        // Expose this shell to the CLI dispatch task and track which window
-        // was focused last (the `new_tab`/`activate` URL target).
-        let entry = ShellEntry {
-            window_id,
-            handle: window.window_handle(),
-            shell: cx.weak_entity(),
-        };
-
-        cx.global_mut::<ShellRegistry>().0.push(entry);
-
         // OS-level close requests (Alt+F4, taskbar, system menu) go through
         // the running-processes confirmation. The titlebar X bypasses
         // WM_CLOSE, so it routes through the same check via `on_close_window`.
@@ -252,8 +468,6 @@ impl Shell {
         let registry_entry = cx.global::<WindowRegistry>().get(window_id);
 
         // A CLI new_window target replaces session restore for this window.
-        let initial_cwd = registry_entry.and_then(|entry| entry.initial_cwd.clone());
-
         let remembered_session = if initial_cwd.is_some() {
             None
         } else {
@@ -337,7 +551,7 @@ impl Shell {
         let bounds = window_bounds.get_bounds();
 
         if let Some(entry) = cx.global_mut::<WindowRegistry>().get_mut(id) {
-            entry.bounds = Some(WindowState {
+            entry.window = Some(WindowState {
                 x: bounds.origin.x.as_f32(),
                 y: bounds.origin.y.as_f32(),
                 width: bounds.size.width.as_f32(),
@@ -1560,10 +1774,10 @@ impl Shell {
     ) {
         let bounds = window.window_bounds().get_bounds();
 
-        AppWindow::open(
+        open_window(
             cx,
-            AppWindow {
-                bounds: Some(WindowState {
+            WindowLocalState {
+                window: Some(WindowState {
                     x: bounds.origin.x.as_f32() + 30.0,
                     y: bounds.origin.y.as_f32() + 30.0,
                     width: bounds.size.width.as_f32(),
@@ -1573,8 +1787,8 @@ impl Shell {
                 session: None,
                 // New windows inherit this window's sidebar width.
                 sidebar_width: Some(self.sidebar.width),
-                initial_cwd: None,
             },
+            None,
         );
     }
 
@@ -2993,7 +3207,7 @@ impl Shell {
 
     /// Publish this window's session to the registry the app writes out on
     /// quit. Called from every path that changes what a restore would rebuild.
-    pub(super) fn sync_session_memory(&self, cx: &mut Context<Shell>) {
+    pub(super) fn sync_session_memory(&self, cx: &mut Context<AppWindow>) {
         let session = session_state(&self.workspaces, self.doomed_workspace, cx);
 
         if let Some(entry) = cx.global_mut::<WindowRegistry>().get_mut(self.window_id) {
@@ -3035,7 +3249,7 @@ enum AgentRouteTarget {
     Agent(Entity<AgentPane>),
 }
 
-impl Render for Shell {
+impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Safety net for any activation path that reaches a render without
         // passing `focus_active`: the visible tab must be live before anything
@@ -3263,7 +3477,7 @@ impl Render for Shell {
                     .ui_font
                     .clone(),
             ))
-            .key_context("Shell");
+            .key_context("AppWindow");
 
         Self::bind_actions(shell, cx)
             .children(background_image)
@@ -3310,7 +3524,7 @@ impl Render for Shell {
     }
 }
 
-impl Focusable for Shell {
+impl Focusable for AppWindow {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
     }
@@ -3318,7 +3532,7 @@ impl Focusable for Shell {
 
 const PANE_RESIZE_STEP: Pixels = px(30.0);
 
-impl Shell {
+impl AppWindow {
     pub(super) fn on_toggle_git_sidebar(
         &mut self,
         _: &ToggleGitSidebar,

@@ -25,7 +25,7 @@ impl AgentNotificationState {
         }
     }
 
-    pub(super) fn reschedule_agent_timer(&mut self, cx: &mut Context<Shell>) {
+    pub(super) fn reschedule_agent_timer(&mut self, cx: &mut Context<AppWindow>) {
         self.agent_timer_generation = self.agent_timer_generation.wrapping_add(1);
 
         let generation = self.agent_timer_generation;
@@ -47,7 +47,7 @@ impl AgentNotificationState {
     }
 
     /// Stop tracking `route`, whose pane or tab is gone.
-    pub(super) fn remove_route(&mut self, route: &AgentRoute, cx: &mut Context<Shell>) {
+    pub(super) fn remove_route(&mut self, route: &AgentRoute, cx: &mut Context<AppWindow>) {
         let mutation = self.agent_monitor.remove_route(route);
 
         apply_monitor_display_change(&mutation, cx);
@@ -61,7 +61,7 @@ impl AgentNotificationState {
         &mut self,
         route: &AgentRoute,
         notification_id: &str,
-        cx: &mut Context<Shell>,
+        cx: &mut Context<AppWindow>,
     ) -> bool {
         let mutation = self.agent_monitor.acknowledge(route, notification_id);
 
@@ -76,7 +76,7 @@ impl AgentNotificationState {
     pub(super) fn process_native_notifications(
         &mut self,
         visible_route: Option<&AgentRoute>,
-        cx: &mut Context<Shell>,
+        cx: &mut Context<AppWindow>,
     ) {
         let system_notifications_enabled = cx
             .global::<AppSettings>()
@@ -135,7 +135,10 @@ impl AgentNotificationState {
 
 /// Carry a monitor change to the screen: withdraw the system notifications
 /// it removed, and repaint when what the chrome shows changed.
-pub(super) fn apply_monitor_display_change(mutation: &MonitorMutation, cx: &mut Context<Shell>) {
+pub(super) fn apply_monitor_display_change(
+    mutation: &MonitorMutation,
+    cx: &mut Context<AppWindow>,
+) {
     remove_native_notifications(&mutation.removed_notifications);
 
     if mutation.visible_changed {

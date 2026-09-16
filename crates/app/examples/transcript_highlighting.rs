@@ -100,7 +100,7 @@ fn main() {
         "launch this preview with --testing"
     );
 
-    nmt_config::enable_testing_mode();
+    nmt_config::set_testing_mode(true);
 
     #[cfg(windows)]
     let platform = Rc::new(Platform::new(false).expect("initialize preview platform"));

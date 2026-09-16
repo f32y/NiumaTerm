@@ -39,3 +39,16 @@ pub const THEME_CARD_MIN_WIDTH: Pixels = px(200.0);
 pub const THEME_CARD_HEIGHT: Pixels = px(120.0);
 pub const THEME_PREVIEW_HEIGHT: Pixels = px(72.0);
 pub const THEME_GRID_MAX_COLUMNS: u16 = 4;
+
+/// The bar is taller than the Fluent standard strip because it carries
+/// controls and a session heading rather than a title alone. A host that
+/// draws its own window buttons over the bar measures their inset from this
+/// height, since it would otherwise center them in a shorter strip.
+pub const TITLE_BAR_HEIGHT: f32 = 44.0;
+
+/// How far a row's fill reaches back into the sidebar inset on each side,
+/// and how much padding the row then puts back so its content still lands
+/// on the column's edge. Without it the highlight stops exactly where the
+/// first glyph starts and reads as clipped; the leading half is also the
+/// lane the selected-row mark stands in.
+pub const SIDEBAR_ROW_GUTTER: f32 = 6.0;

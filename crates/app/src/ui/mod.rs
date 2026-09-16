@@ -1,4 +1,5 @@
 pub(crate) use app::design::SURFACE_RADIUS as UI_RADIUS;
+pub(crate) use app::platform_style;
 pub(crate) use gpui_component::modern_menu::dismiss_modern_menu;
 
 pub(crate) use crate::ui::active_list::{ActiveList, HasId};
@@ -17,12 +18,11 @@ pub(crate) use crate::ui::settings::{
 #[cfg(windows)]
 pub(crate) use crate::ui::shell::NewRemoteTab;
 pub(crate) use crate::ui::shell::{
-    CloseTab, NewAgentTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace, PrevTab,
-    PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp, Shell,
-    ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp, TabSurface, ToggleSidebar,
+    AppWindow, CloseTab, LastActiveWindow, NewAgentTab, NewTab, NewWindow, NewWorkspace, NextTab,
+    NextWorkspace, PrevTab, PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight,
+    ResizePaneUp, ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp, TabSurface,
+    ToggleSidebar, WindowRegistry, open_window, selected_window_appearance,
 };
-
-pub(crate) mod platform_style;
 
 mod active_list;
 mod background_tasks;

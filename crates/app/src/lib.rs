@@ -1,22 +1,18 @@
 //! Application presentation and embedded translations shared with examples.
 
+pub use crate::i18n::_rust_i18n_try_translate;
+
+pub(crate) use crate::i18n::_rust_i18n_t;
+
 pub mod agent_tab;
 pub mod assets;
 pub mod design;
+pub mod platform_style;
 pub mod syntax;
 pub mod terminal_tab;
 pub mod utils;
 
-pub(crate) mod platform_style;
+mod i18n;
 
 #[cfg(test)]
 mod localization_tests;
-
-rust_i18n::i18n!("locales", fallback = "en");
-
-// The translation macro reads outside Rust's dependency tracking. These inputs
-// let compiler caches invalidate this target when either catalog changes.
-const _: (&str, &str) = (
-    include_str!("../locales/en.toml"),
-    include_str!("../locales/zh-CN.toml"),
-);

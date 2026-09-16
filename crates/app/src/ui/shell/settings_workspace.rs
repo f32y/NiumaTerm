@@ -17,7 +17,7 @@ use rust_i18n::t;
 use crate::agent_updates::AgentUpdates;
 use crate::ui;
 use crate::ui::settings::{AppSettings, SettingsEditing};
-use crate::ui::shell::Shell;
+use crate::ui::shell::AppWindow;
 
 /// Sidebar entry name and tab title of the settings pseudo workspace, in the
 /// active language. Looked up at creation time; the entry is never persisted,
@@ -42,7 +42,7 @@ struct OpenSettings {
 }
 
 impl SettingsSurface {
-    pub(super) fn open(&mut self, window: &mut Window, cx: &mut Context<Shell>) {
+    pub(super) fn open(&mut self, window: &mut Window, cx: &mut Context<AppWindow>) {
         let state = SettingsState::owned(SelectIndex::default(), window, cx);
         let editing = cx.new(|_| SettingsEditing::default());
 

@@ -24,7 +24,7 @@ pub(super) struct UpdateNotificationLayer {
 
 fn update_notification_card(
     view: UpdateNotificationView,
-    shell: gpui::WeakEntity<Shell>,
+    shell: gpui::WeakEntity<AppWindow>,
 ) -> Notification {
     let tone = match view.tone {
         UpdateNotificationTone::Info => NotificationType::Info,
@@ -129,7 +129,7 @@ fn update_notification_card(
 }
 
 impl UpdateNotificationLayer {
-    pub(super) fn render(&mut self, cx: &mut Context<Shell>) -> Option<AnyElement> {
+    pub(super) fn render(&mut self, cx: &mut Context<AppWindow>) -> Option<AnyElement> {
         let snapshots = cx.global::<AgentUpdates>().coordinator.snapshots();
 
         let views = snapshots
@@ -205,7 +205,7 @@ impl UpdateNotificationLayer {
         })
     }
 
-    fn ensure_timer(&mut self, cx: &mut Context<Shell>) {
+    fn ensure_timer(&mut self, cx: &mut Context<AppWindow>) {
         let any_expiring = self.cards.values().any(|entry| entry.elapsed.is_some());
 
         if self.timer_running || !any_expiring {
@@ -235,7 +235,7 @@ impl UpdateNotificationLayer {
     }
 }
 
-fn expire_elapsed_cards(shell: &mut Shell, cx: &mut Context<Shell>) -> bool {
+fn expire_elapsed_cards(shell: &mut AppWindow, cx: &mut Context<AppWindow>) -> bool {
     let mut expired = Vec::new();
 
     if shell.window_active {

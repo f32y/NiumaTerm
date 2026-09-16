@@ -2,7 +2,7 @@
 //! vertical rows listed under each workspace in the sidebar. The two layouts
 //! share the new-tab menu, drag previews, and progress colors kept here.
 
-pub(super) use crate::ui::tab_bar::horizontal::{TabDensity, TabStrip, tab_shape_preview};
+pub(super) use crate::ui::tab_bar::horizontal::{TabStrip, tab_shape_preview};
 pub(super) use crate::ui::tab_bar::menu::new_tab_menu;
 pub(super) use crate::ui::tab_bar::vertical::{VerticalTabList, WorkspaceTabs, accept_row_drops};
 

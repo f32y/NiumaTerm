@@ -25,7 +25,7 @@ use tracing::warn;
 
 use crate::pane_tree::{PaneId, PaneNode, PaneTree};
 use crate::tabs::{TabId, TabManager};
-use crate::ui::Shell;
+use crate::ui::AppWindow;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::settings::{AgentProfile, AppSettings, builtin_agent_profile};
 use crate::ui::shell::tab_surface::{AgentTab, GitTab, TerminalPaneTree};
@@ -135,7 +135,7 @@ pub(super) fn default_session(
     initial_cwd: Option<String>,
     default_profile: (Option<String>, Vec<String>),
     next_id: &mut u64,
-    cx: &mut Context<Shell>,
+    cx: &mut Context<AppWindow>,
 ) -> WorkspaceManager {
     // The default (no-CLI) branch keeps spawning with no cwd — the shell
     // then starts in its own default directory, as before.
@@ -149,7 +149,7 @@ pub(super) fn default_session(
         ),
     };
 
-    let surface_id = Shell::alloc_id(next_id);
+    let surface_id = AppWindow::alloc_id(next_id);
     let pane = spawn_default_pane(cx, surface_id, default_profile, spawn_cwd);
     let title = pane.read(cx).profile_name().to_string();
 
@@ -159,7 +159,7 @@ pub(super) fn default_session(
         title,
     );
 
-    let workspace_id = Shell::alloc_id(next_id);
+    let workspace_id = AppWindow::alloc_id(next_id);
 
     WorkspaceManager::new(
         tabs,
@@ -173,7 +173,7 @@ pub(super) fn restore_session(
     session: Option<SessionState>,
     next_id: &mut u64,
     window: &mut Window,
-    cx: &mut Context<Shell>,
+    cx: &mut Context<AppWindow>,
 ) -> Option<WorkspaceManager> {
     let session = session?;
     let saved_active = session.active_workspace;
@@ -197,7 +197,7 @@ pub(super) fn restore_session(
 
         restored_count += 1;
 
-        let workspace_id = WorkspaceId(Shell::alloc_id(next_id));
+        let workspace_id = WorkspaceId(AppWindow::alloc_id(next_id));
 
         let name = if name.trim().is_empty() {
             t!("workspace-restored-default-name", count = restored_count).into_owned()
@@ -263,7 +263,7 @@ pub(super) fn materialize_active_tab(
     workspaces: &mut WorkspaceManager,
     next_id: &mut u64,
     window: &mut Window,
-    cx: &mut Context<Shell>,
+    cx: &mut Context<AppWindow>,
 ) -> bool {
     let state = match workspaces.active_tabs().active() {
         TabSurface::Pending(state) => (**state).clone(),
@@ -303,7 +303,7 @@ pub(super) fn materialize_active_tab(
             let owner = AgentSession::create(profile, workspace, None, cx);
             let pane = cx.new(|cx| AgentPane::attach(&owner, window, cx));
 
-            Shell::watch_agent_tab(&pane, cx);
+            AppWindow::watch_agent_tab(&pane, cx);
 
             owner.start(None, cx);
 
@@ -323,7 +323,7 @@ pub(super) fn materialize_active_tab(
 fn restore_terminal_tree(
     state: TabState,
     next_id: &mut u64,
-    cx: &mut Context<Shell>,
+    cx: &mut Context<AppWindow>,
 ) -> TerminalPaneTree {
     state
         .panes
@@ -331,7 +331,7 @@ fn restore_terminal_tree(
         .and_then(|panes| restore_pane_node(panes, next_id, cx))
         .map(Into::into)
         .unwrap_or_else(|| {
-            let surface_id = Shell::alloc_id(next_id);
+            let surface_id = AppWindow::alloc_id(next_id);
             let default_profile = cx.global::<AppSettings>().default_profile_command();
 
             let (launch, profile_name) =
@@ -339,7 +339,7 @@ fn restore_terminal_tree(
 
             let pane = match spawn_pane(cx, surface_id, launch, profile_name) {
                 Ok(pane) => {
-                    Shell::watch_pane(&pane, cx);
+                    AppWindow::watch_pane(&pane, cx);
 
                     pane
                 }
@@ -430,7 +430,7 @@ fn restore_tabs(
 
         restored.push((
             TabSurface::Pending(Box::new(tab_state)),
-            TabId(Shell::alloc_id(next_id)),
+            TabId(AppWindow::alloc_id(next_id)),
             name,
             default_title,
         ));
@@ -468,7 +468,7 @@ fn restore_tabs(
 fn restore_pane_node(
     node: &PaneNodeState,
     next_id: &mut u64,
-    cx: &mut Context<Shell>,
+    cx: &mut Context<AppWindow>,
 ) -> Option<PaneNode<Entity<TerminalPane>>> {
     match node {
         PaneNodeState::Leaf {
@@ -477,7 +477,7 @@ fn restore_pane_node(
             cwd,
             grid_size,
         } => {
-            let surface_id = Shell::alloc_id(next_id);
+            let surface_id = AppWindow::alloc_id(next_id);
 
             let mut launch = TabState {
                 shell: shell.clone(),
@@ -493,7 +493,7 @@ fn restore_pane_node(
 
             match spawn_pane(cx, surface_id, launch, profile_name) {
                 Ok(pane) => {
-                    Shell::watch_pane(&pane, cx);
+                    AppWindow::watch_pane(&pane, cx);
 
                     Some(PaneTree::restored_leaf(PaneId(surface_id), pane))
                 }

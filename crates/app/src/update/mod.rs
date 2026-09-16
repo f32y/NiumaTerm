@@ -27,10 +27,9 @@ use rust_i18n::t;
 use tracing::warn;
 
 use crate::AWAIT_EXIT_FLAG;
-use crate::ui::AppSettings;
+use crate::ui::{AppSettings, WindowRegistry};
 use crate::update::releases::{Release, supersedes};
 use crate::utils::get_exe_dir;
-use crate::window::ShellRegistry;
 
 /// Where a package is unpacked before any of it replaces an installed file.
 const STAGING_DIRECTORY: &str = "update";
@@ -339,8 +338,8 @@ fn show_file_use_prompt(prompt: FileUsePrompt, cx: &mut App) {
 fn pending_windows(pending: &PendingInstall, cx: &App) -> Vec<AnyWindowHandle> {
     let mut handles = vec![pending.window];
 
-    if let Some(registry) = cx.try_global::<ShellRegistry>() {
-        handles.extend(registry.0.iter().map(|entry| entry.handle));
+    if let Some(registry) = cx.try_global::<WindowRegistry>() {
+        handles.extend(registry.windows().iter().map(|entry| entry.handle));
     }
 
     handles
@@ -677,7 +676,7 @@ fn install_staged_additions(staging: &Path, install: &Path) {
 
 /// Wait for the instance an update replaced, so the single-instance check that
 /// follows is not answered by a process on its way out.
-pub(crate) fn await_predecessor(pid: u32) {
+pub(crate) fn wait_for_previous_instance(pid: u32) {
     if !nmt_platform::wait_for_exit(pid, install::PREDECESSOR_TIMEOUT) {
         warn!("update: the previous instance is still running; starting anyway");
     }

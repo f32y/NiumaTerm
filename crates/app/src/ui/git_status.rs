@@ -489,7 +489,7 @@ impl GitStatusModel {
         self.enabled || self.sidebar_open
     }
 
-    /// Idempotent target sync; `Shell` calls this on every render. A real
+    /// Idempotent target sync; `AppWindow` calls this on every render. A real
     /// change bumps the generation and (when a consumer is active) refreshes.
     pub(crate) fn set_target_cwd(&mut self, cwd: Option<String>, cx: &mut Context<Self>) {
         if cwd == self.target_cwd {

@@ -1,3 +1,5 @@
+pub(super) use app::design::SIDEBAR_ROW_GUTTER;
+
 mod drag;
 mod list;
 mod status;
@@ -20,8 +22,7 @@ use crate::ui::sidebar_resize::ResizeDrag;
 use crate::ui::title_bar::TITLE_BAR_CONTROLS_WIDTH;
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workspace_sidebar::list::WorkspaceList;
-use crate::ui::{AppSettings, NewWorkspace, Shell, sidebar_resize};
-use crate::window::WindowRegistry;
+use crate::ui::{AppSettings, AppWindow, NewWorkspace, WindowRegistry, sidebar_resize};
 use crate::workspace::{ProgressTally, TerminalActivity, WorkspaceSummary};
 
 pub(super) struct WorkspaceChrome {
@@ -96,7 +97,7 @@ impl Sidebar {
         tab_rows: Vec<Vec<AnyElement>>,
         renames: &InlineRenameSession,
         usage: SidebarUsage,
-        cx: &mut Context<Shell>,
+        cx: &mut Context<AppWindow>,
     ) -> AnyElement {
         self.list.end_cancelled_drag(cx);
 
@@ -260,13 +261,6 @@ impl IconNamed for CloseTemporaryWorkspacesIcon {
 ///
 /// The panel owns the horizontal text inset; row fills extend into its gutter.
 const SIDEBAR_PADDING_X: f32 = 12.0;
-
-/// How far a row's fill reaches back into that inset on each side, and how
-/// much padding the row then puts back so its content still lands on the
-/// column's edge. Without it the highlight stops exactly where the first
-/// glyph starts and reads as clipped; the leading half of it is also the lane
-/// the selected-row mark stands in.
-pub(super) const SIDEBAR_ROW_GUTTER: f32 = 6.0;
 
 /// Where the host draws its window buttons over the title bar, the visible
 /// row fill starts directly below the close button: the outer panel offset

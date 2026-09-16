@@ -22,7 +22,7 @@ use gpui_component::{
 };
 use rust_i18n::t;
 
-use crate::ui::Shell;
+use crate::ui::AppWindow;
 use crate::workspace::{RootChange, WorkspaceId, WorkspaceRoots, root_identity};
 
 /// A user-selected path resolved to something a workspace can own, or the
@@ -385,7 +385,7 @@ impl RootAvailability {
     /// ones the filesystem could not reach. Rendering a sidebar row or opening
     /// the New Tab menu reads the remembered answer, so neither one waits on a
     /// sleeping disk or a disconnected share.
-    pub(super) fn refresh(&mut self, paths: Vec<String>, cx: &mut Context<Shell>) {
+    pub(super) fn refresh(&mut self, paths: Vec<String>, cx: &mut Context<AppWindow>) {
         cx.spawn(async move |shell, cx| {
             let available = cx
                 .background_executor()
@@ -419,7 +419,7 @@ fn root_key(path: &str) -> Option<String> {
 
 /// Open the new-workspace dialog: a name plus the directory editor, so a
 /// workspace can be created with several directories in one step.
-pub(super) fn open_new_workspace_dialog(window: &mut Window, cx: &mut Context<Shell>) {
+pub(super) fn open_new_workspace_dialog(window: &mut Window, cx: &mut Context<AppWindow>) {
     let name_input = cx.new(|cx| {
         InputState::new(window, cx).default_value(t!("shell-workspace-default-name").to_string())
     });
@@ -441,7 +441,7 @@ pub(super) fn open_workspace_dirs_dialog(
     id: WorkspaceId,
     roots: WorkspaceRoots,
     window: &mut Window,
-    cx: &mut Context<Shell>,
+    cx: &mut Context<AppWindow>,
 ) {
     let editor = cx.new(|cx| WorkspaceDirsEditor::new(Some(roots), cx));
     let shell = cx.entity();
@@ -455,7 +455,7 @@ fn new_workspace_dialog(
     dialog: Dialog,
     name_input: &Entity<InputState>,
     dirs: &Entity<WorkspaceDirsEditor>,
-    shell: &Entity<Shell>,
+    shell: &Entity<AppWindow>,
     window: &Window,
 ) -> Dialog {
     let name_input = name_input.clone();
@@ -523,7 +523,7 @@ fn new_workspace_dialog(
 fn workspace_dirs_dialog(
     dialog: Dialog,
     editor: &Entity<WorkspaceDirsEditor>,
-    shell: &Entity<Shell>,
+    shell: &Entity<AppWindow>,
     id: WorkspaceId,
     window: &Window,
     cx: &App,

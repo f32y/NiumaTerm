@@ -11,7 +11,7 @@ use nmt_terminal::session::TerminalSessionConfig;
 use rust_i18n::t;
 use tracing::warn;
 
-use crate::ui::Shell;
+use crate::ui::AppWindow;
 use crate::ui::settings::AppSettings;
 
 pub(super) fn spawn_pane(
@@ -85,7 +85,7 @@ pub(super) fn launch_with_profile(
 /// given. Falls back in layers: an unusable cwd retries without it, a
 /// broken profile retries the built-in shell.
 pub(super) fn spawn_default_pane(
-    cx: &mut Context<Shell>,
+    cx: &mut Context<AppWindow>,
     surface_id: u64,
     default_profile: (Option<String>, Vec<String>),
     cwd: Option<String>,
@@ -133,7 +133,7 @@ pub(super) fn spawn_default_pane(
         }
     };
 
-    Shell::watch_pane(&pane, cx);
+    AppWindow::watch_pane(&pane, cx);
 
     pane
 }

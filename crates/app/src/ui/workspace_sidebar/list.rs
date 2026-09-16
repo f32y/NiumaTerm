@@ -27,7 +27,7 @@ use crate::ui::workspace_sidebar::status::WorkspaceStatus;
 use crate::ui::workspace_sidebar::{
     SELECTION_BAR_INSET, SIDEBAR_ROW_GUTTER, WORKSPACE_NAME_INSET, WorkspaceChrome,
 };
-use crate::ui::{AppSettings, Shell, UI_RADIUS, modern_dropdown};
+use crate::ui::{AppSettings, AppWindow, UI_RADIUS, modern_dropdown};
 use crate::workspace::WorkspaceKind;
 
 /// The scrolling list of workspaces, each heading the tab rows the vertical
@@ -68,7 +68,7 @@ impl WorkspaceList {
     /// list (cancelled via Escape, or released elsewhere). The cancel itself
     /// refreshes the window, so a call on every render always gets a chance
     /// to run.
-    pub(super) fn end_cancelled_drag(&mut self, cx: &Context<Shell>) {
+    pub(super) fn end_cancelled_drag(&mut self, cx: &Context<AppWindow>) {
         if !cx.has_active_drag() {
             self.drag_over = None;
             self.dragging = None;
@@ -85,7 +85,7 @@ impl WorkspaceList {
         tab_rows: Vec<Vec<AnyElement>>,
         renames: &InlineRenameSession,
         width: f32,
-        cx: &mut Context<Shell>,
+        cx: &mut Context<AppWindow>,
     ) -> AnyElement {
         let mut tab_rows = tab_rows.into_iter();
 
@@ -148,7 +148,7 @@ impl WorkspaceList {
         chrome: &WorkspaceChrome,
         renames: &InlineRenameSession,
         width: f32,
-        cx: &mut Context<Shell>,
+        cx: &mut Context<AppWindow>,
     ) -> AnyElement {
         let ws = &chrome.summary;
 

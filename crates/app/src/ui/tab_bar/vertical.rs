@@ -20,7 +20,7 @@ use crate::ui::tab_bar::drag::{DragLabelPreview, DragStyle, TAB_ROW_HEIGHT};
 use crate::ui::tab_bar::progress_visual;
 use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
 use crate::ui::workspace_sidebar::SIDEBAR_ROW_GUTTER;
-use crate::ui::{Shell, UI_RADIUS};
+use crate::ui::{AppWindow, UI_RADIUS};
 use crate::workspace::TerminalActivity;
 
 /// Tabs listed as rows under their workspace. Rows can be reordered by drag
@@ -106,7 +106,7 @@ impl VerticalTabList {
     /// list (cancelled via Escape, or released elsewhere). The cancel itself
     /// refreshes the window, so a call on every render always gets a chance
     /// to run.
-    pub(crate) fn end_cancelled_drag(&mut self, cx: &Context<Shell>) {
+    pub(crate) fn end_cancelled_drag(&mut self, cx: &Context<AppWindow>) {
         if !cx.has_active_drag() {
             self.drag_over = None;
             self.dragging = None;
@@ -122,7 +122,7 @@ impl VerticalTabList {
         busy_agent_tabs: &collections::HashSet<TabId>,
         renames: &InlineRenameSession,
         row_width: f32,
-        cx: &mut Context<Shell>,
+        cx: &mut Context<AppWindow>,
     ) -> Vec<AnyElement> {
         let list = workspace.tabs.list();
         let active_id = list.active_id();
@@ -148,7 +148,7 @@ impl VerticalTabList {
                 pending: matches!(tab.surface(), TabSurface::Pending(_)),
                 exited: tab.exited(),
                 progress: tab.progress(),
-                terminal: Shell::tab_terminal_activity(tab, cx),
+                terminal: AppWindow::tab_terminal_activity(tab, cx),
             })
             .collect();
 
@@ -183,7 +183,7 @@ impl VerticalTabList {
         closeable: bool,
         row_width: f32,
         renames: &InlineRenameSession,
-        cx: &mut Context<Shell>,
+        cx: &mut Context<AppWindow>,
     ) -> AnyElement {
         let (ws_idx, tab_idx) = position;
         let tab_id = tab.id;
@@ -437,7 +437,7 @@ impl VerticalTabList {
 /// Fallback drop target for a list holding tab rows: a drop released over
 /// the make-way gap (a margin, outside every row's hitbox) still lands on the
 /// tracked insertion position instead of silently ending the drag.
-pub(crate) fn accept_row_drops(list: Stateful<Div>, cx: &mut Context<Shell>) -> Stateful<Div> {
+pub(crate) fn accept_row_drops(list: Stateful<Div>, cx: &mut Context<AppWindow>) -> Stateful<Div> {
     list.on_drop(cx.listener(|this, drag: &RowDrag, window, cx| {
         this.vertical_tabs_mut().dragging = None;
 

@@ -18,7 +18,7 @@ use tracing::warn;
 
 use crate::ui;
 use crate::ui::settings::AppSettings;
-use crate::ui::shell::Shell;
+use crate::ui::shell::AppWindow;
 use crate::workspace::WorkspaceId;
 
 /// The description of a close confirmation: `with_processes` when `count`
@@ -57,13 +57,13 @@ fn processes_running(count: usize) -> String {
 /// itself does not cover.
 pub(super) fn open_close_confirm(
     window: &mut Window,
-    cx: &mut Context<Shell>,
+    cx: &mut Context<AppWindow>,
     // Dialog callbacks can rebuild their content, so they retain a
     // translated title that can be reused on each invocation.
     title: Cow<'static, str>,
     description: String,
     note: Option<SharedString>,
-    on_confirm: impl Fn(&mut Shell, &mut Window, &mut Context<Shell>) + 'static,
+    on_confirm: impl Fn(&mut AppWindow, &mut Window, &mut Context<AppWindow>) + 'static,
 ) {
     let shell = cx.entity();
     let on_confirm = Rc::new(on_confirm);
@@ -98,7 +98,7 @@ pub(super) fn open_save_failed_close(
     description: String,
     note: Option<SharedString>,
     window: &mut Window,
-    cx: &mut Context<Shell>,
+    cx: &mut Context<AppWindow>,
 ) {
     // `remove_window` tears the window down directly (no WM_CLOSE
     // round-trip), so this dialog won't re-trigger.
@@ -131,7 +131,7 @@ pub(super) fn open_save_failed_close(
 
 pub(super) fn close_last_workspace_dialog(
     dialog: Dialog,
-    shell: &Entity<Shell>,
+    shell: &Entity<AppWindow>,
     id: WorkspaceId,
     message: &str,
     note: &Option<SharedString>,

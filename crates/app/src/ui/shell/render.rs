@@ -29,7 +29,7 @@ pub(super) struct ShellChrome {
 }
 
 impl ShellChrome {
-    pub(super) fn new(git_model: Entity<GitStatusModel>, cx: &mut Context<Shell>) -> Self {
+    pub(super) fn new(git_model: Entity<GitStatusModel>, cx: &mut Context<AppWindow>) -> Self {
         Self {
             tab_strip: TabStrip::new(),
             vertical_tabs: VerticalTabList::new(),
@@ -41,7 +41,7 @@ impl ShellChrome {
         }
     }
 
-    pub(super) fn observe_root(&mut self, window: &Window, cx: &mut Context<Shell>) {
+    pub(super) fn observe_root(&mut self, window: &Window, cx: &mut Context<AppWindow>) {
         // Re-render the shell whenever the wrapping Root changes (dialog
         // open/close), since the shell draws the dialog layer.
         if !self.root_observed

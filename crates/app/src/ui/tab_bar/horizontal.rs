@@ -23,7 +23,7 @@ use crate::ui::composition::{
     HoverActionLayout, HoverActionVisibility, StatusMark, StatusMarkTone, TOOLBAR_BUTTON_SIZE,
     hover_action, toolbar_button,
 };
-use crate::ui::platform_style::{Host, PlatformStyle as _};
+use crate::ui::platform_style::{Host, PlatformStyle as _, TabDensity};
 use crate::ui::shell::{
     InlineRename, InlineRenameSession, InlineRenameStyle, TabSurface, pending_tab_icon,
 };
@@ -31,7 +31,7 @@ use crate::ui::tab_bar::drag::{DragLabelPreview, DragStyle, TabDrag};
 use crate::ui::tab_bar::menu::new_tab_menu;
 use crate::ui::tab_bar::progress_visual;
 use crate::ui::terminal_status::{TerminalVisual, terminal_dot, terminal_presentation};
-use crate::ui::{AppSettings, Shell, UI_RADIUS, modern_dropdown};
+use crate::ui::{AppSettings, AppWindow, UI_RADIUS, modern_dropdown};
 use crate::workspace::TerminalActivity;
 
 pub(crate) struct TabStrip {
@@ -64,19 +64,6 @@ pub(crate) struct TabStrip {
 /// (2 borders + 32 padding + 16 slot + 4 gap).
 const MIN_AUTO_TAB_WIDTH: f32 = 54.0;
 
-/// What a tab still has room to draw. The close control outranks the tab
-/// icon, which outranks the title: a tab nobody can close is worse than a tab
-/// nobody can identify at a glance.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TabDensity {
-    /// Icon, title, and the close control on hover.
-    Full,
-    /// Icon and the close control on hover; the title is dropped.
-    Compact,
-    /// A single glyph slot, shared by the icon and the close control.
-    IconOnly,
-}
-
 impl TabStrip {
     pub(crate) fn new() -> Self {
         Self {
@@ -98,7 +85,7 @@ impl TabStrip {
         &mut self,
         active_id: TabId,
         active_index: usize,
-        cx: &mut Context<Shell>,
+        cx: &mut Context<AppWindow>,
     ) {
         let changed = self.last_active != Some(active_id);
 
@@ -128,7 +115,7 @@ impl TabStrip {
         unread_tabs: &collections::HashSet<TabId>,
         busy_agent_tabs: &collections::HashSet<TabId>,
         renames: &InlineRenameSession,
-        cx: &mut Context<Shell>,
+        cx: &mut Context<AppWindow>,
     ) -> AnyElement {
         let active_idx = tabs.list().active_index();
 
@@ -151,7 +138,7 @@ impl TabStrip {
                 pending: matches!(tab.surface(), TabSurface::Pending(_)),
                 exited: tab.exited(),
                 progress: tab.progress(),
-                terminal: Shell::tab_terminal_activity(tab, cx),
+                terminal: AppWindow::tab_terminal_activity(tab, cx),
             })
             .collect();
 
