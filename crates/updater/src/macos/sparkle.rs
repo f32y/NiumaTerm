@@ -18,10 +18,9 @@
 //! development build that was never meant to update itself. Driving `SPUUpdater`
 //! directly turns that into a value the caller can decide about.
 
-#![cfg(target_os = "macos")]
-
 #[cfg(test)]
-mod tests;
+#[path = "sparkle_tests.rs"]
+mod sparkle_tests;
 
 use std::cell::Cell;
 use std::error::Error;
@@ -40,7 +39,7 @@ use objc2_foundation::{NSBundle, NSError, NSSet, NSString, ns_string};
 /// versions are ordered by release time, so a stable release is only offered to
 /// a nightly user when it was cut after the nightly they are running.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Channel {
+pub(super) enum Channel {
     /// The default channel, which carries no channel name at all.
     #[default]
     Stable,
@@ -126,7 +125,7 @@ impl Error for StartError {}
 /// Dropping this stops scheduled checks. The type holds Objective-C references
 /// and is neither `Send` nor `Sync`, which is what keeps every call below on the
 /// thread that created it.
-pub struct Updater {
+pub(super) struct Updater {
     updater: Retained<AnyObject>,
 
     /// Sparkle keeps only a weak reference to its delegate and is silent
@@ -142,7 +141,7 @@ pub struct Updater {
 
 impl Updater {
     /// Bring the updater up, or report why it stayed down.
-    pub fn start(channel: Channel) -> Result<Self, StartError> {
+    pub(super) fn start(channel: Channel) -> Result<Self, StartError> {
         MainThreadMarker::new().ok_or(StartError::NotMainThread)?;
 
         let bundle = NSBundle::mainBundle();
@@ -174,7 +173,7 @@ impl Updater {
     /// brings that forward; doing it on every settings write instead of only on
     /// a real change would restart the cycle for edits that have nothing to do
     /// with updates.
-    pub fn set_channel(&self, channel: Channel) {
+    pub(super) fn set_channel(&self, channel: Channel) {
         if self.delegate.ivars().channel.replace(channel) == channel {
             return;
         }
@@ -184,14 +183,14 @@ impl Updater {
 
     /// Check now, on the user's behalf, showing Sparkle's own progress and
     /// result windows.
-    pub fn check_for_updates(&self) {
+    pub(super) fn check_for_updates(&self) {
         unsafe { msg_send![&*self.updater, checkForUpdates] }
     }
 
     /// Whether a user-initiated check can be started right now. Sparkle keeps
     /// this current while a check runs, so it is what a menu item's enabled
     /// state should follow.
-    pub fn can_check_for_updates(&self) -> bool {
+    pub(super) fn can_check_for_updates(&self) -> bool {
         unsafe { msg_send![&*self.updater, canCheckForUpdates] }
     }
 
@@ -199,7 +198,7 @@ impl Updater {
     ///
     /// Sparkle reschedules its own cycle a moment after this changes, so a
     /// caller that has just written the setting has nothing further to do.
-    pub fn set_automatic_checks(&self, enabled: bool) {
+    pub(super) fn set_automatic_checks(&self, enabled: bool) {
         unsafe { msg_send![&*self.updater, setAutomaticallyChecksForUpdates: enabled] }
     }
 }

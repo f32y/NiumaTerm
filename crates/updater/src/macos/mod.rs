@@ -5,10 +5,13 @@
 //! existing quit handler can save settings and window state once, without a
 //! separate updater callback repeating those writes.
 
-pub use nmt_sparkle::StartError;
+pub use crate::macos::sparkle::StartError;
+
+mod sparkle;
 
 use nmt_config::update::{UpdateChannel, UpdateConfig};
-use nmt_sparkle::{Channel, Updater as SparkleUpdater};
+
+use crate::macos::sparkle::{Channel, Updater as SparkleUpdater};
 
 /// Keep this value alive on the main thread for as long as updates are enabled.
 pub struct Updater(SparkleUpdater);

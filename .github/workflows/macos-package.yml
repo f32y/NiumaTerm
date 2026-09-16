@@ -129,7 +129,7 @@ jobs:
         run: ./scripts/bundle-macos.sh --profile release --out dist
 
       # Only the tools. The framework that ships is the one the build linked
-      # against, so its version is pinned in crates/sparkle/build.rs alone and
+      # against, so its version is pinned in crates/updater/build.rs alone and
       # the two cannot disagree.
       - name: Fetch the Sparkle tools
         run: |
