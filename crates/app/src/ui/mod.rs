@@ -10,7 +10,7 @@ pub(crate) use crate::ui::modern_dropdown::modern_dropdown;
 pub(crate) use crate::ui::settings::save_settings;
 pub(crate) use crate::ui::settings::{
     AppSettings, apply_ui_theme, apply_window_translucency, background_image_layer_opacity,
-    install_agent_settings, install_terminal_settings, main_view_background_opacity, watch_themes,
+    install_agent_settings, install_terminal_settings, main_view_background_opacity,
     window_background_appearance,
 };
 // Remote sessions connect to a Windows host, so only the Windows key table

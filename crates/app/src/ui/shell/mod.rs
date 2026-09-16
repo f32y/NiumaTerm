@@ -22,7 +22,6 @@ mod main_surface;
 mod panels;
 mod rename;
 mod render;
-mod settings_workspace;
 mod tab_presentation;
 mod updates_layer;
 mod workspace_dirs;
@@ -88,7 +87,9 @@ use crate::ui::persistence::{
 };
 use crate::ui::platform_style::{Host, PlatformStyle as _};
 use crate::ui::right_panel::{RightPanel, RightPanelKind};
-use crate::ui::settings::{AgentProfile, AppSettings, TabBarStyle};
+use crate::ui::settings::{
+    AgentProfile, AppSettings, SettingsSurface, TabBarStyle, settings_title,
+};
 use crate::ui::shell::actions::NewTeamTab;
 use crate::ui::shell::agent_notifications::{
     AgentNotificationState, apply_monitor_display_change, remove_native_notifications,
@@ -100,9 +101,6 @@ use crate::ui::shell::close_confirm::{
 use crate::ui::shell::main_surface::{floating_surface_card, surface_border, tab_surface_view};
 use crate::ui::shell::panels::RightPanelController;
 use crate::ui::shell::render::ShellChrome;
-#[cfg(enable_profiling)]
-use crate::ui::shell::settings_workspace::profiling::start_settings_profile;
-use crate::ui::shell::settings_workspace::{SettingsSurface, settings_title};
 use crate::ui::shell::tab_surface::{AgentTab, GitTab};
 use crate::ui::shell::updates_layer::UpdateNotificationLayer;
 use crate::ui::shell::workspace_dirs::{
@@ -538,9 +536,6 @@ impl AppWindow {
         this.sync_session_memory(cx);
 
         this.refresh_root_availability(cx);
-
-        #[cfg(enable_profiling)]
-        start_settings_profile(window, cx);
 
         this
     }

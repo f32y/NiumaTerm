@@ -162,7 +162,7 @@ fn reload_themes(editing: &Entity<SettingsEditing>, cx: &mut App) {
     });
 }
 
-pub(crate) fn watch_themes(editing: &Entity<SettingsEditing>, cx: &mut App) -> Option<Task<()>> {
+pub(super) fn watch_themes(editing: &Entity<SettingsEditing>, cx: &mut App) -> Option<Task<()>> {
     reload_themes(editing, cx);
 
     let themes_dir = config_dir_path().join("themes");
