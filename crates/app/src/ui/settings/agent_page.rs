@@ -188,6 +188,27 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                 ),
             )
             .description(t!("settings-agent-enable-team-description").into_owned()),
+        )
+        .item(
+            SettingItem::new(
+                t!("settings-appearance-human-friendly-agent-ui-layout"),
+                SettingField::switch(
+                    |cx| {
+                        cx.global::<AppSettings>()
+                            .config()
+                            .appearance
+                            .human_friendly_agent_ui_layout
+                    },
+                    |value, cx| {
+                        cx.global_mut::<AppSettings>().edit_appearance(|section| {
+                            section.human_friendly_agent_ui_layout = value
+                        });
+                    },
+                ),
+            )
+            .description(
+                t!("settings-appearance-human-friendly-agent-ui-layout-description").into_owned(),
+            ),
         );
 
     let mut cli_updates = SettingGroup::new()
