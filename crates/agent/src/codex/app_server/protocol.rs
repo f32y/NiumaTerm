@@ -7,10 +7,11 @@ use crate::CodexProviderConfig;
 use crate::chat::{
     Compaction, ContextUsageScope, ContextWindowUsage, Event, ForkAnchor, ForkCheckpoint, Item,
     ModelInfo, ReplayItem, ReplayTurn, ScopedTokenUsage, SessionScope, SessionSummary,
-    SkillReference, SlashCommandOutcome, ThreadSettings, TokenUsageBreakdown,
+    SkillReference, SlashCommandOutcome, ThreadSettings, TokenUsageBreakdown, list_selected_model,
 };
 use crate::codex::app_server::questions::parse_async_questions;
 use crate::codex::app_server::{PROVIDER_API_FIELD, THREAD_LIST_LIMIT, ThreadProfile};
+use crate::json::{block_text, rfc3339_from_unix_seconds};
 use crate::workspace::AgentWorkspace;
 
 pub(super) fn parse_context_window_usage(value: &Value) -> Option<ContextWindowUsage> {
@@ -416,22 +417,7 @@ pub(super) fn parse_models(result: &Value, selected_model: Option<&str>) -> Vec<
         })
         .unwrap_or_default();
 
-    if let Some(model) = selected_model
-        .map(str::trim)
-        .filter(|model| !model.is_empty())
-        && !models.iter().any(|entry| entry.model == model)
-    {
-        models.insert(
-            0,
-            ModelInfo {
-                model: model.to_string(),
-                display: model.to_string(),
-                tiers: Vec::new(),
-                default_tier: None,
-                efforts: Vec::new(),
-            },
-        );
-    }
+    list_selected_model(&mut models, selected_model);
 
     models
 }
@@ -560,7 +546,9 @@ pub(super) fn parse_fork_checkpoints(turns: &Value) -> Vec<ForkCheckpoint> {
 
             Some(ForkCheckpoint {
                 prompt: turn_prompt(opened)?,
-                timestamp: opened["startedAt"].as_i64().map(unix_seconds_to_rfc3339),
+                timestamp: opened["startedAt"]
+                    .as_i64()
+                    .and_then(rfc3339_from_unix_seconds),
                 anchor: ForkAnchor::CodexThrough(kept["id"].as_str()?.to_string()),
             })
         })
@@ -580,14 +568,6 @@ fn turn_prompt(turn: &Value) -> Option<String> {
         .find(|item| item["type"].as_str() == Some("userMessage"))
         .map(|item| user_input_text(&item["content"]))
         .filter(|text| !text.trim().is_empty())
-}
-
-/// Codex dates turns in Unix seconds while the picker renders RFC 3339, which
-/// is what the backends reading their history off disk already record.
-fn unix_seconds_to_rfc3339(seconds: i64) -> String {
-    chrono::DateTime::from_timestamp(seconds, 0)
-        .unwrap_or_default()
-        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
 pub(super) fn parse_replay(turns: &Value) -> Vec<ReplayTurn> {
@@ -656,15 +636,9 @@ pub(super) fn parse_replay(turns: &Value) -> Vec<ReplayTurn> {
 
 /// A user message item's `content` is an array of typed `UserInput` blocks.
 pub(super) fn user_input_text(content: &Value) -> String {
-    let parts: Vec<&str> = content
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|block| block["type"].as_str() == Some("text"))
-        .filter_map(|block| block["text"].as_str())
-        .collect();
-
-    parts.join("\n").trim().to_string()
+    block_text(content, true)
+        .map(|text| text.trim().to_string())
+        .unwrap_or_default()
 }
 
 pub(super) fn parse_item(item: &Value) -> Option<Item> {

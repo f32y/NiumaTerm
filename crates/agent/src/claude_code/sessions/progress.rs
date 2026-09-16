@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::claude_code::sessions::session_path;
+use crate::json::block_text;
 use crate::progress::{GoalStatus, Task, TaskList, TaskStatus};
 
 pub(crate) const PROGRESS_METHOD: &str = "nmt/claudeProgress";
@@ -215,18 +216,7 @@ impl ProgressTracker {
                         .get("toolUseResult")
                         .or_else(|| record.get("tool_use_result"));
 
-                    let text = block["content"]
-                        .as_str()
-                        .map(str::to_owned)
-                        .unwrap_or_else(|| {
-                            block["content"]
-                                .as_array()
-                                .into_iter()
-                                .flatten()
-                                .filter_map(|part| part["text"].as_str())
-                                .collect::<Vec<_>>()
-                                .join("\n")
-                        });
+                    let text = block_text(&block["content"], false).unwrap_or_default();
 
                     let parsed = serde_json::from_str::<Value>(&text).ok();
 
@@ -298,14 +288,11 @@ impl ProgressTracker {
                     .iter()
                     .enumerate()
                     .filter_map(|(index, todo)| {
-                        Some(Task {
-                            id: index.to_string(),
-                            title: todo["content"].as_str()?.to_owned(),
-                            status: TaskStatus::parse(todo["status"].as_str()?)?,
-                            description: None,
-                            owner: None,
-                            blocked_by: Vec::new(),
-                        })
+                        Some(Task::indexed(
+                            index,
+                            todo["content"].as_str()?,
+                            TaskStatus::parse(todo["status"].as_str()?)?,
+                        ))
                     })
                     .collect();
             }

@@ -23,7 +23,7 @@ fn process_routes_are_unique_and_environment_is_exact() {
     assert_eq!(environment[0], (AGENT_ROUTE_ENV.into(), first.0.clone()));
     assert_eq!(
         environment[1],
-        (AGENT_HOOK_TOKEN_ENV.into(), process.hook_token.clone())
+        (AGENT_HOOK_TOKEN_ENV.into(), process.hook_token().into())
     );
     assert_eq!(environment[2], (AGENT_HOOK_VERSION_ENV.into(), "1".into()));
 

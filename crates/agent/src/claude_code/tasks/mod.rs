@@ -22,6 +22,10 @@
 
 pub(crate) use crate::claude_code::tasks::shells::shell_items;
 
+pub(super) use crate::claude_code::tasks::records::{
+    lifecycle_state, record_identifiers, sidechain_preview,
+};
+
 mod children;
 mod records;
 mod shells;
@@ -42,20 +46,19 @@ use crate::background_task::{
 use crate::claude_code::sessions::RestoredTask;
 use crate::claude_code::tasks::children::ChildTranscripts;
 use crate::claude_code::tasks::records::{
-    AliasTable, admits_new_row, lifecycle_state, record_identifiers, refs_from, result_text,
-    sidechain_preview, stop_target,
+    AliasTable, admits_new_row, refs_from, result_text, stop_target,
 };
 use crate::claude_code::tasks::shells::ShellIndex;
 use crate::json::text_field;
 
 /// Tool names that launch a child agent.
-const LAUNCH_TOOLS: [&str; 2] = ["Task", "Agent"];
+pub(super) const LAUNCH_TOOLS: [&str; 2] = ["Task", "Agent"];
 
 /// System subtypes that report one child's lifecycle. Both terminal records
 /// matter: a child stopped through the CLI's own stop path reports `killed`
 /// only in an update patch, and the matching notification can be suppressed
 /// entirely, so watching notifications alone leaves it running forever.
-const LIFECYCLE_RECORDS: [&str; 4] = [
+pub(super) const LIFECYCLE_RECORDS: [&str; 4] = [
     "task_started",
     "task_progress",
     "task_notification",
@@ -65,7 +68,7 @@ const LIFECYCLE_RECORDS: [&str; 4] = [
 /// The task type of delegated agent work. Monitors and workflows travel
 /// through the same lifecycle records, so an explicit type is what keeps them
 /// out of a view that is about child agents and background shells.
-const AGENT_TASK_TYPE: &str = "local_agent";
+pub(super) const AGENT_TASK_TYPE: &str = "local_agent";
 
 /// The task type of a shell command the CLI runs as a task. Every `Bash` call
 /// registers one; only the backgrounded ones belong in this view, which is why

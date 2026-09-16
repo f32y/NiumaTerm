@@ -11,7 +11,7 @@ use serde_json::Value;
 
 use crate::background_task::{BackgroundTaskRefs, BackgroundTaskState};
 use crate::claude_code::tasks::{AGENT_TASK_TYPE, SHELL_TASK_TYPE};
-use crate::json::{condense, text_field};
+use crate::json::{block_text, condense, text_field};
 
 /// Whether a lifecycle record may create a row nothing is known about yet. A
 /// child agent is admitted from its own type alone. A shell is admitted only
@@ -28,7 +28,7 @@ pub(super) fn admits_new_row(task_type: Option<&str>, record: &Value) -> bool {
 
 /// Every identifier a lifecycle record supplies. Their presence together in one
 /// record is what makes them aliases of the same child.
-pub(super) fn record_identifiers(record: &Value) -> Vec<String> {
+pub(crate) fn record_identifiers(record: &Value) -> Vec<String> {
     let mut ids = Vec::new();
 
     for key in ["task_id", "tool_use_id", "agent_id"] {
@@ -66,7 +66,7 @@ pub(super) fn refs_from(record: &Value) -> BackgroundTaskRefs {
 /// Lifecycle state a task record reports. `task_notification` carries only
 /// terminal statuses; `task_updated` carries the full vocabulary and is the
 /// only place a stopped task's `killed` reliably appears.
-pub(super) fn lifecycle_state(kind: &str, record: &Value) -> Option<BackgroundTaskState> {
+pub(crate) fn lifecycle_state(kind: &str, record: &Value) -> Option<BackgroundTaskState> {
     let status = match kind {
         "task_started" => return Some(BackgroundTaskState::Working),
         "task_progress" => return Some(BackgroundTaskState::Working),
@@ -98,21 +98,11 @@ pub(super) fn result_text(block: &Value) -> Option<String> {
 /// preview a row shows, because a handoff result states a path that is longer
 /// than the preview bound and would be cut in half by it.
 pub(super) fn result_content(block: &Value) -> Option<String> {
-    let content = &block["content"];
-
-    content.as_str().map(str::to_owned).or_else(|| {
-        let parts: Vec<&str> = content
-            .as_array()?
-            .iter()
-            .filter_map(|part| part["text"].as_str())
-            .collect();
-
-        (!parts.is_empty()).then(|| parts.join("\n"))
-    })
+    block_text(&block["content"], false)
 }
 
 /// One-line summary of a child's latest sidechain record.
-pub(super) fn sidechain_preview(message: &Value) -> Option<String> {
+pub(crate) fn sidechain_preview(message: &Value) -> Option<String> {
     for block in message["message"]["content"]
         .as_array()
         .into_iter()

@@ -16,6 +16,7 @@ mod records_tests;
 use serde_json::Value;
 
 use crate::chat::{Compaction, CompactionTrigger, Item};
+use crate::json::{block_text, diff_lines};
 
 /// The metadata object of a `compact_boundary` record, whichever key
 /// convention produced it.
@@ -107,7 +108,7 @@ pub(crate) fn tool_item(id: &str, name: &str, input: &Value) -> Item {
 pub(crate) fn complete_tool_item(started: Item, result: &Value) -> Item {
     let failed = result["is_error"].as_bool().unwrap_or(false);
     let status = Some(if failed { "failed" } else { "completed" }.to_string());
-    let output = tool_result_text(&result["content"]);
+    let output = block_text(&result["content"], false).unwrap_or_default();
 
     match started {
         Item::CommandExecution {
@@ -190,25 +191,7 @@ pub(super) fn edit_diff(name: &str, input: &Value) -> Option<String> {
         return None;
     }
 
-    let mut diff = String::new();
-
-    for line in removed.lines() {
-        diff.push('-');
-
-        diff.push_str(line);
-
-        diff.push('\n');
-    }
-
-    for line in added.lines() {
-        diff.push('+');
-
-        diff.push_str(line);
-
-        diff.push('\n');
-    }
-
-    Some(diff)
+    Some(diff_lines(removed, added))
 }
 
 /// Best-effort one-line label for an arbitrary tool call, from the input
@@ -230,18 +213,4 @@ pub(super) fn tool_title(input: &Value) -> String {
     }
 
     String::new()
-}
-
-/// Extract readable text from a tool-result payload, which is either a plain
-/// string or an array of content blocks.
-fn tool_result_text(content: &Value) -> String {
-    match content {
-        Value::String(s) => s.clone(),
-        Value::Array(blocks) => blocks
-            .iter()
-            .filter_map(|block| block["text"].as_str())
-            .collect::<Vec<_>>()
-            .join("\n"),
-        _ => String::new(),
-    }
 }

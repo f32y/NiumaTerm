@@ -13,9 +13,9 @@ use crate::chat::Event;
 use crate::codex::app_server::host::{CodexHost, HOST_EXIT_METHOD, RegistrationId};
 use crate::codex::app_server::protocol::{thread_name_request, thread_start_params};
 use crate::codex::app_server::{Session, ThreadProfile};
+use crate::session::naming::provisional_title;
 use crate::workspace::AgentWorkspace;
 
-const PROVISIONAL_TITLE_CHARS: usize = 60;
 const GENERATED_TITLE_CHARS: usize = 36;
 const TITLE_PROMPT_CHARS: usize = 2_000;
 const DEFAULT_TITLE_MODEL: &str = "gpt-5.6-luna";
@@ -425,15 +425,7 @@ fn finish_title_thread(
 /// leave the conversation unnamed because they describe an operation rather
 /// than the subject the user wants to discuss.
 pub(crate) fn provisional_title_from_prompt(prompt: &str) -> Option<String> {
-    let first_line = prompt.lines().find(|line| !line.trim().is_empty())?.trim();
-
-    if first_line.starts_with('/') {
-        return None;
-    }
-
-    let normalized = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
-
-    truncate_with_ellipsis(&normalized, PROVISIONAL_TITLE_CHARS)
+    provisional_title(prompt, None)
 }
 
 pub(super) fn title_thread_start_request(
@@ -541,26 +533,4 @@ fn title_prompt(prompt: &str) -> String {
         &prompt,
     ]
     .join("\n")
-}
-
-fn truncate_with_ellipsis(text: &str, limit: usize) -> Option<String> {
-    let count = text.chars().count();
-
-    if count == 0 {
-        return None;
-    }
-
-    if count <= limit {
-        return Some(text.to_string());
-    }
-
-    let mut truncated: String = text.chars().take(limit.saturating_sub(1)).collect();
-
-    while truncated.ends_with(char::is_whitespace) {
-        truncated.pop();
-    }
-
-    truncated.push('…');
-
-    Some(truncated)
 }

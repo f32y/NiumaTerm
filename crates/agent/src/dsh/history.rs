@@ -15,6 +15,7 @@ use crate::chat::{
     Event, ForkAnchor, ForkCheckpoint, Item, ReplayItem, ReplayTurn, SessionSummary,
 };
 use crate::dsh::mapping::{ToolTracker, map_session_event};
+use crate::json::rfc3339_from_unix_seconds;
 
 /// Read a `session.list` result into the resumable conversations of one
 /// working directory.
@@ -260,7 +261,11 @@ pub(crate) fn fork_checkpoints(page: &Value) -> Vec<ForkCheckpoint> {
 
             Some(ForkCheckpoint {
                 prompt: prompt.clone(),
-                timestamp: at.and_then(unix_millis_to_rfc3339),
+                timestamp: at.and_then(|millis| {
+                    // The picker shows second precision, so the sub-second
+                    // part is dropped before the conversion.
+                    rfc3339_from_unix_seconds(i64::try_from(millis / 1_000).ok()?)
+                }),
                 anchor: ForkAnchor::DeepSeekThrough(*kept),
             })
         })
@@ -269,15 +274,6 @@ pub(crate) fn fork_checkpoints(page: &Value) -> Vec<ForkCheckpoint> {
     checkpoints.reverse();
 
     checkpoints
-}
-
-/// The harness dates its events in Unix milliseconds while the picker renders
-/// RFC 3339, which is what a backend reading its history off disk records.
-fn unix_millis_to_rfc3339(millis: u64) -> Option<String> {
-    let millis = i64::try_from(millis).ok()?;
-
-    chrono::DateTime::from_timestamp_millis(millis)
-        .map(|date| date.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
 }
 
 /// Flatten a rebuilt page into one stream of items.

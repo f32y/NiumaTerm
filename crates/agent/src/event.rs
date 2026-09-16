@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use subtle::ConstantTimeEq as _;
 
 use crate::AgentRoute;
 use crate::claude_code::hook::normalize as normalize_claude;
@@ -106,7 +107,9 @@ impl AgentEvent {
             return Err(AgentValidationError::UnsupportedVersion);
         }
 
-        if expected_token.is_empty() || !constant_time_eq(input.token, expected_token) {
+        if expected_token.is_empty()
+            || !bool::from(input.token.as_bytes().ct_eq(expected_token.as_bytes()))
+        {
             return Err(AgentValidationError::InvalidToken);
         }
 
@@ -166,24 +169,6 @@ pub(super) fn validate_identity(
     } else {
         Ok(())
     }
-}
-
-fn constant_time_eq(left: &str, right: &str) -> bool {
-    let left = left.as_bytes();
-    let right = right.as_bytes();
-
-    let mut different = left.len() ^ right.len();
-
-    let length = left.len().max(right.len());
-
-    for index in 0..length {
-        let byte_diff: usize =
-            (*left.get(index).unwrap_or(&0) ^ *right.get(index).unwrap_or(&0)).into();
-
-        different |= byte_diff;
-    }
-
-    different == 0
 }
 
 pub fn normalize_title(value: &str) -> String {

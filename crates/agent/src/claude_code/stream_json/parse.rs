@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::chat::{
     ContextUsageScope, ContextWindowUsage, Event, ModelInfo, ScopedTokenUsage,
     SlashCommandArguments, SlashCommandInfo, SlashCommandRunPolicy, SlashCommandSource,
-    TokenUsageBreakdown,
+    TokenUsageBreakdown, list_selected_model,
 };
 use crate::claude_code::records::tool_title;
 
@@ -330,22 +330,7 @@ pub(super) fn parse_models(models: &Value, selected_model: Option<&str>) -> Vec<
         })
         .unwrap_or_default();
 
-    if let Some(model) = selected_model
-        .map(str::trim)
-        .filter(|model| !model.is_empty())
-        && !parsed.iter().any(|entry| entry.model == model)
-    {
-        parsed.insert(
-            0,
-            ModelInfo {
-                model: model.to_string(),
-                display: model.to_string(),
-                tiers: Vec::new(),
-                default_tier: None,
-                efforts: Vec::new(),
-            },
-        );
-    }
+    list_selected_model(&mut parsed, selected_model);
 
     // A custom endpoint's discovered model lists no supportedEffortLevels,
     // while the built-in aliases remapped to it (ANTHROPIC_DEFAULT_* env

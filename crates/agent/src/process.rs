@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use getrandom::fill;
+use hex::encode;
 
 use crate::AgentRoute;
 
@@ -16,7 +17,7 @@ pub const AGENT_TESTING_ENV: &str = "NMT_TESTING";
 
 pub struct AgentProcess {
     nonce: String,
-    pub(super) hook_token: String,
+    hook_token: String,
     hook_executable: OnceLock<String>,
     testing: AtomicBool,
     next_route: AtomicU64,
@@ -33,8 +34,8 @@ impl AgentProcess {
         fill(&mut hook_token).expect("Windows cryptographic random source");
 
         Self {
-            nonce: format!("{:x}-{}", process::id(), hex(&nonce)),
-            hook_token: hex(&hook_token),
+            nonce: format!("{:x}-{}", process::id(), encode(nonce)),
+            hook_token: encode(hook_token),
             hook_executable: OnceLock::new(),
             testing: AtomicBool::new(false),
             next_route: AtomicU64::new(1),
@@ -105,16 +106,4 @@ pub fn agent_process() -> &'static AgentProcess {
     static PROCESS: OnceLock<AgentProcess> = OnceLock::new();
 
     PROCESS.get_or_init(AgentProcess::new)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-
-    let mut output = String::with_capacity(bytes.len() * 2);
-
-    for byte in bytes {
-        write!(output, "{byte:02x}").expect("writing to String cannot fail");
-    }
-
-    output
 }

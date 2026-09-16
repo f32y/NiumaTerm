@@ -32,6 +32,22 @@ pub struct Task {
     pub blocked_by: Vec<String>,
 }
 
+impl Task {
+    /// A checklist entry identified by its position. Providers publish their
+    /// plans and todo lists as whole arrays without stable ids, so the index
+    /// is the only identity a row has between snapshots.
+    pub(crate) fn indexed(index: usize, title: &str, status: TaskStatus) -> Self {
+        Self {
+            id: index.to_string(),
+            title: title.to_owned(),
+            description: None,
+            status,
+            owner: None,
+            blocked_by: Vec::new(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TaskStatus {
     #[default]

@@ -11,6 +11,7 @@ use serde_json::{Value, from_str, json};
 use crate::chat::{
     Compaction, CompactionTrigger, Event, Item, Question, QuestionOption, TurnRetry,
 };
+use crate::json::diff_lines;
 
 /// The status vocabulary the transcript renders: anything else reads as still
 /// running, and `failed` is what turns a row red.
@@ -378,13 +379,7 @@ fn render_diffs(diffs: &Value) -> Option<String> {
 
         body.push_str(&format!("--- {path}\n+++ {path}\n"));
 
-        for line in old.lines() {
-            body.push_str(&format!("-{line}\n"));
-        }
-
-        for line in new.lines() {
-            body.push_str(&format!("+{line}\n"));
-        }
+        body.push_str(&diff_lines(old, new));
     }
 
     (!body.is_empty()).then_some(body)

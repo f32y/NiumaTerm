@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 
-use chrono::DateTime;
 use serde_json::Value;
 use tracing::warn;
 
@@ -15,6 +14,7 @@ use crate::claude_code::sessions::titles::{
     clean_prompt, compaction_summary_text, conversation_user_text, is_interruption,
 };
 use crate::claude_code::sessions::{ClaudeCheckpoint, session_path};
+use crate::json::unix_seconds_from_rfc3339;
 
 /// Opening a selected conversation must distinguish unreadable history from an
 /// empty transcript, so a failed read cannot replace the visible conversation.
@@ -374,11 +374,7 @@ fn output_tokens(record: &Value) -> Option<u64> {
 
 /// Wall-clock time of a record as Unix seconds.
 fn record_time(record: &Value) -> Option<i64> {
-    let stamp = record["timestamp"].as_str()?;
-
-    DateTime::parse_from_rfc3339(stamp)
-        .ok()
-        .map(|time| time.timestamp())
+    unix_seconds_from_rfc3339(record["timestamp"].as_str()?)
 }
 
 /// Stable transcript id for a replayed compaction. The record's own uuid keeps
