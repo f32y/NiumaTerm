@@ -3,10 +3,8 @@
 //! reports them as Task tool calls plus sidechain records; both reduce into the
 //! same summary so the UI never parses a provider protocol.
 
-pub use nmt_profile::AgentKind as BackgroundTaskProvider;
-
 pub use crate::background_task::transcript::{
-    BackgroundTaskTranscriptState, BackgroundTaskTranscriptUpdate, MAX_TRANSCRIPT_ITEMS,
+    BackgroundTaskLoadState, BackgroundTaskTranscriptUpdate, MAX_TRANSCRIPT_ITEMS,
 };
 
 mod transcript;
@@ -17,17 +15,19 @@ mod tests;
 use std::collections::HashMap;
 use std::time::SystemTime;
 
+use crate::session::AgentKind;
+
 /// A provider plus a provider-local stable id. Used both for a child task and
 /// for the parent session that owns it, because both need the same
 /// qualification to stay distinct across simultaneously open providers.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BackgroundTaskKey {
-    pub provider: BackgroundTaskProvider,
+    pub provider: AgentKind,
     pub id: String,
 }
 
 impl BackgroundTaskKey {
-    pub fn new(provider: BackgroundTaskProvider, id: impl Into<String>) -> Self {
+    pub fn new(provider: AgentKind, id: impl Into<String>) -> Self {
         Self {
             provider,
             id: id.into(),
@@ -35,15 +35,15 @@ impl BackgroundTaskKey {
     }
 
     pub fn codex(id: impl Into<String>) -> Self {
-        Self::new(BackgroundTaskProvider::Codex, id)
+        Self::new(AgentKind::Codex, id)
     }
 
     pub fn claude_code(id: impl Into<String>) -> Self {
-        Self::new(BackgroundTaskProvider::Claude, id)
+        Self::new(AgentKind::Claude, id)
     }
 
     pub fn deepseek(id: impl Into<String>) -> Self {
-        Self::new(BackgroundTaskProvider::DeepSeek, id)
+        Self::new(AgentKind::DeepSeek, id)
     }
 }
 
@@ -170,20 +170,6 @@ pub enum BackgroundTaskKind {
     Shell,
 }
 
-/// How far provider-specific restoration has progressed. Kept beside the rows
-/// rather than encoded into them so a failed refresh can leave known rows
-/// visible while still reporting the failure.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub enum BackgroundTaskDiscoveryState {
-    #[default]
-    NotLoaded,
-    Loading,
-    Ready,
-    Unavailable {
-        message: String,
-    },
-}
-
 /// One child agent as the UI sees it. Optional fields stay absent when a
 /// provider does not report them; a row is shown from its key and state alone.
 #[derive(Clone, Debug, PartialEq)]
@@ -284,7 +270,7 @@ impl BackgroundTaskUpdate {
 pub struct BackgroundTaskSnapshot {
     pub parent_session: BackgroundTaskKey,
     pub tasks: Vec<BackgroundTaskSummary>,
-    pub discovery: BackgroundTaskDiscoveryState,
+    pub discovery: BackgroundTaskLoadState,
 
     /// Advances when a task is created or changes lifecycle state. The title-bar
     /// button compares it against the last ordinal seen for this parent session,
@@ -318,7 +304,7 @@ impl BackgroundTaskSnapshot {
 pub struct BackgroundTaskRegistry {
     parent_session: BackgroundTaskKey,
     tasks: HashMap<BackgroundTaskKey, BackgroundTaskSummary>,
-    discovery: BackgroundTaskDiscoveryState,
+    discovery: BackgroundTaskLoadState,
     sequence: u64,
     activity: u64,
 }
@@ -328,7 +314,7 @@ impl BackgroundTaskRegistry {
         Self {
             parent_session,
             tasks: HashMap::new(),
-            discovery: BackgroundTaskDiscoveryState::default(),
+            discovery: BackgroundTaskLoadState::default(),
             sequence: 0,
             activity: 0,
         }
@@ -356,13 +342,13 @@ impl BackgroundTaskRegistry {
         self.sequence
     }
 
-    pub fn discovery(&self) -> &BackgroundTaskDiscoveryState {
+    pub fn discovery(&self) -> &BackgroundTaskLoadState {
         &self.discovery
     }
 
     /// Returns true when the state changed, so callers only publish a snapshot
     /// for a real transition.
-    pub fn set_discovery(&mut self, discovery: BackgroundTaskDiscoveryState) -> bool {
+    pub fn set_discovery(&mut self, discovery: BackgroundTaskLoadState) -> bool {
         if self.discovery == discovery {
             return false;
         }
@@ -460,13 +446,13 @@ impl BackgroundTaskRegistry {
 
     /// Drop every row, for example when the pane switches to another session.
     pub fn clear(&mut self) -> bool {
-        if self.tasks.is_empty() && self.discovery == BackgroundTaskDiscoveryState::NotLoaded {
+        if self.tasks.is_empty() && self.discovery == BackgroundTaskLoadState::NotLoaded {
             return false;
         }
 
         self.tasks.clear();
 
-        self.discovery = BackgroundTaskDiscoveryState::NotLoaded;
+        self.discovery = BackgroundTaskLoadState::NotLoaded;
         self.activity += 1;
 
         true
@@ -490,18 +476,18 @@ impl BackgroundTaskRegistry {
 
 fn default_refs(key: &BackgroundTaskKey) -> BackgroundTaskRefs {
     match key.provider {
-        BackgroundTaskProvider::Codex => BackgroundTaskRefs::Codex {
+        AgentKind::Codex => BackgroundTaskRefs::Codex {
             thread_id: key.id.clone(),
             parent_thread_id: None,
         },
-        BackgroundTaskProvider::Claude => BackgroundTaskRefs::ClaudeCode {
+        AgentKind::Claude => BackgroundTaskRefs::ClaudeCode {
             task_id: None,
             tool_use_id: None,
             agent_id: None,
         },
         // A child is addressed by the pair, so a reference built without its
         // parent names nothing readable; the snapshot always supplies one.
-        BackgroundTaskProvider::DeepSeek => BackgroundTaskRefs::DeepSeek {
+        AgentKind::DeepSeek => BackgroundTaskRefs::DeepSeek {
             parent_session_id: String::new(),
             continuable: false,
         },

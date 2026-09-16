@@ -14,7 +14,7 @@ use nmt_agent::session::branch::{BranchUpdate, RewindAction};
 use nmt_agent::session::lifecycle::{StartOutcome, Status};
 use nmt_agent::session::test_support::TestBackend;
 use nmt_agent::session::{AgentKind, Backend};
-use nmt_config::profile::{AgentProfile, AgentProfileKind};
+use nmt_config::profile::AgentProfile;
 use rust_i18n::t;
 
 use crate::agent_tab::settings::AgentSettings;
@@ -24,7 +24,7 @@ use crate::agent_tab::{AgentPane, AgentThreadDefaults, RecentSessionsMode};
 fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>) {
     let profile = AgentProfile {
         name: "Branch Test".into(),
-        kind: AgentProfileKind::Codex,
+        kind: AgentKind::Codex,
         // The initial async start is replaced before it is polled.
         executable: "missing-agent.exe".into(),
         ..AgentProfile::default()

@@ -90,7 +90,7 @@ fn sample_profiles() -> Vec<Profile> {
 fn sample_agent_profiles() -> Vec<profile::AgentProfile> {
     vec![profile::AgentProfile {
         name: "Claude Code".to_string(),
-        kind: profile::AgentProfileKind::Claude,
+        kind: profile::AgentKind::Claude,
         executable: "claude".to_string(),
         launcher: profile::AgentProfileLauncher::Custom,
         model: "claude-opus-4-8".to_string(),

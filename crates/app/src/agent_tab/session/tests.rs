@@ -1,6 +1,6 @@
 use nmt_agent::background_task::{
-    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRegistry,
-    BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskUpdate,
+    BackgroundTaskKey, BackgroundTaskLoadState, BackgroundTaskRegistry, BackgroundTaskSnapshot,
+    BackgroundTaskState, BackgroundTaskUpdate,
 };
 use nmt_agent::chat::ThreadSettings;
 use nmt_agent::session::ConversationTitleRequest;
@@ -86,7 +86,7 @@ fn a_failed_refresh_reports_unavailable_without_dropping_known_rows() {
         BackgroundTaskUpdate::state(BackgroundTaskState::Working),
     );
 
-    registry.set_discovery(BackgroundTaskDiscoveryState::Unavailable {
+    registry.set_discovery(BackgroundTaskLoadState::Unavailable {
         message: "thread/list failed".into(),
     });
 
@@ -96,7 +96,7 @@ fn a_failed_refresh_reports_unavailable_without_dropping_known_rows() {
     assert_eq!(snapshot.active_count(), 1);
     assert!(matches!(
         snapshot.discovery,
-        BackgroundTaskDiscoveryState::Unavailable { .. }
+        BackgroundTaskLoadState::Unavailable { .. }
     ));
 }
 
@@ -326,16 +326,16 @@ mod conversation_title_tests {
     use nmt_agent::AgentWorkspace;
     use nmt_agent::chat::{SendOutcome, SlashCommandOutcome};
     use nmt_agent::session::lifecycle::StartOutcome;
-    use nmt_config::profile::{AgentProfile, AgentProfileKind};
+    use nmt_config::profile::{AgentKind, AgentProfile};
 
     use crate::agent_tab::session::{Backend, RecoveryIdentity, Status, TestBackend};
     use crate::agent_tab::settings::AgentSettings;
     use crate::agent_tab::tests::deliver_session_event;
-    use crate::agent_tab::{AgentKind, AgentPane, AgentPaneEvent, AgentThreadDefaults};
+    use crate::agent_tab::{AgentPane, AgentPaneEvent, AgentThreadDefaults};
 
     fn open_pane(
         cx: &mut TestAppContext,
-        kind: AgentProfileKind,
+        kind: AgentKind,
         resume: Option<RecoveryIdentity>,
     ) -> (Entity<AgentPane>, WindowHandle<gpui_component::Root>) {
         let profile = AgentProfile {
@@ -372,7 +372,7 @@ mod conversation_title_tests {
 
     #[gpui::test]
     fn command_catalog_rebuilds_when_the_cached_language_changes(cx: &mut TestAppContext) {
-        let (pane, _) = open_pane(cx, AgentProfileKind::Codex, None);
+        let (pane, _) = open_pane(cx, AgentKind::Codex, None);
 
         cx.update(|cx| {
             pane.update(cx, |pane, cx| {
@@ -396,7 +396,7 @@ mod conversation_title_tests {
 
     #[gpui::test]
     fn output_failure_retires_backend_and_marks_session_exited(cx: &mut TestAppContext) {
-        let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
+        let (pane, window) = open_pane(cx, AgentKind::Codex, None);
 
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
@@ -432,7 +432,7 @@ mod conversation_title_tests {
 
         use crate::agent_tab::profile::AgentKind;
 
-        let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
+        let (pane, window) = open_pane(cx, AgentKind::Codex, None);
 
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
@@ -522,7 +522,7 @@ mod conversation_title_tests {
     fn rejected_control_replies_keep_interaction_cards(cx: &mut TestAppContext) {
         use nmt_agent::chat::{Event, Question, QuestionInput, QuestionMode, QuestionRequest};
 
-        let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
+        let (pane, window) = open_pane(cx, AgentKind::Codex, None);
 
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
@@ -618,7 +618,7 @@ mod conversation_title_tests {
 
     #[gpui::test]
     fn accepted_codex_prompt_publishes_a_provisional_title(cx: &mut TestAppContext) {
-        let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
+        let (pane, window) = open_pane(cx, AgentKind::Codex, None);
 
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
@@ -664,7 +664,7 @@ mod conversation_title_tests {
     fn accepted_claude_prompt_publishes_one_provisional_title(cx: &mut TestAppContext) {
         // Starting the test fixture as Codex avoids a real Claude subprocess;
         // the installed test backend below owns all message behavior.
-        let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
+        let (pane, window) = open_pane(cx, AgentKind::Codex, None);
 
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
@@ -718,7 +718,7 @@ mod conversation_title_tests {
     fn resumed_claude_prompt_does_not_enter_first_prompt_naming(cx: &mut TestAppContext) {
         let (pane, window) = open_pane(
             cx,
-            AgentProfileKind::Codex,
+            AgentKind::Codex,
             Some(RecoveryIdentity::new(
                 AgentKind::Codex,
                 "resumed-conversation",
@@ -780,7 +780,7 @@ mod queued_prompt_placement_tests {
         Event as SessionEvent, Item as SessionItem, QueuedPrompt, SendOutcome, SlashCommandOutcome,
     };
     use nmt_agent::session::lifecycle::StartOutcome;
-    use nmt_config::profile::{AgentProfile, AgentProfileKind};
+    use nmt_config::profile::{AgentKind, AgentProfile};
 
     use crate::agent_tab::session::{Backend, Status, TestBackend};
     use crate::agent_tab::settings::AgentSettings;
@@ -789,7 +789,7 @@ mod queued_prompt_placement_tests {
 
     fn open_pane(
         cx: &mut TestAppContext,
-        kind: AgentProfileKind,
+        kind: AgentKind,
     ) -> (Entity<AgentPane>, WindowHandle<gpui_component::Root>) {
         let profile = AgentProfile {
             name: "Queued Prompt Test".into(),
@@ -844,7 +844,7 @@ mod queued_prompt_placement_tests {
     fn a_pending_command_starts_working_on_its_turn_event_once(cx: &mut TestAppContext) {
         // Codex initialization stays on the test executor; Claude would start
         // a real stdout reader before the test backend replaces it.
-        let (pane, window) = open_pane(cx, AgentProfileKind::Codex);
+        let (pane, window) = open_pane(cx, AgentKind::Codex);
 
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
@@ -902,7 +902,7 @@ mod queued_prompt_placement_tests {
 
     #[gpui::test]
     fn a_queued_prompt_heads_the_turn_opened_for_it(cx: &mut TestAppContext) {
-        let (pane, window) = open_pane(cx, AgentProfileKind::Claude);
+        let (pane, window) = open_pane(cx, AgentKind::Claude);
 
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
@@ -992,7 +992,7 @@ mod queued_prompt_placement_tests {
     /// as well would show the same message twice for that whole window.
     #[gpui::test]
     fn a_pending_inbox_omits_the_prompt_its_send_already_drew(cx: &mut TestAppContext) {
-        let (pane, window) = open_pane(cx, AgentProfileKind::DeepSeek);
+        let (pane, window) = open_pane(cx, AgentKind::DeepSeek);
 
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
@@ -1073,7 +1073,7 @@ mod turn_error_tests {
     use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, WindowHandle};
     use nmt_agent::AgentWorkspace;
     use nmt_agent::chat::{Event as SessionEvent, Item as SessionItem};
-    use nmt_config::profile::{AgentProfile, AgentProfileKind};
+    use nmt_config::profile::{AgentKind, AgentProfile};
 
     use crate::agent_tab::settings::AgentSettings;
     use crate::agent_tab::tests::deliver_session_event;
@@ -1084,7 +1084,7 @@ mod turn_error_tests {
     ) -> (Entity<AgentPane>, WindowHandle<gpui_component::Root>) {
         let profile = AgentProfile {
             name: "Turn Error Test".into(),
-            kind: AgentProfileKind::Codex,
+            kind: AgentKind::Codex,
             executable: "missing-codex.exe".into(),
             ..AgentProfile::default()
         };
@@ -1179,7 +1179,7 @@ mod session_replacement_tests {
     use nmt_agent::AgentWorkspace;
     use nmt_agent::chat::{SendOutcome, SlashCommandOutcome};
     use nmt_agent::session::lifecycle::StartOutcome;
-    use nmt_config::profile::{AgentProfile, AgentProfileKind};
+    use nmt_config::profile::{AgentKind, AgentProfile};
 
     use crate::agent_tab::session::{Backend, TestBackend};
     use crate::agent_tab::settings::AgentSettings;
@@ -1189,7 +1189,7 @@ mod session_replacement_tests {
     fn a_reset_holds_its_old_session_until_the_replacement_is_installed(cx: &mut TestAppContext) {
         let profile = AgentProfile {
             name: "Session Replacement Test".into(),
-            kind: AgentProfileKind::DeepSeek,
+            kind: AgentKind::DeepSeek,
             // The replacement start never reaches a process: the spawn runs on
             // the background executor, which this test does not run.
             executable: "missing-agent.exe".into(),
@@ -1263,18 +1263,18 @@ mod shared_host_recovery_tests {
     use nmt_agent::AgentWorkspace;
     use nmt_agent::chat::{Event as SessionEvent, SendOutcome, SlashCommandOutcome};
     use nmt_agent::session::lifecycle::StartOutcome;
-    use nmt_config::profile::{AgentProfile, AgentProfileKind};
+    use nmt_config::profile::{AgentKind, AgentProfile};
 
     use crate::agent_tab::session::{Backend, Status, TestBackend, UpdateSuspension};
     use crate::agent_tab::settings::AgentSettings;
     use crate::agent_tab::tests::deliver_session_event;
-    use crate::agent_tab::{AgentKind, AgentPane, AgentThreadDefaults};
+    use crate::agent_tab::{AgentPane, AgentThreadDefaults};
 
     #[gpui::test]
     fn a_host_exit_retains_the_thread_for_retry(cx: &mut TestAppContext) {
         let profile = AgentProfile {
             name: "Codex Recovery Test".into(),
-            kind: AgentProfileKind::Codex,
+            kind: AgentKind::Codex,
             executable: "missing-codex.exe".into(),
             ..AgentProfile::default()
         };
@@ -1374,7 +1374,7 @@ mod command_catalog_cache_tests {
         SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
     };
     use nmt_agent::session::lifecycle::StartOutcome;
-    use nmt_config::profile::{AgentProfile, AgentProfileKind};
+    use nmt_config::profile::{AgentKind, AgentProfile};
 
     use crate::agent_tab::session::{Backend, TestBackend};
     use crate::agent_tab::settings::AgentSettings;
@@ -1386,7 +1386,7 @@ mod command_catalog_cache_tests {
     ) -> (Entity<AgentPane>, WindowHandle<gpui_component::Root>) {
         let profile = AgentProfile {
             name: "Catalog Cache Test".into(),
-            kind: AgentProfileKind::Codex,
+            kind: AgentKind::Codex,
             // Never spawned: the test publishes discovery results by hand.
             executable: "missing-agent.exe".into(),
             ..AgentProfile::default()

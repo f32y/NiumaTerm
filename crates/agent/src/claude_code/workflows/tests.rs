@@ -452,10 +452,9 @@ fn source_retries_unaccepted_reads_and_invalidates_grown_transcripts() {
     let transcript = first.transcript.expect("initial transcript");
 
     assert!(!transcript.items.is_empty());
-    assert_eq!(first.refresh.agents.len(), 2);
+    assert_eq!(first.agents.len(), 2);
     assert!(
         first
-            .refresh
             .agents
             .iter()
             .all(|agent| agent.state == WorkflowAgentState::Done)
@@ -493,7 +492,7 @@ fn source_retries_unaccepted_reads_and_invalidates_grown_transcripts() {
 
     let failed = source.refresh_directory(Some(&dir), &request);
 
-    assert!(failed.refresh.failed);
+    assert!(failed.failed);
     assert!(failed.transcript.is_none());
 
     fs::remove_dir_all(&root).ok();
@@ -549,25 +548,24 @@ fn a_journal_refresh_advances_agents_the_stream_has_not_settled() {
         agent_entry(2, AGENT_TWO, "start", json!({})),
     ])));
 
-    assert!(workflows.apply_refresh(
-        TASK,
-        WorkflowRefresh {
-            run_id: Some(RUN_ID.to_owned()),
-            agents: vec![
-                WorkflowAgentProgress {
-                    agent_id: AGENT_ONE.to_owned(),
-                    state: WorkflowAgentState::Done,
-                    result: Some("ok".to_owned()),
-                },
-                WorkflowAgentProgress {
-                    agent_id: AGENT_TWO.to_owned(),
-                    state: WorkflowAgentState::Running,
-                    result: None,
-                },
-            ],
-            failed: false,
-        },
-    ));
+    assert!(workflows.apply_refresh(WorkflowRefreshResult {
+        task_id: TASK.to_owned(),
+        transcript: None,
+        run_id: Some(RUN_ID.to_owned()),
+        agents: vec![
+            WorkflowAgentProgress {
+                agent_id: AGENT_ONE.to_owned(),
+                state: WorkflowAgentState::Done,
+                result: Some("ok".to_owned()),
+            },
+            WorkflowAgentProgress {
+                agent_id: AGENT_TWO.to_owned(),
+                state: WorkflowAgentState::Running,
+                result: None,
+            },
+        ],
+        failed: false,
+    },));
 
     let run = only_run(&workflows);
 
@@ -592,13 +590,11 @@ fn a_failed_refresh_is_reported_without_touching_known_state() {
         json!({"tokens": 15_577})
     ),])));
 
-    assert!(workflows.apply_refresh(
-        TASK,
-        WorkflowRefresh {
-            failed: true,
-            ..WorkflowRefresh::default()
-        },
-    ));
+    assert!(workflows.apply_refresh(WorkflowRefreshResult {
+        task_id: TASK.to_owned(),
+        failed: true,
+        ..WorkflowRefreshResult::default()
+    },));
 
     let run = only_run(&workflows);
 

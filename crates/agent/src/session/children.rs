@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::background_task::{
-    BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscriptState,
+    BackgroundTaskKey, BackgroundTaskLoadState, BackgroundTaskSnapshot,
     BackgroundTaskTranscriptUpdate, MAX_TRANSCRIPT_ITEMS,
 };
 use crate::session::{AgentKind, RecoveryIdentity};
@@ -131,12 +131,12 @@ impl ChildAgents {
 #[derive(Default)]
 pub struct ChildTranscript {
     pub conversation: Rc<RefCell<ConversationState>>,
-    state: BackgroundTaskTranscriptState,
+    state: BackgroundTaskLoadState,
     dropped: usize,
 }
 
 impl ChildTranscript {
-    pub fn state(&self) -> &BackgroundTaskTranscriptState {
+    pub fn state(&self) -> &BackgroundTaskLoadState {
         &self.state
     }
 

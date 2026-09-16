@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 
 use crate::background_task::{
-    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRefs, BackgroundTaskState,
+    BackgroundTaskKey, BackgroundTaskLoadState, BackgroundTaskRefs, BackgroundTaskState,
 };
 use crate::chat::Item;
 use crate::codex::app_server::THREAD_SCOPED_NOTIFICATIONS;
@@ -496,7 +496,7 @@ fn descendant_requests_page_through_subagent_spawns() {
     assert!(tasks.query_in_flight());
     assert!(matches!(
         tasks.snapshot().expect("registry exists").discovery,
-        BackgroundTaskDiscoveryState::Loading
+        BackgroundTaskLoadState::Loading
     ));
 
     let (_, next_cursor) = tasks.apply_descendants(
@@ -539,10 +539,7 @@ fn descendant_requests_page_through_subagent_spawns() {
     let snapshot = tasks.snapshot().expect("registry exists");
 
     assert_eq!(snapshot.tasks.len(), 2);
-    assert!(matches!(
-        snapshot.discovery,
-        BackgroundTaskDiscoveryState::Ready
-    ));
+    assert!(matches!(snapshot.discovery, BackgroundTaskLoadState::Ready));
 
     // A listed thread that is no longer loaded reads as ended, so a resumed
     // parent shows its past children under Finished.
@@ -646,7 +643,7 @@ fn a_failed_query_keeps_known_rows_and_only_reports_unavailable_when_empty() {
     assert!(empty.fail_query(7, "thread/list unsupported"));
     assert!(matches!(
         empty.snapshot().expect("registry exists").discovery,
-        BackgroundTaskDiscoveryState::Unavailable { .. }
+        BackgroundTaskLoadState::Unavailable { .. }
     ));
 
     let mut populated = rooted();
@@ -661,10 +658,7 @@ fn a_failed_query_keeps_known_rows_and_only_reports_unavailable_when_empty() {
 
     assert_eq!(snapshot.tasks.len(), 1);
     assert_eq!(snapshot.active_count(), 1);
-    assert!(matches!(
-        snapshot.discovery,
-        BackgroundTaskDiscoveryState::Ready
-    ));
+    assert!(matches!(snapshot.discovery, BackgroundTaskLoadState::Ready));
 }
 
 #[test]

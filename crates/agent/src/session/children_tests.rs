@@ -1,5 +1,5 @@
 use crate::background_task::{
-    BackgroundTaskTranscriptState as LoadState, BackgroundTaskTranscriptUpdate as Update,
+    BackgroundTaskLoadState as LoadState, BackgroundTaskTranscriptUpdate as Update,
     MAX_TRANSCRIPT_ITEMS,
 };
 use crate::chat::Item;

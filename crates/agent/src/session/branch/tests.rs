@@ -230,12 +230,12 @@ fn retry_after_file_success_only_retries_conversation_and_moves_replay_once() {
     assert!(flow.starting(epoch, identity.as_ref()));
     assert!(flow.ready(epoch - 1).is_none());
 
-    let completion = flow.ready(epoch).expect("ready publishes the copy");
+    let (completion, replay) = flow.ready(epoch).expect("ready publishes the copy");
 
     assert_eq!(completion.files, FileProgress::Restored);
     assert_eq!(completion.prompt, "continue here");
 
-    let replay = completion.replay.expect("local replay");
+    assert!(completion.replayed);
 
     assert_eq!(replay.as_ptr(), allocation);
     assert!(flow.ready(epoch).is_none());
@@ -271,11 +271,12 @@ fn conversation_only_can_start_before_the_first_prompt_without_touching_files() 
 
     assert!(flow.starting(epoch, None));
 
-    let completion = flow
+    let (completion, replay) = flow
         .ready(epoch)
         .expect("empty branch is still a completed operation");
 
-    assert!(completion.replay.expect("local replay").is_empty());
+    assert!(completion.replayed);
+    assert!(replay.is_empty());
 }
 
 #[test]
@@ -434,7 +435,7 @@ fn protocol_branch_returns_the_prompt_only_with_its_own_replay() {
     };
 
     assert_eq!(completion.prompt, "continue here");
-    assert!(completion.replay.is_none());
+    assert!(!completion.replayed);
     assert!(matches!(
         flow.replayed(runtime.epoch()),
         BranchReplay::Unrelated

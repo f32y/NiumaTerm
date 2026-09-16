@@ -6,7 +6,7 @@
 //! conversation thread and shares its app-server host with other sessions.
 
 pub use crate::background_task::{
-    BackgroundTaskKey, BackgroundTaskTranscriptState, BackgroundTaskTranscriptUpdate,
+    BackgroundTaskKey, BackgroundTaskLoadState, BackgroundTaskTranscriptUpdate,
 };
 pub use crate::chat::{
     Compaction, CompactionTrigger, ContextUsageScope, ContextWindowUsage, Event, ForkAnchor,
@@ -691,7 +691,7 @@ impl Session {
 
         vec![Event::BackgroundTaskTranscript {
             key: BackgroundTaskKey::codex(thread_id),
-            update: BackgroundTaskTranscriptUpdate::state(BackgroundTaskTranscriptState::Loading),
+            update: BackgroundTaskTranscriptUpdate::state(BackgroundTaskLoadState::Loading),
         }]
     }
 
@@ -1023,7 +1023,7 @@ impl Session {
 
         let update = match message["error"]["message"].as_str() {
             Some(error) => {
-                BackgroundTaskTranscriptUpdate::state(BackgroundTaskTranscriptState::Unavailable {
+                BackgroundTaskTranscriptUpdate::state(BackgroundTaskLoadState::Unavailable {
                     message: error.to_owned(),
                 })
             }

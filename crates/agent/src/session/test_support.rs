@@ -11,7 +11,7 @@ use crate::session::{AgentKind, RecoveryIdentity, RenameOutcome};
 use crate::workflow::{WorkflowRefreshRequest, WorkflowSource};
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct InputResponse {
+pub(crate) struct InputResponse {
     pub id: String,
     pub answers: Option<Vec<Vec<String>>>,
 }
@@ -23,7 +23,7 @@ pub struct TestBackend {
     pub approval_waits: bool,
     pub approval_responses: Vec<String>,
     pub input_result: Result<QuestionResponse, String>,
-    pub input_responses: Vec<InputResponse>,
+    pub(crate) input_responses: Vec<InputResponse>,
     pub restored_questions: Vec<QuestionRequest>,
     pub rename_outcome: RenameOutcome,
     pub interrupt_accepted: bool,

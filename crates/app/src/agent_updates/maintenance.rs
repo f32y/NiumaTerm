@@ -4,7 +4,8 @@ mod maintenance_tests;
 
 use std::time::Duration;
 
-use nmt_agent::session::lifecycle::{RecoveryReadiness, RecoverySnapshot, RestorationReadiness};
+use app::agent_tab::RecoveryReadiness;
+use nmt_agent::session::lifecycle::{RecoverySnapshot, RestorationReadiness};
 use nmt_agent::update::{UpdateError, UpdateErrorKind, UpdatePhase, UpdateProgress, VersionStatus};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

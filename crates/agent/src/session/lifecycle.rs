@@ -31,13 +31,6 @@ pub struct RecoverySnapshot {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RecoveryReadiness {
-    Ready(RecoverySnapshot),
-    Busy(String),
-    MissingIdentity(String),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RestorationReadiness {
     Pending,
     Ready,

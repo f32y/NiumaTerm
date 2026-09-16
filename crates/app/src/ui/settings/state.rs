@@ -8,16 +8,13 @@ pub use nmt_config::appearance::{
     terminal_font_or_default, ui_font_or_default,
 };
 pub use nmt_config::appearance::{InputStyle, MIN_TAB_WIDTH, TabBarStyle, WindowBackdrop};
-pub use nmt_config::profile::{
-    AgentProfile, AgentProfileKind, AgentProfileLauncher, EnvVar, Profile,
-};
+pub use nmt_config::profile::{AgentKind, AgentProfile, AgentProfileLauncher, EnvVar, Profile};
 
 use std::borrow::Cow;
 use std::io;
 use std::path::Path;
 use std::rc::Rc;
 
-use app::agent_tab::AgentKind;
 use gpui::Global;
 #[cfg(windows)]
 use gpui::SharedString;
@@ -84,22 +81,22 @@ fn builtin_profile() -> Profile {
     }
 }
 
-pub(super) fn agent_kind_display_label(kind: AgentProfileKind) -> Cow<'static, str> {
+pub(super) fn agent_kind_display_label(kind: AgentKind) -> Cow<'static, str> {
     match kind {
-        AgentProfileKind::Claude => t!("settings-agent-kind-claude-code"),
-        AgentProfileKind::Codex => t!("settings-agent-kind-codex"),
-        AgentProfileKind::DeepSeek => t!("settings-agent-kind-deepseek"),
+        AgentKind::Claude => t!("settings-agent-kind-claude-code"),
+        AgentKind::Codex => t!("settings-agent-kind-codex"),
+        AgentKind::DeepSeek => t!("settings-agent-kind-deepseek"),
     }
 }
 
 /// The built-in agent profile for `kind`. The bare executable name resolves
 /// through PATH (and PATHEXT on Windows), so it finds `claude.exe` as well as
 /// the npm `claude.cmd` shim.
-pub(crate) fn builtin_agent_profile(kind: AgentProfileKind) -> AgentProfile {
+pub(crate) fn builtin_agent_profile(kind: AgentKind) -> AgentProfile {
     let executable = match kind {
-        AgentProfileKind::Claude => "claude",
-        AgentProfileKind::Codex => "codex",
-        AgentProfileKind::DeepSeek => dsh::DEFAULT_EXECUTABLE,
+        AgentKind::Claude => "claude",
+        AgentKind::Codex => "codex",
+        AgentKind::DeepSeek => dsh::DEFAULT_EXECUTABLE,
     };
 
     AgentProfile {
@@ -110,7 +107,7 @@ pub(crate) fn builtin_agent_profile(kind: AgentProfileKind) -> AgentProfile {
         // own, so a fresh profile runs it through npx and needs nothing
         // installed first. The executable stays filled in as what the profile
         // falls back to once it is pointed at a binary instead.
-        launcher: if kind == AgentProfileKind::DeepSeek {
+        launcher: if kind == AgentKind::DeepSeek {
             AgentProfileLauncher::Npx
         } else {
             AgentProfileLauncher::Custom
@@ -367,7 +364,7 @@ impl AppSettings {
     pub fn unique_agent_profile_name(
         &self,
         desired: &str,
-        kind: AgentProfileKind,
+        kind: AgentKind,
         exclude: Option<usize>,
     ) -> String {
         let base = if desired.trim().is_empty() {
@@ -463,7 +460,7 @@ impl AppSettings {
             .find(|p| p.name == self.config.agent_profiles.default)
             .or_else(|| self.config.agent_profiles.list.first())
             .cloned()
-            .unwrap_or_else(|| builtin_agent_profile(AgentProfileKind::Claude))
+            .unwrap_or_else(|| builtin_agent_profile(AgentKind::Claude))
     }
 
     /// The default profile's launch command: shell plus whitespace-split

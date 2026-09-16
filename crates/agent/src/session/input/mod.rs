@@ -39,7 +39,12 @@ pub enum QuestionAction {
 pub enum Submission {
     Ignored,
     Waiting,
-    Settled,
+    /// `waiting_finished` reports that this answer released the last thing
+    /// the conversation was waiting on, which the host reports as the tool
+    /// finishing.
+    Settled {
+        waiting_finished: bool,
+    },
     Failed,
 }
 
@@ -177,6 +182,8 @@ impl SessionInput {
             return Submission::Ignored;
         }
 
+        let waiting = self.waiting();
+
         let Some(draft) = self.draft_mut(key) else {
             return Submission::Ignored;
         };
@@ -211,7 +218,9 @@ impl SessionInput {
                     QuestionStatus::Skipped
                 });
 
-                Submission::Settled
+                Submission::Settled {
+                    waiting_finished: waiting && !self.waiting(),
+                }
             }
             Ok(QuestionResponse::Pending) => {
                 draft.error = None;

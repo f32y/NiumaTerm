@@ -2,17 +2,15 @@ use std::iter;
 use std::path::Path;
 use std::time::Instant;
 
-use crate::background_task::{
-    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskSnapshot,
-};
+use crate::background_task::{BackgroundTaskKey, BackgroundTaskLoadState, BackgroundTaskSnapshot};
 use crate::chat::{
     Event, Item, ModelInfo, Question, QuestionInput, QuestionMode, QuestionRequest,
     QuestionResolution, SendOutcome, SlashCommandOutcome, ThreadSettings,
 };
 use crate::progress::{GoalStatus, Task, TaskList, TaskStatus};
-use crate::session::controller::{QuestionSubmission, SessionController, SessionEffect};
-use crate::session::delivery::{RecoverablePrompt, Submission};
-use crate::session::input::{ApprovalOutcome, QuestionAction, QuestionKey};
+use crate::session::controller::{SessionController, SessionEffect};
+use crate::session::delivery::RecoverablePrompt;
+use crate::session::input::{ApprovalOutcome, QuestionAction, QuestionKey, Submission};
 use crate::session::lifecycle::{InterruptOutcome, StartOutcome, Status};
 use crate::session::restore::SettingsSeed;
 use crate::session::test_support::TestBackend;
@@ -68,7 +66,7 @@ fn progress_survives_turns_but_clears_with_the_conversation_for_every_provider()
 fn started(kind: AgentKind, id: &str, outcomes: Vec<SendOutcome>) -> SessionController {
     let mut session = SessionController::new(kind);
 
-    let epoch = session.starting(None).epoch;
+    let epoch = session.starting(None);
 
     let mut backend = TestBackend::new(outcomes, SlashCommandOutcome::NotReady, Vec::new())
         .with_recovery(kind, id);
@@ -90,7 +88,7 @@ fn started(kind: AgentKind, id: &str, outcomes: Vec<SendOutcome>) -> SessionCont
     session
 }
 
-fn send(session: &mut SessionController, text: &str) -> Submission {
+fn send(session: &mut SessionController, text: &str) -> SendOutcome {
     session
         .submit(
             text.into(),
@@ -145,12 +143,12 @@ fn request(session: &mut SessionController, id: &str) -> QuestionKey {
 fn startup_rejects_sends_and_superseded_installation_cannot_replace_current_backend() {
     let mut session = SessionController::new(AgentKind::Codex);
 
-    let old = session.starting(None).epoch;
+    let old = session.starting(None);
 
-    assert_eq!(send(&mut session, "draft"), Submission::NotReady);
+    assert_eq!(send(&mut session, "draft"), SendOutcome::NotReady);
     assert_eq!(session.delivery.turn(), 0);
 
-    let current = session.starting(None).epoch;
+    let current = session.starting(None);
 
     assert!(matches!(
         session.install(
@@ -185,19 +183,14 @@ fn rejected_send_preserves_accepted_prompt_and_interrupt_is_consumed_once() {
         ],
     );
 
-    assert_eq!(
-        send(&mut session, "accepted"),
-        Submission::Started {
-            text: "accepted".into()
-        }
-    );
+    assert_eq!(send(&mut session, "accepted"), SendOutcome::StartedTurn);
     assert!(matches!(
         apply(&mut session, Event::TurnStarted),
         SessionEffect::TurnStarted { opened: false }
     ));
     assert_eq!(
         send(&mut session, "rejected"),
-        Submission::Rejected {
+        SendOutcome::Rejected {
             message: "busy".into()
         }
     );
@@ -280,7 +273,7 @@ fn provider_busy_input_keeps_its_existing_delivery_boundary() {
 
         apply(&mut session, Event::TurnStarted);
 
-        assert_eq!(send(&mut session, "follow-up"), Submission::Queued);
+        assert_eq!(send(&mut session, "follow-up"), SendOutcome::Steered);
         assert!(session.delivery.pop_confirmed().is_none());
 
         apply(&mut session, Event::TurnCompleted { error: None });
@@ -314,7 +307,7 @@ fn independent_sessions_route_approval_and_question_answers_to_their_own_backend
 
     assert!(matches!(
         bob.submit_question(key, QuestionAction::Skip, Instant::now()),
-        QuestionSubmission::Waiting
+        Submission::Waiting
     ));
     assert!(alice.input.approval().is_some());
     assert_eq!(alice.respond_approval("accept"), ApprovalOutcome::Settled);
@@ -344,7 +337,7 @@ fn independent_sessions_route_approval_and_question_answers_to_their_own_backend
     assert!(!bob.input.has_submission());
     assert!(matches!(
         bob.submit_question(key, QuestionAction::Skip, Instant::now()),
-        QuestionSubmission::Ignored
+        Submission::Ignored
     ));
 }
 
@@ -357,7 +350,7 @@ fn child_snapshots_are_visible_only_to_the_matching_parent_and_epoch() {
     let snapshot = |id| BackgroundTaskSnapshot {
         parent_session: BackgroundTaskKey::codex(id),
         tasks: Vec::new(),
-        discovery: BackgroundTaskDiscoveryState::Ready,
+        discovery: BackgroundTaskLoadState::Ready,
         activity: 0,
     };
 
@@ -471,7 +464,7 @@ fn repeated_ready_preserves_the_running_turn_and_selected_settings() {
 fn deepseek_with_remembered_permission(selection: Result<(), String>) -> (SessionController, u64) {
     let mut session = SessionController::new(AgentKind::DeepSeek);
 
-    let epoch = session.starting(None).epoch;
+    let epoch = session.starting(None);
 
     session.controls.seed_settings(SettingsSeed::Defaults);
 

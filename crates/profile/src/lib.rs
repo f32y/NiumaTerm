@@ -1,7 +1,7 @@
 //! Shell profiles, persisted as top-level `[[profiles]]` entries in
 //! `config.toml` by the settings dialog.
 
-pub use crate::kind::{AgentKind, AgentKind as AgentProfileKind};
+pub use crate::kind::AgentKind;
 
 mod kind;
 
@@ -91,7 +91,7 @@ pub struct AgentProfile {
     #[serde(default)]
     pub name: String,
     #[serde(default, serialize_with = "serialize_profile_kind")]
-    pub kind: AgentProfileKind,
+    pub kind: AgentKind,
 
     /// Executable name or path; a bare name resolves via PATH (and PATHEXT on
     /// Windows, so `claude` finds both `claude.exe` and the npm `claude.cmd`).
@@ -156,7 +156,7 @@ struct PersistedAgentProfile {
     #[serde(default)]
     name: String,
     #[serde(default, deserialize_with = "deserialize_profile_kind")]
-    kind: AgentProfileKind,
+    kind: AgentKind,
     #[serde(default)]
     executable: String,
     #[serde(default)]

@@ -28,10 +28,8 @@ use nmt_agent::claude_code::sessions;
 use nmt_agent::launcher::AgentCli;
 use nmt_agent::session::branch::{BranchUpdate, CheckpointRead};
 use nmt_agent::session::capabilities::AgentCapabilities as _;
-use nmt_agent::session::controller::{
-    QuestionSubmission, ReadyDefaults, SessionController, SessionEffect,
-};
-use nmt_agent::session::input::QuestionAction;
+use nmt_agent::session::controller::{ReadyDefaults, SessionController, SessionEffect};
+use nmt_agent::session::input::{QuestionAction, Submission};
 use nmt_agent::session::lifecycle::{RecoverySnapshot, StartOutcome};
 use nmt_agent::session::restore::{ReplayLoaded, ReplayRead, SettingsSeed};
 use nmt_agent::session::team_capabilities::TeamLaunch;
@@ -44,7 +42,7 @@ use nmt_agent::{
     AgentEvent, AgentEventKind, AgentRoute, AgentWorkspace, agent_process, normalize_body,
     normalize_title,
 };
-use nmt_config::profile::{AgentProfile, AgentProfileKind};
+use nmt_config::profile::AgentProfile;
 use rust_i18n::t;
 use serde_json::Value;
 use uuid::Uuid;
@@ -1171,7 +1169,7 @@ impl AgentSession {
 
                         if matches!(
                             outcome,
-                            QuestionSubmission::Settled {
+                            Submission::Settled {
                                 waiting_finished: true
                             }
                         ) {
@@ -1280,7 +1278,7 @@ impl AgentSession {
                     .and_then(|stored| stored.agent_preset.clone())
             };
 
-            session.starting(recovery.as_ref()).epoch
+            session.starting(recovery.as_ref())
         };
 
         cx.emit(AgentPaneEvent::Interrupted);
@@ -1293,7 +1291,7 @@ impl AgentSession {
             cx.global::<AgentSettings>()
                 .profiles
                 .iter()
-                .filter(|profile| profile.kind == AgentProfileKind::Codex)
+                .filter(|profile| profile.kind == AgentKind::Codex)
                 .map(agent_launch)
                 .collect()
         } else {

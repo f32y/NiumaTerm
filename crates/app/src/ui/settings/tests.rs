@@ -713,15 +713,15 @@ fn agent_profile_mutations_keep_default_valid() {
     // label, collisions get a numeric suffix, and the excluded index
     // (edit mode) keeps its own name available.
     assert_eq!(
-        settings.unique_agent_profile_name("", AgentProfileKind::Claude, None),
+        settings.unique_agent_profile_name("", AgentKind::Claude, None),
         "Claude Code 2"
     );
     assert_eq!(
-        settings.unique_agent_profile_name("Codex", AgentProfileKind::Codex, Some(1)),
+        settings.unique_agent_profile_name("Codex", AgentKind::Codex, Some(1)),
         "Codex"
     );
     assert_eq!(
-        settings.unique_agent_profile_name(" Mine ", AgentProfileKind::Codex, None),
+        settings.unique_agent_profile_name(" Mine ", AgentKind::Codex, None),
         "Mine"
     );
 
@@ -751,7 +751,7 @@ fn agent_profile_mutations_keep_default_valid() {
     // The shortcut fallback still produces a launchable profile.
     assert_eq!(
         settings.default_agent_profile_entry().kind,
-        AgentProfileKind::Claude
+        AgentKind::Claude
     );
 }
 
@@ -876,7 +876,7 @@ fn default_agent_profile_entry_resolves_by_name() {
 
     assert_eq!(
         settings.default_agent_profile_entry().kind,
-        AgentProfileKind::Claude
+        AgentKind::Claude
     );
 }
 
@@ -1086,7 +1086,7 @@ fn every_registered_harness_can_be_named_seeded_and_launched() {
     }
 
     assert_eq!(
-        builtin_agent_profile(AgentProfileKind::DeepSeek).launcher,
+        builtin_agent_profile(AgentKind::DeepSeek).launcher,
         AgentProfileLauncher::Npx
     );
 }

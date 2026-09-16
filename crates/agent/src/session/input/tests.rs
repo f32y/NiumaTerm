@@ -257,10 +257,10 @@ fn async_defaults_do_not_send_until_explicit_submission_and_blocking_requires_an
 
     backend(&mut runtime).input_result = Ok(QuestionResponse::Settled);
 
-    assert_eq!(
+    assert!(matches!(
         submit(&mut input, &mut runtime, asynchronous, QuestionAction::Skip),
-        Submission::Settled
-    );
+        Submission::Settled { .. }
+    ));
     assert_eq!(input.batches()[0].status(), QuestionStatus::Skipped);
 }
 
@@ -599,10 +599,10 @@ fn synchronous_question_responses_settle_once_and_clear_secrets() {
         .unwrap()
         .set_text(0, "temporary value".into());
 
-    assert_eq!(
+    assert!(matches!(
         submit(&mut input, &mut runtime, key, QuestionAction::Answer),
-        Submission::Settled
-    );
+        Submission::Settled { .. }
+    ));
     assert_eq!(input.batches()[index].status(), QuestionStatus::Submitted);
     assert_eq!(input.batches()[index].text(0), "");
     assert!(!input.waiting());

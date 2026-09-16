@@ -9,7 +9,7 @@ use crate::chat::{ForkCheckpoint, ReplayTurn, SlashCommandOutcome};
 use crate::claude_code::sessions;
 use crate::claude_code::sessions::{ClaudeCheckpoint, ClaudeFork, FileRestoreAvailability};
 use crate::session::lifecycle::{SessionRuntime, Status};
-use crate::session::{AgentKind, Backend, OperationError, RecoveryIdentity};
+use crate::session::{AgentKind, Backend, OperationError, RecoveryIdentity, UnsupportedOperation};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PromptTarget {
@@ -61,8 +61,17 @@ pub enum BranchError {
     MissingSession,
     FilesUnavailable,
     InvalidFileResult(Option<String>),
-    Operation(OperationError),
+    Unsupported(UnsupportedOperation),
     Failed(String),
+}
+
+impl From<OperationError> for BranchError {
+    fn from(error: OperationError) -> Self {
+        match error {
+            OperationError::Unsupported(operation) => Self::Unsupported(operation),
+            OperationError::Failed(message) => Self::Failed(message),
+        }
+    }
 }
 
 pub struct BranchFailure {
@@ -71,12 +80,13 @@ pub struct BranchFailure {
     pub error: BranchError,
 }
 
+/// A branch the conversation is now on. A local branch replays the copied
+/// transcript itself; a protocol branch already carries its replay in the
+/// incoming event, which is what `replayed` tells apart.
 pub struct BranchCompletion {
-    /// Protocol branches already carry their replay in the incoming event.
-    pub replay: Option<Vec<ReplayTurn>>,
-
     pub prompt: String,
     pub files: FileProgress,
+    pub replayed: bool,
 }
 
 pub enum BranchUpdate {
@@ -102,7 +112,7 @@ pub enum BranchView<'a> {
     Working,
 }
 
-pub enum BranchReplay {
+pub(crate) enum BranchReplay {
     Unrelated,
     Ignore,
     Complete(BranchCompletion),
@@ -114,15 +124,10 @@ struct Operation {
     epoch: u64,
 }
 
-#[derive(Clone)]
-struct Source {
-    id: String,
-    cwd: Option<String>,
-}
-
 struct LocalOperation {
     operation: Operation,
-    source: Source,
+    session_id: String,
+    cwd: Option<String>,
     phase: LocalPhase,
 }
 
@@ -263,7 +268,9 @@ impl ConversationBranch {
         self.state.is_some()
     }
 
-    pub fn ready(&mut self, epoch: u64) -> Option<BranchCompletion> {
+    /// The finished local branch and the transcript it replays into the
+    /// conversation the provider just opened.
+    pub fn ready(&mut self, epoch: u64) -> Option<(BranchCompletion, Vec<ReplayTurn>)> {
         if !matches!(&self.state, Some(State::Local(local)) if local.operation.epoch == epoch &&
             matches!(local.phase, LocalPhase::Starting { .. }))
         {
@@ -283,14 +290,17 @@ impl ConversationBranch {
             unreachable!()
         };
 
-        Some(BranchCompletion {
-            replay: Some(fork.replay),
-            prompt,
-            files,
-        })
+        Some((
+            BranchCompletion {
+                prompt,
+                files,
+                replayed: true,
+            },
+            fork.replay,
+        ))
     }
 
-    pub fn replayed(&mut self, epoch: u64) -> BranchReplay {
+    pub(crate) fn replayed(&mut self, epoch: u64) -> BranchReplay {
         match &self.state {
             Some(State::Branching { operation, .. }) if operation.epoch == epoch => {
                 let Some(State::Branching { prompt, .. }) = self.state.take() else {
@@ -298,9 +308,9 @@ impl ConversationBranch {
                 };
 
                 BranchReplay::Complete(BranchCompletion {
-                    replay: None,
                     prompt,
                     files: FileProgress::NotConfirmed,
+                    replayed: false,
                 })
             }
             Some(State::Local(_)) | Some(State::Branching { .. }) => BranchReplay::Ignore,
@@ -362,16 +372,16 @@ impl ConversationBranch {
             .ok_or(BranchError::MissingSession)?
             .to_owned();
 
-        let source = Source { id, cwd };
-
         let request = CheckpointRead {
             operation,
-            source: source.clone(),
+            session_id: id.clone(),
+            cwd: cwd.clone(),
         };
 
         self.state = Some(State::Local(LocalOperation {
             operation,
-            source,
+            session_id: id,
+            cwd,
             phase: LocalPhase::Loading(target),
         }));
 
@@ -509,7 +519,7 @@ impl ConversationBranch {
                 .and_then(|backend| {
                     backend
                         .rewind_files(&checkpoint.user_message_id)
-                        .map_err(BranchError::Operation)
+                        .map_err(BranchError::from)
                 })
                 .and_then(|outcome| match outcome {
                     SlashCommandOutcome::Accepted => Ok(()),
@@ -750,7 +760,7 @@ impl ConversationBranch {
             .and_then(|backend| {
                 backend
                     .fork_conversation(&checkpoint.anchor)
-                    .map_err(BranchError::Operation)
+                    .map_err(BranchError::from)
             });
 
         match result {
@@ -795,30 +805,28 @@ impl<'a> From<&'a ConversationBranch> for BranchView<'a> {
 
 pub struct CheckpointRead {
     operation: Operation,
-    source: Source,
+    session_id: String,
+    cwd: Option<String>,
 }
 
 impl CheckpointRead {
     /// Synchronous disk work for the caller's existing background executor.
     pub fn load(&self) -> Result<Vec<ClaudeCheckpoint>, String> {
-        sessions::load_checkpoints(self.source.cwd.as_deref(), &self.source.id)
+        sessions::load_checkpoints(self.cwd.as_deref(), &self.session_id)
     }
 }
 
 pub struct ForkRequest {
     operation: Operation,
-    source: Source,
+    session_id: String,
+    cwd: Option<String>,
     user_message_id: String,
 }
 
 impl ForkRequest {
     /// Uses the existing transcript algorithm and leaves the source file intact.
     pub fn run(&self) -> Result<ClaudeFork, String> {
-        sessions::fork_session_before(
-            self.source.cwd.as_deref(),
-            &self.source.id,
-            &self.user_message_id,
-        )
+        sessions::fork_session_before(self.cwd.as_deref(), &self.session_id, &self.user_message_id)
     }
 }
 
@@ -837,7 +845,8 @@ fn fork_request(
 ) -> ForkRequest {
     let request = ForkRequest {
         operation: local.operation,
-        source: local.source.clone(),
+        session_id: local.session_id.clone(),
+        cwd: local.cwd.clone(),
         user_message_id: checkpoint.user_message_id.clone(),
     };
 

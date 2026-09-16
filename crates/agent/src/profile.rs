@@ -1,9 +1,8 @@
 //! Provider launch rules independent of application configuration storage.
 
-use nmt_profile::{AgentProfile, AgentProfileKind, AgentProfileLauncher};
+use nmt_profile::{AgentKind, AgentProfile, AgentProfileLauncher};
 
 use crate::codex::ProviderConfig;
-use crate::session::AgentKind;
 use crate::{LaunchConfig, dsh};
 
 pub const ANTHROPIC_MODEL_ENV: &str = "ANTHROPIC_MODEL";
@@ -74,7 +73,7 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
 
     let model = (!profile.model.trim().is_empty()).then(|| profile.model.trim().to_string());
 
-    let codex_provider_id = (profile.kind == AgentProfileKind::Codex
+    let codex_provider_id = (profile.kind == AgentKind::Codex
         && profile.use_custom_endpoint
         && !profile.api_base_url.trim().is_empty())
     .then(|| codex_provider_id(&profile.name));
@@ -86,9 +85,9 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
         // provider entry rather than an environment variable; that entry is
         // built from the same field further down.
         let base_url_env = match profile.kind {
-            AgentProfileKind::Claude => Some("ANTHROPIC_BASE_URL"),
-            AgentProfileKind::DeepSeek => Some(DEEPSEEK_BASE_URL_ENV),
-            AgentProfileKind::Codex => None,
+            AgentKind::Claude => Some("ANTHROPIC_BASE_URL"),
+            AgentKind::DeepSeek => Some(DEEPSEEK_BASE_URL_ENV),
+            AgentKind::Codex => None,
         };
 
         let api_base_url = profile.api_base_url.trim();
@@ -103,18 +102,18 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
 
         if !api_key.is_empty() {
             let key_env = match profile.kind {
-                AgentProfileKind::Claude => "ANTHROPIC_API_KEY",
-                AgentProfileKind::Codex => codex_credential_env
+                AgentKind::Claude => "ANTHROPIC_API_KEY",
+                AgentKind::Codex => codex_credential_env
                     .as_deref()
                     .unwrap_or(OPENAI_API_KEY_ENV),
-                AgentProfileKind::DeepSeek => DEEPSEEK_API_KEY_ENV,
+                AgentKind::DeepSeek => DEEPSEEK_API_KEY_ENV,
             };
 
             env.push((key_env.to_string(), api_key.to_string()));
         }
     }
 
-    if profile.kind == AgentProfileKind::Claude
+    if profile.kind == AgentKind::Claude
         && let Some(model) = model.as_ref()
     {
         env.push((ANTHROPIC_MODEL_ENV.to_string(), model.clone()));
@@ -166,11 +165,11 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
     // their configured executable even if a hand-edited file names a package
     // launcher that their adapter does not support.
     let (executable, executable_args) = match (profile.kind, profile.launcher) {
-        (AgentProfileKind::DeepSeek, AgentProfileLauncher::Npx) => (
+        (AgentKind::DeepSeek, AgentProfileLauncher::Npx) => (
             dsh::NPX_EXECUTABLE.to_string(),
             dsh::NPX_ARGUMENTS.map(str::to_string).to_vec(),
         ),
-        (AgentProfileKind::DeepSeek, AgentProfileLauncher::PnpmDlx) => (
+        (AgentKind::DeepSeek, AgentProfileLauncher::PnpmDlx) => (
             dsh::PNPM_DLX_EXECUTABLE.to_string(),
             dsh::PNPM_DLX_ARGUMENTS.map(str::to_string).to_vec(),
         ),
@@ -186,7 +185,7 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
         provider: codex_provider,
         // Only the harness keeps a provider catalog to declare a model in, and
         // only a model this profile names can be declared in it.
-        declares_image_input: profile.kind == AgentProfileKind::DeepSeek
+        declares_image_input: profile.kind == AgentKind::DeepSeek
             && profile.vision_model
             && !profile.model.trim().is_empty(),
         // A profile names no composition; the pane supplies the one the user

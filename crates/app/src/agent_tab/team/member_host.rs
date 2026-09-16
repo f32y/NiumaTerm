@@ -2,7 +2,6 @@
 
 use gpui::{App, Subscription};
 use nmt_agent::chat::{SendOutcome, TeamDecisionRequest, ThreadSettings};
-use nmt_agent::session::delivery::Submission;
 use nmt_agent::session::lifecycle::Status;
 use nmt_agent::session::{ImageAttachment, RecoveryIdentity};
 use nmt_agent::team::attempt::DispatchIntent;
@@ -117,10 +116,7 @@ impl MemberHost {
             cx.notify();
 
             match result {
-                Ok(Submission::Started { .. }) => SendOutcome::StartedTurn,
-                Ok(Submission::Queued) => SendOutcome::Steered,
-                Ok(Submission::Rejected { message }) => SendOutcome::Rejected { message },
-                Ok(Submission::NotReady) => SendOutcome::NotReady,
+                Ok(outcome) => outcome,
                 Err(blocker) => {
                     tracing::warn!(?blocker, "team submission was blocked before sending");
 

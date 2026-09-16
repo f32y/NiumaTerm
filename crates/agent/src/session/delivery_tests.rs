@@ -1,8 +1,8 @@
 use crate::chat::{QueuedPrompt, SendOutcome};
 use crate::session::AgentKind;
-use crate::session::delivery::{MessageDelivery, RecoverablePrompt, Submission};
+use crate::session::delivery::{MessageDelivery, RecoverablePrompt};
 
-fn submit(delivery: &mut MessageDelivery, outcome: SendOutcome, text: &str) -> Submission {
+fn submit(delivery: &mut MessageDelivery, outcome: SendOutcome, text: &str) -> SendOutcome {
     delivery.submit(outcome, text.into(), || None)
 }
 
@@ -29,17 +29,15 @@ fn running_turn_messages_wait_for_agent_output_or_completion() {
 
     assert_eq!(
         submit(&mut delivery, SendOutcome::StartedTurn, "first"),
-        Submission::Started {
-            text: "first".into()
-        }
+        SendOutcome::StartedTurn
     );
     assert_eq!(
         submit(&mut delivery, SendOutcome::Steered, "second"),
-        Submission::Queued
+        SendOutcome::Steered
     );
     assert_eq!(
         submit(&mut delivery, SendOutcome::Steered, "third"),
-        Submission::Queued
+        SendOutcome::Steered
     );
     assert!(!delivery.provider_started());
 
@@ -281,9 +279,9 @@ fn refused_and_queued_sends_do_not_build_recovery_or_replace_the_active_draft() 
         });
 
         match outcome {
-            SendOutcome::NotReady => assert_eq!(result, Submission::NotReady),
+            SendOutcome::NotReady => assert_eq!(result, SendOutcome::NotReady),
             SendOutcome::Rejected { message } => {
-                assert_eq!(result, Submission::Rejected { message })
+                assert_eq!(result, SendOutcome::Rejected { message })
             }
             _ => unreachable!(),
         }

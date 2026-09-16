@@ -1,7 +1,5 @@
 pub use nmt_agent::session::RecoveryIdentity;
-pub use nmt_agent::session::lifecycle::{
-    RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
-};
+pub use nmt_agent::session::lifecycle::{RecoverySnapshot, RestorationReadiness};
 
 pub(super) use nmt_agent::session::Backend;
 pub(super) use nmt_agent::session::lifecycle::{Status, UpdateSuspension};
@@ -28,4 +26,14 @@ pub(super) fn directory_label(cwd: &str) -> String {
         1 => parts[0].to_string(),
         length => format!("{}/{}", parts[length - 2], parts[length - 1]),
     }
+}
+
+/// Whether a conversation can be handed to a provider update, with the
+/// reason it cannot already worded for the user. The agent crate reports the
+/// bare readiness; the wording belongs here with the profile names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RecoveryReadiness {
+    Ready(RecoverySnapshot),
+    Busy(String),
+    MissingIdentity(String),
 }

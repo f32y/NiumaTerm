@@ -10,7 +10,7 @@ use nmt_agent::session::input::{QuestionDraft, QuestionStatus};
 use nmt_agent::session::lifecycle::StartOutcome;
 use nmt_agent::session::test_support::TestBackend;
 use nmt_agent::session::{AgentKind, Backend};
-use nmt_config::profile::{AgentProfile, AgentProfileKind};
+use nmt_config::profile::AgentProfile;
 
 use crate::agent_tab::questions::{QuestionEditorState, QuestionPresentation};
 use crate::agent_tab::settings::AgentSettings;
@@ -20,7 +20,7 @@ use crate::agent_tab::{AgentPane, AgentThreadDefaults};
 fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>) {
     let profile = AgentProfile {
         name: "Question Editor Test".into(),
-        kind: AgentProfileKind::Codex,
+        kind: AgentKind::Codex,
         executable: "missing-question-test-agent.exe".into(),
         ..AgentProfile::default()
     };

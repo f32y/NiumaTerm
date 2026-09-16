@@ -7,7 +7,7 @@ use nmt_agent::claude_code::usage_fetcher::{UsageFetchError, fetch_with_cancel};
 use nmt_agent::codex::usage_fetcher::fetch;
 use nmt_agent::launcher::AgentCli;
 use nmt_agent::usage::UsageSnapshot;
-use nmt_config::profile::AgentProfileKind;
+use nmt_config::profile::AgentKind;
 use nmt_platform::process::{decode_child_output, hidden_cmd_command};
 
 use crate::daily_usage::{DailyTokenUsage, parse_usage};
@@ -32,7 +32,7 @@ pub(crate) fn codex_usage_launcher(settings: &AppSettings) -> AgentCli {
         .agent_profiles
         .list
         .iter()
-        .filter(|profile| profile.kind == AgentProfileKind::Codex)
+        .filter(|profile| profile.kind == AgentKind::Codex)
         .find(|profile| profile.name == settings.config().agent_profiles.default)
         .or_else(|| {
             settings
@@ -40,7 +40,7 @@ pub(crate) fn codex_usage_launcher(settings: &AppSettings) -> AgentCli {
                 .agent_profiles
                 .list
                 .iter()
-                .find(|profile| profile.kind == AgentProfileKind::Codex)
+                .find(|profile| profile.kind == AgentKind::Codex)
         });
 
     let launch = profile.map(agent_launch).unwrap_or_default();
@@ -82,7 +82,7 @@ fn fetch_daily_usage(_: &AtomicBool) -> Result<Option<DailyTokenUsage>, FetchErr
 #[cfg(test)]
 mod tests {
     use nmt_config::Config;
-    use nmt_config::profile::{AgentProfile, AgentProfileKind, AgentProfilesConfig, EnvVar};
+    use nmt_config::profile::{AgentKind, AgentProfile, AgentProfilesConfig, EnvVar};
 
     use crate::ui::AppSettings;
     use crate::usage_sources::codex_usage_launcher;
@@ -94,13 +94,13 @@ mod tests {
                 list: vec![
                     AgentProfile {
                         name: "First".into(),
-                        kind: AgentProfileKind::Codex,
+                        kind: AgentKind::Codex,
                         executable: "first-codex".into(),
                         ..AgentProfile::default()
                     },
                     AgentProfile {
                         name: "Chosen".into(),
-                        kind: AgentProfileKind::Codex,
+                        kind: AgentKind::Codex,
                         executable: "chosen-codex".into(),
                         env: vec![EnvVar {
                             name: "CODEX_HOME".into(),
@@ -127,7 +127,7 @@ mod tests {
             None,
             AgentProfile {
                 name: "Another provider".into(),
-                kind: AgentProfileKind::Claude,
+                kind: AgentKind::Claude,
                 ..AgentProfile::default()
             },
         );

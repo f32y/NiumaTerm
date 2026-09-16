@@ -36,15 +36,6 @@ pub struct RecoverablePrompt {
     pub skill: Option<SkillReference>,
 }
 
-/// Admission result; only a new turn publishes its message immediately.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Submission {
-    Started { text: String },
-    Queued,
-    NotReady,
-    Rejected { message: String },
-}
-
 /// Owns pending messages and recovery eligibility for one conversation.
 /// Confirmed messages are consumed immediately after each transition with
 /// `pop_confirmed`, retaining the queue allocation between ordinary turns.
@@ -97,27 +88,22 @@ impl MessageDelivery {
         outcome: SendOutcome,
         text: String,
         recovery: impl FnOnce() -> Option<RecoverablePrompt>,
-    ) -> Submission {
-        match outcome {
-            SendOutcome::NotReady => Submission::NotReady,
-            SendOutcome::Rejected { message } => Submission::Rejected { message },
-            SendOutcome::Steered => {
-                self.pending.push_back(QueuedPrompt::local(text));
-
-                Submission::Queued
-            }
+    ) -> SendOutcome {
+        match &outcome {
+            SendOutcome::NotReady | SendOutcome::Rejected { .. } => {}
+            SendOutcome::Steered => self.pending.push_back(QueuedPrompt::local(text)),
             SendOutcome::StartedTurn => {
                 self.begin_turn();
 
                 if self.policy == QueuedPromptDelivery::PendingInbox {
-                    self.published_prompt = Some(text.clone());
+                    self.published_prompt = Some(text);
                 }
 
                 self.unanswered = recovery().map(|prompt| (self.turn, prompt));
-
-                Submission::Started { text }
             }
         }
+
+        outcome
     }
 
     /// Commands and accepted question answers can open a turn without a prompt.
