@@ -26,5 +26,5 @@ Regression tests cover live normalization, default selection, stale indices,
 reordering, failed-write retry, and independent rendered settings windows.
 
 Implementations: `crates/app/src/ui/settings/state.rs`,
-`crates/app/src/ui/shell/settings_workspace.rs`, and
+`crates/app/src/ui/settings/mod.rs`, and
 `crates/config/src/appearance.rs`.
