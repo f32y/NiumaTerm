@@ -14,11 +14,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
+use crate::event::AgentEventInput;
 use crate::hook_store::{self, HookRegistration, invalid};
-use crate::{
-    AgentEvent, AgentEventInput, AgentEventKind, HookInstallStatus, agent_process,
-    build_hook_command,
-};
+use crate::{AgentEvent, AgentEventKind, HookInstallStatus, agent_process, build_hook_command};
 
 /// Every Codex event that contributes to the pane lifecycle.
 pub const HOOK_EVENTS: [&str; 6] = [
@@ -114,7 +112,7 @@ pub fn hooks_status(hooks_path: &Path) -> HookInstallStatus {
 
 /// The exact command written to Codex and used when checking whether an
 /// existing registration still matches this NiumaTerm installation.
-pub fn hook_command() -> io::Result<String> {
+fn hook_command() -> io::Result<String> {
     let executable = agent_process()
         .hook_executable()
         .ok_or_else(|| invalid("NiumaTerm Hook executable path is unavailable"))?;

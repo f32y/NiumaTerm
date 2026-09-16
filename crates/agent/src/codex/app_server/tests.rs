@@ -1,5 +1,6 @@
 use std::sync::mpsc::channel;
 
+use crate::codex::ProviderConfig;
 use crate::codex::app_server::compaction::{
     CompactionState, compaction_completed, compaction_started,
 };
@@ -902,7 +903,7 @@ fn turn_start_sends_the_selected_approval_reviewer() {
 fn thread_start_injects_profile_model_and_provider_without_a_secret() {
     let profile = ThreadProfile {
         model: Some("vendor/custom-model".into()),
-        provider: Some(CodexProviderConfig {
+        provider: Some(ProviderConfig {
             id: "niumaterm-a1".into(),
             name: "Proxy".into(),
             base_url: "https://proxy.example.com/v1".into(),
@@ -1079,7 +1080,7 @@ fn in_place_resume_suppresses_transcript_replay_but_still_becomes_ready() {
 fn resume_without_profile_model_restores_the_persisted_model_and_provider() {
     let profile = ThreadProfile {
         model: None,
-        provider: Some(CodexProviderConfig {
+        provider: Some(ProviderConfig {
             id: "niumaterm-a1".into(),
             name: "Proxy".into(),
             base_url: "https://proxy.example.com/v1".into(),
@@ -1102,9 +1103,9 @@ fn resume_without_profile_model_restores_the_persisted_model_and_provider() {
 fn custom_profile_filters_history_and_adds_an_unknown_selected_model() {
     let profile = ThreadProfile {
         model: Some("vendor/custom-model".into()),
-        provider: Some(CodexProviderConfig {
+        provider: Some(ProviderConfig {
             id: "niumaterm-a1".into(),
-            ..CodexProviderConfig::default()
+            ..ProviderConfig::default()
         }),
     };
 

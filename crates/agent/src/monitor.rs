@@ -230,15 +230,9 @@ impl AgentMonitor {
                 mutation
             }
             AgentEventKind::ToolStarted | AgentEventKind::ToolFinished => {
-                let Some(owner) = event.owner() else {
+                let Some((state, _)) = self.current_turn(&route, &event) else {
                     return MonitorMutation::default();
                 };
-
-                let state = self.panes.get_mut(&route).expect("live route");
-
-                if state.current_owner.as_ref() != Some(&owner) {
-                    return MonitorMutation::default();
-                }
 
                 state.has_work_evidence = true;
                 state.pending_completion = None;
@@ -251,13 +245,11 @@ impl AgentMonitor {
                 }
             }
             AgentEventKind::PermissionRequested => {
-                let Some(owner) = event.owner() else {
+                let Some((state, _)) = self.current_turn(&route, &event) else {
                     return MonitorMutation::default();
                 };
 
-                let state = self.panes.get_mut(&route).expect("live route");
-
-                if state.current_owner.as_ref() != Some(&owner) || !state.has_work_evidence {
+                if !state.has_work_evidence {
                     return MonitorMutation::default();
                 }
 
@@ -272,16 +264,11 @@ impl AgentMonitor {
                 mutation
             }
             AgentEventKind::Stopped => {
-                let Some(owner) = event.owner() else {
+                let Some((state, owner)) = self.current_turn(&route, &event) else {
                     return MonitorMutation::default();
                 };
 
-                let state = self.panes.get_mut(&route).expect("live route");
-
-                if state.current_owner.as_ref() != Some(&owner)
-                    || !state.has_work_evidence
-                    || state.status == AgentRuntimeStatus::Idle
-                {
+                if !state.has_work_evidence || state.status == AgentRuntimeStatus::Idle {
                     return MonitorMutation::default();
                 }
 
@@ -304,57 +291,65 @@ impl AgentMonitor {
         }
     }
 
+    /// The pane state and turn owner when `event` belongs to the turn the
+    /// pane is on. Hook events from an earlier turn can arrive after the next
+    /// one started, and they must not touch the newer turn's state.
+    fn current_turn(
+        &mut self,
+        route: &AgentRoute,
+        event: &AgentEvent,
+    ) -> Option<(&mut AgentPaneState, AgentOwner)> {
+        let owner = event.owner()?;
+        let state = self.panes.get_mut(route).expect("live route");
+
+        (state.current_owner.as_ref() == Some(&owner)).then_some((state, owner))
+    }
+
     pub fn process_due(&mut self, now: Instant) -> MonitorMutation {
         let routes: Vec<_> = self.panes.keys().cloned().collect();
 
         let mut result = MonitorMutation::default();
 
         for route in routes {
-            let completion = self
-                .panes
-                .get(&route)
-                .and_then(|state| state.pending_completion.clone())
-                .filter(|pending| pending.deadline <= now);
+            let state = self.panes.get_mut(&route).expect("route still registered");
 
-            if let Some(pending) = completion {
-                let commit = self.panes.get(&route).is_some_and(|state| {
-                    state.current_owner.as_ref() == Some(&pending.owner)
-                        && state.turn_generation == pending.turn_generation
-                        && state.has_work_evidence
-                        && state.status != AgentRuntimeStatus::Idle
-                });
+            let due = state
+                .pending_completion
+                .take_if(|pending| pending.deadline <= now);
 
-                let state = self.panes.get_mut(&route).expect("route still registered");
+            // A completion is committed only for the turn that scheduled it;
+            // one left behind by an interrupted or superseded turn is dropped.
+            let completed = due.filter(|pending| {
+                state.current_owner.as_ref() == Some(&pending.owner)
+                    && state.turn_generation == pending.turn_generation
+                    && state.has_work_evidence
+                    && state.status != AgentRuntimeStatus::Idle
+            });
 
-                state.pending_completion = None;
+            let mut status_changed = false;
 
-                if commit {
-                    state.has_work_evidence = false;
+            if completed.is_some() {
+                state.has_work_evidence = false;
 
-                    let status_changed = state.set_status(AgentRuntimeStatus::Idle, now);
-
-                    let mut mutation =
-                        self.create_notification(&route, pending.title, pending.body);
-
-                    mutation.visible_changed |= status_changed;
-
-                    result.merge(mutation);
-                }
+                status_changed = state.set_status(AgentRuntimeStatus::Idle, now);
             }
 
-            let stale = self
-                .panes
-                .get(&route)
-                .and_then(AgentPaneState::active_state_deadline)
-                .is_some_and(|deadline| deadline <= now);
-
-            if stale {
-                let state = self.panes.get_mut(&route).expect("route still registered");
-
+            if state
+                .active_state_deadline()
+                .is_some_and(|deadline| deadline <= now)
+            {
                 state.pending_completion = None;
                 state.has_work_evidence = false;
 
                 result.visible_changed |= state.set_status(AgentRuntimeStatus::Idle, now);
+            }
+
+            if let Some(pending) = completed {
+                let mut mutation = self.create_notification(&route, pending.title, pending.body);
+
+                mutation.visible_changed |= status_changed;
+
+                result.merge(mutation);
             }
         }
 

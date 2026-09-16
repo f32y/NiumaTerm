@@ -452,13 +452,6 @@ impl Session {
         }
     }
 
-    /// Whether the shared host is still serving. A host that exited takes every
-    /// tab's session with it, so a tab reports that rather than failing each
-    /// later action on its own.
-    pub fn host_is_running(&self) -> bool {
-        self.host.is_running()
-    }
-
     /// Map one delivered frame into transcript events. Frames for other
     /// sessions and types this build does not know produce nothing.
     pub fn process(&mut self, frame: Value) -> Vec<Event> {

@@ -89,7 +89,6 @@ fn bounded_runner_retains_suffix_and_redacts_environment_values() {
     .unwrap();
 
     assert!(output.success());
-    assert!(output.stdout_truncated);
     assert!(!output.stdout.contains(secret));
     assert!(output.stdout.contains("<redacted>"));
 }

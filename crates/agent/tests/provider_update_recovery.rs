@@ -8,13 +8,13 @@ use std::{env, fs, thread};
 
 use nmt_agent::chat::Event;
 use nmt_agent::claude_code::stream_json;
-use nmt_agent::codex::app_server;
+use nmt_agent::codex::{ProviderConfig, app_server};
 use nmt_agent::launcher::AgentCli;
 use nmt_agent::update::{
     ClaudeMaintenance, ClaudeReleaseChannel, CodexMaintenance, InstallationKey, ProviderKind,
     ProviderMaintenance, UpdateCoordinator, UpdateError, UpdatePhase,
 };
-use nmt_agent::{AgentWorkspace, CodexProviderConfig, LaunchConfig};
+use nmt_agent::{AgentWorkspace, LaunchConfig};
 use parking_lot::Mutex;
 use semver::Version;
 use serde_json::Value;
@@ -753,7 +753,7 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
 
     let mut first = fixture.launch(ProviderKind::Codex, "model-a");
 
-    first.provider = Some(CodexProviderConfig {
+    first.provider = Some(ProviderConfig {
         id: "provider-a".into(),
         name: "Provider A".into(),
         base_url: "https://gateway-a.example/v1".into(),
@@ -766,7 +766,7 @@ fn one_codex_host_starts_threads_for_two_custom_gateways() {
 
     let mut second = fixture.launch(ProviderKind::Codex, "model-b");
 
-    second.provider = Some(CodexProviderConfig {
+    second.provider = Some(ProviderConfig {
         id: "provider-b".into(),
         name: "Provider B".into(),
         base_url: "https://gateway-b.example/v1".into(),

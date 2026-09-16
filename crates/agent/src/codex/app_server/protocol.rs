@@ -3,12 +3,12 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
-use crate::CodexProviderConfig;
 use crate::chat::{
     Compaction, ContextUsageScope, ContextWindowUsage, Event, ForkAnchor, ForkCheckpoint, Item,
     ModelInfo, ReplayItem, ReplayTurn, ScopedTokenUsage, SessionScope, SessionSummary,
     SkillReference, SlashCommandOutcome, ThreadSettings, TokenUsageBreakdown, list_selected_model,
 };
+use crate::codex::ProviderConfig;
 use crate::codex::app_server::questions::parse_async_questions;
 use crate::codex::app_server::{PROVIDER_API_FIELD, THREAD_LIST_LIMIT, ThreadProfile};
 use crate::json::{block_text, rfc3339_from_unix_seconds};
@@ -158,7 +158,7 @@ pub(super) fn delta_event(params: &Value, make: fn(String, String) -> Event) -> 
     }
 }
 
-pub(super) fn add_provider_config(params: &mut Value, provider: &CodexProviderConfig) {
+pub(super) fn add_provider_config(params: &mut Value, provider: &ProviderConfig) {
     let mut provider_value = json!({
         "name": provider.name.as_str(),
         "base_url": provider.base_url.as_str(),

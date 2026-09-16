@@ -104,7 +104,6 @@ fn a_turn_streams_and_survives_being_stopped() {
     })
     .expect("the harness host should start and open a conversation");
 
-    assert!(session.host_is_running());
     assert!(session.session_id().is_some());
 
     session
@@ -163,7 +162,6 @@ fn a_turn_streams_and_survives_being_stopped() {
         !session.has_active_operation(),
         "the turn should have ended"
     );
-    assert!(session.host_is_running(), "the host outlives its turns");
 
     let id = session.session_id().unwrap().to_string();
 
@@ -223,7 +221,6 @@ fn a_session_opens_and_receives_its_preset_catalog() {
     })
     .expect("the harness should create a conversation through its local API");
 
-    assert!(session.host_is_running());
     assert!(session.session_id().is_some());
 
     let (seen, received) = collect_until(&mut session, &frames, Duration::from_secs(15), |event| {
