@@ -4,7 +4,7 @@ use gpui::{
 };
 use gpui_component::{Root, WindowExt as _};
 
-use crate::ui::settings::agent_profile_dialog::{
+use crate::ui::settings::agent_profile_page::{
     AgentProfileDraft, agent_profile_dialog, save_agent_profile_draft,
 };
 use crate::ui::settings::{AgentProfile, AppSettings};

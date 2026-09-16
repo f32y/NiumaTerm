@@ -5,8 +5,9 @@ use std::{fs, io};
 use app::agent_tab::AgentKind;
 use app::terminal_tab::settings::TerminalSettings;
 use gpui::{
-    Context, Entity, IntoElement, ListAlignment, ListOffset, ListState, ScrollDelta,
-    ScrollWheelEvent, TestAppContext, list, point, size,
+    Context, Entity, InteractiveElement as _, IntoElement, ListAlignment, ListOffset, ListState,
+    ScrollDelta, ScrollWheelEvent, StatefulInteractiveElement as _, TestAppContext, list, point,
+    px, size,
 };
 use nmt_config::Config;
 use nmt_config::appearance::SmoothScrollingMode;

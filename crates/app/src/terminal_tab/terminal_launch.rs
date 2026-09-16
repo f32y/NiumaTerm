@@ -11,10 +11,9 @@ use nmt_terminal::session::TerminalSessionConfig;
 use rust_i18n::t;
 use tracing::warn;
 
-use crate::ui::AppWindow;
-use crate::ui::settings::AppSettings;
+use crate::ui::{AppSettings, AppWindow};
 
-pub(super) fn spawn_pane(
+pub(crate) fn spawn_pane(
     cx: &mut impl AppContext,
     id: u64,
     state: TabState,
@@ -62,7 +61,7 @@ pub(super) fn spawn_pane(
 /// hardcoded built-in fallback in the session layer from swallowing the
 /// configured profile. The pane takes only the resolved values, so profile
 /// policy stays with the settings that define it.
-pub(super) fn launch_with_profile(
+pub(crate) fn launch_with_profile(
     tab_state: Option<TabState>,
     default_profile: (Option<String>, Vec<String>),
     cx: &mut impl AppContext,
@@ -84,7 +83,7 @@ pub(super) fn launch_with_profile(
 /// Spawn a pane on the default profile, starting the shell in `cwd` when
 /// given. Falls back in layers: an unusable cwd retries without it, a
 /// broken profile retries the built-in shell.
-pub(super) fn spawn_default_pane(
+pub(crate) fn spawn_default_pane(
     cx: &mut Context<AppWindow>,
     surface_id: u64,
     default_profile: (Option<String>, Vec<String>),
@@ -139,7 +138,7 @@ pub(super) fn spawn_default_pane(
 }
 
 #[cfg(windows)]
-pub(super) fn attach_remote(
+pub(crate) fn attach_remote(
     cx: &mut impl AppContext,
     id: u64,
     remote: nmt_remote_net::RemoteSession,

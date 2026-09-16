@@ -19,6 +19,7 @@ use nmt_terminal::event::ProgressReport;
 use rust_i18n::t;
 
 use crate::tabs::{TabId, TabManager};
+use crate::terminal_tab::terminal_status::{TerminalVisual, terminal_dot, terminal_presentation};
 use crate::ui::composition::{
     HoverActionLayout, HoverActionVisibility, StatusMark, StatusMarkTone, TOOLBAR_BUTTON_SIZE,
     hover_action, toolbar_button,
@@ -30,7 +31,6 @@ use crate::ui::shell::{
 use crate::ui::tab_bar::drag::{DragLabelPreview, DragStyle, TabDrag};
 use crate::ui::tab_bar::menu::new_tab_menu;
 use crate::ui::tab_bar::progress_visual;
-use crate::ui::terminal_status::{TerminalVisual, terminal_dot, terminal_presentation};
 use crate::ui::{AppSettings, AppWindow, UI_RADIUS, modern_dropdown};
 use crate::workspace::TerminalActivity;
 

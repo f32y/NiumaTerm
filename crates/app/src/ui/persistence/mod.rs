@@ -23,15 +23,15 @@ use nmt_config::local_state::{
 use rust_i18n::t;
 use tracing::warn;
 
-use crate::pane_tree::{PaneId, PaneNode, PaneTree};
 use crate::tabs::{TabId, TabManager};
+use crate::terminal_tab::terminal_launch::{launch_with_profile, spawn_default_pane, spawn_pane};
+use crate::terminal_tab::terminal_layout::TerminalLayout;
 use crate::ui::AppWindow;
 use crate::ui::git_sidebar::GitSidebar;
+use crate::ui::pane_tree::{PaneId, PaneNode, PaneTree};
 use crate::ui::settings::{AgentProfile, AppSettings, builtin_agent_profile};
 use crate::ui::shell::tab_surface::{AgentTab, GitTab, TerminalPaneTree};
 use crate::ui::shell::{TabSurface, agent_workspace};
-use crate::ui::terminal_launch::{launch_with_profile, spawn_default_pane, spawn_pane};
-use crate::ui::terminal_layout::TerminalLayout;
 use crate::workspace::{WorkspaceId, WorkspaceManager, WorkspaceRoots, default_workspace_name};
 
 /// What a saved tab reopens as.

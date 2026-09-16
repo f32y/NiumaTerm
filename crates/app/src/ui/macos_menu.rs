@@ -14,9 +14,6 @@
 //! selection, a text field its own), and a menu item would take them away from
 //! both.
 
-#[cfg(test)]
-mod tests;
-
 use gpui::{App, Menu, MenuItem, SystemMenuType, Window, actions};
 use rust_i18n::t;
 

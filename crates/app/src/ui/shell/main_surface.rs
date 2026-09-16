@@ -10,8 +10,8 @@ use gpui_component::resizable::{ResizablePanelGroup, resizable_panel};
 use gpui_component::setting::SettingsView;
 use rust_i18n::t;
 
-use crate::pane_tree::{PaneId, PaneNode};
 use crate::ui::main_view_background_opacity;
+use crate::ui::pane_tree::{PaneId, PaneNode};
 use crate::ui::shell::{AppWindow, TabSurface};
 
 /// The active tab's pane tree as nested resizable groups. The main surface

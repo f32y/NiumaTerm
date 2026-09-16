@@ -11,10 +11,10 @@
 use app::terminal_tab::view::{NextBlock, PreviousBlock, SendShiftTab, SendTab};
 use gpui::{App, KeyBinding};
 
-#[cfg(target_os = "macos")]
-use crate::menu::{Hide, HideOthers, Minimize, Quit};
 #[cfg(windows)]
 use crate::ui::NewRemoteTab;
+#[cfg(target_os = "macos")]
+use crate::ui::macos_menu::{Hide, HideOthers, Minimize, Quit};
 use crate::ui::{
     CloseTab, NewAgentTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace, PrevTab,
     PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp, ShowSettings,

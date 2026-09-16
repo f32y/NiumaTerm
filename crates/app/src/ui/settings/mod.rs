@@ -31,8 +31,7 @@ pub(crate) use crate::ui::settings::theme::{apply_ui_theme, apply_window_translu
 
 mod about_page;
 mod agent_page;
-mod agent_profile_dialog;
-mod agent_profile_list;
+mod agent_profile_page;
 mod appearance_page;
 mod card;
 mod fields;
@@ -60,9 +59,8 @@ use app::design::SETTINGS_NAV_WIDTH;
 use gpui::WindowBackgroundAppearance;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Div, Entity, FileDialogFilter,
-    InteractiveElement as _, IntoElement as _, ParentElement as _, PathPromptOptions, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Task, Window, div, px, relative,
+    App, AppContext as _, Context, Div, Entity, FileDialogFilter, IntoElement as _,
+    ParentElement as _, PathPromptOptions, SharedString, Styled as _, Task, Window, div, relative,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogClose, DialogFooter};
@@ -106,8 +104,7 @@ use crate::ui::settings::about_page::about_page;
 use crate::ui::settings::agent_page::agent_page;
 #[cfg(test)]
 use crate::ui::settings::agent_page::{installation_update_title, installation_version_text};
-use crate::ui::settings::agent_profile_dialog::open_agent_profile_dialog;
-use crate::ui::settings::agent_profile_list::agent_profile_list;
+use crate::ui::settings::agent_profile_page::{agent_profile_list, open_agent_profile_dialog};
 use crate::ui::settings::appearance_page::appearance_page;
 use crate::ui::settings::card::{card_row, card_text_input, description_hint};
 use crate::ui::settings::fields::{
@@ -131,9 +128,7 @@ use crate::ui::settings::state::{
 };
 use crate::ui::settings::state::{agent_kind_display_label, input_style_label};
 use crate::ui::settings::system_page::system_page;
-use crate::ui::settings::table::{
-    ENV_OPERATION_COLUMN, TABLE_OPERATION_BUTTON, TrashIcon, table_frame, table_header, table_row,
-};
+use crate::ui::settings::table::{ENV_OPERATION_COLUMN, table_row};
 use crate::ui::settings::terminal_page::terminal_page;
 use crate::ui::settings::theme::watch_themes;
 use crate::ui::settings::theme_gallery::theme_list;

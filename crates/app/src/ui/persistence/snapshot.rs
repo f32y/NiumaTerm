@@ -10,7 +10,7 @@ use nmt_config::local_state::{
     PaneNodeState, PaneSplitAxis, SessionState, TabState, WorkspaceState,
 };
 
-use crate::pane_tree::PaneNode;
+use crate::ui::pane_tree::PaneNode;
 use crate::ui::settings::AppSettings;
 use crate::ui::shell::TabSurface;
 use crate::workspace::{WorkspaceId, WorkspaceKind, WorkspaceManager};

@@ -1,7 +1,7 @@
 use gpui::{AppContext, TestAppContext};
 use gpui_component::resizable::ResizableState;
 
-use crate::pane_tree::*;
+use crate::ui::pane_tree::*;
 
 type Tree = PaneTree<u32>;
 

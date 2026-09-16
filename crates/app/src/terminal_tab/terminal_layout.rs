@@ -7,7 +7,9 @@ mod terminal_layout_tests;
 use gpui::{App, AppContext, Entity, Pixels, Window};
 use gpui_component::resizable::{PANEL_MIN_SIZE, ResizableState};
 
-use crate::pane_tree::{PaneId, PaneNode, PaneTree, RemoveOutcome, SplitDirection, SplitOutcome};
+use crate::ui::pane_tree::{
+    PaneId, PaneNode, PaneTree, RemoveOutcome, SplitDirection, SplitOutcome,
+};
 
 pub(crate) struct TerminalLayout<L> {
     tree: PaneTree<L>,
@@ -22,7 +24,7 @@ impl<L> TerminalLayout<L> {
         &mut self.tree
     }
 
-    pub(super) fn new_leaf(id: PaneId, pane: L) -> Self {
+    pub(crate) fn new_leaf(id: PaneId, pane: L) -> Self {
         Self {
             tree: PaneTree::new_leaf(id, pane),
         }
@@ -30,7 +32,7 @@ impl<L> TerminalLayout<L> {
 
     /// Split sizes and child order change together. A group that has not been
     /// rendered has no measured slots yet; its first layout supplies them.
-    pub(super) fn split(
+    pub(crate) fn split(
         &mut self,
         id: PaneId,
         pane: L,
@@ -90,7 +92,7 @@ impl<L> TerminalLayout<L> {
         true
     }
 
-    pub(super) fn remove(&mut self, id: PaneId, cx: &mut App) -> Option<L> {
+    pub(crate) fn remove(&mut self, id: PaneId, cx: &mut App) -> Option<L> {
         let (pane, outcome) = self.tree.remove(id)?;
 
         match outcome {
@@ -109,7 +111,7 @@ impl<L> TerminalLayout<L> {
         Some(pane)
     }
 
-    pub(super) fn resize(
+    pub(crate) fn resize(
         &self,
         direction: SplitDirection,
         step: Pixels,
@@ -135,7 +137,7 @@ impl<L> TerminalLayout<L> {
         true
     }
 
-    pub(super) fn apply_pending_ratios(&mut self, cx: &mut App) {
+    pub(crate) fn apply_pending_ratios(&mut self, cx: &mut App) {
         self.tree.for_each_split_mut(&mut |state, pending| {
             if let Some(ratios) = pending.take_if(|_| state.read(cx).has_bounds()) {
                 state.update(cx, |state, cx| state.set_ratios(&ratios, cx));
