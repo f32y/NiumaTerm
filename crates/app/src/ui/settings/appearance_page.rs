@@ -206,29 +206,7 @@ pub(super) fn appearance_page(
                                 .edit_appearance(|section| section.reduce_motion = value);
                         },
                     ),
-                ))
-                .item(
-                    SettingItem::new(
-                        t!("settings-appearance-human-friendly-agent-ui-layout"),
-                        SettingField::switch(
-                            |cx| {
-                                cx.global::<AppSettings>()
-                                    .config()
-                                    .appearance
-                                    .human_friendly_agent_ui_layout
-                            },
-                            |value, cx| {
-                                cx.global_mut::<AppSettings>().edit_appearance(|section| {
-                                    section.human_friendly_agent_ui_layout = value
-                                });
-                            },
-                        ),
-                    )
-                    .description(
-                        t!("settings-appearance-human-friendly-agent-ui-layout-description")
-                            .into_owned(),
-                    ),
-                ),
+                )),
         )
         .group(
             SettingGroup::new()
@@ -351,40 +329,37 @@ pub(super) fn appearance_page(
         .group(
             SettingGroup::new()
                 .title(t!("settings-appearance-tab-bar"))
-                .item(
-                    SettingItem::new(
-                        t!("settings-appearance-tab-bar-style"),
-                        SettingField::dropdown(
-                            vec![
-                                (
-                                    "horizontal".into(),
-                                    t!("settings-appearance-tab-bar-style-horizontal").into(),
-                                ),
-                                (
-                                    "vertical".into(),
-                                    t!("settings-appearance-tab-bar-style-vertical").into(),
-                                ),
-                            ],
-                            |cx| {
-                                let key: &str = cx
-                                    .global::<AppSettings>()
-                                    .config()
-                                    .appearance
-                                    .tab_bar_style
-                                    .into();
+                .item(SettingItem::new(
+                    t!("settings-appearance-tab-bar-style"),
+                    SettingField::dropdown(
+                        vec![
+                            (
+                                "horizontal".into(),
+                                t!("settings-appearance-tab-bar-style-horizontal").into(),
+                            ),
+                            (
+                                "vertical".into(),
+                                t!("settings-appearance-tab-bar-style-vertical").into(),
+                            ),
+                        ],
+                        |cx| {
+                            let key: &str = cx
+                                .global::<AppSettings>()
+                                .config()
+                                .appearance
+                                .tab_bar_style
+                                .into();
 
-                                key.into()
-                            },
-                            |value, cx| {
-                                cx.global_mut::<AppSettings>().edit_appearance(|section| {
-                                    section.tab_bar_style = value.as_str().into()
-                                });
-                            },
-                        )
-                        .default_value("horizontal"),
+                            key.into()
+                        },
+                        |value, cx| {
+                            cx.global_mut::<AppSettings>().edit_appearance(|section| {
+                                section.tab_bar_style = value.as_str().into()
+                            });
+                        },
                     )
-                    .description(t!("settings-appearance-tab-bar-style-description").into_owned()),
-                )
+                    .default_value("horizontal"),
+                ))
                 .item(SettingItem::new(
                     t!("settings-appearance-tab-auto-size"),
                     SettingField::switch(

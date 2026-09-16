@@ -34,19 +34,16 @@ pub(super) fn about_page() -> SettingPage {
     // itself can still be replaced by hand.
     #[cfg(any(windows, target_os = "macos"))]
     let group = group
-        .item(
-            SettingItem::new(
-                t!("settings-about-check-updates"),
-                SettingField::switch(
-                    |cx| cx.global::<AppSettings>().config().update.check_updates,
-                    |value, cx| {
-                        cx.global_mut::<AppSettings>()
-                            .edit_update(|section| section.check_updates = value);
-                    },
-                ),
-            )
-            .description(t!("settings-about-check-updates-description").into_owned()),
-        )
+        .item(SettingItem::new(
+            t!("settings-about-check-updates"),
+            SettingField::switch(
+                |cx| cx.global::<AppSettings>().config().update.check_updates,
+                |value, cx| {
+                    cx.global_mut::<AppSettings>()
+                        .edit_update(|section| section.check_updates = value);
+                },
+            ),
+        ))
         .item(SettingItem::new(
             t!("settings-about-channel"),
             SettingField::dropdown(
