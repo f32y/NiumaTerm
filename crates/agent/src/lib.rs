@@ -1,7 +1,6 @@
-pub use crate::codex::ProviderConfig as CodexProviderConfig;
 pub use crate::event::{
-    AgentEvent, AgentEventInput, AgentEventKind, AgentOwner, AgentRuntimeStatus,
-    AgentValidationError, RawAgentHookMessage, normalize_body, normalize_title,
+    AgentEvent, AgentEventKind, AgentRuntimeStatus, AgentValidationError, RawAgentHookMessage,
+    normalize_body, normalize_title,
 };
 pub use crate::hook_store::{HookInstallStatus, build_hook_command, hook_command_contains};
 pub use crate::monitor::{
@@ -45,6 +44,7 @@ mod subprocess;
 #[cfg(test)]
 mod tests;
 
+use crate::codex::ProviderConfig;
 #[cfg(test)]
 use crate::event::MAX_TITLE_CHARS;
 use crate::event::{MAX_ROUTE_BYTES, validate_identity};
@@ -69,7 +69,7 @@ pub struct LaunchConfig {
     /// settings. Each adapter maps it to its own surface.
     pub effort: Option<String>,
 
-    pub provider: Option<CodexProviderConfig>,
+    pub provider: Option<ProviderConfig>,
     pub env: Vec<(String, String)>,
 
     /// Declare [`Self::model`] as an image-capable model in the harness's own

@@ -9,7 +9,6 @@ pub use crate::codex::update::CodexMaintenance;
 mod tests;
 
 use std::collections::HashMap;
-use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,8 +20,10 @@ use parking_lot::Mutex;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
+use thiserror::Error;
 use tracing::warn;
 
+use crate::json::collapse;
 use crate::launcher::{AgentCli, ProcessError, ProcessLimits, ProcessOutput, run_bounded};
 
 pub(crate) const PROBE_LIMITS: ProcessLimits =
@@ -101,23 +102,16 @@ impl InstallationKey {
             digest.update([0]);
         }
 
-        let fingerprint = hex_digest(digest.finalize().as_slice());
-
         let key = Self(format!(
             "{}:{}",
             match provider {
                 ProviderKind::Claude => "claude",
                 ProviderKind::Codex => "codex",
             },
-            fingerprint
+            hex::encode(digest.finalize())
         ));
 
-        InstallationIdentity {
-            key,
-            provider,
-            resolved_launcher,
-            environment_fingerprint: fingerprint,
-        }
+        InstallationIdentity { key, provider }
     }
 
     pub fn as_str(&self) -> &str {
@@ -144,8 +138,6 @@ impl fmt::Display for InstallationKey {
 pub struct InstallationIdentity {
     pub key: InstallationKey,
     pub provider: ProviderKind,
-    pub resolved_launcher: PathBuf,
-    pub environment_fingerprint: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,7 +176,7 @@ impl VersionStatus {
             channel: None,
             can_update: false,
             support: DiscoverySupport::Unsupported {
-                reason: bounded_label(reason, MAX_LABEL_CHARS),
+                reason: collapse(reason, MAX_LABEL_CHARS),
             },
             remediation: None,
         }
@@ -220,23 +212,12 @@ pub struct UpdateProgress {
     pub total: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstallationUpdateState {
     pub phase: UpdatePhase,
     pub versions: Option<VersionStatus>,
     pub progress: Option<UpdateProgress>,
     pub error: Option<UpdateError>,
-}
-
-impl Default for InstallationUpdateState {
-    fn default() -> Self {
-        Self {
-            phase: UpdatePhase::Unknown,
-            versions: None,
-            progress: None,
-            error: None,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -252,7 +233,8 @@ pub enum UpdateErrorKind {
     Recovery,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Error, PartialEq, Eq, Serialize, Deserialize)]
+#[error("{message}")]
 pub struct UpdateError {
     pub kind: UpdateErrorKind,
     message: String,
@@ -262,7 +244,7 @@ impl UpdateError {
     pub fn new(kind: UpdateErrorKind, message: impl AsRef<str>) -> Self {
         Self {
             kind,
-            message: bounded_label(message.as_ref(), MAX_DIAGNOSTIC_CHARS),
+            message: collapse(message.as_ref(), MAX_DIAGNOSTIC_CHARS),
         }
     }
 
@@ -270,14 +252,6 @@ impl UpdateError {
         &self.message
     }
 }
-
-impl fmt::Display for UpdateError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
-
-impl Error for UpdateError {}
 
 pub trait ProviderMaintenance: Send + Sync {
     fn provider(&self) -> ProviderKind;
@@ -311,7 +285,7 @@ pub(crate) fn vendor_update(
         return Err(classify_vendor_failure(provider, &output));
     }
 
-    Ok(bounded_label(&output.diagnostic(), MAX_DIAGNOSTIC_CHARS))
+    Ok(collapse(&output.diagnostic(), MAX_DIAGNOSTIC_CHARS))
 }
 
 fn classify_vendor_failure(provider: ProviderKind, output: &ProcessOutput) -> UpdateError {
@@ -361,31 +335,6 @@ fn extract_version(output: &str) -> Option<Version> {
             })
         })
         .find_map(|candidate| Version::parse(candidate).ok())
-}
-
-pub(crate) fn bounded_label(value: &str, max_chars: usize) -> String {
-    value
-        .chars()
-        .map(|ch| if ch.is_control() { ' ' } else { ch })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(max_chars)
-        .collect()
-}
-
-fn hex_digest(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-
-    let mut output = String::with_capacity(bytes.len() * 2);
-
-    for byte in bytes {
-        write!(output, "{byte:02x}").expect("writing to String cannot fail");
-    }
-
-    output
 }
 
 const CACHE_VERSION: u32 = 1;

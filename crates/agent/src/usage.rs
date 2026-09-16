@@ -4,9 +4,7 @@
 #[path = "usage_tests.rs"]
 mod usage_tests;
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use chrono::DateTime;
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 pub(crate) const FIVE_HOUR_WINDOW_MINUTES: u32 = 5 * 60;
@@ -91,11 +89,7 @@ impl UsageSnapshot {
 }
 
 pub fn now_unix_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| {
-            duration.as_millis().min(i64::MAX as u128) as i64
-        })
+    Utc::now().timestamp_millis()
 }
 
 pub(crate) fn parse_timestamp_millis(value: &Value) -> Option<i64> {

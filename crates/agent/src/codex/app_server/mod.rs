@@ -42,6 +42,8 @@ use std::time::UNIX_EPOCH;
 
 use serde_json::{Value, json};
 
+use crate::LaunchConfig;
+use crate::codex::ProviderConfig;
 use crate::codex::app_server::background_tasks::{CodexTasks, ThreadScope, notification_thread_id};
 use crate::codex::app_server::compaction::is_legacy_compaction_notification;
 use crate::codex::app_server::control::{ControlOperation, ControlState, QueryKind};
@@ -67,7 +69,6 @@ use crate::codex::app_server::title_generation::{
 };
 use crate::session::team_capabilities::TeamLaunch;
 use crate::workspace::AgentWorkspace;
-use crate::{CodexProviderConfig, LaunchConfig};
 
 const FIRST_TURN_RPC_ID: u64 = 100;
 const PROVIDER_API_FIELD: &str = concat!("wi", "re_api");
@@ -99,7 +100,7 @@ const THREAD_SCOPED_NOTIFICATIONS: [&str; 14] = [
 #[derive(Clone, Debug, Default)]
 struct ThreadProfile {
     model: Option<String>,
-    provider: Option<CodexProviderConfig>,
+    provider: Option<ProviderConfig>,
 }
 
 impl From<&LaunchConfig> for ThreadProfile {

@@ -7,11 +7,12 @@ use std::time::Duration;
 use reqwest::blocking::{Client, Response};
 use semver::Version;
 
+use crate::json::collapse;
 use crate::launcher::{AgentCli, run_bounded};
 use crate::update::{
     DiscoverySupport, MAX_LABEL_CHARS, PROBE_LIMITS, ProviderKind, ProviderMaintenance,
-    UpdateError, UpdateErrorKind, VersionStatus, bounded_label, current_version_fallback,
-    parse_strict_version, vendor_update,
+    UpdateError, UpdateErrorKind, VersionStatus, current_version_fallback, parse_strict_version,
+    vendor_update,
 };
 
 const RELEASE_BASE_URL: &str = "https://downloads.claude.ai/claude-code-releases";
@@ -227,7 +228,7 @@ fn parse_claude_doctor(output: &str) -> Result<VersionStatus, UpdateError> {
 }
 
 fn nonempty_label(value: &str) -> Option<String> {
-    let value = bounded_label(value, MAX_LABEL_CHARS);
+    let value = collapse(value, MAX_LABEL_CHARS);
 
     (!value.is_empty()).then_some(value)
 }

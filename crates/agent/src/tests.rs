@@ -1,6 +1,7 @@
 use std::slice;
 use std::time::{Duration, Instant};
 
+use crate::event::AgentEventInput;
 use crate::*;
 
 const TOKEN: &str = "hook-secret";

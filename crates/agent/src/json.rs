@@ -25,7 +25,7 @@ pub(crate) fn text_field(value: &Value, keys: &[&str]) -> Option<String> {
 pub(crate) fn condense(text: &str) -> Option<String> {
     const MAX_PREVIEW_CHARS: usize = 160;
 
-    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let text = collapse(text, usize::MAX);
 
     if text.is_empty() {
         return None;
@@ -96,4 +96,20 @@ pub(crate) fn diff_lines(removed: &str, added: &str) -> String {
     }
 
     diff
+}
+
+/// One line of at most `max_chars` characters: control characters become
+/// spaces, whitespace runs collapse to one space, and the text is trimmed.
+/// Labels, titles and previews all land in single-line rows, so the same
+/// shape serves every provider string that reaches one.
+pub(crate) fn collapse(text: &str, max_chars: usize) -> String {
+    text.chars()
+        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(max_chars)
+        .collect()
 }

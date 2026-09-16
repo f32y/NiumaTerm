@@ -16,8 +16,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
+use crate::event::AgentEventInput;
 use crate::hook_store::{self, HookRegistration};
-use crate::{AgentEvent, AgentEventInput, AgentEventKind, HookInstallStatus};
+use crate::{AgentEvent, AgentEventKind, HookInstallStatus};
 
 /// Every hook event the adapter normalizes. Keep in sync with the `normalize`
 /// match below.

@@ -2,8 +2,9 @@
 
 use nmt_profile::{AgentProfile, AgentProfileKind, AgentProfileLauncher};
 
+use crate::codex::ProviderConfig;
 use crate::session::AgentKind;
-use crate::{CodexProviderConfig, LaunchConfig, dsh};
+use crate::{LaunchConfig, dsh};
 
 pub const ANTHROPIC_MODEL_ENV: &str = "ANTHROPIC_MODEL";
 pub const OPENAI_API_KEY_ENV: &str = "OPENAI_API_KEY";
@@ -149,7 +150,7 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
     let api_key_env =
         codex_credential_env.filter(|name| launch_env_value_from_entries(&env, name).is_some());
 
-    let codex_provider = codex_provider_id.map(|id| CodexProviderConfig {
+    let codex_provider = codex_provider_id.map(|id| ProviderConfig {
         id,
         name: if profile.name.trim().is_empty() {
             "NiumaTerm custom endpoint".to_string()

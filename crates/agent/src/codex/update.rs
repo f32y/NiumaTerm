@@ -4,11 +4,12 @@ mod update_tests;
 
 use serde_json::Value;
 
+use crate::json::collapse;
 use crate::launcher::{AgentCli, run_bounded};
 use crate::update::{
     DiscoverySupport, MAX_LABEL_CHARS, PROBE_LIMITS, ProviderKind, ProviderMaintenance,
-    UpdateError, UpdateErrorKind, VersionStatus, bounded_label, current_version_fallback,
-    parse_strict_version, vendor_update,
+    UpdateError, UpdateErrorKind, VersionStatus, current_version_fallback, parse_strict_version,
+    vendor_update,
 };
 
 #[derive(Default)]
@@ -71,10 +72,10 @@ fn parse_codex_doctor(json: &str) -> Result<VersionStatus, UpdateError> {
             "install context",
         )
     })
-    .map(|value| bounded_label(value, MAX_LABEL_CHARS));
+    .map(|value| collapse(value, MAX_LABEL_CHARS));
 
     let remediation =
-        detail_string(details, "update action").map(|value| bounded_label(value, MAX_LABEL_CHARS));
+        detail_string(details, "update action").map(|value| collapse(value, MAX_LABEL_CHARS));
 
     let can_update = remediation.as_deref().is_some_and(|action| {
         !action.to_ascii_lowercase().contains("manual")

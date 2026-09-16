@@ -79,10 +79,9 @@ pub fn merge_catalog(
         .collect()
 }
 
-/// One ranked palette hit, borrowed from the catalog it was ranked out of.
-/// Ranking runs again on every keystroke and again on every frame the palette
-/// paints, so the rows carry references and only the entry the user acts on is
-/// ever copied.
+/// Whether the composer text still opens with the `$name` token the bound
+/// skill was inserted as. The token is the only trace of the binding in the
+/// text, so its removal is what releases the binding.
 fn input_has_bound_skill_token(input: &str, binding: &SkillReference) -> bool {
     input
         .split_whitespace()
