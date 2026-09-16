@@ -9,8 +9,8 @@
 #[path = "grid_emit_tests.rs"]
 mod grid_emit_tests;
 
+use crate::pos::Line;
 use crate::selection::SelectionRange;
-use crate::terminal::pos::Line;
 
 /// Per-row selection interval, in column indices. `None` = row is outside the
 /// selection. Block selections reduce to the same `[lo, hi]` on every row;

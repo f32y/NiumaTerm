@@ -1,7 +1,7 @@
+use crate::pos::{Column, Line, Pos};
 use crate::selection::SelectionType;
 use crate::session::mouse::{SurfaceCellSide, SurfaceMouseEventKind};
 use crate::session::selection::SurfaceSelection;
-use crate::terminal::pos::{Column, Line, Pos};
 
 fn pos(row: i32, col: usize) -> Pos {
     Pos::new(Line(row), Column(col))

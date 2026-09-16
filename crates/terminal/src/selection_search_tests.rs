@@ -1,7 +1,7 @@
 use crate::ghostty::GhosttyTerminal;
+use crate::pos::{Column, Line, Pos};
 use crate::render_buffer::RenderBuffer;
 use crate::selection_search::VisibleGrid;
-use crate::terminal::{Column, Line, Pos};
 
 fn buffer(cols: usize, rows: usize, bytes: &[u8]) -> RenderBuffer {
     let mut engine = GhosttyTerminal::new(cols as u16, rows as u16, 100).unwrap();

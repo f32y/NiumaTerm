@@ -8,10 +8,10 @@ use nmt_terminal::event::BlockEvent;
 use nmt_terminal::ghostty::{
     BlockHandle, BlockRef, GhosttyTerminal, Palette, RowCell, ScreenRowRead,
 };
+use nmt_terminal::pos::{Column, Line, Pos};
 use nmt_terminal::selection::SelectionRange;
 use nmt_terminal::session::BlockPoint as FrozenPoint;
 use nmt_terminal::session::page::{PageSource, RowPage};
-use nmt_terminal::terminal::pos::{Column, Line, Pos};
 
 use crate::terminal_tab::block_list::FrozenView;
 use crate::terminal_tab::block_list::chrome::{DurationLabels, item_header, live_chrome};

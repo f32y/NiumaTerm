@@ -4,7 +4,7 @@
 //! expects (kitty keyboard protocol + textual + modifier folding). It was moved
 //! here from `app/rioterm/src/bindings/kitty_keyboard.rs` and decoupled
 //! from frontend-specific key events onto the neutral [`KeyInput`], and from
-//! `nmt_terminal::terminal::Mode`
+//! `nmt_terminal::vt_modes::Mode`
 //! onto [`KeyEncodeFlags`] so terminal encoding stays independent of the renderer.
 //!
 //! `build_key_sequence` was originally taken from alacritty (Apache 2.0).
@@ -24,7 +24,7 @@ use crate::event::ElementState;
 use crate::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
 
 bitflags! {
-    /// Terminal modes that affect key encoding, lifted off `nmt_terminal::terminal::Mode`
+    /// Terminal modes that affect key encoding, lifted off `nmt_terminal::vt_modes::Mode`
     /// so this crate stays independent of rio-backend. Each frontend derives these
     /// from its own mode source (rioterm: `Mode`; NiumaTerm: the session `vt_modes` atomic).
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

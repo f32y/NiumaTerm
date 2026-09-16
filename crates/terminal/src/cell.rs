@@ -10,15 +10,15 @@
 // cell itself is 8 bytes.
 
 #[cfg(test)]
-#[path = "square_tests.rs"]
-mod square_tests;
+#[path = "cell_tests.rs"]
+mod cell_tests;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use bitflags::bitflags;
 
-use crate::terminal::style::StyleId;
+use crate::style::StyleId;
 
 // ---------------------------------------------------------------------------
 // Bit layout for Square(u64)

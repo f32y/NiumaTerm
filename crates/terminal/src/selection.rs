@@ -10,9 +10,9 @@
 use std::mem;
 use std::ops::{Bound, Range, RangeBounds};
 
+use crate::pos::{Column, Line, Pos, Side};
 use crate::render_buffer::RenderBuffer;
 use crate::selection_search::VisibleGrid;
-use crate::terminal::pos::{Column, Line, Pos, Side};
 
 /// Characters that split words for semantic selection. Matches Windows
 /// Terminal's default so paths, flags, and punctuation select predictably.

@@ -1,6 +1,7 @@
 use nmt_input::keyboard::ModifiersState;
 
 use crate::ghostty::GhosttyTerminal;
+use crate::pos::{Column, Line, Pos, Side};
 use crate::render_buffer::RenderBuffer;
 use crate::selection::{Selection, SelectionType};
 use crate::session::mouse::{
@@ -8,8 +9,7 @@ use crate::session::mouse::{
 };
 use crate::session::paste_payload;
 use crate::session::selection::{block_selection_range, selection_screen_range};
-use crate::terminal::Mode;
-use crate::terminal::pos::{Column, Line, Pos, Side};
+use crate::vt_modes::Mode;
 
 #[test]
 fn frozen_click_selection_expands_words_and_wrapped_lines() {

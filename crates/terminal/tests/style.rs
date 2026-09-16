@@ -1,5 +1,5 @@
 use nmt_config::colors::{AnsiColor, NamedColor};
-use nmt_terminal::terminal::style::*;
+use nmt_terminal::style::*;
 
 #[test]
 fn default_style_at_id_zero() {

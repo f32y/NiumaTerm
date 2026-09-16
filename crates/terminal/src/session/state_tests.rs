@@ -16,7 +16,7 @@ use crate::session::mouse::{SurfaceCellSide, SurfaceMouseEventKind, SurfaceScree
 use crate::session::page::PageCache;
 use crate::session::proxy::TerminalEventProxy;
 use crate::session::{SessionSharedState, TerminalSession};
-use crate::terminal::Mode;
+use crate::vt_modes::Mode;
 
 #[test]
 fn path_paste_and_block_replay_obey_session_input_rules() {

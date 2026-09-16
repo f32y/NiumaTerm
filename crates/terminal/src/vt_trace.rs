@@ -14,7 +14,7 @@ use std::{env, fmt, fs, sync, time};
 
 use crate::ghostty::GhosttyTerminal;
 use crate::render_buffer::RenderBuffer;
-use crate::terminal::style::Style;
+use crate::style::Style;
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 

@@ -1,11 +1,11 @@
 use nmt_config::colors::term::TermColors;
 use nmt_config::colors::{ColorArray, Colors, NamedColor};
 use nmt_terminal::ansi::CursorShape;
+use nmt_terminal::cell::Wide;
 use nmt_terminal::ghostty::GhosttyTerminal;
+use nmt_terminal::pos::{Column, Line, Pos};
 use nmt_terminal::render_buffer::RenderBuffer;
 use nmt_terminal::selection::SelectionRange;
-use nmt_terminal::terminal::pos::{Column, Line, Pos};
-use nmt_terminal::terminal::square::Wide;
 
 use crate::terminal_tab::frame::{
     BackgroundColors, EngineRowBuilder, FrameImageKind, GenerationMap, TerminalColor,

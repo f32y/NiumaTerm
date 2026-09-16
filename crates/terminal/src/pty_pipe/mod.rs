@@ -35,7 +35,7 @@ use crate::pty_pipe::requests::answer_query;
 use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
 use crate::session::request::{Checkpoint, RequestError};
-use crate::{terminal, vt_trace};
+use crate::{vt_modes, vt_trace};
 
 /// Reserved `Poll` token for the loop's `Waker`. PTY source tokens start above it.
 const WAKER_TOKEN: Token = Token(0);
@@ -158,9 +158,9 @@ pub struct PtyPipe<T: EventedPty, U: EventListener> {
 /// Read the VT-controlled modes from the Ghostty engine into `Mode`.
 /// bits (e.g. `Mode::VI`) are not touched here — see
 /// [`Crosswords::sync_vt_modes`].
-fn ghostty_vt_modes(g: &GhosttyTerminal) -> terminal::Mode {
+fn ghostty_vt_modes(g: &GhosttyTerminal) -> vt_modes::Mode {
     use crate::ghostty::mode as gm;
-    use crate::terminal::Mode;
+    use crate::vt_modes::Mode;
 
     let mut m = Mode::empty();
 
@@ -641,7 +641,7 @@ where
         }
 
         // Interactive-state detection: full-screen TUIs set alt-screen.
-        self.prev_alt_screen = vt_modes.contains(terminal::Mode::ALT_SCREEN);
+        self.prev_alt_screen = vt_modes.contains(vt_modes::Mode::ALT_SCREEN);
 
         self.emit_interactive_state();
 
