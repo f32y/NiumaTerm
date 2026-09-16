@@ -4,7 +4,7 @@ use std::time::Duration;
 use gpui::prelude::*;
 use gpui::{AnyElement, App, Context, FontWeight, Pixels, ScrollHandle, SharedString, div, px};
 use gpui_component::{ActiveTheme as _, h_flex, v_flex};
-use nmt_agent::chat::{ForkCheckpoint, SkillCatalog, SkillInfo, SkillReference, SlashCommandInfo};
+use nmt_agent::chat::{ForkCheckpoint, SkillInfo, SkillReference, SlashCommandInfo};
 use nmt_agent::claude_code::sessions;
 use nmt_agent::session::commands::CommandQueue;
 use rust_i18n::t;
@@ -53,28 +53,18 @@ pub(crate) struct PaletteModel {
 /// switch language while a pane is open.
 pub(crate) struct CachedCatalog {
     pub(crate) language: String,
+    pub(crate) epoch: u64,
     pub(crate) commands: Rc<[SlashCommandInfo]>,
 }
 
 /// Slash-command palette, skill picker, and pending-command state.
 #[derive(Default)]
 pub(crate) struct SlashPalette {
-    /// Provider discovery is a replacement snapshot; adapter/local entries
-    /// remain available independently of whether discovery has arrived.
-    pub(crate) provider_commands: Vec<SlashCommandInfo>,
-
-    pub(crate) provider_commands_ready: bool,
-
-    /// Derived from `provider_commands`; every write to that list must drop
-    /// this, or the palette keeps offering commands the harness has withdrawn.
+    /// Merged commands are invalidated by provider discovery, language, or epoch changes.
     pub(crate) catalog: Option<CachedCatalog>,
 
-    /// `None` means Codex discovery is still loading. A populated catalog can
-    /// contain both usable skills and non-fatal per-file errors.
-    pub(crate) skill_catalog: Option<SkillCatalog>,
-
     /// Exact picker identity retained while the composer keeps its `$name`
-    /// token. It is validated against `skill_catalog` before every send.
+    /// token. It is validated against the session catalog before every send.
     pub(crate) skill_binding: Option<SkillReference>,
 
     pub(crate) selected: usize,
@@ -88,12 +78,7 @@ pub(crate) struct SlashPalette {
 }
 
 impl SlashPalette {
-    /// Provider commands and their cached catalog belong to one session, so
-    /// resetting discovery must invalidate both together.
-    pub(crate) fn reset_discovery(&mut self, commands_ready: bool) {
-        self.provider_commands.clear();
-
-        self.provider_commands_ready = commands_ready;
+    pub(crate) fn reset_discovery(&mut self) {
         self.catalog = None;
         self.selected = 0;
         self.dismissed = false;

@@ -58,8 +58,8 @@ use gpui_component::{ActiveTheme as _, WindowExt, v_flex};
 use nmt_agent::background_task::{BackgroundTaskKey, BackgroundTaskSnapshot};
 use nmt_agent::catalog::adapter_commands;
 use nmt_agent::chat::{
-    ForkCheckpoint, Item as SessionItem, Question, QuestionMode, SendOutcome, SessionSummary,
-    SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
+    ForkCheckpoint, Item as SessionItem, Question, SendOutcome, SessionSummary, SkillInfo,
+    SkillReference, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
     SlashCommandRunPolicy, SlashCommandSource,
 };
 use nmt_agent::claude_code::stream_json;
@@ -189,7 +189,6 @@ pub struct AgentPane {
 
     host: WeakEntity<AgentSession>,
     binding: CommandBinding,
-    presenting_session_effect: bool,
     team_member: bool,
     #[cfg(test)]
     owned_session: Option<SessionOwner>,
@@ -593,7 +592,7 @@ impl AgentPane {
             update @ (BranchUpdate::CreateFork(_) | BranchUpdate::StartSession(_)) => {
                 self.history_ui.mode = RecentSessionsMode::Loading;
 
-                self.palette.reset_discovery(false);
+                self.palette.reset_discovery();
 
                 if let Some(host) = self.host.upgrade() {
                     host.update(cx, |host, cx| host.on_branch_update(update, cx));
@@ -640,11 +639,9 @@ impl AgentPane {
     /// composer's own text handling, which is what a clipboard holding text
     /// should get.
     pub(crate) fn paste_image(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let Some(session_host) = self.host.upgrade() else {
+        let Some(_) = self.host.upgrade() else {
             return false;
         };
-
-        let session_kind = session_host.read(cx).kind;
 
         // An image reaches the clipboard two ways: as pixels, from a capture
         // tool or a browser, and as a file, from a file manager. Both are the
@@ -663,20 +660,6 @@ impl AgentPane {
         else {
             return false;
         };
-
-        if !session_kind.caps().image_input {
-            self.palette.set_feedback(
-                CommandFeedbackKind::Error,
-                t!(
-                    "agent-composer-images-unsupported",
-                    name = session_kind.display()
-                )
-                .into_owned(),
-                cx,
-            );
-
-            return true;
-        }
 
         match self
             .attachments
@@ -878,7 +861,7 @@ impl AgentPane {
             match validate_skill_binding(
                 &text,
                 self.palette.skill_binding.as_ref(),
-                self.palette.skill_catalog.as_ref(),
+                self.session.borrow().skill_catalog(),
             ) {
                 Ok(skill) => skill,
                 Err(message) => {
@@ -1044,10 +1027,11 @@ impl AgentPane {
             return None;
         }
 
+        let session = self.session.borrow();
+
         let skills: &[SkillInfo] = if slash_skills {
-            self.palette
-                .skill_catalog
-                .as_ref()
+            session
+                .skill_catalog()
                 .map(|catalog| catalog.skills.as_slice())
                 .unwrap_or_default()
         } else {
@@ -1102,20 +1086,17 @@ impl AgentPane {
             .collect::<Vec<_>>();
 
         let note = if rows.is_empty() {
-            if slash_skills && self.palette.skill_catalog.is_none() {
+            if slash_skills && session.skill_catalog().is_none() {
                 Some(SharedString::from(t!(
                     "agent-composer-skill-discovery-loading"
                 )))
             } else if slash_skills
-                && self
-                    .palette
-                    .skill_catalog
-                    .as_ref()
+                && session
+                    .skill_catalog()
                     .is_some_and(|catalog| !catalog.errors.is_empty())
             {
-                self.palette
-                    .skill_catalog
-                    .as_ref()
+                session
+                    .skill_catalog()
                     .and_then(|catalog| catalog.errors.first())
                     .map(SharedString::new)
             } else if slash_skills {
@@ -1127,20 +1108,18 @@ impl AgentPane {
                     "agent-composer-no-matching-commands"
                 )))
             }
-        } else if session_kind.caps().async_command_discovery
-            && !self.palette.provider_commands_ready
+        } else if session_kind.caps().async_command_discovery && session.command_catalog().is_none()
         {
             Some(SharedString::from(t!(
                 "agent-composer-claude-command-loading"
             )))
-        } else if slash_skills && self.palette.skill_catalog.is_none() {
+        } else if slash_skills && session.skill_catalog().is_none() {
             Some(SharedString::from(t!(
                 "agent-composer-skill-discovery-loading"
             )))
         } else if slash_skills {
-            self.palette
-                .skill_catalog
-                .as_ref()
+            session
+                .skill_catalog()
                 .and_then(|catalog| catalog.errors.first())
                 .map(|error| {
                     t!("agent-composer-skill-load-partial", error = error)
@@ -1487,7 +1466,7 @@ impl AgentPane {
             input,
             &catalog,
             session_kind.caps(),
-            self.palette.skill_catalog.as_ref(),
+            self.session.borrow().skill_catalog(),
             |name| self.command_choices(name, cx),
             busy,
         ) else {
@@ -1718,16 +1697,6 @@ impl AgentPane {
         }
     }
 
-    pub(crate) fn run_next_queued_command(&mut self, cx: &mut Context<Self>) {
-        if self.presenting_session_effect {
-            return;
-        }
-
-        if let Some(host) = self.host.upgrade() {
-            host.update(cx, |host, cx| host.advance_commands(cx));
-        }
-    }
-
     pub(super) fn skill_disabled_reason(&self, skill: &SkillInfo) -> Option<SharedString> {
         if !skill.enabled {
             Some(SharedString::from(t!("agent-composer-disabled-by-codex")))
@@ -1749,13 +1718,14 @@ impl AgentPane {
 
         let session_kind = session_host.read(cx).kind;
 
+        let epoch = self.session.borrow().runtime.epoch();
         let language = rust_i18n::locale();
 
         if let Some(cached) = self
             .palette
             .catalog
             .as_ref()
-            .filter(|cached| cached.language == *language)
+            .filter(|cached| cached.language == *language && cached.epoch == epoch)
         {
             return cached.commands.clone();
         }
@@ -1771,12 +1741,17 @@ impl AgentPane {
         let commands: Rc<[SlashCommandInfo]> = merge_catalog(
             local_commands(),
             adapter,
-            self.palette.provider_commands.clone(),
+            self.session
+                .borrow()
+                .command_catalog()
+                .unwrap_or_default()
+                .to_vec(),
         )
         .into();
 
         self.palette.catalog = Some(CachedCatalog {
             language: language.to_string(),
+            epoch,
             commands: commands.clone(),
         });
 
@@ -1861,33 +1836,7 @@ impl AgentPane {
     }
 
     pub(crate) fn present_questions(&mut self, index: usize, cx: &mut Context<Self>) {
-        let Some(session_host) = self.host.upgrade() else {
-            return;
-        };
-
-        let session_kind = session_host.read(cx).kind;
-
         self.prompts.reveal(&self.session.borrow().input, index);
-
-        let shared = self.session.clone();
-        let state = shared.borrow();
-        let prompt = &state.input.batches()[index];
-        let waiting = prompt.mode() != QuestionMode::Async;
-
-        let description = prompt
-            .questions()
-            .first()
-            .map(|question| question.question.clone())
-            .unwrap_or_default();
-
-        if waiting {
-            self.emit_lifecycle(
-                AgentEventKind::PermissionRequested,
-                &t!("agent-session-needs-input", name = session_kind.display()),
-                &description,
-                cx,
-            );
-        }
 
         cx.notify();
     }
@@ -1899,15 +1848,9 @@ impl AgentPane {
     ) {
         if completion.started_turn {
             self.start_working(cx);
-
-            self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
         }
 
         self.prompts.hide_settled(&self.session.borrow().input);
-
-        if completion.waiting_finished {
-            self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
-        }
 
         self.transcript.update(cx, |_, cx| cx.notify());
 
@@ -2258,8 +2201,6 @@ impl AgentPane {
         let session_kind = session_host.read(cx).kind;
         let session_profile = session_host.read(cx).profile.clone();
 
-        self.presenting_session_effect = true;
-
         self.transcript
             .update(cx, |transcript, _| transcript.sync_content());
 
@@ -2269,65 +2210,31 @@ impl AgentPane {
             SessionEffect::TeamDecision(_) => {}
             SessionEffect::ProviderTurnFinished { .. } => {}
             SessionEffect::Changed => cx.notify(),
-            SessionEffect::Title(title) => {
-                self.emit_event(AgentPaneEvent::TitleSuggested(title), cx)
-            }
+            SessionEffect::Title(_) => {}
             SessionEffect::Ready(settings) => self.on_ready(settings, cx),
-            SessionEffect::Commands(commands) => {
-                self.palette.provider_commands = commands;
+            SessionEffect::Commands => {
                 self.palette.catalog = None;
-                self.palette.provider_commands_ready = true;
                 self.palette.selected = 0;
 
                 cx.notify();
             }
-            SessionEffect::Skills(catalog) => {
-                self.palette.skill_catalog = Some(catalog);
+            SessionEffect::Skills => {
                 self.palette.selected = 0;
 
                 cx.notify();
             }
-            SessionEffect::CommandResult {
-                name,
-                outcome,
-                advance,
-            } => {
-                self.on_slash_command_result(&name, outcome, advance, cx);
+            SessionEffect::CommandResult { name, outcome } => {
+                self.on_slash_command_result(&name, outcome, cx);
             }
             SessionEffect::TurnStarted { opened } => self.on_turn_started(opened, cx),
-            SessionEffect::TurnCompleted { error, .. } => self.on_turn_completed(error, cx),
+            SessionEffect::TurnCompleted { .. } => self.on_turn_completed(cx),
             SessionEffect::StatusDetail(_) => cx.notify(),
-            SessionEffect::ApprovalRequested => {
-                self.emit_lifecycle(
-                    AgentEventKind::PermissionRequested,
-                    &t!("agent-session-needs-input", name = session_kind.display()),
-                    self.session.borrow().input.approval().unwrap_or_default(),
-                    cx,
-                );
-
-                cx.notify();
-            }
-            SessionEffect::ApprovalResolved => {
-                self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
-
-                cx.notify();
-            }
+            SessionEffect::ApprovalRequested | SessionEffect::ApprovalResolved => cx.notify(),
             SessionEffect::InputRequested { index } => self.present_questions(index, cx),
             SessionEffect::InputResolved(completion) => {
                 self.present_question_completion(completion, cx)
             }
-            SessionEffect::Workflows { activity_changed } => {
-                if activity_changed {
-                    self.emit_event(AgentPaneEvent::WorkflowActivity, cx);
-                }
-
-                cx.notify();
-            }
-            SessionEffect::BackgroundActivity => {
-                self.emit_event(AgentPaneEvent::BackgroundTaskActivity, cx);
-
-                cx.notify();
-            }
+            SessionEffect::Workflows { .. } | SessionEffect::BackgroundActivity => cx.notify(),
             SessionEffect::Branch(update @ BranchUpdate::Branching) => {
                 self.on_fork_update(update, cx)
             }
@@ -2365,42 +2272,7 @@ impl AgentPane {
                 self.transcript
                     .update(cx, |transcript, _| transcript.sync_content());
             }
-            SessionEffect::HostExited { message } => self.on_host_exited(message, cx),
         }
-
-        self.presenting_session_effect = false;
-    }
-
-    fn on_host_exited(&mut self, message: String, cx: &mut Context<Self>) {
-        let Some(session_host) = self.host.upgrade() else {
-            return;
-        };
-
-        let session_profile = session_host.read(cx).profile.clone();
-
-        let identity = self
-            .session
-            .borrow()
-            .runtime
-            .backend()
-            .and_then(Backend::recovery_identity);
-
-        self.session
-            .borrow_mut()
-            .runtime
-            .reconnect(Some(RecoverySnapshot {
-                identity,
-                profile_name: session_profile.name.clone(),
-            }));
-
-        self.session
-            .borrow_mut()
-            .runtime
-            .recovery_failed(message.clone());
-
-        let failure = self.session.borrow_mut().failed(&message, true);
-
-        self.on_error(message, true, failure, cx);
     }
 
     /// Handshake finished. Fold the reported thread settings together with
@@ -2445,9 +2317,6 @@ impl AgentPane {
             launch_model(session_kind, &session_profile)
         );
 
-        // The session id is known by now, so child agents that ran
-        // before this tab opened can be rebuilt from history.
-
         cx.notify();
     }
 
@@ -2458,7 +2327,6 @@ impl AgentPane {
         &mut self,
         name: &str,
         outcome: SlashCommandOutcome,
-        advance: bool,
         cx: &mut Context<Self>,
     ) {
         let Some(session_host) = self.host.upgrade() else {
@@ -2498,13 +2366,7 @@ impl AgentPane {
                     .into_owned(),
                     cx,
                 );
-
-                self.run_next_queued_command(cx);
             }
-        }
-
-        if advance {
-            self.run_next_queued_command(cx);
         }
     }
 
@@ -2520,49 +2382,13 @@ impl AgentPane {
 
         self.publish_queued_user_messages(cx);
 
-        self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
-
         cx.notify();
     }
 
-    /// Interruption is a completion state of the turn: the stop request
-    /// recorded at press time becomes the transcript mark only once the
-    /// backend actually ended the turn, so a backend that keeps streaming
-    /// never shows an "Interrupted" row above live output. A stale request
-    /// for an earlier turn is dropped at this boundary.
-    fn on_turn_completed(&mut self, error: Option<String>, cx: &mut Context<Self>) {
-        let Some(session_host) = self.host.upgrade() else {
-            return;
-        };
-
-        let session_kind = session_host.read(cx).kind;
-
-        let completion_body = error
-            .clone()
-            .or_else(|| self.latest_agent_message(cx))
-            .unwrap_or_else(|| {
-                t!(
-                    "agent-session-turn-completed",
-                    name = session_kind.display()
-                )
-                .into_owned()
-            });
-
+    fn on_turn_completed(&mut self, cx: &mut Context<Self>) {
         self.turn.refresh_timer(cx);
 
         self.refresh_git_branch(cx);
-
-        self.emit_lifecycle(
-            AgentEventKind::Stopped,
-            &t!(
-                "agent-session-provider-finished",
-                name = session_kind.display()
-            ),
-            &completion_body,
-            cx,
-        );
-
-        self.run_next_queued_command(cx);
 
         cx.notify();
     }
@@ -2596,8 +2422,6 @@ impl AgentPane {
             self.prompts
                 .release_secret_editors(&self.session.borrow().input);
 
-            self.emit_event(AgentPaneEvent::Interrupted, cx);
-
             self.publish_queued_user_messages(cx);
         }
 
@@ -2607,8 +2431,6 @@ impl AgentPane {
                 t!("agent-session-queued-cancelled-failed").to_string(),
                 cx,
             );
-        } else if !fatal {
-            self.run_next_queued_command(cx);
         }
     }
 
@@ -2923,7 +2745,6 @@ impl AgentPane {
             session,
             host: host.downgrade(),
             binding,
-            presenting_session_effect: false,
             team_member: false,
             #[cfg(test)]
             owned_session: None,
@@ -2932,10 +2753,7 @@ impl AgentPane {
             prompts: QuestionPanel::default(),
             effort_drag: None,
             turn: TurnPresentation::default(),
-            palette: SlashPalette {
-                provider_commands_ready: !kind.caps().async_command_discovery,
-                ..SlashPalette::default()
-            },
+            palette: SlashPalette::default(),
             branch: BranchFlow::default(),
             composer_status: ComposerStatusBar::default(),
             workflows: WorkflowUi::default(),
@@ -2950,13 +2768,6 @@ impl AgentPane {
             }
 
             this.prompts.hide_settled(&state.input);
-
-            if let Some(commands) = state.command_catalog() {
-                this.palette.provider_commands = commands.to_vec();
-                this.palette.provider_commands_ready = true;
-            }
-
-            this.palette.skill_catalog = state.skill_catalog().cloned();
         }
 
         this.turn.refresh_timer(cx);
@@ -3094,10 +2905,6 @@ impl AgentPane {
     }
 
     pub(super) fn emit_event(&self, event: AgentPaneEvent, cx: &mut Context<Self>) {
-        if self.presenting_session_effect {
-            return;
-        }
-
         if let Some(host) = self.host.upgrade() {
             host.update(cx, |_, cx| cx.emit(event.clone()));
         }
@@ -3113,15 +2920,12 @@ impl AgentPane {
         body: &str,
         cx: &mut Context<Self>,
     ) {
-        if self.presenting_session_effect {
-            return;
-        }
-
         if let Some(host) = self.host.upgrade() {
             host.update(cx, |host, cx| host.emit_lifecycle(kind, title, body, cx));
         }
     }
 
+    #[cfg(test)]
     pub(super) fn latest_agent_message(&self, cx: &App) -> Option<String> {
         self.transcript
             .read(cx)
@@ -3390,12 +3194,6 @@ impl AgentPane {
     }
 
     pub(super) fn reset_conversation(&mut self, cx: &mut Context<Self>) {
-        let Some(session_host) = self.host.upgrade() else {
-            return;
-        };
-
-        let session_kind = session_host.read(cx).kind;
-
         if !self.binding.is_current() {
             return;
         }
@@ -3406,11 +3204,9 @@ impl AgentPane {
 
         self.clear_conversation_presentation(cx);
 
-        self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
 
-        self.palette
-            .reset_discovery(!session_kind.caps().async_command_discovery);
+        self.palette.reset_discovery();
 
         self.session.borrow_mut().commands.clear();
 
@@ -3450,7 +3246,6 @@ impl AgentPane {
 
         self.history_ui.data.invalidate_filesystem_history();
 
-        self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
 
         let pane = cx.entity().downgrade();
@@ -3795,7 +3590,9 @@ impl AgentPane {
     /// prefix. Discovery runs in the background, so a missing catalog is a
     /// loading state rather than an empty result.
     fn skill_palette_model(&self, query: &str) -> PaletteModel {
-        let Some(skill_catalog) = self.palette.skill_catalog.as_ref() else {
+        let session = self.session.borrow();
+
+        let Some(skill_catalog) = session.skill_catalog() else {
             return PaletteModel {
                 rows: Vec::new(),
                 note: Some(SharedString::from(t!(

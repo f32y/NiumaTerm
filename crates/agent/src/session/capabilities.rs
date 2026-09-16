@@ -35,10 +35,6 @@ pub struct Capabilities {
     /// instead of arriving over the protocol.
     pub filesystem_session_history: bool,
 
-    /// A message can carry images beside its text. A harness without this
-    /// refuses a pasted image rather than attaching one it cannot deliver.
-    pub image_input: bool,
-
     /// The launch fixes the model for the whole session because the system
     /// prompt is built from it, so a pick has to be resolved before spawning
     /// rather than sent as a later setting change.
@@ -101,7 +97,6 @@ const CODEX: Capabilities = Capabilities {
     async_command_discovery: false,
     repeats_ready_during_init: false,
     filesystem_session_history: false,
-    image_input: true,
     model_baked_into_launch: false,
     session_scoped_approval: true,
     slash_skills_are_prompts: false,
@@ -121,7 +116,6 @@ const CLAUDE: Capabilities = Capabilities {
     async_command_discovery: true,
     repeats_ready_during_init: true,
     filesystem_session_history: true,
-    image_input: true,
     model_baked_into_launch: true,
     session_scoped_approval: true,
     slash_skills_are_prompts: false,
@@ -145,7 +139,6 @@ const DEEPSEEK: Capabilities = Capabilities {
     async_command_discovery: true,
     repeats_ready_during_init: false,
     filesystem_session_history: false,
-    image_input: true,
     model_baked_into_launch: false,
     session_scoped_approval: false,
     slash_skills_are_prompts: true,

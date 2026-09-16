@@ -332,7 +332,7 @@ impl TranscriptView {
         step.moving
     }
 
-    /// Latest non-empty assistant reply of `turn`, for notification bodies.
+    #[cfg(test)]
     pub(crate) fn latest_agent_message(&self, turn: u64) -> Option<String> {
         self.conversation
             .borrow()

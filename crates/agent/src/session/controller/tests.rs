@@ -208,18 +208,13 @@ fn rejected_send_preserves_accepted_prompt_and_interrupt_is_consumed_once() {
     assert_eq!(stopped.outcome, InterruptOutcome::Accepted);
     assert!(matches!(
         apply(&mut session, Event::TurnCompleted { error: None }),
-        SessionEffect::TurnCompleted {
-            interrupted: true,
-            ..
-        }
+        SessionEffect::TurnCompleted { .. }
     ));
     assert!(matches!(
         apply(&mut session, Event::TurnCompleted { error: None }),
-        SessionEffect::TurnCompleted {
-            interrupted: false,
-            ..
-        }
+        SessionEffect::TurnCompleted { .. }
     ));
+    assert!(session.conversation.borrow().turns.was_interrupted(turn));
     assert_eq!(session.runtime.status(), Status::Idle);
 }
 
