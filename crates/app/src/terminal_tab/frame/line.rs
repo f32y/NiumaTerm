@@ -4,10 +4,12 @@ use std::iter;
 use std::sync::Arc;
 
 use gpui::SharedString;
-use nmt_config::colors::ColorRgb;
+use nmt_config::colors::{ColorRgb, NamedColor};
 use nmt_terminal::ansi::kitty_virtual::PLACEHOLDER;
 use nmt_terminal::ghostty::{CellText, CellWide, SnapshotStyle, Underline};
 use nmt_terminal::terminal::square::Wide;
+
+use crate::terminal_tab::frame::colors::BackgroundColors;
 
 #[derive(Clone)]
 pub(crate) struct TerminalLine(Arc<TerminalLineData>);
@@ -222,8 +224,9 @@ impl From<LineBuilder> for TerminalLine {
 /// Builds one display line from an engine row visit (frozen-block row or
 /// active-grid history row): every column contributes a char (gaps become
 /// NBSP), spacer cells are dropped. Display conventions (wide placeholder,
-/// run merging) come from the shared `LineBuilder`, so frozen rows shape and
-/// paint exactly like live ones.
+/// run merging, blank and placeholder glyphs) come from the shared
+/// `LineBuilder` and `display_char`, and colors from the shared
+/// `BackgroundColors`, so frozen rows shape and paint like live ones.
 #[derive(Default)]
 pub(crate) struct EngineRowBuilder {
     line: LineBuilder,
@@ -237,7 +240,7 @@ impl EngineRowBuilder {
         cell_text: CellText,
         wide: CellWide,
         style: &SnapshotStyle,
-        default_fg: TerminalColor,
+        colors: &BackgroundColors,
     ) {
         use nmt_terminal::ghostty::CellWide;
 
@@ -248,7 +251,7 @@ impl EngineRowBuilder {
 
         let default_style = StyleRun {
             len: 0,
-            fg: default_fg,
+            fg: colors.named(NamedColor::Foreground),
             bold: false,
             italic: false,
             underline: false,
@@ -262,28 +265,19 @@ impl EngineRowBuilder {
             self.col += 1;
         }
 
-        let (fg, bg) = if style.inverse {
-            (
-                style.bg.unwrap_or(default_fg),
-                Some(style.fg.unwrap_or(default_fg)),
-            )
-        } else {
-            (style.fg.unwrap_or(default_fg), style.bg)
-        };
-
         let is_wide = wide == CellWide::Wide;
 
         let display: String = if cell_text.is_empty() {
             "\u{00a0}".into()
         } else {
-            cell_text.replace([' ', '\t'], "\u{00a0}")
+            cell_text.chars().map(display_char).collect()
         };
 
         self.line.push_segment(
             display.chars(),
             StyleRun {
                 len: 0,
-                fg,
+                fg: colors.engine_foreground(style),
                 bold: style.bold,
                 italic: style.italic,
                 underline: style.underline != Underline::None,
@@ -296,7 +290,7 @@ impl EngineRowBuilder {
             col: x,
             ch: cell_text.chars().next().unwrap_or('\0'),
             style_id: 0,
-            background: bg,
+            background: colors.engine_background(style),
             wide: if is_wide { Wide::Wide } else { Wide::Narrow },
             extras: cell_text.chars().skip(1).collect(),
             has_cursor: false,

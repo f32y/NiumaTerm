@@ -28,7 +28,7 @@ use tracing::trace;
 
 use crate::terminal_tab::block_list::FrozenView;
 use crate::terminal_tab::block_list::chrome::DurationLabels;
-use crate::terminal_tab::frame::{EngineRowBuilder, TerminalColor, TerminalFrame};
+use crate::terminal_tab::frame::{BackgroundColors, EngineRowBuilder, TerminalFrame};
 use crate::terminal_tab::graphics::{FrozenImageCache, GenerationStore, prune_frozen_images};
 use crate::terminal_tab::pane_model::FrameTheme;
 use crate::terminal_tab::wake::{Wake, WakeSender, WakeSignal};
@@ -194,7 +194,7 @@ impl TerminalFrameSource {
         viewport: &ItemViewport,
         selection: Option<(BlockPoint, BlockPoint)>,
         labels: &DurationLabels,
-        foreground: TerminalColor,
+        theme: &FrameTheme,
     ) -> FrozenView {
         let Some((info, handle)) = self
             .session
@@ -227,7 +227,7 @@ impl TerminalFrameSource {
             viewport.cell_height,
             viewport.pad_rows,
             selection,
-            foreground,
+            &BackgroundColors::new(self.snapshot.colors(), theme),
         );
 
         let mut seen = HashSet::new();
@@ -267,7 +267,7 @@ impl TerminalFrameSource {
         history_rows: u64,
         cols: u32,
         viewport: &ItemViewport,
-        foreground: TerminalColor,
+        theme: &FrameTheme,
     ) -> FrozenView {
         let visible = block_list::visible_rows(
             viewport.top,
@@ -277,7 +277,7 @@ impl TerminalFrameSource {
             viewport.pad_rows,
         );
 
-        let lines = self.live_history_lines(visible.start as u64..visible.end as u64, foreground);
+        let lines = self.live_history_lines(visible.start as u64..visible.end as u64, theme);
         let selection = self.session.selection_screen_range_in(&self.snapshot);
 
         block_list::live_history_view(
@@ -321,11 +321,13 @@ impl TerminalFrameSource {
     pub(super) fn live_history_lines(
         &self,
         rows: ops::Range<u64>,
-        default_fg: frame::TerminalColor,
+        theme: &FrameTheme,
     ) -> Vec<(u64, frame::TerminalLine)> {
         let (Ok(start), Ok(end)) = (usize::try_from(rows.start), usize::try_from(rows.end)) else {
             return Vec::new();
         };
+
+        let colors = BackgroundColors::new(self.snapshot.colors(), theme);
 
         let mut lines = Vec::with_capacity(end.saturating_sub(start));
 
@@ -348,13 +350,7 @@ impl TerminalFrameSource {
                 let mut builder = EngineRowBuilder::default();
 
                 for cell in &data.cells {
-                    builder.push(
-                        cell.x,
-                        cell.text.clone(),
-                        cell.wide,
-                        &cell.style,
-                        default_fg,
-                    );
+                    builder.push(cell.x, cell.text.clone(), cell.wide, &cell.style, &colors);
                 }
 
                 lines.push((row as u64, builder.into()));

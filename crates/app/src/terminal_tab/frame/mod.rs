@@ -1,3 +1,4 @@
+pub(super) use crate::terminal_tab::frame::colors::BackgroundColors;
 #[cfg(test)]
 pub(super) use crate::terminal_tab::frame::images::FrameImageKind;
 pub(super) use crate::terminal_tab::frame::images::{FrameImage, ZLayer};
@@ -47,7 +48,6 @@ use nmt_terminal::selection::SelectionRange;
 use nmt_terminal::terminal::square::Wide;
 use nmt_terminal::terminal::style::StyleFlags;
 
-use crate::terminal_tab::frame::colors::BackgroundColors;
 use crate::terminal_tab::frame::images::{empty_images, extract_frame_images};
 use crate::terminal_tab::frame::line::display_char;
 use crate::terminal_tab::pane_model::FrameTheme;

@@ -1,5 +1,6 @@
 use nmt_config::colors::term::{DIM_FACTOR, List, TermColors};
 use nmt_config::colors::{AnsiColor, ColorArray, NamedColor};
+use nmt_terminal::ghostty::SnapshotStyle;
 use nmt_terminal::render_buffer::RenderBuffer;
 use nmt_terminal::terminal::square::Square;
 use nmt_terminal::terminal::style::{Style, StyleFlags};
@@ -7,14 +8,20 @@ use nmt_terminal::terminal::style::{Style, StyleFlags};
 use crate::terminal_tab::frame::TerminalColor;
 use crate::terminal_tab::pane_model::FrameTheme;
 
-pub(super) struct BackgroundColors {
+/// Resolves cell colors for display. The viewport hands over interned
+/// `Style` values with palette references; rows read from the engine
+/// (scrollback and frozen blocks) hand over `SnapshotStyle` values whose
+/// palette entries the engine already resolved to RGB. Both go through the
+/// same default-color override layer, inverse swap, and dim factor so a row
+/// looks the same whether it is still in the viewport or has scrolled out.
+pub(crate) struct BackgroundColors {
     colors: List,
     term_colors: TermColors,
     pub(super) selection_background: TerminalColor,
 }
 
 impl BackgroundColors {
-    pub(super) fn new(term_colors: TermColors, theme: &FrameTheme) -> Self {
+    pub(crate) fn new(term_colors: TermColors, theme: &FrameTheme) -> Self {
         Self {
             colors: theme.palette,
             term_colors,
@@ -51,6 +58,37 @@ impl BackgroundColors {
         }
     }
 
+    /// Foreground of a cell read from the engine. Palette identity is gone
+    /// by then, so the viewport's bold brightening and dim remap of indexed
+    /// colors cannot apply; the default colors and faint text follow the
+    /// same rules as the viewport.
+    pub(super) fn engine_foreground(&self, style: &SnapshotStyle) -> TerminalColor {
+        if style.inverse {
+            style
+                .bg
+                .unwrap_or_else(|| self.named(NamedColor::Background))
+        } else {
+            self.engine_text_color(style)
+        }
+    }
+
+    pub(super) fn engine_background(&self, style: &SnapshotStyle) -> Option<TerminalColor> {
+        if style.inverse {
+            Some(self.engine_text_color(style))
+        } else {
+            style.bg
+        }
+    }
+
+    fn engine_text_color(&self, style: &SnapshotStyle) -> TerminalColor {
+        match (style.fg, style.faint) {
+            (Some(fg), true) => dim(fg),
+            (Some(fg), false) => fg,
+            (None, true) => self.named(NamedColor::DimForeground),
+            (None, false) => self.named(NamedColor::Foreground),
+        }
+    }
+
     fn color(&self, color: &AnsiColor, flags: StyleFlags, foreground: bool) -> TerminalColor {
         let dim = foreground && flags.contains(StyleFlags::DIM);
         let bold = foreground && flags.contains(StyleFlags::BOLD);
@@ -69,9 +107,7 @@ impl BackgroundColors {
             }
             AnsiColor::Spec(rgb) => {
                 if dim {
-                    let color: ColorArray = (*rgb * DIM_FACTOR).into();
-
-                    color.into()
+                    self::dim(*rgb)
                 } else {
                     *rgb
                 }
@@ -98,4 +134,10 @@ impl BackgroundColors {
     fn indexed(&self, index: usize) -> TerminalColor {
         self.term_colors[index].unwrap_or(self.colors[index]).into()
     }
+}
+
+fn dim(color: TerminalColor) -> TerminalColor {
+    let color: ColorArray = (color * DIM_FACTOR).into();
+
+    color.into()
 }

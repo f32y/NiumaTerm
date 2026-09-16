@@ -2,6 +2,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::{collections, time};
 
+use nmt_config::colors::term::TermColors;
 use nmt_terminal::block_store::{BlockStore, SegmentMeta};
 use nmt_terminal::event::BlockEvent;
 use nmt_terminal::ghostty::{
@@ -22,7 +23,7 @@ use crate::terminal_tab::block_list::rows::{
     HandleItemInfo, frozen_block_view as frozen_page_view, handle_item_info, live_history_view,
 };
 use crate::terminal_tab::block_list::selection::BlockListPoint;
-use crate::terminal_tab::frame::{TerminalColor, line_from_parts};
+use crate::terminal_tab::frame::{BackgroundColors, line_from_parts};
 use crate::terminal_tab::pane_model::FrameTheme;
 use crate::terminal_tab::pane_model::frozen_hit_map::FrozenHitInfo;
 use crate::terminal_tab::theme;
@@ -80,7 +81,7 @@ fn frozen_block_view_reads_engine_rows() {
         10.0,
         ITEM_PAD_ROWS,
         None,
-        FrameTheme::default().foreground,
+        &default_colors(),
     );
 
     assert_eq!(row_texts(&view), ["hello", "bold"]);
@@ -121,7 +122,7 @@ fn frozen_block_view_windows_visible_rows() {
         10.0,
         ITEM_PAD_ROWS,
         None,
-        FrameTheme::default().foreground,
+        &default_colors(),
     );
 
     assert_eq!(row_texts(&view), ["r1"]);
@@ -147,7 +148,7 @@ fn frozen_block_view_placeholder_keeps_height() {
         10.0,
         ITEM_PAD_ROWS,
         None,
-        FrameTheme::default().foreground,
+        &default_colors(),
     );
 
     assert!(view.rows.is_empty());
@@ -183,7 +184,7 @@ fn frozen_block_view_selection_spans_rows() {
         10.0,
         ITEM_PAD_ROWS,
         sel,
-        FrameTheme::default().foreground,
+        &default_colors(),
     );
 
     let spans: Vec<Option<(u16, u16)>> = view.rows.iter().map(|r| r.selected).collect();
@@ -216,7 +217,7 @@ fn frozen_selection_expands_wide_character() {
             10.0,
             ITEM_PAD_ROWS,
             Some((point, point)),
-            FrameTheme::default().foreground,
+            &default_colors(),
         );
 
         assert_eq!(view.rows[0].selected, Some((0, 2)));
@@ -240,7 +241,7 @@ fn compact_pad_rows_pack_rows_contiguously() {
         10.0,
         0.0,
         None,
-        FrameTheme::default().foreground,
+        &default_colors(),
     );
 
     assert_eq!(view.rows[0].y, 0.0, "no top pad");
@@ -647,7 +648,7 @@ fn frozen_block_view(
     cell_h: f32,
     pad: f32,
     selection: Option<(FrozenPoint, FrozenPoint)>,
-    foreground: TerminalColor,
+    colors: &BackgroundColors,
 ) -> FrozenView {
     let pages: Vec<_> = block
         .map(|(block, palette)| {
@@ -688,7 +689,9 @@ fn frozen_block_view(
         .into_iter()
         .collect();
 
-    frozen_page_view(
-        &pages, info, item, visible, cell_h, pad, selection, foreground,
-    )
+    frozen_page_view(&pages, info, item, visible, cell_h, pad, selection, colors)
+}
+
+fn default_colors() -> BackgroundColors {
+    BackgroundColors::new(TermColors::default(), &FrameTheme::default())
 }

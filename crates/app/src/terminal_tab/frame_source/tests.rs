@@ -26,9 +26,7 @@ fn visible_history_survives_a_pending_revision_refresh() {
                     .as_bytes(),
             );
 
-            let after = model
-                .source
-                .live_history_lines(rows.clone(), model.theme.foreground);
+            let after = model.source.live_history_lines(rows.clone(), &model.theme);
 
             assert_eq!(
                 after.len(),
@@ -59,7 +57,7 @@ fn history_display_reloads_after_reflow_and_theme_changes() {
     assert!(
         model
             .source
-            .live_history_lines(0..12, model.theme.foreground)
+            .live_history_lines(0..12, &model.theme)
             .is_empty()
     );
 
@@ -81,7 +79,7 @@ fn history_display_reloads_after_reflow_and_theme_changes() {
     assert!(
         model
             .source
-            .live_history_lines(0..12, model.theme.foreground)
+            .live_history_lines(0..12, &model.theme)
             .is_empty()
     );
 
@@ -105,7 +103,7 @@ fn history_display_drops_rows_after_clear_or_command_completion() {
         assert!(
             model
                 .source
-                .live_history_lines(0..12, model.theme.foreground)
+                .live_history_lines(0..12, &model.theme)
                 .is_empty()
         );
 
@@ -134,7 +132,7 @@ fn history_display_adopts_new_pages_and_drops_nonvisible_rows() {
     assert!(
         model
             .source
-            .live_history_lines(128..140, model.theme.foreground)
+            .live_history_lines(128..140, &model.theme)
             .is_empty()
     );
 
@@ -151,7 +149,7 @@ fn history_display_adopts_new_pages_and_drops_nonvisible_rows() {
     assert!(
         model
             .source
-            .live_history_lines(128..140, model.theme.foreground)
+            .live_history_lines(128..140, &model.theme)
             .is_empty()
     );
 }
@@ -178,9 +176,7 @@ fn loaded_history(model: &PaneController, rows: Range<u64>) -> Vec<(u64, Termina
     let mut lines = Vec::new();
 
     wait_until(|| {
-        lines = model
-            .source
-            .live_history_lines(rows.clone(), model.theme.foreground);
+        lines = model.source.live_history_lines(rows.clone(), &model.theme);
 
         lines.len() == (rows.end - rows.start) as usize
     });
@@ -296,7 +292,7 @@ fn frozen_item_loads_rows_and_reuses_images_without_a_window() {
             &viewport,
             None,
             &model.duration_labels,
-            model.theme.foreground,
+            &model.theme,
         );
 
         if !view.rows.is_empty() && !view.images.is_empty() {
@@ -319,13 +315,10 @@ fn frozen_item_loads_rows_and_reuses_images_without_a_window() {
             .is_some_and(|header| header.starts_with("echo hi"))
     }));
 
-    let second = model.source.frozen_block_view(
-        item,
-        &viewport,
-        None,
-        &model.duration_labels,
-        model.theme.foreground,
-    );
+    let second =
+        model
+            .source
+            .frozen_block_view(item, &viewport, None, &model.duration_labels, &model.theme);
 
     assert_eq!(view.images.len(), second.images.len());
     assert!(Arc::ptr_eq(
@@ -340,7 +333,7 @@ fn frozen_item_loads_rows_and_reuses_images_without_a_window() {
                 &viewport,
                 None,
                 &model.duration_labels,
-                model.theme.foreground
+                &model.theme
             )
             .rows
             .is_empty()
