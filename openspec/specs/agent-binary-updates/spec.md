@@ -116,7 +116,11 @@ The system SHALL present an available provider update as a persistent in-app not
 
 #### Scenario: Initial prompt is dismissed
 - **WHEN** the user closes an available-update notification before starting the update
-- **THEN** the system records that installation and target version as dismissed and does not show the prompt again until the reported target version changes
+- **THEN** the system records that installation and target version as dismissed and suppresses automatic prompts for that version until the reported target version changes or a manual check succeeds
+
+#### Scenario: User checks again after dismissing an update
+- **WHEN** the user manually checks an installation whose available-update notification was dismissed and the check succeeds
+- **THEN** the system clears that installation's remembered dismissal, persists the refreshed supported result, and shows the notification again if an update is still available
 
 #### Scenario: Running notification is closed
 - **WHEN** the user closes a notification after its update transaction has started
