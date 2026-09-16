@@ -5,7 +5,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
 use crate::event::{CommandCapture, CommandStart};
-use crate::prompt_sniffer::{PromptRegion, PromptSniffer};
+use crate::pty_pipe::prompt_sniffer::{PromptRegion, PromptSniffer};
 
 /// Collect every forwarded (region, bytes) segment from feeding `chunks` in order,
 /// reusing one sniffer across chunks (so carry-over across reads is exercised).

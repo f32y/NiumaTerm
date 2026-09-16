@@ -7,7 +7,9 @@ pub(crate) mod requests;
 
 mod marks;
 mod powershell_compatibility;
+mod prompt_sniffer;
 mod session;
+mod vt_trace;
 mod write_queue;
 
 #[cfg(test)]
@@ -26,13 +28,13 @@ use tracing::{error, warn};
 
 use crate::event::{self, EventListener, Msg, MsgSender, TerminalEvent};
 use crate::ghostty::{self, GhosttyTerminal, mode};
-use crate::prompt_sniffer::PromptSniffer;
 use crate::pty_pipe::marks::{apply_sniffer_mark, engine_blocks_live_list};
 use crate::pty_pipe::powershell_compatibility::PowerShellCompatibility;
+use crate::pty_pipe::prompt_sniffer::PromptSniffer;
 use crate::pty_pipe::requests::answer_query;
 use crate::render_buffer::{FrameStore, RenderBuffer};
 use crate::session::request::{Checkpoint, RequestError};
-use crate::{vt_modes, vt_trace};
+use crate::vt_modes;
 
 /// Reserved `Poll` token for the loop's `Waker`. PTY source tokens start above it.
 const WAKER_TOKEN: Token = Token(0);

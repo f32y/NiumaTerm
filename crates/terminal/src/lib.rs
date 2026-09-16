@@ -12,7 +12,3 @@ pub mod render_buffer;
 pub mod selection;
 pub mod session;
 pub mod vt_modes;
-
-pub(crate) mod vt_trace;
-
-mod prompt_sniffer;
