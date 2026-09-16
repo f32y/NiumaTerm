@@ -62,6 +62,7 @@ pub struct RenderBuffer {
 
     cursor: Pos,
     cursor_visible: bool,
+    progress_cursor_suppressed: bool,
 
     /// DECSCUSR shape + modes-based blink captured from the engine render-state.
     cursor_shape: ansi::CursorShape,
@@ -129,6 +130,7 @@ impl RenderBuffer {
             row_versions: vec![0; rows],
             cursor: Pos::default(),
             cursor_visible: false,
+            progress_cursor_suppressed: false,
             cursor_shape: ansi::CursorShape::Block,
             colors: TermColors::default(),
             window_bg_override: None,
@@ -212,7 +214,20 @@ impl RenderBuffer {
     }
 
     pub fn cursor_visible(&self) -> bool {
-        self.cursor_visible
+        self.cursor_visible && !self.progress_cursor_suppressed
+    }
+
+    /// The engine-visible cursor row before host progress suppression. Keeping
+    /// this row in the layout prevents an erased progress line from temporarily
+    /// shrinking the live item and shifting every preceding line at the bottom.
+    pub fn layout_cursor_row(&self) -> Option<usize> {
+        if !self.cursor_visible || self.cursor_shape == ansi::CursorShape::Hidden {
+            return None;
+        }
+
+        usize::try_from(self.cursor.row.0)
+            .ok()
+            .filter(|&row| row < self.rows)
     }
 
     /// The cell at `(x, y)`. Returns the default cell when out of bounds.
@@ -369,6 +384,7 @@ impl RenderBuffer {
 
         self.cursor = Pos::new(Line(cy as i32), Column(cx));
         self.cursor_visible = cursor.visible;
+        self.progress_cursor_suppressed = false;
         self.cursor_shape = cursor.shape;
 
         use nmt_config::colors::NamedColor;
@@ -394,7 +410,7 @@ impl RenderBuffer {
         self.content_changed = true;
     }
 
-    pub fn set_cursor_visible(&mut self, visible: bool) {
-        self.cursor_visible = visible;
+    pub(crate) fn suppress_progress_cursor(&mut self) {
+        self.progress_cursor_suppressed = true;
     }
 }

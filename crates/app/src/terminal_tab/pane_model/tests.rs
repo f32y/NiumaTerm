@@ -14,6 +14,7 @@ use nmt_terminal::session::{
 use crate::terminal_tab::block_list::FrozenView;
 use crate::terminal_tab::block_list::live::LiveItemState;
 use crate::terminal_tab::block_list::reconcile::BlockListRenderMetrics;
+use crate::terminal_tab::layout::frame_content_rows;
 use crate::terminal_tab::metrics::CellMetrics;
 use crate::terminal_tab::pane_model::frame_record::FrameRecord;
 use crate::terminal_tab::pane_model::key_action::{KeyOutcome, TextInput};
@@ -23,6 +24,70 @@ use crate::terminal_tab::pane_model::scroll::ScrollOutcome;
 use crate::terminal_tab::pane_model::selection_geometry::selection_drag_started;
 use crate::terminal_tab::pane_model::test_session::{TestClipboard, assert_input, controller};
 use crate::terminal_tab::pane_model::viewport::{LocalPoint, Viewport};
+
+#[test]
+fn progress_repaint_keeps_live_height_and_scroll_extent() {
+    let mut output: Vec<u8> = (0..12)
+        .flat_map(|index| format!("Compiling package-{index}\r\n").into_bytes())
+        .collect();
+
+    let mut previous_extent = None;
+    let mut previous_lines = None;
+
+    for update in [
+        &b"\x1b]9;4;1;40\x1b\\Building [====>] 4/10\r"[..],
+        &b"\r\x1b[2K"[..],
+        &b"Building [=====>] 5/10\r"[..],
+    ] {
+        output.extend_from_slice(update);
+
+        let (mut model, _) = controller(&output, true);
+
+        let frame = model.frame_cache.current().unwrap();
+        let cell = model.cell_metrics.unwrap();
+
+        assert!(frame.cursor().is_none(), "progress keeps the cursor hidden");
+        assert_eq!(
+            frame_content_rows(&frame),
+            6,
+            "erasing the progress row must not shrink the live item"
+        );
+
+        model
+            .prepare_block_list(&frame, cell, 108.0, ListPosition::default())
+            .unwrap();
+
+        let extent = model.block_list.scrollbar.1;
+
+        let lines: Vec<_> = frame.lines()[..5]
+            .iter()
+            .map(|line| line.text().to_string())
+            .collect();
+
+        if let Some(previous) = previous_extent.replace(extent) {
+            assert_eq!(extent, previous, "tail following must keep its position");
+        }
+
+        if let Some(previous) = previous_lines.replace(lines.clone()) {
+            assert_eq!(lines, previous, "progress updates preserve compiled rows");
+        }
+    }
+
+    output.extend_from_slice(b"\x1b]9;4;0;\x1b\\\x1b[2J\x1b[HPrompt>");
+
+    let (model, _) = controller(&output, true);
+    let frame = model.frame_cache.current().unwrap();
+
+    assert!(
+        frame.cursor().is_some(),
+        "completed progress restores the cursor"
+    );
+    assert_eq!(
+        frame_content_rows(&frame),
+        1,
+        "a later clear must still shrink the live item to its current content"
+    );
+}
 
 #[test]
 fn terminal_requested_keyboard_modes_drive_keys_and_ime_commits() {

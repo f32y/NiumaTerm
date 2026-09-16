@@ -59,6 +59,7 @@ pub(super) struct TerminalFrame {
     line_states: Arc<[TerminalLineState]>,
     cols: usize,
     cursor: Option<TerminalCursor>,
+    layout_cursor_row: Option<usize>,
     scrollbar: ScrollbarInfo,
 
     /// Paintable Kitty image placements resolved against the session image cache
@@ -86,6 +87,10 @@ impl TerminalFrame {
 
     pub(super) fn cursor(&self) -> Option<TerminalCursor> {
         self.cursor
+    }
+
+    pub(super) fn layout_cursor_row(&self) -> Option<usize> {
+        self.layout_cursor_row
     }
 
     pub(super) fn scrollbar(&self) -> ScrollbarInfo {
@@ -165,6 +170,7 @@ impl TerminalFrame {
             line_states: line_states.into_boxed_slice().into(),
             cols: buf.cols(),
             cursor,
+            layout_cursor_row: buf.layout_cursor_row(),
             scrollbar: buf.scrollbar(),
             images,
         }
