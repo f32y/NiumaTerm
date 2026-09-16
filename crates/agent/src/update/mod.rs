@@ -470,7 +470,8 @@ impl UpdateCoordinator {
     }
 
     /// Check an installation. Automatic callers reuse a successful result for
-    /// one hour; manual callers always probe the provider.
+    /// one hour; manual callers always probe the provider and clear a previous
+    /// notification dismissal when the check succeeds.
     pub fn check(&self, key: &InstallationKey, manual: bool) -> Result<VersionStatus, UpdateError> {
         let (launcher, maintenance) = {
             let mut inner = self.inner.lock();
@@ -522,6 +523,10 @@ impl UpdateCoordinator {
 
                 record.last_checked = Some(now);
                 record.state = status.clone().into();
+
+                if manual {
+                    record.dismissed_target = None;
+                }
 
                 if matches!(status.support, DiscoverySupport::Supported) {
                     let entry = CacheEntry {
