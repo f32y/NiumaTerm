@@ -39,7 +39,7 @@ use std::time::SystemTime;
 use serde_json::Value;
 
 use crate::background_task::{
-    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskKind, BackgroundTaskRefs,
+    BackgroundTaskKey, BackgroundTaskKind, BackgroundTaskLoadState, BackgroundTaskRefs,
     BackgroundTaskRegistry, BackgroundTaskSnapshot, BackgroundTaskState,
     BackgroundTaskTranscriptUpdate, BackgroundTaskUpdate,
 };
@@ -161,7 +161,7 @@ impl ClaudeTasks {
             return 0;
         };
 
-        registry.set_discovery(BackgroundTaskDiscoveryState::Loading);
+        registry.set_discovery(BackgroundTaskLoadState::Loading);
 
         registry.sequence()
     }
@@ -196,13 +196,13 @@ impl ClaudeTasks {
                     changed |= registry.merge_restored(key, task.update, starting_sequence);
                 }
 
-                changed | registry.set_discovery(BackgroundTaskDiscoveryState::Ready)
+                changed | registry.set_discovery(BackgroundTaskLoadState::Ready)
             }
             Err(message) => {
                 if registry.is_empty() {
-                    registry.set_discovery(BackgroundTaskDiscoveryState::Unavailable { message })
+                    registry.set_discovery(BackgroundTaskLoadState::Unavailable { message })
                 } else {
-                    registry.set_discovery(BackgroundTaskDiscoveryState::Ready)
+                    registry.set_discovery(BackgroundTaskLoadState::Ready)
                 }
             }
         }

@@ -13,7 +13,7 @@ use nmt_agent::chat::{Event, Item, SendOutcome, SlashCommandOutcome, ThreadSetti
 use nmt_agent::session::Backend;
 use nmt_agent::session::test_support::TestBackend;
 use nmt_agent::{AgentEventKind, AgentWorkspace};
-use nmt_config::profile::{AgentProfile, AgentProfileKind};
+use nmt_config::profile::AgentProfile;
 
 use crate::agent_tab::composer::attachments::scratch_dir;
 use crate::agent_tab::execution::{AgentSession, SessionRegistry};
@@ -36,7 +36,7 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
 
         let owner = AgentSession::create(
             AgentProfile {
-                kind: AgentProfileKind::Codex,
+                kind: AgentKind::Codex,
                 ..AgentProfile::default()
             },
             AgentWorkspace::default(),
@@ -82,7 +82,7 @@ async fn detached_session_retains_output_and_interaction_until_owner_close(
 
         backend.approval_accepted = true;
 
-        let epoch = session.controller.borrow_mut().starting(None).epoch;
+        let epoch = session.controller.borrow_mut().starting(None);
 
         assert_eq!(
             session.install(Ok(Backend::Test(backend)), epoch, "test", cx),

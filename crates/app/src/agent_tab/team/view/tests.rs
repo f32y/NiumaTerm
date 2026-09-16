@@ -14,7 +14,7 @@ use nmt_agent::team::member::{HistoryScope, MemberConfig, ProfileReference};
 use nmt_agent::team::model::UserInput;
 use nmt_agent::team::room::Room;
 use nmt_agent::team::session::{AttemptEventKey, TeamSession};
-use nmt_config::profile::{AgentProfile, AgentProfileKind, EnvVar};
+use nmt_config::profile::{AgentProfile, EnvVar};
 use tempfile::tempdir;
 
 use crate::agent_tab::AgentThreadDefaults;
@@ -47,7 +47,7 @@ async fn claude_member_startup_retains_native_permission_selection(cx: &mut Test
 
         let profile = AgentProfile {
             name: "test-claude".into(),
-            kind: AgentProfileKind::Claude,
+            kind: AgentKind::Claude,
             executable: Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../agent/tests/fixtures/claude/fake-stream-json.cmd")
                 .to_string_lossy()
@@ -210,7 +210,7 @@ async fn reopened_request(cx: &mut TestAppContext, completed: bool) {
         let owner = AgentSession::create(
             AgentProfile {
                 name: "test".into(),
-                kind: AgentProfileKind::Codex,
+                kind: AgentKind::Codex,
                 ..AgentProfile::default()
             },
             AgentWorkspace::default(),
@@ -261,7 +261,7 @@ async fn reopened_request(cx: &mut TestAppContext, completed: bool) {
             });
         }
 
-        let epoch = session.controller.borrow_mut().starting(None).epoch;
+        let epoch = session.controller.borrow_mut().starting(None);
 
         session.install(Ok(Backend::Test(backend)), epoch, "test", cx);
 
@@ -389,7 +389,7 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
         let owner = AgentSession::create(
             AgentProfile {
                 name: "test".into(),
-                kind: AgentProfileKind::Codex,
+                kind: AgentKind::Codex,
                 ..AgentProfile::default()
             },
             AgentWorkspace::default(),
@@ -428,7 +428,7 @@ async fn sent_team_request_displays_stream_before_completion(cx: &mut TestAppCon
         )
         .with_recovery(AgentKind::Codex, "retained-team-thread");
 
-        let epoch = session.controller.borrow_mut().starting(None).epoch;
+        let epoch = session.controller.borrow_mut().starting(None);
 
         assert_eq!(
             session.install(Ok(Backend::Test(backend)), epoch, "test", cx),

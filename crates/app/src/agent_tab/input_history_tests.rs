@@ -13,7 +13,7 @@ use nmt_agent::codex::app_server;
 use nmt_agent::input_history::AgentInputHistory as InputHistoryService;
 use nmt_agent::session::lifecycle::StartOutcome;
 use nmt_agent::transcript::TextField;
-use nmt_config::profile::{AgentProfile, AgentProfileKind};
+use nmt_config::profile::AgentProfile;
 
 use crate::agent_tab::input_history::{
     AgentInputHistory, InputHistoryAction, InputHistoryDirection, InputHistoryNavigation,
@@ -85,7 +85,7 @@ fn open_test_pane(
 
     let profile = AgentProfile {
         name: "Input History Test".into(),
-        kind: AgentProfileKind::Codex,
+        kind: AgentKind::Codex,
         executable: directory
             .path()
             .join("missing-agent.exe")

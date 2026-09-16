@@ -1,8 +1,8 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use nmt_agent::background_task::{
-    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRegistry,
-    BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskUpdate,
+    BackgroundTaskKey, BackgroundTaskLoadState, BackgroundTaskRegistry, BackgroundTaskSnapshot,
+    BackgroundTaskState, BackgroundTaskUpdate,
 };
 
 use crate::ui::background_tasks::rows::{
@@ -80,7 +80,7 @@ impl Builder {
         self
     }
 
-    fn discovery(mut self, discovery: BackgroundTaskDiscoveryState) -> Self {
+    fn discovery(mut self, discovery: BackgroundTaskLoadState) -> Self {
         self.0.set_discovery(discovery);
 
         self
@@ -258,7 +258,7 @@ fn compact_sections_hide_the_tail_behind_a_control() {
 #[test]
 fn a_failed_restoration_with_no_rows_is_distinguishable_from_an_empty_session() {
     let unavailable = Builder::codex()
-        .discovery(BackgroundTaskDiscoveryState::Unavailable {
+        .discovery(BackgroundTaskLoadState::Unavailable {
             message: "thread/list failed".into(),
         })
         .build();
@@ -266,13 +266,13 @@ fn a_failed_restoration_with_no_rows_is_distinguishable_from_an_empty_session() 
     assert!(unavailable.tasks.is_empty());
     assert!(matches!(
         unavailable.discovery,
-        BackgroundTaskDiscoveryState::Unavailable { .. }
+        BackgroundTaskLoadState::Unavailable { .. }
     ));
 
     let empty = Builder::codex()
-        .discovery(BackgroundTaskDiscoveryState::Ready)
+        .discovery(BackgroundTaskLoadState::Ready)
         .build();
 
     assert!(empty.tasks.is_empty());
-    assert_eq!(empty.discovery, BackgroundTaskDiscoveryState::Ready);
+    assert_eq!(empty.discovery, BackgroundTaskLoadState::Ready);
 }

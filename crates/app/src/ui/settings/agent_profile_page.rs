@@ -429,11 +429,11 @@ const PROFILE_EFFORT_OPTIONS: [&str; 6] = ["default", "low", "medium", "high", "
 const CODEX_EFFORT_OPTION: &str = "ultra";
 
 /// The levels a profile of this kind can pin, in order.
-fn profile_effort_options(kind: AgentProfileKind) -> Vec<&'static str> {
+fn profile_effort_options(kind: AgentKind) -> Vec<&'static str> {
     PROFILE_EFFORT_OPTIONS
         .iter()
         .copied()
-        .chain((kind == AgentProfileKind::Codex).then_some(CODEX_EFFORT_OPTION))
+        .chain((kind == AgentKind::Codex).then_some(CODEX_EFFORT_OPTION))
         .collect()
 }
 
@@ -497,7 +497,7 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
         // name; Save fills in a unique placeholder.
         None => AgentProfile {
             name: String::new(),
-            ..builtin_agent_profile(AgentProfileKind::Claude)
+            ..builtin_agent_profile(AgentKind::Claude)
         },
     };
 
@@ -584,7 +584,7 @@ fn save_agent_profile_draft(draft: &Entity<AgentProfileDraft>, cx: &mut App) {
 }
 
 /// Point the draft at another agent type, as picked in the add dialog.
-fn select_profile_kind(draft: &mut AgentProfileDraft, profile_kind: AgentProfileKind) {
+fn select_profile_kind(draft: &mut AgentProfileDraft, profile_kind: AgentKind) {
     if draft.profile.kind == profile_kind {
         return;
     }
@@ -691,9 +691,9 @@ fn agent_profile_dialog_content(
     let kind_label = agent_kind_display_label(profile.kind);
 
     let key_env = match profile.kind {
-        AgentProfileKind::Claude => "ANTHROPIC_API_KEY",
-        AgentProfileKind::Codex => "OPENAI_API_KEY",
-        AgentProfileKind::DeepSeek => "DEEPSEEK_API_KEY",
+        AgentKind::Claude => "ANTHROPIC_API_KEY",
+        AgentKind::Codex => "OPENAI_API_KEY",
+        AgentKind::DeepSeek => "DEEPSEEK_API_KEY",
     };
 
     let endpoint_on = profile.use_custom_endpoint;
@@ -887,8 +887,8 @@ fn agent_profile_dialog_content(
             );
 
             match profile.kind {
-                AgentProfileKind::Claude | AgentProfileKind::Codex => this.child(executable),
-                AgentProfileKind::DeepSeek => this
+                AgentKind::Claude | AgentKind::Codex => this.child(executable),
+                AgentKind::DeepSeek => this
                     .child(card_row(
                         t!("settings-agent-profile-launcher"),
                         t!("settings-agent-profile-launcher-description"),
@@ -903,11 +903,11 @@ fn agent_profile_dialog_content(
         .child(card_row(
             t!("settings-agent-profile-model"),
             match profile.kind {
-                AgentProfileKind::Claude => {
+                AgentKind::Claude => {
                     t!("settings-agent-profile-model-claude-description")
                 }
-                AgentProfileKind::Codex => t!("settings-agent-profile-model-codex-description"),
-                AgentProfileKind::DeepSeek => {
+                AgentKind::Codex => t!("settings-agent-profile-model-codex-description"),
+                AgentKind::DeepSeek => {
                     t!("settings-agent-profile-model-deepseek-description")
                 }
             },
@@ -915,14 +915,14 @@ fn agent_profile_dialog_content(
             cx,
         ))
         .map(|this| match profile.kind {
-            AgentProfileKind::Claude => this.child(card_row(
+            AgentKind::Claude => this.child(card_row(
                 t!("settings-agent-profile-replace-sub-models"),
                 t!("settings-agent-profile-replace-sub-models-description"),
                 sub_models_switch,
                 cx,
             )),
-            AgentProfileKind::Codex => this,
-            AgentProfileKind::DeepSeek => this.child(card_row(
+            AgentKind::Codex => this,
+            AgentKind::DeepSeek => this.child(card_row(
                 t!("settings-agent-profile-vision-model"),
                 t!("settings-agent-profile-vision-model-description"),
                 vision_switch,
@@ -944,11 +944,11 @@ fn agent_profile_dialog_content(
         .child(card_row(
             t!("settings-agent-profile-api-url"),
             match profile.kind {
-                AgentProfileKind::Claude => {
+                AgentKind::Claude => {
                     t!("settings-agent-profile-api-url-claude-description")
                 }
-                AgentProfileKind::Codex => t!("settings-agent-profile-api-url-codex-description"),
-                AgentProfileKind::DeepSeek => {
+                AgentKind::Codex => t!("settings-agent-profile-api-url-codex-description"),
+                AgentKind::DeepSeek => {
                     t!("settings-agent-profile-api-url-deepseek-description")
                 }
             },
@@ -958,17 +958,17 @@ fn agent_profile_dialog_content(
         .child(card_row(
             t!("settings-agent-profile-api-key"),
             match profile.kind {
-                AgentProfileKind::Claude => t!(
+                AgentKind::Claude => t!(
                     "settings-agent-profile-api-key-claude-description",
                     key = key_env
                 )
                 .into_owned(),
-                AgentProfileKind::Codex => t!(
+                AgentKind::Codex => t!(
                     "settings-agent-profile-api-key-codex-description",
                     key = key_env
                 )
                 .into_owned(),
-                AgentProfileKind::DeepSeek => t!(
+                AgentKind::DeepSeek => t!(
                     "settings-agent-profile-api-key-deepseek-description",
                     key = key_env
                 )

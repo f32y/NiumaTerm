@@ -11,7 +11,7 @@
 use serde_json::{Value, json};
 
 use crate::background_task::{
-    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskKind, BackgroundTaskRefs,
+    BackgroundTaskKey, BackgroundTaskKind, BackgroundTaskLoadState, BackgroundTaskRefs,
     BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskSummary,
 };
 use crate::chat::{
@@ -96,7 +96,7 @@ pub(crate) fn subagent_snapshot(
     BackgroundTaskSnapshot {
         parent_session,
         tasks,
-        discovery: BackgroundTaskDiscoveryState::Ready,
+        discovery: BackgroundTaskLoadState::Ready,
         activity,
     }
 }

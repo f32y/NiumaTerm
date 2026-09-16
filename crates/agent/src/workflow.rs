@@ -192,16 +192,11 @@ pub struct WorkflowAgentProgress {
     pub result: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct WorkflowRefresh {
-    pub run_id: Option<String>,
-    pub agents: Vec<WorkflowAgentProgress>,
-    pub failed: bool,
-}
-
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WorkflowRefreshResult {
     pub task_id: String,
-    pub refresh: WorkflowRefresh,
+    pub run_id: Option<String>,
+    pub agents: Vec<WorkflowAgentProgress>,
+    pub failed: bool,
     pub transcript: Option<WorkflowTranscriptRead>,
 }

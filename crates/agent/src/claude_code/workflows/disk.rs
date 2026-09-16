@@ -211,14 +211,14 @@ impl ClaudeWorkflowSource {
             return result;
         };
 
-        result.refresh.run_id = dir
+        result.run_id = dir
             .file_name()
             .and_then(|name| name.to_str())
             .map(str::to_owned);
 
         match read_journal(dir) {
             Ok(journal) => {
-                result.refresh.agents = journal
+                result.agents = journal
                     .into_iter()
                     .map(|entry| WorkflowAgentProgress {
                         agent_id: entry.agent_id,
@@ -231,7 +231,7 @@ impl ClaudeWorkflowSource {
                     })
                     .collect()
             }
-            Err(_) => result.refresh.failed = true,
+            Err(_) => result.failed = true,
         }
 
         if let Some(agent_id) = request.open_agent.as_deref() {

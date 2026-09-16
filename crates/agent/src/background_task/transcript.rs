@@ -11,10 +11,11 @@ use crate::chat::Item;
 /// are dropped rather than letting one child grow without limit.
 pub const MAX_TRANSCRIPT_ITEMS: usize = 512;
 
-/// How far a child's conversation has been loaded. Kept apart from the items
-/// so a failed load can report itself without discarding what is already known.
+/// How far a provider read has got: the child list of a session, or one
+/// child's conversation. Kept apart from the data so a failed load can report
+/// itself without discarding what is already known.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum BackgroundTaskTranscriptState {
+pub enum BackgroundTaskLoadState {
     #[default]
     NotLoaded,
     Loading,
@@ -36,7 +37,7 @@ pub struct BackgroundTaskTranscriptUpdate {
     pub restore: bool,
 
     pub items: Vec<Item>,
-    pub state: Option<BackgroundTaskTranscriptState>,
+    pub state: Option<BackgroundTaskLoadState>,
 }
 
 impl BackgroundTaskTranscriptUpdate {
@@ -46,7 +47,7 @@ impl BackgroundTaskTranscriptUpdate {
             replace: false,
             restore: false,
             items,
-            state: Some(BackgroundTaskTranscriptState::Ready),
+            state: Some(BackgroundTaskLoadState::Ready),
         }
     }
 
@@ -56,7 +57,7 @@ impl BackgroundTaskTranscriptUpdate {
             replace: true,
             restore: false,
             items,
-            state: Some(BackgroundTaskTranscriptState::Ready),
+            state: Some(BackgroundTaskLoadState::Ready),
         }
     }
 
@@ -68,11 +69,11 @@ impl BackgroundTaskTranscriptUpdate {
             replace: false,
             restore: true,
             items,
-            state: Some(BackgroundTaskTranscriptState::Ready),
+            state: Some(BackgroundTaskLoadState::Ready),
         }
     }
 
-    pub fn state(state: BackgroundTaskTranscriptState) -> Self {
+    pub fn state(state: BackgroundTaskLoadState) -> Self {
         Self {
             replace: false,
             restore: false,

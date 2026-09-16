@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use crate::background_task::BackgroundTaskTranscriptState;
+use crate::background_task::BackgroundTaskLoadState;
 use crate::chat::{Event, Item};
 use crate::dsh::api::ApiClient;
 use crate::dsh::models::ModelDirectory;
@@ -97,7 +97,7 @@ fn failed_background_reads_deliver_results_and_end_pending_discovery() {
             SKILLS_FRAME => assert!(matches!(&events[0], Event::Skills(_))),
             SUBAGENT_TRANSCRIPT_FRAME => assert!(
                 matches!(&events[0], Event::BackgroundTaskTranscript { update, .. }
-                if !update.replace && matches!(update.state, Some(BackgroundTaskTranscriptState::Unavailable { .. })))
+                if !update.replace && matches!(update.state, Some(BackgroundTaskLoadState::Unavailable { .. })))
             ),
             _ => assert_eq!(
                 events.len(),

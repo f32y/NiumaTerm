@@ -1,7 +1,7 @@
 use std::time::{Duration, SystemTime};
 
 use crate::background_task::{
-    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRefs, BackgroundTaskRegistry,
+    BackgroundTaskKey, BackgroundTaskLoadState, BackgroundTaskRefs, BackgroundTaskRegistry,
     BackgroundTaskState, BackgroundTaskUpdate,
 };
 
@@ -267,11 +267,8 @@ fn the_earliest_known_start_time_wins() {
 fn discovery_state_only_reports_real_transitions() {
     let mut registry = registry();
 
-    assert_eq!(
-        registry.discovery(),
-        &BackgroundTaskDiscoveryState::NotLoaded
-    );
-    assert!(registry.set_discovery(BackgroundTaskDiscoveryState::Loading));
-    assert!(!registry.set_discovery(BackgroundTaskDiscoveryState::Loading));
-    assert!(registry.set_discovery(BackgroundTaskDiscoveryState::Ready));
+    assert_eq!(registry.discovery(), &BackgroundTaskLoadState::NotLoaded);
+    assert!(registry.set_discovery(BackgroundTaskLoadState::Loading));
+    assert!(!registry.set_discovery(BackgroundTaskLoadState::Loading));
+    assert!(registry.set_discovery(BackgroundTaskLoadState::Ready));
 }

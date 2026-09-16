@@ -9,9 +9,8 @@
 pub use nmt_config::appearance::MAX_TAB_WIDTH;
 
 pub use crate::ui::settings::state::{
-    AgentProfile, AgentProfileKind, AgentProfileLauncher, AppSettings, CollapseRows, EnvVar,
-    InputStyle, MIN_TAB_WIDTH, ModelListStyle, Profile, SettingsEditing, TabBarStyle,
-    WindowBackdrop,
+    AgentProfile, AgentProfileLauncher, AppSettings, CollapseRows, EnvVar, InputStyle,
+    MIN_TAB_WIDTH, ModelListStyle, Profile, SettingsEditing, TabBarStyle, WindowBackdrop,
 };
 
 pub(crate) use crate::ui::settings::opacity::{
@@ -52,7 +51,8 @@ mod theme_gallery;
 #[cfg(test)]
 mod tests;
 
-use std::{borrow::Cow, io, path};
+use std::borrow::Cow;
+use std::{io, path};
 
 use app::design::SETTINGS_NAV_WIDTH;
 #[cfg(test)]

@@ -5,7 +5,7 @@ use nmt_agent::chat::{Event, SlashCommandOutcome};
 use nmt_agent::progress::{GoalStatus, Task, TaskList, TaskStatus};
 use nmt_agent::session::test_support::TestBackend;
 use nmt_agent::session::{AgentKind, Backend};
-use nmt_config::profile::{AgentProfile, AgentProfileKind};
+use nmt_config::profile::AgentProfile;
 
 use crate::agent_tab::settings::AgentSettings;
 use crate::agent_tab::tests::deliver_session_event;
@@ -33,7 +33,7 @@ fn progress_panel_is_narrower_and_expands_above_the_composer(cx: &mut TestAppCon
             AgentPane::new(
                 AgentProfile {
                     name: "Progress Test".into(),
-                    kind: AgentProfileKind::Codex,
+                    kind: AgentKind::Codex,
                     executable: "missing-progress-agent.exe".into(),
                     ..AgentProfile::default()
                 },
@@ -54,7 +54,7 @@ fn progress_panel_is_narrower_and_expands_above_the_composer(cx: &mut TestAppCon
     pane.update(cx, |pane, cx| {
         let mut session = pane.session.borrow_mut();
 
-        let epoch = session.starting(None).epoch;
+        let epoch = session.starting(None);
 
         let backend = TestBackend::new([], SlashCommandOutcome::Accepted, vec![])
             .with_recovery(AgentKind::Codex, "progress");

@@ -10,7 +10,7 @@ use std::thread;
 use serde_json::{Value, json};
 
 use crate::background_task::{
-    BackgroundTaskKey, BackgroundTaskTranscriptState, BackgroundTaskTranscriptUpdate,
+    BackgroundTaskKey, BackgroundTaskLoadState, BackgroundTaskTranscriptUpdate,
 };
 use crate::chat::{Event, Item, QueuedPrompt};
 use crate::dsh::api::{ApiClient, CallError};
@@ -53,11 +53,9 @@ pub(super) fn failed_read_events(payload: &Value, session_id: &str) -> Option<Ve
         SKILLS_FRAME => vec![Event::Skills(catalogs::skill_catalog(&Value::Null))],
         SUBAGENT_TRANSCRIPT_FRAME => vec![Event::BackgroundTaskTranscript {
             key: BackgroundTaskKey::deepseek(payload["childSessionId"].as_str()?),
-            update: BackgroundTaskTranscriptUpdate::state(
-                BackgroundTaskTranscriptState::Unavailable {
-                    message: message.to_string(),
-                },
-            ),
+            update: BackgroundTaskTranscriptUpdate::state(BackgroundTaskLoadState::Unavailable {
+                message: message.to_string(),
+            }),
         }],
         HISTORY_FRAME | PRESETS_FRAME | SUBAGENTS_FRAME | WORKFLOW_TRANSCRIPT_FRAME => Vec::new(),
         _ => return None,

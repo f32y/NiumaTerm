@@ -9,12 +9,11 @@ use std::{fs, io};
 use serde_json::Value;
 use tracing::trace;
 
-use crate::background_task::{BackgroundTaskKey, BackgroundTaskProvider};
+use crate::background_task::BackgroundTaskKey;
 use crate::catalog::adapter_commands;
 use crate::chat::{
-    Event as SessionEvent, ForkAnchor, MessageImage, QuestionRequest, QuestionResponse,
-    SendOutcome, SessionScope, SkillReference, SlashCommandInfo, SlashCommandOutcome,
-    TeamDecisionRequest, ThreadSettings,
+    Event, ForkAnchor, MessageImage, QuestionRequest, QuestionResponse, SendOutcome, SessionScope,
+    SkillReference, SlashCommandInfo, SlashCommandOutcome, TeamDecisionRequest, ThreadSettings,
 };
 use crate::claude_code::sessions::RestoredTask;
 use crate::claude_code::stream_json;
@@ -71,6 +70,19 @@ pub enum RenameOutcome {
 }
 
 impl Backend {
+    pub fn kind(&self) -> AgentKind {
+        match self {
+            Self::Codex(_) => AgentKind::Codex,
+            Self::Claude(_) => AgentKind::Claude,
+            Self::DeepSeek(_) => AgentKind::DeepSeek,
+            #[cfg(any(test, feature = "test-support"))]
+            Self::Test(session) => session
+                .recovery
+                .as_ref()
+                .map_or(AgentKind::Codex, |identity| identity.kind),
+        }
+    }
+
     /// Start the harness process for `kind` and wrap it in the matching
     /// variant. Resume differs by harness — Codex asks the running app-server
     /// to reopen a thread, Claude Code takes a session id as a launch flag —
@@ -124,7 +136,7 @@ impl Backend {
         }
     }
 
-    pub(super) fn process(&mut self, message: Value) -> Vec<SessionEvent> {
+    pub(super) fn process(&mut self, message: Value) -> Vec<Event> {
         match self {
             Backend::Codex(session) => session.process(message),
             Backend::Claude(session) => session.process(message),
@@ -228,15 +240,12 @@ impl Backend {
     }
 
     pub fn adapter_commands(&self) -> Vec<SlashCommandInfo> {
-        let kind = match self {
-            Backend::Codex(_) => AgentKind::Codex,
-            Backend::Claude(_) => AgentKind::Claude,
-            Backend::DeepSeek(_) => AgentKind::DeepSeek,
-            #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(session) => return session.commands.clone(),
-        };
+        #[cfg(any(test, feature = "test-support"))]
+        if let Self::Test(session) = self {
+            return session.commands.clone();
+        }
 
-        adapter_commands(kind)
+        adapter_commands(self.kind())
     }
 
     /// Drop one prompt the backend accepted but has not started. Answers
@@ -374,15 +383,12 @@ impl Backend {
     /// provider that minted it, and one harness's task ids mean nothing to
     /// another, so a key from elsewhere reaches no session at all.
     fn owns_task(&self, key: &BackgroundTaskKey) -> bool {
-        let provider = match self {
-            Backend::Codex(_) => BackgroundTaskProvider::Codex,
-            Backend::Claude(_) => BackgroundTaskProvider::Claude,
-            Backend::DeepSeek(_) => BackgroundTaskProvider::DeepSeek,
-            #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(_) => return false,
-        };
+        #[cfg(any(test, feature = "test-support"))]
+        if matches!(self, Self::Test(_)) {
+            return false;
+        }
 
-        provider == key.provider
+        self.kind() == key.provider
     }
 
     /// Ask the provider for one child's conversation. Codex reads the stored
@@ -392,7 +398,7 @@ impl Backend {
         &mut self,
         key: &BackgroundTaskKey,
         cwd: Option<&str>,
-    ) -> Vec<SessionEvent> {
+    ) -> Vec<Event> {
         if !self.owns_task(key) {
             return Vec::new();
         }
@@ -449,7 +455,7 @@ impl Backend {
         &mut self,
         restored: Result<Vec<RestoredTask>, String>,
         starting_sequence: u64,
-    ) -> Vec<SessionEvent> {
+    ) -> Vec<Event> {
         match self {
             Backend::Claude(session) => {
                 session.finish_task_restoration(restored, starting_sequence)
@@ -518,21 +524,18 @@ impl Backend {
     }
 
     pub fn recovery_identity(&self) -> Option<RecoveryIdentity> {
-        match self {
-            Backend::Claude(session) => session
-                .session_id()
-                .map(|id| RecoveryIdentity::new(AgentKind::Claude, id)),
-            Backend::Codex(session) => session
-                .thread_id()
-                .map(|id| RecoveryIdentity::new(AgentKind::Codex, id)),
-            // The id names the conversation on the harness host, which is worth
-            // reporting even though resuming into it is not mapped yet.
-            Backend::DeepSeek(session) => session
-                .session_id()
-                .map(|id| RecoveryIdentity::new(AgentKind::DeepSeek, id)),
+        let id = match self {
+            Self::Claude(session) => session.session_id(),
+            Self::Codex(session) => session.thread_id(),
+            Self::DeepSeek(session) => session.session_id(),
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(session) => session.recovery.clone(),
-        }
+            Self::Test(session) => session
+                .recovery
+                .as_ref()
+                .map(|identity| identity.id.as_str()),
+        };
+
+        id.map(|id| RecoveryIdentity::new(self.kind(), id))
     }
 
     /// Name the conversation this backend holds when its provider stores a
@@ -581,7 +584,7 @@ impl Backend {
         }
     }
 
-    pub fn process_exit(&mut self) -> Vec<SessionEvent> {
+    pub fn process_exit(&mut self) -> Vec<Event> {
         match self {
             Backend::Claude(session) => session.on_exit(),
             Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
@@ -601,26 +604,26 @@ impl Backend {
     }
 
     pub fn respond_approval(&mut self, decision: &str) -> ApprovalOutcome {
-        let (accepted, waits) = match self {
-            Backend::Codex(session) => (
-                session.respond_approval(decision),
-                AgentKind::Codex.caps().async_approval_resolution,
-            ),
-            Backend::Claude(session) => (
-                session.respond_approval(decision),
-                AgentKind::Claude.caps().async_approval_resolution,
-            ),
-            Backend::DeepSeek(session) => (
-                session.respond_approval(decision),
-                AgentKind::DeepSeek.caps().async_approval_resolution,
-            ),
+        let waits = self.kind().caps().async_approval_resolution;
+
+        #[cfg(any(test, feature = "test-support"))]
+        let waits = if let Self::Test(session) = self {
+            session.approval_waits
+        } else {
+            waits
+        };
+
+        let accepted = match self {
+            Self::Codex(session) => session.respond_approval(decision),
+            Self::Claude(session) => session.respond_approval(decision),
+            Self::DeepSeek(session) => session.respond_approval(decision),
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Test(session) => {
+            Self::Test(session) => {
                 if session.approval_accepted {
                     session.approval_responses.push(decision.to_owned());
                 }
 
-                (session.approval_accepted, session.approval_waits)
+                session.approval_accepted
             }
         };
 
@@ -668,7 +671,7 @@ impl Backend {
         }
     }
 
-    pub fn apply_workflow_refresh(&mut self, result: WorkflowRefreshResult) -> Vec<SessionEvent> {
+    pub fn apply_workflow_refresh(&mut self, result: WorkflowRefreshResult) -> Vec<Event> {
         match self {
             Backend::Claude(session) => session.apply_workflow_refresh(result),
             Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
@@ -677,7 +680,7 @@ impl Backend {
         }
     }
 
-    pub fn restore_workflows(&mut self, restored: Vec<WorkflowRun>) -> Vec<SessionEvent> {
+    pub fn restore_workflows(&mut self, restored: Vec<WorkflowRun>) -> Vec<Event> {
         match self {
             Backend::Claude(session) => session.restore_workflows(restored),
             Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),

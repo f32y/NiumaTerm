@@ -24,7 +24,7 @@ use serde_json::Value;
 use crate::background_task::replace_text;
 use crate::json::text_field;
 use crate::workflow::{
-    WorkflowAgent, WorkflowAgentState, WorkflowPhase, WorkflowRefresh, WorkflowRun,
+    WorkflowAgent, WorkflowAgentState, WorkflowPhase, WorkflowRefreshResult, WorkflowRun,
     WorkflowRunState, WorkflowSnapshot,
 };
 
@@ -186,8 +186,8 @@ impl ClaudeWorkflows {
     }
 
     /// Record what a disk refresh learned about one run.
-    pub(crate) fn apply_refresh(&mut self, task_id: &str, refresh: WorkflowRefresh) -> bool {
-        let Some(run) = self.runs.get_mut(task_id) else {
+    pub(crate) fn apply_refresh(&mut self, refresh: WorkflowRefreshResult) -> bool {
+        let Some(run) = self.runs.get_mut(&refresh.task_id) else {
             return false;
         };
 

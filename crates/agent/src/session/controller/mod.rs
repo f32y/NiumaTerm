@@ -16,21 +16,19 @@ use chrono::Utc;
 
 use crate::background_task::{BackgroundTaskKey, BackgroundTaskSnapshot};
 use crate::chat::{
-    ContextComposition, ContextWindowUsage, Event, ForkCheckpoint, GoalStatus, Item, ReplayTurn,
-    SendOutcome, SessionStats, SessionSummary, SkillCatalog, SlashCommandInfo, SlashCommandOutcome,
-    TeamDecisionRequest, ThreadSettings, TurnRetry,
+    Event, GoalStatus, Item, ReplayTurn, SendOutcome, SessionSummary, SkillCatalog,
+    SlashCommandInfo, SlashCommandOutcome, TeamDecisionRequest, ThreadSettings, TurnRetry,
 };
 use crate::progress::TaskList;
 use crate::session::branch::{
-    BranchCompletion, BranchFailure, BranchReplay, BranchUpdate, ConversationBranch, FileProgress,
+    BranchCompletion, BranchFailure, BranchReplay, BranchUpdate, ConversationBranch,
 };
 use crate::session::capabilities::AgentCapabilities as _;
 use crate::session::children::{ChildAgents, ChildTranscript};
 use crate::session::commands::{CommandQueue, PendingSlashCommand};
-use crate::session::delivery::{MessageDelivery, RecoverablePrompt, Submission};
+use crate::session::delivery::{MessageDelivery, RecoverablePrompt};
 use crate::session::input::{
-    ApprovalOutcome, QuestionAction, QuestionCompletion, QuestionKey, SessionInput,
-    Submission as InputSubmission,
+    ApprovalOutcome, QuestionAction, QuestionCompletion, QuestionKey, SessionInput, Submission,
 };
 use crate::session::lifecycle::{InterruptOutcome, SessionRuntime, StartOutcome, Status};
 use crate::session::naming::ConversationNaming;
@@ -115,7 +113,7 @@ impl SessionController {
         text: String,
         send: impl FnOnce(&mut Backend, &str) -> SendOutcome,
         recovery: impl FnOnce() -> Option<RecoverablePrompt>,
-    ) -> Result<Submission, SubmissionBlock> {
+    ) -> Result<SendOutcome, SubmissionBlock> {
         if self.input.has_submission() {
             return Err(SubmissionBlock::QuestionResponse);
         }
@@ -132,17 +130,15 @@ impl SessionController {
 
         let outcome = self.runtime.send(|backend| send(backend, &text));
 
-        let result = self.delivery.submit(outcome, text, recovery);
+        let outcome = self.delivery.submit(outcome, text.clone(), recovery);
 
-        if let Submission::Started { text } = &result {
+        if outcome == SendOutcome::StartedTurn {
             self.conversation.borrow_mut().start();
 
-            self.push_item(Item::UserMessage {
-                text: Some(text.clone()),
-            });
+            self.push_item(Item::UserMessage { text: Some(text) });
         }
 
-        Ok(result)
+        Ok(outcome)
     }
 
     pub fn execute_command(&mut self, command: &PendingSlashCommand) -> SlashCommandOutcome {
@@ -188,25 +184,21 @@ impl SessionController {
         outcome
     }
 
-    pub fn starting(&mut self, recovery: Option<&RecoveryIdentity>) -> SessionStart {
+    /// Begin a start and return its epoch, which later events must carry.
+    pub fn starting(&mut self, recovery: Option<&RecoveryIdentity>) -> u64 {
         let epoch = self.runtime.begin_start();
 
         self.input.starting(epoch);
 
         self.restore.starting(epoch, recovery);
 
-        let reset_branch = !self.branch.starting(epoch, recovery);
-
-        if reset_branch {
+        if !self.branch.starting(epoch, recovery) {
             self.branch.clear();
         }
 
         self.naming.named = recovery.is_some();
 
-        SessionStart {
-            epoch,
-            reset_branch,
-        }
+        epoch
     }
 
     pub fn background_tasks(&self) -> Option<&BackgroundTaskSnapshot> {
@@ -339,59 +331,20 @@ impl SessionController {
         }
     }
 
-    /// Publish content and delivery changes before returning control to readers.
+    /// Compaction is shown on the turn it interrupts, so the flag lives on the
+    /// live turn and the turn is marked changed either way.
+    fn set_compacting(&mut self, compacting: bool) {
+        let mut conversation = self.conversation.borrow_mut();
+
+        conversation.live.set_compacting(compacting);
+
+        conversation.changed_turn(self.delivery.turn());
+    }
+
+    /// Transcript side effects of the results that still leave the
+    /// controller; the payload itself moves on to the host unchanged.
     fn record_content(&mut self, effect: SessionEffect) -> SessionEffect {
         match effect {
-            SessionEffect::ItemStarted(item) => {
-                self.start_item(item);
-
-                SessionEffect::Changed
-            }
-            SessionEffect::ItemCompleted(item) => {
-                self.complete_item(item);
-
-                SessionEffect::Changed
-            }
-            SessionEffect::TextDelta {
-                item_id,
-                delta,
-                field,
-            } => {
-                self.append_delta(&item_id, &delta, field);
-
-                SessionEffect::Changed
-            }
-            SessionEffect::ConfirmedPrompts(prompts) => {
-                for text in prompts {
-                    self.push_item(Item::UserMessage { text: Some(text) });
-                }
-
-                SessionEffect::Changed
-            }
-            SessionEffect::OutputTokens(tokens) => {
-                let mut conversation = self.conversation.borrow_mut();
-
-                if conversation.live.set_output_tokens(tokens) {
-                    conversation.changed_turn(self.delivery.turn());
-                }
-
-                SessionEffect::Changed
-            }
-            SessionEffect::ContextWindow(usage) => {
-                self.conversation.borrow_mut().context_window_usage = Some(usage);
-
-                SessionEffect::Changed
-            }
-            SessionEffect::ContextComposition(composition) => {
-                self.conversation.borrow_mut().context_composition = Some(composition);
-
-                SessionEffect::Changed
-            }
-            SessionEffect::Stats(stats) => {
-                self.conversation.borrow_mut().session_stats = Some(stats);
-
-                SessionEffect::Changed
-            }
             SessionEffect::Error {
                 message,
                 fatal,
@@ -443,30 +396,6 @@ impl SessionController {
                 }
 
                 SessionEffect::TurnCompleted { error, interrupted }
-            }
-            SessionEffect::CompactionStarted => {
-                self.note_visible_output();
-
-                let mut conversation = self.conversation.borrow_mut();
-
-                conversation.live.set_compacting(true);
-
-                conversation.changed_turn(self.delivery.turn());
-
-                SessionEffect::Changed
-            }
-            SessionEffect::CompactionFinished { error } => {
-                if let Some(text) = error {
-                    self.push_item(Item::Error { text });
-                }
-
-                let mut conversation = self.conversation.borrow_mut();
-
-                conversation.live.set_compacting(false);
-
-                conversation.changed_turn(self.delivery.turn());
-
-                SessionEffect::Changed
             }
             effect @ (SessionEffect::ApprovalRequested | SessionEffect::InputRequested { .. }) => {
                 self.note_visible_output();
@@ -541,34 +470,70 @@ impl SessionController {
                 error,
                 interrupted: self.turn_completed(),
             },
-            Event::TurnOutputTokensUpdated(tokens) => SessionEffect::OutputTokens(tokens),
-            Event::ContextWindowUpdated(usage) => SessionEffect::ContextWindow(usage),
-            Event::ContextCompositionUpdated(composition) => {
-                SessionEffect::ContextComposition(composition)
+            Event::TurnOutputTokensUpdated(tokens) => {
+                let mut conversation = self.conversation.borrow_mut();
+
+                if conversation.live.set_output_tokens(tokens) {
+                    conversation.changed_turn(self.delivery.turn());
+                }
+
+                SessionEffect::Changed
             }
-            Event::CompactionStarted => SessionEffect::CompactionStarted,
-            Event::CompactionFinished { error } => SessionEffect::CompactionFinished { error },
+            Event::ContextWindowUpdated(usage) => {
+                self.conversation.borrow_mut().context_window_usage = Some(usage);
+
+                SessionEffect::Changed
+            }
+            Event::ContextCompositionUpdated(composition) => {
+                self.conversation.borrow_mut().context_composition = Some(composition);
+
+                SessionEffect::Changed
+            }
+            Event::CompactionStarted => {
+                self.note_visible_output();
+
+                self.set_compacting(true);
+
+                SessionEffect::Changed
+            }
+            Event::CompactionFinished { error } => {
+                if let Some(text) = error {
+                    self.push_item(Item::Error { text });
+                }
+
+                self.set_compacting(false);
+
+                SessionEffect::Changed
+            }
             Event::FileRewindCompleted { error } => SessionEffect::Branch(
                 self.branch
                     .files_completed(epoch, error.map_or(Ok(()), Err)),
             ),
-            Event::ItemStarted(item) => SessionEffect::ItemStarted(item),
-            Event::ItemCompleted(item) => SessionEffect::ItemCompleted(item),
-            Event::AgentMessageDelta { item_id, delta } => SessionEffect::TextDelta {
-                item_id,
-                delta,
-                field: TextField::Reply,
-            },
-            Event::ReasoningSummaryDelta { item_id, delta } => SessionEffect::TextDelta {
-                item_id,
-                delta,
-                field: TextField::ReasoningSummary,
-            },
-            Event::CommandOutputDelta { item_id, delta } => SessionEffect::TextDelta {
-                item_id,
-                delta,
-                field: TextField::CommandOutput,
-            },
+            Event::ItemStarted(item) => {
+                self.start_item(item);
+
+                SessionEffect::Changed
+            }
+            Event::ItemCompleted(item) => {
+                self.complete_item(item);
+
+                SessionEffect::Changed
+            }
+            Event::AgentMessageDelta { item_id, delta } => {
+                self.append_delta(&item_id, &delta, TextField::Reply);
+
+                SessionEffect::Changed
+            }
+            Event::ReasoningSummaryDelta { item_id, delta } => {
+                self.append_delta(&item_id, &delta, TextField::ReasoningSummary);
+
+                SessionEffect::Changed
+            }
+            Event::CommandOutputDelta { item_id, delta } => {
+                self.append_delta(&item_id, &delta, TextField::CommandOutput);
+
+                SessionEffect::Changed
+            }
             Event::ApprovalRequested { description } => {
                 self.input.ask_approval(description);
 
@@ -642,7 +607,11 @@ impl SessionController {
             Event::History(sessions) => SessionEffect::History(sessions),
             Event::SessionSearchResults(sessions) => SessionEffect::SearchResults(sessions),
             Event::QueuedPrompts(prompts) => {
-                SessionEffect::ConfirmedPrompts(self.delivery.snapshot(prompts))
+                for text in self.delivery.snapshot(prompts) {
+                    self.push_item(Item::UserMessage { text: Some(text) });
+                }
+
+                SessionEffect::Changed
             }
             Event::GoalUpdated(goal) => {
                 self.goal = goal;
@@ -664,7 +633,11 @@ impl SessionController {
 
                 SessionEffect::Title(title)
             }
-            Event::SessionStatsUpdated(stats) => SessionEffect::Stats(stats),
+            Event::SessionStatsUpdated(stats) => {
+                self.conversation.borrow_mut().session_stats = Some(stats);
+
+                SessionEffect::Changed
+            }
             Event::Replay(turns) => self
                 .prepare_replay(turns)
                 .map_or(SessionEffect::Unchanged, SessionEffect::Replay),
@@ -716,26 +689,16 @@ impl SessionController {
         key: QuestionKey,
         action: QuestionAction,
         now: Instant,
-    ) -> QuestionSubmission {
+    ) -> Submission {
         if self.branch.holds_composer() || self.commands.awaiting_turn {
-            return QuestionSubmission::Ignored;
+            return Submission::Ignored;
         }
 
-        let waiting = self.input.waiting();
-
-        match self
-            .input
+        self.input
             .submit(&mut self.runtime, key, action, &self.controls.settings, now)
-        {
-            InputSubmission::Ignored => QuestionSubmission::Ignored,
-            InputSubmission::Settled => QuestionSubmission::Settled {
-                waiting_finished: waiting && !self.input.waiting(),
-            },
-            InputSubmission::Waiting => QuestionSubmission::Waiting,
-            InputSubmission::Failed => QuestionSubmission::Failed,
-        }
     }
 
+    #[cfg(any(test, feature = "test-support"))]
     pub fn restore_questions(&mut self) {
         self.input.restore(&mut self.runtime);
     }
@@ -758,23 +721,21 @@ impl SessionController {
             }
         };
 
-        let branch = branch.map(|completion| self.apply_branch_content(completion));
+        let branch = branch.map(|(completion, turns)| {
+            self.apply_replay(turns);
+
+            completion
+        });
+
         let replaced = replay.is_some();
 
         if let Some(turns) = replay.take() {
             self.apply_replay(turns);
         }
 
-        let defaults = self.ready_defaults.clone();
         let reported_approval = settings.approval.clone();
 
-        let selection = self.finish_ready(
-            self.kind,
-            settings.clone(),
-            defaults.stored.as_ref(),
-            defaults.model.as_deref(),
-            defaults.effort.as_deref(),
-        );
+        let selection = self.finish_ready(settings.clone());
 
         let approval = if self.kind.caps().approval_selection_is_a_command {
             self.runtime
@@ -817,44 +778,28 @@ impl SessionController {
             }
         };
 
-        let branch = branch.map(|completion| self.apply_branch_content(completion));
-
         self.apply_replay(turns);
 
         Some(SessionReplay { branch, replace })
     }
 
-    fn apply_branch_content(&mut self, completion: BranchCompletion) -> SessionBranch {
-        let replayed = completion.replay.is_some();
-
-        if let Some(turns) = completion.replay {
-            self.apply_replay(turns);
-        }
-
-        SessionBranch {
-            prompt: completion.prompt,
-            files: completion.files,
-            replayed,
-        }
-    }
-
     /// Apply host-supplied defaults after any restored content has been accepted.
     /// A model-selection refusal leaves the effective settings reported by the
     /// backend and returns its error for the host to present.
-    pub(crate) fn finish_ready(
-        &mut self,
-        kind: AgentKind,
-        settings: ThreadSettings,
-        stored: Option<&ThreadSettings>,
-        startup_model: Option<&str>,
-        startup_effort: Option<&str>,
-    ) -> Option<Result<(), String>> {
+    fn finish_ready(&mut self, settings: ThreadSettings) -> Option<Result<(), String>> {
         self.input.restore(&mut self.runtime);
 
-        self.controls
-            .ready(kind, settings, stored, startup_model, startup_effort);
+        let defaults = self.ready_defaults.clone();
 
-        let selection = if kind.caps().model_selection_is_a_request {
+        self.controls.ready(
+            self.kind,
+            settings,
+            defaults.stored.as_ref(),
+            defaults.model.as_deref(),
+            defaults.effort.as_deref(),
+        );
+
+        let selection = if self.kind.caps().model_selection_is_a_request {
             self.runtime
                 .backend_mut()
                 .and_then(|backend| self.controls.apply_model(backend))
@@ -1036,11 +981,6 @@ impl SessionController {
     }
 }
 
-pub struct SessionStart {
-    pub epoch: u64,
-    pub reset_branch: bool,
-}
-
 pub struct SessionFailure {
     pub branch: Option<BranchFailure>,
     pub resume_failed: bool,
@@ -1052,21 +992,8 @@ pub struct UserInterruption {
     pub outcome: InterruptOutcome,
 }
 
-pub enum QuestionSubmission {
-    Ignored,
-    Settled { waiting_finished: bool },
-    Waiting,
-    Failed,
-}
-
-pub struct SessionBranch {
-    pub prompt: String,
-    pub files: FileProgress,
-    pub replayed: bool,
-}
-
 pub struct SessionReady {
-    pub branch: Option<SessionBranch>,
+    pub branch: Option<BranchCompletion>,
     pub replaced: bool,
     pub selection: Option<Result<(), String>>,
 
@@ -1076,12 +1003,13 @@ pub struct SessionReady {
 }
 
 pub struct SessionReplay {
-    pub branch: Option<SessionBranch>,
+    pub branch: Option<BranchCompletion>,
     pub replace: bool,
 }
 
-/// What the host must present after the conversation has applied a provider event.
-/// Payloads move through this result once; no transcript snapshot is constructed.
+/// What the host must present after the conversation has applied a provider
+/// event. Content updates are applied here and reported as `Changed`; only
+/// results the host acts on beyond a repaint carry a payload.
 pub enum SessionEffect {
     Unchanged,
     Changed,
@@ -1108,21 +1036,7 @@ pub enum SessionEffect {
         error: Option<String>,
         interrupted: bool,
     },
-    OutputTokens(u64),
-    ContextWindow(ContextWindowUsage),
-    ContextComposition(ContextComposition),
-    CompactionStarted,
-    CompactionFinished {
-        error: Option<String>,
-    },
     Branch(BranchUpdate),
-    ItemStarted(Item),
-    ItemCompleted(Item),
-    TextDelta {
-        item_id: String,
-        delta: String,
-        field: TextField,
-    },
     ApprovalRequested,
     ApprovalResolved,
     InputRequested {
@@ -1135,14 +1049,9 @@ pub enum SessionEffect {
     },
     History(Vec<SessionSummary>),
     SearchResults(Vec<SessionSummary>),
-    ConfirmedPrompts(Vec<String>),
-    Goal(Option<GoalStatus>),
-    PlanMode(bool),
     Title(String),
-    Stats(SessionStats),
     Replay(SessionReplay),
     StatusDetail(Option<TurnRetry>),
-    ForkCheckpoints(Result<Vec<ForkCheckpoint>, String>),
     HostExited {
         message: String,
     },

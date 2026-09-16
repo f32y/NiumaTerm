@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::chat::Item as SessionItem;
+use crate::chat::Item;
 use crate::session::lifecycle::SessionRuntime;
 use crate::transcript::conversation::ConversationState;
 use crate::workflow::{
@@ -116,7 +116,7 @@ impl WorkflowData {
         &mut self,
         task_id: &str,
         agent_id: &str,
-        items: Vec<SessionItem>,
+        items: Vec<Item>,
     ) -> bool {
         let Some(open) = self
             .conversations

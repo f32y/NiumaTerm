@@ -1,7 +1,8 @@
 use std::time::Duration;
 
+use app::agent_tab::RecoveryReadiness;
 use futures::executor::block_on;
-use nmt_agent::session::lifecycle::{RecoveryReadiness, RecoverySnapshot, RestorationReadiness};
+use nmt_agent::session::lifecycle::{RecoverySnapshot, RestorationReadiness};
 use nmt_agent::session::{AgentKind, RecoveryIdentity};
 use nmt_agent::update::{
     DiscoverySupport, ProviderKind, UpdateError, UpdateErrorKind, UpdatePhase, UpdateProgress,

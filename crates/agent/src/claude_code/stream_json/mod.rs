@@ -390,7 +390,7 @@ impl Session {
     /// CLI, so they are set once per change instead of per turn).
     /// Send a user message carrying `images`, which the CLI takes inline as
     /// content blocks beside the text; it has no path input.
-    pub fn send_user_message(
+    pub(crate) fn send_user_message(
         &mut self,
         text: &str,
         settings: &ThreadSettings,
@@ -997,18 +997,19 @@ impl Session {
 
     /// Fold one run's refresh back in. The transcript travels as its own event
     /// because it is read only while someone has that agent open.
-    pub fn apply_workflow_refresh(&mut self, result: WorkflowRefreshResult) -> Vec<Event> {
+    pub fn apply_workflow_refresh(&mut self, mut result: WorkflowRefreshResult) -> Vec<Event> {
         let mut events = Vec::new();
 
-        let task_id = result.task_id;
+        let task_id = result.task_id.clone();
+        let transcript = result.transcript.take();
 
-        if self.workflows.apply_refresh(&task_id, result.refresh)
+        if self.workflows.apply_refresh(result)
             && let Some(snapshot) = self.workflows.snapshot()
         {
             events.push(Event::Workflows(snapshot));
         }
 
-        if let Some(transcript) = result.transcript {
+        if let Some(transcript) = transcript {
             events.push(Event::WorkflowAgentTranscript {
                 task_id,
                 agent_id: transcript.agent_id,

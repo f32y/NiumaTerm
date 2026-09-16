@@ -17,7 +17,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde_json::{Value, json};
 
 use crate::background_task::{
-    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRefs, BackgroundTaskRegistry,
+    BackgroundTaskKey, BackgroundTaskLoadState, BackgroundTaskRefs, BackgroundTaskRegistry,
     BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskUpdate,
 };
 use crate::chat::Item;
@@ -604,7 +604,7 @@ impl CodexTasks {
         self.queries.insert(rpc_id, starting_sequence);
 
         if let Some(registry) = self.registry.as_mut() {
-            registry.set_discovery(BackgroundTaskDiscoveryState::Loading);
+            registry.set_discovery(BackgroundTaskLoadState::Loading);
         }
 
         // `ancestorThreadId` returns spawned descendants at any depth and
@@ -711,7 +711,7 @@ impl CodexTasks {
             && !self.query_in_flight()
             && let Some(registry) = self.registry.as_mut()
         {
-            changed |= registry.set_discovery(BackgroundTaskDiscoveryState::Ready);
+            changed |= registry.set_discovery(BackgroundTaskLoadState::Ready);
         }
 
         (changed, next_cursor)
@@ -789,12 +789,12 @@ impl CodexTasks {
         };
 
         if registry.is_empty() {
-            return registry.set_discovery(BackgroundTaskDiscoveryState::Unavailable {
+            return registry.set_discovery(BackgroundTaskLoadState::Unavailable {
                 message: message.to_owned(),
             });
         }
 
-        registry.set_discovery(BackgroundTaskDiscoveryState::Ready)
+        registry.set_discovery(BackgroundTaskLoadState::Ready)
     }
 }
 

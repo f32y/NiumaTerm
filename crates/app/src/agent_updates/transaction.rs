@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
+use app::agent_tab::RecoveryReadiness;
 use app::agent_tab::execution::{AgentSession, SessionRegistry};
 use futures::future::join_all;
 use gpui::prelude::*;
@@ -8,12 +9,12 @@ use gpui::{App, AsyncApp, Entity, Window, div};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, Dialog, DialogClose, DialogFooter};
 use gpui_component::{ActiveTheme as _, WindowExt as _};
-use nmt_agent::session::lifecycle::{RecoveryReadiness, RecoverySnapshot, RestorationReadiness};
+use nmt_agent::session::lifecycle::{RecoverySnapshot, RestorationReadiness};
 use nmt_agent::update::{
     InstallationKey, ProviderKind, UpdateCoordinator, UpdateError, UpdateErrorKind, UpdatePhase,
     UpdateProgress, VersionStatus,
 };
-use nmt_config::profile::AgentProfileKind;
+use nmt_config::profile::AgentKind;
 use rust_i18n::t;
 
 use crate::agent_updates::AgentUpdates;
@@ -349,10 +350,10 @@ impl UpdateEnvironment for SessionUpdateEnvironment<'_> {
 /// The updatable installation this profile resolves to. `None` means the
 /// harness is installed and updated through the user's own package manager, so
 /// there is nothing for the update surface to probe or replace.
-pub(crate) fn provider_for_profile(kind: AgentProfileKind) -> Option<ProviderKind> {
+pub(crate) fn provider_for_profile(kind: AgentKind) -> Option<ProviderKind> {
     match kind {
-        AgentProfileKind::Claude => Some(ProviderKind::Claude),
-        AgentProfileKind::Codex => Some(ProviderKind::Codex),
-        AgentProfileKind::DeepSeek => None,
+        AgentKind::Claude => Some(ProviderKind::Claude),
+        AgentKind::Codex => Some(ProviderKind::Codex),
+        AgentKind::DeepSeek => None,
     }
 }

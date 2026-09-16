@@ -58,24 +58,26 @@ use gpui_component::{ActiveTheme as _, WindowExt, v_flex};
 use nmt_agent::background_task::{BackgroundTaskKey, BackgroundTaskSnapshot};
 use nmt_agent::catalog::adapter_commands;
 use nmt_agent::chat::{
-    ForkCheckpoint, Item as SessionItem, Question, QuestionMode, SessionSummary, SkillInfo,
-    SkillReference, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
+    ForkCheckpoint, Item as SessionItem, Question, QuestionMode, SendOutcome, SessionSummary,
+    SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
     SlashCommandRunPolicy, SlashCommandSource,
 };
 use nmt_agent::claude_code::stream_json;
 use nmt_agent::codex::app_server;
 use nmt_agent::session::ImageAttachment;
 use nmt_agent::session::branch::{
-    BranchError, BranchFailure, BranchUpdate, BranchView, FileProgress, PromptTarget,
+    BranchCompletion, BranchError, BranchFailure, BranchUpdate, BranchView, FileProgress,
+    PromptTarget,
 };
 use nmt_agent::session::children::ChildTranscript;
 use nmt_agent::session::commands::CommandAdmission;
 use nmt_agent::session::controller::{
-    QuestionSubmission, SessionBranch, SessionController, SessionEffect, SessionFailure,
-    SessionReady, SubmissionBlock,
+    SessionController, SessionEffect, SessionFailure, SessionReady, SubmissionBlock,
 };
-use nmt_agent::session::delivery::{RecoverablePrompt, Submission};
-use nmt_agent::session::input::{ApprovalOutcome, QuestionAction, QuestionCompletion, QuestionKey};
+use nmt_agent::session::delivery::RecoverablePrompt;
+use nmt_agent::session::input::{
+    ApprovalOutcome, QuestionAction, QuestionCompletion, QuestionKey, Submission,
+};
 use nmt_agent::session::lifecycle::InterruptOutcome;
 use nmt_agent::session::restore::{ResumeStart, SettingsSeed};
 use nmt_agent::session::workflows::OpenWorkflowAgent;
@@ -350,24 +352,6 @@ impl AgentPane {
         true
     }
 
-    pub(crate) fn show_fork_checkpoints(
-        &mut self,
-        checkpoints: Result<Vec<ForkCheckpoint>, String>,
-        cx: &mut Context<Self>,
-    ) {
-        let update = {
-            let mut guard = self.session.borrow_mut();
-
-            let state = &mut *guard;
-
-            state
-                .branch
-                .fork_checkpoints(&mut state.runtime, checkpoints)
-        };
-
-        self.on_fork_update(update, cx);
-    }
-
     pub(crate) fn on_fork_update(&mut self, update: BranchUpdate, cx: &mut Context<Self>) {
         match update {
             BranchUpdate::Empty => self.palette.set_feedback(
@@ -445,7 +429,7 @@ impl AgentPane {
         self.session.borrow().branch.holds_composer()
     }
 
-    pub(crate) fn complete_branch(&mut self, completion: SessionBranch, cx: &mut Context<Self>) {
+    pub(crate) fn complete_branch(&mut self, completion: BranchCompletion, cx: &mut Context<Self>) {
         let message = match (completion.replayed, completion.files) {
             (_, FileProgress::Restored) => "agent-rewind-complete-with-files",
             (true, FileProgress::NotConfirmed) => "agent-rewind-complete",
@@ -2002,13 +1986,13 @@ impl AgentPane {
             .submit_question(key, action, Instant::now());
 
         match outcome {
-            QuestionSubmission::Ignored => return,
-            QuestionSubmission::Settled { waiting_finished } => {
+            Submission::Ignored => return,
+            Submission::Settled { waiting_finished } => {
                 if waiting_finished {
                     self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
                 }
             }
-            QuestionSubmission::Waiting | QuestionSubmission::Failed => {}
+            Submission::Waiting | Submission::Failed => {}
         }
 
         self.prompts.hide_settled(&self.session.borrow().input);
@@ -2312,19 +2296,7 @@ impl AgentPane {
             }
             SessionEffect::TurnStarted { opened } => self.on_turn_started(opened, cx),
             SessionEffect::TurnCompleted { error, .. } => self.on_turn_completed(error, cx),
-            SessionEffect::OutputTokens(_)
-            | SessionEffect::ContextWindow(_)
-            | SessionEffect::ContextComposition(_)
-            | SessionEffect::CompactionStarted
-            | SessionEffect::CompactionFinished { .. }
-            | SessionEffect::ItemStarted(_)
-            | SessionEffect::ItemCompleted(_)
-            | SessionEffect::TextDelta { .. }
-            | SessionEffect::ConfirmedPrompts(_)
-            | SessionEffect::Goal(_)
-            | SessionEffect::PlanMode(_)
-            | SessionEffect::Stats(_)
-            | SessionEffect::StatusDetail(_) => cx.notify(),
+            SessionEffect::StatusDetail(_) => cx.notify(),
             SessionEffect::ApprovalRequested => {
                 self.emit_lifecycle(
                     AgentEventKind::PermissionRequested,
@@ -2392,9 +2364,6 @@ impl AgentPane {
 
                 self.transcript
                     .update(cx, |transcript, _| transcript.sync_content());
-            }
-            SessionEffect::ForkCheckpoints(checkpoints) => {
-                self.show_fork_checkpoints(checkpoints, cx)
             }
             SessionEffect::HostExited { message } => self.on_host_exited(message, cx),
         }
@@ -3236,7 +3205,7 @@ impl AgentPane {
         let image_prompt = (!self.attachments.images().is_empty()).then(|| text.clone());
 
         let outcome = self.session.borrow_mut().submit(
-            text,
+            text.clone(),
             |session, text| {
                 let images = self
                     .attachments
@@ -3264,9 +3233,9 @@ impl AgentPane {
         );
 
         let started_text = match outcome {
-            Ok(Submission::Started { text }) => Some(text),
-            Ok(Submission::Queued) => None,
-            Ok(Submission::NotReady) => {
+            Ok(SendOutcome::StartedTurn) => Some(text),
+            Ok(SendOutcome::Steered) => None,
+            Ok(SendOutcome::NotReady) => {
                 self.push_item(
                     SessionItem::Error {
                         text: t!(
@@ -3280,7 +3249,7 @@ impl AgentPane {
 
                 return false;
             }
-            Ok(Submission::Rejected { message }) => {
+            Ok(SendOutcome::Rejected { message }) => {
                 self.push_item(SessionItem::Error { text: message }, cx);
 
                 return false;

@@ -9,7 +9,7 @@ use nmt_agent::chat::{
 use nmt_agent::session::lifecycle::{StartOutcome, Status};
 use nmt_agent::session::restore::{ReadyAction, ReplayLoaded, ResumeStart, SettingsSeed};
 use nmt_agent::session::{AgentKind, RecoveryIdentity};
-use nmt_config::profile::{AgentProfile, AgentProfileKind};
+use nmt_config::profile::AgentProfile;
 
 use crate::agent_tab::session::{Backend, TestBackend};
 use crate::agent_tab::settings::AgentSettings;
@@ -19,7 +19,7 @@ use crate::agent_tab::{AgentPane, AgentThreadDefaults, RecentSessionsMode};
 fn open_pane(cx: &mut TestAppContext) -> (Entity<AgentPane>, WindowHandle<Root>) {
     let profile = AgentProfile {
         name: "Restore Test".into(),
-        kind: AgentProfileKind::Codex,
+        kind: AgentKind::Codex,
         // The test installs a backend before the initial async start is polled.
         executable: "missing-agent.exe".into(),
         ..AgentProfile::default()

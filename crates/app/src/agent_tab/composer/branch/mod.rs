@@ -8,6 +8,7 @@ mod tests;
 
 use gpui::{Context, Entity, Window};
 use gpui_component::input::TextareaState;
+use nmt_agent::session::OperationError;
 use nmt_agent::session::branch::{BranchError, BranchFailure, FailureStage, FileProgress};
 use rust_i18n::t;
 
@@ -81,7 +82,9 @@ pub(crate) fn branch_error_message(error: BranchError, kind: AgentKind) -> Strin
         BranchError::InvalidFileResult(message) => {
             message.unwrap_or_else(|| t!("agent-rewind-invalid-file-state").to_string())
         }
-        BranchError::Operation(error) => operation_error(error),
+        BranchError::Unsupported(operation) => {
+            operation_error(OperationError::Unsupported(operation))
+        }
         BranchError::Failed(message) => message,
     }
 }
