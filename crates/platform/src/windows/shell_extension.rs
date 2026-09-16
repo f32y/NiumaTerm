@@ -220,7 +220,7 @@ impl IClassFactory_Impl for NiumaTermClassFactory_Impl {
         } else {
             // Saturating decrement: one unbalanced unlock must not wrap the
             // count to u32::MAX and pin the DLL in memory forever.
-            let _ = DLL_REF_COUNT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+            let _ = DLL_REF_COUNT.try_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
                 count.checked_sub(1)
             });
         }
