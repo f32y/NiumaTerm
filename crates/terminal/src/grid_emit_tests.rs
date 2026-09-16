@@ -1,6 +1,6 @@
 use crate::grid_emit::{RowSelection, row_selection_for};
+use crate::pos::{Column, Line, Pos};
 use crate::selection::SelectionRange;
-use crate::terminal::pos::{Column, Line, Pos};
 
 fn range(sr: i32, sc: usize, er: i32, ec: usize, block: bool) -> SelectionRange {
     SelectionRange::new(

@@ -1,4 +1,4 @@
-// Direction, Side, CursorState and Column
+// Direction, Side and Column
 // were taken originally from Alacritty https://github.com/alacritty/alacritty/blob/e35e5ad14fce8456afdd89f2b392b9924bb27471/alacritty_terminal/src/index.rs#L19
 // which is licensed under Apache 2.0 license.
 
@@ -6,26 +6,12 @@ use std::cmp::{Ord, Ordering};
 use std::fmt;
 use std::ops::{Add, AddAssign, Deref, Sub, SubAssign};
 
-use crate::ansi::CursorShape;
-
 pub type Side = Direction;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Direction {
     Left,
     Right,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct CursorState {
-    pub pos: Pos,
-    pub content: CursorShape,
-}
-
-impl CursorState {
-    pub fn is_visible(&self) -> bool {
-        self.content != CursorShape::Hidden
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialOrd, PartialEq)]
@@ -231,12 +217,3 @@ macro_rules! ops {
 ops!(Column, Column, usize);
 
 ops!(Line, Line, i32);
-
-impl From<char> for CursorState {
-    fn from(cursor: char) -> Self {
-        CursorState {
-            pos: Pos::default(),
-            content: cursor.into(),
-        }
-    }
-}

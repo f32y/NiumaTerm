@@ -12,9 +12,9 @@
 #[path = "selection_search_tests.rs"]
 mod selection_search_tests;
 
-use crate::terminal::grid::row::Row;
-use crate::terminal::pos::{Column, Pos};
-use crate::terminal::square::{Square, Wide};
+use crate::cell::{Square, Wide};
+use crate::pos::{Column, Pos};
+use crate::row::Row;
 
 const BRACKET_PAIRS: [(char, char); 4] = [('(', ')'), ('[', ']'), ('{', '}'), ('<', '>')];
 

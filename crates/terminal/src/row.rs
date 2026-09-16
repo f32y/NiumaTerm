@@ -5,7 +5,7 @@
 use std::ops::{Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
 use std::slice;
 
-use crate::terminal::Column;
+use crate::pos::Column;
 
 /// A row in the grid.
 #[derive(Clone, Debug)]

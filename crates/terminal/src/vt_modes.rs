@@ -1,29 +1,11 @@
-// Content was originally taken from https://github.com/alacritty/alacritty/blob/e35e5ad14fce8456afdd89f2b392b9924bb27471/alacritty_terminal/src/term/mod.rs
-// which is licensed under Apache 2.0 license.
-
-pub use crate::terminal::grid::row::Row;
-pub use crate::terminal::pos::{Column, Line, Pos};
-pub use crate::terminal::square::Square;
-
-pub mod grid;
-pub mod pos;
-pub mod square;
-pub mod style;
-
-// Cell-geometry re-exports the retained submodules (grid/, square) still reach via
-// the crosswords root (they did so through the deleted Crosswords-era `use`s).
-use std::ops;
+//! The engine's VT mode set packed into one word. The PTY thread reads the
+//! modes off the engine after every batch and publishes them through an
+//! atomic `u32`, so key and mouse encoding on the input path sees the
+//! current modes without a round trip to the engine owner.
 
 use bitflags::bitflags;
-use nmt_config::colors;
 
-// Ghostty plus RenderBuffer replaced the `Crosswords` VT engine. This module now
-// only provides the VT-mode bitflags (`Mode`,
-// consumed by the lock-free facade + ghostty_vt_modes) and the retained
-// cell-geometry submodules (pos/square/style/grid).
 use crate::ansi::KeyboardModes;
-
-pub type NamedColor = colors::NamedColor;
 
 bitflags! {
      #[derive(Debug, Copy, Clone)]
@@ -110,6 +92,3 @@ impl From<KeyboardModes> for Mode {
         mode
     }
 }
-
-/// An inclusive range of grid positions describing one search match.
-pub type Match = ops::RangeInclusive<Pos>;

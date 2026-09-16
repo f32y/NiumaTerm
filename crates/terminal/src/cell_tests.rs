@@ -1,6 +1,6 @@
 use std::mem;
 
-use crate::terminal::square::*;
+use crate::cell::*;
 
 #[test]
 fn square_is_eight_bytes() {

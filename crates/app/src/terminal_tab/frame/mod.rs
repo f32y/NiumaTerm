@@ -41,12 +41,12 @@ use std::sync::Arc;
 
 use nmt_config::colors::NamedColor;
 use nmt_terminal::ansi::CursorShape;
+use nmt_terminal::cell::Wide;
 use nmt_terminal::ghostty::ScrollbarInfo;
 use nmt_terminal::grid_emit::{RowSelection, row_selection_for};
 use nmt_terminal::render_buffer::RenderBuffer;
 use nmt_terminal::selection::SelectionRange;
-use nmt_terminal::terminal::square::Wide;
-use nmt_terminal::terminal::style::StyleFlags;
+use nmt_terminal::style::StyleFlags;
 
 use crate::terminal_tab::frame::images::{empty_images, extract_frame_images};
 use crate::terminal_tab::frame::line::display_char;

@@ -1,9 +1,9 @@
 use nmt_config::colors::term::{DIM_FACTOR, List, TermColors};
 use nmt_config::colors::{AnsiColor, ColorArray, NamedColor};
+use nmt_terminal::cell::Square;
 use nmt_terminal::ghostty::SnapshotStyle;
 use nmt_terminal::render_buffer::RenderBuffer;
-use nmt_terminal::terminal::square::Square;
-use nmt_terminal::terminal::style::{Style, StyleFlags};
+use nmt_terminal::style::{Style, StyleFlags};
 
 use crate::terminal_tab::frame::TerminalColor;
 use crate::terminal_tab::pane_model::FrameTheme;

@@ -14,14 +14,14 @@ use nmt_config::colors::term::TermColors;
 use rustc_hash::FxHashMap;
 
 use crate::ansi;
+use crate::cell::{Extras, Square, Wide};
 use crate::ghostty::{
     CellWide, ScreenRowMeta, ScrollbarInfo, SnapshotColors, SnapshotCursor, SnapshotPlacement,
     SnapshotStyle,
 };
-use crate::terminal::grid::row::Row;
-use crate::terminal::pos::{Column, Line, Pos};
-use crate::terminal::square::{Extras, Square, Wide};
-use crate::terminal::style::{Style, StyleId, StyleSet};
+use crate::pos::{Column, Line, Pos};
+use crate::row::Row;
+use crate::style::{Style, StyleId, StyleSet};
 
 /// A decoupled, renderable copy of the visible viewport.
 pub struct RenderBuffer {

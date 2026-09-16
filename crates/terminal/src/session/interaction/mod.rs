@@ -22,7 +22,7 @@ use crate::selection::SelectionType;
 use crate::session::interaction::copy::CopiedSelection;
 use crate::session::interaction::selection::{FrozenSelection, PendingExpansion};
 use crate::session::{BlockPoint, TerminalSession};
-use crate::terminal::Mode;
+use crate::vt_modes::Mode;
 
 #[derive(Default)]
 pub struct TerminalInteraction {

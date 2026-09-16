@@ -2,7 +2,7 @@ use gpui::{
     App, Bounds, FontStyle, FontWeight, Pixels, ShapedLine, StrikethroughStyle, TextAlign, TextRun,
     UnderlineStyle, Window, fill, point, px, rgb, size,
 };
-use nmt_terminal::terminal::square::Wide;
+use nmt_terminal::cell::Wide;
 
 use crate::terminal_tab::frame::{TerminalColor, TerminalLine};
 use crate::terminal_tab::metrics;

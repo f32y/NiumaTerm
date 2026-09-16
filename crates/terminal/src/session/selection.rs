@@ -5,10 +5,10 @@ mod selection_tests;
 use parking_lot::Mutex;
 
 use crate::ghostty::{BlockRef, Palette};
+use crate::pos::{Column, Line, Pos, Side};
 use crate::render_buffer::RenderBuffer;
 use crate::selection::{Selection, SelectionRange, SelectionType, WORD_DELIMITERS};
 use crate::session::mouse::{SurfaceCellSide, SurfaceMouseEventKind, SurfaceScreenCell};
-use crate::terminal::pos::{Column, Line, Pos, Side};
 
 /// The engine-region selection and the gestures that build it. Anchors are held
 /// in SCREEN coordinates so a selection stays on the same content while the

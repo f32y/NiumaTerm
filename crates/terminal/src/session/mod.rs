@@ -64,6 +64,7 @@ use crate::event::{Msg, MsgSender, ProgressReport};
 use crate::ghostty::BlockHandle;
 use crate::graphics::GraphicData;
 use crate::input::{TerminalKey, key_encode_flags, should_defer_to_ime};
+use crate::pos::{Column, Line, Pos};
 use crate::pty_pipe::{SessionOptions, SessionWorker, start_session};
 use crate::publication::FrameStore;
 use crate::render_buffer::RenderBuffer;
@@ -76,8 +77,7 @@ use crate::session::proxy::TerminalEventProxy;
 use crate::session::request::{BlockRange, Query, Request, TextPiece, TextSource};
 use crate::session::rows::materialized_pointer_row;
 use crate::session::selection::{SurfaceSelection, selection_screen_range};
-use crate::terminal::Mode;
-use crate::terminal::pos::{Column, Line, Pos};
+use crate::vt_modes::Mode;
 
 type SessionBuffer = Arc<FrameStore>;
 

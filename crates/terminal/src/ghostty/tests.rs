@@ -5,6 +5,7 @@ use base64::engine::general_purpose::STANDARD;
 use image_rs::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use nmt_config::colors::AnsiColor;
 
+use crate::cell::Wide;
 use crate::ghostty::*;
 
 fn line_text(snapshot: &RenderBuffer, row: usize) -> String {
@@ -13,12 +14,7 @@ fn line_text(snapshot: &RenderBuffer, row: usize) -> String {
     for x in 0..snapshot.cols() {
         let cell = snapshot.cell(x, row);
 
-        if cell.c() == '\0'
-            || matches!(
-                cell.wide(),
-                terminal::square::Wide::Spacer | terminal::square::Wide::LeadingSpacer
-            )
-        {
+        if cell.c() == '\0' || matches!(cell.wide(), Wide::Spacer | Wide::LeadingSpacer) {
             continue;
         }
 
@@ -1837,7 +1833,7 @@ fn kitty_keyboard_flags_map_to_modes() {
     // `Mode` facade so `session_key_flags` / the input path enable kitty press +
     // key-release encoding. This covers the gap where the flags lived
     // only in the engine's kitty stack and never reached vt_modes.
-    use crate::terminal::Mode;
+    use crate::vt_modes::Mode;
 
     let mut t = GhosttyTerminal::new(8, 1, 100).unwrap();
 

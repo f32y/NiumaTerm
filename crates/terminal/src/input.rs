@@ -7,7 +7,7 @@ use nmt_input::event::ElementState;
 use nmt_input::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
 use nmt_input::{KeyEncodeFlags, KeyInput, encode_terminal_input};
 
-use crate::terminal::Mode;
+use crate::vt_modes::Mode;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TerminalKeyAction {

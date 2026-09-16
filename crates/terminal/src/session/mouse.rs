@@ -1,6 +1,6 @@
 use nmt_input::keyboard::ModifiersState;
 
-use crate::terminal::Mode;
+use crate::vt_modes::Mode;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SurfaceCell {

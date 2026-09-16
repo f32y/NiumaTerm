@@ -1,8 +1,8 @@
+use nmt_terminal::cell::Wide;
 use nmt_terminal::ghostty::GhosttyTerminal;
+use nmt_terminal::pos::{Column, Line, Pos};
 use nmt_terminal::render_buffer::*;
-use nmt_terminal::terminal::square::Wide;
-use nmt_terminal::terminal::style::StyleFlags;
-use nmt_terminal::terminal::{Column, Line, Pos};
+use nmt_terminal::style::StyleFlags;
 
 #[test]
 fn populates_text_styles_and_cursor() {

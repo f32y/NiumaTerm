@@ -68,7 +68,7 @@ use crate::ghostty::kitty::{KittyState, kitty_image_graphic_data, set_kitty_stor
 use crate::ghostty::render_state::RenderStateReader;
 use crate::pwd::pwd_to_path;
 use crate::render_buffer::RenderBuffer;
-use crate::{ansi, clipboard, graphics, terminal};
+use crate::{ansi, clipboard, graphics, vt_modes};
 
 /// What the engine last reported for the title and the working directory.
 ///
@@ -408,8 +408,8 @@ impl GhosttyTerminal {
     /// `mode()` can't read them — the vt_modes facade folds these in separately so
     /// `session_key_flags` / the input path see kitty press+release encoding
     /// for key press and release encoding. Empty when the protocol is inactive.
-    pub fn kitty_keyboard_modes(&self) -> terminal::Mode {
-        use crate::terminal::Mode;
+    pub fn kitty_keyboard_modes(&self) -> vt_modes::Mode {
+        use crate::vt_modes::Mode;
 
         let mut flags: u8 = 0;
 

@@ -6,8 +6,8 @@ use std::sync::Arc;
 use gpui::SharedString;
 use nmt_config::colors::{ColorRgb, NamedColor};
 use nmt_terminal::ansi::kitty_virtual::PLACEHOLDER;
+use nmt_terminal::cell::Wide;
 use nmt_terminal::ghostty::{CellText, CellWide, SnapshotStyle, Underline};
-use nmt_terminal::terminal::square::Wide;
 
 use crate::terminal_tab::frame::colors::BackgroundColors;
 
