@@ -4,8 +4,8 @@ use gpui::{
 };
 use gpui_component::resizable::{ResizablePanelGroup, ResizableState, resizable_panel};
 
-use crate::pane_tree::{PaneId, PaneNode, SplitDirection};
-use crate::ui::terminal_layout::TerminalLayout;
+use crate::terminal_tab::terminal_layout::TerminalLayout;
+use crate::ui::pane_tree::{PaneId, PaneNode, SplitDirection};
 
 struct LayoutView(TerminalLayout<u32>);
 

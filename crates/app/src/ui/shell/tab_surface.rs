@@ -8,11 +8,11 @@ use nmt_agent::AgentRoute;
 use nmt_config::local_state::TabState;
 use tracing::warn;
 
-use crate::pane_tree::PaneId;
 use crate::tabs::TabId;
+use crate::terminal_tab::terminal_layout::TerminalLayout;
 use crate::ui::git_sidebar::GitSidebar;
+use crate::ui::pane_tree::PaneId;
 use crate::ui::tab_bar::menu::tab_icon;
-use crate::ui::terminal_layout::TerminalLayout;
 
 pub(crate) type TerminalPaneTree = TerminalLayout<Entity<TerminalPane>>;
 

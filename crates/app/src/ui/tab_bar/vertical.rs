@@ -9,6 +9,7 @@ use nmt_terminal::event::ProgressReport;
 use rust_i18n::t;
 
 use crate::tabs::{TabId, TabManager};
+use crate::terminal_tab::terminal_status::{terminal_dot, terminal_presentation};
 use crate::ui::composition::{
     HoverActionLayout, HoverActionVisibility, StatusMark, StatusMarkTone, hover_action,
     progress_edge, sidebar_selection,
@@ -18,7 +19,6 @@ use crate::ui::shell::{
 };
 use crate::ui::tab_bar::drag::{DragLabelPreview, DragStyle, TAB_ROW_HEIGHT};
 use crate::ui::tab_bar::progress_visual;
-use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
 use crate::ui::workspace_sidebar::SIDEBAR_ROW_GUTTER;
 use crate::ui::{AppWindow, UI_RADIUS};
 use crate::workspace::TerminalActivity;
