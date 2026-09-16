@@ -22,11 +22,27 @@ use crate::terminal_tab::settings::TerminalSettings;
 use crate::terminal_tab::wake::wake_channel;
 
 struct TestPty {
-    output: VecDeque<u8>,
+    output: Arc<TestOutput>,
     input: Arc<Mutex<Vec<u8>>>,
     read_token: Token,
     write_token: Token,
     child_token: Token,
+}
+
+#[derive(Default)]
+pub(crate) struct TestOutput {
+    bytes: Mutex<VecDeque<u8>>,
+    waker: Mutex<Option<Arc<Waker>>>,
+}
+
+impl TestOutput {
+    pub(crate) fn push(&self, bytes: &[u8]) {
+        self.bytes.lock().extend(bytes);
+
+        if let Some(waker) = &*self.waker.lock() {
+            waker.wake().unwrap();
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -53,10 +69,12 @@ impl ClipboardAccess for TestClipboard {
 
 impl Read for TestPty {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        let count = buffer.len().min(self.output.len());
+        let mut output = self.output.bytes.lock();
+
+        let count = buffer.len().min(output.len());
 
         for slot in &mut buffer[..count] {
-            *slot = self.output.pop_front().unwrap();
+            *slot = output.pop_front().unwrap();
         }
 
         Ok(count)
@@ -105,11 +123,12 @@ impl ProcessReadWrite for TestPty {
         _: &Poll,
         tokens: &mut dyn Iterator<Item = Token>,
         _: Interest,
-        _: &Arc<Waker>,
+        waker: &Arc<Waker>,
     ) -> io::Result<()> {
         self.read_token = tokens.next().unwrap();
         self.write_token = tokens.next().unwrap();
         self.child_token = tokens.next().unwrap();
+        *self.output.waker.lock() = Some(waker.clone());
 
         Ok(())
     }
@@ -125,7 +144,7 @@ impl ProcessReadWrite for TestPty {
     fn drain_ready(&self) -> Vec<Token> {
         let mut tokens = vec![self.write_token];
 
-        if !self.output.is_empty() {
+        if !self.output.bytes.lock().is_empty() {
             tokens.push(self.read_token);
         }
 
@@ -133,7 +152,7 @@ impl ProcessReadWrite for TestPty {
     }
 
     fn has_ready(&self) -> bool {
-        !self.output.is_empty()
+        !self.output.bytes.lock().is_empty()
     }
 }
 
@@ -148,14 +167,23 @@ impl EventedPty for TestPty {
 }
 
 pub(crate) fn controller(vt: &[u8], engine_blocks: bool) -> (PaneController, Arc<Mutex<Vec<u8>>>) {
+    let (controller, input, _) = streaming_controller(vt, engine_blocks);
+
+    (controller, input)
+}
+
+pub(crate) fn streaming_controller(
+    vt: &[u8],
+    engine_blocks: bool,
+) -> (PaneController, Arc<Mutex<Vec<u8>>>, Arc<TestOutput>) {
     let input = Arc::new(Mutex::new(Vec::new()));
+    let output = Arc::new(TestOutput::default());
 
-    let mut output = vt.to_vec();
-
-    output.extend_from_slice(b"\x1b]0;controller-ready\x07");
+    output.push(vt);
+    output.push(b"\x1b]0;controller-ready\x07");
 
     let pty = TestPty {
-        output: output.into(),
+        output: output.clone(),
         input: input.clone(),
         read_token: Token(0),
         write_token: Token(0),
@@ -227,7 +255,7 @@ pub(crate) fn controller(vt: &[u8], engine_blocks: bool) -> (PaneController, Arc
 
     controller.refresh_frame();
 
-    (controller, input)
+    (controller, input, output)
 }
 
 pub(crate) fn assert_input(input: &Mutex<Vec<u8>>, expected: &[u8]) {

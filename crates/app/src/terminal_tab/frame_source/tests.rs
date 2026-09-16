@@ -1,12 +1,215 @@
+use std::ops::Range;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use nmt_config::colors::Colors;
 
+use crate::terminal_tab::frame::TerminalLine;
 use crate::terminal_tab::frame_source::{ItemViewport, TerminalFrameSource};
-use crate::terminal_tab::pane_model::test_session::controller;
+use crate::terminal_tab::pane_model::PaneController;
+use crate::terminal_tab::pane_model::test_session::{TestOutput, controller, streaming_controller};
 use crate::terminal_tab::session::{HostEvent, TerminalSessionConfig};
+
+#[test]
+fn visible_history_survives_a_pending_revision_refresh() {
+    for rows in [0..12, 60..72] {
+        let (mut model, output) = history_controller();
+
+        let before = loaded_history(&model, rows.clone());
+
+        for update in 0..8 {
+            feed_history_output(
+                &mut model,
+                &output,
+                format!("\r\x1b[KCompiling package-{update}\r\n\x1b]9;4;1;50\x1b\\Building")
+                    .as_bytes(),
+            );
+
+            let after = model
+                .source
+                .live_history_lines(rows.clone(), model.theme.foreground);
+
+            assert_eq!(
+                after.len(),
+                before.len(),
+                "pending pages must keep their displayed rows"
+            );
+
+            for ((before_row, before), (after_row, after)) in before.iter().zip(&after) {
+                assert_eq!(after_row, before_row);
+                assert_eq!(after.text(), before.text());
+            }
+        }
+    }
+}
+
+#[test]
+fn history_display_reloads_after_reflow_and_theme_changes() {
+    let (mut model, _) = history_controller();
+
+    loaded_history(&model, 0..12);
+
+    assert!(model.source.session.resize(80, 6, 640, 108));
+
+    wait_until(|| model.source.session.snapshot().cols() == 80);
+
+    model.refresh_frame();
+
+    assert!(
+        model
+            .source
+            .live_history_lines(0..12, model.theme.foreground)
+            .is_empty()
+    );
+
+    loaded_history(&model, 0..12);
+
+    let theme = model.source.snapshot.theme_revision();
+
+    let colors = Colors {
+        foreground: [0.1, 0.8, 0.3, 1.0],
+        ..Colors::default()
+    };
+
+    assert!(model.source.session.set_theme_colors(&colors));
+
+    wait_until(|| model.source.session.snapshot().theme_revision() != theme);
+
+    model.refresh_frame();
+
+    assert!(
+        model
+            .source
+            .live_history_lines(0..12, model.theme.foreground)
+            .is_empty()
+    );
+
+    loaded_history(&model, 0..12);
+}
+
+#[test]
+fn history_display_drops_rows_after_clear_or_command_completion() {
+    for boundary in [
+        "\x1b]133;K\x07\x1b[2J\x1b[3J\x1b[H",
+        "\x1b]133;D;0\x07\x1b]133;A\x07> \x1b]133;B\x07next\r\n\x1b]133;C\x07",
+    ] {
+        let (mut model, output) = history_controller();
+
+        loaded_history(&model, 0..12);
+
+        let replacement = format!("{boundary}{}", history_output("replacement", 100));
+
+        feed_history_output(&mut model, &output, replacement.as_bytes());
+
+        assert!(
+            model
+                .source
+                .live_history_lines(0..12, model.theme.foreground)
+                .is_empty()
+        );
+
+        let after = loaded_history(&model, 0..12);
+
+        assert!(
+            after
+                .iter()
+                .any(|(_, line)| line.text().contains("replacement"))
+        );
+        assert!(
+            after
+                .iter()
+                .all(|(_, line)| !line.text().contains("history row"))
+        );
+    }
+}
+
+#[test]
+fn history_display_adopts_new_pages_and_drops_nonvisible_rows() {
+    let (mut model, output) = history_controller();
+
+    loaded_history(&model, 0..12);
+    feed_history_output(&mut model, &output, history_output("later", 100).as_bytes());
+
+    assert!(
+        model
+            .source
+            .live_history_lines(128..140, model.theme.foreground)
+            .is_empty()
+    );
+
+    let after = loaded_history(&model, 128..140);
+
+    assert!(
+        after
+            .iter()
+            .all(|(row, line)| (128..140).contains(row) && line.text().contains("later"))
+    );
+
+    feed_history_output(&mut model, &output, b"\x1b[3J");
+
+    assert!(
+        model
+            .source
+            .live_history_lines(128..140, model.theme.foreground)
+            .is_empty()
+    );
+}
+
+fn history_output(prefix: &str, count: usize) -> String {
+    (0..count)
+        .map(|row| format!("{prefix} row {row}\r\n"))
+        .collect()
+}
+
+fn history_controller() -> (PaneController, Arc<TestOutput>) {
+    let initial = format!(
+        "\x1b]133;A\x07\x1b]133;B\x07\x1b]133;C\x07\x1b]133;D;0\x07\
+         \x1b]133;A\x07> \x1b]133;B\x07build\r\n\x1b]133;C\x07{}",
+        history_output("history", 80),
+    );
+
+    let (model, _, output) = streaming_controller(initial.as_bytes(), true);
+
+    (model, output)
+}
+
+fn loaded_history(model: &PaneController, rows: Range<u64>) -> Vec<(u64, TerminalLine)> {
+    let mut lines = Vec::new();
+
+    wait_until(|| {
+        lines = model
+            .source
+            .live_history_lines(rows.clone(), model.theme.foreground);
+
+        lines.len() == (rows.end - rows.start) as usize
+    });
+
+    lines
+}
+
+fn feed_history_output(model: &mut PaneController, output: &TestOutput, bytes: &[u8]) {
+    let title = format!("history-update-{}", model.source.snapshot.revision());
+
+    let mut bytes = bytes.to_vec();
+
+    bytes.extend_from_slice(format!("\x1b]0;{title}\x07").as_bytes());
+    output.push(&bytes);
+
+    wait_until(|| model.source.session.title() == title);
+
+    model.refresh_frame();
+}
+
+fn wait_until(mut ready: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+
+    while !ready() {
+        assert!(Instant::now() < deadline, "terminal update did not arrive");
+
+        thread::sleep(Duration::from_millis(1));
+    }
+}
 
 #[test]
 fn bad_shell_returns_error() {
