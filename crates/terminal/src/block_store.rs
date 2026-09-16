@@ -13,6 +13,10 @@
 //! engine-side (the block byte budget evicts oldest blocks);
 //! `EngineBlocksSync` mirrors those evictions into the item list.
 
+#[cfg(test)]
+#[path = "block_store_tests.rs"]
+mod block_store_tests;
+
 use std::collections::HashMap;
 use std::time::SystemTime;
 

@@ -9,6 +9,10 @@
 //! `Arc`. Readers can retain a frame across later writes and resizes. Buffers
 //! return to the capture pool after their last external reader releases them.
 
+#[cfg(test)]
+#[path = "render_buffer_tests.rs"]
+mod render_buffer_tests;
+
 use std::mem;
 use std::sync::Arc;
 

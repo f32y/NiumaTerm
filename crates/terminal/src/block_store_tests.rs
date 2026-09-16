@@ -1,6 +1,6 @@
-use nmt_terminal::block_store::*;
-use nmt_terminal::event::BlockEvent;
-use nmt_terminal::ghostty::BlockHandle;
+use crate::block_store::*;
+use crate::event::BlockEvent;
+use crate::ghostty::BlockHandle;
 
 fn handle(id: u64, generation: u64) -> BlockHandle {
     BlockHandle { id, generation }
