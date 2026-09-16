@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rust_i18n::t;
 
-const EN: &str = include_str!("../locales/en.toml");
-const ZH_CN: &str = include_str!("../locales/zh-CN.toml");
+const EN: &str = include_str!("../../../assets/i18n/en.toml");
+const ZH_CN: &str = include_str!("../../../assets/i18n/zh-CN.toml");
 
 fn catalog(source: &str) -> BTreeMap<String, String> {
     toml::from_str(source).expect("locale catalog must contain string values")
